@@ -1,5 +1,39 @@
 
 import numpy as np
+from functools import wraps
+
+def preprocess_decorator(zscore=False, absval=False):
+    """
+    Z-score or take the absolute value of the time series before passing into
+    the master operation.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(x, *args, **kwargs):
+            if zscore:
+                x = ZScore(x)
+            if absval:
+                x = np.abs(x)
+            return func(x, *args, **kwargs)
+        return wrapper
+    return decorator
+
+def ZScore(x):
+    """
+    Z-score the input data vector.
+    """
+    # Convert input to numpy array
+    x = np.array(x)
+
+    # Check for NaNs
+    if np.isnan(x).any():
+        raise ValueError('input_data contains NaNs')
+
+    # Z-score twice to reduce numerical error
+    zscored_data = (x - np.mean(x)) / np.std(x, ddof=1)
+    zscored_data = (zscored_data - np.mean(zscored_data)) / np.std(zscored_data, ddof=1)
+
+    return zscored_data
 
 def histc(x, bins):
     # reproduce the behaviour of MATLAB's histc function
