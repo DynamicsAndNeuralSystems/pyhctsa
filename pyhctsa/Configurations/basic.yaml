@@ -1,0 +1,56 @@
+Medical:
+  HRVClassic:
+    labels:
+      - medical
+      - discrepancy
+    dependencies:
+    hctsa_name: MD_hrv_classic
+    configs:
+      - zscore: True
+
+  PNN:
+    labels:
+      - medical
+      - raw
+      - spreadDependent
+    dependencies:
+    configs:
+    hctsa_name: MD_pNN
+
+  PolVar:
+    labels:
+      - medical
+      - symbolic
+    dependencies:
+    configs:
+      - d: [1.0, 0.5, 0.1]
+        D: [3, 5, 4, 6]
+        zscore: True
+    hctsa_name: MD_polvar
+    ordered_args: ['d', 'D']
+
+  RawHRVMeas:
+    labels:
+      - medical 
+      - raw
+      - discrepancy
+    dependencies:
+    configs:
+    hctsa_name: MD_rawHRVmeas
+    
+ExtremeEvents:
+  MovingThreshold:
+    labels:
+      - outliers
+      - ExtremeEvents
+    dependencies:
+    configs:
+      - a: 0.1
+        b: [0.1, 0.02]
+        zscore: True
+      - a: 1.0
+        b: [0.1, 0.02]
+        zscore: True
+    hctsa_name: EX_MovingThreshold
+    ordered_args: ["a", "b"]
+    
