@@ -1,5 +1,4 @@
 import numpy as np
-from typing import Union
 from scipy import signal
 from ..Utilities.utils import binpicker, histc
 from numpy.typing import ArrayLike

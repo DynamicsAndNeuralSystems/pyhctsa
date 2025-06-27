@@ -7,7 +7,6 @@ Medical:
     hctsa_name: MD_hrv_classic
     configs:
       - zscore: True
-        abs: True
 
   PNN:
     labels:

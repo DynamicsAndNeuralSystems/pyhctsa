@@ -1,17 +1,18 @@
 import yaml
 from functools import partial
 import importlib
+import numpy as np
+import time
 from numpy.typing import ArrayLike
 from itertools import product
 from ..Utilities.utils import preprocess_decorator
 
 class FeatureCalculator:
-    def __init__(self, configPath, verbose=False):
+    def __init__(self, configPath):
         with open(configPath) as f:
             self.config = yaml.safe_load(f)
         self.operations_package = "pyhctsa.Operations" # abs path
         self.feature_funcs = self._build_feature_funcs()
-        self.verbose = verbose # whether to print summary when loading
 
     def _build_feature_funcs(self):
         feature_funcs = {}
@@ -58,15 +59,30 @@ class FeatureCalculator:
                     feature_funcs[label] = decorated_func
         return feature_funcs
 
-    def extract(self, data : ArrayLike) -> dict:
-        """
-        Extract all time-series features.
-        """
+    def _extract_single(self, ts : ArrayLike):
         results = {}
         for name, func in self.feature_funcs.items():
+            # for each partialed function
             try:
-                results[name] = func(data)
+                results[name] = func(ts)
             except Exception as e:
                 results[name] = f"Error: {e}"
+        return results
+
+    def extract(self, data : ArrayLike):
+        # Single time series: 1D array or list of numbers
+        print(f"Evaluating {len(self.feature_funcs)} partialed functions. Strap in!...")
+        start_time = time.perf_counter()
+        results = []
+        if isinstance(data, (np.ndarray, list)) and all(isinstance(x, (int, float, np.integer, np.floating)) for x in data):
+            results = self._extract_single(np.asarray(data, dtype=float))
+        # List of time series: list/array of lists/arrays
+        elif isinstance(data, (list, np.ndarray)) and all(isinstance(ts, (list, np.ndarray)) for ts in data):
+            for ts in data:
+                results.append(self._extract_single(np.asarray(ts, dtype=float)))
+        else:
+            raise ValueError("Input must be a 1D array-like (single time series) or a list of 1D array-likes (multiple time series).")
+        elapsed = time.perf_counter() - start_time
+        print(f"Feature extraction completed in {elapsed:.3f} seconds.")
         return results
     

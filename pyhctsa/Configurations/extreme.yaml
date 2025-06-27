@@ -1,0 +1,16 @@
+ExtremeEvents:
+  MovingThreshold:
+    labels:
+      - outliers
+      - ExtremeEvents
+    dependencies:
+    configs:
+      - a: 0.1
+        b: [0.1, 0.02]
+        zscore: True
+      - a: 1.0
+        b: [0.1, 0.02]
+        zscore: True
+    hctsa_name: EX_MovingThreshold
+    ordered_args: ["a", "b"]
+    

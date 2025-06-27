@@ -1,7 +1,34 @@
 
 import numpy as np
+import csv
+import os
 from functools import wraps
 
+def get_dataset(which : str = "e1000"):
+    """
+    Load data for testing and validation.
+    """
+    dataset = []
+    if which == "e1000":
+        print("Loading empirical1000 dataset...")
+        # Get the absolute path to the data directory
+        utils_dir = os.path.dirname(os.path.abspath(__file__))
+        data_path = os.path.join(utils_dir, "../../data/e1000.csv")
+        data_path = os.path.normpath(data_path)
+        with open(data_path, newline='') as csvfile:
+            reader = csv.reader(csvfile, delimiter=',')
+            for row in reader:
+                try:
+                    time_series = [float(value) for value in row if value != '']
+                    dataset.append(time_series)
+                except ValueError as e:
+                    print(f"Skipping row due to conversion error: {row}")
+                continue
+    else:
+        raise NotImplementedError("Dataset not found.")
+    print(f"Loaded dataset of {len(dataset)} time series.")
+    return dataset
+    
 def preprocess_decorator(zscore=False, absval=False):
     """
     Z-score or take the absolute value of the time series before passing into
