@@ -8,6 +8,7 @@ from functools import wraps
 def get_dataset(which : str = "e1000"):
     """
     Load data for testing and validation.
+    Options are either 'e1000' or 'sinusoid'. 
     """
     dataset = []
     utils_dir = os.path.dirname(os.path.abspath(__file__))
