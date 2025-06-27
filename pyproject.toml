@@ -15,6 +15,7 @@ dependencies = [
     "numpy",
     "scipy"
 ]
+
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -26,9 +27,17 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=6.0",
+    "pytest-cov",
+    "pytest-mock"
+]
+
 [project.urls]
 Homepage = "https://github.com/author_name/project_urlname/"
 Repository = "https://github.com/author_name/project_urlname/"
 
 [tool.setuptools.packages.find]
 exclude = ["tests*", ".github*"]
+
