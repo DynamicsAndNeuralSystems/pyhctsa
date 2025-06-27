@@ -10,10 +10,10 @@ def get_dataset(which : str = "e1000"):
     Load data for testing and validation.
     """
     dataset = []
+    utils_dir = os.path.dirname(os.path.abspath(__file__))
     if which == "e1000":
         print("Loading empirical1000 dataset...")
         # Get the absolute path to the data directory
-        utils_dir = os.path.dirname(os.path.abspath(__file__))
         data_path = os.path.join(utils_dir, "../../data/e1000.csv")
         data_path = os.path.normpath(data_path)
         with open(data_path, newline='') as csvfile:
@@ -25,6 +25,10 @@ def get_dataset(which : str = "e1000"):
                 except ValueError as e:
                     print(f"Skipping row due to conversion error: {row}")
                 continue
+    elif which == "sinusoid":
+        print("Loading sinusoid dataset...")
+        data_path = os.path.join(utils_dir, "../../data/sinusoid.txt")
+        dataset.append(np.loadtxt(data_path))
     else:
         raise NotImplementedError("Dataset not found.")
     print(f"Loaded dataset of {len(dataset)} time series.")
@@ -70,11 +74,25 @@ def ZScore(x : ArrayLike) -> np.ndarray:
         If the input contains NaN values.
     """
     # Convert input to numpy array
-    x = np.array(x)
+    try:
+        x = np.asarray(x, dtype=float)
+    except (TypeError, ValueError) as e:
+        raise TypeError(f"Input cannot be converted to numeric array: {e}")
+    
+    if x.size == 0:
+        raise ValueError("Input array is empty.")
 
-    # Check for NaNs
-    if np.isnan(x).any():
-        raise ValueError('data contains NaNs')
+    # Check for NaNs, infs, etc. i.e., check data is finite
+    if not np.isfinite(x).all():
+        raise ValueError(f'data contains non-finite values (NaN/inf) at idxs: {np.argwhere(np.isfinite(x) == False)}')
+    
+    # robust checks for constant values
+    var_x = np.var(x, ddof=1)
+    if var_x < 1e-10:
+        raise ValueError(f"Data has sample variance {var_x:.2e} < 1e-10. Values appear to be constant.")
+    data_range = np.ptp(x)  # peak-to-peak (max - min)
+    if data_range < 1e-10:
+        raise ValueError(f"Data range {data_range:.2e} < 1e-10. Values appear to be constant.")
 
     # Z-score twice to reduce numerical error
     zscored_data = np.divide((x - np.mean(x)), np.std(x, ddof=1))
