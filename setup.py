@@ -28,11 +28,9 @@ def read_requirements(path):
 
 setup(
     name="pyhctsa",
-    version="0.1.1",
+    version="0.0.1",
     description="project_description",
-    url="https://github.com/author_name/project_urlname/",
     long_description=read("README.md"),
-    long_description_content_type="text/markdown",
     author="Joshua B. Moore",
     packages=find_packages(exclude=["tests", ".github"]),
     install_requires=read_requirements("requirements.txt")
