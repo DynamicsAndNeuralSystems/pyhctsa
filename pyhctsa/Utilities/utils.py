@@ -208,3 +208,43 @@ def binpicker(xmin, xmax, nbins, bindwidthEst=None):
             edges = np.array([0.0, 1.0])
 
     return edges
+
+def pointOfCrossing(x, threshold, oneIndexing=True):
+    """
+    Linearly interpolate to the point of crossing a threshold
+    
+    Parameters:
+        x (array-like): a vector
+        threshold (float): a threshold x crosses
+        ondeIndexing (bool): whether to use zero or one indexing for consistency with MATLAB implementation.
+    
+    Returns:
+        tuple: (firstCrossing, pointOfCrossing)
+        firstCrossing (int): the first discrete value after which a crossing event has occurred
+        pointOfCrossing (float): the (linearly) interpolated point of crossing
+
+    """
+    x = np.asarray(x)
+
+    if x[0] > threshold:
+        crossings = np.where((x - threshold) < 0)[0]
+    else:
+        crossings = np.where((x - threshold) > 0)[0]
+
+    if crossings.size == 0:
+        # Never crosses
+        N = len(x)
+        firstCrossing = N
+        pointOfCrossing = N
+    else:
+        firstCrossing = crossings[0]
+        # Continuous version
+        valueBefore = x[firstCrossing - 1]
+        valueAfter = x[firstCrossing]
+        pointOfCrossing = firstCrossing - 1 + (threshold - valueBefore) / (valueAfter - valueBefore)
+
+        if oneIndexing:
+            firstCrossing += 1
+            pointOfCrossing += 1
+
+    return firstCrossing, pointOfCrossing

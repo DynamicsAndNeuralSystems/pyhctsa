@@ -1,0 +1,9 @@
+Correlation:
+  AutoCorr:
+    labels:
+      - correlation
+    dependencies:
+    configs:
+      - tau: !range [1, 80]
+        method: 'Fourier'
+        zscore: True

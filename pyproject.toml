@@ -13,7 +13,9 @@ authors = [
 ]
 dependencies = [
     "numpy",
-    "scipy"
+    "scipy",
+    "loguru",
+    "pyyaml"
 ]
 
 classifiers = [

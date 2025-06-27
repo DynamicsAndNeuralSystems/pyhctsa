@@ -7,6 +7,23 @@ from numpy.typing import ArrayLike
 from itertools import product
 from ..Utilities.utils import preprocess_decorator
 
+def range_constructor(loader, node):
+    start, end = loader.construct_sequence(node)
+    return list(range(start, end + 1))
+yaml.SafeLoader.add_constructor("!range", range_constructor)
+
+def _format_param_value(val):
+    if isinstance(val, float) or isinstance(val, int):
+        if val < 0:
+            return 'm' + _format_param_value(-val)
+        elif val == int(val):
+            return str(int(val))
+        elif 0 < val < 1:
+            return '0p' + str(val).split(".")[1].rstrip('0')
+        else:
+            return str(val).replace('.', 'p').rstrip('0').rstrip('p')
+    return str(val)
+
 class FeatureCalculator:
     def __init__(self, configPath):
         with open(configPath) as f:
@@ -23,26 +40,27 @@ class FeatureCalculator:
                 op_func = getattr(module, feature_name, None)
                 if op_func is None:
                     continue
+                base_name = feature_config.get("base_name", f"{module_key}_{feature_name}")
+                ordered_args = feature_config.get("ordered_args", [])
                 configs = feature_config.get("configs", [{}])
                 if isinstance(configs, list) and configs and isinstance(configs[0], dict):
                     for conf in configs:
                         zscore = conf.pop("zscore", False) if "zscore" in conf else False
                         absval = conf.pop("abs", False) if "abs" in conf else False
                         label = f"{module_key}_{feature_name}"
-                        if zscore:
-                            label += "_zscoreTrue"
-                        if absval:
-                            label += "_absTrue"
                         if conf:
                             keys, values = zip(*[(k, v if isinstance(v, list) else [v]) for k, v in conf.items()])
                             for combo in product(*values):
                                 combo_dict = dict(zip(keys, combo))
-                                label_full = label
-                                if combo_dict:
-                                    label_full += "_" + "_".join(f"{k}{v}" for k, v in combo_dict.items())
+                                if ordered_args:
+                                    label = base_name + "_" + "_".join(
+                                        _format_param_value(combo_dict[arg]) for arg in ordered_args)
+                                else:
+                                    label = base_name + "_" + "_".join(f"{k}{v}" for k, v in combo_dict.items())
                                 decorated_func = preprocess_decorator(zscore, absval)(op_func)
-                                feature_funcs[label_full] = partial(decorated_func, **combo_dict)
+                                feature_funcs[label] = partial(decorated_func, **combo_dict)
                         else:
+                            label = base_name
                             decorated_func = preprocess_decorator(zscore, absval)(op_func)
                             feature_funcs[label] = decorated_func
                 else:
@@ -51,10 +69,6 @@ class FeatureCalculator:
                         zscore = configs[0].pop("zscore", False)
                         absval = configs[0].pop("abs", False)
                     label = f"{module_key}_{feature_name}"
-                    if zscore:
-                        label += "_zscoreTrue"
-                    if absval:
-                        label += "_absTrue"
                     decorated_func = preprocess_decorator(zscore, absval)(op_func)
                     feature_funcs[label] = decorated_func
         return feature_funcs
