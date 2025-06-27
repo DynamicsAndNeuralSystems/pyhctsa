@@ -1,6 +1,7 @@
 
 import numpy as np
 import csv
+from numpy.typing import ArrayLike
 import os
 from functools import wraps
 
@@ -45,20 +46,39 @@ def preprocess_decorator(zscore=False, absval=False):
         return wrapper
     return decorator
 
-def ZScore(x):
+def ZScore(x : ArrayLike) -> np.ndarray:
     """
     Z-score the input data vector.
+
+    This function standardizes the input array by removing the mean and scaling to unit variance.
+    It performs the z-scoring operation twice to reduce numerical error, as recommended for 
+    high-precision applications.
+
+    Parameters
+    ----------
+    x : array-like
+        Input data vector (1D array or list of numbers).
+
+    Returns
+    -------
+    np.ndarray
+        The z-scored version of the input data.
+
+    Raises
+    ------
+    ValueError
+        If the input contains NaN values.
     """
     # Convert input to numpy array
     x = np.array(x)
 
     # Check for NaNs
     if np.isnan(x).any():
-        raise ValueError('input_data contains NaNs')
+        raise ValueError('data contains NaNs')
 
     # Z-score twice to reduce numerical error
-    zscored_data = (x - np.mean(x)) / np.std(x, ddof=1)
-    zscored_data = (zscored_data - np.mean(zscored_data)) / np.std(zscored_data, ddof=1)
+    zscored_data = np.divide((x - np.mean(x)), np.std(x, ddof=1))
+    zscored_data = np.divide((zscored_data - np.mean(zscored_data)), np.std(zscored_data, ddof=1))
 
     return zscored_data
 
