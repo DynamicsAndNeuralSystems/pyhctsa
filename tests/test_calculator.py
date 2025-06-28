@@ -7,7 +7,7 @@ import pytest
 #----------------- High-level module tests ------------------
 # does the calculator run on module functions (yes/no)?
 @pytest.mark.parametrize("x", [
-    "medical", "extreme", "criticality", "correlation"])
+    "medical", "extreme", "criticality", "correlation", "information"])
 def test_module_basic(x):
     # basic checks on medical module
     data = get_dataset(which="sinusoid")
