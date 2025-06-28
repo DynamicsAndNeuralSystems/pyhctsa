@@ -2,7 +2,7 @@ from typing import Union, Any, Optional
 import numpy as np
 import jpype as jp
 import os
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, Dict
 from scipy import stats
 from loguru import logger
 from ..Utilities.utils import signChange
@@ -12,7 +12,7 @@ def AutoMutualInfoStats(
     y: ArrayLike,
     maxTau: Optional[int] = None,
     estMethod: str = 'kernel',
-    extraParam: Optional[Union[int, str]] = None) -> dict[str, float]:
+    extraParam: Optional[Union[int, str]] = None) -> Dict[str, float]:
     """
     Calculate statistics on the automutual information (AMI) function of a time series.
 
