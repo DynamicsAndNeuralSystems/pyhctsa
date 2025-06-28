@@ -1,5 +1,6 @@
 ExtremeEvents:
   MovingThreshold:
+    base_name: MovingThreshold
     labels:
       - outliers
       - ExtremeEvents

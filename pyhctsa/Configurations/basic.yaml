@@ -84,4 +84,106 @@ Correlation:
         zscore: True
     hctsa_name: CO_AutoCorr
     ordered_args: ['tau']
+
+  GLSCF:
+    base_name: glscf
+    labels:
+      - correlation
+      - glscf
+    dependencies:
+    configs:
+      - alpha: 1.0
+        beta: [1.0, 2.0, 5.0, 10.0]
+        tau: !range [1, 5]
+        zscore: True
+      - alpha: 1.0
+        beta: [1.0, 2.0, 5.0, 10.0]
+        tau: 'tau'
+        zscore: True
+      - alpha: 2.0
+        beta: [2.0, 5.0]
+        tau: !range [1, 5]
+        zscore: True
+      - alpha: 2.0
+        beta: [2.0, 5.0]
+        tau: 'tau'
+        zscore: True
+    hctsa_name: CO_glscf
+    ordered_args: ["alpha", "beta", "tau"]
+
+  FZCGLSCF:
+    base_name: fzcglscf
+    labels:
+      - correlation
+      - glscf
+      - tau
+    dependencies:
+    configs:
+      - alpha: 1.0
+        beta: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        zscore: True
+      - alpha: 2.0
+        beta: [2, 5, 10]
+        zscore: True
+      - alpha: 5.0
+        beta: [5, 10]
+        zscore: True
+      - alpha: 10
+        beta: 10
+        zscore: True
+    hctsa_name: CO_fzcglscf
+    ordered_args: ["alpha", "beta"]
+  
+  Embed2Shapes:
+    base_name: Embed2_Shapes
+    labels:
+     - embedding
+     - correlation
+    depedencies:
+    configs:
+      - tau: 'tau'
+        shape: 'circle'
+        r: [0.1, 1]
+        zscore: True
+    hctsa_name: CO_Embed2_Shapes
+    ordered_args: ["tau", "shape", "r"]
+
+  Embed2Basic:
+    base_name: Embed2_Basic
+    labels:
+      - embedding
+      - correlation
+    dependencies:
+    configs:
+      - tau: [1, 'tau']
+        zscore: True
+    hctsa_name: CO_Embed2_Basic
+    ordered_args: ["tau"]
+
+  Embed2Dist:
+    base_name: Embed2_Dist
+    labels:
+      - embedding
+      - correlation
+    dependencies:
+      - scipy
+    configs:
+      - tau: ['tau']
+        zscore: True
+    hctsa_name: CO_Embed2_Dist
+    ordered_args: ["tau"]
+  
+  PartialAutoCorr:
+    base_name: PartialAutoCorr
+    labels:
+      - correlation
+    dependencies:
+      - statsmodels
+    configs:
+      - maxTau: 20
+        whatMethod: 'ols'
+        zscore: True
+    hctsa_name: CO_PartialAutoCorr
+    ordered_args: ["maxTau", "whatMethod"]
+
     

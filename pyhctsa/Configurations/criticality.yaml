@@ -1,5 +1,6 @@
 Criticality:
   RAD:
+    base_name: RAD
     labels:
       - criticality
     dependencies:
@@ -8,4 +9,3 @@ Criticality:
         zscore: True
     hctsa_name: CR_RAD
     ordered_args: ['tau']
-  
