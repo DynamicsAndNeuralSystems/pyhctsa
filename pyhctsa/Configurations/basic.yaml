@@ -311,4 +311,26 @@ Correlation:
       - zscore: True
     hctsa_name: PD_PeriodicityWang
     ordered_args: 
+
+Information:
+  AutoMutualInfoStats:
+    base_name: AutoMutualInfoStats
+    labels:
+      - information
+      - correlation
+      - AMI
+    dependencies:
+      - jpype
+      - JIDT
+    configs:
+      - maxTau: [40, 20]
+        estMethod: 'gaussian'
+        extraParam: 
+        zscore: True
+      - maxTau: [40, 20]
+        estMethod: 'kraskov1'
+        extraParam: '4'
+        zscore: True
+    ordered_args: ["maxTau", "estMethod", "extraParam"]
+    hctsa_name: IN_AutoMutualInfoStats
     
