@@ -8,6 +8,7 @@ from itertools import product
 from ..Utilities.utils import preprocess_decorator
 
 def range_constructor(loader, node):
+    """Construct a range from a YAML config"""
     start, end = loader.construct_sequence(node)
     return list(range(start, end + 1))
 yaml.SafeLoader.add_constructor("!range", range_constructor)
