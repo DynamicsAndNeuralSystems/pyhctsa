@@ -13,6 +13,19 @@ def range_constructor(loader, node):
 yaml.SafeLoader.add_constructor("!range", range_constructor)
 
 def _format_param_value(val):
+    """
+    Format parameter value for label:
+    - For floats/ints: as before.
+    - For lists: if contiguous range, show as 'start_end', else join all values.
+    """
+    if isinstance(val, list):
+        # Check if it's a contiguous range
+        if len(val) > 1 and all(isinstance(x, (int, float)) for x in val):
+            diffs = [val[i+1] - val[i] for i in range(len(val)-1)]
+            if all(d == 1 for d in diffs):  # contiguous integer range
+                return f"{_format_param_value(val[0])}_{_format_param_value(val[-1])}"
+        # Otherwise, join all values
+        return "_".join(_format_param_value(x) for x in val)
     if isinstance(val, float) or isinstance(val, int):
         if val < 0:
             return 'm' + _format_param_value(-val)

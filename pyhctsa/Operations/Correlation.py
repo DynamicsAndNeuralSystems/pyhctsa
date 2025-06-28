@@ -2,12 +2,469 @@
 import numpy as np
 from numpy.typing import ArrayLike 
 from typing import Union
-from scipy.stats import expon
-from ..Utilities.utils import pointOfCrossing, binpicker
+from scipy.stats import gaussian_kde, kurtosis, skew, expon
+from scipy.stats import mode as smode
+from ..Utilities.utils import pointOfCrossing, binpicker, ZScore, signChange
 from loguru import logger
 from statsmodels.tsa.stattools import pacf
+from scipy.optimize import curve_fit
+from scipy.linalg import LinAlgError
 
 
+def CompareMinAMI(y : ArrayLike, binMethod : str = 'std1', numBins : int = 10) -> dict:
+    """
+    Assess the variability in the first minimum of automutual information (AMI) across binning strategies.
+
+    This function computes the first minimum of the automutual information function for a time series
+    using various histogram binning strategies and numbers of bins. It summarizes how the location
+    of the first minimum varies across these different coarse-grainings.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    binMethod : str, optional
+        The method for estimating mutual information (passed to `HistogramAMI`). Default is 'std1'.
+    numBins : int or array-like, optional
+        The number of bins (or list of bin counts) to use for AMI estimation. Default is 10.
+
+    Returns
+    -------
+    dict
+        Dictionary containing statistics on the set of first minimums of the automutual information function.
+    """
+    y = np.asarray(y)
+    N = len(y)
+    # Range of time lags to consider
+    tauRange = np.arange(0, int(np.ceil(N/2))+1)
+    numTaus = len(tauRange)
+
+    # range of bin numbers to consider
+    if isinstance(numBins, int):
+        numBins = [numBins]
+    
+    numBinsRange = len(numBins)
+    amiMins = np.zeros(numBinsRange)
+
+    # Calculate automutual information
+    for i in range(numBinsRange):  # vary over number of bins in histogram
+        amis = np.zeros(numTaus)
+        for j in range(numTaus):  # vary over time lags, tau
+            amis[j] = HistogramAMI(y, tauRange[j], binMethod, numBins[i])
+            if (j > 1) and ((amis[j] - amis[j-1]) * (amis[j-1] - amis[j-2]) < 0):
+                amiMins[i] = tauRange[j-1]
+                break
+        if amiMins[i] == 0:
+            amiMins[i] = tauRange[-1]
+    # basic statistics
+    out = {}
+    out['min'] = np.min(amiMins)
+    out['max'] = np.max(amiMins)
+    out['range'] = np.ptp(amiMins)
+    out['median'] = np.median(amiMins)
+    out['mean'] = np.mean(amiMins)
+    out['std'] = np.std(amiMins, ddof=1) # will return NaN for single values instead of 0
+    out['nunique'] = len(np.unique(amiMins))
+    out['mode'], out['modef'] = smode(amiMins)
+    out['modef'] = out['modef']/numBinsRange
+
+    # converged value? 
+    out['conv4'] = np.mean(amiMins[-5:])
+
+    # look for peaks (local maxima)
+    # % local maxima above 1*std from mean
+    # inspired by curious result of periodic maxima for periodic signal with
+    # bin size... ('quantiles', [2:80])
+    diff_ami_mins = np.diff(amiMins[:-1])
+    positive_diff_indices = np.where(diff_ami_mins > 0)[0]
+    sign_change_indices = signChange(diff_ami_mins, 1)
+
+    # Find the intersection of positive_diff_indices and sign_change_indices
+    loc_extr = np.intersect1d(positive_diff_indices, sign_change_indices) + 1
+    above_threshold_indices = np.where(amiMins > out['mean'] + out['std'])[0]
+    big_loc_extr = np.intersect1d(above_threshold_indices, loc_extr)
+
+    # Count the number of elements in big_loc_extr
+    out['nlocmax'] = len(big_loc_extr)
+
+    return out
+
+def HistogramAMI(y : ArrayLike, tau : Union[str, int, ArrayLike] = 1, meth : str = 'even', numBins : int = 10) -> dict:
+    """
+    The automutual information of the distribution using histograms.
+
+    Computes the automutual information between a time series and its time-delayed version
+    using different methods for binning the data.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series
+    tau : int, list, or str, optional
+        The time-lag(s) (default: 1)
+        Can be an integer time lag, list of time lags, or 'ac'/'tau' to use
+        first zero-crossing of autocorrelation function
+    meth : str, optional
+        The method for binning data (default: 'even'):
+        - 'even': evenly-spaced bins through the range
+        - 'std1': bins extending to ±1 standard deviation from mean
+        - 'std2': bins extending to ±2 standard deviations from mean
+        - 'quantiles': equiprobable bins using quantiles
+    numBins : int, optional
+        The number of bins to use (default: 10)
+
+    Returns
+    -------
+    Union[float, dict]
+        If single tau: The automutual information value
+        If multiple taus: Dictionary of automutual information values
+    """
+    # Use first zero crossing of the ACF as the time lag
+    y = np.asarray(y)
+    if isinstance(tau, str) and tau in ['ac', 'tau']:
+        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+    
+    # Bins for the data
+    # same for both -- assume same distribution (true for stationary processes, or small lags)
+    if meth == 'even':
+        b = np.linspace(np.min(y), np.max(y), numBins + 1)
+        # Add increment buffer to ensure all points are included
+        inc = 0.1
+        b[0] -= inc
+        b[-1] += inc
+    elif meth == 'std1': # bins out to +/- 1 std
+        b = np.linspace(-1, 1, numBins + 1)
+        if np.min(y) < -1:
+            b = np.concatenate(([np.min(y) - 0.1], b))
+        if np.max(y) > 1:
+            b = np.concatenate((b, [np.max(y) + 0.1]))
+    elif meth == 'std2': # bins out to +/- 2 std
+        b = np.linspace(-2, 2, numBins + 1)
+        if np.min(y) < -2:
+            b = np.concatenate(([np.min(y) - 0.1], b))
+        if np.max(y) > 2:
+            b = np.concatenate((b, [np.max(y) + 0.1]))
+    elif meth == 'quantiles': # use quantiles with ~equal number in each bin
+        b = np.quantile(y, np.linspace(0, 1, numBins + 1), method='hazen')
+        b[0] -= 0.1
+        b[-1] += 0.1
+    else:
+        raise ValueError(f"Unknown method '{meth}'")
+    
+    # Sometimes bins can be added (e.g., with std1 and std2), so need to redefine numBins
+    numBins = len(b) - 1
+
+    # Form the time-delay vectors y1 and y2
+    if not isinstance(tau, (list, np.ndarray)):
+        # if only single time delay as integer, make into a one element list
+        tau = [tau]
+
+    amis = np.zeros(len(tau))
+    for i, t in enumerate(tau):
+        if t == 0:
+            # for tau = 0, y1 and y2 are identical to y
+            y1 = y2 = y
+        else:
+            y1 = y[:-t]
+            y2 = y[t:]
+        # Joint distribution of y1 and y2
+        pij, _, _ = np.histogram2d(y1, y2, bins=(b, b))
+        pij = pij[:numBins, :numBins]  # joint
+        pij = pij / np.sum(pij)  # normalize
+        pi = np.sum(pij, axis=1)  # marginal
+        pj = np.sum(pij, axis=0)  # other marginal
+
+        pii = np.tile(pi, (numBins, 1)).T
+        pjj = np.tile(pj, (numBins, 1))
+
+        r = pij > 0  # Defining the range in this way, we set log(0) = 0
+        amis[i] = np.sum(pij[r] * np.log(pij[r] / pii[r] / pjj[r]))
+
+    if len(tau) == 1:
+        return amis[0]
+    else:
+        return {f'ami{i+1}': ami for i, ami in enumerate(amis)}
+
+def StickAngles(y : ArrayLike) -> dict:
+    """
+    Analysis of the line-of-sight angles between time series data pts. 
+
+    Line-of-sight angles between time-series pts treat each time-series value as a stick 
+    protruding from an opaque baseline level. Statistics are returned on the raw time series, 
+    where sticks protrude from the zero-level, and the z-scored time series, where sticks
+    protrude from the mean level of the time series.
+
+    Parameters:
+    -----------
+    y : array-like
+        The input time series
+
+    Returns:
+    --------
+    dict
+        A dictionary containing various statistics on the obtained sequence of angles.
+    """
+    y = np.asarray(y)
+    # Split the time series into positive and negative parts
+    ix = [np.where(y >= 0)[0], np.where(y < 0)[0]]
+    n = [len(ix[0]), len(ix[1])]
+
+    # Compute the stick angles
+    angles = [[], []]
+    for j in range(2):
+        if n[j] > 1:
+            diff_y = np.diff(y[ix[j]])
+            diff_x = np.diff(ix[j])
+            angles[j] = np.arctan(diff_y /diff_x)
+    allAngles = np.concatenate(angles)
+
+    # Initialise output dictionary
+    out = {}
+    out['std_p'] = np.nanstd(angles[0], ddof=1) 
+    out['mean_p'] = np.nanmean(angles[0]) 
+    out['median_p'] = np.nanmedian(angles[0])
+
+    out['std_n'] = np.nanstd(angles[1], ddof=1)
+    out['mean_n'] = np.nanmean(angles[1])
+    out['median_n'] = np.nanmedian(angles[1])
+
+    out['std'] = np.nanstd(allAngles, ddof=1)
+    out['mean'] = np.nanmean(allAngles)
+    out['median'] = np.nanmedian(allAngles)
+
+    # difference between positive and negative angles
+    # return difference in densities
+    
+    ksx = np.linspace(np.min(allAngles), np.max(allAngles), 200)
+    out['pnsumabsdiff'] = np.nan
+    if (len(angles[0]) > 0 and len(angles[1]) > 0 and
+        np.var(angles[0]) > 1e-10 and np.var(angles[1]) > 1e-10):
+        try:
+            ksx = np.linspace(np.min(allAngles), np.max(allAngles), 200)
+            # Calculate the Kernel Density Estimate (KDE) for the first angle distribution.
+            kde1 = gaussian_kde(angles[0], bw_method='scott')
+            ksy1 = kde1(ksx)
+
+            # Calculate the KDE for the second angle distribution.
+            kde2 = gaussian_kde(angles[1], bw_method='scott')
+            ksy2 = kde2(ksx)
+
+            # If the KDEs are calculated successfully, compute the sum of the absolute
+            out['pnsumabsdiff'] = np.sum(np.abs(ksy1 - ksy2))
+        except LinAlgError:
+            pass
+    
+    # # how symmetric is the distribution of angles?
+    out['symks_p'] = np.nan
+    out['ratmean_p'] = np.nan
+
+    if len(angles[0]) > 0 and np.var(angles[0]) > 1e-10:
+        try:
+            maxdev = np.max(np.abs(angles[0]))
+            kde = gaussian_kde(angles[0], bw_method='scott')
+            ksy1 = kde(np.linspace(-maxdev, maxdev, 201))
+            out['symks_p'] = np.sum(np.abs(ksy1[:100] - ksy1[101:][::-1]))
+            out['ratmean_p'] = np.mean(angles[0][angles[0] > 0])/np.mean(angles[0][angles[0] < 0])
+        except LinAlgError:
+            pass
+    
+    out['symks_n'] = np.nan
+    out['ratmean_n'] = np.nan
+    if len(angles[1]) > 0 and np.var(angles[1]) > 1e-10:
+        try:
+            maxdev = np.max(np.abs(angles[1]))
+            kde = gaussian_kde(angles[1], bw_method='scott')
+            ksy2 = kde(np.linspace(-maxdev, maxdev, 201))
+            out['symks_n'] = np.sum(np.abs(ksy2[:100] - ksy2[101:][::-1]))
+            out['ratmean_n'] = np.mean(angles[1][angles[1] > 0])/np.mean(angles[1][angles[1] < 0])
+        except LinAlgError:
+            pass
+    
+    # z-score
+    zangles = []
+    zangles.append(ZScore(angles[0]))
+    zangles.append(ZScore(angles[1]))
+    zallAngles = ZScore(allAngles)
+
+    # how stationary are the angle sets?
+
+    # there are positive angles
+    if len(zangles[0]) > 0:
+        # StatAv2
+        out['statav2_p_m'], out['statav2_p_s'] = _SUB_statav(zangles[0], 2)
+        # StatAv3
+        out['statav3_p_m'], out['statav3_p_s'] = _SUB_statav(zangles[0], 3)
+        # StatAv4
+        out['statav4_p_m'], out['statav4_p_s'] = _SUB_statav(zangles[0], 4)
+        # StatAv5
+        out['statav5_p_m'], out['statav5_p_s'] = _SUB_statav(zangles[0], 5)
+    else:
+        out['statav2_p_m'], out['statav2_p_s'] = np.nan, np.nan
+        out['statav3_p_m'], out['statav3_p_s'] = np.nan, np.nan
+        out['statav4_p_m'], out['statav4_p_s'] = np.nan, np.nan
+        out['statav5_p_m'], out['statav5_p_s'] = np.nan, np.nan
+    
+    # there are negative angles
+    if len(zangles[1]) > 0:
+        # StatAv2
+        out['statav2_n_m'], out['statav2_n_s'] = _SUB_statav(zangles[1], 2)
+        # StatAv3
+        out['statav3_n_m'], out['statav3_n_s'] = _SUB_statav(zangles[1], 3)
+        # StatAv4
+        out['statav4_n_m'], out['statav4_n_s'] = _SUB_statav(zangles[1], 4)
+        # StatAv5
+        out['statav5_n_m'], out['statav5_n_s'] = _SUB_statav(zangles[1], 5)
+    else:
+        out['statav2_n_m'], out['statav2_n_s'] = np.nan, np.nan
+        out['statav3_n_m'], out['statav3_n_s'] = np.nan, np.nan
+        out['statav4_n_m'], out['statav4_n_s'] = np.nan, np.nan
+        out['statav5_n_m'], out['statav5_n_s'] = np.nan, np.nan
+    
+    # All angles
+    
+    # StatAv2
+    out['statav2_all_m'], out['statav2_all_s'] = _SUB_statav(zallAngles, 2)
+    # StatAv3
+    out['statav3_all_m'], out['statav3_all_s'] = _SUB_statav(zallAngles, 3)
+    # StatAv4
+    out['statav4_all_m'], out['statav4_all_s'] = _SUB_statav(zallAngles, 4)
+    # StatAv5
+    out['statav5_all_m'], out['statav5_all_s'] = _SUB_statav(zallAngles, 5)
+    
+    # correlations? 
+    if len(zangles[0]) > 0:
+        out['tau_p'] = FirstCrossing(zangles[0], 'ac', 0, 'continuous')
+        out['ac1_p'] = AutoCorr(zangles[0], 1, 'Fourier')[0]
+        out['ac2_p'] = AutoCorr(zangles[0], 2, 'Fourier')[0]
+    else:
+        out['tau_p'] = np.nan
+        out['ac1_p'] = np.nan
+        out['ac2_p'] = np.nan
+    
+    if len(zangles[1]) > 0:
+        out['tau_n'] = FirstCrossing(zangles[1], 'ac', 0, 'continuous')
+        out['ac1_n'] = AutoCorr(zangles[1], 1, 'Fourier')[0]
+        out['ac2_n'] = AutoCorr(zangles[1], 2, 'Fourier')[0]
+    else:
+        out['tau_n'] = np.nan
+        out['ac1_n'] = np.nan
+        out['ac2_n'] = np.nan
+    
+    out['tau_all'] = FirstCrossing(zallAngles, 'ac', 0, 'continuous')
+    out['ac1_all'] = AutoCorr(zallAngles, 1, 'Fourier')[0]
+    out['ac2_all'] = AutoCorr(zallAngles, 2, 'Fourier')[0]
+
+
+    # What does the distribution look like? 
+    
+    # Some quantiles and moments
+    if len(zangles[0]) > 0:
+        out['q1_p'] = np.quantile(zangles[0], 0.01, method='hazen')
+        out['q10_p'] = np.quantile(zangles[0], 0.1, method='hazen')
+        out['q90_p'] = np.quantile(zangles[0], 0.9, method='hazen')
+        out['q99_p'] = np.quantile(zangles[0], 0.99, method='hazen')
+        out['skewness_p'] = skew(angles[0])
+        out['kurtosis_p'] = kurtosis(angles[0], fisher=False)
+    else:
+        out['q1_p'], out['q10_p'], out['q90_p'], out['q99_p'], \
+            out['skewness_p'], out['kurtosis_p'] = np.nan, np.nan, np.nan,  np.nan, np.nan, np.nan
+    
+    if len(zangles[1]) > 0:
+        out['q1_n'] = np.quantile(zangles[1], 0.01, method='hazen')
+        out['q10_n'] = np.quantile(zangles[1], 0.1, method='hazen')
+        out['q90_n'] = np.quantile(zangles[1], 0.9, method='hazen')
+        out['q99_n'] = np.quantile(zangles[1], 0.99, method='hazen')
+        out['skewness_n'] = skew(angles[1])
+        out['kurtosis_n'] = kurtosis(angles[1], fisher=False)
+    else:
+        out['q1_n'], out['q10_n'], out['q90_n'], out['q99_n'], \
+            out['skewness_n'], out['kurtosis_n'] = np.nan, np.nan, np.nan,  np.nan, np.nan, np.nan
+    
+    F_quantz = lambda x : np.quantile(zallAngles, x, method='hazen')
+    out['q1_all'] = F_quantz(0.01)
+    out['q10_all'] = F_quantz(0.1)
+    out['q90_all'] = F_quantz(0.9)
+    out['q99_all'] = F_quantz(0.99)
+    out['skewness_all'] = skew(allAngles)
+    out['kurtosis_all'] = kurtosis(allAngles, fisher=False)
+
+    return out
+
+
+def _SUB_statav(x, n):
+    # helper function
+    NN = len(x)
+    if NN < 2 * n: # not long enough
+        statavmean = np.nan
+        statavstd = np.nan
+    x_buff = _buffer(x, int(np.floor(NN/n)))
+    if x_buff.shape[1] > n:
+        # remove final pt
+        x_buff = x_buff[:, :n]
+    
+    statavmean = np.std(np.mean(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
+    statavstd = np.std(np.std(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
+
+    return statavmean, statavstd
+
+def _buffer(X, n, p=0, opt=None):
+    # helper function
+    '''Mimic MATLAB routine to generate buffer array
+    MATLAB docs here: https://se.mathworks.com/help/signal/ref/buffer.html.
+    Taken from: https://stackoverflow.com/questions/38453249/does-numpy-have-a-function-equivalent-to-matlabs-buffer 
+
+    Parameters
+    ----------
+    x: ndarray
+        Signal array
+    n: int
+        Number of data segments
+    p: int
+        Number of values to overlap
+    opt: str
+        Initial condition options. default sets the first `p` values to zero,
+        while 'nodelay' begins filling the buffer immediately.
+
+    Returns
+    -------
+    result : (n,n) ndarray
+        Buffer array created from X
+    '''
+
+    if opt not in [None, 'nodelay']:
+        raise ValueError('{} not implemented'.format(opt))
+
+    i = 0
+    first_iter = True
+    while i < len(X):
+        if first_iter:
+            if opt == 'nodelay':
+                # No zeros at array start
+                result = X[:n]
+                i = n
+            else:
+                # Start with `p` zeros
+                result = np.hstack([np.zeros(p), X[:n-p]])
+                i = n-p
+            # Make 2D array and pivot
+            result = np.expand_dims(result, axis=0).T
+            first_iter = False
+            continue
+
+        # Create next column, add `p` results from last col if given
+        col = X[i:i+(n-p)]
+        if p != 0:
+            col = np.hstack([result[:,-1][-p:], col])
+        i += n-p
+
+        # Append zeros if last row and not length `n`
+        if len(col) < n:
+            col = np.hstack([col, np.zeros(n-len(col))])
+
+        # Combine result with next row
+        result = np.hstack([result, np.expand_dims(col, axis=0).T])
+
+    return result
 
 def NonlinearAutoCorr(y : ArrayLike, taus : ArrayLike, doAbs : Union[bool, None] = None) -> float:
     """
@@ -599,4 +1056,305 @@ def FirstCrossing(y: ArrayLike, corrFun: str = 'ac', threshold: float = 0.0, wha
     else:
         raise ValueError(f"Unknown output format '{whatOut}'")
 
+    return out
+
+
+def TranslateShape(y : ArrayLike, shape : str = 'circle', d : int = 2, howToMove : str = 'pts') -> dict:
+    """
+    Statistics on datapoints inside geometric shapes across the time series.
+
+    This function moves a specified geometric shape (e.g., a circle or rectangle) of given size
+    along the time axis of the input time series and computes statistics on the number of points
+    falling within the shape at each position. This is a temporal-domain analogue of similar
+    analyses in embedding spaces.
+
+    In the future, this approach could be extended to use soft boundaries, decaying force functions,
+    or truncated shapes.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (1D array).
+    shape : str, optional
+        The shape to move along the time series. Supported options: 'circle', 'rectangle'. Default is 'circle'.
+    d : int, optional
+        Parameter specifying the size of the shape (e.g., radius for 'circle', half-width for 'rectangle'). Default is 2.
+    howToMove : str, optional
+        Method for moving the shape. Currently, only 'pts' is supported, which places the shape on each point in the time series.
+
+    Returns
+    -------
+    dict
+        Dictionary containing statistics on the number of points inside the shape as it moves through the time series,
+        including mean, std, mode, and proportions for various counts.
+
+    """
+    y = np.array(y, dtype=float)
+    N = len(y)
+
+    if y.ndim == 1:
+        y = y.reshape(-1, 1)
+    elif y.shape[1] > y.shape[0]:
+        y = y.T
+
+    # add a time index
+    ty = np.column_stack((np.arange(1, N+1), y[:, 0])) # has increasing integers as time in the first column
+    if howToMove == 'pts':
+
+        if shape == 'circle':
+
+            r = d # set radius
+            w = int(np.floor(r))
+            rnge = np.arange(1 + w, N - w + 1)
+            NN = len(rnge) # number of admissible points
+            np_counts = np.zeros(NN, dtype=int)
+
+            for i in range(NN):
+                idx = rnge[i]
+                start = idx - w - 1
+                end = idx + w
+                win = ty[start:end, :]
+                difwin = win - ty[idx - 1, :]
+                squared_dists = np.sum(difwin**2, axis=1)
+                np_counts[i] = np.sum(squared_dists <= r**2)
+
+        elif shape == 'rectangle':
+
+            w = d
+            rnge = np.arange(1 + w, N - w + 1)
+            NN = len(rnge)
+            np_counts = np.zeros(NN, dtype=int)
+
+            for i in range(NN):
+                idx = rnge[i]
+                start = (idx - w) - 1
+                end = (idx + w)
+                np_counts[i] = np.sum(
+                    np.abs(y[start:end, 0]) <= np.abs(y[i, 0])
+                )
+        else:
+            raise ValueError(f"Unknown shape {shape}. Choose either 'circle' or 'rectangle'")
+    else:
+        raise ValueError(f"Unknown setting for 'howToMove' input: '{howToMove}'. Only option is currently 'pts'.")
+
+    # compute stats on number of hits inside the shape
+    out = {}
+    out["max"] = np.max(np_counts)
+    out["std"] = np.std(np_counts, ddof=1)
+    out["mean"] = np.mean(np_counts)
+    
+    # count the hits
+    vals, hits = np.unique_counts(np_counts)
+    max_val = np.argmax(hits)
+    out["npatmode"] = hits[max_val]/NN
+    out["mode"] = vals[max_val]
+
+    count_types = ["ones", "twos", "threes", "fours", "fives", "sixes", "sevens", "eights", "nines", "tens", "elevens"]
+    for i in range(1, 12):
+        if 2*w + 1 >= i:
+            out[f"{count_types[i-1]}"] = np.mean(np_counts == i)
+    
+    out['statav2_m'] = _stat_av(np_counts, 'mean', 2, 1)
+    out['statav2_s'] = _stat_av(np_counts, 'std', 2, 1)
+    out['statav3_m'] = _stat_av(np_counts, 'mean', 3, 1)
+    out['statav3_s'] = _stat_av(np_counts, 'std', 3, 1)
+    out['statav4_m'] = _stat_av(np_counts, 'mean', 4, 1)
+    out['statav4_s'] = _stat_av(np_counts, 'std', 4, 1)
+
+    return out
+
+def _stat_av(y: ArrayLike, windowStat: str = 'mean', numSeg: int = 5, incMove: int = 2):
+    # helper function to compute sliding winow stats for translate shape
+    y = np.asarray(y)
+    winLength = np.floor(len(y)/numSeg)
+    if winLength == 0:
+        logger.warning(f"Time-series of length {len(y)} is too short for {numSeg} windows")
+        return np.nan
+    inc = np.floor(winLength/incMove) # increment to move at each step
+    # if incrment rounded down to zero, prop it up 
+    if inc == 0:
+        inc = 1
+    
+    numSteps = int(np.floor((len(y)-winLength)/inc) + 1)
+    qs = np.zeros(numSteps)
+
+     # convert a step index (stepInd) to a range of indices corresponding to that window
+    def get_window(stepInd: int):
+        start_idx = (stepInd) * inc
+        end_idx = (stepInd) * inc + winLength
+        return np.arange(start_idx, end_idx).astype(int)
+    
+    if windowStat == 'mean':
+        for i in range(numSteps):
+            qs[i] = np.mean(y[get_window(i)])
+    elif windowStat == 'std':
+        for i in range(numSteps):
+            qs[i] = np.std(y[get_window(i)], ddof=1)
+    return np.std(qs, ddof=1)/np.std(y, ddof=1)
+
+
+def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dict:
+    """
+    How the autocorrelation function changes with the time lag.
+
+    Outputs include the number of peaks, and autocorrelation in the
+    autocorrelation function (ACF) itself.
+
+    Parameters
+    -----------
+    y : array_like
+        The input time series
+    stopWhen : str or int, optional
+        The criterion for the maximum lag to measure the ACF up to.
+        Default is 'posDrown'.
+
+    Returns
+    --------
+    dict
+        A dictionary containing various metrics about the autocorrelation function.
+    """
+    y = np.asarray(y)
+    N = len(y)
+
+    # Only look up to when two consecutive values are under the significance threshold
+    th = 2 / np.sqrt(N)  # significance threshold
+
+    # Calculate the autocorrelation function, up to a maximum lag, length of time series (hopefully it's cropped by then)
+    acf = []
+
+    # At what lag does the acf drop to zero, Ndrown (by my definition)?
+    if isinstance(stopWhen, int):
+        taus = list(range(0, stopWhen+1))
+        acf = AutoCorr(y, taus, 'Fourier')
+        Ndrown = stopWhen
+        
+    elif stopWhen in ['posDrown', 'drown', 'doubleDrown']:
+        # Compute ACF up to a given threshold:
+        Ndrown = 0 # the point at which ACF ~ 0
+        if stopWhen == 'posDrown':
+            # stop when ACF drops below threshold, th
+            for i in range(1, N+1):
+                acf_val = AutoCorr(y, i-1, 'Fourier')[0]
+                if np.isnan(acf_val):
+                    logger.warning("Weird time series (constant?)")
+                    out = np.nan
+                if acf_val < th:
+                    # Ensure ACF is all positive
+                    if acf_val > 0:
+                        Ndrown = i
+                        acf.append(acf_val)
+                    else:
+                        # stop at the previous point if not positive
+                        Ndrown = i-1
+                    # ACF has dropped below threshold, break the for loop...
+                    break
+                # hasn't dropped below thresh, append to list 
+                acf.append(acf_val)
+            # This should yield the initial, positive portion of the ACF.
+            assert all(np.array(acf) > 0)
+        elif stopWhen == 'drown':
+            # Stop when ACF is very close to 0 (within threshold, th = 2/sqrt(N))
+            for i in range(1, N+1):
+                acf_val = AutoCorr(y, i-1, 'Fourier')[0] # acf vector indicies are not lags
+                # if positive and less than thresh
+                if i > 0 and abs(acf_val) < th:
+                    Ndrown = i
+                    acf.append(acf_val)
+                    break
+                acf.append(acf_val)
+        elif stopWhen == 'doubleDrown':
+            # Stop at 2*tau, where tau is the lag where ACF ~ 0 (within 1/sqrt(N) threshold)
+            for i in range(1, N+1):
+                acf_val = AutoCorr(y, i-1, 'Fourier')[0]
+                if Ndrown > 0 and i == Ndrown * 2:
+                    acf.append(acf_val)
+                    break
+                elif i > 1 and abs(acf_val) < th:
+                    Ndrown = i
+                acf.append(acf_val)
+    else:
+        raise ValueError(f"Unknown ACF decay criterion: '{stopWhen}'")
+
+    acf = np.array(acf)
+    Nac = len(acf)
+
+    # Check for good behavior
+    if np.any(np.isnan(acf)):
+        # This is an anomalous time series (e.g., all constant, or conatining NaNs)
+        out = np.nan
+    
+    out = {}
+    out['Nac'] = Ndrown
+
+    # Basic stats on the ACF
+    out['sumacf'] = np.sum(acf)
+    out['meanacf'] = np.mean(acf)
+    if stopWhen != 'posDrown':
+        out['meanabsacf'] = np.mean(np.abs(acf))
+        out['sumabsacf'] = np.sum(np.abs(acf))
+
+    # Autocorrelation of the ACF
+    minPointsForACFofACF = 5 # can't take lots of complex stats with fewer than this
+
+    if Nac > minPointsForACFofACF:
+        out['ac1'] = AutoCorr(acf, 1, 'Fourier')[0]
+        if all(acf > 0):
+            out['actau'] = np.nan
+        else:
+            out['actau'] = AutoCorr(acf, FirstCrossing(acf, 'ac', 0, 'discrete'), 'Fourier')[0]
+
+    else:
+        out['ac1'] = np.nan
+        out['actau'] = np.nan
+    
+    # Local extrema
+    dacf = np.diff(acf)
+    ddacf = np.diff(dacf)
+    extrr = signChange(dacf, 1)
+    sdsp = ddacf[extrr]
+
+    # Proportion of local minima
+    out['nminima'] = np.sum(sdsp > 0)
+    out['meanminima'] = np.mean(sdsp[sdsp > 0])
+
+    # Proportion of local maxima
+    out['nmaxima'] = np.sum(sdsp < 0)
+    out['meanmaxima'] = abs(np.mean(sdsp[sdsp < 0])) # must be negative: make it positive
+
+    # Proportion of extrema
+    out['nextrema'] = len(sdsp)
+    out['pextrema'] = len(sdsp) / Nac
+
+    # Fit exponential decay (only for 'posDrown', and if there are enough points)
+    # Should probably only do this up to the first zero crossing...
+    fitSuccess = False
+    minPointsToFitExp = 4 # (need at least four points to fit exponential)
+
+    if stopWhen == 'posDrown' and Nac >= minPointsToFitExp:
+        # Fit exponential decay to (absolute) ACF:
+        # (kind of only makes sense for the first positive period)
+        expFunc = lambda x, b : np.exp(-b * x)
+        try:
+            popt, _ = curve_fit(expFunc, np.arange(Nac), acf, p0=0.5)
+            fitSuccess = True
+        except:
+            fitSuccess = False
+        
+    if fitSuccess:
+        bFit = popt[0] # fitted b
+        out['decayTimescale'] = 1 / bFit
+        expFit = expFunc(np.arange(Nac), bFit)
+        residuals = acf - expFit
+        out['fexpacf_r2'] = 1 - (np.sum(residuals**2) / np.sum((acf - np.mean(acf))**2))
+        # had to fit a second exponential function with negative b to get same output as MATLAB for std residuals
+        expFit2 = expFunc(np.arange(Nac), -bFit)
+        residuals2 = acf - expFit2
+        out['fexpacf_stdres'] = np.std(residuals2, ddof=1) 
+
+    else:
+        # Fit inappropriate (or failed): return nans for the relevant stats
+        out['decayTimescale'] = np.nan
+        out['fexpacf_r2'] = np.nan
+        out['fexpacf_stdres'] = np.nan
+    
     return out

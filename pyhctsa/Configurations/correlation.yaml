@@ -140,4 +140,87 @@ Correlation:
         zscore: True
     hctsa_name: CO_NonlinearAutocorr
     ordered_args: ["taus", "doAbs"]
-    
+  
+  StickAngles:
+    base_name: StickAngles
+    labels:
+      - correlation
+      - discrepancy
+    dependencies:
+    configs:
+      - zscore: True
+    hctsa_name: CO_StickAngles
+    ordered_args: []
+  
+  FirstCrossing:
+    base_name: FirstCrossing
+    labels:
+      - correlation
+    dependencies:
+    configs:
+      - corrFun: 'ac'
+        threshold: [0, 0.36787944117144233]
+        whatOut: 'both'
+        zscore: True
+    hctsa_name: CO_FirstCrossing
+    ordered_args: ['corrFun', 'threshold', 'whatOut']
+  
+  TranslateShape:
+    base_name: TranslateShape
+    labels:
+      - correlation
+      - discrepancy
+    dependencies:
+    configs:
+      - shape: 'circle'
+        d: [1.5, 2.5, 3.5]
+        howToMove: 'pts'
+        zscore: True
+      - shape: 'rectangle'
+        d: 2
+        howToMove: 'pts'
+        zscore: True
+    hctsa_name: CO_TranslateShape
+    ordered_args: ["shape", "d", "howToMove"]
+  
+  AutoCorrShape:
+    base_name: AutoCorrShape
+    labels:
+      - correlation
+      - autocorrelation
+    dependencies:
+      - scipy
+    configs:
+      - stopWhen: ['drown', 'posDrown']
+        zscore: True
+    hctsa_name: CO_AutoCorrShape
+    ordered_args: ["stopWhen"]
+  
+  HistogramAMI:
+    base_name: HistogramAMI
+    labels:
+      - information
+      - correlation
+      - AMI
+    dependencies:
+    configs:
+      - tau: [[1, 2, 3, 4, 5]]
+        meth: ['std1', 'std2', 'even', 'quantiles']
+        numBins: [2, 5, 10]
+        zscore: True
+    hctsa_name: CO_HistogramAMI
+    ordered_args: ["tau", "meth", "numBins"]
+
+  CompareMinAMI:
+    base_name: CompareMinAMI
+    labels:
+      - correlation
+      - AMI
+    dependencies:
+      - scipy
+    configs:
+      - binMethod: ['std1', 'std2'] #'quantiles', 'even', 'std2']
+        numBins: [!range [2, 80]]
+        zscore: True
+    hctsa_name: CO_CompareMinAMI
+    ordered_args: ["binMethod", "numBins"]

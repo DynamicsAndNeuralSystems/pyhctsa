@@ -2,6 +2,7 @@
 import numpy as np
 import csv
 from numpy.typing import ArrayLike
+from typing import Union
 import os
 from functools import wraps
 
@@ -248,3 +249,13 @@ def pointOfCrossing(x, threshold, oneIndexing=True):
             pointOfCrossing += 1
 
     return firstCrossing, pointOfCrossing
+
+def signChange(y : Union[list, np.ndarray], doFind=0):
+    """
+    Where a data vector changes sign.
+    """
+    if doFind == 0:
+        return (np.multiply(y[1:],y[0:len(y)-1]) < 0)
+    indexs = np.where((np.multiply(y[1:],y[0:len(y)-1]) < 0))[0]
+
+    return indexs
