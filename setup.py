@@ -21,6 +21,17 @@ def get_libraries():
     else:
         return ['m']  # Math library for Unix-like systems
     
+
+sampen_extension = Extension(
+    'pyhctsa.Toolboxes.physionet.sampen',
+    sources=['pyhctsa/Toolboxes/physionet/sampen.c'],  
+    include_dirs=["pyhctsa/Toolboxes/physionet", np.get_include()], 
+    extra_compile_args=get_compile_args(),
+    libraries=get_libraries(),
+    extra_link_args=[],
+    define_macros=[],
+)
+
 close_returns_extension = Extension(
     'pyhctsa.Toolboxes.Max_Little.close_returns',
     sources=['pyhctsa/Toolboxes/Max_Little/ML_close_ret.c'],  
@@ -77,7 +88,7 @@ setup(
     long_description=read("README.md"),
     author="Joshua B. Moore",
     packages=find_packages(exclude=["tests", ".github"]),
-    ext_modules=[periodicity_wang_module, close_returns_extension],
+    ext_modules=[periodicity_wang_module, close_returns_extension, sampen_extension],
     install_requires=read_requirements("requirements.txt"),
     zip_safe=False,
 )

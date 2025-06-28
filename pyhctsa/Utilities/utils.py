@@ -259,3 +259,32 @@ def signChange(y : Union[list, np.ndarray], doFind=0):
     indexs = np.where((np.multiply(y[1:],y[0:len(y)-1]) < 0))[0]
 
     return indexs
+
+def make_buffer(y, bufferSize):
+    """
+    Make a buffered version of a time series.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    bufferSize : int
+        The length of each buffer segment.
+
+    Returns
+    -------
+    y_buffer : ndarray
+        2D array where each row is a segment of length `bufferSize` 
+        corresponding to consecutive, non-overlapping segments of the input time series.
+    """
+    y = np.asarray(y) 
+    N = len(y)
+
+    numBuffers = int(np.floor(N/bufferSize))
+
+    # may need trimming
+    y_buffer = y[:numBuffers*bufferSize]
+    # then reshape
+    y_buffer = y_buffer.reshape((numBuffers,bufferSize))
+
+    return y_buffer

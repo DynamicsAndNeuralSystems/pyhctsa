@@ -333,5 +333,91 @@ Information:
         zscore: True
     ordered_args: ["maxTau", "estMethod", "extraParam"]
     hctsa_name: IN_AutoMutualInfoStats
+
+Entropy:
+  LZComplexity:
+    base_name: LZcomplexity
+    labels:
+      - entropy
+      - symbolic
+    dependencies:
+    configs:
+      - nbits: !range [2, 10]
+        preProc: [[], 'diff']
+        zscore: True
+    hctsa_name: EN_MS_LZcomplexity
+    ordered_args: ['nbits', 'preProc']
   
+  ComplexityInvariantDistance:
+    base_name: CID
+    labels:
+      - entropy
+    dependencies:
+    configs:
+      - zscore: True
+    hctsa_name: EN_CID
+  
+  ApproximateEntropy:
+    base_name: ApEn
+    labels:
+      - entropy
+    dependencies:
+    configs:
+      - mnom: [1, 2]
+        rth: [0.1, 0.2]
+        zscore: True
+    hctsa_name: EN_ApEn
+    ordered_args: ['mnom', 'rth']
+
+  RPDE:
+    base_name: rpde
+    labels:
+      - entropy
+    dependencies:
+    configs:
+      - m: 3
+        tau: 1
+        zscore: True
+      # - m: 3
+      #   tau: 'ac'
+      #   zscore: True
+    hctsa_name: EN_rpde
+    ordered_args: ['m', 'tau']
+  
+  SampleEntropy:
+    base_name: SampEn
+    labels:
+      - entropy
+    dependencies:
+    configs:
+      - M: 5
+        r: [0.05, 0.1, 0.15, 0.2, 0.3]
+        preProcessHow: ''
+        zscore: True
+      - M: 5
+        r: [0.1, 0.2]
+        preProcessHow: 'diff1'
+        zscore: True
+    hctsa_name: EN_SampEn
+    ordered_args: ['M', 'r', 'preProcessHow']
+
+  MultiScaleEntropy:
+    base_name: mse
+    labels:
+      - entropy
+      - intensive
+    dependencies:
+    configs:
+      - scaleRange: [!range [1, 10]]
+        m: 2
+        r: 0.15
+        preProcessHow: ['diff1', 'rescale_tau']
+        zscore: True
+      - scaleRange: [!range [1, 10]]
+        m: 2
+        r: 0.15
+        zscore: True
+        preProcessHow:
+    hctsa_name: EN_mse
+    ordered_args: ['scaleRange', 'm', 'r', 'preProcessHow']
   

@@ -1,10 +1,202 @@
 import numpy as np
-from typing import Union
+from typing import Union, Optional
 from numba import njit
 from numpy.typing import ArrayLike
+from math import factorial
 from sklearn.neighbors import KDTree
-from ..Utilities.utils import ZScore
+from ..Utilities.utils import ZScore, make_buffer
 from ..Toolboxes.Max_Little.rpde_wrapper import close_returns_analysis
+from antropy.entropy import _xlogx
+from ..Toolboxes.physionet.sampen_wrapper import calculate_sampen
+from ..Operations.Correlation import FirstCrossing
+
+
+def MultiScaleEntropy(
+    y: ArrayLike,
+    scaleRange: Optional[Union[list, range]] = None,
+    m: int = 2,
+    r: float = 0.15,
+    preProcessHow: Optional[str] = None
+) -> dict:
+    """
+    Compute multiscale entropy (MSE) of a time series using sample entropy across multiple scales.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series (list or NumPy array).
+    scaleRange : list or range, optional
+        List or range of scales (window sizes) to use for coarse-graining. Default is range(1, 11).
+    m : int, optional
+        Embedding dimension for sample entropy (default: 2).
+    r : float, optional
+        Similarity threshold for sample entropy (default: 0.15).
+    preProcessHow : str, optional
+        Preprocessing method. Supported:
+            - 'diff1': Use z-scored first differences.
+            - 'rescale_tau': Rescale using autocorrelation time.
+
+    Returns
+    -------
+    dict
+        Dictionary containing sample entropy at each scale and summary statistics:
+            - 'sampen_s{scale}': SampEn at each scale
+            - 'maxSampEn', 'maxScale', 'minSampEn', 'minScale', 'meanSampEn', 'stdSampEn', 'cvSampEn', 'meanch'
+    """
+    y = np.asarray(y)
+    if scaleRange is None:
+        scaleRange = range(1, 10)
+    minTsLength = 20
+    numScales = len(scaleRange)
+
+    if preProcessHow is not None:
+        if preProcessHow == 'diff1':
+            y = ZScore(np.diff(y))
+        elif preProcessHow == 'rescale_tau':
+            tau = FirstCrossing(y, 'ac', 0, 'discrete')
+            y_buffer = make_buffer(y, tau)
+            y = np.mean(y_buffer, 1)
+            y = ZScore(y)
+        else:
+            raise ValueError(f"Unknown preprocessing setting: {preProcessHow}")    
+    
+    # Coarse-graining across scales
+    y_cg = []
+    for i in range(numScales):
+        buffer_size = scaleRange[i]
+        y_buffer = make_buffer(y, buffer_size)
+        y_cg.append(np.mean(y_buffer, 1))
+    
+    # Run sample entropy for each m and r value at each scale
+    samp_ens = np.zeros(numScales)
+    for si in range(numScales):
+        if len(y_cg[si]) >= minTsLength:
+            samp_en_struct = SampleEntropy(y_cg[si], m, r)
+            samp_ens[si] = samp_en_struct[f'sampen{m}']
+        else:
+            samp_ens[si] = np.nan
+
+
+    # Outputs: multiscale entropy
+    if np.all(np.isnan(samp_ens)):
+        if preProcessHow:
+            pp_text = f"after {preProcessHow} pre-processing"
+        else:
+            pp_text = ""
+        print(f"Warning: Not enough samples ({len(y)} {pp_text}) to compute SampEn at multiple scales")
+        return {'out': np.nan}
+
+    # Output raw values
+    out = {f'sampen_s{scaleRange[i]}': samp_ens[i] for i in range(numScales)}
+
+     # Summary statistics of the variation
+    max_samp_en = np.nanmax(samp_ens)
+    max_ind = np.nanargmax(samp_ens)
+    min_samp_en = np.nanmin(samp_ens)
+    min_ind = np.nanargmin(samp_ens)
+
+    out.update({
+        'maxSampEn': max_samp_en,
+        'maxScale': scaleRange[max_ind],
+        'minSampEn': min_samp_en,
+        'minScale': scaleRange[min_ind],
+        'meanSampEn': np.nanmean(samp_ens),
+        'stdSampEn': np.nanstd(samp_ens, ddof=1),
+        'cvSampEn': np.nanstd(samp_ens, ddof=1) / np.nanmean(samp_ens),
+        'meanch': np.nanmean(np.diff(samp_ens))
+    })
+
+    return out
+
+def SampleEntropy(y: ArrayLike, M: int = 2, r: Optional[float] = None, preProcessHow: Optional[str] = None) -> dict:
+    """
+    Compute Sample Entropy (SampEn) of a time series.
+
+    This function calculates SampEn for embedding dimensions from 0 to M. The implementation
+    uses the PhysioNet C code for efficiency and accuracy.
+    Can specify to first apply an incremental differencing of the time series
+    thus yielding the 'Control Entropy': "Control Entropy: A complexity measure for nonstationary signals"
+    E. M. Bollt and J. Skufca, Math. Biosci. Eng., 6(1) 1 (2009).
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series
+    M : int, optional
+        Maximum embedding dimension (default: 2)
+    r : float, optional
+        Similarity threshold. If None, set to 0.1 * std(y)
+    preProcessHow : str, optional
+        Preprocessing method:
+            - 'diff1': Use first differences
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+            - 'sampen{m}': Sample entropy for each m from 0 to M
+            - 'quadSampEn{m}': Quadratic sample entropy for each m
+            - 'meanchsampen': Mean change in sample entropy values
+
+    Notes
+    -----
+    Implementation based on PhysioNet's sampen.c by Doug Lake
+    """
+    y = np.asarray(y, dtype=np.float64)
+    if r is None:
+        r = 0.1 * np.std(y, ddof=1)
+    if preProcessHow == 'diff1':
+        y = np.diff(y)
+
+    sampEN = calculate_sampen(y, M+1, r)
+    sampEN = sampEN[:-1] # always that extra one for the M = 0 
+    out = {}
+    for m in range(M + 1):
+        out[f'sampen{m}'] = sampEN[m]
+        out[f'quadSampEn{m}'] = sampEN[m] + np.log(2 * r)
+    if M > 1:
+        out['meanchsampen'] = np.mean(np.diff(sampEN))
+    return out
+
+def PermEn(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
+    """
+    Permutation Entropy (PermEn) of a time series.
+
+    Computes the permutation entropy and its normalized version for a given time series,
+    as described in:
+        C. Bandt and B. Pompe, "Permutation Entropy: A Natural Complexity Measure for Time Series",
+        Phys. Rev. Lett. 88(17) 174102 (2002).
+    This implementation modifies code from the antropy package:
+    https://github.com/raphaelvallat/antropy to provide both raw and normalized permutation entropy values.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    m : int, optional
+        Embedding dimension (order of the permutation entropy, default: 2).
+    tau : int, optional
+        Time-delay for the embedding (default: 1).
+
+    Returns
+    -------
+    dict
+        A dictionary containing the permutation entropy and normalized permutation entropy.
+    """
+    y = np.asarray(y)
+    ran_order = range(m)
+    hashmult = np.power(m, ran_order)
+    assert tau > 0, "delay must be greater than zero."
+    sorted_idx = _embed(y, order=m, delay=tau).argsort(kind="quicksort")
+    Nx = sorted_idx.shape[0]
+    assert Nx > 5, "Time series too short to embed." # need at least 5 embedding vectors to actually do a computation
+    hashval = (np.multiply(sorted_idx, hashmult)).sum(1)
+    _, c = np.unique(hashval, return_counts=True)
+    p = np.true_divide(c, c.sum())
+    pe = - _xlogx(p).sum()
+    pe_norm = pe / np.log2(factorial(m))
+    out = {"permEn": pe, "normPermEn": pe_norm}
+    return out
 
 def RPDE(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, TMax : int = -1) -> dict:
     """
