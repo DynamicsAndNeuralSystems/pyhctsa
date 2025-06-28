@@ -116,7 +116,7 @@ def AutoMutualInfo(
     timeDelay: Union[int, str, list[int]] = 1,
     estMethod: str = 'kernel',
     extraParam: Optional[Union[int, str]] = None
-) -> Union[float, dict[str, float]]:
+) -> Union[float, Dict[str, float]]:
     """
     Compute time-delayed automutual information of a time series.
 
