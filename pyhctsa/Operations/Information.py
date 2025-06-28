@@ -1,4 +1,4 @@
-from typing import Union, Any, Optional, Dict
+from typing import Union, Any, Optional, Dict, List
 import numpy as np
 import jpype as jp
 import os
@@ -113,7 +113,7 @@ def AutoMutualInfoStats(
 
 def AutoMutualInfo(
     y: ArrayLike,
-    timeDelay: Union[int, str, list[int]] = 1,
+    timeDelay: Union[int, str, List[int]] = 1,
     estMethod: str = 'kernel',
     extraParam: Optional[Union[int, str]] = None
 ) -> Union[float, Dict[str, float]]:
