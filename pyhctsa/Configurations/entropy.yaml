@@ -1,0 +1,49 @@
+Entropy:
+  LZComplexity:
+    base_name: LZcomplexity
+    labels:
+      - entropy
+      - symbolic
+    dependencies:
+    configs:
+      - nbits: !range [2, 10]
+        preProc: [[], 'diff']
+        zscore: True
+    hctsa_name: EN_MS_LZcomplexity
+    ordered_args: ['nbits', 'preProc']
+  
+  ComplexityInvariantDistance:
+    base_name: CID
+    labels:
+      - entropy
+    dependencies:
+    configs:
+      - zscore: True
+    hctsa_name: EN_CID
+  
+  ApproximateEntropy:
+    base_name: ApEn
+    labels:
+      - entropy
+    dependencies:
+    configs:
+      - mnom: [1, 2]
+        rth: [0.1, 0.2]
+        zscore: True
+    hctsa_name: EN_ApEn
+    ordered_args: ['mnom', 'rth']
+
+  RPDE:
+    base_name: rpde
+    labels:
+      - entropy
+    dependencies:
+    configs:
+      - m: 3
+        tau: 1
+        zscore: True
+      # - m: 3
+      #   tau: 'ac'
+      #   zscore: True
+    hctsa_name: EN_rpde
+    ordered_args: ['m', 'tau']
