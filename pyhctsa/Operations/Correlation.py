@@ -9,7 +9,37 @@ from loguru import logger
 from statsmodels.tsa.stattools import pacf
 from scipy.optimize import curve_fit
 from scipy.linalg import LinAlgError
+from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
 
+def PeriodicityWang(y : ArrayLike) -> dict:
+    """
+    Periodicity extraction measure of Wang et al. (2007).
+
+    Implements an idea based on the periodicity extraction measure proposed in the paper
+    "Structure-based Statistical Features and Multivariate Time Series Clustering"
+    by X. Wang, A. Wirth, and L. Wang (2007).
+
+    The function:
+    1. Detrends the time series using a three-knot cubic regression spline
+    2. Computes autocorrelations up to one third of the length of the time series
+    3. Finds the first peak in the autocorrelation function satisfying certain conditions
+
+    While the original paper used a single threshold of 0.01, this implementation tests
+    multiple thresholds: 0, 0.01 (original paper threshold), 0.1, 0.2, 1/sqrt(N), 5/sqrt(N), 
+    10/sqrt(N), where N is the length of the time series.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series
+
+    Returns
+    -------
+    dict
+        Dictionary containing periodicity measures for each threshold
+    """
+    y = np.asarray(y)
+    return periodicity_wang(y)
 
 def CompareMinAMI(y : ArrayLike, binMethod : str = 'std1', numBins : int = 10) -> dict:
     """

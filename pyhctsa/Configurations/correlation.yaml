@@ -224,3 +224,16 @@ Correlation:
         zscore: True
     hctsa_name: CO_CompareMinAMI
     ordered_args: ["binMethod", "numBins"]
+
+  PeriodicityWang:
+    base_name: PeriodicityWang
+    labels:
+      - periodicity
+      - spline
+      - C
+    dependencies:
+    configs:
+      - zscore: True
+    hctsa_name: PD_PeriodicityWang
+    ordered_args: 
+  

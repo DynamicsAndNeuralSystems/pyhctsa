@@ -1,6 +1,40 @@
 import io
+import sys
 import os
-from setuptools import find_packages, setup
+import numpy as np
+import platform
+from setuptools import find_packages, setup, Extension
+
+def get_compile_args():
+    """Get platform-specific compilation arguments."""
+    if platform.system() == 'Windows':
+        # MSVC compiler flags
+        return ['/O2']
+    else:
+        # GCC/Clang flags for Unix-like systems
+        return ['-O3', '-fPIC', '-std=c99']
+    
+def get_libraries():
+    """Get platform-specific libraries to link."""
+    if platform.system() == 'Windows':
+        return []
+    else:
+        return ['m']  # Math library for Unix-like systems
+
+periodicity_wang_module = Extension(
+    "pyhctsa.Toolboxes.c22.PD_PeriodicityWang",
+    sources=[
+        "pyhctsa/Toolboxes/c22/PD_PeriodicityWang.c",
+        "pyhctsa/Toolboxes/c22/splinefit.c",
+        "pyhctsa/Toolboxes/c22/stats.c",
+        "pyhctsa/Toolboxes/c22/helper_functions.c"
+    ],
+    include_dirs=["pyhctsa/Toolboxes/c22", np.get_include()],
+    extra_compile_args=get_compile_args(),
+    libraries=get_libraries(),
+    extra_link_args=[],
+    define_macros=[],
+)
 
 def read(*paths, **kwargs):
     """Read the contents of a text file safely.
@@ -33,5 +67,7 @@ setup(
     long_description=read("README.md"),
     author="Joshua B. Moore",
     packages=find_packages(exclude=["tests", ".github"]),
-    install_requires=read_requirements("requirements.txt")
+    ext_modules=[periodicity_wang_module],
+    install_requires=read_requirements("requirements.txt"),
+    zip_safe=False,
 )
