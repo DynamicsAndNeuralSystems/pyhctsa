@@ -10,6 +10,20 @@ from antropy.entropy import _xlogx
 from ..Toolboxes.physionet.sampen_wrapper import calculate_sampen
 from ..Operations.Correlation import FirstCrossing
 
+# def EntropyRandomise(y : ArrayLike, randomiseHow = 'statdist', randomSeed = 42):
+#     # how time series properties change with increasing randomisation
+#     y = np.asarray(y)
+#     N = len(y)
+
+#     randp_max = 2
+#     rand_inc = 0.1
+#     numCalc = randp_max / rand_inc
+#     calc_ints = np.floor((randp_max*N)/numCalc)
+#     if calc_ints == 0:
+#         calc_ints = 1 # round up for short time series
+#     calc_pts = 
+
+#     pass
 
 def MultiScaleEntropy(
     y: ArrayLike,

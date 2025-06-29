@@ -1,0 +1,60 @@
+Stationarity:
+  StatAv:
+    base_name: StatAv
+    labels:
+      - stationarity
+      - StatAv
+    dependencies:
+    configs:
+      - whatType: 'len'
+        extraParam: [25, 50, 100, 150, 200, 250, 500, 1000]
+        zscore: True
+    hctsa_name: SY_StatAv
+    ordered_args: ["whatType", "extraParam"]
+
+  Trend:
+    base_name: Trend
+    labels:
+      - stationarity
+    dependencies:
+      - scipy
+    configs:
+      - zscore: True
+    hctsa_name: SY_Trend
+    ordered_args: 
+  
+  StdNthDer:
+    base_name: StdNthDer
+    labels:
+      - stationarity
+    dependencies:
+    configs:
+      - ndr: [1, 2, 3, 4, 5, 10]
+        zscore: True
+    hctsa_name: SY_StdNthDer
+    ordered_args: ["ndr"]
+
+  TSLength:
+    base_name: length
+    labels:
+      - misc
+      - raw
+      - stationarity
+      - lengthDependent
+    dependencies:
+    configs:
+    hctsa_name: ST_Length
+    ordered_args:
+
+  FitPolynomial:
+    base_name: FitPolynomial
+    labels:
+      - trend
+      - stationarity
+    dependencies:
+    configs:
+      - k: !range [1, 4]
+        zscore: True
+    hctsa_name: ST_FitPolynomial
+    ordered_args: ["k"]
+    
