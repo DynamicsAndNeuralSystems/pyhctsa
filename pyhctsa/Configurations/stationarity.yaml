@@ -59,3 +59,107 @@ Stationarity:
     hctsa_name: ST_FitPolynomial
     ordered_args: ["k"]
   
+  SlidingWindow:
+    base_name: SlidingWindow
+    labels:
+      - stationarity
+    dependencies:
+    configs:
+      - windowStat: 'mean'
+        acrossWinStat: 'std'
+        numSeg: !range [2, 10]
+        incMove: 1
+        zscore: True
+      - windowStat: 'mean'
+        acrossWinStat: 'std'
+        numSeg: [2, 5, 10]
+        incMove: [2, 10]
+        zscore: True
+      - windowStat: 'mean'
+        acrossWinStat: 'sampen'
+        numSeg: 10
+        incMove: [1, 2, 10]
+        zscore: True
+      - windowStat: 'mean'
+        acrossWinStat: 'sampen'
+        numSeg: [2, 5]
+        incMove: 10
+        zscore: True
+      - windowStat: 'std'
+        acrossWinStat: 'std'
+        numSeg: [2, 5, 10]
+        incMove: [1, 2, 10]
+        zscore: True
+      - windowStat: 'std'
+        acrossWinStat: 'sampen'
+        numSeg: [2, 5, 10]
+        incMove: 10
+        zscore: True
+      - windowStat: 'std'
+        acrossWinStat: 'sampen'
+        numSeg: 10
+        incMove: [1, 2]
+        zscore: True
+      # - windowStat: 'sampen'
+      #   acrossWinStat: 'std'
+      #   numSeg: [2, 5, 10]
+      #   incMove: [1, 2, 10]
+      #   zscore: True
+      # #- windowStat: 'sampen'
+      # #  acrossWinStat: 'sampen'
+      # #  numSeg: [2, 5, 10]
+      # #  incMove: 10
+      # #  zscore: True
+      # - windowStat: 'sampen'
+      #   acrossWinStat: 'sampen'
+      #   numSeg: 10
+      #   incMove: [1, 2]
+      #   zscore: True
+      - windowStat: 'mom3'
+        acrossWinStat: 'std'
+        numSeg: [2, 5, 10]
+        incMove: [1, 2, 10]
+        zscore: True
+      - windowStat: 'mom3'
+        acrossWinStat: 'sampen'
+        numSeg: [2, 5, 10]
+        incMove: 10
+        zscore: True
+      - windowStat: 'mom3'
+        acrossWinStat: 'sampen'
+        numSeg: 10
+        incMove: [1, 2]
+        zscore: True
+      - windowStat: 'mom4'
+        acrossWinStat: 'std'
+        numSeg: [2, 5, 10]
+        incMove: [1, 2, 10]
+        zscore: True
+      - windowStat: 'mom4'
+        acrossWinStat: 'sampen'
+        numSeg: [2, 5, 10]
+        incMove: 10
+        zscore: True
+      - windowStat: 'mom4'
+        acrossWinStat: 'sampen'
+        numSeg: 10
+        incMove: [1, 2]
+        zscore: True
+      - windowStat: 'AC1'
+        acrossWinStat: 'std'
+        numSeg: [2, 5, 10]
+        incMove: [1, 2, 10]
+        zscore: True
+      - windowStat: 'AC1'
+        acrossWinStat: 'sampen'
+        numSeg: [2, 5, 10]
+        incMove: 10
+        zscore: True
+      - windowStat: 'AC1'
+        acrossWinStat: 'sampen'
+        numSeg: 10
+        incMove: [1, 2]
+        zscore: True
+    hctsa_name: SY_SlidingWindow
+    ordered_args: ["windowStat", "acrossWinStat", "numSeg", "incMove"]
+  

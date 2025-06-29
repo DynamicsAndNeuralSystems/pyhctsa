@@ -6,6 +6,7 @@ from ..Operations.Correlation import AutoCorr
 from typing import Dict, Union
 from scipy.signal import detrend
 from scipy.optimize import curve_fit
+from ..Operations.Distribution import Moments
 
 
 def FitPolynomial(y : ArrayLike, k : int = 1) -> float:
@@ -283,15 +284,15 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
         for i in range(numSteps):
             sampen_dict = SampleEntropy(y[_get_window(i, inc, winLength)], 1, 0.1)
             qs[i] = sampen_dict['sampen1']
-    # elif windowStat == 'mom3':
-    #     for i in range(numSteps):
-    #         qs[i] = Moments(y[_get_window(i, inc, winLength)], 3)
-    # elif windowStat == 'mom4':
-    #     for i in range(numSteps):
-    #         qs[i] = Moments(y[_get_window(i, inc, winLength)], 4)
-    # elif windowStat == 'mom5':
-    #     for i in range(numSteps):
-    #         qs[i] = Moments(y[_get_window(i, inc, winLength)], 5)
+    elif windowStat == 'mom3':
+        for i in range(numSteps):
+            qs[i] = Moments(y[_get_window(i, inc, winLength)], 3)
+    elif windowStat == 'mom4':
+        for i in range(numSteps):
+            qs[i] = Moments(y[_get_window(i, inc, winLength)], 4)
+    elif windowStat == 'mom5':
+        for i in range(numSteps):
+            qs[i] = Moments(y[_get_window(i, inc, winLength)], 5)
     elif windowStat == 'AC1':
         for i in range(numSteps):
             qs[i] = AutoCorr(y[_get_window(i, inc, winLength)], 1, 'Fourier')
@@ -303,7 +304,6 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
     elif acrossWinStat == 'apen':
         out = ApproximateEntropy(qs, 1, 0.2)
     elif acrossWinStat == 'sampen':
-        print(qs)
         sampen_dict = SampleEntropy(qs, 2, 0.15)
         out = sampen_dict['quadSampEn1']
     elif acrossWinStat == 'ent':
