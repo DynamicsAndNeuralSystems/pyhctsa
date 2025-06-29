@@ -435,3 +435,23 @@ def Burstiness(y: ArrayLike) -> Dict[str, float]:
     out = {'B': B, 'B_Kim': B_Kim}
 
     return out
+
+def Moments(y : ArrayLike, theMom : int = 0) -> float:
+    """
+    A moment of the distribution of the input time series.
+    Normalizes by the standard deviation.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series or data vector
+    theMom: int, optional
+        The moment to calculate. Default is 0.
+
+    Returns
+    -------
+    float
+        The calculated moment.
+    """
+    y = np.asarray(y)
+    return stats.moment(y, theMom) / np.std(y, ddof=1)

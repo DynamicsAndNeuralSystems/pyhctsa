@@ -168,3 +168,21 @@ Distribution:
       - zscore: False
     hctsa_name: DN_Burstiness
     ordered_args: 
+  
+  Moments:
+    base_name: Moments
+    labels:
+      - distribution
+      - moment
+      - shape
+    dependencies:
+      - scipy
+    configs:
+      - theMom: [3, 4, 5, 6, 7, 8, 9, 10, 11]
+        zscore: True
+      - theMom: [3, 4, 5, 6, 7, 8, 9, 10, 11]
+        zscore: False
+    hctsa_name: DN_Moments
+    ordered_args: ["theMom"]
+  
+  

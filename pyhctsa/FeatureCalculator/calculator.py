@@ -58,23 +58,30 @@ class FeatureCalculator:
                 ordered_args = feature_config.get("ordered_args", [])
                 configs = feature_config.get("configs", [{}])
                 if isinstance(configs, list) and configs and isinstance(configs[0], dict):
+                    # Check if zscore varies
+                    zscore_values = [conf.get("zscore", False) for conf in configs]
+                    zscore_varies = len(set(zscore_values)) > 1
                     for conf in configs:
                         zscore = conf.pop("zscore", False) if "zscore" in conf else False
                         absval = conf.pop("abs", False) if "abs" in conf else False
-                        label = f"{module_key}_{feature_name}"
                         if conf:
                             keys, values = zip(*[(k, v if isinstance(v, list) else [v]) for k, v in conf.items()])
                             for combo in product(*values):
                                 combo_dict = dict(zip(keys, combo))
+                                label = base_name
                                 if ordered_args:
-                                    label = base_name + "_" + "_".join(
-                                        _format_param_value(combo_dict[arg]) for arg in ordered_args)
+                                    label += "_" + "_".join(_format_param_value(combo_dict[arg]) for arg in ordered_args)
                                 else:
-                                    label = base_name + "_" + "_".join(f"{k}{v}" for k, v in combo_dict.items())
+                                    label += "_" + "_".join(f"{k}{_format_param_value(v)}" for k, v in combo_dict.items())
+                                # Only append "_raw" if zscore varies and zscore is False
+                                if zscore_varies and not zscore:
+                                    label += "_raw"
                                 decorated_func = preprocess_decorator(zscore, absval)(op_func)
                                 feature_funcs[label] = partial(decorated_func, **combo_dict)
                         else:
                             label = base_name
+                            if zscore_varies and not zscore:
+                                label += "_raw"
                             decorated_func = preprocess_decorator(zscore, absval)(op_func)
                             feature_funcs[label] = decorated_func
                 else:
@@ -113,4 +120,3 @@ class FeatureCalculator:
         elapsed = time.perf_counter() - start_time
         print(f"Feature extraction completed in {elapsed:.3f} seconds.")
         return results
-    
