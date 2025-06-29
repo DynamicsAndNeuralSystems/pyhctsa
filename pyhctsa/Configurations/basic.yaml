@@ -466,6 +466,93 @@ Stationarity:
       - lengthDependent
     dependencies:
     configs:
+      - zscore : False
     hctsa_name: ST_Length
     ordered_args:
+
+  FitPolynomial:
+    base_name: FitPolynomial
+    labels:
+      - trend
+      - stationarity
+    dependencies:
+    configs:
+      - k: !range [1, 4]
+        zscore: True
+    hctsa_name: ST_FitPolynomial
+    ordered_args: ["k"]
+
+Distribution:
+  Withinp:
+    base_name: Withinp
+    labels:
+      - distribution
+      - spread
+    dependencies:
+    configs:
+      - p: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+        meanOrMedian: ['mean', 'median']
+        zscore: True
+    hctsa_name: DN_Withinp
+    ordered_args: ["p", "meanOrMedian"]
+
+  Unique:
+    base_name: Unique
+    labels:
+      - distribution
+      - raw
+    dependencies:
+    configs:
+      - zscore: False
+    hctsa_name: DN_Unique
+    ordered_args:
+  
+  Spread:
+    base_name: Spread
+    labels:
+      - raw
+      - spread
+      - distribution
+      - spreadDependent
+    dependencies:
+      - scipy
+    configs:
+      - spreadMeasure: ['std', 'mad', 'iqr', 'mead']
+    hctsa_name: DN_Spread
+    ordered_args: ["spreadMeasure"]
+
+  Quantile:
+    base_name: Quantile
+    labels:
+      - distribution
+    dependencies:
+    configs:
+      - p: [0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99]
+        zscore: True
+    hctsa_name: DN_Quantile
+    ordered_args: ["p"]
+
+  ProportionValues:
+    base_name: ProportionValues
+    labels:
+      - distribution
+      - raw
+    dependencies:
+    configs:
+      - propWhat: ['zeros', 'positive', 'geq0']
+        zscore: False
+    hctsa_name: DN_ProportionValues
+    ordered_args: ["propWhat"]
+
+  PLeft:
+    base_name: pleft
+    labels:
+      - distribution
+      - spread
+    dependencies:
+    configs:
+      - th : [0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
+        zscore: True
+    hctsa_name: DN_pleft
+    ordered_args: ["th"]
 

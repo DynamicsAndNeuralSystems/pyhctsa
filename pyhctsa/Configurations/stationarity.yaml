@@ -43,6 +43,7 @@ Stationarity:
       - lengthDependent
     dependencies:
     configs:
+      - zscore: False
     hctsa_name: ST_Length
     ordered_args:
 
@@ -57,4 +58,4 @@ Stationarity:
         zscore: True
     hctsa_name: ST_FitPolynomial
     ordered_args: ["k"]
-    
+  
