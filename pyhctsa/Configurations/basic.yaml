@@ -773,5 +773,12 @@ Distribution:
     hctsa_name: DN_Moments
     ordered_args: ["theMom"]
   
-  
-
+Scaling:
+  FastDFA:
+    base_name: fastdfa
+    labels:
+      - scaling
+    configs:
+      - zscore: True
+    hctsa_name: SC_fastdfa
+    

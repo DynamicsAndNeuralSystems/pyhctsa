@@ -5,9 +5,9 @@ from numpy.typing import ArrayLike
 from math import factorial
 from sklearn.neighbors import KDTree
 from ..Utilities.utils import ZScore, make_buffer
-from ..Toolboxes.Max_Little.rpde_wrapper import close_returns_analysis
+from ..Toolboxes.Max_Little import close_returns as _close_returns_c
 from antropy.entropy import _xlogx
-from ..Toolboxes.physionet.sampen_wrapper import calculate_sampen
+from ..Toolboxes.physionet import sampen as _sampen_c 
 from ..Operations.Correlation import FirstCrossing
 
 # def EntropyRandomise(y : ArrayLike, randomiseHow = 'statdist', randomSeed = 42):
@@ -158,7 +158,7 @@ def SampleEntropy(y: ArrayLike, M: int = 2, r: Optional[float] = None, preProces
     if preProcessHow == 'diff1':
         y = np.diff(y)
 
-    sampEN = calculate_sampen(y, M+1, r)
+    sampEN = _sampen_c.calculate(y, M+1, r)
     sampEN = sampEN[:-1] # always that extra one for the M = 0 
     out = {}
     for m in range(M + 1):
@@ -247,7 +247,7 @@ def RPDE(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, TMax : i
     """
 
     y = np.asarray(y)
-    rpd = np.array(close_returns_analysis(y, m, tau, epsilon))
+    rpd = np.array(_close_returns_c.close_returns(y, m, tau, epsilon))
     if TMax > -1:
         rpd = rpd[:TMax]
     rpd = np.divide(rpd, np.sum(rpd))
