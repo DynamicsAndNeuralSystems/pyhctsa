@@ -72,5 +72,99 @@ Distribution:
     hctsa_name: DN_pleft
     ordered_args: ["th"]
 
+  MinMax:
+    base_name: MinMax
+    labels:
+      - distribution
+    dependencies:
+    configs:
+      - minOrMax: ['max', 'min']
+        zscore: True
+    hctsa_name: DN_MinMax
+    ordered_args: ["minOrMax"]
   
+  Mean:
+    base_name: mean
+    labels:
+      - distribution
+      - location
+      - raw
+      - locationDependent
+    dependencies:
+      - scipy
+    configs:
+      - meanType: ['norm', 'harm', 'rms', 'median', 'midhinge']
+    hctsa_name: DN_Mean
+    ordered_args: ["meanType"]
   
+  HighLowMu:
+    base_name: HighLowMu
+    labels:
+      - distribution
+      - raw
+      - locationDependent
+      - spreadDependent
+    dependencies:
+    configs:
+      - zscore: False
+    hctsa_name: DN_HighLowMu
+    ordered_args:
+
+  FitMLE:
+    base_name: Fit_mle
+    labels:
+      - distribution
+      - raw
+    dependencies:
+      - scipy
+    configs:
+      - fitWhat: ['geometric']
+        zscore: False
+    hctsa_name: DN_Fit_mle
+    ordered_args: ["fitWhat"]
+
+  CV:
+    base_name: cv
+    labels:
+      - distribution
+      - spread
+      - cv
+      - raw
+      - locationDependent
+      - spreadDependent
+    dependencies:
+    configs:
+      - k: [1, 2]
+        zscore: False
+    hctsa_name: DN_cv
+    ordered_args: ["k"]
+
+  CustomSkewness:
+    base_name: CustomSkewness
+    labels: 
+      - distribution
+      - moment
+      - shape
+      - raw
+      - locationDependent
+    dependencies:
+    configs:
+      - whatSkew: ['pearson']
+        zscore: False
+      - whatSkew: ['bowley']
+        zscore: True
+    hctsa_name: DN_CustomSkewness
+    ordered_args: ["whatSkew"]
+  
+  Burstiness:
+    base_name: burstiness
+    labels:
+      - distribution
+      - raw
+      - locationDependent
+      - spreadDependent
+    dependencies:
+    configs:
+      - zscore: False
+    hctsa_name: DN_Burstiness
+    ordered_args: 

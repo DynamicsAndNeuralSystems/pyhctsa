@@ -3,6 +3,7 @@ from numpy.typing import ArrayLike
 from typing import Dict, Union
 from scipy import stats
 from loguru import logger
+from ..Utilities.utils import histc, binpicker, simple_binner 
 
 
 def Withinp(x : ArrayLike, p : float = 1.0, meanOrMedian : str = 'mean') -> float:
@@ -179,3 +180,258 @@ def PLeft(y : ArrayLike, th : float = 0.1) -> float:
     # A proportion, th, of the data lie further than p from the mean
     out = np.divide(p, np.std(y, ddof=1))
     return float(out)
+
+def MinMax(y : ArrayLike, minOrMax : str = 'max') -> float:
+    """
+    The maximum and minimum values of the input data vector.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series or data vector
+    minOrMax : str, optional
+        Return either the minimum or maximum of y. Default is 'max':
+        - 'min': minimum of y
+        - 'max': maximum of y
+
+    Returns
+    -------
+    float
+        The calculated min or max value.
+    """
+    y = np.asarray(y)
+    if minOrMax == 'max':
+        out = max(y)
+    elif minOrMax == 'min':
+        out = min(y)
+    else:
+        raise ValueError(f"Unknown method '{minOrMax}'")
+    
+    return out
+
+def Mean(y : ArrayLike, meanType : str = 'arithmetic') -> float:
+    """
+    A given measure of location of a data vector.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series or data vector
+    meanType : str, optional
+        Type of mean to calculate. Default is 'arithmtic':
+        - 'norm' or 'arithmetic': standard arithmetic mean
+        - 'median': middle value (50th percentile)
+        - 'geom': geometric mean (nth root of product)
+        - 'harm': harmonic mean (reciprocal of mean of reciprocals)
+        - 'rms': root mean square (quadratic mean)
+        - 'iqm': interquartile mean (mean of values between Q1 and Q3)
+        - 'midhinge': average of first and third quartiles
+
+    Returns
+    -------
+    float
+        The calculated mean value.
+    """
+    y = np.asarray(y)
+    N = len(y)
+
+    if meanType in ['norm', 'arithmetic']:
+        out = np.mean(y)
+    elif meanType == 'median': # median
+        out = np.median(y)
+    elif meanType == 'geom': # geometric mean
+        out = stats.gmean(y)
+    elif meanType == 'harm': # harmonic mean
+        out = N/sum(y**(-1))
+    elif meanType == 'rms':
+        out = np.sqrt(np.mean(y**2))
+    elif meanType == 'iqm': # interquartile mean
+        p = np.percentile(y, [25, 75], method='hazen')
+        out = np.mean(y[(y >= p[0]) & (y <= p[1])])
+    elif meanType == 'midhinge':  # average of 1st and third quartiles
+        p = np.percentile(y, [25, 75], method='hazen')
+        out = np.mean(p)
+    else:
+        raise ValueError(f"Unknown mean type '{meanType}'")
+
+    return float(out)
+
+def HighLowMu(y: ArrayLike) -> float:
+    """
+    The highlowmu statistic.
+
+    The highlowmu statistic is the ratio of the mean of the data that is above the
+    (global) mean compared to the mean of the data that is below the global mean.
+
+    Paramters
+    ----------
+    y (array-like): The input data vector
+
+    Returns
+    --------
+    float
+        The highlowmu statistic.
+    """
+    y = np.asarray(y)
+    mu = np.mean(y) # mean of data
+    mhi = np.mean(y[y > mu]) # mean of data above the mean
+    mlo = np.mean(y[y < mu]) # mean of data below the mean
+    out = np.divide((mhi-mu), (mu-mlo)) # ratio of the differences
+
+    return out
+
+
+def FitMLE(y : ArrayLike, fitWhat : str = 'gaussian') -> Union[Dict[str, float], float]:
+    """
+    Maximum likelihood distribution fit to data.
+
+    Fits a specified probability distribution to the data using maximum likelihood 
+    estimation (MLE) and returns the fitted parameters.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series or data vector
+    fitWhat : {'gaussian', 'uniform', 'geometric'}, optional
+        Distribution type to fit:
+        - 'gaussian': Normal distribution (returns mean and std)
+        - 'uniform': Uniform distribution (returns bounds a and b)
+        - 'geometric': Geometric distribution (returns p parameter)
+        Default is 'gaussian'
+
+    Returns
+    -------
+    Union[Dict[str, float], float]
+        For 'gaussian':
+            dict with keys:
+                - 'mean': location parameter
+                - 'std': scale parameter
+        For 'uniform':
+            dict with keys:
+                - 'a': lower bound
+                - 'b': upper bound
+        For 'geometric':
+            float: success probability p
+    """
+    y = np.asarray(y)
+    out = {}
+    if fitWhat == 'gaussian':
+        loc, scale = stats.norm.fit(y, method="MLE")
+        out['mean'] = loc
+        out['std'] = scale
+    elif fitWhat == 'uniform':
+        loc, scale = stats.uniform.fit(y, method="MLE")
+        out['a'] = loc
+        out['b'] = loc + scale 
+    elif fitWhat == 'geometric':
+        sampMean = np.mean(y)
+        p = 1/(1+sampMean)
+        return p
+    else:
+        raise ValueError(f"Invalid fit specifier, {fitWhat}")
+
+    return out
+
+def CV(x : ArrayLike, k : int = 1) -> float:
+    """
+    Calculate the coefficient of variation of order k.
+
+    The coefficient of variation of order k is (sigma/mu)^k, where sigma is the
+    standard deviation and mu is the mean of the input data vector.
+
+    Parameters
+    ----------
+    x : array-like
+        Input time series or data vector
+    k : int, optional
+        Order of the coefficient of variation. Default is 1.
+
+    Returns
+    -------
+    float
+        The coefficient of variation of order k.
+    """
+    if not isinstance(k, int) or k < 0:
+        logger.warn('k should probably be a positive integer')
+        # carry on with just this warning, though
+    
+    # Compute the coefficient of variation (of order k) of the data
+    return (np.std(x, ddof=1) ** k) / (np.mean(x) ** k)
+
+def CustomSkewness(y : ArrayLike, whatSkew : str = 'pearson') -> float:
+    """
+    Calculate custom skewness measures of a time series.
+
+    Computes either the Pearson or Bowley skewness. The Pearson skewness uses mean, 
+    median and standard deviation, while the Bowley skewness (also known as quartile 
+    skewness) uses quartiles.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series
+    whatSkew : {'pearson', 'bowley'}, optional
+        The skewness measure to calculate:
+        - 'pearson': (3 * mean - median) / std
+        - 'bowley': (Q3 + Q1 - 2*Q2) / (Q3 - Q1)
+        Default is 'pearson'.
+
+    Returns
+    -------
+    float
+        The calculated skewness measure:
+        - Positive values indicate right skew
+        - Negative values indicate left skew
+        - Zero indicates symmetry
+    """
+    y = np.asarray(y)
+    out = 0.0
+    if whatSkew == 'pearson':
+        out = ((3 * np.mean(y) - np.median(y)) / np.std(y, ddof=1))
+    elif whatSkew == 'bowley':
+        qs = np.quantile(y, [0.25, 0.5, 0.75], method='hazen')
+        out = (qs[2]+qs[0] - 2 * qs[1]) / (qs[2] - qs[0]) 
+    
+    return float(out)
+
+def Burstiness(y: ArrayLike) -> Dict[str, float]:
+    """
+    Calculate burstiness statistics of a time series.
+    
+    Implements both the original Goh & Barabasi burstiness and
+    the improved Kim & Jo version for finite time series.
+    
+    Parameters
+    ----------
+    y : array-like
+        Input time series
+    
+    Returns
+    -------
+    dict:
+        'B': Original burstiness statistic
+        'B_Kim': Improved burstiness for finite series
+    
+    References
+    ----------
+    - Goh & Barabasi (2008). Europhys. Lett. 81, 48002
+    - Kim & Jo (2016). http://arxiv.org/pdf/1604.01125v1.pdf
+    """
+    y = np.asarray(y)
+    mean = np.mean(y)
+    std = np.std(y, ddof=1)
+
+    r = np.divide(std,mean) # coefficient of variation
+    B = np.divide((r - 1), (r + 1)) # Original Goh and Barabasi burstiness statistic, B
+
+    # improved burstiness statistic, accounting for scaling for finite time series
+    # Kim and Jo, 2016, http://arxiv.org/pdf/1604.01125v1.pdf
+    N = len(y)
+    p1 = np.sqrt(N+1)*r - np.sqrt(N-1)
+    p2 = (np.sqrt(N+1)-2)*r + np.sqrt(N-1)
+
+    B_Kim = np.divide(p1, p2)
+
+    out = {'B': B, 'B_Kim': B_Kim}
+
+    return out

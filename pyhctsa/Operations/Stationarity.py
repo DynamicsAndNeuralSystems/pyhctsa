@@ -14,7 +14,7 @@ def FitPolynomial(y : ArrayLike, k : int = 1) -> float:
 
     Usually kind of a stupid thing to do with a time series, but it's sometimes
     somehow informative for time series with large trends.
-D
+
     Parameters:
     -----------
     y : array_like
@@ -24,7 +24,7 @@ D
 
     Returns:
     --------
-    out : float
+    float
         RMS error of the fit
     """
     y = np.asarray(y)
@@ -50,7 +50,7 @@ def TSLength(y : ArrayLike) -> int:
     Returns
     --------
     int
-        the length of the time series
+        The length of the time series
     """
     return len(np.asarray(y))
 
