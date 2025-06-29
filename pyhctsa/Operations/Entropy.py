@@ -127,7 +127,7 @@ def SampleEntropy(y: ArrayLike, M: int = 2, r: Optional[float] = None, preProces
     Compute Sample Entropy (SampEn) of a time series.
 
     This function calculates SampEn for embedding dimensions from 0 to M. The implementation
-    uses the PhysioNet C code for efficiency and accuracy.
+    uses the PhysioNet C code (sampen.c by Doug Lake) for efficiency and accuracy.
     Can specify to first apply an incremental differencing of the time series
     thus yielding the 'Control Entropy': "Control Entropy: A complexity measure for nonstationary signals"
     E. M. Bollt and J. Skufca, Math. Biosci. Eng., 6(1) 1 (2009).
@@ -151,10 +151,6 @@ def SampleEntropy(y: ArrayLike, M: int = 2, r: Optional[float] = None, preProces
             - 'sampen{m}': Sample entropy for each m from 0 to M
             - 'quadSampEn{m}': Quadratic sample entropy for each m
             - 'meanchsampen': Mean change in sample entropy values
-
-    Notes
-    -----
-    Implementation based on PhysioNet's sampen.c by Doug Lake
     """
     y = np.asarray(y, dtype=np.float64)
     if r is None:
