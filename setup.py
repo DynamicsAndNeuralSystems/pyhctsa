@@ -12,7 +12,7 @@ def get_compile_args():
         return ['/O2']
     else:
         # GCC/Clang flags for Unix-like systems
-        return ['-O3', '-fPIC', '-std=c99']
+        return ['-O3', '-fPIC', '-std=c99', '-ffast-math']
     
 def get_libraries():
     """Get platform-specific libraries to link."""
@@ -20,6 +20,16 @@ def get_libraries():
         return []
     else:
         return ['m']  # Math library for Unix-like systems
+
+fastdfa_extension = Extension(
+    'pyhctsa.Toolboxes.Max_Little.fastdfa',
+    sources=['pyhctsa/Toolboxes/Max_Little/ML_fastdfa_core.c'],
+    include_dirs=["pyhctsa/Toolboxes/Max_Little", np.get_include()],
+    extra_compile_args=get_compile_args(),
+    libraries=get_libraries(),
+    extra_link_args=[],
+    define_macros=[],
+)
     
 
 sampen_extension = Extension(
@@ -88,7 +98,7 @@ setup(
     long_description=read("README.md"),
     author="Joshua B. Moore",
     packages=find_packages(exclude=["tests", ".github"]),
-    ext_modules=[periodicity_wang_module, close_returns_extension, sampen_extension],
+    ext_modules=[periodicity_wang_module, close_returns_extension, sampen_extension, fastdfa_extension],
     install_requires=read_requirements("requirements.txt"),
     zip_safe=False,
 )

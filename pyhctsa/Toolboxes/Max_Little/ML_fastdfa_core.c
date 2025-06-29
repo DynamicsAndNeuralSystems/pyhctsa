@@ -17,11 +17,16 @@
    in Proceedings of ICASSP 2006, IEEE Publishers: Toulouse, France.
 */
 
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+#include <numpy/arrayobject.h>
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
 
 #define REAL double
+
+/* Include the original FastDFA code exactly as provided */
 
 /* Calculate accumulated sum signal */
 static void cumulativeSum(
@@ -136,7 +141,7 @@ static void dfa(
    free(trend);
 }
 
-/* Main C-callable entry point */
+/* Main C-callable entry point - EXACT copy from original */
 void fastdfa_core(
     const double *x,
     unsigned long elements,
@@ -180,4 +185,142 @@ void fastdfa_core(
     dfa(y_in, elements, *intervals, flucts, n_scales_local);
 
     free(y_in);
+}
+
+/* Python wrapper function - simplified to match your ctypes approach */
+static PyObject* py_fastdfa(PyObject* self, PyObject* args, PyObject* kwargs) {
+    PyArrayObject *input_array = NULL;
+    PyObject *intervals_obj = NULL;
+    
+    static char *kwlist[] = {"x", "intervals", NULL};
+    
+    // Parse arguments
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|O", kwlist,
+                                     &PyArray_Type, &input_array,
+                                     &intervals_obj)) {
+        return NULL;
+    }
+    
+    // Convert input to contiguous double array
+    PyArrayObject *x_array = (PyArrayObject*)PyArray_FROM_OTF((PyObject*)input_array, 
+                                                              NPY_DOUBLE, 
+                                                              NPY_ARRAY_IN_ARRAY);
+    if (x_array == NULL) {
+        return NULL;
+    }
+    
+    // Check input array
+    if (PyArray_NDIM(x_array) != 1) {
+        PyErr_SetString(PyExc_ValueError, "Input array must be 1-dimensional");
+        Py_DECREF(x_array);
+        return NULL;
+    }
+    
+    unsigned long elements = (unsigned long)PyArray_DIM(x_array, 0);
+    if (elements < 10) {
+        PyErr_SetString(PyExc_ValueError, "Input signal must have at least 10 elements");
+        Py_DECREF(x_array);
+        return NULL;
+    }
+    
+    double *x_data = (double*)PyArray_DATA(x_array);
+    
+    // Estimate maximum possible scales
+    unsigned long max_scales = (unsigned long)(log10((double)elements) / log10(2.0)) + 2;
+    
+    // Allocate flucts array
+    double *flucts = (double*)calloc(max_scales, sizeof(double));
+    if (!flucts) {
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for fluctuations");
+        Py_DECREF(x_array);
+        return NULL;
+    }
+    
+    // Initialize for automatic interval calculation
+    unsigned long *intervals_ptr = NULL;
+    unsigned long N_scales = 0;
+    
+    // Call the core function - it will allocate intervals internally
+    fastdfa_core(x_data, elements, &intervals_ptr, flucts, &N_scales);
+    
+    // Clean up input array
+    Py_DECREF(x_array);
+    
+    // Check if the function succeeded
+    if (intervals_ptr == NULL || N_scales == 0) {
+        free(flucts);
+        PyErr_SetString(PyExc_RuntimeError, "FastDFA computation failed");
+        return NULL;
+    }
+    
+    // Create output numpy arrays
+    npy_intp dims[1] = {(npy_intp)N_scales};
+    
+    PyObject *intervals_out = PyArray_SimpleNew(1, dims, NPY_ULONG);
+    PyObject *flucts_out = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
+    
+    if (!intervals_out || !flucts_out) {
+        Py_XDECREF(intervals_out);
+        Py_XDECREF(flucts_out);
+        free(intervals_ptr);
+        free(flucts);
+        return NULL;
+    }
+    
+    // Copy data to output arrays
+    unsigned long *intervals_out_data = (unsigned long*)PyArray_DATA((PyArrayObject*)intervals_out);
+    double *flucts_out_data = (double*)PyArray_DATA((PyArrayObject*)flucts_out);
+    
+    memcpy(intervals_out_data, intervals_ptr, N_scales * sizeof(unsigned long));
+    memcpy(flucts_out_data, flucts, N_scales * sizeof(double));
+    
+    // Clean up C arrays - the function allocated intervals_ptr for us
+    free(intervals_ptr);
+    free(flucts);
+    
+    // Return tuple (intervals, flucts)
+    return PyTuple_Pack(2, intervals_out, flucts_out);
+}
+
+/* Method definitions */
+static PyMethodDef FastDFAMethods[] = {
+    {"fastdfa", (PyCFunction)py_fastdfa, METH_VARARGS | METH_KEYWORDS,
+     "Perform fast detrended fluctuation analysis\n\n"
+     "Parameters:\n"
+     "  x : array_like\n"
+     "      Input signal (1D array)\n"
+     "  intervals : array_like, optional\n"
+     "      List of sample interval widths at each scale (not yet implemented)\n"
+     "      If not specified, binary subdivision is used\n\n"
+     "Returns:\n"
+     "  intervals : ndarray\n"
+     "      Sample interval widths at each scale\n"
+     "  flucts : ndarray\n"
+     "      Fluctuation amplitudes at each scale\n"},
+    {NULL, NULL, 0, NULL}
+};
+
+/* Module definition */
+static struct PyModuleDef fastdfa_module = {
+    PyModuleDef_HEAD_INIT,
+    "fastdfa",
+    "Fast Detrended Fluctuation Analysis module",
+    -1,
+    FastDFAMethods
+};
+
+/* Module initialization */
+PyMODINIT_FUNC PyInit_fastdfa(void) {
+    PyObject *module;
+    
+    module = PyModule_Create(&fastdfa_module);
+    if (module == NULL)
+        return NULL;
+    
+    // Import numpy
+    import_array();
+    if (PyErr_Occurred())
+        return NULL;
+    
+    return module;
 }
