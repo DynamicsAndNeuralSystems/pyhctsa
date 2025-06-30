@@ -781,4 +781,74 @@ Scaling:
     configs:
       - zscore: True
     hctsa_name: SC_fastdfa
+
+Symbolic:
+  TransitionMatrix:
+    base_name: TransitionMatrix
+    labels:
+      - symbolic
+      - transitionmat
+      - discrepancy
+    dependencies:
+    configs:
+      - howtocg: 'quantile'
+        numGroups: !range [2, 5]
+        tau: 1
+        zscore: True
+      # - howtocg: 'quantile'
+      #   numGroups: !range [3, 5] # discrepancy when using numGroups = 2 specifically for 'ac' warrants further investigation
+      #   tau: 'ac'
+      #   zscore: True
+    hctsa_name: SB_TransitionMatrix
+    ordered_args: ['howtocg', 'numGroups', 'tau']
+
+  BinaryStats:
+    base_name: BinaryStats
+    labels:
+      - symbolic
+      - distribution
+      - correlation
+      - stationarity
+    dependencies:
+    configs:
+      - binaryMethod: ['mean', 'diff']
+        zscore: True
+    hctsa_name: SB_BinaryStats
+    ordered_args: ['binaryMethod']
+  
+  MotifThree:
+    base_name: MotifThree
+    labels: 
+      - symbolic
+      - motifs
+    dependencies:
+    configs:
+      - cgHow: ['quantile', 'diffquant']
+        zscore: True
+    hctsa_name: SB_MotifThree
+    ordered_args: ['cgHow']
+
+  MotifTwo:
+    base_name: MotifTwo
+    labels: 
+        - symbolic
+        - motifs
+    dependencies:
+    configs:
+      - binarizeHow: ['diff', 'mean', 'median']
+        zscore: True
+    hctsa_name: SB_MotifTwo
+    ordered_args: ['binarizeHow']
+  
+  BinaryStretch:
+    base_name: BinaryStretch
+    labels:
+      - binary
+      - symbolic
+    dependencies:
+    configs:
+      - stretchWhat: ['lseq1', 'lseq0']
+        zscore: True
+    hctsa_name: SB_BinaryStretch
+    ordered_args: ['stretchWhat']
     

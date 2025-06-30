@@ -31,7 +31,6 @@ fastdfa_extension = Extension(
     define_macros=[],
 )
     
-
 sampen_extension = Extension(
     'pyhctsa.Toolboxes.physionet.sampen',
     sources=['pyhctsa/Toolboxes/physionet/sampen.c'],  
