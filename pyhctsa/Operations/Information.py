@@ -6,7 +6,151 @@ from numpy.typing import ArrayLike
 from scipy import stats
 from loguru import logger
 from ..Utilities.utils import signChange
-from ..Operations.Correlation import FirstCrossing, AutoCorr
+
+
+def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, minNotMax : Union[bool, None] = True):
+    """
+    Time of first minimum in a given self-correlation function.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    minWhat : str, optional
+        The type of correlation to minimize. Options are 'ac' for autocorrelation,
+        or 'mi' for automutual information. By default, 'mi' specifies the
+        'gaussian' method from the Information Dynamics Toolkit. Other options
+        include 'mi-kernel', 'mi-kraskov1', 'mi-kraskov2' (from Information Dynamics Toolkit),
+        or 'mi-hist' (histogram-based method). Default is 'mi'.
+    extraParam : any, optional
+        An additional parameter required for the specified `minWhat` method (e.g., for Kraskov).
+    minNotMax : bool, optional
+        If True, return the maximum instead of the minimum. Default is False.
+
+    Returns
+    -------
+    int
+        The time of the first minimum (or maximum if `minNotMax` is True).
+    """
+    from ..Operations.Correlation import AutoCorr
+    y = np.asarray(y)
+    N = len(y)
+
+    # Define the autocorrelation function
+    if minWhat in ['ac', 'corr']:
+        corrfn = lambda x : AutoCorr(y, tau=x, method='Fourier')
+    elif minWhat == 'mi-hist':
+        # if extraParam is none, use default num of bins in BF_MutualInformation (default : 10)
+        corrfn = lambda x : _mi_bin(y[:-x], y[x:], 'range', 'range', extraParam or 10)
+    elif minWhat == 'mi-kraskov2':
+        # (using Information Dynamics Toolkit)
+        # extraParam is the number of nearest neighbors
+        corrfn = lambda x : AutoMutualInfo(y, x, 'kraskov2', extraParam)
+    elif minWhat == 'mi-kraskov1':
+        # (using Information Dynamics Toolkit)
+        corrfn = lambda x : AutoMutualInfo(y, x, 'kraskov1', extraParam)
+    elif minWhat == 'mi-kernel':
+        corrfn = lambda x : AutoMutualInfo(y, x, 'kernel', extraParam)
+    elif minWhat in ['mi', 'mi-gaussian']:
+        corrfn = lambda x : AutoMutualInfo(y, x, 'gaussian', extraParam)
+    else:
+        raise ValueError(f"Unknown correlation type specified: {minWhat}")
+    
+    # search for a minimum (incrementally through time lags until a minimum is found)
+    autoCorr = np.zeros(N-1) # pre-allocate maximum length autocorrelation vector
+    if minNotMax:
+        # FIRST LOCAL MINUMUM 
+        for i in range(1, N):
+            autoCorr[i-1] = corrfn(i)
+            # Hit a NaN before got to a minimum -- there is no minimum
+            if np.isnan(autoCorr[i-1]):
+                logger.warning(f"No minimum in {minWhat} [[time series too short to find it?]]")
+                return np.nan
+            # we're at a local minimum
+            if (i == 2) and (autoCorr[1] > autoCorr[0]):
+                # already increases at lag of 2 from lag of 1: a minimum (since ac(0) is maximal)
+                return 1
+            elif (i > 2) and autoCorr[i-3] > autoCorr[i-2] < autoCorr[i-1]:
+                # minimum at previous i
+                return i-1 # I found the first minimum!
+    else:
+        # FIRST LOCAL MAXIMUM
+        for i in range(1, N):
+            autoCorr[i-1] = corrfn(i)
+            # Hit a NaN before got to a max -- there is no max
+            if np.isnan(autoCorr[i-1]):
+                logger.warning(f"No minimum in {minWhat} [[time series too short to find it?]]")
+                return np.nan
+
+            # we're at a local maximum
+            if i > 2 and autoCorr[i-3] < autoCorr[i-2] > autoCorr[i-1]:
+                return i-1
+
+    return np.nan
+
+
+def _mi_bin(v1, v2, r1 = 'range', r2 = 'range', numBins = 10):
+    """
+    Compute mutual information between two data vectors using bin counting.
+
+    Parameters:
+    -----------
+        v1 (array-like): The first input vector
+        v2 (array-like): The second input vector
+        r1 (str or list): The bin-partitioning method for v1 ('range', 'quantile', or [min, max])
+        r2 (str or list): The bin-partitioning method for v2 ('range', 'quantile', or [min, max])
+        numBins (int): The number of bins to partition each vector into (default : 10)
+
+    Returns:
+    --------
+        float: The mutual information computed between v1 and v2
+    """
+    v1 = np.asarray(v1).flatten()
+    v2 = np.asarray(v2).flatten()
+
+    if len(v1) != len(v2):
+        raise ValueError("Input vectors must be the same length")
+
+    N = len(v1)
+
+    # Create histograms
+    edges_i = _give_me_edges(r1, v1, numBins)
+    edges_j = _give_me_edges(r2, v2, numBins)
+
+    ni, _ = np.histogram(v1, edges_i)
+    nj, _ = np.histogram(v2, edges_j)
+
+    # Create a joint histogram
+    hist_xy, _, _ = np.histogram2d(v1, v2, [edges_i, edges_j])
+
+    # Normalize counts to probabilities
+    p_i = ni[:numBins] / N
+    p_j = nj[:numBins] / N
+    p_ij = hist_xy / N
+    p_ixp_j = np.outer(p_i, p_j)
+
+    # Calculate mutual information
+    mask = (p_ixp_j > 0) & (p_ij > 0)
+    if np.any(mask):
+        mi = np.sum(p_ij[mask] * np.log(p_ij[mask] / p_ixp_j[mask]))
+    else:
+        print("The histograms aren't catching any points. Perhaps due to an inappropriate custom range for binning the data.")
+        mi = np.nan
+
+    return mi
+
+def _give_me_edges(r, v, nbins):
+    EE = 1E-6 # this small addition gets lost in the last bin
+    if r == 'range':
+            return np.linspace(np.min(v), np.max(v) + EE, nbins + 1)
+    elif r == 'quantile': # bin edges based on quantiles
+        edges = np.quantile(v, np.linspace(0, 1, nbins + 1))
+        edges[-1] += EE
+        return edges
+    elif isinstance(r, (list, np.ndarray)) and len(r) == 2: # a two-component vector
+        return np.linspace(r[0], r[1] + EE, nbins + 1)
+    else:
+        raise ValueError(f"Unknown partitioning method '{r}'")
 
 def AutoMutualInfoStats(
     y: ArrayLike,

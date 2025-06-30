@@ -237,3 +237,29 @@ Correlation:
     hctsa_name: PD_PeriodicityWang
     ordered_args: 
   
+  TRev:
+    base_name: trev
+    labels:
+      - correlation
+    dependencies:
+    configs:
+      - tau: [1, 2, 3]
+        zscore: True
+      - tau: ['ac', 'mi']
+        zscore: True
+    hctsa_name: CO_trev
+    ordered_args: ["tau"]
+
+  TC3:
+    base_name: tc3
+    labels:
+      - correlation
+    dependencies:
+    configs:
+      - tau: [1, 2, 3]
+        zscore: True
+      - tau: ['ac', 'mi']
+        zscore: True
+    hctsa_name: CO_tc3
+    ordered_args: ["tau"]
+

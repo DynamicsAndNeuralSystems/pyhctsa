@@ -8,6 +8,7 @@ from ..Utilities.utils import pointOfCrossing, binpicker, ZScore, signChange
 from loguru import logger
 from statsmodels.tsa.stattools import pacf
 from scipy.optimize import curve_fit
+from ..Operations.Information import FirstMin
 from scipy.linalg import LinAlgError
 from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
 
@@ -1387,4 +1388,134 @@ def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dic
         out['fexpacf_r2'] = np.nan
         out['fexpacf_stdres'] = np.nan
     
+    return out
+
+
+def TRev(y : ArrayLike, tau : Union[int, str] = 'ac') -> dict:
+    """
+    CO_trev: Normalized nonlinear autocorrelation (trev) function of a time series.
+
+    Calculates the trev function, a normalized nonlinear autocorrelation, as described in the TSTOOL nonlinear time-series analysis package. This quantity is often used as a nonlinearity statistic in surrogate data analysis,
+    see: "Surrogate time series", T. Schreiber and A. Schmitz, Physica D, 142(3-4), 346 (2000).
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    tau : int or str, optional
+        Time lag. Can be:
+            - int: Use the specified lag.
+            - 'ac': Use the first zero-crossing of the autocorrelation function.
+            - 'mi': Use the first minimum of the automutual information function.
+        Default is 'ac'.
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+            - 'raw': The raw trev expression.
+            - 'abs': The magnitude of the raw expression.
+            - 'num': The numerator.
+            - 'absnum': The magnitude of the numerator.
+            - 'denom': The denominator.
+    """
+    # Can set the time lag, tau, to be 'ac' or 'mi'
+    if tau == 'ac':
+        # tau is first zero crossing of the autocorrelation function
+        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+    elif tau == 'mi':
+        # tau is the first minimum of the automutual information function
+        tau = FirstMin(y, 'mi')
+    if np.isnan(tau):
+        raise ValueError("No valid setting for time delay. (Is the time series too short?)")
+
+    # Compute trev quantities
+    yn = y[:-tau]
+    yn1 = y[tau:] # yn, tau steps ahead
+    
+    out = {}
+
+    # The trev expression used in TSTOOL
+    raw = np.mean((yn1 - yn)**3) / (np.mean((yn1 - yn)**2))**(3/2)
+    out['raw'] = raw
+
+    # The magnitude
+    out['abs'] = np.abs(raw)
+
+    # The numerator
+    num = np.mean((yn1-yn)**3)
+    out['num'] = num
+    out['absnum'] = np.abs(num)
+
+    # the denominator
+    out['denom'] = (np.mean((yn1-yn)**2))**(3/2)
+
+    return out
+
+
+def TC3(y : list, tau : Union[int, str, None] = 'ac'):
+    """
+    Normalized nonlinear autocorrelation function, tc3.
+
+    Computes the tc3 function, a normalized nonlinear autocorrelation, at a
+    given time-delay, tau.
+    Statistic is for two time-delays, normalized in terms of a single time delay.
+    Used as a test statistic for higher order correlational moments in surrogate
+    data analysis.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    tau : int or str, optional
+        Time lag. Can be:
+            - int: Use the specified lag.
+            - 'ac': Use the first zero-crossing of the autocorrelation function. Default is 'ac'.
+            - 'mi': Use the first minimum of the automutual information function.
+
+    Returns
+    -------
+
+    dict
+        A dictionary containing:
+        - 'raw': The raw tc3 expression
+        - 'abs': The magnitude of the raw expression
+        - 'num': The numerator
+        - 'absnum': The magnitude of the numerator
+        - 'denom': The denominator
+    """
+    # Set the time lag as a measure of the time-series correlation length
+    # Can set the time lag, tau, to be 'ac' or 'mi'
+    if tau == 'ac':
+        # tau is first zero crossing of the autocorrelation function
+        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+    elif tau == 'mi':
+        # tau is the first minimum of the automutual information function
+        tau = FirstMin(y, 'mi')
+    
+    if np.isnan(tau):
+        raise ValueError("No valid setting for time delay (time series too short?)")
+    
+    # Compute tc3 statistic
+    yn = y[:-2*tau]
+    yn1 = y[tau:-tau] # yn1, tau steps ahead
+    yn2 = y[2*tau:] # yn2, 2*tau steps ahead
+
+    numerator = np.mean(yn * yn1 * yn2)
+    denominator = np.abs(np.mean(yn * yn1)) ** (3/2)
+
+    # The expression used in TSTOOL tc3:
+    out = {}
+    out['raw'] = numerator / denominator
+
+    # The magnitude
+    out['abs'] = np.abs(out['raw'])
+
+    # The numerator
+    out['num'] = numerator
+    out['absnum'] = np.abs(out['num'])
+
+    # The denominator
+    out['denom'] = denominator
+
     return out
