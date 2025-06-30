@@ -19,8 +19,8 @@ def get_libraries():
     if platform.system() == 'Windows':
         return []
     else:
-        return ['m']  # Math library for Unix-like systems
-
+        return ['m']
+    
 fastdfa_extension = Extension(
     'pyhctsa.Toolboxes.Max_Little.fastdfa',
     sources=['pyhctsa/Toolboxes/Max_Little/ML_fastdfa_core.c'],
@@ -98,7 +98,8 @@ setup(
     long_description=read("README.md"),
     author="Joshua B. Moore",
     packages=find_packages(exclude=["tests", ".github"]),
-    ext_modules=[periodicity_wang_module, close_returns_extension, sampen_extension, fastdfa_extension],
+    ext_modules=[periodicity_wang_module, close_returns_extension, 
+                 sampen_extension, fastdfa_extension],
     install_requires=read_requirements("requirements.txt"),
     zip_safe=False,
 )

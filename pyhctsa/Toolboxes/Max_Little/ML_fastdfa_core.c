@@ -26,8 +26,6 @@
 
 #define REAL double
 
-/* Include the original FastDFA code exactly as provided */
-
 /* Calculate accumulated sum signal */
 static void cumulativeSum(
    unsigned long elements,
@@ -141,7 +139,6 @@ static void dfa(
    free(trend);
 }
 
-/* Main C-callable entry point - EXACT copy from original */
 void fastdfa_core(
     const double *x,
     unsigned long elements,
@@ -187,7 +184,7 @@ void fastdfa_core(
     free(y_in);
 }
 
-/* Python wrapper function - simplified to match your ctypes approach */
+/* Python wrapper function */
 static PyObject* py_fastdfa(PyObject* self, PyObject* args, PyObject* kwargs) {
     PyArrayObject *input_array = NULL;
     PyObject *intervals_obj = NULL;
