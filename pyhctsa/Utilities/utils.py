@@ -362,3 +362,31 @@ def stepBinary(X):
     Y[X > 0] = 1
 
     return Y
+
+def xcorr(x, y, normed=True, maxlags=10):
+    # taken from https://github.com/colizoli/xcorr_python 
+    # Cross correlation of two signals of equal length
+    # Returns the coefficients when normed=True
+    # Returns inner products when normed=False
+    # Usage: lags, c = xcorr(x,y,maxlags=len(x)-1)
+
+    Nx = len(x)
+    if Nx != len(y):
+        raise ValueError('x and y must be equal length')
+    
+    c = np.correlate(x, y, mode='full')
+
+    if normed:
+        n = np.sqrt(np.dot(x, x) * np.dot(y, y)) # this is the transformation function
+        c = np.true_divide(c,n)
+
+    if maxlags is None:
+        maxlags = Nx - 1
+
+    if maxlags >= Nx or maxlags < 1:
+        raise ValueError('maglags must be None or strictly '
+                         'positive < %d' % Nx)
+
+    lags = np.arange(-maxlags, maxlags + 1)
+    c = c[Nx - 1 - maxlags:Nx + maxlags]
+    return lags, c

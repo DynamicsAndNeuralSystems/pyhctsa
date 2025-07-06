@@ -3,7 +3,7 @@ from numpy.typing import ArrayLike
 from typing import Dict, Union
 from scipy import stats
 from loguru import logger
-from ..Utilities.utils import histc, binpicker, simple_binner 
+from ..Utilities.utils import histc, binpicker, simple_binner, xcorr
 
 
 def Withinp(x : ArrayLike, p : float = 1.0, meanOrMedian : str = 'mean') -> float:
@@ -455,3 +455,227 @@ def Moments(y : ArrayLike, theMom : int = 0) -> float:
     """
     y = np.asarray(y)
     return stats.moment(y, theMom) / np.std(y, ddof=1)
+
+def OutlierInclude(y: ArrayLike, thresholdHow: str = 'abs', inc: float = 0.01) -> dict:
+    """
+    How statistics depend on distributional outliers.
+
+    Measures how various statistics of a time series change as more and more outliers are included in the calculation, according to a specified rule for defining outliers.
+
+    At each threshold, the mean, standard error, proportion of included points, median, and standard deviation are calculated. Outputs summarize how these statistics change as more extreme points are included.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    thresholdHow : {'abs', 'pos', 'neg'}, optional
+        The method for determining outliers:
+            - 'abs': Outliers are furthest from the mean (default).
+            - 'pos': Outliers are the greatest positive deviations from the mean.
+            - 'neg': Outliers are the greatest negative deviations from the mean.
+    inc : float, optional
+        The increment to move through thresholds (as a fraction of the standard deviation).
+        Default is 0.01.
+
+    Returns
+    -------
+    dict
+        Dictionary containing statistics describing how the statistics change as more outliers are included.
+    """
+    y = np.asarray(y)
+    
+    # Handle constant time series
+    if np.all(y[0] == y):
+        return np.nan
+    
+    N = len(y)
+    results = {}
+    
+    # Initialize thresholds based on method
+    if thresholdHow == 'abs':
+        thresholds = np.arange(0, max(abs(y)), inc)
+        total_points = N
+    elif thresholdHow == 'pos':
+        thresholds = np.arange(0, max(y), inc)
+        total_points = np.sum(y >= 0)
+    elif thresholdHow == 'neg':
+        thresholds = np.arange(0, max(-y), inc)
+        total_points = np.sum(y <= 0)
+    else:
+        raise ValueError(f"Invalid thresholdHow: '{thresholdHow}'. Must be 'abs', 'pos', or 'neg'.")
+    
+    if len(thresholds) == 0:
+        raise ValueError("Error setting increments through the time-series values")
+    
+    # Initialize statistics matrix
+    # Columns: [mean_diff, std_err, percentage, median_pos, mean_pos, std_pos]
+    statistics = np.zeros((len(thresholds), 6))
+    
+    # Calculate statistics for each threshold
+    for i, threshold in enumerate(thresholds):
+        # Find indices exceeding threshold
+        if thresholdHow == 'abs':
+            over_threshold_idx = np.argwhere(abs(y) >= threshold).flatten()
+        elif thresholdHow == 'pos':
+            over_threshold_idx = np.argwhere(y >= threshold).flatten()
+        elif thresholdHow == 'neg':
+            over_threshold_idx = np.argwhere(y <= -threshold).flatten()
+            
+        # Calculate differences between consecutive over-threshold events
+        time_diffs = np.diff(over_threshold_idx)
+        
+        # Store statistics
+        statistics[i, 0] = np.mean(time_diffs)  # Mean time between events
+        statistics[i, 1] = np.std(time_diffs, ddof=1) / np.sqrt(len(over_threshold_idx))  # Standard error
+        statistics[i, 2] = len(time_diffs) / total_points * 100  # Percentage of events
+        statistics[i, 3] = (np.median(over_threshold_idx) / (N / 2)) - 1  # Median position deviation
+        statistics[i, 4] = np.mean(over_threshold_idx) / (N / 2) - 1  # Mean position deviation
+        statistics[i, 5] = np.std(over_threshold_idx, ddof=1) / np.sqrt(len(over_threshold_idx))  # Position std error
+    
+    # Trim data where statistics become invalid
+    first_nan_idx = np.argmax(np.isnan(statistics[:, 0])) if np.any(np.isnan(statistics[:, 0])) else None
+    if first_nan_idx and first_nan_idx > 0:
+        statistics = statistics[:first_nan_idx, :]
+        thresholds = thresholds[:first_nan_idx]
+    
+    # Further trim based on percentage threshold
+    trim_threshold = 2 # percent
+    valid_indices = np.argwhere(statistics[:, 2] > trim_threshold).flatten()
+    if len(valid_indices) > 0:
+        last_valid_idx = valid_indices[-1]
+        statistics = statistics[:last_valid_idx + 1, :]
+        thresholds = thresholds[:last_valid_idx + 1]
+    
+    # Basic statistics on mean times
+    results.update({
+        'mdtm': np.mean(statistics[:, 0]),
+        'mdtmd': np.median(statistics[:, 0]),
+        'mdtstd': np.std(statistics[:, 0], ddof=1)
+    })
+    
+    # Statistics on median position deviations
+    results.update({
+        'mdrm': np.mean(statistics[:, 3]),
+        'mdrmd': np.median(statistics[:, 3]),
+        'mdrstd': np.std(statistics[:, 3], ddof=1)
+    })
+    
+    # Statistics on mean position deviations
+    results.update({
+        'mrm': np.mean(statistics[:, 4]),
+        'mrmd': np.median(statistics[:, 4]),
+        'mrstd': np.std(statistics[:, 4], ddof=1)
+    })
+    
+    # Cross-correlation between mean and error
+    _, cross_corr = xcorr(statistics[:, 0], statistics[:, 1], maxlags=1)
+    results.update({
+        'xcmerr1': cross_corr[-1],
+        'xcmerrn1': cross_corr[0]
+    })
+    
+    return results
+
+
+def OutlierTest(y: ArrayLike, p: float = 2, justMe: Union[str, None] = None) -> Union[Dict[str, float], float]:
+    """
+    How distributional statistics depend on distributional outliers.
+
+    Removes the p% of highest and lowest values in the time series (i.e., 2*p% removed in total)
+    and returns the ratio of either the mean or the standard deviation of the time series,
+    before and after this transformation.
+
+    Parameters
+    ----------
+    y : array-like
+        The input data vector.
+    p : float
+        The percentage (0 < p < 50) of values to remove from both the upper and lower ends of the distribution.
+    justMe : {'mean', 'std'}, optional
+        If specified, returns only the mean or standard deviation of the middle portion of the data after trimming:
+            - 'mean': returns the mean of the trimmed data.
+            - 'std': returns the standard deviation of the trimmed data.
+        If None (default), returns a dictionary with the ratio of mean and std before and after trimming.
+
+    Returns
+    -------
+    float or dict
+        If justMe is specified, returns the mean or std of the trimmed data.
+        Otherwise, returns a dictionary with the ratios:
+            - 'mean_ratio': mean(trimmed) / mean(original)
+            - 'std_ratio': std(trimmed) / std(original)
+    """
+
+    # mean of the middle (100-2*p)% of the data
+    y = np.array(y)
+    lower_bound = np.percentile(y, p, method='hazen')
+    upper_bound = np.percentile(y, (100 - p), method='hazen')
+    
+    middle_portion = y[(y > lower_bound) & (y < upper_bound)]
+    
+    # Mean of the middle (100-2*p)% of the data
+    mean_middle = np.mean(middle_portion)
+    
+    # Std of the middle (100-2*p)% of the data
+    std_middle = np.std(middle_portion, ddof=1) / np.std(y, ddof=1)  # [although std(y) should be 1]
+
+    out = {'mean': mean_middle, 'std': std_middle}
+
+    if justMe == 'mean':
+        return out['mean']
+    elif justMe == 'std':
+        return out['std']     
+    
+    return out
+
+def TrimmedMean(x: ArrayLike, pExclude: float = 0.0) -> float:
+    """
+    Mean of the trimmed time series.
+
+    Returns the mean of the time series after removing a specified percentage of 
+    the highest and lowest values.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series or data vector
+    pExclude : float, optional
+        The percentage of highest and lowest values to exclude from the mean 
+        calculation (default is 0.0, which gives the standard mean)
+
+    Returns
+    -------
+    float
+        The mean of the trimmed time series.
+    """
+    if not 0 <= pExclude < 100:
+        raise ValueError("The 'percent' argument must be between 0 and 100.")
+
+    x = np.asarray(x)
+    # handle the edge case of an empty array
+    if x.size == 0:
+        return np.nan
+
+    # sort the array; np.sort conveniently places NaNs at the end
+    x_sorted = np.sort(x)
+
+    # count non-NaN values for an accurate trimming calculation
+    non_nan_count = np.count_nonzero(~np.isnan(x_sorted))
+    if non_nan_count == 0:
+        return np.nan
+
+    # calculate the number of elements to trim from each end (k)
+    k = non_nan_count * (pExclude / 100.0) / 2.0
+
+    lowercut = int(np.ceil(k - 0.5))
+
+    # If all data would be trimmed, return NaN
+    if (2 * lowercut) >= non_nan_count:
+        return np.nan
+
+    # slice the sorted, non-NaN part of the array
+    trimmed_x = x_sorted[lowercut : non_nan_count - lowercut]
+
+    out = np.mean(trimmed_x)
+    return float(out)
+

@@ -799,6 +799,32 @@ Distribution:
     hctsa_name: DN_Moments
     ordered_args: ["theMom"]
   
+  OutlierInclude:
+    base_name: OutlierInclude
+    labels:
+      - distribution
+      - outliers
+    dependencies:
+    configs:
+      - thresholdHow: ['abs', 'pos', 'neg']
+        inc: 0.01
+        zscore: True
+    hctsa_name: DN_OutlierInclude
+    ordered_args: ["thresholdHow", "inc"]
+  
+  TrimmedMean:
+    base_name: TrimmedMean
+    labels:
+      - distribution
+      - location
+      - raw
+      - locationDependent
+    dependencies:
+    configs:
+      - pExclude: [1, 5, 10, 25, 50]
+    hctsa_name: DN_TrimmedMean
+    ordered_args: ["pExclude"]
+  
 Scaling:
   FastDFA:
     base_name: fastdfa
