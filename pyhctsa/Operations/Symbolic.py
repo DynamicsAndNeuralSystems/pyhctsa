@@ -6,7 +6,6 @@ from scipy.signal import resample as ssre
 from numpy.typing import ArrayLike
 from loguru import logger
 
-
 def MotifTwo(y : ArrayLike, binarizeHow : str = 'diff') -> dict:
     """
     Compute local motifs in a binary symbolization of the input time series.
