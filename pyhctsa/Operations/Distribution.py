@@ -679,3 +679,95 @@ def TrimmedMean(x: ArrayLike, pExclude: float = 0.0) -> float:
     out = np.mean(trimmed_x)
     return float(out)
 
+def HistogramAsymmetry(y : ArrayLike, numBins : int = 10, doSimple : bool = True) -> Dict[str, float]:
+    """
+    Calculate measures of histogram asymmetry for a time series.
+
+    Computes various measures of asymmetry by analyzing the positive and negative 
+    values in the histogram distribution separately.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series
+    numBins : int, optional
+        Number of bins to use in histogram calculation. Default is 10
+    doSimple : bool, optional
+        If True, uses linearly spaced bins. If False, uses optimized bin edges.
+
+    Returns
+    -------
+    dict
+        Dictionary containing asymmetry measures.
+    """
+    y = np.asarray(y)
+    # compute the histogram seperately from positive and negative values in the data
+    yPos = y[y > 0] # filter out the positive vals
+    yNeg = y[y < 0] # filter out the negative vals
+
+    if doSimple:
+        countsPos, binEdgesPos = simple_binner(yPos, numBins)
+        countsNeg, binEdgesNeg = simple_binner(yNeg, numBins)
+    else:
+        binEdgesPos = binpicker(yPos.min(), yPos.max(), numBins)
+        countsPos = histc(yPos, binEdgesPos)[:-1]
+        binEdgesNeg = binpicker(yNeg.min(), yNeg.max(), numBins)
+        countsNeg = histc(yNeg, binEdgesNeg)[:-1]
+    # normalise by the total counts
+    NnonZero = np.sum(y!=0)
+    pPos = np.divide(countsPos, NnonZero)
+    pNeg = np.divide(countsNeg, NnonZero)
+
+    # compute bin centers from bin edges
+    binCentersPos = np.mean([binEdgesPos[:-1], binEdgesPos[1:]], axis=0)
+    binCentersNeg = np.mean([binEdgesNeg[:-1], binEdgesNeg[1:]], axis=0)
+
+    # Histogram counts and overall density differences
+    out = {}
+    out['densityDiff'] = np.sum(y > 0) - np.sum(y < 0)  # measure of asymmetry about the mean
+    out['modeProbPos'] = np.max(pPos)
+    out['modeProbNeg'] = np.max(pNeg)
+    out['modeDiff'] = out['modeProbPos'] - out['modeProbNeg']
+
+    # Mean position of maximums (if multiple)
+    out['posMode'] = np.mean(binCentersPos[pPos == out['modeProbPos']])
+    out['negMode'] = np.mean(binCentersNeg[pNeg == out['modeProbNeg']])
+    out['modeAsymmetry'] = out['posMode'] + out['negMode']
+
+    return out
+
+
+def HistogramMode(y : ArrayLike, numBins : int = 10, doAbs : bool = False) -> float:
+    """
+    Measures the mode of the data vector using histograms with a given number
+    of bins.
+
+    Parameters
+    -----------
+    y : array-like
+        the input data vector
+    numBins : int, optional
+        the number of bins to use in the histogram
+    doSimple : bool, optional
+        whether to use a simple binning method (linearly spaced bins)
+    doAbs: bool, optional
+        whether to take the absolute value first
+
+    Returns
+    --------
+    float
+        the mode of the data vector using histograms with numBins bins. 
+    """
+    y = np.asarray(y)
+    if doAbs:
+        y = np.abs(y)
+    N, binEdges = simple_binner(y, numBins)
+    # compute bin centers from bin edges
+    binCenters = np.mean([binEdges[:-1], binEdges[1:]], axis=0)
+
+    # mean position of maximums (if multiple)
+    out = np.mean(binCenters[N == np.max(N)])
+
+    return float(out)
+
+

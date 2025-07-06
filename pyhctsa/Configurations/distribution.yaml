@@ -223,3 +223,27 @@ Distribution:
     hctsa_name: DN_TrimmedMean
     ordered_args: ["pExclude"]
   
+  HistogramAsymmetry:
+    base_name: HistogramAsymmetry
+    labels:
+      - distribution
+      - discrepancy
+    dependencies:
+    configs:
+      - numBins: 11
+        doSimple: False
+        zscore: True
+    hctsa_name: DN_HistogramAsymmetry
+    ordered_args: ["numBins", "doSimple"]
+  
+  HistogramMode:
+    base_name: HistogramMode
+    labels:
+      - distribution
+    dependencies:
+    configs:
+      - numBins: [5, 10, 21]
+        doAbs: [False, True]
+        zscore: True
+    hctsa_name: DN_HistogramMode
+    ordered_args: ["numBins", "doAbs"]
