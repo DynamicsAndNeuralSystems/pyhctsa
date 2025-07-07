@@ -133,6 +133,18 @@ Correlation:
         zscore: True
     hctsa_name: CO_fzcglscf
     ordered_args: ["alpha", "beta"]
+    
+  Embed2:
+    base_name: Embed2
+    labels:
+      - embedding
+      - correlation
+    dependencies:
+    configs:
+      - tau: "tau"
+        zscore: True
+    hctsa_name: CO_Embed2
+    ordered_args: ["tau"]
   
   Embed2Shapes:
     base_name: Embed2_Shapes
