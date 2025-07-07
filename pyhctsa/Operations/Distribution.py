@@ -4,6 +4,7 @@ from typing import Dict, Union
 from scipy import stats
 from loguru import logger
 from ..Utilities.utils import histc, binpicker, simple_binner, xcorr
+from ..Operations.Correlation import AutoCorr
 
 
 def Withinp(x : ArrayLike, p : float = 1.0, meanOrMedian : str = 'mean') -> float:
@@ -771,3 +772,109 @@ def HistogramMode(y : ArrayLike, numBins : int = 10, doAbs : bool = False) -> fl
     return float(out)
 
 
+def RemovePoints(y : ArrayLike, removeHow : str = 'absfar', p : float = 0.1, removeOrSaturate : str = 'remove') -> dict:
+    """
+    How time-series properties change as points are removed.
+
+    Removes a proportion, p, of points from the time series according to a specified rule,
+    and computes a set of statistics before and after the change.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    removeHow : {'absclose', 'absfar', 'min', 'max', 'random'}, optional
+        How to remove points from the time series:
+            - 'absclose': those that are the closest to the mean,
+            - 'absfar': those that are the furthest from the mean,
+            - 'min': the lowest values,
+            - 'max': the highest values,
+            - 'random': at random.
+        Default is 'absfar'.
+    p : float, optional
+        The proportion of points to remove (default: 0.1).
+    removeOrSaturate : {'remove', 'saturate'}, optional
+        Whether to remove points ('remove') or saturate their values ('saturate').
+        Default is 'remove'.
+
+    Returns
+    -------
+    dict
+        Statistics including the change in autocorrelation, time scales, mean.
+    """
+    y = np.asarray(y)
+    N = len(y)
+
+    is_ = None
+    if removeHow == 'absclose':
+        is_ = np.argsort(np.abs(y))[::-1] # descending
+    elif removeHow == 'absfar':
+        is_ = np.argsort(np.abs(y)) # ascending
+    elif removeHow == 'min':
+        is_ = np.argsort(y)[::-1]
+    elif removeHow == 'max':
+        is_ = np.argsort(y)
+    elif removeHow == 'random':
+        is_ = np.random.permutation(N)
+    else:
+        raise ValueError(f"Unknown method '{removeHow}'")
+    
+    # Indices of points to *keep*:
+    rKeep = np.sort(is_[:round(N * (1 - p))])
+
+    # Indices of points to *transform*:
+    rTransform = np.setdiff1d(np.arange(N), rKeep)
+
+    # Do the removing/saturating to convert y -> yTransform
+    if removeOrSaturate == 'remove':
+        yTransform = y[rKeep]
+    elif removeOrSaturate == 'saturate':
+        # Saturate out the targeted points
+        if removeHow == 'max':
+            yTransform = y.copy()
+            yTransform[rTransform] = np.max(y[rKeep])
+        elif removeHow == 'min':
+            yTransform = y.copy()
+            yTransform[rTransform] = np.min(y[rKeep])
+        elif removeHow == 'absfar':
+            yTransform = y.copy()
+            yTransform[yTransform > np.max(y[rKeep])] = np.max(y[rKeep])
+            yTransform[yTransform < np.min(y[rKeep])] = np.min(y[rKeep])
+        else:
+            raise ValueError(f"Cannot 'saturate' when using '{removeHow}' method")
+    else:
+        raise ValueError(f"Unknown removOrSaturate option '{removeOrSaturate}'")
+    
+    # Compute some autocorrelation properties
+    n = 8
+    acf_y = AutoCorr(y, list(range(1, n+1)), 'Fourier')
+    acf_yTransform = AutoCorr(yTransform, list(range(1, n+1)), 'Fourier')
+    # Compute output statistics
+    out = {}
+
+    # Helper functions
+    f_absDiff = lambda x1, x2: np.abs(x1 - x2) # ignores the sign
+    f_ratio = lambda x1, x2: np.divide(x1, x2) # includes the sign
+
+    # out['fzcacrat'] = f_ratio(FirstCrossing(yTransform, 'ac', 0, 'continuous'), 
+    #                           FirstCrossing(y, 'ac', 0, 'continuous'))
+    
+    out['ac1rat'] = f_ratio(acf_yTransform[0], acf_y[0])
+    out['ac1diff'] = f_absDiff(acf_yTransform[0], acf_y[0])
+
+    out['ac2rat'] = f_ratio(acf_yTransform[1], acf_y[1])
+    out['ac2diff'] = f_absDiff(acf_yTransform[1], acf_y[1])
+    
+    out['ac3rat'] = f_ratio(acf_yTransform[2], acf_y[2])
+    out['ac3diff'] = f_absDiff(acf_yTransform[2], acf_y[2])
+    
+    out['sumabsacfdiff'] = np.sum(np.abs(acf_yTransform - acf_y))
+    out['mean'] = np.mean(yTransform)
+    out['median'] = np.median(yTransform)
+    out['std'] = np.std(yTransform, ddof=1)
+    
+    #out['skewnessrat'] = stats.skew(yTransform) / stats.skew(y)
+    # return kurtosis instead of excess kurtosis
+    out['kurtosisrat'] = stats.kurtosis(yTransform, fisher=False) / stats.kurtosis(y, fisher=False)
+
+    return out

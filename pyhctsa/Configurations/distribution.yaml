@@ -247,3 +247,31 @@ Distribution:
         zscore: True
     hctsa_name: DN_HistogramMode
     ordered_args: ["numBins", "doAbs"]
+
+  RemovePoints:
+    base_name: RemovePoints
+    labels:
+      - correlation
+      - outliers
+      - distribution
+    dependencies:
+      - scipy
+    configs:
+      - removeHow: 'absclose'
+        p: [0.1, 0.5, 0.8]
+        removeOrSaturate: 'remove'
+        zscore: True
+      - removeHow: 'absfar'
+        p: [0.1, 0.8]
+        removeOrSaturate: ['remove', 'saturate']
+        zscore: True
+      - removeHow: 'min'
+        p: [0.1, 0.5, 0.8]
+        removeOrSaturate: 'saturate'
+        zscore: True
+      - removeHow: 'max'
+        p: [0.1, 0.8]
+        removeOrSaturate: 'saturate'
+        zscore: True
+    hctsa_name: DN_RemovePoints
+    ordered_args: ["removeHow", "p", "removeOrSaturate"]
