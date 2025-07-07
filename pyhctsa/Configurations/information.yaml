@@ -54,4 +54,17 @@ Information:
         zscore: True
     hctsa_name: CO_FirstMin
     ordered_args: ["minWhat", "extraParam", "minNotMax"]
+  
+  AMInformation:
+    base_name: RM_AMInformation
+    labels:
+      - correlation
+      - AMI
+      - information
+    dependencies:
+    configs:
+      - tau: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        zscore: True
+    hctsa_name: CO_RM_AMInformation
+    ordered_args: ["tau"]
  

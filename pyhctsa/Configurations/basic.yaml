@@ -360,6 +360,54 @@ Information:
     ordered_args: ["maxTau", "estMethod", "extraParam"]
     hctsa_name: IN_AutoMutualInfoStats
 
+  AMInformation:
+    base_name: RM_AMInformation
+    labels:
+      - correlation
+      - AMI
+      - information
+    dependencies:
+    configs:
+      - tau: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        zscore: True
+    hctsa_name: CO_RM_AMInformation
+    ordered_args: ["tau"]
+  
+  FirstMin:
+    base_name: FirstMin
+    labels:
+      - correlation
+      - AMI
+    dependencies:
+      - JIDT
+    configs:
+      - minWhat: ['ac', 'mi-gaussian']
+        extraParam: ['']
+        minNotMax: ['']
+        zscore: True
+      - minWhat: ['mi-kraskov2']
+        extraParam: '4'
+        minNotMax: ['']
+        zscore: True
+      - minWhat: 'mi-hist'
+        extraParam: [5, 10]
+        minNotMax: ['']
+        zscore: True
+      - minWhat: ['ac', 'mi-gaussian']
+        extraParam: ['']
+        minNotMax: False
+        zscore: True
+      - minWhat: ['mi-kraskov2']
+        extraParam: '4'
+        minNotMax: False
+        zscore: True
+      - minWhat: 'mi-hist'
+        extraParam: [5, 10]
+        minNotMax: False
+        zscore: True
+    hctsa_name: CO_FirstMin
+    ordered_args: ["minWhat", "extraParam", "minNotMax"]
+
 Entropy:
   LZComplexity:
     base_name: LZcomplexity

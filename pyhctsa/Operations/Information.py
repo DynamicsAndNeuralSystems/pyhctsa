@@ -5,7 +5,7 @@ import os
 from numpy.typing import ArrayLike
 from scipy import stats
 from loguru import logger
-from ..Utilities.utils import signChange
+from ..Utilities.utils import signChange, RM_histogram2
 
 
 def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, minNotMax : Union[bool, None] = True):
@@ -485,3 +485,205 @@ def _initialize_MI(
     miCalc.initialise(1,1)
 
     return miCalc
+
+
+def AMInformation(y : ArrayLike, tau : int = 1) -> float:
+    """
+    Estimates the mutual information of two stationary signals with 
+    independent pairs of samples using various approaches.
+
+    Based on a wrapper initially developed by Ben D. Fulcher in MATLAB,
+    which is based on rm_information.py initially developed by Rudy Moddemeijer in MATLAB,
+    and translated to to python by Tucker Cullen.
+
+    Inputs
+    ------
+    y : array-like
+        The input time series.
+
+    Returns
+    -------
+    float:
+        Estimate of the auto-mutual information
+    """
+    if tau >= len(y):
+        return np.nan
+    elif tau == 0:
+        # handle the case when tau = 0 (no lag)
+        y1 = y2 = y
+    else:
+        y1 = y[:-tau]
+        y2 = y[tau:]
+
+    out = _rm_info(y1, y2)[0]
+
+    return out
+
+def _rm_info(*args):
+    """
+    Estimates the mutual information of two stationary signals with independent pairs of samples using various approaches.
+
+    Parameters
+    ----------
+    x : array-like
+        First input time series (row vector).
+    y : array-like
+        Second input time series (row vector).
+    descriptor : array-like, optional
+        Histogram descriptor array of shape (2, 3):
+            [[LOWERBOUNDX, UPPERBOUNDX, NCELLX],
+             [LOWERBOUNDY, UPPERBOUNDY, NCELLY]]
+        If not provided, will be computed automatically.
+    approach : {'unbiased', 'mmse', 'biased'}, optional
+        Method for estimating mutual information:
+            - 'unbiased': The unbiased estimate (default)
+            - 'mmse': The minimum mean square error estimate
+            - 'biased': The biased estimate
+    base : float, optional
+        The base of the logarithm (default: e).
+
+    Returns
+    -------
+    estimate : float
+        The mutual information estimate.
+    nbias : float
+        The N-bias of the estimate.
+    sigma : float
+        The standard error of the estimate.
+    descriptor : np.ndarray
+        The descriptor of the histogram used, see also RM_histogram2.
+
+    Notes
+    -----
+    - See also: http://www.cs.rug.nl/~rudy/matlab/
+    - Original MATLAB function by R. Moddemeijer, minor modifications by Ben Fulcher.
+    - Python translation by Tucker Cullen.
+    """
+
+    nargin = len(args)
+
+    if nargin < 1:
+        print("Takes in 2-5 parameters: ")
+        print("rm_information(x, y)")
+        print("rm_information(x, y, descriptor)")
+        print("rm_information(x, y, descriptor, approach)")
+        print("rm_information(x, y, descriptor, approach, base)")
+        print()
+
+        print("Returns a tuple containing: ")
+        print("estimate, nbias, sigma, descriptor")
+        return
+
+    # some initial tests on the input arguments
+
+    x = np.array(args[0])  # make sure the imputs are in numpy array form
+    y = np.array(args[1])
+
+    xshape = x.shape
+    yshape = y.shape
+
+    lenx = xshape[0]  # how many elements are in the row vector
+    leny = yshape[0]
+
+    if len(xshape) != 1:  # makes sure x is a row vector
+        print("Error: invalid dimension of x")
+        return
+
+    if len(yshape) != 1:
+        print("Error: invalid dimension of y")
+        return
+
+    if lenx != leny:  # makes sure x and y have the same amount of elements
+        print("Error: unequal length of x and y")
+        return
+
+    if nargin > 5:
+        print("Error: too many arguments")
+        return
+
+    if nargin < 2:
+        print("Error: not enough arguments")
+        return
+
+    # setting up variables depending on amount of inputs
+
+    if nargin == 2:
+        hist = RM_histogram2(x, y)  # call outside function from rm_histogram2.py
+        h = hist[0]
+        descriptor = hist[1]
+
+    if nargin >= 3:
+        hist = RM_histogram2(x, y, args[2])  # call outside function from rm_histogram2.py, args[2] represents the given descriptor
+        h = hist[0]
+        descriptor = hist[1]
+
+    if nargin < 4:
+        approach = 'unbiased'
+    else:
+        approach = args[3]
+
+    if nargin < 5:
+        base = np.e  # as in e = 2.71828
+    else:
+        base = args[4]
+
+    lowerboundx = descriptor[0, 0]  #not sure why most of these were included in the matlab script, most of them go unused
+    upperboundx = descriptor[0, 1]
+    ncellx = descriptor[0, 2]
+    lowerboundy = descriptor[1, 0]
+    upperboundy = descriptor[1, 1]
+    ncelly = descriptor[1, 2]
+
+    estimate = 0
+    sigma = 0
+    count = 0
+
+    # determine row and column sums
+
+    hy = np.sum(h, 0)
+    hx = np.sum(h, 1)
+
+    ncellx = ncellx.astype(int)
+    ncelly = ncelly.astype(int)
+
+    for nx in range(0, ncellx):
+        for ny in range(0, ncelly):
+            if h[nx, ny] != 0:
+                logf = np.log(h[nx, ny] / hx[nx] / hy[ny])
+            else:
+                logf = 0
+
+            count = count + h[nx, ny]
+            estimate = estimate + h[nx, ny] * logf
+            sigma = sigma + h[nx, ny] * (logf ** 2)
+
+    # biased estimate
+
+    estimate = estimate / count
+    sigma = np.sqrt((sigma / count - estimate ** 2) / (count - 1))
+    estimate = estimate + np.log(count)
+    nbias = (ncellx - 1) * (ncelly - 1) / (2 * count)
+
+    # conversion to unbiased estimate
+
+    if approach[0] == 'u':
+        estimate = estimate - nbias
+        nbias = 0
+
+        # conversion to minimum mse estimate
+
+    if approach[0] == 'm':
+        estimate = estimate - nbias
+        nbias = 0
+        lamda = (estimate ** 2) / ((estimate ** 2) + (sigma ** 2))
+        nbias = (1 - lamda) * estimate
+        estimate = lamda * estimate
+        sigma = lamda * sigma
+
+        # base transformations
+
+    estimate = estimate / np.log(base)
+    nbias = nbias / np.log(base)
+    sigma = sigma / np.log(base)
+
+    return estimate, nbias, sigma, descriptor
