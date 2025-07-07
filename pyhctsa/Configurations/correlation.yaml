@@ -109,6 +109,18 @@ Correlation:
         zscore: True
     hctsa_name: CO_Embed2_Dist
     ordered_args: ["tau"]
+
+  Embed2_AngleTau:
+    base_name: Embed2_AngleTau
+    labels:
+      - embedding
+      - correlation
+    dependencies:
+    configs:
+      - maxTau: 50
+        zscore: True
+    hctsa_name: CO_Embed2_AngleTau
+    ordered_args: ["maxTau"]
   
   PartialAutoCorr:
     base_name: PartialAutoCorr

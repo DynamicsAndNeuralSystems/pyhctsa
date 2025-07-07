@@ -12,6 +12,70 @@ from ..Operations.Information import FirstMin
 from scipy.linalg import LinAlgError
 from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
 
+
+def Embed2_AngleTau(y : ArrayLike, maxTau : int) -> dict:
+    """
+    Angle autocorrelation in a 2-dimensional embedding space.
+
+    Investigates how the autocorrelation of angles between successive points in
+    the two-dimensional time-series embedding change as tau varies from
+    tau = 1, 2, ..., maxTau.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (column vector).
+    maxTau : int
+        The maximum time lag to consider.
+
+    Returns
+    -------
+    dict
+        Dictionary containing statistics of the autocorrelation of angles for each tau,
+        including mean, max, min, and autocorrelation at different lags.
+    """
+    tauRange = np.arange(1, maxTau + 1)
+    numTau = len(tauRange)
+
+    # Ensure y is a column vector
+    y = np.atleast_2d(y)
+    if y.shape[0] < y.shape[1]:
+        y = y.T
+
+    stats_store = np.zeros((2, numTau))
+
+    for i, tau in enumerate(tauRange):
+        m = np.column_stack((y[:-tau], y[tau:]))
+        diff_x = np.diff(m[:, 0])
+        diff_y = np.diff(m[:, 1])
+        # Handle division by zero
+        with np.errstate(divide='ignore', invalid='ignore'):
+            theta = diff_y / diff_x
+        theta = np.arctan(theta)
+
+        if len(theta) == 0:
+            raise ValueError(f'Time series (N={len(y)}) too short for embedding')
+
+        stats_store[0, i] = AutoCorr(theta, 1, 'Fourier')[0]
+        stats_store[1, i] = AutoCorr(theta, 2, 'Fourier')[0]
+    
+    # Compute output statistics
+    out = {
+        'ac1_thetaac1': AutoCorr(stats_store[0, :], 1, 'Fourier')[0],
+        'ac1_thetaac2': AutoCorr(stats_store[1, :], 1, 'Fourier')[0],
+        'mean_thetaac1': np.mean(stats_store[0, :]),
+        'max_thetaac1': np.max(stats_store[0, :]),
+        'min_thetaac1': np.min(stats_store[0, :]),
+        'mean_thetaac2': np.mean(stats_store[1, :]),
+        'max_thetaac2': np.max(stats_store[1, :]),
+        'min_thetaac2': np.min(stats_store[1, :]),
+    }
+
+    out['meanrat_thetaac12'] = out['mean_thetaac1'] / out['mean_thetaac2']
+    out['diff_thetaac12'] = np.sum(np.abs(stats_store[1, :] - stats_store[0, :]))
+
+    return out
+
 def Embed2(y: ArrayLike, tau: str = 'tau') -> dict:
     """
     Statistics of the time series in a 2-dimensional embedding space.
