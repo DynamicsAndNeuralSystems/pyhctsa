@@ -190,3 +190,43 @@ Stationarity:
     hctsa_name: SY_DriftingMean
     ordered_args: ["segmentHow", "l"]
   
+  RangeEvolve:
+    base_name: RangeEvolve
+    labels:
+      - stationarity
+    dependencies:
+    configs:
+      - zscore: True
+    hctsa_name: SY_RangeEvolve
+    ordered_args:
+
+  KPSSTest:
+    base_name: KPSStest
+    labels:
+      - stationarity
+      - hypothesistest
+    dependencies:
+      - statsmodels
+    configs:
+      - lags: [0, 1, 2]
+        zscore: True
+      - lags: [!range [0, 10]]
+        zscore: True
+    hctsa_name: SY_KPSStest
+    ordered_args: ["lags"]
+
+  LocalExtrema:
+    base_name: LocalExtrema
+    labels:
+      - stationarity
+      - distribution
+    dependencies:
+    configs:
+      - howToWindow: 'l'
+        n: [50, 100]
+        zscore: True
+      - howToWindow: 'n'
+        n: [25, 50, 100]
+        zscore: True
+    hctsa_name: ST_LocalExtrema
+    ordered_args: ["howToWindow", "n"]

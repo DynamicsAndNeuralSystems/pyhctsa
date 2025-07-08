@@ -2,12 +2,226 @@ import numpy as np
 from numpy.typing import ArrayLike
 from loguru import logger
 from ..Operations.Entropy import ApproximateEntropy, SampleEntropy
-from ..Operations.Correlation import AutoCorr
+from ..Operations.Correlation import AutoCorr, FirstCrossing
+from ..Utilities.utils import make_mat_buffer
 from typing import Dict, Union
 from scipy.signal import detrend
 from scipy.optimize import curve_fit
 from scipy.stats import skew, kurtosis
 from ..Operations.Distribution import Moments
+from statsmodels.tsa.stattools import kpss
+
+def LocalExtrema(y : ArrayLike, howToWindow : str = 'l', n : Union[int, None] = None) -> dict:
+    """
+    How local maximums and minimums vary across the time series.
+
+    Finds maximums and minimums within given segments of the time series and
+    analyzes the results.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series
+    howToWindow : str, optional
+        Method to determine window size (default is 'l'):
+        - 'l': windows of a given length (n specifies the window length)
+        - 'n': specified number of windows to break the time series into (n specifies number of windows)
+        - 'tau': sets window length equal to correlation length (first zero-crossing of autocorrelation)
+    n : int, optional
+        Specifies either:
+        - Window length when howToWindow='l' (defaults to 100)
+        - Number of windows when howToWindow='n' (defaults to 5)
+        - Not used when howToWindow='tau'
+
+    Returns
+    -------
+    dict
+        Statistics about local extrema.
+    """
+    y = np.asarray(y)
+    if n is None:
+        if howToWindow == 'l':
+            n = 100 # 100 sample windows
+        elif howToWindow == 'n':
+            n = 5 # 5 windows
+    
+    N = len(y)
+
+    # Set the window length
+    if howToWindow == 'l':
+        windowLength = n # window length
+    elif howToWindow == 'n':
+        windowLength = int(np.floor(N/n))
+    elif howToWindow == 'tau':
+        windowLength = FirstCrossing(y, 'ac', 0, 'discrete')
+    else:
+        raise ValueError(f"Unknown method {howToWindow}")
+    
+    if (windowLength > N) or (windowLength <= 1):
+        # This feature is unsuitable if the window length exceeds ts
+        out = np.nan
+    
+    # Buffer the time series
+    y_buff = make_mat_buffer(y, windowLength) # no overlap
+    # each column is a window of samples
+    if y_buff[-1, -1] == 0:
+        y_buff = y_buff[:, :-1]  # remove last window if zero-padded
+    
+    numWindows = np.size(y_buff, 1) # number of windows
+    # Find local extrema
+    locMax = np.max(y_buff, axis=0) # summary of local maxima
+    locMin = np.min(y_buff, axis=0) # summary of local minima
+    absLocMin = np.abs(locMin) # abs val of local minima
+    exti = np.where(absLocMin > locMax)
+    loc_ext = locMax.copy()
+    loc_ext[exti] = locMin[exti] # local extrema (furthest from mean; either maxs or mins)
+    abs_loc_ext = np.abs(loc_ext) # the magnitude of the most extreme events in each window
+
+    # Return Outputs
+    out = {
+        'meanrat': np.mean(locMax) / np.mean(absLocMin),
+        'medianrat': np.median(locMax) / np.median(absLocMin),
+        'minmax': np.min(locMax),
+        'minabsmin': np.min(absLocMin),
+        'minmaxonminabsmin': np.min(locMax) / np.min(absLocMin),
+        'meanmax': np.mean(locMax),
+        'meanabsmin': np.mean(absLocMin),
+        'meanext': np.mean(loc_ext),
+        'medianmax': np.median(locMax),
+        'medianabsmin': np.median(absLocMin),
+        'medianext': np.median(loc_ext),
+        'stdmax': np.std(locMax, ddof=1),
+        'stdmin': np.std(locMin, ddof=1),
+        'stdext': np.std(loc_ext, ddof=1),
+        'zcext': np.sum((loc_ext[:-1] * loc_ext[1:]) < 0) / numWindows,
+        'meanabsext': np.mean(abs_loc_ext),
+        'medianabsext': np.median(abs_loc_ext),
+        'diffmaxabsmin': np.sum(np.abs(locMax - absLocMin)) / numWindows,
+        'uord': np.sum(np.sign(loc_ext)) / numWindows,
+        'maxmaxmed': np.max(locMax) / np.median(locMax),
+        'minminmed': np.min(locMin) / np.median(locMin),
+        'maxabsext': np.max(abs_loc_ext) / np.median(abs_loc_ext)
+    }
+    return out
+
+def KPSSTest(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
+    """
+    Performs the KPSS (Kwiatkowski-Phillips-Schmidt-Shin) stationarity test.
+
+    This implementation uses the statsmodels kpss function to test whether a time series
+    is trend stationary. The null hypothesis is that the time series is trend stationary,
+    while the alternative hypothesis is that it is a non-stationary unit-root process.
+
+    The test was introduced in:
+    Kwiatkowski, D., Phillips, P. C., Schmidt, P., & Shin, Y. (1992). Testing the null 
+    hypothesis of stationarity against the alternative of a unit root: How sure are we 
+    that economic time series have a unit root? Journal of Econometrics, 54(1-3), 159-178.
+
+    The function can be used in two ways:
+    1. With a single lag value - returns basic test statistic and p-value
+    2. With multiple lag values - returns statistics about how the test results 
+       change across different lags
+
+    Parameters
+    ----------
+    y : ArrayLike
+        The input time series to analyze for stationarity
+    lags : Union[int, list], optional
+        Either:
+        - A single lag value (int) to compute the test statistic and p-value
+        - A list of lag values to analyze how the test results vary across lags
+        Default is 0.
+
+    Returns
+    -------
+    Dict[str, float]
+        The KPSS test statistic and p-value of the test.
+    """
+    if isinstance(lags, list):
+        # evaluate kpss at multiple lags
+        pValue = np.zeros(len(lags))
+        stat = np.zeros(len(lags))
+        for (i, l) in enumerate(lags):
+            s, pv, _, _ = kpss(y, nlags=l, regression='ct')
+            pValue[i] = pv
+            stat[i] = s
+        out = {}
+        # return stats on outputs
+        out['maxpValue'] = np.max(pValue)
+        out['minpValue'] = np.min(pValue)
+        out['maxstat'] = np.max(stat)
+        out['minstat'] = np.min(stat)
+        out['lagmaxstat'] = lags[np.argmax(stat)]
+        out['lagminstat'] = lags[np.argmin(stat)]
+    else:
+        if isinstance(lags, int):
+            stat, pValue, _, _ = kpss(y, nlags=lags, regression='ct')
+            # return the statistic and pvalue
+            out = {'stat': stat, 'pValue': pValue}
+        else:
+            raise TypeError("Expected either a single lag (as an int) or list of lags.")
+    
+    return out
+
+def RangeEvolve(y : ArrayLike) -> dict:
+    """
+    Analyze how the time-series range changes across time.
+
+    This operation measures the range (peak-to-peak) of the time series as a function
+    of time by calculating range(x_{1:i}) for i = 1, 2, ..., N, where N is the 
+    length of the time series. It provides insights into how new extreme events 
+    emerge over time.
+
+    Parameters
+    ----------
+    y : ArrayLike
+        The input time series to analyze
+
+    Returns
+    -------
+    Dict[str, float]
+        Dictionary containing various metrics about range evolution.
+    """
+    y = np.asarray(y)
+    N = len(y)
+    out = {} # initialise storage
+    cums = np.zeros(N)
+    for i in range(N):
+        cums[i] = np.ptp(y[:i+1])  # np.ptp calculates the range (peak to peak)
+    
+    fullr = np.ptp(y)
+
+    # return number of unqiue entries in a vector, x
+    lunique = lambda x : len(np.unique(x))
+    out['totnuq'] = lunique(cums)
+
+    # how many of the unique extrema are in the first <proportions> of time series? 
+    cumtox = lambda x : lunique(cums[:int(np.floor(N*x))])/out['totnuq']
+    out['nuqp1'] = cumtox(0.01)
+    out['nuqp10'] = cumtox(0.1)
+    out['nuqp20'] = cumtox(0.2)
+    out['nuqp50'] = cumtox(0.5)
+
+    # how many unique extrema are in the first <length> of time series? 
+    Ns = [10, 50, 100, 1000]
+    for Nval in Ns:
+        if N >= Nval:
+            out[f'nuql{Nval}'] = lunique(cums[:Nval])/out['totnuq']
+        else:
+            out[f'nuql{N}'] = np.nan
+    # (**2**) Actual proportion of full range captured at different points
+    out['p1'] = cums[int(np.ceil(N * 0.01)) - 1]/fullr
+    out['p10'] = cums[int(np.ceil(N * 0.1)) - 1]/fullr
+    out['p20'] = cums[int(np.ceil(N * 0.2)) - 1]/fullr
+    out['p50'] = cums[int(np.ceil(N * 0.5)) - 1]/fullr
+
+    for Nval in Ns:
+        if N >= Nval:
+            out[f'l{Nval}'] = cums[Nval-1]/fullr
+        else:
+            out[f'l{Nval}'] = np.nan
+
+    return out
 
 def DriftingMean(y: ArrayLike, segmentHow: str = 'fix', l: int = 20) -> dict:
     """
