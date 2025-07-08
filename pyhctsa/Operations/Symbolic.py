@@ -9,7 +9,7 @@ from scipy.stats import mstats
 
 
 def Surprise(y, whatPrior='dist', memory=0.2, numGroups=3, coarseGrainMethod='quantile', 
-                numIters=500, randomSeed=None, use_deterministic=True):
+                numIters=500, randomSeed=0):
 
     if (memory > 0) and (memory < 1): #specify memory as a proportion of the time series length
         memory = int(np.round(memory*len(y)))
@@ -17,29 +17,15 @@ def Surprise(y, whatPrior='dist', memory=0.2, numGroups=3, coarseGrainMethod='qu
     # COURSE GRAIN
     yth = CoarseGrain(y, coarseGrainMethod, numGroups) # a coarse-grained time series using the numbers 1:numgroups
     N = int(len(yth))
-    #print(sum(yth))
 
-    #select random samples to test
-    if use_deterministic:
-        # Use evenly spaced points for deterministic results
-        available_points = N - memory
-        if numIters >= available_points:
-            rs = np.arange(memory, N)
-        else:
-            # Create evenly spaced indices
-            indices = np.round(np.linspace(1, available_points, numIters)).astype(int) - 1
-            rs = indices + memory
-        rs = np.array([rs])  # Match original 2D array format
-    else:
-        # Use random sampling (original behavior)
-        if randomSeed is not None:
-            np.random.seed(randomSeed)
-        rs = np.random.permutation(int(N - memory)) + memory
-        rs = np.sort(rs[0:min(numIters, len(rs) - 1)])
-        rs = np.array([rs])
+    # Use random sampling (original behavior)
+    if randomSeed is not None:
+        np.random.seed(randomSeed)
+    rs = np.random.permutation(int(N - memory)) + memory
+    rs = np.sort(rs[0:min(numIters, len(rs) - 1)])
+    rs = np.array([rs])
 
     # COMPUTE EMPIRICAL PROBABILITIES FROM TIME SERIES
-    #print(rs)
     store = np.zeros([numIters, 1])
     for i in range(0, rs.size): # rs.size
         if whatPrior == 'dist':
