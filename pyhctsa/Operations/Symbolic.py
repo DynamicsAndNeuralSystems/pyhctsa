@@ -5,6 +5,111 @@ from ..Utilities.utils import binarize, signChange
 from scipy.signal import resample as ssre
 from numpy.typing import ArrayLike
 from loguru import logger
+from scipy.stats import mstats
+
+
+def Surprise(y, whatPrior='dist', memory=0.2, numGroups=3, coarseGrainMethod='quantile', 
+                numIters=500, randomSeed=None, use_deterministic=True):
+
+    if (memory > 0) and (memory < 1): #specify memory as a proportion of the time series length
+        memory = int(np.round(memory*len(y)))
+
+    # COURSE GRAIN
+    yth = CoarseGrain(y, coarseGrainMethod, numGroups) # a coarse-grained time series using the numbers 1:numgroups
+    N = int(len(yth))
+    #print(sum(yth))
+
+    #select random samples to test
+    if use_deterministic:
+        # Use evenly spaced points for deterministic results
+        available_points = N - memory
+        if numIters >= available_points:
+            rs = np.arange(memory, N)
+        else:
+            # Create evenly spaced indices
+            indices = np.round(np.linspace(1, available_points, numIters)).astype(int) - 1
+            rs = indices + memory
+        rs = np.array([rs])  # Match original 2D array format
+    else:
+        # Use random sampling (original behavior)
+        if randomSeed is not None:
+            np.random.seed(randomSeed)
+        rs = np.random.permutation(int(N - memory)) + memory
+        rs = np.sort(rs[0:min(numIters, len(rs) - 1)])
+        rs = np.array([rs])
+
+    # COMPUTE EMPIRICAL PROBABILITIES FROM TIME SERIES
+    #print(rs)
+    store = np.zeros([numIters, 1])
+    for i in range(0, rs.size): # rs.size
+        if whatPrior == 'dist':
+            # uses the distribution up to memory to inform the next point
+            p = np.sum(yth[rs[0, i]-memory:rs[0, i]] == yth[rs[0, i]])/memory # had to be careful with indexing, arange() works like matlab's : operator
+            store[i] = p
+        elif whatPrior == 'T1':
+            # uses one-point correlations in memory to inform the next point
+            # estimate transition probabilites from data in memory
+            # find where in memory this has been observbed before, and preceded it
+            memory_data = yth[rs[0, i] - memory:rs[0, i]]
+            inmem = np.where(memory_data[:-1] == yth[rs[0, i] - 1])[0]
+            if len(inmem) == 0:
+                p = 0
+            else:
+                p = np.mean(memory_data[inmem + 1] == yth[rs[0, i]])
+            store[i] = p
+
+        elif whatPrior == 'T2':
+            # Uses two-point correlations in memory to inform the next point
+            memory_data = yth[rs[0, i] - memory:rs[0, i]]
+            # Previous value observed in memory here
+            inmem1 = np.where(memory_data[1:-1] == yth[rs[0, i] - 1])[0]
+            inmem2 = np.where(memory_data[inmem1] == yth[rs[0, i] - 2])[0]
+            if len(inmem2) == 0:
+                p = 0
+            else:
+                p = np.sum(memory_data[inmem2 + 2] == yth[rs[0, i]]) / len(inmem2)
+            store[i] = p
+            
+        else:
+            raise ValueError(f"Unknown method: {whatPrior}")
+    
+    #print(store)
+    # INFORMATION GAINED FROM NEXT OBSERVATION IS log(1/p) = -log(p)
+    store[store == 0] = 1 # so that we set log[0] == 0
+
+    out = {} # dictionary for outputs
+    for i in range(0, len(store)):
+        if store[i] == 0:
+            store[i] = 1
+
+    store = -(np.log(store))
+    #minimum amount of information you can gain in this way
+    if np.any(store > 0):
+        out['min'] = min(store[store > 0]) # find the minimum value in the array, excluding zero
+    else:
+        out['min'] = np.nan
+        
+    # Calculate statistics
+    #print(sum(store))
+    out['max'] = np.max(store) # maximum amount of information you cna gain in this way
+    out['mean'] = np.mean(store)
+    out['sum'] = np.sum(store)
+    out['median'] = np.median(store)
+    lq = mstats.mquantiles(store, 0.25, alphap=0.5, betap=0.5) # outputs an array of size one
+    out['lq'] = lq[0] #convert array to int
+    uq = mstats.mquantiles(store, 0.75, alphap=0.5, betap=0.5)
+    out['uq'] = uq[0]
+    out['std'] = np.std(store, ddof=1)
+
+    # t-statistic to information gain of 1. Note due to division of std which can be very effectively 0,
+    # this value can explode. Should fix w/ a NaN but want to replicate MATLAB func for now. 
+    if out['std'] == 0:
+        out['tstat'] = np.nan
+    else:
+        out['tstat'] = abs((out['mean']-1)/(out['std']/np.sqrt(numIters)))
+
+    return out 
+
 
 def MotifTwo(y : ArrayLike, binarizeHow : str = 'diff') -> dict:
     """

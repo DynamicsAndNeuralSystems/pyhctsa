@@ -67,4 +67,109 @@ Symbolic:
         zscore: True
     hctsa_name: SB_BinaryStretch
     ordered_args: ['stretchWhat']
+  
+  Surprise:
+    base_name: Surprise
+    labels:
+      - symbolic
+    dependencies:
+    configs:
+      - whatPrior: 'dist'
+        memory: [5, 20]
+        numGroups: 2
+        coarseGrainMethod: 'quantile'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'dist'
+        memory: 50
+        numGroups: 3
+        coarseGrainMethod: 'quantile'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'T1'
+        memory: 20
+        numGroups: 2
+        coarseGrainMethod: 'quantile'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'T1'
+        memory: 50
+        numGroups: 3
+        coarseGrainMethod: 'quantile'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'T1'
+        memory: 100
+        numGroups: [4, 5]
+        coarseGrainMethod: 'quantile'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'T2'
+        memory: 20
+        numGroups: 2
+        coarseGrainMethod: 'quantile'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'T2'
+        memory: 50
+        numGroups: 3
+        coarseGrainMethod: 'quantile'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'T2'
+        memory: 100
+        numGroups: [4, 5]
+        coarseGrainMethod: 'quantile'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'dist'
+        memory: [5, 20]
+        numGroups: 2
+        coarseGrainMethod: 'updown'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'T1'
+        memory: 20
+        numGroups: 2
+        coarseGrainMethod: 'updown'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'T2'
+        memory: 20
+        numGroups: 2
+        coarseGrainMethod: 'updown'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'dist'
+        memory: [5]
+        numGroups: [1, "tau"]
+        coarseGrainMethod: 'embed2quadrants'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'dist'
+        memory: [10, 20]
+        numGroups: "tau"
+        coarseGrainMethod: 'embed2quadrants'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'T1'
+        memory: 10
+        numGroups: [1, "tau"]
+        coarseGrainMethod: 'embed2quadrants'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'T1'
+        memory: [20, 50]
+        numGroups: "tau"
+        coarseGrainMethod: 'embed2quadrants'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'T2'
+        memory: [50, 100]
+        numGroups: "tau"
+        coarseGrainMethod: 'embed2quadrants'
+        numIters: 500
+        zscore: True
+    hctsa_name: FC_Surprise
+    ordered_args: ["whatPrior", "memory", "numGroups", "coarseGrainMethod", "numIters"]
     

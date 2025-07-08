@@ -5,3 +5,4 @@ __07/07:__ 470 partialed functions, 1654 validated features
 
 __08/07:__ 539 partialed functions, 2033 validated features
 
+__09/07:__ 564 partialed functions, 2258 validated features

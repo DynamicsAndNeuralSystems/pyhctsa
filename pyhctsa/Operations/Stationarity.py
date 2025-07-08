@@ -3,10 +3,9 @@ from numpy.typing import ArrayLike
 from loguru import logger
 from ..Operations.Entropy import ApproximateEntropy, SampleEntropy
 from ..Operations.Correlation import AutoCorr, FirstCrossing
-from ..Utilities.utils import make_mat_buffer
-from typing import Dict, Union
+from ..Utilities.utils import make_mat_buffer, ZScore, signChange
+from typing import Union
 from scipy.signal import detrend
-from scipy.optimize import curve_fit
 from scipy.stats import skew, kurtosis
 from ..Operations.Distribution import Moments
 from statsmodels.tsa.stattools import kpss
@@ -26,7 +25,7 @@ def DynWin(y : ArrayLike, maxNumSegments : int = 10) -> dict:
 
     Parameters:
     -----------
-    y : array_like
+    y : array-like
         the time series to analyze.
     maxNumSegments : int, optional
         the maximum number of segments to consider. Sweeps from 2 to
@@ -101,7 +100,7 @@ def MomentCorr(x : ArrayLike, windowLength : Union[None, float] = None, wOverlap
 
     Paramters
     ----------
-    x : array_like
+    x : array-like
         the input time series
     windowLength : float, optional
         the sliding window length (can be a fraction to specify or a proportion of the time-series length)
@@ -426,7 +425,7 @@ def RangeEvolve(y : ArrayLike) -> dict:
 
     Parameters
     ----------
-    y : ArrayLike
+    y : array-like
         The input time series to analyze
 
     Returns
@@ -495,7 +494,7 @@ def DriftingMean(y: ArrayLike, segmentHow: str = 'fix', l: int = 20) -> dict:
 
     Parameters
     ----------
-    y : ArrayLike
+    y : array-like
         The input time series
     segmentHow : str, optional
         Method to segment the time series:
@@ -662,7 +661,7 @@ def TSLength(y : ArrayLike) -> int:
 
     Parameters
     -----------
-    y : array_like
+    y : array-like
         the time series to analyze.
 
     Returns
@@ -691,7 +690,7 @@ def StdNthDer(y : ArrayLike, ndr : int = 2) -> float:
 
     Parameters
     ----------
-    y : ArrayLike
+    y : array-like
         The input time series to analyze
     ndr : int, optional
         The order of derivative to analyze (default=2)
@@ -725,7 +724,7 @@ def Trend(y : ArrayLike) -> dict:
 
     Parameters
     ----------
-    y : ArrayLike
+    y : array-like
         The input time series
 
     Returns
@@ -780,7 +779,7 @@ def StatAv(y: ArrayLike, whatType: str = 'seg', extraParam: int = 5) -> float:
 
     Parameters
     ----------
-    y : ArrayLike
+    y : array-like
         The input time series
     whatType : str, optional
         Method to segment the time series:
@@ -839,7 +838,7 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
 
     Parameters
     ----------
-    y : ArrayLike
+    y : array-like
         The input time series to analyze
     windowStat : str, optional (default='mean')
         Statistic to calculate in each window:
