@@ -163,3 +163,30 @@ Stationarity:
     hctsa_name: SY_SlidingWindow
     ordered_args: ["windowStat", "acrossWinStat", "numSeg", "incMove"]
   
+  LocalGlobal:
+    base_name: LocalGlobal
+    labels:
+      - stationarity
+      - distribution
+    dependencies:
+    configs:
+      - subsetHow: ['l', 'unicg']
+        nsamps: [10, 20, 50, 100, 500]
+        zscore: True
+    hctsa_name: SY_LocalGlobal
+    ordered_args: ["subsetHow", "nsamps"]
+  
+  DriftingMean:
+    base_name: DriftingMean
+    labels:
+    dependencies:
+    configs:
+      - segmentHow: "fix"
+        l: [20, 50, 100]
+        zscore: True
+      - segmentHow: "num"
+        l: [5, 10]
+        zscore: True
+    hctsa_name: SY_DriftingMean
+    ordered_args: ["segmentHow", "l"]
+  

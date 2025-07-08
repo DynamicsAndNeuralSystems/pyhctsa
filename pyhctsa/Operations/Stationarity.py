@@ -6,8 +6,159 @@ from ..Operations.Correlation import AutoCorr
 from typing import Dict, Union
 from scipy.signal import detrend
 from scipy.optimize import curve_fit
+from scipy.stats import skew, kurtosis
 from ..Operations.Distribution import Moments
 
+def DriftingMean(y: ArrayLike, segmentHow: str = 'fix', l: int = 20) -> dict:
+    """
+    Measures mean drift by analyzing mean and variance in time-series subsegments.
+
+    This operation splits a time series into segments, computes the mean and variance 
+    in each segment, and compares the maximum and minimum means to the mean variance. 
+    This helps identify if the time series has a drifting mean by comparing local 
+    statistics across different segments.
+
+    The method follows this approach:
+    1. Splits signal into frames of length N (or num segments)
+    2. Computes means of each frame
+    3. Computes variance for each frame
+    4. Compares ratio of max/min means with mean variance
+
+    Original idea by Rune from Matlab Central forum:
+    http://www.mathworks.de/matlabcentral/newsreader/view_thread/136539
+
+    Parameters
+    ----------
+    y : ArrayLike
+        The input time series
+    segmentHow : str, optional
+        Method to segment the time series:
+        - 'fix': fixed-length segments of length l (default)
+        - 'num': splits into l number of segments
+    l : int, optional
+        Specifies either:
+        - The length of segments when segmentHow='fix' (default=20)
+        - The number of segments when segmentHow='num'
+
+    Returns
+    -------
+    Dict[str, float]
+        Dictionary containing the measures of mean drift.
+    """
+    y = np.asarray(y)
+    N = len(y)
+    
+    # Set default segment parameters
+    if l is None:
+        l = 200 if segmentHow == 'fix' else 5
+    
+    # Calculate segment length
+    if segmentHow == 'num':
+        segment_length = int(np.floor(N/l))
+    elif segmentHow == 'fix':
+        segment_length = l
+    else:
+        raise ValueError(f"segmentHow must be 'fix' or 'num', got {segmentHow}")
+    
+    # Validate segment length
+    if segment_length <= 1 or segment_length > N:
+        return {
+            'max': np.nan,
+            'min': np.nan,
+            'mean': np.nan,
+            'meanmaxmin': np.nan,
+            'meanabsmaxmin': np.nan
+        }
+    
+    # Calculate number of complete segments
+    num_segments = int(np.floor(N/segment_length))
+    
+    # More efficient segmentation using array operations
+    segments = y[:num_segments * segment_length].reshape(num_segments, segment_length)
+    
+    # Calculate statistics
+    segment_means = np.mean(segments, axis=1)
+    segment_vars = np.var(segments, axis=1, ddof=1)
+    mean_var = np.mean(segment_vars)
+    
+    # Prepare output statistics
+    out = {
+        'max': np.max(segment_means) / mean_var,
+        'min': np.min(segment_means) / mean_var,
+        'mean': np.mean(segment_means) / mean_var
+    }
+    out['meanmaxmin'] = (out['max'] + out['min']) / 2
+    out['meanabsmaxmin'] = (np.abs(out['max']) + np.abs(out['min'])) / 2
+
+    return out
+
+def LocalGlobal(y : ArrayLike, subsetHow : str = 'l', nsamps : Union[int, float, None] = None) -> dict:
+    """
+    Compare local statistics to global statistics of a time series.
+
+    Parameters
+    -----------
+    y : ArrayLike
+        The time series to analyse.
+    subsetHow : str, optional
+        The method to select the local subset of time series:
+        'l': the first n points in a time series (default)
+        'p': an initial proportion of the full time series
+        'unicg': n evenly-spaced points throughout the time series
+        'randcg': n randomly-chosen points from the time series (chosen with replacement)
+    n : int or float, optional
+        The parameter for the method specified by subsetHow.
+        Default is 100 samples or 0.1 (10% of time series length) if proportion. 
+
+    Returns
+    --------
+    dict
+        A dictionary containing various statistical measures comparing
+        the subset to the full time series.
+    """
+    # check input time series is z-scored
+    y = np.asarray(y)
+
+    if nsamps is None:
+        if subsetHow in ['l', 'unicg', 'randcg']:
+            nsamps = 100 # 100 samples
+        elif subsetHow == 'p':
+            nsamps = 0.1 # 10 % of time series
+    N = len(y)
+
+    # Determine subset range to use: r
+    if subsetHow == 'l':
+        # take first n pts of time series
+        r = np.arange(min(nsamps, N))
+    elif subsetHow == 'p':
+        # take initial proportion n of time series
+        r = np.arange(int(np.floor(N*nsamps)))
+        #print(r)
+    elif subsetHow == 'unicg':
+        r = np.round(np.linspace(1, N, nsamps)).astype(int) - 1
+    else:
+        raise ValueError(f"Unknown specifier, {subsetHow}. Can be either 'l', 'p', 'unicg', or 'randcg'.")
+
+    if len(r) < 5:
+        # It's not really appropriate to compute statistics on less than 5 datapoints
+        logger.warning(f"Time series (of length {N}) is too short")
+        return np.nan
+    
+    # Compare statistics of this subset to those obtained from the full time series
+    out = {}
+    out['absmean'] = np.abs(np.mean(y[r])) # Makes sense without normalization if y is z-scored
+    out['std'] = np.std(y[r], ddof=1) # Makes sense without normalization if y is z-scored
+    out['median'] = np.median(y[r]) # if median is very small then normalization could be very noisy
+    raw_iqr_yr = np.percentile(y[r], 75, method='hazen') - np.percentile(y[r], 25, method='hazen')
+    raw_iqr_y = np.percentile(y, 75, method='hazen') - np.percentile(y, 25, method='hazen')
+    out['iqr'] = np.abs(1 - (raw_iqr_yr/raw_iqr_y))
+    out['skewness'] = np.abs(1 - (skew(y[r])/skew(y)))
+    # use Pearson definition (normal ==> 3.0)
+    out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/kurtosis(y, fisher=False)))
+    out['ac1'] = np.abs(1 - (AutoCorr(y[r], 1, 'Fourier')[0]/AutoCorr(y, 1, 'Fourier')[0]))
+    #out['sampen101'] = SampleEntropy(y[r], 1, 0.1)['sampen1']/SampleEntropy(y, 1, 0.1)['sampen1']
+
+    return out
 
 def FitPolynomial(y : ArrayLike, k : int = 1) -> float:
     """
@@ -18,7 +169,7 @@ def FitPolynomial(y : ArrayLike, k : int = 1) -> float:
 
     Parameters:
     -----------
-    y : array_like
+    y : ArrayLike
         the time series to analyze.
     k : int, optional
         the order of the polynomial to fit to y.
@@ -205,7 +356,7 @@ def StatAv(y: ArrayLike, whatType: str = 'seg', extraParam: int = 5) -> float:
 
 
 def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = 'std', 
-                 numSeg: int = 5, incMove: int = 2) -> Dict:
+                 numSeg: int = 5, incMove: int = 2) -> dict:
     """
     Sliding window measures of stationarity.
 
