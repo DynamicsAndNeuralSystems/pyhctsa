@@ -753,6 +753,47 @@ Stationarity:
     hctsa_name: ST_LocalExtrema
     ordered_args: ["howToWindow", "n"]
   
+  SimpleStats:
+    base_name: SimpleStats
+    labels:
+      - noisiness
+      - statistics
+      - stationarity
+    dependencies:
+      - scipy
+    configs:
+      - whatStat: ['zcross', 'pmcross']
+        zscore: True
+    hctsa_name: ST_SimpleStats
+    ordered_args: ["whatStat"]
+  
+  MomentCorr:
+    base_name: MomentCorr
+    labels:
+      - statistics
+    dependencies:
+    configs:
+      - windowLength: 0.02
+        wOverlap: 0.2
+        mom1: ['mean', 'median']
+        mom2: ['std', 'iqr']
+        whatTransform: ['none', 'abs', 'sqrt']
+        zscore: True
+    hctsa_name: ST_MomentCorr
+    ordered_args: ["windowLength", "wOverlap", "mom1", "mom2", "whatTransform"]
+  
+  DynWin:
+    base_name: DynWin
+    labels:
+      - stationarity
+    dependencies:
+      - scipy
+    configs:
+      - maxNumSegments: 10
+        zscore: True
+    hctsa_name: SY_DynWin
+    ordered_args: ["maxNumSegments"]
+  
 Distribution:
   Withinp:
     base_name: Withinp

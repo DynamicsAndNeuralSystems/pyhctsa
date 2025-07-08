@@ -11,6 +11,258 @@ from scipy.stats import skew, kurtosis
 from ..Operations.Distribution import Moments
 from statsmodels.tsa.stattools import kpss
 
+
+def DynWin(y : ArrayLike, maxNumSegments : int = 10) -> dict:
+    """
+    How stationarity estimates depend on the number of time-series subsegments.
+    
+    Specifically, variation in a range of local measures are implemented: mean,
+    standard deviation, skewness, kurtosis, ApEn(1,0.2), SampEn(1,0.2), AC(1),
+    AC(2), and the first zero-crossing of the autocorrelation function.
+    
+    The standard deviation of local estimates of these quantities across the time
+    series are calculated as an estimate of the stationarity in this quantity as a
+    function of the number of splits, n_{seg}, of the time series.
+
+    Parameters:
+    -----------
+    y : array_like
+        the time series to analyze.
+    maxNumSegments : int, optional
+        the maximum number of segments to consider. Sweeps from 2 to
+        maxNumSegments. Defaults to 10. 
+    
+    Returns:
+    --------
+    out : dict
+        the standard deviation of this set of 'stationarity' estimates across these window sizes
+    """
+    y = np.asarray(y)
+    nsegr = np.arange(2, maxNumSegments+1, 1) # range of nseg to sweep across
+    nmov = 1 # controls window overlap
+    numFeatures = 11 # num of features
+    fs = np.zeros((len(nsegr), numFeatures)) # standard deviation of feature values over windows
+    taug = FirstCrossing(y, 'ac', 0, 'discrete') # global tau
+
+    for i, nseg in enumerate(nsegr):
+        wlen = int(np.floor(len(y)/nseg)) # window length
+        inc = int(np.floor(wlen/nmov)) # increment to move at each step
+        # if increment is rounded to zero, prop it up
+        if inc == 0:
+            inc = 1
+        
+        numSteps = int(np.floor((len(y) - wlen)/inc) + 1)
+        qs = np.zeros((numSteps, numFeatures))
+
+        for j in range(numSteps):
+            ySub = y[j*inc:j*inc+wlen]
+            taul = FirstCrossing(ySub, 'ac', 0, 'discrete')
+
+            qs[j, 0] = np.mean(ySub)
+            qs[j, 1] = np.std(ySub, ddof=1)
+            qs[j, 2] = skew(ySub)
+            qs[j, 3] = kurtosis(ySub)
+            sampenOut = SampleEntropy(ySub, 2, 0.15)
+            qs[j, 4] = sampenOut['quadSampEn1'] # SampEn_1_015
+            #qs[j, 5] = sampenOut['quadSampEn2'] # SampEn_2_015
+            qs[j, 6] = AutoCorr(ySub, 1, 'Fourier')[0] # AC1
+            qs[j, 7] = AutoCorr(ySub, 2, 'Fourier')[0] # AC2
+            # (Sometimes taug or taul can be longer than ySub; then these will output NaNs:)
+            qs[j, 8] = AutoCorr(ySub, taug, 'Fourier')[0] # AC_glob_tau
+            qs[j, 9] = AutoCorr(ySub, taul, 'Fourier')[0] # AC_loc_tau
+            qs[j, 10] = taul
+        
+        fs[i, :numFeatures] = np.std(qs, ddof=1, axis=0)
+
+    # fs contains std of quantities at all different 'scales' (segment lengths)
+    fs = np.std(fs, ddof=1, axis=0) # how much does the 'std stationarity' vary over different scales?
+
+    # Outputs
+    out = {}
+    out['stdmean'] = fs[0]
+    out['stdstd'] = fs[1]
+    out['stdskew'] = fs[2]
+    out['stdkurt'] = fs[3]
+    out['stdsampen1_015'] = fs[4]
+    #out['stdsampen2_015'] = fs[5]
+    out['stdac1'] = fs[6]
+    out['stdac2'] = fs[7]
+    out['stdactaug'] = fs[8]
+    out['stdactaul'] = fs[9]
+    out['stdtaul'] = fs[10]
+
+    return out 
+
+def MomentCorr(x : ArrayLike, windowLength : Union[None, float] = None, wOverlap : Union[None, float] = None, 
+               mom1 : str = 'mean', mom2 : str = 'std', whatTransform : str = 'none') -> dict:
+    """
+    Correlations between simple statistics in local windows of a time series.
+    The idea to implement this was that of Prof. Nick S. Jones (Imperial College London).
+
+    Paramters
+    ----------
+    x : array_like
+        the input time series
+    windowLength : float, optional
+        the sliding window length (can be a fraction to specify or a proportion of the time-series length)
+    wOverlap : 
+        the overlap between consecutive windows as a fraction of the window length
+    mom1, mom2 : str, optional
+        the statistics to investigate correlations between (in each window):
+            (i) 'iqr': interquartile range
+            (ii) 'median': median
+            (iii) 'std': standard deviation (about the local mean)
+            (iv) 'mean': mean
+    whatTransform : str, optional
+        the pre-processing whatTransformormation to apply to the time series before
+        analyzing it:
+           (i) 'abs': takes absolute values of all data points
+           (ii) 'sqrt': takes the square root of absolute values of all data points
+           (iii) 'sq': takes the square of every data point
+           (iv) 'none': does no whatTransformormation
+    
+    Returns
+    --------
+    out : dict
+        dictionary of statistics related to the correlation between simple statistics in local windows of the input time series. 
+    """
+    x = np.asarray(x)
+    N = len(x) # length of the time series
+
+    if windowLength is None:
+        windowLength = 0.02 # 2% of the time-series length
+    
+    if windowLength < 1:
+        windowLength = int(np.ceil(N * windowLength))
+    
+    # sliding window overlap length
+    if wOverlap is None:
+        wOverlap = 1/5
+    
+    if wOverlap < 1:
+        wOverlap = int(np.floor(windowLength * wOverlap))
+
+    # Apply the specified whatTransformation
+    if whatTransform == 'abs':
+        x = np.abs(x)
+    elif whatTransform == 'sq':
+        x = x**2
+    elif whatTransform == 'sqrt':
+        x = np.sqrt(np.abs(x))
+    elif whatTransform == 'none':
+        pass
+    else:
+        raise ValueError(f"Unknown transformation {whatTransform}")
+    
+    # create the windows
+    x_buff = make_mat_buffer(x, windowLength, wOverlap)
+    numWindows = (N/(windowLength - wOverlap)) # number of windows
+
+    if np.size(x_buff, 1) > numWindows:
+        x_buff = x_buff[:, :-1] # lose the last point
+
+    pointsPerWindow = np.size(x_buff, 0)
+    if pointsPerWindow == 1:
+        raise ValueError(f"This time series (N = {N}) is too short to extract {numWindows}")
+    
+    # okay now we have the sliding window ('buffered') signal, x_buff
+    # first calculate the first moment in all the windows
+    M1 = __calc_me_moments(x_buff, mom1)
+    M2 = __calc_me_moments(x_buff, mom2)
+    #print(M1)
+
+    out = {}
+    rmat = np.corrcoef(M1, M2)
+    R = rmat[0, 1] # correlation coeff
+    #out['R'] = R
+    out['absR'] = np.abs(rmat[0, 1])
+    out['density'] = np.ptp(M1) * np.ptp(M2) / N
+    #out['mi'] = MutualInfo(M1, M2, 'gaussian')
+
+    return out
+
+def __calc_me_moments(x_buff, momType):
+    # helper function for MomentCorr
+    if momType == 'mean':
+        moms = np.mean(x_buff, axis=0)
+    elif momType == 'std':
+        moms = np.std(x_buff, axis=0, ddof=1)
+    elif momType == 'median':
+        moms = np.median(x_buff, axis=0)
+    elif momType == 'iqr':
+        moms = np.percentile(x_buff, 75, method='hazen', axis=0) - np.percentile(x_buff, 25, method='hazen', axis=0)
+    else:
+        raise ValueError(f"Unknown statistic {momType}")
+    return moms
+
+def SimpleStats(x : ArrayLike, whatStat : str = 'zcross') -> dict:
+    """
+    Basic statistics about an input time series.
+
+    This function computes various statistical measures about zero-crossings and local 
+    extrema in a time series.
+
+    Parameters
+    ----------
+    x : array-like
+        The input time series
+    whatStat : str, optional
+        The statistic to return (default is 'zcross'):
+        - 'zcross': proportion of zero-crossings (for z-scored input, returns mean-crossings)
+        - 'maxima': proportion of points that are local maxima
+        - 'minima': proportion of points that are local minima
+        - 'pmcross': ratio of crossings above +1σ to crossings below -1σ
+        - 'zsczcross': ratio of zero-crossings in raw vs detrended time series
+
+    Returns
+    -------
+    float
+        The calculated statistic based on whatStat
+    """
+    x = np.asarray(x)
+    N = len(x)
+
+    out = None
+    if whatStat == 'zcross':
+        # Proportion of zero-crossings of the time series
+        # (% in the case of z-scored input, crosses its mean)
+        xch = x[:-1] * x[1:]
+        out = np.sum(xch < 0)/N
+
+    elif whatStat == 'maxima':
+        # proportion of local maxima in the time series
+        dx = np.diff(x)
+        out = np.sum((dx[:-1] > 0) & (dx[1:] < 0)) / (N - 1)
+    elif whatStat == 'minima':
+        # proportion of local minima in the time series
+        dx = np.diff(x)
+        out = np.sum((dx[:-1] < 0) & (dx[1:] > 0)) / (N-1)
+    elif whatStat == 'pmcross':
+        # ratio of times cross 1 to -1
+        c1sig = np.sum(signChange(x-1)) # num times cross 1
+        c2sig = np.sum(signChange(x+1)) # num times cross -1
+        if c2sig == 0:
+            out = np.nan
+        else:
+            out = c1sig/c2sig
+    elif whatStat == 'zsczcross':
+        # ratio of zero crossings of raw to detrended time series
+        # where the raw has zero mean
+        x = ZScore(x)
+        xch = x[:-1] * x[1:]
+        h1 = np.sum(xch < 0) # num of zscross of raw series
+        y = detrend(x)
+        ych = y[:-1] * y[1:]
+        h2 = np.sum(ych < 0) # % of detrended series
+        if h1 == 0:
+            out = np.nan
+        else:
+            out = h2/h1
+    else:
+        raise(ValueError(f"Unknown statistic {whatStat}"))
+    
+    return out
+
 def LocalExtrema(y : ArrayLike, howToWindow : str = 'l', n : Union[int, None] = None) -> dict:
     """
     How local maximums and minimums vary across the time series.
