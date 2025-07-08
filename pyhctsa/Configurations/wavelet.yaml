@@ -1,0 +1,15 @@
+Wavelet:
+  WLCoeffs:
+    base_name: WL_coeffs
+    labels:
+      - wavelet
+    dependencies:
+      - pywt
+      - PyWavelets
+    configs:
+      - wname: 'db3'
+        level:  [1, 2, 3, 4, 5, 'max']
+        zscore: True
+    hctsa_name: WL_coeffs
+    ordered_args: ["wname", "level"]
+    

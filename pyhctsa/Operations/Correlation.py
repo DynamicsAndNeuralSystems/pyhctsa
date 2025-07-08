@@ -1,4 +1,3 @@
-
 import numpy as np
 from numpy.typing import ArrayLike 
 from typing import Union
@@ -11,7 +10,6 @@ from scipy.optimize import curve_fit
 from ..Operations.Information import FirstMin
 from scipy.linalg import LinAlgError
 from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
-
 
 def Embed2_AngleTau(y : ArrayLike, maxTau : int) -> dict:
     """
