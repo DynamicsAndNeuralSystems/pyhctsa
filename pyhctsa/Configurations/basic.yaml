@@ -365,12 +365,35 @@ Correlation:
   TimeRevKaplan:
     base_name: timerevKaplan
     labels:
+      - correlation
+      - nonlinearity
+      - timerev
     dependencies:
     configs:
       - timeLag: [1, 2, 3, 4]
         zscore: True
     hctsa_name: DK_timerev
     ordered_args: ["timeLag"]
+  
+  Crinkle:
+    base_name: crinkle_statistic
+    labels:
+      - correlation
+    depedencies:
+    configs:
+      - zscore: True
+    hctsa_name: DK_crinkle
+    ordered_args:
+  
+  TheilerQ:
+    base_name: TheilerQ
+    labels:
+      - correlation
+    depedencies:
+    configs:
+      - zscore: True
+    hctsa_name: DK_theilerQ
+    ordered_args:
 
 Information:
   AutoMutualInfoStats:

@@ -12,6 +12,52 @@ from scipy.linalg import LinAlgError
 from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
 
 
+def TheilerQ(y : ArrayLike) -> float:
+    y = np.asarray(y)
+    y2 = (np.mean(y**2))**(3/2)
+    Q = 0.0
+    if y2 != 0:
+        d2 = y[:-1] + y[1:]
+        Q = np.mean(d2 **3)/y2
+    return float(Q)
+
+def Crinkle(y : ArrayLike) -> float:
+    """
+    Computes James Theiler's crinkle statistic.
+
+    Calculates the "crinkle statistic" on a vector y:
+        <(y_{t-1} - 2*y_t + y_{t+1})^4> / <(y_t^2)>^2
+    as proposed by James Theiler.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+
+    Returns
+    -------
+    float
+        The crinkle statistic.
+
+    Notes
+    -----
+    Copyright (C) 1996, D. Kaplan <kaplan@macalester.edu>
+    This function is free software: you can redistribute it and/or modify it under
+    the terms of the GNU General Public License as published by the Free Software
+    Foundation, either version 3 of the License, or (at your option) any later
+    version. See <http://www.gnu.org/licenses/>.
+    """
+    
+    # subtract out the mean
+    y = np.asarray(y)
+    y = y - np.mean(y)
+    y2 = np.mean(y*y)**2
+    out = 0
+    if y2 != 0:
+        d2 = (2 * y[1:-1]) - y[:-2] - y[2:]
+        out = np.mean(d2 ** 4)/y2
+    return float(out)
+
 def TimeRevKaplan(y : ArrayLike, timeLag : int = 1) -> float:
     """
     Time reversal asymmetry statistic.
