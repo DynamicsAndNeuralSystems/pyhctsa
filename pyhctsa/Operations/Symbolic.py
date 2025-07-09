@@ -8,8 +8,46 @@ from loguru import logger
 from scipy.stats import mstats
 
 
-def Surprise(y, whatPrior='dist', memory=0.2, numGroups=3, coarseGrainMethod='quantile', 
-                numIters=500, randomSeed=0):
+def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numGroups : int = 3, coarseGrainMethod : str = 'quantile', 
+                numIters : int = 500, randomSeed : int = 0):
+    """
+    Quantifies how surprised you would be of the next data point given recent memory.
+
+    Coarse-grains the time series, turning it into a sequence of symbols of a given alphabet size (`numGroups`),
+    and quantifies measures of surprise of a process with local memory of the past `memory` values of the symbolic string.
+    For each sample, the 'information gained' (log(1/p)) is estimated using expectations calculated from the previous `memory` samples.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    whatPrior : {'dist', 'T1', 'T2'}, optional
+        The type of information to store in memory:
+            - 'dist': the values of the time series in the previous memory samples,
+            - 'T1': the one-point transition probabilities in the previous memory samples,
+            - 'T2': the two-point transition probabilities in the previous memory samples.
+        Default is 'dist'.
+    memory : float, optional
+        The memory length (either number of samples, or a proportion of the time-series length if between 0 and 1).
+        Default is 0.2.
+    numGroups : int, optional
+        The number of groups to coarse-grain the time series into. Default is 3.
+    coarseGrainMethod : {'quantile', 'updown', 'embed2quadrants'}, optional
+        The coarse-graining or symbolization method:
+            - 'quantile': equiprobable alphabet by value of each time-series datapoint,
+            - 'updown': equiprobable alphabet by incremental changes in the time-series values,
+            - 'embed2quadrants': 4-letter alphabet of the quadrant each data point resides in a 2D embedding space.
+        Default is 'quantile'.
+    numIters : int, optional
+        The number of iterations to repeat the procedure for. Default is 500.
+    randomSeed : int, optional
+        Whether (and how) to reset the random seed. Default is 0.
+
+    Returns
+    -------
+    dict
+        Summaries of the series of information gains.
+    """
 
     if (memory > 0) and (memory < 1): #specify memory as a proportion of the time series length
         memory = int(np.round(memory*len(y)))

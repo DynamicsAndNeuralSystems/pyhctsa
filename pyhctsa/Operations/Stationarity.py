@@ -6,10 +6,84 @@ from ..Operations.Correlation import AutoCorr, FirstCrossing
 from ..Utilities.utils import make_mat_buffer, ZScore, signChange
 from typing import Union
 from scipy.signal import detrend
-from scipy.stats import skew, kurtosis
+from scipy.stats import skew, kurtosis, gaussian_kde
 from ..Operations.Distribution import Moments
 from statsmodels.tsa.stattools import kpss
 
+def LocalDistributions(y : ArrayLike, numSegs : int = 5, eachOrPar : str = 'par', numPoints : int = 200) -> dict:
+    """
+    Compares the distribution in consecutive time-series segments.
+
+    Returns the sum of differences between each kernel-smoothed distribution, either comparing each segment to the parent (full time series)
+    distribution or to all other segments.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    numSegs : int, optional
+        The number of segments to break the time series into. Default is 5.
+    eachOrPar : {'par', 'each'}, optional
+        - 'par': compares each local distribution to the parent (full time series) distribution.
+        - 'each': compares each local distribution to all other local distributions.
+        Default is 'par'.
+    numPoints : int, optional
+        Number of points to compute the distribution across in each local segment. Default is 200.
+
+    Returns
+    -------
+    dict
+        Measures of the sum of absolute deviations between distributions across the different pairwise comparisons.
+    """
+    # preliminaries 
+    y = np.asarray(y)
+    N = len(y)
+    lseg = int(np.floor(N / numSegs))
+    dns = np.zeros((numPoints, numSegs))
+    r = np.linspace(np.min(y), np.max(y), numPoints) # Make range of ksdensity uniform across all subsegments
+    # Compute the kernel-smoothed distribution in all numSegs segments of the time series
+    for i in range(numSegs):
+        start_idx = i * lseg
+        end_idx = (i + 1) * lseg
+        segment_data = y[start_idx:end_idx]
+        #kde = KDEUnivariate(segment_data)
+        kde = gaussian_kde(segment_data, bw_method="scott")
+        #kde.fit(bw="scott") # tune bw adjustment factor empiricially? 
+        dns[:, i] = kde.evaluate(r)
+    # Compare the local distributions
+    if eachOrPar in ["par", "parent"]:
+        #Compares each subdistribtuion to the parent (full signal) distribution
+        #kde = KDEUnivariate(y).fit(bw="scott")
+        kde = gaussian_kde(y, bw_method="scott")
+        pardn = kde.evaluate(r)
+        divs = np.zeros(numSegs)
+        for i in range(numSegs):
+            divs[i] = np.sum(np.abs(dns[:, i] - pardn))
+    elif eachOrPar == 'each':
+        # Compares each subdistribtuion to the parent (full signal) distribution
+        if numSegs == 2:
+            out = np.sum(np.abs(dns[:, 0] - dns[:, 1]))
+            return out
+        # numSegs > 2
+        diffmat = np.nan * np.ones((numSegs, numSegs)) 
+        for i in range(numSegs):
+            for j in range(numSegs):
+                if j > i:
+                    diffmat[i, j] = np.sum(np.abs(dns[:, i] - dns[:, j]))
+        divs = diffmat[~np.isnan(diffmat)] # % (the upper triangle of diffmat)
+    else:
+        raise ValueError(f"Unknown method: {eachOrPar}. Should be 'each' or 'par'. ")
+
+    # Return basic statistics on differences in distributions in different
+    # segments of the time series
+    out = {}
+    out['meandiv'] = np.mean(divs)
+    out['mediandiv'] = np.median(divs)
+    #out['mindiv'] = np.min(divs)
+    out['maxdiv'] = np.max(divs)
+    out['stddiv'] = np.std(divs)
+
+    return out
 
 def DynWin(y : ArrayLike, maxNumSegments : int = 10) -> dict:
     """

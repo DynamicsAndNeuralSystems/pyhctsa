@@ -794,6 +794,19 @@ Stationarity:
     hctsa_name: SY_DynWin
     ordered_args: ["maxNumSegments"]
   
+  LocalDistributions:
+    base_name: LocalDistributions
+    labels:
+      - stationarity
+    dependencies:
+      - scipy
+    configs:
+      - numSegs: [2, 3, 4, 5]
+        eachOrPar: ['par', 'each']
+        zscore: True
+    hctsa_name: SY_LocalDistributions
+    ordered_args: ["numSegs", "eachOrPar"]
+  
 Distribution:
   Withinp:
     base_name: Withinp
