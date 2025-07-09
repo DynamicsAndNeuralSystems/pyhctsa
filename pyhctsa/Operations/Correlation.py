@@ -11,6 +11,56 @@ from ..Operations.Information import FirstMin
 from scipy.linalg import LinAlgError
 from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
 
+
+def TimeRevKaplan(y : ArrayLike, timeLag : int = 1) -> float:
+    """
+    Time reversal asymmetry statistic.
+
+    Calculates a time reversal asymmetry statistic as described by D. Kaplan.
+    This statistic quantifies the asymmetry of a time series under time reversal.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    timeLag : int, optional
+        The time scale (in samples) to use for the embedding (default is 1).
+
+    Returns
+    -------
+    float
+        The time reversal asymmetry statistic.
+
+    Notes
+    -----
+    Copyright (C) 1996, D. Kaplan <kaplan@macalester.edu>
+    This function is free software: you can redistribute it and/or modify it under
+    the terms of the GNU General Public License as published by the Free Software
+    Foundation, either version 3 of the License, or (at your option) any later
+    version. See <http://www.gnu.org/licenses/>.
+    """
+    foo = _lagEmbed(np.asarray(y), 3, timeLag)
+    a = foo[:, 0]
+    b = foo[:, 1]
+    c = foo[:, 2]
+    res = np.mean(a * a * b - b*c*c)
+    return float(res)
+
+def _lagEmbed(x, m, lag=1):
+    """Constructs a time-delay embedding of a time series."""
+    x = np.asarray(x).flatten()
+    lx = len(x)
+    if lx < lag * (m - 1) + 1:
+        raise ValueError("Time series is too short for the given dimension and lag.")
+    new_size = lx - lag * (m - 1)
+    y = np.zeros((new_size, m))
+    for i in range(m):
+        # The first column (i=0) should be the most delayed data
+        start_index = (m - 1 - i) * lag
+        end_index = start_index + new_size
+        y[:, i] = x[start_index:end_index]
+    return y
+
 def Embed2_AngleTau(y : ArrayLike, maxTau : int) -> dict:
     """
     Angle autocorrelation in a 2-dimensional embedding space.

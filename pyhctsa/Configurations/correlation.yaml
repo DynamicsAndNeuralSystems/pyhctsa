@@ -286,6 +286,14 @@ Correlation:
         zscore: True
     hctsa_name: CO_tc3
     ordered_args: ["tau"]
-
   
+  TimeRevKaplan:
+    base_name: timerevKaplan
+    labels:
+    dependencies:
+    configs:
+      - timeLag: [1, 2, 3, 4]
+        zscore: True
+    hctsa_name: DK_timerev
+    ordered_args: ["timeLag"]
 
