@@ -13,6 +13,30 @@ from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
 
 
 def TheilerQ(y : ArrayLike) -> float:
+    """
+    Computes Theiler's Q statistic which quantifies asymmetry in time. 
+
+    Calculates Q = <(x_t + x_{t+1})^3> normalized by <x^2>^{3/2} on a vector x,
+    as proposed by James Theiler.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+
+    Returns
+    -------
+    float
+        Theiler's Q statistic.
+
+    Notes
+    -----
+    Copyright (C) 1996, D. Kaplan <kaplan@macalester.edu>
+    This function is free software: you can redistribute it and/or modify it under
+    the terms of the GNU General Public License as published by the Free Software
+    Foundation, either version 3 of the License, or (at your option) any later
+    version. See <http://www.gnu.org/licenses/>.
+    """
     y = np.asarray(y)
     y2 = (np.mean(y**2))**(3/2)
     Q = 0.0
@@ -23,7 +47,7 @@ def TheilerQ(y : ArrayLike) -> float:
 
 def Crinkle(y : ArrayLike) -> float:
     """
-    Computes James Theiler's crinkle statistic.
+    Computes Theiler's crinkle statistic.
 
     Calculates the "crinkle statistic" on a vector y:
         <(y_{t-1} - 2*y_t + y_{t+1})^4> / <(y_t^2)>^2

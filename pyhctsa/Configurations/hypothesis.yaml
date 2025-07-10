@@ -1,0 +1,13 @@
+HypothesisTests:
+  HypothesisTest:
+    base_name: HypothesisTest
+    labels:
+      - hypothesistest 
+    dependencies:
+    configs:
+      - theTest: ['signtest', 'lbq', 'signrank', 'ztest']
+        zscore: True
+      - theTest: ['runstest', 'lbq', 'jbtest']
+        zscore: False
+    hctsa_name: HT_HypothesisTest
+    ordered_args: ["theTest"]

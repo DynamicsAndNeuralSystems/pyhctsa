@@ -316,6 +316,8 @@ Correlation:
     base_name: TheilerQ
     labels:
       - correlation
+      - asymmetry
+      - timerev
     depedencies:
     configs:
       - zscore: True
