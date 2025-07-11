@@ -3,6 +3,64 @@ import pywt
 from numpy.typing import ArrayLike
 from typing import Union
 
+def WLCoeffs(y : ArrayLike, wname : str = 'db3', level : Union[int, str] = 3) -> dict:
+    """
+    Wavelet decomposition of the time series.
+
+    Performs a wavelet decomposition of the time series using a given wavelet at a
+    specified level and returns a set of statistics on the coefficients obtained.
+
+    Parameters
+    ----------
+    y : list or array-like
+        The input time series.
+    wname : str, optional
+        The wavelet name (e.g., 'db3'). See PyWavelets documentation for all options.
+        Default is 'db3'.
+    level : int or 'max', optional
+        The level of wavelet decomposition. If 'max', uses the maximum allowed level for the data length and wavelet.
+        Default is 3.
+
+    Returns
+    -------
+    dict
+        Dictionary containing statistics of the wavelet coefficients, including:
+            - 'mean_coeff': Mean of sorted absolute detail coefficients.
+            - 'max_coeff': Maximum of sorted absolute detail coefficients.
+            - 'med_coeff': Median of sorted absolute detail coefficients.
+            - 'wb75m', 'wb50m', 'wb25m', 'wb10m', 'wb1m': Decay rate statistics (fraction of coefficients below a threshold of the maximum).
+    """
+    y = np.asarray(y)
+    N = len(y)
+    if level == 'max':
+        level = pywt.dwt_max_level(N, wname)
+        if level == 0:
+            raise ValueError("Cannot compute wavelet coefficients (short time series)")
+    
+    if pywt.dwt_max_level(N, wname) < level:
+        raise ValueError(f"Chosen level, {level}, is too large for this wavelet on this signal.")
+    
+    C, L = wavedec(y, wavelet=wname, level=level)
+    det = wrcoef(C, L, wname, level)
+    det_s = np.sort(np.abs(det))[::-1]
+
+    #%% Return statistics
+    out = {}
+    out['mean_coeff'] = np.mean(det_s)
+    out['max_coeff'] = np.max(det_s)
+    out['med_coeff'] = np.median(det_s)
+
+    #% Decay rate stats ('where below _ maximum' = 'wb_m')
+    #out['wb99m'] = findMyThreshold(0.99, det_s, N)
+    #out['wb90m'] = findMyThreshold(0.90, det_s, N)
+    out['wb75m'] = findMyThreshold(0.75, det_s, N)
+    out['wb50m'] = findMyThreshold(0.50, det_s, N)
+    out['wb25m'] = findMyThreshold(0.25, det_s, N)
+    out['wb10m'] = findMyThreshold(0.10, det_s, N)
+    out['wb1m'] = findMyThreshold(0.01, det_s, N)
+
+    return out
+
 def wavedec(data, wavelet, mode='symmetric', level=1, axis=-1):
     """
     Multiple level 1-D discrete fast wavelet decomposition
@@ -103,61 +161,4 @@ def findMyThreshold(x, det_s, N):
     else:
         pr = indices[0]/N
         return pr[0]
-    
-def WLCoeffs(y : ArrayLike, wname : str = 'db3', level : Union[int, str] = 3) -> dict:
-    """
-    Wavelet decomposition of the time series.
 
-    Performs a wavelet decomposition of the time series using a given wavelet at a
-    specified level and returns a set of statistics on the coefficients obtained.
-
-    Parameters
-    ----------
-    y : list or array-like
-        The input time series.
-    wname : str, optional
-        The wavelet name (e.g., 'db3'). See PyWavelets documentation for all options.
-        Default is 'db3'.
-    level : int or 'max', optional
-        The level of wavelet decomposition. If 'max', uses the maximum allowed level for the data length and wavelet.
-        Default is 3.
-
-    Returns
-    -------
-    dict
-        Dictionary containing statistics of the wavelet coefficients, including:
-            - 'mean_coeff': Mean of sorted absolute detail coefficients.
-            - 'max_coeff': Maximum of sorted absolute detail coefficients.
-            - 'med_coeff': Median of sorted absolute detail coefficients.
-            - 'wb75m', 'wb50m', 'wb25m', 'wb10m', 'wb1m': Decay rate statistics (fraction of coefficients below a threshold of the maximum).
-    """
-    y = np.asarray(y)
-    N = len(y)
-    if level == 'max':
-        level = pywt.dwt_max_level(N, wname)
-        if level == 0:
-            raise ValueError("Cannot compute wavelet coefficients (short time series)")
-    
-    if pywt.dwt_max_level(N, wname) < level:
-        raise ValueError(f"Chosen level, {level}, is too large for this wavelet on this signal.")
-    
-    C, L = wavedec(y, wavelet=wname, level=level)
-    det = wrcoef(C, L, wname, level)
-    det_s = np.sort(np.abs(det))[::-1]
-
-    #%% Return statistics
-    out = {}
-    out['mean_coeff'] = np.mean(det_s)
-    out['max_coeff'] = np.max(det_s)
-    out['med_coeff'] = np.median(det_s)
-
-    #% Decay rate stats ('where below _ maximum' = 'wb_m')
-    #out['wb99m'] = findMyThreshold(0.99, det_s, N)
-    #out['wb90m'] = findMyThreshold(0.90, det_s, N)
-    out['wb75m'] = findMyThreshold(0.75, det_s, N)
-    out['wb50m'] = findMyThreshold(0.50, det_s, N)
-    out['wb25m'] = findMyThreshold(0.25, det_s, N)
-    out['wb10m'] = findMyThreshold(0.10, det_s, N)
-    out['wb1m'] = findMyThreshold(0.01, det_s, N)
-
-    return out

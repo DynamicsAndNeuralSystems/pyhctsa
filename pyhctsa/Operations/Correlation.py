@@ -11,7 +11,6 @@ from ..Operations.Information import FirstMin
 from scipy.linalg import LinAlgError
 from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
 
-
 def TheilerQ(y : ArrayLike) -> float:
     """
     Computes Theiler's Q statistic which quantifies asymmetry in time. 

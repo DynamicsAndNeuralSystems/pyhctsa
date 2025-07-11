@@ -9,7 +9,7 @@ import pytest
 @pytest.mark.parametrize("x", [
     "medical", "extreme", "criticality", "correlation", "information", "entropy",
     "stationarity", "distribution", "scaling", "symbolic", "wavelet", 
-    "hypothesis"])
+    "hypothesis", "spectral"])
 def test_module_basic(x):
     # basic checks on medical module
     data = get_dataset(which="sinusoid")

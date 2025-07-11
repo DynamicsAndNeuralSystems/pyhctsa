@@ -55,4 +55,6 @@ def HypothesisTest(x : ArrayLike, theTest: str = "signtest") -> float:
         T = np.sum(~np.isnan(x)) # get the effective sample size
         nLags = min(20, T-1)
         p = acorr_ljungbox(x, lags=[nLags])['lb_pvalue'].to_numpy()[0]
+    else:
+        raise ValueError(f"Unknown test: {theTest}.")
     return p
