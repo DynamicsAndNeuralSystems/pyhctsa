@@ -7,6 +7,35 @@ from scipy.optimize import curve_fit
 from numpy.typing import ArrayLike
 
 def SpectralSummaries(y : ArrayLike, psdMeth : str = 'fft', windowType : str = 'none') -> dict:
+    """
+    Statistics of the power spectrum of a time series.
+
+    Computes a range of statistics summarizing the power spectrum of a time series.
+    The spectrum can be estimated using a periodogram, fast Fourier transform (FFT), or Welch's method.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    psdMeth : {'periodogram', 'fft', 'welch'}, optional
+        The method for obtaining the spectrum from the signal:
+            - 'periodogram': periodogram
+            - 'fft': fast Fourier transform (default)
+            - 'welch': Welch's method
+    windowType : {'boxcar', 'rect', 'bartlett', 'hann', 'hamming', 'none'}, optional
+        The window to use for spectral estimation:
+            - 'boxcar'
+            - 'rect'
+            - 'bartlett'
+            - 'hann'
+            - 'hamming'
+            - 'none' (default)
+
+    Returns
+    -------
+    dict
+        Statistics summarizing various properties of the spectrum.
+    """
 
     y = np.asarray(y)
     Ny = len(y)
@@ -45,7 +74,8 @@ def SpectralSummaries(y : ArrayLike, psdMeth : str = 'fft', windowType : str = '
         f, S = scipy.signal.welch(y, window=window, noverlap=0, nfft=N, fs=Fs)
         w = 2 * np.pi * f # angular frequency
         S = S/(2*np.pi) # adjust so that area remains normalized in angular frequency space
-
+    elif psdMeth == 'periodogram':
+        raise NotImplementedError("Periodogram is not yet available.")
     # elif psdMeth == 'periodogram':
     #     if nf:
     #         w = np.linspace(0, np.pi, nf)
