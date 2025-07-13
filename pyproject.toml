@@ -21,7 +21,7 @@ dependencies = [
     "numba",
     "scikit-learn",
     "antropy",
-    "PyWavelets"
+    "PyWavelets @ git+https://github.com/joshuabmoore/pywt.git"
 ]
 
 classifiers = [
@@ -48,4 +48,3 @@ Repository = "https://github.com/author_name/project_urlname/"
 
 [tool.setuptools.packages.find]
 exclude = ["tests*", ".github*"]
-

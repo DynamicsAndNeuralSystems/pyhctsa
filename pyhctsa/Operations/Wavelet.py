@@ -1,7 +1,81 @@
 import numpy as np
 import pywt
+from pywt import cwt
 from numpy.typing import ArrayLike
 from typing import Union
+from ..Utilities.utils import signChange
+
+def CWT(y : ArrayLike, wname : str = 'db3', maxScale : int = 32) -> dict:
+
+    y = np.asarray(y)
+    N = len(y)
+    scales = np.arange(1, maxScale+1)
+    coeffs, _ = cwt(data=y,scales=scales,wavelet=wname)
+    S = np.abs(coeffs * coeffs)
+    SC = 100*S/np.sum(S)
+
+    # Get statistics from CWT
+    numEntries = SC.shape[0] * SC.shape[1]
+    # 1) Coefficients, coeffs
+    allCoeffs = coeffs if pywt.Wavelet(wname).symmetry == 'asymmetric' else -coeffs
+    out = {}
+    out['meanC'] = np.mean(allCoeffs)
+
+    out['meanabsC'] = np.mean(abs(allCoeffs))
+    out['medianabsC'] = np.median(abs(allCoeffs))
+    out['maxabsC'] = np.max(abs(allCoeffs))
+    out['maxonmeanC'] = out['maxabsC']/out['meanabsC']
+
+    out['maxonmeanSC'] = np.max(SC)/np.mean(SC)
+
+    #% Proportion of coeffs matrix over ___ maximum (thresholded)
+    poverfn = lambda x : np.sum(SC[SC > x * np.max(SC)])/numEntries
+    out['pover99'] = poverfn(0.99)
+    out['pover98'] = poverfn(0.88)
+    out['pover95'] = poverfn(0.95)
+    out['pover90'] = poverfn(0.90)
+    out['pover80'] = poverfn(0.80)
+
+    # Distribution of scaled power
+    #shape, loc, scale = gamma.fit(SC, floc=0, method="MM")
+    # out['gam1'] = shape
+    # out['gam2'] = scale
+    # 2D entropy
+    SC_a = SC/np.sum(SC)
+    out['SC_h'] = -np.sum(SC_a * np.log(SC_a))
+
+    SSC = sum(SC)
+    out['max_ssc'] = np.max(SSC)
+    out['min_ssc'] = np.min(SSC)
+    out['maxonmed_ssc'] = np.max(SSC) / np.median(SSC)
+    out['pcross_maxssc50'] = np.sum(signChange(SSC - 0.5 * np.max(SSC))) / (N - 1)
+    out['std_ssc'] = np.std(SSC)
+
+    #Stationarity
+    midpoint = N // 2  # Integer division is equivalent to floor
+    SC_1 = SC[:, :midpoint]
+    SC_2 = SC[:, midpoint:]
+
+    mean2_1 = SC_1.mean()
+    mean2_2 = SC_2.mean()
+
+    std2_1 = SC_1.std(ddof=1)
+    std2_2 = SC_2.std(ddof=1)
+
+    out['stat_2_m_s'] = np.mean([std2_1, std2_2]) / SC.mean()
+    out['stat_2_s_m'] = np.std([mean2_1, mean2_2], ddof=1) / SC.std(ddof=1)
+    out['stat_2_s_s'] = np.std([std2_1, std2_2], ddof=1) / SC.std(ddof=1)
+    SCs = np.array_split(SC, 5, axis=1)
+    for i in range(1, 6):
+        out[f'mean5_{i}'] = np.mean(SCs[i-1])
+        out[f'std5_{i}'] = np.std(SCs[i-1], ddof=1)
+    
+    out['stat_5_m_s'] = np.mean([out['std5_1'], out['std5_2'], out['std5_3'], out['std5_4'], out['std5_5']])/np.mean(SC)
+    out['stat_5_s_m'] = np.std([out['mean5_1'], out['mean5_2'], out['mean5_3'], out['mean5_4'], out['mean5_5']], ddof=1)/np.std(SC, ddof=1)
+    out['stat_5_s_s'] = np.std([out['std5_1'], out['std5_2'], out['std5_3'], out['std5_4'], out['std5_5']], ddof=1)/np.std(SC, ddof=1)
+
+
+    return out
 
 def _slosr(xx) -> int:
     # helper function for DetailCoeffs

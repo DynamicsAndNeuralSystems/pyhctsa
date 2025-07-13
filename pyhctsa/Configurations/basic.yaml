@@ -1345,6 +1345,20 @@ Wavelet:
     hctsa_name: WL_DetailCoeffs
     ordered_args: ["wname", "maxlevel"]
   
+  CWT:
+    base_name: cwt
+    labels:
+      - wavelet
+    dependencies:
+      - pywt
+      - PyWavelets
+    configs:
+      - wname: ['db3', 'sym2']
+        maxScale: 32
+        zscore: True
+    hctsa_name: WL_cwt
+    ordered_args: ["wname", "maxScale"]
+  
 HypothesisTests:
   HypothesisTest:
     base_name: HypothesisTest

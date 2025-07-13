@@ -7,4 +7,4 @@ jpype1 @ git+https://github.com/jpype-project/jpype.git@v1.5.2
 numba
 scikit-learn
 antropy
-PyWavelets
+PyWavelets @ git+https://github.com/joshuabmoore/pywt.git
