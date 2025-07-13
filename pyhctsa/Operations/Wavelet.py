@@ -3,6 +3,99 @@ import pywt
 from numpy.typing import ArrayLike
 from typing import Union
 
+def _slosr(xx) -> int:
+    # helper function for DetailCoeffs
+    theMaxLevel = len(xx)
+    slosr = np.zeros(theMaxLevel-2)
+    for i in range(2, theMaxLevel):
+        slosr[i-2] = np.sum(xx[:i-1])/np.sum(xx[i:])
+    absm1 = np.abs(slosr - 1)
+    idx = np.argwhere(absm1 == np.min(absm1).flatten())[0][0] + 1
+    return idx
+
+def DetailCoeffs(y : ArrayLike, wname : str = 'db3', maxlevel : Union[int, str] = 20) -> dict:
+    """
+    Detail coefficients of a wavelet decomposition.
+
+    Compares the detail coefficients obtained at each level of the wavelet decomposition from 1 to the maximum possible level for the wavelet,
+    given the length of the input time series.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    wname : str, optional
+        The name of the mother wavelet to analyze the data with (e.g., 'db3', 'sym2').
+        See the Wavelet Toolbox or PyWavelets documentation for details. Default is 'db3'.
+    maxlevel : int or 'max', optional
+        The maximum wavelet decomposition level. If 'max', uses the maximum allowed level for the data length and wavelet.
+        Default is 20.
+
+    Returns
+    -------
+    dict
+        Statistics on the detail coefficients at each level.
+    """
+    y = np.asarray(y)
+    N = len(y)
+    if maxlevel == 'max':
+        maxlevel = pywt.dwt_max_level(N, wname)
+    if pywt.dwt_max_level(N, wname) < maxlevel:
+        print(f"Chosen wavelet level is too large for the {wname} wavelet for this signal of length N = {N}")
+        maxlevel = pywt.dwt_max_level(N, wname)
+        print(f"Using a wavelet level of {maxlevel} instead.")
+    # Perform a single-level wavelet decomposition
+    means = np.zeros(maxlevel) # mean detail coefficient magnitude at each level
+    medians = np.zeros(maxlevel) # median detail coefficient magnitude at each level
+    maxs = np.zeros(maxlevel) # max detail coefficient magnitude at each level
+    
+    for k in range(1, maxlevel+1):
+        level = k
+        c, l = wavedec(data=y, wavelet=wname, level=level)
+        det = wrcoef(coefs=c, lengths=l, wavelet=wname, level=level)
+        absdet = np.abs(det)
+        means[k-1] = np.mean(absdet)
+        medians[k-1] = np.median(absdet)
+        maxs[k-1] = np.max(absdet)
+    
+    #Return statistics on detail coefficients
+    means_s = np.sort(means)[::-1] # descending order
+    medians_s = np.sort(medians)[::-1]
+    maxs_s = np.sort(maxs)[::-1]
+
+    # % What is the maximum across these levels
+    out = {}
+    out['max_mean'] = means_s[0]
+    out['max_median'] = medians_s[0]
+    out['max_max'] = maxs_s[0]
+
+    #% stds
+    out['std_mean'] = np.std(means, ddof=1)
+    out['std_median'] = np.std(medians, ddof=1)
+    out['std_max'] = np.std(maxs, ddof=1)
+
+    #% At what level is the maximum
+    out['wheremax_mean'] = np.argwhere(means == means_s[0]).flatten()[0]
+    out['wheremax_median'] = np.argwhere(medians == medians_s[0]).flatten()[0]
+    out['wheremax_max'] = np.argwhere(maxs == maxs_s[0]).flatten()[0]
+
+    #% Size of maximum (relative to next maximum)
+    out['max1on2_mean'] = means_s[0]/means_s[1]
+    out['max1on2_median'] = medians_s[0]/medians_s[1]
+    out['max1on2_max'] = maxs_s[0]/maxs_s[1]
+
+    # % Where sum of values to left equals sum of values to right
+    # % Measure of centrality
+    out['wslesr_mean'] = _slosr(means)
+    out['wslesr_median'] = _slosr(medians)
+    out['wslesr_max'] = _slosr(maxs)
+    
+    #% What's the correlation between maximum and median
+    r = np.corrcoef(maxs, medians)
+    out['corrcoef_max_medians'] = r[0, 1]
+
+    return out
+
 def WLCoeffs(y : ArrayLike, wname : str = 'db3', level : Union[int, str] = 3) -> dict:
     """
     Wavelet decomposition of the time series.
