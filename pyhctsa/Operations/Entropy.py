@@ -4,9 +4,10 @@ from numba import njit
 from numpy.typing import ArrayLike
 from math import factorial
 from sklearn.neighbors import KDTree
-from ..Utilities.utils import ZScore, make_buffer
+from ..Utilities.utils import ZScore, make_buffer, binpicker, histc
 from ..Toolboxes.Max_Little import close_returns as _close_returns_c
 from antropy.entropy import _xlogx
+from scipy.stats import gaussian_kde
 from ..Toolboxes.physionet import sampen as _sampen_c 
 from ..Operations.Correlation import FirstCrossing
 
@@ -24,6 +25,55 @@ from ..Operations.Correlation import FirstCrossing
 #     calc_pts = 
 
 #     pass
+
+
+def DistributionEntropy(y : ArrayLike, histOrKS : str = 'hist', numBins : int = 10, olremp : float = 0) -> float:
+    # (1) Remove outliers?
+    y = np.asarray(y)
+    if olremp != 0:
+        yHat = y[(y >= np.quantile(y, olremp, method='hazen')) & (y <= np.quantile(y, 1-olremp, method='hazen'))]
+        if yHat.size == 0:
+            return np.nan
+        else:
+            out = DistributionEntropy(y, histOrKS, numBins) - DistributionEntropy(yHat, histOrKS, numBins)
+            return out
+    # (2) Form the histogram
+    if histOrKS == 'hist':
+        # use histogram to calculate pdf
+        if isinstance(numBins, int):
+            binEdges = binpicker(y.min(), y.max(), nbins=numBins)
+            px = histc(y, binEdges)
+            px = np.divide(px, np.sum(px))[:-1]
+        elif numBins in ['sturges', 'fd', 'sqrt', 'auto']:
+            binEdges = np.histogram_bin_edges(y, bins=numBins)
+            px = histc(y, binEdges)[:-1]
+            px = np.divide(px, np.sum(px))
+        else:
+            raise ValueError(f"Unknown binning method: {numBins}. Choose either a valid rule or manually specify numBins.")
+        binWidths = np.diff(binEdges)
+    elif histOrKS == 'ks':
+        # use kernel density estimate to calculate pdf
+        if isinstance(numBins, float):
+            #uses specified width
+            bw = numBins
+            kde = gaussian_kde(y, bw_method=bw)
+            xr = np.linspace(min(y) - 3 * bw, max(y) + 3 * bw, 100) # 3 x bandwidth padding
+            px = kde(xr)
+        elif numBins in ['', ' ', '[]', 'none']:
+            # determine the optimal width
+            kde = gaussian_kde(y, bw_method='silverman') # normal-approx equivalent as per docs
+            actual_bw = kde.factor * np.std(y)  # Convert factor to actual bandwidth
+            xr = np.linspace(min(y) - 3 * actual_bw, max(y) + 3 * actual_bw, 100)
+            px = kde(xr)
+        else:
+            raise ValueError(f"Unknown type for {numBins}. Either set to a float (which specifies the width, or leave empty.)")
+        binWidths = np.ones(len(px)) * (xr[1] - xr[0])
+
+    # (3) Compute the entropy sum and return it as output
+    P = px[px>0]
+    logP = np.log(px[px>0]/binWidths[px>0])
+
+    return -np.sum(P * logP)
 
 def MultiScaleEntropy(
     y: ArrayLike,

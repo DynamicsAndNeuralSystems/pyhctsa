@@ -466,6 +466,32 @@ Information:
     ordered_args: ["minWhat", "extraParam", "minNotMax"]
 
 Entropy:
+  DistributionEntropy:
+    base_name: DistributionEntropy
+    labels:
+      - entropy
+    dependencies:
+      - scipy
+    configs:
+      - histOrKS: 'ks'
+        numBins: [0.01, 0.1, 0.5, 1.0]
+        olremp: 0
+        zscore: True
+      - histOrKS: 'ks'
+        numBins: ''
+        olremp: [0.01, 0.02, 0.05, 0.1, 0.2, 0.3]
+        zscore: True 
+      - histOrKS: 'hist'
+        numBins: [5, 10, 20, 50, 'sqrt', 'fd', 'sturges']
+        olremp: 0
+        zscore: True 
+      - histOrKS: 'hist'
+        numBins: 10
+        olremp: [0.01, 0.02, 0.05, 0.1, 0.2, 0.3]
+        zscore: True 
+    hctsa_name: EN_DistributionEntropy
+    ordered_args: ['histOrKS', 'numBins', 'olremp']
+    
   LZComplexity:
     base_name: LZcomplexity
     labels:
