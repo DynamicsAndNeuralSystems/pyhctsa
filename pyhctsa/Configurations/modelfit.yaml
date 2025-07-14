@@ -1,0 +1,14 @@
+ModelFit:
+  ARCov:
+    base_name: AR_arcov
+    labels:
+      - ModelFit
+      - AR
+    dependencies:
+      - statsmodels
+    configs:
+      - p: !range [1, 5]
+        zscore: True
+    hctsa_name: MF_AR_arcov
+    ordered_args: ["p"]
+  

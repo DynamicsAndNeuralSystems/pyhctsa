@@ -1372,7 +1372,7 @@ HypothesisTests:
         zscore: False
     hctsa_name: HT_HypothesisTest
     ordered_args: ["theTest"]
-    
+
   VarianceRatioTest:
     base_name: VarRatioTest
     labels:
@@ -1404,4 +1404,18 @@ Spectral:
     hctsa_name: SP_Summaries
     ordered_args: ["psdMeth", "windowType"]
 
-    
+ModelFit:
+  ARCov:
+    base_name: AR_arcov
+    labels:
+      - ModelFit
+      - AR
+      - gof
+      - fit
+    dependencies:
+      - statsmodels
+    configs:
+      - p: !range [1, 5]
+        zscore: True
+    hctsa_name: MF_AR_arcov
+    ordered_args: ["p"]
