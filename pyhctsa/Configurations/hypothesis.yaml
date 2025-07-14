@@ -11,3 +11,17 @@ HypothesisTests:
         zscore: False
     hctsa_name: HT_HypothesisTest
     ordered_args: ["theTest"]
+  
+  VarianceRatioTest:
+    base_name: VarRatioTest
+    labels:
+      - hypothesistest
+    dependencies:
+      - arch
+    configs:
+      - periods: [2, 4]
+        IIDs: [0, 1]
+        zscore: True
+    hctsa_name: SY_VarRatioTest
+    ordered_args: ['periods', 'IIDs']
+

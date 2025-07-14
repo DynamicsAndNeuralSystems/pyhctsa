@@ -6,7 +6,26 @@ from typing import Union
 from ..Utilities.utils import signChange
 
 def CWT(y : ArrayLike, wname : str = 'db3', maxScale : int = 32) -> dict:
+    """
+    Continuous wavelet transform of a time series.
 
+    Computes the continuous wavelet transform (CWT) of a time series using the specified wavelet and maximum scale,
+    and returns a set of statistics on the coefficients, entropy, and results of coefficients summed across scales.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    wname : str, optional
+        The wavelet name, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), etc. Default is 'db3'.
+    maxScale : int, optional
+        The maximum scale of wavelet analysis. Default is 32.
+
+    Returns
+    -------
+    dict
+        Dictionary of statistics on the CWT coefficients.
+    """
     y = np.asarray(y)
     N = len(y)
     scales = np.arange(1, maxScale+1)
