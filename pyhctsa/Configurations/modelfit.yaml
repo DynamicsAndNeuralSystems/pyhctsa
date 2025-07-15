@@ -4,6 +4,7 @@ ModelFit:
     labels:
       - ModelFit
       - AR
+      - model
     dependencies:
       - statsmodels
     configs:
@@ -11,4 +12,18 @@ ModelFit:
         zscore: True
     hctsa_name: MF_AR_arcov
     ordered_args: ["p"]
-  
+
+  ExpSmoothing:
+    base_name: ExpSmoothing
+    labels:
+      - model
+      - ModelFit
+    dependencies:
+      - numba
+      - scipy
+    configs:
+      - ntrain: 0.5
+        alpha: 'best'
+        zscore: True
+    hctsa_name: MF_ExpSmoothing
+    ordered_args: ["ntrain", "alpha"]
