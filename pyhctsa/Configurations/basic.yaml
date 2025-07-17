@@ -1420,6 +1420,21 @@ ModelFit:
     hctsa_name: MF_AR_arcov
     ordered_args: ["p"]
   
+  ARFit:
+    base_name: arfit
+    labels:
+      - models
+      - ModelFit
+      - AR
+    dependencies:
+    configs:
+      - pmin: 1
+        pmax: 8
+        selector: 'sbc'
+        zscore: True
+    hctsa_name: MF_arfit
+    ordered_args: ["pmin", "pmax", "selector"]
+
   ExpSmoothing:
     base_name: ExpSmoothing
     labels:
@@ -1434,3 +1449,4 @@ ModelFit:
         zscore: True
     hctsa_name: MF_ExpSmoothing
     ordered_args: ["ntrain", "alpha"]
+  

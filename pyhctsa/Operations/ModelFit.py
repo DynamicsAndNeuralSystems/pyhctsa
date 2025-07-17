@@ -1,12 +1,13 @@
 import numpy as np
 from numpy.typing import ArrayLike
-from statsmodels.tsa.ar_model import AutoReg
+from statsmodels.tsa.ar_model import AutoReg, ar_select_order
 from scipy.signal import lfilter
 from pyhctsa.Operations.Correlation import AutoCorr
-from scipy.stats import ks_1samp, norm
+from scipy.stats import ks_1samp, norm, t
 import numba
 from typing import Union
 from pyhctsa.Utilities.utils import ZScore
+from statsmodels.stats.diagnostic import acorr_ljungbox
 
 
 def ExpSmoothing(x : ArrayLike, ntrain : Union[None, int, float] = None, alpha : Union[str, float] = 'best') -> dict:
@@ -144,9 +145,6 @@ def ExpSmoothing(x : ArrayLike, ntrain : Union[None, int, float] = None, alpha :
 
 @numba.jit(nopython=True, cache=True)
 def _fit_exp_smooth(x: np.ndarray, a: float) -> np.ndarray:
-    """
-    An accelerated version of _fit_exp_smooth using Numba.
-    """
     n = x.shape[0]
     xf = np.zeros(n)
     
@@ -167,7 +165,7 @@ def _fit_exp_smooth(x: np.ndarray, a: float) -> np.ndarray:
     return xf
 
 
-def ResidualAnalysis(e):
+def ResidualAnalysis(e : ArrayLike) -> dict:
     """
     Analysis of residuals from a model fit.
 
@@ -277,4 +275,166 @@ def ARCov(y : ArrayLike, p : int = 2) -> dict:
     out['res_std'] = np.std(err, ddof=1)
     out['res_AC1'] = AutoCorr(err, 1, 'Fourier')[0]
     out['res_AC2'] = AutoCorr(err, 2, 'Fourier')[0]
+    return out
+
+
+def _arconf_from_arfit(fitted_ar, theConfInterval : float = 0.95):
+    params = fitted_ar.params
+    has_intercept = fitted_ar.model.trend == 'c'
+    if has_intercept:
+        w = params[0]
+        A = params[1:]
+    else:
+        w = None
+        A = params
+    # degress of freedom
+    dof = fitted_ar.df_resid
+    t_crit = t.ppf(0.5 + theConfInterval / 2, df=dof) # quantiles of the t distrib
+    Cest = fitted_ar.sigma2 # the noise covariance/variance
+    uinv = fitted_ar.cov_params() / Cest
+    all_errs = t_crit * np.sqrt(np.diag(uinv) * Cest)
+    if has_intercept:
+        w_err = all_errs[0]
+        A_err = all_errs[1:]
+        return {'w_err': w_err, 'A_err': A_err}
+    else:
+        A_err = all_errs
+        return {'A_err': A_err}
+
+def _get_criteria(sel, N, type = "aic"):
+    # pop the first key
+    keys = None
+    se = None
+
+    if type == "aic":
+        se = sel.aic
+        se.pop(0)
+        keys = se.keys()
+    elif type == "bic":
+        se = sel.bic
+        se.pop(0)
+        keys = se.keys()
+    else:
+        return ValueError(f"Unknown crtieria: {type}!")
+    
+    orlist = np.array([i[-1] for i in list(keys)])
+    ps_len = len(keys)
+    orlist_sorted_idxs = np.argsort(orlist)
+    criteria_vals = np.zeros(ps_len)
+    
+    for i in range(ps_len):
+        key_i = list(keys)[orlist_sorted_idxs[i]] # both aic and bic ordered the same way
+        val = se.get(key_i)/N # normalise by num observations
+        criteria_vals[i] = val
+    
+    return criteria_vals
+
+def ARFit(y : ArrayLike, pmin : int = 1, pmax : int = 10, selector : str = 'sbc') -> dict:
+    """
+    Statistics of a fitted AR model to a time series.
+
+    Fits autoregressive (AR) models of orders p = pmin, pmin + 1, ..., pmax to the input time series,
+    selects the optimal model order using Schwartz's Bayesian Criterion (SBC), and returns statistics
+    on the fitted model, residuals, and confidence intervals.
+
+    Reference
+    ----------
+    - "Estimation of parameters and eigenmodes of multivariate autoregressive models",
+      A. Neumaier and T. Schneider, ACM Trans. Math. Softw. 27, 27 (2001)
+    - "Algorithm 808: ARFIT---a Matlab package for the estimation of parameters and eigenmodes of multivariate autoregressive models",
+      T. Schneider and A. Neumaier, ACM Trans. Math. Softw. 27, 58 (2001)
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    pmin : int, optional
+        The minimum AR model order to fit. Default is 1.
+    pmax : int, optional
+        The maximum AR model order to fit. Default is 10.
+    selector : str, optional
+        Criterion to select optimal model order (e.g., 'sbc', cf. ARFIT package documentation). Default is 'sbc'.
+
+    Returns
+    -------
+    dict
+        Dictionary containing statistics of a fitted AR model to a time series.
+    """
+    y = np.asarray(y)
+    N = len(y)
+    if selector in ['bic', 'sbc']: # bic and sbc are the same metrics
+        selector = 'bic'
+    #(I) Fit AR model)
+    sel = ar_select_order(y, maxlag=pmax, ic=selector, glob=False, trend='n') # bic is the same as sbc
+    p_optimal = max(pmin, np.max(sel.ar_lags)) if sel.ar_lags is not None else pmin
+    ps = np.arange(pmin, pmax+1)
+    # fit the AR model using the optimal number of lags from above
+    model = AutoReg(y, lags=p_optimal, trend='n')
+    res = model.fit()
+    popt = len(res.params)
+    Aest = res.params
+    #2) Coefficients Aest
+    out = {}
+    out['A1'] = Aest[0]
+    for i in range(2, 7):
+        if popt >= i:
+            out[f'A{i}'] = Aest[i-1]
+        else:
+            out[f'A{i}'] = 0 # % set all the higher order coefficients are all zero
+    # (ii) Summary statistics on the coefficients
+    out['maxA'] = np.max(Aest)
+    out['minA'] = np.min(Aest)
+    out['meanA'] = np.mean(Aest)
+    out['stdA'] = np.std(Aest, ddof=1) if len(Aest) > 1 else 0
+    out['sumA'] = np.sum(Aest)
+    out['rmsA'] = np.sqrt(sum(Aest**2))
+    out['sumsqA'] = np.sum(Aest**2)
+
+    #(3) Noise covariance matrix, Cest
+    # In our case of a univariate time series, just a scalar for the noise magnitude.
+    Cest = res.sigma2
+    out['C'] = Cest
+
+
+    # #(4) Schwartz's Bayesian Criterion, SBC (BIC)
+    bics = _get_criteria(sel, N, "bic")
+    for i in range(len(bics)):
+        out[f'sbc_{ps[i]}'] = bics[i]
+
+    # return minimum 
+    out['minsbc'] = np.min(bics)
+    popt_sbc = ps[np.argmin(bics)]
+    out['popt_sbc'] = popt_sbc
+    
+    # Akiake Information Criteria (AIC) as a viable alternative to Akiake's FPE for final prediction error (FPE)
+    aics = _get_criteria(sel, N, "aic")
+    n = aics.size
+    for i in range(len(aics)):
+        out[f'fpe_{ps[i]}'] = aics[i]
+    # return minimum 
+    out['minfpe'] = np.min(aics)
+    popt_fpe = ps[np.argmin(aics)]
+    out['popt_fpe'] = popt_fpe
+
+    #%% (II) Test Residuals
+    ljung_box_results = acorr_ljungbox(res.resid, lags=[20], model_df=p_optimal, return_df=False) # test of auto correlation in the residuals (test up to lag 20)
+    out['res_siglev'] = ljung_box_results.iloc[0]['lb_pvalue']
+
+    # Correlation test of residuals
+    resids = res.resid
+    # out['res_ac1'] = AutoCorr(resids, 1, 'Fourier')[0]
+    # out['res_ac1_norm'] = out['res_ac1']/np.sqrt(N)
+
+    #Calculate correlations up to 20, return how many exceed significance threshold
+    acf = AutoCorr(resids, list(range(1, 21)), 'Fourier')
+    out['pcorr_res'] = np.sum(np.abs(acf) > 1.96/np.sqrt(N))/20
+
+    # Confidence Intervals
+    Aerr = _arconf_from_arfit(res, 0.95)['A_err']
+    out['aerr_min'] = np.min(Aerr)
+    out['aerr_max'] = np.max(Aerr)
+    out['aerr_mean'] = np.mean(Aerr)
+
+    # TODO: Add eigendecomposition analysis
+
     return out
