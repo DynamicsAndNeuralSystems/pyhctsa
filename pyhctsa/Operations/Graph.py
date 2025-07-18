@@ -46,6 +46,29 @@ def _horiz_vgraph(ts_data):
 
 
 def VisibilityGraph(y : ArrayLike, meth : str = 'horiz', maxL : int = 5000) -> dict:
+    """
+    Visibility graph analysis of a time series.
+
+    Constructs a visibility graph of the time series and returns various statistics on the properties of the resulting network.
+    
+    Parameters
+    ----------
+    y : array-like
+        The time series (a column vector).
+    meth : str, optional
+        The method for constructing the visibility graph:
+            - 'norm': the normal visibility definition
+            - 'horiz': uses only horizontal lines to link nodes/datums
+        Default is 'horiz'.
+    maxL : int, optional
+        The maximum number of samples to consider. Only the first maxL points of the time series are analyzed
+        (default 5000). Longer time series are truncated to their first maxL samples.
+
+    Returns
+    -------
+    dict
+        Statistics on the degree distribution.
+    """
     y = np.asarray(y)
     N = len(y)
     if N > maxL:
