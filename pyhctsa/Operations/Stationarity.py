@@ -895,7 +895,7 @@ def StatAv(y: ArrayLike, whatType: str = 'seg', extraParam: int = 5) -> float:
 
 
 def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = 'std', 
-                 numSeg: int = 5, incMove: int = 2) -> dict:
+                 numSeg: int = 5, incMove: int = 2):
     """
     Sliding window measures of stationarity.
 

@@ -1,0 +1,20 @@
+PreProcess:
+  PreProcCompare:
+    base_name: PreProcCompare
+    labels:
+      - raw
+      - preprocess
+    dependencies: 
+      - scipy
+    configs:
+      - detrendMeth: ["poly1", "poly2"]
+        zscore: False
+      - detrendMeth: ["diff1", "diff2"]
+        zscore: False
+      - detrendMeth: ["rav2", "rav3", "rav4", "rav10"]
+        zscore: False
+      - detrendMeth: ["resample_1_2", "resample_2_1"]
+        zscore: False
+    hctsa_name: PP_Compare
+    ordered_args: ["detrendMeth"]
+  
