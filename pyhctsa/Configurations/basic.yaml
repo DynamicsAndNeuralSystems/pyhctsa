@@ -1494,4 +1494,22 @@ Physics:
         zscore: True
     hctsa_name: PH_ForcePotential
     ordered_args: ['whatPotential', 'params']
-    
+
+  Walker:
+    base_name: Walker
+    labels:
+      - physics
+      - dynamicalSystem
+    dependencies:
+    configs:
+      - walkerRule: 'prop'
+        walkerParams: [0.1, 0.5, 0.9, 1.1] 
+        zscore: True
+      - walkerRule: 'biasprop'
+        walkerParams: [[0.5, 0.1], [0.1, 0.5]] 
+        zscore: True
+      - walkerRule: 'momentum'
+        walkerParams: [2, 5]
+        zscore: True
+    hctsa_name: PH_Walker
+    ordered_args: ["walkerRule", "walkerParams"]
