@@ -10,9 +10,41 @@ from statsmodels.sandbox.stats.runs import runstest_1samp
 def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, float, int, list] = None) -> dict:
     """
     Simulates a hypothetical walker moving through the time domain.
-
-    Note: due to differences in how the kde is implemented, exepct a discrepancy in the 
-    `sw_distdiff` feature.
+    
+    The hypothetical particle (or 'walker') moves in response to values of the
+    time series at each point. Outputs from this operation are summaries of the
+    walker's motion, and comparisons of it to the original time series.
+    
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    walkerRule : str, optional
+        The kinematic rule by which the walker moves in response to the
+        time series over time:
+        
+        - 'prop': the walker narrows the gap between its value and that
+          of the time series by a given proportion p.
+          walkerParams = p
+        - 'biasprop': the walker is biased to move more in one
+          direction; when it is being pushed up by the time
+          series, it narrows the gap by a proportion p_up,
+          and when it is being pushed down by the time series,
+          it narrows the gap by a (potentially different)
+          proportion p_down. walkerParams = [pup, pdown]
+        - 'momentum': the walker moves as if it has mass m and inertia
+          from the previous time step and the time series acts
+          as a force altering its motion in a classical
+          Newtonian dynamics framework. walkerParams = m (the mass).
+          
+    walkerParams : float, int, or list, optional
+        The parameters for the specified walkerRule, explained above.
+        
+    Returns
+    -------
+    dict
+        Various statistics summarizing properties of the residuals between the
+        walker's trajectory and the original time series.
     """
     N = len(y)
 
@@ -146,16 +178,35 @@ def ForcePotential(y : ArrayLike, whatPotential : str = 'dblwell', params : Unio
 
     The input time series forces a particle in the given potential well.
 
-    Args:
-    y (array-like): The input time series.
-    what_potential (str): The potential function to simulate:
-                          'dblwell' (a double well potential function) or
-                          'sine' (a sinusoidal potential function).
-    params (list): The parameters for simulation, should be in the form:
-                   [alpha, kappa, deltat]
+    The time series contributes to a forcing term on a simulated particle in either:
+        (i) A quartic double-well potential with potential energy V(x) = x^4/4 - alpha^2 x^2/2,
+            or a force F(x) = -x^3 + alpha^2 x
+        (ii) A sinusoidal potential with V(x) = -cos(x/alpha),
+            or F(x) = sin(x/alpha)/alpha
 
-    Returns:
-    dict: Statistics summarizing the trajectory of the simulated particle.
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    whatPotential : str, optional
+        The potential function to simulate:
+            - 'dblwell': a double well potential function
+            - 'sine': a sinusoidal potential function
+    params : list, optional
+        The parameters for simulation, should be in the form [alpha, kappa, deltat]:
+            For 'dblwell':
+                - alpha: controls the relative positions of the wells
+                - kappa: coefficient of friction
+                - deltat: time step for the simulation
+            For 'sine':
+                - alpha: controls the period of oscillations in the potential
+                - kappa: coefficient of friction
+                - deltat: time step for the simulation
+
+    Returns
+    --------
+    dict
+        Statistics summarizing the trajectory of the simulated particle.
     """
     y = np.array(y)
     if params is None:
