@@ -680,21 +680,36 @@ Stationarity:
         numSeg: 10
         incMove: [1, 2]
         zscore: True
-      # - windowStat: 'sampen'
-      #   acrossWinStat: 'std'
-      #   numSeg: [2, 5, 10]
-      #   incMove: [1, 2, 10]
-      #   zscore: True
-      # #- windowStat: 'sampen'
-      # #  acrossWinStat: 'sampen'
-      # #  numSeg: [2, 5, 10]
-      # #  incMove: 10
-      # #  zscore: True
-      # - windowStat: 'sampen'
-      #   acrossWinStat: 'sampen'
-      #   numSeg: 10
-      #   incMove: [1, 2]
-      #   zscore: True
+      - windowStat: 'ent'
+        acrossWinStat: 'std'
+        numSeg: [2, 5, 10]
+        incMove: [1, 2, 10]
+        zscore: True
+      - windowStat: 'ent'
+        acrossWinStat: 'sampen'
+        numSeg: [2, 5, 10]
+        incMove: 10
+        zscore: True
+      - windowStat: 'ent'
+        acrossWinStat: 'sampen'
+        numSeg: 10
+        incMove: 2
+        zscore: True
+      - windowStat: 'sampen'
+        acrossWinStat: 'std'
+        numSeg: [2, 5, 10]
+        incMove: [1, 2, 10]
+        zscore: True
+      - windowStat: 'sampen'
+        acrossWinStat: 'sampen'
+        numSeg: [2, 5, 10]
+        incMove: 10
+        zscore: True
+      - windowStat: 'sampen'
+        acrossWinStat: 'sampen'
+        numSeg: 10
+        incMove: [1, 2]
+        zscore: True
       - windowStat: 'mom3'
         acrossWinStat: 'std'
         numSeg: [2, 5, 10]
@@ -1450,3 +1465,16 @@ ModelFit:
     hctsa_name: MF_ExpSmoothing
     ordered_args: ["ntrain", "alpha"]
   
+Graph:
+  VisibilityGraph:
+    base_name: VisibilityGraph
+    labels:
+      - graph
+    dependencies:
+      - ts2vg
+    configs:
+      - meth: ['horiz', 'norm']
+        zscore: True
+    hctsa_name: NW_VisibilityGraph
+    ordered_args: ['meth']
+    

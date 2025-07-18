@@ -158,6 +158,9 @@ Stationarity:
       - subsetHow: ['l', 'unicg']
         nsamps: [10, 20, 50, 100, 500]
         zscore: True
+      - subsetHow: ['p']
+        nsamps: [0.01, 0.05, 0.1, 0.5]
+        zscore: True
     hctsa_name: SY_LocalGlobal
     ordered_args: ["subsetHow", "nsamps"]
   

@@ -237,8 +237,8 @@ def WLCoeffs(y : ArrayLike, wname : str = 'db3', level : Union[int, str] = 3) ->
     out['med_coeff'] = np.median(det_s)
 
     #% Decay rate stats ('where below _ maximum' = 'wb_m')
-    #out['wb99m'] = findMyThreshold(0.99, det_s, N)
-    #out['wb90m'] = findMyThreshold(0.90, det_s, N)
+    out['wb99m'] = findMyThreshold(0.99, det_s, N)
+    out['wb90m'] = findMyThreshold(0.90, det_s, N)
     out['wb75m'] = findMyThreshold(0.75, det_s, N)
     out['wb50m'] = findMyThreshold(0.50, det_s, N)
     out['wb25m'] = findMyThreshold(0.25, det_s, N)
@@ -347,4 +347,3 @@ def findMyThreshold(x, det_s, N):
     else:
         pr = indices[0]/N
         return pr[0]
-

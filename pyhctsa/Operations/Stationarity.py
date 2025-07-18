@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.typing import ArrayLike
 from loguru import logger
-from ..Operations.Entropy import ApproximateEntropy, SampleEntropy
+from ..Operations.Entropy import ApproximateEntropy, SampleEntropy, DistributionEntropy
 from ..Operations.Correlation import AutoCorr, FirstCrossing
 from ..Utilities.utils import make_mat_buffer, ZScore, signChange
 from typing import Union
@@ -966,7 +966,8 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
         for i in range(numSteps):
             qs[i] = np.std(y[_get_window(i, inc, winLength)], ddof=1)
     elif windowStat == 'ent':
-        logger.warning(f"{windowStat} not yet implemented")
+        for i in range(numSteps):
+            qs[i] = DistributionEntropy(y[_get_window(i, inc, winLength)], 'ks','[]')
     elif windowStat == 'apen':
         for i in range(numSteps):
             qs[i] = ApproximateEntropy(y[_get_window(i, inc, winLength)], 1, 0.2)
