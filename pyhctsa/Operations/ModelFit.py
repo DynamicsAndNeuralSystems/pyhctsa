@@ -11,6 +11,70 @@ from ..Utilities.utils import ZScore
 from ..Operations.Stationarity import SlidingWindow
 from ..Operations.Correlation import FirstCrossing, AutoCorr
 
+
+def LoopLocalSimple(y, forecastMeth = 'mean'):
+    y = np.asarray(y)
+    if forecastMeth == 'mean':
+        trainLengthRange = np.arange(1, 11)
+    elif forecastMeth == 'median':
+        trainLengthRange = np.arange(1, 19, 2)
+    else:
+        raise ValueError(f"Unknown prediction method: {forecastMeth}")
+    stats_st = np.zeros((len(trainLengthRange), 5))
+    for i in range(len(trainLengthRange)):
+        outtmp = None
+        if forecastMeth == 'mean':
+            outtmp = LocalSimple(y, 'mean', trainLengthRange[i])
+        elif forecastMeth == 'median':
+            outtmp = LocalSimple(y, 'median', trainLengthRange[i])
+        stats_st[i, 0] = outtmp['stderr']
+        stats_st[i, 1] = outtmp['sws']
+        stats_st[i, 2] = outtmp['swm']
+        stats_st[i, 3] = outtmp['ac1']
+        stats_st[i, 4] = outtmp['ac2']
+    # Compute statistics from the shapes of the curves
+    #% (1) root mean square error
+    out = {}
+    out['stderr_chn'] = np.mean(np.diff(stats_st[:, 0]))/(np.ptp(stats_st[:, 0]))
+    out['stderr_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:, 0])))
+    #% TODO: (ii) Is there a peak?
+
+    #% (2) Sliding Window Stationarity
+    out['sws_chn'] = np.mean(np.diff(stats_st[:,1]))/(np.ptp(stats_st[:,1]))
+    out['sws_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:,1])))
+    out['sws_stdn'] = np.std(stats_st[:,1], ddof=1)/np.ptp(stats_st[:,1])
+
+    # # % Fit exponential decay:
+    # exp_func = lambda x, a, b, c: a * np.exp(b * x) + c 
+    # popt, _ = curve_fit(exp_func, np.arange(len(stats_st[:,1])), stats_st[:,1], p0=[np.ptp(stats_st[:, 1]), -0.5, np.min(stats_st[:, 1])], maxfev=100000)
+    # out['sws_fexp_a'] = popt[0]
+    # out['sws_fexp_b'] = popt[1]
+    # out['sws_fexp_c'] = popt[2]
+    # resids_exp = exp_func(np.arange(len(stats_st[:,1])), *popt) - stats_st[:,1]
+    # sse_exp = np.sum(resids_exp**2)
+    # sst_exp = np.sum((stats_st[:,1] - np.mean(stats_st[:,1]))**2)
+    # n = len(stats_st[:, 1])
+    # out['sws_fexp_r2'] = 1 - (sse_exp/sst_exp)
+    # out['sws_fexp_adjr2'] = 1 - (sse_exp/(n - len(popt)))/(sst_exp/(n-1))
+    # out['sws_fexp_rmse'] = np.sqrt(np.mean(resids_exp**2))
+
+    #% (3) sliding window mean
+    out['swm_chn'] = np.mean(np.diff(stats_st[:, 2]))/(np.ptp(stats_st[:, 2]))
+    out['swm_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:,2])))
+    out['swm_stdn'] = np.std(stats_st[:,2], ddof=1)/np.ptp(stats_st[:,2])
+    
+    # (4) AC1
+    out['ac1_chn'] = np.mean(np.diff(stats_st[:, 3]))/(np.ptp(stats_st[:, 3]))
+    out['ac1_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:,3])))
+    out['ac1_stdn'] = np.std(stats_st[:,3], ddof=1)/np.ptp(stats_st[:,3])
+
+    # (5) AC2
+    out['ac2_chn'] = np.mean(np.diff(stats_st[:, 4]))/(np.ptp(stats_st[:, 4]))
+    out['ac2_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:,4])))
+    out['ac2_stdn'] = np.std(stats_st[:,4], ddof=1)/np.ptp(stats_st[:,4])
+
+    return out
+
 def LocalSimple(y, forecastMeth = 'mean', trainLength = 3):
     y = np.asarray(y)
     N = len(y)

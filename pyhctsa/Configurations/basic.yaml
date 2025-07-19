@@ -1508,6 +1508,19 @@ ModelFit:
     hctsa_name: FC_LocalSimple
     ordered_args: ["forecastMeth", "trainLength"]
   
+  LoopLocalSimple:
+    base_name: LoopLocalSimple
+    labels:
+      - models
+      - forecasting
+      - modelfit
+    dependencies:
+    configs:
+      - forecastMeth: 'mean'
+        zscore: True
+    hctsa_name: FC_LoopLocalSimple
+    ordered_args: ["forecastMeth"]
+  
 Graph:
   VisibilityGraph:
     base_name: VisibilityGraph
