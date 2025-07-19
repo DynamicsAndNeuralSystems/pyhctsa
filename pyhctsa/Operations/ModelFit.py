@@ -1,14 +1,61 @@
 import numpy as np
 from numpy.typing import ArrayLike
 from statsmodels.tsa.ar_model import AutoReg, ar_select_order
+from statsmodels.stats.diagnostic import acorr_ljungbox
 from scipy.signal import lfilter
 from pyhctsa.Operations.Correlation import AutoCorr
 from scipy.stats import ks_1samp, norm, t
 import numba
 from typing import Union
-from pyhctsa.Utilities.utils import ZScore
-from statsmodels.stats.diagnostic import acorr_ljungbox
+from ..Utilities.utils import ZScore
+from ..Operations.Stationarity import SlidingWindow
+from ..Operations.Correlation import FirstCrossing, AutoCorr
 
+def LocalSimple(y, forecastMeth = 'mean', trainLength = 3):
+    y = np.asarray(y)
+    N = len(y)
+    # % Do the local prediction
+    if trainLength == 'ac':
+        lp = FirstCrossing(y, 'ac', 0, 'discrete')
+    else:
+        lp = trainLength # the length of the subsegment preceeding to use to predict the subsequent value
+    evalr = np.arange(lp, N) #range over which to evaluate the forecast
+    if np.size(evalr) == 0:
+        print("This time series is too short for forecasting")
+        return np.nan
+    res = np.zeros(len(evalr))
+    if forecastMeth == 'mean':
+        for i in range(len(evalr)):
+            res[i] = np.mean(y[evalr[i]-lp:evalr[i]]) - y[evalr[i]] # prediction - value
+    elif forecastMeth == 'median':
+        for i in range(len(evalr)):
+            res[i] = np.median(y[evalr[i]-lp:evalr[i]]) - y[evalr[i]]  # prediction - value
+    elif forecastMeth == 'lfit':
+        for i in range(len(evalr)):
+            # Fit linear
+            p = np.polyfit(np.arange(1, lp+1), y[evalr[i]-lp:evalr[i]], 1)
+            res[i] = np.polyval(p, lp+1) - y[evalr[i]]  # prediction - value
+    else:
+        raise ValueError(f"Unknown forecasting method: {forecastMeth}")
+    
+    #Output statistics on the residuals, res
+    #% Mean residual (mean error/bias):
+    out = {}
+    out['meanerr'] = np.mean(res)
+    #% Spread of residuals:
+    out['stderr'] = np.std(res, ddof=1)
+    out['meanabserr'] = np.mean(np.abs(res))
+    #% Stationarity of residuals:
+    out['sws'] = SlidingWindow(res, 'std', 'std', 5, 1) # across five non-overlapping segments
+    out['swm'] = SlidingWindow(res, 'mean', 'std', 5, 1) # across five non-overlapping segments
+    #% TODO Normality of residuals:
+    #% Autocorrelation structure of the residuals:
+    out['ac1'] = AutoCorr(res, 1, 'Fourier')[0]
+    out['ac2'] = AutoCorr(res, 2, 'Fourier')[0]
+    out['taures'] = FirstCrossing(res, 'ac', 0, 'continuous')
+    out['tauresrat'] = FirstCrossing(res, 'ac', 0, 'continuous')/FirstCrossing(y, 'ac', 0, 'continuous')
+
+    return out
 
 def ExpSmoothing(x : ArrayLike, ntrain : Union[None, int, float] = None, alpha : Union[str, float] = 'best') -> dict:
     """

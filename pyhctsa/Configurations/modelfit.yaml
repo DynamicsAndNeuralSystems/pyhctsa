@@ -42,4 +42,24 @@ ModelFit:
         zscore: True
     hctsa_name: MF_arfit
     ordered_args: ["pmin", "pmax", "selector"]
+
+  LocalSimple:
+    base_name: LocalSimple
+    labels:
+      - models
+      - forecasting
+      - modelfit
+    dependencies:
+    configs:
+      - forecastMeth: "mean"
+        trainLength: [1, 2, 3, 4, 'ac']
+        zscore: True
+      - forecastMeth: "median"
+        trainLength: [3, 5, 7, 'ac']
+        zscore: True
+      - forecastMeth: "lfit"
+        trainLength: [2, 3, 4, 5, 'ac']
+        zscore: True
+    hctsa_name: FC_LocalSimple
+    ordered_args: ["forecastMeth", "trainLength"]
     
