@@ -1,31 +1,55 @@
 import numpy as np
+from numpy.typing import ArrayLike
 from typing import Union, Optional
 from numba import njit
-from numpy.typing import ArrayLike
 from math import factorial
 from sklearn.neighbors import KDTree
-from ..Utilities.utils import ZScore, make_buffer, binpicker, histc
-from ..Toolboxes.Max_Little import close_returns as _close_returns_c
-from antropy.entropy import _xlogx
 from scipy.stats import gaussian_kde
+from antropy.entropy import _xlogx
+from ..Utilities.utils import ZScore, make_buffer, binpicker, histc
 from ..Toolboxes.physionet import sampen as _sampen_c 
 from ..Operations.Correlation import FirstCrossing
+from ..Toolboxes.Michael_Small import shannon
+from ..Toolboxes.Max_Little import close_returns as _close_returns_c
 
-# def EntropyRandomise(y : ArrayLike, randomiseHow = 'statdist', randomSeed = 42):
-#     # how time series properties change with increasing randomisation
-#     y = np.asarray(y)
-#     N = len(y)
-
-#     randp_max = 2
-#     rand_inc = 0.1
-#     numCalc = randp_max / rand_inc
-#     calc_ints = np.floor((randp_max*N)/numCalc)
-#     if calc_ints == 0:
-#         calc_ints = 1 # round up for short time series
-#     calc_pts = 
-
-#     pass
-
+def ShannonEntropy(y : ArrayLike, numBins : Union[int, list[int]] = 2, depth : Union[int, list[int]] = 3) -> Union[float, dict, None]:
+    y = np.asarray(y)
+    binRangeSize = np.size(numBins)
+    depthRangeSize = np.size(depth)
+    out = None
+    if binRangeSize == 1:
+        if depthRangeSize == 1:
+            # %% Evaluate the shannon entropy of discretization - scales with depth, so it's nice to normalize by this factor
+            out = shannon.entropy(y, numBins, depth) / depth
+        elif depthRangeSize > 1:
+            # % Range over depths specified in the vector and return statistics on results
+            numDepths = depthRangeSize
+            ents = np.zeros(numDepths)
+            for i in range(numDepths):
+                ents[i] = shannon.entropy(y, numBins, depth[i]) / depth[i]
+            out = {}
+            #% Output statistics on variation across the range tested:
+            out['maxent'] = np.max(ents)
+            out['minent'] = np.min(ents)
+            out['medent'] = np.median(ents)
+            out['meanent'] = np.mean(ents)
+            out['stdent'] = np.std(ents, ddof=1)
+    elif binRangeSize > 1:
+        if depthRangeSize == 1:
+            #%% (*) Statistics over different bin numbers (constant depth)
+            ents = np.zeros(binRangeSize)
+            for i in range(binRangeSize):
+                ents[i] = shannon.entropy(y, numBins[i], depth)
+            out = {}
+            out['maxent'] = np.max(ents)
+            out['minent'] = np.min(ents)
+            out['medent'] = np.median(ents)
+            out['meanent'] = np.mean(ents)
+            out['stdent'] = np.std(ents, ddof=1)
+        elif depthRangeSize > 1:
+            raise NotImplementedError("Comparing both bins and depth not implemented.")
+    
+    return out 
 
 def DistributionEntropy(y : ArrayLike, histOrKS : str = 'hist', numBins : int = 10, olremp : float = 0) -> float:
     # (1) Remove outliers?

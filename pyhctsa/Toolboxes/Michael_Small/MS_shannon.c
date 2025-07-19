@@ -1,22 +1,24 @@
 /*=================================================================
  *
- * SHANNON.C	.MEX file corresponding to SHANNON.M
- *              returns the approximate Shannon Entropy, for a n-bin
- *              encoding of the time series x at depth d
- *                 I.e. -\sum Plog(P)
- *              where P=(x_i,x_{i+1},....x_{i+d}) and the sum is
- *                              over all trajectories P
+ * SHANNON.C
+ * returns the approximate Shannon Entropy, for a n-bin
+ * encoding of the time series x at depth d
+ * I.e. -\sum Plog(P)
+ * where P=(x_i,x_{i+1},....x_{i+d}) and the sum is
+ * over all trajectories P
  *
  * The calling syntax is:
  *
- *		ent= entropy(x,n,d)
+ * ent= shannon_entropy(x,n,d)
  *
+ * Original MATLAB MEX implementation - Michael Small
+ * Modified to standalone C function
  *
- * This is a MEX-file for MATLAB.
  *=================================================================*/
 /* $Revision: 1.5 $ */
-#include <math.h>
-#include "mex.h"
+#include <Python.h>
+#include <numpy/arrayobject.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 
@@ -26,201 +28,175 @@ int compare(const void *arg1, const void *arg2)
   return( *(int *)arg1 - *(int *)arg2 );
 }
 
-void entropy(double	*data,
-		int length,
-		int bin,
-                int depth,
-		double *ent)
-     /*actually calculate the entropy*/
-{
-	unsigned short *s;
-	double *sorted;
-	float *td;
-        unsigned long int *tally;
-	int i,j,pc=0,nc=0;
-	float total=0,prob=0;
-	int k;
-	unsigned long int os;
-
-	/*allocate memory for symbol sequence*/
-	s = (unsigned short *) calloc(length,sizeof(unsigned short));
-	sorted = (double *) calloc(length,sizeof(double));
-	td = (float *) calloc(bin-1,sizeof(float));
-
-        /*determine threshold --- for n-bit encoding */
-        /* copy the data */
-        for (i=0; i<length; i++)
-          *(sorted+i) = *(data+i);
-        /*sort the copy*/
-        qsort(sorted,length,sizeof(double),compare);
-        /*extract the relevant percentiles*/
-	for (i=1; i<bin; i++)
-          *(td+i-1) = *(sorted+(int)(i*length/bin));
-
-        /*dispose of the sorted data*/
+/**
+ * Calculate Shannon entropy of a time series using n-bin encoding at depth d
+ * 
+ * @param data: Input time series data
+ * @param length: Length of the data array
+ * @param bins: Number of bins for encoding (typically 2-10)
+ * @param depth: Embedding depth (typically 1-5)
+ * @return: Shannon entropy value, or -1.0 on error
+ */
+double shannon_entropy(double *data, int length, int bins, int depth) {
+    if (!data || length <= 0 || bins <= 1 || depth <= 0 || depth >= length) {
+        return -1.0;
+    }
+    
+    // Allocate memory
+    unsigned short *symbols = calloc(length, sizeof(unsigned short));
+    double *sorted = calloc(length, sizeof(double));
+    float *thresholds = calloc(bins - 1, sizeof(float));
+    unsigned long *tally = calloc((unsigned long)pow(bins, depth), sizeof(unsigned long));
+    
+    if (!symbols || !sorted || !thresholds || !tally) {
+        free(symbols);
         free(sorted);
-
-	/* do the encoding */
-	for (i=0; i<length; i++)
-	  {
-	    *(s+i)=0;
-	    for (j=0; j<(bin-1); j++)
-	      *(s+i) += (data[i]<*(td+j));
-	  }
-
-	/*allocate memory for the counters*/
-	tally = (unsigned long int *) calloc(pow(bin,depth),sizeof(unsigned long int));
-        for (i=0; i<pow(bin,depth); i++)
-	  *(tally+i)=0;
-
-	/* now calculate the entropy */
-	length=length-depth+1;
-	for (k=0; k<length; k++)
-	{
-	  os=0;
-	  /*whats the encoded symbol sequence?*/
-	  for (i=0; i<depth; i++)
-	    os += pow(bin,i)*(*(s+i+k));
-	  /* increase the appropriate counter */
-	  (*(tally+os)) ++;
-	}
-
-	/*now calculate sum of P log P */
-	total=0;
-	for (i=0; i<pow(bin,depth); i++)
-	  {
-	    prob = (*(tally+i)) / (double)length; /* the probabilty of the i-th encoding - P */
-	    if (prob>0)
-	      total += prob*log(prob); /*the running sum of P*log(P) */
-	  }
-
-	/* free memory allocated for s */
-	free(s);
-	free(td);
-
-	/* free memory allocated for tally */
-	free(tally);
-
-	/*now, calculate the entropy*/
-	*ent=-total;
-
+        free(thresholds);
+        free(tally);
+        return -1.0;
+    }
+    
+    // Copy and sort data to determine thresholds
+    for (int i = 0; i < length; i++) {
+        sorted[i] = data[i];
+    }
+    qsort(sorted, length, sizeof(double), compare);
+    
+    // Extract percentile thresholds for n-bin encoding
+    for (int i = 1; i < bins; i++) {
+        thresholds[i-1] = (float)sorted[i * length / bins];  // Cast to float like original
+    }
+    
+    // Encode the data into symbols
+    for (int i = 0; i < length; i++) {
+        symbols[i] = 0;
+        for (int j = 0; j < bins - 1; j++) {
+            if (data[i] >= thresholds[j]) {
+                symbols[i]++;
+            }
+        }
+    }
+    
+    // Count symbol sequences of given depth
+    int valid_length = length - depth + 1;
+    for (int k = 0; k < valid_length; k++) {
+        unsigned long pattern = 0;
+        for (int i = 0; i < depth; i++) {
+            pattern += (unsigned long)pow(bins, i) * symbols[k + i];
+        }
+        tally[pattern]++;
+    }
+    
+    // Calculate Shannon entropy: -sum(P * log(P))
+    double entropy = 0.0;
+    unsigned long total_patterns = (unsigned long)pow(bins, depth);
+    
+    for (unsigned long i = 0; i < total_patterns; i++) {
+        if (tally[i] > 0) {
+            double prob = (double)tally[i] / valid_length;
+            entropy -= prob * log(prob);
+        }
+    }
+    
+    // Cleanup
+    free(symbols);
+    free(sorted);
+    free(thresholds);
+    free(tally);
+    
+    return entropy;
 }
 
-void mexFunction( int nlhs, mxArray *plhs[],
-		  int nrhs, const mxArray *prhs[] )
-     /* the MATLAB mex wrapper function */
-{
-    double *x,*bins,*deps,*ent;
-    double thisEnt;
-    int mrows,ncols,i,j;
-    int lengthx,bin,nbins,dep,ndeps;
-    bool warnThem;
-
-    /* Check for proper number of arguments */
-
-    if (nrhs > 3) {
-	mexErrMsgTxt("Too many input arguments.");
+/* Python wrapper function */
+static PyObject* py_shannon_entropy(PyObject* self, PyObject* args) {
+    PyArrayObject *data_array;
+    int bins = 2;     // default values
+    int depth = 3;
+    
+    // Parse arguments: data array is required, bins and depth are optional
+    if (!PyArg_ParseTuple(args, "O!|ii", &PyArray_Type, &data_array, &bins, &depth)) {
+        return NULL;
     }
-    if (nrhs == 0) {
-        mexErrMsgTxt("Insufficient input arguments.");
+    
+    // Check that input is a 1D array of doubles
+    if (PyArray_NDIM(data_array) != 1) {
+        PyErr_SetString(PyExc_ValueError, "Input must be a 1D array");
+        return NULL;
     }
-    if (nrhs < 2) {
-      /* set bin=2 */
-      nbins=1;
-      bins = (double *) calloc(1,sizeof(double));
-      *bins=2;
+    
+    if (PyArray_TYPE(data_array) != NPY_DOUBLE) {
+        PyErr_SetString(PyExc_TypeError, "Input array must be of type float64 (double)");
+        return NULL;
     }
-    if (nrhs < 3) {
-      /* set dep=3 */
-      ndeps=1;
-      deps = (double *) calloc(1,sizeof(double));
-      *deps=3;
+    
+    // Get data pointer and length
+    double *data = (double*)PyArray_DATA(data_array);
+    int length = (int)PyArray_SIZE(data_array);
+    
+    // Validate parameters
+    if (length <= 0) {
+        PyErr_SetString(PyExc_ValueError, "Input array must not be empty");
+        return NULL;
     }
-    if (nlhs > 1) {
-	mexErrMsgTxt("Too many output arguments.");
+    
+    if (bins <= 1) {
+        PyErr_SetString(PyExc_ValueError, "Number of bins must be greater than 1");
+        return NULL;
     }
-
-    /*Assign a pointer to the input matrix*/
-    x = mxGetPr(prhs[0]);
-
-    /* Check the dimensions of Y.  Y can be 4 X 1 or 1 X 4. */
-    mrows = mxGetM(prhs[0]);
-    ncols = mxGetN(prhs[0]);
-    /* check that x is a vector */
-    if ((mrows!=1) && (ncols!=1)) {
-      mexWarnMsgTxt("First input should be a vector");
+    
+    if (depth <= 0 || depth >= length) {
+        PyErr_SetString(PyExc_ValueError, "Depth must be positive and less than array length");
+        return NULL;
     }
-    lengthx = mrows*ncols;
-
-    /* Get the size of the "forbidden zone" --- the second input arg. */
-    if (nrhs>=2){
-      bins=mxGetPr(prhs[1]);
-      mrows = mxGetM(prhs[1]);
-      ncols = mxGetN(prhs[1]);
-      /* check that x is a vector */
-      if ((mrows!=1) && (ncols!=1)) {
-	mexWarnMsgTxt("Second input should be a vector");
-      }
-      nbins = mrows*ncols;
-      /* check that all bins are integers */
-      warnThem=0;
-      for (i=0; i<nbins; i++) {
-	if (floor(*(bins+i))!=*(bins+i)) {
-	  warnThem=1;
-	  *(bins+i)=(int)floor(*(bins+i));
-	}
-      }
-      if (warnThem) {
-	mexWarnMsgTxt("Second input being rounded to integer value(s).");
-      }
+    
+    // Calculate entropy
+    double result = shannon_entropy(data, length, bins, depth);
+    
+    if (result < 0) {
+        PyErr_SetString(PyExc_RuntimeError, "Error calculating Shannon entropy");
+        return NULL;
     }
+    
+    return PyFloat_FromDouble(result);
+}
 
-    /* */
-    if (nrhs==3){
-      deps=mxGetPr(prhs[2]);
-      mrows = mxGetM(prhs[2]);
-      ncols = mxGetN(prhs[2]);
-      /* check that x is a vector */
-      if ((mrows!=1) && (ncols!=1)) {
-	mexWarnMsgTxt("Third input should be a vector");
-      }
-      ndeps = mrows*ncols;
-      /* check that all bins are integers */
-      warnThem=0;
-      for (i=0; i<ndeps; i++) {
-	if (floor(*(deps+i))!=*(deps+i)) {
-	  warnThem=1;
-	  *(deps+i)=(int)floor(*(deps+i));
-	}
-      }
-      if (warnThem) {
-	mexWarnMsgTxt("Third input being rounded to integer value(s).");
-      }
+/* Method definition */
+static PyMethodDef ShannonMethods[] = {
+    {"entropy", py_shannon_entropy, METH_VARARGS, 
+     "Calculate Shannon entropy of a time series.\n\n"
+     "Parameters:\n"
+     "  data (array): 1D numpy array of float64 values\n"
+     "  bins (int, optional): Number of bins for encoding (default: 2)\n"
+     "  depth (int, optional): Embedding depth (default: 3)\n\n"
+     "Returns:\n"
+     "  float: Shannon entropy value\n\n"
+     "Example:\n"
+     "  >>> import numpy as np\n"
+     "  >>> import shannon\n"
+     "  >>> data = np.random.randn(1000)\n"
+     "  >>> ent = shannon.entropy(data, bins=4, depth=3)\n"
+    },
+    {NULL, NULL, 0, NULL}
+};
+
+/* Module definition */
+static struct PyModuleDef shannon_module = {
+    PyModuleDef_HEAD_INIT,
+    "shannon",
+    "Shannon entropy calculation for time series data",
+    -1,
+    ShannonMethods
+};
+
+/* Module initialisation */
+PyMODINIT_FUNC PyInit_shannon(void) {
+    PyObject *module = PyModule_Create(&shannon_module);
+    if (module == NULL) {
+        return NULL;
     }
-
-
-    /* Create a matrix for the return argument */
-    plhs[0] = mxCreateDoubleMatrix(ndeps, nbins, mxREAL);
-
-    /* Assign pointer to the ouput matrix */
-    ent = mxGetPr(plhs[0]);
-
-    /* Do the actual computations in a subroutine */
-    for (i=0; i<nbins; i++)
-      for (j=0; j<ndeps; j++)
-	{
-	  bin=*(bins+i);
-	  dep=*(deps+j);
-	  entropy(x,lengthx,bin,dep,&thisEnt);
-	  *(ent+i*ndeps+j)=thisEnt;
-	}
-
-    /*free allocated memory (if any) */
-    if (nrhs<2)
-      free(bins);
-    if (nrhs<3)
-      free(deps);
-
-    return;
-
+    
+    // Initialize numpy
+    import_array();
+    
+    return module;
 }

@@ -578,6 +578,29 @@ Entropy:
     hctsa_name: EN_mse
     ordered_args: ['scaleRange', 'm', 'r', 'preProcessHow']
   
+  ShannonEntropy:
+    base_name: shannon
+    labels:
+      - entropy
+      - shannon
+      - C 
+    dependencies:
+    configs:
+      - numBins: 2
+        depth: [2, 3]
+        zscore: True
+      - numBins: 3
+        depth: 2
+        zscore: True
+      - numBins: [!range [2, 10]]
+        depth: [2, 3, 4]
+        zscore: True
+      - numBins: [2, 3, 4]
+        depth: [!range [1, 10]]
+        zscore: True
+    hctsa_name: EN_MS_shannon
+    ordered_args: ["numBins", "depth"]
+  
 Stationarity:
   StatAv:
     base_name: StatAv

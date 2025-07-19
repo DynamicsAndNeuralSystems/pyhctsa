@@ -66,6 +66,18 @@ periodicity_wang_module = Extension(
     define_macros=[],
 )
 
+shannon_entropy_module = Extension(
+    "pyhctsa.Toolboxes.Michael_Small.shannon",
+    sources=[
+        "pyhctsa/Toolboxes/Michael_Small/MS_Shannon.c"
+    ],
+    include_dirs=["pyhctsa/Toolboxes/Michael_Small", np.get_include()],
+    extra_compile_args=get_compile_args(),
+    libraries=get_libraries(),
+    extra_link_args=[],
+    define_macros=[]
+)
+
 def read(*paths, **kwargs):
     """Read the contents of a text file safely.
     >>> read("project_name", "VERSION")
@@ -98,7 +110,7 @@ setup(
     author="Joshua B. Moore",
     packages=find_packages(exclude=["tests", ".github"]),
     ext_modules=[periodicity_wang_module, close_returns_extension, 
-                 sampen_extension, fastdfa_extension],
+                 sampen_extension, fastdfa_extension, shannon_entropy_module],
     install_requires=read_requirements("requirements.txt"),
     zip_safe=False,
 )

@@ -12,7 +12,7 @@ __11/07:__ 587 partialed functions, 2488 validated features
 
 __13/07:__ 623 partialed functions, 2673 validated features
 
-__18/07:__ 678 partialed functions, 3244 validated features
+__18/07:__ 687 partialed functions, 3277 validated features
 
 # Feature Conversion Progress...
 ![](https://geps.dev/progress/46)
