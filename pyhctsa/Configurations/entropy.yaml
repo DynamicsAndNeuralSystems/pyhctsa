@@ -1,115 +1,115 @@
 Entropy:
-  # DistributionEntropy:
-  #   base_name: DistributionEntropy
-  #   labels:
-  #     - entropy
-  #   dependencies:
-  #     - scipy
-  #   configs:
-  #     - histOrKS: 'ks'
-  #       numBins: [0.01, 0.1, 0.5, 1.0]
-  #       olremp: 0
-  #       zscore: True
-  #     - histOrKS: 'ks'
-  #       numBins: ''
-  #       olremp: [0.01, 0.02, 0.05, 0.1, 0.2, 0.3]
-  #       zscore: True 
-  #     - histOrKS: 'hist'
-  #       numBins: [5, 10, 20, 50, 'sqrt', 'fd', 'sturges']
-  #       olremp: 0
-  #       zscore: True 
-  #     - histOrKS: 'hist'
-  #       numBins: 10
-  #       olremp: [0.01, 0.02, 0.05, 0.1, 0.2, 0.3]
-  #       zscore: True 
-  #   hctsa_name: EN_DistributionEntropy
-  #   ordered_args: ['histOrKS', 'numBins', 'olremp']
+  DistributionEntropy:
+    base_name: DistributionEntropy
+    labels:
+      - entropy
+    dependencies:
+      - scipy
+    configs:
+      - histOrKS: 'ks'
+        numBins: [0.01, 0.1, 0.5, 1.0]
+        olremp: 0
+        zscore: True
+      - histOrKS: 'ks'
+        numBins: ''
+        olremp: [0.01, 0.02, 0.05, 0.1, 0.2, 0.3]
+        zscore: True 
+      - histOrKS: 'hist'
+        numBins: [5, 10, 20, 50, 'sqrt', 'fd', 'sturges']
+        olremp: 0
+        zscore: True 
+      - histOrKS: 'hist'
+        numBins: 10
+        olremp: [0.01, 0.02, 0.05, 0.1, 0.2, 0.3]
+        zscore: True 
+    hctsa_name: EN_DistributionEntropy
+    ordered_args: ['histOrKS', 'numBins', 'olremp']
 
-  # LZComplexity:
-  #   base_name: LZcomplexity
-  #   labels:
-  #     - entropy
-  #     - symbolic
-  #   dependencies:
-  #   configs:
-  #     - nbits: !range [2, 10]
-  #       preProc: [[], 'diff']
-  #       zscore: True
-  #   hctsa_name: EN_MS_LZcomplexity
-  #   ordered_args: ['nbits', 'preProc']
+  LZComplexity:
+    base_name: LZcomplexity
+    labels:
+      - entropy
+      - symbolic
+    dependencies:
+    configs:
+      - nbits: !range [2, 10]
+        preProc: [[], 'diff']
+        zscore: True
+    hctsa_name: EN_MS_LZcomplexity
+    ordered_args: ['nbits', 'preProc']
   
-  # ComplexityInvariantDistance:
-  #   base_name: CID
-  #   labels:
-  #     - entropy
-  #   dependencies:
-  #   configs:
-  #     - zscore: True
-  #   hctsa_name: EN_CID
+  ComplexityInvariantDistance:
+    base_name: CID
+    labels:
+      - entropy
+    dependencies:
+    configs:
+      - zscore: True
+    hctsa_name: EN_CID
   
-  # ApproximateEntropy:
-  #   base_name: ApEn
-  #   labels:
-  #     - entropy
-  #   dependencies:
-  #   configs:
-  #     - mnom: [1, 2]
-  #       rth: [0.1, 0.2]
-  #       zscore: True
-  #   hctsa_name: EN_ApEn
-  #   ordered_args: ['mnom', 'rth']
+  ApproximateEntropy:
+    base_name: ApEn
+    labels:
+      - entropy
+    dependencies:
+    configs:
+      - mnom: [1, 2]
+        rth: [0.1, 0.2]
+        zscore: True
+    hctsa_name: EN_ApEn
+    ordered_args: ['mnom', 'rth']
 
-  # RPDE:
-  #   base_name: rpde
-  #   labels:
-  #     - entropy
-  #   dependencies:
-  #   configs:
-  #     - m: 3
-  #       tau: 1
-  #       zscore: True
-  #     # - m: 3
-  #     #   tau: 'ac'
-  #     #   zscore: True
-  #   hctsa_name: EN_rpde
-  #   ordered_args: ['m', 'tau']
+  RPDE:
+    base_name: rpde
+    labels:
+      - entropy
+    dependencies:
+    configs:
+      - m: 3
+        tau: 1
+        zscore: True
+      # - m: 3
+      #   tau: 'ac'
+      #   zscore: True
+    hctsa_name: EN_rpde
+    ordered_args: ['m', 'tau']
   
-  # SampleEntropy:
-  #   base_name: SampEn
-  #   labels:
-  #     - entropy
-  #   dependencies:
-  #   configs:
-  #     - M: 5
-  #       r: [0.05, 0.1, 0.15, 0.2, 0.3]
-  #       preProcessHow: ''
-  #       zscore: True
-  #     - M: 5
-  #       r: [0.1, 0.2]
-  #       preProcessHow: 'diff1'
-  #       zscore: True
-  #   hctsa_name: EN_SampEn
-  #   ordered_args: ['M', 'r', 'preProcessHow']
+  SampleEntropy:
+    base_name: SampEn
+    labels:
+      - entropy
+    dependencies:
+    configs:
+      - M: 5
+        r: [0.05, 0.1, 0.15, 0.2, 0.3]
+        preProcessHow: ''
+        zscore: True
+      - M: 5
+        r: [0.1, 0.2]
+        preProcessHow: 'diff1'
+        zscore: True
+    hctsa_name: EN_SampEn
+    ordered_args: ['M', 'r', 'preProcessHow']
 
-  # MultiScaleEntropy:
-  #   base_name: mse
-  #   labels:
-  #     - entropy
-  #     - intensive
-  #   dependencies:
-  #   configs:
-  #     - scaleRange: [!range [1, 10]]
-  #       m: 2
-  #       r: 0.15
-  #       preProcessHow: ['diff1', 'rescale_tau']
-  #       zscore: True
-  #     - scaleRange: [!range [1, 10]]
-  #       m: 2
-  #       r: 0.15
-  #       zscore: True
-  #       preProcessHow:
-  #   hctsa_name: EN_mse
-  #   ordered_args: ['scaleRange', 'm', 'r', 'preProcessHow']
+  MultiScaleEntropy:
+    base_name: mse
+    labels:
+      - entropy
+      - intensive
+    dependencies:
+    configs:
+      - scaleRange: [!range [1, 10]]
+        m: 2
+        r: 0.15
+        preProcessHow: ['diff1', 'rescale_tau']
+        zscore: True
+      - scaleRange: [!range [1, 10]]
+        m: 2
+        r: 0.15
+        zscore: True
+        preProcessHow:
+    hctsa_name: EN_mse
+    ordered_args: ['scaleRange', 'm', 'r', 'preProcessHow']
   
   ShannonEntropy:
     base_name: shannon
