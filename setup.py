@@ -69,7 +69,7 @@ periodicity_wang_module = Extension(
 shannon_entropy_module = Extension(
     "pyhctsa.Toolboxes.Michael_Small.shannon",
     sources=[
-        "pyhctsa/Toolboxes/Michael_Small/MS_Shannon.c"
+        "pyhctsa/Toolboxes/Michael_Small/MS_shannon.c"
     ],
     include_dirs=["pyhctsa/Toolboxes/Michael_Small", np.get_include()],
     extra_compile_args=get_compile_args(),

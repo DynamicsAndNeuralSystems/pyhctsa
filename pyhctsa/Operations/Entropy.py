@@ -13,6 +13,39 @@ from ..Toolboxes.Michael_Small import shannon
 from ..Toolboxes.Max_Little import close_returns as _close_returns_c
 
 def ShannonEntropy(y : ArrayLike, numBins : Union[int, list[int]] = 2, depth : Union[int, list[int]] = 3) -> Union[float, dict, None]:
+    """
+    Approximate Shannon entropy of a time series.
+
+    Uses a numBin-bin encoding and depth-symbol sequences.
+    Uniform population binning is used, and the implementation uses Michael Small's code
+    MS_shannon.c.
+
+    Reference
+    ---------
+    M. Small, Applied Nonlinear Time Series Analysis: Applications in Physics,
+    Physiology, and Finance (book) World Scientific, Nonlinear Science Series A,
+    Vol. 52 (2005).
+    Michael Small's code is available at http://small.eie.polyu.edu.hk/matlab/
+
+    In this wrapper function, you can evaluate the code at a given n and d, and
+    also across a range of depth and numBin to return statistics on how the obtained
+    entropies change.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    numBins : int or list of int, optional
+        The number of bins to discretize the time series into (i.e., alphabet size).
+    depth : int or list of int, optional
+        The length of strings to analyze.
+
+    Returns
+    -------
+    float or dict or None
+        The normalized Shannon entropy for a given setting, or summary statistics
+        (max, min, median, mean, std) across a range of numBins or depths.
+    """
     y = np.asarray(y)
     binRangeSize = np.size(numBins)
     depthRangeSize = np.size(depth)
@@ -52,6 +85,37 @@ def ShannonEntropy(y : ArrayLike, numBins : Union[int, list[int]] = 2, depth : U
     return out 
 
 def DistributionEntropy(y : ArrayLike, histOrKS : str = 'hist', numBins : int = 10, olremp : float = 0) -> float:
+    """
+    Distributional entropy.
+
+    Estimates entropy from the distribution of a data vector. The distribution is estimated
+    either using a histogram with numBins bins, or as a kernel-smoothed distribution using
+    a Gaussian kernel.
+
+    An optional additional parameter can be used to remove a proportion of the most extreme
+    positive and negative deviations from the mean as an initial pre-processing step.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    histOrKS : str, optional
+        'hist' for histogram, or 'ks' for kernel density estimation.
+    numBins : int or float, optional
+        For 'hist': an integer, uses a histogram with that many bins.
+        For 'ks': a positive real number, the width parameter for kernel density estimation
+        (can also be empty for default width parameter, optimum for Gaussian).
+    olremp : float, optional
+        The proportion of outliers at both extremes to remove (e.g., if olremp = 0.01,
+        keeps only the middle 98% of data; 0 keeps all data). This parameter should be
+        less than 0.5. If specified, returns the difference in entropy from removing
+        the outliers.
+
+    Returns
+    -------
+    float
+        The estimated entropy, or the difference in entropy if outlier removal is used.
+    """
     # (1) Remove outliers?
     y = np.asarray(y)
     if olremp != 0:
