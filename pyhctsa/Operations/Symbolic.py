@@ -9,7 +9,7 @@ from scipy.stats import mstats
 
 
 def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numGroups : int = 3, coarseGrainMethod : str = 'quantile', 
-                numIters : int = 500, randomSeed : int = 0):
+                numIters : int = 500, randomSeed : int = 0) -> dict:
     """
     Quantifies how surprised you would be of the next data point given recent memory.
 
@@ -97,7 +97,6 @@ def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numG
         else:
             raise ValueError(f"Unknown method: {whatPrior}")
     
-    #print(store)
     # INFORMATION GAINED FROM NEXT OBSERVATION IS log(1/p) = -log(p)
     store[store == 0] = 1 # so that we set log[0] == 0
 

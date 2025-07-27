@@ -11,8 +11,79 @@ from ..Utilities.utils import ZScore
 from ..Operations.Stationarity import SlidingWindow
 from ..Operations.Correlation import FirstCrossing, AutoCorr
 
+def fitSubSegments(y, model = 'ar', order = 2, subsetHow = 'uniform', samplep = [20, 0.1]) -> dict:
+    y = np.asarray(y)
+    N = len(y)
+    numPred = samplep[0]
+    r = np.zeros((numPred, 2))
+    if subsetHow == 'uniform':
+        if len(samplep) == 1:  # size will depend on number of unique subsegments
+            spts = np.round(np.linspace(0, N, numPred + 1)).astype(int)  # numPred+1 boundaries = numPred portions
+            r = np.zeros((numPred, 2), dtype=int)
+            r[:, 0] = spts[:numPred] + 1  # +1 for 1-based indexing (if needed)
+            r[:, 1] = spts[1:]
+        else:
+            if samplep[1] < 1:  # specified a fraction of time series
+                l = int(np.floor(N * samplep[1]))
+            else:  # specified an absolute interval
+                l = int(samplep[1])
+            
+            spts = np.round(np.linspace(1, N - l + 1, numPred)).astype(int)  # numPred boundaries
+            r = np.zeros((numPred, 2), dtype=int)
+            r[:, 0] = spts
+            r[:, 1] = spts + l - 1
+    elif subsetHow == 'rand':
+        raise NotImplementedError("Subset method not yet implemented.")
+    else:
+        raise ValueError(f"Unknown subset method: {subsetHow}")  
+    # Fit the model to each training set
+    if model == 'ar':
+        avals = np.zeros((numPred,order))
+        for i in range(numPred):
+            dat = y[r[i, 0]:r[i, 1]]
+            m = AutoReg(dat, lags=order, trend='n')
+            results = m.fit()
+            avals[i, :] = -results.params
 
-def LoopLocalSimple(y, forecastMeth = 'mean'):
+        #TODO: % statistics on FPE
+        #% Statistics on fitted AR parameters
+        out = {}
+        for i in range(order):
+            out[f'a_{i+1}_std'] = np.std(avals[:, i], ddof=1)
+            out[f'a_{i+1}_mean'] = np.mean(avals[:, i])
+            out[f'a_{i+1}_max'] = np.max(avals[:, i])
+            out[f'a_{i+1}_min'] = np.min(avals[:, i])
+    elif model in ['arsbc', 'ss', 'arma']:
+        raise NotImplementedError("Model not yet implemented.")
+    else:
+        raise ValueError(f"Unknown model: {model}")
+    
+    return out
+
+
+def LoopLocalSimple(y : ArrayLike, forecastMeth : str = 'mean') -> dict:
+    """
+    How simple local forecasting depends on window length.
+    
+    Analyzes the outputs of LocalSimple for a range of local window lengths, l.
+    Loops over the length of the data to use for LocalSimple prediction.
+    
+    Parameters
+    ----------
+    y : array-like
+        The input time series
+    forecastMeth : str, optional
+        The prediction method:
+        - 'mean': local mean prediction
+        - 'median': local median prediction
+        Default is 'mean'
+        
+    Returns
+    -------
+    dict
+        Dictionary containing statistics about how forecasting performance varies
+        with window length.
+    """
     y = np.asarray(y)
     if forecastMeth == 'mean':
         trainLengthRange = np.arange(1, 11)
@@ -75,7 +146,34 @@ def LoopLocalSimple(y, forecastMeth = 'mean'):
 
     return out
 
-def LocalSimple(y, forecastMeth = 'mean', trainLength = 3):
+def LocalSimple(y : ArrayLike, forecastMeth : str = 'mean', trainLength : Union[int, str] = 3) -> dict:
+    """
+    Simple local time-series forecasting.
+    
+    Simple predictors using the past trainLength values of the time series to
+    predict its next value.
+    
+    Parameters
+    ----------
+    y : array-like
+        The input time series
+    forecastMeth : str, optional
+        The forecasting method:
+        - 'mean': local mean prediction using the past trainLength time-series values
+        - 'median': local median prediction using the past trainLength time-series values  
+        - 'lfit': local linear prediction using the past trainLength time-series values
+        Default is 'mean'
+    trainLength : int or str, optional
+        The number of time-series values to use to forecast the next value.
+        If 'ac', uses first zero-crossing of autocorrelation function.
+        Default is 1
+        
+    Returns
+    -------
+    dict
+        Dictionary containing output statistics on the residuals of the simple fortecasting method. 
+
+    """
     y = np.asarray(y)
     N = len(y)
     # % Do the local prediction

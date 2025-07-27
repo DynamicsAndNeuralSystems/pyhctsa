@@ -75,3 +75,18 @@ ModelFit:
         zscore: True
     hctsa_name: FC_LoopLocalSimple
     ordered_args: ["forecastMeth"]
+  
+  fitSubSegments:
+    base_name: FitSubsegments
+    labels:
+      - models
+      - modelfit
+    dependencies:
+      - statsmodels
+    configs:
+      - model: 'ar'
+        order: 2
+        subsetHow: 'uniform'
+        samplep: [[25, 0.1]]
+    hctsa_name: MF_FitSubsegments
+    ordered_args: ["model", "order", "subsetHow", "samplep"]
