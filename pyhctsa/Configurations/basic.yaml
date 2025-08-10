@@ -1604,4 +1604,18 @@ PreProcess:
         zscore: False
     hctsa_name: PP_Compare
     ordered_args: ["detrendMeth"]
-  
+
+Surrogates:
+  SurrogateTest:
+    base_name: SurrogateTest
+    labels:
+      - surrogates
+    dependencies:
+    configs:
+      - surrMeth: "RP"
+        numSurrs: 99
+        theTestStat: [['ami1','fmmi','o3','tc3']]
+        zscore: True
+    hctsa_name: SD_SurrogateTest
+    ordered_args: ["surrMeth","numSurrs","theTestStat"]
+    

@@ -7,6 +7,7 @@ from scipy.signal import resample_poly
 from pyhctsa.Utilities.utils import ZScore
 from pyhctsa.Operations.Distribution import OutlierTest
 
+
 def _medfilt1d(x, k):
     """Apply a length-k median filter to a 1D array x.
     Taken from https://gist.github.com/bhawkins/3535131.
