@@ -8,7 +8,7 @@ from loguru import logger
 from ..Utilities.utils import signChange, RM_histogram2
 
 
-def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, minNotMax : Union[bool, None] = True):
+def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, minNotMax : Union[bool, None] = True) -> int:
     """
     Time of first minimum in a given self-correlation function.
 
@@ -89,7 +89,7 @@ def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, minNotM
     return np.nan
 
 
-def _mi_bin(v1, v2, r1 = 'range', r2 = 'range', numBins = 10):
+def _mi_bin(v1, v2, r1 = 'range', r2 = 'range', numBins = 10) -> float:
     """
     Compute mutual information between two data vectors using bin counting.
 

@@ -41,3 +41,17 @@ Wavelet:
     hctsa_name: WL_cwt
     ordered_args: ["wname", "maxScale"]
   
+  dwtCoeff:
+    base_name: dwtcoeff
+    labels:
+      - wavelet
+    dependencies:
+      - pywt
+      - PyWavelets
+    configs:
+      - wname: ['db3', 'sym2']
+        level: 5
+        zscore: True
+    hctsa_name: WL_dwtcoeff
+    ordered_args: ["wname", "level"]
+  

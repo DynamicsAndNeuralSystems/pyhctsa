@@ -5,6 +5,62 @@ from numpy.typing import ArrayLike
 from typing import Union
 from ..Utilities.utils import signChange
 
+def dwtCoeff(y : ArrayLike, wname : str = 'db3', level : int = 3) -> dict:
+    """
+    Discrete wavelet transform coefficients.
+
+    Decomposes the time series using a given wavelet and outputs statistics on the
+    coefficients obtained up to a maximum level, level.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    wname : str, optional
+        The mother wavelet, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), etc. Default is 'db3'.
+    level : int, optional
+        The level of wavelet decomposition (can be set to 'max' for the maximum level determined by wmaxlev)
+            
+    Returns
+    -------
+    dict
+        Dictionary of statistics on the DWT coefficients.
+    """
+    y = np.asarray(y)
+    N = len(y)
+    if level == 'max':
+        level = pywt.dwt_max_level(N, wname)
+    maxLevelAllowed = pywt.dwt_max_level(N, wname)
+    if maxLevelAllowed < level:
+        print("Chosen level is too large for this wavelet on this signal....\n")
+    #%% Perform Wavelet Decomposition
+    C, L = None, None
+    if maxLevelAllowed < level: # if level exceeds max level, just use max level instead
+        C, L = wavedec(y, wavelet=wname, level=maxLevelAllowed)
+    else:
+        C, L = wavedec(y, wavelet=wname, level=level)
+    #%% Get statistics on coefficients
+    out = {}
+    for k in range(1, level+1):
+        if k <= maxLevelAllowed:
+            d = detcoef(coefs=C, lengths=L, levels=k) # detail coeffs at level k
+            # max coeff at this level
+            out[f'maxd_l{k}'] = np.max(d)
+            #% minimum coefficient at this level:
+            out[f'mind_l{k}'] = np.min(d)
+            # std coefficients at this level:
+            out[f'stdd_l{k}'] = np.std(d, ddof=1)
+            #% 1-D noise coefficient estimate (estimate of the noise std):
+            out[f'noisestd_l{k}'] = np.median(np.abs(d)) / 0.67448975
+        else:
+            # exceeds max level, return nans
+            out[f'maxd_l{k}'] = np.nan 
+            out[f'mind_l{k}'] = np.nan 
+            out[f'stdd_l{k}'] = np.nan
+            out[f'noisestd_l{k}'] = np.nan
+    
+    return out
+
 def CWT(y : ArrayLike, wname : str = 'db3', maxScale : int = 32) -> dict:
     """
     Continuous wavelet transform of a time series.
