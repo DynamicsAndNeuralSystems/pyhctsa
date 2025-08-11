@@ -1411,6 +1411,33 @@ Wavelet:
     hctsa_name: WL_dwtcoeff
     ordered_args: ["wname", "level"]
   
+  scal2Frq:
+    base_name: scal2frq
+    labels: 
+      - wavelet
+    depedencies:
+      - pywt
+      - PyWavelets
+    configs:
+      - wname: 'db3'
+        amax: 'max'
+        delta: 1
+        zscore: True
+    hctsa_name: WL_scal2frq
+    ordered_args: ["wname", "amax", "delta"]
+  
+  wfBM_estimate:
+    base_name: fBM
+    labels:
+      - wavelet
+    depedencies:
+      - pywt
+      - PyWavelets
+    configs:
+      - zscore: True
+    hctsa_name: WL_fBM
+    ordered_args: 
+  
 HypothesisTests:
   HypothesisTest:
     base_name: HypothesisTest

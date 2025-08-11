@@ -5,6 +5,111 @@ from numpy.typing import ArrayLike
 from typing import Union
 from ..Utilities.utils import signChange
 
+def wfBM_estimate(x : ArrayLike) -> dict:
+    """
+    Parameters of fractional Gaussian noise/Brownian motion in a time series.
+
+    Based on an adaptation of the wfbmesti function in MATLAB.
+
+    Parameters
+    ----------
+    x : array-like
+        The input time series.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the three estimates of the fractal index H of the signal x: 
+        - (i) using a second order discrete derivative, 
+        - (ii) using a second order discrete derivative with wavelets, 
+        - (iii) using wavelet variance versus wavelet level.
+    """
+    x = np.asarray(x)
+    y = np.cumsum(np.diff(x))
+    b1 = np.array([1.0, -2.0, 1.0])
+    b2 = np.array([1.0, 0.0, -2.0, 0.0, 1.0])
+    y1 = np.convolve(y, b1, mode='valid')
+    y2 = np.convolve(y, b2, mode='valid')
+    s1 = np.mean(y1**2)
+    s2 = np.mean(y2**2)
+    H1 = 0.5 * np.log2(s2 / s1)
+
+    w = pywt.Wavelet('sym5')
+    c1 = np.array(w.dec_hi, dtype=float)
+    c2 = np.zeros(2 * len(c1))
+    c2[::2] = c1
+    cy1 = np.convolve(y, c1,  mode='valid')
+    cy2 = np.convolve(y, c2,  mode='valid')
+    cs1 = np.mean(cy1**2)
+    cs2 = np.mean(cy2**2)
+    H2 = 0.5*np.log2(cs2 / cs1)
+
+    level_decomp = min(pywt.dwt_max_level(len(x), 'haar'), 6)
+    C, L = wavedec(x, wavelet='haar', level=level_decomp)
+    all_levels = np.arange(1, level_decomp+1)
+    stdc = np.zeros(len(all_levels))
+    for i in range(len(all_levels)):
+        d = detcoef(coefs=C, lengths=L, levels=all_levels[i])
+        stdc_val = np.median(np.abs(d)) / 0.67448975
+        stdc[i] = stdc_val
+    po = np.polyfit(all_levels, np.log2(stdc**2), 1)
+    H3 = (po[0] - 1)/2
+
+    return {"p1": H1, "p2": H2, "p3": H3}
+
+def scal2Frq(y, wname = 'db3', amax = 5, delta = 1) -> dict:
+    """
+    Frequency components in a periodic time series
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    wname : str, optional
+        The name of the mother wavelet to analyze the data with: e.g., 'db3', 'sym2'.
+    amax : int, optional
+        The maximum scale / level (can be 'max' to set according to wmaxlev)
+    delta: int, optional
+        TThe sampling period.
+            
+    Returns
+    -------
+    dict
+        Dictionary containing the level with the highest energy coefficients, the dominant period, and the dominant pseudo-frequency.
+    """
+    y = np.asarray(y)
+    N = len(y)
+    maxlevel = pywt.dwt_max_level(N, wname)
+    if amax == 'max':
+        amax = maxlevel
+    if maxlevel < amax:
+        print(f'Chosen level {amax} is too large for this wavelet on this signal...')
+        amax = maxlevel # set to max allowed level
+        print(f'changed to maximum level computed with wmaxlev: {amax}')
+
+    # % Define scales.
+    scales = np.arange(1, amax+1)
+    a = 2**scales
+    # Compute associated pseudo-frequencies.
+    f = pywt.scale2frequency(wname, a, delta+1)
+    # Compute associated pseudo-periods.
+    per = 1/f
+    #Decompose the time series at level specified as maximum
+    C, L = wavedec(y, wavelet=wname, level=amax)
+    #Estimate standard deviation of detail coefficients.
+    stdc = []
+    for k in range(1, amax+1):
+        d = detcoef(coefs=C, lengths=L, levels=k)
+        stdc_val = np.median(np.abs(d)) / 0.67448975
+        stdc.append(stdc_val)
+    #% Compute identified period.
+    jmax = np.argmax(stdc)
+    out = {"lmax": jmax + 1, # level with highest energy coefficients
+           "period": per[jmax], #% output dominant period
+           "pf": f[jmax]} # output dominant pseudo-frequency
+
+    return out
+
 def dwtCoeff(y : ArrayLike, wname : str = 'db3', level : int = 3) -> dict:
     """
     Discrete wavelet transform coefficients.
