@@ -11,7 +11,37 @@ from ..Utilities.utils import ZScore
 from ..Operations.Stationarity import SlidingWindow
 from ..Operations.Correlation import FirstCrossing, AutoCorr
 
-def fitSubSegments(y, model = 'ar', order = 2, subsetHow = 'uniform', samplep = [20, 0.1]) -> dict:
+def fitSubSegments(y : ArrayLike, model : str = 'ar', order : int = 2, subsetHow : str = 'uniform', samplep = [20, 0.1]) -> dict:
+    """
+    Robustness of model parameters across different segments of a time series.
+
+    The spread of parameters obtained (including in-sample goodness of fit statistics) provides some indication of stationarity.
+    Values of goodness of fit provide some indication of model suitability.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    model : str, optional
+        The model to fit in each segment of the time series:
+            - 'ar': fits an AR model of a specified order using the code ar from Matlab's System Identification Toolbox.
+              Outputs are on how Akaike's Final Prediction Error (FPE), and the fitted AR parameters vary across the different segments of time series.
+    order : int, optional
+        The order of the model to fit (used for 'ar', 'ss', or 'arma' models).
+    subsetHow : str, optional
+        How to choose segments from the time series, either 'uniform' (uniformly) or 'rand' (at random).
+    samplep : list or tuple, optional
+        A two-vector specifying how many segments to take and of what length.
+        Of the form [nsamples, length], where length can be a proportion of the time-series length.
+        For example, [20, 0.1] takes 20 segments of 10% the time-series length.
+    randomSeed : int, optional
+        Whether (and how) to reset the random seed (for when subsetHow is 'rand').
+
+    Returns
+    -------
+    dict
+        Dictionary of statistics on the spread and mean of fitted model parameters and goodness of fit across segments.
+    """
     y = np.asarray(y)
     N = len(y)
     numPred = samplep[0]
