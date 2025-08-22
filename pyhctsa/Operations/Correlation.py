@@ -42,6 +42,7 @@ def TheilerQ(y : ArrayLike) -> float:
     if y2 != 0:
         d2 = y[:-1] + y[1:]
         Q = np.mean(d2 **3)/y2
+
     return float(Q)
 
 def Crinkle(y : ArrayLike) -> float:
@@ -79,6 +80,7 @@ def Crinkle(y : ArrayLike) -> float:
     if y2 != 0:
         d2 = (2 * y[1:-1]) - y[:-2] - y[2:]
         out = np.mean(d2 ** 4)/y2
+
     return float(out)
 
 def TimeRevKaplan(y : ArrayLike, timeLag : int = 1) -> float:
@@ -128,6 +130,7 @@ def _lagEmbed(x, m, lag=1):
         start_index = (m - 1 - i) * lag
         end_index = start_index + new_size
         y[:, i] = x[start_index:end_index]
+
     return y
 
 def Embed2_AngleTau(y : ArrayLike, maxTau : int) -> dict:
@@ -190,7 +193,6 @@ def Embed2_AngleTau(y : ArrayLike, maxTau : int) -> dict:
 
     out['meanrat_thetaac12'] = out['mean_thetaac1'] / out['mean_thetaac2']
     out['diff_thetaac12'] = np.sum(np.abs(stats_store[1, :] - stats_store[0, :]))
-
     return out
 
 def Embed2(y: ArrayLike, tau: str = 'tau') -> dict:
@@ -300,7 +302,6 @@ def Embed2(y: ArrayLike, tau: str = 'tau') -> dict:
     
     out['areas_50'] = np.ptp(m[r50, 0]) * np.ptp(m[r50, 1])
     out['arearat'] = out['areas_50'] / out['areas_all']
-
     return out 
 
 
@@ -351,6 +352,7 @@ def PeriodicityWang(y : ArrayLike) -> dict:
         Dictionary containing periodicity measures for each threshold
     """
     y = np.asarray(y)
+
     return periodicity_wang(y)
 
 def CompareMinAMI(y : ArrayLike, binMethod : str = 'std1', numBins : int = 10) -> dict:
@@ -847,10 +849,9 @@ def PartialAutoCorr(y : ArrayLike, maxTau : int = 10, whatMethod : str = 'ols') 
 
     return out
 
-
 def Embed2Dist(y : ArrayLike, tau : Union[None, str] = None) -> dict:
     """
-    Analyzes distances in a 2-dim embedding space of a time series.
+    Analyzes distances in a 2-dimensional embedding space of a time series.
 
     Returns statistics on the sequence of successive Euclidean distances between
     points in a two-dimensional time-delay embedding space with a given
@@ -860,12 +861,18 @@ def Embed2Dist(y : ArrayLike, tau : Union[None, str] = None) -> dict:
     spread of distances, and statistics from an exponential fit to the
     distribution of distances.
 
-    Parameters:
-    y (array-like): A z-scored column vector representing the input time series.
-    tau (int, optional): The time delay. If None, it's set to the first minimum of the autocorrelation function.
+    Parameters
+    ----------
+    y : array-like
+        The z-scored input time series (1D array).
+    tau : (int, optional)
+        The time delay. If None, it's set to the first minimum of the autocorrelation function.
 
-    Returns:
-    dict: A dictionary containing various statistics of the embedding.
+    Returns
+    -------
+    dict: 
+        A dictionary containing various statistics of the embedding including the autocorrelation of distances, the mean distance, the
+        spread of distances, and statistics from an exponential fit to the distribution of distances.
     """
     y = np.asarray(y)
     N = len(y) # time-series length
@@ -912,11 +919,12 @@ def Embed2Dist(y : ArrayLike, tau : Union[None, str] = None) -> dict:
     out['d_expfit_nlogL'] = nlogL
 
     # Calculate histogram
-    bin_edges = binpicker(d.min(), d.max(), nbins=27)
+    # % Sum of abs differences between exp fit and observed:
+    bin_edges = binpicker(d.min(), d.max(), nbins=np.floor(np.sqrt(len(d))))
     N, bin_edges = np.histogram(d, bins=bin_edges, density=True)
     bin_centers = np.mean(np.vstack([bin_edges[:-1], bin_edges[1:]]), axis=0)
-    #exp_fit = expon.pdf(bin_centers, scale=1/l)
-    #out['d_expfit_meandiff'] = np.mean(np.abs(N - exp_fit))
+    exp_fit = expon.pdf(bin_centers, scale=1/l)
+    out['d_expfit_meandiff'] = np.mean(np.abs(N - exp_fit))
 
     return out
 
@@ -930,7 +938,7 @@ def Embed2Basic(y : ArrayLike, tau : Union[int, str] = 1) -> dict:
 
     Parameters
     -----------
-    y : array_like
+    y : array-like
         The input time series.
     tau : int or str, optional
         The time lag (can be set to 'tau' to set the time lag to the first zero
@@ -1016,9 +1024,9 @@ def Embed2Shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau', shape : str
     embedding space sequentially. This function counts the points inside this shape
     as a function of time, and returns statistics on this extracted time series.
 
-    Parameters:
+    Parameters
     -----------
-    y : array_like
+    y : array-like
         The input time-series as a (z-scored) column vector.
     tau : int or str, optional
         The time-delay. If 'tau', it's set to the first zero crossing of the autocorrelation function.
@@ -1027,7 +1035,7 @@ def Embed2Shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau', shape : str
     r : float, optional
         The radius of the circle.
 
-    Returns:
+    Returns
     --------
     dict
         A dictionary containing various statistics of the constructed time series.
@@ -1075,7 +1083,7 @@ def Embed2Shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau', shape : str
     out['iqronrange'] = out['iqr']/np.ptp(counts)
 
     # distribution - using sqrt binning method
-    # numBinsToUse = int(np.ceil(np.sqrt(len(counts)))) # supposed to be what MATLAB uses for 'sqrt' option.
+    # numBinsToUse = int(np.ceil(np.sqrt(len(counts))))
     # binCountsNorm, binEdges = np.histogram(counts, density=True, bins=numBinsToUse)
     # #minX, maxX = np.min(counts), np.max(counts)
     # #binEdges = binpicker(minX, maxX, nbins=numBinsToUse)
@@ -1109,7 +1117,7 @@ def FZCGLSCF(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int], ma
 
     Parameters
     ----------
-    y : array_like
+    y : array-like
         The input time series
     alpha : float 
         The parameter alpha for GLSCF calculation. Must be non-zero.
@@ -1166,7 +1174,7 @@ def GLSCF(y : ArrayLike, alpha : float, beta : float, tau : Union[int, str] = 't
 
     Parameters
     ----------
-    y : array_like
+    y : array-like
         The input time series
     alpha : float 
         Exponent applied to the earlier time point x(t). Must be non-zero.
@@ -1210,9 +1218,9 @@ def AutoCorr(y: ArrayLike, tau: Union[int, list] = 1, method: str = 'Fourier') -
     """
     Compute the autocorrelation of an input time series.
 
-    Parameters:
+    Parameters
     -----------
-    y : array_like
+    y : array-like
         A scalar time series column vector.
     tau : int, list, optional
         The time-delay. If tau is a scalar, returns autocorrelation for y at that
@@ -1222,7 +1230,7 @@ def AutoCorr(y: ArrayLike, tau: Union[int, list] = 1, method: str = 'Fourier') -
         The method of computing the autocorrelation: 'Fourier',
         'TimeDomainStat', or 'TimeDomain'.
 
-    Returns:
+    Returns
     --------
     float or array
         The autocorrelation at the given time lag(s).
@@ -1299,7 +1307,7 @@ def FirstCrossing(y: ArrayLike, corrFun: str = 'ac', threshold: float = 0.0, wha
 
     Parameters
     -----------
-    y : array_like
+    y : array-like
         The input time series
     corrFun : str, optional
         The self-correlation function to measure:
@@ -1312,7 +1320,7 @@ def FirstCrossing(y: ArrayLike, corrFun: str = 'ac', threshold: float = 0.0, wha
     Returns
     --------
     dict or float
-        The first crossing information, format depends on whatOut
+        The first crossing information, format depends on whatOut.
     """
     # Select the self-correlation function
     if corrFun == 'ac':
@@ -1484,7 +1492,7 @@ def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dic
 
     Parameters
     -----------
-    y : array_like
+    y : array-like
         The input time series
     stopWhen : str or int, optional
         The criterion for the maximum lag to measure the ACF up to.
@@ -1628,7 +1636,6 @@ def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dic
         expFit = expFunc(np.arange(Nac), bFit)
         residuals = acf - expFit
         out['fexpacf_r2'] = 1 - (np.sum(residuals**2) / np.sum((acf - np.mean(acf))**2))
-        # had to fit a second exponential function with negative b to get same output as MATLAB for std residuals
         expFit2 = expFunc(np.arange(Nac), -bFit)
         residuals2 = acf - expFit2
         out['fexpacf_stdres'] = np.std(residuals2, ddof=1) 
@@ -1644,9 +1651,10 @@ def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dic
 
 def TRev(y : ArrayLike, tau : Union[int, str] = 'ac') -> dict:
     """
-    CO_trev: Normalized nonlinear autocorrelation (trev) function of a time series.
+    Normalized nonlinear autocorrelation (trev) function of a time series.
 
-    Calculates the trev function, a normalized nonlinear autocorrelation, as described in the TSTOOL nonlinear time-series analysis package. This quantity is often used as a nonlinearity statistic in surrogate data analysis,
+    Calculates the trev function, a normalized nonlinear autocorrelation, as described in the TSTOOL nonlinear time-series analysis package. 
+    This quantity is often used as a nonlinearity statistic in surrogate data analysis,
     see: "Surrogate time series", T. Schreiber and A. Schmitz, Physica D, 142(3-4), 346 (2000).
 
     Parameters
@@ -1726,7 +1734,6 @@ def TC3(y : list, tau : Union[int, str, None] = 'ac'):
 
     Returns
     -------
-
     dict
         A dictionary containing:
         - 'raw': The raw tc3 expression

@@ -102,8 +102,7 @@ def ZScore(x : ArrayLike) -> np.ndarray:
 
     return zscored_data
 
-def histc(x, bins):
-    # reproduce the behaviour of MATLAB's histc function
+def histc(x : ArrayLike, bins : ArrayLike) -> int:
     map_to_bins = np.digitize(x, bins) # Get indices of the bins to which each value in input array belongs.
     res = np.zeros(bins.shape)
     for el in map_to_bins:
@@ -113,8 +112,6 @@ def histc(x, bins):
 def binpicker(xmin, xmax, nbins, bindwidthEst=None):
     """
     Choose histogram bins. 
-    A 1:1 port of the internal MATLAB function.
-
 
     Parameters:
     -----------
