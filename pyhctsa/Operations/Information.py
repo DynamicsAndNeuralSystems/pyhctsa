@@ -7,7 +7,6 @@ from scipy import stats
 from loguru import logger
 from ..Utilities.utils import signChange, RM_histogram2
 
-
 def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, minNotMax : Union[bool, None] = True) -> int:
     """
     Time of first minimum in a given self-correlation function.

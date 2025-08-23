@@ -1,8 +1,7 @@
 import numpy as np
 from numpy.typing import ArrayLike
-from typing import Dict
 
-def MovingThreshold(y : ArrayLike, a : float = 1.0, b : float = 0.1) -> Dict[str, float]:
+def MovingThreshold(y : ArrayLike, a : float = 1.0, b : float = 0.1) -> dict:
     """
     Moving threshold model for extreme events in a time series.
 
@@ -12,13 +11,13 @@ def MovingThreshold(y : ArrayLike, a : float = 1.0, b : float = 0.1) -> Dict[str
 
     This algorithm uses the occurrence of extreme events to modify a hypothetical 
     'barrier' that classifies new points as 'extreme' or not. The barrier begins 
-    at sigma (standard deviation), and:
-    - If |next_point| > barrier: barrier increases by proportion 'a'
-    - Otherwise: barrier decreases by proportion 'b'
+    at sigma (standard deviation), and if the absolute value of the next data point
+    is greater than the barrier, the barrier is increased by a proportion 'a',
+    otherwise the position of the barrier is decreased by a proportion 'b'.
 
     Parameters
     ----------
-    y : ArrayLike
+    y : array-like
         The input time series (should be z-scored)
     a : float, optional (default=1.0)
         The barrier jump parameter - how much to increase barrier after extreme event
@@ -27,7 +26,7 @@ def MovingThreshold(y : ArrayLike, a : float = 1.0, b : float = 0.1) -> Dict[str
 
     Returns
     -------
-    Dict[str, float]
+    dict
         Dictionary containing barrier and kick statistics.
     """
     y = np.asarray(y)

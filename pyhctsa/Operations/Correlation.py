@@ -1664,9 +1664,8 @@ def TRev(y : ArrayLike, tau : Union[int, str] = 'ac') -> dict:
     tau : int or str, optional
         Time lag. Can be:
             - int: Use the specified lag.
-            - 'ac': Use the first zero-crossing of the autocorrelation function.
+            - 'ac': Use the first zero-crossing of the autocorrelation function (default).
             - 'mi': Use the first minimum of the automutual information function.
-        Default is 'ac'.
 
     Returns
     -------

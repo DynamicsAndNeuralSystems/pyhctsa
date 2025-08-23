@@ -24,6 +24,23 @@ Entropy:
         zscore: True 
     hctsa_name: EN_DistributionEntropy
     ordered_args: ['histOrKS', 'numBins', 'olremp']
+  
+  PermEn:
+    labels:
+      - entropy
+      - symbolic
+      - ordinal
+    dependencies:
+      - antropy 
+    configs:
+      - m: [2, 3, 4, 5]
+        tau: 1
+        zscore: True
+      - m: [2, 3, 4, 5]
+        tau: 2
+        zscore: True
+    hctsa_name: EN_PermEn
+    ordered_args: ['m', 'tau']
 
   LZComplexity:
     base_name: LZcomplexity
@@ -68,9 +85,9 @@ Entropy:
       - m: 3
         tau: 1
         zscore: True
-      # - m: 3
-      #   tau: 'ac'
-      #   zscore: True
+      - m: 3
+        tau: 'ac'
+        zscore: True
     hctsa_name: EN_rpde
     ordered_args: ['m', 'tau']
   

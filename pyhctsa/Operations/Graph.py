@@ -79,6 +79,7 @@ def VisibilityGraph(y : ArrayLike, meth : str = 'horiz', maxL : int = 5000) -> d
     y = y - np.min(y) # adjust so that the minimum of y is at zero
 
     # Compute the visibility graph:
+    k = np.zeros(1)
     if meth == 'horiz':
         A = _horiz_vgraph(y)
         k = A.sum(axis=0)
