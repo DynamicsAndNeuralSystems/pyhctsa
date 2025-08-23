@@ -275,3 +275,18 @@ Distribution:
         zscore: True
     hctsa_name: DN_RemovePoints
     ordered_args: ["removeHow", "p", "removeOrSaturate"]
+
+  CompareKSFit:
+    base_name: CompareKSFit
+    labels:
+      - distribution
+      - ksdensity
+      - raw
+    dependencies:
+      - scipy
+    configs:
+      - whatDistn: ['norm', 'ev', 'uni', 'exp', 'logn']
+        zscore: False
+    hctsa_name: DN_CompareKSFit
+    ordered_args: ['whatDistn']
+    

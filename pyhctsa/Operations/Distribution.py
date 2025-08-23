@@ -2,28 +2,191 @@ import numpy as np
 from numpy.typing import ArrayLike
 from typing import Dict, Union
 from scipy import stats
+from scipy.stats import norm, gumbel_l, uniform, expon, lognorm, gaussian_kde
 from loguru import logger
 from ..Utilities.utils import histc, binpicker, simple_binner, xcorr
-from ..Operations.Correlation import AutoCorr
+from ..Operations.Correlation import AutoCorr, FirstCrossing
 
+
+def _find_bounds(pdf_func, start_left, start_right, xStep, thresh):
+    """Expand left/right until pdf falls below threshold."""
+    xf = [start_left, start_right]
+
+    # Left search (only if start_left is not None)
+    if start_left is not None:
+        ange = 10
+        while ange > thresh:
+            xf[0] -= xStep
+            ange = pdf_func(xf[0])
+
+    # Right search
+    ange = 10
+    while ange > thresh:
+        xf[1] += xStep
+        ange = pdf_func(xf[1])
+
+    return xf
+
+def CompareKSFit(x : ArrayLike, whatDistn : str) -> dict:
+    """
+    Fits a distribution to data.
+
+    Returns simple statistics on the discrepancy between the kernel-smoothed distribution
+    of the time-series values and the distribution fitted to it by some model:
+    Gaussian, Extreme Value, Uniform, Exponential, and LogNormal.
+
+    Parameters
+    ----------
+    x : array-like
+        The input data vector.
+    whatDistn : str
+        The type of distribution to fit to the data:
+            - 'norm': normal
+            - 'ev': extreme value
+            - 'uni': uniform
+            - 'exp': exponential
+            - 'logn': Log-Normal
+
+    Returns
+    -------
+    dict
+        Includes the absolute area between the two distributions, the peak separation,
+        overlap integral, and relative entropy.
+    """
+    
+    x = np.asarray(x)
+    xStep = np.std(x, ddof=1)/100  # set a step size
+
+    # ----------------------------
+    # Fit distribution & thresholds
+    # ----------------------------
+    if whatDistn == 'norm':
+        # Fit a normal distribution
+        a, b = norm.fit(x)
+        peaky = norm.pdf(a, loc=a, scale=b)
+        thresh = peaky / 100.0  # stop when gets to 1/100 of peak value
+        pdf_func  = lambda z: norm.pdf(z, loc=a, scale=b)
+        xf = _find_bounds(pdf_func, np.mean(x), np.mean(x), xStep, thresh)
+        ffit_func = lambda xi: norm.pdf(xi, loc=a, scale=b)
+
+    elif whatDistn == 'ev':
+        # Fit an extreme value (Gumbel, left) distribution
+        loc, scale = gumbel_l.fit(x)
+        peaky = gumbel_l.pdf(loc, loc=loc, scale=scale)
+        thresh = peaky / 100.0
+        pdf_func  = lambda z: gumbel_l.pdf(z, loc=loc, scale=scale)
+        xf = _find_bounds(pdf_func, 0.0, 0.0, xStep, thresh)
+        ffit_func = lambda xi: gumbel_l.pdf(xi, loc=loc, scale=scale)
+
+    elif whatDistn == 'uni':
+        # Fit a uniform distribution
+        loc, scale = uniform.fit(x)
+        a, b = loc, loc + scale
+        # Peak of uniform PDF = 1 / (b - a)
+        peaky = uniform.pdf(np.mean(x), loc=a, scale=(b - a))
+        thresh = peaky / 100.0
+        pdf_func  = lambda z: uniform.pdf(z, loc=a, scale=(b - a))
+        xf = _find_bounds(pdf_func, 0.0, 0.0, xStep, thresh)
+        ffit_func = lambda xi: uniform.pdf(xi, loc=a, scale=(b - a))
+
+    elif whatDistn == 'exp':
+        # Check positivity
+        if np.any(x < 0):
+            print("The data contains negative values, but Exponential is a positive-only distribution.")
+            return np.nan
+        # Check constant
+        if np.all(x == x[0]):
+            print("Data are a constant")
+            return np.nan
+        # Fit Exponential distribution (equivalent to expfit in MATLAB)
+        _, lam = expon.fit(x, floc=0)  # force support at 0
+        # Peak of PDF occurs at 0
+        peaky = expon.pdf(0, loc=0, scale=lam)
+        thresh = peaky / 100.0
+        pdf_func  = lambda z: expon.pdf(z, loc=0, scale=lam)
+        xf = _find_bounds(pdf_func, 0.0, 0.0, xStep, thresh)
+        ffit_func = lambda xi: expon.pdf(xi, loc=0, scale=lam)
+
+    elif whatDistn == 'logn':
+        # Check positivity
+        if np.any(x <= 0):
+            print("The data are not positive, but Log-Normal is a positive-only distribution.")
+            return np.nan
+        # Fit log-normal distribution
+        shape, loc, scale = lognorm.fit(x, floc=0)  # sigma, 0, exp(mu)
+        sigma = shape
+        mu = np.log(scale)
+        # Mode of log-normal
+        mode = np.exp(mu - sigma**2)
+        # Peak PDF value at the mode
+        peaky = lognorm.pdf(mode, s=sigma, loc=0, scale=np.exp(mu))
+        thresh = peaky / 100.0
+        pdf_func  = lambda z: lognorm.pdf(z, s=sigma, loc=0, scale=np.exp(mu))
+        xf = _find_bounds(pdf_func, 0.0, mode, xStep, thresh)
+        ffit_func = lambda xi: lognorm.pdf(xi, s=sigma, loc=0, scale=np.exp(mu))
+
+    else:
+        raise ValueError(f"Unknown distribution:  {whatDistn}.")
+
+    # ----------------------------
+    # Estimate smoothed empirical distribution
+    # ----------------------------
+    xi = np.linspace(np.min(x), np.max(x), 100)
+    # Calculate the Kernel Density Estimate (KDE) for the first angle distribution.
+    kde = gaussian_kde(x)
+    f = kde(xi)
+    xi = xi[f > 1e-6]  # only keep values greater than 1E-6
+    if xi.size == 0:
+        return np.nan
+    # Round outward
+    xi = [np.floor(xi[0] * 10) / 10, np.ceil(xi[-1] * 10) / 10]
+    # Find appropriate range [x1 x2] that incorporates the full range of both
+    x1 = min(xf[0], xi[0])
+    x2 = max(xf[1], xi[1])
+
+    # Rerun both over the same range
+    xi = np.linspace(x1, x2, 1000)
+    f = kde(xi)
+    ffit = ffit_func(xi)
+
+    # ----------------------------
+    # Statistics
+    # ----------------------------
+    dx = xi[1] - xi[0]
+    out = {}
+    # ADIFF: returns absolute area between the curves
+    out['adiff'] = np.sum(np.abs(f - ffit) * dx)
+    # PEAKSEPY: separation (in y) between the maxima of each distribution
+    out['peaksepy'] = np.max(ffit) - np.max(f)
+    # PEAKSEPX: separation (in x) between the maxima of each distribution
+    i1 = np.argmax(f)
+    i2 = np.argmax(ffit)
+    out['peaksepx'] = xi[i2] - xi[i1]
+    # OLAPINT: overlap integral between the two curves; normalized by variance
+    out['olapint'] = np.sum(f * ffit * dx) * np.std(x, ddof=1)
+    # RELENT: relative entropy of the two distributions
+    r = ffit > 0
+    out['relent'] = np.sum(f[r] * np.log(f[r] / ffit[r]) * dx)
+
+    return out
 
 def Withinp(x : ArrayLike, p : float = 1.0, meanOrMedian : str = 'mean') -> float:
     """
     Proportion of data points within p standard deviations of the mean or median.
 
-    Parameters:
+    Parameters
     -----------
-    x (array-like): The input data vector
-    p (float): The number (proportion) of standard deviations
-    meanOrMedian (str): Whether to use units of 'mean' and standard deviation,
-                          or 'median' and rescaled interquartile range
+    x : array-like
+        The input data vector
+    p : float
+        The number (proportion) of standard deviations
+    meanOrMedian : str 
+        Whether to use units of 'mean' and standard deviation, or 'median' and rescaled interquartile range.
 
-    Returns:
+    Returns
     --------
-    float: The proportion of data points within p standard deviations
-
-    Raises:
-    ValueError: If mean_or_median is not 'mean' or 'median'
+    float: 
+        The proportion of data points within p standard deviations
     """
     x = np.asarray(x)
     N = len(x)
@@ -48,12 +211,12 @@ def Unique(y : ArrayLike) -> float:
     Parameters
     ----------
     y : array-like
-        The input time series or data vector
+        The input time series or data vector.
 
     Returns
     -------
     float
-        the proportion of time series that are unique values
+        The proportion of time series that are unique values.
     """
     y = np.asarray(y)
     return np.divide(len(np.unique(y)), len(y))
@@ -64,12 +227,11 @@ def Spread(y : ArrayLike, spreadMeasure : str = 'std') -> float:
     Measure of spread of the input time series.
 
     Returns the spread of the raw data vector using different statistical measures.
-    This is part of the Distributional operations from hctsa, implementing DN_Spread.
 
     Parameters
     ----------
     y : array-like
-        The input time series or data vector
+        The input time series or data vector.
     spreadMeasure : str, optional
         The spread measure to use (default is 'std'):
         - 'std': standard deviation
@@ -80,7 +242,7 @@ def Spread(y : ArrayLike, spreadMeasure : str = 'std') -> float:
     Returns
     -------
     float
-        The calculated spread measure
+        The calculated spread measure.
     """
     y = np.asarray(y)
     if spreadMeasure == 'std':
@@ -97,21 +259,24 @@ def Spread(y : ArrayLike, spreadMeasure : str = 'std') -> float:
         out = np.median(np.absolute(y - np.median(y, None)), None)
     else:
         raise ValueError('spreadMeasure must be one of std, iqr, mad or mead')
+    
     return out
 
 def Quantile(y : ArrayLike, p : float = 0.5) -> float:
     """ 
     Calculates the quantile value at a specified proportion, p.
 
-    Parameters:
-    y (array-like): The input data vector
-    p (float): The quantile proportion (default is 0.5, which is the median)
+    Parameters
+    ----------
+    y : array-like
+        The input data vector.
+    p : float 
+        The quantile proportion (default is 0.5, which is the median).
 
-    Returns:
-    float: The calculated quantile value
-
-    Raises:
-    ValueError: If p is not a number between 0 and 1
+    Returns
+    -------
+    float: 
+        The calculated quantile value.
     """
     y = np.asarray(y)
     if p == 0.5:
@@ -166,7 +331,7 @@ def PLeft(y : ArrayLike, th : float = 0.1) -> float:
     
     Parameters
     ----------
-    y : array_like
+    y : array-like
         The input data vector.
     th : float, optional
         The proportion of data further than `th` from the mean (default is 0.1).
@@ -266,7 +431,8 @@ def HighLowMu(y: ArrayLike) -> float:
 
     Paramters
     ----------
-    y (array-like): The input data vector
+    y : array-like
+        The input data vector
 
     Returns
     --------
@@ -343,7 +509,7 @@ def CV(x : ArrayLike, k : int = 1) -> float:
     Parameters
     ----------
     x : array-like
-        Input time series or data vector
+        Input time series or data vector.
     k : int, optional
         Order of the coefficient of variation. Default is 1.
 
@@ -395,7 +561,7 @@ def CustomSkewness(y : ArrayLike, whatSkew : str = 'pearson') -> float:
     
     return float(out)
 
-def Burstiness(y: ArrayLike) -> Dict[str, float]:
+def Burstiness(y: ArrayLike) -> dict:
     """
     Calculate burstiness statistics of a time series.
     
@@ -445,7 +611,7 @@ def Moments(y : ArrayLike, theMom : int = 0) -> float:
     Parameters
     ----------
     y : array-like
-        Input time series or data vector
+        Input time series or data vector.
     theMom: int, optional
         The moment to calculate. Default is 0.
 
@@ -578,7 +744,7 @@ def OutlierInclude(y: ArrayLike, thresholdHow: str = 'abs', inc: float = 0.01) -
     return results
 
 
-def OutlierTest(y: ArrayLike, p: float = 2, justMe: Union[str, None] = None) -> Union[Dict[str, float], float]:
+def OutlierTest(y: ArrayLike, p: float = 2, justMe: Union[str, None] = None) -> Union[dict, float]:
     """
     How distributional statistics depend on distributional outliers.
 
@@ -591,20 +757,18 @@ def OutlierTest(y: ArrayLike, p: float = 2, justMe: Union[str, None] = None) -> 
     y : array-like
         The input data vector.
     p : float
-        The percentage (0 < p < 50) of values to remove from both the upper and lower ends of the distribution.
+        The percentage of values to remove beyond upper and lower percentiles.
     justMe : {'mean', 'std'}, optional
-        If specified, returns only the mean or standard deviation of the middle portion of the data after trimming:
-            - 'mean': returns the mean of the trimmed data.
-            - 'std': returns the standard deviation of the trimmed data.
-        If None (default), returns a dictionary with the ratio of mean and std before and after trimming.
+        If specified, just returns a number:
+            - 'mean': returns the mean of the middle portion of the data
+            - 'std': returns the std of the middle portion of the data
+        If None (default), returns a dictionary.
 
     Returns
     -------
     float or dict
-        If justMe is specified, returns the mean or std of the trimmed data.
-        Otherwise, returns a dictionary with the ratios:
-            - 'mean_ratio': mean(trimmed) / mean(original)
-            - 'std_ratio': std(trimmed) / std(original)
+        If justMe is specified, returns the mean or std of the middle portion of the data.
+        Otherwise, returns a dictionary.
     """
 
     # mean of the middle (100-2*p)% of the data
@@ -678,9 +842,10 @@ def TrimmedMean(x: ArrayLike, pExclude: float = 0.0) -> float:
     trimmed_x = x_sorted[lowercut : non_nan_count - lowercut]
 
     out = np.mean(trimmed_x)
+
     return float(out)
 
-def HistogramAsymmetry(y : ArrayLike, numBins : int = 10, doSimple : bool = True) -> Dict[str, float]:
+def HistogramAsymmetry(y : ArrayLike, numBins : int = 10, doSimple : bool = True) -> dict:
     """
     Calculate measures of histogram asymmetry for a time series.
 
@@ -757,7 +922,7 @@ def HistogramMode(y : ArrayLike, numBins : int = 10, doAbs : bool = False) -> fl
     Returns
     --------
     float
-        the mode of the data vector using histograms with numBins bins. 
+        The mode of the data vector using histograms with numBins bins. 
     """
     y = np.asarray(y)
     if doAbs:
@@ -783,14 +948,13 @@ def RemovePoints(y : ArrayLike, removeHow : str = 'absfar', p : float = 0.1, rem
     ----------
     y : array-like
         The input time series.
-    removeHow : {'absclose', 'absfar', 'min', 'max', 'random'}, optional
+    removeHow : {'absclose', 'absfar' (default), 'min', 'max', 'random'}, optional
         How to remove points from the time series:
             - 'absclose': those that are the closest to the mean,
-            - 'absfar': those that are the furthest from the mean,
+            - 'absfar': those that are the furthest from the mean (default),
             - 'min': the lowest values,
             - 'max': the highest values,
             - 'random': at random.
-        Default is 'absfar'.
     p : float, optional
         The proportion of points to remove (default: 0.1).
     removeOrSaturate : {'remove', 'saturate'}, optional
@@ -856,8 +1020,8 @@ def RemovePoints(y : ArrayLike, removeHow : str = 'absfar', p : float = 0.1, rem
     f_absDiff = lambda x1, x2: np.abs(x1 - x2) # ignores the sign
     f_ratio = lambda x1, x2: np.divide(x1, x2) # includes the sign
 
-    # out['fzcacrat'] = f_ratio(FirstCrossing(yTransform, 'ac', 0, 'continuous'), 
-    #                           FirstCrossing(y, 'ac', 0, 'continuous'))
+    out['fzcacrat'] = f_ratio(FirstCrossing(yTransform, 'ac', 0, 'continuous'), 
+                              FirstCrossing(y, 'ac', 0, 'continuous'))
     
     out['ac1rat'] = f_ratio(acf_yTransform[0], acf_y[0])
     out['ac1diff'] = f_absDiff(acf_yTransform[0], acf_y[0])
