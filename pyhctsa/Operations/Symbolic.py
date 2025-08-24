@@ -145,15 +145,15 @@ def MotifTwo(y : ArrayLike, binarizeHow : str = 'diff') -> dict:
     y : array-like
         The input time series.
 
-    binarizeHow : str, optional, default='diff'
+    binarizeHow : str, optional
         The method used for binary transformation. One of:
-            - 'diff': Encode increases in the time series as 1, and decreases as 0.
+            - 'diff': Encode increases in the time series as 1, and decreases as 0 (default).
             - 'mean': Encode values above the mean as 1, and below as 0.
             - 'median': Encode values above the median as 1, and below as 0.
 
     Returns
     -------
-    result : dict
+    dict
         A dictionary containing:
             - 'prob_len_1', 'prob_len_2', ..., 'prob_len_4': 
               Lists of probabilities for each binary word of lengths 1 to 4.
@@ -294,19 +294,18 @@ def MotifThree(y : ArrayLike, cgHow : str = 'quantile') -> dict:
     """
     Motifs in a coarse-graining of a time series to a 3-letter alphabet.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     y : np.ndarray
         Time series to analyze.
     cgHow : {'quantile', 'diffquant'}, optional
         The coarse-graining method to use:
-        - 'quantile': equiprobable alphabet by time-series value
+        - 'quantile': equiprobable alphabet by time-series value (default)
         - 'diffquant': equiprobably alphabet by time-series increments
-        Default is 'quantile'.
 
-    Returns:
-    --------
-    Dict[str, float]
+    Returns
+    -------
+    dict
         Statistics on words of length 1, 2, 3, and 4.
     """
 
@@ -414,9 +413,9 @@ def BinaryStretch(x : ArrayLike, stretchWhat : str = 'lseq1') -> float:
     x : array-like
         The input time series.
 
-    stretchWhat : str, optional, default='lseq1'
+    stretchWhat : str, optional
         Specifies which binary symbol's stretch length to analyze:
-            - 'lseq1': Analyze stretches related to consecutive 1s.
+            - 'lseq1': Analyze stretches related to consecutive 1s (default).
             - 'lseq0': Analyze stretches related to consecutive 0s.
 
     Returns
@@ -454,10 +453,10 @@ def BinaryStretch(x : ArrayLike, stretchWhat : str = 'lseq1') -> float:
 
 def BinaryStats(y : ArrayLike, binaryMethod : str = 'diff') -> dict:
     """
-    Compute statistics on a binary symbolization of the input time series.
+    Compute statistics on a binary symbolisation of the input time series.
 
     The time series is first symbolized as a binary string of 0s and 1s 
-    using a specified coarse-graining (symbolization) method. Then, various 
+    using a specified coarse-graining (symbolisation) method. Then, various 
     statistics are computed to characterize the structure of the resulting 
     binary sequence.
 
@@ -466,16 +465,15 @@ def BinaryStats(y : ArrayLike, binaryMethod : str = 'diff') -> dict:
     y : array-like
         The input time series.
 
-    binaryMethod : str, optional, default='diff'
-        The binary symbolization rule. One of:
-            - 'diff' : Encode as 1 if the time-series difference is positive,
-                       and 0 otherwise.
+    binaryMethod : str, optional
+        The binary symbolisation rule. One of:
+            - 'diff' : Encode as 1 if the time-series difference is positive, and 0 otherwise (default).
             - 'mean' : Encode as 1 if the value is above the mean, 0 otherwise.
 
     Returns
     -------
     dict
-        Statistics computed on the binary symbolization.
+        Statistics computed on the binary symbolisation.
     """
     
     # Binarize the time series
@@ -548,13 +546,12 @@ def TransitionMatrix(y : ArrayLike, howtocg : str = 'quantile', numGroups : int 
     cf. Andriana et al. (2011). Duality between Time Series and Networks. PLoS ONE.
     https://doi.org/10.1371/journal.pone.0023378
 
-    Parameters:
+    Parameters
     -----------
-    y : array_like
-        Input time series (column vector)
+    y : array-like
+        Input time series.
     howtocg : str, optional
-        The method of discretization (currently 'quantile' is the only
-        option)
+        The method of discretization (currently 'quantile' is the only option)
     numGroups : int, optional
         number of groups in the course-graining
     tau : int or str, optional
@@ -564,8 +561,8 @@ def TransitionMatrix(y : ArrayLike, howtocg : str = 'quantile', numGroups : int 
         look at this dicrete lag. Here we do the former. Can also set tau to 'ac'
         to set tau to the first zero-crossing of the autocorrelation function.
 
-    Returns:
-    --------
+    Returns
+    -------
     dict 
         A dictionary including the transition probabilities themselves, as well as the trace
         of the transition matrix, measures of asymmetry, and eigenvalues of the
@@ -607,11 +604,11 @@ def TransitionMatrix(y : ArrayLike, howtocg : str = 'quantile', numGroups : int 
 
     if numGroups == 2:
         for i in range(4):
-            out[f'T{i+1}'] = T.transpose().flatten()[i] # transpose to match MATLAB column major
+            out[f'T{i+1}'] = T.transpose().flatten()[i]
 
     elif numGroups == 3:
         for i in range(9):
-            out[f'T{i+1}'] = T.transpose().flatten()[i] # transpose to match MATLAB column major
+            out[f'T{i+1}'] = T.transpose().flatten()[i] 
 
     elif numGroups > 3:
         for i in range(numGroups):
@@ -633,7 +630,7 @@ def TransitionMatrix(y : ArrayLike, howtocg : str = 'quantile', numGroups : int 
     out['maximeig'] = np.max(np.imag(eig_T))
 
     # Measures from covariance matrix
-    cov_T = np.cov(T.transpose()) # need to transpose T to get same output as MATLAB's cov func. 
+    cov_T = np.cov(T.transpose())
     out['sumdiagcov'] = np.trace(cov_T)
 
     # Eigenvalues of covariance matrix
@@ -648,7 +645,7 @@ def CoarseGrain(y : list, howtocg : str, numGroups : int) -> np.ndarray:
     """
     Coarse-grains a continuous time series to a discrete alphabet.
 
-    Parameters:
+    Parameters
     -----------
     y : array-like
         The input time series.
@@ -659,7 +656,7 @@ def CoarseGrain(y : list, howtocg : str, numGroups : int) -> np.ndarray:
         Specifies the size of the alphabet for 'quantile' and 'updown',
         or sets the time delay for the embedding subroutines.
 
-    Returns:
+    Returns
     --------
     yth : array-like
         The coarse-grained time series.

@@ -737,6 +737,11 @@ Stationarity:
         numSeg: [2, 5]
         incMove: 10
         zscore: True
+      - windowStat: 'mean'
+        acrossWinStat: 'ent'
+        numSeg: [2, 5, 10]
+        incMove: [1, 2, 10]
+        zscore: True
       - windowStat: 'std'
         acrossWinStat: 'std'
         numSeg: [2, 5, 10]
@@ -751,6 +756,11 @@ Stationarity:
         acrossWinStat: 'sampen'
         numSeg: 10
         incMove: [1, 2]
+        zscore: True
+      - windowStat: 'std'
+        acrossWinStat: 'ent'
+        numSeg: [2, 5, 10]
+        incMove: [1, 2, 10]
         zscore: True
       - windowStat: 'ent'
         acrossWinStat: 'std'
@@ -767,6 +777,11 @@ Stationarity:
         numSeg: 10
         incMove: 2
         zscore: True
+      - windowStat: 'ent'
+        acrossWinStat: 'ent'
+        numSeg: [2, 5, 10]
+        incMove: [1, 2, 10]
+        zscore: True
       - windowStat: 'sampen'
         acrossWinStat: 'std'
         numSeg: [2, 5, 10]
@@ -781,6 +796,11 @@ Stationarity:
         acrossWinStat: 'sampen'
         numSeg: 10
         incMove: [1, 2]
+        zscore: True
+      - windowStat: 'sampen'
+        acrossWinStat: 'ent'
+        numSeg: [2, 5, 10]
+        incMove: [1, 2, 10]
         zscore: True
       - windowStat: 'mom3'
         acrossWinStat: 'std'
@@ -797,6 +817,11 @@ Stationarity:
         numSeg: 10
         incMove: [1, 2]
         zscore: True
+      - windowStat: 'mom3'
+        acrossWinStat: 'ent'
+        numSeg: [2, 5, 10]
+        incMove: [1, 2, 10]
+        zscore: True
       - windowStat: 'mom4'
         acrossWinStat: 'std'
         numSeg: [2, 5, 10]
@@ -812,6 +837,11 @@ Stationarity:
         numSeg: 10
         incMove: [1, 2]
         zscore: True
+      - windowStat: 'mom4'
+        acrossWinStat: 'ent'
+        numSeg: [2, 5, 10]
+        incMove: [1, 2, 10]
+        zscore: True
       - windowStat: 'AC1'
         acrossWinStat: 'std'
         numSeg: [2, 5, 10]
@@ -826,6 +856,11 @@ Stationarity:
         acrossWinStat: 'sampen'
         numSeg: 10
         incMove: [1, 2]
+        zscore: True
+      - windowStat: 'AC1'
+        acrossWinStat: 'ent'
+        numSeg: [2, 5, 10]
+        incMove: [1, 2, 10]
         zscore: True
     hctsa_name: SY_SlidingWindow
     ordered_args: ["windowStat", "acrossWinStat", "numSeg", "incMove"]
@@ -1230,10 +1265,10 @@ Symbolic:
         numGroups: !range [2, 5]
         tau: 1
         zscore: True
-      # - howtocg: 'quantile'
-      #   numGroups: !range [3, 5] # discrepancy when using numGroups = 2 specifically for 'ac' warrants further investigation
-      #   tau: 'ac'
-      #   zscore: True
+      - howtocg: 'quantile'
+        numGroups: !range [3, 5]
+        tau: 'ac'
+        zscore: True
     hctsa_name: SB_TransitionMatrix
     ordered_args: ['howtocg', 'numGroups', 'tau']
 

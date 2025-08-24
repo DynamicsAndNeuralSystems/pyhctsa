@@ -8,6 +8,7 @@ from typing import Union
 from scipy.signal import detrend
 from scipy.stats import skew, kurtosis, gaussian_kde
 from ..Operations.Distribution import Moments
+from ..Operations.Entropy import DistributionEntropy
 from statsmodels.tsa.stattools import kpss
 
 def LocalDistributions(y : ArrayLike, numSegs : int = 5, eachOrPar : str = 'par', numPoints : int = 200) -> dict:
@@ -157,7 +158,7 @@ def DynWin(y : ArrayLike, maxNumSegments : int = 10) -> dict:
     out['stdskew'] = fs[2]
     out['stdkurt'] = fs[3]
     out['stdsampen1_015'] = fs[4]
-    #out['stdsampen2_015'] = fs[5]
+    out['stdsampen2_015'] = fs[5]
     out['stdac1'] = fs[6]
     out['stdac2'] = fs[7]
     out['stdactaug'] = fs[8]
@@ -991,6 +992,7 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
         raise ValueError(f"Unknown statistic '{windowStat}'")
     
     if acrossWinStat == 'std':
+        #% normalized by std of full time series
         out = np.std(qs, ddof=1)/np.std(y, ddof=1)
     elif acrossWinStat == 'apen':
         out = ApproximateEntropy(qs, 1, 0.2)
@@ -998,8 +1000,14 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
         sampen_dict = SampleEntropy(qs, 2, 0.15)
         out = sampen_dict['quadSampEn1']
     elif acrossWinStat == 'ent':
-        logger.warning(f"{acrossWinStat} not yet implemented")
-        out = np.nan
+        #% get a load of statistics from kernel-smoothed distribution
+        kde = gaussian_kde(qs)
+        xi = np.linspace(qs.min() - 3 * np.std(qs, ddof=1), qs.max() + 3 * np.std(qs, ddof=1), 100)
+        f = kde(xi)
+        f_pos = f[f > 0]
+        dx = xi[1] - xi[0]
+        dist_ent = -np.sum(f_pos * np.log(f_pos) * dx)
+        out = dist_ent
     else:
         raise ValueError(f"Unknown statistic '{acrossWinStat}'")
     

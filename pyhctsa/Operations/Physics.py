@@ -65,6 +65,7 @@ def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, 
             'valid_types': (int, float),
             'error_msg': 'must be float or integer'
         }
+
     }
 
     if walkerRule not in WALKER_CONFIGS:

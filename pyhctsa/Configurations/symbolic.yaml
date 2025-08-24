@@ -11,10 +11,10 @@ Symbolic:
         numGroups: !range [2, 5]
         tau: 1
         zscore: True
-      # - howtocg: 'quantile'
-      #   numGroups: !range [3, 5] # discrepancy when using numGroups = 2 specifically for 'ac' warrants further investigation
-      #   tau: 'ac'
-      #   zscore: True
+      - howtocg: 'quantile'
+        numGroups: !range [2, 5]
+        tau: 'ac'
+        zscore: True
     hctsa_name: SB_TransitionMatrix
     ordered_args: ['howtocg', 'numGroups', 'tau']
 

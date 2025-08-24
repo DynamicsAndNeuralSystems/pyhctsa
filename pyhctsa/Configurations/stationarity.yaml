@@ -145,6 +145,11 @@ Stationarity:
         numSeg: 10
         incMove: [1, 2]
         zscore: True
+      - windowStat: 'mean'
+        acrossWinStat: 'ent'
+        numSeg: 2
+        incMove: 1
+        zscore: True
     hctsa_name: SY_SlidingWindow
     ordered_args: ["windowStat", "acrossWinStat", "numSeg", "incMove"]
   

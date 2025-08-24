@@ -4,28 +4,45 @@ from typing import Dict, Union
 from scipy import stats
 from scipy.stats import norm, gumbel_l, uniform, expon, lognorm, gaussian_kde
 from loguru import logger
-from ..Utilities.utils import histc, binpicker, simple_binner, xcorr
+from ..Utilities.utils import histc, binpicker, simple_binner, xcorr, signChange
 from ..Operations.Correlation import AutoCorr, FirstCrossing
 
 
-def _find_bounds(pdf_func, start_left, start_right, xStep, thresh):
-    """Expand left/right until pdf falls below threshold."""
-    xf = [start_left, start_right]
+#kde = gaussian_kde(y, bw_method='silverman') # normal-approx equivalent as per docs
+            # actual_bw = kde.factor * np.std(y)  # Convert factor to actual bandwidth
+            # xr = np.linspace(min(y) - 3 * actual_bw, max(y) + 3 * actual_bw, 100)
+            # px = kde(xr)
 
-    # Left search (only if start_left is not None)
-    if start_left is not None:
-        ange = 10
-        while ange > thresh:
-            xf[0] -= xStep
-            ange = pdf_func(xf[0])
+def FitKernelSmooth(x : ArrayLike) -> dict:
 
-    # Right search
-    ange = 10
-    while ange > thresh:
-        xf[1] += xStep
-        ange = pdf_func(xf[1])
+    x = np.asarray(x)
+    m = np.mean(x)
+    kde = gaussian_kde(x, bw_method='silverman')
+    actual_bw = kde.factor * np.std(x)
+    xi = np.linspace(x.min() - 3 * actual_bw, x.max() + 3 * actual_bw, 100)
+    f = kde(xi)
+    #% 1. Number of peaks
+    df = np.diff(f)
+    ddf = np.diff(df)
+    sdsp = ddf[signChange(df, 1)]
+    out = {}
+    out['npeaks'] = np.sum(sdsp < -0.0002) #% 'large enough' maxima
+    #% 2. Max
+    out['max'] = np.max(f) #% maximum of the distribution
+    #% 3. Entropy
+    dx = xi[1] - xi[0]
+    out['entropy'] = - np.sum(f[f > 0] * np.log(f[f > 0])*dx)
+    #% 4. Assymetry
+    out1 = np.sum(f[xi > m] * dx)
+    out2 = np.sum(f[xi < m] * dx)
+    out['asym'] = out1/out2
+    #% 5. Plsym
+    out1 = np.sum(np.abs(np.diff(f[xi < m]))*dx)
+    out2 = np.sum(np.abs(np.diff(f[xi > m]))*dx)
+    out['plsym'] = out1/out2
 
-    return xf
+    return out
+
 
 def CompareKSFit(x : ArrayLike, whatDistn : str) -> dict:
     """
@@ -169,6 +186,25 @@ def CompareKSFit(x : ArrayLike, whatDistn : str) -> dict:
     out['relent'] = np.sum(f[r] * np.log(f[r] / ffit[r]) * dx)
 
     return out
+
+def _find_bounds(pdf_func, start_left, start_right, xStep, thresh):
+    """Expand left/right until pdf falls below threshold."""
+    xf = [start_left, start_right]
+
+    # Left search (only if start_left is not None)
+    if start_left is not None:
+        ange = 10
+        while ange > thresh:
+            xf[0] -= xStep
+            ange = pdf_func(xf[0])
+
+    # Right search
+    ange = 10
+    while ange > thresh:
+        xf[1] += xStep
+        ange = pdf_func(xf[1])
+
+    return xf
 
 def Withinp(x : ArrayLike, p : float = 1.0, meanOrMedian : str = 'mean') -> float:
     """
