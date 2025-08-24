@@ -4,45 +4,8 @@ from typing import Dict, Union
 from scipy import stats
 from scipy.stats import norm, gumbel_l, uniform, expon, lognorm, gaussian_kde
 from loguru import logger
-from ..Utilities.utils import histc, binpicker, simple_binner, xcorr, signChange
+from ..Utilities.utils import histc, binpicker, simple_binner, xcorr
 from ..Operations.Correlation import AutoCorr, FirstCrossing
-
-
-#kde = gaussian_kde(y, bw_method='silverman') # normal-approx equivalent as per docs
-            # actual_bw = kde.factor * np.std(y)  # Convert factor to actual bandwidth
-            # xr = np.linspace(min(y) - 3 * actual_bw, max(y) + 3 * actual_bw, 100)
-            # px = kde(xr)
-
-def FitKernelSmooth(x : ArrayLike) -> dict:
-
-    x = np.asarray(x)
-    m = np.mean(x)
-    kde = gaussian_kde(x, bw_method='silverman')
-    actual_bw = kde.factor * np.std(x)
-    xi = np.linspace(x.min() - 3 * actual_bw, x.max() + 3 * actual_bw, 100)
-    f = kde(xi)
-    #% 1. Number of peaks
-    df = np.diff(f)
-    ddf = np.diff(df)
-    sdsp = ddf[signChange(df, 1)]
-    out = {}
-    out['npeaks'] = np.sum(sdsp < -0.0002) #% 'large enough' maxima
-    #% 2. Max
-    out['max'] = np.max(f) #% maximum of the distribution
-    #% 3. Entropy
-    dx = xi[1] - xi[0]
-    out['entropy'] = - np.sum(f[f > 0] * np.log(f[f > 0])*dx)
-    #% 4. Assymetry
-    out1 = np.sum(f[xi > m] * dx)
-    out2 = np.sum(f[xi < m] * dx)
-    out['asym'] = out1/out2
-    #% 5. Plsym
-    out1 = np.sum(np.abs(np.diff(f[xi < m]))*dx)
-    out2 = np.sum(np.abs(np.diff(f[xi > m]))*dx)
-    out['plsym'] = out1/out2
-
-    return out
-
 
 def CompareKSFit(x : ArrayLike, whatDistn : str) -> dict:
     """
