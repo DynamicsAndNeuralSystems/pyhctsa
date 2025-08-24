@@ -1330,6 +1330,24 @@ Symbolic:
         coarseGrainMethod: 'quantile'
         numIters: 500
         zscore: True
+      - whatPrior: 'dist'
+        memory: 100
+        numGroups: [4, 5]
+        coarseGrainMethod: 'quantile'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'dist'
+        memory: 50
+        numGroups: 3
+        coarseGrainMethod: 'updown'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'dist'
+        memory: 100
+        numGroups: [4, 5]
+        coarseGrainMethod: 'updown'
+        numIters: 500
+        zscore: True
       - whatPrior: 'T1'
         memory: 20
         numGroups: 2
@@ -1348,6 +1366,12 @@ Symbolic:
         coarseGrainMethod: 'quantile'
         numIters: 500
         zscore: True
+      - whatPrior: 'T1'
+        memory: 100
+        numGroups: [4, 5]
+        coarseGrainMethod: 'updown'
+        numIters: 500
+        zscore: True
       - whatPrior: 'T2'
         memory: 20
         numGroups: 2
@@ -1364,6 +1388,18 @@ Symbolic:
         memory: 100
         numGroups: [4, 5]
         coarseGrainMethod: 'quantile'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'T2'
+        memory: 50
+        numGroups: 3
+        coarseGrainMethod: 'updown'
+        numIters: 500
+        zscore: True
+      - whatPrior: 'T2'
+        memory: 100
+        numGroups: [4, 5]
+        coarseGrainMethod: 'updown'
         numIters: 500
         zscore: True
       - whatPrior: 'dist'
