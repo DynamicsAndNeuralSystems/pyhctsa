@@ -10,6 +10,107 @@ from scipy.optimize import curve_fit
 from ..Operations.Information import FirstMin
 from scipy.linalg import LinAlgError
 from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
+from ..Operations.Information import AutoMutualInfo
+
+
+def AddNoise(y : ArrayLike, tau : int = 1, amiMethod : str = 'even', extraParam : int = 10, randomSeed = None) -> dict:
+    """
+    Changes in the automutual information with the addition of noise
+
+    Parameters:
+    y (array-like): The input time series (should be z-scored)
+    tau (int or str): The time delay for computing AMI (default: 1)
+    amiMethod (str): The method for computing AMI:
+                      'std1','std2','quantiles','even' for histogram-based estimation,
+                      'gaussian','kernel','kraskov1','kraskov2' for estimation using JIDT
+    extraParam: e.g., the number of bins input to CO_HistogramAMI, or parameter for IN_AutoMutualInfo
+    randomSeed (int): Settings for resetting the random seed for reproducible results
+
+    Returns:
+    dict: Statistics on the resulting set of automutual information estimates
+    """
+    y = np.asarray(y)
+    # Set tau to minimum of autocorrelation function if 'ac' or 'tau'
+    if tau in ['ac', 'tau']:
+        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+    
+    # Generate noise
+    if randomSeed is not None:
+        np.random.seed(randomSeed)
+    else:
+        np.random.seed(0)
+    noise = np.random.randn(len(y)) # generate uncorrelated additive noise
+
+    # Set up noise range
+    noiseRange = np.linspace(0, 3, 50) # compare properties across this noise range
+    numRepeats = len(noiseRange)
+
+    # Compute the automutual information across a range of noise levels
+    amis = np.zeros(numRepeats)
+    if amiMethod in ['std1', 'std2', 'quantiles', 'even']:
+        # histogram-based methods using my naive implementation in CO_Histogram
+        for i in range(numRepeats):
+            amis[i] = HistogramAMI(y + noiseRange[i]*noise, tau, amiMethod, extraParam)
+            if np.isnan(amis[i]):
+                raise ValueError('Error computing AMI: Time series too short (?)')
+    if amiMethod in ['gaussian','kernel','kraskov1','kraskov2']:
+        for i in range(numRepeats):
+            amis[i] = AutoMutualInfo(y + noiseRange[i]*noise, tau, amiMethod, str(extraParam))
+            if np.isnan(amis[i]):
+                raise ValueError('Error computing AMI: Time series too short (?)')
+    
+    # Output statistics
+    out = {}
+    # Proportion decreases
+    out['pdec'] = np.sum(np.diff(amis) < 0) / (numRepeats - 1)
+
+    # Mean change in AMI
+    out['meanch'] = np.mean(np.diff(amis))
+
+    # Autocorrelation of AMIs
+    out['ac1'] = AutoCorr(amis, 1, 'Fourier')[0]
+    out['ac2'] = AutoCorr(amis, 2, 'Fourier')[0]
+
+    # Noise level required to reduce ami to proportion x of its initial value
+    firstUnderVals = [0.75, 0.50, 0.25]
+    for val in firstUnderVals:
+        out[f'firstUnder{int(val*100)}'] = firstUnder_fn(val * amis[0], noiseRange, amis)
+
+    # AMI at actual noise levels: 0.5, 1, 1.5 and 2
+    noiseLevels = [0.5, 1, 1.5, 2]
+    for nlvl in noiseLevels:
+        out[f'ami_at_{nlvl*10}'] = amis[np.argmax(noiseRange >= nlvl)]
+
+    # Count number of times the AMI function crosses its mean
+    out['pcrossmean'] = np.sum(np.diff(np.sign(amis - np.mean(amis))) != 0) / (numRepeats - 1)
+
+    # Fit exponential decay model 
+    expFunc = lambda x, a, b : a * np.exp(b * x)
+    popt, pcov = curve_fit(expFunc, noiseRange, amis, p0=[amis[0], -1])
+    out['fitexpa'], out['fitexpb'] = popt
+    residuals = amis - expFunc(noiseRange, *popt)
+    ss_res = np.sum(residuals**2)
+    ss_tot = np.sum((amis - np.mean(amis))**2)
+    out['fitexpr2'] = 1 - (ss_res / ss_tot)
+    out['fitexpadjr2'] = 1 - (1-out['fitexpr2'])*(len(amis)-1)/(len(amis)-2-1)
+    out['fitexprmse'] = np.sqrt(np.mean(residuals**2))
+
+    # Fit linear function
+    p = np.polyfit(noiseRange, amis, 1)
+    out['fitlina'], out['fitlinb'] = p
+    lin_fit = np.polyval(p, noiseRange)
+    out['linfit_mse'] = np.mean((lin_fit - amis)**2)
+
+    return out
+
+def firstUnder_fn(x, m, p):
+    """
+    Find the value of m for the first time p goes under the threshold, x. 
+    p and m are vectors of the same length
+    """
+    first_i = next((m_val for m_val, p_val in zip(m, p) if p_val < x), m[-1])
+    return first_i
+
 
 def TheilerQ(y : ArrayLike) -> float:
     """

@@ -9,6 +9,39 @@ Correlation:
         zscore: True
     hctsa_name: CO_AutoCorr
     ordered_args: ['tau']
+  
+  AddNoise:
+    base_name: AddNoise
+    labels:
+      - correlation
+    depedencies:
+    configs:
+      - tau: 1
+        amiMethod: ['quantiles', 'even', 'std1']
+        extraParam: 10
+        zscore: True
+      - tau: 1
+        amiMethod: 'gaussian'
+        extraParam: 
+        zscore: True
+      - tau: 1
+        amiMethod: 'kraskov1'
+        extraParam: 4
+        zscore: True
+      - tau: 'ac'
+        amiMethod: ['quantiles', 'even', 'std1']
+        extraParam: 10
+        zscore: True
+      - tau: 'ac'
+        amiMethod: 'gaussian'
+        extraParam: 
+        zscore: True
+      - tau: 'ac'
+        amiMethod: 'kraskov1'
+        extraParam: 4
+        zscore: True
+    hctsa_name: CO_AddNoise
+    ordered_args: ['tau', 'amiMethod', 'extraParam']
 
   GLSCF:
     base_name: glscf

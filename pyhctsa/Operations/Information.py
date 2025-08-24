@@ -4,6 +4,7 @@ import jpype as jp
 import os
 from numpy.typing import ArrayLike
 from scipy import stats
+from scipy.optimize import curve_fit
 from loguru import logger
 from ..Utilities.utils import signChange, RM_histogram2
 

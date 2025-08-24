@@ -23,10 +23,9 @@ def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numG
         The input time series.
     whatPrior : {'dist', 'T1', 'T2'}, optional
         The type of information to store in memory:
-            - 'dist': the values of the time series in the previous memory samples,
+            - 'dist': the values of the time series in the previous memory samples (default),
             - 'T1': the one-point transition probabilities in the previous memory samples,
             - 'T2': the two-point transition probabilities in the previous memory samples.
-        Default is 'dist'.
     memory : float, optional
         The memory length (either number of samples, or a proportion of the time-series length if between 0 and 1).
         Default is 0.2.
@@ -34,10 +33,9 @@ def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numG
         The number of groups to coarse-grain the time series into. Default is 3.
     coarseGrainMethod : {'quantile', 'updown', 'embed2quadrants'}, optional
         The coarse-graining or symbolization method:
-            - 'quantile': equiprobable alphabet by value of each time-series datapoint,
+            - 'quantile': equiprobable alphabet by value of each time-series datapoint (default),
             - 'updown': equiprobable alphabet by incremental changes in the time-series values,
             - 'embed2quadrants': 4-letter alphabet of the quadrant each data point resides in a 2D embedding space.
-        Default is 'quantile'.
     numIters : int, optional
         The number of iterations to repeat the procedure for. Default is 500.
     randomSeed : int, optional
