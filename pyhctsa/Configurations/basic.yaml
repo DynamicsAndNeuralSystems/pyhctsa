@@ -1711,6 +1711,21 @@ ModelFit:
     hctsa_name: MF_FitSubsegments
     ordered_args: ["model", "order", "subsetHow", "samplep"]
   
+  HMMFit:
+    base_name: hmm
+    labels:
+      - models
+      - hmm
+      - modelfit
+    dependencies:
+      - hmmlearn
+    configs:
+      - trainp: [0.7, 0.8]
+        numStates: [3, 2]
+        zscore: True
+    hctsa_name: MF_hmm_fit
+    ordered_args: ["trainp", "numStates"]
+  
 Graph:
   VisibilityGraph:
     base_name: VisibilityGraph

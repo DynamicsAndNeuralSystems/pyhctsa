@@ -23,7 +23,8 @@ dependencies = [
     "antropy",
     "PyWavelets @ git+https://github.com/joshuabmoore/pywt.git",
     "ts2vg",
-    "arch"
+    "arch",
+    "hmmlearn"
 ]
 
 classifiers = [

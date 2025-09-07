@@ -10,6 +10,82 @@ from typing import Union
 from ..Utilities.utils import ZScore
 from ..Operations.Stationarity import SlidingWindow
 from ..Operations.Correlation import FirstCrossing, AutoCorr
+from hmmlearn.hmm import GaussianHMM
+
+def HMMFit(y : ArrayLike, trainp : float = 0.8, numStates : int = 3, randomSeed : int = 0) -> dict:
+    """
+    Fits a Hidden Markov Model to sequential data.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    trainp : float
+        The proportion of data to train on, 0 < trainp < 1 (default is 0.8).
+    numStates : int
+        The number of states in the HMM (default is 3).
+
+    Returns
+    -------
+    dict
+        Dictionary of statistics based on the fitted HMM. 
+
+    """
+    #Actually highly stochastic, so for reproducible results helps to set the
+    #random seed.
+    y = np.asarray(y)
+    n_samples = len(y)
+    out = {}
+
+    # 1. Split data into training and test sets
+    n_train = int(np.floor(trainp * n_samples))
+    n_test = n_samples-n_train
+    if n_train <= 0 or n_train > n_samples:
+        raise ValueError("Invalid training proportion 'train_p' results in an invalid training set size.")
+    
+    y_train = y[:n_train]
+    y_test = y[n_train:]
+    y_train_reshaped = y_train.reshape(-1, 1)
+    y_test_reshaped = y_test.reshape(-1, 1)
+
+    model = GaussianHMM(n_components=numStates,
+                    covariance_type='tied',
+                    n_iter=30,
+                    tol=0.0001,
+                    params='stmc',
+                    init_params='stmc',
+                    random_state=randomSeed)
+    
+    model.fit(y_train_reshaped)
+    means_sorted = np.sort(model.means_.flatten())
+    for i, mu in enumerate(means_sorted):
+        out[f'Mu_{i+1}'] = mu
+    out['meanMu'] = np.mean(means_sorted)
+    out['rangeMu'] = np.ptp(means_sorted)
+    out['maxMu'] = np.max(means_sorted)
+    out['minMu'] = np.min(means_sorted)
+
+    # Covariance Cov
+    out['Cov'] = model.covars_.flatten()[0]
+
+    #% Transition matrix
+    p_matrix = model.transmat_
+
+    out['Pmeandiag'] = np.mean(np.diag(p_matrix))
+    out['std_mean_p'] = np.std(np.mean(p_matrix, axis=0), ddof=1)
+    out['max_p'] = np.max(p_matrix)
+    out['mean_p'] = np.mean(p_matrix)
+    out['std_p'] = np.std(p_matrix, ddof=1)
+
+    #% Within-sample log-likelihood
+    train_ll = model.score(y_train_reshaped)
+    out['LLtrainpersample'] = train_ll / n_train
+
+    #Calculate log likelihood for the test data
+    out['LLtestpersample'] = model.score(y_test_reshaped)/n_test
+    out['LLdifference'] = out['LLtestpersample'] - out['LLtrainpersample']
+
+    return out
 
 def fitSubSegments(y : ArrayLike, model : str = 'ar', order : int = 2, subsetHow : str = 'uniform', samplep = [20, 0.1]) -> dict:
     """
@@ -661,8 +737,8 @@ def ARFit(y : ArrayLike, pmin : int = 1, pmax : int = 10, selector : str = 'sbc'
 
     # Correlation test of residuals
     resids = res.resid
-    # out['res_ac1'] = AutoCorr(resids, 1, 'Fourier')[0]
-    # out['res_ac1_norm'] = out['res_ac1']/np.sqrt(N)
+    out['res_ac1'] = AutoCorr(resids, 1, 'Fourier')[0]
+    out['res_ac1_norm'] = out['res_ac1']/np.sqrt(N)
 
     #Calculate correlations up to 20, return how many exceed significance threshold
     acf = AutoCorr(resids, list(range(1, 21)), 'Fourier')
