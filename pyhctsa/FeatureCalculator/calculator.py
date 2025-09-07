@@ -119,10 +119,15 @@ class FeatureCalculator:
             except Exception as e:
                 results[name] = f"Error: {e}"
         return results
+    
+    def summary(self):
+        # method to display a summary of the last compute operation
+        # numbe of series, number of NaNs, number of infs, etc.
+        pass
 
     def extract(self, data : ArrayLike) -> pd.DataFrame:
         """
-        Extract time-series features.
+        Extract the time series features specified in the YAML from time series.
         """
         # Single time series: 1D array or list of numbers
         # TODO checks on the input...
@@ -130,7 +135,7 @@ class FeatureCalculator:
         start_time = time.perf_counter()
         results = [] # list of dictionaries
         if isinstance(data, (np.ndarray, list)) and all(isinstance(x, (int, float, np.integer, np.floating)) for x in data):
-            results = self._extract_single(np.asarray(data, dtype=float))
+            results = [self._extract_single(np.asarray(data, dtype=float))]
         # List of time series: list/array of lists/arrays
         elif isinstance(data, (list, np.ndarray)) and all(isinstance(ts, (list, np.ndarray)) for ts in data):
             for ts in data:
@@ -141,10 +146,7 @@ class FeatureCalculator:
         print(f"Feature extraction completed in {elapsed:.3f} seconds.")
 
         # return a dataframe
-        dfs = []
-        for i in range(len(results)):
-            df = unfold_results(results[i])
-            dfs.append(df)
+        dfs = [unfold_results(result) for result in results]
         df = pd.concat(dfs, ignore_index=True)
 
         return df

@@ -2,6 +2,7 @@ from pyhctsa.Utilities.utils import get_dataset
 from pyhctsa.FeatureCalculator.calculator import FeatureCalculator
 import numpy as np
 import os
+import pandas as pd
 import pytest
 
 #----------------- High-level module tests ------------------
@@ -21,13 +22,11 @@ def test_module_basic(x):
     fvec = calc.extract(data)
     # Check that something is returned and it's not empty
     assert fvec is not None, "No output returned"
-    assert isinstance(fvec, list), "Output should be a list (of feature dicts)"
-    assert len(fvec) > 0, "Output list is empty"
-    assert isinstance(fvec[0], dict), "Each element should be a dict of features"
-    assert len(fvec[0]) > 0, "Feature dict is empty"
+    assert isinstance(fvec, pd.DataFrame),  "Output should be a dataframe."
+
     # check output for multiple time series
-    data2 = get_dataset("e1000")[1:3] # just the first 3 time-series instances
+    data2 = get_dataset("e1000")[0:3] # just the first 3 time-series instances
     fvec2 = calc.extract(data2)
     assert fvec2 is not None, "No output returned for multiple time-series input"
-    assert isinstance(fvec2, list), "Output should be a list (of feature dicts)"
-    assert len(fvec2) == len(data2)
+    assert isinstance(fvec2, pd.DataFrame), "Output should be a list (of feature dicts)"
+    assert fvec2.shape[0] == 3, "Expected three rows of features for three time series."
