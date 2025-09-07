@@ -127,10 +127,39 @@ class FeatureCalculator:
 
     def extract(self, data : ArrayLike) -> pd.DataFrame:
         """
-        Extract the time series features specified in the YAML from time series.
+        Run the configured feature extractor over one or more time series and
+        return a single tidy `pandas.DataFrame`.
+
+        Parameters
+        ----------
+        data : ArrayLike
+            The input time series data. Two forms are accepted:
+
+            * **Single series**: a 1-D array-like of real values
+            (e.g., list[float] or `np.ndarray` of shape ``(n_samples,)``).
+            * **Multiple series**: an array-like of 1-D array-likes
+            (e.g., list[np.ndarray] or `np.ndarray` of dtype=object), where
+            each element is a 1-D real-valued series of shape ``(n_samples_i,)``.
+        
+        Returns
+        -------
+        pd.DataFrame
+            A DataFrame with one row per input series and one column per computed
+            feature. 
+
+        Examples
+        --------
+        >>> fc = FeatureCalculator("custom.yaml")
+        Single time series
+        ------------------
+        >>> x = np.random.randn(1000)
+        >>> df = fc.extract(x)
+        Evaluating 128 partialed functions. Strap in!...
+        Feature extraction completed in 0.237 seconds.
+        >>> df.shape
+        (1, 128)
         """
         # Single time series: 1D array or list of numbers
-        # TODO checks on the input...
         print(f"Evaluating {len(self.feature_funcs)} partialed functions. Strap in!...")
         start_time = time.perf_counter()
         results = [] # list of dictionaries
@@ -146,7 +175,7 @@ class FeatureCalculator:
         print(f"Feature extraction completed in {elapsed:.3f} seconds.")
 
         # return a dataframe
-        dfs = [unfold_results(result) for result in results]
+        dfs = [unfold_results(res) for res in results]
         df = pd.concat(dfs, ignore_index=True)
 
         return df
