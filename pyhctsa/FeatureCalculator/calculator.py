@@ -3,17 +3,33 @@ from functools import partial
 import importlib
 import numpy as np
 import time
+import pandas as pd
+from typing import Union
 from numpy.typing import ArrayLike
 from itertools import product
 from ..Utilities.utils import preprocess_decorator
 
-def range_constructor(loader, node):
+def range_constructor(loader, node) -> list:
     """Construct a range from a YAML config"""
     start, end = loader.construct_sequence(node)
     return list(range(start, end + 1))
 yaml.SafeLoader.add_constructor("!range", range_constructor)
 
-def _format_param_value(val):
+def unfold_results(res : list) -> dict:
+    # unfold the results from an extraction
+    feature_dict = dict()
+    for k in res:
+        if isinstance(res[k], dict):
+            # unfold
+            for i in res[k]:
+                feature = f"{k}.{i}"
+                feature_dict[feature] = res[k][i]
+        else:
+            feature_dict[k] = res[k]
+    # make into a pandas dataframe
+    return pd.DataFrame([feature_dict])
+  
+def _format_param_value(val) -> str:
     """
     Format parameter value for label:
     - For floats/ints: as before.
@@ -104,11 +120,15 @@ class FeatureCalculator:
                 results[name] = f"Error: {e}"
         return results
 
-    def extract(self, data : ArrayLike):
+    def extract(self, data : ArrayLike) -> pd.DataFrame:
+        """
+        Extract time-series features.
+        """
         # Single time series: 1D array or list of numbers
+        # TODO checks on the input...
         print(f"Evaluating {len(self.feature_funcs)} partialed functions. Strap in!...")
         start_time = time.perf_counter()
-        results = []
+        results = [] # list of dictionaries
         if isinstance(data, (np.ndarray, list)) and all(isinstance(x, (int, float, np.integer, np.floating)) for x in data):
             results = self._extract_single(np.asarray(data, dtype=float))
         # List of time series: list/array of lists/arrays
@@ -119,4 +139,12 @@ class FeatureCalculator:
             raise ValueError("Input must be a 1D array-like (single time series) or a list of 1D array-likes (multiple time series).")
         elapsed = time.perf_counter() - start_time
         print(f"Feature extraction completed in {elapsed:.3f} seconds.")
-        return results
+
+        # return a dataframe
+        dfs = []
+        for i in range(len(results)):
+            df = unfold_results(results[i])
+            dfs.append(df)
+        df = pd.concat(dfs, ignore_index=True)
+
+        return df

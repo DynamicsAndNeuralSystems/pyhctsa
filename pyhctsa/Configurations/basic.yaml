@@ -584,9 +584,6 @@ Entropy:
       - m: 3
         tau: 1
         zscore: True
-      - m: 3
-        tau: 'ac'
-        zscore: True
     hctsa_name: EN_rpde
     ordered_args: ['m', 'tau']
   
