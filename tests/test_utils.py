@@ -1,6 +1,7 @@
-from pyhctsa.Utilities.utils import get_dataset, ZScore
 import numpy as np
 import pytest
+from pyhctsa.Utilities.utils import get_dataset, ZScore
+
 #----------------- Data loader tests ------------------
 
 def test_get_dataset_default():

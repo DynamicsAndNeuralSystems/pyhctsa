@@ -5,6 +5,26 @@ from typing import Union
 import os
 from functools import wraps
 
+def validate_data(ts : np.ndarray) -> bool:
+    # validate a time series before computing features
+    if len(ts) < 100:
+        print("Time series is too short!")
+        return False
+    if np.all(ts == ts[0]):
+        # constant time series
+        # maybe do a tolerance instead?
+        print("Time series is constant")
+        return False
+    if np.any(np.isnan(ts)):
+        # data contains nans
+        print("Time series contains NaNs")
+        return False
+    if np.any(np.isinf(ts)):
+        print("Time series contains Inf")
+        return False
+
+    return True
+
 def _load_csv(path: str) -> list:
     """Helper function to load CSV formatted datasets."""
     dataset = []

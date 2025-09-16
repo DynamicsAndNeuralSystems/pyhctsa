@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 from functools import partial
 from itertools import product
-from ..Utilities.utils import preprocess_decorator
+from ..Utilities.utils import preprocess_decorator, validate_data
 
 def range_constructor(loader, node) -> list:
     """Construct a range from a YAML config."""
@@ -83,7 +83,7 @@ def standardise_inputs(data) -> list[np.ndarray]:
         "Input must be a 1D series, a list of 1D series, a 2D array "
         "with shape (n_series, n_samples), or a pandas Series/DataFrame.")
   
-def _format_param_value(val) -> str:
+def _format_param_value(val : Union[int, float, list]) -> str:
     """
     Format parameter value for label:
     - For floats/ints: as before.
@@ -233,6 +233,11 @@ class FeatureCalculator:
         (1, 128)
         """
         series_list = standardise_inputs(data)
+        isValid = np.array([validate_data(t) for t in series_list]) # check each time series to see if valid...
+        invalid = np.argwhere(isValid == False)
+        if invalid.size > 0:
+            raise ValueError(f"One or more time series instances are invalid: {invalid.flatten()}")
+
         n_funcs = len(self.feature_funcs)
         print(f"Evaluating {n_funcs} partialed functions. Strap in!...")
         start_time = time.perf_counter()
