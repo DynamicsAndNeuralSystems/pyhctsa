@@ -28,6 +28,59 @@ def unfold_results(res : list) -> dict:
             feature_dict[k] = res[k]
     # make into a pandas dataframe
     return pd.DataFrame([feature_dict])
+
+def classify_output(res) -> int:
+    # classify the type of output
+    if isinstance(res, str) and res.startswith("Error:"):
+        # fatal error encountered
+        return 1
+    elif np.isnan(res):
+        # NaN
+        return 2
+    elif np.isposinf(res):
+        # pos inf val
+        return 3
+    elif np.isneginf(res):
+        # negative inf val
+        return 4
+    elif np.iscomplexobj(res):
+        # non-zero imarginary component
+        return 5
+    elif res is None:
+        # output is empty
+        return 6
+    else:
+        return 0
+
+def standardise_inputs(data) -> list[np.ndarray]:
+     # standardize the input into a list of 1D float arrays
+    if isinstance(data, pd.Series):
+        return [np.asarray(data.to_numpy(), dtype=float)]
+    elif isinstance(data, pd.DataFrame):
+        return [np.asarray(r, dtype=float) for _, r in data.iterrows()]
+    elif isinstance(data, np.ndarray):
+        if data.ndim == 1:
+            return [np.asarray(data, dtype=float)]
+        elif data.ndim == 2:
+            return [np.asarray(row, dtype=float) for row in data]
+        else:
+            raise ValueError("NumPy array must be 1D or 2D.")
+    # list/tuple/array-likes
+    elif isinstance(data, (list, tuple)):
+        # If it looks like a list of series, coerce each;
+        # otherwise treat as a single series.
+        if len(data) > 0 and all(isinstance(ts, (list, tuple, np.ndarray, pd.Series)) for ts in data):
+            out = []
+            for ts in data:
+                ts = ts.to_numpy() if isinstance(ts, pd.Series) else ts
+                out.append(np.asarray(ts, dtype=float))
+            return out
+        # single series
+        return [np.asarray(data, dtype=float)]
+    else:
+        raise ValueError(
+        "Input must be a 1D series, a list of 1D series, a 2D array "
+        "with shape (n_series, n_samples), or a pandas Series/DataFrame.")
   
 def _format_param_value(val) -> str:
     """
@@ -125,7 +178,7 @@ class FeatureCalculator:
         # numbe of series, number of NaNs, number of infs, etc.
         pass
 
-    def extract(self, data : ArrayLike) -> pd.DataFrame:
+    def extract(self, data) -> pd.DataFrame:
         """
         Run the configured feature extractor over one or more time series and
         return a single tidy `pandas.DataFrame`.
@@ -150,8 +203,6 @@ class FeatureCalculator:
         Examples
         --------
         >>> fc = FeatureCalculator("custom.yaml")
-        Single time series
-        ------------------
         >>> x = np.random.randn(1000)
         >>> df = fc.extract(x)
         Evaluating 128 partialed functions. Strap in!...
@@ -159,23 +210,40 @@ class FeatureCalculator:
         >>> df.shape
         (1, 128)
         """
-        # Single time series: 1D array or list of numbers
-        print(f"Evaluating {len(self.feature_funcs)} partialed functions. Strap in!...")
+        series_list = standardise_inputs(data)
+        n_funcs = len(self.feature_funcs)
+        print(f"Evaluating {n_funcs} partialed functions. Strap in!...")
         start_time = time.perf_counter()
-        results = [] # list of dictionaries
-        if isinstance(data, (np.ndarray, list)) and all(isinstance(x, (int, float, np.integer, np.floating)) for x in data):
-            results = [self._extract_single(np.asarray(data, dtype=float))]
-        # List of time series: list/array of lists/arrays
-        elif isinstance(data, (list, np.ndarray)) and all(isinstance(ts, (list, np.ndarray)) for ts in data):
-            for ts in data:
-                results.append(self._extract_single(np.asarray(ts, dtype=float)))
-        else:
-            raise ValueError("Input must be a 1D array-like (single time series) or a list of 1D array-likes (multiple time series).")
+        rows: list[dict] = []
+
+        for ts in series_list:
+            row = {}
+            for name, func in self.feature_funcs.items():
+                try:
+                    val = func(ts)
+                    # flatten if the feature returns a dict
+                    if isinstance(val, dict):
+                        for k, v in val.items():
+                            # check the output for quality
+                            row[f"{name}.{k}"] = v
+                    # flatten small 1D arrays: name_0, name_1, ...
+                    elif isinstance(val, np.ndarray) and val.ndim == 1 and val.size <= 16:
+                        for i, v in enumerate(val):
+                            row[f"{name}_{i}"] = v
+                    else:
+                        row[name] = val
+                except Exception as e:
+                    row[name] = f"Error: {e}"
+            rows.append(row)
+
         elapsed = time.perf_counter() - start_time
         print(f"Feature extraction completed in {elapsed:.3f} seconds.")
-
-        # return a dataframe
-        dfs = [unfold_results(res) for res in results]
-        df = pd.concat(dfs, ignore_index=True)
+        df = pd.json_normalize(rows)
+        # run output quality checks
+        df_errs = df.map(lambda x: classify_output(x))
+        self._last_elapsed = elapsed
+        self._last_result = df
+        self._errors = df_errs
 
         return df
+    
