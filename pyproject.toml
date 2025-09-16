@@ -17,7 +17,7 @@ dependencies = [
     "loguru",
     "pyyaml",
     "statsmodels",
-    "jpype1 @ git+https://github.com/jpype-project/jpype.git@v1.5.2",
+    "jpype1",
     "numba",
     "scikit-learn",
     "antropy",

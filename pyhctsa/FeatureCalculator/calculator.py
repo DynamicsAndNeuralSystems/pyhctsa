@@ -2,6 +2,7 @@ import yaml
 from functools import partial
 import importlib
 import numpy as np
+from pathlib import Path
 import time
 import pandas as pd
 from typing import Union
@@ -108,17 +109,30 @@ def _format_param_value(val) -> str:
     return str(val)
 
 class FeatureCalculator:
-    def __init__(self, configPath):
+    def __init__(self, configPath : Union[str, None] = None):
+        """
+        Initialises a FeatureCalculator instance.  
+
+        Parameters
+        ----------
+        configPath : str or None, optional
+            Path to the YAML configuration file. If None, uses the default configuration.
+        """
+        # set the default config path
+        if configPath is None:
+            ROOT_DIR = Path(__file__).resolve().parent.parent
+            configPath = ROOT_DIR / "Configurations" / "basic.yaml"
         with open(configPath) as f:
             self.config = yaml.safe_load(f)
-        self.operations_package = "pyhctsa.Operations" # abs path
+        self._operations_package = "pyhctsa.Operations" # abs path
         self.feature_funcs = self._build_feature_funcs()
+        print(f"Loaded {len(self.feature_funcs)} master operations.")
 
     def _build_feature_funcs(self):
         feature_funcs = {}
         for module_key in self.config.keys():
             # Dynamically import the module based on the config key
-            module = importlib.import_module(f"{self.operations_package}.{module_key}")
+            module = importlib.import_module(f"{self._operations_package}.{module_key}")
             for feature_name, feature_config in self.config[module_key].items():
                 op_func = getattr(module, feature_name, None)
                 if op_func is None:
@@ -174,6 +188,9 @@ class FeatureCalculator:
         return results
     
     def summary(self):
+        """
+        Generate a summary of the last feature extraction call. 
+        """
         # method to display a summary of the last compute operation
         # numbe of series, number of NaNs, number of infs, etc.
         pass
@@ -202,7 +219,7 @@ class FeatureCalculator:
 
         Examples
         --------
-        >>> fc = FeatureCalculator("custom.yaml")
+        >>> fc = FeatureCalculator()
         >>> x = np.random.randn(1000)
         >>> df = fc.extract(x)
         Evaluating 128 partialed functions. Strap in!...

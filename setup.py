@@ -1,5 +1,4 @@
 import io
-import sys
 import os
 import numpy as np
 import platform
@@ -8,10 +7,8 @@ from setuptools import find_packages, setup, Extension
 def get_compile_args():
     """Get platform-specific compilation arguments."""
     if platform.system() == 'Windows':
-        # MSVC compiler flags
         return ['/O2']
     else:
-        # GCC/Clang flags for Unix-like systems
         return ['-O3', '-fPIC', '-std=c99', '-ffast-math']
     
 def get_libraries():
