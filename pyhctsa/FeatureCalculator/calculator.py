@@ -1,17 +1,17 @@
-import yaml
-from functools import partial
-import importlib
 import numpy as np
-from pathlib import Path
-import time
 import pandas as pd
+import time
 from typing import Union
 from numpy.typing import ArrayLike
+import importlib
+from pathlib import Path
+import yaml
+from functools import partial
 from itertools import product
 from ..Utilities.utils import preprocess_decorator
 
 def range_constructor(loader, node) -> list:
-    """Construct a range from a YAML config"""
+    """Construct a range from a YAML config."""
     start, end = loader.construct_sequence(node)
     return list(range(start, end + 1))
 yaml.SafeLoader.add_constructor("!range", range_constructor)
