@@ -190,10 +190,15 @@ class FeatureCalculator:
     def summary(self):
         """
         Generate a summary of the last feature extraction call. 
+        Currently generates a summary for all instances.
         """
-        # method to display a summary of the last compute operation
-        # numbe of series, number of NaNs, number of infs, etc.
-        pass
+        # Check that extract has already been called. Otherwise return nothing...
+        print(f"Time taken to compute {len(self.feature_funcs)} master operations: {self._last_elapsed:.4f} seconds.")
+        codings = { "succesful" : 0, "fatal error(s)" : 1, "NaN(s)": 2, "+inf(s)": 3, "-inf(s)": 4, "complex": 5, "empty": 6}
+        e_arr = self._errors.to_numpy()
+        for c in codings:
+            print(f"{c} : {np.sum(e_arr == codings[c])}")
+        return e_arr
 
     def extract(self, data) -> pd.DataFrame:
         """

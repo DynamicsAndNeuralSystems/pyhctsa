@@ -5,34 +5,67 @@ from typing import Union
 import os
 from functools import wraps
 
+def _load_csv(path: str) -> list:
+    """Helper function to load CSV formatted datasets."""
+    dataset = []
+    with open(path, newline='') as csvfile:
+        reader = csv.reader(csvfile, delimiter=',')
+        for row in reader:
+            try:
+                time_series = [float(value) for value in row if value != '']
+                dataset.append(time_series)
+            except ValueError:
+                continue
+    return dataset
 
-def get_dataset(which : str = "e1000"):
+def get_dataset(which : str = "e1000") -> list:
     """
-    Load data for testing and validation.
-    Options are either 'e1000' or 'sinusoid'. 
+    Load predefined datasets for testing and validation.
+
+    Parameters
+    ----------
+    which : str, default="e1000"
+        Dataset identifier. Options are:
+        - "e1000": Empirical 1000 dataset.
+        - "sinusoid": Sinusoidal test data.
+        - "noise": Gaussian noise data (T = 1000 sample length time series).
+    
+    Returns
+    -------
+    list
+        List of time series data, where each element is a time series instance as a numpy array.
     """
     dataset = []
     utils_dir = os.path.dirname(os.path.abspath(__file__))
-    if which == "e1000":
-        print("Loading empirical1000 dataset...")
-        # Get the absolute path to the data directory
-        data_path = os.path.join(utils_dir, "../../data/e1000.csv")
-        data_path = os.path.normpath(data_path)
-        with open(data_path, newline='') as csvfile:
-            reader = csv.reader(csvfile, delimiter=',')
-            for row in reader:
-                try:
-                    time_series = [float(value) for value in row if value != '']
-                    dataset.append(time_series)
-                except ValueError as e:
-                    print(f"Skipping row due to conversion error: {row}")
-                continue
-    elif which == "sinusoid":
-        print("Loading sinusoid dataset...")
-        data_path = os.path.join(utils_dir, "../../data/sinusoid.txt")
-        dataset.append(np.loadtxt(data_path))
-    else:
-        raise NotImplementedError("Dataset not found.")
+
+    datasets = {
+        "e1000": {
+            "path": "../../data/e1000.csv",
+            "loader": lambda p: _load_csv(p),
+            "desc": "empirical1000"
+        },
+        "sinusoid": {
+            "path": "../../data/sinusoid.txt",
+            "loader": lambda p: [np.loadtxt(p)],
+            "desc": "sinusoid"
+        },
+        "noise": {
+            "path": "../../data/noise_gaussian.txt",
+            "loader": lambda p: [np.loadtxt(p)],
+            "desc": "gaussian noise"
+        }
+    }
+
+    if which not in datasets:
+        raise NotImplementedError(f"Dataset '{which}' not found. Available options: {list(datasets.keys())}")
+
+    print(f"Loading {datasets[which]['desc']} dataset...")
+    data_path = os.path.normpath(os.path.join(utils_dir, datasets[which]['path']))
+    
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(f"Data file not found at: {data_path}")
+    
+    dataset = datasets[which]['loader'](data_path)
     print(f"Loaded dataset of {len(dataset)} time series.")
     return dataset
     
