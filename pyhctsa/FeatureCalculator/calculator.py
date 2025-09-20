@@ -1,8 +1,10 @@
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 import time
 from typing import Union
 from numpy.typing import ArrayLike
+from multiprocessing import Pool, cpu_count
 import importlib
 from pathlib import Path
 import yaml
@@ -33,25 +35,25 @@ def unfold_results(res : list) -> dict:
 def classify_output(res) -> int:
     # classify the type of output
     if isinstance(res, str) and res.startswith("Error:"):
-        # fatal error encountered
         return 1
+    elif res is None:
+        return 6
+    elif np.iscomplexobj(res):
+        # non-zero imaginary component
+        return 5
     elif np.isnan(res):
-        # NaN
         return 2
     elif np.isposinf(res):
-        # pos inf val
         return 3
     elif np.isneginf(res):
-        # negative inf val
         return 4
-    elif np.iscomplexobj(res):
-        # non-zero imarginary component
-        return 5
-    elif res is None:
-        # output is empty
-        return 6
     else:
         return 0
+    
+def _process_batch_static(batch_data):
+    """Static method for parallel processing of batches."""
+    calc = FeatureCalculator()  # Create new instance for each process
+    return calc.extract(batch_data)
 
 def standardise_inputs(data) -> list[np.ndarray]:
      # standardize the input into a list of 1D float arrays
@@ -199,6 +201,75 @@ class FeatureCalculator:
         for c in codings:
             print(f"{c} : {np.sum(e_arr == codings[c])}")
         return e_arr
+    
+    def extract_parallel(self, data, batch_size : int = 100, n_procs : int = None) -> pd.DataFrame:
+        
+        series_list = standardise_inputs(data)
+        
+        # Create batches
+        batches = [
+            series_list[i:i + batch_size]
+            for i in range(0, len(series_list), batch_size)
+        ]
+        
+        # Set number of processes
+        if n_procs is None:
+            n_procs = max(1, cpu_count() - 1)
+            
+        print(f"Processing {len(series_list)} series in {len(batches)} "
+              f"batches using {n_procs} processes...")
+        
+        # Process batches in parallel
+        with Pool(processes=n_procs) as pool:
+            results = list(tqdm(
+                pool.imap(_process_batch_static, batches),
+                total=len(batches),
+                desc="Processing batches"))
+            
+        # Combine results
+        valid_results = [df for df in results if not df.empty]
+        if not valid_results:
+            raise RuntimeError("No valid results obtained from any batch")
+            
+        return pd.concat(valid_results, ignore_index=True)
+        
+    
+    def extract_batch(self, data, batch_size : int = 100) -> pd.DataFrame:
+
+        series_list = standardise_inputs(data)
+        isValid = np.array([validate_data(t) for t in series_list]) # check each time series to see if valid...
+        invalid = np.argwhere(isValid == False)
+        if invalid.size > 0:
+            raise ValueError(f"One or more time series instances are invalid: {invalid.flatten()}")
+        
+        # get the number of batches
+        n_series = len(series_list)
+        n_batches = (n_series+ batch_size - 1) // batch_size
+        print(f'Processing {n_series} series in {n_batches} batches of {batch_size}...')
+        dfs = []
+        iterator = range(0, n_series, batch_size)
+        for start_idx in iterator:
+            end_idx = min(start_idx + batch_size, n_series)
+            batch = series_list[start_idx:end_idx]
+
+            try:
+                batch_df = self.extract(batch)
+                dfs.append(batch_df)
+            except Exception as e:
+                print(f"Error in batch {start_idx//batch_size}: {str(e)}")
+                continue
+        
+        # merge
+        if not dfs:
+            raise RuntimeError("No valid results obtained from any batch")
+        
+        final_df = pd.concat(dfs, ignore_index=True)
+        # store summary statistics
+        self._last_result = final_df
+        self._errors = final_df.map(lambda x: classify_output(x))
+        
+        return final_df
+
 
     def extract(self, data) -> pd.DataFrame:
         """
