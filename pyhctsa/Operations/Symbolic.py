@@ -636,8 +636,8 @@ def TransitionMatrix(y : ArrayLike, howtocg : str = 'quantile', numGroups : int 
     # Eigenvalues of covariance matrix
     eig_cov_T = np.linalg.eigvals(cov_T)
     out['stdeigcov'] = np.std(eig_cov_T, ddof=1)
-    out['maxeigcov'] = np.max(eig_cov_T)
-    #out['mineigcov'] = np.min(eig_cov_T)
+    out['maxeigcov'] = np.max(np.real(eig_cov_T))
+    out['mineigcov'] = np.min(np.real(eig_cov_T))
 
     return out
 
