@@ -1,13 +1,13 @@
 import numpy as np
 import pandas as pd
+from functools import partial
+from itertools import product
 import time
 from typing import Union
 from numpy.typing import ArrayLike
 import importlib
 from pathlib import Path
 import yaml
-from functools import partial
-from itertools import product
 from ..Utilities.utils import preprocess_decorator, validate_data
 
 def range_constructor(loader, node) -> list:
@@ -47,11 +47,6 @@ def classify_output(res) -> int:
         return 4
     else:
         return 0
-    
-def _process_batch_static(batch_data):
-    """Static method for parallel processing of batches."""
-    calc = FeatureCalculator()  # Create new instance for each process
-    return calc.extract(batch_data)
 
 def standardise_inputs(data) -> list[np.ndarray]:
      # standardize the input into a list of 1D float arrays
@@ -199,38 +194,6 @@ class FeatureCalculator:
         for c in codings:
             print(f"{c} : {np.sum(e_arr == codings[c])}")
         return e_arr
-    
-    # def extract_parallel(self, data, batch_size : int = 100, n_procs : int = None) -> pd.DataFrame:
-        
-    #     series_list = standardise_inputs(data)
-        
-    #     # Create batches
-    #     batches = [
-    #         series_list[i:i + batch_size]
-    #         for i in range(0, len(series_list), batch_size)
-    #     ]
-        
-    #     # Set number of processes
-    #     if n_procs is None:
-    #         n_procs = max(1, cpu_count() - 1)
-            
-    #     print(f"Processing {len(series_list)} series in {len(batches)} "
-    #           f"batches using {n_procs} processes...")
-        
-    #     # Process batches in parallel
-    #     with Pool(processes=n_procs) as pool:
-    #         results = list(tqdm(
-    #             pool.imap(_process_batch_static, batches),
-    #             total=len(batches),
-    #             desc="Processing batches"))
-            
-    #     # Combine results
-    #     valid_results = [df for df in results if not df.empty]
-    #     if not valid_results:
-    #         raise RuntimeError("No valid results obtained from any batch")
-            
-    #     return pd.concat(valid_results, ignore_index=True)
-        
     
     def extract_batch(self, data, batch_size : int = 100) -> pd.DataFrame:
 

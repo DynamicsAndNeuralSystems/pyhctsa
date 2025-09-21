@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel", "numpy", "cython"]
+requires = ["setuptools>=68", "wheel", "numpy>=1.24"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,42 +8,37 @@ version = "0.0.1"
 description = "project_description"
 readme = "README.md"
 license = {text = "MIT"}
-authors = [
-    {name = "Joshua B. Moore"}
-]
+authors = [{name = "Joshua B. Moore"}]
+
 dependencies = [
-    "numpy",
-    "scipy",
-    "loguru",
-    "pyyaml",
-    "statsmodels",
-    "jpype1",
-    "numba",
-    "scikit-learn",
-    "antropy",
-    "PyWavelets @ git+https://github.com/joshuabmoore/pywt.git",
-    "ts2vg",
-    "arch",
-    "hmmlearn"
+  "numpy",
+  "scipy",
+  "loguru",
+  "pyyaml",
+  "statsmodels",
+  "jpype1",
+  "numba",
+  "scikit-learn",
+  "antropy",
+  "ts2vg",
+  "arch",
+  "hmmlearn",
+  "PyWavelets @ git+https://github.com/joshuabmoore/pywt.git"
 ]
 
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
 ]
 
 [project.optional-dependencies]
-test = [
-    "pytest>=6.0",
-    "pytest-cov",
-    "pytest-mock"
-]
+test = ["pytest>=6.0", "pytest-cov", "pytest-mock"]
 
 [project.urls]
 Homepage = "https://github.com/author_name/project_urlname/"
