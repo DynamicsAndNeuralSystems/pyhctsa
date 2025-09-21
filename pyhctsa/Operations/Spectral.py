@@ -3,7 +3,6 @@ import numpy as np
 from pyhctsa.Operations.Distribution import Moments
 from pyhctsa.Operations.Correlation import AutoCorr, FirstCrossing
 from pyhctsa.Utilities.utils import make_mat_buffer, signChange
-from scipy.optimize import curve_fit
 from numpy.typing import ArrayLike
 
 def SpectralSummaries(y : ArrayLike, psdMeth : str = 'fft', windowType : str = 'none') -> dict:

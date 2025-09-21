@@ -57,7 +57,7 @@ def wfBM_estimate(x : ArrayLike) -> dict:
 
     return {"p1": H1, "p2": H2, "p3": H3}
 
-def scal2Frq(y, wname = 'db3', amax = 5, delta = 1) -> dict:
+def scal2Frq(y : ArrayLike, wname : str = 'db3', amax : int = 5, delta : int = 1) -> dict:
     """
     Frequency components in a periodic time series
 
@@ -408,7 +408,7 @@ def WLCoeffs(y : ArrayLike, wname : str = 'db3', level : Union[int, str] = 3) ->
 
     return out
 
-def wavedec(data, wavelet, mode='symmetric', level=1, axis=-1):
+def wavedec(data : ArrayLike, wavelet : str, mode : str ='symmetric', level : int = 1, axis=-1):
     """
     Multiple level 1-D discrete fast wavelet decomposition
 

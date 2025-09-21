@@ -1,9 +1,20 @@
 import numpy as np
+import jpype
 import csv
 from numpy.typing import ArrayLike
 from typing import Union
 import os
 from functools import wraps
+
+def check_java_is_available() -> bool:
+    # retrieve the path to the default JVM library
+    try:
+        path = jpype.getDefaultJVMPath()
+    except jpype.JVMNotFoundException as e:
+        print("JVM not found. Please check your JAVA_HOME or installation.")
+        return False
+    
+    return True
 
 def validate_data(ts : np.ndarray) -> bool:
     # validate a time series before computing features

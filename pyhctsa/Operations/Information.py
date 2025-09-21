@@ -4,11 +4,11 @@ import jpype as jp
 import os
 from numpy.typing import ArrayLike
 from scipy import stats
-from scipy.optimize import curve_fit
 from loguru import logger
-from ..Utilities.utils import signChange, RM_histogram2
+from ..Utilities.utils import signChange, RM_histogram2, check_java_is_available
 
-def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, minNotMax : Union[bool, None] = True) -> int:
+def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, 
+             minNotMax : Union[bool, None] = True) -> int:
     """
     Time of first minimum in a given self-correlation function.
 
@@ -20,7 +20,7 @@ def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, minNotM
         The type of correlation to minimize. Options are 'ac' for autocorrelation,
         or 'mi' for automutual information. By default, 'mi' specifies the
         'gaussian' method from the Information Dynamics Toolkit. Other options
-        include 'mi-kernel', 'mi-kraskov1', 'mi-kraskov2' (from Information Dynamics Toolkit),
+        include 'mi-kernel', 'mi-kraskov1', 'mi-kraskov2' (from Information Dynamics Toolkit, JIDT),
         or 'mi-hist' (histogram-based method). Default is 'mi'.
     extraParam : any, optional
         An additional parameter required for the specified `minWhat` method (e.g., for Kraskov).
@@ -89,7 +89,8 @@ def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, minNotM
     return np.nan
 
 
-def _mi_bin(v1, v2, r1 = 'range', r2 = 'range', numBins = 10) -> float:
+def _mi_bin(v1 : ArrayLike, v2 : ArrayLike, r1 : Union[str, list] = 'range', 
+            r2 : Union[str, list] = 'range', numBins : int = 10) -> float:
     """
     Compute mutual information between two data vectors using bin counting.
 
@@ -142,7 +143,7 @@ def _mi_bin(v1, v2, r1 = 'range', r2 = 'range', numBins = 10) -> float:
 def _give_me_edges(r, v, nbins):
     EE = 1E-6 # this small addition gets lost in the last bin
     if r == 'range':
-            return np.linspace(np.min(v), np.max(v) + EE, nbins + 1)
+        return np.linspace(np.min(v), np.max(v) + EE, nbins + 1)
     elif r == 'quantile': # bin edges based on quantiles
         edges = np.quantile(v, np.linspace(0, 1, nbins + 1))
         edges[-1] += EE
@@ -443,7 +444,9 @@ def _initialize_MI(
     miCalc : Java object
         An initialized mutual information calculator object ready for use.
     """
-    # Check to see whether a jpype JVM has been started.
+    # Check to see whether a jpype JVM has been started. If not, start one. 
+    check_java_is_available()
+    
     if not jp.isJVMStarted():
         jarloc = (
             os.path.dirname(os.path.abspath(__file__)) + "/../Toolboxes/infodynamics-dist/infodynamics.jar"
