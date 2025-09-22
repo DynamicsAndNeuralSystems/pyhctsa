@@ -221,20 +221,6 @@ def LoopLocalSimple(y : ArrayLike, forecastMeth : str = 'mean') -> dict:
     out['sws_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:,1])))
     out['sws_stdn'] = np.std(stats_st[:,1], ddof=1)/np.ptp(stats_st[:,1])
 
-    # # % Fit exponential decay:
-    # exp_func = lambda x, a, b, c: a * np.exp(b * x) + c 
-    # popt, _ = curve_fit(exp_func, np.arange(len(stats_st[:,1])), stats_st[:,1], p0=[np.ptp(stats_st[:, 1]), -0.5, np.min(stats_st[:, 1])], maxfev=100000)
-    # out['sws_fexp_a'] = popt[0]
-    # out['sws_fexp_b'] = popt[1]
-    # out['sws_fexp_c'] = popt[2]
-    # resids_exp = exp_func(np.arange(len(stats_st[:,1])), *popt) - stats_st[:,1]
-    # sse_exp = np.sum(resids_exp**2)
-    # sst_exp = np.sum((stats_st[:,1] - np.mean(stats_st[:,1]))**2)
-    # n = len(stats_st[:, 1])
-    # out['sws_fexp_r2'] = 1 - (sse_exp/sst_exp)
-    # out['sws_fexp_adjr2'] = 1 - (sse_exp/(n - len(popt)))/(sst_exp/(n-1))
-    # out['sws_fexp_rmse'] = np.sqrt(np.mean(resids_exp**2))
-
     #% (3) sliding window mean
     out['swm_chn'] = np.mean(np.diff(stats_st[:, 2]))/(np.ptp(stats_st[:, 2]))
     out['swm_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:,2])))

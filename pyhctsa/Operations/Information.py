@@ -5,7 +5,7 @@ import os
 from numpy.typing import ArrayLike
 from scipy import stats
 from loguru import logger
-from ..Utilities.utils import signChange, RM_histogram2, check_java_is_available
+from ..Utilities.utils import signChange, RM_histogram2
 
 def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, 
              minNotMax : Union[bool, None] = True) -> int:
@@ -444,9 +444,7 @@ def _initialize_MI(
     miCalc : Java object
         An initialized mutual information calculator object ready for use.
     """
-    # Check to see whether a jpype JVM has been started. If not, start one. 
-    check_java_is_available()
-    
+
     if not jp.isJVMStarted():
         jarloc = (
             os.path.dirname(os.path.abspath(__file__)) + "/../Toolboxes/infodynamics-dist/infodynamics.jar"

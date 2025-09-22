@@ -8,7 +8,7 @@ from numpy.typing import ArrayLike
 import importlib
 from pathlib import Path
 import yaml
-from ..Utilities.utils import preprocess_decorator, validate_data
+from ..Utilities.utils import preprocess_decorator, validate_data, check_optional_deps
 
 def range_constructor(loader, node) -> list:
     """Construct a range from a YAML config."""
@@ -116,7 +116,7 @@ class FeatureCalculator:
         # set the default config path
         if configPath is None:
             ROOT_DIR = Path(__file__).resolve().parent.parent
-            configPath = ROOT_DIR / "Configurations" / "basic.yaml"
+            configPath = ROOT_DIR / "Configurations" / "hctsa.yaml"
         with open(configPath) as f:
             self.config = yaml.safe_load(f)
         self._operations_package = "pyhctsa.Operations" # abs path
@@ -125,10 +125,42 @@ class FeatureCalculator:
 
     def _build_feature_funcs(self):
         feature_funcs = {}
+        skipped_functions = []
+        
         for module_key in self.config.keys():
-            # Dynamically import the module based on the config key
-            module = importlib.import_module(f"{self._operations_package}.{module_key}")
+            try:
+                module = importlib.import_module(f"{self._operations_package}.{module_key}")
+            except ImportError as e:
+                print(f"Failed to import module '{module_key}': {e}")
+                # Skip all functions in this module since we can't import it
+                for feature_name in self.config[module_key].keys():
+                    skipped_functions.append((f"{module_key}.{feature_name}", ["import_error"]))
+                continue
+            
+            # Process features from this module
             for feature_name, feature_config in self.config[module_key].items():
+                # Check if this specific function has dependencies
+                function_dependencies = feature_config.get("dependencies", None)
+                missing_deps = []
+                
+                if function_dependencies is not None:
+                    # Handle both string and list of dependencies
+                    if isinstance(function_dependencies, str):
+                        deps_to_check = [function_dependencies]
+                    elif isinstance(function_dependencies, list):
+                        deps_to_check = function_dependencies
+                    else:
+                        deps_to_check = []
+                    
+                    # Check each dependency for this function
+                    for dep in deps_to_check:
+                        if not check_optional_deps(dep):
+                            missing_deps.append(dep)
+                    
+                    if missing_deps:
+                        print(f"Skipping function '{module_key}.{feature_name}' - missing dependencies: {', '.join(missing_deps)}")
+                        skipped_functions.append((f"{module_key}.{feature_name}", missing_deps))
+                        continue
                 op_func = getattr(module, feature_name, None)
                 if op_func is None:
                     continue
@@ -170,6 +202,12 @@ class FeatureCalculator:
                     label = f"{module_key}_{feature_name}"
                     decorated_func = preprocess_decorator(zscore, absval)(op_func)
                     feature_funcs[label] = decorated_func
+        
+        # Store information about skipped functions for later reference
+        self._skipped_functions = skipped_functions
+        if skipped_functions:
+            print(f"Total functions skipped due to missing dependencies: {len(skipped_functions)}")
+        
         return feature_funcs
 
     def _extract_single(self, ts : ArrayLike):

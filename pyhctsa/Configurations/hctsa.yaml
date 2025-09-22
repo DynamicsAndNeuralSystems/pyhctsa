@@ -178,7 +178,6 @@ Correlation:
       - embedding
       - correlation
     dependencies:
-      - scipy
     configs:
       - tau: ['tau']
         zscore: True
@@ -288,7 +287,6 @@ Correlation:
       - correlation
       - autocorrelation
     dependencies:
-      - scipy
     configs:
       - stopWhen: ['drown', 'posDrown']
         zscore: True
@@ -300,6 +298,7 @@ Correlation:
     labels:
       - correlation
     depedencies:
+      - jpype1
     configs:
       - tau: 1
         amiMethod: ['quantiles', 'even', 'std1']
@@ -349,7 +348,6 @@ Correlation:
       - correlation
       - AMI
     dependencies:
-      - scipy
     configs:
       - binMethod: ['std1', 'std2', 'quantiles', 'even']
         numBins: [!range [2, 80]]
@@ -436,8 +434,7 @@ Information:
       - correlation
       - AMI
     dependencies:
-      - jpype
-      - JIDT
+      - jpype1
     configs:
       - maxTau: [40, 20]
         estMethod: 'gaussian'
@@ -469,7 +466,7 @@ Information:
       - correlation
       - AMI
     dependencies:
-      - JIDT
+      - jpype1
     configs:
       - minWhat: ['ac', 'mi-gaussian']
         extraParam: ['']
@@ -504,7 +501,7 @@ Entropy:
     labels:
       - entropy
     dependencies:
-      - scipy
+      - jpype1
     configs:
       - histOrKS: 'ks'
         numBins: [0.01, 0.1, 0.5, 1.0]
@@ -666,7 +663,6 @@ Stationarity:
     labels:
       - stationarity
     dependencies:
-      - scipy
     configs:
       - zscore: True
     hctsa_name: SY_Trend
@@ -938,7 +934,6 @@ Stationarity:
       - statistics
       - stationarity
     dependencies:
-      - scipy
     configs:
       - whatStat: ['zcross', 'pmcross']
         zscore: True
@@ -965,7 +960,6 @@ Stationarity:
     labels:
       - stationarity
     dependencies:
-      - scipy
     configs:
       - maxNumSegments: 10
         zscore: True
@@ -977,7 +971,6 @@ Stationarity:
     labels:
       - stationarity
     dependencies:
-      - scipy
     configs:
       - numSegs: [2, 3, 4, 5]
         eachOrPar: ['par', 'each']
@@ -1018,7 +1011,6 @@ Distribution:
       - distribution
       - spreadDependent
     dependencies:
-      - scipy
     configs:
       - spreadMeasure: ['std', 'mad', 'iqr', 'mead']
     hctsa_name: DN_Spread
@@ -1078,7 +1070,6 @@ Distribution:
       - raw
       - locationDependent
     dependencies:
-      - scipy
     configs:
       - meanType: ['norm', 'harm', 'rms', 'median', 'midhinge']
     hctsa_name: DN_Mean
@@ -1103,7 +1094,6 @@ Distribution:
       - distribution
       - raw
     dependencies:
-      - scipy
     configs:
       - fitWhat: ['geometric']
         zscore: False
@@ -1163,7 +1153,6 @@ Distribution:
       - moment
       - shape
     dependencies:
-      - scipy
     configs:
       - theMom: [3, 4, 5, 6, 7, 8, 9, 10, 11]
         zscore: True
@@ -1205,7 +1194,6 @@ Distribution:
       - outliers
       - distribution
     dependencies:
-      - scipy
     configs:
       - removeHow: 'absclose'
         p: [0.1, 0.5, 0.8]
@@ -1233,7 +1221,6 @@ Distribution:
       - ksdensity
       - raw
     dependencies:
-      - scipy
     configs:
       - whatDistn: ['norm', 'ev', 'uni', 'exp', 'logn']
         zscore: False
@@ -1491,7 +1478,6 @@ Wavelet:
     labels:
       - wavelet
     dependencies:
-      - pywt
       - PyWavelets
     configs:
       - wname: 'db3'
@@ -1505,7 +1491,6 @@ Wavelet:
     labels:
       - wavelet
     dependencies:
-      - pywt
       - PyWavelets
     configs:
       - wname: 'db3'
@@ -1519,7 +1504,6 @@ Wavelet:
     labels:
       - wavelet
     dependencies:
-      - pywt
       - PyWavelets
     configs:
       - wname: ['db3', 'sym2']
@@ -1533,7 +1517,6 @@ Wavelet:
     labels:
       - wavelet
     dependencies:
-      - pywt
       - PyWavelets
     configs:
       - wname: ['db3', 'sym2']
@@ -1547,7 +1530,6 @@ Wavelet:
     labels: 
       - wavelet
     depedencies:
-      - pywt
       - PyWavelets
     configs:
       - wname: 'db3'
@@ -1562,7 +1544,6 @@ Wavelet:
     labels:
       - wavelet
     depedencies:
-      - pywt
       - PyWavelets
     configs:
       - zscore: True
@@ -1603,7 +1584,6 @@ Spectral:
       - spectral
       - FourierSpectrum
     depedencies:
-      - scipy
     configs:
       - psdMeth: 'welch'
         windowType: 'rect'
@@ -1651,8 +1631,6 @@ ModelFit:
       - model
       - ModelFit
     dependencies:
-      - numba
-      - scipy
     configs:
       - ntrain: 0.5
         alpha: 'best'
@@ -1779,7 +1757,6 @@ PreProcess:
       - raw
       - preprocess
     dependencies: 
-      - scipy
     configs:
       - detrendMeth: ["poly1", "poly2"]
         zscore: False

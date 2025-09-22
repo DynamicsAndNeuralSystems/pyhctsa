@@ -1,23 +1,32 @@
+import os
 import numpy as np
-import jpype
-import csv
 from numpy.typing import ArrayLike
 from typing import Union
-import os
+from importlib.metadata import version, PackageNotFoundError
+import csv
 from functools import wraps
 
-def check_java_is_available() -> bool:
-    # retrieve the path to the default JVM library
+def check_optional_deps(dep: str) -> bool:
+    """Check whether an optional dependency exists.
+    Returns True if available, else False."""
     try:
-        path = jpype.getDefaultJVMPath()
-    except jpype.JVMNotFoundException as e:
-        print("JVM not found. Please check your JAVA_HOME or installation.")
+        version(dep)
+        # special check for JPype dependency
+        if dep == "jpype1":
+            try:
+                import jpype
+                jpype.getDefaultJVMPath()
+            except (ImportError, AttributeError):
+                return False
+            except jpype.JVMNotFoundException:
+                print("JVM not found. Please check your JAVA_HOME or installation.")
+                return False
+        return True
+    except PackageNotFoundError:
         return False
-    
-    return True
 
 def validate_data(ts : np.ndarray) -> bool:
-    # validate a time series before computing features
+    """validate a time series before computing features"""
     if len(ts) < 100:
         print("Time series is too short!")
         return False
@@ -100,7 +109,7 @@ def get_dataset(which : str = "e1000") -> list:
     print(f"Loaded dataset of {len(dataset)} time series.")
     return dataset
     
-def preprocess_decorator(zscore=False, absval=False):
+def preprocess_decorator(zscore : bool = False, absval : bool = False):
     """
     Z-score or take the absolute value of the time series before passing into
     the master operation.
@@ -133,11 +142,6 @@ def ZScore(x : ArrayLike) -> np.ndarray:
     -------
     np.ndarray
         The z-scored version of the input data.
-
-    Raises
-    ------
-    ValueError
-        If the input contains NaN values.
     """
     # Convert input to numpy array
     try:
@@ -167,17 +171,18 @@ def ZScore(x : ArrayLike) -> np.ndarray:
     return zscored_data
 
 def histc(x : ArrayLike, bins : ArrayLike) -> int:
+    """Counts the number of values in x that are within each specified bin."""
     map_to_bins = np.digitize(x, bins) # Get indices of the bins to which each value in input array belongs.
     res = np.zeros(bins.shape)
     for el in map_to_bins:
         res[el-1] += 1 # Increment appropriate bin.
     return res
 
-def binpicker(xmin, xmax, nbins, bindwidthEst=None):
+def binpicker(xmin : float, xmax : float, nbins : Union[None, int], bindwidthEst : Union[None, float] = None) -> np.ndarray:
     """
     Choose histogram bins. 
 
-    Parameters:
+    Parameters
     -----------
     xmin : float
         Minimum value of the data range.
@@ -185,8 +190,10 @@ def binpicker(xmin, xmax, nbins, bindwidthEst=None):
         Maximum value of the data range.
     nbins : int or None
         Number of bins. If None, an automatic rule is used.
+    bindwidthEst : float or None
+        Estimate of the bin width.
 
-    Returns:
+    Returns
     --------
     edges : numpy.ndarray
         Array of bin edges.
@@ -271,15 +278,17 @@ def binpicker(xmin, xmax, nbins, bindwidthEst=None):
 
     return edges
 
-def simple_binner(xData, numBins) -> tuple:
+def simple_binner(xData : ArrayLike, numBins : int) -> tuple:
     """
     Generate a histogram from equally spaced bins.
    
-    Parameters:
+    Parameters
+    ----------
     xData (array-like): A data vector.
     numBins (int): The number of bins.
 
-    Returns:
+    Returns
+    -------
     tuple: (N, binEdges)
         N (numpy.ndarray): The counts
         binEdges (numpy.ndarray): The extremities of the bins.
@@ -300,16 +309,18 @@ def simple_binner(xData, numBins) -> tuple:
     
     return N, binEdges
 
-def pointOfCrossing(x, threshold, oneIndexing=True):
+def pointOfCrossing(x : ArrayLike, threshold : float, oneIndexing : bool = True):
     """
     Linearly interpolate to the point of crossing a threshold
     
-    Parameters:
+    Parameters
+    ----------
         x (array-like): a vector
         threshold (float): a threshold x crosses
         ondeIndexing (bool): whether to use zero or one indexing for consistency with MATLAB implementation.
     
-    Returns:
+    Returns
+    -------
         tuple: (firstCrossing, pointOfCrossing)
         firstCrossing (int): the first discrete value after which a crossing event has occurred
         pointOfCrossing (float): the (linearly) interpolated point of crossing
@@ -350,7 +361,7 @@ def signChange(y : Union[list, np.ndarray], doFind=0):
 
     return indexs
 
-def make_buffer(y, bufferSize):
+def make_buffer(y : ArrayLike, bufferSize : int) -> np.ndarray:
     """
     Make a buffered version of a time series.
 
@@ -380,9 +391,11 @@ def make_buffer(y, bufferSize):
     return y_buffer
 
 
-def make_mat_buffer(X, n, p=0, opt=None):
+def make_mat_buffer(X : ArrayLike, n : int, p : int = 0, opt : Union[str, None] = None) -> np.ndarray:
     # helper function
-    '''Mimic MATLAB routine to generate buffer array
+    '''
+    Create a buffer array.
+
     MATLAB docs here: https://se.mathworks.com/help/signal/ref/buffer.html.
     Taken from: https://stackoverflow.com/questions/38453249/does-numpy-have-a-function-equivalent-to-matlabs-buffer 
 
@@ -439,7 +452,7 @@ def make_mat_buffer(X, n, p=0, opt=None):
 
     return result
 
-def binarize(y, binarizeHow='diff'):
+def binarize(y : ArrayLike, binarizeHow : str = 'diff') -> ArrayLike:
     """
     Converts an input vector into a binarized version.
 
@@ -477,14 +490,18 @@ def binarize(y, binarizeHow='diff'):
 
     return yBin
 
-def stepBinary(X):
+def stepBinary(X : ArrayLike) -> ArrayLike:
     # Transform real values to 0 if <=0 and 1 if >0:
     Y = np.zeros(len(X))
     Y[X > 0] = 1
 
     return Y
 
-def xcorr(x, y, normed=True, maxlags=10):
+def xcorr(x : ArrayLike, y : ArrayLike, normed : bool = True, maxlags : int = 10) -> tuple:
+    """Cross correlation of two signals of equal length.
+    Returns the coefficients when normed = True and 
+    Returns inner products when normed = False."""
+
     # taken from https://github.com/colizoli/xcorr_python 
     # Cross correlation of two signals of equal length
     # Returns the coefficients when normed=True

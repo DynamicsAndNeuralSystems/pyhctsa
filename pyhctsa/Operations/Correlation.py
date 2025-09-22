@@ -12,7 +12,6 @@ from scipy.linalg import LinAlgError
 from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
 from ..Operations.Information import AutoMutualInfo
 
-
 def AddNoise(y : ArrayLike, tau : int = 1, amiMethod : str = 'even', extraParam : int = 10, randomSeed = None) -> dict:
     """
     Changes in the automutual information with the addition of noise
