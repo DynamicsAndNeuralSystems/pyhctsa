@@ -16,7 +16,7 @@ def test_module_basic(x):
     # basic checks on medical module
     data = get_dataset(which="sinusoid")
     config_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "Configurations", f"{x}.yaml")
+        os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "Configurations", "TestConfigs", f"{x}.yaml")
     assert os.path.exists(config_path), f"Config file not found: {config_path}"
     calc = FeatureCalculator(config_path)
     fvec = calc.extract(data)
