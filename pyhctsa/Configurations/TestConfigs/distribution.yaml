@@ -31,7 +31,6 @@ Distribution:
       - distribution
       - spreadDependent
     dependencies:
-      - 
     configs:
       - spreadMeasure: ['std', 'mad', 'iqr', 'mead']
     hctsa_name: DN_Spread
