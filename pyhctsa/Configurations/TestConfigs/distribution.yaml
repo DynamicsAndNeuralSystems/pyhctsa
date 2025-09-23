@@ -90,7 +90,6 @@ Distribution:
       - raw
       - locationDependent
     dependencies:
-      - 
     configs:
       - meanType: ['norm', 'harm', 'rms', 'median', 'midhinge']
     hctsa_name: DN_Mean
@@ -115,7 +114,6 @@ Distribution:
       - distribution
       - raw
     dependencies:
-      - 
     configs:
       - fitWhat: ['geometric']
         zscore: False
