@@ -1,6 +1,6 @@
 # py-HCTSA
 
-## Installation
+## ⬇️ Installation
 To install py-hctsa locally, you can call:
 ```
 pip install -e .
@@ -8,7 +8,7 @@ pip install -e .
 
 This will install pyhctsa in development mode. 
 
-## Basic Usage
+## ✨ Basic Usage
 A `FeatureCalculator` object must first be instantiated using:
 ```Python
 from pyhctsa.FeatureCalculator.calculator import FeatureCalculator
@@ -30,7 +30,17 @@ res = calc.extract(data)
 ``` 
 Note that each time-series instances does *not* have to be the same length to compute a vector of features. 
 The results of the extraction will be returned in a pandas dataframe of shape $N \times F$, where $N$ is the number of time-series instances and $F$ is the number of time-series features.
+
 You can also inspect the quality of the extracted feature values by calling ```calc.summary()```.  
 
+## 🤖 Advanced Usage
+## Calling individual operations
+If you would like to run individual operations on your data, you can access the corresponding functions from their respective modules directly.
+For example, to compute the `RawHRVMeas` features on your data:
+```Python
+from pyhctsa.Operations.Medical import RawHRVMeas
 
-## Configuration Files
+data = ... # your ArrayLike data
+res = RawHRVMeas(data) # result as either a dictionary or scalar value
+```
+Note that individual operations can only be called direclty on single time-series instances.
