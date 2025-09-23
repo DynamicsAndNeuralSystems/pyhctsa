@@ -36,11 +36,11 @@ You can also inspect the quality of the extracted feature values by calling ```c
 ## 🤖 Advanced Usage
 ## Calling individual operations
 If you would like to run individual operations on your data, you can access the corresponding functions from their respective modules directly.
-For example, to compute the `RawHRVMeas` features on your data:
+For example, to compute the `RawHRVMeas` features on your data, the `RawHRVMeas` master operation can be accessed from the `Medical` module:
 ```Python
 from pyhctsa.Operations.Medical import RawHRVMeas
 
 data = ... # your ArrayLike data
 res = RawHRVMeas(data) # result as either a dictionary or scalar value
 ```
-Note that individual operations can only be called direclty on single time-series instances.
+Note that individual operations can only be called directly on individual time-series instances.
