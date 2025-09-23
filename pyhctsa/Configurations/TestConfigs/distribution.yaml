@@ -31,7 +31,7 @@ Distribution:
       - distribution
       - spreadDependent
     dependencies:
-      - scipy
+      - 
     configs:
       - spreadMeasure: ['std', 'mad', 'iqr', 'mead']
     hctsa_name: DN_Spread
@@ -91,7 +91,7 @@ Distribution:
       - raw
       - locationDependent
     dependencies:
-      - scipy
+      - 
     configs:
       - meanType: ['norm', 'harm', 'rms', 'median', 'midhinge']
     hctsa_name: DN_Mean
@@ -116,7 +116,7 @@ Distribution:
       - distribution
       - raw
     dependencies:
-      - scipy
+      - 
     configs:
       - fitWhat: ['geometric']
         zscore: False
@@ -255,7 +255,6 @@ Distribution:
       - outliers
       - distribution
     dependencies:
-      - scipy
     configs:
       - removeHow: 'absclose'
         p: [0.1, 0.5, 0.8]
@@ -283,7 +282,6 @@ Distribution:
       - ksdensity
       - raw
     dependencies:
-      - scipy
     configs:
       - whatDistn: ['norm', 'ev', 'uni', 'exp', 'logn']
         zscore: False

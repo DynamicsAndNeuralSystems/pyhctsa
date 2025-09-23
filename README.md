@@ -1,30 +1,32 @@
-# Status Updates
+# py-HCTSA
 
-__01/7:__ 440 partialed functions, 1610 validated features
+## Installation
+To install py-hctsa locally, you can call:
+```
+pip install -e .
+```
 
-__07/07:__ 470 partialed functions, 1654 validated features
+This will install pyhctsa in development mode. 
 
-__08/07:__ 539 partialed functions, 2033 validated features
+## Basic Usage
+A `FeatureCalculator` object must first be instantiated using:
+```Python
+from pyhctsa.FeatureCalculator.calculator import FeatureCalculator
 
-__09/07:__ 585 partialed functions, 2300 validated features
+calc = FeatureCalculator()
+```
+By default, the `FeatureCalculator` will initialize the full feature set (> 800 master operations). If you would like to specify a custom feature set, you can pass the corresponding configuration .YAML file as an argument to the `FeatureCalculator`:
+```Python
+customCalc = FeatureCalculator(configFile="subset.yaml")
+```
+Once a `FeatureCalculator` has been initialized, you can call the `extract` method to compute time series features:
+```Python
+from pyhctsa.Utilities.utils import get_dataset
 
-__11/07:__ 587 partialed functions, 2488 validated features
+e1000 = get_dataset()
+data = e1000[0] # your data as a list, array, or pandas series
+res = calc.extract(data)
+``` 
+The results of the extraction will be returned in a pandas dataframe of shape $N \times F$, where $N$ is the number of time-series instances and $F$ is the number of time-series features.
 
-__13/07:__ 623 partialed functions, 2673 validated features
-
-__18/07:__ 687 partialed functions, 3277 validated features
-
-__20/07:__ 702 partialed functions, 3417 validated features
-
-__27/07:__ 703 partialed functions, 3425 validated features
-
-__11/08:__ 708 partialed functions, 3491 validated features
-
-__23/08:__ 810 partialed functions, 3975 validated features 
-
-__07/09:__ 814 partialed functions, 4037 validated features 
-
-__08/09:__ 813 partialed functions, 4212 validated features 
-
-# Feature Conversion Progress...
-![](https://geps.dev/progress/60)
+## Configuration Files
