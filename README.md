@@ -1,3 +1,12 @@
+<p align="center">
+  <picture>
+    <source srcset="img/pyhctsa_logo_dark.png" media="(prefers-color-scheme: dark)">
+    <img src="img/pyhctsa_logo.png" alt="pyhctsa logo" height="200"/>
+  </picture>
+</p>
+
+<h1 align="center"><em>pyspi</em>: Python Toolkit of Statistics for Pairwise Interactions</h1>
+
 # py-HCTSA
 
 ## ⬇️ Installation
