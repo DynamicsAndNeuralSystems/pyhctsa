@@ -7,7 +7,7 @@
 
 <h1 align="center"><em>pyhctsa</em>: Python Toolkit of Highly Comparative Time-Series Analysis Features</h1>
 
-# py-HCTSA
+# pyhctsa
 
 ## ⬇️ Installation
 To install py-hctsa locally, you can call:
