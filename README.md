@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h1 align="center"><em>pyspi</em>: Python Toolkit of Statistics for Pairwise Interactions</h1>
+<h1 align="center"><em>pyhctsa</em>: Python Toolkit of Highly Comparative Time-Series Analysis Featurea</h1>
 
 # py-HCTSA
 
