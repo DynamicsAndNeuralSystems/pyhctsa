@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h1 align="center"><em>pyhctsa</em>: Python Toolkit of Highly Comparative Time-Series Analysis Featurea</h1>
+<h1 align="center"><em>pyhctsa</em>: Python Toolkit of Highly Comparative Time-Series Analysis Features</h1>
 
 # py-HCTSA
 
