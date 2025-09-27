@@ -1,13 +1,15 @@
-from ts2vg import NaturalVG
 import numpy as np
 from numpy.typing import ArrayLike
+
 import scipy
 from scipy.stats import norm, expon
+from ts2vg import NaturalVG
+
 from pyhctsa.Operations.Correlation import AutoCorr, FirstCrossing
 from pyhctsa.Operations.Entropy import DistributionEntropy
 
-def _horiz_vgraph(ts_data):
-    # helper function for Visibility graph
+def _horiz_vgraph(ts_data : ArrayLike) -> ArrayLike:
+    """Helper function for `VisibilityGraph`."""
     # Ensure ts_data is a NumPy array
     ts_data = np.asarray(ts_data)
     N = len(ts_data)
@@ -44,7 +46,6 @@ def _horiz_vgraph(ts_data):
     
     return A
 
-
 def VisibilityGraph(y : ArrayLike, meth : str = 'horiz', maxL : int = 5000) -> dict:
     """
     Visibility graph analysis of a time series.
@@ -53,16 +54,16 @@ def VisibilityGraph(y : ArrayLike, meth : str = 'horiz', maxL : int = 5000) -> d
     
     Parameters
     ----------
-    y : array-like
-        The time series (a column vector).
+    y : ArrayLike
+        Input time series
     meth : str, optional
-        The method for constructing the visibility graph:
-            - 'norm': the normal visibility definition
-            - 'horiz': uses only horizontal lines to link nodes/datums
+        Method for constructing the visibility graph:
+        - 'horiz': Uses horizontal visibility (only horizontal lines link nodes)
+        - 'norm': Uses natural visibility (standard visibility definition)
         Default is 'horiz'.
     maxL : int, optional
-        The maximum number of samples to consider. Only the first maxL points of the time series are analyzed
-        (default 5000). Longer time series are truncated to their first maxL samples.
+        Maximum number of samples to analyze. Longer time series are truncated
+        to first maxL points. Default is 5000.
 
     Returns
     -------

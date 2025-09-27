@@ -19,9 +19,9 @@ def MovingThreshold(y : ArrayLike, a : float = 1.0, b : float = 0.1) -> dict:
     ----------
     y : array-like
         The input time series (should be z-scored)
-    a : float, optional (default=1.0)
+    a : float, optional (default is 1.0)
         The barrier jump parameter - how much to increase barrier after extreme event
-    b : float, optional (default=0.1)
+    b : float, optional (default is 0.1)
         The barrier decay proportion (0-1) - how much to decrease barrier otherwise
 
     Returns

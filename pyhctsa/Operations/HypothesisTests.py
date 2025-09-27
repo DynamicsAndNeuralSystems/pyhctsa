@@ -1,11 +1,12 @@
-from statsmodels.stats.descriptivestats import sign_test
-from scipy.stats import jarque_bera, wilcoxon, norm
 import numpy as np
+from numpy.typing import ArrayLike
+from typing import Union
+
+from statsmodels.stats.descriptivestats import sign_test
 from statsmodels.sandbox.stats.runs import runstest_1samp
 from statsmodels.stats.diagnostic import acorr_ljungbox
-from numpy.typing import ArrayLike
+from scipy.stats import jarque_bera, wilcoxon, norm
 from arch.unitroot import VarianceRatio
-from typing import Union
 
 def VarianceRatioTest(y : ArrayLike, periods : Union[int, list[int]] = 2, IIDs : Union[int, list[int]] = 0) -> dict:
     """
@@ -81,31 +82,30 @@ def VarianceRatioTest(y : ArrayLike, periods : Union[int, list[int]] = 2, IIDs :
 
 def HypothesisTest(x : ArrayLike, theTest: str = "signtest") -> float:
     """
-    Statistical hypothesis test applied to a time series.
+    Perform statistical hypothesis testing on a time series.
 
-    Applies a specified statistical hypothesis test to the input time series and returns the p-value.
-
-    Tests are implemented using functions from Python's statsmodels and scipy libraries.
+    Applies a specified statistical test and returns its p-value. Tests are chosen
+    to evaluate different null hypotheses about the time series properties.
 
     Parameters
     ----------
-    x : array-like
-        The input time series.
-    theTest : {'signtest', 'runstest', 'vartest', 'ztest', 'signrank', 'jbtest', 'lbq'}, optional
-        The hypothesis test to perform:
-            - 'signtest': Sign test
-            - 'runstest': Runs test
-            - 'vartest': Variance test (not implemented)
-            - 'ztest': Z-test
-            - 'signrank': Wilcoxon signed rank test for zero median
-            - 'jbtest': Jarque-Bera test of composite normality
-            - 'lbq': Ljung-Box Q-test for residual autocorrelation
+    x : ArrayLike
+        Input time series
+    theTest : str, optional
+        Type of hypothesis test to perform:
+        - 'signtest': Tests if median equals zero
+        - 'runstest': Tests for randomness in sequence
+        - 'ztest': Tests if mean equals zero (assumes unit variance)
+        - 'signrank': Wilcoxon signed rank test for zero median
+        - 'jbtest': Jarque-Bera test for normality
+        - 'lbq': Ljung-Box Q-test for autocorrelation
         Default is 'signtest'.
 
     Returns
     -------
     float
-        p-value from the specified statistical test.
+        P-value from the statistical test. A small p-value (< 0.05) typically
+        indicates rejection of the null hypothesis.
     """
     x = np.asarray(x)
     p = np.nan
@@ -131,4 +131,5 @@ def HypothesisTest(x : ArrayLike, theTest: str = "signtest") -> float:
         p = acorr_ljungbox(x, lags=[nLags])['lb_pvalue'].to_numpy()[0]
     else:
         raise ValueError(f"Unknown test: {theTest}.")
+    
     return p

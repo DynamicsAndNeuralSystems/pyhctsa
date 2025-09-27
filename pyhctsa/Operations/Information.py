@@ -1,11 +1,14 @@
-from typing import Union, Any, Optional, Dict, List
-import numpy as np
-import jpype as jp
 import os
+import numpy as np
+from typing import Union, Any, Optional, Dict, List
 from numpy.typing import ArrayLike
+
+import jpype as jp
 from scipy import stats
-from loguru import logger
+
 from ..Utilities.utils import signChange, RM_histogram2
+
+from loguru import logger
 
 def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, 
              minNotMax : Union[bool, None] = True) -> int:
@@ -85,9 +88,7 @@ def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None,
             # we're at a local maximum
             if i > 2 and autoCorr[i-3] < autoCorr[i-2] > autoCorr[i-1]:
                 return i-1
-
     return np.nan
-
 
 def _mi_bin(v1 : ArrayLike, v2 : ArrayLike, r1 : Union[str, list] = 'range', 
             r2 : Union[str, list] = 'range', numBins : int = 10) -> float:
@@ -303,7 +304,6 @@ def AutoMutualInfo(
     Kraskov, A., Stoegbauer, H., Grassberger, P. (2004). 
     Estimating mutual information. Physical Review E, 69(6), 066138.
     """
-
     if isinstance(timeDelay, str) and timeDelay in ['ac', 'tau']:
         timeDelay = FirstCrossing(y, corr_fun='ac', threshold=0, what_out='discrete')
         
@@ -364,30 +364,32 @@ def MutualInfo(
     extraParam: Optional[Union[int, str]] = None
 ) -> float:
     """
-    Compute the mutual information between two time series using the Java Information Dynamics Toolkit (JIDT).
+    Compute mutual information between two time series using JIDT estimators.
+
+    This function calculates the mutual information between two time series using
+    various estimators from the Java Information Dynamics Toolkit (JIDT).
 
     Parameters
     ----------
-    y1 : array-like
-        First input time series (1D array).
-    y2 : array-like
-        Second input time series (1D array).
+    y1 : ArrayLike
+        First input time series
+    y2 : ArrayLike
+        Second input time series
     estMethod : str, optional
-        The estimation method to use. Options are:
-            - 'gaussian'  : Gaussian estimator
-            - 'kernel'    : Kernel estimator
-            - 'kraskov1'  : Kraskov estimator 1 (KSG1)
-            - 'kraskov2'  : Kraskov estimator 2 (KSG2)
-        Default is 'kernel'.
-    extraParam : any, optional
-        Extra parameter for the estimator. For Kraskov estimators, this sets the number
-        of nearest neighbors 'k' (default is 3). If provided as an integer, it will be
-        converted to a string.
+        Estimation method to use:
+        - 'gaussian': Assumes Gaussian variables
+        - 'kernel': Kernel density estimation (default)
+        - 'kraskov1': Kraskov estimator 1 (KSG1)
+        - 'kraskov2': Kraskov estimator 2 (KSG2)
+    extraParam : Union[int, str], optional
+        Extra parameter for the estimator:
+        - For Kraskov estimators: number of nearest neighbors 'k' (default: 3)
+        - For other methods: ignored
 
     Returns
     -------
     float
-        The estimated mutual information between the two input time series.
+        Estimated mutual information between the input time series
 
     References
     ----------
@@ -416,33 +418,37 @@ def _initialize_MI(
     addNoise: bool = False
 ) -> Any:  # Returns a Java object, use Any since we can't type hint JPype objects
     """
-    Helper function to initialize a mutual information calculator object from the Java
-    Information Dynamics Toolkit (JIDT).
-
-    This function starts the Java Virtual Machine (JVM) if it is not already running,
-    loads the appropriate mutual information estimator class based on the specified
-    estimation method, and configures its parameters.
+    Initialize a mutual information calculator from JIDT (Java Information Dynamics Toolkit).
+    
+    Creates and configures a mutual information estimator by starting the JVM if needed,
+    loading the appropriate JIDT class, and setting up the calculation parameters.
 
     Parameters
     ----------
-    estMethod : str
-        The estimation method to use. Must be one of
-            - 'gaussian'  : Gaussian estimator
-            - 'kernel'    : Kernel estimator
-            - 'kraskov1'  : Kraskov estimator 1 (KSG1)
-            - 'kraskov2'  : Kraskov estimator 2 (KSG2)
-    extraParam : any, optional
-        Extra parameter for the estimator. For Kraskov estimators, this sets the number
-        of nearest neighbors 'k' (default is 3). If provided as an integer, it will be
-        converted to a string.
+    estMethod : str, optional
+        Estimation method to use:
+        - 'gaussian': Assumes Gaussian variables (simplest)
+        - 'kernel': Kernel density estimation
+        - 'kraskov1': Kraskov estimator 1 (KSG1)
+        - 'kraskov2': Kraskov estimator 2 (KSG2)
+        Default is 'gaussian'.
+
+    extraParam : Union[int, str], optional
+        Configuration parameter for the estimator:
+        - For Kraskov methods: number of nearest neighbors 'k'
+        - For other methods: ignored
+        Default is None (uses k=3 for Kraskov).
+
     addNoise : bool, optional
-        If False (default), disables the small random noise that is added by default
-        in Kraskov estimators for determinism.
+        Whether to add small random noise for Kraskov estimators:
+        - True: Add noise (helpful for deterministic signals)
+        - False: No noise (default)
 
     Returns
     -------
-    miCalc : Java object
-        An initialized mutual information calculator object ready for use.
+    Any
+        Initialized JIDT mutual information calculator object.
+        Type varies by estimation method chosen.
     """
 
     if not jp.isJVMStarted():
