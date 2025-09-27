@@ -1,9 +1,11 @@
-import scipy.fft
 import numpy as np
+from numpy.typing import ArrayLike
+
+import scipy.fft
+
 from pyhctsa.Operations.Distribution import Moments
 from pyhctsa.Operations.Correlation import AutoCorr, FirstCrossing
 from pyhctsa.Utilities.utils import make_mat_buffer, signChange
-from numpy.typing import ArrayLike
 
 def SpectralSummaries(y : ArrayLike, psdMeth : str = 'fft', windowType : str = 'none') -> dict:
     """
@@ -304,8 +306,6 @@ def SpectralSummaries(y : ArrayLike, psdMeth : str = 'fft', windowType : str = '
 
 def _findpeaks(S, minPkDist=0, sort_str='none'):
     """
-    MATLAB-compatible findpeaks implementation
-    
     Parameters:
     S: input signal
     minPkDist: minimum peak distance

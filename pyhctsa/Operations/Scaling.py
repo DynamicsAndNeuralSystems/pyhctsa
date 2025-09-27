@@ -1,5 +1,6 @@
 import numpy as np
 from numpy.typing import ArrayLike
+
 from ..Toolboxes.Max_Little import fastdfa
 
 def FastDFA(y: ArrayLike) -> float:
@@ -30,4 +31,5 @@ def FastDFA(y: ArrayLike) -> float:
     # Log-log linear fit
     coeffs = np.polyfit(np.log10(intervals_sorted), np.log10(flucts_sorted), 1)
     alpha = coeffs[0]
+    
     return alpha

@@ -1,13 +1,14 @@
 import numpy as np
-from scipy.stats import zmap, norm, gaussian_kde
-from pyhctsa.Operations.Information import AutoMutualInfo
-from pyhctsa.Operations.Correlation import FirstMin, TC3
 from numpy.typing import ArrayLike
 from typing import Union
 
+from scipy.stats import zmap, norm, gaussian_kde
+
+from pyhctsa.Operations.Information import AutoMutualInfo
+from pyhctsa.Operations.Correlation import FirstMin, TC3
 
 def SDgivemestats(statx : float, statsurr : ArrayLike, leftrightboth : str) -> dict:
-    # compute stats on the surrogate distribution
+    """Compute statistiscs on the surrogate distribution."""
     numSurrs = len(statsurr)
     out = {}
     if np.isnan(statsurr).any():
@@ -114,12 +115,6 @@ def MakeSurrogates(x : ArrayLike, surrMethod : str, numSurrs : int = 1, randomSe
     -------
     np.ndarray
         Array of surrogate time series.
-
-    Notes
-    -----
-    Only the 'RP' (random phase) surrogate method is currently implemented.
-    The 'AAFT' and 'TFT' methods are documented for future reference but are not yet available.
-
     """
     x = np.asarray(x)
     N = len(x)
@@ -164,22 +159,21 @@ def MakeSurrogates(x : ArrayLike, surrMethod : str, numSurrs : int = 1, randomSe
             out[:, s] = x_new
 
     elif surrMethod == "AAFT":
-
         raise NotImplementedError("AAFT not yet implemented.")
     
     elif surrMethod == "TFT":
-
         raise NotImplementedError("TFT not yet implemented.")
     
     else:
-
         raise ValueError(f"Unknown method: {surrMethod}")
     
     return out
 
-
-
-def SurrogateTest(x : ArrayLike, surrMeth : str = "RP", numSurrs : int = 99, theTestStat : Union[str, ArrayLike] = "ami1", randomSeed : int = 42) -> dict:
+def SurrogateTest(x : ArrayLike, 
+                surrMeth : str = "RP",
+                numSurrs : int = 99, 
+                theTestStat : Union[str, ArrayLike] = "ami1", 
+                randomSeed : int = 42) -> dict:
     """
     SD_SurrogateTest: Analyzes test statistics obtained from surrogate time series.
 
@@ -283,4 +277,5 @@ def SurrogateTest(x : ArrayLike, surrMeth : str = "RP", numSurrs : int = 99, the
         someStats = SDgivemestats(tc3x, tc3surr, "both")
         for (k, v) in zip(someStats.keys(), someStats.values()):
             out[f'tc3_{k}'] = v
+            
     return out

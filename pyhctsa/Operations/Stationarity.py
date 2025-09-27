@@ -1,15 +1,18 @@
 import numpy as np
 from numpy.typing import ArrayLike
-from loguru import logger
+from typing import Union
+
+from scipy.signal import detrend
+from scipy.stats import skew, kurtosis, gaussian_kde
+from statsmodels.tsa.stattools import kpss
+
 from ..Operations.Entropy import ApproximateEntropy, SampleEntropy, DistributionEntropy
 from ..Operations.Correlation import AutoCorr, FirstCrossing
 from ..Utilities.utils import make_mat_buffer, ZScore, signChange
-from typing import Union
-from scipy.signal import detrend
-from scipy.stats import skew, kurtosis, gaussian_kde
 from ..Operations.Distribution import Moments
 from ..Operations.Entropy import DistributionEntropy
-from statsmodels.tsa.stattools import kpss
+
+from loguru import logger
 
 def LocalDistributions(y : ArrayLike, numSegs : int = 5, eachOrPar : str = 'par', numPoints : int = 200) -> dict:
     """
@@ -256,7 +259,7 @@ def MomentCorr(x : ArrayLike, windowLength : Union[None, float] = None, wOverlap
     return out
 
 def __calc_me_moments(x_buff, momType):
-    # helper function for MomentCorr
+    """Helper function for `MomentCorr`"""
     if momType == 'mean':
         moms = np.mean(x_buff, axis=0)
     elif momType == 'std':
@@ -267,6 +270,7 @@ def __calc_me_moments(x_buff, momType):
         moms = np.percentile(x_buff, 75, method='hazen', axis=0) - np.percentile(x_buff, 25, method='hazen', axis=0)
     else:
         raise ValueError(f"Unknown statistic {momType}")
+    
     return moms
 
 def SimpleStats(x : ArrayLike, whatStat : str = 'zcross') -> dict:
@@ -428,6 +432,7 @@ def LocalExtrema(y : ArrayLike, howToWindow : str = 'l', n : Union[int, None] = 
         'minminmed': np.min(locMin) / np.median(locMin),
         'maxabsext': np.max(abs_loc_ext) / np.median(abs_loc_ext)
     }
+
     return out
 
 def KPSSTest(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
@@ -696,7 +701,7 @@ def LocalGlobal(y : ArrayLike, subsetHow : str = 'l', nsamps : Union[int, float,
     # use Pearson definition (normal ==> 3.0)
     out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/kurtosis(y, fisher=False)))
     out['ac1'] = np.abs(1 - (AutoCorr(y[r], 1, 'Fourier')[0]/AutoCorr(y, 1, 'Fourier')[0]))
-    #out['sampen101'] = SampleEntropy(y[r], 1, 0.1)['sampen1']/SampleEntropy(y, 1, 0.1)['sampen1']
+    out['sampen101'] = SampleEntropy(y[r], 1, 0.1)['sampen1']/SampleEntropy(y, 1, 0.1)['sampen1']
 
     return out
 
@@ -835,7 +840,6 @@ def Trend(y : ArrayLike) -> dict:
 
     return out
 
-
 def StatAv(y: ArrayLike, whatType: str = 'seg', extraParam: int = 5) -> float:
     """
     Simple mean-stationarity metric using the StatAv measure.
@@ -893,7 +897,6 @@ def StatAv(y: ArrayLike, whatType: str = 'seg', extraParam: int = 5) -> float:
     out = sdav / s
 
     return float(out)
-
 
 def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = 'std', 
                  numSeg: int = 5, incMove: int = 2):
@@ -1017,5 +1020,5 @@ def _get_window(stepInd, inc, winLength):
     # helper funtion to convert a step index (stepInd) to a range of indices corresponding to that window
     start_idx = (stepInd) * inc
     end_idx = (stepInd) * inc + winLength
+    
     return np.arange(start_idx, end_idx).astype(int)
-

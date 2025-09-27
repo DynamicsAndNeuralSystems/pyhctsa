@@ -1,12 +1,14 @@
 import numpy as np
 from typing import Union
+from numpy.typing import ArrayLike
+
+from scipy.stats import mstats
+from scipy.signal import resample as ssre
+
 from ..Operations.Correlation import FirstCrossing
 from ..Utilities.utils import binarize, signChange
-from scipy.signal import resample as ssre
-from numpy.typing import ArrayLike
-from loguru import logger
-from scipy.stats import mstats
 
+from loguru import logger
 
 def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numGroups : int = 3, coarseGrainMethod : str = 'quantile', 
                 numIters : int = 500, randomSeed : int = 0) -> dict:
@@ -388,7 +390,6 @@ def MotifThree(y : ArrayLike, cgHow : str = 'quantile') -> dict:
 
     return out
 
-# helper function for MotifThree
 def _f_entropy(x):
     """Entropy of a set of counts, log(0) = 0"""
     return -np.sum(x[x > 0] * np.log(x[x > 0]))

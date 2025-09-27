@@ -1,15 +1,15 @@
 import numpy as np
-import pywt
-from pywt import cwt
 from numpy.typing import ArrayLike
 from typing import Union
+
+import pywt
+from pywt import cwt
+
 from ..Utilities.utils import signChange
 
 def wfBM_estimate(x : ArrayLike) -> dict:
     """
     Parameters of fractional Gaussian noise/Brownian motion in a time series.
-
-    Based on an adaptation of the wfbmesti function in MATLAB.
 
     Parameters
     ----------
@@ -59,7 +59,7 @@ def wfBM_estimate(x : ArrayLike) -> dict:
 
 def scal2Frq(y : ArrayLike, wname : str = 'db3', amax : int = 5, delta : int = 1) -> dict:
     """
-    Frequency components in a periodic time series
+    Frequency components in a periodic time series.
 
     Parameters
     ----------
@@ -254,10 +254,9 @@ def CWT(y : ArrayLike, wname : str = 'db3', maxScale : int = 32) -> dict:
     out['stat_5_s_m'] = np.std([out['mean5_1'], out['mean5_2'], out['mean5_3'], out['mean5_4'], out['mean5_5']], ddof=1)/np.std(SC, ddof=1)
     out['stat_5_s_s'] = np.std([out['std5_1'], out['std5_2'], out['std5_3'], out['std5_4'], out['std5_5']], ddof=1)/np.std(SC, ddof=1)
 
-
     return out
 
-def _slosr(xx) -> int:
+def _slosr(xx : ArrayLike) -> int:
     # helper function for DetailCoeffs
     theMaxLevel = len(xx)
     slosr = np.zeros(theMaxLevel-2)
@@ -265,6 +264,7 @@ def _slosr(xx) -> int:
         slosr[i-2] = np.sum(xx[:i-1])/np.sum(xx[i:])
     absm1 = np.abs(slosr - 1)
     idx = np.argwhere(absm1 == np.min(absm1).flatten())[0][0] + 1
+
     return idx
 
 def DetailCoeffs(y : ArrayLike, wname : str = 'db3', maxlevel : Union[int, str] = 20) -> dict:
@@ -441,7 +441,6 @@ def wavedec(data : ArrayLike, wavelet : str, mode : str ='symmetric', level : in
     lengths.reverse()
 
     return np.concatenate(coefs).ravel(), lengths
-
 
 def detcoef(coefs, lengths, levels=None):
     """
