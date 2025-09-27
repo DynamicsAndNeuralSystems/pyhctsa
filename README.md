@@ -61,7 +61,7 @@ Some features require Java (JDK) to be installed. If you encounter a `JVM not fo
    - Download from [Oracle](https://www.oracle.com/java/technologies/downloads/) or use OpenJDK
    - Minimum version required: JDK 11
 
-2. Before importing pychsta, set the `JAVA_HOME` environment variable using the location of the JDK installation on your system:
+2. Before importing pyhctsa, set the `JAVA_HOME` environment variable using the location of the JDK installation on your system:
 ```Python
 import os
 os.environ['JAVA_HOME'] = "C:\Program Files\Java\jdk-11" # replace with relevant path
