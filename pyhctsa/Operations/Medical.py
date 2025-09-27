@@ -1,7 +1,9 @@
 import numpy as np
-from scipy import signal
-from ..Utilities.utils import binpicker, histc
 from numpy.typing import ArrayLike
+
+from scipy import signal
+
+from ..Utilities.utils import binpicker, histc
 
 def RawHRVMeas(x: ArrayLike) -> dict:
     """
@@ -26,7 +28,7 @@ def RawHRVMeas(x: ArrayLike) -> dict:
 
     Parameters
     ----------
-    x : array_like
+    x : array-like
         Time series of RR intervals in milliseconds.
 
     Returns
@@ -39,7 +41,6 @@ def RawHRVMeas(x: ArrayLike) -> dict:
         - 'SD1'     : Standard deviation of the Poincaré plot’s minor axis (short-term variability).
         - 'SD2'     : Standard deviation of the Poincaré plot’s major axis (long-term variability).
     """
-
     x = np.asarray(x)
     N = len(x)
     
@@ -104,7 +105,7 @@ def HRVClassic(y: ArrayLike) -> dict:
 
     Parameters
     ----------
-    y : array_like
+    y : array-like
         Input time series of RR intervals, assumed to be in seconds.
 
     Returns
@@ -243,7 +244,7 @@ def PolVar(x : ArrayLike, d : float = 1, D : int = 6) -> float:
 
     Parameters
     ----------
-    x : array_like
+    x : array-like
         The input time series.
     d : float
         Symbolic coding threshold in units of standard deviation.
@@ -310,8 +311,8 @@ def PNN(x : ArrayLike) -> dict:
 
     Parameters
     ----------
-    x : array_like
-        Time series of RR intervals in milliseconds.
+    x : array-like
+        Time series of RR intervals in milliseconds (ms).
 
     Returns
     -------
@@ -326,7 +327,6 @@ def PNN(x : ArrayLike) -> dict:
     N = len(x)
 
     # Calculate pNNx percentage
-
     Dx = np.abs(diffx) * 1000 # assume milliseconds as for RR intervals
     pnns = np.array([5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
 
