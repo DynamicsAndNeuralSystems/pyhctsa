@@ -1,11 +1,14 @@
 import numpy as np
 from numpy.typing import ArrayLike
 from typing import Dict, Union
+
 from scipy import stats
 from scipy.stats import norm, gumbel_l, uniform, expon, lognorm, gaussian_kde
-from loguru import logger
+
 from ..Utilities.utils import histc, binpicker, simple_binner, xcorr
 from ..Operations.Correlation import AutoCorr, FirstCrossing
+
+from loguru import logger
 
 def CompareKSFit(x : ArrayLike, whatDistn : str) -> dict:
     """
@@ -220,7 +223,6 @@ def Unique(y : ArrayLike) -> float:
     y = np.asarray(y)
     return np.divide(len(np.unique(y)), len(y))
 
-
 def Spread(y : ArrayLike, spreadMeasure : str = 'std') -> float:
     """
     Measure of spread of the input time series.
@@ -320,7 +322,6 @@ def ProportionValues(x : ArrayLike, propWhat : str = 'positive') -> float:
 
     return out
 
-
 def PLeft(y : ArrayLike, th : float = 0.1) -> float:
     """
     Distance from the mean at which a given proportion of data are more distant.
@@ -344,6 +345,7 @@ def PLeft(y : ArrayLike, th : float = 0.1) -> float:
     p = np.quantile(np.abs(y - np.mean(y)), 1-th, method='hazen')
     # A proportion, th, of the data lie further than p from the mean
     out = np.divide(p, np.std(y, ddof=1))
+
     return float(out)
 
 def MinMax(y : ArrayLike, minOrMax : str = 'max') -> float:
@@ -445,7 +447,6 @@ def HighLowMu(y: ArrayLike) -> float:
     out = np.divide((mhi-mu), (mu-mlo)) # ratio of the differences
 
     return out
-
 
 def FitMLE(y : ArrayLike, fitWhat : str = 'gaussian') -> Union[Dict[str, float], float]:
     """
@@ -620,6 +621,7 @@ def Moments(y : ArrayLike, theMom : int = 0) -> float:
         The calculated moment.
     """
     y = np.asarray(y)
+
     return stats.moment(y, theMom) / np.std(y, ddof=1)
 
 def OutlierInclude(y: ArrayLike, thresholdHow: str = 'abs', inc: float = 0.01) -> dict:
@@ -741,7 +743,6 @@ def OutlierInclude(y: ArrayLike, thresholdHow: str = 'abs', inc: float = 0.01) -
     })
     
     return results
-
 
 def OutlierTest(y: ArrayLike, p: float = 2, justMe: Union[str, None] = None) -> Union[dict, float]:
     """
@@ -901,7 +902,6 @@ def HistogramAsymmetry(y : ArrayLike, numBins : int = 10, doSimple : bool = True
 
     return out
 
-
 def HistogramMode(y : ArrayLike, numBins : int = 10, doAbs : bool = False) -> float:
     """
     Measures the mode of the data vector using histograms with a given number
@@ -934,7 +934,6 @@ def HistogramMode(y : ArrayLike, numBins : int = 10, doAbs : bool = False) -> fl
     out = np.mean(binCenters[N == np.max(N)])
 
     return float(out)
-
 
 def RemovePoints(y : ArrayLike, removeHow : str = 'absfar', p : float = 0.1, removeOrSaturate : str = 'remove') -> dict:
     """

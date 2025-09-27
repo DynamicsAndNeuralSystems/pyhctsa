@@ -1804,7 +1804,6 @@ def TRev(y : ArrayLike, tau : Union[int, str] = 'ac') -> dict:
 
     return out
 
-
 def TC3(y : list, tau : Union[int, str, None] = 'ac') -> dict:
     """
     Normalized nonlinear autocorrelation function, tc3.

@@ -1,6 +1,7 @@
 import numpy as np
-from typing import Union
 from numpy.typing import ArrayLike
+from typing import Union
+
 from ..Operations.Correlation import FirstCrossing
 
 def RAD(x: ArrayLike, tau : Union[int, str] = 1, centre : bool = True) -> float:
