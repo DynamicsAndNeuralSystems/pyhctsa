@@ -1,32 +1,49 @@
 import numpy as np
 from numpy.typing import ArrayLike 
 from typing import Union
+
 from scipy.stats import gaussian_kde, kurtosis, skew, expon
 from scipy.stats import mode as smode
-from ..Utilities.utils import pointOfCrossing, binpicker, ZScore, signChange, make_mat_buffer
-from loguru import logger
-from statsmodels.tsa.stattools import pacf
 from scipy.optimize import curve_fit
-from ..Operations.Information import FirstMin
 from scipy.linalg import LinAlgError
+from statsmodels.tsa.stattools import pacf
+
+from ..Utilities.utils import pointOfCrossing, binpicker, ZScore, signChange, make_mat_buffer
 from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
+from ..Operations.Information import FirstMin
 from ..Operations.Information import AutoMutualInfo
 
-def AddNoise(y : ArrayLike, tau : int = 1, amiMethod : str = 'even', extraParam : int = 10, randomSeed = None) -> dict:
+from loguru import logger
+
+def AddNoise(y : ArrayLike, tau : Union[int, str] = 1, amiMethod : str = 'even', extraParam : int = 10, randomSeed = None) -> dict:
     """
-    Changes in the automutual information with the addition of noise
+    Changes in the automutual information with the addition of noise.
 
-    Parameters:
-    y (array-like): The input time series (should be z-scored)
-    tau (int or str): The time delay for computing AMI (default: 1)
-    amiMethod (str): The method for computing AMI:
-                      'std1','std2','quantiles','even' for histogram-based estimation,
-                      'gaussian','kernel','kraskov1','kraskov2' for estimation using JIDT
-    extraParam: e.g., the number of bins input to CO_HistogramAMI, or parameter for IN_AutoMutualInfo
-    randomSeed (int): Settings for resetting the random seed for reproducible results
+    Parameters
+    -----------
+    y : ArrayLike
+        Input time series (should be z-scored)
+    tau : Union[int, str], optional
+        Time delay for computing AMI. If 'ac' or 'tau', uses first zero-crossing 
+        of autocorrelation function. Default is 1.
+    amiMethod : str, optional
+        Method for computing AMI:
+        - 'std1', 'std2', 'quantiles', 'even': Histogram-based estimation
+        - 'gaussian', 'kernel', 'kraskov1', 'kraskov2': JIDT-based estimation
+        Default is 'even'.
+    extraParam : int, optional
+        Additional parameter for AMI calculation:
+        - For histogram methods: number of bins
+        - For JIDT methods: algorithm-specific parameter
+        Default is 10.
+    randomSeed : int, optional
+        Seed for random number generator. If None, uses 0. Default is None.
 
-    Returns:
-    dict: Statistics on the resulting set of automutual information estimates
+
+    Returns
+    --------
+    dict: 
+        Statistics on the resulting set of automutual information estimates.
     """
     y = np.asarray(y)
     # Set tau to minimum of autocorrelation function if 'ac' or 'tau'
