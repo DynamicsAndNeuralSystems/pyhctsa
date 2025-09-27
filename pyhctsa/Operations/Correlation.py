@@ -119,12 +119,13 @@ def AddNoise(y : ArrayLike, tau : Union[int, str] = 1, amiMethod : str = 'even',
 
     return out
 
-def firstUnder_fn(x, m, p):
+def firstUnder_fn(x : ArrayLike, m : ArrayLike, p : ArrayLike):
     """
     Find the value of m for the first time p goes under the threshold, x. 
     p and m are vectors of the same length
     """
     first_i = next((m_val for m_val, p_val in zip(m, p) if p_val < x), m[-1])
+
     return first_i
 
 
@@ -144,14 +145,6 @@ def TheilerQ(y : ArrayLike) -> float:
     -------
     float
         Theiler's Q statistic.
-
-    Notes
-    -----
-    Copyright (C) 1996, D. Kaplan <kaplan@macalester.edu>
-    This function is free software: you can redistribute it and/or modify it under
-    the terms of the GNU General Public License as published by the Free Software
-    Foundation, either version 3 of the License, or (at your option) any later
-    version. See <http://www.gnu.org/licenses/>.
     """
     y = np.asarray(y)
     y2 = (np.mean(y**2))**(3/2)
@@ -179,16 +172,7 @@ def Crinkle(y : ArrayLike) -> float:
     -------
     float
         The crinkle statistic.
-
-    Notes
-    -----
-    Copyright (C) 1996, D. Kaplan <kaplan@macalester.edu>
-    This function is free software: you can redistribute it and/or modify it under
-    the terms of the GNU General Public License as published by the Free Software
-    Foundation, either version 3 of the License, or (at your option) any later
-    version. See <http://www.gnu.org/licenses/>.
     """
-    
     # subtract out the mean
     y = np.asarray(y)
     y = y - np.mean(y)
@@ -218,23 +202,16 @@ def TimeRevKaplan(y : ArrayLike, timeLag : int = 1) -> float:
     -------
     float
         The time reversal asymmetry statistic.
-
-    Notes
-    -----
-    Copyright (C) 1996, D. Kaplan <kaplan@macalester.edu>
-    This function is free software: you can redistribute it and/or modify it under
-    the terms of the GNU General Public License as published by the Free Software
-    Foundation, either version 3 of the License, or (at your option) any later
-    version. See <http://www.gnu.org/licenses/>.
     """
     foo = _lagEmbed(np.asarray(y), 3, timeLag)
     a = foo[:, 0]
     b = foo[:, 1]
     c = foo[:, 2]
     res = np.mean(a * a * b - b*c*c)
+
     return float(res)
 
-def _lagEmbed(x, m, lag=1):
+def _lagEmbed(x : ArrayLike, m : int, lag : int = 1) -> ArrayLike:
     """Constructs a time-delay embedding of a time series."""
     x = np.asarray(x).flatten()
     lx = len(x)
@@ -250,7 +227,7 @@ def _lagEmbed(x, m, lag=1):
 
     return y
 
-def Embed2_AngleTau(y : ArrayLike, maxTau : int) -> dict:
+def Embed2AngleTau(y : ArrayLike, maxTau : int) -> dict:
     """
     Angle autocorrelation in a 2-dimensional embedding space.
 
@@ -310,9 +287,10 @@ def Embed2_AngleTau(y : ArrayLike, maxTau : int) -> dict:
 
     out['meanrat_thetaac12'] = out['mean_thetaac1'] / out['mean_thetaac2']
     out['diff_thetaac12'] = np.sum(np.abs(stats_store[1, :] - stats_store[0, :]))
+
     return out
 
-def Embed2(y: ArrayLike, tau: str = 'tau') -> dict:
+def Embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     """
     Statistics of the time series in a 2-dimensional embedding space.
 
@@ -369,7 +347,6 @@ def Embed2(y: ArrayLike, tau: str = 'tau') -> dict:
     out['hist10std'] = np.std(px, ddof=1)
     out['histent'] = -np.sum(px[px>0] * np.log(px[px>0] / binWidths[px>0]))
     
-
     # Stationarity in fifths of the time series
     # Use histograms with 4 bins
     x = np.linspace(-np.pi/2, np.pi/2, 5) # 4 bins
@@ -419,10 +396,10 @@ def Embed2(y: ArrayLike, tau: str = 'tau') -> dict:
     
     out['areas_50'] = np.ptp(m[r50, 0]) * np.ptp(m[r50, 1])
     out['arearat'] = out['areas_50'] / out['areas_all']
+
     return out 
 
-
-def _histcounts(x, bins=None, binEdges=None):
+def _histcounts(x : ArrayLike, bins : Union[int, None, str] = None, binEdges : Union[ArrayLike, None] = None) -> tuple:
     x = np.asarray(x).flatten()
     if binEdges is not None:
         edges = np.asarray(binEdges)
@@ -472,7 +449,7 @@ def PeriodicityWang(y : ArrayLike) -> dict:
 
     return periodicity_wang(y)
 
-def CompareMinAMI(y : ArrayLike, binMethod : str = 'std1', numBins : int = 10) -> dict:
+def CompareMinAMI(y : ArrayLike, binMethod : str = 'std1', numBins : Union[int, ArrayLike] = 10) -> dict:
     """
     Assess the variability in the first minimum of automutual information (AMI) across binning strategies.
 
@@ -550,7 +527,7 @@ def CompareMinAMI(y : ArrayLike, binMethod : str = 'std1', numBins : int = 10) -
 
     return out
 
-def HistogramAMI(y : ArrayLike, tau : Union[str, int, ArrayLike] = 1, meth : str = 'even', numBins : int = 10) -> dict:
+def HistogramAMI(y : ArrayLike, tau : Union[str, int, ArrayLike] = 1, meth : str = 'even', numBins : int = 10) -> Union[float, dict]:
     """
     The automutual information of the distribution using histograms.
 
@@ -655,12 +632,12 @@ def StickAngles(y : ArrayLike) -> dict:
     where sticks protrude from the zero-level, and the z-scored time series, where sticks
     protrude from the mean level of the time series.
 
-    Parameters:
+    Parameters
     -----------
     y : array-like
         The input time series
 
-    Returns:
+    Returns
     --------
     dict
         A dictionary containing various statistics on the obtained sequence of angles.
@@ -815,9 +792,7 @@ def StickAngles(y : ArrayLike) -> dict:
     out['ac1_all'] = AutoCorr(zallAngles, 1, 'Fourier')[0]
     out['ac2_all'] = AutoCorr(zallAngles, 2, 'Fourier')[0]
 
-
     # What does the distribution look like? 
-    
     # Some quantiles and moments
     if len(zangles[0]) > 0:
         out['q1_p'] = np.quantile(zangles[0], 0.01, method='hazen')
@@ -851,7 +826,7 @@ def StickAngles(y : ArrayLike) -> dict:
 
     return out
 
-def _SUB_statav(x, n):
+def _SUB_statav(x : ArrayLike, n : int) -> tuple:
     # helper function
     NN = len(x)
     if NN < 2 * n: # not long enough
@@ -966,7 +941,7 @@ def PartialAutoCorr(y : ArrayLike, maxTau : int = 10, whatMethod : str = 'ols') 
 
     return out
 
-def Embed2Dist(y : ArrayLike, tau : Union[None, str] = None) -> dict:
+def Embed2Dist(y : ArrayLike, tau : Union[None, str, int] = None) -> dict:
     """
     Analyzes distances in a 2-dimensional embedding space of a time series.
 
@@ -1570,8 +1545,8 @@ def TranslateShape(y : ArrayLike, shape : str = 'circle', d : int = 2, howToMove
 
     return out
 
-def _stat_av(y: ArrayLike, windowStat: str = 'mean', numSeg: int = 5, incMove: int = 2):
-    # helper function to compute sliding winow stats for translate shape
+def _stat_av(y: ArrayLike, windowStat: str = 'mean', numSeg: int = 5, incMove: int = 2) -> float:
+    """helper function to compute sliding winow stats for `TranslateShape`"""
     y = np.asarray(y)
     winLength = np.floor(len(y)/numSeg)
     if winLength == 0:
@@ -1589,6 +1564,7 @@ def _stat_av(y: ArrayLike, windowStat: str = 'mean', numSeg: int = 5, incMove: i
     def get_window(stepInd: int):
         start_idx = (stepInd) * inc
         end_idx = (stepInd) * inc + winLength
+
         return np.arange(start_idx, end_idx).astype(int)
     
     if windowStat == 'mean':
@@ -1597,6 +1573,7 @@ def _stat_av(y: ArrayLike, windowStat: str = 'mean', numSeg: int = 5, incMove: i
     elif windowStat == 'std':
         for i in range(numSteps):
             qs[i] = np.std(y[get_window(i)], ddof=1)
+
     return np.std(qs, ddof=1)/np.std(y, ddof=1)
 
 
@@ -1828,7 +1805,7 @@ def TRev(y : ArrayLike, tau : Union[int, str] = 'ac') -> dict:
     return out
 
 
-def TC3(y : list, tau : Union[int, str, None] = 'ac'):
+def TC3(y : list, tau : Union[int, str, None] = 'ac') -> dict:
     """
     Normalized nonlinear autocorrelation function, tc3.
 

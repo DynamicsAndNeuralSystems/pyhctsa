@@ -143,7 +143,7 @@ Correlation:
     hctsa_name: CO_Embed2_Dist
     ordered_args: ["tau"]
 
-  Embed2_AngleTau:
+  Embed2AngleTau:
     base_name: Embed2_AngleTau
     labels:
       - embedding
