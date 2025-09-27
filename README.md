@@ -54,15 +54,17 @@ res = RawHRVMeas(data) # result as either a dictionary or scalar value
 ```
 Note that individual operations can only be called directly on individual time-series instances.
 
-## ℹ️ Note for Java Dependencies
+## ℹ️ Note for Windows users
 Some features require Java (JDK) to be installed. If you encounter a `JVM not found` error:
 
 1. Ensure Java Development Kit (JDK) is installed on your system
    - Download from [Oracle](https://www.oracle.com/java/technologies/downloads/) or use OpenJDK
    - Minimum version required: JDK 11
 
-2. Set the `JAVA_HOME` environment variable using the location of the JDK installation on your system:
+2. Before importing pychsta, set the `JAVA_HOME` environment variable using the location of the JDK installation on your system:
 ```Python
 import os
 os.environ['JAVA_HOME'] = "C:\Program Files\Java\jdk-11" # replace with relevant path
+from pyhctsa.FeatureCalculator.calculator import FeatureCalculator
+# rest of your code...
 ```
