@@ -1,10 +1,10 @@
 import numpy as np
 import pandas as pd
+from typing import Union
+from numpy.typing import ArrayLike
 from functools import partial
 from itertools import product
 import time
-from typing import Union
-from numpy.typing import ArrayLike
 import importlib
 from pathlib import Path
 import yaml
@@ -231,45 +231,9 @@ class FeatureCalculator:
         e_arr = self._errors.to_numpy()
         for c in codings:
             print(f"{c} : {np.sum(e_arr == codings[c])}")
+            
         return e_arr
     
-    def extract_batch(self, data, batch_size : int = 100) -> pd.DataFrame:
-
-        series_list = standardise_inputs(data)
-        isValid = np.array([validate_data(t) for t in series_list]) # check each time series to see if valid...
-        invalid = np.argwhere(isValid == False)
-        if invalid.size > 0:
-            raise ValueError(f"One or more time series instances are invalid: {invalid.flatten()}")
-        
-        # get the number of batches
-        n_series = len(series_list)
-        n_batches = (n_series+ batch_size - 1) // batch_size
-        print(f'Processing {n_series} series in {n_batches} batches of {batch_size}...')
-        dfs = []
-        iterator = range(0, n_series, batch_size)
-        for start_idx in iterator:
-            end_idx = min(start_idx + batch_size, n_series)
-            batch = series_list[start_idx:end_idx]
-
-            try:
-                batch_df = self.extract(batch)
-                dfs.append(batch_df)
-            except Exception as e:
-                print(f"Error in batch {start_idx//batch_size}: {str(e)}")
-                continue
-        
-        # merge
-        if not dfs:
-            raise RuntimeError("No valid results obtained from any batch")
-        
-        final_df = pd.concat(dfs, ignore_index=True)
-        # store summary statistics
-        self._last_result = final_df
-        self._errors = final_df.map(lambda x: classify_output(x))
-        
-        return final_df
-
-
     def extract(self, data) -> pd.DataFrame:
         """
         Run the configured feature extractor over one or more time series and

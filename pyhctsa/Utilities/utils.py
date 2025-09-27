@@ -203,7 +203,6 @@ def binpicker(xmin : float, xmax : float, nbins : Union[None, int], bindwidthEst
     else:
         rawBinWidth = bindwidthEst
 
-
     if xmin is not None:
         if not np.issubdtype(type(xmin), np.floating):
             raise ValueError("Input must be float type when number of bins is specified.")
