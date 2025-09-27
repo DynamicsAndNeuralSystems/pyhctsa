@@ -1,14 +1,15 @@
 import numpy as np
-from statsmodels.tsa.tsatools import detrend
-from pyhctsa.Operations.Stationarity import StatAv, SlidingWindow
+
 from scipy.signal import lfilter
 from numpy.typing import ArrayLike
 from scipy.signal import resample_poly
+from statsmodels.tsa.tsatools import detrend
+
+from pyhctsa.Operations.Stationarity import StatAv, SlidingWindow
 from pyhctsa.Utilities.utils import ZScore
 from pyhctsa.Operations.Distribution import OutlierTest
 
-
-def _medfilt1d(x, k):
+def _medfilt1d(x : ArrayLike, k : int) -> ArrayLike:
     """Apply a length-k median filter to a 1D array x.
     Taken from https://gist.github.com/bhawkins/3535131.
     """
@@ -23,6 +24,7 @@ def _medfilt1d(x, k):
         y[:j,i] = x[0]
         y[:-j,-(i+1)] = x[j:]
         y[-j:,-(i+1)] = x[-1]
+
     return np.median(y, axis=1)
 
 def _safe_divide(num, denom):
@@ -30,6 +32,43 @@ def _safe_divide(num, denom):
     return num / denom if denom != 0 else np.nan
 
 def PreProcCompare(y : ArrayLike, detrendMeth : str = 'medianf') -> dict:
+    """
+    Compare how time-series properties change after pre-processing.
+
+    Applies a pre-processing transformation to the time series and analyzes how
+    various statistical properties change as a result.
+
+    Parameters
+    ----------
+    y : ArrayLike
+        Input time series
+    detrendMeth : str, optional
+        Method for pre-processing. Options include:
+        
+        1. Polynomial detrending ('poly<n>'):
+           - n = 1-9: polynomial order (e.g., 'poly1' for linear)
+        
+        2. Differencing ('diff<n>'):
+           - n: number of differences (e.g., 'diff1')
+        
+        3. Median filtering ('medianf<n>'):
+           - n: window length, must be odd (e.g., 'medianf3')
+        
+        4. Running average ('rav<n>'):
+           - n: window size (e.g., 'rav4')
+        
+        5. Resampling ('resample_<P>_<Q>'):
+           - P: upsampling factor
+           - Q: downsampling factor
+           (e.g., 'resample_1_2' for half rate)
+        
+        Default is 'medianf'.
+    
+    Returns
+    -------
+    dict
+        Comparison statistics between original and processed series.
+    """
     y = np.asarray(y)
     N = len(y)
     r = np.arange(N)

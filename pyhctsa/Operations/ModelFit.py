@@ -1,16 +1,18 @@
 import numpy as np
 from numpy.typing import ArrayLike
+from typing import Union
+import numba
+
 from statsmodels.tsa.ar_model import AutoReg, ar_select_order
 from statsmodels.stats.diagnostic import acorr_ljungbox
-from scipy.signal import lfilter
-from pyhctsa.Operations.Correlation import AutoCorr
 from scipy.stats import ks_1samp, norm, t
-import numba
-from typing import Union
+from scipy.signal import lfilter
+from hmmlearn.hmm import GaussianHMM
+from pyhctsa.Operations.Correlation import AutoCorr
+
 from ..Utilities.utils import ZScore
 from ..Operations.Stationarity import SlidingWindow
 from ..Operations.Correlation import FirstCrossing, AutoCorr
-from hmmlearn.hmm import GaussianHMM
 
 def HMMFit(y : ArrayLike, trainp : float = 0.8, numStates : int = 3, randomSeed : int = 0) -> dict:
     """
@@ -165,7 +167,6 @@ def fitSubSegments(y : ArrayLike, model : str = 'ar', order : int = 2, subsetHow
         raise ValueError(f"Unknown model: {model}")
     
     return out
-
 
 def LoopLocalSimple(y : ArrayLike, forecastMeth : str = 'mean') -> dict:
     """
@@ -442,6 +443,7 @@ def ExpSmoothing(x : ArrayLike, ntrain : Union[None, int, float] = None, alpha :
         residout = ResidualAnalysis(residuals)
     
     out.update(residout)
+
     return out
 
 @numba.jit(nopython=True, cache=True)
@@ -464,7 +466,6 @@ def _fit_exp_smooth(x: np.ndarray, a: float) -> np.ndarray:
         xf[i + 1] = s_curr
         
     return xf
-
 
 def ResidualAnalysis(e : ArrayLike) -> dict:
     """
@@ -536,7 +537,6 @@ def ResidualAnalysis(e : ArrayLike) -> dict:
 
     return out
 
-
 def ARCov(y : ArrayLike, p : int = 2) -> dict:
     """
     Fits an autoregressive (AR) model of a given order p.
@@ -576,10 +576,10 @@ def ARCov(y : ArrayLike, p : int = 2) -> dict:
     out['res_std'] = np.std(err, ddof=1)
     out['res_AC1'] = AutoCorr(err, 1, 'Fourier')[0]
     out['res_AC2'] = AutoCorr(err, 2, 'Fourier')[0]
+
     return out
 
-
-def _arconf_from_arfit(fitted_ar, theConfInterval : float = 0.95):
+def _arconf_from_arfit(fitted_ar, theConfInterval : float = 0.95) -> dict:
     params = fitted_ar.params
     has_intercept = fitted_ar.model.trend == 'c'
     if has_intercept:

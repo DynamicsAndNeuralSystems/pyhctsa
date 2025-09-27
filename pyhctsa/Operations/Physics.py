@@ -1,11 +1,12 @@
 import numpy as np
 from typing import Union
 from numpy.typing import ArrayLike
-from pyhctsa.Operations.Correlation import FirstCrossing, AutoCorr
-from pyhctsa.Operations.Stationarity import SlidingWindow
+
 from scipy.stats import ansari, gaussian_kde
 from statsmodels.sandbox.stats.runs import runstest_1samp
 
+from pyhctsa.Operations.Correlation import FirstCrossing, AutoCorr
+from pyhctsa.Operations.Stationarity import SlidingWindow
 
 def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, float, int, list] = None) -> dict:
     """
@@ -171,7 +172,6 @@ def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, 
     out['res_ac1'] = AutoCorr(res, 1)[0] # auto correlation at lag-1
 
     return out
-
 
 def ForcePotential(y : ArrayLike, whatPotential : str = 'dblwell', params : Union[list, None] = None) -> dict:
     """
