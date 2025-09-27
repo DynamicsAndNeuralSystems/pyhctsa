@@ -3,9 +3,12 @@ from numpy.typing import ArrayLike
 from typing import Union, Optional
 from numba import njit
 from math import factorial
-from sklearn.neighbors import KDTree
+
 from scipy.stats import gaussian_kde
+from sklearn.neighbors import KDTree
 from antropy.entropy import _xlogx
+
+
 from ..Utilities.utils import ZScore, make_buffer, binpicker, histc
 from ..Toolboxes.physionet import sampen as _sampen_c 
 from ..Operations.Correlation import FirstCrossing
@@ -304,6 +307,7 @@ def SampleEntropy(y: ArrayLike, M: int = 2, r: Optional[float] = None, preProces
         out[f'quadSampEn{m}'] = sampEN[m] + np.log(2 * r)
     if M > 1:
         out['meanchsampen'] = np.mean(np.diff(sampEN))
+
     return out
 
 def PermEn(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
@@ -333,17 +337,21 @@ def PermEn(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
     """
     y = np.asarray(y)
     ran_order = range(m)
+
     hashmult = np.power(m, ran_order)
     assert tau > 0, "delay must be greater than zero."
+
     sorted_idx = _embed(y, order=m, delay=tau).argsort(kind="quicksort")
     Nx = sorted_idx.shape[0]
     assert Nx > 5, "Time series too short to embed." # need at least 5 embedding vectors to actually do a computation
+    
     hashval = (np.multiply(sorted_idx, hashmult)).sum(1)
     _, c = np.unique(hashval, return_counts=True)
     p = np.true_divide(c, c.sum())
     pe = - _xlogx(p).sum()
     pe_norm = pe / np.log2(factorial(m))
     out = {"permEn": pe, "normPermEn": pe_norm}
+
     return out
 
 def RPDE(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, TMax : int = -1) -> dict:
@@ -383,7 +391,6 @@ def RPDE(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, TMax : i
     "Exploiting Nonlinear Recurrence and Fractal Scaling Properties for Voice Disorder Detection",
     BioMedical Engineering OnLine 2007, 6:23.
     """
-
     y = np.asarray(y)
     rpd = np.array(_close_returns_c.close_returns(y, m, tau, epsilon))
     if TMax > -1:
@@ -434,6 +441,7 @@ def ApproximateEntropy(x : ArrayLike, mnom : int = 1, rth : float = 0.2) -> floa
     x = np.asarray(x)
     r = rth * np.std(x, ddof=1) # threshold of similarity
     phi = _app_samp_entropy(x, order=mnom, r=r, metric="chebyshev", approximate=True)
+
     return np.subtract(phi[0], phi[1])
 
 def _embed(x, order, delay=1):
@@ -444,10 +452,16 @@ def _embed(x, order, delay=1):
     N = x.shape[0]
     if N - (order - 1) * delay <= 0:
         raise ValueError("Time series is too short for the given order and delay.")
+    
     return np.array([x[i:i + order * delay:delay] for i in range(N - (order - 1) * delay)])
 
-def _app_samp_entropy(x, order, r, metric="chebyshev", approximate=True):
-    """Modified version of _app_samp_entropy that supports order=1."""
+def _app_samp_entropy(
+        x : ArrayLike, 
+        order : int, 
+        r : float, 
+        metric : str = "chebyshev", 
+        approximate : bool = True) -> ArrayLike:
+    """Modified version of `_app_samp_entropy` that supports order=1."""
     phi = np.zeros(2)
     emb_data1 = _embed(x, order, 1)
     if approximate:
@@ -465,6 +479,7 @@ def _app_samp_entropy(x, order, r, metric="chebyshev", approximate=True):
     else:
         phi[0] = np.mean((count1 - 1) / (emb_data1.shape[0] - 1))
         phi[1] = np.mean((count2 - 1) / (emb_data2.shape[0] - 1))
+
     return phi
 
 def ComplexityInvariantDistance(y : ArrayLike) -> dict:
@@ -627,5 +642,6 @@ def _symbolise_lz(x: np.ndarray, n_bins: int, rng) -> np.ndarray:
     symbols = np.floor(ranks * (n_bins / (nx + 1)))
 
     out = np.empty_like(symbols)
-    out[order] = symbols + 1                          
+    out[order] = symbols + 1     
+                         
     return out
