@@ -12,8 +12,8 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 np.random.seed(0)
 
-REPO = Path(__file__).resolve().parents[2]
-OUTDIR = REPO / "ci_out"
+WORKSPACE = Path(os.environ.get("GITHUB_WORKSPACE", Path.cwd()))
+OUTDIR = WORKSPACE / "ci_out"
 OUTDIR.mkdir(parents=True, exist_ok=True)
 
 # get data
