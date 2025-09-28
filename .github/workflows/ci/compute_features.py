@@ -1,8 +1,7 @@
 import numpy as np
 from pyhctsa.FeatureCalculator.calculator import FeatureCalculator
 from pyhctsa.Utilities.utils import get_dataset
-import pickle as pkl
-import os, json, hashlib, platform, sys
+import os, json, platform, sys
 from pathlib import Path
 
 os.environ.setdefault("PYTHONHASHSEED", "0")
