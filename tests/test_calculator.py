@@ -74,5 +74,3 @@ def test_standardise_inputs():
     tuple_standardised = standardise_inputs(test_tuple)
     assert isinstance(tuple_standardised, list)
     assert isinstance(tuple_standardised[0], np.ndarray), "Expected tuple to be returned as numpy array"
-
-    
