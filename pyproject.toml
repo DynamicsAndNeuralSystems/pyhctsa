@@ -28,7 +28,8 @@ dependencies = [
   "ts2vg",
   "arch",
   "hmmlearn",
-  "PyWavelets @ git+https://github.com/joshuabmoore/pywt.git"
+  "PyWavelets @ git+https://github.com/joshuabmoore/pywt.git",
+  "tqdm"
 ]
 
 classifiers = [

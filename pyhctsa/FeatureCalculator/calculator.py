@@ -9,6 +9,7 @@ import importlib
 from pathlib import Path
 import yaml
 from ..Utilities.utils import preprocess_decorator, validate_data, check_optional_deps
+from tqdm import tqdm
 
 def range_constructor(loader, node) -> list:
     """Construct a range from a YAML config."""
@@ -63,7 +64,7 @@ def standardise_inputs(data) -> list[np.ndarray]:
             raise ValueError("NumPy array must be 1D or 2D.")
     # list/tuple/array-likes
     elif isinstance(data, (list, tuple)):
-        # If it looks like a list of series, coerce each;
+        # if it looks like a list of series, coerce each
         # otherwise treat as a single series.
         if len(data) > 0 and all(isinstance(ts, (list, tuple, np.ndarray, pd.Series)) for ts in data):
             out = []
@@ -234,7 +235,7 @@ class FeatureCalculator:
             
         return e_arr
     
-    def extract(self, data) -> pd.DataFrame:
+    def extract(self, data, verbose = True) -> pd.DataFrame:
         """
         Run the configured feature extractor over one or more time series and
         return a single tidy `pandas.DataFrame`.
@@ -249,6 +250,8 @@ class FeatureCalculator:
             * **Multiple series**: an array-like of 1-D array-likes
             (e.g., list[np.ndarray] or `np.ndarray` of dtype=object), where
             each element is a 1-D real-valued series of shape ``(n_samples_i,)``.
+        verbose : Bool, optional
+            Whether to show a progress bar. 
         
         Returns
         -------
@@ -277,9 +280,11 @@ class FeatureCalculator:
         start_time = time.perf_counter()
         rows: list[dict] = []
 
-        for ts in series_list:
+        pbar = tqdm if verbose else (lambda x, **kwargs: x)
+
+        for ts in pbar(series_list, desc="Instances", unit="instance"):
             row = {}
-            for name, func in self.feature_funcs.items():
+            for name, func in pbar(self.feature_funcs.items(), desc="Features", unit="feature", leave=False, colour="green"):
                 try:
                     val = func(ts)
                     # flatten if the feature returns a dict
