@@ -38,7 +38,7 @@ jobs:
           name: ${{ runner.os }}-py${{ matrix.python-version }}
           path: ci_out/
 
-    compare:
+  compare:
     name: Compare results
     needs: run-per-os
     runs-on: ubuntu-latest
@@ -58,4 +58,3 @@ jobs:
       - name: Compare pickles
         run: |
           python .github/ci/compare_pickles.py
-          
