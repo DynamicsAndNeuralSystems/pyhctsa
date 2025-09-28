@@ -57,4 +57,4 @@ jobs:
 
       - name: Compare pickles
         run: |
-          python .github/ci/compare_pickles.py
+          python .github/workflows/ci/compare_pickles.py
