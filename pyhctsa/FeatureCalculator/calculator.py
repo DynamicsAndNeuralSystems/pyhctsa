@@ -251,7 +251,7 @@ class FeatureCalculator:
             (e.g., list[np.ndarray] or `np.ndarray` of dtype=object), where
             each element is a 1-D real-valued series of shape ``(n_samples_i,)``.
         verbose : Bool, optional
-            Whether to show a progress bar. 
+            Whether to show a progress bar of the features being computed.
         
         Returns
         -------
