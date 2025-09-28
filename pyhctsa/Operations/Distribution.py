@@ -279,10 +279,7 @@ def Quantile(y : ArrayLike, p : float = 0.5) -> float:
     float: 
         The calculated quantile value.
     """
-    y = np.asarray(y)
-    if p == 0.5:
-        logger.warning("Using quantile p = 0.5 (median) by default")
-    
+    y = np.asarray(y)    
     if not isinstance(p, (int, float)) or p < 0 or p > 1:
         raise ValueError("p must specify a proportion, in (0,1)")
     

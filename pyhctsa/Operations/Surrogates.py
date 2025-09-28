@@ -1,6 +1,8 @@
 import numpy as np
 from numpy.typing import ArrayLike
 from typing import Union
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 from scipy.stats import zmap, norm, gaussian_kde
 

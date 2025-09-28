@@ -1,10 +1,12 @@
 import numpy as np
 from numpy.typing import ArrayLike
 from typing import Union
+import warnings
 
 from scipy.signal import detrend
 from scipy.stats import skew, kurtosis, gaussian_kde
 from statsmodels.tsa.stattools import kpss
+from statsmodels.tools.sm_exceptions import InterpolationWarning
 
 from ..Operations.Entropy import ApproximateEntropy, SampleEntropy, DistributionEntropy
 from ..Operations.Correlation import AutoCorr, FirstCrossing
@@ -439,7 +441,7 @@ def KPSSTest(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
     """
     Performs the KPSS (Kwiatkowski-Phillips-Schmidt-Shin) stationarity test.
 
-    This implementation uses the statsmodels kpss function to test whether a time series
+    This implementation uses the statsmodels `kpss` function to test whether a time series
     is trend stationary. The null hypothesis is that the time series is trend stationary,
     while the alternative hypothesis is that it is a non-stationary unit-root process.
 
@@ -473,7 +475,9 @@ def KPSSTest(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
         pValue = np.zeros(len(lags))
         stat = np.zeros(len(lags))
         for (i, l) in enumerate(lags):
-            s, pv, _, _ = kpss(y, nlags=l, regression='ct')
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=InterpolationWarning)
+                s, pv, _, _ = kpss(y, nlags=l, regression='ct')
             pValue[i] = pv
             stat[i] = s
         out = {}
@@ -486,7 +490,9 @@ def KPSSTest(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
         out['lagminstat'] = lags[np.argmin(stat)]
     else:
         if isinstance(lags, int):
-            stat, pValue, _, _ = kpss(y, nlags=lags, regression='ct')
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=InterpolationWarning)
+                stat, pValue, _, _ = kpss(y, nlags=lags, regression='ct')
             # return the statistic and pvalue
             out = {'stat': stat, 'pValue': pValue}
         else:

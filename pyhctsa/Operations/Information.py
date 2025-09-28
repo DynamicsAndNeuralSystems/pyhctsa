@@ -415,7 +415,8 @@ def MutualInfo(
 def _initialize_MI(
     estMethod: str = "gaussian",
     extraParam: Optional[Union[int, str]] = None,
-    addNoise: bool = False
+    addNoise: bool = False,
+    verbose: bool = False
 ) -> Any:  # Returns a Java object, use Any since we can't type hint JPype objects
     """
     Initialize a mutual information calculator from JIDT (Java Information Dynamics Toolkit).
@@ -443,6 +444,9 @@ def _initialize_MI(
         Whether to add small random noise for Kraskov estimators:
         - True: Add noise (helpful for deterministic signals)
         - False: No noise (default)
+    
+    verbose : bool, optional
+        Display JVM debug info. 
 
     Returns
     -------
@@ -456,7 +460,8 @@ def _initialize_MI(
             os.path.dirname(os.path.abspath(__file__)) + "/../Toolboxes/infodynamics-dist/infodynamics.jar"
         )
         # change to debug info
-        logger.debug(f"Starting JVM with java class {jarloc}.")
+        if verbose:
+            logger.debug(f"Starting JVM with java class {jarloc}.")
         jp.startJVM(jp.getDefaultJVMPath(), "-ea", "-Djava.class.path=" + jarloc)
 
 
