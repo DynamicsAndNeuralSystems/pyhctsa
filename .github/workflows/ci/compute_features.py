@@ -16,12 +16,10 @@ WORKSPACE = Path(os.environ.get("GITHUB_WORKSPACE", Path.cwd()))
 OUTDIR = WORKSPACE / "ci_out"
 OUTDIR.mkdir(parents=True, exist_ok=True)
 
-# get data
 e1000 = get_dataset()
 dat = [e1000[0], e1000[100], e1000[500], e1000[890]]
 calc = FeatureCalculator()
 res = calc.extract(dat)
-# save results
 
 pkl_path = OUTDIR / "results.pkl"
 res.to_pickle(pkl_path)
