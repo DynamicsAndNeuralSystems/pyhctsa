@@ -183,7 +183,7 @@ def AutoMutualInfoStats(
     dict
         Dictionary containing AMI statistics.
     """
-    from ..Operations.Correlation import AutoCorr
+    from ..Operations.correlation import AutoCorr
     y = np.asarray(y)
     N = len(y) # length of the time series
     

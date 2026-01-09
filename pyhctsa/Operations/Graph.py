@@ -5,7 +5,7 @@ import scipy
 from scipy.stats import norm, expon
 from ts2vg import NaturalVG
 
-from pyhctsa.Operations.Correlation import AutoCorr, FirstCrossing
+from pyhctsa.Operations.correlation import AutoCorr, FirstCrossing
 from pyhctsa.Operations.Entropy import DistributionEntropy
 
 def _horiz_vgraph(ts_data : ArrayLike) -> ArrayLike:

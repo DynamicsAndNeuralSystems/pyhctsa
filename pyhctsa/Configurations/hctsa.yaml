@@ -73,7 +73,7 @@ Criticality:
     hctsa_name: CR_RAD
     ordered_args: ['tau']
 
-Correlation:
+correlation:
   AutoCorr:
     base_name: AC
     labels:
@@ -1004,7 +1004,7 @@ Distribution:
         zscore: True
     hctsa_name: DN_HistogramMode
     ordered_args: ["numBins", "doAbs"]
-    
+
   Withinp:
     base_name: Withinp
     labels:

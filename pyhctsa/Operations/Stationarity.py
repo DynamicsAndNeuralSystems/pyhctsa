@@ -10,7 +10,7 @@ from statsmodels.tsa.stattools import kpss
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 
 from ..Operations.Entropy import ApproximateEntropy, SampleEntropy, DistributionEntropy
-from ..Operations.Correlation import AutoCorr, FirstCrossing
+from ..Operations.correlation import AutoCorr, FirstCrossing
 from ..Utilities.utils import make_mat_buffer, ZScore, signChange
 from ..Operations.Distribution import Moments
 from ..Operations.Entropy import DistributionEntropy

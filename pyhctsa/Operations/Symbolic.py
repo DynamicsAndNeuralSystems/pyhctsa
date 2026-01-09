@@ -6,7 +6,7 @@ import logging
 from scipy.stats import mstats
 from scipy.signal import resample as ssre
 
-from ..Operations.Correlation import FirstCrossing
+from ..Operations.correlation import FirstCrossing
 from ..Utilities.utils import binarize, signChange
 
 def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numGroups : int = 3, coarseGrainMethod : str = 'quantile', 

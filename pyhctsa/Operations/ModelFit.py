@@ -8,11 +8,10 @@ from statsmodels.stats.diagnostic import acorr_ljungbox
 from scipy.stats import ks_1samp, norm, t
 from scipy.signal import lfilter
 from hmmlearn.hmm import GaussianHMM
-from pyhctsa.Operations.Correlation import AutoCorr
 
 from ..Utilities.utils import ZScore
 from ..Operations.Stationarity import SlidingWindow
-from ..Operations.Correlation import FirstCrossing, AutoCorr
+from ..Operations.correlation import FirstCrossing, AutoCorr
 
 def HMMFit(y : ArrayLike, trainp : float = 0.8, numStates : int = 3, randomSeed : int = 0) -> dict:
     """

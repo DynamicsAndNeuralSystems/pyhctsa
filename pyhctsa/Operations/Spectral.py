@@ -4,7 +4,7 @@ from numpy.typing import ArrayLike
 import scipy.fft
 
 from pyhctsa.Operations.Distribution import Moments
-from pyhctsa.Operations.Correlation import AutoCorr, FirstCrossing
+from pyhctsa.Operations.correlation import AutoCorr, FirstCrossing
 from pyhctsa.Utilities.utils import make_mat_buffer, signChange
 
 def SpectralSummaries(y : ArrayLike, psdMeth : str = 'fft', windowType : str = 'none') -> dict:
