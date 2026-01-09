@@ -1,14 +1,13 @@
 import numpy as np
 from typing import Union
 from numpy.typing import ArrayLike
+import logging
 
 from scipy.stats import mstats
 from scipy.signal import resample as ssre
 
 from ..Operations.Correlation import FirstCrossing
 from ..Utilities.utils import binarize, signChange
-
-from loguru import logger
 
 def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numGroups : int = 3, coarseGrainMethod : str = 'quantile', 
                 numIters : int = 500, randomSeed : int = 0) -> dict:
@@ -171,7 +170,7 @@ def MotifTwo(y : ArrayLike, binarizeHow : str = 'diff') -> dict:
     N = len(yBin)
 
     if N < 5:
-        logger.warning("Time series too short!")
+        logging.warning("Time series too short!")
         return np.nan
     
     # Binary sequences of length 1

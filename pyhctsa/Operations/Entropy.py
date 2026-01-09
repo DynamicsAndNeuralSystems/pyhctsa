@@ -8,7 +8,6 @@ from scipy.stats import gaussian_kde
 from sklearn.neighbors import KDTree
 from antropy.entropy import _xlogx
 
-
 from ..Utilities.utils import ZScore, make_buffer, binpicker, histc
 from ..Toolboxes.physionet import sampen as _sampen_c 
 from ..Operations.Correlation import FirstCrossing

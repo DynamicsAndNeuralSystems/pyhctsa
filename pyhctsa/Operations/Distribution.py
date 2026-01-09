@@ -1,14 +1,13 @@
 import numpy as np
 from numpy.typing import ArrayLike
 from typing import Dict, Union
+import logging
 
 from scipy import stats
 from scipy.stats import norm, gumbel_l, uniform, expon, lognorm, gaussian_kde
 
 from ..Utilities.utils import histc, binpicker, simple_binner, xcorr
 from ..Operations.Correlation import AutoCorr, FirstCrossing
-
-from loguru import logger
 
 def CompareKSFit(x : ArrayLike, whatDistn : str) -> dict:
     """
@@ -516,7 +515,7 @@ def CV(x : ArrayLike, k : int = 1) -> float:
         The coefficient of variation of order k.
     """
     if not isinstance(k, int) or k < 0:
-        logger.warn('k should probably be a positive integer')
+        logging.warning('k should probably be a positive integer')
         # carry on with just this warning, though
     
     # Compute the coefficient of variation (of order k) of the data

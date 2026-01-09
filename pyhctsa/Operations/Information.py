@@ -2,13 +2,12 @@ import os
 import numpy as np
 from typing import Union, Any, Optional, Dict, List
 from numpy.typing import ArrayLike
+import logging
 
 import jpype as jp
 from scipy import stats
 
 from ..Utilities.utils import signChange, RM_histogram2
-
-from loguru import logger
 
 def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, 
              minNotMax : Union[bool, None] = True) -> int:
@@ -67,7 +66,7 @@ def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None,
             autoCorr[i-1] = corrfn(i)
             # Hit a NaN before got to a minimum -- there is no minimum
             if np.isnan(autoCorr[i-1]):
-                logger.warning(f"No minimum in {minWhat} [[time series too short to find it?]]")
+                logging.warning(f"No minimum in {minWhat} [[time series too short to find it?]]")
                 return np.nan
             # we're at a local minimum
             if (i == 2) and (autoCorr[1] > autoCorr[0]):
@@ -82,7 +81,7 @@ def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None,
             autoCorr[i-1] = corrfn(i)
             # Hit a NaN before got to a max -- there is no max
             if np.isnan(autoCorr[i-1]):
-                logger.warning(f"No minimum in {minWhat} [[time series too short to find it?]]")
+                logging.warning(f"No minimum in {minWhat} [[time series too short to find it?]]")
                 return np.nan
 
             # we're at a local maximum
@@ -461,7 +460,7 @@ def _initialize_MI(
         )
         # change to debug info
         if verbose:
-            logger.debug(f"Starting JVM with java class {jarloc}.")
+            logging.debug(f"Starting JVM with java class {jarloc}.")
         jp.startJVM(jp.getDefaultJVMPath(), "-ea", "-Djava.class.path=" + jarloc)
 
 
@@ -484,7 +483,7 @@ def _initialize_MI(
     if estMethod in ['kraskov1', 'kraskov2']:
         if extraParam != None:
             if isinstance(extraParam, int):
-                logger.warning("Number of nearest neighbors needs to be a string. Setting this for you...")
+                logging.warning("Number of nearest neighbors needs to be a string. Setting this for you...")
                 extraParam = str(extraParam)
             miCalc.setProperty('k', extraParam) # 4th input specifies number of nearest neighbors for KSG estimator
         else:

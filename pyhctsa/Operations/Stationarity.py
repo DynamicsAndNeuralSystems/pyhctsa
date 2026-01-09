@@ -2,6 +2,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from typing import Union
 import warnings
+import logging
 
 from scipy.signal import detrend
 from scipy.stats import skew, kurtosis, gaussian_kde
@@ -13,8 +14,6 @@ from ..Operations.Correlation import AutoCorr, FirstCrossing
 from ..Utilities.utils import make_mat_buffer, ZScore, signChange
 from ..Operations.Distribution import Moments
 from ..Operations.Entropy import DistributionEntropy
-
-from loguru import logger
 
 def LocalDistributions(y : ArrayLike, numSegs : int = 5, eachOrPar : str = 'par', numPoints : int = 200) -> dict:
     """
@@ -692,7 +691,7 @@ def LocalGlobal(y : ArrayLike, subsetHow : str = 'l', nsamps : Union[int, float,
 
     if len(r) < 5:
         # It's not really appropriate to compute statistics on less than 5 datapoints
-        logger.warning(f"Time series (of length {N}) is too short")
+        logging.warning(f"Time series (of length {N}) is too short")
         return np.nan
     
     # Compare statistics of this subset to those obtained from the full time series
@@ -959,7 +958,7 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
     y = np.asarray(y)
     winLength = np.floor(len(y)/numSeg)
     if winLength == 0:
-        logger.warning(f"Time-series of length {len(y)} is too short for {numSeg} windows")
+        logging.warning(f"Time-series of length {len(y)} is too short for {numSeg} windows")
         return np.nan
     inc = np.floor(winLength/incMove) # increment to move at each step
     # if incrment rounded down to zero, prop it up 
