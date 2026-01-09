@@ -14,9 +14,20 @@ from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
 from ..Operations.Information import FirstMin
 from ..Operations.Information import AutoMutualInfo
 
-def AddNoise(y : ArrayLike, tau : Union[int, str] = 1, amiMethod : str = 'even', extraParam : int = 10, randomSeed = None) -> dict:
+def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even', 
+              extra_param : Union[int, None] = None, random_seed = None) -> dict:
     """
     Changes in the automutual information with the addition of noise.
+
+    Adds Gaussian-distributed noise to the time series with increasing standard deviation, eta, across the range eta = 0, 0.1, ..., 2, and measures the
+    mutual information at each point. Can be measured using histograms with extra_param bins or using the Information Dynamics Toolkit.
+    The output is a set of statistics on the resulting set of automutual information estimates, including a fit to an exponential decay, since the
+    automutual information decreases with the added white noise.
+    This algorithm is quite different, but was based on the idea in [1].
+
+    References
+    ----------
+    .. [1] "Titration of chaos with added noise", Chi-Sang Poon and Mauricio Barahona P. Natl. Acad. Sci. USA, 98(13) 7107 (2001)
 
     Parameters
     -----------
@@ -25,19 +36,18 @@ def AddNoise(y : ArrayLike, tau : Union[int, str] = 1, amiMethod : str = 'even',
     tau : Union[int, str], optional
         Time delay for computing AMI. If 'ac' or 'tau', uses first zero-crossing 
         of autocorrelation function. Default is 1.
-    amiMethod : str, optional
+    ami_method : str, optional
         Method for computing AMI:
         - 'std1', 'std2', 'quantiles', 'even': Histogram-based estimation
         - 'gaussian', 'kernel', 'kraskov1', 'kraskov2': JIDT-based estimation
         Default is 'even'.
-    extraParam : int, optional
+    extra_param : int, optional
         Additional parameter for AMI calculation:
         - For histogram methods: number of bins
         - For JIDT methods: algorithm-specific parameter
         Default is 10.
-    randomSeed : int, optional
+    random_seed : int, optional
         Seed for random number generator. If None, uses 0. Default is None.
-
 
     Returns
     --------
@@ -48,10 +58,13 @@ def AddNoise(y : ArrayLike, tau : Union[int, str] = 1, amiMethod : str = 'even',
     # Set tau to minimum of autocorrelation function if 'ac' or 'tau'
     if tau in ['ac', 'tau']:
         tau = FirstCrossing(y, 'ac', 0, 'discrete')
+    if extra_param is None:
+        # JIDT expects empty string for no extra params
+        extra_param = ''
     
     # Generate noise
-    if randomSeed is not None:
-        np.random.seed(randomSeed)
+    if random_seed is not None:
+        np.random.seed(random_seed)
     else:
         np.random.seed(0)
     noise = np.random.randn(len(y)) # generate uncorrelated additive noise
@@ -62,15 +75,15 @@ def AddNoise(y : ArrayLike, tau : Union[int, str] = 1, amiMethod : str = 'even',
 
     # Compute the automutual information across a range of noise levels
     amis = np.zeros(numRepeats)
-    if amiMethod in ['std1', 'std2', 'quantiles', 'even']:
+    if ami_method in ['std1', 'std2', 'quantiles', 'even']:
         # histogram-based methods using my naive implementation in CO_Histogram
         for i in range(numRepeats):
-            amis[i] = HistogramAMI(y + noiseRange[i]*noise, tau, amiMethod, extraParam)
+            amis[i] = HistogramAMI(y + noiseRange[i]*noise, tau, ami_method, extra_param)
             if np.isnan(amis[i]):
                 raise ValueError('Error computing AMI: Time series too short (?)')
-    if amiMethod in ['gaussian','kernel','kraskov1','kraskov2']:
+    if ami_method in ['gaussian','kernel','kraskov1','kraskov2']:
         for i in range(numRepeats):
-            amis[i] = AutoMutualInfo(y + noiseRange[i]*noise, tau, amiMethod, str(extraParam))
+            amis[i] = AutoMutualInfo(y + noiseRange[i]*noise, tau, ami_method, str(extra_param))
             if np.isnan(amis[i]):
                 raise ValueError('Error computing AMI: Time series too short (?)')
     

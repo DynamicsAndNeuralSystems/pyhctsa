@@ -181,7 +181,12 @@ class FeatureCalculator:
                                 combo_dict = dict(zip(keys, combo))
                                 label = base_name
                                 if ordered_args:
-                                    label += "_" + "_".join(_format_param_value(combo_dict[arg]) for arg in ordered_args)
+                                    parts = []
+                                    for arg in ordered_args:
+                                        if arg in combo_dict:
+                                            parts.append(_format_param_value(combo_dict[arg]))
+                                    if parts:
+                                        label += "_" + "_".join(parts)
                                 else:
                                     label += "_" + "_".join(f"{k}{_format_param_value(v)}" for k, v in combo_dict.items())
                                 # Only append "_raw" if zscore varies and zscore is False

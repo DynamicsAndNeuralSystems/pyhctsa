@@ -293,39 +293,24 @@ correlation:
     hctsa_name: CO_AutoCorrShape
     ordered_args: ["stopWhen"]
   
-  AddNoise:
-    base_name: AddNoise
-    labels:
-      - correlation
+  add_noise:
+    base_name: add_noise
     depedencies:
       - jpype1
     configs:
-      - tau: 1
-        amiMethod: ['quantiles', 'even', 'std1']
-        extraParam: 10
-        zscore: True
-      - tau: 1
-        amiMethod: 'gaussian'
-        extraParam:
-        zscore: True
-      - tau: 1
-        amiMethod: 'kraskov1'
-        extraParam: 4
-        zscore: True
-      - tau: 'ac'
-        amiMethod: ['quantiles', 'even', 'std1']
-        extraParam: 10
-        zscore: True
-      - tau: 'ac'
-        amiMethod: 'gaussian'
-        extraParam:
-        zscore: True
-      - tau: 'ac'
-        amiMethod: 'kraskov1'
-        extraParam: 4
-        zscore: True
-    hctsa_name: CO_AddNoise
-    ordered_args: ['tau', 'amiMethod', 'extraParam']
+      - {tau: 1,   ami_method: 'quantiles', extra_param: 10, zscore: True}
+      - {tau: 1,   ami_method: 'even',      extra_param: 10, zscore: True}
+      - {tau: 1,   ami_method: 'std1',      extra_param: 10, zscore: True}
+      - {tau: 1,   ami_method: 'gaussian',                   zscore: True}
+      - {tau: 1,   ami_method: 'kraskov1',  extra_param: 4,  zscore: True}
+
+      - {tau: 'ac', ami_method: 'quantiles', extra_param: 10, zscore: True}
+      - {tau: 'ac', ami_method: 'even',      extra_param: 10, zscore: True}
+      - {tau: 'ac', ami_method: 'std1',      extra_param: 10, zscore: True}
+      - {tau: 'ac', ami_method: 'gaussian',                   zscore: True}
+      - {tau: 'ac', ami_method: 'kraskov1',  extra_param: 4,  zscore: True}
+    legacy_name: CO_AddNoise
+    ordered_args: ['tau', 'ami_method', 'extra_param']
   
   HistogramAMI:
     base_name: HistogramAMI
