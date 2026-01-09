@@ -10,7 +10,7 @@ from scipy.linalg import LinAlgError
 from statsmodels.tsa.stattools import pacf
 
 from ..Utilities.utils import pointOfCrossing, binpicker, ZScore, signChange, make_mat_buffer
-from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
+from ..Toolboxes.c22 import periodicity_wang_wrapper
 from ..Operations.Information import FirstMin
 from ..Operations.Information import AutoMutualInfo
 
@@ -141,12 +141,14 @@ def first_under_fn(x : ArrayLike, m : ArrayLike, p : ArrayLike):
     return first_i
 
 
-def TheilerQ(y : ArrayLike) -> float:
+def theiler_q(y : ArrayLike) -> float:
     """
     Computes Theiler's Q statistic which quantifies asymmetry in time. 
 
     Calculates Q = <(x_t + x_{t+1})^3> normalized by <x^2>^{3/2} on a vector x,
     as proposed by James Theiler.
+
+    Copyright (C) 1996, D. Kaplan <kaplan@macalester.edu>
 
     Parameters
     ----------
@@ -167,13 +169,15 @@ def TheilerQ(y : ArrayLike) -> float:
 
     return float(Q)
 
-def Crinkle(y : ArrayLike) -> float:
+def crinkle_statistic(y : ArrayLike) -> float:
     """
     Computes Theiler's crinkle statistic.
 
     Calculates the "crinkle statistic" on a vector y:
         <(y_{t-1} - 2*y_t + y_{t+1})^4> / <(y_t^2)>^2
     as proposed by James Theiler.
+
+    Copyright (C) 1996, D. Kaplan <kaplan@macalester.edu>
 
     Parameters
     ----------
@@ -196,7 +200,7 @@ def Crinkle(y : ArrayLike) -> float:
 
     return float(out)
 
-def TimeRevKaplan(y : ArrayLike, timeLag : int = 1) -> float:
+def time_rev_kaplan(y : ArrayLike, time_lag : int = 1) -> float:
     """
     Time reversal asymmetry statistic.
 
@@ -207,7 +211,7 @@ def TimeRevKaplan(y : ArrayLike, timeLag : int = 1) -> float:
     ----------
     y : array-like
         The input time series.
-    timeLag : int, optional
+    time_lag : int, optional
         The time scale (in samples) to use for the embedding (default is 1).
 
     Returns
@@ -215,7 +219,7 @@ def TimeRevKaplan(y : ArrayLike, timeLag : int = 1) -> float:
     float
         The time reversal asymmetry statistic.
     """
-    foo = _lagEmbed(np.asarray(y), 3, timeLag)
+    foo = _lag_embed(np.asarray(y), 3, time_lag)
     a = foo[:, 0]
     b = foo[:, 1]
     c = foo[:, 2]
@@ -223,7 +227,7 @@ def TimeRevKaplan(y : ArrayLike, timeLag : int = 1) -> float:
 
     return float(res)
 
-def _lagEmbed(x : ArrayLike, m : int, lag : int = 1) -> ArrayLike:
+def _lag_embed(x : ArrayLike, m : int, lag : int = 1) -> ArrayLike:
     """Constructs a time-delay embedding of a time series."""
     x = np.asarray(x).flatten()
     lx = len(x)
@@ -239,19 +243,19 @@ def _lagEmbed(x : ArrayLike, m : int, lag : int = 1) -> ArrayLike:
 
     return y
 
-def Embed2AngleTau(y : ArrayLike, maxTau : int) -> dict:
+def embed2_angle_tau(y : ArrayLike, max_tau : int) -> dict:
     """
     Angle autocorrelation in a 2-dimensional embedding space.
 
     Investigates how the autocorrelation of angles between successive points in
     the two-dimensional time-series embedding change as tau varies from
-    tau = 1, 2, ..., maxTau.
+    tau = 1, 2, ..., max_tau.
 
     Parameters
     ----------
     y : array-like
         The input time series (column vector).
-    maxTau : int
+    max_tau : int
         The maximum time lag to consider.
 
     Returns
@@ -260,17 +264,17 @@ def Embed2AngleTau(y : ArrayLike, maxTau : int) -> dict:
         Dictionary containing statistics of the autocorrelation of angles for each tau,
         including mean, max, min, and autocorrelation at different lags.
     """
-    tauRange = np.arange(1, maxTau + 1)
-    numTau = len(tauRange)
+    tau_range = np.arange(1, max_tau + 1)
+    num_tau = len(tau_range)
 
     # Ensure y is a column vector
     y = np.atleast_2d(y)
     if y.shape[0] < y.shape[1]:
         y = y.T
 
-    stats_store = np.zeros((2, numTau))
+    stats_store = np.zeros((2, num_tau))
 
-    for i, tau in enumerate(tauRange):
+    for i, tau in enumerate(tau_range):
         m = np.column_stack((y[:-tau], y[tau:]))
         diff_x = np.diff(m[:, 0])
         diff_y = np.diff(m[:, 1])
@@ -302,7 +306,7 @@ def Embed2AngleTau(y : ArrayLike, maxTau : int) -> dict:
 
     return out
 
-def Embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
+def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     """
     Statistics of the time series in a 2-dimensional embedding space.
 
@@ -353,11 +357,11 @@ def Embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     out['theta_mean'] = np.mean(theta)
     out['theta_std'] = np.std(theta, ddof=1)
     
-    binEdges = np.linspace(-np.pi/2, np.pi/2, 11) # 10 bins in the histogram
-    px, _ = _histcounts(theta, binEdges=binEdges)
-    binWidths = np.diff(binEdges)
+    bin_edges = np.linspace(-np.pi/2, np.pi/2, 11) # 10 bins in the histogram
+    px, _ = _histcounts(theta, bin_edges=bin_edges)
+    bin_widths = np.diff(bin_edges)
     out['hist10std'] = np.std(px, ddof=1)
-    out['histent'] = -np.sum(px[px>0] * np.log(px[px>0] / binWidths[px>0]))
+    out['histent'] = -np.sum(px[px>0] * np.log(px[px>0] / bin_widths[px>0]))
     
     # Stationarity in fifths of the time series
     # Use histograms with 4 bins
@@ -411,13 +415,14 @@ def Embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
 
     return out 
 
-def _histcounts(x : ArrayLike, bins : Union[int, None, str] = None, binEdges : Union[ArrayLike, None] = None) -> tuple:
+def _histcounts(x: ArrayLike, bins: Union[int, None, str] = None, bin_edges: Union[ArrayLike, None] = None) -> tuple:
     x = np.asarray(x).flatten()
-    if binEdges is not None:
-        edges = np.asarray(binEdges)
+
+    if bin_edges is not None:
+        edges = np.asarray(bin_edges)
     elif bins is None or bins == 'auto':
         # Use Scott's rule for automatic binning
-        bin_width = 3.5 * np.std(x, ddof=1) / (len(x) ** (1/3))
+        bin_width = 3.5 * np.std(x, ddof=1) / (len(x) ** (1 / 3))
         edges = np.arange(np.min(x), np.max(x) + bin_width, bin_width)
     elif isinstance(bins, int):
         edges = np.linspace(np.min(x), np.max(x), bins + 1)
@@ -425,27 +430,29 @@ def _histcounts(x : ArrayLike, bins : Union[int, None, str] = None, binEdges : U
         raise ValueError("Invalid bins parameter")
 
     n, _ = np.histogram(x, bins=edges)
-      
+
     n = n / len(x)
-    
+
     return n, edges
 
-def PeriodicityWang(y : ArrayLike) -> dict:
+def periodicity_wang(y : ArrayLike) -> dict:
     """
-    Periodicity extraction measure of Wang et al. (2007).
+    Periodicity extraction measure of Wang et al. (2007) [1].
 
-    Implements an idea based on the periodicity extraction measure proposed in the paper
-    "Structure-based Statistical Features and Multivariate Time Series Clustering"
-    by X. Wang, A. Wirth, and L. Wang (2007).
+    Implements an idea based on the periodicity extraction measure proposed in [1].
 
-    The function:
-    1. Detrends the time series using a three-knot cubic regression spline
-    2. Computes autocorrelations up to one third of the length of the time series
-    3. Finds the first peak in the autocorrelation function satisfying certain conditions
+    Detrends the time series using a three-knot cubic regression spline and then computes 
+    autocorrelations up to one third of the length of the time series. The frequency is the 
+    first peak in the autocorrelation function satisfying a set of conditions.
 
-    While the original paper used a single threshold of 0.01, this implementation tests
-    multiple thresholds: 0, 0.01 (original paper threshold), 0.1, 0.2, 1/sqrt(N), 5/sqrt(N), 
-    10/sqrt(N), where N is the length of the time series.
+    The single threshold of 0.01 was considered in the original paper, this code
+    uses a range of thresholds: 0, 0.01, 0.1, 0.2, 1/sqrt{N}, 5/sqrt{N}, and
+    10/sqrt{N}, where N is the length of the time series.
+
+    References
+    ----------
+    .. [1] "Structure-based Statistical Features and Multivariate Time Series Clustering"
+            by X. Wang, A. Wirth, and L. Wang (2007).
 
     Parameters
     ----------
@@ -455,11 +462,11 @@ def PeriodicityWang(y : ArrayLike) -> dict:
     Returns
     -------
     dict
-        Dictionary containing periodicity measures for each threshold
+        Dictionary containing periodicity measures for each threshold.
     """
     y = np.asarray(y)
 
-    return periodicity_wang(y)
+    return periodicity_wang_wrapper.periodicity_wang(y)
 
 def CompareMinAMI(y : ArrayLike, binMethod : str = 'std1', numBins : Union[int, ArrayLike] = 10) -> dict:
     """
@@ -1472,6 +1479,7 @@ def TranslateShape(y : ArrayLike, shape : str = 'circle', d : int = 2, howToMove
     shape : str, optional
         The shape to move along the time series. Supported options: 'circle', 'rectangle'. Default is 'circle'.
     d : int, optional
+
         Parameter specifying the size of the shape (e.g., radius for 'circle', half-width for 'rectangle'). Default is 2.
     howToMove : str, optional
         Method for moving the shape. Currently, only 'pts' is supported, which places the shape on each point in the time series.

@@ -184,17 +184,13 @@ correlation:
     hctsa_name: CO_Embed2_Dist
     ordered_args: ["tau"]
   
-  Embed2AngleTau:
-    base_name: Embed2_AngleTau
-    labels:
-      - embedding
-      - correlation
+  embed2_angle_tau:
+    base_name: embed2_angle_tau
     dependencies:
     configs:
-      - maxTau: 50
-        zscore: True
+      - {max_tau: 50, zscore: True}
     hctsa_name: CO_Embed2_AngleTau
-    ordered_args: ["maxTau"]
+    ordered_args: ['max_tau']
   
   PartialAutoCorr:
     base_name: PartialAutoCorr
@@ -340,16 +336,12 @@ correlation:
     hctsa_name: CO_CompareMinAMI
     ordered_args: ["binMethod", "numBins"]
   
-  PeriodicityWang:
-    base_name: PeriodicityWang
-    labels:
-      - periodicity
-      - spline
-      - C
+  periodicity_wang:
+    base_name: periodicity_wang
     dependencies:
     configs:
-      - zscore: True
-    hctsa_name: PD_PeriodicityWang
+      - {zscore: True}
+    legacy_name: PD_PeriodicityWang
     ordered_args: 
   
   TRev:
@@ -378,37 +370,31 @@ correlation:
     hctsa_name: CO_tc3
     ordered_args: ["tau"]
   
-  TimeRevKaplan:
-    base_name: timerevKaplan
-    labels:
-      - correlation
-      - nonlinearity
-      - timerev
+  time_rev_kaplan:
+    base_name: time_rev_kaplan
     dependencies:
     configs:
-      - timeLag: [1, 2, 3, 4]
-        zscore: True
-    hctsa_name: DK_timerev
-    ordered_args: ["timeLag"]
+      - {time_lag: 1, zscore: True}
+      - {time_lag: 2, zscore: True}
+      - {time_lag: 3, zscore: True}
+      - {time_lag: 4, zscore: True}
+    legacy_name: DK_timerev
+    ordered_args: ['time_lag']
   
-  Crinkle:
+  crinkle_statistic:
     base_name: crinkle_statistic
-    labels:
-      - correlation
     depedencies:
     configs:
-      - zscore: True
-    hctsa_name: DK_crinkle
+      - {zscore: True}
+    legacy_name: DK_crinkle
     ordered_args:
   
-  TheilerQ:
-    base_name: TheilerQ
-    labels:
-      - correlation
+  theiler_q:
+    base_name: theiler_q
     depedencies:
     configs:
-      - zscore: True
-    hctsa_name: DK_theilerQ
+      - {zscore: True}
+    legacy_name: DK_theilerQ
     ordered_args:
 
 Information:
