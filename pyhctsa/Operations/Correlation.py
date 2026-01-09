@@ -1,6 +1,7 @@
 import numpy as np
 from numpy.typing import ArrayLike 
 from typing import Union
+import logging
 
 from scipy.stats import gaussian_kde, kurtosis, skew, expon
 from scipy.stats import mode as smode
@@ -12,8 +13,6 @@ from ..Utilities.utils import pointOfCrossing, binpicker, ZScore, signChange, ma
 from ..Toolboxes.c22.periodicity_wang_wrapper import periodicity_wang
 from ..Operations.Information import FirstMin
 from ..Operations.Information import AutoMutualInfo
-
-from loguru import logger
 
 def AddNoise(y : ArrayLike, tau : Union[int, str] = 1, amiMethod : str = 'even', extraParam : int = 10, randomSeed = None) -> dict:
     """
@@ -1334,9 +1333,9 @@ def AutoCorr(y: ArrayLike, tau: Union[int, list] = 1, method: str = 'Fourier') -
     if tau:
         # if list is not empty
         if np.max(tau) > N - 1:  # -1 because acf(1) is lag 0
-            logger.warning(f"Time lag {np.max(tau)} is too long for time-series length {N}.")
+            logging.warning(f"Time lag {np.max(tau)} is too long for time-series length {N}.")
         if np.any(np.array(tau) < 0):
-            logger.warning('Negative time lags not applicable.')
+            logging.warning('Negative time lags not applicable.')
     
     if method == 'Fourier':
         n_fft = 2 ** (int(np.ceil(np.log2(N))) + 1)
@@ -1550,7 +1549,7 @@ def _stat_av(y: ArrayLike, windowStat: str = 'mean', numSeg: int = 5, incMove: i
     y = np.asarray(y)
     winLength = np.floor(len(y)/numSeg)
     if winLength == 0:
-        logger.warning(f"Time-series of length {len(y)} is too short for {numSeg} windows")
+        logging.warning(f"Time-series of length {len(y)} is too short for {numSeg} windows")
         return np.nan
     inc = np.floor(winLength/incMove) # increment to move at each step
     # if incrment rounded down to zero, prop it up 
@@ -1620,7 +1619,7 @@ def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dic
             for i in range(1, N+1):
                 acf_val = AutoCorr(y, i-1, 'Fourier')[0]
                 if np.isnan(acf_val):
-                    logger.warning("Weird time series (constant?)")
+                    logging.warning("Weird time series (constant?)")
                     out = np.nan
                 if acf_val < th:
                     # Ensure ACF is all positive
