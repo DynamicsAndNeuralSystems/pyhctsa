@@ -70,27 +70,27 @@ def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even
     noise = np.random.randn(len(y)) # generate uncorrelated additive noise
 
     # Set up noise range
-    noiseRange = np.linspace(0, 3, 50) # compare properties across this noise range
-    numRepeats = len(noiseRange)
+    noise_range = np.linspace(0, 3, 50) # compare properties across this noise range
+    num_repeats = len(noise_range)
 
     # Compute the automutual information across a range of noise levels
-    amis = np.zeros(numRepeats)
+    amis = np.zeros(num_repeats)
     if ami_method in ['std1', 'std2', 'quantiles', 'even']:
         # histogram-based methods using my naive implementation in CO_Histogram
-        for i in range(numRepeats):
-            amis[i] = HistogramAMI(y + noiseRange[i]*noise, tau, ami_method, extra_param)
+        for i in range(num_repeats):
+            amis[i] = HistogramAMI(y + noise_range[i]*noise, tau, ami_method, extra_param)
             if np.isnan(amis[i]):
                 raise ValueError('Error computing AMI: Time series too short (?)')
     if ami_method in ['gaussian','kernel','kraskov1','kraskov2']:
-        for i in range(numRepeats):
-            amis[i] = AutoMutualInfo(y + noiseRange[i]*noise, tau, ami_method, str(extra_param))
+        for i in range(num_repeats):
+            amis[i] = AutoMutualInfo(y + noise_range[i]*noise, tau, ami_method, str(extra_param))
             if np.isnan(amis[i]):
                 raise ValueError('Error computing AMI: Time series too short (?)')
     
     # Output statistics
     out = {}
     # Proportion decreases
-    out['pdec'] = np.sum(np.diff(amis) < 0) / (numRepeats - 1)
+    out['pdec'] = np.sum(np.diff(amis) < 0) / (num_repeats - 1)
 
     # Mean change in AMI
     out['meanch'] = np.mean(np.diff(amis))
@@ -100,23 +100,23 @@ def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even
     out['ac2'] = AutoCorr(amis, 2, 'Fourier')[0]
 
     # Noise level required to reduce ami to proportion x of its initial value
-    firstUnderVals = [0.75, 0.50, 0.25]
-    for val in firstUnderVals:
-        out[f'firstUnder{int(val*100)}'] = firstUnder_fn(val * amis[0], noiseRange, amis)
+    first_under_vals = [0.75, 0.50, 0.25]
+    for val in first_under_vals:
+        out[f'firstUnder{int(val*100)}'] = first_under_fn(val * amis[0], noise_range, amis)
 
     # AMI at actual noise levels: 0.5, 1, 1.5 and 2
-    noiseLevels = [0.5, 1, 1.5, 2]
-    for nlvl in noiseLevels:
-        out[f'ami_at_{int(nlvl*10)}'] = amis[np.argmax(noiseRange >= nlvl)]
+    noise_levels = [0.5, 1, 1.5, 2]
+    for nlvl in noise_levels:
+        out[f'ami_at_{int(nlvl*10)}'] = amis[np.argmax(noise_range >= nlvl)]
 
     # Count number of times the AMI function crosses its mean
-    out['pcrossmean'] = np.sum(np.diff(np.sign(amis - np.mean(amis))) != 0) / (numRepeats - 1)
+    out['pcrossmean'] = np.sum(np.diff(np.sign(amis - np.mean(amis))) != 0) / (num_repeats - 1)
 
     # Fit exponential decay model 
-    expFunc = lambda x, a, b : a * np.exp(b * x)
-    popt, pcov = curve_fit(expFunc, noiseRange, amis, p0=[amis[0], -1])
+    exp_func = lambda x, a, b : a * np.exp(b * x)
+    popt, pcov = curve_fit(exp_func, noise_range, amis, p0=[amis[0], -1])
     out['fitexpa'], out['fitexpb'] = popt
-    residuals = amis - expFunc(noiseRange, *popt)
+    residuals = amis - exp_func(noise_range, *popt)
     ss_res = np.sum(residuals**2)
     ss_tot = np.sum((amis - np.mean(amis))**2)
     out['fitexpr2'] = 1 - (ss_res / ss_tot)
@@ -124,14 +124,14 @@ def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even
     out['fitexprmse'] = np.sqrt(np.mean(residuals**2))
 
     # Fit linear function
-    p = np.polyfit(noiseRange, amis, 1)
+    p = np.polyfit(noise_range, amis, 1)
     out['fitlina'], out['fitlinb'] = p
-    lin_fit = np.polyval(p, noiseRange)
+    lin_fit = np.polyval(p, noise_range)
     out['linfit_mse'] = np.mean((lin_fit - amis)**2)
 
     return out
 
-def firstUnder_fn(x : ArrayLike, m : ArrayLike, p : ArrayLike):
+def first_under_fn(x : ArrayLike, m : ArrayLike, p : ArrayLike):
     """
     Find the value of m for the first time p goes under the threshold, x. 
     p and m are vectors of the same length
