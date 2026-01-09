@@ -95,7 +95,7 @@ def AddNoise(y : ArrayLike, tau : Union[int, str] = 1, amiMethod : str = 'even',
     # AMI at actual noise levels: 0.5, 1, 1.5 and 2
     noiseLevels = [0.5, 1, 1.5, 2]
     for nlvl in noiseLevels:
-        out[f'ami_at_{nlvl*10}'] = amis[np.argmax(noiseRange >= nlvl)]
+        out[f'ami_at_{int(nlvl*10)}'] = amis[np.argmax(noiseRange >= nlvl)]
 
     # Count number of times the AMI function crosses its mean
     out['pcrossmean'] = np.sum(np.diff(np.sign(amis - np.mean(amis))) != 0) / (numRepeats - 1)
