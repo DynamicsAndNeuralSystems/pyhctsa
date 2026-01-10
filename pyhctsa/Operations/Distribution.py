@@ -7,9 +7,9 @@ from scipy import stats
 from scipy.stats import norm, gumbel_l, uniform, expon, lognorm, gaussian_kde
 
 from ..Utilities.utils import histc, binpicker, simple_binner, xcorr
-from ..Operations.correlation import autocorr, FirstCrossing
+from ..Operations.correlation import autocorr, first_crossing
 
-def CompareKSFit(x : ArrayLike, whatDistn : str) -> dict:
+def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """
     Fits a distribution to data.
 
@@ -21,7 +21,7 @@ def CompareKSFit(x : ArrayLike, whatDistn : str) -> dict:
     ----------
     x : array-like
         The input data vector.
-    whatDistn : str
+    what_distn : str
         The type of distribution to fit to the data:
             - 'norm': normal
             - 'ev': extreme value
@@ -37,41 +37,41 @@ def CompareKSFit(x : ArrayLike, whatDistn : str) -> dict:
     """
     
     x = np.asarray(x)
-    xStep = np.std(x, ddof=1)/100  # set a step size
+    x_step = np.std(x, ddof=1) / 100  # set a step size
 
     # ----------------------------
     # Fit distribution & thresholds
     # ----------------------------
-    if whatDistn == 'norm':
+    if what_distn == 'norm':
         # Fit a normal distribution
         a, b = norm.fit(x)
         peaky = norm.pdf(a, loc=a, scale=b)
         thresh = peaky / 100.0  # stop when gets to 1/100 of peak value
-        pdf_func  = lambda z: norm.pdf(z, loc=a, scale=b)
-        xf = _find_bounds(pdf_func, np.mean(x), np.mean(x), xStep, thresh)
+        pdf_func = lambda z: norm.pdf(z, loc=a, scale=b)
+        xf = _find_bounds(pdf_func, np.mean(x), np.mean(x), x_step, thresh)
         ffit_func = lambda xi: norm.pdf(xi, loc=a, scale=b)
 
-    elif whatDistn == 'ev':
+    elif what_distn == 'ev':
         # Fit an extreme value (Gumbel, left) distribution
         loc, scale = gumbel_l.fit(x)
         peaky = gumbel_l.pdf(loc, loc=loc, scale=scale)
         thresh = peaky / 100.0
-        pdf_func  = lambda z: gumbel_l.pdf(z, loc=loc, scale=scale)
-        xf = _find_bounds(pdf_func, 0.0, 0.0, xStep, thresh)
+        pdf_func = lambda z: gumbel_l.pdf(z, loc=loc, scale=scale)
+        xf = _find_bounds(pdf_func, 0.0, 0.0, x_step, thresh)
         ffit_func = lambda xi: gumbel_l.pdf(xi, loc=loc, scale=scale)
 
-    elif whatDistn == 'uni':
+    elif what_distn == 'uni':
         # Fit a uniform distribution
         loc, scale = uniform.fit(x)
         a, b = loc, loc + scale
         # Peak of uniform PDF = 1 / (b - a)
         peaky = uniform.pdf(np.mean(x), loc=a, scale=(b - a))
         thresh = peaky / 100.0
-        pdf_func  = lambda z: uniform.pdf(z, loc=a, scale=(b - a))
-        xf = _find_bounds(pdf_func, 0.0, 0.0, xStep, thresh)
+        pdf_func = lambda z: uniform.pdf(z, loc=a, scale=(b - a))
+        xf = _find_bounds(pdf_func, 0.0, 0.0, x_step, thresh)
         ffit_func = lambda xi: uniform.pdf(xi, loc=a, scale=(b - a))
 
-    elif whatDistn == 'exp':
+    elif what_distn == 'exp':
         # Check positivity
         if np.any(x < 0):
             print("The data contains negative values, but Exponential is a positive-only distribution.")
@@ -85,11 +85,11 @@ def CompareKSFit(x : ArrayLike, whatDistn : str) -> dict:
         # Peak of PDF occurs at 0
         peaky = expon.pdf(0, loc=0, scale=lam)
         thresh = peaky / 100.0
-        pdf_func  = lambda z: expon.pdf(z, loc=0, scale=lam)
-        xf = _find_bounds(pdf_func, 0.0, 0.0, xStep, thresh)
+        pdf_func = lambda z: expon.pdf(z, loc=0, scale=lam)
+        xf = _find_bounds(pdf_func, 0.0, 0.0, x_step, thresh)
         ffit_func = lambda xi: expon.pdf(xi, loc=0, scale=lam)
 
-    elif whatDistn == 'logn':
+    elif what_distn == 'logn':
         # Check positivity
         if np.any(x <= 0):
             print("The data are not positive, but Log-Normal is a positive-only distribution.")
@@ -103,12 +103,12 @@ def CompareKSFit(x : ArrayLike, whatDistn : str) -> dict:
         # Peak PDF value at the mode
         peaky = lognorm.pdf(mode, s=sigma, loc=0, scale=np.exp(mu))
         thresh = peaky / 100.0
-        pdf_func  = lambda z: lognorm.pdf(z, s=sigma, loc=0, scale=np.exp(mu))
-        xf = _find_bounds(pdf_func, 0.0, mode, xStep, thresh)
+        pdf_func = lambda z: lognorm.pdf(z, s=sigma, loc=0, scale=np.exp(mu))
+        xf = _find_bounds(pdf_func, 0.0, mode, x_step, thresh)
         ffit_func = lambda xi: lognorm.pdf(xi, s=sigma, loc=0, scale=np.exp(mu))
 
     else:
-        raise ValueError(f"Unknown distribution:  {whatDistn}.")
+        raise ValueError(f"Unknown distribution:  {what_distn}.")
 
     # ----------------------------
     # Estimate smoothed empirical distribution
@@ -171,7 +171,7 @@ def _find_bounds(pdf_func, start_left, start_right, xStep, thresh):
 
     return xf
 
-def Withinp(x : ArrayLike, p : float = 1.0, meanOrMedian : str = 'mean') -> float:
+def withinp(x : ArrayLike, p : float = 1.0, mean_or_median : str = 'mean') -> float:
     """
     Proportion of data points within p standard deviations of the mean or median.
 
@@ -181,7 +181,7 @@ def Withinp(x : ArrayLike, p : float = 1.0, meanOrMedian : str = 'mean') -> floa
         The input data vector
     p : float
         The number (proportion) of standard deviations
-    meanOrMedian : str 
+    mean_or_median : str 
         Whether to use units of 'mean' and standard deviation, or 'median' and rescaled interquartile range.
 
     Returns
@@ -192,20 +192,20 @@ def Withinp(x : ArrayLike, p : float = 1.0, meanOrMedian : str = 'mean') -> floa
     x = np.asarray(x)
     N = len(x)
 
-    if meanOrMedian == 'mean':
+    if mean_or_median == 'mean':
         mu = np.mean(x)
         sig = np.std(x, ddof=1)
-    elif meanOrMedian == 'median':
+    elif mean_or_median == 'median':
         mu = np.median(x)
         iqr_val = np.percentile(x, 75, method='hazen') - np.percentile(x, 25, method='hazen')
         sig = 1.35 * iqr_val
     else:
-        raise ValueError(f"Unknown setting: '{meanOrMedian}'")
+        raise ValueError(f"Unknown setting: '{mean_or_median}'")
 
     # The withinp statistic:
     return np.divide(np.sum((x >= mu - p * sig) & (x <= mu + p * sig)), N)
 
-def Unique(y : ArrayLike) -> float:
+def unique(y : ArrayLike) -> float:
     """
     The proportion of the time series that are unique values.
 
@@ -222,7 +222,7 @@ def Unique(y : ArrayLike) -> float:
     y = np.asarray(y)
     return np.divide(len(np.unique(y)), len(y))
 
-def Spread(y : ArrayLike, spreadMeasure : str = 'std') -> float:
+def spread(y : ArrayLike, spread_measure : str = 'std') -> float:
     """
     Measure of spread of the input time series.
 
@@ -232,7 +232,7 @@ def Spread(y : ArrayLike, spreadMeasure : str = 'std') -> float:
     ----------
     y : array-like
         The input time series or data vector.
-    spreadMeasure : str, optional
+    spread_measure : str, optional
         The spread measure to use (default is 'std'):
         - 'std': standard deviation
         - 'iqr': interquartile range 
@@ -245,24 +245,24 @@ def Spread(y : ArrayLike, spreadMeasure : str = 'std') -> float:
         The calculated spread measure.
     """
     y = np.asarray(y)
-    if spreadMeasure == 'std':
+    if spread_measure == 'std':
         out = np.std(y, ddof=1)
-    elif spreadMeasure == 'iqr':
+    elif spread_measure == 'iqr':
         q75 = np.quantile(y, 0.75, method='hazen')
         q25 = np.quantile(y, 0.25, method='hazen')
         out = q75 - q25
-    elif spreadMeasure == 'mad':
+    elif spread_measure == 'mad':
         # mean absolute deviation
         out = np.mean(np.absolute(y - np.mean(y, None)), None)
-    elif spreadMeasure == 'mead':
+    elif spread_measure == 'mead':
         # median absolute deviation
         out = np.median(np.absolute(y - np.median(y, None)), None)
     else:
-        raise ValueError('spreadMeasure must be one of std, iqr, mad or mead')
+        raise ValueError('spread must be one of std, iqr, mad or mead')
     
     return out
 
-def Quantile(y : ArrayLike, p : float = 0.5) -> float:
+def quantile(y : ArrayLike, p : float = 0.5) -> float:
     """ 
     Calculates the quantile value at a specified proportion, p.
 
@@ -284,7 +284,7 @@ def Quantile(y : ArrayLike, p : float = 0.5) -> float:
     
     return float(np.quantile(y, p, method = 'hazen'))
 
-def ProportionValues(x : ArrayLike, propWhat : str = 'positive') -> float:
+def proportion_values(x : ArrayLike, prop_what : str = 'positive') -> float:
     """
     Calculate the proportion of values meeting specific conditions in a time series.
 
@@ -292,7 +292,7 @@ def ProportionValues(x : ArrayLike, propWhat : str = 'positive') -> float:
     ----------
     x : array-like
         Input time series or data vector
-    propWhat : str, optional (default is 'positive')
+    prop_what : str, optional (default is 'positive')
         Type of values to count:
         - 'zeros': values equal to zero
         - 'positive': values strictly greater than zero
@@ -306,19 +306,19 @@ def ProportionValues(x : ArrayLike, propWhat : str = 'positive') -> float:
     x = np.asarray(x)
     N = len(x)
 
-    if propWhat == 'zeros':
+    if prop_what == 'zeros':
         # returns the proportion of zeros in the input vector
         out = sum(x == 0) / N
-    elif propWhat == 'positive':
+    elif prop_what == 'positive':
         out = sum(x > 0) / N
-    elif propWhat == 'geq0':
+    elif prop_what == 'geq0':
         out = sum(x >= 0) / N
     else:
-        raise ValueError(f"Unknown condition to measure: {propWhat}")
+        raise ValueError(f"Unknown condition to measure: {prop_what}")
 
     return out
 
-def PLeft(y : ArrayLike, th : float = 0.1) -> float:
+def pleft(y : ArrayLike, th : float = 0.1) -> float:
     """
     Distance from the mean at which a given proportion of data are more distant.
     
@@ -344,7 +344,7 @@ def PLeft(y : ArrayLike, th : float = 0.1) -> float:
 
     return float(out)
 
-def MinMax(y : ArrayLike, minOrMax : str = 'max') -> float:
+def min_max(y : ArrayLike, min_or_max : str = 'max') -> float:
     """
     The maximum and minimum values of the input data vector.
 
@@ -363,16 +363,16 @@ def MinMax(y : ArrayLike, minOrMax : str = 'max') -> float:
         The calculated min or max value.
     """
     y = np.asarray(y)
-    if minOrMax == 'max':
+    if min_or_max == 'max':
         out = max(y)
-    elif minOrMax == 'min':
+    elif min_or_max == 'min':
         out = min(y)
     else:
-        raise ValueError(f"Unknown method '{minOrMax}'")
+        raise ValueError(f"Unknown method '{min_or_max}'")
     
     return out
 
-def Mean(y : ArrayLike, meanType : str = 'arithmetic') -> float:
+def mean(y : ArrayLike, mean_type : str = 'arithmetic') -> float:
     """
     A given measure of location of a data vector.
 
@@ -380,7 +380,7 @@ def Mean(y : ArrayLike, meanType : str = 'arithmetic') -> float:
     ----------
     y : array-like
         Input time series or data vector
-    meanType : str, optional
+    mean_type : str, optional
         Type of mean to calculate. Default is 'arithmtic':
         - 'norm' or 'arithmetic': standard arithmetic mean
         - 'median': middle value (50th percentile)
@@ -398,32 +398,32 @@ def Mean(y : ArrayLike, meanType : str = 'arithmetic') -> float:
     y = np.asarray(y)
     N = len(y)
 
-    if meanType in ['norm', 'arithmetic']:
+    if mean_type in ['norm', 'arithmetic']:
         out = np.mean(y)
-    elif meanType == 'median': # median
+    elif mean_type == 'median': # median
         out = np.median(y)
-    elif meanType == 'geom': # geometric mean
+    elif mean_type == 'geom': # geometric mean
         out = stats.gmean(y)
-    elif meanType == 'harm': # harmonic mean
+    elif mean_type == 'harm': # harmonic mean
         out = N/sum(y**(-1))
-    elif meanType == 'rms':
+    elif mean_type == 'rms':
         out = np.sqrt(np.mean(y**2))
-    elif meanType == 'iqm': # interquartile mean
+    elif mean_type == 'iqm': # interquartile mean
         p = np.percentile(y, [25, 75], method='hazen')
         out = np.mean(y[(y >= p[0]) & (y <= p[1])])
-    elif meanType == 'midhinge':  # average of 1st and third quartiles
+    elif mean_type == 'midhinge':  # average of 1st and third quartiles
         p = np.percentile(y, [25, 75], method='hazen')
         out = np.mean(p)
     else:
-        raise ValueError(f"Unknown mean type '{meanType}'")
+        raise ValueError(f"Unknown mean type '{mean_type}'")
 
     return float(out)
 
-def HighLowMu(y: ArrayLike) -> float:
+def high_low_mu(y: ArrayLike) -> float:
     """
-    The highlowmu statistic.
+    The high_low_mu statistic.
 
-    The highlowmu statistic is the ratio of the mean of the data that is above the
+    The high_low_mu statistic is the ratio of the mean of the data that is above the
     (global) mean compared to the mean of the data that is below the global mean.
 
     Paramters
@@ -434,7 +434,7 @@ def HighLowMu(y: ArrayLike) -> float:
     Returns
     --------
     float
-        The highlowmu statistic.
+        The high_low_mu statistic.
     """
     y = np.asarray(y)
     mu = np.mean(y) # mean of data
@@ -444,7 +444,7 @@ def HighLowMu(y: ArrayLike) -> float:
 
     return out
 
-def FitMLE(y : ArrayLike, fitWhat : str = 'gaussian') -> Union[Dict[str, float], float]:
+def fit_mle(y : ArrayLike, fit_what : str = 'gaussian') -> Union[Dict[str, float], float]:
     """
     Maximum likelihood distribution fit to data.
 
@@ -455,7 +455,7 @@ def FitMLE(y : ArrayLike, fitWhat : str = 'gaussian') -> Union[Dict[str, float],
     ----------
     y : array-like
         Input time series or data vector
-    fitWhat : {'gaussian', 'uniform', 'geometric'}, optional
+    fit_what : {'gaussian', 'uniform', 'geometric'}, optional
         Distribution type to fit:
         - 'gaussian': Normal distribution (returns mean and std)
         - 'uniform': Uniform distribution (returns bounds a and b)
@@ -478,24 +478,24 @@ def FitMLE(y : ArrayLike, fitWhat : str = 'gaussian') -> Union[Dict[str, float],
     """
     y = np.asarray(y)
     out = {}
-    if fitWhat == 'gaussian':
+    if fit_what == 'gaussian':
         loc, scale = stats.norm.fit(y, method="MLE")
         out['mean'] = loc
         out['std'] = scale
-    elif fitWhat == 'uniform':
+    elif fit_what == 'uniform':
         loc, scale = stats.uniform.fit(y, method="MLE")
         out['a'] = loc
         out['b'] = loc + scale 
-    elif fitWhat == 'geometric':
-        sampMean = np.mean(y)
-        p = 1/(1+sampMean)
+    elif fit_what == 'geometric':
+        samp_mean = np.mean(y)
+        p = 1/(1+samp_mean)
         return p
     else:
-        raise ValueError(f"Invalid fit specifier, {fitWhat}")
+        raise ValueError(f"Invalid fit specifier, {fit_what}")
 
     return out
 
-def CV(x : ArrayLike, k : int = 1) -> float:
+def cv(x : ArrayLike, k : int = 1) -> float:
     """
     Calculate the coefficient of variation of order k.
 
@@ -521,7 +521,7 @@ def CV(x : ArrayLike, k : int = 1) -> float:
     # Compute the coefficient of variation (of order k) of the data
     return (np.std(x, ddof=1) ** k) / (np.mean(x) ** k)
 
-def CustomSkewness(y : ArrayLike, whatSkew : str = 'pearson') -> float:
+def custom_skewness(y : ArrayLike, what_skew : str = 'pearson') -> float:
     """
     Calculate custom skewness measures of a time series.
 
@@ -533,7 +533,7 @@ def CustomSkewness(y : ArrayLike, whatSkew : str = 'pearson') -> float:
     ----------
     y : array-like
         Input time series
-    whatSkew : {'pearson', 'bowley'}, optional
+    what_skew : {'pearson', 'bowley'}, optional
         The skewness measure to calculate:
         - 'pearson': (3 * mean - median) / std
         - 'bowley': (Q3 + Q1 - 2*Q2) / (Q3 - Q1)
@@ -549,20 +549,25 @@ def CustomSkewness(y : ArrayLike, whatSkew : str = 'pearson') -> float:
     """
     y = np.asarray(y)
     out = 0.0
-    if whatSkew == 'pearson':
+    if what_skew == 'pearson':
         out = ((3 * np.mean(y) - np.median(y)) / np.std(y, ddof=1))
-    elif whatSkew == 'bowley':
+    elif what_skew == 'bowley':
         qs = np.quantile(y, [0.25, 0.5, 0.75], method='hazen')
         out = (qs[2]+qs[0] - 2 * qs[1]) / (qs[2] - qs[0]) 
     
     return float(out)
 
-def Burstiness(y: ArrayLike) -> dict:
+def burstiness(y: ArrayLike) -> dict:
     """
     Calculate burstiness statistics of a time series.
     
     Implements both the original Goh & Barabasi burstiness and
     the improved Kim & Jo version for finite time series.
+
+    References
+    ----------
+    .. [1] Goh & Barabasi (2008). Europhys. Lett. 81, 48002
+    .. [2] Kim & Jo (2016). http://arxiv.org/pdf/1604.01125v1.pdf
     
     Parameters
     ----------
@@ -574,11 +579,6 @@ def Burstiness(y: ArrayLike) -> dict:
     dict:
         'B': Original burstiness statistic
         'B_Kim': Improved burstiness for finite series
-    
-    References
-    ----------
-    - Goh & Barabasi (2008). Europhys. Lett. 81, 48002
-    - Kim & Jo (2016). http://arxiv.org/pdf/1604.01125v1.pdf
     """
     y = np.asarray(y)
     mean = np.mean(y)
@@ -599,7 +599,7 @@ def Burstiness(y: ArrayLike) -> dict:
 
     return out
 
-def Moments(y : ArrayLike, theMom : int = 0) -> float:
+def moments(y : ArrayLike, the_mom : int = 0) -> float:
     """
     A moment of the distribution of the input time series.
     Normalizes by the standard deviation.
@@ -618,9 +618,9 @@ def Moments(y : ArrayLike, theMom : int = 0) -> float:
     """
     y = np.asarray(y)
 
-    return stats.moment(y, theMom) / np.std(y, ddof=1)
+    return stats.moment(y, the_mom) / np.std(y, ddof=1)
 
-def OutlierInclude(y: ArrayLike, thresholdHow: str = 'abs', inc: float = 0.01) -> dict:
+def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01) -> dict:
     """
     How statistics depend on distributional outliers.
 
@@ -632,7 +632,7 @@ def OutlierInclude(y: ArrayLike, thresholdHow: str = 'abs', inc: float = 0.01) -
     ----------
     y : array-like
         The input time series.
-    thresholdHow : {'abs', 'pos', 'neg'}, optional
+    threshold_how : {'abs', 'pos', 'neg'}, optional
         The method for determining outliers:
             - 'abs': Outliers are furthest from the mean (default).
             - 'pos': Outliers are the greatest positive deviations from the mean.
@@ -656,17 +656,17 @@ def OutlierInclude(y: ArrayLike, thresholdHow: str = 'abs', inc: float = 0.01) -
     results = {}
     
     # Initialize thresholds based on method
-    if thresholdHow == 'abs':
+    if threshold_how == 'abs':
         thresholds = np.arange(0, max(abs(y)), inc)
         total_points = N
-    elif thresholdHow == 'pos':
+    elif threshold_how == 'pos':
         thresholds = np.arange(0, max(y), inc)
         total_points = np.sum(y >= 0)
-    elif thresholdHow == 'neg':
+    elif threshold_how == 'neg':
         thresholds = np.arange(0, max(-y), inc)
         total_points = np.sum(y <= 0)
     else:
-        raise ValueError(f"Invalid thresholdHow: '{thresholdHow}'. Must be 'abs', 'pos', or 'neg'.")
+        raise ValueError(f"Invalid thresholdHow: '{threshold_how}'. Must be 'abs', 'pos', or 'neg'.")
     
     if len(thresholds) == 0:
         raise ValueError("Error setting increments through the time-series values")
@@ -678,11 +678,11 @@ def OutlierInclude(y: ArrayLike, thresholdHow: str = 'abs', inc: float = 0.01) -
     # Calculate statistics for each threshold
     for i, threshold in enumerate(thresholds):
         # Find indices exceeding threshold
-        if thresholdHow == 'abs':
+        if threshold_how == 'abs':
             over_threshold_idx = np.argwhere(abs(y) >= threshold).flatten()
-        elif thresholdHow == 'pos':
+        elif threshold_how == 'pos':
             over_threshold_idx = np.argwhere(y >= threshold).flatten()
-        elif thresholdHow == 'neg':
+        elif threshold_how == 'neg':
             over_threshold_idx = np.argwhere(y <= -threshold).flatten()
             
         # Calculate differences between consecutive over-threshold events
@@ -740,7 +740,7 @@ def OutlierInclude(y: ArrayLike, thresholdHow: str = 'abs', inc: float = 0.01) -
     
     return results
 
-def OutlierTest(y: ArrayLike, p: float = 2, justMe: Union[str, None] = None) -> Union[dict, float]:
+def outlier_test(y: ArrayLike, p: float = 2, just_me: Union[str, None] = None) -> Union[dict, float]:
     """
     How distributional statistics depend on distributional outliers.
 
@@ -754,7 +754,7 @@ def OutlierTest(y: ArrayLike, p: float = 2, justMe: Union[str, None] = None) -> 
         The input data vector.
     p : float
         The percentage of values to remove beyond upper and lower percentiles.
-    justMe : {'mean', 'std'}, optional
+    just_me : {'mean', 'std'}, optional
         If specified, just returns a number:
             - 'mean': returns the mean of the middle portion of the data
             - 'std': returns the std of the middle portion of the data
@@ -763,7 +763,7 @@ def OutlierTest(y: ArrayLike, p: float = 2, justMe: Union[str, None] = None) -> 
     Returns
     -------
     float or dict
-        If justMe is specified, returns the mean or std of the middle portion of the data.
+        If just_me is specified, returns the mean or std of the middle portion of the data.
         Otherwise, returns a dictionary.
     """
 
@@ -782,14 +782,14 @@ def OutlierTest(y: ArrayLike, p: float = 2, justMe: Union[str, None] = None) -> 
 
     out = {'mean': mean_middle, 'std': std_middle}
 
-    if justMe == 'mean':
+    if just_me == 'mean':
         return out['mean']
-    elif justMe == 'std':
+    elif just_me == 'std':
         return out['std']     
     
     return out
 
-def TrimmedMean(x: ArrayLike, pExclude: float = 0.0) -> float:
+def trimmed_mean(x: ArrayLike, p_exclude: float = 0.0) -> float:
     """
     Mean of the trimmed time series.
 
@@ -800,7 +800,7 @@ def TrimmedMean(x: ArrayLike, pExclude: float = 0.0) -> float:
     ----------
     y : array-like
         The input time series or data vector
-    pExclude : float, optional
+    p_exclude : float, optional
         The percentage of highest and lowest values to exclude from the mean 
         calculation (default is 0.0, which gives the standard mean)
 
@@ -809,7 +809,7 @@ def TrimmedMean(x: ArrayLike, pExclude: float = 0.0) -> float:
     float
         The mean of the trimmed time series.
     """
-    if not 0 <= pExclude < 100:
+    if not 0 <= p_exclude < 100:
         raise ValueError("The 'percent' argument must be between 0 and 100.")
 
     x = np.asarray(x)
@@ -826,7 +826,7 @@ def TrimmedMean(x: ArrayLike, pExclude: float = 0.0) -> float:
         return np.nan
 
     # calculate the number of elements to trim from each end (k)
-    k = non_nan_count * (pExclude / 100.0) / 2.0
+    k = non_nan_count * (p_exclude / 100.0) / 2.0
 
     lowercut = int(np.ceil(k - 0.5))
 
@@ -841,7 +841,7 @@ def TrimmedMean(x: ArrayLike, pExclude: float = 0.0) -> float:
 
     return float(out)
 
-def HistogramAsymmetry(y : ArrayLike, numBins : int = 10, doSimple : bool = True) -> dict:
+def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> dict:
     """
     Calculate measures of histogram asymmetry for a time series.
 
@@ -852,9 +852,9 @@ def HistogramAsymmetry(y : ArrayLike, numBins : int = 10, doSimple : bool = True
     ----------
     y : array-like
         Input time series
-    numBins : int, optional
+    num_bins : int, optional
         Number of bins to use in histogram calculation. Default is 10
-    doSimple : bool, optional
+    do_simple : bool, optional
         If True, uses linearly spaced bins. If False, uses optimized bin edges.
 
     Returns
@@ -864,41 +864,41 @@ def HistogramAsymmetry(y : ArrayLike, numBins : int = 10, doSimple : bool = True
     """
     y = np.asarray(y)
     # compute the histogram seperately from positive and negative values in the data
-    yPos = y[y > 0] # filter out the positive vals
-    yNeg = y[y < 0] # filter out the negative vals
+    y_pos = y[y > 0]  # filter out the positive vals
+    y_neg = y[y < 0]  # filter out the negative vals
 
-    if doSimple:
-        countsPos, binEdgesPos = simple_binner(yPos, numBins)
-        countsNeg, binEdgesNeg = simple_binner(yNeg, numBins)
+    if do_simple:
+        counts_pos, bin_edges_pos = simple_binner(y_pos, num_bins)
+        counts_neg, bin_edges_neg = simple_binner(y_neg, num_bins)
     else:
-        binEdgesPos = binpicker(yPos.min(), yPos.max(), numBins)
-        countsPos = histc(yPos, binEdgesPos)[:-1]
-        binEdgesNeg = binpicker(yNeg.min(), yNeg.max(), numBins)
-        countsNeg = histc(yNeg, binEdgesNeg)[:-1]
+        bin_edges_pos = binpicker(y_pos.min(), y_pos.max(), num_bins)
+        counts_pos = histc(y_pos, bin_edges_pos)[:-1]
+        bin_edges_neg = binpicker(y_neg.min(), y_neg.max(), num_bins)
+        counts_neg = histc(y_neg, bin_edges_neg)[:-1]
     # normalise by the total counts
-    NnonZero = np.sum(y!=0)
-    pPos = np.divide(countsPos, NnonZero)
-    pNeg = np.divide(countsNeg, NnonZero)
+    n_non_zero = np.sum(y != 0)
+    p_pos = np.divide(counts_pos, n_non_zero)
+    p_neg = np.divide(counts_neg, n_non_zero)
 
     # compute bin centers from bin edges
-    binCentersPos = np.mean([binEdgesPos[:-1], binEdgesPos[1:]], axis=0)
-    binCentersNeg = np.mean([binEdgesNeg[:-1], binEdgesNeg[1:]], axis=0)
+    bin_centers_pos = np.mean([bin_edges_pos[:-1], bin_edges_pos[1:]], axis=0)
+    bin_centers_neg = np.mean([bin_edges_neg[:-1], bin_edges_neg[1:]], axis=0)
 
     # Histogram counts and overall density differences
     out = {}
     out['densityDiff'] = np.sum(y > 0) - np.sum(y < 0)  # measure of asymmetry about the mean
-    out['modeProbPos'] = np.max(pPos)
-    out['modeProbNeg'] = np.max(pNeg)
+    out['modeProbPos'] = np.max(p_pos)
+    out['modeProbNeg'] = np.max(p_neg)
     out['modeDiff'] = out['modeProbPos'] - out['modeProbNeg']
 
     # Mean position of maximums (if multiple)
-    out['posMode'] = np.mean(binCentersPos[pPos == out['modeProbPos']])
-    out['negMode'] = np.mean(binCentersNeg[pNeg == out['modeProbNeg']])
+    out['posMode'] = np.mean(bin_centers_pos[p_pos == out['modeProbPos']])
+    out['negMode'] = np.mean(bin_centers_neg[p_neg == out['modeProbNeg']])
     out['modeAsymmetry'] = out['posMode'] + out['negMode']
 
     return out
 
-def HistogramMode(y : ArrayLike, numBins : int = 10, doAbs : bool = False) -> float:
+def histogram_mode(y : ArrayLike, num_bins : int = 10, do_simple : bool = True) -> float:
     """
     Measures the mode of the data vector using histograms with a given number
     of bins.
@@ -907,31 +907,34 @@ def HistogramMode(y : ArrayLike, numBins : int = 10, doAbs : bool = False) -> fl
     -----------
     y : array-like
         the input data vector
-    numBins : int, optional
+    num_bins : int, optional
         the number of bins to use in the histogram
     doSimple : bool, optional
         whether to use a simple binning method (linearly spaced bins)
-    doAbs: bool, optional
+    do_abs: bool, optional
         whether to take the absolute value first
 
     Returns
     --------
     float
-        The mode of the data vector using histograms with numBins bins. 
+        The mode of the data vector using histograms with num_bins bins. 
     """
     y = np.asarray(y)
-    if doAbs:
-        y = np.abs(y)
-    N, binEdges = simple_binner(y, numBins)
+    if do_simple:
+        N, bin_edges = simple_binner(y, num_bins)
+    else:
+        bin_edges = binpicker(y.min(), y.max(), num_bins)
+        N = histc(y, bin_edges)[:-1]
     # compute bin centers from bin edges
-    binCenters = np.mean([binEdges[:-1], binEdges[1:]], axis=0)
+    bin_centres = np.mean([bin_edges[:-1], bin_edges[1:]], axis=0)
 
     # mean position of maximums (if multiple)
-    out = np.mean(binCenters[N == np.max(N)])
+    out = np.mean(bin_centres[N == np.max(N)])
 
     return float(out)
 
-def RemovePoints(y : ArrayLike, removeHow : str = 'absfar', p : float = 0.1, removeOrSaturate : str = 'remove') -> dict:
+def remove_points(y : ArrayLike, remove_how : str = 'absfar', p : float = 0.1, 
+                  remove_or_saturate : str = 'remove') -> dict:
     """
     How time-series properties change as points are removed.
 
@@ -942,7 +945,7 @@ def RemovePoints(y : ArrayLike, removeHow : str = 'absfar', p : float = 0.1, rem
     ----------
     y : array-like
         The input time series.
-    removeHow : {'absclose', 'absfar' (default), 'min', 'max', 'random'}, optional
+    remove_how : {'absclose', 'absfar' (default), 'min', 'max', 'random'}, optional
         How to remove points from the time series:
             - 'absclose': those that are the closest to the mean,
             - 'absfar': those that are the furthest from the mean (default),
@@ -951,7 +954,7 @@ def RemovePoints(y : ArrayLike, removeHow : str = 'absfar', p : float = 0.1, rem
             - 'random': at random.
     p : float, optional
         The proportion of points to remove (default: 0.1).
-    removeOrSaturate : {'remove', 'saturate'}, optional
+    remove_or_saturate : {'remove', 'saturate'}, optional
         Whether to remove points ('remove') or saturate their values ('saturate').
         Default is 'remove'.
 
@@ -964,18 +967,18 @@ def RemovePoints(y : ArrayLike, removeHow : str = 'absfar', p : float = 0.1, rem
     N = len(y)
 
     is_ = None
-    if removeHow == 'absclose':
+    if remove_how == 'absclose':
         is_ = np.argsort(np.abs(y))[::-1] # descending
-    elif removeHow == 'absfar':
+    elif remove_how == 'absfar':
         is_ = np.argsort(np.abs(y)) # ascending
-    elif removeHow == 'min':
+    elif remove_how == 'min':
         is_ = np.argsort(y)[::-1]
-    elif removeHow == 'max':
+    elif remove_how == 'max':
         is_ = np.argsort(y)
-    elif removeHow == 'random':
+    elif remove_how == 'random':
         is_ = np.random.permutation(N)
     else:
-        raise ValueError(f"Unknown method '{removeHow}'")
+        raise ValueError(f"Unknown method '{remove_how}'")
     
     # Indices of points to *keep*:
     rKeep = np.sort(is_[:round(N * (1 - p))])
@@ -984,24 +987,24 @@ def RemovePoints(y : ArrayLike, removeHow : str = 'absfar', p : float = 0.1, rem
     rTransform = np.setdiff1d(np.arange(N), rKeep)
 
     # Do the removing/saturating to convert y -> yTransform
-    if removeOrSaturate == 'remove':
+    if remove_or_saturate == 'remove':
         yTransform = y[rKeep]
-    elif removeOrSaturate == 'saturate':
+    elif remove_or_saturate == 'saturate':
         # Saturate out the targeted points
-        if removeHow == 'max':
+        if remove_how == 'max':
             yTransform = y.copy()
             yTransform[rTransform] = np.max(y[rKeep])
-        elif removeHow == 'min':
+        elif remove_how == 'min':
             yTransform = y.copy()
             yTransform[rTransform] = np.min(y[rKeep])
-        elif removeHow == 'absfar':
+        elif remove_how == 'absfar':
             yTransform = y.copy()
             yTransform[yTransform > np.max(y[rKeep])] = np.max(y[rKeep])
             yTransform[yTransform < np.min(y[rKeep])] = np.min(y[rKeep])
         else:
-            raise ValueError(f"Cannot 'saturate' when using '{removeHow}' method")
+            raise ValueError(f"Cannot 'saturate' when using '{remove_how}' method")
     else:
-        raise ValueError(f"Unknown removOrSaturate option '{removeOrSaturate}'")
+        raise ValueError(f"Unknown removOrSaturate option '{remove_or_saturate}'")
     
     # Compute some autocorrelation properties
     n = 8
@@ -1014,8 +1017,8 @@ def RemovePoints(y : ArrayLike, removeHow : str = 'absfar', p : float = 0.1, rem
     f_absDiff = lambda x1, x2: np.abs(x1 - x2) # ignores the sign
     f_ratio = lambda x1, x2: np.divide(x1, x2) # includes the sign
 
-    out['fzcacrat'] = f_ratio(FirstCrossing(yTransform, 'ac', 0, 'continuous'), 
-                              FirstCrossing(y, 'ac', 0, 'continuous'))
+    out['fzcacrat'] = f_ratio(first_crossing(yTransform, 'ac', 0, 'continuous'), 
+                              first_crossing(y, 'ac', 0, 'continuous'))
     
     out['ac1rat'] = f_ratio(acf_yTransform[0], acf_y[0])
     out['ac1diff'] = f_absDiff(acf_yTransform[0], acf_y[0])
@@ -1031,7 +1034,7 @@ def RemovePoints(y : ArrayLike, removeHow : str = 'absfar', p : float = 0.1, rem
     out['median'] = np.median(yTransform)
     out['std'] = np.std(yTransform, ddof=1)
     
-    #out['skewnessrat'] = stats.skew(yTransform) / stats.skew(y)
+    out['skewnessrat'] = stats.skew(yTransform) / stats.skew(y)
     # return kurtosis instead of excess kurtosis
     out['kurtosisrat'] = stats.kurtosis(yTransform, fisher=False) / stats.kurtosis(y, fisher=False)
 

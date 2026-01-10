@@ -169,9 +169,11 @@ class FeatureCalculator:
                 ordered_args = feature_config.get("ordered_args", [])
                 configs = feature_config.get("configs", [{}])
                 if isinstance(configs, list) and configs and isinstance(configs[0], dict):
-                    # Check if zscore varies
+                    # Check if zscore and abs vary
                     zscore_values = [conf.get("zscore", False) for conf in configs]
+                    abs_values = [conf.get("abs", False) for conf in configs]
                     zscore_varies = len(set(zscore_values)) > 1
+                    abs_varies = len(set(abs_values)) > 1
                     for conf in configs:
                         zscore = conf.pop("zscore", False) if "zscore" in conf else False
                         absval = conf.pop("abs", False) if "abs" in conf else False
@@ -192,12 +194,19 @@ class FeatureCalculator:
                                 # Only append "_raw" if zscore varies and zscore is False
                                 if zscore_varies and not zscore:
                                     label += "_raw"
+                                # Only append "_abs" if abs varies and abs is True
+                                if abs_varies and absval:
+                                    label += "_abs"
                                 decorated_func = preprocess_decorator(zscore, absval)(op_func)
                                 feature_funcs[label] = partial(decorated_func, **combo_dict)
                         else:
                             label = base_name
+                            # Only append "_raw" if zscore varies and zscore is False
                             if zscore_varies and not zscore:
                                 label += "_raw"
+                            # Only append "_abs" if abs varies and abs is True
+                            if abs_varies and absval:
+                                label += "_abs"
                             decorated_func = preprocess_decorator(zscore, absval)(op_func)
                             feature_funcs[label] = decorated_func
                 else:
@@ -206,6 +215,9 @@ class FeatureCalculator:
                         zscore = configs[0].pop("zscore", False)
                         absval = configs[0].pop("abs", False)
                     label = f"{module_key}_{feature_name}"
+                    # If abs is explicitly set True on the single config, include suffix to make it explicit
+                    if absval:
+                        label += "_abs"
                     decorated_func = preprocess_decorator(zscore, absval)(op_func)
                     feature_funcs[label] = decorated_func
         
@@ -317,4 +329,3 @@ class FeatureCalculator:
         self._errors = df_errs
 
         return df
-    

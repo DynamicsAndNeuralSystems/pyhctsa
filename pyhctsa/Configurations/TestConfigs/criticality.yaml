@@ -1,11 +1,11 @@
-Criticality:
-  RAD:
-    base_name: RAD
-    labels:
-      - criticality
+criticality:
+  rad:
+    base_name: rad
     dependencies:
     configs:
-      - tau: [1, 2, 'tau']
-        zscore: True
-    hctsa_name: CR_RAD
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 'tau', zscore: True}
+    legacy_name: CR_RAD
     ordered_args: ['tau']
+    

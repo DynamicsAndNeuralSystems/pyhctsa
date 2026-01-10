@@ -74,16 +74,33 @@ Criticality:
     ordered_args: ['tau']
 
 correlation:
-  AutoCorr:
-    base_name: AC
-    labels:
-      - correlation
+
+  autocorr:
+    base_name: ac
     dependencies:
     configs:
-      - tau: !range [1, 40]
-        zscore: True
-    hctsa_name: CO_AutoCorr
+      - {tau: !range [1, 40], zscore: True}
+    legacy_name: CO_AutoCorr
     ordered_args: ['tau']
+  
+  add_noise:
+    base_name: add_noise
+    depedencies:
+      - jpype1
+    configs:
+      - {tau: 1,   ami_method: 'quantiles', extra_param: 10, zscore: True}
+      - {tau: 1,   ami_method: 'even',      extra_param: 10, zscore: True}
+      - {tau: 1,   ami_method: 'std1',      extra_param: 10, zscore: True}
+      - {tau: 1,   ami_method: 'gaussian',                   zscore: True}
+      - {tau: 1,   ami_method: 'kraskov1',  extra_param: 4,  zscore: True}
+
+      - {tau: 'ac', ami_method: 'quantiles', extra_param: 10, zscore: True}
+      - {tau: 'ac', ami_method: 'even',      extra_param: 10, zscore: True}
+      - {tau: 'ac', ami_method: 'std1',      extra_param: 10, zscore: True}
+      - {tau: 'ac', ami_method: 'gaussian',                   zscore: True}
+      - {tau: 'ac', ami_method: 'kraskov1',  extra_param: 4,  zscore: True}
+    legacy_name: CO_AddNoise
+    ordered_args: ['tau', 'ami_method', 'extra_param']
 
   glscf:
     base_name: glscf
@@ -131,7 +148,7 @@ correlation:
       - {alpha: 2, beta: 5, tau: 'tau', zscore: True}
     legacy_name: CO_glscf
     ordered_args: ['alpha', 'beta', 'tau']
-
+  
   fzcglscf:
     base_name: fzcglscf
     dependencies:
@@ -158,18 +175,14 @@ correlation:
     legacy_name: CO_fzcglscf
     ordered_args: ['alpha', 'beta']
 
-  Embed2:
-    base_name: Embed2
-    labels:
-      - embedding
-      - correlation
+  embed2:
+    base_name: embed2
     dependencies:
     configs:
-      - tau: "tau"
-        zscore: True
-    hctsa_name: CO_Embed2
-    ordered_args: ["tau"]
-  
+      - {tau: 'tau', zscore: True}
+    legacy_name: CO_Embed2
+    ordered_args: ['tau']
+
   embed2_shapes:
     base_name: embed2_shapes
     depedencies:
@@ -195,13 +208,13 @@ correlation:
       - {tau: 'tau', zscore: True}
     legacy_name: CO_Embed2_Dist
     ordered_args: ['tau']
-  
+
   embed2_angle_tau:
     base_name: embed2_angle_tau
     dependencies:
     configs:
       - {max_tau: 50, zscore: True}
-    hctsa_name: CO_Embed2_AngleTau
+    legacy_name: CO_Embed2_AngleTau
     ordered_args: ['max_tau']
   
   partial_autocorr:
@@ -313,82 +326,54 @@ correlation:
     legacy_name: CO_StickAngles
     ordered_args:
   
-  FirstCrossing:
-    base_name: FirstCrossing
-    labels:
-      - correlation
+  first_crossing:
+    base_name: first_crossing
     dependencies:
     configs:
-      - corrFun: 'ac'
-        threshold: [0, 0.36787944117144233]
-        whatOut: 'both'
-        zscore: True
-    hctsa_name: CO_FirstCrossing
-    ordered_args: ['corrFun', 'threshold', 'whatOut']
+      - {corr_fun: 'ac', threshold: 0, what_out: 'both', zscore: True}
+      - {corr_fun: 'ac', threshold: '1/e', what_out: 'both', zscore: True}
+    legacy_name: CO_FirstCrossing
+    ordered_args: ['corr_fun', 'threshold', 'what_out']
   
-  TranslateShape:
-    base_name: TranslateShape
-    labels:
-      - correlation
-      - discrepancy
+  translate_shape:
+    base_name: translate_shape
     dependencies:
     configs:
-      - shape: 'circle'
-        d: [1.5, 2.5, 3.5]
-        howToMove: 'pts'
-        zscore: True
-      - shape: 'rectangle'
-        d: 2
-        howToMove: 'pts'
-        zscore: True
-    hctsa_name: CO_TranslateShape
-    ordered_args: ["shape", "d", "howToMove"]
+      - {shape: 'circle', d: 1.5, how_to_move: 'pts', zscore: True}
+      - {shape: 'circle', d: 2.5, how_to_move: 'pts', zscore: True}
+      - {shape: 'circle', d: 3.5, how_to_move: 'pts', zscore: True}
+      - {shape: 'rectangle', d: 2, how_to_move: 'pts', zscore: True}
+    legacy_name: CO_TranslateShape
+    ordered_args: ['shape', 'd', 'how_to_move']
   
-  AutoCorrShape:
-    base_name: AutoCorrShape
-    labels:
-      - correlation
-      - autocorrelation
+  autocorr_shape:
+    base_name: autocorr_shape
+    configs:
+      - {stop_when: 'drown', zscore: True}
+      - {stop_when: 'posDrown', zscore: True}
+    legacy_name: CO_AutoCorrShape
+    ordered_args: ['stop_when']
+  
+  histogram_ami:
+    base_name: histogram_ami
     dependencies:
     configs:
-      - stopWhen: ['drown', 'posDrown']
-        zscore: True
-    hctsa_name: CO_AutoCorrShape
-    ordered_args: ["stopWhen"]
-  
-  add_noise:
-    base_name: add_noise
-    depedencies:
-      - jpype1
-    configs:
-      - {tau: 1,   ami_method: 'quantiles', extra_param: 10, zscore: True}
-      - {tau: 1,   ami_method: 'even',      extra_param: 10, zscore: True}
-      - {tau: 1,   ami_method: 'std1',      extra_param: 10, zscore: True}
-      - {tau: 1,   ami_method: 'gaussian',                   zscore: True}
-      - {tau: 1,   ami_method: 'kraskov1',  extra_param: 4,  zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std1', num_bins: 2, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std2', num_bins: 2, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'even', num_bins: 2, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'quantiles', num_bins: 2, zscore: True}
 
-      - {tau: 'ac', ami_method: 'quantiles', extra_param: 10, zscore: True}
-      - {tau: 'ac', ami_method: 'even',      extra_param: 10, zscore: True}
-      - {tau: 'ac', ami_method: 'std1',      extra_param: 10, zscore: True}
-      - {tau: 'ac', ami_method: 'gaussian',                   zscore: True}
-      - {tau: 'ac', ami_method: 'kraskov1',  extra_param: 4,  zscore: True}
-    legacy_name: CO_AddNoise
-    ordered_args: ['tau', 'ami_method', 'extra_param']
-  
-  HistogramAMI:
-    base_name: HistogramAMI
-    labels:
-      - information
-      - correlation
-      - AMI
-    dependencies:
-    configs:
-      - tau: [[1, 2, 3, 4, 5]]
-        meth: ['std1', 'std2', 'even', 'quantiles']
-        numBins: [2, 5, 10]
-        zscore: True
-    hctsa_name: CO_HistogramAMI
-    ordered_args: ["tau", "meth", "numBins"]
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std1', num_bins: 5, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std2', num_bins: 5, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'even', num_bins: 5, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'quantiles', num_bins: 5, zscore: True}
+
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std1', num_bins: 10, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std2', num_bins: 10, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'even', num_bins: 10, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'quantiles', num_bins: 10, zscore: True}
+    legacy_name: CO_HistogramAMI
+    ordered_args: ['tau', 'meth', 'num_bins']
 
   compare_min_ami:
     base_name: compare_min_ami
@@ -400,7 +385,7 @@ correlation:
       - {bin_method: 'even', num_bins: [!range [2, 80]], zscore: True}
     legacy_name: CO_CompareMinAMI
     ordered_args: ['bin_method', 'num_bins']
-  
+
   periodicity_wang:
     base_name: periodicity_wang
     dependencies:
@@ -409,31 +394,29 @@ correlation:
     legacy_name: PD_PeriodicityWang
     ordered_args: 
   
-  TRev:
+  trev:
     base_name: trev
-    labels:
-      - correlation
     dependencies:
     configs:
-      - tau: [1, 2, 3]
-        zscore: True
-      - tau: ['ac', 'mi']
-        zscore: True
-    hctsa_name: CO_trev
-    ordered_args: ["tau"]
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 3, zscore: True}
+      - {tau: 'ac', zscore: True}
+      - {tau: 'mi', zscore: True}
+    legacy_name: CO_trev
+    ordered_args: ['tau']
 
-  TC3:
+  tc3:
     base_name: tc3
-    labels:
-      - correlation
     dependencies:
     configs:
-      - tau: [1, 2, 3]
-        zscore: True
-      - tau: ['ac', 'mi']
-        zscore: True
-    hctsa_name: CO_tc3
-    ordered_args: ["tau"]
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 3, zscore: True}
+      - {tau: 'ac', zscore: True}
+      - {tau: 'mi', zscore: True}
+    legacy_name: CO_tc3
+    ordered_args: ['tau']
   
   time_rev_kaplan:
     base_name: time_rev_kaplan
@@ -445,7 +428,7 @@ correlation:
       - {time_lag: 4, zscore: True}
     legacy_name: DK_timerev
     ordered_args: ['time_lag']
-  
+
   crinkle_statistic:
     base_name: crinkle_statistic
     depedencies:

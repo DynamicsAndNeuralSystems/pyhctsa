@@ -2,9 +2,9 @@ import numpy as np
 from numpy.typing import ArrayLike
 from typing import Union
 
-from ..Operations.correlation import FirstCrossing
+from ..Operations.correlation import first_crossing
 
-def RAD(x: ArrayLike, tau : Union[int, str] = 1, centre : bool = True) -> float:
+def rad(x: ArrayLike, tau : Union[int, str] = 1, centre : bool = True) -> float:
     """
     Compute the Rescaled Auto-Density (RAD) feature of a time series.
 
@@ -13,6 +13,11 @@ def RAD(x: ArrayLike, tau : Union[int, str] = 1, centre : bool = True) -> float:
     experiments on the Hopf bifurcation with variable and unknown measurement noise.
 
     This method was devised and implemented by Brendan Harris (@brendanjohnharris, GitHub, 2023).
+
+    References
+    ----------
+    .. [1] Harris et al., "Tracking the Distance to Criticality in Systems with 
+        Unknown Noise", Phys. Rev. X 14, 031021 (2024)
 
     Parameters
     ----------
@@ -29,10 +34,6 @@ def RAD(x: ArrayLike, tau : Union[int, str] = 1, centre : bool = True) -> float:
     -------
     float
         The RAD feature value, quantifying proximity to criticality.
-
-    References
-    ----------
-    Harris, B. (2023). Rescaled Auto-Density (RAD) metric for criticality inference.
     """
 
     # ensure that x is in the form of a numpy array
@@ -46,7 +47,7 @@ def RAD(x: ArrayLike, tau : Union[int, str] = 1, centre : bool = True) -> float:
     # if specified, make tau the first crossing of the AC function
     if isinstance(tau, str):
         if tau == "tau":
-            tau = FirstCrossing(x, 'ac', 0, 'discrete')
+            tau = first_crossing(x, 'ac', 0, 'discrete')
         else:
             raise ValueError(f"Unknown operation {tau}")
 
