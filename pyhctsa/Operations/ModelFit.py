@@ -11,7 +11,7 @@ from hmmlearn.hmm import GaussianHMM
 
 from ..Utilities.utils import ZScore
 from ..Operations.Stationarity import SlidingWindow
-from ..Operations.correlation import FirstCrossing, AutoCorr
+from ..Operations.correlation import FirstCrossing, autocorr
 
 def HMMFit(y : ArrayLike, trainp : float = 0.8, numStates : int = 3, randomSeed : int = 0) -> dict:
     """
@@ -304,8 +304,8 @@ def LocalSimple(y : ArrayLike, forecastMeth : str = 'mean', trainLength : Union[
     out['swm'] = SlidingWindow(res, 'mean', 'std', 5, 1) # across five non-overlapping segments
     #% TODO Normality of residuals:
     #% Autocorrelation structure of the residuals:
-    out['ac1'] = AutoCorr(res, 1, 'Fourier')[0]
-    out['ac2'] = AutoCorr(res, 2, 'Fourier')[0]
+    out['ac1'] = autocorr(res, 1, 'Fourier')[0]
+    out['ac2'] = autocorr(res, 2, 'Fourier')[0]
     out['taures'] = FirstCrossing(res, 'ac', 0, 'continuous')
     out['tauresrat'] = FirstCrossing(res, 'ac', 0, 'continuous')/FirstCrossing(y, 'ac', 0, 'continuous')
 
@@ -503,7 +503,7 @@ def ResidualAnalysis(e : ArrayLike) -> dict:
     # TODO: Identify any low-frequency trends in residuals
     # Analyze autocorrelation in residuals
     maxLag = 25
-    autoCorrResid = AutoCorr(e, list(range(1, maxLag+1)), 'Fourier')
+    autoCorrResid = autocorr(e, list(range(1, maxLag+1)), 'Fourier')
     sqrtN = np.sqrt(N)
 
     # Output first 3 ACs
@@ -573,8 +573,8 @@ def ARCov(y : ArrayLike, p : int = 2) -> dict:
     err = y - y_est
     out['res_mu'] = np.mean(err)
     out['res_std'] = np.std(err, ddof=1)
-    out['res_AC1'] = AutoCorr(err, 1, 'Fourier')[0]
-    out['res_AC2'] = AutoCorr(err, 2, 'Fourier')[0]
+    out['res_AC1'] = autocorr(err, 1, 'Fourier')[0]
+    out['res_AC2'] = autocorr(err, 2, 'Fourier')[0]
 
     return out
 
@@ -722,11 +722,11 @@ def ARFit(y : ArrayLike, pmin : int = 1, pmax : int = 10, selector : str = 'sbc'
 
     # Correlation test of residuals
     resids = res.resid
-    out['res_ac1'] = AutoCorr(resids, 1, 'Fourier')[0]
+    out['res_ac1'] = autocorr(resids, 1, 'Fourier')[0]
     out['res_ac1_norm'] = out['res_ac1']/np.sqrt(N)
 
     #Calculate correlations up to 20, return how many exceed significance threshold
-    acf = AutoCorr(resids, list(range(1, 21)), 'Fourier')
+    acf = autocorr(resids, list(range(1, 21)), 'Fourier')
     out['pcorr_res'] = np.sum(np.abs(acf) > 1.96/np.sqrt(N))/20
 
     # Confidence Intervals

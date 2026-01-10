@@ -78,7 +78,7 @@ def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even
     if ami_method in ['std1', 'std2', 'quantiles', 'even']:
         # histogram-based methods using my naive implementation in CO_Histogram
         for i in range(num_repeats):
-            amis[i] = HistogramAMI(y + noise_range[i]*noise, tau, ami_method, extra_param)
+            amis[i] = histogram_ami(y + noise_range[i]*noise, tau, ami_method, extra_param)
             if np.isnan(amis[i]):
                 raise ValueError('Error computing AMI: Time series too short (?)')
     if ami_method in ['gaussian','kernel','kraskov1','kraskov2']:
@@ -468,7 +468,7 @@ def periodicity_wang(y : ArrayLike) -> dict:
 
     return periodicity_wang_wrapper.periodicity_wang(y)
 
-def CompareMinAMI(y : ArrayLike, binMethod : str = 'std1', numBins : Union[int, ArrayLike] = 10) -> dict:
+def compare_min_ami(y: ArrayLike, bin_method: str = 'std1', num_bins: Union[int, ArrayLike] = 10) -> dict:
     """
     Assess the variability in the first minimum of automutual information (AMI) across binning strategies.
 
@@ -480,9 +480,9 @@ def CompareMinAMI(y : ArrayLike, binMethod : str = 'std1', numBins : Union[int, 
     ----------
     y : array-like
         The input time series.
-    binMethod : str, optional
-        The method for estimating mutual information (passed to `HistogramAMI`). Default is 'std1'.
-    numBins : int or array-like, optional
+    bin_method : str, optional
+        The method for estimating mutual information (passed to `histogram_ami`). Default is 'std1'.
+    num_bins : int or array-like, optional
         The number of bins (or list of bin counts) to use for AMI estimation. Default is 10.
 
     Returns
@@ -491,54 +491,54 @@ def CompareMinAMI(y : ArrayLike, binMethod : str = 'std1', numBins : Union[int, 
         Dictionary containing statistics on the set of first minimums of the automutual information function.
     """
     y = np.asarray(y)
-    N = len(y)
+    n = len(y)
     # Range of time lags to consider
-    tauRange = np.arange(0, int(np.ceil(N/2))+1)
-    numTaus = len(tauRange)
+    tau_range = np.arange(0, int(np.ceil(n / 2)) + 1)
+    num_taus = len(tau_range)
 
     # range of bin numbers to consider
-    if isinstance(numBins, int):
-        numBins = [numBins]
-    
-    numBinsRange = len(numBins)
-    amiMins = np.zeros(numBinsRange)
+    if isinstance(num_bins, int):
+        num_bins = [num_bins]
+
+    num_bins_range = len(num_bins)
+    ami_mins = np.zeros(num_bins_range)
 
     # Calculate automutual information
-    for i in range(numBinsRange):  # vary over number of bins in histogram
-        amis = np.zeros(numTaus)
-        for j in range(numTaus):  # vary over time lags, tau
-            amis[j] = HistogramAMI(y, tauRange[j], binMethod, numBins[i])
-            if (j > 1) and ((amis[j] - amis[j-1]) * (amis[j-1] - amis[j-2]) < 0):
-                amiMins[i] = tauRange[j-1]
+    for i in range(num_bins_range):  # vary over number of bins in histogram
+        amis = np.zeros(num_taus)
+        for j in range(num_taus):  # vary over time lags, tau
+            amis[j] = histogram_ami(y, tau_range[j], bin_method, num_bins[i])
+            if (j > 1) and ((amis[j] - amis[j - 1]) * (amis[j - 1] - amis[j - 2]) < 0):
+                ami_mins[i] = tau_range[j - 1]
                 break
-        if amiMins[i] == 0:
-            amiMins[i] = tauRange[-1]
+        if ami_mins[i] == 0:
+            ami_mins[i] = tau_range[-1]
     # basic statistics
     out = {}
-    out['min'] = np.min(amiMins)
-    out['max'] = np.max(amiMins)
-    out['range'] = np.ptp(amiMins)
-    out['median'] = np.median(amiMins)
-    out['mean'] = np.mean(amiMins)
-    out['std'] = np.std(amiMins, ddof=1) # will return NaN for single values instead of 0
-    out['nunique'] = len(np.unique(amiMins))
-    out['mode'], out['modef'] = smode(amiMins)
-    out['modef'] = out['modef']/numBinsRange
+    out['min'] = np.min(ami_mins)
+    out['max'] = np.max(ami_mins)
+    out['range'] = np.ptp(ami_mins)
+    out['median'] = np.median(ami_mins)
+    out['mean'] = np.mean(ami_mins)
+    out['std'] = np.std(ami_mins, ddof=1) # will return NaN for single values instead of 0
+    out['nunique'] = len(np.unique(ami_mins))
+    out['mode'], out['modef'] = smode(ami_mins)
+    out['modef'] = out['modef'] / num_bins_range
 
     # converged value? 
-    out['conv4'] = np.mean(amiMins[-5:])
+    out['conv4'] = np.mean(ami_mins[-5:])
 
     # look for peaks (local maxima)
     # % local maxima above 1*std from mean
     # inspired by curious result of periodic maxima for periodic signal with
     # bin size... ('quantiles', [2:80])
-    diff_ami_mins = np.diff(amiMins[:-1])
+    diff_ami_mins = np.diff(ami_mins[:-1])
     positive_diff_indices = np.where(diff_ami_mins > 0)[0]
     sign_change_indices = signChange(diff_ami_mins, 1)
 
     # Find the intersection of positive_diff_indices and sign_change_indices
     loc_extr = np.intersect1d(positive_diff_indices, sign_change_indices) + 1
-    above_threshold_indices = np.where(amiMins > out['mean'] + out['std'])[0]
+    above_threshold_indices = np.where(ami_mins > out['mean'] + out['std'])[0]
     big_loc_extr = np.intersect1d(above_threshold_indices, loc_extr)
 
     # Count the number of elements in big_loc_extr
@@ -546,7 +546,12 @@ def CompareMinAMI(y : ArrayLike, binMethod : str = 'std1', numBins : Union[int, 
 
     return out
 
-def HistogramAMI(y : ArrayLike, tau : Union[str, int, ArrayLike] = 1, meth : str = 'even', numBins : int = 10) -> Union[float, dict]:
+def histogram_ami(
+    y: ArrayLike,
+    tau: Union[str, int, ArrayLike] = 1,
+    meth: str = 'even',
+    num_bins: int = 10
+) -> Union[float, dict]:
     """
     The automutual information of the distribution using histograms.
 
@@ -567,7 +572,7 @@ def HistogramAMI(y : ArrayLike, tau : Union[str, int, ArrayLike] = 1, meth : str
         - 'std1': bins extending to ±1 standard deviation from mean
         - 'std2': bins extending to ±2 standard deviations from mean
         - 'quantiles': equiprobable bins using quantiles
-    numBins : int, optional
+    num_bins : int, optional
         The number of bins to use (default: 10)
 
     Returns
@@ -580,36 +585,36 @@ def HistogramAMI(y : ArrayLike, tau : Union[str, int, ArrayLike] = 1, meth : str
     y = np.asarray(y)
     if isinstance(tau, str) and tau in ['ac', 'tau']:
         tau = FirstCrossing(y, 'ac', 0, 'discrete')
-    
+
     # Bins for the data
     # same for both -- assume same distribution (true for stationary processes, or small lags)
     if meth == 'even':
-        b = np.linspace(np.min(y), np.max(y), numBins + 1)
+        b = np.linspace(np.min(y), np.max(y), num_bins + 1)
         # Add increment buffer to ensure all points are included
         inc = 0.1
         b[0] -= inc
         b[-1] += inc
-    elif meth == 'std1': # bins out to +/- 1 std
-        b = np.linspace(-1, 1, numBins + 1)
+    elif meth == 'std1':  # bins out to +/- 1 std
+        b = np.linspace(-1, 1, num_bins + 1)
         if np.min(y) < -1:
             b = np.concatenate(([np.min(y) - 0.1], b))
         if np.max(y) > 1:
             b = np.concatenate((b, [np.max(y) + 0.1]))
-    elif meth == 'std2': # bins out to +/- 2 std
-        b = np.linspace(-2, 2, numBins + 1)
+    elif meth == 'std2':  # bins out to +/- 2 std
+        b = np.linspace(-2, 2, num_bins + 1)
         if np.min(y) < -2:
             b = np.concatenate(([np.min(y) - 0.1], b))
         if np.max(y) > 2:
             b = np.concatenate((b, [np.max(y) + 0.1]))
-    elif meth == 'quantiles': # use quantiles with ~equal number in each bin
-        b = np.quantile(y, np.linspace(0, 1, numBins + 1), method='hazen')
+    elif meth == 'quantiles':  # use quantiles with ~equal number in each bin
+        b = np.quantile(y, np.linspace(0, 1, num_bins + 1), method='hazen')
         b[0] -= 0.1
         b[-1] += 0.1
     else:
         raise ValueError(f"Unknown method '{meth}'")
-    
+
     # Sometimes bins can be added (e.g., with std1 and std2), so need to redefine numBins
-    numBins = len(b) - 1
+    num_bins = len(b) - 1
 
     # Form the time-delay vectors y1 and y2
     if not isinstance(tau, (list, np.ndarray)):
@@ -626,13 +631,13 @@ def HistogramAMI(y : ArrayLike, tau : Union[str, int, ArrayLike] = 1, meth : str
             y2 = y[t:]
         # Joint distribution of y1 and y2
         pij, _, _ = np.histogram2d(y1, y2, bins=(b, b))
-        pij = pij[:numBins, :numBins]  # joint
+        pij = pij[:num_bins, :num_bins]  # joint
         pij = pij / np.sum(pij)  # normalize
         pi = np.sum(pij, axis=1)  # marginal
         pj = np.sum(pij, axis=0)  # other marginal
 
-        pii = np.tile(pi, (numBins, 1)).T
-        pjj = np.tile(pj, (numBins, 1))
+        pii = np.tile(pi, (num_bins, 1)).T
+        pjj = np.tile(pj, (num_bins, 1))
 
         r = pij > 0  # Defining the range in this way, we set log(0) = 0
         amis[i] = np.sum(pij[r] * np.log(pij[r] / pii[r] / pjj[r]))
@@ -642,7 +647,7 @@ def HistogramAMI(y : ArrayLike, tau : Union[str, int, ArrayLike] = 1, meth : str
     else:
         return {f'ami{i+1}': ami for i, ami in enumerate(amis)}
 
-def StickAngles(y : ArrayLike) -> dict:
+def stick_angles(y : ArrayLike) -> dict:
     """
     Analysis of the line-of-sight angles between time series data pts. 
 
@@ -659,7 +664,12 @@ def StickAngles(y : ArrayLike) -> dict:
     Returns
     --------
     dict
-        A dictionary containing various statistics on the obtained sequence of angles.
+        A dictionary containing are returned on the obtained sequence of angles, theta, reflecting the
+        maximum deviation a stick can rotate before hitting a stick representing
+        another time point. Statistics include the mean and spread of theta,
+        the different between positive and negative angles, measures of symmetry of
+        the angles, stationarity, autocorrelation, and measures of the distribution of
+        these stick angles.
     """
     y = np.asarray(y)
     # Split the time series into positive and negative parts
@@ -748,13 +758,13 @@ def StickAngles(y : ArrayLike) -> dict:
     # there are positive angles
     if len(zangles[0]) > 0:
         # StatAv2
-        out['statav2_p_m'], out['statav2_p_s'] = _SUB_statav(zangles[0], 2)
+        out['statav2_p_m'], out['statav2_p_s'] = _sub_statav(zangles[0], 2)
         # StatAv3
-        out['statav3_p_m'], out['statav3_p_s'] = _SUB_statav(zangles[0], 3)
+        out['statav3_p_m'], out['statav3_p_s'] = _sub_statav(zangles[0], 3)
         # StatAv4
-        out['statav4_p_m'], out['statav4_p_s'] = _SUB_statav(zangles[0], 4)
+        out['statav4_p_m'], out['statav4_p_s'] = _sub_statav(zangles[0], 4)
         # StatAv5
-        out['statav5_p_m'], out['statav5_p_s'] = _SUB_statav(zangles[0], 5)
+        out['statav5_p_m'], out['statav5_p_s'] = _sub_statav(zangles[0], 5)
     else:
         out['statav2_p_m'], out['statav2_p_s'] = np.nan, np.nan
         out['statav3_p_m'], out['statav3_p_s'] = np.nan, np.nan
@@ -764,13 +774,13 @@ def StickAngles(y : ArrayLike) -> dict:
     # there are negative angles
     if len(zangles[1]) > 0:
         # StatAv2
-        out['statav2_n_m'], out['statav2_n_s'] = _SUB_statav(zangles[1], 2)
+        out['statav2_n_m'], out['statav2_n_s'] = _sub_statav(zangles[1], 2)
         # StatAv3
-        out['statav3_n_m'], out['statav3_n_s'] = _SUB_statav(zangles[1], 3)
+        out['statav3_n_m'], out['statav3_n_s'] = _sub_statav(zangles[1], 3)
         # StatAv4
-        out['statav4_n_m'], out['statav4_n_s'] = _SUB_statav(zangles[1], 4)
+        out['statav4_n_m'], out['statav4_n_s'] = _sub_statav(zangles[1], 4)
         # StatAv5
-        out['statav5_n_m'], out['statav5_n_s'] = _SUB_statav(zangles[1], 5)
+        out['statav5_n_m'], out['statav5_n_s'] = _sub_statav(zangles[1], 5)
     else:
         out['statav2_n_m'], out['statav2_n_s'] = np.nan, np.nan
         out['statav3_n_m'], out['statav3_n_s'] = np.nan, np.nan
@@ -780,13 +790,13 @@ def StickAngles(y : ArrayLike) -> dict:
     # All angles
     
     # StatAv2
-    out['statav2_all_m'], out['statav2_all_s'] = _SUB_statav(zallAngles, 2)
+    out['statav2_all_m'], out['statav2_all_s'] = _sub_statav(zallAngles, 2)
     # StatAv3
-    out['statav3_all_m'], out['statav3_all_s'] = _SUB_statav(zallAngles, 3)
+    out['statav3_all_m'], out['statav3_all_s'] = _sub_statav(zallAngles, 3)
     # StatAv4
-    out['statav4_all_m'], out['statav4_all_s'] = _SUB_statav(zallAngles, 4)
+    out['statav4_all_m'], out['statav4_all_s'] = _sub_statav(zallAngles, 4)
     # StatAv5
-    out['statav5_all_m'], out['statav5_all_s'] = _SUB_statav(zallAngles, 5)
+    out['statav5_all_m'], out['statav5_all_s'] = _sub_statav(zallAngles, 5)
     
     # correlations? 
     if len(zangles[0]) > 0:
@@ -845,7 +855,7 @@ def StickAngles(y : ArrayLike) -> dict:
 
     return out
 
-def _SUB_statav(x : ArrayLike, n : int) -> tuple:
+def _sub_statav(x : ArrayLike, n : int) -> tuple:
     # helper function
     NN = len(x)
     if NN < 2 * n: # not long enough
@@ -861,7 +871,7 @@ def _SUB_statav(x : ArrayLike, n : int) -> tuple:
 
     return statavmean, statavstd
 
-def NonlinearAutoCorr(y : ArrayLike, taus : ArrayLike, doAbs : Union[bool, None] = None) -> float:
+def nonlinear_autocorr(y : ArrayLike, taus : ArrayLike, do_abs : Union[bool, None] = None) -> float:
     """
     Compute a custom nonlinear autocorrelation of a time series.
 
@@ -882,9 +892,9 @@ def NonlinearAutoCorr(y : ArrayLike, taus : ArrayLike, doAbs : Union[bool, None]
             [1, 2] computes <x_i x_{i-1} x_{i-2}>
             [1, 1, 3] computes <x_i x_{i-1}^2 x_{i-3}>
             [0, 0, 1] computes <x_i^3 x_{i-1}>
-    doAbs : bool or None, optional
+    do_abs : bool or None, optional
         If True, takes the absolute value before the final mean (recommended for even-length taus).
-        If None (default), automatically sets doAbs=True for even-length taus and False for odd-length.
+        If None (default), automatically sets do_abs=True for even-length taus and False for odd-length.
 
     Returns
     -------
@@ -893,11 +903,11 @@ def NonlinearAutoCorr(y : ArrayLike, taus : ArrayLike, doAbs : Union[bool, None]
     """
     y = np.asarray(y)
     taus = np.asarray(taus)
-    if doAbs == None:
+    if do_abs == None:
         if len(taus) % 2 == 1:
-            doAbs = False
+            do_abs = False
         else:
-            doAbs = True
+            do_abs = True
 
     N = len(y)
     tmax = np.max(taus)
@@ -907,7 +917,7 @@ def NonlinearAutoCorr(y : ArrayLike, taus : ArrayLike, doAbs : Union[bool, None]
     for i in taus:
         nlac = np.multiply(nlac,y[tmax - i:N - i])
 
-    if doAbs:
+    if do_abs:
         out = np.mean(np.absolute(nlac))
 
     else:
@@ -915,7 +925,7 @@ def NonlinearAutoCorr(y : ArrayLike, taus : ArrayLike, doAbs : Union[bool, None]
 
     return float(out)
 
-def PartialAutoCorr(y : ArrayLike, maxTau : int = 10, whatMethod : str = 'ols') -> dict:
+def partial_autocorr(y : ArrayLike, max_tau : int = 10, what_method : str = 'ols') -> dict:
     """
     Compute the partial autocorrelation of an input time series.
     
@@ -926,9 +936,9 @@ def PartialAutoCorr(y : ArrayLike, maxTau : int = 10, whatMethod : str = 'ols') 
     ----------
     y : array-like
         The input time series as a scalar column vector
-    maxTau : int, optional
+    max_tau : int, optional
         The maximum time-delay to compute PACF values for (default=10)
-    whatMethod : {'ols', 'Yule-Walker'}, optional
+    what_method : {'ols', 'Yule-Walker'}, optional
         Method to compute partial autocorrelation (default='ols'):
         - 'ols': Ordinary least squares regression
         - 'Yule-Walker': Yule-Walker equations method
@@ -942,25 +952,24 @@ def PartialAutoCorr(y : ArrayLike, maxTau : int = 10, whatMethod : str = 'ols') 
         ...up to maxTau
     """
     y = np.asarray(y)
-    N = len(y)
-    if maxTau <= 0:
+    if max_tau <= 0:
         raise ValueError('Negative or zero time lags not applicable')
 
     method_map = {'ols': 'ols', 'Yule-Walker': 'ywm'} 
-    if whatMethod not in method_map:
-        raise ValueError(f"Invalid method: {whatMethod}. Use 'ols' or 'Yule-Walker'.")
+    if what_method not in method_map:
+        raise ValueError(f"Invalid method: {what_method}. Use 'ols' or 'Yule-Walker'.")
 
     # Compute partial autocorrelation
-    pacf_values = pacf(y, nlags=maxTau, method=method_map[whatMethod])
+    pacf_values = pacf(y, nlags=max_tau, method=method_map[what_method])
 
     # Create output dictionary
     out = {}
-    for i in range(1, maxTau + 1):
+    for i in range(1, max_tau + 1):
         out[f'pac_{i}'] = pacf_values[i]
 
     return out
 
-def Embed2Dist(y : ArrayLike, tau : Union[None, str, int] = None) -> dict:
+def embed2_dist(y : ArrayLike, tau : Union[None, str, int] = None) -> dict:
     """
     Analyzes distances in a 2-dimensional embedding space of a time series.
 
@@ -1026,8 +1035,8 @@ def Embed2Dist(y : ArrayLike, tau : Union[None, str, int] = None) -> dict:
     # Empirical distances distribution often fits Exponential distribution quite well
     # Fit to all values (often some extreme outliers, but oh well)
     l = 1 / np.mean(d)
-    nlogL = -np.sum(expon.logpdf(d, scale=1/l))
-    out['d_expfit_nlogL'] = nlogL
+    n_log_l = -np.sum(expon.logpdf(d, scale=1/l))
+    out['d_expfit_nlogL'] = n_log_l
 
     # Calculate histogram
     # % Sum of abs differences between exp fit and observed:
@@ -1039,7 +1048,7 @@ def Embed2Dist(y : ArrayLike, tau : Union[None, str, int] = None) -> dict:
 
     return out
 
-def Embed2Basic(y : ArrayLike, tau : Union[int, str] = 1) -> dict:
+def embed2_basic(y : ArrayLike, tau : Union[int, str] = 1) -> dict:
     """
     Point density statistics in a 2-d embedding space.
 
@@ -1127,7 +1136,7 @@ def Embed2Basic(y : ArrayLike, tau : Union[int, str] = 1) -> dict:
     
     return out
 
-def Embed2Shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau', shape : str = 'circle', r : float = 1.0) -> dict:
+def embed2_shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau', shape : str = 'circle', r : float = 1.0) -> dict:
     """
     Shape-based statistics in a 2-d embedding space.
 
@@ -1216,7 +1225,7 @@ def Embed2Shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau', shape : str
 
     return out
 
-def FZCGLSCF(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int], maxtau: Union[int, None] = None) -> float:
+def fzcglscf(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int], max_tau: Union[int, None] = None) -> float:
     """
     The first zero-crossing of the generalized self-correlation function.
 
@@ -1226,6 +1235,13 @@ def FZCGLSCF(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int], ma
 
     Uses GLSCF to calculate the generalized self-correlations at each lag.
 
+    References
+    ----------
+    .. [1] Queirós, S.M.D., Moyano, L.G. (2007) "Yet on statistical properties of 
+           traded volume: Correlation and mutual information at different value magnitudes"
+           Physica A, 383(1), pp. 10-15.
+           DOI: 10.1016/j.physa.2007.04.068
+
     Parameters
     ----------
     y : array-like
@@ -1234,7 +1250,7 @@ def FZCGLSCF(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int], ma
         The parameter alpha for GLSCF calculation. Must be non-zero.
     beta : float
         The parameter beta for GLSCF calculation. Must be non-zero.
-    maxtau : int, optional
+    max_tau : int, optional
         Maximum time delay to search up to. If None, uses the time-series length.
         Default is None.
 
@@ -1243,33 +1259,27 @@ def FZCGLSCF(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int], ma
     float
         The time lag τ of the first zero-crossing of the GLSCF.
 
-    References
-    ----------
-    .. [1] Queirós, S.M.D., Moyano, L.G. (2007) "Yet on statistical properties of 
-           traded volume: Correlation and mutual information at different value magnitudes"
-           Physica A, 383(1), pp. 10-15.
-           DOI: 10.1016/j.physa.2007.04.068
     """
     y = np.asarray(y)
     N = len(y)
 
-    if maxtau is None:
-        maxtau = N
+    if max_tau is None:
+        max_tau = N
     
-    glscfs = np.zeros(maxtau)
+    glscfs = np.zeros(max_tau)
 
-    for i in range(1, maxtau+1):
+    for i in range(1, max_tau+1):
         tau = i
 
-        glscfs[i-1] = GLSCF(y, alpha, beta, tau)
+        glscfs[i-1] = glscf(y, alpha, beta, tau)
         if (i > 1) and (glscfs[i-1]*glscfs[i-2] < 0):
             # Draw a straight line between these two and look at where it hits zero
             out = i - 1 + glscfs[i-1]/(glscfs[i-1]-glscfs[i-2])
             return out
     
-    return maxtau
+    return max_tau
 
-def GLSCF(y : ArrayLike, alpha : float, beta : float, tau : Union[int, str] = 'tau') -> float:
+def glscf(y : ArrayLike, alpha : float, beta : float, tau : Union[int, str] = 'tau') -> float:
     """
     Compute the generalized linear self-correlation function (GLSCF) of a time series.
 
@@ -1282,6 +1292,13 @@ def GLSCF(y : ArrayLike, alpha : float, beta : float, tau : Union[int, str] = 't
         GLSCF = (E[|x(t)|^α |x(t+τ)|^β] - E[|x(t)|^α]E[|x(t+τ)|^β]) / 
                 (σ(|x(t)|^α)σ(|x(t+τ)|^β))
     where E[] denotes expectation and σ() denotes standard deviation.
+
+    References
+    ----------
+    .. [1] Queirós, S.M.D., Moyano, L.G. (2007) "Yet on statistical properties of 
+           traded volume: Correlation and mutual information at different value magnitudes"
+           Physica A, 383(1), pp. 10-15.
+           DOI: 10.1016/j.physa.2007.04.068
 
     Parameters
     ----------
@@ -1299,13 +1316,6 @@ def GLSCF(y : ArrayLike, alpha : float, beta : float, tau : Union[int, str] = 't
     -------
     float
         The GLSCF value at the specified lag τ
-
-    References
-    ----------
-    .. [1] Queirós, S.M.D., Moyano, L.G. (2007) "Yet on statistical properties of 
-           traded volume: Correlation and mutual information at different value magnitudes"
-           Physica A, 383(1), pp. 10-15.
-           DOI: 10.1016/j.physa.2007.04.068
     """
     # Set tau to first zero-crossing of the autocorrelation function with the input 'tau'
     if tau == 'tau':
@@ -1314,7 +1324,6 @@ def GLSCF(y : ArrayLike, alpha : float, beta : float, tau : Union[int, str] = 't
     # Take magnitudes of time-delayed versions of the time series
     y1 = np.abs(y[:-tau])
     y2 = np.abs(y[tau:])
-
 
     p1 = np.mean(np.multiply((y1 ** alpha), (y2 ** beta)))
     p2 = np.multiply(np.mean(y1 ** alpha), np.mean(y2 ** beta))
@@ -1325,7 +1334,7 @@ def GLSCF(y : ArrayLike, alpha : float, beta : float, tau : Union[int, str] = 't
 
     return glscf
 
-def AutoCorr(y: ArrayLike, tau: Union[int, list] = 1, method: str = 'Fourier') -> Union[float, np.ndarray]:
+def autocorr(y: ArrayLike, tau: Union[int, list] = 1, method: str = 'Fourier') -> Union[float, np.ndarray]:
     """
     Compute the autocorrelation of an input time series.
 

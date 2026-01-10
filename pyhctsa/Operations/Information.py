@@ -34,13 +34,13 @@ def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None,
     int
         The time of the first minimum (or maximum if `minNotMax` is True).
     """
-    from ..Operations.Correlation import AutoCorr
+    from ..Operations.correlation import autocorr
     y = np.asarray(y)
     N = len(y)
 
     # Define the autocorrelation function
     if minWhat in ['ac', 'corr']:
-        corrfn = lambda x : AutoCorr(y, tau=x, method='Fourier')
+        corrfn = lambda x : autocorr(y, tau=x, method='Fourier')
     elif minWhat == 'mi-hist':
         # if extraParam is none, use default num of bins in BF_MutualInformation (default : 10)
         corrfn = lambda x : _mi_bin(y[:-x], y[x:], 'range', 'range', extraParam or 10)
@@ -183,7 +183,7 @@ def AutoMutualInfoStats(
     dict
         Dictionary containing AMI statistics.
     """
-    from ..Operations.correlation import AutoCorr
+    from ..Operations.correlation import autocorr
     y = np.asarray(y)
     N = len(y) # length of the time series
     
@@ -253,7 +253,7 @@ def AutoMutualInfoStats(
     out['pcrossq90'] = np.mean(signChange(ami - np.percentile(ami, 90, method='hazen')))
 
     # ac1 
-    out['amiac1'] = AutoCorr(ami, 1, 'Fourier')[0]
+    out['amiac1'] = autocorr(ami, 1, 'Fourier')[0]
 
     return out 
 

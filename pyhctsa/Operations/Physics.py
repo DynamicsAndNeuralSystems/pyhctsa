@@ -5,7 +5,7 @@ from numpy.typing import ArrayLike
 from scipy.stats import ansari, gaussian_kde
 from statsmodels.sandbox.stats.runs import runstest_1samp
 
-from pyhctsa.Operations.correlation import FirstCrossing, AutoCorr
+from pyhctsa.Operations.correlation import FirstCrossing, autocorr
 from pyhctsa.Operations.Stationarity import SlidingWindow
 
 def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, float, int, list] = None) -> dict:
@@ -131,8 +131,8 @@ def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, 
     out['w_mean'] = np.mean(w)
     out['w_median'] = np.median(w)
     out['w_std'] = np.std(w, ddof=1)
-    out['w_ac1'] = AutoCorr(w, 1, 'Fourier')[0] # lag 1 autocorr
-    out['w_ac2'] = AutoCorr(w, 2, 'Fourier')[0] # lag 2 autocorr
+    out['w_ac1'] = autocorr(w, 1, 'Fourier')[0] # lag 1 autocorr
+    out['w_ac2'] = autocorr(w, 2, 'Fourier')[0] # lag 2 autocorr
     out['w_tau'] = FirstCrossing(w, 'ac', 0, 'continuous')
     out['w_min'] = np.min(w)
     out['w_max'] = np.max(w)
@@ -143,7 +143,7 @@ def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, 
     out['sw_meanabsdiff'] = np.mean(np.abs(y - w))
     out['sw_taudiff'] = FirstCrossing(y, 'ac', 0, 'continuous') - FirstCrossing(w, 'ac', 0 , 'continuous')
     out['sw_stdrat'] =  np.std(w, ddof=1)/np.std(y, ddof=1)
-    out['sw_ac1rat'] = out['w_ac1']/AutoCorr(y, 1)[0]
+    out['sw_ac1rat'] = out['w_ac1']/autocorr(y, 1)[0]
     out['sw_minrat'] = np.min(w)/np.min(y)
     out['sw_maxrat'] = np.max(w)/np.max(y)
     out['sw_propcross'] = np.sum((w[:-1] - y[:-1]) * (w[1:] - y[1:]) < 0)/(N-1)
@@ -169,7 +169,7 @@ def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, 
     _, runs_pval = runstest_1samp(res, cutoff='mean')
     out['res_runstest'] = runs_pval
     out['res_swss5_1'] = SlidingWindow(res, 'std', 'std', 5, 1) # sliding window stationarity
-    out['res_ac1'] = AutoCorr(res, 1)[0] # auto correlation at lag-1
+    out['res_ac1'] = autocorr(res, 1)[0] # auto correlation at lag-1
 
     return out
 
@@ -258,9 +258,9 @@ def ForcePotential(y : ArrayLike, whatPotential : str = 'dblwell', params : Unio
     out['range'] = np.ptp(x)
     out['proppos'] = np.sum(x >0)/N
     out['pcross'] = np.sum(x[:-1] * x[1:] < 0) / (N - 1)
-    out['ac1'] = np.abs(AutoCorr(x, 1, 'Fourier')[0])
-    out['ac10'] = np.abs(AutoCorr(x, 10, 'Fourier')[0])
-    out['ac50'] = np.abs(AutoCorr(x, 50, 'Fourier')[0])
+    out['ac1'] = np.abs(autocorr(x, 1, 'Fourier')[0])
+    out['ac10'] = np.abs(autocorr(x, 10, 'Fourier')[0])
+    out['ac50'] = np.abs(autocorr(x, 50, 'Fourier')[0])
     out['tau'] = FirstCrossing(x, 'ac', 0, 'continuous')
     out['finaldev'] = np.abs(x[-1]) # final position
 

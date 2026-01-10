@@ -10,7 +10,7 @@ from statsmodels.tsa.stattools import kpss
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 
 from ..Operations.Entropy import ApproximateEntropy, SampleEntropy, DistributionEntropy
-from ..Operations.correlation import AutoCorr, FirstCrossing
+from ..Operations.correlation import autocorr, FirstCrossing
 from ..Utilities.utils import make_mat_buffer, ZScore, signChange
 from ..Operations.Distribution import Moments
 from ..Operations.Entropy import DistributionEntropy
@@ -143,11 +143,11 @@ def DynWin(y : ArrayLike, maxNumSegments : int = 10) -> dict:
             sampenOut = SampleEntropy(ySub, 2, 0.15)
             qs[j, 4] = sampenOut['quadSampEn1'] # SampEn_1_015
             #qs[j, 5] = sampenOut['quadSampEn2'] # SampEn_2_015
-            qs[j, 6] = AutoCorr(ySub, 1, 'Fourier')[0] # AC1
-            qs[j, 7] = AutoCorr(ySub, 2, 'Fourier')[0] # AC2
+            qs[j, 6] = autocorr(ySub, 1, 'Fourier')[0] # AC1
+            qs[j, 7] = autocorr(ySub, 2, 'Fourier')[0] # AC2
             # (Sometimes taug or taul can be longer than ySub; then these will output NaNs:)
-            qs[j, 8] = AutoCorr(ySub, taug, 'Fourier')[0] # AC_glob_tau
-            qs[j, 9] = AutoCorr(ySub, taul, 'Fourier')[0] # AC_loc_tau
+            qs[j, 8] = autocorr(ySub, taug, 'Fourier')[0] # AC_glob_tau
+            qs[j, 9] = autocorr(ySub, taul, 'Fourier')[0] # AC_loc_tau
             qs[j, 10] = taul
         
         fs[i, :numFeatures] = np.std(qs, ddof=1, axis=0)
@@ -705,7 +705,7 @@ def LocalGlobal(y : ArrayLike, subsetHow : str = 'l', nsamps : Union[int, float,
     out['skewness'] = np.abs(1 - (skew(y[r])/skew(y)))
     # use Pearson definition (normal ==> 3.0)
     out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/kurtosis(y, fisher=False)))
-    out['ac1'] = np.abs(1 - (AutoCorr(y[r], 1, 'Fourier')[0]/AutoCorr(y, 1, 'Fourier')[0]))
+    out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')[0]/autocorr(y, 1, 'Fourier')[0]))
     out['sampen101'] = SampleEntropy(y[r], 1, 0.1)['sampen1']/SampleEntropy(y, 1, 0.1)['sampen1']
 
     return out
@@ -995,7 +995,7 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
             qs[i] = Moments(y[_get_window(i, inc, winLength)], 5)
     elif windowStat == 'AC1':
         for i in range(numSteps):
-            qs[i] = AutoCorr(y[_get_window(i, inc, winLength)], 1, 'Fourier')
+            qs[i] = autocorr(y[_get_window(i, inc, winLength)], 1, 'Fourier')
     else:
         raise ValueError(f"Unknown statistic '{windowStat}'")
     

@@ -7,7 +7,7 @@ from scipy import stats
 from scipy.stats import norm, gumbel_l, uniform, expon, lognorm, gaussian_kde
 
 from ..Utilities.utils import histc, binpicker, simple_binner, xcorr
-from ..Operations.correlation import AutoCorr, FirstCrossing
+from ..Operations.correlation import autocorr, FirstCrossing
 
 def CompareKSFit(x : ArrayLike, whatDistn : str) -> dict:
     """
@@ -1005,8 +1005,8 @@ def RemovePoints(y : ArrayLike, removeHow : str = 'absfar', p : float = 0.1, rem
     
     # Compute some autocorrelation properties
     n = 8
-    acf_y = AutoCorr(y, list(range(1, n+1)), 'Fourier')
-    acf_yTransform = AutoCorr(yTransform, list(range(1, n+1)), 'Fourier')
+    acf_y = autocorr(y, list(range(1, n+1)), 'Fourier')
+    acf_yTransform = autocorr(yTransform, list(range(1, n+1)), 'Fourier')
     # Compute output statistics
     out = {}
 
