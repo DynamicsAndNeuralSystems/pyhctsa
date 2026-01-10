@@ -10,9 +10,9 @@ from statsmodels.tsa.stattools import kpss
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 
 from ..Operations.Entropy import ApproximateEntropy, SampleEntropy, DistributionEntropy
-from ..Operations.correlation import autocorr, FirstCrossing
+from ..Operations.correlation import autocorr, first_crossing
 from ..Utilities.utils import make_mat_buffer, ZScore, signChange
-from ..Operations.Distribution import Moments
+from ..Operations.distribution import moments
 from ..Operations.Entropy import DistributionEntropy
 
 def LocalDistributions(y : ArrayLike, numSegs : int = 5, eachOrPar : str = 'par', numPoints : int = 200) -> dict:
@@ -120,7 +120,7 @@ def DynWin(y : ArrayLike, maxNumSegments : int = 10) -> dict:
     nmov = 1 # controls window overlap
     numFeatures = 11 # num of features
     fs = np.zeros((len(nsegr), numFeatures)) # standard deviation of feature values over windows
-    taug = FirstCrossing(y, 'ac', 0, 'discrete') # global tau
+    taug = first_crossing(y, 'ac', 0, 'discrete') # global tau
 
     for i, nseg in enumerate(nsegr):
         wlen = int(np.floor(len(y)/nseg)) # window length
@@ -134,7 +134,7 @@ def DynWin(y : ArrayLike, maxNumSegments : int = 10) -> dict:
 
         for j in range(numSteps):
             ySub = y[j*inc:j*inc+wlen]
-            taul = FirstCrossing(ySub, 'ac', 0, 'discrete')
+            taul = first_crossing(ySub, 'ac', 0, 'discrete')
 
             qs[j, 0] = np.mean(ySub)
             qs[j, 1] = np.std(ySub, ddof=1)
@@ -384,7 +384,7 @@ def LocalExtrema(y : ArrayLike, howToWindow : str = 'l', n : Union[int, None] = 
     elif howToWindow == 'n':
         windowLength = int(np.floor(N/n))
     elif howToWindow == 'tau':
-        windowLength = FirstCrossing(y, 'ac', 0, 'discrete')
+        windowLength = first_crossing(y, 'ac', 0, 'discrete')
     else:
         raise ValueError(f"Unknown method {howToWindow}")
     
@@ -986,13 +986,13 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
             qs[i] = sampen_dict['sampen1']
     elif windowStat == 'mom3':
         for i in range(numSteps):
-            qs[i] = Moments(y[_get_window(i, inc, winLength)], 3)
+            qs[i] = moments(y[_get_window(i, inc, winLength)], 3)
     elif windowStat == 'mom4':
         for i in range(numSteps):
-            qs[i] = Moments(y[_get_window(i, inc, winLength)], 4)
+            qs[i] = moments(y[_get_window(i, inc, winLength)], 4)
     elif windowStat == 'mom5':
         for i in range(numSteps):
-            qs[i] = Moments(y[_get_window(i, inc, winLength)], 5)
+            qs[i] = moments(y[_get_window(i, inc, winLength)], 5)
     elif windowStat == 'AC1':
         for i in range(numSteps):
             qs[i] = autocorr(y[_get_window(i, inc, winLength)], 1, 'Fourier')

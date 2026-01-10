@@ -6,7 +6,7 @@ import logging
 from scipy.stats import mstats
 from scipy.signal import resample as ssre
 
-from ..Operations.correlation import FirstCrossing
+from ..Operations.correlation import first_crossing
 from ..Utilities.utils import binarize, signChange
 
 def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numGroups : int = 3, coarseGrainMethod : str = 'quantile', 
@@ -574,7 +574,7 @@ def TransitionMatrix(y : ArrayLike, howtocg : str = 'quantile', numGroups : int 
         raise ValueError("Too few groups for coarse-graining")
     if tau == 'ac':
         # determine the tau from first zero of the ACF
-        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+        tau = first_crossing(y, 'ac', 0, 'discrete')
         if np.isnan(tau):
             raise ValueError("Time series too short to estimate tau")
     if tau > 1: # calculate transition matrix at a non-unit lag
@@ -677,7 +677,7 @@ def CoarseGrain(y : list, howtocg : str, numGroups : int) -> np.ndarray:
         # Construct the embedding
         if numGroups == 'tau':
             # First zero-crossing of the ACF
-            tau = FirstCrossing(y, 'ac', 0, 'discrete')
+            tau = first_crossing(y, 'ac', 0, 'discrete')
         else:
             tau = numGroups
         

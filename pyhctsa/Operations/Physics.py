@@ -5,7 +5,7 @@ from numpy.typing import ArrayLike
 from scipy.stats import ansari, gaussian_kde
 from statsmodels.sandbox.stats.runs import runstest_1samp
 
-from pyhctsa.Operations.correlation import FirstCrossing, autocorr
+from pyhctsa.Operations.correlation import first_crossing, autocorr
 from pyhctsa.Operations.Stationarity import SlidingWindow
 
 def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, float, int, list] = None) -> dict:
@@ -133,7 +133,7 @@ def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, 
     out['w_std'] = np.std(w, ddof=1)
     out['w_ac1'] = autocorr(w, 1, 'Fourier')[0] # lag 1 autocorr
     out['w_ac2'] = autocorr(w, 2, 'Fourier')[0] # lag 2 autocorr
-    out['w_tau'] = FirstCrossing(w, 'ac', 0, 'continuous')
+    out['w_tau'] = first_crossing(w, 'ac', 0, 'continuous')
     out['w_min'] = np.min(w)
     out['w_max'] = np.max(w)
     # fraction of time series length that walker crosses time series
@@ -141,7 +141,7 @@ def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, 
 
     # Differences between the walk at signal
     out['sw_meanabsdiff'] = np.mean(np.abs(y - w))
-    out['sw_taudiff'] = FirstCrossing(y, 'ac', 0, 'continuous') - FirstCrossing(w, 'ac', 0 , 'continuous')
+    out['sw_taudiff'] = first_crossing(y, 'ac', 0, 'continuous') - first_crossing(w, 'ac', 0 , 'continuous')
     out['sw_stdrat'] =  np.std(w, ddof=1)/np.std(y, ddof=1)
     out['sw_ac1rat'] = out['w_ac1']/autocorr(y, 1)[0]
     out['sw_minrat'] = np.min(w)/np.min(y)
@@ -261,7 +261,7 @@ def ForcePotential(y : ArrayLike, whatPotential : str = 'dblwell', params : Unio
     out['ac1'] = np.abs(autocorr(x, 1, 'Fourier')[0])
     out['ac10'] = np.abs(autocorr(x, 10, 'Fourier')[0])
     out['ac50'] = np.abs(autocorr(x, 50, 'Fourier')[0])
-    out['tau'] = FirstCrossing(x, 'ac', 0, 'continuous')
+    out['tau'] = first_crossing(x, 'ac', 0, 'continuous')
     out['finaldev'] = np.abs(x[-1]) # final position
 
     # additional outputs for dbl well

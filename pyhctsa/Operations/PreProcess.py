@@ -7,7 +7,7 @@ from statsmodels.tsa.tsatools import detrend
 
 from pyhctsa.Operations.Stationarity import StatAv, SlidingWindow
 from pyhctsa.Utilities.utils import ZScore
-from pyhctsa.Operations.Distribution import OutlierTest
+from pyhctsa.Operations.distribution import outlier_test
 
 def _medfilt1d(x : ArrayLike, k : int) -> ArrayLike:
     """Apply a length-k median filter to a 1D array x.
@@ -168,8 +168,8 @@ def PreProcCompare(y : ArrayLike, detrendMeth : str = 'medianf') -> dict:
 
     # 3) Outliers
     for thresh, method in [(2, 'mean'), (5, 'mean'), (2, 'std'), (5, 'std')]:
-        num = OutlierTest(y_d, thresh, method)
-        denom = OutlierTest(y, thresh, method)
+        num = outlier_test(y_d, thresh, method)
+        denom = outlier_test(y, thresh, method)
         key = f'olbt_{"m" if method=="mean" else "s"}{thresh}'
         out[key] = _safe_divide(num, denom)
 

@@ -5,7 +5,7 @@ import scipy
 from scipy.stats import norm, expon
 from ts2vg import NaturalVG
 
-from pyhctsa.Operations.correlation import autocorr, FirstCrossing
+from pyhctsa.Operations.correlation import autocorr, first_crossing
 from pyhctsa.Operations.Entropy import DistributionEntropy
 
 def _horiz_vgraph(ts_data : ArrayLike) -> ArrayLike:
@@ -121,6 +121,6 @@ def VisibilityGraph(y : ArrayLike, meth : str = 'horiz', maxL : int = 5000) -> d
     out['kac1'] = autocorr(k, 1, 'Fourier')[0]
     out['kac2'] = autocorr(k, 2, 'Fourier')[0]
     out['kac3'] = autocorr(k, 3, 'Fourier')[0]
-    out['ktau'] = FirstCrossing(k, 'ac', 0, 'continuous')
+    out['ktau'] = first_crossing(k, 'ac', 0, 'continuous')
 
     return out

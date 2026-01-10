@@ -8,6 +8,7 @@ import jpype as jp
 from scipy import stats
 
 from ..Utilities.utils import signChange, RM_histogram2
+from ..Operations.distribution import first_crossing
 
 def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, 
              minNotMax : Union[bool, None] = True) -> int:
@@ -304,7 +305,7 @@ def AutoMutualInfo(
     Estimating mutual information. Physical Review E, 69(6), 066138.
     """
     if isinstance(timeDelay, str) and timeDelay in ['ac', 'tau']:
-        timeDelay = FirstCrossing(y, corr_fun='ac', threshold=0, what_out='discrete')
+        timeDelay = first_crossing(y, corr_fun='ac', threshold=0, what_out='discrete')
         
     y = np.asarray(y).flatten()
     N = len(y)

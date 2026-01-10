@@ -10,7 +10,7 @@ from antropy.entropy import _xlogx
 
 from ..Utilities.utils import ZScore, make_buffer, binpicker, histc
 from ..Toolboxes.physionet import sampen as _sampen_c 
-from ..Operations.correlation import FirstCrossing
+from ..Operations.correlation import first_crossing
 from ..Toolboxes.Michael_Small import shannon
 from ..Toolboxes.Max_Little import close_returns as _close_returns_c
 
@@ -207,7 +207,7 @@ def MultiScaleEntropy(
         if preProcessHow == 'diff1':
             y = ZScore(np.diff(y))
         elif preProcessHow == 'rescale_tau':
-            tau = FirstCrossing(y, 'ac', 0, 'discrete')
+            tau = first_crossing(y, 'ac', 0, 'discrete')
             y_buffer = make_buffer(y, tau)
             y = np.mean(y_buffer, 1)
             y = ZScore(y)

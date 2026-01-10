@@ -3,8 +3,8 @@ from numpy.typing import ArrayLike
 
 import scipy.fft
 
-from pyhctsa.Operations.Distribution import Moments
-from pyhctsa.Operations.correlation import autocorr, FirstCrossing
+from pyhctsa.Operations.distribution import moments
+from pyhctsa.Operations.correlation import autocorr, first_crossing
 from pyhctsa.Utilities.utils import make_mat_buffer, signChange
 
 def SpectralSummaries(y : ArrayLike, psdMeth : str = 'fft', windowType : str = 'none') -> dict:
@@ -171,13 +171,13 @@ def SpectralSummaries(y : ArrayLike, psdMeth : str = 'fft', windowType : str = '
     out['mean'] = np.mean(S)
     out['logmean'] = np.mean(logS)
     for i in range(3, 6):
-        out[f'mom{i}'] = Moments(S, i)
+        out[f'mom{i}'] = moments(S, i)
 
     # Autocorrelation of amplitude spectrum:
-    autoCorrs_S = AutoCorr(S, [1, 2, 3, 4], 'Fourier')
+    autoCorrs_S = autocorr(S, [1, 2, 3, 4], 'Fourier')
     out['ac1'] = autoCorrs_S[0]
     out['ac2'] = autoCorrs_S[1]
-    out['tau'] = FirstCrossing(S, 'ac', 0, 'continuous') # first zero crossing
+    out['tau'] = first_crossing(S, 'ac', 0, 'continuous') # first zero crossing
 
 
     # Shape of cumulative sum curve

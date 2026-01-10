@@ -11,7 +11,7 @@ from hmmlearn.hmm import GaussianHMM
 
 from ..Utilities.utils import ZScore
 from ..Operations.Stationarity import SlidingWindow
-from ..Operations.correlation import FirstCrossing, autocorr
+from ..Operations.correlation import first_crossing, autocorr
 
 def HMMFit(y : ArrayLike, trainp : float = 0.8, numStates : int = 3, randomSeed : int = 0) -> dict:
     """
@@ -270,7 +270,7 @@ def LocalSimple(y : ArrayLike, forecastMeth : str = 'mean', trainLength : Union[
     N = len(y)
     # % Do the local prediction
     if trainLength == 'ac':
-        lp = FirstCrossing(y, 'ac', 0, 'discrete')
+        lp = first_crossing(y, 'ac', 0, 'discrete')
     else:
         lp = trainLength # the length of the subsegment preceeding to use to predict the subsequent value
     evalr = np.arange(lp, N) #range over which to evaluate the forecast
@@ -306,8 +306,8 @@ def LocalSimple(y : ArrayLike, forecastMeth : str = 'mean', trainLength : Union[
     #% Autocorrelation structure of the residuals:
     out['ac1'] = autocorr(res, 1, 'Fourier')[0]
     out['ac2'] = autocorr(res, 2, 'Fourier')[0]
-    out['taures'] = FirstCrossing(res, 'ac', 0, 'continuous')
-    out['tauresrat'] = FirstCrossing(res, 'ac', 0, 'continuous')/FirstCrossing(y, 'ac', 0, 'continuous')
+    out['taures'] = first_crossing(res, 'ac', 0, 'continuous')
+    out['tauresrat'] = first_crossing(res, 'ac', 0, 'continuous')/first_crossing(y, 'ac', 0, 'continuous')
 
     return out
 

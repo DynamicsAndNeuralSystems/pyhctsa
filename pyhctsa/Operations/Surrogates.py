@@ -7,7 +7,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 from scipy.stats import zmap, norm, gaussian_kde
 
 from pyhctsa.Operations.Information import AutoMutualInfo
-from pyhctsa.Operations.correlation import FirstMin, TC3
+from pyhctsa.Operations.correlation import FirstMin, tc3
 
 def SDgivemestats(statx : float, statsurr : ArrayLike, leftrightboth : str) -> dict:
     """Compute statistiscs on the surrogate distribution."""
@@ -268,13 +268,13 @@ def SurrogateTest(x : ArrayLike,
         for (k, v) in zip(someStats.keys(), someStats.values()):
             out[f'o3_{k}'] = v
     if "tc3" in theTestStat:
-        # TC3 statistic -- another time-reversal asymmetry measure
+        # tc3 statistic -- another time-reversal asymmetry measure
         tau = 1
-        tmp = TC3(x, tau)
+        tmp = tc3(x, tau)
         tc3x = tmp['raw']
         tc3surr = np.zeros(numSurrs)
         for i in range(numSurrs):
-            tmp = TC3(z[:, i], tau)
+            tmp = tc3(z[:, i], tau)
             tc3surr[i] = tmp['raw']
         someStats = SDgivemestats(tc3x, tc3surr, "both")
         for (k, v) in zip(someStats.keys(), someStats.values()):

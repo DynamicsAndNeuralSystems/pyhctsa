@@ -1,4 +1,4 @@
-Distribution:
+distribution:
   withinp:
     base_name: withinp
     dependencies:
@@ -199,18 +199,17 @@ Distribution:
     legacy_name: DN_OutlierTest
     ordered_args: ['p']
 
-  # TrimmedMean:
-  #   base_name: TrimmedMean
-  #   labels:
-  #     - distribution
-  #     - location
-  #     - raw
-  #     - locationDependent
-  #   dependencies:
-  #   configs:
-  #     - pExclude: [1, 5, 10, 25, 50]
-  #   hctsa_name: DN_TrimmedMean
-  #   ordered_args: ["pExclude"]
+  trimmed_mean:
+    base_name: trimmed_mean
+    dependencies:
+    configs:
+      - {p_exclude: 1}
+      - {p_exclude: 5}
+      - {p_exclude: 10}
+      - {p_exclude: 25}
+      - {p_exclude: 50}
+    legacy_name: DN_TrimmedMean
+    ordered_args: ['p_exclude']
   
   histogram_asymmetry:
     base_name: histogram_asymmetry
