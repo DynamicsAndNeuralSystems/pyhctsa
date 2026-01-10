@@ -100,17 +100,13 @@ correlation:
     legacy_name: CO_fzcglscf
     ordered_args: ['alpha', 'beta']
 
-  # Embed2:
-  #   base_name: Embed2
-  #   labels:
-  #     - embedding
-  #     - correlation
-  #   dependencies:
-  #   configs:
-  #     - tau: "tau"
-  #       zscore: True
-  #   hctsa_name: CO_Embed2
-  #   ordered_args: ["tau"]
+  embed2:
+    base_name: embed2
+    dependencies:
+    configs:
+      - {tau: 'tau', zscore: True}
+    legacy_name: CO_Embed2
+    ordered_args: ['tau']
 
   embed2_shapes:
     base_name: embed2_shapes
@@ -255,49 +251,33 @@ correlation:
     legacy_name: CO_StickAngles
     ordered_args:
   
-  # FirstCrossing:
-  #   base_name: FirstCrossing
-  #   labels:
-  #     - correlation
-  #   dependencies:
-  #   configs:
-  #     - corrFun: 'ac'
-  #       threshold: [0, 0.36787944117144233]
-  #       whatOut: 'both'
-  #       zscore: True
-  #   hctsa_name: CO_FirstCrossing
-  #   ordered_args: ['corrFun', 'threshold', 'whatOut']
+  first_crossing:
+    base_name: first_crossing
+    dependencies:
+    configs:
+      - {corr_fun: 'ac', threshold: 0, what_out: 'both', zscore: True}
+      - {corr_fun: 'ac', threshold: '1/e', what_out: 'both', zscore: True}
+    legacy_name: CO_FirstCrossing
+    ordered_args: ['corr_fun', 'threshold', 'what_out']
   
-  # TranslateShape:
-  #   base_name: TranslateShape
-  #   labels:
-  #     - correlation
-  #     - discrepancy
-  #   dependencies:
-  #   configs:
-  #     - shape: 'circle'
-  #       d: [1.5, 2.5, 3.5]
-  #       howToMove: 'pts'
-  #       zscore: True
-  #     - shape: 'rectangle'
-  #       d: 2
-  #       howToMove: 'pts'
-  #       zscore: True
-  #   hctsa_name: CO_TranslateShape
-  #   ordered_args: ["shape", "d", "howToMove"]
+  translate_shape:
+    base_name: translate_shape
+    dependencies:
+    configs:
+      - {shape: 'circle', d: 1.5, how_to_move: 'pts', zscore: True}
+      - {shape: 'circle', d: 2.5, how_to_move: 'pts', zscore: True}
+      - {shape: 'circle', d: 3.5, how_to_move: 'pts', zscore: True}
+      - {shape: 'rectangle', d: 2, how_to_move: 'pts', zscore: True}
+    legacy_name: CO_TranslateShape
+    ordered_args: ['shape', 'd', 'how_to_move']
   
-  # AutoCorrShape:
-  #   base_name: AutoCorrShape
-  #   labels:
-  #     - correlation
-  #     - autocorrelation
-  #   dependencies:
-  #     - scipy
-  #   configs:
-  #     - stopWhen: ['drown', 'posDrown']
-  #       zscore: True
-  #   hctsa_name: CO_AutoCorrShape
-  #   ordered_args: ["stopWhen"]
+  autocorr_shape:
+    base_name: autocorr_shape
+    configs:
+      - {stop_when: 'drown', zscore: True}
+      - {stop_when: 'posDrown', zscore: True}
+    legacy_name: CO_AutoCorrShape
+    ordered_args: ['stop_when']
   
   histogram_ami:
     base_name: histogram_ami
@@ -339,33 +319,29 @@ correlation:
     legacy_name: PD_PeriodicityWang
     ordered_args: 
   
-  # TRev:
-  #   base_name: trev
-  #   labels:
-  #     - correlation
-  #     - timerev
-  #   dependencies:
-  #   configs:
-  #     - tau: [1, 2, 3]
-  #       zscore: True
-  #     - tau: ['ac', 'mi']
-  #       zscore: True
-  #   hctsa_name: CO_trev
-  #   ordered_args: ["tau"]
+  trev:
+    base_name: trev
+    dependencies:
+    configs:
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 3, zscore: True}
+      - {tau: 'ac', zscore: True}
+      - {tau: 'mi', zscore: True}
+    legacy_name: CO_trev
+    ordered_args: ['tau']
 
-  # TC3:
-  #   base_name: tc3
-  #   labels:
-  #     - correlation
-  #     - timerev
-  #   dependencies:
-  #   configs:
-  #     - tau: [1, 2, 3]
-  #       zscore: True
-  #     - tau: ['ac', 'mi']
-  #       zscore: True
-  #   hctsa_name: CO_tc3
-  #   ordered_args: ["tau"]
+  tc3:
+    base_name: tc3
+    dependencies:
+    configs:
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 3, zscore: True}
+      - {tau: 'ac', zscore: True}
+      - {tau: 'mi', zscore: True}
+    legacy_name: CO_tc3
+    ordered_args: ['tau']
   
   time_rev_kaplan:
     base_name: time_rev_kaplan

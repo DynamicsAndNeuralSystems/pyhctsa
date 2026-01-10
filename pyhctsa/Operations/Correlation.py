@@ -57,7 +57,7 @@ def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even
     y = np.asarray(y)
     # Set tau to minimum of autocorrelation function if 'ac' or 'tau'
     if tau in ['ac', 'tau']:
-        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+        tau = first_crossing(y, 'ac', 0, 'discrete')
     if extra_param is None:
         # JIDT expects empty string for no extra params
         extra_param = ''
@@ -96,8 +96,8 @@ def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even
     out['meanch'] = np.mean(np.diff(amis))
 
     # Autocorrelation of AMIs
-    out['ac1'] = AutoCorr(amis, 1, 'Fourier')[0]
-    out['ac2'] = AutoCorr(amis, 2, 'Fourier')[0]
+    out['ac1'] = autocorr(amis, 1, 'Fourier')[0]
+    out['ac2'] = autocorr(amis, 2, 'Fourier')[0]
 
     # Noise level required to reduce ami to proportion x of its initial value
     first_under_vals = [0.75, 0.50, 0.25]
@@ -286,13 +286,13 @@ def embed2_angle_tau(y : ArrayLike, max_tau : int) -> dict:
         if len(theta) == 0:
             raise ValueError(f'Time series (N={len(y)}) too short for embedding')
 
-        stats_store[0, i] = AutoCorr(theta, 1, 'Fourier')[0]
-        stats_store[1, i] = AutoCorr(theta, 2, 'Fourier')[0]
+        stats_store[0, i] = autocorr(theta, 1, 'Fourier')[0]
+        stats_store[1, i] = autocorr(theta, 2, 'Fourier')[0]
     
     # Compute output statistics
     out = {
-        'ac1_thetaac1': AutoCorr(stats_store[0, :], 1, 'Fourier')[0],
-        'ac1_thetaac2': AutoCorr(stats_store[1, :], 1, 'Fourier')[0],
+        'ac1_thetaac1': autocorr(stats_store[0, :], 1, 'Fourier')[0],
+        'ac1_thetaac2': autocorr(stats_store[1, :], 1, 'Fourier')[0],
         'mean_thetaac1': np.mean(stats_store[0, :]),
         'max_thetaac1': np.max(stats_store[0, :]),
         'min_thetaac1': np.min(stats_store[0, :]),
@@ -333,7 +333,7 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
 
     # Set tau to the first zero-crossing of the autocorrelation function with the 'tau' input
     if tau == 'tau':
-        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+        tau = first_crossing(y, 'ac', 0, 'discrete')
         if tau > len(y) / 10:
             tau = len(y) // 10
     # Ensure that y is a column vector
@@ -350,9 +350,9 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
 
     out = {}
 
-    out['theta_ac1'] = AutoCorr(theta, 1, 'Fourier')[0]
-    out['theta_ac2'] = AutoCorr(theta, 2, 'Fourier')[0]
-    out['theta_ac3'] = AutoCorr(theta, 3, 'Fourier')[0]
+    out['theta_ac1'] = autocorr(theta, 1, 'Fourier')[0]
+    out['theta_ac2'] = autocorr(theta, 2, 'Fourier')[0]
+    out['theta_ac3'] = autocorr(theta, 3, 'Fourier')[0]
 
     out['theta_mean'] = np.mean(theta)
     out['theta_std'] = np.std(theta, ddof=1)
@@ -584,7 +584,7 @@ def histogram_ami(
     # Use first zero crossing of the ACF as the time lag
     y = np.asarray(y)
     if isinstance(tau, str) and tau in ['ac', 'tau']:
-        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+        tau = first_crossing(y, 'ac', 0, 'discrete')
 
     # Bins for the data
     # same for both -- assume same distribution (true for stationary processes, or small lags)
@@ -800,26 +800,26 @@ def stick_angles(y : ArrayLike) -> dict:
     
     # correlations? 
     if len(zangles[0]) > 0:
-        out['tau_p'] = FirstCrossing(zangles[0], 'ac', 0, 'continuous')
-        out['ac1_p'] = AutoCorr(zangles[0], 1, 'Fourier')[0]
-        out['ac2_p'] = AutoCorr(zangles[0], 2, 'Fourier')[0]
+        out['tau_p'] = first_crossing(zangles[0], 'ac', 0, 'continuous')
+        out['ac1_p'] = autocorr(zangles[0], 1, 'Fourier')[0]
+        out['ac2_p'] = autocorr(zangles[0], 2, 'Fourier')[0]
     else:
         out['tau_p'] = np.nan
         out['ac1_p'] = np.nan
         out['ac2_p'] = np.nan
     
     if len(zangles[1]) > 0:
-        out['tau_n'] = FirstCrossing(zangles[1], 'ac', 0, 'continuous')
-        out['ac1_n'] = AutoCorr(zangles[1], 1, 'Fourier')[0]
-        out['ac2_n'] = AutoCorr(zangles[1], 2, 'Fourier')[0]
+        out['tau_n'] = first_crossing(zangles[1], 'ac', 0, 'continuous')
+        out['ac1_n'] = autocorr(zangles[1], 1, 'Fourier')[0]
+        out['ac2_n'] = autocorr(zangles[1], 2, 'Fourier')[0]
     else:
         out['tau_n'] = np.nan
         out['ac1_n'] = np.nan
         out['ac2_n'] = np.nan
     
-    out['tau_all'] = FirstCrossing(zallAngles, 'ac', 0, 'continuous')
-    out['ac1_all'] = AutoCorr(zallAngles, 1, 'Fourier')[0]
-    out['ac2_all'] = AutoCorr(zallAngles, 2, 'Fourier')[0]
+    out['tau_all'] = first_crossing(zallAngles, 'ac', 0, 'continuous')
+    out['ac1_all'] = autocorr(zallAngles, 1, 'Fourier')[0]
+    out['ac2_all'] = autocorr(zallAngles, 2, 'Fourier')[0]
 
     # What does the distribution look like? 
     # Some quantiles and moments
@@ -1001,7 +1001,7 @@ def embed2_dist(y : ArrayLike, tau : Union[None, str, int] = None) -> dict:
         tau = 'tau' # set to the first minimum of autocorrelation function
     
     if tau == 'tau':
-        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+        tau = first_crossing(y, 'ac', 0, 'discrete')
         if tau > N / 10:
             tau = N//10
 
@@ -1016,9 +1016,9 @@ def embed2_dist(y : ArrayLike, tau : Union[None, str, int] = None) -> dict:
     d = np.sqrt(np.sum(np.diff(m, axis=0)**2, axis=1))
     
     # Calculate autocorrelations
-    out['d_ac1'] = AutoCorr(d, 1, 'Fourier')[0] # lag 1 ac
-    out['d_ac2'] = AutoCorr(d, 2, 'Fourier')[0] # lag 2 ac
-    out['d_ac3'] = AutoCorr(d, 3, 'Fourier')[0] # lag 3 ac
+    out['d_ac1'] = autocorr(d, 1, 'Fourier')[0] # lag 1 ac
+    out['d_ac2'] = autocorr(d, 2, 'Fourier')[0] # lag 2 ac
+    out['d_ac3'] = autocorr(d, 3, 'Fourier')[0] # lag 3 ac
 
     out['d_mean'] = np.mean(d) # Mean distance
     out['d_median'] = np.median(d) # Median distance
@@ -1072,7 +1072,7 @@ def embed2_basic(y : ArrayLike, tau : Union[int, str] = 1) -> dict:
     y = np.asarray(y)
     if tau == 'tau':
         # Make tau the first zero crossing of the autocorrelation function
-        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+        tau = first_crossing(y, 'ac', 0, 'discrete')
 
     xt = y[:-tau]  # part of the time series
     xtp = y[tau:]  # time-lagged time series
@@ -1162,7 +1162,7 @@ def embed2_shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau', shape : st
     """
     y = np.asarray(y)
     if tau == 'tau':
-        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+        tau = first_crossing(y, 'ac', 0, 'discrete')
         # cannot set time delay > 10% of the length of the time series...
         if tau > len(y)/10:
             tau = int(np.floor(len(y)/10))
@@ -1191,10 +1191,10 @@ def embed2_shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau', shape : st
 
     # Return basic statistics on the counts
     out = {}
-    out['ac1'] = AutoCorr(counts, 1, 'Fourier')[0]
-    out['ac2'] = AutoCorr(counts, 2, 'Fourier')[0]
-    out['ac3'] = AutoCorr(counts, 3, 'Fourier')[0]
-    out['tau'] = FirstCrossing(counts, 'ac', 0, 'continuous')
+    out['ac1'] = autocorr(counts, 1, 'Fourier')[0]
+    out['ac2'] = autocorr(counts, 2, 'Fourier')[0]
+    out['ac3'] = autocorr(counts, 3, 'Fourier')[0]
+    out['tau'] = first_crossing(counts, 'ac', 0, 'continuous')
     out['max'] = np.max(counts)
     out['std'] = np.std(counts, ddof=1)
     out['median'] = np.median(counts)
@@ -1319,7 +1319,7 @@ def glscf(y : ArrayLike, alpha : float, beta : float, tau : Union[int, str] = 't
     """
     # Set tau to first zero-crossing of the autocorrelation function with the input 'tau'
     if tau == 'tau':
-        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+        tau = first_crossing(y, 'ac', 0, 'discrete')
     
     # Take magnitudes of time-delayed versions of the time series
     y1 = np.abs(y[:-tau])
@@ -1421,7 +1421,7 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1, method: str = 'Fourier') -
     
     return out
 
-def FirstCrossing(y: ArrayLike, corrFun: str = 'ac', threshold: float = 0.0, whatOut: str = 'both') -> Union[dict, float]:
+def first_crossing(y: ArrayLike, corr_fun: str = 'ac', threshold: float = 0.0, what_out: str = 'both') -> Union[dict, float]:
     """
     The first crossing of a given autocorrelation function across a given threshold.
 
@@ -1429,12 +1429,12 @@ def FirstCrossing(y: ArrayLike, corrFun: str = 'ac', threshold: float = 0.0, wha
     -----------
     y : array-like
         The input time series
-    corrFun : str, optional
+    corr_fun : str, optional
         The self-correlation function to measure:
         'ac': normal linear autocorrelation function
     threshold : float, optional
         Threshold to cross. Examples: 0 [first zero crossing], 1/np.e [first 1/e crossing]
-    whatOut : str, optional
+    what_out : str, optional
         Specifies the output format: 'both', 'discrete', or 'continuous'
 
     Returns
@@ -1443,33 +1443,34 @@ def FirstCrossing(y: ArrayLike, corrFun: str = 'ac', threshold: float = 0.0, wha
         The first crossing information, format depends on whatOut.
     """
     # Select the self-correlation function
-    if corrFun == 'ac':
+    if threshold == '1/e':
+        threshold = 1/np.e
+    if corr_fun == 'ac':
         # Autocorrelation at all time lags
-        corrs = AutoCorr(y, [], 'Fourier')
+        corrs = autocorr(y, [], 'Fourier')
     else:
-        raise ValueError(f"Unknown correlation function '{corrFun}'")
+        raise ValueError(f"Unknown correlation function '{corr_fun}'")
 
     # Calculate point of crossing
     first_crossing_index, point_of_crossing_index = pointOfCrossing(corrs, threshold)
 
     # Assemble the appropriate output (dictionary or float)
     # Convert from index space (1,2,…) to lag space (0,1,2,…)
-    if whatOut == 'both':
+    if what_out == 'both':
         out = {
             'firstCrossing': first_crossing_index - 1,
             'pointOfCrossing': point_of_crossing_index - 1
         }
-    elif whatOut == 'discrete':
+    elif what_out == 'discrete':
         out = first_crossing_index - 1
-    elif whatOut == 'continuous':
+    elif what_out == 'continuous':
         out = point_of_crossing_index - 1
     else:
-        raise ValueError(f"Unknown output format '{whatOut}'")
+        raise ValueError(f"Unknown output format '{what_out}'")
 
     return out
 
-
-def TranslateShape(y : ArrayLike, shape : str = 'circle', d : int = 2, howToMove : str = 'pts') -> dict:
+def translate_shape(y : ArrayLike, shape : str = 'circle', d : int = 2, how_to_move : str = 'pts') -> dict:
     """
     Statistics on datapoints inside geometric shapes across the time series.
 
@@ -1490,7 +1491,7 @@ def TranslateShape(y : ArrayLike, shape : str = 'circle', d : int = 2, howToMove
     d : int, optional
 
         Parameter specifying the size of the shape (e.g., radius for 'circle', half-width for 'rectangle'). Default is 2.
-    howToMove : str, optional
+    how_to_move : str, optional
         Method for moving the shape. Currently, only 'pts' is supported, which places the shape on each point in the time series.
 
     Returns
@@ -1510,7 +1511,7 @@ def TranslateShape(y : ArrayLike, shape : str = 'circle', d : int = 2, howToMove
 
     # add a time index
     ty = np.column_stack((np.arange(1, N+1), y[:, 0])) # has increasing integers as time in the first column
-    if howToMove == 'pts':
+    if how_to_move == 'pts':
 
         if shape == 'circle':
 
@@ -1546,7 +1547,7 @@ def TranslateShape(y : ArrayLike, shape : str = 'circle', d : int = 2, howToMove
         else:
             raise ValueError(f"Unknown shape {shape}. Choose either 'circle' or 'rectangle'")
     else:
-        raise ValueError(f"Unknown setting for 'howToMove' input: '{howToMove}'. Only option is currently 'pts'.")
+        raise ValueError(f"Unknown setting for 'howToMove' input: '{how_to_move}'. Only option is currently 'pts'.")
 
     # compute stats on number of hits inside the shape
     out = {}
@@ -1574,14 +1575,14 @@ def TranslateShape(y : ArrayLike, shape : str = 'circle', d : int = 2, howToMove
 
     return out
 
-def _stat_av(y: ArrayLike, windowStat: str = 'mean', numSeg: int = 5, incMove: int = 2) -> float:
+def _stat_av(y: ArrayLike, window_stat: str = 'mean', num_seg: int = 5, inc_move: int = 2) -> float:
     """helper function to compute sliding winow stats for `TranslateShape`"""
     y = np.asarray(y)
-    winLength = np.floor(len(y)/numSeg)
+    winLength = np.floor(len(y)/num_seg)
     if winLength == 0:
-        logging.warning(f"Time-series of length {len(y)} is too short for {numSeg} windows")
+        logging.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
         return np.nan
-    inc = np.floor(winLength/incMove) # increment to move at each step
+    inc = np.floor(winLength/inc_move) # increment to move at each step
     # if incrment rounded down to zero, prop it up 
     if inc == 0:
         inc = 1
@@ -1589,24 +1590,23 @@ def _stat_av(y: ArrayLike, windowStat: str = 'mean', numSeg: int = 5, incMove: i
     numSteps = int(np.floor((len(y)-winLength)/inc) + 1)
     qs = np.zeros(numSteps)
 
-     # convert a step index (stepInd) to a range of indices corresponding to that window
+    # convert a step index (stepInd) to a range of indices corresponding to that window
     def get_window(stepInd: int):
         start_idx = (stepInd) * inc
         end_idx = (stepInd) * inc + winLength
 
         return np.arange(start_idx, end_idx).astype(int)
     
-    if windowStat == 'mean':
+    if window_stat == 'mean':
         for i in range(numSteps):
             qs[i] = np.mean(y[get_window(i)])
-    elif windowStat == 'std':
+    elif window_stat == 'std':
         for i in range(numSteps):
             qs[i] = np.std(y[get_window(i)], ddof=1)
 
     return np.std(qs, ddof=1)/np.std(y, ddof=1)
 
-
-def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dict:
+def autocorr_shape(y : ArrayLike, stop_when : Union[int, str] = 'posDrown') -> dict:
     """
     How the autocorrelation function changes with the time lag.
 
@@ -1617,7 +1617,7 @@ def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dic
     -----------
     y : array-like
         The input time series
-    stopWhen : str or int, optional
+    stop_when : str or int, optional
         The criterion for the maximum lag to measure the ACF up to.
         Default is 'posDrown'.
 
@@ -1636,18 +1636,18 @@ def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dic
     acf = []
 
     # At what lag does the acf drop to zero, Ndrown (by my definition)?
-    if isinstance(stopWhen, int):
-        taus = list(range(0, stopWhen+1))
-        acf = AutoCorr(y, taus, 'Fourier')
-        Ndrown = stopWhen
+    if isinstance(stop_when, int):
+        taus = list(range(0, stop_when+1))
+        acf = autocorr(y, taus, 'Fourier')
+        Ndrown = stop_when
         
-    elif stopWhen in ['posDrown', 'drown', 'doubleDrown']:
+    elif stop_when in ['posDrown', 'drown', 'doubleDrown']:
         # Compute ACF up to a given threshold:
         Ndrown = 0 # the point at which ACF ~ 0
-        if stopWhen == 'posDrown':
+        if stop_when == 'posDrown':
             # stop when ACF drops below threshold, th
             for i in range(1, N+1):
-                acf_val = AutoCorr(y, i-1, 'Fourier')[0]
+                acf_val = autocorr(y, i-1, 'Fourier')[0]
                 if np.isnan(acf_val):
                     logging.warning("Weird time series (constant?)")
                     out = np.nan
@@ -1665,20 +1665,20 @@ def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dic
                 acf.append(acf_val)
             # This should yield the initial, positive portion of the ACF.
             assert all(np.array(acf) > 0)
-        elif stopWhen == 'drown':
+        elif stop_when == 'drown':
             # Stop when ACF is very close to 0 (within threshold, th = 2/sqrt(N))
             for i in range(1, N+1):
-                acf_val = AutoCorr(y, i-1, 'Fourier')[0] # acf vector indicies are not lags
+                acf_val = autocorr(y, i-1, 'Fourier')[0] # acf vector indicies are not lags
                 # if positive and less than thresh
                 if i > 0 and abs(acf_val) < th:
                     Ndrown = i
                     acf.append(acf_val)
                     break
                 acf.append(acf_val)
-        elif stopWhen == 'doubleDrown':
+        elif stop_when == 'doubleDrown':
             # Stop at 2*tau, where tau is the lag where ACF ~ 0 (within 1/sqrt(N) threshold)
             for i in range(1, N+1):
-                acf_val = AutoCorr(y, i-1, 'Fourier')[0]
+                acf_val = autocorr(y, i-1, 'Fourier')[0]
                 if Ndrown > 0 and i == Ndrown * 2:
                     acf.append(acf_val)
                     break
@@ -1686,7 +1686,7 @@ def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dic
                     Ndrown = i
                 acf.append(acf_val)
     else:
-        raise ValueError(f"Unknown ACF decay criterion: '{stopWhen}'")
+        raise ValueError(f"Unknown ACF decay criterion: '{stop_when}'")
 
     acf = np.array(acf)
     Nac = len(acf)
@@ -1702,7 +1702,7 @@ def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dic
     # Basic stats on the ACF
     out['sumacf'] = np.sum(acf)
     out['meanacf'] = np.mean(acf)
-    if stopWhen != 'posDrown':
+    if stop_when != 'posDrown':
         out['meanabsacf'] = np.mean(np.abs(acf))
         out['sumabsacf'] = np.sum(np.abs(acf))
 
@@ -1710,11 +1710,11 @@ def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dic
     minPointsForACFofACF = 5 # can't take lots of complex stats with fewer than this
 
     if Nac > minPointsForACFofACF:
-        out['ac1'] = AutoCorr(acf, 1, 'Fourier')[0]
+        out['ac1'] = autocorr(acf, 1, 'Fourier')[0]
         if all(acf > 0):
             out['actau'] = np.nan
         else:
-            out['actau'] = AutoCorr(acf, FirstCrossing(acf, 'ac', 0, 'discrete'), 'Fourier')[0]
+            out['actau'] = autocorr(acf, first_crossing(acf, 'ac', 0, 'discrete'), 'Fourier')[0]
 
     else:
         out['ac1'] = np.nan
@@ -1743,7 +1743,7 @@ def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dic
     fitSuccess = False
     minPointsToFitExp = 4 # (need at least four points to fit exponential)
 
-    if stopWhen == 'posDrown' and Nac >= minPointsToFitExp:
+    if stop_when == 'posDrown' and Nac >= minPointsToFitExp:
         # Fit exponential decay to (absolute) ACF:
         # (kind of only makes sense for the first positive period)
         expFunc = lambda x, b : np.exp(-b * x)
@@ -1771,14 +1771,17 @@ def AutoCorrShape(y : ArrayLike, stopWhen : Union[int, str] = 'posDrown') -> dic
     
     return out
 
-
-def TRev(y : ArrayLike, tau : Union[int, str] = 'ac') -> dict:
+def trev(y : ArrayLike, tau : Union[int, str] = 'ac') -> dict:
     """
     Normalized nonlinear autocorrelation (trev) function of a time series.
 
     Calculates the trev function, a normalized nonlinear autocorrelation, as described in the TSTOOL nonlinear time-series analysis package. 
     This quantity is often used as a nonlinearity statistic in surrogate data analysis,
-    see: "Surrogate time series", T. Schreiber and A. Schmitz, Physica D, 142(3-4), 346 (2000).
+    see [1].
+
+    References
+    ----------
+    .. [1] "Surrogate time series", T. Schreiber and A. Schmitz, Physica D, 142(3-4), 346 (2000).
 
     Parameters
     ----------
@@ -1803,7 +1806,7 @@ def TRev(y : ArrayLike, tau : Union[int, str] = 'ac') -> dict:
     # Can set the time lag, tau, to be 'ac' or 'mi'
     if tau == 'ac':
         # tau is first zero crossing of the autocorrelation function
-        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+        tau = first_crossing(y, 'ac', 0, 'discrete')
     elif tau == 'mi':
         # tau is the first minimum of the automutual information function
         tau = FirstMin(y, 'mi')
@@ -1833,7 +1836,7 @@ def TRev(y : ArrayLike, tau : Union[int, str] = 'ac') -> dict:
 
     return out
 
-def TC3(y : list, tau : Union[int, str, None] = 'ac') -> dict:
+def tc3(y : list, tau : Union[int, str, None] = 'ac') -> dict:
     """
     Normalized nonlinear autocorrelation function, tc3.
 
@@ -1867,7 +1870,7 @@ def TC3(y : list, tau : Union[int, str, None] = 'ac') -> dict:
     # Can set the time lag, tau, to be 'ac' or 'mi'
     if tau == 'ac':
         # tau is first zero crossing of the autocorrelation function
-        tau = FirstCrossing(y, 'ac', 0, 'discrete')
+        tau = first_crossing(y, 'ac', 0, 'discrete')
     elif tau == 'mi':
         # tau is the first minimum of the automutual information function
         tau = FirstMin(y, 'mi')
