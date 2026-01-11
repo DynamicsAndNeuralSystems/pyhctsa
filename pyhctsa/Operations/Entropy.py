@@ -519,14 +519,21 @@ def _app_samp_entropy(
 
     return phi
 
-def ComplexityInvariantDistance(y : ArrayLike) -> dict:
+def complexity_invariant_distance(y : ArrayLike) -> dict:
     """
     Complexity-invariant distance
 
     Computes two estimates of the 'complexity' of a time series based on the 
     stretched-out length of the lines in its line graph. These features are 
-    based on the method described by Batista et al. (2014), designed for use 
+    based on the method described by Batista et al. (2014) [1], designed for use 
     in complexity-invariant distance calculations.
+
+    References
+    ----------
+    .. [1] Batista, G. E. A. P. A., Keogh, E. J., Tataw, O. M., & de Souza, V. M. A. 
+        (2014). CID: an efficient complexity-invariant distance for time series. 
+        Data Mining and Knowledge Discovery, 28(3), 634–669. 
+        https://doi.org/10.1007/s10618-013-0312-3
 
     Parameters
     ----------
@@ -551,13 +558,6 @@ def ComplexityInvariantDistance(y : ArrayLike) -> dict:
             Normalized CE1: CE1 / minCE1.
         - 'CE2_norm' : float
             Normalized CE2: CE2 / minCE2.
-
-    References
-    ----------
-    Batista, G. E. A. P. A., Keogh, E. J., Tataw, O. M., & de Souza, V. M. A. 
-    (2014). CID: an efficient complexity-invariant distance for time series. 
-    Data Mining and Knowledge Discovery, 28(3), 634–669. 
-    https://doi.org/10.1007/s10618-013-0312-3
     """
     y = np.asarray(y)
     #% Original definition (in Table 2 of paper cited above)
@@ -576,22 +576,22 @@ def ComplexityInvariantDistance(y : ArrayLike) -> dict:
     # % this would be attained from putting close values close; i.e., sorting the time
     # % series
     y_sorted = np.sort(y)
-    minCE1 = f_CE1(y_sorted)
-    minCE2 = f_CE2(y_sorted)
+    min_CE1 = f_CE1(y_sorted)
+    min_CE2 = f_CE2(y_sorted)
 
-    CE1_norm = CE1 / minCE1
-    CE2_norm = CE2 / minCE2
+    CE1_norm = CE1 / min_CE1
+    CE2_norm = CE2 / min_CE2
 
     out = {'CE1':       CE1,
            'CE2':       CE2,
-           'minCE1':    minCE1,
-           'minCE2':    minCE2,
+           'minCE1':    min_CE1,
+           'minCE2':    min_CE2,
            'CE1_norm':  CE1_norm,
            'CE2_norm':  CE2_norm}
 
     return out
 
-def LZComplexity(x: ArrayLike, nbits: int = 2, preProc: Union[str, list] = [], rng : int = 0) -> float:
+def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2, pre_proc: Union[str, None] = None, rng : int = 0) -> float:
     """
     Compute the normalized Lempel-Ziv (LZ) complexity of an n-bit encoding of a time series.
 
@@ -604,9 +604,9 @@ def LZComplexity(x: ArrayLike, nbits: int = 2, preProc: Union[str, list] = [], r
     ----------
     x : array-like
         Input time series (1-D array or list).
-    nbits : int, optional
+    n_bits : int, optional
         Number of bits (alphabet size) to encode the data into (default: 2).
-    preProc : str or list, optional
+    pre_proc : str, optional
         Preprocessing method to apply before symbolization. Currently supported:
             - 'diff': Use z-scored first differences of the time series.
     rng : int, optional
@@ -621,21 +621,20 @@ def LZComplexity(x: ArrayLike, nbits: int = 2, preProc: Union[str, list] = [], r
     """
     rng = np.random.RandomState(rng) # fix the seed for reproducibility
     x = np.asarray(x, dtype=np.float64).ravel()
-    if preProc == "diff":
+    if pre_proc == "diff":
         x = ZScore(np.diff(x))
 
-    if x.size == 0 or nbits < 2:
+    if x.size == 0 or n_bits < 2:
         return 0.0
 
-    symbols = _symbolise_lz(x, nbits, rng)
+    symbols = _symbolise_lz(x, n_bits, rng)
     c = _lz_complexity(symbols)
 
-    return (c * np.log(x.size)) / (x.size * np.log(nbits))
+    return (c * np.log(x.size)) / (x.size * np.log(n_bits))
 
 @njit(cache=True, fastmath=True)
 def _lz_complexity(symbols: np.ndarray) -> int:
     """
-    Count phrases exactly as in the original Python function.
     Input must be a 1-D int32/64 NumPy array whose values start at 1.
     """
     n = symbols.size
@@ -672,6 +671,7 @@ def _lz_complexity(symbols: np.ndarray) -> int:
     return c
 
 def _symbolise_lz(x: np.ndarray, n_bins: int, rng) -> np.ndarray:
+    """Helper function for lempel_ziv_complexity"""
     nx = x.size
     noisy = x + np.finfo(np.float64).eps * rng.randn(nx)
     order = np.argsort(noisy, kind="mergesort") 

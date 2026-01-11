@@ -1,4 +1,4 @@
-Entropy:
+entropy:
   distribution_entropy:
     base_name: distribution_entropy
     dependencies:
@@ -54,27 +54,38 @@ Entropy:
     legacy_name: EN_PermEn
     ordered_args: ['m', 'tau']
 
-  # LZComplexity:
-  #   base_name: LZcomplexity
-  #   labels:
-  #     - entropy
-  #     - symbolic
-  #   dependencies:
-  #   configs:
-  #     - nbits: !range [2, 10]
-  #       preProc: [[], 'diff']
-  #       zscore: True
-  #   hctsa_name: EN_MS_LZcomplexity
-  #   ordered_args: ['nbits', 'preProc']
+  lempel_ziv_complexity:
+    base_name: lempel_ziv_complexity
+    dependencies:
+    configs:
+      - {n_bits: 2, zscore: True}
+      - {n_bits: 3, zscore: True}
+      - {n_bits: 4, zscore: True}
+      - {n_bits: 5, zscore: True}
+      - {n_bits: 6, zscore: True}
+      - {n_bits: 7, zscore: True}
+      - {n_bits: 8, zscore: True}
+      - {n_bits: 9, zscore: True}
+      - {n_bits: 10, zscore: True}
+
+      - {n_bits: 2, pre_proc: 'diff', zscore: True}
+      - {n_bits: 3, pre_proc: 'diff', zscore: True}
+      - {n_bits: 4, pre_proc: 'diff', zscore: True}
+      - {n_bits: 5, pre_proc: 'diff', zscore: True}
+      - {n_bits: 6, pre_proc: 'diff', zscore: True}
+      - {n_bits: 7, pre_proc: 'diff', zscore: True}
+      - {n_bits: 8, pre_proc: 'diff', zscore: True}
+      - {n_bits: 9, pre_proc: 'diff', zscore: True}
+      - {n_bits: 10, pre_proc: 'diff',  zscore: True}
+    legacy_name: EN_MS_LZcomplexity
+    ordered_args: ['n_bits', 'pre_proc']
   
-  # ComplexityInvariantDistance:
-  #   base_name: CID
-  #   labels:
-  #     - entropy
-  #   dependencies:
-  #   configs:
-  #     - zscore: True
-  #   hctsa_name: EN_CID
+  complexity_invariant_distance:
+    base_name: complexity_invariant_distance
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: EN_CID
   
   approximate_entropy:
     base_name: approximate_entropy
