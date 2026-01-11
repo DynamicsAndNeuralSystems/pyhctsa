@@ -32,22 +32,27 @@ Entropy:
     legacy_name: EN_DistributionEntropy
     ordered_args: ['hist_or_ks', 'num_bins', 'olremp']
   
-  # PermEn:
-  #   labels:
-  #     - entropy
-  #     - symbolic
-  #     - ordinal
-  #   dependencies:
-  #     - antropy 
-  #   configs:
-  #     - m: [2, 3, 4, 5]
-  #       tau: 1
-  #       zscore: True
-  #     - m: [2, 3, 4, 5]
-  #       tau: 2
-  #       zscore: True
-  #   hctsa_name: EN_PermEn
-  #   ordered_args: ['m', 'tau']
+  permutation_entropy:
+    base_name: permutation_entropy
+    dependencies:
+      - antropy 
+    configs:
+      - {m: 2, tau: 1, zscore: True}
+      - {m: 3, tau: 1, zscore: True}
+      - {m: 4, tau: 1, zscore: True}
+      - {m: 5, tau: 1, zscore: True}
+
+      - {m: 2, tau: 2, zscore: True}
+      - {m: 3, tau: 2, zscore: True}
+      - {m: 4, tau: 2, zscore: True}
+      - {m: 5, tau: 2, zscore: True}
+
+      - {m: 2, tau: 'ac', zscore: True}
+      - {m: 3, tau: 'ac', zscore: True}
+      - {m: 4, tau: 'ac', zscore: True}
+      - {m: 5, tau: 'ac', zscore: True}
+    legacy_name: EN_PermEn
+    ordered_args: ['m', 'tau']
 
   # LZComplexity:
   #   base_name: LZcomplexity
@@ -71,29 +76,25 @@ Entropy:
   #     - zscore: True
   #   hctsa_name: EN_CID
   
-  # ApproximateEntropy:
-  #   base_name: ApEn
-  #   labels:
-  #     - entropy
-  #   dependencies:
-  #   configs:
-  #     - mnom: [1, 2]
-  #       rth: [0.1, 0.2]
-  #       zscore: True
-  #   hctsa_name: EN_ApEn
-  #   ordered_args: ['mnom', 'rth']
+  approximate_entropy:
+    base_name: approximate_entropy
+    dependencies:
+    configs:
+      - {mnom: 1, rth: 0.1, zscore: True}
+      - {mnom: 2, rth: 0.1, zscore: True}
+      - {mnom: 1, rth: 0.2, zscore: True}
+      - {mnom: 2, rth: 0.2, zscore: True}
+    legacy_name: EN_ApEn
+    ordered_args: ['mnom', 'rth']
 
-  # RPDE:
-  #   base_name: rpde
-  #   labels:
-  #     - entropy
-  #   dependencies:
-  #   configs:
-  #     - m: 3
-  #       tau: 1
-  #       zscore: True
-  #   hctsa_name: EN_rpde
-  #   ordered_args: ['m', 'tau']
+  rpde:
+    base_name: rpde
+    dependencies:
+    configs:
+      - {m: 3, tau: 1, zscore: True}
+      - {m: 3, tau: 'ac', zscore: True}
+    legacy_name: EN_rpde
+    ordered_args: ['m', 'tau']
   
   sample_entropy:
     base_name: sample_entropy

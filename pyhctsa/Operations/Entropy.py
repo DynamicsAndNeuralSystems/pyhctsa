@@ -340,12 +340,16 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
     """
     Permutation Entropy (PermEn) of a time series.
 
-    Computes the permutation entropy and its normalized version for a given time series,
-    as described in:
-        C. Bandt and B. Pompe, "Permutation Entropy: A Natural Complexity Measure for Time Series",
-        Phys. Rev. Lett. 88(17) 174102 (2002).
+    Computes the permutation entropy and its normalised version for a given time series,
+    as described in [1]. 
+
     This implementation modifies code from the antropy package:
-    https://github.com/raphaelvallat/antropy to provide both raw and normalized permutation entropy values.
+    https://github.com/raphaelvallat/antropy to provide both raw and normalised permutation entropy values.
+
+    References
+    ----------
+    .. [1] C. Bandt and B. Pompe, "Permutation Entropy: A Natural Complexity Measure for Time Series",
+        Phys. Rev. Lett. 88(17) 174102 (2002).
 
     Parameters
     ----------
@@ -353,7 +357,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
         Input time series.
     m : int, optional
         Embedding dimension (order of the permutation entropy, default: 2).
-    tau : int, optional
+    tau : int or str, optional
         Time-delay for the embedding (default: 1).
 
     Returns
@@ -361,18 +365,20 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
     dict
         A dictionary containing the permutation entropy and normalized permutation entropy.
     """
+    if tau == 'ac':
+        tau = int(first_crossing(y, 'ac', 0, 'discrete'))
     y = np.asarray(y)
     ran_order = range(m)
 
-    hashmult = np.power(m, ran_order)
+    hash_mult = np.power(m, ran_order)
     assert tau > 0, "delay must be greater than zero."
 
     sorted_idx = _embed(y, order=m, delay=tau).argsort(kind="quicksort")
-    Nx = sorted_idx.shape[0]
-    assert Nx > 5, "Time series too short to embed." # need at least 5 embedding vectors to actually do a computation
+    nx = sorted_idx.shape[0]
+    assert nx > 5, "Time series too short to embed. Need at least 5 embedding vectors to compute permutation entropy."
     
-    hashval = (np.multiply(sorted_idx, hashmult)).sum(1)
-    _, c = np.unique(hashval, return_counts=True)
+    hash_val = (np.multiply(sorted_idx, hash_mult)).sum(1)
+    _, c = np.unique(hash_val, return_counts=True)
     p = np.true_divide(c, c.sum())
     pe = - _xlogx(p).sum()
     pe_norm = pe / np.log2(factorial(m))
@@ -380,12 +386,18 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
 
     return out
 
-def RPDE(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, TMax : int = -1) -> dict:
+def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max : int = -1) -> dict:
     """
     Recurrence period density entropy (RPDE).
 
     Fast RPDE analysis on an input signal to obtain an estimate of the normalized entropy (H_norm)
-    and other related statistics. Based on Max Little's original rpde code.
+    and other related statistics. Based on Max Little's original rpde code [1]. 
+
+    References
+    ----------
+    .. [1] M. Little, P. McSharry, S. Roberts, D. Costello, I. Moroz (2007),
+        "Exploiting Nonlinear Recurrence and Fractal Scaling Properties for Voice Disorder Detection",
+        BioMedical Engineering OnLine 2007, 6:23.
 
     Parameters
     ----------
@@ -393,11 +405,11 @@ def RPDE(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, TMax : i
         Input signal (must be a 1D array or list).
     m : int, optional
         Embedding dimension (default: 2).
-    tau : int, optional
+    tau : int or str, optional
         Embedding time delay (default: 1).
     epsilon : float, optional
         Recurrence neighbourhood radius (default: 0.12).
-    TMax : int, optional
+    t_max : int, optional
         Maximum recurrence time. If not specified (default: -1), all recurrence times are returned.
 
     Returns
@@ -411,22 +423,21 @@ def RPDE(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, TMax : i
             - 'meanNonZero': Mean value of non-zero rpd entries (rescaled by N).
             - 'maxRPD': Maximum value of rpd (rescaled by N).
 
-    References
-    ----------
-    M. Little, P. McSharry, S. Roberts, D. Costello, I. Moroz (2007),
-    "Exploiting Nonlinear Recurrence and Fractal Scaling Properties for Voice Disorder Detection",
-    BioMedical Engineering OnLine 2007, 6:23.
     """
+    if tau == 'ac':
+        # use the first zero crossing of the ACF
+        tau = int(first_crossing(y, 'ac', 0, 'discrete'))
     y = np.asarray(y)
     rpd = np.array(_close_returns_c.close_returns(y, m, tau, epsilon))
-    if TMax > -1:
-        rpd = rpd[:TMax]
+    if t_max > -1:
+        rpd = rpd[:t_max]
     rpd = np.divide(rpd, np.sum(rpd))
     N = len(rpd)
     ip = rpd > 0
     H = -np.sum(rpd[ip] * np.log(rpd[ip]))
-    H_norm = np.divide(H, np.log(N))
+    H_norm = np.divide(H, np.log(N)) # log(N) is the H for an i.i.d. process
     out = {}
+    #% Entropy and normalized entropy:
     out['H'] = H
     out["H_norm"] = H_norm
 
@@ -437,11 +448,18 @@ def RPDE(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, TMax : i
 
     return out 
 
-def ApproximateEntropy(x : ArrayLike, mnom : int = 1, rth : float = 0.2) -> float:
+def approximate_entropy(x : ArrayLike, mnom : int = 1, rth : float = 0.2) -> float:
     """
     Approximate Entropy of a time series
 
     ApEn(m,r).
+
+    For more information, cf. http://physionet.org/physiotools/ApEn/
+
+    References:
+    -----------
+    .. [1] S. M. Pincus, "Approximate entropy as a measure of system complexity",
+        P. Natl. Acad. Sci. USA, 88(6) 2297 (1991)
 
     Parameters
     -----------
@@ -456,13 +474,6 @@ def ApproximateEntropy(x : ArrayLike, mnom : int = 1, rth : float = 0.2) -> floa
     --------
     float
         The Approximate Entropy value
-
-    References:
-    -----------
-    S. M. Pincus, "Approximate entropy as a measure of system complexity",
-    P. Natl. Acad. Sci. USA, 88(6) 2297 (1991)
-
-    For more information, cf. http://physionet.org/physiotools/ApEn/
     """
     x = np.asarray(x)
     r = rth * np.std(x, ddof=1) # threshold of similarity
@@ -470,7 +481,7 @@ def ApproximateEntropy(x : ArrayLike, mnom : int = 1, rth : float = 0.2) -> floa
 
     return np.subtract(phi[0], phi[1])
 
-def _embed(x, order, delay=1):
+def _embed(x : ArrayLike, order : int, delay : int = 1) -> ArrayLike:
     """Safe embedding that supports order=1."""
     x = np.asarray(x)
     if order < 1:
