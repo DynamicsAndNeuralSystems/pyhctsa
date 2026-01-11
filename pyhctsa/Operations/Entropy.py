@@ -246,7 +246,7 @@ def multi_scale_entropy(
     samp_ens = np.zeros(numScales)
     for si in range(numScales):
         if len(y_cg[si]) >= minTsLength:
-            samp_en_struct = SampleEntropy(y_cg[si], m, r)
+            samp_en_struct = sample_entropy(y_cg[si], m, r)
             samp_ens[si] = samp_en_struct[f'sampen{m}']
         else:
             samp_ens[si] = np.nan
@@ -283,25 +283,31 @@ def multi_scale_entropy(
 
     return out
 
-def sample_entropy(y: ArrayLike, M: int = 2, r: Optional[float] = None, preProcessHow: Optional[str] = None) -> dict:
+def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None, 
+                    pre_process_how: Optional[str] = None) -> dict:
     """
     Compute Sample Entropy (SampEn) of a time series.
 
-    This function calculates SampEn for embedding dimensions from 0 to M. The implementation
-    uses the PhysioNet C code (sampen.c by Doug Lake) for efficiency and accuracy.
+    This function calculates SampEn for embedding dimensions from 0 to m. The implementation
+    uses the PhysioNet C code (sampen.c by Doug Lake) [1] for efficiency and accuracy.
     Can specify to first apply an incremental differencing of the time series
-    thus yielding the 'Control Entropy': "Control Entropy: A complexity measure for nonstationary signals"
-    E. M. Bollt and J. Skufca, Math. Biosci. Eng., 6(1) 1 (2009).
+    thus yielding the 'Control Entropy' [2]
+
+    References
+    ----------
+    .. [1] "Sample Entropy Estimation 1.0.0", https://physionet.org/content/sampen/1.0.0/c/sampen-1.1.c
+    .. [2] "Control Entropy: A complexity measure for nonstationary signals"
+        E. M. Bollt and J. Skufca, Math. Biosci. Eng., 6(1) 1 (2009).
 
     Parameters
     ----------
     y : array-like
         Input time series
-    M : int, optional
+    m : int, optional
         Maximum embedding dimension (default: 2)
     r : float, optional
         Similarity threshold. If None, set to 0.1 * std(y)
-    preProcessHow : str, optional
+    pre_process_how : str, optional
         Preprocessing method:
             - 'diff1': Use first differences
 
@@ -316,21 +322,21 @@ def sample_entropy(y: ArrayLike, M: int = 2, r: Optional[float] = None, preProce
     y = np.asarray(y, dtype=np.float64)
     if r is None:
         r = 0.1 * np.std(y, ddof=1)
-    if preProcessHow == 'diff1':
+    if pre_process_how == 'diff1':
         y = np.diff(y)
 
-    sampEN = _sampen_c.calculate(y, M+1, r)
-    sampEN = sampEN[:-1] # always that extra one for the M = 0 
+    samp_en = _sampen_c.calculate(y, m+1, r)
+    samp_en = samp_en[:-1] # always that extra one for the M = 0 
     out = {}
-    for m in range(M + 1):
-        out[f'sampen{m}'] = sampEN[m]
-        out[f'quadSampEn{m}'] = sampEN[m] + np.log(2 * r)
-    if M > 1:
-        out['meanchsampen'] = np.mean(np.diff(sampEN))
+    for mi in range(m + 1):
+        out[f'sampen{mi}'] = samp_en[mi]
+        out[f'quadSampEn{mi}'] = samp_en[mi] + np.log(2 * r)
+    if m > 1:
+        out['meanchsampen'] = np.mean(np.diff(samp_en))
 
     return out
 
-def PermEn(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
+def permutation_entropy(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
     """
     Permutation Entropy (PermEn) of a time series.
 

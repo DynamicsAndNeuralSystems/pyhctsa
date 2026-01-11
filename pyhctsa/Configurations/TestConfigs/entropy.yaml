@@ -95,22 +95,19 @@ Entropy:
   #   hctsa_name: EN_rpde
   #   ordered_args: ['m', 'tau']
   
-  # SampleEntropy:
-  #   base_name: SampEn
-  #   labels:
-  #     - entropy
-  #   dependencies:
-  #   configs:
-  #     - M: 5
-  #       r: [0.05, 0.1, 0.15, 0.2, 0.3]
-  #       preProcessHow: ''
-  #       zscore: True
-  #     - M: 5
-  #       r: [0.1, 0.2]
-  #       preProcessHow: 'diff1'
-  #       zscore: True
-  #   hctsa_name: EN_SampEn
-  #   ordered_args: ['M', 'r', 'preProcessHow']
+  sample_entropy:
+    base_name: sample_entropy
+    dependencies:
+    configs:
+      - {m: 5, r: 0.05, zscore: True}
+      - {m: 5, r: 0.1, zscore: True}
+      - {m: 5, r: 0.15, zscore: True}
+      - {m: 5, r: 0.2, zscore: True}
+      - {m: 5, r: 0.3, zscore: True}
+      - {m: 5, r: 0.1, pre_process_how: 'diff1', zscore: True}
+      - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True}
+    legacy_name: EN_SampEn
+    ordered_args: ['m', 'r', 'pre_process_how']
 
   multi_scale_entropy:
     base_name: multi_scale_entropy
