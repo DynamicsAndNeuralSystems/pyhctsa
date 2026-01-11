@@ -8,7 +8,7 @@ from statsmodels.stats.diagnostic import acorr_ljungbox
 from scipy.stats import jarque_bera, wilcoxon, norm
 from arch.unitroot import VarianceRatio
 
-def VarianceRatioTest(y : ArrayLike, periods : Union[int, list[int]] = 2, IIDs : Union[int, list[int]] = 0) -> dict:
+def variance_ratio_test(y : ArrayLike, periods : Union[int, list[int]] = 2, iids : Union[int, list[int]] = 0) -> dict:
     """
     Variance ratio test for random walk.
 
@@ -23,7 +23,7 @@ def VarianceRatioTest(y : ArrayLike, periods : Union[int, list[int]] = 2, IIDs :
         The input time series.
     periods : int or list of int, optional
         A scalar or vector of period(s) to use for the test.
-    IIDs : int or list of int, optional
+    iids : int or list of int, optional
         A scalar or vector of boolean values (0 or 1) indicating whether to assume
         independent and identically distributed (IID) innovations for each period.
 
@@ -38,16 +38,16 @@ def VarianceRatioTest(y : ArrayLike, periods : Union[int, list[int]] = 2, IIDs :
     if isinstance(periods, list):
         # Return statistics on multiple outputs for multiple periods/IIDs
         # check that IIDS is also a list
-        if isinstance(IIDs, list):
+        if isinstance(iids, list):
             # some checks on the data types...
-            if len(IIDs) != len(periods):
-                raise ValueError(f"Length of IIDs list ({len(IIDs)}) does not match the list of periods ({len(periods)}).")
-            if not logical_check(IIDs):
+            if len(iids) != len(periods):
+                raise ValueError(f"Length of IIDs list ({len(iids)}) does not match the list of periods ({len(periods)}).")
+            if not logical_check(iids):
                 raise ValueError("List of IIDs must only be logicals (0 or 1).")
 
             vrs = []
             for (i, p) in enumerate(periods):
-                robust = True if IIDs[i] == 0 else False 
+                robust = True if iids[i] == 0 else False 
                 vr = VarianceRatio(y, lags=p, robust=robust)
                 vrs.append(vr)
             all_pvals = np.array([p.pvalue for p in vrs])
@@ -60,16 +60,16 @@ def VarianceRatioTest(y : ArrayLike, periods : Union[int, list[int]] = 2, IIDs :
             iminp = np.argmin(all_pvals)
             out['periodmaxpValue'] = periods[imaxp]
             out['periodminpValue'] = periods[iminp]
-            out['IIDperiodmaxpValue'] = IIDs[imaxp]
-            out['IIDperiodminpValue'] = IIDs[iminp]
+            out['IIDperiodmaxpValue'] = iids[imaxp]
+            out['IIDperiodminpValue'] = iids[iminp]
 
             out['meanstat'] = np.mean(all_stats)
             out['maxstat'] = np.max(all_stats)
             out['minstat'] = np.min(all_stats)
         else:
-            raise ValueError(f"Expected IIDs to be a list of bools, since periods are also a list. Got data type: {type(IIDs)} instead.")
+            raise ValueError(f"Expected iids to be a list of bools, since periods are also a list. Got data type: {type(iids)} instead.")
     elif isinstance(periods, int):
-        robust = True if IIDs == 0 else False 
+        robust = True if iids == 0 else False 
         vr = VarianceRatio(y, lags=periods, robust=robust)
         out = {}
         out['pValue'] = vr.pvalue
@@ -80,7 +80,7 @@ def VarianceRatioTest(y : ArrayLike, periods : Union[int, list[int]] = 2, IIDs :
 
     return out
 
-def HypothesisTest(x : ArrayLike, theTest: str = "signtest") -> float:
+def hypothesis_test(x : ArrayLike, the_test: str = "signtest") -> float:
     """
     Perform statistical hypothesis testing on a time series.
 
@@ -91,7 +91,7 @@ def HypothesisTest(x : ArrayLike, theTest: str = "signtest") -> float:
     ----------
     x : ArrayLike
         Input time series
-    theTest : str, optional
+    the_test : str, optional
         Type of hypothesis test to perform:
         - 'signtest': Tests if median equals zero
         - 'runstest': Tests for randomness in sequence
@@ -109,27 +109,27 @@ def HypothesisTest(x : ArrayLike, theTest: str = "signtest") -> float:
     """
     x = np.asarray(x)
     p = np.nan
-    if theTest == "signtest":
+    if the_test == "signtest":
         _, p = sign_test(x)
-    elif theTest == "runstest":
+    elif the_test == "runstest":
         _, p = runstest_1samp(x, cutoff='mean', correction=True)
-    elif theTest == "jbtest":
+    elif the_test == "jbtest":
         s = jarque_bera(x)
         p = s.pvalue
-    elif theTest == "ztest":
-        xmean = np.mean(x)
+    elif the_test == "ztest":
+        x_mean = np.mean(x)
         n = len(x)
         sigma = 1
-        zval = (xmean - 0) / (sigma / np.sqrt(n))
+        zval = (x_mean - 0) / (sigma / np.sqrt(n))
         p = 2 * norm.cdf(-abs(zval))
-    elif theTest == "signrank":
+    elif the_test == "signrank":
         _, p = wilcoxon(x)
-    elif theTest == "lbq":
+    elif the_test == "lbq":
         # Ljung-Box Q-test for residual autocorrelation
         T = np.sum(~np.isnan(x)) # get the effective sample size
-        nLags = min(20, T-1)
-        p = acorr_ljungbox(x, lags=[nLags])['lb_pvalue'].to_numpy()[0]
+        n_lags = min(20, T-1)
+        p = acorr_ljungbox(x, lags=[n_lags])['lb_pvalue'].to_numpy()[0]
     else:
-        raise ValueError(f"Unknown test: {theTest}.")
+        raise ValueError(f"Unknown test: {the_test}.")
     
     return p

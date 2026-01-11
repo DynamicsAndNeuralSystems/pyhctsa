@@ -1560,32 +1560,33 @@ Wavelet:
     hctsa_name: WL_fBM
     ordered_args: 
   
-HypothesisTests:
-  HypothesisTest:
-    base_name: HypothesisTest
-    labels:
-      - hypothesistest 
+hypothesis_tests:
+  hypothesis_test:
+    base_name: hypothesis_test
     dependencies:
     configs:
-      - theTest: ['signtest', 'lbq', 'signrank', 'ztest']
-        zscore: True
-      - theTest: ['runstest', 'lbq', 'jbtest']
-        zscore: False
-    hctsa_name: HT_HypothesisTest
-    ordered_args: ["theTest"]
+      - {the_test: 'signtest', zscore: True}
+      - {the_test: 'lbq', zscore: True}
+      - {the_test: 'signrank', zscore: True}
+      - {the_test: 'ztest', zscore: True}
 
-  VarianceRatioTest:
-    base_name: VarRatioTest
-    labels:
-      - hypothesistest
+      - {the_test: 'runstest', zscore: False}
+      - {the_test: 'lbq', zscore: False}
+      - {the_test: 'jbtest', zscore: False}
+    legacy_name: HT_HypothesisTest
+    ordered_args: ['the_test']
+  
+  variance_ratio_test:
+    base_name: variance_ratio_test
     dependencies:
       - arch
     configs:
-      - periods: [2, 4]
-        IIDs: [0, 1]
-        zscore: True
-    hctsa_name: SY_VarRatioTest
-    ordered_args: ['periods', 'IIDs']
+      - {periods: 2, iids: 0, zscore: True}
+      - {periods: 4, iids: 0, zscore: True}
+      - {periods: 2, iids: 1, zscore: True}
+      - {periods: 4, iids: 1, zscore: True}
+    legacy_name: SY_VarRatioTest
+    ordered_args: ['periods', 'iids']
 
 Spectral:
   SpectralSummaries:
