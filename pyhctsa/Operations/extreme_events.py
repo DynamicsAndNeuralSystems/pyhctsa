@@ -1,19 +1,22 @@
 import numpy as np
 from numpy.typing import ArrayLike
 
-def MovingThreshold(y : ArrayLike, a : float = 1.0, b : float = 0.1) -> dict:
+def moving_threshold(y : ArrayLike, a : float = 1.0, b : float = 0.1) -> dict:
     """
     Moving threshold model for extreme events in a time series.
 
-    Inspired by an idea contained in:
-    "Reactions to extreme events: Moving threshold model"
-    Altmann et al., Physica A 364, 435--444 (2006)
+    Inspired by an idea contained in Altmann et al. (2006) [1].
 
     This algorithm uses the occurrence of extreme events to modify a hypothetical 
     'barrier' that classifies new points as 'extreme' or not. The barrier begins 
     at sigma (standard deviation), and if the absolute value of the next data point
     is greater than the barrier, the barrier is increased by a proportion 'a',
     otherwise the position of the barrier is decreased by a proportion 'b'.
+
+    References
+    ----------
+    .. [1] "Reactions to extreme events: Moving threshold model"
+        Altmann et al., Physica A 364, 435--444 (2006)
 
     Parameters
     ----------
@@ -67,10 +70,10 @@ def MovingThreshold(y : ArrayLike, a : float = 1.0, b : float = 0.1) -> dict:
     }
 
     # Kicks (when the barrier is changed due to extreme event)
-    fkicks = np.argwhere(kicks > 0).flatten()
-    Ikicks = np.diff(fkicks)
-    out['stdkicks'] = np.std(Ikicks, ddof=1)
-    out['meankickf'] = np.mean(Ikicks)
-    out['mediankicksf'] = np.median(Ikicks)
+    f_kicks = np.argwhere(kicks > 0).flatten()
+    i_kicks = np.diff(f_kicks)
+    out['stdkicks'] = np.std(i_kicks, ddof=1)
+    out['meankickf'] = np.mean(i_kicks)
+    out['mediankicksf'] = np.median(i_kicks)
 
     return out

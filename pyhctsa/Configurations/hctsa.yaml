@@ -44,22 +44,17 @@ Medical:
       - zscore: False
     hctsa_name: MD_rawHRVmeas
     
-ExtremeEvents:
-  MovingThreshold:
-    base_name: MovingThreshold
-    labels:
-      - outliers
-      - ExtremeEvents
+extreme_events:
+  moving_threshold:
+    base_name: moving_threshold
     dependencies:
     configs:
-      - a: 0.1
-        b: [0.1, 0.02]
-        zscore: True
-      - a: 1.0
-        b: [0.1, 0.02]
-        zscore: True
-    hctsa_name: EX_MovingThreshold
-    ordered_args: ["a", "b"]
+      - {a: 0.1, b: 0.1, zscore: True}
+      - {a: 0.1, b: 0.02, zscore: True}
+      - {a: 1.0, b: 0.1, zscore: True}
+      - {a: 1.0, b: 0.02, zscore: True}
+    legacy_name: EX_MovingThreshold
+    ordered_args: ['a', 'b']
 
 Criticality:
   RAD:
@@ -1716,17 +1711,15 @@ ModelFit:
     hctsa_name: MF_hmm_fit
     ordered_args: ["trainp", "numStates"]
   
-Graph:
-  VisibilityGraph:
-    base_name: VisibilityGraph
-    labels:
-      - graph
+graph:
+  visibility_graph:
+    base_name: visibility_graph
     dependencies:
       - ts2vg
     configs:
-      - meth: ['horiz', 'norm']
-        zscore: True
-    hctsa_name: NW_VisibilityGraph
+      - {meth: 'horiz', zscore: True}
+      - {meth: 'norm', zscore: True}
+    legacy_name: NW_VisibilityGraph
     ordered_args: ['meth']
 
 Physics:

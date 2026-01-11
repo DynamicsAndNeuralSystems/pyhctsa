@@ -1,13 +1,11 @@
-Graph:
-  VisibilityGraph:
-    base_name: VisibilityGraph
-    labels:
-      - graph
+graph:
+  visibility_graph:
+    base_name: visibility_graph
     dependencies:
       - ts2vg
     configs:
-      - meth: ['horiz', 'norm']
-        zscore: True
-    hctsa_name: NW_VisibilityGraph
+      - {meth: 'horiz', zscore: True}
+      - {meth: 'norm', zscore: True}
+    legacy_name: NW_VisibilityGraph
     ordered_args: ['meth']
     

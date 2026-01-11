@@ -46,11 +46,21 @@ def _horiz_vgraph(ts_data : ArrayLike) -> ArrayLike:
     
     return A
 
-def VisibilityGraph(y : ArrayLike, meth : str = 'horiz', maxL : int = 5000) -> dict:
+def visibility_graph(y : ArrayLike, meth : str = 'horiz', max_l : int = 5000) -> dict:
     """
     Visibility graph analysis of a time series.
 
     Constructs a visibility graph of the time series and returns various statistics on the properties of the resulting network.
+    cf. [1] and [2].
+
+    References
+    ----------
+    .. [1] "From time series to complex networks: The visibility graph"
+            Lacasa, Lucas and Luque, Bartolo and Ballesteros, Fernando and Luque, Jordi
+            and Nuno, Juan Carlos P. Natl. Acad. Sci. USA. 105(13) 4972 (2008)
+    .. [2] "Horizontal visibility graphs: Exact results for random time series"
+            Luque, B. and Lacasa, L. and Ballesteros, F. and Luque, J.
+            Phys. Rev. E. 80(4) 046103 (2009)
     
     Parameters
     ----------
@@ -61,9 +71,9 @@ def VisibilityGraph(y : ArrayLike, meth : str = 'horiz', maxL : int = 5000) -> d
         - 'horiz': Uses horizontal visibility (only horizontal lines link nodes)
         - 'norm': Uses natural visibility (standard visibility definition)
         Default is 'horiz'.
-    maxL : int, optional
+    max_l : int, optional
         Maximum number of samples to analyze. Longer time series are truncated
-        to first maxL points. Default is 5000.
+        to first max_l points. Default is 5000.
 
     Returns
     -------
@@ -72,10 +82,10 @@ def VisibilityGraph(y : ArrayLike, meth : str = 'horiz', maxL : int = 5000) -> d
     """
     y = np.asarray(y)
     N = len(y)
-    if N > maxL:
+    if N > max_l:
         # too long to store in memory
-        print(f"Time series ({N} > {maxL}) is too long for visibility graph. Analyzing the first {maxL} samples.")
-        y = y[:maxL]
+        print(f"Time series ({N} > {max_l}) is too long for visibility graph. Analyzing the first {max_l} samples.")
+        y = y[:max_l]
         N = len(y)
     y = y - np.min(y) # adjust so that the minimum of y is at zero
 
@@ -115,7 +125,6 @@ def VisibilityGraph(y : ArrayLike, meth : str = 'horiz', maxL : int = 5000) -> d
     #Using likelihood now:
     out['gaussnlogL'] = -np.sum(norm.logpdf(k, loc=np.mean(k), scale=np.std(k, ddof=1)))
     out['expnlogL'] = -np.sum(expon.logpdf(k, scale=np.mean(k)))
-    
 
     # Autocorr
     out['kac1'] = autocorr(k, 1, 'Fourier')[0]
