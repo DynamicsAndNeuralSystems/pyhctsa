@@ -14,30 +14,34 @@ from ..Operations.correlation import first_crossing
 from ..Toolboxes.Michael_Small import shannon
 from ..Toolboxes.Max_Little import close_returns as _close_returns_c
 
-def ShannonEntropy(y : ArrayLike, numBins : Union[int, list[int]] = 2, depth : Union[int, list[int]] = 3) -> Union[float, dict, None]:
+def shannon_entropy(
+    y: ArrayLike,
+    num_bins: Union[int, list[int]] = 2,
+    depth: Union[int, list[int]] = 3
+) -> Union[float, dict, None]:
     """
     Approximate Shannon entropy of a time series.
 
-    Uses a numBin-bin encoding and depth-symbol sequences.
+    Uses a num_bins-bin encoding and depth-symbol sequences.
     Uniform population binning is used, and the implementation uses Michael Small's code
     MS_shannon.c.
 
-    Reference
-    ---------
-    M. Small, Applied Nonlinear Time Series Analysis: Applications in Physics,
-    Physiology, and Finance (book) World Scientific, Nonlinear Science Series A,
-    Vol. 52 (2005).
-    Michael Small's code is available at http://small.eie.polyu.edu.hk/matlab/
-
     In this wrapper function, you can evaluate the code at a given n and d, and
-    also across a range of depth and numBin to return statistics on how the obtained
+    also across a range of depth and num_bins to return statistics on how the obtained
     entropies change.
+
+    References
+    ----------
+    .. [1] M. Small, Applied Nonlinear Time Series Analysis: Applications in Physics,
+        Physiology, and Finance (book) World Scientific, Nonlinear Science Series A,
+        Vol. 52 (2005).
+    .. [2] Michael Small's code is available at http://small.eie.polyu.edu.hk/matlab/
 
     Parameters
     ----------
     y : array-like
         The input time series.
-    numBins : int or list of int, optional
+    num_bins : int or list of int, optional
         The number of bins to discretize the time series into (i.e., alphabet size).
     depth : int or list of int, optional
         The length of strings to analyze.
@@ -49,19 +53,20 @@ def ShannonEntropy(y : ArrayLike, numBins : Union[int, list[int]] = 2, depth : U
         (max, min, median, mean, std) across a range of numBins or depths.
     """
     y = np.asarray(y)
-    binRangeSize = np.size(numBins)
-    depthRangeSize = np.size(depth)
+    bin_range_size = np.size(num_bins)
+    depth_range_size = np.size(depth)
     out = None
-    if binRangeSize == 1:
-        if depthRangeSize == 1:
+
+    if bin_range_size == 1:
+        if depth_range_size == 1:
             # %% Evaluate the shannon entropy of discretization - scales with depth, so it's nice to normalize by this factor
-            out = shannon.entropy(y, numBins, depth) / depth
-        elif depthRangeSize > 1:
+            out = shannon.entropy(y, num_bins, depth) / depth
+        elif depth_range_size > 1:
             # % Range over depths specified in the vector and return statistics on results
-            numDepths = depthRangeSize
-            ents = np.zeros(numDepths)
-            for i in range(numDepths):
-                ents[i] = shannon.entropy(y, numBins, depth[i]) / depth[i]
+            num_depths = depth_range_size
+            ents = np.zeros(num_depths)
+            for i in range(num_depths):
+                ents[i] = shannon.entropy(y, num_bins, depth[i]) / depth[i]
             out = {}
             #% Output statistics on variation across the range tested:
             out['maxent'] = np.max(ents)
@@ -69,24 +74,30 @@ def ShannonEntropy(y : ArrayLike, numBins : Union[int, list[int]] = 2, depth : U
             out['medent'] = np.median(ents)
             out['meanent'] = np.mean(ents)
             out['stdent'] = np.std(ents, ddof=1)
-    elif binRangeSize > 1:
-        if depthRangeSize == 1:
+
+    elif bin_range_size > 1:
+        if depth_range_size == 1:
             #%% (*) Statistics over different bin numbers (constant depth)
-            ents = np.zeros(binRangeSize)
-            for i in range(binRangeSize):
-                ents[i] = shannon.entropy(y, numBins[i], depth)
+            ents = np.zeros(bin_range_size)
+            for i in range(bin_range_size):
+                ents[i] = shannon.entropy(y, num_bins[i], depth)
             out = {}
             out['maxent'] = np.max(ents)
             out['minent'] = np.min(ents)
             out['medent'] = np.median(ents)
             out['meanent'] = np.mean(ents)
             out['stdent'] = np.std(ents, ddof=1)
-        elif depthRangeSize > 1:
+        elif depth_range_size > 1:
             raise NotImplementedError("Comparing both bins and depth not implemented.")
-    
-    return out 
 
-def DistributionEntropy(y : ArrayLike, histOrKS : str = 'hist', numBins : int = 10, olremp : float = 0) -> float:
+    return out
+
+def distribution_entropy(
+    y: ArrayLike,
+    hist_or_ks: str = 'hist',
+    num_bins: int = 10,
+    olremp: float = 0
+) -> float:
     """
     Distributional entropy.
 
@@ -101,76 +112,86 @@ def DistributionEntropy(y : ArrayLike, histOrKS : str = 'hist', numBins : int = 
     ----------
     y : array-like
         The input time series.
-    histOrKS : str, optional
-        'hist' for histogram, or 'ks' for kernel density estimation.
-    numBins : int or float, optional
-        For 'hist': an integer, uses a histogram with that many bins.
-        For 'ks': a positive real number, the width parameter for kernel density estimation
-        (can also be empty for default width parameter, optimum for Gaussian).
+    hist_or_ks : str
+        Whether to use a histogram ('hist') or kernel-smoothed ('ks') distribution.
+    num_bins : int or list of int, optional
+        (for 'hist'): an integer, uses a histogram with that many bins
+        (for 'ks'): a positive real number, for the bandwidth parameter for the kernel density estimate.
     olremp : float, optional
-        The proportion of outliers at both extremes to remove (e.g., if olremp = 0.01,
-        keeps only the middle 98% of data; 0 keeps all data). This parameter should be
-        less than 0.5. If specified, returns the difference in entropy from removing
-        the outliers.
+        The proportion of outliers at both extremes to remove.
+        (e.g., if olremp = 0.01; keeps only the middle 98% of data; 0 keeps all data. 
+        This parameter ought to be less than 0.5, which keeps none of the data).
 
     Returns
     -------
     float
-        The estimated entropy, or the difference in entropy if outlier removal is used.
+        Estimate of entropy from the distribution.
     """
     # (1) Remove outliers?
     y = np.asarray(y)
     if olremp != 0:
-        yHat = y[(y >= np.quantile(y, olremp, method='hazen')) & (y <= np.quantile(y, 1-olremp, method='hazen'))]
-        if yHat.size == 0:
+        y_hat = y[
+            (y >= np.quantile(y, olremp, method='hazen')) &
+            (y <= np.quantile(y, 1 - olremp, method='hazen'))
+        ]
+        if y_hat.size == 0:
             return np.nan
         else:
-            out = DistributionEntropy(y, histOrKS, numBins) - DistributionEntropy(yHat, histOrKS, numBins)
+            out = (
+                distribution_entropy(y, hist_or_ks, num_bins)
+                - distribution_entropy(y_hat, hist_or_ks, num_bins)
+            )
             return out
+
     # (2) Form the histogram
-    if histOrKS == 'hist':
+    if hist_or_ks == 'hist':
         # use histogram to calculate pdf
-        if isinstance(numBins, int):
-            binEdges = binpicker(y.min(), y.max(), nbins=numBins)
-            px = histc(y, binEdges)
+        if isinstance(num_bins, int):
+            bin_edges = binpicker(y.min(), y.max(), nbins=num_bins)
+            px = histc(y, bin_edges)
             px = np.divide(px, np.sum(px))[:-1]
-        elif numBins in ['sturges', 'fd', 'sqrt', 'auto']:
-            binEdges = np.histogram_bin_edges(y, bins=numBins)
-            px = histc(y, binEdges)[:-1]
+        elif num_bins in ['sturges', 'fd', 'sqrt', 'auto']:
+            bin_edges = np.histogram_bin_edges(y, bins=num_bins)
+            px = histc(y, bin_edges)[:-1]
             px = np.divide(px, np.sum(px))
         else:
-            raise ValueError(f"Unknown binning method: {numBins}. Choose either a valid rule or manually specify numBins.")
-        binWidths = np.diff(binEdges)
-    elif histOrKS == 'ks':
+            raise ValueError(
+                f"Unknown binning method: {num_bins}. Choose either a valid rule or manually specify numBins."
+            )
+        bin_widths = np.diff(bin_edges)
+
+    elif hist_or_ks == 'ks':
         # use kernel density estimate to calculate pdf
-        if isinstance(numBins, float):
-            #uses specified width
-            bw = numBins
+        if isinstance(num_bins, float):
+            # uses specified width
+            bw = num_bins
             kde = gaussian_kde(y, bw_method=bw)
-            xr = np.linspace(min(y) - 3 * bw, max(y) + 3 * bw, 100) # 3 x bandwidth padding
+            xr = np.linspace(min(y) - 3 * bw, max(y) + 3 * bw, 100)  # 3 x bandwidth padding
             px = kde(xr)
-        elif numBins in ['', ' ', '[]', 'none']:
+        elif num_bins in ['', ' ', '[]', 'none']:
             # determine the optimal width
-            kde = gaussian_kde(y, bw_method='silverman') # normal-approx equivalent as per docs
+            kde = gaussian_kde(y, bw_method='silverman')  # normal-approx equivalent as per docs
             actual_bw = kde.factor * np.std(y)  # Convert factor to actual bandwidth
             xr = np.linspace(min(y) - 3 * actual_bw, max(y) + 3 * actual_bw, 100)
             px = kde(xr)
         else:
-            raise ValueError(f"Unknown type for {numBins}. Either set to a float (which specifies the width, or leave empty.)")
-        binWidths = np.ones(len(px)) * (xr[1] - xr[0])
+            raise ValueError(
+                f"Unknown type for {num_bins}. Either set to a float (which specifies the width, or leave empty.)"
+            )
+        bin_widths = np.ones(len(px)) * (xr[1] - xr[0])
 
     # (3) Compute the entropy sum and return it as output
-    P = px[px>0]
-    logP = np.log(px[px>0]/binWidths[px>0])
+    p = px[px > 0]
+    log_p = np.log(px[px > 0] / bin_widths[px > 0])
 
-    return -np.sum(P * logP)
+    return -np.sum(p * log_p)
 
-def MultiScaleEntropy(
+def multi_scale_entropy(
     y: ArrayLike,
-    scaleRange: Optional[Union[list, range]] = None,
+    scale_range: Optional[Union[list, range]] = None,
     m: int = 2,
     r: float = 0.15,
-    preProcessHow: Optional[str] = None
+    pre_process_how: Optional[str] = None
 ) -> dict:
     """
     Compute multiscale entropy (MSE) of a time series using sample entropy across multiple scales.
@@ -179,13 +200,13 @@ def MultiScaleEntropy(
     ----------
     y : array-like
         Input time series (list or NumPy array).
-    scaleRange : list or range, optional
+    scale_range : list or range, optional
         List or range of scales (window sizes) to use for coarse-graining. Default is range(1, 11).
     m : int, optional
         Embedding dimension for sample entropy (default: 2).
     r : float, optional
         Similarity threshold for sample entropy (default: 0.15).
-    preProcessHow : str, optional
+    pre_process_how : str, optional
         Preprocessing method. Supported:
             - 'diff1': Use z-scored first differences.
             - 'rescale_tau': Rescale using autocorrelation time.
@@ -198,26 +219,26 @@ def MultiScaleEntropy(
             - 'maxSampEn', 'maxScale', 'minSampEn', 'minScale', 'meanSampEn', 'stdSampEn', 'cvSampEn', 'meanch'
     """
     y = np.asarray(y)
-    if scaleRange is None:
-        scaleRange = range(1, 10)
+    if scale_range is None:
+        scale_range = range(1, 10)
     minTsLength = 20
-    numScales = len(scaleRange)
+    numScales = len(scale_range)
 
-    if preProcessHow is not None:
-        if preProcessHow == 'diff1':
+    if pre_process_how is not None:
+        if pre_process_how == 'diff1':
             y = ZScore(np.diff(y))
-        elif preProcessHow == 'rescale_tau':
+        elif pre_process_how == 'rescale_tau':
             tau = first_crossing(y, 'ac', 0, 'discrete')
             y_buffer = make_buffer(y, tau)
             y = np.mean(y_buffer, 1)
             y = ZScore(y)
         else:
-            raise ValueError(f"Unknown preprocessing setting: {preProcessHow}")    
+            raise ValueError(f"Unknown preprocessing setting: {pre_process_how}")    
     
     # Coarse-graining across scales
     y_cg = []
     for i in range(numScales):
-        buffer_size = scaleRange[i]
+        buffer_size = scale_range[i]
         y_buffer = make_buffer(y, buffer_size)
         y_cg.append(np.mean(y_buffer, 1))
     
@@ -233,15 +254,15 @@ def MultiScaleEntropy(
 
     # Outputs: multiscale entropy
     if np.all(np.isnan(samp_ens)):
-        if preProcessHow:
-            pp_text = f"after {preProcessHow} pre-processing"
+        if pre_process_how:
+            pp_text = f"after {pre_process_how} pre-processing"
         else:
             pp_text = ""
         print(f"Warning: Not enough samples ({len(y)} {pp_text}) to compute SampEn at multiple scales")
         return {'out': np.nan}
 
     # Output raw values
-    out = {f'sampen_s{scaleRange[i]}': samp_ens[i] for i in range(numScales)}
+    out = {f'sampen_s{scale_range[i]}': samp_ens[i] for i in range(numScales)}
 
      # Summary statistics of the variation
     max_samp_en = np.nanmax(samp_ens)
@@ -251,9 +272,9 @@ def MultiScaleEntropy(
 
     out.update({
         'maxSampEn': max_samp_en,
-        'maxScale': scaleRange[max_ind],
+        'maxScale': scale_range[max_ind],
         'minSampEn': min_samp_en,
-        'minScale': scaleRange[min_ind],
+        'minScale': scale_range[min_ind],
         'meanSampEn': np.nanmean(samp_ens),
         'stdSampEn': np.nanstd(samp_ens, ddof=1),
         'cvSampEn': np.nanstd(samp_ens, ddof=1) / np.nanmean(samp_ens),
@@ -262,7 +283,7 @@ def MultiScaleEntropy(
 
     return out
 
-def SampleEntropy(y: ArrayLike, M: int = 2, r: Optional[float] = None, preProcessHow: Optional[str] = None) -> dict:
+def sample_entropy(y: ArrayLike, M: int = 2, r: Optional[float] = None, preProcessHow: Optional[str] = None) -> dict:
     """
     Compute Sample Entropy (SampEn) of a time series.
 
