@@ -514,154 +514,155 @@ Information:
     hctsa_name: CO_FirstMin
     ordered_args: ["minWhat", "extraParam", "minNotMax"]
 
-Entropy:
-  DistributionEntropy:
-    base_name: DistributionEntropy
-    labels:
-      - entropy
+entropy:
+
+  distribution_entropy:
+    base_name: distribution_entropy
     dependencies:
-      - jpype1
     configs:
-      - histOrKS: 'ks'
-        numBins: [0.01, 0.1, 0.5, 1.0]
-        olremp: 0
-        zscore: True
-      - histOrKS: 'ks'
-        numBins: ''
-        olremp: [0.01, 0.02, 0.05, 0.1, 0.2, 0.3]
-        zscore: True 
-      - histOrKS: 'hist'
-        numBins: [5, 10, 20, 50, 'sqrt', 'fd', 'sturges']
-        olremp: 0
-        zscore: True 
-      - histOrKS: 'hist'
-        numBins: 10
-        olremp: [0.01, 0.02, 0.05, 0.1, 0.2, 0.3]
-        zscore: True 
-    hctsa_name: EN_DistributionEntropy
-    ordered_args: ['histOrKS', 'numBins', 'olremp']
+      - {hist_or_ks: 'ks', num_bins: 0.01, olremp: 0, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: 0.1, olremp: 0, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: 0.5, olremp: 0, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: 1.0, olremp: 0, zscore: True}
+
+      - {hist_or_ks: 'ks', num_bins: '', olremp: 0.01, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: '', olremp: 0.02, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: '', olremp: 0.05, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: '', olremp: 0.1, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: '', olremp: 0.2, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: '', olremp: 0.3, zscore: True}
+
+      - {hist_or_ks: 'hist', num_bins: 5, olremp: 0, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 20, olremp: 0, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 50, olremp: 0, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 'sqrt', olremp: 0, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 'fd', olremp: 0, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 'sturges', olremp: 0, zscore: True}
+      
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.01, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.02, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.05, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.1, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.2, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.3, zscore: True}
+    legacy_name: EN_DistributionEntropy
+    ordered_args: ['hist_or_ks', 'num_bins', 'olremp']
   
-  PermEn:
-    labels:
-      - entropy
-      - symbolic
-      - ordinal
-    dependencies: 
+  permutation_entropy:
+    base_name: permutation_entropy
+    dependencies:
+      - antropy 
     configs:
-      - m: [2, 3, 4, 5]
-        tau: 1
-        zscore: True
-      - m: [2, 3, 4, 5]
-        tau: 2
-        zscore: True
-    hctsa_name: EN_PermEn
+      - {m: 2, tau: 1, zscore: True}
+      - {m: 3, tau: 1, zscore: True}
+      - {m: 4, tau: 1, zscore: True}
+      - {m: 5, tau: 1, zscore: True}
+
+      - {m: 2, tau: 2, zscore: True}
+      - {m: 3, tau: 2, zscore: True}
+      - {m: 4, tau: 2, zscore: True}
+      - {m: 5, tau: 2, zscore: True}
+
+      - {m: 2, tau: 'ac', zscore: True}
+      - {m: 3, tau: 'ac', zscore: True}
+      - {m: 4, tau: 'ac', zscore: True}
+      - {m: 5, tau: 'ac', zscore: True}
+    legacy_name: EN_PermEn
     ordered_args: ['m', 'tau']
-    
-  LZComplexity:
-    base_name: LZcomplexity
-    labels:
-      - entropy
-      - symbolic
+
+  lempel_ziv_complexity:
+    base_name: lempel_ziv_complexity
     dependencies:
     configs:
-      - nbits: !range [2, 10]
-        preProc: [[], 'diff']
-        zscore: True
-    hctsa_name: EN_MS_LZcomplexity
-    ordered_args: ['nbits', 'preProc']
+      - {n_bits: 2, zscore: True}
+      - {n_bits: 3, zscore: True}
+      - {n_bits: 4, zscore: True}
+      - {n_bits: 5, zscore: True}
+      - {n_bits: 6, zscore: True}
+      - {n_bits: 7, zscore: True}
+      - {n_bits: 8, zscore: True}
+      - {n_bits: 9, zscore: True}
+      - {n_bits: 10, zscore: True}
+
+      - {n_bits: 2, pre_proc: 'diff', zscore: True}
+      - {n_bits: 3, pre_proc: 'diff', zscore: True}
+      - {n_bits: 4, pre_proc: 'diff', zscore: True}
+      - {n_bits: 5, pre_proc: 'diff', zscore: True}
+      - {n_bits: 6, pre_proc: 'diff', zscore: True}
+      - {n_bits: 7, pre_proc: 'diff', zscore: True}
+      - {n_bits: 8, pre_proc: 'diff', zscore: True}
+      - {n_bits: 9, pre_proc: 'diff', zscore: True}
+      - {n_bits: 10, pre_proc: 'diff',  zscore: True}
+    legacy_name: EN_MS_LZcomplexity
+    ordered_args: ['n_bits', 'pre_proc']
   
-  ComplexityInvariantDistance:
-    base_name: CID
-    labels:
-      - entropy
+  complexity_invariant_distance:
+    base_name: complexity_invariant_distance
     dependencies:
     configs:
-      - zscore: True
-    hctsa_name: EN_CID
+      - {zscore: True}
+    legacy_name: EN_CID
   
-  ApproximateEntropy:
-    base_name: ApEn
-    labels:
-      - entropy
+  approximate_entropy:
+    base_name: approximate_entropy
     dependencies:
     configs:
-      - mnom: [1, 2]
-        rth: [0.1, 0.2]
-        zscore: True
-    hctsa_name: EN_ApEn
+      - {mnom: 1, rth: 0.1, zscore: True}
+      - {mnom: 2, rth: 0.1, zscore: True}
+      - {mnom: 1, rth: 0.2, zscore: True}
+      - {mnom: 2, rth: 0.2, zscore: True}
+    legacy_name: EN_ApEn
     ordered_args: ['mnom', 'rth']
 
-  RPDE:
+  rpde:
     base_name: rpde
-    labels:
-      - entropy
     dependencies:
     configs:
-      - m: 3
-        tau: 1
-        zscore: True
-    hctsa_name: EN_rpde
+      - {m: 3, tau: 1, zscore: True}
+      - {m: 3, tau: 'ac', zscore: True}
+    legacy_name: EN_rpde
     ordered_args: ['m', 'tau']
   
-  SampleEntropy:
-    base_name: SampEn
-    labels:
-      - entropy
+  sample_entropy:
+    base_name: sample_entropy
     dependencies:
     configs:
-      - M: 5
-        r: [0.05, 0.1, 0.15, 0.2, 0.3]
-        preProcessHow: ''
-        zscore: True
-      - M: 5
-        r: [0.1, 0.2]
-        preProcessHow: 'diff1'
-        zscore: True
-    hctsa_name: EN_SampEn
-    ordered_args: ['M', 'r', 'preProcessHow']
+      - {m: 5, r: 0.05, zscore: True}
+      - {m: 5, r: 0.1, zscore: True}
+      - {m: 5, r: 0.15, zscore: True}
+      - {m: 5, r: 0.2, zscore: True}
+      - {m: 5, r: 0.3, zscore: True}
+      - {m: 5, r: 0.1, pre_process_how: 'diff1', zscore: True}
+      - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True}
+    legacy_name: EN_SampEn
+    ordered_args: ['m', 'r', 'pre_process_how']
 
-  MultiScaleEntropy:
-    base_name: mse
-    labels:
-      - entropy
-      - intensive
+  multi_scale_entropy:
+    base_name: multi_scale_entropy
     dependencies:
     configs:
-      - scaleRange: [!range [1, 10]]
-        m: 2
-        r: 0.15
-        preProcessHow: ['diff1', 'rescale_tau']
-        zscore: True
-      - scaleRange: [!range [1, 10]]
-        m: 2
-        r: 0.15
-        zscore: True
-        preProcessHow:
-    hctsa_name: EN_mse
-    ordered_args: ['scaleRange', 'm', 'r', 'preProcessHow']
+      - {scale_range: [!range [1, 10]], m: 2, r: 0.15, pre_process_how: 'diff1', zscore: True}
+      - {scale_range: [!range [1, 10]], m: 2, r: 0.15, pre_process_how: 'rescale_tau', zscore: True}
+      - {scale_range: [!range [1, 10]], m: 2, r: 0.15, zscore: True}
+    legacy_name: EN_mse
+    ordered_args: ['scale_range', 'm', 'r', 'pre_process_how']
   
-  ShannonEntropy:
-    base_name: shannon
-    labels:
-      - entropy
-      - shannon
-      - C 
+  shannon_entropy:
+    base_name: shannon_entropy
     dependencies:
     configs:
-      - numBins: 2
-        depth: [2, 3]
-        zscore: True
-      - numBins: 3
-        depth: 2
-        zscore: True
-      - numBins: [!range [2, 10]]
-        depth: [2, 3, 4]
-        zscore: True
-      - numBins: [2, 3, 4]
-        depth: [!range [1, 10]]
-        zscore: True
-    hctsa_name: EN_MS_shannon
-    ordered_args: ["numBins", "depth"]
+      - {num_bins: 2, depth: 2, zscore: True}
+      - {num_bins: 2, depth: 3, zscore: True}
+      - {num_bins: 3, depth: 2, zscore: True}
+      - {num_bins: [[2, 3, 4, 5, 6, 7, 8, 9, 10]], depth: 2, zscore: True}
+      - {num_bins: [[2, 3, 4, 5, 6, 7, 8, 9, 10]], depth: 3, zscore: True}
+      - {num_bins: [[2, 3, 4, 5, 6, 7, 8, 9, 10]], depth: 4, zscore: True}
+      - {num_bins: 2, depth: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], zscore: True}
+      - {num_bins: 3, depth: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], zscore: True}
+      - {num_bins: 4, depth: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], zscore: True}
+    legacy_name: EN_MS_shannon
+    ordered_args: ['num_bins', 'depth']
   
 Stationarity:
   StatAv:

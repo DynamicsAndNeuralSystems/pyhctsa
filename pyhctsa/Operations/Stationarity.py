@@ -9,11 +9,10 @@ from scipy.stats import skew, kurtosis, gaussian_kde
 from statsmodels.tsa.stattools import kpss
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 
-from ..Operations.Entropy import ApproximateEntropy, SampleEntropy, DistributionEntropy
+from ..Operations.entropy import approximate_entropy, sample_entropy, distribution_entropy
 from ..Operations.correlation import autocorr, first_crossing
 from ..Utilities.utils import make_mat_buffer, ZScore, signChange
 from ..Operations.distribution import moments
-from ..Operations.Entropy import DistributionEntropy
 
 def LocalDistributions(y : ArrayLike, numSegs : int = 5, eachOrPar : str = 'par', numPoints : int = 200) -> dict:
     """
@@ -140,7 +139,7 @@ def DynWin(y : ArrayLike, maxNumSegments : int = 10) -> dict:
             qs[j, 1] = np.std(ySub, ddof=1)
             qs[j, 2] = skew(ySub)
             qs[j, 3] = kurtosis(ySub)
-            sampenOut = SampleEntropy(ySub, 2, 0.15)
+            sampenOut = sample_entropy(ySub, 2, 0.15)
             qs[j, 4] = sampenOut['quadSampEn1'] # SampEn_1_015
             #qs[j, 5] = sampenOut['quadSampEn2'] # SampEn_2_015
             qs[j, 6] = autocorr(ySub, 1, 'Fourier')[0] # AC1
@@ -706,7 +705,7 @@ def LocalGlobal(y : ArrayLike, subsetHow : str = 'l', nsamps : Union[int, float,
     # use Pearson definition (normal ==> 3.0)
     out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/kurtosis(y, fisher=False)))
     out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')[0]/autocorr(y, 1, 'Fourier')[0]))
-    out['sampen101'] = SampleEntropy(y[r], 1, 0.1)['sampen1']/SampleEntropy(y, 1, 0.1)['sampen1']
+    out['sampen101'] = sample_entropy(y[r], 1, 0.1)['sampen1']/sample_entropy(y, 1, 0.1)['sampen1']
 
     return out
 
@@ -976,13 +975,13 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
             qs[i] = np.std(y[_get_window(i, inc, winLength)], ddof=1)
     elif windowStat == 'ent':
         for i in range(numSteps):
-            qs[i] = DistributionEntropy(y[_get_window(i, inc, winLength)], 'ks','[]')
+            qs[i] = distribution_entropy(y[_get_window(i, inc, winLength)], 'ks','[]')
     elif windowStat == 'apen':
         for i in range(numSteps):
-            qs[i] = ApproximateEntropy(y[_get_window(i, inc, winLength)], 1, 0.2)
+            qs[i] = approximate_entropy(y[_get_window(i, inc, winLength)], 1, 0.2)
     elif windowStat == 'sampen':
         for i in range(numSteps):
-            sampen_dict = SampleEntropy(y[_get_window(i, inc, winLength)], 1, 0.1)
+            sampen_dict = sample_entropy(y[_get_window(i, inc, winLength)], 1, 0.1)
             qs[i] = sampen_dict['sampen1']
     elif windowStat == 'mom3':
         for i in range(numSteps):
@@ -1003,9 +1002,9 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
         #% normalized by std of full time series
         out = np.std(qs, ddof=1)/np.std(y, ddof=1)
     elif acrossWinStat == 'apen':
-        out = ApproximateEntropy(qs, 1, 0.2)
+        out = approximate_entropy(qs, 1, 0.2)
     elif acrossWinStat == 'sampen':
-        sampen_dict = SampleEntropy(qs, 2, 0.15)
+        sampen_dict = sample_entropy(qs, 2, 0.15)
         out = sampen_dict['quadSampEn1']
     elif acrossWinStat == 'ent':
         #% get a load of statistics from kernel-smoothed distribution
