@@ -1,70 +1,53 @@
 Information:
-  AutoMutualInfoStats:
-    base_name: AutoMutualInfoStats
-    labels:
-      - information
-      - correlation
-      - AMI
-    dependencies:
-      - jpype
-      - JIDT
-    configs:
-      - maxTau: [40, 20]
-        estMethod: 'gaussian'
-        extraParam: 
-        zscore: True
-      - maxTau: [40, 20]
-        estMethod: 'kraskov1'
-        extraParam: '4'
-        zscore: True
-    ordered_args: ["maxTau", "estMethod", "extraParam"]
-    hctsa_name: IN_AutoMutualInfoStats
+  # AutoMutualInfoStats:
+  #   base_name: AutoMutualInfoStats
+  #   labels:
+  #     - information
+  #     - correlation
+  #     - AMI
+  #   dependencies:
+  #     - jpype
+  #     - JIDT
+  #   configs:
+  #     - maxTau: [40, 20]
+  #       estMethod: 'gaussian'
+  #       extraParam: 
+  #       zscore: True
+  #     - maxTau: [40, 20]
+  #       estMethod: 'kraskov1'
+  #       extraParam: '4'
+  #       zscore: True
+  #   ordered_args: ["maxTau", "estMethod", "extraParam"]
+  #   hctsa_name: IN_AutoMutualInfoStats
 
-  FirstMin:
-    base_name: FirstMin
-    labels:
-      - correlation
-      - AMI
+  first_min:
+    base_name: first_min
     dependencies:
-      - JIDT
+      - jpype1
     configs:
-      - minWhat: ['ac', 'mi-gaussian']
-        extraParam: ['']
-        minNotMax: ['']
-        zscore: True
-      - minWhat: ['mi-kraskov2']
-        extraParam: '4'
-        minNotMax: ['']
-        zscore: True
-      - minWhat: 'mi-hist'
-        extraParam: [5, 10]
-        minNotMax: ['']
-        zscore: True
-      - minWhat: ['ac', 'mi-gaussian']
-        extraParam: ['']
-        minNotMax: False
-        zscore: True
-      - minWhat: ['mi-kraskov2']
-        extraParam: '4'
-        minNotMax: False
-        zscore: True
-      - minWhat: 'mi-hist'
-        extraParam: [5, 10]
-        minNotMax: False
-        zscore: True
-    hctsa_name: CO_FirstMin
-    ordered_args: ["minWhat", "extraParam", "minNotMax"]
+      - {min_what: 'ac', zscore: True}
+      - {min_what: 'mi-gaussian', zscore: True}
+      - {min_what: 'mi-kraskov2', extra_param: '4', zscore: True}
+      - {min_what: 'mi-hist', extra_param: '5', zscore: True}
+      - {min_what: 'mi-hist', extra_param: '10', zscore: True}
+      - {min_what: 'ac', min_not_max: False, zscore: True}
+      - {min_what: 'mi-gaussian', min_not_max: False, zscore: True}
+      - {min_what: 'mi-kraskov2', extra_param: '4', min_not_max: False, zscore: True}
+      - {min_what: 'mi-hist', extra_param: '5', min_not_max: False, zscore: True}
+      - {min_what: 'mi-hist', extra_param: '10', min_not_max: False, zscore: True}
+    legacy_name: CO_FirstMin
+    ordered_args: ['min_what', 'extra_param', 'min_not_max']
   
-  AMInformation:
-    base_name: RM_AMInformation
-    labels:
-      - correlation
-      - AMI
-      - information
-    dependencies:
-    configs:
-      - tau: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        zscore: True
-    hctsa_name: CO_RM_AMInformation
-    ordered_args: ["tau"]
+  # AMInformation:
+  #   base_name: RM_AMInformation
+  #   labels:
+  #     - correlation
+  #     - AMI
+  #     - information
+  #   dependencies:
+  #   configs:
+  #     - tau: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  #       zscore: True
+  #   hctsa_name: CO_RM_AMInformation
+  #   ordered_args: ["tau"]
  

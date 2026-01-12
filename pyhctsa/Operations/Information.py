@@ -9,8 +9,12 @@ from scipy import stats
 
 from ..Utilities.utils import signChange, RM_histogram2
 
-def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None, 
-             minNotMax : Union[bool, None] = True) -> int:
+def first_min(
+    y: list,
+    min_what: str = "mi-gaussian",
+    extra_param: Union[int, float, None] = None,
+    min_not_max: Union[bool, None] = True,
+) -> int:
     """
     Time of first minimum in a given self-correlation function.
 
@@ -18,79 +22,87 @@ def FirstMin(y : list, minWhat : str = 'mi-gaussian', extraParam = None,
     ----------
     y : array-like
         The input time series.
-    minWhat : str, optional
+    min_what : str, optional
         The type of correlation to minimize. Options are 'ac' for autocorrelation,
         or 'mi' for automutual information. By default, 'mi' specifies the
         'gaussian' method from the Information Dynamics Toolkit. Other options
         include 'mi-kernel', 'mi-kraskov1', 'mi-kraskov2' (from Information Dynamics Toolkit, JIDT),
         or 'mi-hist' (histogram-based method). Default is 'mi'.
-    extraParam : any, optional
-        An additional parameter required for the specified `minWhat` method (e.g., for Kraskov).
-    minNotMax : bool, optional
-        If True, return the maximum instead of the minimum. Default is False.
+    extra_param : any, optional
+        An additional parameter required for the specified `min_what` method (e.g., for Kraskov).
+    min_not_max : bool, optional
+        If False, return the maximum instead of the minimum. Default is True.
 
     Returns
     -------
     int
-        The time of the first minimum (or maximum if `minNotMax` is True).
+        The time of the first minimum (or maximum if `min_not_max` is False).
     """
     from ..Operations.correlation import autocorr
-    y = np.asarray(y)
-    N = len(y)
 
+    y = np.asarray(y)
+    n = len(y)
+    
     # Define the autocorrelation function
-    if minWhat in ['ac', 'corr']:
-        corrfn = lambda x : autocorr(y, tau=x, method='Fourier')
-    elif minWhat == 'mi-hist':
-        # if extraParam is none, use default num of bins in BF_MutualInformation (default : 10)
-        corrfn = lambda x : _mi_bin(y[:-x], y[x:], 'range', 'range', extraParam or 10)
-    elif minWhat == 'mi-kraskov2':
+    if min_what in ["ac", "corr"]:
+        corrfn = lambda x: autocorr(y, tau=x, method="Fourier")
+    elif min_what == "mi-hist":
+        # if extraParam is none, use default num of bins in MutualInformation (default : 10)
+        if extra_param:
+            # coerce into integer if not int
+            extra_param = int(extra_param)
+        corrfn = lambda x: _mi_bin(y[:-x], y[x:], "range", "range", extra_param or 10)
+    elif min_what == "mi-kraskov2":
         # (using Information Dynamics Toolkit)
         # extraParam is the number of nearest neighbors
-        corrfn = lambda x : AutoMutualInfo(y, x, 'kraskov2', extraParam)
-    elif minWhat == 'mi-kraskov1':
+        corrfn = lambda x: AutoMutualInfo(y, x, "kraskov2", extra_param)
+    elif min_what == "mi-kraskov1":
         # (using Information Dynamics Toolkit)
-        corrfn = lambda x : AutoMutualInfo(y, x, 'kraskov1', extraParam)
-    elif minWhat == 'mi-kernel':
-        corrfn = lambda x : AutoMutualInfo(y, x, 'kernel', extraParam)
-    elif minWhat in ['mi', 'mi-gaussian']:
-        corrfn = lambda x : AutoMutualInfo(y, x, 'gaussian', extraParam)
+        corrfn = lambda x: AutoMutualInfo(y, x, "kraskov1", extra_param)
+    elif min_what == "mi-kernel":
+        corrfn = lambda x: AutoMutualInfo(y, x, "kernel", extra_param)
+    elif min_what in ["mi", "mi-gaussian"]:
+        corrfn = lambda x: AutoMutualInfo(y, x, "gaussian", extra_param)
     else:
-        raise ValueError(f"Unknown correlation type specified: {minWhat}")
-    
+        raise ValueError(f"Unknown correlation type specified: {min_what}")
+
     # search for a minimum (incrementally through time lags until a minimum is found)
-    autoCorr = np.zeros(N-1) # pre-allocate maximum length autocorrelation vector
-    if minNotMax:
-        # FIRST LOCAL MINUMUM 
-        for i in range(1, N):
-            autoCorr[i-1] = corrfn(i)
+    auto_corr = np.zeros(n - 1)  # pre-allocate maximum length autocorrelation vector
+    if min_not_max:
+        # FIRST LOCAL MINUMUM
+        for i in range(1, n):
+            auto_corr[i - 1] = corrfn(i)
             # Hit a NaN before got to a minimum -- there is no minimum
-            if np.isnan(autoCorr[i-1]):
-                logging.warning(f"No minimum in {minWhat} [[time series too short to find it?]]")
+            if np.isnan(auto_corr[i - 1]):
+                logging.warning(
+                    f"No minimum in {min_what} [[time series too short to find it?]]"
+                )
                 return np.nan
             # we're at a local minimum
-            if (i == 2) and (autoCorr[1] > autoCorr[0]):
+            if (i == 2) and (auto_corr[1] > auto_corr[0]):
                 # already increases at lag of 2 from lag of 1: a minimum (since ac(0) is maximal)
                 return 1
-            elif (i > 2) and autoCorr[i-3] > autoCorr[i-2] < autoCorr[i-1]:
+            elif (i > 2) and auto_corr[i - 3] > auto_corr[i - 2] < auto_corr[i - 1]:
                 # minimum at previous i
-                return i-1 # I found the first minimum!
+                return i - 1  # I found the first minimum!
     else:
         # FIRST LOCAL MAXIMUM
-        for i in range(1, N):
-            autoCorr[i-1] = corrfn(i)
+        for i in range(1, n):
+            auto_corr[i - 1] = corrfn(i)
             # Hit a NaN before got to a max -- there is no max
-            if np.isnan(autoCorr[i-1]):
-                logging.warning(f"No minimum in {minWhat} [[time series too short to find it?]]")
+            if np.isnan(auto_corr[i - 1]):
+                logging.warning(
+                    f"No minimum in {min_what} [[time series too short to find it?]]"
+                )
                 return np.nan
 
             # we're at a local maximum
-            if i > 2 and autoCorr[i-3] < autoCorr[i-2] > autoCorr[i-1]:
-                return i-1
+            if i > 2 and auto_corr[i - 3] < auto_corr[i - 2] > auto_corr[i - 1]:
+                return i - 1
     return np.nan
 
 def _mi_bin(v1 : ArrayLike, v2 : ArrayLike, r1 : Union[str, list] = 'range', 
-            r2 : Union[str, list] = 'range', numBins : int = 10) -> float:
+            r2 : Union[str, list] = 'range', num_bins : int = 10) -> float:
     """
     Compute mutual information between two data vectors using bin counting.
 
@@ -100,7 +112,7 @@ def _mi_bin(v1 : ArrayLike, v2 : ArrayLike, r1 : Union[str, list] = 'range',
         v2 (array-like): The second input vector
         r1 (str or list): The bin-partitioning method for v1 ('range', 'quantile', or [min, max])
         r2 (str or list): The bin-partitioning method for v2 ('range', 'quantile', or [min, max])
-        numBins (int): The number of bins to partition each vector into (default : 10)
+        num_bins (int): The number of bins to partition each vector into (default : 10)
 
     Returns:
     --------
@@ -115,8 +127,8 @@ def _mi_bin(v1 : ArrayLike, v2 : ArrayLike, r1 : Union[str, list] = 'range',
     N = len(v1)
 
     # Create histograms
-    edges_i = _give_me_edges(r1, v1, numBins)
-    edges_j = _give_me_edges(r2, v2, numBins)
+    edges_i = _give_me_edges(r1, v1, num_bins)
+    edges_j = _give_me_edges(r2, v2, num_bins)
 
     ni, _ = np.histogram(v1, edges_i)
     nj, _ = np.histogram(v2, edges_j)
@@ -125,8 +137,8 @@ def _mi_bin(v1 : ArrayLike, v2 : ArrayLike, r1 : Union[str, list] = 'range',
     hist_xy, _, _ = np.histogram2d(v1, v2, [edges_i, edges_j])
 
     # Normalize counts to probabilities
-    p_i = ni[:numBins] / N
-    p_j = nj[:numBins] / N
+    p_i = ni[:num_bins] / N
+    p_j = nj[:num_bins] / N
     p_ij = hist_xy / N
     p_ixp_j = np.outer(p_i, p_j)
 
@@ -140,16 +152,18 @@ def _mi_bin(v1 : ArrayLike, v2 : ArrayLike, r1 : Union[str, list] = 'range',
 
     return mi
 
-def _give_me_edges(r, v, nbins):
+def _give_me_edges(r, v, n_bins):
     EE = 1E-6 # this small addition gets lost in the last bin
+    if n_bins <= 0:
+        raise ValueError(f"nbins must be > 0, got {n_bins}")
     if r == 'range':
-        return np.linspace(np.min(v), np.max(v) + EE, nbins + 1)
+        return np.linspace(np.min(v), np.max(v) + EE, n_bins + 1)
     elif r == 'quantile': # bin edges based on quantiles
-        edges = np.quantile(v, np.linspace(0, 1, nbins + 1))
+        edges = np.quantile(v, np.linspace(0, 1, n_bins + 1))
         edges[-1] += EE
         return edges
     elif isinstance(r, (list, np.ndarray)) and len(r) == 2: # a two-component vector
-        return np.linspace(r[0], r[1] + EE, nbins + 1)
+        return np.linspace(r[0], r[1] + EE, n_bins + 1)
     else:
         raise ValueError(f"Unknown partitioning method '{r}'")
 

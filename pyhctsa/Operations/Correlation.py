@@ -11,7 +11,7 @@ from statsmodels.tsa.stattools import pacf
 
 from ..Utilities.utils import pointOfCrossing, binpicker, ZScore, signChange, make_mat_buffer
 from ..Toolboxes.c22 import periodicity_wang_wrapper
-from ..Operations.Information import FirstMin, AutoMutualInfo
+from ..Operations.Information import first_min, AutoMutualInfo
 
 def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even', 
               extra_param : Union[int, None] = None, random_seed = None) -> dict:
@@ -1808,7 +1808,7 @@ def trev(y : ArrayLike, tau : Union[int, str] = 'ac') -> dict:
         tau = first_crossing(y, 'ac', 0, 'discrete')
     elif tau == 'mi':
         # tau is the first minimum of the automutual information function
-        tau = FirstMin(y, 'mi')
+        tau = first_min(y, 'mi')
     if np.isnan(tau):
         raise ValueError("No valid setting for time delay. (Is the time series too short?)")
 
@@ -1872,7 +1872,7 @@ def tc3(y : list, tau : Union[int, str, None] = 'ac') -> dict:
         tau = first_crossing(y, 'ac', 0, 'discrete')
     elif tau == 'mi':
         # tau is the first minimum of the automutual information function
-        tau = FirstMin(y, 'mi')
+        tau = first_min(y, 'mi')
     
     if np.isnan(tau):
         raise ValueError("No valid setting for time delay (time series too short?)")
