@@ -293,7 +293,7 @@ def automutual_info(
 
     References
     ----------
-    .. [1] Kraskov, A., Stoegbauer, H., Grassberger, P. (2004). 
+    .. [1] Kraskov, A., Stoegbauer, H., Grassberger, P. (2004).
         Estimating mutual information. Physical Review E, 69(6), 066138.
 
     Parameters
@@ -313,7 +313,7 @@ def automutual_info(
             - 'kernel': Kernel density estimation (default)
             - 'kraskov1': Kraskov estimator 1 (KSG1)
             - 'kraskov2': Kraskov estimator 2 (KSG2)
-    extra_param : int or str, optional 
+    extra_param : int or str, optional
         Extra parameter for the estimator. For Kraskov estimators,
         this sets the number of nearest neighbors 'k' (default is 3).
 
@@ -326,53 +326,59 @@ def automutual_info(
             dict: Keys are f"ami{delay}", values are corresponding AMI values
     """
     from ..Operations.distribution import first_crossing
+
     if isinstance(time_delay, str) and time_delay in ['ac', 'tau']:
         time_delay = first_crossing(y, corr_fun='ac', threshold=0, what_out='discrete')
-        
+
     y = np.asarray(y).flatten()
-    N = len(y)
-    minSamples = 5 # minimum 5 samples to compute mutual information (could make higher?)
+    n = len(y)
+    min_samples = 5  # minimum 5 samples to compute mutual information (could make higher?)
 
     # Loop over time delays if a vector
     if not isinstance(time_delay, list):
         time_delay = [time_delay]
-    
-    numTimeDelays = len(time_delay)
-    amis = np.full(numTimeDelays, np.nan)
 
-    if numTimeDelays > 1:
+    num_time_delays = len(time_delay)
+    amis = np.full(num_time_delays, np.nan)
+
+    if num_time_delays > 1:
         time_delay = np.sort(time_delay)
-    
+
     # initialise the MI calculator object if using non-Gaussian estimator
     if est_method != 'gaussian':
         # assumes the JVM has already been started up
-        miCalc = _initialize_MI(est_method=est_method, extra_param=extra_param, add_noise=False) # NO ADDED NOISE!
-    
+        mi_calc = _initialize_MI(est_method=est_method, extra_param=extra_param, add_noise=False)  # NO ADDED NOISE!
+
     for k, delay in enumerate(time_delay):
         # check enough samples to compute automutual info
-        if delay > N - minSamples:
+        if delay > n - min_samples:
             # time sereis too short - keep the remaining values as NaNs
             break
+
         # form the time-delay vectors y1 and y2
         y1 = y[:-delay]
         y2 = y[delay:]
 
         if est_method == 'gaussian':
             r, _ = stats.pearsonr(y1, y2)
-            amis[k] = -0.5*np.log(1 - r**2)
+            amis[k] = -0.5 * np.log(1 - r**2)
         else:
             # Reinitialize for Kraskov:
-            miCalc.initialise(1, 1)
+            mi_calc.initialise(1, 1)
             # Set observations to time-delayed versions of the time series:
-            y1_jp = jp.JArray(jp.JDouble)(y1) # convert observations to java double
+            y1_jp = jp.JArray(jp.JDouble)(y1)  # convert observations to java double
             y2_jp = jp.JArray(jp.JDouble)(y2)
-            miCalc.setObservations(y1_jp, y2_jp)
+            mi_calc.setObservations(y1_jp, y2_jp)
             # compute
-            amis[k] = miCalc.computeAverageLocalOfObservations()
-        
+            amis[k] = mi_calc.computeAverageLocalOfObservations()
+
     if np.isnan(amis).any():
-        print(f"Warning: Time series (N={N}) is too short for automutual information calculations up to lags of {max(time_delay)}")
-    if numTimeDelays == 1:
+        print(
+            f"Warning: Time series (n={n}) is too short for automutual information calculations "
+            f"up to lags of {max(time_delay)}"
+        )
+
+    if num_time_delays == 1:
         # return a scalar if only one time delay
         return amis[0]
     else:
@@ -421,14 +427,14 @@ def mutual_info(
         Estimated mutual information between the input time series
     """
     # Initialize miCalc object (don't add noise!):
-    miCalc = _initialize_MI(est_method=est_method, extra_param=extra_param, add_noise=False)
+    mi_calc = _initialize_MI(est_method=est_method, extra_param=extra_param, add_noise=False)
     # Set observations to two time series:
     y1_jp = jp.JArray(jp.JDouble)(y1) # convert observations to java double
     y2_jp = jp.JArray(jp.JDouble)(y2) # convert observations to java double
-    miCalc.setObservations(y1_jp, y2_jp)
+    mi_calc.setObservations(y1_jp, y2_jp)
 
     # Compute mutual information
-    out = miCalc.computeAverageLocalOfObservations()
+    out = mi_calc.computeAverageLocalOfObservations()
 
     return out
 
@@ -486,17 +492,17 @@ def _initialize_MI(
 
 
     if est_method == 'gaussian':
-        implementingClass = 'infodynamics.measures.continuous.gaussian'
-        miCalc = jp.JPackage(implementingClass).MutualInfoCalculatorMultiVariateGaussian()
+        implementing_class = 'infodynamics.measures.continuous.gaussian'
+        mi_calc = jp.JPackage(implementing_class).MutualInfoCalculatorMultiVariateGaussian()
     elif est_method == 'kernel':
-        implementingClass = 'infodynamics.measures.continuous.kernel'
-        miCalc = jp.JPackage(implementingClass).MutualInfoCalculatorMultiVariateKernel()
+        implementing_class = 'infodynamics.measures.continuous.kernel'
+        mi_calc = jp.JPackage(implementing_class).MutualInfoCalculatorMultiVariateKernel()
     elif est_method == 'kraskov1':
-        implementingClass = 'infodynamics.measures.continuous.kraskov'
-        miCalc = jp.JPackage(implementingClass).MutualInfoCalculatorMultiVariateKraskov1()
+        implementing_class = 'infodynamics.measures.continuous.kraskov'
+        mi_calc = jp.JPackage(implementing_class).MutualInfoCalculatorMultiVariateKraskov1()
     elif est_method == 'kraskov2':
-        implementingClass = 'infodynamics.measures.continuous.kraskov'
-        miCalc = jp.JPackage(implementingClass).MutualInfoCalculatorMultiVariateKraskov2()
+        implementing_class = 'infodynamics.measures.continuous.kraskov'
+        mi_calc = jp.JPackage(implementing_class).MutualInfoCalculatorMultiVariateKraskov2()
     else:
         raise ValueError(f"Unknown mutual information estimation method '{est_method}'")
 
@@ -506,18 +512,18 @@ def _initialize_MI(
             if isinstance(extra_param, int):
                 logging.warning("Number of nearest neighbors needs to be a string. Setting this for you...")
                 extra_param = str(extra_param)
-            miCalc.setProperty('k', extra_param) # 4th input specifies number of nearest neighbors for KSG estimator
+            mi_calc.setProperty('k', extra_param) # 4th input specifies number of nearest neighbors for KSG estimator
         else:
-            miCalc.setProperty('k', '3') # use 3 nearest neighbors for KSG estimator as default
+            mi_calc.setProperty('k', '3') # use 3 nearest neighbors for KSG estimator as default
         
     # Make deterministic if kraskov1 or 2 (which adds a small amount of noise to the signal by default)
     if (est_method in ['kraskov1', 'kraskov2']) and (add_noise == False):
-        miCalc.setProperty('NOISE_LEVEL_TO_ADD','0')
+        mi_calc.setProperty('NOISE_LEVEL_TO_ADD','0')
     
     # Specify a univariate calculation
-    miCalc.initialise(1,1)
+    mi_calc.initialise(1,1)
 
-    return miCalc
+    return mi_calc
 
 def rm_automutual_information(y : ArrayLike, tau : int = 1) -> float:
     """
@@ -591,10 +597,8 @@ def _rm_info(*args):
     - Original MATLAB function by R. Moddemeijer, minor modifications by Ben Fulcher.
     - Python translation by Tucker Cullen.
     """
-
-    nargin = len(args)
-
-    if nargin < 1:
+    n_args = len(args)
+    if n_args < 1:
         print("Takes in 2-5 parameters: ")
         print("rm_information(x, y)")
         print("rm_information(x, y, descriptor)")
@@ -607,113 +611,108 @@ def _rm_info(*args):
         return
 
     # some initial tests on the input arguments
-
     x = np.array(args[0])  # make sure the imputs are in numpy array form
     y = np.array(args[1])
 
-    xshape = x.shape
-    yshape = y.shape
+    x_shape = x.shape
+    y_shape = y.shape
 
-    lenx = xshape[0]  # how many elements are in the row vector
-    leny = yshape[0]
+    len_x = x_shape[0]  # how many elements are in the row vector
+    len_y = y_shape[0]
 
-    if len(xshape) != 1:  # makes sure x is a row vector
+    if len(x_shape) != 1:  # makes sure x is a row vector
         print("Error: invalid dimension of x")
         return
 
-    if len(yshape) != 1:
+    if len(y_shape) != 1:
         print("Error: invalid dimension of y")
         return
 
-    if lenx != leny:  # makes sure x and y have the same amount of elements
+    if len_x != len_y:  # makes sure x and y have the same amount of elements
         print("Error: unequal length of x and y")
         return
 
-    if nargin > 5:
+    if n_args > 5:
         print("Error: too many arguments")
         return
 
-    if nargin < 2:
+    if n_args < 2:
         print("Error: not enough arguments")
         return
 
     # setting up variables depending on amount of inputs
-
-    if nargin == 2:
+    if n_args == 2:
         hist = RM_histogram2(x, y)  # call outside function from rm_histogram2.py
         h = hist[0]
         descriptor = hist[1]
 
-    if nargin >= 3:
-        hist = RM_histogram2(x, y, args[2])  # call outside function from rm_histogram2.py, args[2] represents the given descriptor
+    if n_args >= 3:
+        hist = RM_histogram2(
+            x, y, args[2]
+        )  # call outside function from rm_histogram2.py, args[2] represents the given descriptor
         h = hist[0]
         descriptor = hist[1]
 
-    if nargin < 4:
+    if n_args < 4:
         approach = 'unbiased'
     else:
         approach = args[3]
 
-    if nargin < 5:
+    if n_args < 5:
         base = np.e  # as in e = 2.71828
     else:
         base = args[4]
 
-    lowerboundx = descriptor[0, 0]  #not sure why most of these were included in the matlab script, most of them go unused
-    upperboundx = descriptor[0, 1]
-    ncellx = descriptor[0, 2]
-    lowerboundy = descriptor[1, 0]
-    upperboundy = descriptor[1, 1]
-    ncelly = descriptor[1, 2]
+    lower_bound_x = descriptor[0, 0]  # not sure why most of these were included in the matlab script, most of them go unused
+    upper_bound_x = descriptor[0, 1]
+    n_cell_x = descriptor[0, 2]
+    lower_bound_y = descriptor[1, 0]
+    upper_bound_y = descriptor[1, 1]
+    n_cell_y = descriptor[1, 2]
 
     estimate = 0
     sigma = 0
     count = 0
 
     # determine row and column sums
+    h_y = np.sum(h, 0)
+    h_x = np.sum(h, 1)
 
-    hy = np.sum(h, 0)
-    hx = np.sum(h, 1)
+    n_cell_x = n_cell_x.astype(int)
+    n_cell_y = n_cell_y.astype(int)
 
-    ncellx = ncellx.astype(int)
-    ncelly = ncelly.astype(int)
-
-    for nx in range(0, ncellx):
-        for ny in range(0, ncelly):
-            if h[nx, ny] != 0:
-                logf = np.log(h[nx, ny] / hx[nx] / hy[ny])
+    for n_x in range(0, n_cell_x):
+        for n_y in range(0, n_cell_y):
+            if h[n_x, n_y] != 0:
+                log_f = np.log(h[n_x, n_y] / h_x[n_x] / h_y[n_y])
             else:
-                logf = 0
+                log_f = 0
 
-            count = count + h[nx, ny]
-            estimate = estimate + h[nx, ny] * logf
-            sigma = sigma + h[nx, ny] * (logf ** 2)
+            count = count + h[n_x, n_y]
+            estimate = estimate + h[n_x, n_y] * log_f
+            sigma = sigma + h[n_x, n_y] * (log_f**2)
 
     # biased estimate
-
     estimate = estimate / count
-    sigma = np.sqrt((sigma / count - estimate ** 2) / (count - 1))
+    sigma = np.sqrt((sigma / count - estimate**2) / (count - 1))
     estimate = estimate + np.log(count)
-    nbias = (ncellx - 1) * (ncelly - 1) / (2 * count)
+    nbias = (n_cell_x - 1) * (n_cell_y - 1) / (2 * count)
 
     # conversion to unbiased estimate
-
     if approach[0] == 'u':
         estimate = estimate - nbias
         nbias = 0
 
-        # conversion to minimum mse estimate
-
+    # conversion to minimum mse estimate
     if approach[0] == 'm':
         estimate = estimate - nbias
         nbias = 0
-        lamda = (estimate ** 2) / ((estimate ** 2) + (sigma ** 2))
+        lamda = (estimate**2) / ((estimate**2) + (sigma**2))
         nbias = (1 - lamda) * estimate
         estimate = lamda * estimate
         sigma = lamda * sigma
 
-        # base transformations
-
+    # base transformations
     estimate = estimate / np.log(base)
     nbias = nbias / np.log(base)
     sigma = sigma / np.log(base)

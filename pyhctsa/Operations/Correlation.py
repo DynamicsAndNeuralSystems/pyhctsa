@@ -11,7 +11,7 @@ from statsmodels.tsa.stattools import pacf
 
 from ..Utilities.utils import pointOfCrossing, binpicker, ZScore, signChange, make_mat_buffer
 from ..Toolboxes.c22 import periodicity_wang_wrapper
-from ..Operations.Information import first_min, automutual_info
+from ..Operations.information import first_min, automutual_info
 
 def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even', 
               extra_param : Union[int, None] = None, random_seed = None) -> dict:
