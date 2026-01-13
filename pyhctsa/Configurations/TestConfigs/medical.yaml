@@ -1,45 +1,42 @@
 Medical:
-  HRVClassic:
+  hrv_classic:
     base_name: hrv_classic
-    labels:
-      - medical
-      - discrepancy
     dependencies:
-    hctsa_name: MD_hrv_classic
     configs:
-      - zscore: True
+      - {zscore: True}
+    legacy_name: MD_hrv_classic
 
-  PNN:
-    base_name: pNN_raw
-    labels:
-      - medical
-      - raw
-      - spreadDependent
+  pnn:
+    base_name: pnn_raw
     dependencies:
     configs:
-      - zscore: False
-    hctsa_name: MD_pNN
+      - {zscore: False}
+    legacy_name: MD_pNN
 
-  PolVar:
-    base_name: polvar
-    labels:
-      - medical
-      - symbolic
+  pol_var:
+    base_name: pol_var
     dependencies:
     configs:
-      - d: [1.0, 0.5, 0.1]
-        D: [3, 5, 4, 6]
-        zscore: True
-    hctsa_name: MD_polvar
+      - {d: 1.0, D: 3, zscore: True}
+      - {d: 1.0, D: 4, zscore: True}
+      - {d: 1.0, D: 5, zscore: True}
+      - {d: 1.0, D: 6, zscore: True}
+
+      - {d: 0.5, D: 3, zscore: True}
+      - {d: 0.5, D: 4, zscore: True}
+      - {d: 0.5, D: 5, zscore: True}
+      - {d: 0.5, D: 6, zscore: True}
+
+      - {d: 0.1, D: 3, zscore: True}
+      - {d: 0.1, D: 4, zscore: True}
+      - {d: 0.1, D: 5, zscore: True}
+      - {d: 0.1, D: 6, zscore: True}
+    legacy_name: MD_polvar
     ordered_args: ['d', 'D']
 
-  RawHRVMeas:
-    base_name: rawHRVmeas
-    labels:
-      - medical 
-      - raw
-      - discrepancy
+  raw_hrv_meas:
+    base_name: raw_hrv_meas
     dependencies:
     configs:
-      - zscore: False
-    hctsa_name: MD_rawHRVmeas
+      - {zscore: False}
+    legacy_name: MD_rawHRVmeas

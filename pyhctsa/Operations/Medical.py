@@ -5,7 +5,7 @@ from scipy import signal
 
 from ..Utilities.utils import binpicker, histc
 
-def RawHRVMeas(x: ArrayLike) -> dict:
+def raw_hrv_meas(x: ArrayLike) -> dict:
     """
     Compute Poincaré plot-based HRV (Heart Rate Variability) measures from RR interval time series.
 
@@ -20,11 +20,10 @@ def RawHRVMeas(x: ArrayLike) -> dict:
 
     References
     ----------
-    - M. Brennan, M. Palaniswami, and P. Kamen, 
-    "Do existing measures of Poincaré plot geometry reflect nonlinear features of heart rate variability?", 
-    IEEE Transactions on Biomedical Engineering, 48(11), pp. 1342–1347, 2001.
-    - Original MATLAB implementation adapted from: Max Little's `hrv_classic.m`
-    (http://www.maxlittle.net/)
+    .. [1] M. Brennan, M. Palaniswami, and P. Kamen, 
+        "Do existing measures of Poincaré plot geometry reflect nonlinear features of heart rate variability?", 
+        IEEE Transactions on Biomedical Engineering, 48(11), pp. 1342–1347, 2001.
+    .. [2] Original MATLAB implementation adapted from: Max Little's `hrv_classic.m` (http://www.maxlittle.net/)
 
     Parameters
     ----------
@@ -48,13 +47,13 @@ def RawHRVMeas(x: ArrayLike) -> dict:
 
     # triangular histogram index  
     # 10 bins  
-    edges10 = binpicker(x.min(), x.max(), 10)
-    hist_counts10 = histc(x, edges10)
+    edges_10 = binpicker(x.min(), x.max(), 10)
+    hist_counts10 = histc(x, edges_10)
     out['tri10'] = N/np.max(hist_counts10)
 
     # 20 bins
-    edges20 = binpicker(x.min(), x.max(), 20)
-    hist_counts20 = histc(x, edges20)
+    edges_20 = binpicker(x.min(), x.max(), 20)
+    hist_counts20 = histc(x, edges_20)
     out['tri20'] = N/np.max(hist_counts20)
 
     # (sqrt samples) bins
@@ -63,45 +62,46 @@ def RawHRVMeas(x: ArrayLike) -> dict:
     out['trisqrt'] = N/np.max(hist_counts_sqrt)
 
     # Poincare plot measures
-    diffx = np.diff(x)
-    out['SD1'] = 1/np.sqrt(2) * np.std(diffx, ddof=1) * 1000
-    out['SD2'] = np.sqrt(2 * np.var(x, ddof=1) - (1/2) * np.std(diffx, ddof=1)**2) * 1000
+    diff_x = np.diff(x)
+    out['SD1'] = 1/np.sqrt(2) * np.std(diff_x, ddof=1) * 1000
+    out['SD2'] = np.sqrt(2 * np.var(x, ddof=1) - (1/2) * np.std(diff_x, ddof=1)**2) * 1000
 
     return out
 
-def HRVClassic(y: ArrayLike) -> dict:
+def hrv_classic(y: ArrayLike) -> dict:
     """
     Compute classic heart rate variability (HRV) statistics.
 
-    This function computes a variety of standard time-domain, frequency-domain, and 
-    geometric HRV measures from a time series of RR (or NN) intervals. The input is 
+    This function computes a variety of standard time-domain, frequency-domain, and
+    geometric HRV measures from a time series of RR (or NN) intervals. The input is
     typically assumed to be in **seconds**.
 
     The following categories of HRV features are included:
 
-    1. **pNNx measures**  
-    Measures the proportion of interval differences greater than a given threshold `x`.  
-    Reference:  
-    Mietus, J.E., et al., *The pNNx files: Re-examining a widely used heart rate variability measure*,  
-    Heart, 88(4):378, 2002.
+    1. **pNNx measures**
+    Measures the proportion of interval differences greater than a given threshold `x` [1].
 
-    2. **Frequency-domain measures**  
-    Power spectral density ratios computed over standard frequency bands (e.g., LF, HF).  
-    Reference:  
-    Malik, M., et al., *Heart rate variability: Standards of measurement, physiological interpretation, and clinical use*,  
-    European Heart Journal, 17(3):354, 1996.
+    2. **Frequency-domain measures**
+    Power spectral density ratios computed over standard frequency bands (e.g., LF, HF) [2].
 
-    3. **Triangular histogram index**  
+    3. **Triangular histogram index**
     A geometric measure of HRV based on the shape of the RR interval histogram.
 
-    4. **Poincaré plot measures (SD1, SD2)**  
-    Geometric descriptors of the Poincaré plot reflecting short- and long-term variability.  
-    Reference:  
-    Brennan, M., et al., *Do existing measures of Poincaré plot geometry reflect nonlinear features of heart rate variability?*,  
-    IEEE Transactions on Biomedical Engineering, 48(11):1342, 2001.
+    4. **Poincaré plot measures (SD1, SD2)**
+    Geometric descriptors of the Poincaré plot reflecting short- and long-term variability [3]. 
 
-    This implementation is adapted from original MATLAB code by Max A. Little  
+    This implementation is adapted from original MATLAB code by Max A. Little
     (http://www.maxlittle.net/).
+
+    References
+    ----------
+    .. [1] Mietus, J.E., et al., *The pNNx files: Re-examining a widely used heart rate variability measure*,
+        Heart, 88(4):378, 2002.
+    .. [2] Malik, M., et al., *Heart rate variability: Standards of measurement, physiological interpretation, and clinical use*,
+        European Heart Journal, 17(3):354, 1996.
+    .. [3] Brennan, M., et al., *Do existing measures of Poincaré plot geometry reflect nonlinear features of heart rate variability?*,
+        IEEE Transactions on Biomedical Engineering, 48(11):1342, 2001.
+    .. [4] 
 
     Parameters
     ----------
@@ -111,106 +111,114 @@ def HRVClassic(y: ArrayLike) -> dict:
     Returns
     -------
     out: dict
-        Dictionary containing various HRV features, including pNNx statistics, 
+        Dictionary containing various HRV features, including pNNx statistics,
         frequency-domain power ratios, triangular index, and Poincaré measures.
     """
 
     # Standard defaults
     y = np.asarray(y)
-    diffy = np.diff(y)
-    N = len(y)
+    diff_y = np.diff(y)
+    n = len(y)
 
     # ------------------------------------------------------------------------------
     # Calculate pNNx percentage
     # ------------------------------------------------------------------------------
     # pNNx: recommendation as per Mietus et. al. 2002, "The pNNx files: ...", Heart
     # strange to do this for a z-scored time series...
-    Dy = np.abs(diffy)
-    PNNxfn = lambda x : np.mean(Dy > x/1000)
+    d_y = np.abs(diff_y)
+    pnn_x_fn = lambda x: np.mean(d_y > x / 1000)
 
     out = {}
 
-    out['pnn5'] = PNNxfn(5) # 0.0055*sigma
-    out['pnn10'] = PNNxfn(10) # 0.01*sigma
-    out['pnn20'] = PNNxfn(20) # 0.02*sigma
-    out['pnn30'] = PNNxfn(30) # 0.03*sigma
-    out['pnn40'] = PNNxfn(40) # 0.04*sigma
+    out['pnn5'] = pnn_x_fn(5)  # 0.0055*sigma
+    out['pnn10'] = pnn_x_fn(10)  # 0.01*sigma
+    out['pnn20'] = pnn_x_fn(20)  # 0.02*sigma
+    out['pnn30'] = pnn_x_fn(30)  # 0.03*sigma
+    out['pnn40'] = pnn_x_fn(40)  # 0.04*sigma
 
     # ------------------------------------------------------------------------------
     # Calculate PSD
     # ------------------------------------------------------------------------------
 
-    nfft = max(256, 2**int(np.ceil(np.log2((N)))))
-    F, Pxx = signal.periodogram(y, window = np.hanning(len(y)), detrend=False, scaling='density', fs=2*np.pi, nfft=nfft)
+    nfft = max(256, 2 ** int(np.ceil(np.log2((n)))))
+    f, pxx = signal.periodogram(
+        y,
+        window=np.hanning(len(y)),
+        detrend=False,
+        scaling='density',
+        fs=2 * np.pi,
+        nfft=nfft
+    )
 
     # Calculate spectral measures such as subband spectral power percentage, LF/HF ratio etc.
-    LF_lo = 0.04 # /pi -- fraction of total power (max F is pi)
-    LF_hi = 0.15
-    HF_lo = 0.15
-    HF_hi = 0.4
+    lf_lo = 0.04  # /pi -- fraction of total power (max F is pi)
+    lf_hi = 0.15
+    hf_lo = 0.15
+    hf_hi = 0.4
 
-    fbinsize = F[1] - F[0]
+    f_bin_size = f[1] - f[0]
 
-    indl = []
-    for x in F:
-        if x >= LF_lo and x <= LF_hi:
-            indl.append(1)
-        else :
-            indl.append(0)
-    indh = []
-    for x in F:
-        if x >= HF_lo and x <= HF_hi:
-            indh.append(1)
+    ind_l = []
+    for x in f:
+        if x >= lf_lo and x <= lf_hi:
+            ind_l.append(1)
         else:
-            indh.append(0)
+            ind_l.append(0)
 
-    indv = []
-    for x in F:
-        if x <= LF_lo:
-            indv.append(1)
-        else :
-            indv.append(0)
+    ind_h = []
+    for x in f:
+        if x >= hf_lo and x <= hf_hi:
+            ind_h.append(1)
+        else:
+            ind_h.append(0)
 
-    indlPxx = []
-    for i in range(0, len(Pxx)):
-        if indl[i] == 1:
-            indlPxx.append(Pxx[i])
-    lfp = fbinsize * np.sum(indlPxx)
+    ind_v = []
+    for x in f:
+        if x <= lf_lo:
+            ind_v.append(1)
+        else:
+            ind_v.append(0)
 
-    indhPxx = []
-    for i in range(0, len(Pxx)):
-        if indh[i] == 1:
-            indhPxx.append(Pxx[i])
-    hfp = fbinsize * np.sum(indhPxx)
+    ind_l_pxx = []
+    for i in range(0, len(pxx)):
+        if ind_l[i] == 1:
+            ind_l_pxx.append(pxx[i])
+    lf_p = f_bin_size * np.sum(ind_l_pxx)
 
-    indvPxx = []
-    for i in range(0, len(Pxx)):
-        if indv[i] == 1:
-            indvPxx.append(Pxx[i])
-    vlfp = fbinsize * np.sum(indvPxx)
+    ind_h_pxx = []
+    for i in range(0, len(pxx)):
+        if ind_h[i] == 1:
+            ind_h_pxx.append(pxx[i])
+    hf_p = f_bin_size * np.sum(ind_h_pxx)
 
-    out['lfhf'] = lfp / hfp
-    total = fbinsize * np.sum(Pxx)
-    out['vlf'] = vlfp/total * 100
-    out['lf'] = lfp/total * 100
-    out['hf'] = hfp/total * 100
+    ind_v_pxx = []
+    for i in range(0, len(pxx)):
+        if ind_v[i] == 1:
+            ind_v_pxx.append(pxx[i])
+    vlf_p = f_bin_size * np.sum(ind_v_pxx)
+
+    out['lfhf'] = lf_p / hf_p
+    total = f_bin_size * np.sum(pxx)
+    out['vlf'] = vlf_p / total * 100
+    out['lf'] = lf_p / total * 100
+    out['hf'] = hf_p / total * 100
 
     # Triangular histogram index
-    edges10 = binpicker(y.min(), y.max(), 10)
-    hist = histc(y, edges10)
-    out['tri'] = len(y)/np.max(hist)
+    edges_10 = binpicker(y.min(), y.max(), 10)
+    hist = histc(y, edges_10)
+    out['tri'] = len(y) / np.max(hist)
 
     # Poincare plot measures:
     # cf. "Do Existing Measures ... ", Brennan et. al. (2001), IEEE Trans Biomed Eng 48(11)
-    rmssd = np.std(diffy, ddof=1)
+    rmssd = np.std(diff_y, ddof=1)
     sigma = np.std(y, ddof=1)
 
-    out["SD1"] = 1/np.sqrt(2) * rmssd * 1000
-    out["SD2"] = np.sqrt(2 * sigma**2 - (1/2) * rmssd**2) * 1000
+    out["SD1"] = 1 / np.sqrt(2) * rmssd * 1000
+    out["SD2"] = np.sqrt(2 * sigma**2 - (1 / 2) * rmssd**2) * 1000
 
     return out
 
-def PolVar(x : ArrayLike, d : float = 1, D : int = 6) -> float:
+def pol_var(x : ArrayLike, d : float = 1, D : int = 6) -> float:
     """
     Compute the POLVARd measure of a time series.
 
@@ -218,10 +226,7 @@ def PolVar(x : ArrayLike, d : float = 1, D : int = 6) -> float:
     obtaining a sequence of consecutive ones or zeros in a symbolic sequence 
     derived from the input time series.
 
-    This measure was originally introduced in:
-        Wessel et al., "Short-term forecasting of life-threatening cardiac 
-        arrhythmias based on symbolic dynamics and finite-time growth rates",
-        Phys. Rev. E 61(1), 733 (2000).
+    This measure was originally introduced in [1].
 
     The original implementation applied this measure to RR interval sequences 
     (typically in milliseconds), with the symbolic threshold `d` representing 
@@ -233,14 +238,9 @@ def PolVar(x : ArrayLike, d : float = 1, D : int = 6) -> float:
 
     References
     ----------
-    .. [1] Wessel et al., Phys. Rev. E 61(1), 733 (2000).
-    .. [2] B.D. Fulcher and N.S. Jones, "hctsa: A Computational Framework for 
-           Automated Time-Series Phenotyping Using Massive Feature Extraction", 
-           Cell Systems 5: 527 (2017). DOI: 10.1016/j.cels.2017.10.001
-    .. [3] B.D. Fulcher, M.A. Little, N.S. Jones, "Highly comparative time-series 
-           analysis: the empirical structure of time series and their methods", 
-           J. Roy. Soc. Interface 10(83) 20130048 (2013). 
-           DOI: 10.1098/rsif.2013.0048
+    .. [1] Wessel et al., "Short-term forecasting of life-threatening cardiac 
+            arrhythmias based on symbolic dynamics and finite-time growth rates",
+            Phys. Rev. E 61(1), 733 (2000).
 
     Parameters
     ----------
@@ -261,9 +261,9 @@ def PolVar(x : ArrayLike, d : float = 1, D : int = 6) -> float:
     N = len(dx) # number of diffs in the input time series
 
     # binary representation of time series based on consecutive changes being greater than d/1000...
-    xsym = dx >= d # consec. diffs exceed some threshold, d
-    zseq = np.zeros(D)
-    oseq = np.ones(D)
+    x_sym = dx >= d # consec. diffs exceed some threshold, d
+    z_seq = np.zeros(D)
+    o_seq = np.ones(D)
 
     # search for D consecutive zeros/ones
     i = 0
@@ -271,8 +271,8 @@ def PolVar(x : ArrayLike, d : float = 1, D : int = 6) -> float:
 
     # seqcnt = 0
     while i <= (N-D):
-        xseq = xsym[i:(i+D)]
-        if np.array_equal(xseq, zseq) or np.array_equal(xseq, oseq):
+        x_seq = x_sym[i:(i+D)]
+        if np.array_equal(x_seq, z_seq) or np.array_equal(x_seq, o_seq):
             pc += 1
             i += D
         else:
@@ -282,7 +282,7 @@ def PolVar(x : ArrayLike, d : float = 1, D : int = 6) -> float:
 
     return p 
 
-def PNN(x : ArrayLike) -> dict:
+def pnn(x : ArrayLike) -> dict:
     """
     Compute pNNx measures of heart rate variability (HRV).
 
@@ -301,13 +301,6 @@ def PNN(x : ArrayLike) -> dict:
     ----------
     .. [1] Mietus, J.E., et al. "The pNNx files: re-examining a widely used 
            heart rate variability measure." Heart 88(4): 378 (2002).
-    .. [2] B.D. Fulcher and N.S. Jones, "hctsa: A Computational Framework for 
-           Automated Time-Series Phenotyping Using Massive Feature Extraction", 
-           Cell Systems 5: 527 (2017). DOI: 10.1016/j.cels.2017.10.001
-    .. [3] B.D. Fulcher, M.A. Little, N.S. Jones, "Highly comparative 
-           time-series analysis: the empirical structure of time series and 
-           their methods", J. Roy. Soc. Interface 10(83) 20130048 (2013). 
-           DOI: 10.1098/rsif.2013.0048
 
     Parameters
     ----------
@@ -323,11 +316,11 @@ def PNN(x : ArrayLike) -> dict:
 
     """
     x = np.asarray(x)
-    diffx = np.diff(x)
+    diff_x = np.diff(x)
     N = len(x)
 
     # Calculate pNNx percentage
-    Dx = np.abs(diffx) * 1000 # assume milliseconds as for RR intervals
+    Dx = np.abs(diff_x) * 1000 # assume milliseconds as for RR intervals
     pnns = np.array([5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
 
     out = {}

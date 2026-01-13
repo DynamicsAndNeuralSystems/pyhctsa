@@ -538,6 +538,8 @@ def rm_automutual_information(y : ArrayLike, tau : int = 1) -> float:
     ------
     y : array-like
         The input time series.
+    tau: int
+        Time lag for automutual information calculation
 
     Returns
     -------
