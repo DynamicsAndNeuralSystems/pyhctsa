@@ -6,8 +6,8 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 from scipy.stats import zmap, norm, gaussian_kde
 
-from pyhctsa.Operations.Information import AutoMutualInfo
-from pyhctsa.Operations.correlation import FirstMin, tc3
+from pyhctsa.Operations.Information import automutual_info
+from pyhctsa.Operations.correlation import first_min, tc3
 
 def SDgivemestats(statx : float, statsurr : ArrayLike, leftrightboth : str) -> dict:
     """Compute statistiscs on the surrogate distribution."""
@@ -232,7 +232,7 @@ def SurrogateTest(x : ArrayLike,
     #% Evaluate test statistic on each surrogate
     out = {}
     if "ami1" in theTestStat:
-        ami_fn = lambda timeSeries, timeDelay : AutoMutualInfo(timeSeries, timeDelay, 'gaussian')
+        ami_fn = lambda timeSeries, timeDelay : automutual_info(timeSeries, timeDelay, 'gaussian')
         AMIx = ami_fn(x, 1)
         AMIsurr = np.zeros(numSurrs)
         for i in range(numSurrs):
@@ -243,11 +243,11 @@ def SurrogateTest(x : ArrayLike,
     if "fmmi" in theTestStat:
         #% Investigate the first minimum of mutual information of surrogates compared to
         #% that of signal itself
-        fmmix = FirstMin(x, 'mi')
+        fmmix = first_min(x, 'mi')
         fmmiSurr = np.zeros(numSurrs)
         for i in range(numSurrs):
             try:
-                fmmiSurr[i] = FirstMin(z[:, i], 'mi')
+                fmmiSurr[i] = first_min(z[:, i], 'mi')
             except:
                 fmmiSurr[i] = np.nan
         

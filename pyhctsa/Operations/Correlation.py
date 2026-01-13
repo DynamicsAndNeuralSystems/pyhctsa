@@ -11,7 +11,7 @@ from statsmodels.tsa.stattools import pacf
 
 from ..Utilities.utils import pointOfCrossing, binpicker, ZScore, signChange, make_mat_buffer
 from ..Toolboxes.c22 import periodicity_wang_wrapper
-from ..Operations.Information import first_min, AutoMutualInfo
+from ..Operations.Information import first_min, automutual_info
 
 def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even', 
               extra_param : Union[int, None] = None, random_seed = None) -> dict:
@@ -82,7 +82,7 @@ def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even
                 raise ValueError('Error computing AMI: Time series too short (?)')
     if ami_method in ['gaussian','kernel','kraskov1','kraskov2']:
         for i in range(num_repeats):
-            amis[i] = AutoMutualInfo(y + noise_range[i]*noise, tau, ami_method, str(extra_param))
+            amis[i] = automutual_info(y + noise_range[i]*noise, tau, ami_method, str(extra_param))
             if np.isnan(amis[i]):
                 raise ValueError('Error computing AMI: Time series too short (?)')
     

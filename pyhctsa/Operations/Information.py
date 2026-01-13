@@ -55,14 +55,14 @@ def first_min(
     elif min_what == "mi-kraskov2":
         # (using Information Dynamics Toolkit)
         # extraParam is the number of nearest neighbors
-        corrfn = lambda x: AutoMutualInfo(y, x, "kraskov2", extra_param)
+        corrfn = lambda x: automutual_info(y, x, "kraskov2", extra_param)
     elif min_what == "mi-kraskov1":
         # (using Information Dynamics Toolkit)
-        corrfn = lambda x: AutoMutualInfo(y, x, "kraskov1", extra_param)
+        corrfn = lambda x: automutual_info(y, x, "kraskov1", extra_param)
     elif min_what == "mi-kernel":
-        corrfn = lambda x: AutoMutualInfo(y, x, "kernel", extra_param)
+        corrfn = lambda x: automutual_info(y, x, "kernel", extra_param)
     elif min_what in ["mi", "mi-gaussian"]:
-        corrfn = lambda x: AutoMutualInfo(y, x, "gaussian", extra_param)
+        corrfn = lambda x: automutual_info(y, x, "gaussian", extra_param)
     else:
         raise ValueError(f"Unknown correlation type specified: {min_what}")
 
@@ -167,11 +167,12 @@ def _give_me_edges(r, v, n_bins):
     else:
         raise ValueError(f"Unknown partitioning method '{r}'")
 
-def AutoMutualInfoStats(
+def automutual_info_stats(
     y: ArrayLike,
-    maxTau: Optional[int] = None,
-    estMethod: str = 'kernel',
-    extraParam: Optional[Union[int, str]] = None) -> Dict[str, float]:
+    max_tau: Optional[int] = None,
+    est_method: str = 'kernel',
+    extra_param: Optional[Union[int, str]] = None
+) -> Dict[str, float]:
     """
     Calculate statistics on the automutual information (AMI) function of a time series.
 
@@ -182,14 +183,14 @@ def AutoMutualInfoStats(
     ----------
     y : array-like
         Input time series (1D).
-    maxTau : int, optional
+    max_tau : int, optional
         Maximum time delay to investigate. If None, uses N/4 where N is the length
         of the time series, but won't exceed N/2.
-    estMethod : {'gaussian', 'kernel', 'kraskov1', 'kraskov2'}, optional
-        Method for estimating mutual information (passed to AutoMutualInfo).
+    est_method : {'gaussian', 'kernel', 'kraskov1', 'kraskov2'}, optional
+        Method for estimating mutual information (passed to automutual_info).
         Default is 'kernel'.
-    extraParam : int or str, optional
-        Extra parameter for the estimator (passed to AutoMutualInfo).
+    extra_param : int or str, optional
+        Extra parameter for the estimator (passed to automutual_info).
         For Kraskov estimators, sets the number of nearest neighbors 'k'.
 
     Returns
@@ -198,29 +199,36 @@ def AutoMutualInfoStats(
         Dictionary containing AMI statistics.
     """
     from ..Operations.correlation import autocorr
+
     y = np.asarray(y)
-    N = len(y) # length of the time series
-    
-    # maxTau: the maximum time delay to investigate
-    if maxTau is None:
-        maxTau = np.ceil(N/4)
-    maxTau0 = maxTau
+    n = len(y)  # length of the time series
+
+    # max_tau: the maximum time delay to investigate
+    if max_tau is None:
+        max_tau = np.ceil(n / 4)
+    max_tau_0 = max_tau
 
     # Don't go above N/2
-    maxTau = min(maxTau, np.ceil(N/2))
+    max_tau = min(max_tau, np.ceil(n / 2))
 
     # Get the AMI data
-    maxTau = int(maxTau)
-    maxTau0 = int(maxTau0)
-    timeDelay = list(range(1, maxTau+1))
-    ami = AutoMutualInfo(y, timeDelay=timeDelay, estMethod=estMethod, extraParam=extraParam)
+    max_tau = int(max_tau)
+    max_tau_0 = int(max_tau_0)
+    time_delay = list(range(1, max_tau + 1))
+    ami = automutual_info(
+        y,
+        time_delay=time_delay,
+        est_method=est_method,
+        extra_param=extra_param
+    )
     ami = np.array(list(ami.values()))
 
-    out = {} # create dict for storing results
+    out = {}  # create dict for storing results
+
     # Output the raw values
-    for i in range(1, maxTau0+1):
-        if i <= maxTau:
-            out[f'ami{i}'] = ami[i-1]
+    for i in range(1, max_tau_0 + 1):
+        if i <= max_tau:
+            out[f'ami{i}'] = ami[i - 1]
         else:
             out[f'ami{i}'] = np.nan
 
@@ -231,51 +239,51 @@ def AutoMutualInfoStats(
 
     # First minimum of mutual information across range
     dami = np.diff(ami)
-    extremai = np.where((dami[:-1] * dami[1:]) < 0)[0]
-    out['pextrema'] = len(extremai) / (lami - 1)
-    out['fmmi'] = min(extremai) + 1 if len(extremai) > 0 else lami
+    extrema_i = np.where((dami[:-1] * dami[1:]) < 0)[0]
+    out['pextrema'] = len(extrema_i) / (lami - 1)
+    out['fmmi'] = min(extrema_i) + 1 if len(extrema_i) > 0 else lami
 
     # Look for periodicities in local maxima
-    maximai = np.where((dami[:-1] > 0) & (dami[1:] < 0))[0] + 1
-    dmaximai = np.diff(maximai)
+    maxima_i = np.where((dami[:-1] > 0) & (dami[1:] < 0))[0] + 1
+    dmaxima_i = np.diff(maxima_i)
     # Is there a big peak in dmaxima? (no need to normalize since a given method inputs its range; but do it anyway... ;-))
-    out['pmaxima'] = len(dmaximai) / (lami // 2)
-    if len(dmaximai) == 0:  # fewer than 2 local maxima
+    out['pmaxima'] = len(dmaxima_i) / (lami // 2)
+    if len(dmaxima_i) == 0:  # fewer than 2 local maxima
         out['modeperiodmax'] = np.nan
         out['pmodeperiodmax'] = np.nan
     else:
-        out['modeperiodmax'] = stats.mode(dmaximai, keepdims=True).mode[0]
-        out['pmodeperiodmax'] = np.sum(dmaximai == out['modeperiodmax']) / len(dmaximai)
+        out['modeperiodmax'] = stats.mode(dmaxima_i, keepdims=True).mode[0]
+        out['pmodeperiodmax'] = np.sum(dmaxima_i == out['modeperiodmax']) / len(dmaxima_i)
 
     # Look for periodicities in local minima
-    minimai = np.where((dami[:-1] < 0) & (dami[1:] > 0))[0] + 1
-    dminimai = np.diff(minimai)
+    minima_i = np.where((dami[:-1] < 0) & (dami[1:] > 0))[0] + 1
+    dminima_i = np.diff(minima_i)
 
-    out['pminima'] = len(dminimai) / (lami // 2)
+    out['pminima'] = len(dminima_i) / (lami // 2)
 
-    if len(dminimai) == 0:  # fewer than 2 local minima
+    if len(dminima_i) == 0:  # fewer than 2 local minima
         out['modeperiodmin'] = np.nan
         out['pmodeperiodmin'] = np.nan
     else:
-        out['modeperiodmin'] = stats.mode(dminimai, keepdims=True).mode[0]
-        out['pmodeperiodmin'] = np.sum(dminimai == out['modeperiodmin']) / len(dminimai)
-    
+        out['modeperiodmin'] = stats.mode(dminima_i, keepdims=True).mode[0]
+        out['pmodeperiodmin'] = np.sum(dminima_i == out['modeperiodmin']) / len(dminima_i)
+
     # Number of crossings at mean/median level, percentiles
     out['pcrossmean'] = np.mean(np.diff(np.sign(ami - np.mean(ami))) != 0)
     out['pcrossmedian'] = np.mean(np.diff(np.sign(ami - np.median(ami))) != 0)
     out['pcrossq10'] = np.mean(signChange(ami - np.percentile(ami, 10, method='hazen')))
     out['pcrossq90'] = np.mean(signChange(ami - np.percentile(ami, 90, method='hazen')))
 
-    # ac1 
+    # ac1
     out['amiac1'] = autocorr(ami, 1, 'Fourier')[0]
 
-    return out 
+    return out
 
-def AutoMutualInfo(
+def automutual_info(
     y: ArrayLike,
-    timeDelay: Union[int, str, List[int]] = 1,
-    estMethod: str = 'kernel',
-    extraParam: Optional[Union[int, str]] = None
+    time_delay: Union[int, str, List[int]] = 1,
+    est_method: str = 'kernel',
+    extra_param: Optional[Union[int, str]] = None
 ) -> Union[float, Dict[str, float]]:
     """
     Compute time-delayed automutual information of a time series.
@@ -283,64 +291,64 @@ def AutoMutualInfo(
     Calculates the mutual information between a time series and its time-delayed version
     using various estimation methods from the JIDT (Java Information Dynamics Toolkit).
 
+    References
+    ----------
+    .. [1] Kraskov, A., Stoegbauer, H., Grassberger, P. (2004). 
+        Estimating mutual information. Physical Review E, 69(6), 066138.
+
     Parameters
     ----------
     y : array-like
         Input time series (1D).
-    timeDelay : int, str, or list of int, optional
+    time_delay : int, str, or list of int, optional
         Time lag(s) for automutual information calculation. Can be:
             - int: a fixed lag
             - list of int: multiple lags
             - 'ac': first zero-crossing of autocorrelation
             - 'tau': same as 'ac'
         Default is 1.
-    estMethod : {'gaussian', 'kernel', 'kraskov1', 'kraskov2'}, optional
+    est_method : {'gaussian', 'kernel', 'kraskov1', 'kraskov2'}, optional
         Method for estimating mutual information:
             - 'gaussian': Assumes Gaussian variables
             - 'kernel': Kernel density estimation (default)
             - 'kraskov1': Kraskov estimator 1 (KSG1)
             - 'kraskov2': Kraskov estimator 2 (KSG2)
-    extraParam : int or str, optional 
+    extra_param : int or str, optional 
         Extra parameter for the estimator. For Kraskov estimators,
         this sets the number of nearest neighbors 'k' (default is 3).
 
     Returns
     -------
     float or dict
-        If single timeDelay:
+        If single time_delay:
             float: The automutual information value
-        If multiple timeDelays:
+        If multiple time_delay:
             dict: Keys are f"ami{delay}", values are corresponding AMI values
-
-    References
-    ----------
-    Kraskov, A., Stoegbauer, H., Grassberger, P. (2004). 
-    Estimating mutual information. Physical Review E, 69(6), 066138.
     """
     from ..Operations.distribution import first_crossing
-    if isinstance(timeDelay, str) and timeDelay in ['ac', 'tau']:
-        timeDelay = first_crossing(y, corr_fun='ac', threshold=0, what_out='discrete')
+    if isinstance(time_delay, str) and time_delay in ['ac', 'tau']:
+        time_delay = first_crossing(y, corr_fun='ac', threshold=0, what_out='discrete')
         
     y = np.asarray(y).flatten()
     N = len(y)
     minSamples = 5 # minimum 5 samples to compute mutual information (could make higher?)
 
     # Loop over time delays if a vector
-    if not isinstance(timeDelay, list):
-        timeDelay = [timeDelay]
+    if not isinstance(time_delay, list):
+        time_delay = [time_delay]
     
-    numTimeDelays = len(timeDelay)
+    numTimeDelays = len(time_delay)
     amis = np.full(numTimeDelays, np.nan)
 
     if numTimeDelays > 1:
-        timeDelay = np.sort(timeDelay)
+        time_delay = np.sort(time_delay)
     
     # initialise the MI calculator object if using non-Gaussian estimator
-    if estMethod != 'gaussian':
+    if est_method != 'gaussian':
         # assumes the JVM has already been started up
-        miCalc = _initialize_MI(estMethod, extraParam=extraParam, addNoise=False) # NO ADDED NOISE!
+        miCalc = _initialize_MI(est_method=est_method, extra_param=extra_param, add_noise=False) # NO ADDED NOISE!
     
-    for k, delay in enumerate(timeDelay):
+    for k, delay in enumerate(time_delay):
         # check enough samples to compute automutual info
         if delay > N - minSamples:
             # time sereis too short - keep the remaining values as NaNs
@@ -349,7 +357,7 @@ def AutoMutualInfo(
         y1 = y[:-delay]
         y2 = y[delay:]
 
-        if estMethod == 'gaussian':
+        if est_method == 'gaussian':
             r, _ = stats.pearsonr(y1, y2)
             amis[k] = -0.5*np.log(1 - r**2)
         else:
@@ -363,19 +371,19 @@ def AutoMutualInfo(
             amis[k] = miCalc.computeAverageLocalOfObservations()
         
     if np.isnan(amis).any():
-        print(f"Warning: Time series (N={N}) is too short for automutual information calculations up to lags of {max(timeDelay)}")
+        print(f"Warning: Time series (N={N}) is too short for automutual information calculations up to lags of {max(time_delay)}")
     if numTimeDelays == 1:
         # return a scalar if only one time delay
         return amis[0]
     else:
         # return a dict for multiple time delays
-        return {f"ami{delay}": ami for delay, ami in zip(timeDelay, amis)}
+        return {f"ami{delay}": ami for delay, ami in zip(time_delay, amis)}
 
-def MutualInfo(
+def mutual_info(
     y1: ArrayLike,
     y2: ArrayLike,
-    estMethod: str = 'kernel',
-    extraParam: Optional[Union[int, str]] = None
+    est_method: str = 'kernel',
+    extra_param: Optional[Union[int, str]] = None
 ) -> float:
     """
     Compute mutual information between two time series using JIDT estimators.
@@ -383,19 +391,26 @@ def MutualInfo(
     This function calculates the mutual information between two time series using
     various estimators from the Java Information Dynamics Toolkit (JIDT).
 
+    Note: This function requires the infodynamics.jar Java library and JPype.
+
+    References
+    ----------
+    .. [1] Kraskov, A., Stoegbauer, H., Grassberger, P. (2004). Estimating mutual information.
+        Physical Review E, 69(6), 066138. https://doi.org/10.1103/PhysRevE.69.066138
+
     Parameters
     ----------
     y1 : ArrayLike
         First input time series
     y2 : ArrayLike
         Second input time series
-    estMethod : str, optional
+    est_method : str, optional
         Estimation method to use:
         - 'gaussian': Assumes Gaussian variables
         - 'kernel': Kernel density estimation (default)
         - 'kraskov1': Kraskov estimator 1 (KSG1)
         - 'kraskov2': Kraskov estimator 2 (KSG2)
-    extraParam : Union[int, str], optional
+    extra_param : Union[int, str], optional
         Extra parameter for the estimator:
         - For Kraskov estimators: number of nearest neighbors 'k' (default: 3)
         - For other methods: ignored
@@ -404,18 +419,9 @@ def MutualInfo(
     -------
     float
         Estimated mutual information between the input time series
-
-    References
-    ----------
-    Kraskov, A., Stoegbauer, H., Grassberger, P. (2004). Estimating mutual information.
-    Physical Review E, 69(6), 066138. https://doi.org/10.1103/PhysRevE.69.066138
-
-    Notes
-    -----
-    This function requires the infodynamics.jar Java library and JPype.
     """
     # Initialize miCalc object (don't add noise!):
-    miCalc = _initialize_MI(estMethod=estMethod, extraParam=extraParam, addNoise=False)
+    miCalc = _initialize_MI(est_method=est_method, extra_param=extra_param, add_noise=False)
     # Set observations to two time series:
     y1_jp = jp.JArray(jp.JDouble)(y1) # convert observations to java double
     y2_jp = jp.JArray(jp.JDouble)(y2) # convert observations to java double
@@ -427,9 +433,9 @@ def MutualInfo(
     return out
 
 def _initialize_MI(
-    estMethod: str = "gaussian",
-    extraParam: Optional[Union[int, str]] = None,
-    addNoise: bool = False,
+    est_method: str = "gaussian",
+    extra_param: Optional[Union[int, str]] = None,
+    add_noise: bool = False,
     verbose: bool = False
 ) -> Any:  # Returns a Java object, use Any since we can't type hint JPype objects
     """
@@ -440,7 +446,7 @@ def _initialize_MI(
 
     Parameters
     ----------
-    estMethod : str, optional
+    est_method : str, optional
         Estimation method to use:
         - 'gaussian': Assumes Gaussian variables (simplest)
         - 'kernel': Kernel density estimation
@@ -448,13 +454,13 @@ def _initialize_MI(
         - 'kraskov2': Kraskov estimator 2 (KSG2)
         Default is 'gaussian'.
 
-    extraParam : Union[int, str], optional
+    extra_param : Union[int, str], optional
         Configuration parameter for the estimator:
         - For Kraskov methods: number of nearest neighbors 'k'
         - For other methods: ignored
         Default is None (uses k=3 for Kraskov).
 
-    addNoise : bool, optional
+    add_noise : bool, optional
         Whether to add small random noise for Kraskov estimators:
         - True: Add noise (helpful for deterministic signals)
         - False: No noise (default)
@@ -479,33 +485,33 @@ def _initialize_MI(
         jp.startJVM(jp.getDefaultJVMPath(), "-ea", "-Djava.class.path=" + jarloc)
 
 
-    if estMethod == 'gaussian':
+    if est_method == 'gaussian':
         implementingClass = 'infodynamics.measures.continuous.gaussian'
         miCalc = jp.JPackage(implementingClass).MutualInfoCalculatorMultiVariateGaussian()
-    elif estMethod == 'kernel':
+    elif est_method == 'kernel':
         implementingClass = 'infodynamics.measures.continuous.kernel'
         miCalc = jp.JPackage(implementingClass).MutualInfoCalculatorMultiVariateKernel()
-    elif estMethod == 'kraskov1':
+    elif est_method == 'kraskov1':
         implementingClass = 'infodynamics.measures.continuous.kraskov'
         miCalc = jp.JPackage(implementingClass).MutualInfoCalculatorMultiVariateKraskov1()
-    elif estMethod == 'kraskov2':
+    elif est_method == 'kraskov2':
         implementingClass = 'infodynamics.measures.continuous.kraskov'
         miCalc = jp.JPackage(implementingClass).MutualInfoCalculatorMultiVariateKraskov2()
     else:
-        raise ValueError(f"Unknown mutual information estimation method '{estMethod}'")
+        raise ValueError(f"Unknown mutual information estimation method '{est_method}'")
 
     # Add neighest neighbor option for KSG estimator
-    if estMethod in ['kraskov1', 'kraskov2']:
-        if extraParam != None:
-            if isinstance(extraParam, int):
+    if est_method in ['kraskov1', 'kraskov2']:
+        if extra_param != None:
+            if isinstance(extra_param, int):
                 logging.warning("Number of nearest neighbors needs to be a string. Setting this for you...")
-                extraParam = str(extraParam)
-            miCalc.setProperty('k', extraParam) # 4th input specifies number of nearest neighbors for KSG estimator
+                extra_param = str(extra_param)
+            miCalc.setProperty('k', extra_param) # 4th input specifies number of nearest neighbors for KSG estimator
         else:
             miCalc.setProperty('k', '3') # use 3 nearest neighbors for KSG estimator as default
         
     # Make deterministic if kraskov1 or 2 (which adds a small amount of noise to the signal by default)
-    if (estMethod in ['kraskov1', 'kraskov2']) and (addNoise == False):
+    if (est_method in ['kraskov1', 'kraskov2']) and (add_noise == False):
         miCalc.setProperty('NOISE_LEVEL_TO_ADD','0')
     
     # Specify a univariate calculation
@@ -513,8 +519,7 @@ def _initialize_MI(
 
     return miCalc
 
-
-def AMInformation(y : ArrayLike, tau : int = 1) -> float:
+def rm_automutual_information(y : ArrayLike, tau : int = 1) -> float:
     """
     Estimates the mutual information of two stationary signals with 
     independent pairs of samples using various approaches.
@@ -523,7 +528,7 @@ def AMInformation(y : ArrayLike, tau : int = 1) -> float:
     which is based on rm_information.py initially developed by Rudy Moddemeijer in MATLAB,
     and translated to to python by Tucker Cullen.
 
-    Inputs
+    Parameters
     ------
     y : array-like
         The input time series.

@@ -1,24 +1,15 @@
 Information:
-  # AutoMutualInfoStats:
-  #   base_name: AutoMutualInfoStats
-  #   labels:
-  #     - information
-  #     - correlation
-  #     - AMI
-  #   dependencies:
-  #     - jpype
-  #     - JIDT
-  #   configs:
-  #     - maxTau: [40, 20]
-  #       estMethod: 'gaussian'
-  #       extraParam: 
-  #       zscore: True
-  #     - maxTau: [40, 20]
-  #       estMethod: 'kraskov1'
-  #       extraParam: '4'
-  #       zscore: True
-  #   ordered_args: ["maxTau", "estMethod", "extraParam"]
-  #   hctsa_name: IN_AutoMutualInfoStats
+  automutual_info_stats:
+    base_name: automutual_info_stats
+    dependencies:
+      - jpype1
+    configs:
+      - {max_tau: 40, est_method: 'gaussian', zscore: True}
+      - {max_tau: 20, est_method: 'gaussian', zscore: True}
+      - {max_tau: 40, est_method: 'kraskov1', extra_param: '4', zscore: True}
+      - {max_tau: 20, est_method: 'kraskov1', extra_param: '4', zscore: True}
+    legacy_name: IN_AutoMutualInfoStats
+    ordered_args: ['max_tau', 'est_method', 'extra_param']
 
   first_min:
     base_name: first_min
@@ -38,16 +29,21 @@ Information:
     legacy_name: CO_FirstMin
     ordered_args: ['min_what', 'extra_param', 'min_not_max']
   
-  # AMInformation:
-  #   base_name: RM_AMInformation
-  #   labels:
-  #     - correlation
-  #     - AMI
-  #     - information
-  #   dependencies:
-  #   configs:
-  #     - tau: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-  #       zscore: True
-  #   hctsa_name: CO_RM_AMInformation
-  #   ordered_args: ["tau"]
+  rm_automutual_information:
+    base_name: rm_automutual_information
+    dependencies:
+    configs:
+      - {tau: 0, zscore: True}
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 3, zscore: True}
+      - {tau: 4, zscore: True}
+      - {tau: 5, zscore: True}
+      - {tau: 6, zscore: True}
+      - {tau: 7, zscore: True}
+      - {tau: 8, zscore: True}
+      - {tau: 9, zscore: True}
+      - {tau: 10, zscore: True}
+    legacy_name: CO_RM_AMInformation
+    ordered_args: ['tau']
  
