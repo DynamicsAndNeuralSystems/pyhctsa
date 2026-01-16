@@ -101,7 +101,6 @@ def hrv_classic(y: ArrayLike) -> dict:
         European Heart Journal, 17(3):354, 1996.
     .. [3] Brennan, M., et al., *Do existing measures of Poincaré plot geometry reflect nonlinear features of heart rate variability?*,
         IEEE Transactions on Biomedical Engineering, 48(11):1342, 2001.
-    .. [4] 
 
     Parameters
     ----------

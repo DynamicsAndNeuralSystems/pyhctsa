@@ -1,13 +1,47 @@
-Medical:
-  HRVClassic:
+medical:
+
+  hrv_classic:
     base_name: hrv_classic
-    labels:
-      - medical
-      - discrepancy
     dependencies:
-    hctsa_name: MD_hrv_classic
     configs:
-      - zscore: True
+      - {zscore: True}
+    legacy_name: MD_hrv_classic
+
+  pnn:
+    base_name: pnn_raw
+    dependencies:
+    configs:
+      - {zscore: False}
+    legacy_name: MD_pNN
+
+  pol_var:
+    base_name: pol_var
+    dependencies:
+    configs:
+      - {d: 1.0, D: 3, zscore: True}
+      - {d: 1.0, D: 4, zscore: True}
+      - {d: 1.0, D: 5, zscore: True}
+      - {d: 1.0, D: 6, zscore: True}
+
+      - {d: 0.5, D: 3, zscore: True}
+      - {d: 0.5, D: 4, zscore: True}
+      - {d: 0.5, D: 5, zscore: True}
+      - {d: 0.5, D: 6, zscore: True}
+
+      - {d: 0.1, D: 3, zscore: True}
+      - {d: 0.1, D: 4, zscore: True}
+      - {d: 0.1, D: 5, zscore: True}
+      - {d: 0.1, D: 6, zscore: True}
+    legacy_name: MD_polvar
+    ordered_args: ['d', 'D']
+
+  raw_hrv_meas:
+    base_name: raw_hrv_meas
+    dependencies:
+    configs:
+      - {zscore: False}
+    legacy_name: MD_rawHRVmeas
+
 
   PNN:
     base_name: pNN_raw
@@ -439,7 +473,7 @@ correlation:
       - {zscore: True}
     legacy_name: DK_theilerQ
     ordered_args:
-    
+
 information:
   automutual_info_stats:
     base_name: automutual_info_stats
@@ -1585,112 +1619,87 @@ Spectral:
     hctsa_name: SP_Summaries
     ordered_args: ["psdMeth", "windowType"]
 
-ModelFit:
-  ARCov:
-    base_name: AR_arcov
-    labels:
-      - ModelFit
-      - AR
-      - gof
-      - fit
+model_fit:
+  ar_cov:
+    base_name: ar_cov
     dependencies:
       - statsmodels
     configs:
-      - p: !range [1, 5]
-        zscore: True
-    hctsa_name: MF_AR_arcov
-    ordered_args: ["p"]
-  
-  ARFit:
-    base_name: arfit
-    labels:
-      - models
-      - ModelFit
-      - AR
-    dependencies:
-    configs:
-      - pmin: 1
-        pmax: 8
-        selector: 'sbc'
-        zscore: True
-    hctsa_name: MF_arfit
-    ordered_args: ["pmin", "pmax", "selector"]
+      - {p: 1, zscore: True}
+      - {p: 2, zscore: True}
+      - {p: 3, zscore: True}
+      - {p: 4, zscore: True}
+      - {p: 5, zscore: True}
+    legacy_name: MF_AR_arcov
+    ordered_args: ['p']
 
-  ExpSmoothing:
-    base_name: ExpSmoothing
-    labels:
-      - model
-      - ModelFit
+  exp_smoothing:
+    base_name: exp_smoothing
     dependencies:
     configs:
-      - ntrain: 0.5
-        alpha: 'best'
-        zscore: True
-    hctsa_name: MF_ExpSmoothing
-    ordered_args: ["ntrain", "alpha"]
+      - {n_train: 0.5, alpha: 'best', zscore: True}
+    legacy_name: MF_ExpSmoothing
+    ordered_args: ['n_train', 'alpha']
   
-  LocalSimple:
-    base_name: LocalSimple
-    labels:
-      - models
-      - forecasting
-      - modelfit
+  ar_fit:
+    base_name: ar_fit
     dependencies:
     configs:
-      - forecastMeth: "mean"
-        trainLength: [1, 2, 3, 4, 'ac']
-        zscore: True
-      - forecastMeth: "median"
-        trainLength: [3, 5, 7, 'ac']
-        zscore: True
-      - forecastMeth: "lfit"
-        trainLength: [2, 3, 4, 5, 'ac']
-        zscore: True
-    hctsa_name: FC_LocalSimple
-    ordered_args: ["forecastMeth", "trainLength"]
-  
-  LoopLocalSimple:
-    base_name: LoopLocalSimple
-    labels:
-      - models
-      - forecasting
-      - modelfit
+      - {p_min: 1, p_max: 8, selector: 'sbc', zscore: True}
+    legacy_name: MF_arfit
+    ordered_args: ['p_min', 'p_max', 'selector']
+
+  local_simple:
+    base_name: local_simple
     dependencies:
     configs:
-      - forecastMeth: 'mean'
-        zscore: True
-    hctsa_name: FC_LoopLocalSimple
-    ordered_args: ["forecastMeth"]
+      - {forecast_meth: 'mean', train_length: 1,    zscore: True}
+      - {forecast_meth: 'mean', train_length: 2,    zscore: True}
+      - {forecast_meth: 'mean', train_length: 3,    zscore: True}
+      - {forecast_meth: 'mean', train_length: 4,    zscore: True}
+      - {forecast_meth: 'mean', train_length: 'ac', zscore: True}
+
+      - {forecast_meth: 'median', train_length: 3, zscore: True}
+      - {forecast_meth: 'median', train_length: 5, zscore: True}
+      - {forecast_meth: 'median', train_length: 7, zscore: True}
+      - {forecast_meth: 'median', train_length: 'ac', zscore: True}
+
+      - {forecast_meth: 'lfit', train_length: 2, zscore: True}
+      - {forecast_meth: 'lfit', train_length: 3, zscore: True}
+      - {forecast_meth: 'lfit', train_length: 4, zscore: True}
+      - {forecast_meth: 'lfit', train_length: 5, zscore: True}
+      - {forecast_meth: 'lfit', train_length: 'ac', zscore: True}
+    legacy_name: FC_LocalSimple
+    ordered_args: ['forecast_meth', 'train_length']
   
-  fitSubSegments:
-    base_name: FitSubsegments
-    labels:
-      - models
-      - modelfit
+  loop_local_simple:
+    base_name: loop_local_simple
+    dependencies:
+    configs:
+      - {forecast_meth: 'mean', zscore: True}
+    legacy_name: FC_LoopLocalSimple
+    ordered_args: ['forecast_meth']
+  
+  fit_subsegments:
+    base_name: fit_subsegments
     dependencies:
       - statsmodels
     configs:
-      - model: 'ar'
-        order: 2
-        subsetHow: 'uniform'
-        samplep: [[25, 0.1]]
-    hctsa_name: MF_FitSubsegments
-    ordered_args: ["model", "order", "subsetHow", "samplep"]
+      - {model: 'ar', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True}
+    legacy_name: MF_FitSubsegments
+    ordered_args: ['model', 'order', 'subset_how', 'sample_p']
   
-  HMMFit:
-    base_name: hmm
-    labels:
-      - models
-      - hmm
-      - modelfit
+  hmm_fit:
+    base_name: hmm_fit
     dependencies:
       - hmmlearn
     configs:
-      - trainp: [0.7, 0.8]
-        numStates: [3, 2]
-        zscore: True
-    hctsa_name: MF_hmm_fit
-    ordered_args: ["trainp", "numStates"]
+      - {train_p: 0.7, num_states: 3, zscore: True}
+      - {train_p: 0.7, num_states: 2, zscore: True}
+      - {train_p: 0.8, num_states: 3, zscore: True}
+      - {train_p: 0.8, num_states: 2, zscore: True}
+    legacy_name: MF_hmm_fit
+    ordered_args: ['train_p', 'num_states']
   
 graph:
   visibility_graph:

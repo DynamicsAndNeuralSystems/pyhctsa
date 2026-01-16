@@ -1,35 +1,35 @@
 Physics:
-  ForcePotential:
-    base_name: ForcePotential
-    labels:
-      - physics
-      - dynamicalSystem
-    dependencies:
-    configs:
-      - whatPotential: 'dblwell'
-        params: [[1, 0.2, 0.1], [1, 0.5, 0.2], [2, 0.05, 0.2], [3, 0.01, 0.1]]
-        zscore: True
-      - whatPotential: 'sine'
-        params: [[3,0.5,1], [1,1,1], [10,0.04,10]]
-        zscore: True
-    hctsa_name: PH_ForcePotential
-    ordered_args: ['whatPotential', 'params']
+  # ForcePotential:
+  #   base_name: ForcePotential
+  #   labels:
+  #     - physics
+  #     - dynamicalSystem
+  #   dependencies:
+  #   configs:
+  #     - whatPotential: 'dblwell'
+  #       params: [[1, 0.2, 0.1], [1, 0.5, 0.2], [2, 0.05, 0.2], [3, 0.01, 0.1]]
+  #       zscore: True
+  #     - whatPotential: 'sine'
+  #       params: [[3,0.5,1], [1,1,1], [10,0.04,10]]
+  #       zscore: True
+  #   hctsa_name: PH_ForcePotential
+  #   ordered_args: ['whatPotential', 'params']
   
-  Walker:
-    base_name: Walker
-    labels:
-      - physics
-      - dynamicalSystem
+  walker:
+    base_name: walker
     dependencies:
     configs:
-      - walkerRule: 'prop'
-        walkerParams: [0.1, 0.5, 0.9, 1.1] 
-        zscore: True
-      - walkerRule: 'biasprop'
-        walkerParams: [[0.5, 0.1], [0.1, 0.5]] 
-        zscore: True
-      - walkerRule: 'momentum'
-        walkerParams: [2, 5]
-        zscore: True
-    hctsa_name: PH_Walker
-    ordered_args: ["walkerRule", "walkerParams"]
+      - {walker_rule: 'prop', walker_params: 0.1, zscore: True}
+      - {walker_rule: 'prop', walker_params: 0.5, zscore: True}
+      - {walker_rule: 'prop', walker_params: 0.9, zscore: True}
+      - {walker_rule: 'prop', walker_params: 1.1, zscore: True}
+
+      - {walker_rule: 'biasprop', walker_params: [[0.5, 0.1]], zscore: True}
+      - {walker_rule: 'biasprop', walker_params: [[0.1, 0.5]], zscore: True}
+
+      - {walker_rule: 'momentum', walker_params: 2, zscore: True}
+      - {walker_rule: 'momentum', walker_params: 5, zscore: True}
+
+      - {walker_rule: 'runningvar', walker_params: [[1.5, 50]], zscore: True}
+    legacy_name: PH_Walker
+    ordered_args: ['walker_rule', 'walker_params']

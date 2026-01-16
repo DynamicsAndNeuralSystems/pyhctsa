@@ -8,7 +8,7 @@ from statsmodels.sandbox.stats.runs import runstest_1samp
 from pyhctsa.Operations.correlation import first_crossing, autocorr
 from pyhctsa.Operations.Stationarity import SlidingWindow
 
-def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, float, int, list] = None) -> dict:
+def walker(y : ArrayLike, walker_rule : str = 'prop', walker_params : Union[None, float, int, list] = None) -> dict:
     """
     Simulates a hypothetical walker moving through the time domain.
     
@@ -20,31 +20,41 @@ def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, 
     ----------
     y : array-like
         The input time series.
-    walkerRule : str, optional
+    walker_rule : str, optional
         The kinematic rule by which the walker moves in response to the
         time series over time:
         
         - 'prop': the walker narrows the gap between its value and that
           of the time series by a given proportion p.
-          walkerParams = p
+          walker_params = p
         - 'biasprop': the walker is biased to move more in one
           direction; when it is being pushed up by the time
           series, it narrows the gap by a proportion p_up,
           and when it is being pushed down by the time series,
           it narrows the gap by a (potentially different)
-          proportion p_down. walkerParams = [pup, pdown]
+          proportion p_down. walker_params = [pup, pdown]
         - 'momentum': the walker moves as if it has mass m and inertia
           from the previous time step and the time series acts
           as a force altering its motion in a classical
-          Newtonian dynamics framework. walkerParams = m (the mass).
+          Newtonian dynamics framework. walker_params = m (the mass).
+        - 'runningvar': the walker moves with inertia as above, but
+           its values are also adjusted so as to match the local
+           variance of time series by a multiplicative factor.
+           walkerParams = [m, wl], where m is the inertial mass and wl
+           is the window length.
           
-    walkerParams : float, int, or list, optional
-        The parameters for the specified walkerRule, explained above.
+    walker_params : float, int, or list, optional
+        The parameters for the specified walker_rule, explained above.
         
     Returns
     -------
     dict
-        Various statistics summarizing properties of the residuals between the
+        Include the mean, spread, maximum, minimum, and autocorrelation of
+        the walker's trajectory, the number of crossings between the walker and the
+        original time series, the ratio or difference of some basic summary statistics
+        between the original time series and the walker, an Ansari-Bradley test
+        comparing the distributions of the walker and original time series, and
+        various statistics summarizing properties of the residuals between the
         walker's trajectory and the original time series.
     """
     N = len(y)
@@ -65,42 +75,47 @@ def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, 
             'default': 2,
             'valid_types': (int, float),
             'error_msg': 'must be float or integer'
+        },
+        'runningvar': {
+            'default': [1.5, 50],
+            'valid_types': (list,),
+            'error_msg': 'must be a list'
         }
 
     }
 
-    if walkerRule not in WALKER_CONFIGS:
+    if walker_rule not in WALKER_CONFIGS:
         valid_rules = ", ".join(f"'{rule}'" for rule in WALKER_CONFIGS.keys())
-        raise ValueError(f"Unknown walker_rule: '{walkerRule}'. Choose from: {valid_rules}")
+        raise ValueError(f"Unknown walker_rule: '{walker_rule}'. Choose from: {valid_rules}")
     
     # get configuration for the specified rule
-    config = WALKER_CONFIGS[walkerRule]
+    config = WALKER_CONFIGS[walker_rule]
 
     # use the default value if no parameters provided
-    if walkerParams is None:
-        walkerParams = config['default']
+    if walker_params is None:
+        walker_params = config['default']
 
-    if not isinstance(walkerParams, config["valid_types"]):
+    if not isinstance(walker_params, config["valid_types"]):
         raise ValueError(
-            f"walkerParams {config['error_msg']} for walker rule: '{walkerRule}'"
+            f"walker_params {config['error_msg']} for walker rule: '{walker_rule}'"
         )
     
     # Do the walk
     w = np.zeros(N)
 
-    if walkerRule == 'prop':
+    if walker_rule == 'prop':
         #  % walker starts at zero and narrows the gap between its position
         #and the time series value at that point by the proportion given
-        #in walkerParams, to give the value at the subsequent time step
-        p = walkerParams
+        #in walker_params, to give the value at the subsequent time step
+        p = walker_params
         w[0] = 0 # start at zero
         for i in range(1, N):
             w[i] = w[i-1] + p * (y[i-1] - w[i-1])
         
-    elif walkerRule == 'biasprop':
+    elif walker_rule == 'biasprop':
         #walker is biased in one or the other direction (i.e., prefers to
         # go up, or down). Requires a vector of inputs: [p_up, p_down]
-        pup, pdown = walkerParams
+        pup, pdown = walker_params
 
         w[0] = 0
         for i in range(1, N):
@@ -108,11 +123,11 @@ def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, 
                 w[i] = w[i-1] + pup*(y[i-1]-w[i-1])
             else:
                 w[i] = w[i-1] + pdown*(y[i-1]-w[i-1])
-    elif walkerRule == 'momentum':
+    elif walker_rule == 'momentum':
         #  % walker moves as if it had inertia from the previous time step,
         # i.e., it 'wants' to move the same amount; the time series acts as
         # a force changing its motion
-        m = walkerParams # 'inertial mass'
+        m = walker_params # 'inertial mass'
 
         w[0] = y[0]
         w[1] = y[1]
@@ -122,8 +137,21 @@ def Walker(y : ArrayLike, walkerRule : str = 'prop', walkerParams : Union[None, 
             #  % equation of motion (s-s_0=ut+F/m*t^2)
             # where the 'force' F is the change in the original time series
             # at that point
+    elif walker_rule == 'runningvar':
+        #% walker moves with momentum defined by amplitude of past values in
+        #% a given length window
+        m, wl = walker_params
+        w[0] = y[0]
+        w[1] = y[1]
+        for i in range(2, N):
+            w_inert = w[i-1] + (w[i-1]-w[i-2])
+            w_mom = w_inert + (y[i]-w_inert)/m # dissipative term from time series
+            if i > wl:
+                w[i] = w_mom * (np.std(y[i-wl:i], ddof=1)/np.std(w[i-wl:i], ddof=1)) # adjust by local standard dev.
+            else:
+                w[i] = w_mom
     else:
-        raise ValueError(f"Unknown rule : {walkerRule}")
+        raise ValueError(f"Unknown rule : {walker_rule}")
     
     # Get statistics on the walk
     out = {}

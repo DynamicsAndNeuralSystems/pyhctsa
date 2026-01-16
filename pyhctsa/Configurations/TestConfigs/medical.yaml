@@ -1,4 +1,5 @@
-Medical:
+medical:
+
   hrv_classic:
     base_name: hrv_classic
     dependencies:
