@@ -1,10 +1,11 @@
 import csv
+import os
 from functools import wraps
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
+from typing import Union
+
 import numpy as np
 from numpy.typing import ArrayLike
-import os
-from typing import Union
 
 def check_optional_deps(dep: str) -> bool:
     """Check whether an optional dependency exists.

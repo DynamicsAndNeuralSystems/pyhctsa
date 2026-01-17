@@ -1,10 +1,9 @@
 import numpy as np
 from numpy.typing import ArrayLike
-
 import scipy.fft
 
-from ..operations.distribution import moments
 from ..operations.correlation import autocorr, first_crossing
+from ..operations.distribution import moments
 from ..utils import make_mat_buffer, sign_change
 
 def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = 'none') -> dict:

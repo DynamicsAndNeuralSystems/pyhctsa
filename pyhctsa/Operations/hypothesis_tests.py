@@ -1,12 +1,12 @@
-import numpy as np
-from numpy.typing import ArrayLike
 from typing import Union
 
-from statsmodels.stats.descriptivestats import sign_test
-from statsmodels.sandbox.stats.runs import runstest_1samp
-from statsmodels.stats.diagnostic import acorr_ljungbox
-from scipy.stats import jarque_bera, wilcoxon, norm
+import numpy as np
+from numpy.typing import ArrayLike
 from arch.unitroot import VarianceRatio
+from scipy.stats import jarque_bera, norm, wilcoxon
+from statsmodels.sandbox.stats.runs import runstest_1samp
+from statsmodels.stats.descriptivestats import sign_test
+from statsmodels.stats.diagnostic import acorr_ljungbox
 
 def variance_ratio_test(y : ArrayLike, periods : Union[int, list[int]] = 2, iids : Union[int, list[int]] = 0) -> dict:
     """

@@ -1,18 +1,18 @@
+from math import factorial
+from typing import Optional, Union
+
 import numpy as np
 from numpy.typing import ArrayLike
-from typing import Union, Optional
 from numba import njit
-from math import factorial
-
+from antropy.entropy import _xlogx
 from scipy.stats import gaussian_kde
 from sklearn.neighbors import KDTree
-from antropy.entropy import _xlogx
 
-from ..utils import z_score, make_buffer, bin_picker, histc
-from ..toolboxes.physionet import sampen as _sampen_c 
 from ..operations.correlation import first_crossing
 from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
+from ..toolboxes.physionet import sampen as _sampen_c
+from ..utils import bin_picker, histc, make_buffer, z_score
 
 def shannon_entropy(
     y: ArrayLike,

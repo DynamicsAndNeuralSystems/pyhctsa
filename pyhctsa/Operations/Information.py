@@ -1,10 +1,10 @@
-import os
-import numpy as np
-from typing import Union, Any, Optional, Dict, List
-from numpy.typing import ArrayLike
 import logging
+import os
+from typing import Any, Dict, List, Optional, Union
 
 import jpype as jp
+import numpy as np
+from numpy.typing import ArrayLike
 from scipy import stats
 
 from ..utils import sign_change

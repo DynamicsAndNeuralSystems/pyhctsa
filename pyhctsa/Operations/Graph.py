@@ -1,8 +1,7 @@
 import numpy as np
 from numpy.typing import ArrayLike
-
 import scipy
-from scipy.stats import norm, expon
+from scipy.stats import expon, norm
 from ts2vg import NaturalVG
 
 from pyhctsa.operations.correlation import autocorr, first_crossing

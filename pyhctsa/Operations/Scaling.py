@@ -1,5 +1,5 @@
-import numpy as np
 from numpy.typing import ArrayLike
+import numpy as np
 
 from ..toolboxes.Max_Little import fastdfa
 

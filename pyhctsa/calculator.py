@@ -11,7 +11,7 @@ import yaml
 from numpy.typing import ArrayLike
 from tqdm import tqdm
 
-from .utils import preprocess_decorator, validate_data, check_optional_deps
+from .utils import check_optional_deps, preprocess_decorator, validate_data
 
 def range_constructor(loader, node) -> list:
     """Construct a range from a YAML config."""

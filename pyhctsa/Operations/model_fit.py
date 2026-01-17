@@ -1,17 +1,17 @@
+from typing import Union
+
+import numba
 import numpy as np
 from numpy.typing import ArrayLike
-from typing import Union
-import numba
-
-from statsmodels.tsa.ar_model import AutoReg, ar_select_order
-from statsmodels.stats.diagnostic import acorr_ljungbox
-from scipy.stats import ks_1samp, norm, t
-from scipy.signal import lfilter
 from hmmlearn.hmm import GaussianHMM
+from scipy.signal import lfilter
+from scipy.stats import ks_1samp, norm, t
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.ar_model import AutoReg, ar_select_order
 
-from ..utils import z_score
+from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
-from ..operations.correlation import first_crossing, autocorr
+from ..utils import z_score
 
 def hmm_fit(y : ArrayLike, train_p : float = 0.8, num_states : int = 3, random_seed : int = 0) -> dict:
     """

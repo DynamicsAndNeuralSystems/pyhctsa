@@ -1,13 +1,14 @@
+import warnings
+from typing import Union
+
 import numpy as np
 from numpy.typing import ArrayLike
-from typing import Union
-import warnings
-warnings.filterwarnings("ignore", category=RuntimeWarning)
+from scipy.stats import gaussian_kde, norm, zmap
 
-from scipy.stats import zmap, norm, gaussian_kde
-
-from ..operations.information import automutual_info, first_min
 from ..operations.correlation import tc3
+from ..operations.information import automutual_info, first_min
+
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 def sd_give_me_stats(stat_x : float, stat_surr : ArrayLike, left_right_both : str) -> dict:
     """Compute statistiscs on the surrogate distribution."""

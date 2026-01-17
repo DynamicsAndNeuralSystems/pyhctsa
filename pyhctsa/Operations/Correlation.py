@@ -1,17 +1,17 @@
-import numpy as np
-from numpy.typing import ArrayLike 
-from typing import Union
 import logging
+from typing import Union
 
-from scipy.stats import gaussian_kde, kurtosis, skew, expon
-from scipy.stats import mode as smode
-from scipy.optimize import curve_fit
+import numpy as np
+from numpy.typing import ArrayLike
 from scipy.linalg import LinAlgError
+from scipy.optimize import curve_fit
+from scipy.stats import expon, gaussian_kde, kurtosis, skew
+from scipy.stats import mode as smode
 from statsmodels.tsa.stattools import pacf
 
-from ..utils import point_of_crossing, bin_picker, z_score, sign_change, make_mat_buffer
+from ..operations.information import automutual_info, first_min
 from ..toolboxes.c22 import periodicity_wang_wrapper
-from ..operations.information import first_min, automutual_info
+from ..utils import bin_picker, make_mat_buffer, point_of_crossing, sign_change, z_score
 
 def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even', 
               extra_param : Union[int, None] = None, random_seed = None) -> dict:

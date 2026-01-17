@@ -1,6 +1,5 @@
 import numpy as np
 from numpy.typing import ArrayLike
-
 from scipy import signal
 
 from ..utils import bin_picker, histc

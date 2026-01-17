@@ -1,22 +1,24 @@
-from pyhctsa.utils import get_dataset
-from pyhctsa.calculator import FeatureCalculator, classify_output, standardise_inputs
-import numpy as np
 import os
+
+import numpy as np
 import pandas as pd
 import pytest
+
+from pyhctsa.calculator import FeatureCalculator, classify_output, standardise_inputs
+from pyhctsa.utils import get_dataset
 
 #----------------- High-level module tests ------------------
 # does the calculator run on module functions (yes/no)?
 @pytest.mark.parametrize("x", [
-    "medical", "extreme", "criticality", "correlation", "information", "entropy",
+    "medical", "extreme_events", "criticality", "correlation", "information", "entropy",
     "stationarity", "distribution", "scaling", "symbolic", "wavelet", 
-    "hypothesis", "spectral", "modelfit", "graph", "physics", "preprocess",
+    "hypothesis", "spectral", "model_fit", "graph", "physics", "pre_process",
     "surrogates"])
 def test_module_basic(x):
     # basic checks on medical module
     data = get_dataset(which="sinusoid")
     config_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "Configurations", "TestConfigs", f"{x}.yaml")
+        os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "configurations", "module_configs", f"{x}.yaml")
     assert os.path.exists(config_path), f"Config file not found: {config_path}"
     calc = FeatureCalculator(config_path)
     fvec = calc.extract(data)

@@ -1,6 +1,7 @@
+from typing import Union
+
 import numpy as np
 from numpy.typing import ArrayLike
-from typing import Union
 
 from ..operations.correlation import first_crossing
 

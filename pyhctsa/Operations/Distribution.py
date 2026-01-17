@@ -1,13 +1,13 @@
+import logging
+from typing import Dict, Union
+
 import numpy as np
 from numpy.typing import ArrayLike
-from typing import Dict, Union
-import logging
-
 from scipy import stats
-from scipy.stats import norm, gumbel_l, uniform, expon, lognorm, gaussian_kde
+from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, uniform
 
-from ..utils import histc, bin_picker, simple_binner, x_corr
 from ..operations.correlation import autocorr, first_crossing
+from ..utils import bin_picker, histc, simple_binner, x_corr
 
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """

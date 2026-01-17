@@ -1,7 +1,7 @@
-import numpy as np
-from numpy.typing import ArrayLike
 from typing import Union
 
+import numpy as np
+from numpy.typing import ArrayLike
 import pywt
 from pywt import cwt
 
