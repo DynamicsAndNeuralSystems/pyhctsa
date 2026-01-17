@@ -1,14 +1,12 @@
-Surrogates:
-  SurrogateTest:
-    base_name: SurrogateTest
-    labels:
-      - surrogates
+surrogates:
+  surrogate_test:
+    base_name: surrogate_test
     dependencies:
     configs:
-      - surrMeth: "RP"
-        numSurrs: 99
-        theTestStat: [['ami1','fmmi','o3','tc3']]
-        zscore: True
-    hctsa_name: SD_SurrogateTest
-    ordered_args: ["surrMeth","numSurrs","theTestStat"]
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'ami1', zscore: True}
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'fmmi', zscore: True}
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'o3', zscore: True}
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'tc3', zscore: True}
+    legacy_name: SD_SurrogateTest
+    ordered_args: ['surr_meth', 'num_surrs', 'the_test_stat']
     

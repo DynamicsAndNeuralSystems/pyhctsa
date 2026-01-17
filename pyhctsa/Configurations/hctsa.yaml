@@ -1,5 +1,4 @@
 medical:
-
   hrv_classic:
     base_name: hrv_classic
     dependencies:
@@ -90,18 +89,16 @@ extreme_events:
     legacy_name: EX_MovingThreshold
     ordered_args: ['a', 'b']
 
-Criticality:
-  RAD:
-    base_name: RAD
-    labels:
-      - criticality
+criticality:
+  rad:
+    base_name: rad
     dependencies:
     configs:
-      - tau: [1, 2, 'tau']
-        zscore: True
-    hctsa_name: CR_RAD
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 'tau', zscore: True}
+    legacy_name: CR_RAD
     ordered_args: ['tau']
-
 correlation:
 
   autocorr:
@@ -673,339 +670,283 @@ entropy:
     legacy_name: EN_MS_shannon
     ordered_args: ['num_bins', 'depth']
   
-Stationarity:
-  StatAv:
-    base_name: StatAv
-    labels:
-      - stationarity
-      - StatAv
+stationarity:
+  stat_av:
+    base_name: stat_av
     dependencies:
     configs:
-      - whatType: 'len'
-        extraParam: [25, 50, 100, 150, 200, 250, 500, 1000]
-        zscore: True
-    hctsa_name: SY_StatAv
-    ordered_args: ["whatType", "extraParam"]
+      - {what_type: 'len', extra_param: 25, zscore: True}
+      - {what_type: 'len', extra_param: 50, zscore: True}
+      - {what_type: 'len', extra_param: 100, zscore: True}
+      - {what_type: 'len', extra_param: 150, zscore: True}
+      - {what_type: 'len', extra_param: 200, zscore: True}
+      - {what_type: 'len', extra_param: 250, zscore: True}
+      - {what_type: 'len', extra_param: 500, zscore: True}
+      - {what_type: 'len', extra_param: 1000, zscore: True}
+    legacy_name: SY_StatAv
+    ordered_args: ['what_type', 'extra_param']
 
-  Trend:
-    base_name: Trend
-    labels:
-      - stationarity
+  trend:
+    base_name: trend
     dependencies:
     configs:
-      - zscore: True
-    hctsa_name: SY_Trend
+      - {zscore: True}
+    legacy_name: SY_Trend
     ordered_args: 
   
-  StdNthDer:
-    base_name: StdNthDer
-    labels:
-      - stationarity
+  std_nth_deriv:
+    base_name: std_nth_deriv
     dependencies:
     configs:
-      - ndr: [1, 2, 3, 4, 5, 10]
-        zscore: True
-    hctsa_name: SY_StdNthDer
-    ordered_args: ["ndr"]
+      - {ndr: 1, zscore: True}
+      - {ndr: 2, zscore: True}
+      - {ndr: 3, zscore: True}
+      - {ndr: 4, zscore: True}
+      - {ndr: 5, zscore: True}
+      - {ndr: 10, zscore: True}
+    legacy_name: SY_StdNthDer
+    ordered_args: ['ndr']
 
-  TSLength:
-    base_name: length
-    labels:
-      - misc
-      - raw
-      - stationarity
-      - lengthDependent
+  ts_length:
+    base_name: ts_length
     dependencies:
     configs:
-      - zscore : False
-    hctsa_name: ST_Length
+      - {zscore: False}
+    legacy_name: ST_Length
     ordered_args:
 
-  FitPolynomial:
-    base_name: FitPolynomial
-    labels:
-      - trend
-      - stationarity
+  fit_polynomial:
+    base_name: fit_polynomial
     dependencies:
     configs:
-      - k: !range [1, 4]
-        zscore: True
-    hctsa_name: ST_FitPolynomial
-    ordered_args: ["k"]
+      - {k: 1, zscore: True}
+      - {k: 2, zscore: True}
+      - {k: 3, zscore: True}
+      - {k: 4, zscore: True}
+    legacy_name: ST_FitPolynomial
+    ordered_args: ['k']
   
-  SlidingWindow:
-    base_name: SlidingWindow
-    labels:
-      - stationarity
+  sliding_window:
+    base_name: sliding_window
     dependencies:
     configs:
-      - windowStat: 'mean'
-        acrossWinStat: 'std'
-        numSeg: !range [2, 10]
-        incMove: 1
-        zscore: True
-      - windowStat: 'mean'
-        acrossWinStat: 'std'
-        numSeg: [2, 5, 10]
-        incMove: [2, 10]
-        zscore: True
-      - windowStat: 'mean'
-        acrossWinStat: 'sampen'
-        numSeg: 10
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'mean'
-        acrossWinStat: 'sampen'
-        numSeg: [2, 5]
-        incMove: 10
-        zscore: True
-      - windowStat: 'mean'
-        acrossWinStat: 'ent'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'std'
-        acrossWinStat: 'std'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'std'
-        acrossWinStat: 'sampen'
-        numSeg: [2, 5, 10]
-        incMove: 10
-        zscore: True
-      - windowStat: 'std'
-        acrossWinStat: 'sampen'
-        numSeg: 10
-        incMove: [1, 2]
-        zscore: True
-      - windowStat: 'std'
-        acrossWinStat: 'ent'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'ent'
-        acrossWinStat: 'std'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'ent'
-        acrossWinStat: 'sampen'
-        numSeg: [2, 5, 10]
-        incMove: 10
-        zscore: True
-      - windowStat: 'ent'
-        acrossWinStat: 'sampen'
-        numSeg: 10
-        incMove: 2
-        zscore: True
-      - windowStat: 'ent'
-        acrossWinStat: 'ent'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'sampen'
-        acrossWinStat: 'std'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'sampen'
-        acrossWinStat: 'sampen'
-        numSeg: [2, 5, 10]
-        incMove: 10
-        zscore: True
-      - windowStat: 'sampen'
-        acrossWinStat: 'sampen'
-        numSeg: 10
-        incMove: [1, 2]
-        zscore: True
-      - windowStat: 'sampen'
-        acrossWinStat: 'ent'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'mom3'
-        acrossWinStat: 'std'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'mom3'
-        acrossWinStat: 'sampen'
-        numSeg: [2, 5, 10]
-        incMove: 10
-        zscore: True
-      - windowStat: 'mom3'
-        acrossWinStat: 'sampen'
-        numSeg: 10
-        incMove: [1, 2]
-        zscore: True
-      - windowStat: 'mom3'
-        acrossWinStat: 'ent'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'mom4'
-        acrossWinStat: 'std'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'mom4'
-        acrossWinStat: 'sampen'
-        numSeg: [2, 5, 10]
-        incMove: 10
-        zscore: True
-      - windowStat: 'mom4'
-        acrossWinStat: 'sampen'
-        numSeg: 10
-        incMove: [1, 2]
-        zscore: True
-      - windowStat: 'mom4'
-        acrossWinStat: 'ent'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'AC1'
-        acrossWinStat: 'std'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'AC1'
-        acrossWinStat: 'sampen'
-        numSeg: [2, 5, 10]
-        incMove: 10
-        zscore: True
-      - windowStat: 'AC1'
-        acrossWinStat: 'sampen'
-        numSeg: 10
-        incMove: [1, 2]
-        zscore: True
-      - windowStat: 'AC1'
-        acrossWinStat: 'ent'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-    hctsa_name: SY_SlidingWindow
-    ordered_args: ["windowStat", "acrossWinStat", "numSeg", "incMove"]
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 3, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 4, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 5, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 6, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 7, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 8, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 9, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}
+      
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 5, inc_move: 2, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 5, inc_move: 10, zscore: True}
+
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 5, inc_move: 1, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 5, inc_move: 2, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 10, inc_move: 2, zscore: True}
+
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 2, inc_move: 10, zscore: True}
+
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 5, inc_move: 1, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 5, inc_move: 2, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 5, inc_move: 10, zscore: True}
+
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 10, inc_move: 10, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 10, inc_move: 2, zscore: True}
+
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 5, inc_move: 1, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 5, inc_move: 2, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 10, inc_move: 10, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 10, inc_move: 2, zscore: True}
+
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 2, inc_move: 10, zscore: True}
+      
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 5, inc_move: 1, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 5, inc_move: 2, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 5, inc_move: 10, zscore: True}
+
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 10, inc_move: 2, zscore: True}
+
+      - {window_stat: 'mean', across_win_stat: 'ent', num_seg: 2, inc_move: 1, zscore: True}
+    legacy_name: SY_SlidingWindow
+    ordered_args: ['window_stat', 'across_win_stat', 'num_seg', 'inc_move']
   
-  LocalGlobal:
-    base_name: LocalGlobal
-    labels:
-      - stationarity
-      - distribution
+  local_global:
+    base_name: local_global
     dependencies:
     configs:
-      - subsetHow: ['l', 'unicg']
-        nsamps: [10, 20, 50, 100, 500]
-        zscore: True
-    hctsa_name: SY_LocalGlobal
-    ordered_args: ["subsetHow", "nsamps"]
+      - {subset_how: 'l', n: 10, zscore: True}
+      - {subset_how: 'l', n: 20, zscore: True}
+      - {subset_how: 'l', n: 50, zscore: True}
+      - {subset_how: 'l', n: 100, zscore: True}
+      - {subset_how: 'l', n: 500, zscore: True}
+
+      - {subset_how: 'unicg', n: 10, zscore: True}
+      - {subset_how: 'unicg', n: 20, zscore: True}
+      - {subset_how: 'unicg', n: 50, zscore: True}
+      - {subset_how: 'unicg', n: 100, zscore: True}
+      - {subset_how: 'unicg', n: 500, zscore: True}
+      
+      - {subset_how: 'p', n: 0.01, zscore: True}
+      - {subset_how: 'p', n: 0.05, zscore: True}
+      - {subset_how: 'p', n: 0.1, zscore: True}
+      - {subset_how: 'p', n: 0.5, zscore: True}
+    legacy_name: SY_LocalGlobal
+    ordered_args: ['subset_how', 'n']
   
-  DriftingMean:
-    base_name: DriftingMean
-    labels:
-      - stationarity
+  drifting_mean:
+    base_name: drifting_mean
     dependencies:
     configs:
-      - segmentHow: "fix"
-        l: [20, 50, 100]
-        zscore: True
-      - segmentHow: "num"
-        l: [5, 10]
-        zscore: True
-    hctsa_name: SY_DriftingMean
-    ordered_args: ["segmentHow", "l"]
+      - {segment_how: 'fix', l: 20, zscore: True}
+      - {segment_how: 'fix', l: 50, zscore: True}
+      - {segment_how: 'fix', l: 100, zscore: True}
+      - {segment_how: 'num', l: 5, zscore: True}
+      - {segment_how: 'num', l: 10, zscore: True}
+    legacy_name: SY_DriftingMean
+    ordered_args: ['segment_how', 'l']
   
-  RangeEvolve:
-    base_name: RangeEvolve
-    labels:
-      - stationarity
+  range_evolve:
+    base_name: range_evolve
     dependencies:
     configs:
-      - zscore: True
-    hctsa_name: SY_RangeEvolve
+      - {zscore: True}
+    legacy_name: SY_RangeEvolve
     ordered_args:
-  
-  KPSSTest:
-    base_name: KPSStest
-    labels:
-      - stationarity
-      - hypothesistest
+
+  kpss_test:
+    base_name: kpss_test
     dependencies:
       - statsmodels
     configs:
-      - lags: [0, 1, 2]
-        zscore: True
-      - lags: [!range [0, 10]]
-        zscore: True
-    hctsa_name: SY_KPSStest
-    ordered_args: ["lags"]
-  
-  LocalExtrema:
-    base_name: LocalExtrema
-    labels:
-      - stationarity
-      - distribution
+      - {lags: 0, zscore: True}
+      - {lags: 1, zscore: True}
+      - {lags: 2, zscore: True}
+      - {lags: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], zscore: True}
+    legacy_name: SY_KPSStest
+    ordered_args: ['lags']
+
+  local_extrema:
+    base_name: local_extrema
     dependencies:
     configs:
-      - howToWindow: 'l'
-        n: [50, 100]
-        zscore: True
-      - howToWindow: 'n'
-        n: [25, 50, 100]
-        zscore: True
-    hctsa_name: ST_LocalExtrema
-    ordered_args: ["howToWindow", "n"]
+      - {how_to_window: 'l', n: 50, zscore: True}
+      - {how_to_window: 'l', n: 100, zscore: True}
+      - {how_to_window: 'n', n: 25, zscore: True}
+      - {how_to_window: 'n', n: 50, zscore: True}
+      - {how_to_window: 'n', n: 100, zscore: True}
+    legacy_name: ST_LocalExtrema
+    ordered_args: ['how_to_window', 'n']
   
-  SimpleStats:
-    base_name: SimpleStats
-    labels:
-      - noisiness
-      - statistics
-      - stationarity
+  simple_stats:
+    base_name: simple_stats
     dependencies:
     configs:
-      - whatStat: ['zcross', 'pmcross']
-        zscore: True
-    hctsa_name: ST_SimpleStats
-    ordered_args: ["whatStat"]
+      - {what_stat: 'zcross', zscore: True}
+      - {what_stat: 'pmcross', zscore: True}
+    legacy_name: ST_SimpleStats
+    ordered_args: ['what_stat']
   
-  MomentCorr:
-    base_name: MomentCorr
-    labels:
-      - statistics
+  moment_corr:
+    base_name: moment_corr
     dependencies:
     configs:
-      - windowLength: 0.02
-        wOverlap: 0.2
-        mom1: ['mean', 'median']
-        mom2: ['std', 'iqr']
-        whatTransform: ['none', 'abs', 'sqrt']
-        zscore: True
-    hctsa_name: ST_MomentCorr
-    ordered_args: ["windowLength", "wOverlap", "mom1", "mom2", "whatTransform"]
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'std', what_transform: 'none', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'iqr', what_transform: 'none', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'std', what_transform: 'abs', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'iqr', what_transform: 'abs', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'std', what_transform: 'sqrt', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'iqr', what_transform: 'sqrt', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'std', what_transform: 'none', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'iqr', what_transform: 'none', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'std', what_transform: 'abs', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'iqr', what_transform: 'abs', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'std', what_transform: 'sqrt', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'iqr', what_transform: 'sqrt', zscore: True}
+    legacy_name: ST_MomentCorr
+    ordered_args: ['window_length', 'w_overlap', 'mom_1', 'mom_2', 'what_transform']
   
-  DynWin:
-    base_name: DynWin
-    labels:
-      - stationarity
+  dyn_win:
+    base_name: dyn_win
     dependencies:
     configs:
-      - maxNumSegments: 10
-        zscore: True
-    hctsa_name: SY_DynWin
-    ordered_args: ["maxNumSegments"]
+      - {max_num_segments: 10, zscore: True}
+    legacy_name: SY_DynWin
+    ordered_args: ['max_num_segments']
   
-  LocalDistributions:
-    base_name: LocalDistributions
-    labels:
-      - stationarity
+  local_distributions:
+    base_name: local_distributions
     dependencies:
     configs:
-      - numSegs: [2, 3, 4, 5]
-        eachOrPar: ['par', 'each']
-        zscore: True
-    hctsa_name: SY_LocalDistributions
-    ordered_args: ["numSegs", "eachOrPar"]
+      - {num_segs: 2, each_or_par: 'par', zscore: True}
+      - {num_segs: 3, each_or_par: 'par', zscore: True}
+      - {num_segs: 4, each_or_par: 'par', zscore: True}
+      - {num_segs: 5, each_or_par: 'par', zscore: True}
+
+      - {num_segs: 2, each_or_par: 'each', zscore: True}
+      - {num_segs: 3, each_or_par: 'each', zscore: True}
+      - {num_segs: 4, each_or_par: 'each', zscore: True}
+      - {num_segs: 5, each_or_par: 'each', zscore: True}
+    legacy_name: SY_LocalDistributions
+    ordered_args: ['num_segs', 'each_or_par']
   
 distribution:
 
@@ -1276,302 +1217,178 @@ distribution:
     legacy_name: DN_CompareKSFit
     ordered_args: ['what_distn']
   
-Scaling:
-  FastDFA:
-    base_name: fastdfa
-    labels:
-      - scaling
+scaling:
+  fast_dfa:
+    base_name: fast_dfa
     configs:
-      - zscore: True
-    hctsa_name: SC_fastdfa
+      - {zscore: True}
+    legacy_name: SC_fastdfa
 
-Symbolic:
-  TransitionMatrix:
-    base_name: TransitionMatrix
-    labels:
-      - symbolic
-      - transitionmat
-      - discrepancy
+symbolic:
+  transition_matrix:
+    base_name: transition_matrix
     dependencies:
     configs:
-      - howtocg: 'quantile'
-        numGroups: !range [2, 5]
-        tau: 1
-        zscore: True
-      - howtocg: 'quantile'
-        numGroups: !range [3, 5]
-        tau: 'ac'
-        zscore: True
-    hctsa_name: SB_TransitionMatrix
-    ordered_args: ['howtocg', 'numGroups', 'tau']
+      - {how_to_cg: 'quantile', num_groups: 2, tau: 1, zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 3, tau: 1, zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 4, tau: 1, zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 5, tau: 1, zscore: True}
 
-  BinaryStats:
-    base_name: BinaryStats
-    labels:
-      - symbolic
-      - distribution
-      - correlation
-      - stationarity
-    dependencies:
-    configs:
-      - binaryMethod: ['mean', 'diff']
-        zscore: True
-    hctsa_name: SB_BinaryStats
-    ordered_args: ['binaryMethod']
-  
-  MotifThree:
-    base_name: MotifThree
-    labels: 
-      - symbolic
-      - motifs
-    dependencies:
-    configs:
-      - cgHow: ['quantile', 'diffquant']
-        zscore: True
-    hctsa_name: SB_MotifThree
-    ordered_args: ['cgHow']
+      - {how_to_cg: 'quantile', num_groups: 2, tau: 'ac', zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 3, tau: 'ac', zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 4, tau: 'ac', zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 5, tau: 'ac', zscore: True}
+    legacy_name: SB_TransitionMatrix
+    ordered_args: ['how_to_cg', 'num_groups', 'tau']
 
-  MotifTwo:
-    base_name: MotifTwo
-    labels: 
-        - symbolic
-        - motifs
+  binary_stats:
+    base_name: binary_stats
     dependencies:
     configs:
-      - binarizeHow: ['diff', 'mean', 'median']
-        zscore: True
-    hctsa_name: SB_MotifTwo
-    ordered_args: ['binarizeHow']
+      - {binary_method: 'mean', zscore: True}
+      - {binary_method: 'diff', zscore: True}
+    legacy_name: SB_BinaryStats
+    ordered_args: ['binary_method']
   
-  BinaryStretch:
-    base_name: BinaryStretch
-    labels:
-      - binary
-      - symbolic
+  motif_three:
+    base_name: motif_three
     dependencies:
     configs:
-      - stretchWhat: ['lseq1', 'lseq0']
-        zscore: True
-    hctsa_name: SB_BinaryStretch
-    ordered_args: ['stretchWhat']
+      - {cg_how: 'quantile', zscore: True}
+      - {cg_how: 'diffquant', zscore: True}
+    legacy_name: SB_MotifThree
+    ordered_args: ['cg_how']
+
+  motif_two:
+    base_name: motif_two
+    dependencies:
+    configs:
+      - {binarize_how: 'diff', zscore: True}
+      - {binarize_how: 'mean', zscore: True}
+      - {binarize_how: 'median', zscore: True}
+    legacy_name: SB_MotifTwo
+    ordered_args: ['binarize_how']
   
-  Surprise:
-    base_name: Surprise
-    labels:
-      - symbolic
+  binary_stretch:
+    base_name: binary_stretch
     dependencies:
     configs:
-      - whatPrior: 'dist'
-        memory: [5, 20]
-        numGroups: 2
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: 50
-        numGroups: 3
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: 100
-        numGroups: [4, 5]
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: 50
-        numGroups: 3
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: 100
-        numGroups: [4, 5]
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: 20
-        numGroups: 2
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: 50
-        numGroups: 3
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: 100
-        numGroups: [4, 5]
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: 100
-        numGroups: [4, 5]
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: 20
-        numGroups: 2
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: 50
-        numGroups: 3
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: 100
-        numGroups: [4, 5]
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: 50
-        numGroups: 3
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: 100
-        numGroups: [4, 5]
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: [5, 20]
-        numGroups: 2
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: 20
-        numGroups: 2
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: 20
-        numGroups: 2
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: [5]
-        numGroups: [1, "tau"]
-        coarseGrainMethod: 'embed2quadrants'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: [10, 20]
-        numGroups: "tau"
-        coarseGrainMethod: 'embed2quadrants'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: 10
-        numGroups: [1, "tau"]
-        coarseGrainMethod: 'embed2quadrants'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: [20, 50]
-        numGroups: "tau"
-        coarseGrainMethod: 'embed2quadrants'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: [50, 100]
-        numGroups: "tau"
-        coarseGrainMethod: 'embed2quadrants'
-        numIters: 500
-        zscore: True
-    hctsa_name: FC_Surprise
-    ordered_args: ["whatPrior", "memory", "numGroups", "coarseGrainMethod", "numIters"]
+      - {stretch_what: 'lseq1', zscore: True}
+      - {stretch_what: 'lseq0', zscore: True}
+    legacy_name: SB_BinaryStretch
+    ordered_args: ['stretch_what']
+  
+  surprise:
+    base_name: surprise
+    dependencies:
+    configs:
+      - {what_prior: 'dist', memory: 5, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 20, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 50, num_groups: 3, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 4, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 5, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T1', memory: 20, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 4, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 5, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T2', memory: 20, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 50, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 4, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 5, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+
+      - {what_prior: 'dist', memory: 5, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 50, num_groups: 3, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T1', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 3, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T2', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 50, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+
+      - {what_prior: 'dist', memory: 5, num_groups: 1, coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 5, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 10, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 20, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T1', memory: 10, num_groups: 1, coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 10, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 20, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 50, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+    legacy_name: FC_Surprise
+    ordered_args: ['what_prior', 'memory', 'num_groups', 'coarse_grain_method', 'num_iters']
     
-Wavelet:
-  WLCoeffs:
-    base_name: WL_coeffs
-    labels:
-      - wavelet
+wavelet:
+  wl_coeffs:
+    base_name: wl_coeffs
     dependencies:
       - PyWavelets
     configs:
-      - wname: 'db3'
-        level:  [1, 2, 3, 4, 5, 'max']
-        zscore: True
-    hctsa_name: WL_coeffs
-    ordered_args: ["wname", "level"]
+      - {w_name: 'db3', level: 1, zscore: True}
+      - {w_name: 'db3', level: 2, zscore: True}
+      - {w_name: 'db3', level: 3, zscore: True}
+      - {w_name: 'db3', level: 4, zscore: True}
+      - {w_name: 'db3', level: 5, zscore: True}
+      - {w_name: 'db3', level: 'max', zscore: True}
+    legacy_name: WL_coeffs
+    ordered_args: ['w_name', 'level']
   
-  DetailCoeffs:
-    base_name: DetailCoeffs
-    labels:
-      - wavelet
+  detail_coeffs:
+    base_name: detail_coeffs
     dependencies:
       - PyWavelets
     configs:
-      - wname: 'db3'
-        maxlevel: 'max'
-        zscore: True
-    hctsa_name: WL_DetailCoeffs
-    ordered_args: ["wname", "maxlevel"]
+      - {w_name: 'db3', max_level: 'max', zscore: True}
+    legacy_name: WL_DetailCoeffs
+    ordered_args: ['w_name', 'max_level']
   
-  CWT:
+  cwt:
     base_name: cwt
-    labels:
-      - wavelet
     dependencies:
       - PyWavelets
     configs:
-      - wname: ['db3', 'sym2']
-        maxScale: 32
-        zscore: True
-    hctsa_name: WL_cwt
-    ordered_args: ["wname", "maxScale"]
+      - {w_name: 'db3', max_scale: 32, zscore: True}
+      - {w_name: 'sym2', max_scale: 32, zscore: True}
+    legacy_name: WL_cwt
+    ordered_args: ['w_name', 'max_scale']
   
-  dwtCoeff:
-    base_name: dwtcoeff
-    labels:
-      - wavelet
+  dwt_coeff:
+    base_name: dwt_coeff
     dependencies:
       - PyWavelets
     configs:
-      - wname: ['db3', 'sym2']
-        level: 5
-        zscore: True
-    hctsa_name: WL_dwtcoeff
-    ordered_args: ["wname", "level"]
+      - {w_name: 'db3', level: 5, zscore: True}
+      - {w_name: 'sym2', level: 5, zscore: True}
+    legacy_name: WL_dwtcoeff
+    ordered_args: ['w_name', 'level']
   
-  scal2Frq:
-    base_name: scal2frq
-    labels: 
-      - wavelet
+  scal_2_freq:
+    base_name: scal_2_freq
     depedencies:
       - PyWavelets
     configs:
-      - wname: 'db3'
-        amax: 'max'
-        delta: 1
-        zscore: True
-    hctsa_name: WL_scal2frq
-    ordered_args: ["wname", "amax", "delta"]
+      - {w_name: 'db3', a_max: 'max', delta: 1, zscore: True}
+    legacy_name: WL_scal2frq
+    ordered_args: ['w_name', 'a_max', 'delta']
   
-  wfBM_estimate:
-    base_name: fBM
-    labels:
-      - wavelet
+  wfbm:
+    base_name: wfbm
     depedencies:
+      - pywt
       - PyWavelets
     configs:
-      - zscore: True
-    hctsa_name: WL_fBM
+      - {zscore: True}
+    legacy_name: WL_fBM
     ordered_args: 
   
 hypothesis_tests:
@@ -1602,22 +1419,15 @@ hypothesis_tests:
     legacy_name: SY_VarRatioTest
     ordered_args: ['periods', 'iids']
 
-Spectral:
-  SpectralSummaries:
-    base_name: Spectral_Summaries
-    labels:
-      - spectral
-      - FourierSpectrum
+spectral:
+  spectral_summaries:
+    base_name: spectral_summaries
     depedencies:
     configs:
-      - psdMeth: 'welch'
-        windowType: 'rect'
-        zscore: True
-      - psdMeth: 'fft'
-        windowType: 'none'
-        zscore: True
-    hctsa_name: SP_Summaries
-    ordered_args: ["psdMeth", "windowType"]
+      - {psd_meth: 'welch', window_type: 'rect', zscore: True}
+      - {psd_meth: 'fft', window_type: 'none', zscore: True}
+    legacy_name: SP_Summaries
+    ordered_args: ['psd_meth', 'window_type']
 
 model_fit:
   ar_cov:
@@ -1712,71 +1522,75 @@ graph:
     legacy_name: NW_VisibilityGraph
     ordered_args: ['meth']
 
-Physics:
-  ForcePotential:
-    base_name: ForcePotential
-    labels:
-      - physics
-      - dynamicalSystem
+physics:
+  force_potential:
+    base_name: force_potential
     dependencies:
     configs:
-      - whatPotential: 'dblwell'
-        params: [[1, 0.2, 0.1], [1, 0.5, 0.2], [2, 0.05, 0.2], [3, 0.01, 0.1]]
-        zscore: True
-      - whatPotential: 'sine'
-        params: [[3,0.5,1], [1,1,1], [10,0.04,10]]
-        zscore: True
-    hctsa_name: PH_ForcePotential
-    ordered_args: ['whatPotential', 'params']
+      - {what_potential: 'dblwell', params: [[1, 0.2, 0.1]], zscore: True}
+      - {what_potential: 'dblwell', params: [[1, 0.5, 0.2]], zscore: True}
+      - {what_potential: 'dblwell', params: [[2, 0.05, 0.2]], zscore: True}
+      - {what_potential: 'dblwell', params: [[3, 0.01, 0.1]], zscore: True}
 
-  Walker:
-    base_name: Walker
-    labels:
-      - physics
-      - dynamicalSystem
+      - {what_potential: 'sine', params: [[3, 0.5, 1]], zscore: True}
+      - {what_potential: 'sine', params: [[1, 1, 1]], zscore: True}
+      - {what_potential: 'sine', params: [[10, 0.04, 10]], zscore: True}
+    legacy_name: PH_ForcePotential
+    ordered_args: ['what_potential', 'params']
+  
+  walker:
+    base_name: walker
     dependencies:
     configs:
-      - walkerRule: 'prop'
-        walkerParams: [0.1, 0.5, 0.9, 1.1] 
-        zscore: True
-      - walkerRule: 'biasprop'
-        walkerParams: [[0.5, 0.1], [0.1, 0.5]] 
-        zscore: True
-      - walkerRule: 'momentum'
-        walkerParams: [2, 5]
-        zscore: True
-    hctsa_name: PH_Walker
-    ordered_args: ["walkerRule", "walkerParams"]
+      - {walker_rule: 'prop', walker_params: 0.1, zscore: True}
+      - {walker_rule: 'prop', walker_params: 0.5, zscore: True}
+      - {walker_rule: 'prop', walker_params: 0.9, zscore: True}
+      - {walker_rule: 'prop', walker_params: 1.1, zscore: True}
 
-PreProcess:
-  PreProcCompare:
-    base_name: PreProcCompare
-    labels:
-      - raw
-      - preprocess
-    dependencies: 
-    configs:
-      - detrendMeth: ["poly1", "poly2"]
-        zscore: False
-      - detrendMeth: ["diff1", "diff2"]
-        zscore: False
-      - detrendMeth: ["rav2", "rav3", "rav4", "rav10"]
-        zscore: False
-      - detrendMeth: ["resample_1_2", "resample_2_1"]
-        zscore: False
-    hctsa_name: PP_Compare
-    ordered_args: ["detrendMeth"]
+      - {walker_rule: 'biasprop', walker_params: [[0.5, 0.1]], zscore: True}
+      - {walker_rule: 'biasprop', walker_params: [[0.1, 0.5]], zscore: True}
 
-Surrogates:
-  SurrogateTest:
-    base_name: SurrogateTest
-    labels:
-      - surrogates
+      - {walker_rule: 'momentum', walker_params: 2, zscore: True}
+      - {walker_rule: 'momentum', walker_params: 5, zscore: True}
+
+      - {walker_rule: 'runningvar', walker_params: [[1.5, 50]], zscore: True}
+    legacy_name: PH_Walker
+    ordered_args: ['walker_rule', 'walker_params']
+
+pre_process:
+  preproc_compare:
+    base_name: preproc_compare
     dependencies:
     configs:
-      - surrMeth: "RP"
-        numSurrs: 99
-        theTestStat: [['ami1','fmmi','o3','tc3']]
-        zscore: True
-    hctsa_name: SD_SurrogateTest
-    ordered_args: ["surrMeth","numSurrs","theTestStat"]
+      - {detrend_meth: 'poly1', zscore: False}
+      - {detrend_meth: 'poly2', zscore: False}
+
+      - {detrend_meth: 'diff1', zscore: False}
+      - {detrend_meth: 'diff2', zscore: False}
+
+      - {detrend_meth: 'medianf3', zscore: False}
+      - {detrend_meth: 'medianf4', zscore: False}
+      - {detrend_meth: 'medianf10', zscore: False}
+
+
+      - {detrend_meth: 'rav2', zscore: False}
+      - {detrend_meth: 'rav3', zscore: False}
+      - {detrend_meth: 'rav4', zscore: False}
+      - {detrend_meth: 'rav10', zscore: False}
+
+      - {detrend_meth: 'resample_1_2', zscore: False}
+      - {detrend_meth: 'resample_2_1', zscore: False}
+    legacy_name: PP_Compare
+    ordered_args: ['detrend_meth']
+
+surrogates:
+  surrogate_test:
+    base_name: surrogate_test
+    dependencies:
+    configs:
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'ami1', zscore: True}
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'fmmi', zscore: True}
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'o3', zscore: True}
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'tc3', zscore: True}
+    legacy_name: SD_SurrogateTest
+    ordered_args: ['surr_meth', 'num_surrs', 'the_test_stat']

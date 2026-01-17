@@ -1,9 +1,7 @@
-Scaling:
-  FastDFA:
-    base_name: fastdfa
-    labels:
-      - scaling
+scaling:
+  fast_dfa:
+    base_name: fast_dfa
     configs:
-      - zscore: True
-    hctsa_name: SC_fastdfa
+      - {zscore: True}
+    legacy_name: SC_fastdfa
     

@@ -1,281 +1,278 @@
-Stationarity:
-  StatAv:
-    base_name: StatAv
-    labels:
-      - stationarity
-      - StatAv
+stationarity:
+  stat_av:
+    base_name: stat_av
     dependencies:
     configs:
-      - whatType: 'len'
-        extraParam: [25, 50, 100, 150, 200, 250, 500, 1000]
-        zscore: True
-    hctsa_name: SY_StatAv
-    ordered_args: ["whatType", "extraParam"]
+      - {what_type: 'len', extra_param: 25, zscore: True}
+      - {what_type: 'len', extra_param: 50, zscore: True}
+      - {what_type: 'len', extra_param: 100, zscore: True}
+      - {what_type: 'len', extra_param: 150, zscore: True}
+      - {what_type: 'len', extra_param: 200, zscore: True}
+      - {what_type: 'len', extra_param: 250, zscore: True}
+      - {what_type: 'len', extra_param: 500, zscore: True}
+      - {what_type: 'len', extra_param: 1000, zscore: True}
+    legacy_name: SY_StatAv
+    ordered_args: ['what_type', 'extra_param']
 
-  Trend:
-    base_name: Trend
-    labels:
-      - stationarity
+  trend:
+    base_name: trend
     dependencies:
-      - scipy
     configs:
-      - zscore: True
-    hctsa_name: SY_Trend
+      - {zscore: True}
+    legacy_name: SY_Trend
     ordered_args: 
   
-  StdNthDer:
-    base_name: StdNthDer
-    labels:
-      - stationarity
+  std_nth_deriv:
+    base_name: std_nth_deriv
     dependencies:
     configs:
-      - ndr: [1, 2, 3, 4, 5, 10]
-        zscore: True
-    hctsa_name: SY_StdNthDer
-    ordered_args: ["ndr"]
+      - {ndr: 1, zscore: True}
+      - {ndr: 2, zscore: True}
+      - {ndr: 3, zscore: True}
+      - {ndr: 4, zscore: True}
+      - {ndr: 5, zscore: True}
+      - {ndr: 10, zscore: True}
+    legacy_name: SY_StdNthDer
+    ordered_args: ['ndr']
 
-  TSLength:
-    base_name: length
-    labels:
-      - misc
-      - raw
-      - stationarity
-      - lengthDependent
+  ts_length:
+    base_name: ts_length
     dependencies:
     configs:
-      - zscore: False
-    hctsa_name: ST_Length
+      - {zscore: False}
+    legacy_name: ST_Length
     ordered_args:
 
-  FitPolynomial:
-    base_name: FitPolynomial
-    labels:
-      - trend
-      - stationarity
+  fit_polynomial:
+    base_name: fit_polynomial
     dependencies:
     configs:
-      - k: !range [1, 4]
-        zscore: True
-    hctsa_name: ST_FitPolynomial
-    ordered_args: ["k"]
+      - {k: 1, zscore: True}
+      - {k: 2, zscore: True}
+      - {k: 3, zscore: True}
+      - {k: 4, zscore: True}
+    legacy_name: ST_FitPolynomial
+    ordered_args: ['k']
   
-  SlidingWindow:
-    base_name: SlidingWindow
-    labels:
-      - stationarity
+  sliding_window:
+    base_name: sliding_window
     dependencies:
     configs:
-      - windowStat: 'mean'
-        acrossWinStat: 'std'
-        numSeg: !range [2, 10]
-        incMove: 1
-        zscore: True
-      - windowStat: 'mean'
-        acrossWinStat: 'std'
-        numSeg: [2, 5, 10]
-        incMove: [2, 10]
-        zscore: True
-      - windowStat: 'mean'
-        acrossWinStat: 'sampen'
-        numSeg: 10
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'mean'
-        acrossWinStat: 'sampen'
-        numSeg: [2, 5]
-        incMove: 10
-        zscore: True
-      - windowStat: 'std'
-        acrossWinStat: 'std'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'std'
-        acrossWinStat: 'sampen'
-        numSeg: [2, 5, 10]
-        incMove: 10
-        zscore: True
-      - windowStat: 'std'
-        acrossWinStat: 'sampen'
-        numSeg: 10
-        incMove: [1, 2]
-        zscore: True
-      - windowStat: 'mom3'
-        acrossWinStat: 'std'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'mom3'
-        acrossWinStat: 'sampen'
-        numSeg: [2, 5, 10]
-        incMove: 10
-        zscore: True
-      - windowStat: 'mom3'
-        acrossWinStat: 'sampen'
-        numSeg: 10
-        incMove: [1, 2]
-        zscore: True
-      - windowStat: 'mom4'
-        acrossWinStat: 'std'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'mom4'
-        acrossWinStat: 'sampen'
-        numSeg: [2, 5, 10]
-        incMove: 10
-        zscore: True
-      - windowStat: 'mom4'
-        acrossWinStat: 'sampen'
-        numSeg: 10
-        incMove: [1, 2]
-        zscore: True
-      - windowStat: 'AC1'
-        acrossWinStat: 'std'
-        numSeg: [2, 5, 10]
-        incMove: [1, 2, 10]
-        zscore: True
-      - windowStat: 'AC1'
-        acrossWinStat: 'sampen'
-        numSeg: [2, 5, 10]
-        incMove: 10
-        zscore: True
-      - windowStat: 'AC1'
-        acrossWinStat: 'sampen'
-        numSeg: 10
-        incMove: [1, 2]
-        zscore: True
-      - windowStat: 'mean'
-        acrossWinStat: 'ent'
-        numSeg: 2
-        incMove: 1
-        zscore: True
-    hctsa_name: SY_SlidingWindow
-    ordered_args: ["windowStat", "acrossWinStat", "numSeg", "incMove"]
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 3, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 4, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 5, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 6, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 7, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 8, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 9, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}
+      
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 5, inc_move: 2, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 5, inc_move: 10, zscore: True}
+
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 5, inc_move: 1, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 5, inc_move: 2, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 10, inc_move: 2, zscore: True}
+
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 2, inc_move: 10, zscore: True}
+
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 5, inc_move: 1, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 5, inc_move: 2, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 5, inc_move: 10, zscore: True}
+
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 10, inc_move: 10, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 10, inc_move: 2, zscore: True}
+
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 5, inc_move: 1, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 5, inc_move: 2, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 10, inc_move: 10, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 10, inc_move: 2, zscore: True}
+
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 2, inc_move: 10, zscore: True}
+      
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 5, inc_move: 1, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 5, inc_move: 2, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 5, inc_move: 10, zscore: True}
+
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 2, inc_move: 10, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 5, inc_move: 10, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 10, inc_move: 10, zscore: True}
+
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 10, inc_move: 2, zscore: True}
+
+      - {window_stat: 'mean', across_win_stat: 'ent', num_seg: 2, inc_move: 1, zscore: True}
+    legacy_name: SY_SlidingWindow
+    ordered_args: ['window_stat', 'across_win_stat', 'num_seg', 'inc_move']
   
-  LocalGlobal:
-    base_name: LocalGlobal
-    labels:
-      - stationarity
-      - distribution
+  local_global:
+    base_name: local_global
     dependencies:
     configs:
-      - subsetHow: ['l', 'unicg']
-        nsamps: [10, 20, 50, 100, 500]
-        zscore: True
-      - subsetHow: ['p']
-        nsamps: [0.01, 0.05, 0.1, 0.5]
-        zscore: True
-    hctsa_name: SY_LocalGlobal
-    ordered_args: ["subsetHow", "nsamps"]
+      - {subset_how: 'l', n: 10, zscore: True}
+      - {subset_how: 'l', n: 20, zscore: True}
+      - {subset_how: 'l', n: 50, zscore: True}
+      - {subset_how: 'l', n: 100, zscore: True}
+      - {subset_how: 'l', n: 500, zscore: True}
+
+      - {subset_how: 'unicg', n: 10, zscore: True}
+      - {subset_how: 'unicg', n: 20, zscore: True}
+      - {subset_how: 'unicg', n: 50, zscore: True}
+      - {subset_how: 'unicg', n: 100, zscore: True}
+      - {subset_how: 'unicg', n: 500, zscore: True}
+      
+      - {subset_how: 'p', n: 0.01, zscore: True}
+      - {subset_how: 'p', n: 0.05, zscore: True}
+      - {subset_how: 'p', n: 0.1, zscore: True}
+      - {subset_how: 'p', n: 0.5, zscore: True}
+    legacy_name: SY_LocalGlobal
+    ordered_args: ['subset_how', 'n']
   
-  DriftingMean:
-    base_name: DriftingMean
-    labels:
-      - stationarity
+  drifting_mean:
+    base_name: drifting_mean
     dependencies:
     configs:
-      - segmentHow: "fix"
-        l: [20, 50, 100]
-        zscore: True
-      - segmentHow: "num"
-        l: [5, 10]
-        zscore: True
-    hctsa_name: SY_DriftingMean
-    ordered_args: ["segmentHow", "l"]
+      - {segment_how: 'fix', l: 20, zscore: True}
+      - {segment_how: 'fix', l: 50, zscore: True}
+      - {segment_how: 'fix', l: 100, zscore: True}
+      - {segment_how: 'num', l: 5, zscore: True}
+      - {segment_how: 'num', l: 10, zscore: True}
+    legacy_name: SY_DriftingMean
+    ordered_args: ['segment_how', 'l']
   
-  RangeEvolve:
-    base_name: RangeEvolve
-    labels:
-      - stationarity
+  range_evolve:
+    base_name: range_evolve
     dependencies:
     configs:
-      - zscore: True
-    hctsa_name: SY_RangeEvolve
+      - {zscore: True}
+    legacy_name: SY_RangeEvolve
     ordered_args:
 
-  KPSSTest:
-    base_name: KPSStest
-    labels:
-      - stationarity
-      - hypothesistest
+  kpss_test:
+    base_name: kpss_test
     dependencies:
       - statsmodels
     configs:
-      - lags: [0, 1, 2]
-        zscore: True
-      - lags: [!range [0, 10]]
-        zscore: True
-    hctsa_name: SY_KPSStest
-    ordered_args: ["lags"]
+      - {lags: 0, zscore: True}
+      - {lags: 1, zscore: True}
+      - {lags: 2, zscore: True}
+      - {lags: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], zscore: True}
+    legacy_name: SY_KPSStest
+    ordered_args: ['lags']
 
-  LocalExtrema:
-    base_name: LocalExtrema
-    labels:
-      - stationarity
-      - distribution
+  local_extrema:
+    base_name: local_extrema
     dependencies:
     configs:
-      - howToWindow: 'l'
-        n: [50, 100]
-        zscore: True
-      - howToWindow: 'n'
-        n: [25, 50, 100]
-        zscore: True
-    hctsa_name: ST_LocalExtrema
-    ordered_args: ["howToWindow", "n"]
+      - {how_to_window: 'l', n: 50, zscore: True}
+      - {how_to_window: 'l', n: 100, zscore: True}
+      - {how_to_window: 'n', n: 25, zscore: True}
+      - {how_to_window: 'n', n: 50, zscore: True}
+      - {how_to_window: 'n', n: 100, zscore: True}
+    legacy_name: ST_LocalExtrema
+    ordered_args: ['how_to_window', 'n']
   
-  SimpleStats:
-    base_name: SimpleStats
-    labels:
-      - noisiness
-      - statistics
-      - stationarity
+  simple_stats:
+    base_name: simple_stats
     dependencies:
-      - scipy
     configs:
-      - whatStat: ['zcross', 'pmcross']
-        zscore: True
-    hctsa_name: ST_SimpleStats
-    ordered_args: ["whatStat"]
+      - {what_stat: 'zcross', zscore: True}
+      - {what_stat: 'pmcross', zscore: True}
+    legacy_name: ST_SimpleStats
+    ordered_args: ['what_stat']
   
-  MomentCorr:
-    base_name: MomentCorr
-    labels:
-      - statistics
+  moment_corr:
+    base_name: moment_corr
     dependencies:
     configs:
-      - windowLength: 0.02
-        wOverlap: 0.2
-        mom1: ['mean', 'median']
-        mom2: ['std', 'iqr']
-        whatTransform: ['none', 'abs', 'sqrt']
-        zscore: True
-    hctsa_name: ST_MomentCorr
-    ordered_args: ["windowLength", "wOverlap", "mom1", "mom2", "whatTransform"]
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'std', what_transform: 'none', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'iqr', what_transform: 'none', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'std', what_transform: 'abs', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'iqr', what_transform: 'abs', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'std', what_transform: 'sqrt', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'iqr', what_transform: 'sqrt', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'std', what_transform: 'none', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'iqr', what_transform: 'none', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'std', what_transform: 'abs', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'iqr', what_transform: 'abs', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'std', what_transform: 'sqrt', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'iqr', what_transform: 'sqrt', zscore: True}
+    legacy_name: ST_MomentCorr
+    ordered_args: ['window_length', 'w_overlap', 'mom_1', 'mom_2', 'what_transform']
   
-  DynWin:
-    base_name: DynWin
-    labels:
-      - stationarity
+  dyn_win:
+    base_name: dyn_win
     dependencies:
-      - scipy
     configs:
-      - maxNumSegments: 10
-        zscore: True
-    hctsa_name: SY_DynWin
-    ordered_args: ["maxNumSegments"]
+      - {max_num_segments: 10, zscore: True}
+    legacy_name: SY_DynWin
+    ordered_args: ['max_num_segments']
   
-  LocalDistributions:
-    base_name: LocalDistributions
-    labels:
-      - stationarity
+  local_distributions:
+    base_name: local_distributions
     dependencies:
-      - scipy
     configs:
-      - numSegs: [2, 3, 4, 5]
-        eachOrPar: ['par', 'each']
-        zscore: True
-    hctsa_name: SY_LocalDistributions
-    ordered_args: ["numSegs", "eachOrPar"]
+      - {num_segs: 2, each_or_par: 'par', zscore: True}
+      - {num_segs: 3, each_or_par: 'par', zscore: True}
+      - {num_segs: 4, each_or_par: 'par', zscore: True}
+      - {num_segs: 5, each_or_par: 'par', zscore: True}
+
+      - {num_segs: 2, each_or_par: 'each', zscore: True}
+      - {num_segs: 3, each_or_par: 'each', zscore: True}
+      - {num_segs: 4, each_or_par: 'each', zscore: True}
+      - {num_segs: 5, each_or_par: 'each', zscore: True}
+    legacy_name: SY_LocalDistributions
+    ordered_args: ['num_segs', 'each_or_par']
     

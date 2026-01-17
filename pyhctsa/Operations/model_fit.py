@@ -10,7 +10,7 @@ from scipy.signal import lfilter
 from hmmlearn.hmm import GaussianHMM
 
 from ..Utilities.utils import ZScore
-from ..Operations.Stationarity import SlidingWindow
+from ..Operations.stationarity import sliding_window
 from ..Operations.correlation import first_crossing, autocorr
 
 def hmm_fit(y : ArrayLike, train_p : float = 0.8, num_states : int = 3, random_seed : int = 0) -> dict:
@@ -325,8 +325,8 @@ def local_simple(y : ArrayLike, forecast_meth : str = 'mean', train_length : Uni
     out['stderr'] = np.std(res, ddof=1)
     out['meanabserr'] = np.mean(np.abs(res))
     #% Stationarity of residuals:
-    out['sws'] = SlidingWindow(res, 'std', 'std', 5, 1) # across five non-overlapping segments
-    out['swm'] = SlidingWindow(res, 'mean', 'std', 5, 1) # across five non-overlapping segments
+    out['sws'] = sliding_window(res, 'std', 'std', 5, 1) # across five non-overlapping segments
+    out['swm'] = sliding_window(res, 'mean', 'std', 5, 1) # across five non-overlapping segments
     #% TODO Normality of residuals
     #% Autocorrelation structure of the residuals:
     out['ac1'] = autocorr(res, 1, 'Fourier')[0]

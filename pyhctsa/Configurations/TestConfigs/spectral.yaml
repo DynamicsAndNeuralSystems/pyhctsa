@@ -1,17 +1,9 @@
-Spectral:
-  SpectralSummaries:
-    base_name: Spectral_Summaries
-    labels:
-      - spectral
-      - FourierSpectrum
+spectral:
+  spectral_summaries:
+    base_name: spectral_summaries
     depedencies:
-      - scipy
     configs:
-      - psdMeth: 'welch'
-        windowType: 'rect'
-        zscore: True
-      - psdMeth: 'fft'
-        windowType: 'none'
-        zscore: True
-    hctsa_name: SP_Summaries
-    ordered_args: ["psdMeth", "windowType"]
+      - {psd_meth: 'welch', window_type: 'rect', zscore: True}
+      - {psd_meth: 'fft', window_type: 'none', zscore: True}
+    legacy_name: SP_Summaries
+    ordered_args: ['psd_meth', 'window_type']

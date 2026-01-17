@@ -9,12 +9,12 @@ from scipy.signal import resample as ssre
 from ..Operations.correlation import first_crossing
 from ..Utilities.utils import binarize, signChange
 
-def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numGroups : int = 3, coarseGrainMethod : str = 'quantile', 
-                numIters : int = 500, randomSeed : int = 0) -> dict:
+def surprise(y : ArrayLike, what_prior : str = 'dist', memory : float = 0.2, num_groups : int = 3, 
+             coarse_grain_method : str = 'quantile', num_iters : int = 500, random_seed : int = 0) -> dict:
     """
     Quantifies how surprised you would be of the next data point given recent memory.
 
-    Coarse-grains the time series, turning it into a sequence of symbols of a given alphabet size (`numGroups`),
+    Coarse-grains the time series, turning it into a sequence of symbols of a given alphabet size (`num_groups`),
     and quantifies measures of surprise of a process with local memory of the past `memory` values of the symbolic string.
     For each sample, the 'information gained' (log(1/p)) is estimated using expectations calculated from the previous `memory` samples.
 
@@ -22,7 +22,7 @@ def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numG
     ----------
     y : array-like
         The input time series.
-    whatPrior : {'dist', 'T1', 'T2'}, optional
+    what_prior : {'dist', 'T1', 'T2'}, optional
         The type of information to store in memory:
             - 'dist': the values of the time series in the previous memory samples (default),
             - 'T1': the one-point transition probabilities in the previous memory samples,
@@ -30,16 +30,16 @@ def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numG
     memory : float, optional
         The memory length (either number of samples, or a proportion of the time-series length if between 0 and 1).
         Default is 0.2.
-    numGroups : int, optional
+    num_groups : int, optional
         The number of groups to coarse-grain the time series into. Default is 3.
-    coarseGrainMethod : {'quantile', 'updown', 'embed2quadrants'}, optional
+    coarse_grain_method : {'quantile', 'updown', 'embed2quadrants'}, optional
         The coarse-graining or symbolization method:
             - 'quantile': equiprobable alphabet by value of each time-series datapoint (default),
             - 'updown': equiprobable alphabet by incremental changes in the time-series values,
             - 'embed2quadrants': 4-letter alphabet of the quadrant each data point resides in a 2D embedding space.
-    numIters : int, optional
+    num_iters : int, optional
         The number of iterations to repeat the procedure for. Default is 500.
-    randomSeed : int, optional
+    random_seed : int, optional
         Whether (and how) to reset the random seed. Default is 0.
 
     Returns
@@ -52,24 +52,24 @@ def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numG
         memory = int(np.round(memory*len(y)))
 
     # COURSE GRAIN
-    yth = CoarseGrain(y, coarseGrainMethod, numGroups) # a coarse-grained time series using the numbers 1:numgroups
+    yth = coarse_grain(y, coarse_grain_method, num_groups) # a coarse-grained time series using the numbers 1:num_groups
     N = int(len(yth))
 
     # Use random sampling (original behavior)
-    if randomSeed is not None:
-        np.random.seed(randomSeed)
+    if random_seed is not None:
+        np.random.seed(random_seed)
     rs = np.random.permutation(int(N - memory)) + memory
-    rs = np.sort(rs[0:min(numIters, len(rs) - 1)])
+    rs = np.sort(rs[0:min(num_iters, len(rs) - 1)])
     rs = np.array([rs])
 
     # COMPUTE EMPIRICAL PROBABILITIES FROM TIME SERIES
-    store = np.zeros([numIters, 1])
+    store = np.zeros([num_iters, 1])
     for i in range(0, rs.size): # rs.size
-        if whatPrior == 'dist':
+        if what_prior == 'dist':
             # uses the distribution up to memory to inform the next point
             p = np.sum(yth[rs[0, i]-memory:rs[0, i]] == yth[rs[0, i]])/memory # had to be careful with indexing, arange() works like matlab's : operator
             store[i] = p
-        elif whatPrior == 'T1':
+        elif what_prior == 'T1':
             # uses one-point correlations in memory to inform the next point
             # estimate transition probabilites from data in memory
             # find where in memory this has been observbed before, and preceded it
@@ -81,7 +81,7 @@ def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numG
                 p = np.mean(memory_data[inmem + 1] == yth[rs[0, i]])
             store[i] = p
 
-        elif whatPrior == 'T2':
+        elif what_prior == 'T2':
             # Uses two-point correlations in memory to inform the next point
             memory_data = yth[rs[0, i] - memory:rs[0, i]]
             # Previous value observed in memory here
@@ -94,7 +94,7 @@ def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numG
             store[i] = p
             
         else:
-            raise ValueError(f"Unknown method: {whatPrior}")
+            raise ValueError(f"Unknown method: {what_prior}")
     
     # INFORMATION GAINED FROM NEXT OBSERVATION IS log(1/p) = -log(p)
     store[store == 0] = 1 # so that we set log[0] == 0
@@ -128,12 +128,12 @@ def Surprise(y : ArrayLike, whatPrior : str = 'dist', memory : float = 0.2, numG
     if out['std'] == 0:
         out['tstat'] = np.nan
     else:
-        out['tstat'] = abs((out['mean']-1)/(out['std']/np.sqrt(numIters)))
+        out['tstat'] = abs((out['mean']-1)/(out['std']/np.sqrt(num_iters)))
 
     return out 
 
 
-def MotifTwo(y : ArrayLike, binarizeHow : str = 'diff') -> dict:
+def motif_two(y : ArrayLike, binarize_how : str = 'diff') -> dict:
     """
     Compute local motifs in a binary symbolization of the input time series.
 
@@ -146,7 +146,7 @@ def MotifTwo(y : ArrayLike, binarizeHow : str = 'diff') -> dict:
     y : array-like
         The input time series.
 
-    binarizeHow : str, optional
+    binarize_how : str, optional
         The method used for binary transformation. One of:
             - 'diff': Encode increases in the time series as 1, and decreases as 0 (default).
             - 'mean': Encode values above the mean as 1, and below as 0.
@@ -164,7 +164,7 @@ def MotifTwo(y : ArrayLike, binarizeHow : str = 'diff') -> dict:
     """
     # Generate a binarized version of the input time series
     y = np.asarray(y)
-    yBin = binarize(y, binarizeHow)
+    yBin = binarize(y, binarize_how)
 
     # Define the length of the new, symbolized sequence, N
     N = len(yBin)
@@ -179,7 +179,6 @@ def MotifTwo(y : ArrayLike, binarizeHow : str = 'diff') -> dict:
 
     # ------ Record these -------
     # (Will be dependent outputs since signal is binary, sum to 1)
-    # (Default hctsa library measures just the u output: up)
     out = {}
     out['u'] = np.mean(r1) # proportion 1 (corresponds to a movement up for 'diff')
     out['d'] = np.mean(r0) # proportion 0 (corresponds to a movement down for 'diff')
@@ -291,7 +290,7 @@ def MotifTwo(y : ArrayLike, binarizeHow : str = 'diff') -> dict:
 
     return out
 
-def MotifThree(y : ArrayLike, cgHow : str = 'quantile') -> dict:
+def motif_three(y : ArrayLike, cg_how : str = 'quantile') -> dict:
     """
     Motifs in a coarse-graining of a time series to a 3-letter alphabet.
 
@@ -299,7 +298,7 @@ def MotifThree(y : ArrayLike, cgHow : str = 'quantile') -> dict:
     ----------
     y : np.ndarray
         Time series to analyze.
-    cgHow : {'quantile', 'diffquant'}, optional
+    cg_how : {'quantile', 'diffquant'}, optional
         The coarse-graining method to use:
         - 'quantile': equiprobable alphabet by time-series value (default)
         - 'diffquant': equiprobably alphabet by time-series increments
@@ -313,12 +312,12 @@ def MotifThree(y : ArrayLike, cgHow : str = 'quantile') -> dict:
     # Coarse-grain the data y -> yt
     y = np.asarray(y)
     numLetters = 3
-    if cgHow == 'quantile':
+    if cg_how == 'quantile':
         yt = CoarseGrain(y, 'quantile', numLetters)
-    elif cgHow == 'diffquant':
+    elif cg_how == 'diffquant':
         yt = CoarseGrain(np.diff(y), 'quantile', numLetters)
     else:
-        raise ValueError(f"Unknown coarse-graining method {cgHow}")
+        raise ValueError(f"Unknown coarse-graining method {cg_how}")
 
     # So we have a vectory yt with entries in {1, 2, 3}
     N = len(yt) # length of the symbolized sequence derived from the time series
@@ -394,7 +393,7 @@ def _f_entropy(x):
     return -np.sum(x[x > 0] * np.log(x[x > 0]))
 
 
-def BinaryStretch(x : ArrayLike, stretchWhat : str = 'lseq1') -> float:
+def binary_stretch(x : ArrayLike, stretch_what : str = 'lseq1') -> float:
     """
     Characterize stretches of 0s or 1s in a binarized time series.
 
@@ -413,7 +412,7 @@ def BinaryStretch(x : ArrayLike, stretchWhat : str = 'lseq1') -> float:
     x : array-like
         The input time series.
 
-    stretchWhat : str, optional
+    stretch_what : str, optional
         Specifies which binary symbol's stretch length to analyze:
             - 'lseq1': Analyze stretches related to consecutive 1s (default).
             - 'lseq0': Analyze stretches related to consecutive 0s.
@@ -428,7 +427,7 @@ def BinaryStretch(x : ArrayLike, stretchWhat : str = 'lseq1') -> float:
     N = len(x) # time series length
     x = np.where(x > 0, 1, 0)
 
-    if stretchWhat == 'lseq1':
+    if stretch_what == 'lseq1':
         # longest stretch of 1s [this code doesn't actualy measure this!]
         indices = np.where(x == 1)[0]
         diffs = np.diff(indices) - 1.5
@@ -437,7 +436,7 @@ def BinaryStretch(x : ArrayLike, stretchWhat : str = 'lseq1') -> float:
             out = np.max(np.diff(sign_changes)) / N
         else:
             out = None
-    elif stretchWhat == 'lseq0':
+    elif stretch_what == 'lseq0':
         # longest stretch of 0s [this code doesn't actualy measure this!]
         indices = np.where(x == 0)[0]
         diffs = np.diff(indices) - 1.5
@@ -447,11 +446,11 @@ def BinaryStretch(x : ArrayLike, stretchWhat : str = 'lseq1') -> float:
         else:
             out = None
     else:
-        raise ValueError(f"Unknown input {stretchWhat}")
+        raise ValueError(f"Unknown input {stretch_what}")
     
     return out if out is not None else 0
 
-def BinaryStats(y : ArrayLike, binaryMethod : str = 'diff') -> dict:
+def binary_stats(y : ArrayLike, binary_method : str = 'diff') -> dict:
     """
     Compute statistics on a binary symbolisation of the input time series.
 
@@ -465,7 +464,7 @@ def BinaryStats(y : ArrayLike, binaryMethod : str = 'diff') -> dict:
     y : array-like
         The input time series.
 
-    binaryMethod : str, optional
+    binary_method : str, optional
         The binary symbolisation rule. One of:
             - 'diff' : Encode as 1 if the time-series difference is positive, and 0 otherwise (default).
             - 'mean' : Encode as 1 if the value is above the mean, 0 otherwise.
@@ -478,7 +477,7 @@ def BinaryStats(y : ArrayLike, binaryMethod : str = 'diff') -> dict:
     
     # Binarize the time series
     y = np.asarray(y)
-    yBin = binarize(y, binarizeHow=binaryMethod)
+    yBin = binarize(y, binarizeHow=binary_method)
     N = len(yBin)
 
     # Stationarity of binarised time series
@@ -533,26 +532,29 @@ def BinaryStats(y : ArrayLike, binaryMethod : str = 'diff') -> dict:
 
     return out 
 
-def TransitionMatrix(y : ArrayLike, howtocg : str = 'quantile', numGroups : int = 2, tau : Union[int, str] = 1) -> dict:
+def transition_matrix(y : ArrayLike, how_to_cg : str = 'quantile', num_groups : int = 2, tau : Union[int, str] = 1) -> dict:
     """
     Transition probabilities between time-series states. 
     The time series is coarse-grained according to a given method.
 
     The input time series is transformed into a symbolic string using an
-    equiprobable alphabet of numGroups letters. The transition probabilities are
+    equiprobable alphabet of num_groups letters. The transition probabilities are
     calculated at a lag tau.
 
-    Related to the idea of quantile graphs from time series.
-    cf. Andriana et al. (2011). Duality between Time Series and Networks. PLoS ONE.
-    https://doi.org/10.1371/journal.pone.0023378
+    Related to the idea of quantile graphs from time series, cf. [1]
+
+    References
+    ----------
+    .. [1] Andriana et al. (2011). Duality between Time Series and Networks. PLoS ONE.
+        https://doi.org/10.1371/journal.pone.0023378
 
     Parameters
     -----------
     y : array-like
         Input time series.
-    howtocg : str, optional
+    how_to_cg : str, optional
         The method of discretization (currently 'quantile' is the only option)
-    numGroups : int, optional
+    num_groups : int, optional
         number of groups in the course-graining
     tau : int or str, optional
         analyze transition matricies corresponding to this lag. We
@@ -570,7 +572,7 @@ def TransitionMatrix(y : ArrayLike, howtocg : str = 'quantile', numGroups : int 
     """
     # check inputs
     y = np.asarray(y)
-    if numGroups < 2:
+    if num_groups < 2:
         raise ValueError("Too few groups for coarse-graining")
     if tau == 'ac':
         # determine the tau from first zero of the ACF
@@ -583,35 +585,35 @@ def TransitionMatrix(y : ArrayLike, howtocg : str = 'quantile', numGroups : int 
     
     N = len(y)
 
-    yth = CoarseGrain(y, howtocg, numGroups)
+    yth = coarse_grain(y, how_to_cg, num_groups)
     # At this point we should have:
-    # (*) yth: a thresholded y containing integers from 1 to numGroups
+    # (*) yth: a thresholded y containing integers from 1 to num_groups
     yth = np.ravel(yth)
 
-    T = np.zeros((numGroups,numGroups))
-    for i in range(numGroups):
+    T = np.zeros((num_groups,num_groups))
+    for i in range(num_groups):
         ri = (yth == i + 1)
         if sum(ri) == 0:
             T[i,:] = 0
         else:
             ri_next = np.r_[False, ri[:-1]]
-            for j in range(numGroups):
+            for j in range(num_groups):
                 T[i, j] = np.sum(yth[ri_next] == j + 1)
 
     out = {}
     # Normalize from counts to probabilities:
     T = T/(N - 1) # N-1 is appropriate because it's a 1-time transition matrix
 
-    if numGroups == 2:
+    if num_groups == 2:
         for i in range(4):
             out[f'T{i+1}'] = T.transpose().flatten()[i]
 
-    elif numGroups == 3:
+    elif num_groups == 3:
         for i in range(9):
             out[f'T{i+1}'] = T.transpose().flatten()[i] 
 
-    elif numGroups > 3:
-        for i in range(numGroups):
+    elif num_groups > 3:
+        for i in range(num_groups):
             out[f'TD{i+1}'] = T.transpose()[i, i]
 
     # (ii) Measures on the diagonal
@@ -641,7 +643,7 @@ def TransitionMatrix(y : ArrayLike, howtocg : str = 'quantile', numGroups : int 
 
     return out
 
-def CoarseGrain(y : list, howtocg : str, numGroups : int) -> np.ndarray:
+def coarse_grain(y : list, how_to_cg : str, num_groups : int) -> np.ndarray:
     """
     Coarse-grains a continuous time series to a discrete alphabet.
 
@@ -649,10 +651,10 @@ def CoarseGrain(y : list, howtocg : str, numGroups : int) -> np.ndarray:
     -----------
     y : array-like
         The input time series.
-    howtocg : str
+    how_to_cg : str
         The method of coarse-graining.
         Options: 'updown', 'quantile', 'embed2quadrants', 'embed2octants'
-    numGroups : int
+    num_groups : int
         Specifies the size of the alphabet for 'quantile' and 'updown',
         or sets the time delay for the embedding subroutines.
 
@@ -664,22 +666,22 @@ def CoarseGrain(y : list, howtocg : str, numGroups : int) -> np.ndarray:
     y = np.asarray(y)
     N = len(y)
 
-    if howtocg not in ['updown', 'quantile', 'embed2quadrants', 'embed2octants']:
-        raise ValueError(f"Unknown coarse-graining method '{howtocg}'")
+    if how_to_cg not in ['updown', 'quantile', 'embed2quadrants', 'embed2octants']:
+        raise ValueError(f"Unknown coarse-graining method '{how_to_cg}'")
 
     # Some coarse-graining/symbolization methods require initial processing:
-    if howtocg == 'updown':
+    if how_to_cg == 'updown':
         y = np.diff(y)
         N = N - 1 # the time series is one value shorter than the input because of differencing
-        howtocg = 'quantile' # successive differences and then quantiles
+        how_to_cg = 'quantile' # successive differences and then quantiles
 
-    elif howtocg in ['embed2quadrants', 'embed2octants']:
+    elif how_to_cg in ['embed2quadrants', 'embed2octants']:
         # Construct the embedding
-        if numGroups == 'tau':
+        if num_groups == 'tau':
             # First zero-crossing of the ACF
             tau = first_crossing(y, 'ac', 0, 'discrete')
         else:
-            tau = numGroups
+            tau = num_groups
         
         if tau > N/25:
             tau = N // 25
@@ -698,15 +700,15 @@ def CoarseGrain(y : list, howtocg : str, numGroups : int) -> np.ndarray:
     
     # Do the coarse graining
     yth = None  # Ensure yth is always defined
-    if howtocg == 'quantile':
-        th = np.quantile(y, np.linspace(0, 1, numGroups + 1), method='hazen') # thresholds for dividing the time-series values
+    if how_to_cg == 'quantile':
+        th = np.quantile(y, np.linspace(0, 1, num_groups + 1), method='hazen') # thresholds for dividing the time-series values
         th[0] -= 1  # Ensure the first point is included
-        # turn the time series into a set of numbers from 1:numGroups
+        # turn the time series into a set of numbers from 1:num_groups
         yth = np.zeros(N, dtype=int)
-        for i in range(numGroups):
+        for i in range(num_groups):
             yth[(y > th[i]) & (y <= th[i+1])] = i + 1
 
-    elif howtocg == 'embed2quadrants': # divides based on quadrants in a 2-D embedding space
+    elif how_to_cg == 'embed2quadrants': # divides based on quadrants in a 2-D embedding space
         # create alphabet in quadrants -- {1,2,3,4}
         yth = np.zeros(len(m1), dtype=int)
         yth[q1r] = 1
@@ -714,7 +716,7 @@ def CoarseGrain(y : list, howtocg : str, numGroups : int) -> np.ndarray:
         yth[q3r] = 3
         yth[q4r] = 4
         
-    elif howtocg == 'embed2octants': # divide based on octants in 2-D embedding space
+    elif how_to_cg == 'embed2octants': # divide based on octants in 2-D embedding space
         o1r = np.logical_and(q1r, m2 < m1) # points in octant 1
         o2r = np.logical_and(q1r, m2 >= m1) # points in octant 2
         o3r = np.logical_and(q2r, m2 >= -m1) # points in octant 3

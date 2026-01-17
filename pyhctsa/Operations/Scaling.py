@@ -3,16 +3,19 @@ from numpy.typing import ArrayLike
 
 from ..Toolboxes.Max_Little import fastdfa
 
-def FastDFA(y: ArrayLike) -> float:
+def fast_dfa(y: ArrayLike) -> float:
     """
     Measures the scaling exponent of the time series using a fast implementation
     of detrended fluctuation analysis (DFA).
 
-    This is a Python wrapper for Max Little's ML_fastdfa code.
-    The original fastdfa code is by Max A. Little and publicly available at:
-    http://www.maxlittle.net/software/index.php
+    This is a Python wrapper for Max Little's fastdfa code.
+    The original fastdfa code is by 
 
-    Parameters
+    References
+    ----------
+    .. [1] Max A. Little, http://www.maxlittle.net/software/index.php
+
+    Parameterss
     ----------
     y : array-like
         Input time series (1D array), fed straight into the fastdfa script.

@@ -1,211 +1,104 @@
-Symbolic:
-  TransitionMatrix:
-    base_name: TransitionMatrix
-    labels:
-      - symbolic
-      - transitionmat
-      - discrepancy
+symbolic:
+  transition_matrix:
+    base_name: transition_matrix
     dependencies:
     configs:
-      - howtocg: 'quantile'
-        numGroups: !range [2, 5]
-        tau: 1
-        zscore: True
-      - howtocg: 'quantile'
-        numGroups: !range [2, 5]
-        tau: 'ac'
-        zscore: True
-    hctsa_name: SB_TransitionMatrix
-    ordered_args: ['howtocg', 'numGroups', 'tau']
+      - {how_to_cg: 'quantile', num_groups: 2, tau: 1, zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 3, tau: 1, zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 4, tau: 1, zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 5, tau: 1, zscore: True}
 
-  BinaryStats:
-    base_name: BinaryStats
-    labels:
-      - symbolic
-      - distribution
-      - correlation
-      - stationarity
-    dependencies:
-    configs:
-      - binaryMethod: ['mean', 'diff']
-        zscore: True
-    hctsa_name: SB_BinaryStats
-    ordered_args: ['binaryMethod']
-  
-  MotifThree:
-    base_name: MotifThree
-    labels: 
-      - symbolic
-      - motifs
-    dependencies:
-    configs:
-      - cgHow: ['quantile', 'diffquant']
-        zscore: True
-    hctsa_name: SB_MotifThree
-    ordered_args: ['cgHow']
+      - {how_to_cg: 'quantile', num_groups: 2, tau: 'ac', zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 3, tau: 'ac', zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 4, tau: 'ac', zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 5, tau: 'ac', zscore: True}
+    legacy_name: SB_TransitionMatrix
+    ordered_args: ['how_to_cg', 'num_groups', 'tau']
 
-  MotifTwo:
-    base_name: MotifTwo
-    labels: 
-        - symbolic
-        - motifs
+  binary_stats:
+    base_name: binary_stats
     dependencies:
     configs:
-      - binarizeHow: ['diff', 'mean', 'median']
-        zscore: True
-    hctsa_name: SB_MotifTwo
-    ordered_args: ['binarizeHow']
+      - {binary_method: 'mean', zscore: True}
+      - {binary_method: 'diff', zscore: True}
+    legacy_name: SB_BinaryStats
+    ordered_args: ['binary_method']
   
-  BinaryStretch:
-    base_name: BinaryStretch
-    labels:
-      - binary
-      - symbolic
+  motif_three:
+    base_name: motif_three
     dependencies:
     configs:
-      - stretchWhat: ['lseq1', 'lseq0']
-        zscore: True
-    hctsa_name: SB_BinaryStretch
-    ordered_args: ['stretchWhat']
+      - {cg_how: 'quantile', zscore: True}
+      - {cg_how: 'diffquant', zscore: True}
+    legacy_name: SB_MotifThree
+    ordered_args: ['cg_how']
+
+  motif_two:
+    base_name: motif_two
+    dependencies:
+    configs:
+      - {binarize_how: 'diff', zscore: True}
+      - {binarize_how: 'mean', zscore: True}
+      - {binarize_how: 'median', zscore: True}
+    legacy_name: SB_MotifTwo
+    ordered_args: ['binarize_how']
   
-  Surprise:
-    base_name: Surprise
-    labels:
-      - symbolic
+  binary_stretch:
+    base_name: binary_stretch
     dependencies:
     configs:
-      - whatPrior: 'dist'
-        memory: [5, 20]
-        numGroups: 2
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: 50
-        numGroups: 3
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: 100
-        numGroups: [4, 5]
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: 50
-        numGroups: 3
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: 100
-        numGroups: [4, 5]
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: 20
-        numGroups: 2
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: 50
-        numGroups: 3
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: 100
-        numGroups: [4, 5]
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: 100
-        numGroups: [4, 5]
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: 20
-        numGroups: 2
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: 50
-        numGroups: 3
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: 100
-        numGroups: [4, 5]
-        coarseGrainMethod: 'quantile'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: 50
-        numGroups: 3
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: 100
-        numGroups: [4, 5]
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: [5, 20]
-        numGroups: 2
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: 20
-        numGroups: 2
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: 20
-        numGroups: 2
-        coarseGrainMethod: 'updown'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: [5]
-        numGroups: [1, "tau"]
-        coarseGrainMethod: 'embed2quadrants'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'dist'
-        memory: [10, 20]
-        numGroups: "tau"
-        coarseGrainMethod: 'embed2quadrants'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: 10
-        numGroups: [1, "tau"]
-        coarseGrainMethod: 'embed2quadrants'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T1'
-        memory: [20, 50]
-        numGroups: "tau"
-        coarseGrainMethod: 'embed2quadrants'
-        numIters: 500
-        zscore: True
-      - whatPrior: 'T2'
-        memory: [50, 100]
-        numGroups: "tau"
-        coarseGrainMethod: 'embed2quadrants'
-        numIters: 500
-        zscore: True
-    hctsa_name: FC_Surprise
-    ordered_args: ["whatPrior", "memory", "numGroups", "coarseGrainMethod", "numIters"]
+      - {stretch_what: 'lseq1', zscore: True}
+      - {stretch_what: 'lseq0', zscore: True}
+    legacy_name: SB_BinaryStretch
+    ordered_args: ['stretch_what']
+  
+  surprise:
+    base_name: surprise
+    dependencies:
+    configs:
+      - {what_prior: 'dist', memory: 5, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 20, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 50, num_groups: 3, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 4, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 5, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T1', memory: 20, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 4, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 5, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T2', memory: 20, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 50, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 4, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 5, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+
+      - {what_prior: 'dist', memory: 5, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 50, num_groups: 3, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T1', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 3, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T2', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 50, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+
+      - {what_prior: 'dist', memory: 5, num_groups: 1, coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 5, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 10, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 20, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T1', memory: 10, num_groups: 1, coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 10, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 20, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 50, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+    legacy_name: FC_Surprise
+    ordered_args: ['what_prior', 'memory', 'num_groups', 'coarse_grain_method', 'num_iters']
     

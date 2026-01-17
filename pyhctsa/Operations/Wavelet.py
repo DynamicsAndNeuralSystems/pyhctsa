@@ -7,7 +7,7 @@ from pywt import cwt
 
 from ..Utilities.utils import signChange
 
-def wfBM_estimate(x : ArrayLike) -> dict:
+def wfbm(x : ArrayLike) -> dict:
     """
     Parameters of fractional Gaussian noise/Brownian motion in a time series.
 
@@ -57,7 +57,7 @@ def wfBM_estimate(x : ArrayLike) -> dict:
 
     return {"p1": H1, "p2": H2, "p3": H3}
 
-def scal2Frq(y : ArrayLike, wname : str = 'db3', amax : int = 5, delta : int = 1) -> dict:
+def scal_2_freq(y : ArrayLike, w_name : str = 'db3', a_max : int = 5, delta : int = 1) -> dict:
     """
     Frequency components in a periodic time series.
 
@@ -65,9 +65,9 @@ def scal2Frq(y : ArrayLike, wname : str = 'db3', amax : int = 5, delta : int = 1
     ----------
     y : array-like
         The input time series.
-    wname : str, optional
+    w_name : str, optional
         The name of the mother wavelet to analyze the data with: e.g., 'db3', 'sym2'.
-    amax : int, optional
+    a_max : int, optional
         The maximum scale / level (can be 'max' to set according to wmaxlev)
     delta: int, optional
         TThe sampling period.
@@ -79,38 +79,38 @@ def scal2Frq(y : ArrayLike, wname : str = 'db3', amax : int = 5, delta : int = 1
     """
     y = np.asarray(y)
     N = len(y)
-    maxlevel = pywt.dwt_max_level(N, wname)
-    if amax == 'max':
-        amax = maxlevel
-    if maxlevel < amax:
-        print(f'Chosen level {amax} is too large for this wavelet on this signal...')
-        amax = maxlevel # set to max allowed level
-        print(f'changed to maximum level computed with wmaxlev: {amax}')
+    max_level = pywt.dwt_max_level(N, w_name)
+    if a_max == 'max':
+        a_max = max_level
+    if max_level < a_max:
+        print(f'Chosen level {a_max} is too large for this wavelet on this signal...')
+        a_max = max_level # set to max allowed level
+        print(f'changed to maximum level computed with wmaxlev: {a_max}')
 
     # % Define scales.
-    scales = np.arange(1, amax+1)
+    scales = np.arange(1, a_max+1)
     a = 2**scales
     # Compute associated pseudo-frequencies.
-    f = pywt.scale2frequency(wname, a, delta+1)
+    f = pywt.scale2frequency(w_name, a, delta+1)
     # Compute associated pseudo-periods.
     per = 1/f
     #Decompose the time series at level specified as maximum
-    C, L = wavedec(y, wavelet=wname, level=amax)
+    C, L = wavedec(y, wavelet=w_name, level=a_max)
     #Estimate standard deviation of detail coefficients.
     stdc = []
-    for k in range(1, amax+1):
+    for k in range(1, a_max+1):
         d = detcoef(coefs=C, lengths=L, levels=k)
         stdc_val = np.median(np.abs(d)) / 0.67448975
         stdc.append(stdc_val)
     #% Compute identified period.
-    jmax = np.argmax(stdc)
-    out = {"lmax": jmax + 1, # level with highest energy coefficients
-           "period": per[jmax], #% output dominant period
-           "pf": f[jmax]} # output dominant pseudo-frequency
+    j_max = np.argmax(stdc)
+    out = {"lmax": j_max + 1, # level with highest energy coefficients
+           "period": per[j_max], #% output dominant period
+           "pf": f[j_max]} # output dominant pseudo-frequency
 
     return out
 
-def dwtCoeff(y : ArrayLike, wname : str = 'db3', level : int = 3) -> dict:
+def dwt_coeff(y : ArrayLike, w_name : str = 'db3', level : int = 3) -> dict:
     """
     Discrete wavelet transform coefficients.
 
@@ -121,7 +121,7 @@ def dwtCoeff(y : ArrayLike, wname : str = 'db3', level : int = 3) -> dict:
     ----------
     y : array-like
         The input time series.
-    wname : str, optional
+    w_name : str, optional
         The mother wavelet, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), etc. Default is 'db3'.
     level : int, optional
         The level of wavelet decomposition (can be set to 'max' for the maximum level determined by wmaxlev)
@@ -134,20 +134,20 @@ def dwtCoeff(y : ArrayLike, wname : str = 'db3', level : int = 3) -> dict:
     y = np.asarray(y)
     N = len(y)
     if level == 'max':
-        level = pywt.dwt_max_level(N, wname)
-    maxLevelAllowed = pywt.dwt_max_level(N, wname)
-    if maxLevelAllowed < level:
+        level = pywt.dwt_max_level(N, w_name)
+    max_level_allowed = pywt.dwt_max_level(N, w_name)
+    if max_level_allowed < level:
         print("Chosen level is too large for this wavelet on this signal....\n")
     #%% Perform Wavelet Decomposition
     C, L = None, None
-    if maxLevelAllowed < level: # if level exceeds max level, just use max level instead
-        C, L = wavedec(y, wavelet=wname, level=maxLevelAllowed)
+    if max_level_allowed < level: # if level exceeds max level, just use max level instead
+        C, L = wavedec(y, wavelet=w_name, level=max_level_allowed)
     else:
-        C, L = wavedec(y, wavelet=wname, level=level)
+        C, L = wavedec(y, wavelet=w_name, level=level)
     #%% Get statistics on coefficients
     out = {}
     for k in range(1, level+1):
-        if k <= maxLevelAllowed:
+        if k <= max_level_allowed:
             d = detcoef(coefs=C, lengths=L, levels=k) # detail coeffs at level k
             # max coeff at this level
             out[f'maxd_l{k}'] = np.max(d)
@@ -166,7 +166,7 @@ def dwtCoeff(y : ArrayLike, wname : str = 'db3', level : int = 3) -> dict:
     
     return out
 
-def CWT(y : ArrayLike, wname : str = 'db3', maxScale : int = 32) -> dict:
+def cwt(y : ArrayLike, w_name : str = 'db3', max_scale : int = 32) -> dict:
     """
     Continuous wavelet transform of a time series.
 
@@ -177,9 +177,9 @@ def CWT(y : ArrayLike, wname : str = 'db3', maxScale : int = 32) -> dict:
     ----------
     y : array-like
         The input time series.
-    wname : str, optional
+    w_name : str, optional
         The wavelet name, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), etc. Default is 'db3'.
-    maxScale : int, optional
+    max_scale : int, optional
         The maximum scale of wavelet analysis. Default is 32.
 
     Returns
@@ -189,27 +189,27 @@ def CWT(y : ArrayLike, wname : str = 'db3', maxScale : int = 32) -> dict:
     """
     y = np.asarray(y)
     N = len(y)
-    scales = np.arange(1, maxScale+1)
-    coeffs, _ = cwt(data=y,scales=scales,wavelet=wname)
+    scales = np.arange(1, max_scale+1)
+    coeffs, _ = cwt(data=y, scales=scales, wavelet=w_name)
     S = np.abs(coeffs * coeffs)
     SC = 100*S/np.sum(S)
 
     # Get statistics from CWT
-    numEntries = SC.shape[0] * SC.shape[1]
+    num_entries = SC.shape[0] * SC.shape[1]
     # 1) Coefficients, coeffs
-    allCoeffs = coeffs if pywt.Wavelet(wname).symmetry == 'asymmetric' else -coeffs
+    all_coeffs = coeffs if pywt.Wavelet(w_name).symmetry == 'asymmetric' else -coeffs
     out = {}
-    out['meanC'] = np.mean(allCoeffs)
+    out['meanC'] = np.mean(all_coeffs)
 
-    out['meanabsC'] = np.mean(abs(allCoeffs))
-    out['medianabsC'] = np.median(abs(allCoeffs))
-    out['maxabsC'] = np.max(abs(allCoeffs))
+    out['meanabsC'] = np.mean(abs(all_coeffs))
+    out['medianabsC'] = np.median(abs(all_coeffs))
+    out['maxabsC'] = np.max(abs(all_coeffs))
     out['maxonmeanC'] = out['maxabsC']/out['meanabsC']
 
     out['maxonmeanSC'] = np.max(SC)/np.mean(SC)
 
     #% Proportion of coeffs matrix over ___ maximum (thresholded)
-    poverfn = lambda x : np.sum(SC[SC > x * np.max(SC)])/numEntries
+    poverfn = lambda x : np.sum(SC[SC > x * np.max(SC)])/num_entries
     out['pover99'] = poverfn(0.99)
     out['pover98'] = poverfn(0.88)
     out['pover95'] = poverfn(0.95)
@@ -258,16 +258,16 @@ def CWT(y : ArrayLike, wname : str = 'db3', maxScale : int = 32) -> dict:
 
 def _slosr(xx : ArrayLike) -> int:
     # helper function for DetailCoeffs
-    theMaxLevel = len(xx)
-    slosr = np.zeros(theMaxLevel-2)
-    for i in range(2, theMaxLevel):
+    the_max_level = len(xx)
+    slosr = np.zeros(the_max_level-2)
+    for i in range(2, the_max_level):
         slosr[i-2] = np.sum(xx[:i-1])/np.sum(xx[i:])
     absm1 = np.abs(slosr - 1)
     idx = np.argwhere(absm1 == np.min(absm1).flatten())[0][0] + 1
 
     return idx
 
-def DetailCoeffs(y : ArrayLike, wname : str = 'db3', maxlevel : Union[int, str] = 20) -> dict:
+def detail_coeffs(y : ArrayLike, w_name : str = 'db3', max_level : Union[int, str] = 20) -> dict:
     """
     Detail coefficients of a wavelet decomposition.
 
@@ -278,10 +278,10 @@ def DetailCoeffs(y : ArrayLike, wname : str = 'db3', maxlevel : Union[int, str] 
     ----------
     y : array-like
         The input time series.
-    wname : str, optional
+    w_name : str, optional
         The name of the mother wavelet to analyze the data with (e.g., 'db3', 'sym2').
         See the Wavelet Toolbox or PyWavelets documentation for details. Default is 'db3'.
-    maxlevel : int or 'max', optional
+    max_level : int or 'max', optional
         The maximum wavelet decomposition level. If 'max', uses the maximum allowed level for the data length and wavelet.
         Default is 20.
 
@@ -292,21 +292,21 @@ def DetailCoeffs(y : ArrayLike, wname : str = 'db3', maxlevel : Union[int, str] 
     """
     y = np.asarray(y)
     N = len(y)
-    if maxlevel == 'max':
-        maxlevel = pywt.dwt_max_level(N, wname)
-    if pywt.dwt_max_level(N, wname) < maxlevel:
-        print(f"Chosen wavelet level is too large for the {wname} wavelet for this signal of length N = {N}")
-        maxlevel = pywt.dwt_max_level(N, wname)
-        print(f"Using a wavelet level of {maxlevel} instead.")
+    if max_level == 'max':
+        max_level = pywt.dwt_max_level(N, w_name)
+    if pywt.dwt_max_level(N, w_name) < max_level:
+        print(f"Chosen wavelet level is too large for the {w_name} wavelet for this signal of length N = {N}")
+        max_level = pywt.dwt_max_level(N, w_name)
+        print(f"Using a wavelet level of {max_level} instead.")
     # Perform a single-level wavelet decomposition
-    means = np.zeros(maxlevel) # mean detail coefficient magnitude at each level
-    medians = np.zeros(maxlevel) # median detail coefficient magnitude at each level
-    maxs = np.zeros(maxlevel) # max detail coefficient magnitude at each level
+    means = np.zeros(max_level) # mean detail coefficient magnitude at each level
+    medians = np.zeros(max_level) # median detail coefficient magnitude at each level
+    maxs = np.zeros(max_level) # max detail coefficient magnitude at each level
     
-    for k in range(1, maxlevel+1):
+    for k in range(1, max_level+1):
         level = k
-        c, l = wavedec(data=y, wavelet=wname, level=level)
-        det = wrcoef(coefs=c, lengths=l, wavelet=wname, level=level)
+        c, l = wavedec(data=y, wavelet=w_name, level=level)
+        det = wrcoef(coefs=c, lengths=l, wavelet=w_name, level=level)
         absdet = np.abs(det)
         means[k-1] = np.mean(absdet)
         medians[k-1] = np.median(absdet)
@@ -350,7 +350,7 @@ def DetailCoeffs(y : ArrayLike, wname : str = 'db3', maxlevel : Union[int, str] 
 
     return out
 
-def WLCoeffs(y : ArrayLike, wname : str = 'db3', level : Union[int, str] = 3) -> dict:
+def wl_coeffs(y : ArrayLike, w_name : str = 'db3', level : Union[int, str] = 3) -> dict:
     """
     Wavelet decomposition of the time series.
 
@@ -361,7 +361,7 @@ def WLCoeffs(y : ArrayLike, wname : str = 'db3', level : Union[int, str] = 3) ->
     ----------
     y : list or array-like
         The input time series.
-    wname : str, optional
+    w_name : str, optional
         The wavelet name (e.g., 'db3'). See PyWavelets documentation for all options.
         Default is 'db3'.
     level : int or 'max', optional
@@ -380,15 +380,15 @@ def WLCoeffs(y : ArrayLike, wname : str = 'db3', level : Union[int, str] = 3) ->
     y = np.asarray(y)
     N = len(y)
     if level == 'max':
-        level = pywt.dwt_max_level(N, wname)
+        level = pywt.dwt_max_level(N, w_name)
         if level == 0:
             raise ValueError("Cannot compute wavelet coefficients (short time series)")
     
-    if pywt.dwt_max_level(N, wname) < level:
+    if pywt.dwt_max_level(N, w_name) < level:
         raise ValueError(f"Chosen level, {level}, is too large for this wavelet on this signal.")
     
-    C, L = wavedec(y, wavelet=wname, level=level)
-    det = wrcoef(C, L, wname, level)
+    C, L = wavedec(y, wavelet=w_name, level=level)
+    det = wrcoef(C, L, w_name, level)
     det_s = np.sort(np.abs(det))[::-1]
 
     #%% Return statistics
@@ -398,13 +398,13 @@ def WLCoeffs(y : ArrayLike, wname : str = 'db3', level : Union[int, str] = 3) ->
     out['med_coeff'] = np.median(det_s)
 
     #% Decay rate stats ('where below _ maximum' = 'wb_m')
-    out['wb99m'] = findMyThreshold(0.99, det_s, N)
-    out['wb90m'] = findMyThreshold(0.90, det_s, N)
-    out['wb75m'] = findMyThreshold(0.75, det_s, N)
-    out['wb50m'] = findMyThreshold(0.50, det_s, N)
-    out['wb25m'] = findMyThreshold(0.25, det_s, N)
-    out['wb10m'] = findMyThreshold(0.10, det_s, N)
-    out['wb1m'] = findMyThreshold(0.01, det_s, N)
+    out['wb99m'] = find_my_threshold(0.99, det_s, N)
+    out['wb90m'] = find_my_threshold(0.90, det_s, N)
+    out['wb75m'] = find_my_threshold(0.75, det_s, N)
+    out['wb50m'] = find_my_threshold(0.50, det_s, N)
+    out['wb25m'] = find_my_threshold(0.25, det_s, N)
+    out['wb10m'] = find_my_threshold(0.10, det_s, N)
+    out['wb1m'] = find_my_threshold(0.01, det_s, N)
 
     return out
 
@@ -500,7 +500,7 @@ def wrcoef(coefs, lengths, wavelet, level):
 
     return data
 
-def findMyThreshold(x, det_s, N):
+def find_my_threshold(x, det_s, N):
     indices = np.argwhere(det_s < x * np.max(det_s))
     if indices.size == 0:
         return np.nan

@@ -14,7 +14,7 @@ from ..Operations.correlation import autocorr, first_crossing
 from ..Utilities.utils import make_mat_buffer, ZScore, signChange
 from ..Operations.distribution import moments
 
-def LocalDistributions(y : ArrayLike, numSegs : int = 5, eachOrPar : str = 'par', numPoints : int = 200) -> dict:
+def local_distributions(y : ArrayLike, num_segs : int = 5, each_or_par : str = 'par', num_points : int = 200) -> dict:
     """
     Compares the distribution in consecutive time-series segments.
 
@@ -25,13 +25,13 @@ def LocalDistributions(y : ArrayLike, numSegs : int = 5, eachOrPar : str = 'par'
     ----------
     y : array-like
         The input time series.
-    numSegs : int, optional
+    num_segs : int, optional
         The number of segments to break the time series into. Default is 5.
-    eachOrPar : {'par', 'each'}, optional
+    each_or_par : {'par', 'each'}, optional
         - 'par': compares each local distribution to the parent (full time series) distribution.
         - 'each': compares each local distribution to all other local distributions.
         Default is 'par'.
-    numPoints : int, optional
+    num_points : int, optional
         Number of points to compute the distribution across in each local segment. Default is 200.
 
     Returns
@@ -42,11 +42,11 @@ def LocalDistributions(y : ArrayLike, numSegs : int = 5, eachOrPar : str = 'par'
     # preliminaries 
     y = np.asarray(y)
     N = len(y)
-    lseg = int(np.floor(N / numSegs))
-    dns = np.zeros((numPoints, numSegs))
-    r = np.linspace(np.min(y), np.max(y), numPoints) # Make range of ksdensity uniform across all subsegments
-    # Compute the kernel-smoothed distribution in all numSegs segments of the time series
-    for i in range(numSegs):
+    lseg = int(np.floor(N / num_segs))
+    dns = np.zeros((num_points, num_segs))
+    r = np.linspace(np.min(y), np.max(y), num_points) # Make range of ksdensity uniform across all subsegments
+    # Compute the kernel-smoothed distribution in all num_segs segments of the time series
+    for i in range(num_segs):
         start_idx = i * lseg
         end_idx = (i + 1) * lseg
         segment_data = y[start_idx:end_idx]
@@ -55,28 +55,28 @@ def LocalDistributions(y : ArrayLike, numSegs : int = 5, eachOrPar : str = 'par'
         #kde.fit(bw="scott") # tune bw adjustment factor empiricially? 
         dns[:, i] = kde.evaluate(r)
     # Compare the local distributions
-    if eachOrPar in ["par", "parent"]:
+    if each_or_par in ["par", "parent"]:
         #Compares each subdistribtuion to the parent (full signal) distribution
         #kde = KDEUnivariate(y).fit(bw="scott")
         kde = gaussian_kde(y, bw_method="scott")
         pardn = kde.evaluate(r)
-        divs = np.zeros(numSegs)
-        for i in range(numSegs):
+        divs = np.zeros(num_segs)
+        for i in range(num_segs):
             divs[i] = np.sum(np.abs(dns[:, i] - pardn))
-    elif eachOrPar == 'each':
+    elif each_or_par == 'each':
         # Compares each subdistribtuion to the parent (full signal) distribution
-        if numSegs == 2:
+        if num_segs == 2:
             out = np.sum(np.abs(dns[:, 0] - dns[:, 1]))
             return out
-        # numSegs > 2
-        diffmat = np.nan * np.ones((numSegs, numSegs)) 
-        for i in range(numSegs):
-            for j in range(numSegs):
+        # num_segs > 2
+        diffmat = np.nan * np.ones((num_segs, num_segs)) 
+        for i in range(num_segs):
+            for j in range(num_segs):
                 if j > i:
                     diffmat[i, j] = np.sum(np.abs(dns[:, i] - dns[:, j]))
         divs = diffmat[~np.isnan(diffmat)] # % (the upper triangle of diffmat)
     else:
-        raise ValueError(f"Unknown method: {eachOrPar}. Should be 'each' or 'par'. ")
+        raise ValueError(f"Unknown method: {each_or_par}. Should be 'each' or 'par'. ")
 
     # Return basic statistics on differences in distributions in different
     # segments of the time series
@@ -89,14 +89,14 @@ def LocalDistributions(y : ArrayLike, numSegs : int = 5, eachOrPar : str = 'par'
 
     return out
 
-def DynWin(y : ArrayLike, maxNumSegments : int = 10) -> dict:
+def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
     """
     How stationarity estimates depend on the number of time-series subsegments.
-    
+
     Specifically, variation in a range of local measures are implemented: mean,
     standard deviation, skewness, kurtosis, ApEn(1,0.2), SampEn(1,0.2), AC(1),
     AC(2), and the first zero-crossing of the autocorrelation function.
-    
+
     The standard deviation of local estimates of these quantities across the time
     series are calculated as an estimate of the stationarity in this quantity as a
     function of the number of splits, n_{seg}, of the time series.
@@ -105,54 +105,54 @@ def DynWin(y : ArrayLike, maxNumSegments : int = 10) -> dict:
     -----------
     y : array-like
         the time series to analyze.
-    maxNumSegments : int, optional
+    max_num_segments : int, optional
         the maximum number of segments to consider. Sweeps from 2 to
-        maxNumSegments. Defaults to 10. 
-    
+        max_num_segments. Defaults to 10.
+
     Returns:
     --------
     out : dict
         the standard deviation of this set of 'stationarity' estimates across these window sizes
     """
     y = np.asarray(y)
-    nsegr = np.arange(2, maxNumSegments+1, 1) # range of nseg to sweep across
-    nmov = 1 # controls window overlap
-    numFeatures = 11 # num of features
-    fs = np.zeros((len(nsegr), numFeatures)) # standard deviation of feature values over windows
-    taug = first_crossing(y, 'ac', 0, 'discrete') # global tau
+    nsegr = np.arange(2, max_num_segments + 1, 1)  # range of nseg to sweep across
+    nmov = 1  # controls window overlap
+    num_features = 11  # num of features
+    fs = np.zeros((len(nsegr), num_features))  # standard deviation of feature values over windows
+    tau_g = first_crossing(y, 'ac', 0, 'discrete')  # global tau
 
     for i, nseg in enumerate(nsegr):
-        wlen = int(np.floor(len(y)/nseg)) # window length
-        inc = int(np.floor(wlen/nmov)) # increment to move at each step
+        wlen = int(np.floor(len(y) / nseg))  # window length
+        inc = int(np.floor(wlen / nmov))  # increment to move at each step
         # if increment is rounded to zero, prop it up
         if inc == 0:
             inc = 1
-        
-        numSteps = int(np.floor((len(y) - wlen)/inc) + 1)
-        qs = np.zeros((numSteps, numFeatures))
 
-        for j in range(numSteps):
-            ySub = y[j*inc:j*inc+wlen]
-            taul = first_crossing(ySub, 'ac', 0, 'discrete')
+        num_steps = int(np.floor((len(y) - wlen) / inc) + 1)
+        qs = np.zeros((num_steps, num_features))
 
-            qs[j, 0] = np.mean(ySub)
-            qs[j, 1] = np.std(ySub, ddof=1)
-            qs[j, 2] = skew(ySub)
-            qs[j, 3] = kurtosis(ySub)
-            sampenOut = sample_entropy(ySub, 2, 0.15)
-            qs[j, 4] = sampenOut['quadSampEn1'] # SampEn_1_015
-            #qs[j, 5] = sampenOut['quadSampEn2'] # SampEn_2_015
-            qs[j, 6] = autocorr(ySub, 1, 'Fourier')[0] # AC1
-            qs[j, 7] = autocorr(ySub, 2, 'Fourier')[0] # AC2
-            # (Sometimes taug or taul can be longer than ySub; then these will output NaNs:)
-            qs[j, 8] = autocorr(ySub, taug, 'Fourier')[0] # AC_glob_tau
-            qs[j, 9] = autocorr(ySub, taul, 'Fourier')[0] # AC_loc_tau
-            qs[j, 10] = taul
-        
-        fs[i, :numFeatures] = np.std(qs, ddof=1, axis=0)
+        for j in range(num_steps):
+            y_sub = y[j * inc:j * inc + wlen]
+            tau_l = first_crossing(y_sub, 'ac', 0, 'discrete')
+
+            qs[j, 0] = np.mean(y_sub)
+            qs[j, 1] = np.std(y_sub, ddof=1)
+            qs[j, 2] = skew(y_sub)
+            qs[j, 3] = kurtosis(y_sub)
+            sampen_out = sample_entropy(y_sub, 2, 0.15)
+            qs[j, 4] = sampen_out['quadSampEn1']  # SampEn_1_015
+            #qs[j, 5] = sampen_out['quadSampEn2'] # SampEn_2_015
+            qs[j, 6] = autocorr(y_sub, 1, 'Fourier')[0]  # AC1
+            qs[j, 7] = autocorr(y_sub, 2, 'Fourier')[0]  # AC2
+            # (Sometimes tau_g or taul can be longer than ySub; then these will output NaNs:)
+            qs[j, 8] = autocorr(y_sub, tau_g, 'Fourier')[0]  # AC_glob_tau
+            qs[j, 9] = autocorr(y_sub, tau_l, 'Fourier')[0]  # AC_loc_tau
+            qs[j, 10] = tau_l
+
+        fs[i, :num_features] = np.std(qs, ddof=1, axis=0)
 
     # fs contains std of quantities at all different 'scales' (segment lengths)
-    fs = np.std(fs, ddof=1, axis=0) # how much does the 'std stationarity' vary over different scales?
+    fs = np.std(fs, ddof=1, axis=0)  # how much does the 'std stationarity' vary over different scales?
 
     # Outputs
     out = {}
@@ -168,10 +168,10 @@ def DynWin(y : ArrayLike, maxNumSegments : int = 10) -> dict:
     out['stdactaul'] = fs[9]
     out['stdtaul'] = fs[10]
 
-    return out 
+    return out
 
-def MomentCorr(x : ArrayLike, windowLength : Union[None, float] = None, wOverlap : Union[None, float] = None, 
-               mom1 : str = 'mean', mom2 : str = 'std', whatTransform : str = 'none') -> dict:
+def moment_corr(x : ArrayLike, window_length : Union[None, float] = None, w_overlap : Union[None, float] = None, 
+               mom_1 : str = 'mean', mom_2 : str = 'std', what_transform : str = 'none') -> dict:
     """
     Correlations between simple statistics in local windows of a time series.
     The idea to implement this was that of Prof. Nick S. Jones (Imperial College London).
@@ -180,23 +180,23 @@ def MomentCorr(x : ArrayLike, windowLength : Union[None, float] = None, wOverlap
     ----------
     x : array-like
         the input time series
-    windowLength : float, optional
+    window_length : float, optional
         the sliding window length (can be a fraction to specify or a proportion of the time-series length)
-    wOverlap : 
+    w_overlap : 
         the overlap between consecutive windows as a fraction of the window length
-    mom1, mom2 : str, optional
+    mom_1, mom_2 : str, optional
         the statistics to investigate correlations between (in each window):
             (i) 'iqr': interquartile range
             (ii) 'median': median
             (iii) 'std': standard deviation (about the local mean)
             (iv) 'mean': mean
-    whatTransform : str, optional
-        the pre-processing whatTransformormation to apply to the time series before
+    what_transform : str, optional
+        the pre-processing what_transform to apply to the time series before
         analyzing it:
            (i) 'abs': takes absolute values of all data points
            (ii) 'sqrt': takes the square root of absolute values of all data points
            (iii) 'sq': takes the square of every data point
-           (iv) 'none': does no whatTransformormation
+           (iv) 'none': does no what_transform
     
     Returns
     --------
@@ -206,34 +206,34 @@ def MomentCorr(x : ArrayLike, windowLength : Union[None, float] = None, wOverlap
     x = np.asarray(x)
     N = len(x) # length of the time series
 
-    if windowLength is None:
-        windowLength = 0.02 # 2% of the time-series length
+    if window_length is None:
+        window_length = 0.02 # 2% of the time-series length
     
-    if windowLength < 1:
-        windowLength = int(np.ceil(N * windowLength))
+    if window_length < 1:
+        window_length = int(np.ceil(N * window_length))
     
     # sliding window overlap length
-    if wOverlap is None:
-        wOverlap = 1/5
+    if w_overlap is None:
+        w_overlap = 1/5
     
-    if wOverlap < 1:
-        wOverlap = int(np.floor(windowLength * wOverlap))
+    if w_overlap < 1:
+        w_overlap = int(np.floor(window_length * w_overlap))
 
-    # Apply the specified whatTransformation
-    if whatTransform == 'abs':
+    # Apply the specified what_transformation
+    if what_transform == 'abs':
         x = np.abs(x)
-    elif whatTransform == 'sq':
+    elif what_transform == 'sq':
         x = x**2
-    elif whatTransform == 'sqrt':
+    elif what_transform == 'sqrt':
         x = np.sqrt(np.abs(x))
-    elif whatTransform == 'none':
+    elif what_transform == 'none':
         pass
     else:
-        raise ValueError(f"Unknown transformation {whatTransform}")
+        raise ValueError(f"Unknown transformation {what_transform}")
     
     # create the windows
-    x_buff = make_mat_buffer(x, windowLength, wOverlap)
-    numWindows = (N/(windowLength - wOverlap)) # number of windows
+    x_buff = make_mat_buffer(x, window_length, w_overlap)
+    numWindows = (N/(window_length - w_overlap)) # number of windows
 
     if np.size(x_buff, 1) > numWindows:
         x_buff = x_buff[:, :-1] # lose the last point
@@ -244,8 +244,8 @@ def MomentCorr(x : ArrayLike, windowLength : Union[None, float] = None, wOverlap
     
     # okay now we have the sliding window ('buffered') signal, x_buff
     # first calculate the first moment in all the windows
-    M1 = __calc_me_moments(x_buff, mom1)
-    M2 = __calc_me_moments(x_buff, mom2)
+    M1 = _calc_me_moments(x_buff, mom_1)
+    M2 = _calc_me_moments(x_buff, mom_2)
     #print(M1)
 
     out = {}
@@ -258,8 +258,8 @@ def MomentCorr(x : ArrayLike, windowLength : Union[None, float] = None, wOverlap
 
     return out
 
-def __calc_me_moments(x_buff, momType):
-    """Helper function for `MomentCorr`"""
+def _calc_me_moments(x_buff, momType):
+    """Helper function for `moment_corr`"""
     if momType == 'mean':
         moms = np.mean(x_buff, axis=0)
     elif momType == 'std':
@@ -273,7 +273,7 @@ def __calc_me_moments(x_buff, momType):
     
     return moms
 
-def SimpleStats(x : ArrayLike, whatStat : str = 'zcross') -> dict:
+def simple_stats(x : ArrayLike, what_stat : str = 'zcross') -> dict:
     """
     Basic statistics about an input time series.
 
@@ -284,7 +284,7 @@ def SimpleStats(x : ArrayLike, whatStat : str = 'zcross') -> dict:
     ----------
     x : array-like
         The input time series
-    whatStat : str, optional
+    what_stat : str, optional
         The statistic to return (default is 'zcross'):
         - 'zcross': proportion of zero-crossings (for z-scored input, returns mean-crossings)
         - 'maxima': proportion of points that are local maxima
@@ -295,27 +295,27 @@ def SimpleStats(x : ArrayLike, whatStat : str = 'zcross') -> dict:
     Returns
     -------
     float
-        The calculated statistic based on whatStat
+        The calculated statistic based on what_stat
     """
     x = np.asarray(x)
     N = len(x)
 
     out = None
-    if whatStat == 'zcross':
+    if what_stat == 'zcross':
         # Proportion of zero-crossings of the time series
         # (% in the case of z-scored input, crosses its mean)
         xch = x[:-1] * x[1:]
         out = np.sum(xch < 0)/N
 
-    elif whatStat == 'maxima':
+    elif what_stat == 'maxima':
         # proportion of local maxima in the time series
         dx = np.diff(x)
         out = np.sum((dx[:-1] > 0) & (dx[1:] < 0)) / (N - 1)
-    elif whatStat == 'minima':
+    elif what_stat == 'minima':
         # proportion of local minima in the time series
         dx = np.diff(x)
         out = np.sum((dx[:-1] < 0) & (dx[1:] > 0)) / (N-1)
-    elif whatStat == 'pmcross':
+    elif what_stat == 'pmcross':
         # ratio of times cross 1 to -1
         c1sig = np.sum(signChange(x-1)) # num times cross 1
         c2sig = np.sum(signChange(x+1)) # num times cross -1
@@ -323,7 +323,7 @@ def SimpleStats(x : ArrayLike, whatStat : str = 'zcross') -> dict:
             out = np.nan
         else:
             out = c1sig/c2sig
-    elif whatStat == 'zsczcross':
+    elif what_stat == 'zsczcross':
         # ratio of zero crossings of raw to detrended time series
         # where the raw has zero mean
         x = ZScore(x)
@@ -337,11 +337,11 @@ def SimpleStats(x : ArrayLike, whatStat : str = 'zcross') -> dict:
         else:
             out = h2/h1
     else:
-        raise(ValueError(f"Unknown statistic {whatStat}"))
+        raise(ValueError(f"Unknown statistic {what_stat}"))
     
     return out
 
-def LocalExtrema(y : ArrayLike, howToWindow : str = 'l', n : Union[int, None] = None) -> dict:
+def local_extrema(y : ArrayLike, how_to_window : str = 'l', n : Union[int, None] = None) -> dict:
     """
     How local maximums and minimums vary across the time series.
 
@@ -352,16 +352,16 @@ def LocalExtrema(y : ArrayLike, howToWindow : str = 'l', n : Union[int, None] = 
     ----------
     y : array-like
         The input time series
-    howToWindow : str, optional
+    how_to_window : str, optional
         Method to determine window size (default is 'l'):
         - 'l': windows of a given length (n specifies the window length)
         - 'n': specified number of windows to break the time series into (n specifies number of windows)
         - 'tau': sets window length equal to correlation length (first zero-crossing of autocorrelation)
     n : int, optional
         Specifies either:
-        - Window length when howToWindow='l' (defaults to 100)
-        - Number of windows when howToWindow='n' (defaults to 5)
-        - Not used when howToWindow='tau'
+        - Window length when how_to_window='l' (defaults to 100)
+        - Number of windows when how_to_window='n' (defaults to 5)
+        - Not used when how_to_window='tau'
 
     Returns
     -------
@@ -370,29 +370,29 @@ def LocalExtrema(y : ArrayLike, howToWindow : str = 'l', n : Union[int, None] = 
     """
     y = np.asarray(y)
     if n is None:
-        if howToWindow == 'l':
+        if how_to_window == 'l':
             n = 100 # 100 sample windows
-        elif howToWindow == 'n':
+        elif how_to_window == 'n':
             n = 5 # 5 windows
     
     N = len(y)
 
     # Set the window length
-    if howToWindow == 'l':
-        windowLength = n # window length
-    elif howToWindow == 'n':
-        windowLength = int(np.floor(N/n))
-    elif howToWindow == 'tau':
-        windowLength = first_crossing(y, 'ac', 0, 'discrete')
+    if how_to_window == 'l':
+        window_length = n # window length
+    elif how_to_window == 'n':
+        window_length = int(np.floor(N/n))
+    elif how_to_window == 'tau':
+        window_length = first_crossing(y, 'ac', 0, 'discrete')
     else:
-        raise ValueError(f"Unknown method {howToWindow}")
+        raise ValueError(f"Unknown method {how_to_window}")
     
-    if (windowLength > N) or (windowLength <= 1):
+    if (window_length > N) or (window_length <= 1):
         # This feature is unsuitable if the window length exceeds ts
         out = np.nan
     
     # Buffer the time series
-    y_buff = make_mat_buffer(y, windowLength) # no overlap
+    y_buff = make_mat_buffer(y, window_length) # no overlap
     # each column is a window of samples
     if y_buff[-1, -1] == 0:
         y_buff = y_buff[:, :-1]  # remove last window if zero-padded
@@ -435,7 +435,7 @@ def LocalExtrema(y : ArrayLike, howToWindow : str = 'l', n : Union[int, None] = 
 
     return out
 
-def KPSSTest(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
+def kpss_test(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
     """
     Performs the KPSS (Kwiatkowski-Phillips-Schmidt-Shin) stationarity test.
 
@@ -443,15 +443,18 @@ def KPSSTest(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
     is trend stationary. The null hypothesis is that the time series is trend stationary,
     while the alternative hypothesis is that it is a non-stationary unit-root process.
 
-    The test was introduced in:
-    Kwiatkowski, D., Phillips, P. C., Schmidt, P., & Shin, Y. (1992). Testing the null 
-    hypothesis of stationarity against the alternative of a unit root: How sure are we 
-    that economic time series have a unit root? Journal of Econometrics, 54(1-3), 159-178.
+    The test was introduced in [1]
 
     The function can be used in two ways:
     1. With a single lag value - returns basic test statistic and p-value
     2. With multiple lag values - returns statistics about how the test results 
        change across different lags
+    
+    References
+    ----------
+    .. [1] Kwiatkowski, D., Phillips, P. C., Schmidt, P., & Shin, Y. (1992). Testing the null 
+        hypothesis of stationarity against the alternative of a unit root: How sure are we 
+        that economic time series have a unit root? Journal of Econometrics, 54(1-3), 159-178.
 
     Parameters
     ----------
@@ -498,7 +501,7 @@ def KPSSTest(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
     
     return out
 
-def RangeEvolve(y : ArrayLike) -> dict:
+def range_evolve(y : ArrayLike) -> dict:
     """
     Analyze how the time-series range changes across time.
 
@@ -558,7 +561,7 @@ def RangeEvolve(y : ArrayLike) -> dict:
 
     return out
 
-def DriftingMean(y: ArrayLike, segmentHow: str = 'fix', l: int = 20) -> dict:
+def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
     """
     Measures mean drift by analyzing mean and variance in time-series subsegments.
 
@@ -580,14 +583,14 @@ def DriftingMean(y: ArrayLike, segmentHow: str = 'fix', l: int = 20) -> dict:
     ----------
     y : array-like
         The input time series
-    segmentHow : str, optional
+    segment_how : str, optional
         Method to segment the time series:
         - 'fix': fixed-length segments of length l (default)
         - 'num': splits into l number of segments
     l : int, optional
         Specifies either:
-        - The length of segments when segmentHow='fix' (default=20)
-        - The number of segments when segmentHow='num'
+        - The length of segments when segment_how='fix' (default=20)
+        - The number of segments when segment_how='num'
 
     Returns
     -------
@@ -599,15 +602,15 @@ def DriftingMean(y: ArrayLike, segmentHow: str = 'fix', l: int = 20) -> dict:
     
     # Set default segment parameters
     if l is None:
-        l = 200 if segmentHow == 'fix' else 5
+        l = 200 if segment_how == 'fix' else 5
     
     # Calculate segment length
-    if segmentHow == 'num':
+    if segment_how == 'num':
         segment_length = int(np.floor(N/l))
-    elif segmentHow == 'fix':
+    elif segment_how == 'fix':
         segment_length = l
     else:
-        raise ValueError(f"segmentHow must be 'fix' or 'num', got {segmentHow}")
+        raise ValueError(f"segment_how must be 'fix' or 'num', got {segment_how}")
     
     # Validate segment length
     if segment_length <= 1 or segment_length > N:
@@ -641,7 +644,7 @@ def DriftingMean(y: ArrayLike, segmentHow: str = 'fix', l: int = 20) -> dict:
 
     return out
 
-def LocalGlobal(y : ArrayLike, subsetHow : str = 'l', nsamps : Union[int, float, None] = None) -> dict:
+def local_global(y : ArrayLike, subset_how : str = 'l', n : Union[int, float, None] = None) -> dict:
     """
     Compare local statistics to global statistics of a time series.
 
@@ -649,14 +652,14 @@ def LocalGlobal(y : ArrayLike, subsetHow : str = 'l', nsamps : Union[int, float,
     -----------
     y : ArrayLike
         The time series to analyse.
-    subsetHow : str, optional
+    subset_how : str, optional
         The method to select the local subset of time series:
         'l': the first n points in a time series (default)
         'p': an initial proportion of the full time series
         'unicg': n evenly-spaced points throughout the time series
         'randcg': n randomly-chosen points from the time series (chosen with replacement)
     n : int or float, optional
-        The parameter for the method specified by subsetHow.
+        The parameter for the method specified by subset_how.
         Default is 100 samples or 0.1 (10% of time series length) if proportion. 
 
     Returns
@@ -668,25 +671,25 @@ def LocalGlobal(y : ArrayLike, subsetHow : str = 'l', nsamps : Union[int, float,
     # check input time series is z-scored
     y = np.asarray(y)
 
-    if nsamps is None:
-        if subsetHow in ['l', 'unicg', 'randcg']:
-            nsamps = 100 # 100 samples
-        elif subsetHow == 'p':
-            nsamps = 0.1 # 10 % of time series
+    if n is None:
+        if subset_how in ['l', 'unicg', 'randcg']:
+            n = 100 # 100 samples
+        elif subset_how == 'p':
+            n = 0.1 # 10 % of time series
     N = len(y)
 
     # Determine subset range to use: r
-    if subsetHow == 'l':
+    if subset_how == 'l':
         # take first n pts of time series
-        r = np.arange(min(nsamps, N))
-    elif subsetHow == 'p':
+        r = np.arange(min(n, N))
+    elif subset_how == 'p':
         # take initial proportion n of time series
-        r = np.arange(int(np.floor(N*nsamps)))
+        r = np.arange(int(np.floor(N*n)))
         #print(r)
-    elif subsetHow == 'unicg':
-        r = np.round(np.linspace(1, N, nsamps)).astype(int) - 1
+    elif subset_how == 'unicg':
+        r = np.round(np.linspace(1, N, n)).astype(int) - 1
     else:
-        raise ValueError(f"Unknown specifier, {subsetHow}. Can be either 'l', 'p', 'unicg', or 'randcg'.")
+        raise ValueError(f"Unknown specifier, {subset_how}. Can be either 'l', 'p', 'unicg', or 'randcg'.")
 
     if len(r) < 5:
         # It's not really appropriate to compute statistics on less than 5 datapoints
@@ -709,7 +712,7 @@ def LocalGlobal(y : ArrayLike, subsetHow : str = 'l', nsamps : Union[int, float,
 
     return out
 
-def FitPolynomial(y : ArrayLike, k : int = 1) -> float:
+def fit_polynomial(y : ArrayLike, k : int = 1) -> float:
     """
     Goodness of a polynomial fit to a time series
 
@@ -739,7 +742,7 @@ def FitPolynomial(y : ArrayLike, k : int = 1) -> float:
 
     return float(out)
 
-def TSLength(y : ArrayLike) -> int:
+def ts_length(y : ArrayLike) -> int:
     """
     Length of an input data vector.
 
@@ -755,7 +758,7 @@ def TSLength(y : ArrayLike) -> int:
     """
     return len(np.asarray(y))
 
-def StdNthDer(y : ArrayLike, ndr : int = 2) -> float:
+def std_nth_deriv(y : ArrayLike, ndr : int = 2) -> float:
     """
     Standard deviation of the nth derivative of the time series.
 
@@ -768,9 +771,12 @@ def StdNthDer(y : ArrayLike, ndr : int = 2) -> float:
     deviation of the nth derivative, if you like".
     cf. http://www.mathworks.de/matlabcentral/newsreader/view_thread/136539
 
-    This approach is widely used in heart-rate variability literature, see:
-    "Do Existing Measures of Long-Term Heart Rate Variability...", Brennan et al. (2001)
-    IEEE Trans Biomed Eng 48(11)
+    This approach is widely used in heart-rate variability literature, see [1].
+
+    References
+    ----------
+    .. [1] "Do Existing Measures of Long-Term Heart Rate Variability...", Brennan et al. (2001)
+        IEEE Trans Biomed Eng 48(11)
 
     Parameters
     ----------
@@ -794,7 +800,7 @@ def StdNthDer(y : ArrayLike, ndr : int = 2) -> float:
 
     return float(out)
 
-def Trend(y : ArrayLike) -> dict:
+def trend(y : ArrayLike) -> dict:
     """
     Quantifies various measures of trend in a time series.
 
@@ -844,7 +850,7 @@ def Trend(y : ArrayLike) -> dict:
 
     return out
 
-def StatAv(y: ArrayLike, whatType: str = 'seg', extraParam: int = 5) -> float:
+def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float:
     """
     Simple mean-stationarity metric using the StatAv measure.
 
@@ -864,37 +870,37 @@ def StatAv(y: ArrayLike, whatType: str = 'seg', extraParam: int = 5) -> float:
     ----------
     y : array-like
         The input time series
-    whatType : str, optional
+    what_type : str, optional
         Method to segment the time series:
         - 'seg': divide into n segments (default)
         - 'len': divide into segments of length n
-    extraParam : int, optional
+    extra_param : int, optional
         Specifies either:
-        - Number of segments when whatType='seg' (default=5)
-        - Segment length when whatType='len'
+        - Number of segments when what_type='seg' (default=5)
+        - Segment length when what_type='len'
 
     Returns
     -------
     float
-        The StatAv statistic. Values closer to zero indicate more 
+        The stat_av statistic. Values closer to zero indicate more 
         stationary means across segments.
     """
     y = np.asarray(y)
     N = len(y)
 
-    if whatType == 'seg':
+    if what_type == 'seg':
         # divide time series into n segments
-        p = int(np.floor(N / extraParam))  # integer division, lose the last N mod n data points
-        M = np.array([np.mean(y[p*j:p*(j+1)]) for j in range(extraParam)])
-    elif whatType == 'len':
-        if N > 2*extraParam:
-            pn = int(np.floor(N / extraParam))
-            M = np.array([np.mean(y[j*extraParam:(j+1)*extraParam]) for j in range(pn)])
+        p = int(np.floor(N / extra_param))  # integer division, lose the last N mod n data points
+        M = np.array([np.mean(y[p*j:p*(j+1)]) for j in range(extra_param)])
+    elif what_type == 'len':
+        if N > 2*extra_param:
+            pn = int(np.floor(N / extra_param))
+            M = np.array([np.mean(y[j*extra_param:(j+1)*extra_param]) for j in range(pn)])
         else:
-            print(f"This time series (N = {N}) is too short for StatAv({whatType},'{extraParam}')")
+            print(f"This time series (N = {N}) is too short for StatAv({what_type},'{extra_param}')")
             return np.nan
     else:
-        raise ValueError(f"Error evaluating StatAv of type '{whatType}', please select either 'seg' or 'len'")
+        raise ValueError(f"Error evaluating StatAv of type '{what_type}', please select either 'seg' or 'len'")
 
     s = np.std(y, ddof=1)  # should be 1 (for a z-scored time-series input)
     sdav = np.std(M, ddof=1)
@@ -902,15 +908,15 @@ def StatAv(y: ArrayLike, whatType: str = 'seg', extraParam: int = 5) -> float:
 
     return float(out)
 
-def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = 'std', 
-                 numSeg: int = 5, incMove: int = 2):
+def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str = 'std', 
+                 num_seg: int = 5, inc_move: int = 2):
     """
     Sliding window measures of stationarity.
 
     This function analyzes time series stationarity by sliding a window along the series,
     calculating specified statistics in each window, and then comparing these local 
-    estimates across windows. For each window, it computes a statistic (windowStat) and 
-    then summarizes the variation of these statistics across windows (acrossWinStat).
+    estimates across windows. For each window, it computes a statistic (window_stat) and 
+    then summarizes the variation of these statistics across windows (across_win_stat).
 
     This implementation is based on:
     "Heart rate control in normal and aborted-SIDS infants", S. M. Pincus et al.
@@ -922,7 +928,7 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
     ----------
     y : array-like
         The input time series to analyze
-    windowStat : str, optional (default='mean')
+    window_stat : str, optional (default='mean')
         Statistic to calculate in each window:
         - 'mean': arithmetic mean
         - 'std': standard deviation
@@ -934,18 +940,18 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
         - 'AC1': lag-1 autocorrelation
         - 'apen': Approximate Entropy with m=1, r=0.2
         - 'sampen': Sample Entropy with m=2, r=0.1
-    acrossWinStat : str, optional (default='std')
+    across_win_stat : str, optional (default='std')
         Method to compare statistics across windows:
         - 'std': standard deviation (normalized by full series std)
         - 'ent': distribution entropy (not implemented)
         - 'apen': Approximate Entropy with m=1, r=0.2
         - 'sampen': Sample Entropy with m=2, r=0.15
-    numSeg : int, optional (default=5)
+    num_seg : int, optional (default=5)
         Number of segments to divide the time series into
         (controls the window length)
-    incMove : int, optional (default=2)
-        Controls window overlap - window moves by windowLength/incMove at each step
-        (e.g., incMove=2 means 50% overlap between windows)
+    inc_move : int, optional (default=2)
+        Controls window overlap - window moves by window_length/inc_move at each step
+        (e.g., inc_move=2 means 50% overlap between windows)
 
     Returns
     -------
@@ -955,11 +961,11 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
         Returns np.nan if time series is too short for specified segmentation.
     """
     y = np.asarray(y)
-    winLength = np.floor(len(y)/numSeg)
+    winLength = np.floor(len(y)/num_seg)
     if winLength == 0:
-        logging.warning(f"Time-series of length {len(y)} is too short for {numSeg} windows")
+        logging.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
         return np.nan
-    inc = np.floor(winLength/incMove) # increment to move at each step
+    inc = np.floor(winLength/inc_move) # increment to move at each step
     # if incrment rounded down to zero, prop it up 
     if inc == 0:
         inc = 1
@@ -967,46 +973,46 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
     numSteps = int(np.floor((len(y)-winLength)/inc) + 1)
     qs = np.zeros(numSteps)
     
-    if windowStat == 'mean':
+    if window_stat == 'mean':
         for i in range(numSteps):
             qs[i] = np.mean(y[_get_window(i, inc, winLength)])
-    elif windowStat == 'std':
+    elif window_stat == 'std':
         for i in range(numSteps):
             qs[i] = np.std(y[_get_window(i, inc, winLength)], ddof=1)
-    elif windowStat == 'ent':
+    elif window_stat == 'ent':
         for i in range(numSteps):
             qs[i] = distribution_entropy(y[_get_window(i, inc, winLength)], 'ks','[]')
-    elif windowStat == 'apen':
+    elif window_stat == 'apen':
         for i in range(numSteps):
             qs[i] = approximate_entropy(y[_get_window(i, inc, winLength)], 1, 0.2)
-    elif windowStat == 'sampen':
+    elif window_stat == 'sampen':
         for i in range(numSteps):
             sampen_dict = sample_entropy(y[_get_window(i, inc, winLength)], 1, 0.1)
             qs[i] = sampen_dict['sampen1']
-    elif windowStat == 'mom3':
+    elif window_stat == 'mom3':
         for i in range(numSteps):
             qs[i] = moments(y[_get_window(i, inc, winLength)], 3)
-    elif windowStat == 'mom4':
+    elif window_stat == 'mom4':
         for i in range(numSteps):
             qs[i] = moments(y[_get_window(i, inc, winLength)], 4)
-    elif windowStat == 'mom5':
+    elif window_stat == 'mom5':
         for i in range(numSteps):
             qs[i] = moments(y[_get_window(i, inc, winLength)], 5)
-    elif windowStat == 'AC1':
+    elif window_stat == 'AC1':
         for i in range(numSteps):
             qs[i] = autocorr(y[_get_window(i, inc, winLength)], 1, 'Fourier')
     else:
-        raise ValueError(f"Unknown statistic '{windowStat}'")
+        raise ValueError(f"Unknown statistic '{window_stat}'")
     
-    if acrossWinStat == 'std':
+    if across_win_stat == 'std':
         #% normalized by std of full time series
         out = np.std(qs, ddof=1)/np.std(y, ddof=1)
-    elif acrossWinStat == 'apen':
+    elif across_win_stat == 'apen':
         out = approximate_entropy(qs, 1, 0.2)
-    elif acrossWinStat == 'sampen':
+    elif across_win_stat == 'sampen':
         sampen_dict = sample_entropy(qs, 2, 0.15)
         out = sampen_dict['quadSampEn1']
-    elif acrossWinStat == 'ent':
+    elif across_win_stat == 'ent':
         #% get a load of statistics from kernel-smoothed distribution
         kde = gaussian_kde(qs)
         xi = np.linspace(qs.min() - 3 * np.std(qs, ddof=1), qs.max() + 3 * np.std(qs, ddof=1), 100)
@@ -1016,7 +1022,7 @@ def SlidingWindow(y: ArrayLike, windowStat: str = 'mean', acrossWinStat: str = '
         dist_ent = -np.sum(f_pos * np.log(f_pos) * dx)
         out = dist_ent
     else:
-        raise ValueError(f"Unknown statistic '{acrossWinStat}'")
+        raise ValueError(f"Unknown statistic '{across_win_stat}'")
     
     return out
 

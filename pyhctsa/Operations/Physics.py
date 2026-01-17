@@ -6,7 +6,7 @@ from scipy.stats import ansari, gaussian_kde
 from statsmodels.sandbox.stats.runs import runstest_1samp
 
 from pyhctsa.Operations.correlation import first_crossing, autocorr
-from pyhctsa.Operations.Stationarity import SlidingWindow
+from pyhctsa.Operations.stationarity import sliding_window
 
 def walker(y : ArrayLike, walker_rule : str = 'prop', walker_params : Union[None, float, int, list] = None) -> dict:
     """
@@ -196,12 +196,12 @@ def walker(y : ArrayLike, walker_rule : str = 'prop', walker_params : Union[None
     res = w - y
     _, runs_pval = runstest_1samp(res, cutoff='mean')
     out['res_runstest'] = runs_pval
-    out['res_swss5_1'] = SlidingWindow(res, 'std', 'std', 5, 1) # sliding window stationarity
+    out['res_swss5_1'] = sliding_window(res, 'std', 'std', 5, 1) # sliding window stationarity
     out['res_ac1'] = autocorr(res, 1)[0] # auto correlation at lag-1
 
     return out
 
-def ForcePotential(y : ArrayLike, whatPotential : str = 'dblwell', params : Union[list, None] = None) -> dict:
+def force_potential(y : ArrayLike, what_potential : str = 'dblwell', params : Union[list, None] = None) -> dict:
     """
     Couples the values of the time series to a dynamical system.
 
@@ -217,7 +217,7 @@ def ForcePotential(y : ArrayLike, whatPotential : str = 'dblwell', params : Unio
     ----------
     y : array-like
         The input time series.
-    whatPotential : str, optional
+    what_potential : str, optional
         The potential function to simulate:
             - 'dblwell': a double well potential function
             - 'sine': a sinusoidal potential function
@@ -235,16 +235,18 @@ def ForcePotential(y : ArrayLike, whatPotential : str = 'dblwell', params : Unio
     Returns
     --------
     dict
-        Statistics summarizing the trajectory of the simulated particle.
+        Statistics summarizing the trajectory of the simulated particle,
+        including its mean, the range, proportion positive, proportion of times it
+        crosses zero, its autocorrelation, final position, and standard deviation.
     """
     y = np.array(y)
     if params is None:
-        if whatPotential == 'dblwell':
+        if what_potential == 'dblwell':
             params = [2, 0.1, 0.1]
-        elif whatPotential == 'sine':
+        elif what_potential == 'sine':
             params = [1, 1, 1]
         else:
-            raise ValueError(f"Unknown system {whatPotential}")
+            raise ValueError(f"Unknown system {what_potential}")
     else:
         # check params
         if not isinstance(params, list):
@@ -258,14 +260,14 @@ def ForcePotential(y : ArrayLike, whatPotential : str = 'dblwell', params : Unio
     alpha, kappa, deltat = params
 
     # specify potential function
-    if whatPotential == 'sine':
+    if what_potential == 'sine':
         V = lambda x: -np.cos(x/alpha)
         F = lambda x: np.sin(x/alpha)/alpha
-    elif whatPotential == 'dblwell':
+    elif what_potential == 'dblwell':
         F = lambda x: -x**3 + alpha**2 * x
         V = lambda x: ((x**4) / 4) - (alpha**2) * ((x**2) / 2)
     else:
-        raise ValueError(f"Unknown potential function {whatPotential}")
+        raise ValueError(f"Unknown potential function {what_potential}")
     
     x = np.zeros(N) # position
     v = np.zeros(N) # velocity
@@ -293,7 +295,7 @@ def ForcePotential(y : ArrayLike, whatPotential : str = 'dblwell', params : Unio
     out['finaldev'] = np.abs(x[-1]) # final position
 
     # additional outputs for dbl well
-    if whatPotential == 'dblwell':
+    if what_potential == 'dblwell':
         out['pcrossup'] = np.sum((x[:-1] - alpha) * (x[1:] - alpha) < 0) / (N - 1)
         out['pcrossdown'] = np.sum((x[:-1] + alpha) * (x[1:] + alpha) < 0) / (N - 1)
 
