@@ -5,8 +5,8 @@ from numpy.typing import ArrayLike
 from scipy.stats import ansari, gaussian_kde
 from statsmodels.sandbox.stats.runs import runstest_1samp
 
-from pyhctsa.Operations.correlation import first_crossing, autocorr
-from pyhctsa.Operations.stationarity import sliding_window
+from ..operations.correlation import first_crossing, autocorr
+from ..operations.stationarity import sliding_window
 
 def walker(y : ArrayLike, walker_rule : str = 'prop', walker_params : Union[None, float, int, list] = None) -> dict:
     """

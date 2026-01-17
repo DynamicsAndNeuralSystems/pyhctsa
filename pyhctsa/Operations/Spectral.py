@@ -3,9 +3,9 @@ from numpy.typing import ArrayLike
 
 import scipy.fft
 
-from pyhctsa.Operations.distribution import moments
-from pyhctsa.Operations.correlation import autocorr, first_crossing
-from pyhctsa.Utilities.utils import make_mat_buffer, signChange
+from ..operations.distribution import moments
+from ..operations.correlation import autocorr, first_crossing
+from ..Utilities.utils import make_mat_buffer, signChange
 
 def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = 'none') -> dict:
     """

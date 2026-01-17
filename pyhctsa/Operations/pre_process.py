@@ -1,13 +1,12 @@
 import numpy as np
 
-from scipy.signal import lfilter
+from scipy.signal import lfilter, resample_poly
 from numpy.typing import ArrayLike
-from scipy.signal import resample_poly
 from statsmodels.tsa.tsatools import detrend
 
-from pyhctsa.Operations.stationarity import stat_av, sliding_window
-from pyhctsa.Utilities.utils import ZScore
-from pyhctsa.Operations.distribution import outlier_test
+from ..operations.stationarity import stat_av, sliding_window
+from ..Utilities.utils import ZScore
+from ..operations.distribution import outlier_test
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
     """Apply a length-k median filter to a 1D array x.

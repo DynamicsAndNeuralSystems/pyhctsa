@@ -38,7 +38,7 @@ def first_min(
     int
         The time of the first minimum (or maximum if `min_not_max` is False).
     """
-    from ..Operations.correlation import autocorr
+    from ..operations.correlation import autocorr
 
     y = np.asarray(y)
     n = len(y)
@@ -198,7 +198,7 @@ def automutual_info_stats(
     dict
         Dictionary containing AMI statistics.
     """
-    from ..Operations.correlation import autocorr
+    from ..operations.correlation import autocorr
 
     y = np.asarray(y)
     n = len(y)  # length of the time series
@@ -325,7 +325,7 @@ def automutual_info(
         If multiple time_delay:
             dict: Keys are f"ami{delay}", values are corresponding AMI values
     """
-    from ..Operations.distribution import first_crossing
+    from ..operations.distribution import first_crossing
 
     if isinstance(time_delay, str) and time_delay in ['ac', 'tau']:
         time_delay = first_crossing(y, corr_fun='ac', threshold=0, what_out='discrete')
@@ -483,7 +483,7 @@ def _initialize_MI(
 
     if not jp.isJVMStarted():
         jarloc = (
-            os.path.dirname(os.path.abspath(__file__)) + "/../Toolboxes/infodynamics-dist/infodynamics.jar"
+            os.path.dirname(os.path.abspath(__file__)) + "/../toolboxes/infodynamics-dist/infodynamics.jar"
         )
         # change to debug info
         if verbose:

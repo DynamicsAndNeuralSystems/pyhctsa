@@ -7,7 +7,7 @@ from scipy import stats
 from scipy.stats import norm, gumbel_l, uniform, expon, lognorm, gaussian_kde
 
 from ..Utilities.utils import histc, binpicker, simple_binner, xcorr
-from ..Operations.correlation import autocorr, first_crossing
+from ..operations.correlation import autocorr, first_crossing
 
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """

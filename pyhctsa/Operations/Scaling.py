@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ..Toolboxes.Max_Little import fastdfa
+from ..toolboxes.Max_Little import fastdfa
 
 def fast_dfa(y: ArrayLike) -> float:
     """

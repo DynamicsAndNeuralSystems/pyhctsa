@@ -117,10 +117,10 @@ class FeatureCalculator:
         # set the default config path
         if config_path is None:
             ROOT_DIR = Path(__file__).resolve().parent
-            config_path = ROOT_DIR / "Configurations" / "hctsa.yaml"
+            config_path = ROOT_DIR / "configurations" / "hctsa.yaml"
         with open(config_path) as f:
             self.config = yaml.safe_load(f)
-        self._operations_package = "pyhctsa.Operations" # abs path
+        self._operations_package = "pyhctsa.operations" # abs path
         self.feature_funcs = self._build_feature_funcs()
         print(f"Loaded {len(self.feature_funcs)} master operations.")
 

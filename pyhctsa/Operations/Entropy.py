@@ -9,10 +9,10 @@ from sklearn.neighbors import KDTree
 from antropy.entropy import _xlogx
 
 from ..Utilities.utils import ZScore, make_buffer, binpicker, histc
-from ..Toolboxes.physionet import sampen as _sampen_c 
-from ..Operations.correlation import first_crossing
-from ..Toolboxes.Michael_Small import shannon
-from ..Toolboxes.Max_Little import close_returns as _close_returns_c
+from ..toolboxes.physionet import sampen as _sampen_c 
+from ..operations.correlation import first_crossing
+from ..toolboxes.Michael_Small import shannon
+from ..toolboxes.Max_Little import close_returns as _close_returns_c
 
 def shannon_entropy(
     y: ArrayLike,

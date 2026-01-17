@@ -15,46 +15,46 @@ def build_extensions():
     np_inc = np.get_include()
 
     fastdfa = Extension(
-        "pyhctsa.Toolboxes.Max_Little.fastdfa",
-        sources=["pyhctsa/Toolboxes/Max_Little/ML_fastdfa_core.c"],
-        include_dirs=["pyhctsa/Toolboxes/Max_Little", np_inc],
+        "pyhctsa.toolboxes.Max_Little.fastdfa",
+        sources=["pyhctsa/toolboxes/Max_Little/ML_fastdfa_core.c"],
+        include_dirs=["pyhctsa/toolboxes/Max_Little", np_inc],
         extra_compile_args=_compile_args(),
         libraries=_libraries(),
     )
 
     sampen = Extension(
-        "pyhctsa.Toolboxes.physionet.sampen",
-        sources=["pyhctsa/Toolboxes/physionet/sampen.c"],
-        include_dirs=["pyhctsa/Toolboxes/physionet", np_inc],
+        "pyhctsa.toolboxes.physionet.sampen",
+        sources=["pyhctsa/toolboxes/physionet/sampen.c"],
+        include_dirs=["pyhctsa/toolboxes/physionet", np_inc],
         extra_compile_args=_compile_args(),
         libraries=_libraries(),
     )
 
     close_returns = Extension(
-        "pyhctsa.Toolboxes.Max_Little.close_returns",
-        sources=["pyhctsa/Toolboxes/Max_Little/ML_close_ret.c"],
-        include_dirs=["pyhctsa/Toolboxes/Max_Little", np_inc],
+        "pyhctsa.toolboxes.Max_Little.close_returns",
+        sources=["pyhctsa/toolboxes/Max_Little/ML_close_ret.c"],
+        include_dirs=["pyhctsa/toolboxes/Max_Little", np_inc],
         extra_compile_args=_compile_args(),
         libraries=_libraries(),
     )
 
     periodicity_wang = Extension(
-        "pyhctsa.Toolboxes.c22.PD_PeriodicityWang",
+        "pyhctsa.toolboxes.c22.PD_PeriodicityWang",
         sources=[
-            "pyhctsa/Toolboxes/c22/PD_PeriodicityWang.c",
-            "pyhctsa/Toolboxes/c22/splinefit.c",
-            "pyhctsa/Toolboxes/c22/stats.c",
-            "pyhctsa/Toolboxes/c22/helper_functions.c",
+            "pyhctsa/toolboxes/c22/PD_PeriodicityWang.c",
+            "pyhctsa/toolboxes/c22/splinefit.c",
+            "pyhctsa/toolboxes/c22/stats.c",
+            "pyhctsa/toolboxes/c22/helper_functions.c",
         ],
-        include_dirs=["pyhctsa/Toolboxes/c22", np_inc],
+        include_dirs=["pyhctsa/toolboxes/c22", np_inc],
         extra_compile_args=_compile_args(),
         libraries=_libraries(),
     )
 
     shannon = Extension(
-        "pyhctsa.Toolboxes.Michael_Small.shannon",
-        sources=["pyhctsa/Toolboxes/Michael_Small/MS_shannon.c"],
-        include_dirs=["pyhctsa/Toolboxes/Michael_Small", np_inc],
+        "pyhctsa.toolboxes.Michael_Small.shannon",
+        sources=["pyhctsa/toolboxes/Michael_Small/MS_shannon.c"],
+        include_dirs=["pyhctsa/toolboxes/Michael_Small", np_inc],
         extra_compile_args=_compile_args(),
         libraries=_libraries(),
     )

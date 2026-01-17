@@ -5,8 +5,8 @@ import scipy
 from scipy.stats import norm, expon
 from ts2vg import NaturalVG
 
-from pyhctsa.Operations.correlation import autocorr, first_crossing
-from pyhctsa.Operations.entropy import distribution_entropy
+from pyhctsa.operations.correlation import autocorr, first_crossing
+from pyhctsa.operations.entropy import distribution_entropy
 
 def _horiz_vgraph(ts_data : ArrayLike) -> ArrayLike:
     """Helper function for `VisibilityGraph`."""

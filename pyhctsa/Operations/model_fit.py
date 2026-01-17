@@ -10,8 +10,8 @@ from scipy.signal import lfilter
 from hmmlearn.hmm import GaussianHMM
 
 from ..Utilities.utils import ZScore
-from ..Operations.stationarity import sliding_window
-from ..Operations.correlation import first_crossing, autocorr
+from ..operations.stationarity import sliding_window
+from ..operations.correlation import first_crossing, autocorr
 
 def hmm_fit(y : ArrayLike, train_p : float = 0.8, num_states : int = 3, random_seed : int = 0) -> dict:
     """

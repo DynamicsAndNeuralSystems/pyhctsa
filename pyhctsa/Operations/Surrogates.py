@@ -6,8 +6,8 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 from scipy.stats import zmap, norm, gaussian_kde
 
-from pyhctsa.Operations.information import automutual_info, first_min
-from pyhctsa.Operations.correlation import tc3
+from ..operations.information import automutual_info, first_min
+from ..operations.correlation import tc3
 
 def sd_give_me_stats(stat_x : float, stat_surr : ArrayLike, left_right_both : str) -> dict:
     """Compute statistiscs on the surrogate distribution."""

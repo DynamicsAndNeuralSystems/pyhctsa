@@ -9,10 +9,10 @@ from scipy.stats import skew, kurtosis, gaussian_kde
 from statsmodels.tsa.stattools import kpss
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 
-from ..Operations.entropy import approximate_entropy, sample_entropy, distribution_entropy
-from ..Operations.correlation import autocorr, first_crossing
+from ..operations.entropy import approximate_entropy, sample_entropy, distribution_entropy
+from ..operations.correlation import autocorr, first_crossing
 from ..Utilities.utils import make_mat_buffer, ZScore, signChange
-from ..Operations.distribution import moments
+from ..operations.distribution import moments
 
 def local_distributions(y : ArrayLike, num_segs : int = 5, each_or_par : str = 'par', num_points : int = 200) -> dict:
     """

@@ -2,7 +2,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from typing import Union
 
-from ..Operations.correlation import first_crossing
+from ..operations.correlation import first_crossing
 
 def rad(x: ArrayLike, tau : Union[int, str] = 1, centre : bool = True) -> float:
     """
