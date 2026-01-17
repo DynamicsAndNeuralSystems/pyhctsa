@@ -1,5 +1,5 @@
 from pyhctsa.Utilities.utils import get_dataset
-from pyhctsa.FeatureCalculator.calculator import FeatureCalculator, classify_output, standardise_inputs
+from pyhctsa.calculator import FeatureCalculator, classify_output, standardise_inputs
 import numpy as np
 import os
 import pandas as pd

@@ -8,7 +8,7 @@ import time
 import importlib
 from pathlib import Path
 import yaml
-from ..Utilities.utils import preprocess_decorator, validate_data, check_optional_deps
+from pyhctsa.Utilities.utils import preprocess_decorator, validate_data, check_optional_deps
 from tqdm import tqdm
 
 def range_constructor(loader, node) -> list:
@@ -105,7 +105,7 @@ def _format_param_value(val : Union[int, float, list]) -> str:
     return str(val)
 
 class FeatureCalculator:
-    def __init__(self, configPath : Union[str, None] = None):
+    def __init__(self, config_path : Union[str, None] = None):
         """
         Initialises a FeatureCalculator instance.  
 
@@ -115,10 +115,10 @@ class FeatureCalculator:
             Path to the YAML configuration file. If None, uses the default configuration.
         """
         # set the default config path
-        if configPath is None:
-            ROOT_DIR = Path(__file__).resolve().parent.parent
-            configPath = ROOT_DIR / "Configurations" / "hctsa.yaml"
-        with open(configPath) as f:
+        if config_path is None:
+            ROOT_DIR = Path(__file__).resolve().parent
+            config_path = ROOT_DIR / "Configurations" / "hctsa.yaml"
+        with open(config_path) as f:
             self.config = yaml.safe_load(f)
         self._operations_package = "pyhctsa.Operations" # abs path
         self.feature_funcs = self._build_feature_funcs()
