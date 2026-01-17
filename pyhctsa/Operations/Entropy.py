@@ -8,7 +8,7 @@ from scipy.stats import gaussian_kde
 from sklearn.neighbors import KDTree
 from antropy.entropy import _xlogx
 
-from ..Utilities.utils import ZScore, make_buffer, binpicker, histc
+from ..utils import z_score, make_buffer, binpicker, histc
 from ..toolboxes.physionet import sampen as _sampen_c 
 from ..operations.correlation import first_crossing
 from ..toolboxes.Michael_Small import shannon
@@ -226,12 +226,12 @@ def multi_scale_entropy(
 
     if pre_process_how is not None:
         if pre_process_how == 'diff1':
-            y = ZScore(np.diff(y))
+            y = z_score(np.diff(y))
         elif pre_process_how == 'rescale_tau':
             tau = first_crossing(y, 'ac', 0, 'discrete')
             y_buffer = make_buffer(y, tau)
             y = np.mean(y_buffer, 1)
-            y = ZScore(y)
+            y = z_score(y)
         else:
             raise ValueError(f"Unknown preprocessing setting: {pre_process_how}")    
     
@@ -622,7 +622,7 @@ def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2, pre_proc: Union[str, No
     rng = np.random.RandomState(rng) # fix the seed for reproducibility
     x = np.asarray(x, dtype=np.float64).ravel()
     if pre_proc == "diff":
-        x = ZScore(np.diff(x))
+        x = z_score(np.diff(x))
 
     if x.size == 0 or n_bits < 2:
         return 0.0

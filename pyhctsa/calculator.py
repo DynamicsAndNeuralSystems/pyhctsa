@@ -1,15 +1,17 @@
-import numpy as np
-import pandas as pd
-from typing import Union
-from numpy.typing import ArrayLike
+import importlib
+import time
 from functools import partial
 from itertools import product
-import time
-import importlib
 from pathlib import Path
+from typing import Union
+
+import numpy as np
+import pandas as pd
 import yaml
-from pyhctsa.Utilities.utils import preprocess_decorator, validate_data, check_optional_deps
+from numpy.typing import ArrayLike
 from tqdm import tqdm
+
+from .utils import preprocess_decorator, validate_data, check_optional_deps
 
 def range_constructor(loader, node) -> list:
     """Construct a range from a YAML config."""

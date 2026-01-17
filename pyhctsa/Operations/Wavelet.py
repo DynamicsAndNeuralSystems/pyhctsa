@@ -5,7 +5,7 @@ from typing import Union
 import pywt
 from pywt import cwt
 
-from ..Utilities.utils import signChange
+from ..utils import signChange
 
 def wfbm(x : ArrayLike) -> dict:
     """

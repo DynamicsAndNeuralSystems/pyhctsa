@@ -80,17 +80,17 @@ def get_dataset(which : str = "e1000") -> list:
 
     datasets = {
         "e1000": {
-            "path": "../../data/e1000.csv",
+            "path": "../data/e1000.csv",
             "loader": lambda p: _load_csv(p),
             "desc": "empirical1000"
         },
         "sinusoid": {
-            "path": "../../data/sinusoid.txt",
+            "path": "../data/sinusoid.txt",
             "loader": lambda p: [np.loadtxt(p)],
             "desc": "sinusoid"
         },
         "noise": {
-            "path": "../../data/noise_gaussian.txt",
+            "path": "../data/noise_gaussian.txt",
             "loader": lambda p: [np.loadtxt(p)],
             "desc": "gaussian noise"
         }
@@ -118,14 +118,14 @@ def preprocess_decorator(zscore : bool = False, absval : bool = False):
         @wraps(func)
         def wrapper(x, *args, **kwargs):
             if zscore:
-                x = ZScore(x)
+                x = z_score(x)
             if absval:
                 x = np.abs(x)
             return func(x, *args, **kwargs)
         return wrapper
     return decorator
 
-def ZScore(x : ArrayLike) -> np.ndarray:
+def z_score(x : ArrayLike) -> np.ndarray:
     """
     Z-score the input data vector.
 

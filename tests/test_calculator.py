@@ -1,4 +1,4 @@
-from pyhctsa.Utilities.utils import get_dataset
+from pyhctsa.utils import get_dataset
 from pyhctsa.calculator import FeatureCalculator, classify_output, standardise_inputs
 import numpy as np
 import os

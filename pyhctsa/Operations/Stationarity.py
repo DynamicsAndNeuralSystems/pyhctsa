@@ -11,7 +11,7 @@ from statsmodels.tools.sm_exceptions import InterpolationWarning
 
 from ..operations.entropy import approximate_entropy, sample_entropy, distribution_entropy
 from ..operations.correlation import autocorr, first_crossing
-from ..Utilities.utils import make_mat_buffer, ZScore, signChange
+from ..utils import make_mat_buffer, z_score, signChange
 from ..operations.distribution import moments
 
 def local_distributions(y : ArrayLike, num_segs : int = 5, each_or_par : str = 'par', num_points : int = 200) -> dict:
@@ -326,7 +326,7 @@ def simple_stats(x : ArrayLike, what_stat : str = 'zcross') -> dict:
     elif what_stat == 'zsczcross':
         # ratio of zero crossings of raw to detrended time series
         # where the raw has zero mean
-        x = ZScore(x)
+        x = z_score(x)
         xch = x[:-1] * x[1:]
         h1 = np.sum(xch < 0) # num of zscross of raw series
         y = detrend(x)

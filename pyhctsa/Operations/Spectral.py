@@ -5,7 +5,7 @@ import scipy.fft
 
 from ..operations.distribution import moments
 from ..operations.correlation import autocorr, first_crossing
-from ..Utilities.utils import make_mat_buffer, signChange
+from ..utils import make_mat_buffer, signChange
 
 def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = 'none') -> dict:
     """

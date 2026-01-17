@@ -5,7 +5,7 @@ from numpy.typing import ArrayLike
 from statsmodels.tsa.tsatools import detrend
 
 from ..operations.stationarity import stat_av, sliding_window
-from ..Utilities.utils import ZScore
+from ..utils import z_score
 from ..operations.distribution import outlier_test
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
@@ -157,8 +157,8 @@ def preproc_compare(y : ArrayLike, detrend_meth : str = 'medianf') -> dict:
     
     # Statistical tests on original and processed time series
     # zscore both
-    y = ZScore(y)
-    y_d = ZScore(y_d)
+    y = z_score(y)
+    y_d = z_score(y_d)
 
     out = {}
 

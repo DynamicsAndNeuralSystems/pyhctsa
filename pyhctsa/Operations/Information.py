@@ -7,7 +7,7 @@ import logging
 import jpype as jp
 from scipy import stats
 
-from ..Utilities.utils import signChange, RM_histogram2
+from ..utils import signChange, RM_histogram2
 
 def first_min(
     y: list,

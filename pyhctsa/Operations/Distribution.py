@@ -6,7 +6,7 @@ import logging
 from scipy import stats
 from scipy.stats import norm, gumbel_l, uniform, expon, lognorm, gaussian_kde
 
-from ..Utilities.utils import histc, binpicker, simple_binner, xcorr
+from ..utils import histc, binpicker, simple_binner, xcorr
 from ..operations.correlation import autocorr, first_crossing
 
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
@@ -909,10 +909,8 @@ def histogram_mode(y : ArrayLike, num_bins : int = 10, do_simple : bool = True) 
         the input data vector
     num_bins : int, optional
         the number of bins to use in the histogram
-    doSimple : bool, optional
+    do_simple : bool, optional
         whether to use a simple binning method (linearly spaced bins)
-    do_abs: bool, optional
-        whether to take the absolute value first
 
     Returns
     --------

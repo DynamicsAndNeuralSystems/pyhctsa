@@ -9,7 +9,7 @@ from scipy.optimize import curve_fit
 from scipy.linalg import LinAlgError
 from statsmodels.tsa.stattools import pacf
 
-from ..Utilities.utils import pointOfCrossing, binpicker, ZScore, signChange, make_mat_buffer
+from ..utils import pointOfCrossing, binpicker, z_score, signChange, make_mat_buffer
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..operations.information import first_min, automutual_info
 
@@ -748,9 +748,9 @@ def stick_angles(y : ArrayLike) -> dict:
     
     # z-score
     zangles = []
-    zangles.append(ZScore(angles[0]))
-    zangles.append(ZScore(angles[1]))
-    zallAngles = ZScore(allAngles)
+    zangles.append(z_score(angles[0]))
+    zangles.append(z_score(angles[1]))
+    zallAngles = z_score(allAngles)
 
     # how stationary are the angle sets?
 

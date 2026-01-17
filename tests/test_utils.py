@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from pyhctsa.Utilities.utils import get_dataset, ZScore
+from pyhctsa.utils import get_dataset, zscore
 
 #----------------- Data loader tests ------------------
 
@@ -31,8 +31,8 @@ def test_zscore_basic():
     # basic test - is the data zero mean and unit variance
     x = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     x2 = np.array([10, 20, 30, 14, 32, 4])
-    z = ZScore(x)
-    z2 = ZScore(x2)
+    z = zscore(x)
+    z2 = zscore(x2)
     assert isinstance(z, np.ndarray) # check that numpy array is returned
     assert isinstance(z2, np.ndarray)
     np.testing.assert_almost_equal(np.mean(z), 0, decimal=7)
@@ -44,7 +44,7 @@ def test_zscore_constant_values():
     # check behaviour when values are constant
     x = [7, 7, 7, 7]
     with pytest.raises(ValueError):
-        ZScore(x)
+        zscore(x)
 
 @pytest.mark.parametrize("x", [
     [1, 2, np.nan, 4],
@@ -55,12 +55,12 @@ def test_zscore_constant_values():
 def test_zscore_with_nonfinite(x):
     # check behaviour when nonfinite values (nan/infs) are passed into zscore
     with pytest.raises(ValueError):
-        ZScore(x)
+        zscore(x)
 
 def test_zscore_with_empty():
     # test behaviour when empty list/array is passed
     x = []
     with pytest.raises(ValueError):
-        ZScore(x)
+        zscore(x)
 
 #----------------- zscore function tests ------------------

@@ -3,7 +3,7 @@ from numpy.typing import ArrayLike
 
 from scipy import signal
 
-from ..Utilities.utils import binpicker, histc
+from ..utils import binpicker, histc
 
 def raw_hrv_meas(x: ArrayLike) -> dict:
     """
