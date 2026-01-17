@@ -7,7 +7,7 @@ from scipy.stats import mstats
 from scipy.signal import resample as ssre
 
 from ..operations.correlation import first_crossing
-from ..utils import binarize, signChange
+from ..utils import binarize, sign_change
 
 def surprise(y : ArrayLike, what_prior : str = 'dist', memory : float = 0.2, num_groups : int = 3, 
              coarse_grain_method : str = 'quantile', num_iters : int = 500, random_seed : int = 0) -> dict:
@@ -431,7 +431,7 @@ def binary_stretch(x : ArrayLike, stretch_what : str = 'lseq1') -> float:
         # longest stretch of 1s [this code doesn't actualy measure this!]
         indices = np.where(x == 1)[0]
         diffs = np.diff(indices) - 1.5
-        sign_changes = signChange(diffs, 1)
+        sign_changes = sign_change(diffs, 1)
         if sign_changes.size > 1:
             out = np.max(np.diff(sign_changes)) / N
         else:
@@ -440,7 +440,7 @@ def binary_stretch(x : ArrayLike, stretch_what : str = 'lseq1') -> float:
         # longest stretch of 0s [this code doesn't actualy measure this!]
         indices = np.where(x == 0)[0]
         diffs = np.diff(indices) - 1.5
-        sign_changes = signChange(diffs, 1)
+        sign_changes = sign_change(diffs, 1)
         if sign_changes.size > 1:
             out = np.max(np.diff(sign_changes)) / N
         else:
@@ -477,7 +477,7 @@ def binary_stats(y : ArrayLike, binary_method : str = 'diff') -> dict:
     
     # Binarize the time series
     y = np.asarray(y)
-    yBin = binarize(y, binarizeHow=binary_method)
+    yBin = binarize(y, binarize_how=binary_method)
     N = len(yBin)
 
     # Stationarity of binarised time series

@@ -8,7 +8,7 @@ from scipy.stats import gaussian_kde
 from sklearn.neighbors import KDTree
 from antropy.entropy import _xlogx
 
-from ..utils import z_score, make_buffer, binpicker, histc
+from ..utils import z_score, make_buffer, bin_picker, histc
 from ..toolboxes.physionet import sampen as _sampen_c 
 from ..operations.correlation import first_crossing
 from ..toolboxes.Michael_Small import shannon
@@ -147,7 +147,7 @@ def distribution_entropy(
     if hist_or_ks == 'hist':
         # use histogram to calculate pdf
         if isinstance(num_bins, int):
-            bin_edges = binpicker(y.min(), y.max(), nbins=num_bins)
+            bin_edges = bin_picker(x_min=y.min(), x_max=y.max(), n_bins=num_bins)
             px = histc(y, bin_edges)
             px = np.divide(px, np.sum(px))[:-1]
         elif num_bins in ['sturges', 'fd', 'sqrt', 'auto']:

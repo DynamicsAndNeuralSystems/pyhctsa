@@ -5,7 +5,7 @@ from typing import Union
 import pywt
 from pywt import cwt
 
-from ..utils import signChange
+from ..utils import sign_change
 
 def wfbm(x : ArrayLike) -> dict:
     """
@@ -228,7 +228,7 @@ def cwt(y : ArrayLike, w_name : str = 'db3', max_scale : int = 32) -> dict:
     out['max_ssc'] = np.max(SSC)
     out['min_ssc'] = np.min(SSC)
     out['maxonmed_ssc'] = np.max(SSC) / np.median(SSC)
-    out['pcross_maxssc50'] = np.sum(signChange(SSC - 0.5 * np.max(SSC))) / (N - 1)
+    out['pcross_maxssc50'] = np.sum(sign_change(SSC - 0.5 * np.max(SSC))) / (N - 1)
     out['std_ssc'] = np.std(SSC)
 
     #Stationarity

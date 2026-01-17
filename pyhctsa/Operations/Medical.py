@@ -3,7 +3,7 @@ from numpy.typing import ArrayLike
 
 from scipy import signal
 
-from ..utils import binpicker, histc
+from ..utils import bin_picker, histc
 
 def raw_hrv_meas(x: ArrayLike) -> dict:
     """
@@ -47,17 +47,17 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
 
     # triangular histogram index  
     # 10 bins  
-    edges_10 = binpicker(x.min(), x.max(), 10)
+    edges_10 = bin_picker(x.min(), x.max(), 10)
     hist_counts10 = histc(x, edges_10)
     out['tri10'] = N/np.max(hist_counts10)
 
     # 20 bins
-    edges_20 = binpicker(x.min(), x.max(), 20)
+    edges_20 = bin_picker(x.min(), x.max(), 20)
     hist_counts20 = histc(x, edges_20)
     out['tri20'] = N/np.max(hist_counts20)
 
     # (sqrt samples) bins
-    edges_sqrt = binpicker(x.min(), x.max(), int(np.ceil(np.sqrt(N))))
+    edges_sqrt = bin_picker(x.min(), x.max(), int(np.ceil(np.sqrt(N))))
     hist_counts_sqrt = histc(x, edges_sqrt)
     out['trisqrt'] = N/np.max(hist_counts_sqrt)
 
@@ -203,7 +203,7 @@ def hrv_classic(y: ArrayLike) -> dict:
     out['hf'] = hf_p / total * 100
 
     # Triangular histogram index
-    edges_10 = binpicker(y.min(), y.max(), 10)
+    edges_10 = bin_picker(y.min(), y.max(), 10)
     hist = histc(y, edges_10)
     out['tri'] = len(y) / np.max(hist)
 

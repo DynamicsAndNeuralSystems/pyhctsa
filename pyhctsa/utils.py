@@ -1,10 +1,10 @@
-import os
-import numpy as np
-from numpy.typing import ArrayLike
-from typing import Union
-from importlib.metadata import version, PackageNotFoundError
 import csv
 from functools import wraps
+from importlib.metadata import version, PackageNotFoundError
+import numpy as np
+from numpy.typing import ArrayLike
+import os
+from typing import Union
 
 def check_optional_deps(dep: str) -> bool:
     """Check whether an optional dependency exists.
@@ -111,8 +111,26 @@ def get_dataset(which : str = "e1000") -> list:
     
 def preprocess_decorator(zscore : bool = False, absval : bool = False):
     """
-    Z-score or take the absolute value of the time series before passing into
-    the master operation.
+    Decorator to preprocess time series data before feature computation.
+    
+    Applies optional z-score normalization and/or absolute value transformation
+    to the input time series before passing it to the decorated function.
+
+    Parameters
+    ----------
+    zscore : bool, optional
+        If True, z-score normalize the input time series to have mean 0 and 
+        standard deviation 1. Default is False.
+    absval : bool, optional
+        If True, take the absolute value of all data points in the input time series.
+        Default is False.
+    
+    Returns
+    -------
+    decorator : function
+        A decorator function that wraps a feature computation function and applies
+        the specified preprocessing operations to the input time series before
+        passing it to the wrapped function.
     """
     def decorator(func):
         @wraps(func)
@@ -178,19 +196,19 @@ def histc(x : ArrayLike, bins : ArrayLike) -> int:
         res[el-1] += 1 # Increment appropriate bin.
     return res
 
-def binpicker(xmin : float, xmax : float, nbins : Union[None, int], bindwidthEst : Union[None, float] = None) -> np.ndarray:
+def bin_picker(x_min : float, x_max : float, n_bins : Union[None, int], bin_width_est : Union[None, float] = None) -> np.ndarray:
     """
     Choose histogram bins. 
 
     Parameters
     -----------
-    xmin : float
+    x_min : float
         Minimum value of the data range.
-    xmax : float
+    x_max : float
         Maximum value of the data range.
-    nbins : int or None
+    n_bins : int or None
         Number of bins. If None, an automatic rule is used.
-    bindwidthEst : float or None
+    bin_width_est : float or None
         Estimate of the bin width.
 
     Returns
@@ -198,17 +216,17 @@ def binpicker(xmin : float, xmax : float, nbins : Union[None, int], bindwidthEst
     edges : numpy.ndarray
         Array of bin edges.
     """
-    if bindwidthEst == None:
-        rawBinWidth = abs(xmax - xmin)/nbins
+    if bin_width_est == None:
+        rawBinWidth = abs(x_max - x_min)/n_bins
     else:
-        rawBinWidth = bindwidthEst
+        rawBinWidth = bin_width_est
 
-    if xmin is not None:
-        if not np.issubdtype(type(xmin), np.floating):
+    if x_min is not None:
+        if not np.issubdtype(type(x_min), np.floating):
             raise ValueError("Input must be float type when number of bins is specified.")
 
-        xscale = max(abs(xmin), abs(xmax))
-        xrange = xmax - xmin
+        xscale = max(abs(x_min), abs(x_max))
+        xrange = x_max - x_min
 
         # Make sure the bin width is not effectively zero
         rawBinWidth = max(rawBinWidth, np.spacing(xscale))
@@ -220,7 +238,7 @@ def binpicker(xmin : float, xmax : float, nbins : Union[None, int], bindwidthEst
             rel_size = rawBinWidth / pow_of_ten  # guaranteed in [1, 10)
 
             # Automatic rule specified
-            if nbins is None:
+            if n_bins is None:
                 if rel_size < 1.5:
                     bin_width = 1 * pow_of_ten
                 elif rel_size < 2.5:
@@ -232,98 +250,99 @@ def binpicker(xmin : float, xmax : float, nbins : Union[None, int], bindwidthEst
                 else:
                     bin_width = 10 * pow_of_ten
 
-                left_edge = max(min(bin_width * np.floor(xmin / bin_width), xmin), -np.finfo(xmax).max)
-                nbins_actual = max(1, np.ceil((xmax - left_edge) / bin_width))
-                right_edge = min(max(left_edge + nbins_actual * bin_width, xmax), np.finfo(xmax).max)
+                left_edge = max(min(bin_width * np.floor(x_min / bin_width), x_min), -np.finfo(x_max).max)
+                n_bins_actual = max(1, np.ceil((x_max - left_edge) / bin_width))
+                right_edge = min(max(left_edge + n_bins_actual * bin_width, x_max), np.finfo(x_max).max)
 
             # Number of bins specified
             else:
                 bin_width = pow_of_ten * np.floor(rel_size)
-                left_edge = max(min(bin_width * np.floor(xmin / bin_width), xmin), -np.finfo(xmin).max)
-                if nbins > 1:
-                    ll = (xmax - left_edge) / nbins
-                    ul = (xmax - left_edge) / (nbins - 1)
+                left_edge = max(min(bin_width * np.floor(x_min / bin_width), x_min), -np.finfo(x_min).max)
+                if n_bins > 1:
+                    ll = (x_max - left_edge) / n_bins
+                    ul = (x_max - left_edge) / (n_bins - 1)
                     p10 = 10 ** np.floor(np.log10(ul - ll))
                     bin_width = p10 * np.ceil(ll / p10)
 
-                nbins_actual = nbins
-                right_edge = min(max(left_edge + nbins_actual * bin_width, xmax), np.finfo(xmax).max)
+                n_bins_actual = n_bins
+                right_edge = min(max(left_edge + n_bins_actual * bin_width, x_max), np.finfo(x_max).max)
 
         else:  # the data are nearly constant
-            if nbins is None:
-                nbins = 1
+            if n_bins is None:
+                n_bins = 1
 
-            bin_range = max(1, np.ceil(nbins * np.spacing(xscale)))
-            left_edge = np.floor(2 * (xmin - bin_range / 4)) / 2
-            right_edge = np.ceil(2 * (xmax + bin_range / 4)) / 2
+            bin_range = max(1, np.ceil(n_bins * np.spacing(xscale)))
+            left_edge = np.floor(2 * (x_min - bin_range / 4)) / 2
+            right_edge = np.ceil(2 * (x_max + bin_range / 4)) / 2
 
-            bin_width = (right_edge - left_edge) / nbins
-            nbins_actual = nbins
+            bin_width = (right_edge - left_edge) / n_bins
+            n_bins_actual = n_bins
 
         if not np.isfinite(bin_width):
-            edges = np.linspace(left_edge, right_edge, nbins_actual + 1)
+            edges = np.linspace(left_edge, right_edge, n_bins_actual + 1)
         else:
             edges = np.concatenate([
                 [left_edge],
-                left_edge + np.arange(1, nbins_actual) * bin_width,
+                left_edge + np.arange(1, n_bins_actual) * bin_width,
                 [right_edge]
             ])
     else:
         # empty input
-        if nbins is not None:
-            edges = np.arange(nbins + 1, dtype=float)
+        if n_bins is not None:
+            edges = np.arange(n_bins + 1, dtype=float)
         else:
             edges = np.array([0.0, 1.0])
 
     return edges
 
-def simple_binner(xData : ArrayLike, numBins : int) -> tuple:
+def simple_binner(x_data : ArrayLike, num_bins : int) -> tuple:
     """
     Generate a histogram from equally spaced bins.
    
     Parameters
     ----------
-    xData (array-like): A data vector.
-    numBins (int): The number of bins.
+    x_data : array-like 
+        A data vector.
+    num_bins : int 
+        The number of bins.
 
     Returns
     -------
     tuple: (N, binEdges)
-        N (numpy.ndarray): The counts
-        binEdges (numpy.ndarray): The extremities of the bins.
+       The counts and extremities of the bins.
     """
-    minX = np.min(xData)
-    maxX = np.max(xData)
+    min_x = np.min(x_data)
+    max_x = np.max(x_data)
     
     # Linearly spaced bins:
-    binEdges = np.linspace(minX, maxX, numBins + 1)
-    N = np.zeros(numBins, dtype=int)
+    bin_edges = np.linspace(min_x, max_x, num_bins + 1)
+    N = np.zeros(num_bins, dtype=int)
     
-    for i in range(numBins):
-        if i < numBins - 1:
-            N[i] = np.sum((xData >= binEdges[i]) & (xData < binEdges[i+1]))
+    for i in range(num_bins):
+        if i < num_bins - 1:
+            N[i] = np.sum((x_data >= bin_edges[i]) & (x_data < bin_edges[i+1]))
         else:
             # the final bin
-            N[i] = np.sum((xData >= binEdges[i]) & (xData <= binEdges[i+1]))
+            N[i] = np.sum((x_data >= bin_edges[i]) & (x_data <= bin_edges[i+1]))
     
-    return N, binEdges
+    return N, bin_edges
 
-def pointOfCrossing(x : ArrayLike, threshold : float, oneIndexing : bool = True):
+def point_of_crossing(x: ArrayLike, threshold: float):
     """
     Linearly interpolate to the point of crossing a threshold
-    
+
     Parameters
     ----------
-        x (array-like): a vector
-        threshold (float): a threshold x crosses
-        ondeIndexing (bool): whether to use zero or one indexing for consistency with MATLAB implementation.
-    
+    x : array-like)
+        a vector
+    threshold : float
+        a threshold x crosses
+
     Returns
     -------
         tuple: (firstCrossing, pointOfCrossing)
         firstCrossing (int): the first discrete value after which a crossing event has occurred
         pointOfCrossing (float): the (linearly) interpolated point of crossing
-
     """
     x = np.asarray(x)
 
@@ -334,33 +353,32 @@ def pointOfCrossing(x : ArrayLike, threshold : float, oneIndexing : bool = True)
 
     if crossings.size == 0:
         # Never crosses
-        N = len(x)
-        firstCrossing = N
-        pointOfCrossing = N
+        n = len(x)
+        first_crossing = n
+        point_of_crossing = n
     else:
-        firstCrossing = crossings[0]
+        first_crossing = crossings[0]
         # Continuous version
-        valueBefore = x[firstCrossing - 1]
-        valueAfter = x[firstCrossing]
-        pointOfCrossing = firstCrossing - 1 + (threshold - valueBefore) / (valueAfter - valueBefore)
+        value_before = x[first_crossing - 1]
+        value_after = x[first_crossing]
+        point_of_crossing = (
+            first_crossing - 1
+            + (threshold - value_before) / (value_after - value_before)
+        )
 
-        if oneIndexing:
-            firstCrossing += 1
-            pointOfCrossing += 1
+    return first_crossing, point_of_crossing
 
-    return firstCrossing, pointOfCrossing
-
-def signChange(y : Union[list, np.ndarray], doFind=0):
+def sign_change(y : Union[list, np.ndarray], do_find = 0):
     """
     Where a data vector changes sign.
     """
-    if doFind == 0:
+    if do_find == 0:
         return (np.multiply(y[1:],y[0:len(y)-1]) < 0)
     indexs = np.where((np.multiply(y[1:],y[0:len(y)-1]) < 0))[0]
 
     return indexs
 
-def make_buffer(y : ArrayLike, bufferSize : int) -> np.ndarray:
+def make_buffer(y : ArrayLike, buffer_size : int) -> np.ndarray:
     """
     Make a buffered version of a time series.
 
@@ -374,28 +392,26 @@ def make_buffer(y : ArrayLike, bufferSize : int) -> np.ndarray:
     Returns
     -------
     y_buffer : ndarray
-        2D array where each row is a segment of length `bufferSize` 
+        2D array where each row is a segment of length `buffer_size` 
         corresponding to consecutive, non-overlapping segments of the input time series.
     """
     y = np.asarray(y) 
     N = len(y)
 
-    numBuffers = int(np.floor(N/bufferSize))
+    numBuffers = int(np.floor(N/buffer_size))
 
     # may need trimming
-    y_buffer = y[:numBuffers*bufferSize]
+    y_buffer = y[:numBuffers*buffer_size]
     # then reshape
-    y_buffer = y_buffer.reshape((numBuffers,bufferSize))
+    y_buffer = y_buffer.reshape((numBuffers,buffer_size))
 
     return y_buffer
-
 
 def make_mat_buffer(X : ArrayLike, n : int, p : int = 0, opt : Union[str, None] = None) -> np.ndarray:
     # helper function
     '''
     Create a buffer array.
 
-    MATLAB docs here: https://se.mathworks.com/help/signal/ref/buffer.html.
     Taken from: https://stackoverflow.com/questions/38453249/does-numpy-have-a-function-equivalent-to-matlabs-buffer 
 
     Parameters
@@ -451,61 +467,84 @@ def make_mat_buffer(X : ArrayLike, n : int, p : int = 0, opt : Union[str, None] 
 
     return result
 
-def binarize(y : ArrayLike, binarizeHow : str = 'diff') -> ArrayLike:
+def binarize(y : ArrayLike, binarize_how : str = 'diff') -> ArrayLike:
     """
     Converts an input vector into a binarized version.
 
-    Parameters:
+    Parameters
     -----------
     y : array_like
         The input time series
-    binarizeHow : str, optional
+    binarize_how : str, optional
         Method to binarize the time series: 'diff', 'mean', 'median', 'iqr'.
-    Returns:
+    
+    Returns
     --------
-    yBin : array_like
+    y_bin : array_like
         The binarized time series
     """
-    if binarizeHow == 'diff':
+    if binarize_how == 'diff':
         # Binary signal: 1 for stepwise increases, 0 for stepwise decreases
-        yBin = stepBinary(np.diff(y))
+        y_bin = _step_binary(np.diff(y))
     
-    elif binarizeHow == 'mean':
+    elif binarize_how == 'mean':
         # Binary signal: 1 for above mean, 0 for below mean
-        yBin = stepBinary(y - np.mean(y))
+        y_bin = _step_binary(y - np.mean(y))
     
-    elif binarizeHow == 'median':
+    elif binarize_how == 'median':
         # Binary signal: 1 for above median, 0 for below median
-        yBin = stepBinary(y - np.median(y))
+        y_bin = _step_binary(y - np.median(y))
     
-    elif binarizeHow == 'iqr':
+    elif binarize_how == 'iqr':
         # Binary signal: 1 if inside interquartile range, 0 otherwise
         iqr = np.quantile(y,[.25,.75], method='hazen')
         iniqr = np.logical_and(y > iqr[0], y<iqr[1])
-        yBin = np.zeros(len(y))
-        yBin[iniqr] = 1
+        y_bin = np.zeros(len(y))
+        y_bin[iniqr] = 1
     else:
-        raise ValueError(f"Unknown binary transformation setting '{binarizeHow}'")
+        raise ValueError(f"Unknown binary transformation setting '{binarize_how}'")
 
-    return yBin
+    return y_bin
 
-def stepBinary(X : ArrayLike) -> ArrayLike:
+def _step_binary(X : ArrayLike) -> ArrayLike:
     # Transform real values to 0 if <=0 and 1 if >0:
     Y = np.zeros(len(X))
     Y[X > 0] = 1
 
     return Y
 
-def xcorr(x : ArrayLike, y : ArrayLike, normed : bool = True, maxlags : int = 10) -> tuple:
-    """Cross correlation of two signals of equal length.
-    Returns the coefficients when normed = True and 
-    Returns inner products when normed = False."""
+def x_corr(x : ArrayLike, y : ArrayLike, normed : bool = True, max_lags : int = 10) -> tuple:
+    """
+    Calculates the cross-correlation coefficients or inner products between two
+    signals at various lags. The function computes correlations up to a specified
+    maximum lag in both positive and negative directions.
 
-    # taken from https://github.com/colizoli/xcorr_python 
-    # Cross correlation of two signals of equal length
-    # Returns the coefficients when normed=True
-    # Returns inner products when normed=False
-    # Usage: lags, c = xcorr(x,y,maxlags=len(x)-1)
+    Taken from https://github.com/colizoli/xcorr_python 
+
+    Parameters
+    ----------
+    x : array-like
+        First input signal. Must be equal length to y.
+    y : array-like
+        Second input signal. Must be equal length to x.
+    normed : bool, optional
+        If True, returns normalized correlation coefficients (default).
+        If False, returns raw inner products.
+        Default is True.
+    max_lags : int, optional
+        Maximum lag to compute in both directions. Must be positive and less than
+        the signal length. Default is 10.
+
+    Returns
+    -------
+    tuple
+        A tuple containing:
+        - lags : np.ndarray
+            Array of lag values ranging from -max_lags to +max_lags.
+        - c : np.ndarray
+            Cross-correlation values at each lag. Normalized correlation coefficients
+            if normed=True, otherwise raw inner products.
+    """
 
     Nx = len(x)
     if Nx != len(y):
@@ -517,128 +556,13 @@ def xcorr(x : ArrayLike, y : ArrayLike, normed : bool = True, maxlags : int = 10
         n = np.sqrt(np.dot(x, x) * np.dot(y, y)) # this is the transformation function
         c = np.true_divide(c,n)
 
-    if maxlags is None:
-        maxlags = Nx - 1
+    if max_lags is None:
+        max_lags = Nx - 1
 
-    if maxlags >= Nx or maxlags < 1:
+    if max_lags >= Nx or max_lags < 1:
         raise ValueError('maglags must be None or strictly '
                          'positive < %d' % Nx)
 
-    lags = np.arange(-maxlags, maxlags + 1)
-    c = c[Nx - 1 - maxlags:Nx + maxlags]
+    lags = np.arange(-max_lags, max_lags + 1)
+    c = c[Nx - 1 - max_lags:Nx + max_lags]
     return lags, c
-
-
-def RM_histogram2(*args):
-    """
-    rm_histogram2() computes the two dimensional frequency histogram of two row vectors x and y
-
-    Takes in either two or three parameters:
-        rm_histogram(x, y)
-        rm_histogram(x, y, descriptor)
-
-    x, y : the row vectors to be analyzed
-    descriptor : the descriptor of the histogram where:
-
-        descriptor = [lowerx, upperx, ncellx, lowery, uppery, ncelly]
-            lower? : the lowerbound of the ? dimension of the histogram
-            upper? : the upperbound of the dimension of the histogram
-            ncell? : the number of cells of the ? dimension of the histogram
-
-    :return: a tuple countaining a) the result (the 2d frequency histogram), b) descriptor (the descriptor used)
-
-    MATLAB function and logic by Rudy Moddemeijer
-    Translated to python by Tucker Cullen
-    """
-
-    nargin = len(args)
-
-    if nargin < 1:
-        print("Usage: result = rm_histogram2(X, Y)")
-        print("       result = rm_histogram2(X,Y)")
-        print("Where: descriptor = [lowerX, upperX, ncellX; lowerY, upperY, ncellY")
-
-    # some initial tests on the input arguments
-
-    x = np.array(args[0])  # make sure the imputs are in numpy array form
-    y = np.array(args[1])
-
-    xshape = x.shape
-    yshape = y.shape
-
-    lenx = xshape[0]  # how many elements are in the row vector
-    leny = yshape[0]
-
-    if len(xshape) != 1:  # makes sure x is a row vector
-        print("Error: invalid dimension of x")
-        return
-
-    if len(yshape) != 1:
-        print("Error: invalid dimension of y")
-        return
-
-    if lenx != leny:  # makes sure x and y have the same amount of elements
-        print("Error: unequal length of x and y")
-        return
-
-    if nargin > 3:
-        print("Error: too many arguments")
-        return
-
-    if nargin == 2:
-        minx = np.amin(x)
-        maxx = np.amax(x)
-        deltax = (maxx - minx) / (lenx - 1)
-        ncellx = np.ceil(lenx ** (1 / 3))
-
-        miny = np.amin(y)
-        maxy = np.amax(y)
-        deltay = (maxy - miny) / (leny - 1)
-        ncelly = ncellx
-        descriptor = np.array(
-            [[minx - deltax / 2, maxx + deltax / 2, ncellx], [miny - deltay / 2, maxy + deltay / 2, ncelly]])
-    else:
-        descriptor = args[2]
-
-    lowerx = descriptor[0, 0]  # python indexes one less then matlab indexes, since starts at zero
-    upperx = descriptor[0, 1]
-    ncellx = descriptor[0, 2]
-    lowery = descriptor[1, 0]
-    uppery = descriptor[1, 1]
-    ncelly = descriptor[1, 2]
-
-    # checking descriptor to make sure it is valid, otherwise print an error
-
-    if ncellx < 1:
-        print("Error: invalid number of cells in X dimension")
-
-    if ncelly < 1:
-        print("Error: invalid number of cells in Y dimension")
-
-    if upperx <= lowerx:
-        print("Error: invalid bounds in X dimension")
-
-    if uppery <= lowery:
-        print("Error: invalid bounds in Y dimension")
-
-    result = np.zeros([int(ncellx), int(ncelly)],
-                      dtype=int)  # should do the same thing as matlab: result(1:ncellx,1:ncelly) = 0;
-
-    xx = np.around((x - lowerx) / (upperx - lowerx) * ncellx + 1 / 2)
-    yy = np.around((y - lowery) / (uppery - lowery) * ncelly + 1 / 2)
-
-    xx = xx.astype(int)  # cast all the values in xx and yy to ints for use in indexing, already rounded in previous step
-    yy = yy.astype(int)
-
-    for n in range(0, lenx):
-        indexx = xx[n]
-        indexy = yy[n]
-
-        indexx -= 1  # adjust indices to start at zero, not one like in MATLAB
-        indexy -= 1
-
-        if indexx >= 0 and indexx <= ncellx - 1 and indexy >= 0 and indexy <= ncelly - 1:
-            result[indexx, indexy] = result[indexx, indexy] + 1
-
-    return result, descriptor
-    

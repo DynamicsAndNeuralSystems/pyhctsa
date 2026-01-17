@@ -9,7 +9,7 @@ from scipy.optimize import curve_fit
 from scipy.linalg import LinAlgError
 from statsmodels.tsa.stattools import pacf
 
-from ..utils import pointOfCrossing, binpicker, z_score, signChange, make_mat_buffer
+from ..utils import point_of_crossing, bin_picker, z_score, sign_change, make_mat_buffer
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..operations.information import first_min, automutual_info
 
@@ -533,7 +533,7 @@ def compare_min_ami(y: ArrayLike, bin_method: str = 'std1', num_bins: Union[int,
     # bin size... ('quantiles', [2:80])
     diff_ami_mins = np.diff(ami_mins[:-1])
     positive_diff_indices = np.where(diff_ami_mins > 0)[0]
-    sign_change_indices = signChange(diff_ami_mins, 1)
+    sign_change_indices = sign_change(diff_ami_mins, 1)
 
     # Find the intersection of positive_diff_indices and sign_change_indices
     loc_extr = np.intersect1d(positive_diff_indices, sign_change_indices) + 1
@@ -1039,7 +1039,7 @@ def embed2_dist(y : ArrayLike, tau : Union[None, str, int] = None) -> dict:
 
     # Calculate histogram
     # % Sum of abs differences between exp fit and observed:
-    bin_edges = binpicker(d.min(), d.max(), nbins=np.floor(np.sqrt(len(d))))
+    bin_edges = bin_picker(x_min=d.min(), x_max=d.max(), n_bins=np.floor(np.sqrt(len(d))))
     N, bin_edges = np.histogram(d, bins=bin_edges, density=True)
     bin_centers = np.mean(np.vstack([bin_edges[:-1], bin_edges[1:]]), axis=0)
     exp_fit = expon.pdf(bin_centers, scale=1/l)
@@ -1451,19 +1451,19 @@ def first_crossing(y: ArrayLike, corr_fun: str = 'ac', threshold: float = 0.0, w
         raise ValueError(f"Unknown correlation function '{corr_fun}'")
 
     # Calculate point of crossing
-    first_crossing_index, point_of_crossing_index = pointOfCrossing(corrs, threshold)
+    first_crossing_index, point_of_crossing_index = point_of_crossing(corrs, threshold)
 
     # Assemble the appropriate output (dictionary or float)
     # Convert from index space (1,2,…) to lag space (0,1,2,…)
     if what_out == 'both':
         out = {
-            'firstCrossing': first_crossing_index - 1,
-            'pointOfCrossing': point_of_crossing_index - 1
+            'firstCrossing': first_crossing_index,
+            'pointOfCrossing': point_of_crossing_index
         }
     elif what_out == 'discrete':
-        out = first_crossing_index - 1
+        out = first_crossing_index
     elif what_out == 'continuous':
-        out = point_of_crossing_index - 1
+        out = point_of_crossing_index
     else:
         raise ValueError(f"Unknown output format '{what_out}'")
 
@@ -1722,7 +1722,7 @@ def autocorr_shape(y : ArrayLike, stop_when : Union[int, str] = 'posDrown') -> d
     # Local extrema
     dacf = np.diff(acf)
     ddacf = np.diff(dacf)
-    extrr = signChange(dacf, 1)
+    extrr = sign_change(dacf, 1)
     sdsp = ddacf[extrr]
 
     # Proportion of local minima

@@ -5,7 +5,7 @@ import scipy.fft
 
 from ..operations.distribution import moments
 from ..operations.correlation import autocorr, first_crossing
-from ..utils import make_mat_buffer, signChange
+from ..utils import make_mat_buffer, sign_change
 
 def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = 'none') -> dict:
     """
@@ -293,7 +293,7 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
 
     # Count crossings:
     # Get a horizontal line and count the number of crossings with the power spectrum
-    ncrossfn_rel = lambda frac: np.sum(signChange(s - frac * np.max(s)))
+    ncrossfn_rel = lambda frac: np.sum(sign_change(s - frac * np.max(s)))
     out['ncross_f05'] = ncrossfn_rel(0.05)
     out['ncross_f01'] = ncrossfn_rel(0.1)
     out['ncross_f02'] = ncrossfn_rel(0.2)

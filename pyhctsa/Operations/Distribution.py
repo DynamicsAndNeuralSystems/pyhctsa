@@ -6,7 +6,7 @@ import logging
 from scipy import stats
 from scipy.stats import norm, gumbel_l, uniform, expon, lognorm, gaussian_kde
 
-from ..utils import histc, binpicker, simple_binner, xcorr
+from ..utils import histc, bin_picker, simple_binner, x_corr
 from ..operations.correlation import autocorr, first_crossing
 
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
@@ -732,7 +732,7 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01)
     })
     
     # Cross-correlation between mean and error
-    _, cross_corr = xcorr(statistics[:, 0], statistics[:, 1], maxlags=1)
+    _, cross_corr = x_corr(statistics[:, 0], statistics[:, 1], max_lags=1)
     results.update({
         'xcmerr1': cross_corr[-1],
         'xcmerrn1': cross_corr[0]
@@ -871,9 +871,9 @@ def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True
         counts_pos, bin_edges_pos = simple_binner(y_pos, num_bins)
         counts_neg, bin_edges_neg = simple_binner(y_neg, num_bins)
     else:
-        bin_edges_pos = binpicker(y_pos.min(), y_pos.max(), num_bins)
+        bin_edges_pos = bin_picker(y_pos.min(), y_pos.max(), num_bins)
         counts_pos = histc(y_pos, bin_edges_pos)[:-1]
-        bin_edges_neg = binpicker(y_neg.min(), y_neg.max(), num_bins)
+        bin_edges_neg = bin_picker(y_neg.min(), y_neg.max(), num_bins)
         counts_neg = histc(y_neg, bin_edges_neg)[:-1]
     # normalise by the total counts
     n_non_zero = np.sum(y != 0)
@@ -921,7 +921,7 @@ def histogram_mode(y : ArrayLike, num_bins : int = 10, do_simple : bool = True) 
     if do_simple:
         N, bin_edges = simple_binner(y, num_bins)
     else:
-        bin_edges = binpicker(y.min(), y.max(), num_bins)
+        bin_edges = bin_picker(y.min(), y.max(), num_bins)
         N = histc(y, bin_edges)[:-1]
     # compute bin centers from bin edges
     bin_centres = np.mean([bin_edges[:-1], bin_edges[1:]], axis=0)

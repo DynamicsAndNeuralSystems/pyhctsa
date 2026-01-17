@@ -11,7 +11,7 @@ from statsmodels.tools.sm_exceptions import InterpolationWarning
 
 from ..operations.entropy import approximate_entropy, sample_entropy, distribution_entropy
 from ..operations.correlation import autocorr, first_crossing
-from ..utils import make_mat_buffer, z_score, signChange
+from ..utils import make_mat_buffer, z_score, sign_change
 from ..operations.distribution import moments
 
 def local_distributions(y : ArrayLike, num_segs : int = 5, each_or_par : str = 'par', num_points : int = 200) -> dict:
@@ -317,8 +317,8 @@ def simple_stats(x : ArrayLike, what_stat : str = 'zcross') -> dict:
         out = np.sum((dx[:-1] < 0) & (dx[1:] > 0)) / (N-1)
     elif what_stat == 'pmcross':
         # ratio of times cross 1 to -1
-        c1sig = np.sum(signChange(x-1)) # num times cross 1
-        c2sig = np.sum(signChange(x+1)) # num times cross -1
+        c1sig = np.sum(sign_change(x-1)) # num times cross 1
+        c2sig = np.sum(sign_change(x+1)) # num times cross -1
         if c2sig == 0:
             out = np.nan
         else:
