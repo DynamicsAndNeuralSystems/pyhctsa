@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source srcset="img/pyhctsa_logo_dark.png" media="(prefers-color-scheme: dark)">
-    <img src="img/pyhctsa_logo.png" alt="pyhctsa logo" height="200"/>
+    <img src="img/pyhctsa_logo.png" alt="pyhctsa logo" height="300"/>
   </picture>
 </p>
 
