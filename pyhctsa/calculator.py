@@ -269,11 +269,13 @@ class FeatureCalculator:
             or a list of 1-D array-likes (e.g., list[np.ndarray]), where
             each element is a 1-D real-valued series of shape ``(n_samples_i,)``.
         labels : array-like, list, str, int, or None, optional
-            Labels for each time series. Can be:
+            Labels for each time series. The order of labels is assumed to match the order 
+            of the time series as passed in the `data` argument. Can be:
             
             * A single label (str or int) for a single series.
             * A list or array of labels, one per series.
             * None (default), in which case series are labeled as 'ts_1', 'ts_2', etc.
+
         verbose : bool, optional
             Whether to show a progress bar of the features being computed.
         
