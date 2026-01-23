@@ -10,7 +10,7 @@
 # pyhctsa
 
 ## ⬇️ Installation
-To install py-hctsa locally, you can call:
+To install pyhctsa locally, you can call:
 ```
 pip install -e .
 ```
