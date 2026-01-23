@@ -51,7 +51,7 @@ medical:
     dependencies:
     configs:
       - zscore: False
-    hctsa_name: MD_pNN
+    legacy_name: MD_pNN
 
   PolVar:
     base_name: polvar
@@ -63,7 +63,7 @@ medical:
       - d: [1.0, 0.5, 0.1]
         D: [3, 5, 4, 6]
         zscore: True
-    hctsa_name: MD_polvar
+    legacy_name: MD_polvar
     ordered_args: ['d', 'D']
 
   RawHRVMeas:
@@ -75,7 +75,7 @@ medical:
     dependencies:
     configs:
       - zscore: False
-    hctsa_name: MD_rawHRVmeas
+    legacy_name: MD_rawHRVmeas
     
 extreme_events:
   moving_threshold:
@@ -99,6 +99,7 @@ criticality:
       - {tau: 'tau', zscore: True}
     legacy_name: CR_RAD
     ordered_args: ['tau']
+    
 correlation:
 
   autocorr:
@@ -1180,7 +1181,7 @@ distribution:
       - {num_bins: 5, do_simple: True, zscore: True, abs: True}
       - {num_bins: 10, do_simple: True, zscore: True, abs: True}
       - {num_bins: 21, do_simple: True, zscore: True, abs: True}
-    hctsa_name: DN_HistogramMode
+    legacy_name: DN_HistogramMode
     ordered_args: ['num_bins']
 
   remove_points:
@@ -1202,7 +1203,7 @@ distribution:
 
       - {remove_how: 'max', p: 0.1, remove_or_saturate: 'saturate', zscore: True}
       - {remove_how: 'max', p: 0.8, remove_or_saturate: 'saturate', zscore: True}
-    hctsa_name: DN_RemovePoints
+    legacy_name: DN_RemovePoints
     ordered_args: ['remove_how', 'p', 'remove_or_saturate']
 
   compare_ks_fit:
