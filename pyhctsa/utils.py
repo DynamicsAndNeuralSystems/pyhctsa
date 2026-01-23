@@ -48,12 +48,12 @@ def validate_data(ts : np.ndarray) -> bool:
 
 def _load_csv(path: str) -> list:
     """Helper function to load CSV formatted datasets."""
-    dataset = []
+    dataset = [] # list of np.ndarray
     with open(path, newline='') as csvfile:
         reader = csv.reader(csvfile, delimiter=',')
         for row in reader:
             try:
-                time_series = [float(value) for value in row if value != '']
+                time_series = np.array([float(value) for value in row if value != ''])
                 dataset.append(time_series)
             except ValueError:
                 continue

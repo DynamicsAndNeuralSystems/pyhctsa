@@ -311,11 +311,11 @@ def motif_three(y : ArrayLike, cg_how : str = 'quantile') -> dict:
 
     # Coarse-grain the data y -> yt
     y = np.asarray(y)
-    numLetters = 3
+    num_letters = 3
     if cg_how == 'quantile':
-        yt = coarse_grain(y, 'quantile', numLetters)
+        yt = coarse_grain(y, 'quantile', num_letters)
     elif cg_how == 'diffquant':
-        yt = coarse_grain(np.diff(y), 'quantile', numLetters)
+        yt = coarse_grain(np.diff(y), 'quantile', num_letters)
     else:
         raise ValueError(f"Unknown coarse-graining method {cg_how}")
 

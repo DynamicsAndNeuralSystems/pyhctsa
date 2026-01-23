@@ -53,11 +53,7 @@ def classify_output(res) -> int:
 
 def standardise_inputs(data) -> list[np.ndarray]:
      # standardize the input into a list of 1D float arrays
-    if isinstance(data, pd.Series):
-        return [np.asarray(data.to_numpy(), dtype=float)]
-    elif isinstance(data, pd.DataFrame):
-        return [np.asarray(r, dtype=float) for _, r in data.iterrows()]
-    elif isinstance(data, np.ndarray):
+    if isinstance(data, np.ndarray):
         if data.ndim == 1:
             return [np.asarray(data, dtype=float)]
         elif data.ndim == 2:
@@ -68,18 +64,17 @@ def standardise_inputs(data) -> list[np.ndarray]:
     elif isinstance(data, (list, tuple)):
         # if it looks like a list of series, coerce each
         # otherwise treat as a single series.
-        if len(data) > 0 and all(isinstance(ts, (list, tuple, np.ndarray, pd.Series)) for ts in data):
+        if len(data) > 0 and all(isinstance(ts, (list, np.ndarray)) for ts in data):
             out = []
             for ts in data:
-                ts = ts.to_numpy() if isinstance(ts, pd.Series) else ts
                 out.append(np.asarray(ts, dtype=float))
             return out
         # single series
         return [np.asarray(data, dtype=float)]
     else:
         raise ValueError(
-        "Input must be a 1D series, a list of 1D series, a 2D array "
-        "with shape (n_series, n_samples), or a pandas Series/DataFrame.")
+        "Input must be a 1D series, a list of 1D series, or a 2D array "
+        "with shape (n_series, n_samples)")
   
 def _format_param_value(val : Union[int, float, list]) -> str:
     """
@@ -113,7 +108,7 @@ class FeatureCalculator:
 
         Parameters
         ----------
-        configPath : str or None, optional
+        config_path : str or None, optional
             Path to the YAML configuration file. If None, uses the default configuration.
         """
         # set the default config path

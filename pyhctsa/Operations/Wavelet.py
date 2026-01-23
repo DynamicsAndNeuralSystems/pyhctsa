@@ -410,10 +410,8 @@ def wl_coeffs(y : ArrayLike, w_name : str = 'db3', level : Union[int, str] = 3) 
 
 def wavedec(data : ArrayLike, wavelet : str, mode : str ='symmetric', level : int = 1, axis=-1):
     """
-    Multiple level 1-D discrete fast wavelet decomposition
-
-    # Taken from https://github.com/izlotnik/wavelet-wrcoef/blob/master/wrcoef.py
-    # Ilya Zlotnik 2017
+    Multiple level 1-D discrete fast wavelet decomposition.
+    Taken from https://github.com/izlotnik/wavelet-wrcoef/blob/master/wrcoef.py
     """
     data = np.asarray(data)
 
@@ -500,7 +498,7 @@ def wrcoef(coefs, lengths, wavelet, level):
 
     return data
 
-def find_my_threshold(x, det_s, N):
+def find_my_threshold(x : ArrayLike, det_s : ArrayLike, N : int):
     indices = np.argwhere(det_s < x * np.max(det_s))
     if indices.size == 0:
         return np.nan
