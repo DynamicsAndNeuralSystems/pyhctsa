@@ -1224,6 +1224,26 @@ scaling:
     configs:
       - {zscore: True}
     legacy_name: SC_fastdfa
+    
+  fluctuation_analysis:
+    base_name: fluctuation_analysis
+    configs:
+      - {q: 2, wtf: 'nothing', tau_step: 50,  log_inc: True, zscore: True}
+      - {q: 2, wtf: 'endptdiff', tau_step: 50,  log_inc: True, zscore: True}
+      - {q: 2, wtf: 'range', tau_step: 50,  log_inc: True, zscore: True}
+      - {q: 2, wtf: 'std', tau_step: 50,  log_inc: True, zscore: True}
+      - {q: 2, wtf: 'iqr', tau_step: 50,  log_inc: True, zscore: True}
+      - {q: 2, wtf: 'rsrange', tau_step: 50,  log_inc: True, zscore: True}
+      - {q: 2, wtf: 'rsrangefit', tau_step: 50,  log_inc: True, zscore: True}
+      - {q: 2, wtf: 'dfa', tau_step: 50,  k: 0, log_inc: True, zscore: True}
+      - {q: 2, wtf: 'dfa', tau_step: 50,  k: 1, log_inc: True, zscore: True}
+      - {q: 2, wtf: 'dfa', tau_step: 50,  k: 1, lag: 2, log_inc: True, zscore: True}
+      - {q: 2, wtf: 'dfa', tau_step: 50,  k: 1, lag: 3, log_inc: True, zscore: True}
+      - {q: 2, wtf: 'dfa', tau_step: 50,  k: 2, log_inc: True, zscore: True}
+      - {q: 2, wtf: 'dfa', tau_step: 50,  k: 3, log_inc: True, zscore: True}
+      
+    legacy_name: SC_FluctAnal
+    ordered_args: ['q', 'wtf', 'tau_step', 'k', 'lag', 'log_inc']
 
 symbolic:
   transition_matrix:

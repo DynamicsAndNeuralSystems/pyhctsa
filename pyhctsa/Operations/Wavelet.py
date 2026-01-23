@@ -3,7 +3,6 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 import pywt
-from pywt import cwt
 
 from ..utils import sign_change
 
@@ -70,7 +69,7 @@ def scal_2_freq(y : ArrayLike, w_name : str = 'db3', a_max : int = 5, delta : in
     a_max : int, optional
         The maximum scale / level (can be 'max' to set according to wmaxlev)
     delta: int, optional
-        TThe sampling period.
+        The sampling period.
             
     Returns
     -------
@@ -190,7 +189,7 @@ def cwt(y : ArrayLike, w_name : str = 'db3', max_scale : int = 32) -> dict:
     y = np.asarray(y)
     N = len(y)
     scales = np.arange(1, max_scale+1)
-    coeffs, _ = cwt(data=y, scales=scales, wavelet=w_name)
+    coeffs, _ = pywt.cwt(data=y, scales=scales, wavelet=w_name)
     S = np.abs(coeffs * coeffs)
     SC = 100*S/np.sum(S)
 
@@ -224,6 +223,7 @@ def cwt(y : ArrayLike, w_name : str = 'db3', max_scale : int = 32) -> dict:
     SC_a = SC/np.sum(SC)
     out['SC_h'] = -np.sum(SC_a * np.log(SC_a))
 
+    # Sum across scales
     SSC = sum(SC)
     out['max_ssc'] = np.max(SSC)
     out['min_ssc'] = np.min(SSC)

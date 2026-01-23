@@ -488,7 +488,7 @@ def _initialize_MI(
         # change to debug info
         if verbose:
             logging.debug(f"Starting JVM with java class {jarloc}.")
-        jp.startJVM(jp.getDefaultJVMPath(), "-ea", "-Djava.class.path=" + jarloc)
+        jp.startJVM(jp.getDefaultJVMPath(), "-ea", "-Djava.class.path=" + jarloc, interrupt=False)
 
 
     if est_method == 'gaussian':

@@ -57,6 +57,9 @@ def standardise_inputs(data) -> list[np.ndarray]:
         if data.ndim == 1:
             return [np.asarray(data, dtype=float)]
         elif data.ndim == 2:
+            if data.shape[0] > data.shape[1]:
+                # notify the user to check that the shapes make sense
+                print(f"Check that the shape of the 2D input is such that (n_series, n_samples). Got shape: {data.shape}")
             return [np.asarray(row, dtype=float) for row in data]
         else:
             raise ValueError("NumPy array must be 1D or 2D.")
@@ -249,7 +252,8 @@ class FeatureCalculator:
             
         return e_arr
     
-    def extract(self, data, verbose = True) -> pd.DataFrame:
+    def extract(self, data : Union[ArrayLike, list[ArrayLike]], labels: Union[ArrayLike, list[ArrayLike], None] = None,
+                verbose : bool = True) -> pd.DataFrame:
         """
         Run the configured feature extractor over one or more time series and
         return a single tidy `pandas.DataFrame`.
@@ -261,10 +265,16 @@ class FeatureCalculator:
 
             * **Single series**: a 1-D array-like of real values
             (e.g., list[float] or `np.ndarray` of shape ``(n_samples,)``).
-            * **Multiple series**: an array-like of 1-D array-likes
-            (e.g., list[np.ndarray] or `np.ndarray` of dtype=object), where
+            * **Multiple series**: a 2-D `np.ndarray` of shape ``(n_series, n_samples)``
+            or a list of 1-D array-likes (e.g., list[np.ndarray]), where
             each element is a 1-D real-valued series of shape ``(n_samples_i,)``.
-        verbose : Bool, optional
+        labels : array-like, list, str, int, or None, optional
+            Labels for each time series. Can be:
+            
+            * A single label (str or int) for a single series.
+            * A list or array of labels, one per series.
+            * None (default), in which case series are labeled as 'ts_1', 'ts_2', etc.
+        verbose : bool, optional
             Whether to show a progress bar of the features being computed.
         
         Returns
@@ -284,10 +294,25 @@ class FeatureCalculator:
         (1, 128)
         """
         series_list = standardise_inputs(data)
-        isValid = np.array([validate_data(t) for t in series_list]) # check each time series to see if valid...
-        invalid = np.argwhere(isValid == False)
+        is_valid = np.array([validate_data(t) for t in series_list]) # check each time series to see if valid...
+        invalid = np.argwhere(is_valid == False)
         if invalid.size > 0:
             raise ValueError(f"One or more time series instances are invalid: {invalid.flatten()}")
+        
+        # check labels if provided
+        if labels is not None:
+            # allow single label for single series, otherwise require one label per series
+            if isinstance(labels, (str, int)):
+                labels_list = [labels]
+            else:
+                labels_list = list(labels)
+
+            if len(labels_list) != len(series_list):
+                raise ValueError(f"Length of labels ({len(labels_list)}) must equal the number of series ({len(series_list)}).")
+        else:
+            # default names
+            n = len(series_list)
+            labels_list = [f"ts_{i}" for i in range(1, n + 1)]
 
         n_funcs = len(self.feature_funcs)
         print(f"Evaluating {n_funcs} partialed functions. Strap in!...")
@@ -319,6 +344,8 @@ class FeatureCalculator:
         elapsed = time.perf_counter() - start_time
         print(f"Feature extraction completed in {elapsed:.3f} seconds.")
         df = pd.json_normalize(rows)
+        # assign row names
+        df.index = pd.Index(labels_list, name="instance")
         # run output quality checks
         df_errs = df.map(lambda x: classify_output(x))
         self._last_elapsed = elapsed
