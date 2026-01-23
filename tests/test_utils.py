@@ -10,7 +10,7 @@ def test_get_dataset_default():
     data = get_dataset()
     assert isinstance(data, list)
     assert len(data) == 1000
-    assert all(isinstance(ts, list) for ts in data)
+    assert all(isinstance(ts, np.ndarray) for ts in data)
     assert all(isinstance(x, float) for ts in data for x in ts)
 
 def test_get_data_e1000():
@@ -18,7 +18,7 @@ def test_get_data_e1000():
     data = get_dataset(which="e1000")
     assert data, "Nothing returned"
     assert len(data) == 1000, "Expected list of length 1000"
-    assert all(isinstance(ts, list) for ts in data)
+    assert all(isinstance(ts, np.ndarray) for ts in data)
     assert all(isinstance(x, float) for ts in data for x in ts)
 
 def test_get_dataset_unknown():

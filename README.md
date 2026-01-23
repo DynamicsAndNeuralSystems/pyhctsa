@@ -20,18 +20,18 @@ This will install pyhctsa in development mode.
 ## ✨ Basic Usage
 A `FeatureCalculator` object must first be instantiated using:
 ```Python
-from pyhctsa.FeatureCalculator.calculator import FeatureCalculator
+from pyhctsa.calculator import FeatureCalculator
 calc = FeatureCalculator()
 ```
 By default, the `FeatureCalculator` will initialize the full feature set (> 800 master operations). If you would like to specify a custom feature set, you can pass the corresponding configuration .YAML file as an argument to the `FeatureCalculator`:
 ```Python
-customCalc = FeatureCalculator(configPath="subset.yaml")
+customCalc = FeatureCalculator(config_path="subset.yaml")
 ```
 The number of master operations (callable functions) specified by the .yaml will be displayed for verification e.g., `Loaded 813 master operations.`
 
 Once a `FeatureCalculator` has been initialized, you can call the `extract` method to compute time series features on either a single time-series instance or a list of multiple instances:
 ```Python
-from pyhctsa.Utilities.utils import get_dataset
+from pyhctsa.utils import get_dataset
 
 e1000 = get_dataset()
 data = e1000[0] # your data as a list, array, or pandas series
@@ -45,12 +45,12 @@ You can also inspect the quality of the extracted feature values by calling ```c
 ## 🤖 Advanced Usage
 ## Calling individual operations
 If you would like to run individual operations on your data, you can access the corresponding functions from their respective modules directly.
-For example, to compute the `RawHRVMeas` features on your data, the `RawHRVMeas` master operation can be accessed from the `Medical` module:
+For example, to compute the `raw_hrv_meas` features on your data, the `raw_hrv_meas` master operation can be accessed from the `medical` module:
 ```Python
-from pyhctsa.Operations.Medical import RawHRVMeas
+from pyhctsa.operations.medical import raw_hrv_meas
 
 data = ... # your ArrayLike data
-res = RawHRVMeas(data) # result as either a dictionary or scalar value
+res = raw_hrv_meas(data) # result as either a dictionary or scalar value
 ```
 Note that individual operations can only be called directly on individual time-series instances.
 

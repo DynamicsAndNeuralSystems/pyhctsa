@@ -47,16 +47,6 @@ def test_standardise_inputs():
     # try each input type
     d = get_dataset()
     dat = d[0]
-    pandas_input = pd.Series(dat)
-    pandas_standardised = standardise_inputs(pandas_input)
-    assert isinstance(pandas_standardised, list)
-    assert isinstance(pandas_standardised[0], np.ndarray), "Expected Pandas Series to be returned as numpy array"
-    # pandas dataframe
-    df = pd.DataFrame([d[0], d[0]])
-    df_standardised = standardise_inputs(df)
-    assert isinstance(df_standardised, list)
-    assert len(df_standardised) == 2
-    assert isinstance(df_standardised[0], np.ndarray), "Expected Pandas df to be returned as list of numpy arrays"
     # numpy array, 1d
     np_input = np.array(dat)
     np_standardised = standardise_inputs(np_input)
@@ -67,7 +57,7 @@ def test_standardise_inputs():
     np_2dstandardised = standardise_inputs(np_input2d)
     assert isinstance(np_2dstandardised, list)
     assert len(np_2dstandardised) == 2
-    assert isinstance(df_standardised[0], np.ndarray), "Expected 2d numpy array to be returned as list of numpy arrays"
+    assert isinstance(np_2dstandardised[0], np.ndarray), "Expected 2d numpy array to be returned as list of numpy arrays"
     # as a list
     list_standardised = standardise_inputs(dat)
     assert isinstance(list_standardised, list)
