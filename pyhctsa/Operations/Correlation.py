@@ -682,7 +682,7 @@ def stick_angles(y : ArrayLike) -> dict:
             diff_y = np.diff(y[ix[j]])
             diff_x = np.diff(ix[j])
             angles[j] = np.arctan(diff_y /diff_x)
-    allAngles = np.concatenate(angles)
+    all_angles = np.concatenate(angles)
 
     # Initialise output dictionary
     out = {}
@@ -694,19 +694,19 @@ def stick_angles(y : ArrayLike) -> dict:
     out['mean_n'] = np.nanmean(angles[1])
     out['median_n'] = np.nanmedian(angles[1])
 
-    out['std'] = np.nanstd(allAngles, ddof=1)
-    out['mean'] = np.nanmean(allAngles)
-    out['median'] = np.nanmedian(allAngles)
+    out['std'] = np.nanstd(all_angles, ddof=1)
+    out['mean'] = np.nanmean(all_angles)
+    out['median'] = np.nanmedian(all_angles)
 
     # difference between positive and negative angles
     # return difference in densities
     
-    ksx = np.linspace(np.min(allAngles), np.max(allAngles), 200)
+    ksx = np.linspace(np.min(all_angles), np.max(all_angles), 200)
     out['pnsumabsdiff'] = np.nan
     if (len(angles[0]) > 0 and len(angles[1]) > 0 and
         np.var(angles[0]) > 1e-10 and np.var(angles[1]) > 1e-10):
         try:
-            ksx = np.linspace(np.min(allAngles), np.max(allAngles), 200)
+            ksx = np.linspace(np.min(all_angles), np.max(all_angles), 200)
             # Calculate the Kernel Density Estimate (KDE) for the first angle distribution.
             kde1 = gaussian_kde(angles[0], bw_method='scott')
             ksy1 = kde1(ksx)
@@ -748,9 +748,16 @@ def stick_angles(y : ArrayLike) -> dict:
     
     # z-score
     zangles = []
-    zangles.append(z_score(angles[0]))
-    zangles.append(z_score(angles[1]))
-    zallAngles = z_score(allAngles)
+    # handle the case where angles is a constant
+    if np.var(angles[0], ddof=1) > 1e-10:
+        zangles.append(z_score(angles[0]))
+    else:
+        zangles.append([])
+    if np.var(angles[1], ddof=1) > 1e-10:
+        zangles.append(z_score(angles[1]))
+    else:
+        zangles.append([])
+    zallAngles = z_score(all_angles)
 
     # how stationary are the angle sets?
 
@@ -849,8 +856,8 @@ def stick_angles(y : ArrayLike) -> dict:
     out['q10_all'] = F_quantz(0.1)
     out['q90_all'] = F_quantz(0.9)
     out['q99_all'] = F_quantz(0.99)
-    out['skewness_all'] = skew(allAngles)
-    out['kurtosis_all'] = kurtosis(allAngles, fisher=False)
+    out['skewness_all'] = skew(all_angles)
+    out['kurtosis_all'] = kurtosis(all_angles, fisher=False)
 
     return out
 
@@ -1224,7 +1231,8 @@ def embed2_shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau', shape : st
 
     return out
 
-def fzcglscf(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int], max_tau: Union[int, None] = None) -> float:
+def fzcglscf(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int], 
+             max_tau: Union[int, None] = None) -> float:
     """
     The first zero-crossing of the generalized self-correlation function.
 
@@ -1232,7 +1240,7 @@ def fzcglscf(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int], ma
     introduced by Queirós and Moyano (2007). The function calculates the GLSCF at 
     increasing time delays until it finds a zero crossing, and returns this lag value.
 
-    Uses GLSCF to calculate the generalized self-correlations at each lag.
+    Uses glscf to calculate the generalized self-correlations at each lag.
 
     References
     ----------
