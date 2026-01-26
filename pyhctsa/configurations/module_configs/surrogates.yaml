@@ -1,0 +1,12 @@
+surrogates:
+  surrogate_test:
+    base_name: surrogate_test
+    dependencies:
+    configs:
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'ami1', zscore: True}
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'fmmi', zscore: True}
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'o3', zscore: True}
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'tc3', zscore: True}
+    legacy_name: SD_SurrogateTest
+    ordered_args: ['surr_meth', 'num_surrs', 'the_test_stat']
+    

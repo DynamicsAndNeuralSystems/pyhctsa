@@ -1,0 +1,121 @@
+medical:
+
+  hrv_classic:
+    base_name: hrv_classic
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: MD_hrv_classic
+
+spectral:
+  spectral_summaries:
+    base_name: spectral_summaries
+    depedencies:
+    configs:
+      - {psd_meth: 'welch', window_type: 'rect', zscore: True}
+      - {psd_meth: 'fft', window_type: 'none', zscore: True}
+    legacy_name: SP_Summaries
+    ordered_args: ['psd_meth', 'window_type']
+
+correlation:
+
+  autocorr:
+    base_name: ac
+    dependencies:
+    configs:
+      - {tau: !range [1, 40], zscore: True}
+    legacy_name: CO_AutoCorr
+    ordered_args: ['tau']
+  
+  nonlinear_autocorr:
+    base_name: ac_nl
+    dependencies:
+    configs:
+      - {taus: [[1, 2]], do_abs: False, zscore: True}
+      - {taus: [[1, 2]], do_abs: True, zscore: True}
+      - {taus: [[1, 2, 3]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 3, 4]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 3, 4]], do_abs: True, zscore: True}
+      - {taus: [[1, 2, 3, 4, 5]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6]], do_abs: True, zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6, 7]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6, 7, 8]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6, 7, 8]], do_abs: True, zscore: True}
+
+      - {taus: [[1, 3]], do_abs: False, zscore: True}
+      - {taus: [[1, 3]], do_abs: True, zscore: True}
+      - {taus: [[2, 4]], do_abs: False, zscore: True}
+      - {taus: [[2, 4]], do_abs: True, zscore: True}
+
+      - {taus: [[1, 3, 5]], do_abs: False, zscore: True}
+      - {taus: [[2, 4, 6]], do_abs: False, zscore: True}
+
+      - {taus: [[1, 3, 5, 7]], do_abs: False, zscore: True}
+      - {taus: [[1, 3, 5, 7]], do_abs: True, zscore: True}
+
+      - {taus: [[2, 4, 6, 8]], do_abs: False, zscore: True}
+      - {taus: [[2, 4, 6, 8]], do_abs: True, zscore: True}
+      
+      - {taus: [[1, 2, 4]], do_abs: False, zscore: True}
+      - {taus: [[1, 3, 4]], do_abs: False, zscore: True}
+
+      - {taus: [[1, 4]], do_abs: False, zscore: True}
+      - {taus: [[1, 4]], do_abs: True, zscore: True}
+
+      - {taus: [[1, 1]], do_abs: False, zscore: True}
+      - {taus: [[1, 1]], do_abs: True, zscore: True}
+
+      - {taus: [[2, 2]], do_abs: False, zscore: True}
+      - {taus: [[2, 2]], do_abs: True, zscore: True}
+
+      - {taus: [[3, 3]], do_abs: False, zscore: True}
+      - {taus: [[3, 3]], do_abs: True, zscore: True}
+
+      - {taus: [[4, 4]], do_abs: False, zscore: True}
+      - {taus: [[4, 4]], do_abs: True, zscore: True}
+
+      - {taus: [[5, 5]], do_abs: False, zscore: True}
+      - {taus: [[5, 5]], do_abs: True, zscore: True}
+
+      - {taus: [[6, 6]], do_abs: False, zscore: True}
+      - {taus: [[6, 6]], do_abs: True, zscore: True}
+
+      - {taus: [[0, 1, 1]], do_abs: False, zscore: True}
+      - {taus: [[0, 2, 2]], do_abs: False, zscore: True}
+      - {taus: [[0, 3, 3]], do_abs: False, zscore: True}
+      - {taus: [[0, 4, 4]], do_abs: False, zscore: True}
+      - {taus: [[0, 5, 5]], do_abs: False, zscore: True}
+      - {taus: [[0, 6, 6]], do_abs: False, zscore: True}
+
+      - {taus: [[0, 0, 1]], do_abs: False, zscore: True}
+      - {taus: [[0, 0, 2]], do_abs: False, zscore: True}
+      - {taus: [[0, 0, 3]], do_abs: False, zscore: True}
+      - {taus: [[0, 0, 4]], do_abs: False, zscore: True}
+      - {taus: [[0, 0, 5]], do_abs: False, zscore: True}
+      - {taus: [[0, 0, 6]], do_abs: False, zscore: True}
+
+      - {taus: [[0, 1, 2]], do_abs: False, zscore: True}
+      - {taus: [[0, 1, 3]], do_abs: False, zscore: True}
+      - {taus: [[0, 2, 3]], do_abs: False, zscore: True}
+      - {taus: [[0, 1, 4]], do_abs: False, zscore: True}
+      - {taus: [[0, 2, 4]], do_abs: False, zscore: True}
+      - {taus: [[0, 3, 4]], do_abs: False, zscore: True}
+      - {taus: [[0, 1, 5]], do_abs: False, zscore: True}
+      - {taus: [[0, 2, 5]], do_abs: False, zscore: True}
+      - {taus: [[0, 3, 5]], do_abs: False, zscore: True}
+      - {taus: [[0, 4, 5]], do_abs: False, zscore: True}
+      - {taus: [[0, 1, 6]], do_abs: False, zscore: True}
+      - {taus: [[0, 2, 6]], do_abs: False, zscore: True}
+      - {taus: [[0, 3, 6]], do_abs: False, zscore: True}
+      - {taus: [[0, 4, 6]], do_abs: False, zscore: True}
+      - {taus: [[0, 5, 6]], do_abs: False, zscore: True}
+      - {taus: [[1, 1, 2]], do_abs: False, zscore: True}
+      - {taus: [[1, 1, 3]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 2]], do_abs: False, zscore: True}
+      - {taus: [[1, 3, 3]], do_abs: False, zscore: True}
+      - {taus: [[2, 2, 3]], do_abs: False, zscore: True}
+      - {taus: [[2, 3, 3]], do_abs: False, zscore: True}
+    legacy_name: CO_NonlinearAutocorr
+    ordered_args: ['taus', 'do_abs']
+    
