@@ -65,6 +65,6 @@ Some features require Java (JDK) to be installed. If you encounter a `JVM not fo
 ```Python
 import os
 os.environ['JAVA_HOME'] = "C:\Program Files\Java\jdk-11" # replace with relevant path
-from pyhctsa.FeatureCalculator.calculator import FeatureCalculator
+from pyhctsa.calculator import FeatureCalculator
 # rest of your code...
 ```
