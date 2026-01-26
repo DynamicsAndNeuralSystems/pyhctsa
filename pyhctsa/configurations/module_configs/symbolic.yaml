@@ -1,0 +1,104 @@
+symbolic:
+  transition_matrix:
+    base_name: transition_matrix
+    dependencies:
+    configs:
+      - {how_to_cg: 'quantile', num_groups: 2, tau: 1, zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 3, tau: 1, zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 4, tau: 1, zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 5, tau: 1, zscore: True}
+
+      - {how_to_cg: 'quantile', num_groups: 2, tau: 'ac', zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 3, tau: 'ac', zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 4, tau: 'ac', zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 5, tau: 'ac', zscore: True}
+    legacy_name: SB_TransitionMatrix
+    ordered_args: ['how_to_cg', 'num_groups', 'tau']
+
+  binary_stats:
+    base_name: binary_stats
+    dependencies:
+    configs:
+      - {binary_method: 'mean', zscore: True}
+      - {binary_method: 'diff', zscore: True}
+    legacy_name: SB_BinaryStats
+    ordered_args: ['binary_method']
+  
+  motif_three:
+    base_name: motif_three
+    dependencies:
+    configs:
+      - {cg_how: 'quantile', zscore: True}
+      - {cg_how: 'diffquant', zscore: True}
+    legacy_name: SB_MotifThree
+    ordered_args: ['cg_how']
+
+  motif_two:
+    base_name: motif_two
+    dependencies:
+    configs:
+      - {binarize_how: 'diff', zscore: True}
+      - {binarize_how: 'mean', zscore: True}
+      - {binarize_how: 'median', zscore: True}
+    legacy_name: SB_MotifTwo
+    ordered_args: ['binarize_how']
+  
+  binary_stretch:
+    base_name: binary_stretch
+    dependencies:
+    configs:
+      - {stretch_what: 'lseq1', zscore: True}
+      - {stretch_what: 'lseq0', zscore: True}
+    legacy_name: SB_BinaryStretch
+    ordered_args: ['stretch_what']
+  
+  surprise:
+    base_name: surprise
+    dependencies:
+    configs:
+      - {what_prior: 'dist', memory: 5, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 20, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 50, num_groups: 3, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 4, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 5, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T1', memory: 20, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 4, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 5, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T2', memory: 20, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 50, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 4, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 5, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+
+      - {what_prior: 'dist', memory: 5, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 50, num_groups: 3, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T1', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 3, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T2', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 50, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+
+      - {what_prior: 'dist', memory: 5, num_groups: 1, coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 5, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 10, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 20, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T1', memory: 10, num_groups: 1, coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 10, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 20, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 50, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+    legacy_name: FC_Surprise
+    ordered_args: ['what_prior', 'memory', 'num_groups', 'coarse_grain_method', 'num_iters']
+    

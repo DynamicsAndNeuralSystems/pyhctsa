@@ -1,0 +1,371 @@
+correlation:
+
+  autocorr:
+    base_name: ac
+    dependencies:
+    configs:
+      - {tau: !range [1, 40], zscore: True}
+    legacy_name: CO_AutoCorr
+    ordered_args: ['tau']
+  
+  add_noise:
+    base_name: add_noise
+    depedencies:
+      - jpype1
+    configs:
+      - {tau: 1,   ami_method: 'quantiles', extra_param: 10, zscore: True}
+      - {tau: 1,   ami_method: 'even',      extra_param: 10, zscore: True}
+      - {tau: 1,   ami_method: 'std1',      extra_param: 10, zscore: True}
+      - {tau: 1,   ami_method: 'gaussian',                   zscore: True}
+      - {tau: 1,   ami_method: 'kraskov1',  extra_param: 4,  zscore: True}
+
+      - {tau: 'ac', ami_method: 'quantiles', extra_param: 10, zscore: True}
+      - {tau: 'ac', ami_method: 'even',      extra_param: 10, zscore: True}
+      - {tau: 'ac', ami_method: 'std1',      extra_param: 10, zscore: True}
+      - {tau: 'ac', ami_method: 'gaussian',                   zscore: True}
+      - {tau: 'ac', ami_method: 'kraskov1',  extra_param: 4,  zscore: True}
+    legacy_name: CO_AddNoise
+    ordered_args: ['tau', 'ami_method', 'extra_param']
+
+  glscf:
+    base_name: glscf
+    dependencies:
+    configs:
+      - {alpha: 1, beta: 1, tau: 1, zscore: True}
+      - {alpha: 1, beta: 1, tau: 2, zscore: True}
+      - {alpha: 1, beta: 1, tau: 3, zscore: True}
+      - {alpha: 1, beta: 1, tau: 4, zscore: True}
+      - {alpha: 1, beta: 1, tau: 5, zscore: True}
+      - {alpha: 1, beta: 1, tau: 'tau', zscore: True}
+
+      - {alpha: 1, beta: 2, tau: 1, zscore: True}
+      - {alpha: 1, beta: 2, tau: 2, zscore: True}
+      - {alpha: 1, beta: 2, tau: 3, zscore: True}
+      - {alpha: 1, beta: 2, tau: 4, zscore: True}
+      - {alpha: 1, beta: 2, tau: 5, zscore: True}
+      - {alpha: 1, beta: 2, tau: 'tau', zscore: True}
+
+      - {alpha: 1, beta: 5, tau: 1, zscore: True}
+      - {alpha: 1, beta: 5, tau: 2, zscore: True}
+      - {alpha: 1, beta: 5, tau: 3, zscore: True}
+      - {alpha: 1, beta: 5, tau: 4, zscore: True}
+      - {alpha: 1, beta: 5, tau: 5, zscore: True}
+      - {alpha: 1, beta: 5, tau: 'tau', zscore: True}
+
+      - {alpha: 1, beta: 10, tau: 1, zscore: True}
+      - {alpha: 1, beta: 10, tau: 2, zscore: True}
+      - {alpha: 1, beta: 10, tau: 3, zscore: True}
+      - {alpha: 1, beta: 10, tau: 4, zscore: True}
+      - {alpha: 1, beta: 10, tau: 5, zscore: True}
+      - {alpha: 1, beta: 10, tau: 'tau', zscore: True}
+
+      - {alpha: 2, beta: 2, tau: 1, zscore: True}
+      - {alpha: 2, beta: 2, tau: 2, zscore: True}
+      - {alpha: 2, beta: 2, tau: 3, zscore: True}
+      - {alpha: 2, beta: 2, tau: 5, zscore: True}
+      - {alpha: 2, beta: 2, tau: 'tau', zscore: True}
+
+      - {alpha: 2, beta: 5, tau: 1, zscore: True}
+      - {alpha: 2, beta: 5, tau: 2, zscore: True}
+      - {alpha: 2, beta: 5, tau: 3, zscore: True}
+      - {alpha: 2, beta: 5, tau: 4, zscore: True}
+      - {alpha: 2, beta: 5, tau: 5, zscore: True}
+      - {alpha: 2, beta: 5, tau: 'tau', zscore: True}
+    legacy_name: CO_glscf
+    ordered_args: ['alpha', 'beta', 'tau']
+  
+  fzcglscf:
+    base_name: fzcglscf
+    dependencies:
+    configs:
+      - {alpha: 1.0, beta: 1, zscore: True}
+      - {alpha: 1.0, beta: 2, zscore: True}
+      - {alpha: 1.0, beta: 3, zscore: True}
+      - {alpha: 1.0, beta: 4, zscore: True}
+      - {alpha: 1.0, beta: 5, zscore: True}
+      - {alpha: 1.0, beta: 6, zscore: True}
+      - {alpha: 1.0, beta: 7, zscore: True}
+      - {alpha: 1.0, beta: 8, zscore: True}
+      - {alpha: 1.0, beta: 9, zscore: True}
+      - {alpha: 1.0, beta: 10, zscore: True}
+
+      - {alpha: 2.0, beta: 2, zscore: True}
+      - {alpha: 2.0, beta: 5, zscore: True}
+      - {alpha: 2.0, beta: 10, zscore: True}
+
+      - {alpha: 5.0, beta: 5, zscore: True}
+      - {alpha: 5.0, beta: 10, zscore: True}
+
+      - {alpha: 10, beta: 10, zscore: True}
+    legacy_name: CO_fzcglscf
+    ordered_args: ['alpha', 'beta']
+
+  embed2:
+    base_name: embed2
+    dependencies:
+    configs:
+      - {tau: 'tau', zscore: True}
+    legacy_name: CO_Embed2
+    ordered_args: ['tau']
+
+  embed2_shapes:
+    base_name: embed2_shapes
+    depedencies:
+    configs:
+      - {tau: 'tau', shape: 'circle', r: 0.1, zscore: True}
+      - {tau: 'tau', shape: 'circle', r: 1, zscore: True}
+    legacy_name: CO_Embed2_Shapes
+    ordered_args: ['tau', 'shape', 'r']
+
+  embed2_basic:
+    base_name: embed2_basic
+    dependencies:
+    configs:
+      - {tau: 1, zscore: True}
+      - {tau: 'tau', zscore: True}
+    legacy_name: CO_Embed2_Basic
+    ordered_args: ['tau']
+
+  embed2_dist:
+    base_name: embed2_dist
+    dependencies:
+    configs:
+      - {tau: 'tau', zscore: True}
+    legacy_name: CO_Embed2_Dist
+    ordered_args: ['tau']
+
+  embed2_angle_tau:
+    base_name: embed2_angle_tau
+    dependencies:
+    configs:
+      - {max_tau: 50, zscore: True}
+    legacy_name: CO_Embed2_AngleTau
+    ordered_args: ['max_tau']
+  
+  partial_autocorr:
+    base_name: partial_autocorr
+    dependencies:
+      - statsmodels
+    configs:
+      - {max_tau: 20, what_method: 'ols', zscore: True}
+    legacy_name: CO_PartialAutoCorr
+    ordered_args: ['max_tau', 'what_method']
+
+  nonlinear_autocorr:
+    base_name: ac_nl
+    dependencies:
+    configs:
+      - {taus: [[1, 2]], do_abs: False, zscore: True}
+      - {taus: [[1, 2]], do_abs: True, zscore: True}
+      - {taus: [[1, 2, 3]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 3, 4]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 3, 4]], do_abs: True, zscore: True}
+      - {taus: [[1, 2, 3, 4, 5]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6]], do_abs: True, zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6, 7]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6, 7, 8]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6, 7, 8]], do_abs: True, zscore: True}
+
+      - {taus: [[1, 3]], do_abs: False, zscore: True}
+      - {taus: [[1, 3]], do_abs: True, zscore: True}
+      - {taus: [[2, 4]], do_abs: False, zscore: True}
+      - {taus: [[2, 4]], do_abs: True, zscore: True}
+
+      - {taus: [[1, 3, 5]], do_abs: False, zscore: True}
+      - {taus: [[2, 4, 6]], do_abs: False, zscore: True}
+
+      - {taus: [[1, 3, 5, 7]], do_abs: False, zscore: True}
+      - {taus: [[1, 3, 5, 7]], do_abs: True, zscore: True}
+
+      - {taus: [[2, 4, 6, 8]], do_abs: False, zscore: True}
+      - {taus: [[2, 4, 6, 8]], do_abs: True, zscore: True}
+      
+      - {taus: [[1, 2, 4]], do_abs: False, zscore: True}
+      - {taus: [[1, 3, 4]], do_abs: False, zscore: True}
+
+      - {taus: [[1, 4]], do_abs: False, zscore: True}
+      - {taus: [[1, 4]], do_abs: True, zscore: True}
+
+      - {taus: [[1, 1]], do_abs: False, zscore: True}
+      - {taus: [[1, 1]], do_abs: True, zscore: True}
+
+      - {taus: [[2, 2]], do_abs: False, zscore: True}
+      - {taus: [[2, 2]], do_abs: True, zscore: True}
+
+      - {taus: [[3, 3]], do_abs: False, zscore: True}
+      - {taus: [[3, 3]], do_abs: True, zscore: True}
+
+      - {taus: [[4, 4]], do_abs: False, zscore: True}
+      - {taus: [[4, 4]], do_abs: True, zscore: True}
+
+      - {taus: [[5, 5]], do_abs: False, zscore: True}
+      - {taus: [[5, 5]], do_abs: True, zscore: True}
+
+      - {taus: [[6, 6]], do_abs: False, zscore: True}
+      - {taus: [[6, 6]], do_abs: True, zscore: True}
+
+      - {taus: [[0, 1, 1]], do_abs: False, zscore: True}
+      - {taus: [[0, 2, 2]], do_abs: False, zscore: True}
+      - {taus: [[0, 3, 3]], do_abs: False, zscore: True}
+      - {taus: [[0, 4, 4]], do_abs: False, zscore: True}
+      - {taus: [[0, 5, 5]], do_abs: False, zscore: True}
+      - {taus: [[0, 6, 6]], do_abs: False, zscore: True}
+
+      - {taus: [[0, 0, 1]], do_abs: False, zscore: True}
+      - {taus: [[0, 0, 2]], do_abs: False, zscore: True}
+      - {taus: [[0, 0, 3]], do_abs: False, zscore: True}
+      - {taus: [[0, 0, 4]], do_abs: False, zscore: True}
+      - {taus: [[0, 0, 5]], do_abs: False, zscore: True}
+      - {taus: [[0, 0, 6]], do_abs: False, zscore: True}
+
+      - {taus: [[0, 1, 2]], do_abs: False, zscore: True}
+      - {taus: [[0, 1, 3]], do_abs: False, zscore: True}
+      - {taus: [[0, 2, 3]], do_abs: False, zscore: True}
+      - {taus: [[0, 1, 4]], do_abs: False, zscore: True}
+      - {taus: [[0, 2, 4]], do_abs: False, zscore: True}
+      - {taus: [[0, 3, 4]], do_abs: False, zscore: True}
+      - {taus: [[0, 1, 5]], do_abs: False, zscore: True}
+      - {taus: [[0, 2, 5]], do_abs: False, zscore: True}
+      - {taus: [[0, 3, 5]], do_abs: False, zscore: True}
+      - {taus: [[0, 4, 5]], do_abs: False, zscore: True}
+      - {taus: [[0, 1, 6]], do_abs: False, zscore: True}
+      - {taus: [[0, 2, 6]], do_abs: False, zscore: True}
+      - {taus: [[0, 3, 6]], do_abs: False, zscore: True}
+      - {taus: [[0, 4, 6]], do_abs: False, zscore: True}
+      - {taus: [[0, 5, 6]], do_abs: False, zscore: True}
+      - {taus: [[1, 1, 2]], do_abs: False, zscore: True}
+      - {taus: [[1, 1, 3]], do_abs: False, zscore: True}
+      - {taus: [[1, 2, 2]], do_abs: False, zscore: True}
+      - {taus: [[1, 3, 3]], do_abs: False, zscore: True}
+      - {taus: [[2, 2, 3]], do_abs: False, zscore: True}
+      - {taus: [[2, 3, 3]], do_abs: False, zscore: True}
+    legacy_name: CO_NonlinearAutocorr
+    ordered_args: ['taus', 'do_abs']
+  
+  stick_angles:
+    base_name: stick_angles
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: CO_StickAngles
+    ordered_args:
+  
+  first_crossing:
+    base_name: first_crossing
+    dependencies:
+    configs:
+      - {corr_fun: 'ac', threshold: 0, what_out: 'both', zscore: True}
+      - {corr_fun: 'ac', threshold: '1/e', what_out: 'both', zscore: True}
+    legacy_name: CO_FirstCrossing
+    ordered_args: ['corr_fun', 'threshold', 'what_out']
+  
+  translate_shape:
+    base_name: translate_shape
+    dependencies:
+    configs:
+      - {shape: 'circle', d: 1.5, how_to_move: 'pts', zscore: True}
+      - {shape: 'circle', d: 2.5, how_to_move: 'pts', zscore: True}
+      - {shape: 'circle', d: 3.5, how_to_move: 'pts', zscore: True}
+      - {shape: 'rectangle', d: 2, how_to_move: 'pts', zscore: True}
+    legacy_name: CO_TranslateShape
+    ordered_args: ['shape', 'd', 'how_to_move']
+  
+  autocorr_shape:
+    base_name: autocorr_shape
+    configs:
+      - {stop_when: 'drown', zscore: True}
+      - {stop_when: 'posDrown', zscore: True}
+    legacy_name: CO_AutoCorrShape
+    ordered_args: ['stop_when']
+  
+  histogram_ami:
+    base_name: histogram_ami
+    dependencies:
+    configs:
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std1', num_bins: 2, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std2', num_bins: 2, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'even', num_bins: 2, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'quantiles', num_bins: 2, zscore: True}
+
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std1', num_bins: 5, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std2', num_bins: 5, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'even', num_bins: 5, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'quantiles', num_bins: 5, zscore: True}
+
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std1', num_bins: 10, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std2', num_bins: 10, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'even', num_bins: 10, zscore: True}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'quantiles', num_bins: 10, zscore: True}
+    legacy_name: CO_HistogramAMI
+    ordered_args: ['tau', 'meth', 'num_bins']
+
+  compare_min_ami:
+    base_name: compare_min_ami
+    dependencies:
+    configs:
+      - {bin_method: 'std1', num_bins: [!range [2, 80]], zscore: True}
+      - {bin_method: 'std2', num_bins: [!range [2, 80]], zscore: True}
+      - {bin_method: 'quantiles', num_bins: [!range [2, 80]], zscore: True}
+      - {bin_method: 'even', num_bins: [!range [2, 80]], zscore: True}
+    legacy_name: CO_CompareMinAMI
+    ordered_args: ['bin_method', 'num_bins']
+
+  periodicity_wang:
+    base_name: periodicity_wang
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: PD_PeriodicityWang
+    ordered_args: 
+  
+  trev:
+    base_name: trev
+    dependencies:
+    configs:
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 3, zscore: True}
+      - {tau: 'ac', zscore: True}
+      - {tau: 'mi', zscore: True}
+    legacy_name: CO_trev
+    ordered_args: ['tau']
+
+  tc3:
+    base_name: tc3
+    dependencies:
+    configs:
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 3, zscore: True}
+      - {tau: 'ac', zscore: True}
+      - {tau: 'mi', zscore: True}
+    legacy_name: CO_tc3
+    ordered_args: ['tau']
+  
+  time_rev_kaplan:
+    base_name: time_rev_kaplan
+    dependencies:
+    configs:
+      - {time_lag: 1, zscore: True}
+      - {time_lag: 2, zscore: True}
+      - {time_lag: 3, zscore: True}
+      - {time_lag: 4, zscore: True}
+    legacy_name: DK_timerev
+    ordered_args: ['time_lag']
+
+  crinkle_statistic:
+    base_name: crinkle_statistic
+    depedencies:
+    configs:
+      - {zscore: True}
+    legacy_name: DK_crinkle
+    ordered_args:
+  
+  theiler_q:
+    base_name: theiler_q
+    depedencies:
+    configs:
+      - {zscore: True}
+    legacy_name: DK_theilerQ
+    ordered_args:

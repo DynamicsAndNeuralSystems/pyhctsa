@@ -1,0 +1,63 @@
+wavelet:
+  wl_coeffs:
+    base_name: wl_coeffs
+    dependencies:
+      - PyWavelets
+    configs:
+      - {w_name: 'db3', level: 1, zscore: True}
+      - {w_name: 'db3', level: 2, zscore: True}
+      - {w_name: 'db3', level: 3, zscore: True}
+      - {w_name: 'db3', level: 4, zscore: True}
+      - {w_name: 'db3', level: 5, zscore: True}
+      - {w_name: 'db3', level: 'max', zscore: True}
+    legacy_name: WL_coeffs
+    ordered_args: ['w_name', 'level']
+  
+  detail_coeffs:
+    base_name: detail_coeffs
+    dependencies:
+      - PyWavelets
+    configs:
+      - {w_name: 'db3', max_level: 'max', zscore: True}
+    legacy_name: WL_DetailCoeffs
+    ordered_args: ['w_name', 'max_level']
+  
+  cwt:
+    base_name: cwt
+    dependencies:
+      - PyWavelets
+    configs:
+      - {w_name: 'db3', max_scale: 32, zscore: True}
+      - {w_name: 'sym2', max_scale: 32, zscore: True}
+    legacy_name: WL_cwt
+    ordered_args: ['w_name', 'max_scale']
+  
+  dwt_coeff:
+    base_name: dwt_coeff
+    dependencies:
+      - PyWavelets
+    configs:
+      - {w_name: 'db3', level: 5, zscore: True}
+      - {w_name: 'sym2', level: 5, zscore: True}
+    legacy_name: WL_dwtcoeff
+    ordered_args: ['w_name', 'level']
+  
+  scal_2_freq:
+    base_name: scal_2_freq
+    depedencies:
+      - PyWavelets
+    configs:
+      - {w_name: 'db3', a_max: 'max', delta: 1, zscore: True}
+    legacy_name: WL_scal2frq
+    ordered_args: ['w_name', 'a_max', 'delta']
+  
+  wfbm:
+    base_name: wfbm
+    depedencies:
+      - pywt
+      - PyWavelets
+    configs:
+      - {zscore: True}
+    legacy_name: WL_fBM
+    ordered_args: 
+    
