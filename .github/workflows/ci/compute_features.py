@@ -1,6 +1,6 @@
 import numpy as np
-from pyhctsa.FeatureCalculator.calculator import FeatureCalculator
-from pyhctsa.Utilities.utils import get_dataset
+from pyhctsa.calculator import FeatureCalculator
+from pyhctsa.utils import get_dataset
 import os, json, platform, sys
 from pathlib import Path
 
