@@ -19,20 +19,6 @@ def range_constructor(loader, node) -> list:
     return list(range(start, end + 1))
 yaml.SafeLoader.add_constructor("!range", range_constructor)
 
-def unfold_results(res : list) -> dict:
-    # unfold the results from an extraction
-    feature_dict = dict()
-    for k in res:
-        if isinstance(res[k], dict):
-            # unfold
-            for i in res[k]:
-                feature = f"{k}.{i}"
-                feature_dict[feature] = res[k][i]
-        else:
-            feature_dict[k] = res[k]
-    # make into a pandas dataframe
-    return pd.DataFrame([feature_dict])
-
 def classify_output(res) -> int:
     # classify the type of output
     if isinstance(res, str) and res.startswith("Error:"):
@@ -50,6 +36,23 @@ def classify_output(res) -> int:
         return 4
     else:
         return 0
+
+def apply_selection_wrapper(func, keep_keys):
+    """
+    Wraps a function to filter its output dictionary to specific keys.
+    
+    :param func: Original function
+    :param keep_keys: Features to keep as keys in a dict.
+    :return: Wrapped function.
+    :rtype: Any
+    """
+    def wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)
+        # if result is a dict, then filter it according to the keys
+        if isinstance(result, dict):
+            return {k: result[k] for k in keep_keys if k in result}
+        return result
+    return wrapper
 
 def standardise_inputs(data) -> list[np.ndarray]:
      # standardize the input into a list of 1D float arrays
@@ -177,11 +180,13 @@ class FeatureCalculator:
                     for conf in configs:
                         zscore = conf.pop("zscore", False) if "zscore" in conf else False
                         absval = conf.pop("abs", False) if "abs" in conf else False
+                        select_keys = conf.pop("_select", None)
                         if conf:
                             keys, values = zip(*[(k, v if isinstance(v, list) else [v]) for k, v in conf.items()])
                             for combo in product(*values):
                                 combo_dict = dict(zip(keys, combo))
                                 label = base_name
+                                # build the unique label string
                                 if ordered_args:
                                     parts = []
                                     for arg in ordered_args:
@@ -191,34 +196,58 @@ class FeatureCalculator:
                                         label += "_" + "_".join(parts)
                                 else:
                                     label += "_" + "_".join(f"{k}{_format_param_value(v)}" for k, v in combo_dict.items())
-                                # Only append "_raw" if zscore varies and zscore is False
+                                
                                 if zscore_varies and not zscore:
                                     label += "_raw"
-                                # Only append "_abs" if abs varies and abs is True
                                 if abs_varies and absval:
                                     label += "_abs"
+
+                                # create the base function
                                 decorated_func = preprocess_decorator(zscore, absval)(op_func)
-                                feature_funcs[label] = partial(decorated_func, **combo_dict)
+                                final_func = partial(decorated_func, **combo_dict)
+
+                                # apply selection wrapper if _select was found
+                                if select_keys:
+                                    final_func = apply_selection_wrapper(final_func, select_keys)
+
+                                feature_funcs[label] = final_func
+
                         else:
+                            # case: no parameters in config
                             label = base_name
-                            # Only append "_raw" if zscore varies and zscore is False
                             if zscore_varies and not zscore:
                                 label += "_raw"
-                            # Only append "_abs" if abs varies and abs is True
                             if abs_varies and absval:
                                 label += "_abs"
+                            
                             decorated_func = preprocess_decorator(zscore, absval)(op_func)
-                            feature_funcs[label] = decorated_func
+                            final_func = decorated_func
+
+                            if select_keys: 
+                                final_func = apply_selection_wrapper(final_func, select_keys)
+
+                            feature_funcs[label] = final_func
                 else:
                     zscore, absval = False, False
+                    select_keys = None # 1. Initialize variable
+
                     if isinstance(configs, list) and configs and isinstance(configs[0], dict):
                         zscore = configs[0].pop("zscore", False)
                         absval = configs[0].pop("abs", False)
+                        select_keys = configs[0].pop("_select", None) # 2. Pop the reserved key
+
                     label = f"{module_key}_{feature_name}"
+                    
                     # If abs is explicitly set True on the single config, include suffix to make it explicit
                     if absval:
                         label += "_abs"
+                    
                     decorated_func = preprocess_decorator(zscore, absval)(op_func)
+                    
+                    # 3. Apply the wrapper if _select was found
+                    if select_keys:
+                        decorated_func = apply_selection_wrapper(decorated_func, select_keys)
+
                     feature_funcs[label] = decorated_func
         
         # Store information about skipped functions for later reference
