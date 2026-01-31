@@ -882,7 +882,7 @@ def _sub_statav(x : ArrayLike, n : int) -> tuple:
 
     return statavmean, statavstd
 
-def nonlinear_autocorr(y : ArrayLike, taus : ArrayLike, do_abs : Union[bool, None] = None) -> float:
+def nonlinear_autocorr(y : ArrayLike, taus : ArrayLike, absval : Union[bool, None] = None) -> float:
     """
     Compute a custom nonlinear autocorrelation of a time series.
 
@@ -903,9 +903,9 @@ def nonlinear_autocorr(y : ArrayLike, taus : ArrayLike, do_abs : Union[bool, Non
             [1, 2] computes <x_i x_{i-1} x_{i-2}>
             [1, 1, 3] computes <x_i x_{i-1}^2 x_{i-3}>
             [0, 0, 1] computes <x_i^3 x_{i-1}>
-    do_abs : bool or None, optional
+    absval : bool or None, optional
         If True, takes the absolute value before the final mean (recommended for even-length taus).
-        If None (default), automatically sets do_abs=True for even-length taus and False for odd-length.
+        If None (default), automatically sets absval=True for even-length taus and False for odd-length.
 
     Returns
     -------
@@ -914,11 +914,11 @@ def nonlinear_autocorr(y : ArrayLike, taus : ArrayLike, do_abs : Union[bool, Non
     """
     y = np.asarray(y)
     taus = np.asarray(taus)
-    if do_abs == None:
+    if absval == None:
         if len(taus) % 2 == 1:
-            do_abs = False
+            absval = False
         else:
-            do_abs = True
+            absval = True
 
     N = len(y)
     tmax = np.max(taus)
@@ -928,7 +928,7 @@ def nonlinear_autocorr(y : ArrayLike, taus : ArrayLike, do_abs : Union[bool, Non
     for i in taus:
         nlac = np.multiply(nlac,y[tmax - i:N - i])
 
-    if do_abs:
+    if absval:
         out = np.mean(np.absolute(nlac))
 
     else:
