@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Callable
 
 import jpype as jp
 import numpy as np
@@ -9,11 +9,30 @@ from scipy import stats
 
 from ..utils import sign_change
 
+def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, None]) -> Callable:
+    """Helper to return the correct correlation function based on method type."""
+    from ..operations.correlation import autocorr, automutual_info, _mi_bin
+
+    if min_what in ["ac", "corr"]:
+        return lambda x: autocorr(y, tau=x, method="Fourier")
+    elif min_what == "mi-hist":
+        num_bins = int(extra_param) if extra_param else 10
+        return lambda x: _mi_bin(y[:-x], y[x:], "range", "range", num_bins)
+    elif min_what == "mi-kraskov2":
+        return lambda x: automutual_info(y, x, "kraskov2", extra_param)
+    elif min_what == "mi-kraskov1":
+        return lambda x: automutual_info(y, x, "kraskov1", extra_param)
+    elif min_what == "mi-kernel":
+        return lambda x: automutual_info(y, x, "kernel", extra_param)
+    elif min_what in ["mi", "mi-gaussian"]:
+        return lambda x: automutual_info(y, x, "gaussian", extra_param)
+    else:
+        raise ValueError(f"Unknown correlation type specified: {min_what}")
+    
 def first_min(
     y: list,
     min_what: str = "mi-gaussian",
     extra_param: Union[int, float, None] = None,
-    min_not_max: Union[bool, None] = True,
 ) -> int:
     """
     Time of first minimum in a given self-correlation function.
@@ -30,75 +49,74 @@ def first_min(
         or 'mi-hist' (histogram-based method). Default is 'mi'.
     extra_param : any, optional
         An additional parameter required for the specified `min_what` method (e.g., for Kraskov).
-    min_not_max : bool, optional
-        If False, return the maximum instead of the minimum. Default is True.
 
     Returns
     -------
     int
-        The time of the first minimum (or maximum if `min_not_max` is False).
+        The time of the first minimum.
     """
-    from ..operations.correlation import autocorr
-
     y = np.asarray(y)
     n = len(y)
+    corrfn = _get_corr_fn(y, min_what, extra_param)
     
-    # Define the autocorrelation function
-    if min_what in ["ac", "corr"]:
-        corrfn = lambda x: autocorr(y, tau=x, method="Fourier")
-    elif min_what == "mi-hist":
-        # if extraParam is none, use default num of bins in MutualInformation (default : 10)
-        if extra_param:
-            # coerce into integer if not int
-            extra_param = int(extra_param)
-        corrfn = lambda x: _mi_bin(y[:-x], y[x:], "range", "range", extra_param or 10)
-    elif min_what == "mi-kraskov2":
-        # (using Information Dynamics Toolkit)
-        # extraParam is the number of nearest neighbors
-        corrfn = lambda x: automutual_info(y, x, "kraskov2", extra_param)
-    elif min_what == "mi-kraskov1":
-        # (using Information Dynamics Toolkit)
-        corrfn = lambda x: automutual_info(y, x, "kraskov1", extra_param)
-    elif min_what == "mi-kernel":
-        corrfn = lambda x: automutual_info(y, x, "kernel", extra_param)
-    elif min_what in ["mi", "mi-gaussian"]:
-        corrfn = lambda x: automutual_info(y, x, "gaussian", extra_param)
-    else:
-        raise ValueError(f"Unknown correlation type specified: {min_what}")
+    auto_corr = np.zeros(n - 1)
+    for i in range(1, n):
+        auto_corr[i - 1] = corrfn(i)
+        
+        if np.isnan(auto_corr[i - 1]):
+            logging.warning(f"No minimum in {min_what}: encountered NaN.")
+            return np.nan
+        
+        # Check for minimum
+        if (i == 2) and (auto_corr[1] > auto_corr[0]):
+            return 1
+        elif (i > 2) and auto_corr[i - 3] > auto_corr[i - 2] < auto_corr[i - 1]:
+            return i - 1
+            
+    return np.nan
 
-    # search for a minimum (incrementally through time lags until a minimum is found)
-    auto_corr = np.zeros(n - 1)  # pre-allocate maximum length autocorrelation vector
-    if min_not_max:
-        # FIRST LOCAL MINUMUM
-        for i in range(1, n):
-            auto_corr[i - 1] = corrfn(i)
-            # Hit a NaN before got to a minimum -- there is no minimum
-            if np.isnan(auto_corr[i - 1]):
-                logging.warning(
-                    f"No minimum in {min_what} [[time series too short to find it?]]"
-                )
-                return np.nan
-            # we're at a local minimum
-            if (i == 2) and (auto_corr[1] > auto_corr[0]):
-                # already increases at lag of 2 from lag of 1: a minimum (since ac(0) is maximal)
-                return 1
-            elif (i > 2) and auto_corr[i - 3] > auto_corr[i - 2] < auto_corr[i - 1]:
-                # minimum at previous i
-                return i - 1  # I found the first minimum!
-    else:
-        # FIRST LOCAL MAXIMUM
-        for i in range(1, n):
-            auto_corr[i - 1] = corrfn(i)
-            # Hit a NaN before got to a max -- there is no max
-            if np.isnan(auto_corr[i - 1]):
-                logging.warning(
-                    f"No minimum in {min_what} [[time series too short to find it?]]"
-                )
-                return np.nan
+def first_max(
+    y: list,
+    max_what: str = "mi-gaussian",
+    extra_param: Union[int, float, None] = None,
+) -> int:
+    """
+    Time of first maximum in a given self-correlation function.
 
-            # we're at a local maximum
-            if i > 2 and auto_corr[i - 3] < auto_corr[i - 2] > auto_corr[i - 1]:
-                return i - 1
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    max_what : str, optional
+        The type of correlation to minimize. Options are 'ac' for autocorrelation,
+        or 'mi' for automutual information. By default, 'mi' specifies the
+        'gaussian' method from the Information Dynamics Toolkit. Other options
+        include 'mi-kernel', 'mi-kraskov1', 'mi-kraskov2' (from Information Dynamics Toolkit, JIDT),
+        or 'mi-hist' (histogram-based method). Default is 'mi'.
+    extra_param : any, optional
+        An additional parameter required for the specified `max_what` method (e.g., for Kraskov).
+
+    Returns
+    -------
+    int
+        The time of the first maximum.
+    """
+    y = np.asarray(y)
+    n = len(y)
+    corrfn = _get_corr_fn(y, max_what, extra_param)
+    
+    auto_corr = np.zeros(n - 1)
+    for i in range(1, n):
+        auto_corr[i - 1] = corrfn(i)
+        
+        if np.isnan(auto_corr[i - 1]):
+            logging.warning(f"No maximum in {max_what}: encountered NaN.")
+            return np.nan
+
+        # Check for maximum
+        if i > 2 and auto_corr[i - 3] < auto_corr[i - 2] > auto_corr[i - 1]:
+            return i - 1
+            
     return np.nan
 
 def _mi_bin(v1 : ArrayLike, v2 : ArrayLike, r1 : Union[str, list] = 'range', 
