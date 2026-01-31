@@ -12,6 +12,7 @@ from numpy.typing import ArrayLike
 from tqdm import tqdm
 
 from .utils import check_optional_deps, preprocess_decorator, validate_data
+from .distribution import _compute_features_for_chunk, _extract_features_single_series
 
 def range_constructor(loader, node) -> list:
     """Construct a range from a YAML config."""
@@ -56,7 +57,7 @@ def apply_selection_wrapper(func, keep_keys):
         return result
     return wrapper
 
-def standardise_inputs(data) -> list[np.ndarray]:
+def _standardise_inputs(data) -> list[np.ndarray]:
      # standardize the input into a list of 1D float arrays
     if isinstance(data, np.ndarray):
         if data.ndim == 1:
@@ -83,7 +84,7 @@ def standardise_inputs(data) -> list[np.ndarray]:
         raise ValueError(
         "Input must be a 1D series, a list of 1D series, or a 2D array "
         "with shape (n_series, n_samples)")
-  
+      
 def _format_param_value(val, key=None) -> str: 
     """ 
     Format parameter value for label: 
@@ -131,10 +132,10 @@ def _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval):
             formatted_v = _format_param_value(v, key=k)
             parts.append(formatted_v if isinstance(v, bool) else f"{k}{formatted_v}")
     
-    # Join base and parts, filter out empty strings
+    # join base and parts, filter out empty strings
     label = "_".join([base_name] + [p for p in parts if p])
     
-    # Append suffix flags
+    # append suffix flags
     if not do_zscore: label += '_raw'
     if do_absval:    label += '_abs'
     return label
@@ -242,7 +243,7 @@ class FeatureCalculator:
         return e_arr
     
     def extract(self, data : Union[ArrayLike, list[ArrayLike]], labels: Union[ArrayLike, list[ArrayLike], None] = None,
-                verbose : bool = True) -> pd.DataFrame:
+                verbose : bool = True, distributor=None) -> pd.DataFrame:
         """
         Run the configured feature extractor over one or more time series and
         return a single tidy `pandas.DataFrame`.
@@ -284,7 +285,7 @@ class FeatureCalculator:
         >>> df.shape
         (1, 128)
         """
-        series_list = standardise_inputs(data)
+        series_list = _standardise_inputs(data)
         is_valid = np.array([validate_data(t) for t in series_list]) # check each time series to see if valid...
         invalid = np.argwhere(is_valid == False)
         if invalid.size > 0:
@@ -305,42 +306,30 @@ class FeatureCalculator:
             n = len(series_list)
             labels_list = [f"ts_{i}" for i in range(1, n + 1)]
 
-        n_funcs = len(self.feature_funcs)
-        print(f"Evaluating {n_funcs} partialed functions. Strap in!...")
+        print(f"Evaluating {len(self.feature_funcs)} partialed functions. Strap in!...")
         start_time = time.perf_counter()
-        rows: list[dict] = []
-
-        pbar = tqdm if verbose else (lambda x, **kwargs: x)
-
-        for ts in pbar(series_list, desc="Instances", unit="instance"):
-            row = {}
-            for name, func in pbar(self.feature_funcs.items(), desc="Features", unit="feature", leave=False, colour="green"):
-                try:
-                    val = func(ts)
-                    # flatten if the feature returns a dict
-                    if isinstance(val, dict):
-                        for k, v in val.items():
-                            # check the output for quality
-                            row[f"{name}.{k}"] = v
-                    # flatten small 1D arrays: name_0, name_1, ...
-                    elif isinstance(val, np.ndarray) and val.ndim == 1 and val.size <= 16:
-                        for i, v in enumerate(val):
-                            row[f"{name}_{i}"] = v
-                    else:
-                        row[name] = val
-                except Exception as e:
-                    row[name] = f"Error: {e}"
-            rows.append(row)
+        
+        if distributor:
+            # Parallel execution (Local or Cluster)
+            rows = distributor.map(
+                _compute_features_for_chunk,
+                series_list, 
+                feature_funcs=self.feature_funcs
+            )
+        else:
+            # Sequential fallback
+            pbar = tqdm if verbose else (lambda x, **kwargs: x)
+            rows = [_extract_features_single_series(ts, self.feature_funcs) 
+                    for ts in pbar(series_list, desc="Sequential Extraction")]
 
         elapsed = time.perf_counter() - start_time
         print(f"Feature extraction completed in {elapsed:.3f} seconds.")
         df = pd.json_normalize(rows)
         # assign row names
         df.index = pd.Index(labels_list, name="instance")
-        # run output quality checks
-        df_errs = df.map(lambda x: classify_output(x))
+        
+        # meta data for summary
         self._last_elapsed = elapsed
-        self._last_result = df
-        self._errors = df_errs
+        self._errors = df.map(classify_output)
 
         return df

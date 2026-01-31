@@ -11,7 +11,7 @@ from ..utils import sign_change
 
 def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, None]) -> Callable:
     """Helper to return the correct correlation function based on method type."""
-    from ..operations.correlation import autocorr, automutual_info, _mi_bin
+    from ..operations.correlation import autocorr, automutual_info
 
     if min_what in ["ac", "corr"]:
         return lambda x: autocorr(y, tau=x, method="Fourier")
