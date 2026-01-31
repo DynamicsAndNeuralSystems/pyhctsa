@@ -11,3 +11,4 @@ ts2vg
 arch
 hmmlearn
 tqdm
+pathos
