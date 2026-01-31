@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pyhctsa.calculator import FeatureCalculator, classify_output, standardise_inputs
+from pyhctsa.calculator import FeatureCalculator, classify_output, _standardise_inputs
 from pyhctsa.utils import get_dataset
 
 #----------------- High-level module tests ------------------
@@ -49,21 +49,21 @@ def test_standardise_inputs():
     dat = d[0]
     # numpy array, 1d
     np_input = np.array(dat)
-    np_standardised = standardise_inputs(np_input)
+    np_standardised = _standardise_inputs(np_input)
     assert isinstance(np_standardised, list)
     assert isinstance(np_standardised[0], np.ndarray), "Expected numpy array to be returned as numpy array"
     # numpy array 2d
     np_input2d = np.random.randn(2,1000)
-    np_2dstandardised = standardise_inputs(np_input2d)
+    np_2dstandardised = _standardise_inputs(np_input2d)
     assert isinstance(np_2dstandardised, list)
     assert len(np_2dstandardised) == 2
     assert isinstance(np_2dstandardised[0], np.ndarray), "Expected 2d numpy array to be returned as list of numpy arrays"
     # as a list
-    list_standardised = standardise_inputs(dat)
+    list_standardised = _standardise_inputs(dat)
     assert isinstance(list_standardised, list)
     assert isinstance(list_standardised[0], np.ndarray), "Expected list to be returned as numpy array"
     test_tuple = tuple(dat)
-    tuple_standardised = standardise_inputs(test_tuple)
+    tuple_standardised = _standardise_inputs(test_tuple)
     assert isinstance(tuple_standardised, list)
     assert isinstance(tuple_standardised[0], np.ndarray), "Expected tuple to be returned as numpy array"
 
