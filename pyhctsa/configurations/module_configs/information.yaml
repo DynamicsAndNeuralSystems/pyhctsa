@@ -21,13 +21,21 @@ information:
       - {min_what: 'mi-kraskov2', extra_param: '4', zscore: True}
       - {min_what: 'mi-hist', extra_param: '5', zscore: True}
       - {min_what: 'mi-hist', extra_param: '10', zscore: True}
-      - {min_what: 'ac', min_not_max: False, zscore: True}
-      - {min_what: 'mi-gaussian', min_not_max: False, zscore: True}
-      - {min_what: 'mi-kraskov2', extra_param: '4', min_not_max: False, zscore: True}
-      - {min_what: 'mi-hist', extra_param: '5', min_not_max: False, zscore: True}
-      - {min_what: 'mi-hist', extra_param: '10', min_not_max: False, zscore: True}
     legacy_name: CO_FirstMin
-    ordered_args: ['min_what', 'extra_param', 'min_not_max']
+    ordered_args: ['min_what', 'extra_param']
+  
+  first_max:
+    base_name: first_max
+    depedencies:
+      - jpype1
+    configs:
+      - {max_what: 'ac', zscore: True}
+      - {max_what: 'mi-gaussian', zscore: True}
+      - {max_what: 'mi-kraskov2', extra_param: '4', zscore: True}
+      - {max_what: 'mi-hist', extra_param: '5', zscore: True}
+      - {max_what: 'mi-hist', extra_param: '10', zscore: True}
+    legacy_name: CO_FirstMin
+    ordered_args: ['max_what', 'extra_param']
   
   rm_automutual_information:
     base_name: rm_automutual_information
