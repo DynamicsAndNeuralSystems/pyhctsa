@@ -46,6 +46,8 @@ def apply_selection_wrapper(func, keep_keys):
     :return: Wrapped function.
     :rtype: Any
     """
+    keys_list = [keep_keys] if isinstance(keep_keys, str) else keep_keys
+    
     def wrapper(*args, **kwargs):
         result = func(*args, **kwargs)
         # if result is a dict, then filter it according to the keys
@@ -82,30 +84,60 @@ def standardise_inputs(data) -> list[np.ndarray]:
         "Input must be a 1D series, a list of 1D series, or a 2D array "
         "with shape (n_series, n_samples)")
   
-def _format_param_value(val : Union[int, float, list]) -> str:
+def _format_param_value(val, key=None) -> str: 
+    """ 
+    Format parameter value for label: 
+    - For bools: if True, return the key name.
+    - For floats/ints: as before. 
+    - For lists: if contiguous range, show as 'start_end', else join all values. 
     """
-    Format parameter value for label:
-    - For floats/ints: as before.
-    - For lists: if contiguous range, show as 'start_end', else join all values.
-    """
-    if isinstance(val, list):
-        # Check if it's a contiguous range
-        if len(val) > 1 and all(isinstance(x, (int, float)) for x in val):
-            diffs = [val[i+1] - val[i] for i in range(len(val)-1)]
-            if all(d == 1 for d in diffs):  # contiguous integer range
-                return f"{_format_param_value(val[0])}_{_format_param_value(val[-1])}"
-        # Otherwise, join all values
-        return "_".join(_format_param_value(x) for x in val)
-    if isinstance(val, float) or isinstance(val, int):
-        if val < 0:
-            return 'm' + _format_param_value(-val)
-        elif val == int(val):
-            return str(int(val))
-        elif 0 < val < 1:
-            return '0p' + str(val).split(".")[1].rstrip('0')
-        else:
-            return str(val).replace('.', 'p').rstrip('0').rstrip('p')
+    # New Logic for Booleans
+    if isinstance(val, bool):
+        return key if val and key else ""
+
+    if isinstance(val, list): 
+        # Check if it's a contiguous range 
+        if len(val) > 1 and all(isinstance(x, (int, float)) for x in val): 
+            diffs = [val[i+1] - val[i] for i in range(len(val)-1)] 
+            if all(d == 1 for d in diffs): 
+                # Pass key down for recursion if needed, though usually lists aren't bools
+                return f"{_format_param_value(val[0])}_{_format_param_value(val[-1])}" 
+        return "_".join(_format_param_value(x) for x in val) 
+
+    if isinstance(val, (float, int)): 
+        if val < 0: 
+            return 'm' + _format_param_value(-val) 
+        elif val == int(val): 
+            return str(int(val)) 
+        elif 0 < val < 1: 
+            return '0p' + str(val).split(".")[1].rstrip('0') 
+        else: 
+            return str(val).replace('.', 'p').rstrip('0').rstrip('p') 
+            
     return str(val)
+
+def _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval):
+    """Constructs the feature string based on params and flags."""
+    parts = []
+    
+    # Process parameters
+    if ordered_args:
+        for arg in ordered_args:
+            if arg in combo_dict:
+                formatted = _format_param_value(combo_dict[arg], key=arg)
+                if formatted: parts.append(formatted)
+    else:
+        for k, v in combo_dict.items():
+            formatted_v = _format_param_value(v, key=k)
+            parts.append(formatted_v if isinstance(v, bool) else f"{k}{formatted_v}")
+    
+    # Join base and parts, filter out empty strings
+    label = "_".join([base_name] + [p for p in parts if p])
+    
+    # Append suffix flags
+    if not do_zscore: label += '_raw'
+    if do_absval:    label += '_abs'
+    return label
 
 class FeatureCalculator:
     def __init__(self, config_path : Union[str, None] = None):
@@ -127,11 +159,26 @@ class FeatureCalculator:
         self.feature_funcs = self._build_feature_funcs()
         print(f"Loaded {len(self.feature_funcs)} master operations.")
 
+    def _check_deps(self, module_key, feature_name, config):
+        raw_deps = config.get("dependencies")
+        if not raw_deps:
+            return True
+        deps_to_check = [raw_deps] if isinstance(raw_deps, str) else raw_deps
+        missing = [dep for dep in deps_to_check if not check_optional_deps(dep)]
+        if missing:
+            full_name = f"{module_key}.{feature_name}"
+            print(f"Skipping function '{full_name}' - missing dependencies: {', '.join(missing)}")
+            self._skipped_functions.append((full_name, missing))
+            return False
+        
+        return True
+    
     def _build_feature_funcs(self):
         feature_funcs = {}
         skipped_functions = []
         
         for module_key in self.config.keys():
+
             try:
                 module = importlib.import_module(f"{self._operations_package}.{module_key}")
             except ImportError as e:
@@ -140,132 +187,45 @@ class FeatureCalculator:
                 for feature_name in self.config[module_key].keys():
                     skipped_functions.append((f"{module_key}.{feature_name}", ["import_error"]))
                 continue
-            
+
             # Process features from this module
             for feature_name, feature_config in self.config[module_key].items():
-                # Check if this specific function has dependencies
-                function_dependencies = feature_config.get("dependencies", None)
-                missing_deps = []
-                
-                if function_dependencies is not None:
-                    # Handle both string and list of dependencies
-                    if isinstance(function_dependencies, str):
-                        deps_to_check = [function_dependencies]
-                    elif isinstance(function_dependencies, list):
-                        deps_to_check = function_dependencies
-                    else:
-                        deps_to_check = []
-                    
-                    # Check each dependency for this function
-                    for dep in deps_to_check:
-                        if not check_optional_deps(dep):
-                            missing_deps.append(dep)
-                    
-                    if missing_deps:
-                        print(f"Skipping function '{module_key}.{feature_name}' - missing dependencies: {', '.join(missing_deps)}")
-                        skipped_functions.append((f"{module_key}.{feature_name}", missing_deps))
-                        continue
-                op_func = getattr(module, feature_name, None)
-                if op_func is None:
-                    continue
-                base_name = feature_config.get("base_name", f"{module_key}_{feature_name}")
+                op_func = getattr(module, feature_name)
+                base_name = feature_config.get("base_name", feature_name)
                 ordered_args = feature_config.get("ordered_args", [])
-                configs = feature_config.get("configs", [{}])
-                if isinstance(configs, list) and configs and isinstance(configs[0], dict):
-                    # Check if zscore and abs vary
-                    zscore_values = [conf.get("zscore", False) for conf in configs]
-                    abs_values = [conf.get("abs", False) for conf in configs]
-                    zscore_varies = len(set(zscore_values)) > 1
-                    abs_varies = len(set(abs_values)) > 1
-                    for conf in configs:
-                        zscore = conf.pop("zscore", False) if "zscore" in conf else False
-                        absval = conf.pop("abs", False) if "abs" in conf else False
-                        select_keys = conf.pop("_select", None)
-                        if conf:
-                            keys, values = zip(*[(k, v if isinstance(v, list) else [v]) for k, v in conf.items()])
-                            for combo in product(*values):
-                                combo_dict = dict(zip(keys, combo))
-                                label = base_name
-                                # build the unique label string
-                                if ordered_args:
-                                    parts = []
-                                    for arg in ordered_args:
-                                        if arg in combo_dict:
-                                            parts.append(_format_param_value(combo_dict[arg]))
-                                    if parts:
-                                        label += "_" + "_".join(parts)
-                                else:
-                                    label += "_" + "_".join(f"{k}{_format_param_value(v)}" for k, v in combo_dict.items())
-                                
-                                if zscore_varies and not zscore:
-                                    label += "_raw"
-                                if abs_varies and absval:
-                                    label += "_abs"
-
-                                # create the base function
-                                decorated_func = preprocess_decorator(zscore, absval)(op_func)
-                                final_func = partial(decorated_func, **combo_dict)
-
-                                # apply selection wrapper if _select was found
-                                if select_keys:
-                                    final_func = apply_selection_wrapper(final_func, select_keys)
-
-                                feature_funcs[label] = final_func
-
-                        else:
-                            # case: no parameters in config
-                            label = base_name
-                            if zscore_varies and not zscore:
-                                label += "_raw"
-                            if abs_varies and absval:
-                                label += "_abs"
-                            
-                            decorated_func = preprocess_decorator(zscore, absval)(op_func)
-                            final_func = decorated_func
-
-                            if select_keys: 
-                                final_func = apply_selection_wrapper(final_func, select_keys)
-
-                            feature_funcs[label] = final_func
-                else:
-                    zscore, absval = False, False
-                    select_keys = None # 1. Initialize variable
-
-                    if isinstance(configs, list) and configs and isinstance(configs[0], dict):
-                        zscore = configs[0].pop("zscore", False)
-                        absval = configs[0].pop("abs", False)
-                        select_keys = configs[0].pop("_select", None) # 2. Pop the reserved key
-
-                    label = f"{module_key}_{feature_name}"
+                
+                for config_item in feature_config.get("configs", [{}]):
+                    # extract and clean meta params
+                    do_zscore = config_item.pop('zscore', False)
+                    do_absval = config_item.pop('abs', False)
+                    select_features = config_item.pop('_select', None)
                     
-                    # If abs is explicitly set True on the single config, include suffix to make it explicit
-                    if absval:
-                        label += "_abs"
+                    # setup base function
+                    master_func = preprocess_decorator(do_zscore, do_absval)(op_func)
                     
-                    decorated_func = preprocess_decorator(zscore, absval)(op_func)
+                    # standardise config_item into a list of combinations
+                    # if config_item is empty, product(*) returns [()], allowing us to loop once
+                    keys = list(config_item.keys())
+                    values = [v if isinstance(v, list) else [v] for v in config_item.values()]
                     
-                    # 3. Apply the wrapper if _select was found
-                    if select_keys:
-                        decorated_func = apply_selection_wrapper(decorated_func, select_keys)
-
-                    feature_funcs[label] = decorated_func
+                    for combo_values in product(*values):
+                        combo_dict = dict(zip(keys, combo_values))
+                        
+                        # generate label and apply wrappers
+                        label = _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval)
+                        
+                        final_func = partial(master_func, **combo_dict)
+                        if select_features:
+                            final_func = apply_selection_wrapper(final_func, select_features)
+                        
+                        feature_funcs[label] = final_func
         
-        # Store information about skipped functions for later reference
+        # store information about skipped functions for later reference
         self._skipped_functions = skipped_functions
         if skipped_functions:
             print(f"Total functions skipped due to missing dependencies: {len(skipped_functions)}")
         
         return feature_funcs
-
-    def _extract_single(self, ts : ArrayLike):
-        results = {}
-        for name, func in self.feature_funcs.items():
-            # for each partialed function
-            try:
-                results[name] = func(ts)
-            except Exception as e:
-                results[name] = f"Error: {e}"
-        return results
     
     def summary(self):
         """
