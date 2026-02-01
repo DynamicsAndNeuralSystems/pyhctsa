@@ -4,7 +4,6 @@ import numpy as np
 from functools import partial
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, MofNCompleteColumn, track
 from pathos.helpers import mp as pathos_mp
-from dask.distributed import as_completed
 
 def _extract_features_single_series(ts, feature_funcs):
     """
@@ -68,7 +67,6 @@ class LocalDistributor(BaseDistributor):
             TimeRemainingColumn(),
             expand=True
         ) as progress:
-            # progress.track is much more reliable than manual advance
             chunked_results = list(progress.track(
                 iterator, 
                 total=len(data_chunks), 
@@ -81,37 +79,3 @@ class LocalDistributor(BaseDistributor):
         self.pool.clear()
         self.pool.close()
         self.pool.join()
-
-class DaskDistributor(BaseDistributor):
-    def __init__(self, address=None):
-        from dask.distributed import Client
-        self.client = Client(address)
-        self.n_workers = len(self.client.scheduler_info()['workers'])
-
-    def map(self, func, data, **kwargs):
-        c_size = self.calculate_chunk_size(len(data), self.n_workers)
-        data_chunks = [data[i:i + c_size] for i in range(0, len(data), c_size)]
-        
-        futures = self.client.map(partial(_compute_features_for_chunk, **kwargs), data_chunks)
-        total_tasks = len(futures)
-        
-        with Progress(
-            TextColumn("[bold blue]{task.description}"),
-            BarColumn(bar_width=None),
-            MofNCompleteColumn(),
-            TaskProgressColumn(),
-            TextColumn("•"),
-            TimeRemainingColumn(),
-            expand=True
-        ) as progress:
-            task = progress.add_task(f"Dask (workers={self.n_workers})", total=total_tasks)
-            
-            chunked_results = []
-            for future in futures:
-                chunked_results.append(future.result())
-                progress.advance(task)
-            
-        return [row for chunk in chunked_results for row in chunk]
-
-    def close(self):
-        self.client.close()

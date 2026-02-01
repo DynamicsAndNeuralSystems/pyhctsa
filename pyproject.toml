@@ -29,8 +29,7 @@ dependencies = [
   "hmmlearn",
   "PyWavelets @ git+https://github.com/joshuabmoore/pywt.git",
   "rich",
-  "pathos",
-  "dask[distributed]"
+  "pathos"
 ]
 
 classifiers = [
