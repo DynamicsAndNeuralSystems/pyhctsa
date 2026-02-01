@@ -9,10 +9,10 @@ import numpy as np
 import pandas as pd
 import yaml
 from numpy.typing import ArrayLike
-from tqdm import tqdm
+from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
 from .utils import check_optional_deps, preprocess_decorator, validate_data
-from .distribution import _compute_features_for_chunk, _extract_features_single_series
+from .distribute import _compute_features_for_chunk, _extract_features_single_series
 
 def range_constructor(loader, node) -> list:
     """Construct a range from a YAML config."""
@@ -243,7 +243,7 @@ class FeatureCalculator:
         return e_arr
     
     def extract(self, data : Union[ArrayLike, list[ArrayLike]], labels: Union[ArrayLike, list[ArrayLike], None] = None,
-                verbose : bool = True, distributor=None) -> pd.DataFrame:
+                verbose : bool = True, distributor = None) -> pd.DataFrame:
         """
         Run the configured feature extractor over one or more time series and
         return a single tidy `pandas.DataFrame`.
@@ -265,9 +265,20 @@ class FeatureCalculator:
             * A single label (str or int) for a single series.
             * A list or array of labels, one per series.
             * None (default), in which case series are labeled as 'ts_1', 'ts_2', etc.
-
         verbose : bool, optional
             Whether to show a progress bar of the features being computed.
+        distributor : object, optional
+            Optional distributor for parallel computation. The distributor must
+            implement a `map(func, iterable, **kwargs)` method that applies
+            `func` to chunks of `iterable` (or to items) and returns a
+            flattened list of results.
+
+            Two implementations provided in this package are
+            `pyhctsa.distribute.LocalDistributor` (uses `pathos.ProcessPool`)
+            and `pyhctsa.distribute.DaskDistributor` (uses
+            `dask.distributed`). If ``None`` (default), extraction runs
+            sequentially in the current process. Distributor objects may also
+            provide an optional `close()` method for cleaning up resources.
         
         Returns
         -------
@@ -310,17 +321,28 @@ class FeatureCalculator:
         start_time = time.perf_counter()
         
         if distributor:
-            # Parallel execution (Local or Cluster)
+            # parallel execution (local or cluster)
             rows = distributor.map(
                 _compute_features_for_chunk,
                 series_list, 
                 feature_funcs=self.feature_funcs
             )
         else:
-            # Sequential fallback
-            pbar = tqdm if verbose else (lambda x, **kwargs: x)
-            rows = [_extract_features_single_series(ts, self.feature_funcs) 
-                    for ts in pbar(series_list, desc="Sequential Extraction")]
+            # sequential fallback
+            if verbose:
+                with Progress(
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(bar_width=None), # 'None' makes it expand to full width
+                    TaskProgressColumn(),
+                    TimeElapsedColumn(),
+                ) as progress:
+                    task = progress.add_task("Sequential Extraction", total=len(series_list))
+                    rows = []
+                    for ts in series_list:
+                        rows.append(_extract_features_single_series(ts, self.feature_funcs))
+                        progress.advance(task)
+            else:
+                rows = [_extract_features_single_series(ts, self.feature_funcs) for ts in series_list]
 
         elapsed = time.perf_counter() - start_time
         print(f"Feature extraction completed in {elapsed:.3f} seconds.")

@@ -2,8 +2,9 @@ from abc import ABC, abstractmethod
 import multiprocessing as mp
 import numpy as np
 from functools import partial
-from tqdm import tqdm
+from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, MofNCompleteColumn, track
 from pathos.helpers import mp as pathos_mp
+from dask.distributed import as_completed
 
 def _extract_features_single_series(ts, feature_funcs):
     """
@@ -54,13 +55,26 @@ class LocalDistributor(BaseDistributor):
     def map(self, func, data, **kwargs):
         c_size = self.calculate_chunk_size(len(data), self.n_workers)
         data_chunks = [data[i:i + c_size] for i in range(0, len(data), c_size)]
-        worker_task = partial(_compute_features_for_chunk, **kwargs)
         
-        chunked_results = list(tqdm(
-            self.pool.imap(worker_task, data_chunks), 
-            total=len(data_chunks), 
-            desc=f"Parallel (Pathos, cores={self.n_workers})"
-        ))
+        worker_task = partial(_compute_features_for_chunk, **kwargs)
+        iterator = self.pool.imap(worker_task, data_chunks)
+        
+        with Progress(
+            TextColumn("[bold cyan]{task.description}"),
+            BarColumn(bar_width=None),
+            MofNCompleteColumn(),
+            TaskProgressColumn(),
+            TextColumn("•"),
+            TimeRemainingColumn(),
+            expand=True
+        ) as progress:
+            # progress.track is much more reliable than manual advance
+            chunked_results = list(progress.track(
+                iterator, 
+                total=len(data_chunks), 
+                description=f"Parallel (Pathos, cores={self.n_workers})"
+            ))
+       
         return [row for chunk in chunked_results for row in chunk]
 
     def close(self):
@@ -75,15 +89,28 @@ class DaskDistributor(BaseDistributor):
         self.n_workers = len(self.client.scheduler_info()['workers'])
 
     def map(self, func, data, **kwargs):
-        if 'feature_funcs' in kwargs:
-            kwargs['feature_funcs'] = self.client.scatter(kwargs['feature_funcs'], broadcast=True)
-            
         c_size = self.calculate_chunk_size(len(data), self.n_workers)
         data_chunks = [data[i:i + c_size] for i in range(0, len(data), c_size)]
         
-        # Now we map using the 'future' reference to the scattered dict
         futures = self.client.map(partial(_compute_features_for_chunk, **kwargs), data_chunks)
-        chunked_results = self.client.gather(futures)
+        total_tasks = len(futures)
+        
+        with Progress(
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(bar_width=None),
+            MofNCompleteColumn(),
+            TaskProgressColumn(),
+            TextColumn("•"),
+            TimeRemainingColumn(),
+            expand=True
+        ) as progress:
+            task = progress.add_task(f"Dask (workers={self.n_workers})", total=total_tasks)
+            
+            chunked_results = []
+            for future in futures:
+                chunked_results.append(future.result())
+                progress.advance(task)
+            
         return [row for chunk in chunked_results for row in chunk]
 
     def close(self):

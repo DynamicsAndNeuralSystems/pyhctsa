@@ -28,7 +28,7 @@ dependencies = [
   "arch",
   "hmmlearn",
   "PyWavelets @ git+https://github.com/joshuabmoore/pywt.git",
-  "tqdm",
+  "rich",
   "pathos"
 ]
 
