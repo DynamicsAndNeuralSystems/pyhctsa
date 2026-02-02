@@ -243,7 +243,7 @@ class FeatureCalculator:
         return e_arr
     
     def extract(self, data : Union[ArrayLike, list[ArrayLike]], labels: Union[ArrayLike, list[ArrayLike], None] = None,
-                verbose : bool = True, distributor = None) -> pd.DataFrame:
+                verbose : bool = False, distributor = None) -> pd.DataFrame:
         """
         Run the configured feature extractor over one or more time series and
         return a single tidy `pandas.DataFrame`.
