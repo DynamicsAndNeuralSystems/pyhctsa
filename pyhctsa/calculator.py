@@ -272,13 +272,6 @@ class FeatureCalculator:
             implement a `map(func, iterable, **kwargs)` method that applies
             `func` to chunks of `iterable` (or to items) and returns a
             flattened list of results.
-
-            Two implementations provided in this package are
-            `pyhctsa.distribute.LocalDistributor` (uses `pathos.ProcessPool`)
-            and `pyhctsa.distribute.DaskDistributor` (uses
-            `dask.distributed`). If ``None`` (default), extraction runs
-            sequentially in the current process. Distributor objects may also
-            provide an optional `close()` method for cleaning up resources.
         
         Returns
         -------
@@ -321,7 +314,7 @@ class FeatureCalculator:
         start_time = time.perf_counter()
         
         if distributor:
-            # parallel execution (local or cluster)
+            # parallel execution
             rows = distributor.map(
                 _compute_features_for_chunk,
                 series_list, 

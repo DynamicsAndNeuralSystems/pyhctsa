@@ -54,6 +54,24 @@ res = raw_hrv_meas(data) # result as either a dictionary or scalar value
 ```
 Note that individual operations can only be called directly on individual time-series instances.
 
+## 🏗️ Parallel Computing
+Time-series feature extraction is computationally intensive. 
+To speed up processing, pyhctsa allows you to distribute the workload across multiple CPU cores on your local machine using the `LocalDistributor`:
+```Python
+from pyhctsa.distributed import LocalDistributor
+from pyhctsa.calculator import FeatureCalculator
+
+# 1. Initialize the calculator
+calc = FeatureCalculator()
+
+# 2. Create a LocalDistributor and specify the number of workers
+# It is generally recommended to set n_workers to the number of physical CPU cores
+dist = LocalDistributor(n_workers=4)
+
+# 3. Pass the distributor to the .extract() method
+res = calc.extract(data, distributor=dist)
+```
+
 ## ℹ️ Note for Windows users
 Some features require Java (JDK) to be installed. If you encounter a `JVM not found` error:
 
