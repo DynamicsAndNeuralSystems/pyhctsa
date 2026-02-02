@@ -267,6 +267,7 @@ class FeatureCalculator:
             * None (default), in which case series are labeled as 'ts_1', 'ts_2', etc.
         verbose : bool, optional
             Whether to show a progress bar of the features being computed.
+            Default is `False`.
         distributor : object, optional
             Optional distributor for parallel computation. The distributor must
             implement a `map(func, iterable, **kwargs)` method that applies
