@@ -61,14 +61,14 @@ To speed up processing, pyhctsa allows you to distribute the workload across mul
 from pyhctsa.distributed import LocalDistributor
 from pyhctsa.calculator import FeatureCalculator
 
-# 1. Initialize the calculator
+# initialize the calculator
 calc = FeatureCalculator()
 
-# 2. Create a LocalDistributor and specify the number of workers
-# It is generally recommended to set n_workers to the number of physical CPU cores
+# create a LocalDistributor and specify the number of workers
+# it is generally recommended to set n_workers to the number of physical CPU cores
 dist = LocalDistributor(n_workers=4)
 
-# 3. Pass the distributor to the .extract() method
+# pass the distributor to the .extract() method
 res = calc.extract(data, distributor=dist)
 ```
 
