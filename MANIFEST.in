@@ -1,1 +1,1 @@
-recursive-include pyhctsa/Toolboxes *.c *.h
+recursive-include pyhctsa/toolboxes *.c *.h

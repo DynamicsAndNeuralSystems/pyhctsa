@@ -1,0 +1,134 @@
+import numpy as np
+from numpy.typing import ArrayLike
+import scipy
+from scipy.stats import expon, norm
+from ts2vg import NaturalVG
+
+from pyhctsa.operations.correlation import autocorr, first_crossing
+from pyhctsa.operations.entropy import distribution_entropy
+
+def _horiz_vgraph(ts_data : ArrayLike) -> ArrayLike:
+    """Helper function for `VisibilityGraph`."""
+    # Ensure ts_data is a NumPy array
+    ts_data = np.asarray(ts_data)
+    N = len(ts_data)
+    # Initialize an empty adjacency matrix
+    A = np.zeros((N, N), dtype=int)
+    for i in range(N):
+        # --- Look forward for the first taller neighbor ---
+        # We only need to look forward if we are not the last node
+        if i < N - 1:
+            # Create a slice of the data from the next element to the end
+            forward_slice = ts_data[i+1:]
+            # Find the indices of all nodes in the slice that are taller than the current node
+            # np.where returns a tuple of arrays, we take the first element [0]
+            taller_nodes_fwd = np.where(forward_slice > ts_data[i])[0]
+            # If any taller nodes were found
+            if taller_nodes_fwd.size > 0:
+                # The first element in this array corresponds to the nearest taller node
+                first_taller_relative_idx = taller_nodes_fwd[0]  
+                # Convert the relative index (from the slice) to an absolute index (from the original series)
+                first_taller_absolute_idx = i + 1 + first_taller_relative_idx      
+                # Set the connection in the adjacency matrix
+                A[i, first_taller_absolute_idx] = 1
+        if i > 0:
+            # Create a slice of the data from the beginning up to the current node
+            backward_slice = ts_data[:i]
+            # Find the indices of all nodes in the slice that are taller than the current node
+            taller_nodes_bwd = np.where(backward_slice > ts_data[i])[0]
+            # If any taller nodes were found
+            if taller_nodes_bwd.size > 0:
+                closest_taller_absolute_idx = taller_nodes_bwd[-1]
+                A[closest_taller_absolute_idx, i] = 1
+
+    A = np.maximum(A, A.T)
+    
+    return A
+
+def visibility_graph(y : ArrayLike, meth : str = 'horiz', max_l : int = 5000) -> dict:
+    """
+    Visibility graph analysis of a time series.
+
+    Constructs a visibility graph of the time series and returns various statistics on the properties of the resulting network.
+    cf. [1] and [2].
+
+    References
+    ----------
+    .. [1] "From time series to complex networks: The visibility graph"
+            Lacasa, Lucas and Luque, Bartolo and Ballesteros, Fernando and Luque, Jordi
+            and Nuno, Juan Carlos P. Natl. Acad. Sci. USA. 105(13) 4972 (2008)
+    .. [2] "Horizontal visibility graphs: Exact results for random time series"
+            Luque, B. and Lacasa, L. and Ballesteros, F. and Luque, J.
+            Phys. Rev. E. 80(4) 046103 (2009)
+    
+    Parameters
+    ----------
+    y : ArrayLike
+        Input time series
+    meth : str, optional
+        Method for constructing the visibility graph:
+        - 'horiz': Uses horizontal visibility (only horizontal lines link nodes)
+        - 'norm': Uses natural visibility (standard visibility definition)
+        Default is 'horiz'.
+    max_l : int, optional
+        Maximum number of samples to analyze. Longer time series are truncated
+        to first max_l points. Default is 5000.
+
+    Returns
+    -------
+    dict
+        Statistics on the degree distribution.
+    """
+    y = np.asarray(y)
+    N = len(y)
+    if N > max_l:
+        # too long to store in memory
+        print(f"Time series ({N} > {max_l}) is too long for visibility graph. Analyzing the first {max_l} samples.")
+        y = y[:max_l]
+        N = len(y)
+    y = y - np.min(y) # adjust so that the minimum of y is at zero
+
+    # Compute the visibility graph:
+    k = np.zeros(1)
+    if meth == 'horiz':
+        A = _horiz_vgraph(y)
+        k = A.sum(axis=0)
+
+    elif meth == 'norm':
+        vg = NaturalVG()
+        vg.build(y,only_degrees=True)
+        k = vg._degrees
+
+    out = {}
+    # Degree distribution: basic statistics
+    m, c = scipy.stats.mode(k)
+    out['mode'] = m
+    out['propmode'] = sum(k == out['mode'])/sum(k)
+    out['meank'] = np.mean(k) # mean number of links per node
+    out['mediank'] = np.median(k)
+    out['stdk'] = np.std(k, ddof=1)
+    out['maxk'] = np.max(k)
+    out['mink'] = np.min(k)
+    out['rangek'] = np.ptp(k)
+    out['iqrk'] = np.quantile(k, .75, method='hazen') - np.quantile(k, .25, method='hazen') 
+    out['skewnessk'] = scipy.stats.skew(k)
+    out['maxonmedian'] = np.max(k)/np.median(k) # max on median (indicator of outlier)
+    out['ol90'] = np.mean(k[(k >= np.quantile(k, 0.05, method='hazen')) & (k <= np.quantile(k, 0.95, method='hazen'))])/np.mean(k)
+    out['olu90'] = np.mean(k[k >= np.quantile(k, 0.95, method='hazen')] - np.mean(k))/np.std(k, ddof=1)
+
+    # Fit distributions to degree distribution
+
+    # Entropy of distribution 
+    out['entropy'] = distribution_entropy(k, 'hist', 'sqrt')
+
+    #Using likelihood now:
+    out['gaussnlogL'] = -np.sum(norm.logpdf(k, loc=np.mean(k), scale=np.std(k, ddof=1)))
+    out['expnlogL'] = -np.sum(expon.logpdf(k, scale=np.mean(k)))
+
+    # Autocorr
+    out['kac1'] = autocorr(k, 1, 'Fourier')[0]
+    out['kac2'] = autocorr(k, 2, 'Fourier')[0]
+    out['kac3'] = autocorr(k, 3, 'Fourier')[0]
+    out['ktau'] = first_crossing(k, 'ac', 0, 'continuous')
+
+    return out

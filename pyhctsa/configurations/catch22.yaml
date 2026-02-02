@@ -1,0 +1,124 @@
+distribution:
+  histogram_mode:
+    base_name: histogram_mode
+    dependencies:
+    configs:
+      - {num_bins: 5, do_simple: True, zscore: False}
+      - {num_bins: 10, do_simple: True, zscore: False}
+    hctsa_name: DN_HistogramMode
+    ordered_args: ['num_bins']
+  
+  outlier_include:
+    base_name: outlier_include
+    dependencies:
+    configs:
+      - {threshold_how: 'pos', inc: 0.01, zscore: True}
+      - {threshold_how: 'neg', inc: 0.01, zscore: True}
+    legacy_name: DN_OutlierInclude_001_mdrmd
+    ordered_args: ['threshold_how', 'inc']
+  
+  first_crossing:
+    base_name: first_crossing
+    dependencies:
+    configs:
+      - {corr_fun: 'ac', threshold: '1/e', what_out: 'discrete', zscore: True}
+    legacy_name: CO_f1ecac
+    ordered_args: ['corr_fun', 'threshold', 'what_out']
+
+information:
+  first_min:
+    base_name: first_min
+    dependencies:
+    configs:
+      - {min_what: 'ac', zscore: True}
+    legacy_name: CO_FirstMin_ac
+    ordered_args: ['min_what', 'extra_param', 'min_not_max']
+  
+spectral:
+  spectral_summaries:
+    base_name: spectral_summaries
+    depedencies:
+    configs:
+      - {psd_meth: 'welch', window_type: 'rect', zscore: True}
+    legacy_name: SP_Summaries_welch_rect
+    ordered_args: ['psd_meth', 'window_type']
+
+model_fit:
+  local_simple:
+    base_name: local_simple
+    dependencies:
+    configs:
+      - {forecast_meth: 'mean', train_length: 1, zscore: True}
+      - {forecast_meth: 'mean', train_length: 3, zscore: True}
+    legacy_name: FC_LocalSimple
+    ordered_args: ['forecast_meth', 'train_length']
+
+medical:
+  hrv_classic:
+    base_name: hrv_classic
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: MD_hrv_classic
+  
+symbolic: 
+  binary_stats:
+    base_name: binary_stats
+    dependencies:
+    configs:
+      - {binary_method: 'mean', zscore: True}
+      - {binary_method: 'diff', zscore: True}
+    legacy_name: SB_BinaryStats
+    ordered_args: ['binary_method']
+  
+  transition_matrix:
+    base_name: transition_matrix
+    dependencies:
+    configs:
+      - {how_to_cg: 'quantile', num_groups: 3, tau: 'ac', zscore: True}
+    legacy_name: SB_TransitionMatrix
+    ordered_args: ['how_to_cg', 'num_groups', 'tau']
+  
+  motif_three:
+    base_name: motif_three
+    dependencies:
+    configs:
+      - {cg_how: 'quantile', zscore: True}
+    legacy_name: SB_MotifThree
+    ordered_args: ['cg_how']
+
+correlation:
+  histogram_ami:
+    base_name: histogram_ami
+    dependencies:
+    configs:
+      - {tau: 2, meth: 'even', num_bins: 5, zscore: True}
+    legacy_name: CO_HistogramAMI
+    ordered_args: ['tau', 'meth', 'num_bins']
+
+  trev:
+    base_name: trev
+    dependencies:
+    configs:
+      - {tau: 1, zscore: True}
+    legacy_name: CO_trev_1
+    ordered_args: ['tau']
+  
+  periodicity_wang:
+    base_name: periodicity_wang
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: PD_PeriodicityWang
+    ordered_args: 
+  
+  embed2_dist:
+    base_name: embed2_dist
+    dependencies:
+    configs:
+      - {tau: 'tau', zscore: True}
+    legacy_name: CO_Embed2_Dist
+    ordered_args: ['tau']
+  
+  
+  

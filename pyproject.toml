@@ -18,7 +18,6 @@ maintainers = [
 dependencies = [
   "numpy",
   "scipy",
-  "loguru",
   "pyyaml",
   "statsmodels",
   "jpype1",
@@ -29,7 +28,8 @@ dependencies = [
   "arch",
   "hmmlearn",
   "PyWavelets @ git+https://github.com/joshuabmoore/pywt.git",
-  "tqdm"
+  "rich",
+  "pathos"
 ]
 
 classifiers = [

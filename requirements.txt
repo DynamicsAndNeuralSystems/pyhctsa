@@ -1,6 +1,5 @@
 scipy
 numpy
-loguru
 pyyaml
 statsmodels
 jpype1
@@ -11,4 +10,5 @@ PyWavelets @ git+https://github.com/joshuabmoore/pywt.git
 ts2vg
 arch
 hmmlearn
-tqdm
+rich
+pathos

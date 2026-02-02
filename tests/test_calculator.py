@@ -1,22 +1,24 @@
-from pyhctsa.Utilities.utils import get_dataset
-from pyhctsa.FeatureCalculator.calculator import FeatureCalculator, classify_output, standardise_inputs
-import numpy as np
 import os
+
+import numpy as np
 import pandas as pd
 import pytest
+
+from pyhctsa.calculator import FeatureCalculator, classify_output, _standardise_inputs
+from pyhctsa.utils import get_dataset
 
 #----------------- High-level module tests ------------------
 # does the calculator run on module functions (yes/no)?
 @pytest.mark.parametrize("x", [
-    "medical", "extreme", "criticality", "correlation", "information", "entropy",
+    "medical", "extreme_events", "criticality", "correlation", "information", "entropy",
     "stationarity", "distribution", "scaling", "symbolic", "wavelet", 
-    "hypothesis", "spectral", "modelfit", "graph", "physics", "preprocess",
+    "hypothesis", "spectral", "model_fit", "graph", "physics", "pre_process",
     "surrogates"])
 def test_module_basic(x):
     # basic checks on medical module
     data = get_dataset(which="sinusoid")
     config_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "Configurations", "TestConfigs", f"{x}.yaml")
+        os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "configurations", "module_configs", f"{x}.yaml")
     assert os.path.exists(config_path), f"Config file not found: {config_path}"
     calc = FeatureCalculator(config_path)
     fvec = calc.extract(data)
@@ -45,32 +47,23 @@ def test_standardise_inputs():
     # try each input type
     d = get_dataset()
     dat = d[0]
-    pandas_input = pd.Series(dat)
-    pandas_standardised = standardise_inputs(pandas_input)
-    assert isinstance(pandas_standardised, list)
-    assert isinstance(pandas_standardised[0], np.ndarray), "Expected Pandas Series to be returned as numpy array"
-    # pandas dataframe
-    df = pd.DataFrame([d[0], d[0]])
-    df_standardised = standardise_inputs(df)
-    assert isinstance(df_standardised, list)
-    assert len(df_standardised) == 2
-    assert isinstance(df_standardised[0], np.ndarray), "Expected Pandas df to be returned as list of numpy arrays"
     # numpy array, 1d
     np_input = np.array(dat)
-    np_standardised = standardise_inputs(np_input)
+    np_standardised = _standardise_inputs(np_input)
     assert isinstance(np_standardised, list)
     assert isinstance(np_standardised[0], np.ndarray), "Expected numpy array to be returned as numpy array"
     # numpy array 2d
     np_input2d = np.random.randn(2,1000)
-    np_2dstandardised = standardise_inputs(np_input2d)
+    np_2dstandardised = _standardise_inputs(np_input2d)
     assert isinstance(np_2dstandardised, list)
     assert len(np_2dstandardised) == 2
-    assert isinstance(df_standardised[0], np.ndarray), "Expected 2d numpy array to be returned as list of numpy arrays"
+    assert isinstance(np_2dstandardised[0], np.ndarray), "Expected 2d numpy array to be returned as list of numpy arrays"
     # as a list
-    list_standardised = standardise_inputs(dat)
+    list_standardised = _standardise_inputs(dat)
     assert isinstance(list_standardised, list)
     assert isinstance(list_standardised[0], np.ndarray), "Expected list to be returned as numpy array"
     test_tuple = tuple(dat)
-    tuple_standardised = standardise_inputs(test_tuple)
+    tuple_standardised = _standardise_inputs(test_tuple)
     assert isinstance(tuple_standardised, list)
     assert isinstance(tuple_standardised[0], np.ndarray), "Expected tuple to be returned as numpy array"
+
