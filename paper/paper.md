@@ -8,18 +8,15 @@ tags:
   - highly comparative
 authors:
   - name: Joshua B. Moore
-    orcid: 0000-0000-0000-0000
+    orcid: 0000-0002-5237-1087
     equal-contrib: true
-    affiliation: "1, 2" # (Multiple affiliations must be quoted)
+    affiliation: "1, 2"
   - name: Ben D. Fulcher
-    equal-contrib: true # (This is how you can denote equal contributions between multiple authors)
+    equal-contrib: true
+    orcid: 0000-0002-3003-4055
     affiliation: 2
   - name: Author with no affiliation
     corresponding: true # (This is how to denote the corresponding author)
-    affiliation: 3
-  - given-names: Ludwig
-    dropping-particle: van
-    surname: Beethoven
     affiliation: 3
 affiliations:
  - name: Lyman Spitzer, Jr. Fellow, Princeton University, United States
@@ -31,11 +28,6 @@ affiliations:
    index: 3
 date: 13 August 2017
 bibliography: paper.bib
-
-# Optional fields if submitting to a AAS journal too, see this blog post:
-# https://blog.joss.theoj.org/2018/12/a-new-collaboration-with-aas-publishing
-aas-doi: 10.3847/xxxxx <- update this with the DOI from AAS once you know it.
-aas-journal: Astrophysical Journal <- The name of the AAS journal.
 ---
 
 # Summary
