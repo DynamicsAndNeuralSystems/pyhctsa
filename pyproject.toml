@@ -4,10 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyhctsa"
-version = "0.1.0"
-description = "project_description"
+version = "0.1.0a1"
+description = "Highly comparative time-series analysis in Python."
 readme = "README.md"
-license = {text = "MIT"}
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
 authors = [
   {name = "Joshua B. Moore", email = "joshua.moore@sydney.edu.au"}, 
   {name = "Ben D. Fulcher", email = "ben.fulcher@sydney.edu.au"}]
@@ -27,7 +28,7 @@ dependencies = [
   "ts2vg",
   "arch",
   "hmmlearn",
-  "PyWavelets @ git+https://github.com/joshuabmoore/pywt.git",
+  "PyWavelets @ git+https://github.com/joshuabmoore/pywt.git@pywt-fork-pyhctsa",
   "rich",
   "pathos"
 ]
@@ -36,7 +37,6 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.8",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",

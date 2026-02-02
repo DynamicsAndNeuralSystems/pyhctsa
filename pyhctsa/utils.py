@@ -81,17 +81,17 @@ def get_dataset(which : str = "e1000") -> list:
 
     datasets = {
         "e1000": {
-            "path": "../data/e1000.csv",
+            "path": "./data/e1000.csv",
             "loader": lambda p: _load_csv(p),
             "desc": "empirical1000"
         },
         "sinusoid": {
-            "path": "../data/sinusoid.txt",
+            "path": "./data/sinusoid.txt",
             "loader": lambda p: [np.loadtxt(p)],
             "desc": "sinusoid"
         },
         "noise": {
-            "path": "../data/noise_gaussian.txt",
+            "path": "./data/noise_gaussian.txt",
             "loader": lambda p: [np.loadtxt(p)],
             "desc": "gaussian noise"
         }
