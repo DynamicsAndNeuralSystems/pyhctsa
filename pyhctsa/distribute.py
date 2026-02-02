@@ -41,6 +41,17 @@ class BaseDistributor(ABC):
         pass
 
 class LocalDistributor(BaseDistributor):
+    """Local process-based distributor using a pathos ProcessPool.
+
+    This distributor parallelises work across local worker processes using
+    `pathos.multiprocessing.ProcessPool`. 
+
+    Parameters
+    ----------
+    n_workers : int, optional
+        Number of worker processes to use. If ``None``, defaults to
+        ``multiprocessing.cpu_count()``.
+    """
     def __init__(self, n_workers=None):
         self.n_workers = n_workers or mp.cpu_count()
         try:
