@@ -18,7 +18,7 @@ authors:
 affiliations:
  - name: School of Physics, The University of Sydney
    index: 1
-   ror: 0384j8v12
+   ror: "0384j8v12"
 date: 3 February 2026
 bibliography: paper.bib
 ---
@@ -33,7 +33,8 @@ Such time-series features
 
 # Statement of need
 
-`pyhctsa` is a Python package for highly comparative time-series feature analysis, based on the original implementation (`HCTSA`) in MATLAB.
+`pyhctsa` is a Python package for highly comparative time-series feature analysis, based on the original implementation (`HCTSA`) in MATLAB [@Fulcher:2017].
+The API for `pyhctsa` was developed to provide a user-friendly interface 
 
 
 enables wrapping low-level languages (e.g., C) for speed without losing
@@ -56,6 +57,9 @@ scientific explorations of forthcoming data releases from the *Gaia* mission
 [@gaia] by students and experts alike.
 
 # Software design
+
+The design philosophy of `pyhctsa` is anchored in the foundations of the original MATLAB implementation [@Fulcher:2017]. However, to meet the needs of the modern data science open-source ecosystem, `pyhcts` integrates the user-friendly, modular, and object-oriented framework established in `pyspi` [@Cliff:2023], a software package previously developed by our group for comparative pairwise feature analysis.  
+
 
 `Gala`'s design philosophy is based on three core principles: (1) to provide a
  user-friendly, modular, object-oriented API, (2) to use community tools and 
