@@ -63,9 +63,8 @@ While `pyhctsa` is designed to be 'plug-and-play' for standard use cases, it als
 
 ## Implementation fidelity
 While `pyhctsa` prioritises algorithmic equivalence with the original `HCTSA` toolbox, discrepancies in time-series feature values may arise from fundamental differences in how MATLAB and Python handle floating-point arithmetic and linear algebra routines. Furthermore, where the legacy implementation relied on proprietary MATLAB toolboxes and functions, we have integrated functionally similar open-source Python alternatives (e.g., `gaussian_kde` in Python instead of `ksdensity` for kernel density estimation).
-With these discrepancies in mind, we conducted a rigorous empirical validation
-To acheive this, we computed features for a large, heterogenous dataset of 1000 empirical time series [@Fulcher:]using both the original MATLAB implementation and `pyhctsa`.
-For each feature-computing function, we then computed the Pearson correlation 
+To verify the functional equivalence of `pyhctsa`, each feature-generating function was empirically validated against its original `HCTSA` counterpart.
+For each function, we compared the outputs of the two implementations for a large, heterogeneous dataset of 1000 empirical time series [@Fulcher:2021], quantifying similarity by computing the Pearson correlation coefficient between the resulting feature vectors.
 
 
 
