@@ -118,9 +118,37 @@
   doi = {10.6084/m9.figshare.5436136.v10},
   url = {https://doi.org/10.6084/m9.figshare.5436136.v10},
   language = {English},
-  note = {CC-BY-4.0},
-  keywords = {time series data, time series datasets, Time-Series Analysis},
-  abstract = {A diverse selection of 1000 empirical time series, along with results of an hctsa feature extraction, using v1.06 of hctsa and Matlab 2019b, computed on a server at The University of Sydney.The results of the computation are in the hctsa file, HCTSA_Empirical1000.mat for use in Matlab using v1.06 of hctsa.The same data is also provided in .csv format for the hctsa_datamatrix.csv (results of feature computation), with information about rows (time series) in hctsa_timeseries-info.csv, information about columns (features) in hctsa_features.csv (and corresponding hctsa code used to compute each feature in hctsa_masterfeatures.csv), and the data of individual time series (each line a time series, for time series described in hctsa_timeseries-info.csv) is in hctsa_timeseries-data.csv. These .csv files were produced by running >>OutputToCSV(HCTSA_Empirical1000.mat,true,true); in hctsa.The input file, INP_Empirical1000.mat, is for use with hctsa, and contains the time-series data and metadata for the 1000 time series. For example, massive feature extraction from these data on the user's machine, using hctsa, can proceed as>> TS_Init('INP_Empirical1000.mat');Some visualizations of the dataset are in CarpetPlot.png (first 1000 samples of all time series as a carpet (color) plot) and 150TS-250samples.png (conventional time-series plots of the first 250 samples of a sample of 150 time series from the dataset). More visualizations can be performed by the user using TS_PlotTimeSeries from the hctsa package.See links in references for more comprehensive documentation for performing methodological comparison using this dataset, and on how to download and use v1.06 of hctsa.}
+  note = {CC-BY-4.0}
+}
+
+@software{Jiang:2022,
+  author = {Jiang, Xiaodong and Srivastava, Sudeep and Chatterjee, Sourav and Yu, Yang and Handler, Jeffrey and Zhang, Peiyi and Bopardikar, Rohan and Li, Dawei and Lin, Yanjun and Thakore, Uttam and Brundage, Michael and Holt, Ginger and Komurlu, Caner and Nagalla, Rakshita and Wang, Zhichao and Sun, Hechao and Gao, Peng and Cheung, Wei and Gao, Jun and Wang, Qi and Guerard, Marius and Kazemi, Morteza and Chen, Yulin and Zhou, Chong and Lee, Sean and Laptev, Nikolay and Levendovszky, Tihamér and Taylor, Jake and Qian, Huijun and Zhang, Jian and Shoydokova, Aida and Singh, Trisha and Zhu, Chengjun and Baz, Zeynep and Bergmeir, Christoph and Yu, Di and Koylan, Ahmet and Jiang, Kun and Temiyasathit, Ploy and Yurtbay, Emre},
+  license = {MIT License},
+  month = {3},
+  title = {{Kats}},
+  url = {https://github.com/facebookresearch/Kats},
+  version = {0.2.0},
+  year = {2022}
+}
+
+@article{Barandas:2020,
+  title = {TSFEL: Time Series Feature Extraction Library},
+  journal = {SoftwareX},
+  volume = {11},
+  pages = {100456},
+  year = {2020},
+  issn = {2352-7110},
+  doi = {https://doi.org/10.1016/j.softx.2020.100456},
+  url = {https://www.sciencedirect.com/science/article/pii/S2352711020300017},
+  author = {Marília Barandas and Duarte Folgado and Letícia Fernandes and Sara Santos and Mariana Abreu and Patrícia Bota and Hui Liu and Tanja Schultz and Hugo Gamboa}
+}
+
+@manual{Henderson:2026,
+  title = {theft: Tools for Handling Extraction of Features from Time Series},
+  author = {Trent Henderson},
+  year = {2026},
+  note = {R package version 0.8.3},
+  url = {https://hendersontrent.github.io/theft/},
 }
 
 

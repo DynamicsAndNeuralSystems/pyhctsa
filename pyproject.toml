@@ -51,4 +51,13 @@ Homepage = "https://github.com/DynamicsAndNeuralSystems/pyhctsa"
 Repository = "https://github.com/DynamicsAndNeuralSystems/pyhctsa"
 
 [tool.setuptools.packages.find]
-exclude = ["tests*", ".github*"]
+where = ["."]
+
+[tool.setuptools.package-data]
+pyhctsa = [
+  "configurations/*.yaml",
+  "configurations/module_configs/*.yaml",
+  "data/*.csv",
+  "data/*.txt",
+  "toolboxes/**/*",
+]

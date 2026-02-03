@@ -1,1 +1,4 @@
-recursive-include pyhctsa/toolboxes *.c *.h
+recursive-include pyhctsa/configurations *.yaml
+recursive-include pyhctsa/data *.csv *.txt
+recursive-include pyhctsa/operations *.py
+recursive-include pyhctsa/toolboxes *

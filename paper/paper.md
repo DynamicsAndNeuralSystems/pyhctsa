@@ -25,32 +25,24 @@ bibliography: paper.bib
 
 # Summary
 
-Across diverse fields of science, finance, and industry, the generation of time-series data XXX.
-With this data, there is an increasing demand for tools to quantify meaningful patterns
-Drawing on a vast interdisciplinary literature of algorithmic methods, highly comparative time-series analysis (hctsa) offers a unified framework to compare thousands of time-series features, each capturing distinct aspects of the data.
-Such time-series features  
+Across diverse fields of science, finance, and industry, the generation of time-series data has reached an unprecedented scale and complexity. With this data, there is an increasing demand for tools to distill interpretable summaries or `features' that capture the varied statistical and dynamical properties of the time series. [sentence about importance/usefuleness of low dim. summaries]
+
+Drawing on a vast interdisciplinary literature of quantitative methods, highly comparative time-series analysis (HCTSA) offers a unified framework to automatically compute and compare thousands of time-series features. Although `HCTSA` has supported over XXX publications, its original MATLAB-based implementation presents significant accesibility and scalability barriers for many researchers. `pyhctsa` addresses these limitations by offering a native Python implementation, bringing the analytical power of the `HCTSA` library to the open-source ecosystem. By integrating with the modern Python data stack, `pyhctsa` will enable a broader community of reseachers to perform large scale, automated feature extraction in a transparent and reproducible environment. 
 
 
 # Statement of need
+[A section that clearly illustrates the research purpose of the software and places it in the context of related work. This should clearly state what problem the software is designed to solve, who the target audience is, and its relation to other work.]
+[importance of time-series feature-based representations, problem with bespoke feature sets which rely on expert knowledge, motivation for comprehensive toolkits.]
 
-`pyhctsa` is a Python package for highly comparative time-series feature analysis, based on the original implementation (`HCTSA`) in MATLAB [@Fulcher:2017; @Fulcher:2013].
-The API for `pyhctsa` was developed to provide a user-friendly interface 
+Automated time-series feature extraction packages in R such as `theft` [@Henderson:2026], Python such as `Kats` [@Jiang:2022], `tsfresh` [@Christ:2018], and `tsfel` [@Barandas:2020]. 
+Python packages limited in scope, often stop at spectral features [bring in HCTSA as being better, but in MATLAB].
+
+While `HCTSA` has supported over XXX publications across a myriad of disciplines -- from computational neuroscience [Ref], to engineering [Ref] and geoscience [Ref] -- the proprietary nature of its original implementation in MATLAB presents significant accessibility barriers 
+to researchers [without expensive licenses].
+[reference to open source science and Python with statistics]
 
 
-enables wrapping low-level languages (e.g., C) for speed without losing
-flexibility or ease-of-use in the user-interface. The API for `Gala` was
-designed to provide a class-based and user-friendly interface to fast (C or
-Cython-optimized) implementations of common operations such as gravitational
-potential and force evaluation, orbit integration, dynamical transformations,
-and chaos indicators for nonlinear dynamics. `Gala` also relies heavily on and
-interfaces well with the implementations of physical units and astronomical
-coordinate systems in the `Astropy` package [@astropy] (`astropy.units` and
-`astropy.coordinates`).
 
-`pyhctsa` was designed to be used by both astronomical researchers and by
-students in courses on gravitational dynamics or astronomy. 
-The original implementation in MATLAB has already been used in a number of scientific publications.
-By open-sourcing, `pyhctsa` will enable XXX something about bringing these tools to more scientists and being used in their workflows, scientific discovery, etc. etc.
 
 # Software design
 
@@ -59,51 +51,20 @@ To ensure functional parity with the MATLAB implementation, `pyhctsa` retains th
 
 At its core, the `pyhctsa` codebase is structured around three components: (1) __feature functions__, i.e., standalone routines that compute and return one or more features from a time-series input; (2) a __configuration file__, which specifies the parameter combinations to be systematically passed to these functions; and (3) the __extractor class__ (`FeatureCalculator`), which manages the execution of configured functions and consolidates the resulting feature values into a structured output. 
 
-While `pyhctsa` is designed to be 'plug-and-play' for standard use cases, it also provides the flexibility to specify bespoke parameter sets (i.e., feature sets) for specialised applications or research needs.
+While `pyhctsa` is designed to be 'plug-and-play' for standard use cases, it also provides the flexibility to specify bespoke parameter sets (i.e., feature sets) for specialised applications or research needs. Additionally, the modular architecture of `pyhctsa` enables the seamless integration of new feature functions and configurations, allowing the package to evolve alongside emerging research.  
 
 ## Implementation fidelity
-While `pyhctsa` prioritises algorithmic equivalence with the original `HCTSA` toolbox, discrepancies in time-series feature values may arise from fundamental differences in how MATLAB and Python handle floating-point arithmetic and linear algebra routines. Furthermore, where the legacy implementation relied on proprietary MATLAB toolboxes and functions, we have integrated functionally similar open-source Python alternatives (e.g., `gaussian_kde` in Python instead of `ksdensity` for kernel density estimation).
-To verify the functional equivalence of `pyhctsa`, each feature-generating function was empirically validated against its original `HCTSA` counterpart.
-For each function, we compared the outputs of the two implementations for a large, heterogeneous dataset of 1000 empirical time series [@Fulcher:2021], quantifying similarity by computing the Pearson correlation coefficient between the resulting feature vectors.
+While `pyhctsa` prioritises algorithmic equivalence with the original `HCTSA` toolbox, discrepancies in time-series feature values may arise from fundamental differences in how MATLAB and Python handle floating-point arithmetic and linear algebra routines. Furthermore, where the legacy implementation relied on proprietary MATLAB toolboxes and functions, we have integrated functionally similar open-source Python alternatives (e.g., `gaussian_kde` in Python instead of `ksdensity` for kernel density estimation). 
+
+To verify the functional equivalence of `pyhctsa`, each feature-generating function was empirically validated against its original `HCTSA` counterpart. Using a heterogeneous dataset of 1000 empirical time series [@Fulcher:2021], we systematically compared the outputs of both implementations. Similarity was quantified by calculating the Pearson correlation coefficient $r$ between resulting feature vectors. We note that because a single function often produces multiple distinct time-series features, each output feature was validated individually. To ensure ported functions were sufficiently similar, we applied a stringent inclusion criterion by retaining only those features that demonstrated strong statistical agreement ($r \geq 0.9$) with the original MATLAB implementation.
 
 
 
 # Research impact statement
 
-`Gala` has demonstrated significant research impact and grown both its user base 
-and contributor community since its initial release. The package has evolved 
-through contributions from over 18 developers beyond the original core developer 
-(@adrn), with community members adding new features, reporting bugs, and 
-suggesting new features. 
-
-While `Gala` started as a tool primarily to support the core developer's 
-research, it has expanded organically to support a range of applications across 
-domains in astrophysics related to Milky Way and galactic dynamics. The package 
-has been used in over 400 publications (according to Google Scholar) spanning 
-topics in galactic dynamics such as modeling stellar streams [@Pearson:2017], 
-Milky Way mass modeling, and interpreting kinematic and stellar population 
-trends in the Galaxy. `Gala` is integrated within the Astropy ecosystem as an 
-affiliated package and has built functionality that extends the widely-used 
-`astropy.units` and `astropy.coordinates` subpackages. `Gala`'s impact extends 
-beyond citations in research: Because of its focus on usability and user 
-interface design, `Gala` has also been incorporated into graduate-level galactic 
-dynamics curricula at multiple institutions. 
-
-`Gala` has been downloaded over 100,000 times from PyPI and conda-forge yearly 
-(or ~2,000 downloads per week) over the past few years, demonstrating a broad 
-and active user community. Users span career stages from graduate students to 
-faculty and other established researchers and represent institutions around the 
-world. This broad adoption and active participation validate `Gala`'s role as 
-core community infrastructure for galactic dynamics research.
-
-# AI usage disclosure
-
-AI tools were used in the development of this software, including the writing of function docstrings and in some cases, the porting of feature functions from their original implementation in MATLAB to python. To ensure. 
-No AI was used in the writing of this manuscript, or the preparation of supporting materials.
 
 # Acknowledgements
 
-We acknowledge contributions from Brigitta Sipocz, Syrtis Major, and Semyeong
-Oh, and support from Kathryn Johnston during the genesis of this project.
+We acknowledge the contributers and maintainers of the original HCTSA package in MATLAB. 
 
 # References
