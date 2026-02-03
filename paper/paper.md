@@ -10,41 +10,32 @@ authors:
   - name: Joshua B. Moore
     orcid: 0000-0002-5237-1087
     equal-contrib: true
-    affiliation: "1, 2"
+    affiliation: 1
   - name: Ben D. Fulcher
     equal-contrib: true
     orcid: 0000-0002-3003-4055
-    affiliation: 2
-  - name: Author with no affiliation
-    corresponding: true # (This is how to denote the corresponding author)
-    affiliation: 3
+    affiliation: 1
 affiliations:
- - name: Lyman Spitzer, Jr. Fellow, Princeton University, United States
+ - name: School of Physics, The University of Sydney
    index: 1
-   ror: 00hx57361
- - name: Institution Name, Country
-   index: 2
- - name: Independent Researcher, Country
-   index: 3
-date: 13 August 2017
+   ror: 0384j8v12
+date: 3 February 2026
 bibliography: paper.bib
 ---
 
 # Summary
 
-The forces on stars, galaxies, and dark matter under external gravitational
-fields lead to the dynamical evolution of structures in the universe. The orbits
-of these bodies are therefore key to understanding the formation, history, and
-future state of galaxies. The field of "galactic dynamics," which aims to model
-the gravitating components of galaxies to study their structure and evolution,
-is now well-established, commonly taught, and frequently used in astronomy.
-Aside from toy problems and demonstrations, the majority of problems require
-efficient numerical tools, many of which require the same base code (e.g., for
-performing numerical orbit integration).
+Across diverse fields of science, finance, and industry, the generation of time-series data XXX.
+With this data, there is an increasing demand for tools to quantify meaningful patterns
+Drawing on a vast interdisciplinary literature of algorithmic methods, highly comparative time-series analysis (hctsa) offers a unified framework to compare thousands of time-series features, each capturing distinct aspects of the data.
+Such time-series features  
+
 
 # Statement of need
 
-`pyhctsa` is a Python package for highly comparative time-series feature analysis. 
+`pyhctsa` is a Python package for highly comparative time-series feature analysis, based on the original implementation (`HCTSA`) in MATLAB.
+
+
 enables wrapping low-level languages (e.g., C) for speed without losing
 flexibility or ease-of-use in the user-interface. The API for `Gala` was
 designed to provide a class-based and user-friendly interface to fast (C or
