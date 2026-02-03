@@ -95,4 +95,36 @@
 	pages = {883--893},
 }
 
+@article{Fulcher:2013,
+    author = {Fulcher, Ben D. and Little, Max A. and Jones, Nick S.},
+    title = {Highly comparative time-series analysis: the empirical structure of time series and their methods},
+    journal = {Journal of The Royal Society Interface},
+    volume = {10},
+    number = {83},
+    pages = {20130048},
+    year = {2013},
+    month = {06},
+    issn = {1742-5689},
+    doi = {10.1098/rsif.2013.0048},
+    url = {https://doi.org/10.1098/rsif.2013.0048},
+    eprint = {https://royalsocietypublishing.org/rsif/article-pdf/doi/10.1098/rsif.2013.0048/185461/rsif.2013.0048.pdf},
+}
+
+@data{Fulcher:2021,
+  author = {Ben Fulcher},
+  title = {1000 Empirical Time series},
+  year = {2021},
+  publisher = {Monash University},
+  doi = {10.6084/m9.figshare.5436136.v10},
+  url = {https://doi.org/10.6084/m9.figshare.5436136.v10},
+  language = {English},
+  note = {CC-BY-4.0},
+  keywords = {time series data, time series datasets, Time-Series Analysis},
+  abstract = {A diverse selection of 1000 empirical time series, along with results of an hctsa feature extraction, using v1.06 of hctsa and Matlab 2019b, computed on a server at The University of Sydney.The results of the computation are in the hctsa file, HCTSA_Empirical1000.mat for use in Matlab using v1.06 of hctsa.The same data is also provided in .csv format for the hctsa_datamatrix.csv (results of feature computation), with information about rows (time series) in hctsa_timeseries-info.csv, information about columns (features) in hctsa_features.csv (and corresponding hctsa code used to compute each feature in hctsa_masterfeatures.csv), and the data of individual time series (each line a time series, for time series described in hctsa_timeseries-info.csv) is in hctsa_timeseries-data.csv. These .csv files were produced by running >>OutputToCSV(HCTSA_Empirical1000.mat,true,true); in hctsa.The input file, INP_Empirical1000.mat, is for use with hctsa, and contains the time-series data and metadata for the 1000 time series. For example, massive feature extraction from these data on the user's machine, using hctsa, can proceed as>> TS_Init('INP_Empirical1000.mat');Some visualizations of the dataset are in CarpetPlot.png (first 1000 samples of all time series as a carpet (color) plot) and 150TS-250samples.png (conventional time-series plots of the first 250 samples of a sample of 150 time series from the dataset). More visualizations can be performed by the user using TS_PlotTimeSeries from the hctsa package.See links in references for more comprehensive documentation for performing methodological comparison using this dataset, and on how to download and use v1.06 of hctsa.}
+}
+
+
+
+
+
 

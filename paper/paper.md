@@ -33,7 +33,7 @@ Such time-series features
 
 # Statement of need
 
-`pyhctsa` is a Python package for highly comparative time-series feature analysis, based on the original implementation (`HCTSA`) in MATLAB [@Fulcher:2017].
+`pyhctsa` is a Python package for highly comparative time-series feature analysis, based on the original implementation (`HCTSA`) in MATLAB [@Fulcher:2017; @Fulcher:2013].
 The API for `pyhctsa` was developed to provide a user-friendly interface 
 
 
@@ -47,38 +47,27 @@ interfaces well with the implementations of physical units and astronomical
 coordinate systems in the `Astropy` package [@astropy] (`astropy.units` and
 `astropy.coordinates`).
 
-`Gala` was designed to be used by both astronomical researchers and by
-students in courses on gravitational dynamics or astronomy. It has already been
-used in a number of scientific publications [@Pearson:2017] and has also been
-used in graduate courses on Galactic dynamics to, e.g., provide interactive
-visualizations of textbook material [@Binney:2008]. The combination of speed,
-design, and support for Astropy functionality in `Gala` will enable exciting
-scientific explorations of forthcoming data releases from the *Gaia* mission
-[@gaia] by students and experts alike.
+`pyhctsa` was designed to be used by both astronomical researchers and by
+students in courses on gravitational dynamics or astronomy. 
+The original implementation in MATLAB has already been used in a number of scientific publications.
+By open-sourcing, `pyhctsa` will enable XXX something about bringing these tools to more scientists and being used in their workflows, scientific discovery, etc. etc.
 
 # Software design
 
-The design philosophy of `pyhctsa` is anchored in the foundations of the original MATLAB implementation [@Fulcher:2017]. However, to meet the needs of the modern data science open-source ecosystem, `pyhcts` integrates the user-friendly, modular, and object-oriented framework established in `pyspi` [@Cliff:2023], a software package previously developed by our group for comparative pairwise feature analysis.  
+The design philosophy of `pyhctsa` is based on the original MATLAB implementation [@Fulcher:2017], however to meet the needs of the open-source data science ecosystem, `pyhctsa` integrates the modular framework established in `pyspi` [@Cliff:2023], a software package previously developed by our group for comparative pairwise feature analysis.
+To ensure functional parity with the MATLAB implementation, `pyhctsa` retains the original function nomenclature, conceptual groupings, and parameter specifications.
+
+At its core, the `pyhctsa` codebase is structured around three components: (1) __feature functions__, i.e., standalone routines that compute and return one or more features from a time-series input; (2) a __configuration file__, which specifies the parameter combinations to be systematically passed to these functions; and (3) the __extractor class__ (`FeatureCalculator`), which manages the execution of configured functions and consolidates the resulting feature values into a structured output. 
+
+While `pyhctsa` is designed to be 'plug-and-play' for standard use cases, it also provides the flexibility to specify bespoke parameter sets (i.e., feature sets) for specialised applications or research needs.
+
+## Implementation fidelity
+While `pyhctsa` prioritises algorithmic equivalence with the original `HCTSA` toolbox, discrepancies in time-series feature values may arise from fundamental differences in how MATLAB and Python handle floating-point arithmetic and linear algebra routines. Furthermore, where the legacy implementation relied on proprietary MATLAB toolboxes and functions, we have integrated functionally similar open-source Python alternatives (e.g., `gaussian_kde` in Python instead of `ksdensity` for kernel density estimation).
+With these discrepancies in mind, we conducted a rigorous empirical validation
+To acheive this, we computed features for a large, heterogenous dataset of 1000 empirical time series [@Fulcher:]using both the original MATLAB implementation and `pyhctsa`.
+For each feature-computing function, we then computed the Pearson correlation 
 
 
-`Gala`'s design philosophy is based on three core principles: (1) to provide a
- user-friendly, modular, object-oriented API, (2) to use community tools and 
- standards (e.g., Astropy for coordinates and units handling), and (3) to use
- low-level code (C/C++/Cython) for performance while keeping the user interface
- in Python. Within each of the main subpackages in `gala` (`gala.potential`, 
- `gala.dynamics`, `gala.integrate`, etc.), we try to maintain a consistent API 
- for classes and functions. For example, all potential classes share a common 
- base class and implement methods for computing the potential, forces, density, 
- and other derived quantities at given positions. This also works for 
- compositions of potentials (i.e., multi-component potential models), which 
- share the potential base class but also act as a dictionary-like container for 
- different potential components. As another example, all integrators implement a 
- common interface for numerically integrating orbits. The integrators and core 
- potential functions are all implemented in C without support for units, but the 
- Python layer handles unit conversions and prepares data to dispatch to the C 
- layer appropriately.Within the coordinates subpackage, we extend Astropy's 
- coordinate classes to add more specialized coordinate frames and 
- transformations that are relevant for Galactic dynamics and Milky Way research.
 
 # Research impact statement
 
@@ -107,46 +96,6 @@ and active user community. Users span career stages from graduate students to
 faculty and other established researchers and represent institutions around the 
 world. This broad adoption and active participation validate `Gala`'s role as 
 core community infrastructure for galactic dynamics research.
-
-# Mathematics
-
-Single dollars ($) are required for inline mathematics e.g. $f(x) = e^{\pi/x}$
-
-Double dollars make self-standing equations:
-
-$$\Theta(x) = \left\{\begin{array}{l}
-0\textrm{ if } x < 0\cr
-1\textrm{ else}
-\end{array}\right.$$
-
-You can also use plain \LaTeX for equations
-\begin{equation}\label{eq:fourier}
-\hat f(\omega) = \int_{-\infty}^{\infty} f(x) e^{i\omega x} dx
-\end{equation}
-and refer to \autoref{eq:fourier} from text.
-
-# Citations
-
-Citations to entries in paper.bib should be in
-[rMarkdown](http://rmarkdown.rstudio.com/authoring_bibliographies_and_citations.html)
-format.
-
-If you want to cite a software repository URL (e.g. something on GitHub without a preferred
-citation) then you can do it with the example BibTeX entry below for @fidgit.
-
-For a quick reference, the following citation commands can be used:
-- `@author:2001`  ->  "Author et al. (2001)"
-- `[@author:2001]` -> "(Author et al., 2001)"
-- `[@author1:2001; @author2:2001]` -> "(Author1 et al., 2001; Author2 et al., 2002)"
-
-# Figures
-
-Figures can be included like this:
-![Caption for example figure.\label{fig:example}](figure.png)
-and referenced from text using \autoref{fig:example}.
-
-Figure sizes can be customized by adding an optional second parameter:
-![Caption for example figure.](figure.png){ width=20% }
 
 # AI usage disclosure
 
