@@ -24,6 +24,7 @@ jobs:
           CIBW_BUILD_VERBOSITY: "1"
           CIBW_TEST_REQUIRES: "pytest meson ninja"
           CIBW_TEST_COMMAND: "pytest {project}/tests"
+          CIBW_BEFORE_ALL_LINUX: "yum install -y openblas-devel lapack-devel gcc-gfortran"
 
       - name: Upload individual job wheels
         uses: actions/upload-artifact@v4
