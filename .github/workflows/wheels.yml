@@ -7,6 +7,7 @@ jobs:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false # Don't cancel other jobs if one fails (useful for debugging)
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-latest]
 
@@ -19,8 +20,12 @@ jobs:
         uses: pypa/cibuildwheel@v2.21.3
         env:
           CIBW_ARCHS: "auto64"
+          CIBW_BUILD_VERBOSITY: "1"
+
+          CIBW_BEFORE_ALL_LINUX: "yum install -y openblas-devel"
+
+          CIBW_TEST_REQUIRES: "pytest meson ninja"
           CIBW_TEST_COMMAND: "pytest {project}/tests"
-          CIBW_TEST_REQUIRES: "pytest"
 
       - name: Upload individual job wheels
         uses: actions/upload-artifact@v4
@@ -58,3 +63,4 @@ jobs:
         with:
           name: all-dist-files
           path: dist/
+          
