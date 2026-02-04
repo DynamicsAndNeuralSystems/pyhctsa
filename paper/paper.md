@@ -56,9 +56,21 @@ While `pyhctsa` prioritises algorithmic equivalence with the original `HCTSA` to
 
 To verify the functional equivalence of `pyhctsa`, each feature-generating function was empirically validated against its original `HCTSA` counterpart. Using a heterogeneous dataset of 1000 empirical time series [@Fulcher:2021], we systematically compared the outputs of both implementations. Similarity was quantified by calculating the Pearson correlation coefficient $r$ between resulting feature vectors. We note that because a single function often produces multiple distinct time-series features, each output feature was validated individually. To ensure ported functions were sufficiently similar, we applied a stringent inclusion criterion by retaining only those features that demonstrated strong statistical agreement ($r \geq 0.9$) with the original MATLAB implementation.
 
-![pyhctsa graphical abstract](pyhctsa_graphical_abstract.png){ width=100% }
+![pyhctsa graphical abstract](pyhctsa_graphical_abstract.png){width=100%}
 
-# Research impact statement
+# Code Example
+```Python 
+from pyhctsa.calculator import FeatureCalculator
+
+data = ... # your data as a 1D array-like or 2D array-like
+calc = FeatureCalculator() # instantiate a FeatureCalculator instance
+res = calc.extract(data) # call the extract method on your data
+```
+
+# Roadmap and future work
+[Modular architecture allows for seamless integration of new features. Contribution guidelines.]
+Any time-series feature, provided it is accompanied by a published research paper, falls within the scope for conisderation in the `pyhctsa` library.
+Clear contribution guidelines etc. here [ref].
 
 
 # Acknowledgements

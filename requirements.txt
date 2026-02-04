@@ -6,7 +6,7 @@ jpype1
 numba
 scikit-learn
 antropy
-PyWavelets @ git+https://github.com/joshuabmoore/pywt.git@pywt-fork-pyhctsa
+PyWavelets
 ts2vg
 arch
 hmmlearn

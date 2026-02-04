@@ -8,7 +8,7 @@ version = "0.1.0a1"
 description = "Highly comparative time-series analysis in Python."
 readme = "README.md"
 license = {file = "LICENSE"}
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
   {name = "Joshua B. Moore", email = "joshua.moore@sydney.edu.au"}, 
   {name = "Ben D. Fulcher", email = "ben.fulcher@sydney.edu.au"}]
@@ -28,7 +28,7 @@ dependencies = [
   "ts2vg",
   "arch",
   "hmmlearn",
-  "PyWavelets @ git+https://github.com/joshuabmoore/pywt.git@pywt-fork-pyhctsa",
+  "PyWavelets",
   "rich",
   "pathos"
 ]
