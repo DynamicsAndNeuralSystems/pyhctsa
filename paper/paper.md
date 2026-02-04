@@ -42,8 +42,6 @@ to researchers [without expensive licenses].
 [reference to open source science and Python with statistics]
 
 
-
-
 # Software design
 
 The design philosophy of `pyhctsa` is based on the original MATLAB implementation [@Fulcher:2017], however to meet the needs of the open-source data science ecosystem, `pyhctsa` integrates the modular framework established in `pyspi` [@Cliff:2023], a software package previously developed by our group for comparative pairwise feature analysis.
@@ -58,7 +56,7 @@ While `pyhctsa` prioritises algorithmic equivalence with the original `HCTSA` to
 
 To verify the functional equivalence of `pyhctsa`, each feature-generating function was empirically validated against its original `HCTSA` counterpart. Using a heterogeneous dataset of 1000 empirical time series [@Fulcher:2021], we systematically compared the outputs of both implementations. Similarity was quantified by calculating the Pearson correlation coefficient $r$ between resulting feature vectors. We note that because a single function often produces multiple distinct time-series features, each output feature was validated individually. To ensure ported functions were sufficiently similar, we applied a stringent inclusion criterion by retaining only those features that demonstrated strong statistical agreement ($r \geq 0.9$) with the original MATLAB implementation.
 
-
+![This description will be the figure caption](pyhctsa_graphical_abstract.svg)
 
 # Research impact statement
 
