@@ -34,6 +34,11 @@ Drawing on a vast interdisciplinary literature of quantitative methods, highly c
 [A section that clearly illustrates the research purpose of the software and places it in the context of related work. This should clearly state what problem the software is designed to solve, who the target audience is, and its relation to other work.]
 [importance of time-series feature-based representations, problem with bespoke feature sets which rely on expert knowledge, motivation for comprehensive toolkits.]
 
+While existing solutions such as `Kats` [@Jiang:2022], `tsfresh` [@Christ:2018], and `tsfel` [@Barandas:2020] offer automated time-series feature extraction in Python, 
+[Kats only a handful of distributional and spectral features]
+
+
+
 Automated time-series feature extraction packages in R such as `theft` [@Henderson:2026], Python such as `Kats` [@Jiang:2022], `tsfresh` [@Christ:2018], and `tsfel` [@Barandas:2020]. 
 Python packages limited in scope, often stop at spectral features [bring in HCTSA as being better, but in MATLAB].
 
@@ -56,7 +61,7 @@ While `pyhctsa` prioritises algorithmic equivalence with the original `HCTSA` to
 
 To verify the functional equivalence of `pyhctsa`, each feature-generating function was empirically validated against its original `HCTSA` counterpart. Using a heterogeneous dataset of 1000 empirical time series [@Fulcher:2021], we systematically compared the outputs of both implementations. Similarity was quantified by calculating the Pearson correlation coefficient $r$ between resulting feature vectors. We note that because a single function often produces multiple distinct time-series features, each output feature was validated individually. To ensure ported functions were sufficiently similar, we applied a stringent inclusion criterion by retaining only those features that demonstrated strong statistical agreement ($r \geq 0.9$) with the original MATLAB implementation.
 
-![pyhctsa graphical abstract](pyhctsa_graphical_abstract.png){width=100%}
+![__Overview of the pyhctsa workflow__. __(i)__ input time-series dataset comprising one or more individual time-series instances. __(ii)__ Large-scale feature extraction transforms each time seris into a feature vector, forming a $N \times F$ feature matrix. __(iii)__ Feature sets are generated from a configuration YAML file that specifies feature function parameter combinations. __(iv)__ Supported data formats include 1D and 2D numpy arrays for time-series instances of equal length, or lists of arrays for time series of different lengths. __(v)__ Post-feature extraction, the output is stuctured as a pandas DataFrame where rows are instances and columns are extracted features.](pyhctsa_graphical_abstract.png){width=100%}
 
 # Code Example
 ```Python 
@@ -67,7 +72,7 @@ calc = FeatureCalculator() # instantiate a FeatureCalculator instance
 res = calc.extract(data) # call the extract method on your data
 ```
 
-# Roadmap and future work
+# Outlook and future developments
 [Modular architecture allows for seamless integration of new features. Contribution guidelines.]
 Any time-series feature, provided it is accompanied by a published research paper, falls within the scope for conisderation in the `pyhctsa` library.
 Clear contribution guidelines etc. here [ref].
