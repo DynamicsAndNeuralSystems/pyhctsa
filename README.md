@@ -10,7 +10,7 @@
 # pyhctsa
 
 ## ⬇️ Installation
-To install pyhctsa locally, you can call:
+To install _pyhctsa_ locally, you can call:
 ```
 pip install -e .
 ```
@@ -86,3 +86,23 @@ os.environ['JAVA_HOME'] = "C:\Program Files\Java\jdk-11" # replace with relevant
 from pyhctsa.calculator import FeatureCalculator
 # rest of your code...
 ```
+
+# 🔑 Licenses
+
+## Internal licenses
+Code for computing features from time-series data is licensed as [GNU General Public License version 3](http://www.gnu.org/licenses/gpl-3.0.en.html).
+
+## External packages and dependencies
+While the majority of features in _pyhctsa_ rely on standard Python libraries, a small subset of features require external toolboxes.
+
+The following external time-series analysis code packages are provided with the software (in the `toolboxes` directory), and are used by our main feature-extraction calculator to compute meaningful structural features from time series:
+
+- Jospeh T. Lizier's [Java Information Dynamics Toolkit (JIDT)](https://github.com/jlizier/jidt) for studying  information-theoretic measures of computation in complex systems, version 1.3 (GPL license).
+- Time-series analysis code developed by [Michael Small](https://github.com/m-small) (unlicensed).
+- Max Little's [time-series analysis code](http://www.maxlittle.net/software/index.php) (GPL License).
+- [TISEAN package for nonlinear time-series analysis](http://www.mpipks-dresden.mpg.de/~tisean/Tisean_3.0.1/index.html), version 3.0.1 (GPL license).
+
+The following codebases have been adapted directly into Python code within _pyhtcsa_, rather than being included as external toolboxes:
+- Danny Kaplan's Code for embedding statistics (GPL license).
+- Histogram code by Rudy Moddemeijer (unlicensed).
+
