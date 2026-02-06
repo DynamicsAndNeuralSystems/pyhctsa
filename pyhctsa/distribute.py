@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import multiprocessing as mp
 import numpy as np
 from functools import partial
-from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, MofNCompleteColumn, track
+from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, MofNCompleteColumn
 from pathos.helpers import mp as pathos_mp
 
 def _extract_features_single_series(ts, feature_funcs):
@@ -57,7 +57,7 @@ class LocalDistributor(BaseDistributor):
         try:
             pathos_mp.set_start_method('spawn', force=True)
         except RuntimeError:
-            # Already set
+            # already set
             pass
         from pathos.multiprocessing import ProcessPool
         self.pool = ProcessPool(nodes=self.n_workers)
