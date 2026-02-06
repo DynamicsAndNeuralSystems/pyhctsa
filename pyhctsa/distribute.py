@@ -57,7 +57,7 @@ class LocalDistributor(BaseDistributor):
         try:
             pathos_mp.set_start_method('spawn', force=True)
         except RuntimeError:
-            # Already set
+            # already set
             pass
         from pathos.multiprocessing import ProcessPool
         self.pool = ProcessPool(nodes=self.n_workers)
