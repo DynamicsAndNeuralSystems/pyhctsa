@@ -15,8 +15,6 @@ To install _pyhctsa_ you can call:
 pip install pyhctsa
 ```
 
-This will install pyhctsa in development mode. 
-
 ## ✨ Basic Usage
 A `FeatureCalculator` object must first be instantiated using:
 ```Python
