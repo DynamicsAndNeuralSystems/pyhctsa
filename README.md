@@ -95,12 +95,12 @@ While the majority of features in _pyhctsa_ rely on standard Python libraries, a
 
 The following external time-series analysis code packages are provided with the software (in the `toolboxes` directory), and are used by our main feature-extraction calculator to compute meaningful structural features from time series:
 
-- Jospeh T. Lizier's [Java Information Dynamics Toolkit (JIDT)](https://github.com/jlizier/jidt) for studying  information-theoretic measures of computation in complex systems, version 1.3 (GPL license).
+- Joseph T. Lizier's [Java Information Dynamics Toolkit (JIDT)](https://github.com/jlizier/jidt) for studying  information-theoretic measures of computation in complex systems, version 1.3 (GPL license).
 - Time-series analysis code developed by [Michael Small](https://github.com/m-small) (unlicensed).
 - Max Little's [time-series analysis code](http://www.maxlittle.net/software/index.php) (GPL License).
 - [TISEAN package for nonlinear time-series analysis](http://www.mpipks-dresden.mpg.de/~tisean/Tisean_3.0.1/index.html), version 3.0.1 (GPL license).
 
-The following codebases have been adapted directly into Python code within _pyhtcsa_, rather than being included as external toolboxes:
+The following codebases have been adapted directly into Python code within _pyhctsa_, rather than being included as external toolboxes:
 - Danny Kaplan's Code for embedding statistics (GPL license).
 - Histogram code by Rudy Moddemeijer (unlicensed).
 
