@@ -13,7 +13,7 @@ authors = [
   {name = "Joshua B. Moore", email = "joshua.moore@sydney.edu.au"}, 
   {name = "Ben D. Fulcher", email = "ben.fulcher@sydney.edu.au"}]
 maintainers = [
-  {name = "Joshua B. Moore", email = "joshua.moore@sydney.edu.au"}
+  {name = "Joshua B. Moore", email = "joshua.moore@sydney.edu.au"},
   {name = "Ben D. Fulcher", email = "ben.fulcher@sydney.edu.au"}
 ]
 
@@ -41,7 +41,7 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.13"
 ]
 
 [project.optional-dependencies]
