@@ -10,9 +10,9 @@
 # pyhctsa
 
 ## ⬇️ Installation
-To install _pyhctsa_ locally, you can call:
+To install _pyhctsa_ you can call:
 ```
-pip install -e .
+pip install pyhctsa
 ```
 
 This will install pyhctsa in development mode. 
