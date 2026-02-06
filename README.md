@@ -23,7 +23,7 @@ calc = FeatureCalculator()
 ```
 By default, the `FeatureCalculator` will initialize the full feature set. If you would like to specify a custom feature set, you can pass the corresponding configuration .YAML file as an argument to the `FeatureCalculator`:
 ```Python
-customCalc = FeatureCalculator(config_path="subset.yaml")
+custom_calc = FeatureCalculator(config_path="subset.yaml")
 ```
 The number of master operations (callable functions) specified by the .yaml will be displayed for verification e.g., `Loaded 700 master operations.`
 
