@@ -8,10 +8,18 @@
 <h1 align="center"><em>pyhctsa</em>: Python Toolkit of Highly Comparative Time-Series Analysis Features</h1>
 
 <p align="center">
-  <a style="text-decoration:none" href="https://pypi.org/project/pyhctsa/"><img style="margin-right:6px" src="https://img.shields.io/pypi/v/pyhctsa?style=flat-square" /></a><!--
-  --><a style="text-decoration:none" href="https://pypi.org/project/pyhctsa/"><img style="margin-right:6px" src="https://img.shields.io/pypi/pyversions/pyhctsa?style=flat-square" /></a><!--
-  --><a style="text-decoration:none" href="https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml"><img style="margin-right:6px" src="https://img.shields.io/github/actions/workflow/status/DynamicsAndNeuralSystems/pyhctsa/run_unit_tests.yaml?branch=main&style=flat-square" /></a><!--
-  --><a style="text-decoration:none" href="https://doi.org/10.5281/zenodo.18529935"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529935-blue?style=flat-square" /></a>
+  <a href="https://pypi.org/project/pyhctsa/" style="text-decoration:none">
+    <img src="https://img.shields.io/pypi/v/pyhctsa?style=flat-square" style="margin-right:6px" />
+  </a><!--
+  --><a href="https://pypi.org/project/pyhctsa/" style="text-decoration:none">
+    <img src="https://img.shields.io/pypi/pyversions/pyhctsa?style=flat-square" style="margin-right:6px" />
+  </a><!--
+  --><a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml" style="text-decoration:none">
+    <img src="https://img.shields.io/github/actions/workflow/status/DynamicsAndNeuralSystems/pyhctsa/run_unit_tests.yaml?branch=main&style=flat-square" style="margin-right:6px" />
+  </a><!--
+  --><a href="https://doi.org/10.5281/zenodo.18529935" style="text-decoration:none">
+    <img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529935-blue?style=flat-square" />
+  </a>
 </p>
 
 
