@@ -56,7 +56,7 @@ The results of the extraction will be returned in a pandas dataframe of shape $N
 
 You can also inspect the quality of the extracted feature values by calling ```calc.summary()```.  
 
-# 📘 Tutorial
+# 📘 Tutorials
 New to _pyhctsa_? Step-by-step tutorials and example workflows are available in the repository
 👉 [`/tutorials`](./tutorials)
 
