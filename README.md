@@ -7,6 +7,22 @@
 
 <h1 align="center"><em>pyhctsa</em>: Python Toolkit of Highly Comparative Time-Series Analysis Features</h1>
 
+<p align="center" style="font-size:0; line-height:0;">
+  <a href="https://pypi.org/project/pyhctsa/">
+    <img src="https://img.shields.io/pypi/v/pyhctsa?style=flat-square" style="margin-right:8px;" />
+  </a>
+  <a href="https://pypi.org/project/pyhctsa/">
+    <img src="https://img.shields.io/pypi/pyversions/pyhctsa?style=flat-square" style="margin-right:8px;" />
+  </a>
+  <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml">
+    <img src="https://img.shields.io/github/actions/workflow/status/DynamicsAndNeuralSystems/pyhctsa/run_unit_tests.yaml?branch=main&style=flat-square" style="margin-right:8px;" />
+  </a>
+  <a href="https://doi.org/10.5281/zenodo.18529935">
+    <img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529935-blue?style=flat-square" />
+  </a>
+</p>
+
+
 # pyhctsa
 
 ## ⬇️ Installation
@@ -39,6 +55,10 @@ Note that each time-series instances does *not* have to be the same length to co
 The results of the extraction will be returned in a pandas dataframe of shape $N \times F$, where $N$ is the number of time-series instances and $F$ is the number of time-series features.
 
 You can also inspect the quality of the extracted feature values by calling ```calc.summary()```.  
+
+# 📘 Tutorial
+New to _pyhctsa_? Step-by-step tutorials and example workflows are available in the repository
+👉 [`/tutorials`](./tutorials)
 
 ## 🤖 Advanced Usage
 ## Calling individual operations

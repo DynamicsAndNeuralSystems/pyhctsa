@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+title: "pyhctsa: Python Toolkit of Highly Comparative Time Series Analysis Features"
+message: "If you use this software, please cite it using the metadata below."
+type: software
+
+authors:
+  - family-names: Moore
+    given-names: Joshua B.
+    orcid: "https://orcid.org/0000-0002-5237-1087"
+  - family-names: Fulcher
+    given-names: Ben D.
+    orcid: "https://orcid.org/0000-0002-3003-4055"
+
+doi: 10.5281/zenodo.18529935
+version: 0.1.0a1
+date-released: 2026-02-09
+url: https://github.com/DynamicsAndNeuralSystems/pyhctsa
+repository-code: https://github.com/DynamicsAndNeuralSystems/pyhctsa
+license: GPL-3.0-only
