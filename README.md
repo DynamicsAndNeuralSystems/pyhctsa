@@ -7,10 +7,20 @@
 
 <h1 align="center"><em>pyhctsa</em>: Python Toolkit of Highly Comparative Time-Series Analysis Features</h1>
 
-| |
-|:--:|
-| [![PyPI](https://img.shields.io/pypi/v/pyhctsa?style=flat-square)](https://pypi.org/project/pyhctsa/) [![Python](https://img.shields.io/pypi/pyversions/pyhctsa?style=flat-square)](https://pypi.org/project/pyhctsa/) [![Unit Tests](https://img.shields.io/github/actions/workflow/status/DynamicsAndNeuralSystems/pyhctsa/run_unit_tests.yaml?branch=main&style=flat-square)](https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml) [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529935-blue?style=flat-square)](https://doi.org/10.5281/zenodo.18529935) |
-
+<p align="center" style="font-size:0; line-height:0;">
+  <a href="https://pypi.org/project/pyhctsa/">
+    <img src="https://img.shields.io/pypi/v/pyhctsa?style=flat-square" style="margin-right:8px;" />
+  </a>
+  <a href="https://pypi.org/project/pyhctsa/">
+    <img src="https://img.shields.io/pypi/pyversions/pyhctsa?style=flat-square" style="margin-right:8px;" />
+  </a>
+  <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml">
+    <img src="https://img.shields.io/github/actions/workflow/status/DynamicsAndNeuralSystems/pyhctsa/run_unit_tests.yaml?branch=main&style=flat-square" style="margin-right:8px;" />
+  </a>
+  <a href="https://doi.org/10.5281/zenodo.18529935">
+    <img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529935-blue?style=flat-square" />
+  </a>
+</p>
 
 
 
