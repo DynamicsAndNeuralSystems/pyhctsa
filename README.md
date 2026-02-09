@@ -7,7 +7,16 @@
 
 <h1 align="center"><em>pyhctsa</em>: Python Toolkit of Highly Comparative Time-Series Analysis Features</h1>
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18529934.svg)](https://doi.org/10.5281/zenodo.18529934)
+<p align="center">
+  <a href="https://doi.org/10.5281/zenodo.18529935">
+    <img src="https://zenodo.org/badge/DOI/10.5281/zenodo.18529935.svg" />
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml">
+    <img src="https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml/badge.svg?branch=main" />
+  </a>
+</p>
+
 
 
 # pyhctsa
