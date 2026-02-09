@@ -43,6 +43,10 @@ The results of the extraction will be returned in a pandas dataframe of shape $N
 
 You can also inspect the quality of the extracted feature values by calling ```calc.summary()```.  
 
+# 📘 Tutorial
+New to _pyhctsa_? Step-by-step tutorials and example workflows are available in the repository:
+👉 [`/tutorials`](./tutorials)
+
 ## 🤖 Advanced Usage
 ## Calling individual operations
 If you would like to run individual operations on your data, you can access the corresponding functions from their respective modules directly.
