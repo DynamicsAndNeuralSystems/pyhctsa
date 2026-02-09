@@ -7,6 +7,9 @@
 
 <h1 align="center"><em>pyhctsa</em>: Python Toolkit of Highly Comparative Time-Series Analysis Features</h1>
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18529935.svg)](https://doi.org/10.5281/zenodo.18529935)
+
+
 # pyhctsa
 
 ## ⬇️ Installation
