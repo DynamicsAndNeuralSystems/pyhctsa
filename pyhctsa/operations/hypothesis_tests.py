@@ -8,7 +8,7 @@ from statsmodels.sandbox.stats.runs import runstest_1samp
 from statsmodels.stats.descriptivestats import sign_test
 from statsmodels.stats.diagnostic import acorr_ljungbox
 
-def variance_ratio_test(y : ArrayLike, periods : Union[int, list[int]] = 2, iids : Union[int, list[int]] = 0) -> dict:
+def variance_ratio_test(y : ArrayLike, periods : Union[int, list[int], float] = 2, iids : Union[int, list[int]] = 0) -> dict:
     """
     Variance ratio test for random walk.
 
@@ -68,7 +68,8 @@ def variance_ratio_test(y : ArrayLike, periods : Union[int, list[int]] = 2, iids
             out['minstat'] = np.min(all_stats)
         else:
             raise ValueError(f"Expected iids to be a list of bools, since periods are also a list. Got data type: {type(iids)} instead.")
-    elif isinstance(periods, int):
+    elif isinstance(periods, (int, float, np.number)):
+        periods = int(periods)
         robust = True if iids == 0 else False 
         vr = VarianceRatio(y, lags=periods, robust=robust)
         out = {}

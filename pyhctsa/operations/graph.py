@@ -116,8 +116,6 @@ def visibility_graph(y : ArrayLike, meth : str = 'horiz', max_l : int = 5000) ->
     out['ol90'] = np.mean(k[(k >= np.quantile(k, 0.05, method='hazen')) & (k <= np.quantile(k, 0.95, method='hazen'))])/np.mean(k)
     out['olu90'] = np.mean(k[k >= np.quantile(k, 0.95, method='hazen')] - np.mean(k))/np.std(k, ddof=1)
 
-    # Fit distributions to degree distribution
-
     # Entropy of distribution 
     out['entropy'] = distribution_entropy(k, 'hist', 'sqrt')
 

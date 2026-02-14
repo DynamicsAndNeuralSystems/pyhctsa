@@ -95,7 +95,7 @@ def shannon_entropy(
 def distribution_entropy(
     y: ArrayLike,
     hist_or_ks: str = 'hist',
-    num_bins: int = 10,
+    num_bins: Union[str, int] = 10,
     olremp: float = 0
 ) -> float:
     """
