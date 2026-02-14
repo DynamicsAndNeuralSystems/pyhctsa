@@ -1,6 +1,7 @@
 import numpy as np
 from numpy.typing import ArrayLike
 import scipy.fft
+import statsmodels.api as sm
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
@@ -11,7 +12,8 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     Statistics of the power spectrum of a time series.
 
     Computes a range of statistics summarizing the power spectrum of a time series.
-    The spectrum can be estimated using a periodogram, fast Fourier transform (FFT), or Welch's method.
+    The spectrum can be estimated using a periodogram, fast Fourier transform (FFT), 
+    or Welch's method.
 
     Parameters
     ----------
@@ -133,9 +135,11 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['numPromPeaks_1'] = np.sum(pk_prom > 1)  # number of peaks with prominence of at least 1
     out['numPromPeaks_2'] = np.sum(pk_prom > 2)  # number of peaks with prominence of at least 2
     out['numPromPeaks_5'] = np.sum(pk_prom > 5)  # number of peaks with prominence of at least 5
-    out['numPeaks_overmean'] = np.sum(pk_prom > np.mean(pk_prom))  # number of peaks with prominence greater than the mean (low for skewed distn)
+    # number of peaks with prominence greater than the mean (low for skewed distn)
+    out['numPeaks_overmean'] = np.sum(pk_prom > np.mean(pk_prom))
     out['maxProm'] = np.max(pk_prom)
-    out['meanProm_2'] = np.mean(pk_prom[pk_prom > 2])  # mean peak prominence of those with prominence of at least 2
+    # mean peak prominence of those with prominence of at least 2
+    out['meanProm_2'] = np.mean(pk_prom[pk_prom > 2])
     out['meanPeakWidth_prom2'] = np.mean(pk_width[pk_prom > 2])
     out['width_weighted_prom'] = np.sum(pk_width * pk_prom) / np.sum(pk_prom)
 
@@ -143,10 +147,13 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     nn = lambda x: np.arange(0, np.minimum(x, out['numPeaks'] - 1))
     out['peakPower_2'] = np.sum(pk_height[nn(2)] * pk_width[nn(2)])
     out['peakPower_5'] = np.sum(pk_height[nn(5)] * pk_width[nn(5)])
-    out['peakPower_prom2'] = np.sum(pk_height[pk_prom > 2] * pk_width[pk_prom > 2])  # power in peaks with prominence of at least 2
-    # note any features which depend on pKLoc will yield slightly diff answers due to one-indexing, but should be perfectly correlated
+    # power in peaks with prominence of at least 2
+    out['peakPower_prom2'] = np.sum(pk_height[pk_prom > 2] * pk_width[pk_prom > 2])
+    # note any features which depend on pKLoc will yield slightly diff answers due to one-indexing,
+    # but should be perfectly correlated
     out['w_weighted_peak_prom'] = np.sum(pk_loc * pk_prom) / np.sum(pk_prom)
-    out['w_weighted_peak_height'] = np.sum(pk_loc * pk_height) / np.sum(pk_height)  #where are prominent peaks located on average (weighted by height)
+    #where are prominent peaks located on average (weighted by height)
+    out['w_weighted_peak_height'] = np.sum(pk_loc * pk_height) / np.sum(pk_height)
     # Number of peaks required to get to 50% of power in peaks
     peak_power = pk_height * pk_width
     out['numPeaks_50power'] = np.where(np.cumsum(peak_power) > 0.5 * np.sum(peak_power))[0][0]
@@ -231,7 +238,29 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['areatopeak'] = np.sum(s[0:np.argmax(s) + 1]) * dw
     out['ylogareatopeak'] = np.sum(log_s[0:np.argmax(s) + 1]) * dw  # % (semilogy)
 
-    # TODO: RobustFits
+    # Robust Fits
+    # across full range
+    r_all = w > 0
+    across_full_range_res = give_me_robust_stats(np.log(w[r_all]), np.log(s[r_all]), 'linfitloglog_all')
+    out = out | across_full_range_res
+    # across first half (low frequency)
+    r_lf = (w > 0)
+    r_lf[int(np.floor(n/2)):] = 0 #% remove second half of angular frequenciesf
+    first_half_res = give_me_robust_stats(np.log(w[r_lf]), np.log(s[r_lf]), 'linfitloglog_lf')
+    out = out | first_half_res
+    # across second half (high frequency)
+    r_hf = np.arange(n // 2, n)
+    second_half_res = give_me_robust_stats(np.log(w[r_hf]), np.log(s[r_hf]), 'linfitloglog_hf')
+    out = out | second_half_res
+    #Middle half (mid-frequencies)
+    start = int(np.round(n / 4)) - 1
+    stop = int(np.round(n * 3 / 4))
+    r_mf = np.arange(start, stop)
+    middle_half_res = give_me_robust_stats(np.log(w[r_mf]), np.log(s[r_mf]), 'linfitloglog_mf')
+    out = out | middle_half_res
+    #Fit linear to semilog plot (across full range)
+    res_semilog = give_me_robust_stats(w, np.log(s), 'linfitsemilog_all')
+    out = out | res_semilog
 
     # Power in specific frequency bands
     # % 2 bands
@@ -381,3 +410,19 @@ def _findpeaks(s, min_pk_dist=0, sort_str='none'):
         pk_loc = pk_loc[sort_idx]
 
     return pk_height, pk_loc
+
+def give_me_robust_stats(x_data, y_data, field_name) -> dict:
+    """
+    Statistics based on a robust linear fit
+    """
+    x = sm.add_constant(x_data)
+    rlm = sm.RLM(y_data, x, M=sm.robust.norms.TukeyBiweight())
+    results = rlm.fit()
+    linfit = results.params  # [intercept, slope]
+    out = {}
+    out[f'{field_name}_a1'] = linfit[0]  # linear fit intercept
+    out[f'{field_name}_a2'] = linfit[1]  # linear fit gradient
+    #% ratio of sigma estimates between ordinary least squares (ols) and the robust fit:
+    out[f'{field_name}_sea1'] = results.bse[0]  # standard error in intercept
+    out[f'{field_name}_sea2'] = results.bse[1]  # standard error in slope
+    return out

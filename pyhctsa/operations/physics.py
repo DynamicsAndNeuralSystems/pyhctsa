@@ -8,7 +8,8 @@ from statsmodels.sandbox.stats.runs import runstest_1samp
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
 
-def walker(y : ArrayLike, walker_rule : str = 'prop', walker_params : Union[None, float, int, list] = None) -> dict:
+def walker(y : ArrayLike, walker_rule : str = 'prop',
+           walker_params : Union[None, float, int, list] = None) -> dict:
     """
     Simulates a hypothetical walker moving through the time domain.
     
@@ -85,9 +86,8 @@ def walker(y : ArrayLike, walker_rule : str = 'prop', walker_params : Union[None
     }
 
     if walker_rule not in WALKER_CONFIGS:
-        valid_rules = ", ".join(f"'{rule}'" for rule in WALKER_CONFIGS.keys())
+        valid_rules = ", ".join(f"'{rule}'" for rule in WALKER_CONFIGS)
         raise ValueError(f"Unknown walker_rule: '{walker_rule}'. Choose from: {valid_rules}")
-    
     # get configuration for the specified rule
     config = WALKER_CONFIGS[walker_rule]
 
@@ -99,7 +99,6 @@ def walker(y : ArrayLike, walker_rule : str = 'prop', walker_params : Union[None
         raise ValueError(
             f"walker_params {config['error_msg']} for walker rule: '{walker_rule}'"
         )
-    
     # Do the walk
     w = np.zeros(N)
 
@@ -147,12 +146,12 @@ def walker(y : ArrayLike, walker_rule : str = 'prop', walker_params : Union[None
             w_inert = w[i-1] + (w[i-1]-w[i-2])
             w_mom = w_inert + (y[i]-w_inert)/m # dissipative term from time series
             if i > wl:
-                w[i] = w_mom * (np.std(y[i-wl:i], ddof=1)/np.std(w[i-wl:i], ddof=1)) # adjust by local standard dev.
+                # adjust by local standard dev.
+                w[i] = w_mom * (np.std(y[i-wl:i], ddof=1)/np.std(w[i-wl:i], ddof=1))
             else:
                 w[i] = w_mom
     else:
         raise ValueError(f"Unknown rule : {walker_rule}")
-    
     # Get statistics on the walk
     out = {}
     # the walk itself
@@ -201,7 +200,8 @@ def walker(y : ArrayLike, walker_rule : str = 'prop', walker_params : Union[None
 
     return out
 
-def force_potential(y : ArrayLike, what_potential : str = 'dblwell', params : Union[list, None] = None) -> dict:
+def force_potential(y : ArrayLike, what_potential : str = 'dblwell',
+                    params : Union[list, None] = None) -> dict:
     """
     Couples the values of the time series to a dynamical system.
 

@@ -44,9 +44,65 @@ def fast_dfa(y: ArrayLike) -> float:
     
     return alpha
 
-def fluctuation_analysis(x : ArrayLike, q: Union[float, int] = 2, 
-                         wtf : str = 'rsrange', tau_step: int = 1, k : int = 1, 
+def fluctuation_analysis(x: ArrayLike, q: Union[float, int] = 2,
+                         wtf: str = 'rsrange', tau_step: int = 1, k: int = 1,
                          lag: Union[int, None] = None, log_inc: bool = True):
+    """
+    Implements fluctuation analysis by a variety of methods.
+    
+    Much of our implementation is based on the well-explained discussion of scaling
+    methods [1]_.
+
+    The main difference between algorithms for estimating scaling exponents amount
+    to differences in how fluctuations, F, are quantified in time-series segments.
+    Many alternatives are implemented in this function.
+    
+    Parameters
+    ----------
+    x : ArrayLike
+        The input time series.
+    q : Union[float, int], optional
+        The parameter in the fluctuation function. q = 2 (default) gives RMS 
+        fluctuations.
+    wtf : str, optional
+        What to fluctuate. Options are:
+        
+        - 'endptdiff': Calculates the differences in end points in each segment
+        - 'range': Calculates the range in each segment
+        - 'std': Takes the standard deviation in each segment [1]_
+        - 'iqr': Takes the interquartile range in each segment
+        - 'dfa': Removes a polynomial trend of order k in each segment
+        - 'rsrange': Returns the range after removing a straight line fit [2]_
+        - 'rsrangefit': Fits a polynomial of order k and returns the range [2]_
+        
+        For 'rsrangefit', an optional timelag can be applied for computing the 
+        cumulative sum (integrated profile) [3]_.
+    tau_step : int, optional
+        number of tau (locInc true), or increments in tau for linear range
+    k : int, optional
+        polynomial order of detrending (for 'dfa' & 'rsrangefit')
+    lag : int or None, optional
+        optional time-lag, as in Alvarez-Ramirez [3]_
+    log_inc : bool, optional
+        whether to use logarithmic increments in tau (it should be logarithmic)
+    
+    Returns
+    -------
+    dict
+        Statistics of fitting a linear function to a plot of log(F) as
+        a function of log(tau), and for fitting two straight lines to the same data,
+        choosing the split point at tau = tau_{split} as that which minimizes the
+        combined fitting errors.
+    
+    References
+    ----------
+    .. [1] "Power spectrum and detrended fluctuation analysis: Application to daily
+        temperatures" P. Talkner and R. O. Weber, Phys. Rev. E 62(1) 150 (2000)
+    .. [2] D. C. Caccia et al., "Analyzing exact fractal time series: evaluating dispersional
+        analysis and rescaled range methods", Physica A 246(3-4) 609 (1997)
+    .. [3] J. Alvarez-Ramirez et al., "Using detrended fluctuation analysis for lagged 
+        correlation analysis of nonstationary signals", Phys. Rev. E 79(5) 057202 (2009)
+    """
     N = len(x)
 
     # Compute integrated sequence
@@ -165,9 +221,12 @@ def fluctuation_analysis(x : ArrayLike, q: Union[float, int] = 2,
     return out_final
 
 
-def _robust_linear_fit(logtt, logFF, the_range, field_name):
-    X = sm.add_constant(logtt[the_range])
-    rlm = sm.RLM(logFF[the_range], X, M=sm.robust.norms.TukeyBiweight())
+def _robust_linear_fit(log_tt, log_ff, the_range, field_name):
+    """
+    Robust linear fit using Tukey's biweight function for M-estimation. 
+    """
+    x = sm.add_constant(log_tt[the_range])
+    rlm = sm.RLM(log_ff[the_range], x, M=sm.robust.norms.TukeyBiweight())
     results = rlm.fit()
     linfit = results.params  # [intercept, slope]
     out = {}
@@ -179,8 +238,3 @@ def _robust_linear_fit(logtt, logFF, the_range, field_name):
     out[f'{field_name}ssr'] = np.mean(results.resid**2)  # mean squares residual
     out[f'{field_name}resac1'] = autocorr(results.resid, 1, 'Fourier')[0]  # autocorr at lag 1
     return out
-
-
-
-
-

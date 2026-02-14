@@ -97,10 +97,11 @@ def preproc_compare(y : ArrayLike, detrend_meth : str = 'medianf') -> dict:
         # extract the order
         order = detrend_meth.strip("poly")
         if not order:
-            raise ValueError(f"Could not detect an order for polynomial: {detrend_meth}. Choose poly<o> where o is an integer between 1 and 9, e.g., poly1.")
+            raise ValueError(f"Could not detect an order for polynomial: {detrend_meth}."
+                             f"Choose poly<o> where o is an integer between 1 and 9, e.g., poly1.")
         try:
             order = int(order)
-        except ValueError as e:
+        except ValueError:
             print(f"Could not convert order: `{order}' to integer.")
         y_d = detrend(y, order=order, axis=0)
 
@@ -108,10 +109,11 @@ def preproc_compare(y : ArrayLike, detrend_meth : str = 'medianf') -> dict:
     elif 'diff' in detrend_meth:
         ndiff = detrend_meth.strip("diff")
         if not ndiff:
-            raise ValueError(f"Could not detect num diffs for diff: {detrend_meth}. Choose diff<n> where n is an integer > 0, e.g., diff1.")
+            raise ValueError(f"Could not detect num diffs for diff: {detrend_meth}."
+                             "Choose diff<n> where n is an integer > 0, e.g., diff1.")
         try:
             ndiff = int(ndiff)
-        except ValueError as e:
+        except ValueError:
             print(f"Could not convert ndiff: `{ndiff}' to integer.")
         y_d = np.diff(y, n=ndiff, axis=0)
     
@@ -119,10 +121,11 @@ def preproc_compare(y : ArrayLike, detrend_meth : str = 'medianf') -> dict:
     elif 'medianf' in detrend_meth:
         med_ord = detrend_meth.strip("medianf")
         if not med_ord:
-            raise ValueError(f"Could not detect median filter order for median filter: {detrend_meth}. Choose medianf<n> where n is an integer >= 3, e.g., medianf3.")
+            raise ValueError(f"Could not detect median filter order for median filter: {detrend_meth}. "
+                             "Choose medianf<n> where n is an integer >= 3, e.g., medianf3.")
         try:
             med_ord = int(med_ord)
-        except ValueError as e:
+        except ValueError:
             print(f"Could not convert median order: `{med_ord}' to integer.")
         y_d = _med_filt_1d(y, med_ord)
     
@@ -130,17 +133,20 @@ def preproc_compare(y : ArrayLike, detrend_meth : str = 'medianf') -> dict:
     elif 'rav' in detrend_meth:
         rav_wsize = detrend_meth.strip("rav")
         if not rav_wsize:
-            raise ValueError(f"Could not detect running average window size for wsize: {detrend_meth}. Choose rav<n> where n is an integer > 1, e.g., rav4.")
+            raise ValueError(f"Could not detect running average window size for wsize: {detrend_meth}."
+                             "Choose rav<n> where n is an integer > 1, e.g., rav4.")
         try:
             rav_wsize = int(rav_wsize)
-        except ValueError as e:
+        except ValueError:
             print(f"Could not running average window size: `{rav_wsize}' to integer.")
         y_d = lfilter(np.ones(rav_wsize)/rav_wsize, [1], y)
     
     elif 'resample' in detrend_meth:
         rs_params = detrend_meth.strip("resample_")
         if not rs_params:
-            raise ValueError(f"Could not detect resample parameters P_Q: {detrend_meth}. Choose resample_<P>_<Q> where P is the upsampling factor and Q is the downsampling factor.")
+            raise ValueError(f"Could not detect resample parameters P_Q: {detrend_meth}."
+                             "Choose resample_<P>_<Q> where P is the upsampling factor and Q "
+                             "is the downsampling factor.")
         P, Q = rs_params.split("_")
         try:
             P = int(P)
@@ -178,11 +184,6 @@ def preproc_compare(y : ArrayLike, detrend_meth : str = 'medianf') -> dict:
         num = sliding_window(y_d, 'std', 'std', win, step)
         denom = sliding_window(y, 'std', 'std', win, step)
         out[f'swss{win}_{step}'] = _safe_divide(num, denom)
-
-
-    #TODO:Gaussianity
-
-    # TODO: Compare distribution to fitted normal distribution
 
     # 3) Outliers
     for thresh, method in [(2, 'mean'), (5, 'mean'), (2, 'std'), (5, 'std')]:
