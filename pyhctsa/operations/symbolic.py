@@ -9,14 +9,17 @@ from scipy.signal import resample as ssre
 from ..operations.correlation import first_crossing
 from ..utils import binarize, sign_change
 
-def surprise(y : ArrayLike, what_prior : str = 'dist', memory : float = 0.2, num_groups : int = 3, 
-             coarse_grain_method : str = 'quantile', num_iters : int = 500, random_seed : int = 0) -> dict:
+def surprise(y : ArrayLike, what_prior : str = 'dist', memory : float = 0.2, num_groups : int = 3,
+             coarse_grain_method : str = 'quantile', num_iters : int = 500, 
+             random_seed : int = 0) -> dict:
     """
     Quantifies how surprised you would be of the next data point given recent memory.
 
-    Coarse-grains the time series, turning it into a sequence of symbols of a given alphabet size (`num_groups`),
-    and quantifies measures of surprise of a process with local memory of the past `memory` values of the symbolic string.
-    For each sample, the 'information gained' (log(1/p)) is estimated using expectations calculated from the previous `memory` samples.
+    Coarse-grains the time series, turning it into a sequence of symbols of a 
+    given alphabet size (`num_groups`), and quantifies measures of surprise of 
+    a process with local memory of the past `memory` values of the symbolic string.
+    For each sample, the 'information gained' (log(1/p)) is estimated using expectations 
+    calculated from the previous `memory` samples.
 
     Parameters
     ----------
@@ -28,15 +31,16 @@ def surprise(y : ArrayLike, what_prior : str = 'dist', memory : float = 0.2, num
             - 'T1': the one-point transition probabilities in the previous memory samples,
             - 'T2': the two-point transition probabilities in the previous memory samples.
     memory : float, optional
-        The memory length (either number of samples, or a proportion of the time-series length if between 0 and 1).
-        Default is 0.2.
+        The memory length (either number of samples, or a proportion of the time-series length 
+        if between 0 and 1). Default is 0.2.
     num_groups : int, optional
         The number of groups to coarse-grain the time series into. Default is 3.
     coarse_grain_method : {'quantile', 'updown', 'embed2quadrants'}, optional
         The coarse-graining or symbolization method:
             - 'quantile': equiprobable alphabet by value of each time-series datapoint (default),
             - 'updown': equiprobable alphabet by incremental changes in the time-series values,
-            - 'embed2quadrants': 4-letter alphabet of the quadrant each data point resides in a 2D embedding space.
+            - 'embed2quadrants': 4-letter alphabet of the quadrant each data point resides in a 
+            2D embedding space.
     num_iters : int, optional
         The number of iterations to repeat the procedure for. Default is 500.
     random_seed : int, optional
@@ -52,7 +56,8 @@ def surprise(y : ArrayLike, what_prior : str = 'dist', memory : float = 0.2, num
         memory = int(np.round(memory*len(y)))
 
     # COURSE GRAIN
-    yth = coarse_grain(y, coarse_grain_method, num_groups) # a coarse-grained time series using the numbers 1:num_groups
+    # a coarse-grained time series using the numbers 1:num_groups
+    yth = coarse_grain(y, coarse_grain_method, num_groups)
     N = int(len(yth))
 
     # Use random sampling (original behavior)
@@ -67,8 +72,9 @@ def surprise(y : ArrayLike, what_prior : str = 'dist', memory : float = 0.2, num
     for i in range(0, rs.size): # rs.size
         if what_prior == 'dist':
             # uses the distribution up to memory to inform the next point
-            p = np.sum(yth[rs[0, i]-memory:rs[0, i]] == yth[rs[0, i]])/memory # had to be careful with indexing, arange() works like matlab's : operator
+            # had to be careful with indexing, arange() works like matlab's : operator
             store[i] = p
+            p = np.sum(yth[rs[0, i]-memory:rs[0, i]] == yth[rs[0, i]])/memory
         elif what_prior == 'T1':
             # uses one-point correlations in memory to inform the next point
             # estimate transition probabilites from data in memory
@@ -92,10 +98,8 @@ def surprise(y : ArrayLike, what_prior : str = 'dist', memory : float = 0.2, num
             else:
                 p = np.sum(memory_data[inmem2 + 2] == yth[rs[0, i]]) / len(inmem2)
             store[i] = p
-            
         else:
             raise ValueError(f"Unknown method: {what_prior}")
-    
     # INFORMATION GAINED FROM NEXT OBSERVATION IS log(1/p) = -log(p)
     store[store == 0] = 1 # so that we set log[0] == 0
 
@@ -123,15 +127,15 @@ def surprise(y : ArrayLike, what_prior : str = 'dist', memory : float = 0.2, num
     out['uq'] = uq[0]
     out['std'] = np.std(store, ddof=1)
 
-    # t-statistic to information gain of 1. Note due to division of std which can be very effectively 0,
-    # this value can explode. Should fix w/ a NaN but want to replicate MATLAB func for now. 
+    # t-statistic to information gain of 1. Note due to division of std which can 
+    # be very effectively 0, this value can explode. 
+    # Should fix w/ a NaN but want to replicate MATLAB func for now.
     if out['std'] == 0:
         out['tstat'] = np.nan
     else:
         out['tstat'] = abs((out['mean']-1)/(out['std']/np.sqrt(num_iters)))
 
-    return out 
-
+    return out
 
 def motif_two(y : ArrayLike, binarize_how : str = 'diff') -> dict:
     """
@@ -164,18 +168,17 @@ def motif_two(y : ArrayLike, binarize_how : str = 'diff') -> dict:
     """
     # Generate a binarized version of the input time series
     y = np.asarray(y)
-    yBin = binarize(y, binarize_how)
+    y_bin = binarize(y, binarize_how)
 
     # Define the length of the new, symbolized sequence, N
-    N = len(yBin)
+    N = len(y_bin)
 
     if N < 5:
         logging.warning("Time series too short!")
         return np.nan
-    
     # Binary sequences of length 1
-    r1 = (yBin == 1) # 1
-    r0 = (yBin == 0) # 0
+    r1 = (y_bin == 1) # 1
+    r0 = (y_bin == 0) # 0
 
     # ------ Record these -------
     # (Will be dependent outputs since signal is binary, sum to 1)
@@ -189,10 +192,10 @@ def motif_two(y : ArrayLike, binarize_how : str = 'diff') -> dict:
     r1 = r1[:-1]
     r0 = r0[:-1]
 
-    r00 = np.logical_and(r0, yBin[1:] == 0)
-    r01 = np.logical_and(r0, yBin[1:] == 1)
-    r10 = np.logical_and(r1, yBin[1:] == 0)
-    r11 = np.logical_and(r1, yBin[1:] == 1)
+    r00 = np.logical_and(r0, y_bin[1:] == 0)
+    r01 = np.logical_and(r0, y_bin[1:] == 1)
+    r10 = np.logical_and(r1, y_bin[1:] == 0)
+    r11 = np.logical_and(r1, y_bin[1:] == 1)
 
     out['dd'] = np.mean(r00)  # down, down
     out['du'] = np.mean(r01)  # down, up
@@ -212,15 +215,15 @@ def motif_two(y : ArrayLike, binarize_how : str = 'diff') -> dict:
     r11 = r11[:-1]
 
     # 000
-    r000 = np.logical_and(r00, yBin[2:] == 0)
+    r000 = np.logical_and(r00, y_bin[2:] == 0)
     # 001 
-    r001 = np.logical_and(r00, yBin[2:] == 1)
-    r010 = np.logical_and(r01, yBin[2:] == 0)
-    r011 = np.logical_and(r01, yBin[2:] == 1)
-    r100 = np.logical_and(r10, yBin[2:] == 0)
-    r101 = np.logical_and(r10, yBin[2:] == 1)
-    r110 = np.logical_and(r11, yBin[2:] == 0)
-    r111 = np.logical_and(r11, yBin[2:] == 1)
+    r001 = np.logical_and(r00, y_bin[2:] == 1)
+    r010 = np.logical_and(r01, y_bin[2:] == 0)
+    r011 = np.logical_and(r01, y_bin[2:] == 1)
+    r100 = np.logical_and(r10, y_bin[2:] == 0)
+    r101 = np.logical_and(r10, y_bin[2:] == 1)
+    r110 = np.logical_and(r11, y_bin[2:] == 0)
+    r111 = np.logical_and(r11, y_bin[2:] == 1)
 
     # ----- Record these -----
     out['ddd'] = np.mean(r000)
@@ -232,7 +235,9 @@ def motif_two(y : ArrayLike, binarize_how : str = 'diff') -> dict:
     out['uud'] = np.mean(r110)
     out['uuu'] = np.mean(r111)
 
-    ppp = np.array([out['ddd'], out['ddu'], out['dud'], out['duu'], out['udd'], out['udu'], out['uud'], out['uuu']])
+    ppp = np.array([out['ddd'], out['ddu'], out['dud'], 
+                    out['duu'], out['udd'], out['udu'], 
+                    out['uud'], out['uuu']])
     out['hhh'] = _f_entropy(ppp)
 
     # -------------------
@@ -249,22 +254,22 @@ def motif_two(y : ArrayLike, binarize_how : str = 'diff') -> dict:
     r110 = r110[:-1]
     r111 = r111[:-1]
 
-    r0000 = np.logical_and(r000, yBin[3:] == 0)
-    r0001 = np.logical_and(r000, yBin[3:] == 1)
-    r0010 = np.logical_and(r001, yBin[3:] == 0)
-    r0011 = np.logical_and(r001, yBin[3:] == 1)
-    r0100 = np.logical_and(r010, yBin[3:] == 0)
-    r0101 = np.logical_and(r010, yBin[3:] == 1)
-    r0110 = np.logical_and(r011, yBin[3:] == 0)
-    r0111 = np.logical_and(r011, yBin[3:] == 1)
-    r1000 = np.logical_and(r100, yBin[3:] == 0)
-    r1001 = np.logical_and(r100, yBin[3:] == 1)
-    r1010 = np.logical_and(r101, yBin[3:] == 0)
-    r1011 = np.logical_and(r101, yBin[3:] == 1)
-    r1100 = np.logical_and(r110, yBin[3:] == 0)
-    r1101 = np.logical_and(r110, yBin[3:] == 1)
-    r1110 = np.logical_and(r111, yBin[3:] == 0)
-    r1111 = np.logical_and(r111, yBin[3:] == 1)
+    r0000 = np.logical_and(r000, y_bin[3:] == 0)
+    r0001 = np.logical_and(r000, y_bin[3:] == 1)
+    r0010 = np.logical_and(r001, y_bin[3:] == 0)
+    r0011 = np.logical_and(r001, y_bin[3:] == 1)
+    r0100 = np.logical_and(r010, y_bin[3:] == 0)
+    r0101 = np.logical_and(r010, y_bin[3:] == 1)
+    r0110 = np.logical_and(r011, y_bin[3:] == 0)
+    r0111 = np.logical_and(r011, y_bin[3:] == 1)
+    r1000 = np.logical_and(r100, y_bin[3:] == 0)
+    r1001 = np.logical_and(r100, y_bin[3:] == 1)
+    r1010 = np.logical_and(r101, y_bin[3:] == 0)
+    r1011 = np.logical_and(r101, y_bin[3:] == 1)
+    r1100 = np.logical_and(r110, y_bin[3:] == 0)
+    r1101 = np.logical_and(r110, y_bin[3:] == 1)
+    r1110 = np.logical_and(r111, y_bin[3:] == 0)
+    r1111 = np.logical_and(r111, y_bin[3:] == 1)
 
     # ----- Record these -----
     out['dddd'] = np.mean(r0000)
@@ -284,8 +289,12 @@ def motif_two(y : ArrayLike, binarize_how : str = 'diff') -> dict:
     out['uuud'] = np.mean(r1110)
     out['uuuu'] = np.mean(r1111)
 
-    pppp = np.array([out['dddd'], out['dddu'], out['ddud'], out['dduu'], out['dudd'], out['dudu'], out['duud'], out['duuu'],
-            out['uddd'], out['uddu'], out['udud'], out['uduu'], out['uudd'], out['uudu'], out['uuud'], out['uuuu']])
+    pppp = np.array([out['dddd'], out['dddu'], out['ddud'], 
+                     out['dduu'], out['dudd'], out['dudu'], 
+                     out['duud'], out['duuu'], out['uddd'], 
+                     out['uddu'], out['udud'], out['uduu'], 
+                     out['uudd'], out['uudu'], out['uuud'], 
+                     out['uuuu']])
     out['hhhh'] = _f_entropy(pppp)
 
     return out
@@ -477,18 +486,18 @@ def binary_stats(y : ArrayLike, binary_method : str = 'diff') -> dict:
     
     # Binarize the time series
     y = np.asarray(y)
-    yBin = binarize(y, binarize_how=binary_method)
-    N = len(yBin)
+    y_bin = binarize(y, binarize_how=binary_method)
+    N = len(y_bin)
 
     # Stationarity of binarised time series
     out = {}
-    out['pupstat2'] = np.sum(yBin[N//2:] == 1) / np.sum(yBin[:N//2] == 1)
+    out['pupstat2'] = np.sum(y_bin[N//2:] == 1) / np.sum(y_bin[:N//2] == 1)
 
     # Consecutive strings of ones/zeros (normalized by length)
-    diff_y = np.diff(np.where(np.concatenate(([1], yBin, [1])))[0])
+    diff_y = np.diff(np.where(np.concatenate(([1], y_bin, [1])))[0])
     stretch0 = diff_y[diff_y != 1] - 1
 
-    diff_y = np.diff(np.where(np.concatenate(([0], yBin, [0])) == 0)[0])
+    diff_y = np.diff(np.where(np.concatenate(([0], y_bin, [0])) == 0)[0])
     stretch1 = diff_y[diff_y != 1] - 1
 
     # pstretches
@@ -530,9 +539,10 @@ def binary_stats(y : ArrayLike, binary_method : str = 'diff') -> dict:
     out['diff21stretch1'] = np.mean(stretch1 == 2) - np.mean(stretch1 == 1)
     out['diff21stretch0'] = np.mean(stretch0 == 2) - np.mean(stretch0 == 1)
 
-    return out 
+    return out
 
-def transition_matrix(y : ArrayLike, how_to_cg : str = 'quantile', num_groups : int = 2, tau : Union[int, str] = 1) -> dict:
+def transition_matrix(y : ArrayLike, how_to_cg : str = 'quantile', 
+                      num_groups : int = 2, tau : Union[int, str] = 1) -> dict:
     """
     Transition probabilities between time-series states. 
     The time series is coarse-grained according to a given method.
@@ -610,7 +620,7 @@ def transition_matrix(y : ArrayLike, how_to_cg : str = 'quantile', num_groups : 
 
     elif num_groups == 3:
         for i in range(9):
-            out[f'T{i+1}'] = T.transpose().flatten()[i] 
+            out[f'T{i+1}'] = T.transpose().flatten()[i]
 
     elif num_groups > 3:
         for i in range(num_groups):
@@ -622,24 +632,25 @@ def transition_matrix(y : ArrayLike, how_to_cg : str = 'quantile', num_groups : 
 
     # (iii) Measures of symmetry:
     out['symdiff'] = np.sum(np.abs(T - T.T)) # sum of differences of individual elements
-    out['symsumdiff'] = np.sum(np.tril(T, -1)) - np.sum(np.triu(T, 1)) # difference in sums of upper and lower triangular parts of T
+    # difference in sums of upper and lower triangular parts of T
+    out['symsumdiff'] = np.sum(np.tril(T, -1)) - np.sum(np.triu(T, 1))
 
     # Measures from eigenvalues of T
-    eig_T = np.linalg.eigvals(T)
-    out['stdeig'] = np.std(eig_T, ddof=1)
-    out['maxeig'] = np.max(np.real(eig_T))
-    out['mineig'] = np.min(np.real(eig_T))
-    out['maximeig'] = np.max(np.imag(eig_T))
+    eig_t = np.linalg.eigvals(T)
+    out['stdeig'] = np.std(eig_t, ddof=1)
+    out['maxeig'] = np.max(np.real(eig_t))
+    out['mineig'] = np.min(np.real(eig_t))
+    out['maximeig'] = np.max(np.imag(eig_t))
 
     # Measures from covariance matrix
-    cov_T = np.cov(T.transpose())
-    out['sumdiagcov'] = np.trace(cov_T)
+    cov_t = np.cov(T.transpose())
+    out['sumdiagcov'] = np.trace(cov_t)
 
     # Eigenvalues of covariance matrix
-    eig_cov_T = np.linalg.eigvals(cov_T)
-    out['stdeigcov'] = np.std(eig_cov_T, ddof=1)
-    out['maxeigcov'] = np.max(np.real(eig_cov_T))
-    out['mineigcov'] = np.min(np.real(eig_cov_T))
+    eig_cov_t = np.linalg.eigvals(cov_t)
+    out['stdeigcov'] = np.std(eig_cov_t, ddof=1)
+    out['maxeigcov'] = np.max(np.real(eig_cov_t))
+    out['mineigcov'] = np.min(np.real(eig_cov_t))
 
     return out
 
@@ -691,7 +702,7 @@ def coarse_grain(y : list, how_to_cg : str, num_groups : int) -> np.ndarray:
 
         # Look at which points are in which angular 'quadrant'
         upr = m2 >= 0 # points above the axis
-        downr = m2 < 0 # points below the axis 
+        downr = m2 < 0 # points below the axis
 
         q1r = np.logical_and(upr, m1 >= 0) # points in quadrant 1
         q2r = np.logical_and(upr, m1 < 0) # points in quadrant 2
@@ -743,4 +754,4 @@ def coarse_grain(y : list, how_to_cg : str, num_groups : int) -> np.ndarray:
     if np.any(yth == 0):
         raise ValueError('All values in the sequence were not assigned to a group')
 
-    return yth 
+    return yth
