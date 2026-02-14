@@ -9,8 +9,8 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
     Compute Poincaré plot-based HRV (Heart Rate Variability) measures from RR interval time series.
 
     This function computes the triangular histogram indices and Poincaré plot measures commonly used 
-    in HRV analysis. It is specifically designed for time series consisting of consecutive RR intervals 
-    measured in milliseconds. It is not suitable for other types of time series.
+    in HRV analysis. It is specifically designed for time series consisting of consecutive 
+    RR intervals measured in milliseconds. It is not suitable for other types of time series.
 
     The computed features are widely used in clinical and physiological studies of autonomic nervous 
     system activity. The Poincaré plot measures (SD1 and SD2) are standard metrics for short- and 
@@ -20,9 +20,11 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
     References
     ----------
     .. [1] M. Brennan, M. Palaniswami, and P. Kamen, 
-        "Do existing measures of Poincaré plot geometry reflect nonlinear features of heart rate variability?", 
-        IEEE Transactions on Biomedical Engineering, 48(11), pp. 1342–1347, 2001.
-    .. [2] Original MATLAB implementation adapted from: Max Little's `hrv_classic.m` (http://www.maxlittle.net/)
+        "Do existing measures of Poincaré plot geometry reflect nonlinear features 
+        of heart rate variability?", IEEE Transactions on Biomedical Engineering, 
+        48(11), pp. 1342–1347, 2001.
+    .. [2] Original MATLAB implementation adapted from: Max Little's `hrv_classic.m` 
+        (http://www.maxlittle.net/)
 
     Parameters
     ----------
@@ -35,16 +37,16 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
         Dictionary containing the following HRV features   
         - 'tri10'   : Triangular histogram index using 10 bins.
         - 'tri20'   : Triangular histogram index using 20 bins.
-        - 'trisqrt' : Triangular histogram index using a number of bins determined by the square root rule.
+        - 'trisqrt' : Triangular histogram index using a number of bins determined by 
+            the square root rule.
         - 'SD1'     : Standard deviation of the Poincaré plot’s minor axis (short-term variability).
         - 'SD2'     : Standard deviation of the Poincaré plot’s major axis (long-term variability).
     """
     x = np.asarray(x)
     N = len(x)
-    
     out = {}
 
-    # triangular histogram index  
+    # triangular histogram index
     # 10 bins  
     edges_10 = bin_picker(x.min(), x.max(), 10)
     hist_counts10 = histc(x, edges_10)
@@ -94,12 +96,13 @@ def hrv_classic(y: ArrayLike) -> dict:
 
     References
     ----------
-    .. [1] Mietus, J.E., et al., *The pNNx files: Re-examining a widely used heart rate variability measure*,
-        Heart, 88(4):378, 2002.
-    .. [2] Malik, M., et al., *Heart rate variability: Standards of measurement, physiological interpretation, and clinical use*,
-        European Heart Journal, 17(3):354, 1996.
-    .. [3] Brennan, M., et al., *Do existing measures of Poincaré plot geometry reflect nonlinear features of heart rate variability?*,
-        IEEE Transactions on Biomedical Engineering, 48(11):1342, 2001.
+    .. [1] Mietus, J.E., et al., *The pNNx files: Re-examining a widely used 
+        heart rate variability measure*, Heart, 88(4):378, 2002.
+    .. [2] Malik, M., et al., *Heart rate variability: Standards of measurement, 
+        physiological interpretation, and clinical use*, European Heart Journal, 17(3):354, 1996.
+    .. [3] Brennan, M., et al., *Do existing measures of Poincaré plot geometry 
+        reflect nonlinear features of heart rate variability?*, IEEE Transactions on 
+        Biomedical Engineering, 48(11):1342, 2001.
 
     Parameters
     ----------
@@ -278,7 +281,7 @@ def pol_var(x : ArrayLike, d : float = 1, D : int = 6) -> float:
     
     p = pc / N
 
-    return p 
+    return p
 
 def pnn(x : ArrayLike) -> dict:
     """
