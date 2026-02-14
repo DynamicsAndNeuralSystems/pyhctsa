@@ -173,12 +173,14 @@ def z_score(x : ArrayLike) -> np.ndarray:
 
     # Check for NaNs, infs, etc. i.e., check data is finite
     if not np.isfinite(x).all():
-        raise ValueError(f'data contains non-finite values (NaN/inf) at idxs: {np.argwhere(np.isfinite(x) == False)}')
+        raise ValueError(f"data contains non-finite values (NaN/inf) at "
+                         f"idxs: {np.argwhere(np.isfinite(x) == False)}")
     
     # robust checks for constant values
     var_x = np.var(x, ddof=1)
     if var_x < 1e-10:
-        raise ValueError(f"Data has sample variance {var_x:.2e} < 1e-10. Values appear to be constant.")
+        raise ValueError(f"Data has sample variance {var_x:.2e} < 1e-10. "
+                         "Values appear to be constant.")
     data_range = np.ptp(x)  # peak-to-peak (max - min)
     if data_range < 1e-10:
         raise ValueError(f"Data range {data_range:.2e} < 1e-10. Values appear to be constant.")
@@ -191,13 +193,15 @@ def z_score(x : ArrayLike) -> np.ndarray:
 
 def histc(x : ArrayLike, bins : ArrayLike) -> int:
     """Counts the number of values in x that are within each specified bin."""
-    map_to_bins = np.digitize(x, bins) # Get indices of the bins to which each value in input array belongs.
+    # Get indices of the bins to which each value in input array belongs.
+    map_to_bins = np.digitize(x, bins)
     res = np.zeros(bins.shape)
     for el in map_to_bins:
         res[el-1] += 1 # Increment appropriate bin.
     return res
 
-def bin_picker(x_min : float, x_max : float, n_bins : Union[None, int], bin_width_est : Union[None, float] = None) -> np.ndarray:
+def bin_picker(x_min : float, x_max : float, n_bins : Union[None, int],
+               bin_width_est : Union[None, float] = None) -> np.ndarray:
     """
     Choose histogram bins. 
 
@@ -217,10 +221,10 @@ def bin_picker(x_min : float, x_max : float, n_bins : Union[None, int], bin_widt
     edges : numpy.ndarray
         Array of bin edges.
     """
-    if bin_width_est == None:
-        rawBinWidth = abs(x_max - x_min)/n_bins
+    if bin_width_est is None:
+        raw_bin_width = abs(x_max - x_min)/n_bins
     else:
-        rawBinWidth = bin_width_est
+        raw_bin_width = bin_width_est
 
     if x_min is not None:
         if not np.issubdtype(type(x_min), np.floating):
@@ -230,13 +234,13 @@ def bin_picker(x_min : float, x_max : float, n_bins : Union[None, int], bin_widt
         xrange = x_max - x_min
 
         # Make sure the bin width is not effectively zero
-        rawBinWidth = max(rawBinWidth, np.spacing(xscale))
+        raw_bin_width = max(raw_bin_width, np.spacing(xscale))
 
         # If the data are not constant, place the bins at "nice" locations
         if xrange > max(np.sqrt(np.spacing(xscale)), np.finfo(xscale).tiny):
             # Choose the bin width as a "nice" value
-            pow_of_ten = 10 ** np.floor(np.log10(rawBinWidth))
-            rel_size = rawBinWidth / pow_of_ten  # guaranteed in [1, 10)
+            pow_of_ten = 10 ** np.floor(np.log10(raw_bin_width))
+            rel_size = raw_bin_width / pow_of_ten  # guaranteed in [1, 10)
 
             # Automatic rule specified
             if n_bins is None:
@@ -374,7 +378,7 @@ def sign_change(y : Union[list, np.ndarray], do_find = 0):
     Where a data vector changes sign.
     """
     if do_find == 0:
-        return (np.multiply(y[1:],y[0:len(y)-1]) < 0)
+        return np.multiply(y[1:],y[0:len(y)-1]) < 0
     indexs = np.where((np.multiply(y[1:],y[0:len(y)-1]) < 0))[0]
 
     return indexs
@@ -396,24 +400,26 @@ def make_buffer(y : ArrayLike, buffer_size : int) -> np.ndarray:
         2D array where each row is a segment of length `buffer_size` 
         corresponding to consecutive, non-overlapping segments of the input time series.
     """
-    y = np.asarray(y) 
+    y = np.asarray(y)
     N = len(y)
 
-    numBuffers = int(np.floor(N/buffer_size))
+    num_buffers = int(np.floor(N/buffer_size))
 
     # may need trimming
-    y_buffer = y[:numBuffers*buffer_size]
+    y_buffer = y[:num_buffers*buffer_size]
     # then reshape
-    y_buffer = y_buffer.reshape((numBuffers,buffer_size))
+    y_buffer = y_buffer.reshape((num_buffers,buffer_size))
 
     return y_buffer
 
-def make_mat_buffer(X : ArrayLike, n : int, p : int = 0, opt : Union[str, None] = None) -> np.ndarray:
+def make_mat_buffer(x : ArrayLike, n : int, p : int = 0,
+                    opt : Union[str, None] = None) -> np.ndarray:
     # helper function
     '''
     Create a buffer array.
 
-    Taken from: https://stackoverflow.com/questions/38453249/does-numpy-have-a-function-equivalent-to-matlabs-buffer 
+    Taken from: https://stackoverflow.com/questions/38453249/does-numpy-have-
+        a-function-equivalent-to-matlabs-buffer 
 
     Parameters
     ----------
@@ -430,23 +436,23 @@ def make_mat_buffer(X : ArrayLike, n : int, p : int = 0, opt : Union[str, None] 
     Returns
     -------
     result : (n,n) ndarray
-        Buffer array created from X
+        Buffer array created from x
     '''
 
     if opt not in [None, 'nodelay']:
-        raise ValueError('{} not implemented'.format(opt))
+        raise ValueError(f'{opt} not implemented')
 
     i = 0
     first_iter = True
-    while i < len(X):
+    while i < len(x):
         if first_iter:
             if opt == 'nodelay':
                 # No zeros at array start
-                result = X[:n]
+                result = x[:n]
                 i = n
             else:
                 # Start with `p` zeros
-                result = np.hstack([np.zeros(p), X[:n-p]])
+                result = np.hstack([np.zeros(p), x[:n-p]])
                 i = n-p
             # Make 2D array and pivot
             result = np.expand_dims(result, axis=0).T
@@ -454,7 +460,7 @@ def make_mat_buffer(X : ArrayLike, n : int, p : int = 0, opt : Union[str, None] 
             continue
 
         # Create next column, add `p` results from last col if given
-        col = X[i:i+(n-p)]
+        col = x[i:i+(n-p)]
         if p != 0:
             col = np.hstack([result[:,-1][-p:], col])
         i += n-p
@@ -507,12 +513,12 @@ def binarize(y : ArrayLike, binarize_how : str = 'diff') -> ArrayLike:
 
     return y_bin
 
-def _step_binary(X : ArrayLike) -> ArrayLike:
+def _step_binary(x : ArrayLike) -> ArrayLike:
     # Transform real values to 0 if <=0 and 1 if >0:
-    Y = np.zeros(len(X))
-    Y[X > 0] = 1
+    y = np.zeros(len(x))
+    y[x > 0] = 1
 
-    return Y
+    return y
 
 def x_corr(x : ArrayLike, y : ArrayLike, normed : bool = True, max_lags : int = 10) -> tuple:
     """
@@ -547,10 +553,9 @@ def x_corr(x : ArrayLike, y : ArrayLike, normed : bool = True, max_lags : int = 
             if normed=True, otherwise raw inner products.
     """
 
-    Nx = len(x)
-    if Nx != len(y):
+    nx = len(x)
+    if nx != len(y):
         raise ValueError('x and y must be equal length')
-    
     c = np.correlate(x, y, mode='full')
 
     if normed:
@@ -558,12 +563,12 @@ def x_corr(x : ArrayLike, y : ArrayLike, normed : bool = True, max_lags : int = 
         c = np.true_divide(c,n)
 
     if max_lags is None:
-        max_lags = Nx - 1
+        max_lags = nx - 1
 
-    if max_lags >= Nx or max_lags < 1:
-        raise ValueError('maglags must be None or strictly '
-                         'positive < %d' % Nx)
+    if max_lags >= nx or max_lags < 1:
+        raise ValueError('max_lags must be None or strictly '
+                         f'positive <{nx}')
 
     lags = np.arange(-max_lags, max_lags + 1)
-    c = c[Nx - 1 - max_lags:Nx + max_lags]
+    c = c[nx - 1 - max_lags:nx + max_lags]
     return lags, c

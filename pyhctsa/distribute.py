@@ -29,8 +29,15 @@ def _compute_features_for_chunk(chunk, feature_funcs):
     return [_extract_features_single_series(ts, feature_funcs) for ts in chunk]
 
 class BaseDistributor(ABC):
+    """
+    BaseDistributor abstract class.
+    """
     def calculate_chunk_size(self, n_items, n_workers):
-        if n_items == 0: return 1
+        """
+        Calculate the number of chunks to distribute amongst the workers.
+        """
+        if n_items == 0:
+            return 1
         return max(1, n_items // (n_workers*5))
     @abstractmethod
     def map(self, func, iterable, **kwargs):
