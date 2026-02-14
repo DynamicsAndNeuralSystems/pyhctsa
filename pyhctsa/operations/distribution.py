@@ -35,7 +35,6 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         Includes the absolute area between the two distributions, the peak separation,
         overlap integral, and relative entropy.
     """
-    
     x = np.asarray(x)
     x_step = np.std(x, ddof=1) / 100  # set a step size
 
@@ -152,7 +151,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
 
     return out
 
-def _find_bounds(pdf_func, start_left, start_right, xStep, thresh):
+def _find_bounds(pdf_func, start_left, start_right, x_step, thresh):
     """Expand left/right until pdf falls below threshold."""
     xf = [start_left, start_right]
 
@@ -160,13 +159,13 @@ def _find_bounds(pdf_func, start_left, start_right, xStep, thresh):
     if start_left is not None:
         ange = 10
         while ange > thresh:
-            xf[0] -= xStep
+            xf[0] -= x_step
             ange = pdf_func(xf[0])
 
     # Right search
     ange = 10
     while ange > thresh:
-        xf[1] += xStep
+        xf[1] += x_step
         ange = pdf_func(xf[1])
 
     return xf
@@ -182,7 +181,8 @@ def withinp(x : ArrayLike, p : float = 1.0, mean_or_median : str = 'mean') -> fl
     p : float
         The number (proportion) of standard deviations
     mean_or_median : str 
-        Whether to use units of 'mean' and standard deviation, or 'median' and rescaled interquartile range.
+        Whether to use units of 'mean' and standard deviation, or 'median' 
+        and rescaled interquartile range.
 
     Returns
     --------
@@ -581,11 +581,11 @@ def burstiness(y: ArrayLike) -> dict:
         'B_Kim': Improved burstiness for finite series
     """
     y = np.asarray(y)
-    mean = np.mean(y)
+    me = np.mean(y)
     std = np.std(y, ddof=1)
 
-    r = np.divide(std,mean) # coefficient of variation
-    B = np.divide((r - 1), (r + 1)) # Original Goh and Barabasi burstiness statistic, B
+    r = np.divide(std,me) # coefficient of variation
+    b = np.divide((r - 1), (r + 1)) # Original Goh and Barabasi burstiness statistic, B
 
     # improved burstiness statistic, accounting for scaling for finite time series
     # Kim and Jo, 2016, http://arxiv.org/pdf/1604.01125v1.pdf
@@ -593,9 +593,9 @@ def burstiness(y: ArrayLike) -> dict:
     p1 = np.sqrt(N+1)*r - np.sqrt(N-1)
     p2 = (np.sqrt(N+1)-2)*r + np.sqrt(N-1)
 
-    B_Kim = np.divide(p1, p2)
+    b_kim = np.divide(p1, p2)
 
-    out = {'B': B, 'B_Kim': B_Kim}
+    out = {'B': b, 'B_Kim': b_kim}
 
     return out
 
@@ -624,9 +624,12 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01)
     """
     How statistics depend on distributional outliers.
 
-    Measures how various statistics of a time series change as more and more outliers are included in the calculation, according to a specified rule for defining outliers.
+    Measures how various statistics of a time series change as more and more outliers 
+    are included in the calculation, according to a specified rule for defining outliers.
 
-    At each threshold, the mean, standard error, proportion of included points, median, and standard deviation are calculated. Outputs summarize how these statistics change as more extreme points are included.
+    At each threshold, the mean, standard error, proportion of included points, median, 
+    and standard deviation are calculated. Outputs summarize how these statistics change 
+    as more extreme points are included.
 
     Parameters
     ----------
@@ -740,7 +743,8 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01)
     
     return results
 
-def outlier_test(y: ArrayLike, p: float = 2, just_me: Union[str, None] = None) -> Union[dict, float]:
+def outlier_test(y: ArrayLike, p: float = 2, 
+                 just_me: Union[str, None] = None) -> Union[dict, float]:
     """
     How distributional statistics depend on distributional outliers.
 
@@ -931,7 +935,7 @@ def histogram_mode(y : ArrayLike, num_bins : int = 10, do_simple : bool = True) 
 
     return float(out)
 
-def remove_points(y : ArrayLike, remove_how : str = 'absfar', p : float = 0.1, 
+def remove_points(y : ArrayLike, remove_how : str = 'absfar', p : float = 0.1,
                   remove_or_saturate : str = 'remove') -> dict:
     """
     How time-series properties change as points are removed.
@@ -979,26 +983,26 @@ def remove_points(y : ArrayLike, remove_how : str = 'absfar', p : float = 0.1,
         raise ValueError(f"Unknown method '{remove_how}'")
     
     # Indices of points to *keep*:
-    rKeep = np.sort(is_[:round(N * (1 - p))])
+    r_keep = np.sort(is_[:round(N * (1 - p))])
 
     # Indices of points to *transform*:
-    rTransform = np.setdiff1d(np.arange(N), rKeep)
+    r_transform = np.setdiff1d(np.arange(N), r_keep)
 
-    # Do the removing/saturating to convert y -> yTransform
+    # Do the removing/saturating to convert y -> y_transform
     if remove_or_saturate == 'remove':
-        yTransform = y[rKeep]
+        y_transform = y[r_keep]
     elif remove_or_saturate == 'saturate':
         # Saturate out the targeted points
         if remove_how == 'max':
-            yTransform = y.copy()
-            yTransform[rTransform] = np.max(y[rKeep])
+            y_transform = y.copy()
+            y_transform[r_transform] = np.max(y[r_keep])
         elif remove_how == 'min':
-            yTransform = y.copy()
-            yTransform[rTransform] = np.min(y[rKeep])
+            y_transform = y.copy()
+            y_transform[r_transform] = np.min(y[r_keep])
         elif remove_how == 'absfar':
-            yTransform = y.copy()
-            yTransform[yTransform > np.max(y[rKeep])] = np.max(y[rKeep])
-            yTransform[yTransform < np.min(y[rKeep])] = np.min(y[rKeep])
+            y_transform = y.copy()
+            y_transform[y_transform > np.max(y[r_keep])] = np.max(y[r_keep])
+            y_transform[y_transform < np.min(y[r_keep])] = np.min(y[r_keep])
         else:
             raise ValueError(f"Cannot 'saturate' when using '{remove_how}' method")
     else:
@@ -1007,33 +1011,33 @@ def remove_points(y : ArrayLike, remove_how : str = 'absfar', p : float = 0.1,
     # Compute some autocorrelation properties
     n = 8
     acf_y = autocorr(y, list(range(1, n+1)), 'Fourier')
-    acf_yTransform = autocorr(yTransform, list(range(1, n+1)), 'Fourier')
+    acf_y_transform = autocorr(y_transform, list(range(1, n+1)), 'Fourier')
     # Compute output statistics
     out = {}
 
     # Helper functions
-    f_absDiff = lambda x1, x2: np.abs(x1 - x2) # ignores the sign
+    f_abs_diff = lambda x1, x2: np.abs(x1 - x2) # ignores the sign
     f_ratio = lambda x1, x2: np.divide(x1, x2) # includes the sign
 
-    out['fzcacrat'] = f_ratio(first_crossing(yTransform, 'ac', 0, 'continuous'), 
+    out['fzcacrat'] = f_ratio(first_crossing(y_transform, 'ac', 0, 'continuous'), 
                               first_crossing(y, 'ac', 0, 'continuous'))
     
-    out['ac1rat'] = f_ratio(acf_yTransform[0], acf_y[0])
-    out['ac1diff'] = f_absDiff(acf_yTransform[0], acf_y[0])
+    out['ac1rat'] = f_ratio(acf_y_transform[0], acf_y[0])
+    out['ac1diff'] = f_abs_diff(acf_y_transform[0], acf_y[0])
 
-    out['ac2rat'] = f_ratio(acf_yTransform[1], acf_y[1])
-    out['ac2diff'] = f_absDiff(acf_yTransform[1], acf_y[1])
+    out['ac2rat'] = f_ratio(acf_y_transform[1], acf_y[1])
+    out['ac2diff'] = f_abs_diff(acf_y_transform[1], acf_y[1])
     
-    out['ac3rat'] = f_ratio(acf_yTransform[2], acf_y[2])
-    out['ac3diff'] = f_absDiff(acf_yTransform[2], acf_y[2])
+    out['ac3rat'] = f_ratio(acf_y_transform[2], acf_y[2])
+    out['ac3diff'] = f_abs_diff(acf_y_transform[2], acf_y[2])
     
-    out['sumabsacfdiff'] = np.sum(np.abs(acf_yTransform - acf_y))
-    out['mean'] = np.mean(yTransform)
-    out['median'] = np.median(yTransform)
-    out['std'] = np.std(yTransform, ddof=1)
+    out['sumabsacfdiff'] = np.sum(np.abs(acf_y_transform - acf_y))
+    out['mean'] = np.mean(y_transform)
+    out['median'] = np.median(y_transform)
+    out['std'] = np.std(y_transform, ddof=1)
     
-    out['skewnessrat'] = stats.skew(yTransform) / stats.skew(y)
+    out['skewnessrat'] = stats.skew(y_transform) / stats.skew(y)
     # return kurtosis instead of excess kurtosis
-    out['kurtosisrat'] = stats.kurtosis(yTransform, fisher=False) / stats.kurtosis(y, fisher=False)
+    out['kurtosisrat'] = stats.kurtosis(y_transform, fisher=False) / stats.kurtosis(y, fisher=False)
 
     return out
