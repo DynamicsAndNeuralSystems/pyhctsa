@@ -417,12 +417,17 @@ def give_me_robust_stats(x_data, y_data, field_name) -> dict:
     """
     x = sm.add_constant(x_data)
     rlm = sm.RLM(y_data, x, M=sm.robust.norms.TukeyBiweight())
-    results = rlm.fit()
-    linfit = results.params  # [intercept, slope]
     out = {}
-    out[f'{field_name}_a1'] = linfit[0]  # linear fit intercept
-    out[f'{field_name}_a2'] = linfit[1]  # linear fit gradient
-    #% ratio of sigma estimates between ordinary least squares (ols) and the robust fit:
-    out[f'{field_name}_sea1'] = results.bse[0]  # standard error in intercept
-    out[f'{field_name}_sea2'] = results.bse[1]  # standard error in slope
+    try:
+        results = rlm.fit()
+        linfit = results.params  # [intercept, slope]
+        out[f'{field_name}_a1'] = linfit[0]  # linear fit intercept
+        out[f'{field_name}_a2'] = linfit[1]  # linear fit gradient
+        out[f'{field_name}_sea1'] = results.bse[0]  # standard error in intercept
+        out[f'{field_name}_sea2'] = results.bse[1]  # standard error in slope
+    except Exception:
+        out[f'{field_name}_a1'] = np.nan
+        out[f'{field_name}_a2'] = np.nan
+        out[f'{field_name}_sea1'] = np.nan
+        out[f'{field_name}_sea2'] = np.nan
     return out
