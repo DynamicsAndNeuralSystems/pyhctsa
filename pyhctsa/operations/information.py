@@ -28,7 +28,7 @@ def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, No
         return lambda x: automutual_info(y, x, "gaussian", extra_param)
     else:
         raise ValueError(f"Unknown correlation type specified: {min_what}")
-    
+
 def first_min(
     y: list,
     min_what: str = "mi-gaussian",
@@ -119,7 +119,7 @@ def first_max(
             
     return np.nan
 
-def _mi_bin(v1 : ArrayLike, v2 : ArrayLike, r1 : Union[str, list] = 'range', 
+def _mi_bin(v1 : ArrayLike, v2 : ArrayLike, r1 : Union[str, list] = 'range',
             r2 : Union[str, list] = 'range', num_bins : int = 10) -> float:
     """
     Compute mutual information between two data vectors using bin counting.
@@ -264,7 +264,8 @@ def automutual_info_stats(
     # Look for periodicities in local maxima
     maxima_i = np.where((dami[:-1] > 0) & (dami[1:] < 0))[0] + 1
     dmaxima_i = np.diff(maxima_i)
-    # Is there a big peak in dmaxima? (no need to normalize since a given method inputs its range; but do it anyway... ;-))
+    # Is there a big peak in dmaxima? (no need to normalize since a given method 
+    # inputs its range; but do it anyway... ;-))
     out['pmaxima'] = len(dmaxima_i) / (lami // 2)
     if len(dmaxima_i) == 0:  # fewer than 2 local maxima
         out['modeperiodmax'] = np.nan
@@ -526,7 +527,7 @@ def _initialize_MI(
 
     # Add neighest neighbor option for KSG estimator
     if est_method in ['kraskov1', 'kraskov2']:
-        if extra_param != None:
+        if extra_param is not None:
             if isinstance(extra_param, int):
                 logging.warning("Number of nearest neighbors needs to be a string. Setting this for you...")
                 extra_param = str(extra_param)
@@ -535,7 +536,7 @@ def _initialize_MI(
             mi_calc.setProperty('k', '3') # use 3 nearest neighbors for KSG estimator as default
         
     # Make deterministic if kraskov1 or 2 (which adds a small amount of noise to the signal by default)
-    if (est_method in ['kraskov1', 'kraskov2']) and (add_noise == False):
+    if (est_method in ['kraskov1', 'kraskov2']) and (add_noise is False):
         mi_calc.setProperty('NOISE_LEVEL_TO_ADD','0')
     
     # Specify a univariate calculation
@@ -579,7 +580,8 @@ def rm_automutual_information(y : ArrayLike, tau : int = 1) -> float:
 
 def _rm_info(*args):
     """
-    Estimates the mutual information of two stationary signals with independent pairs of samples using various approaches.
+    Estimates the mutual information of two stationary signals with independent 
+    pairs of samples using various approaches.
 
     Parameters
     ----------
@@ -683,7 +685,8 @@ def _rm_info(*args):
     else:
         base = args[4]
 
-    lower_bound_x = descriptor[0, 0]  # not sure why most of these were included in the matlab script, most of them go unused
+    # not sure why most of these were included in the matlab script, most of them go unused
+    lower_bound_x = descriptor[0, 0]
     upper_bound_x = descriptor[0, 1]
     n_cell_x = descriptor[0, 2]
     lower_bound_y = descriptor[1, 0]
