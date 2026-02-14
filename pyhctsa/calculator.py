@@ -21,22 +21,22 @@ def range_constructor(loader, node) -> list:
 yaml.SafeLoader.add_constructor("!range", range_constructor)
 
 def classify_output(res) -> int:
-    # classify the type of output
+    """classify the type of output"""
+    out = 0
     if isinstance(res, str) and res.startswith("Error:"):
-        return 1
+        out = 1
     elif res is None:
-        return 6
+        out = 6
     elif np.iscomplexobj(res):
         # non-zero imaginary component
-        return 5
+        out = 5
     elif np.isnan(res):
-        return 2
+        out = 2
     elif np.isposinf(res):
-        return 3
+        out = 3
     elif np.isneginf(res):
-        return 4
-    else:
-        return 0
+        out = 4
+    return out
 
 def apply_selection_wrapper(func, keep_keys):
     """
@@ -47,8 +47,6 @@ def apply_selection_wrapper(func, keep_keys):
     :return: Wrapped function.
     :rtype: Any
     """
-    keys_list = [keep_keys] if isinstance(keep_keys, str) else keep_keys
-    
     def wrapper(*args, **kwargs):
         result = func(*args, **kwargs)
         # if result is a dict, then filter it according to the keys
@@ -65,7 +63,8 @@ def _standardise_inputs(data) -> list[np.ndarray]:
         elif data.ndim == 2:
             if data.shape[0] > data.shape[1]:
                 # notify the user to check that the shapes make sense
-                print(f"Check that the shape of the 2D input is such that (n_series, n_samples). Got shape: {data.shape}")
+                print(f"Check that the shape of the 2D input is such "
+                      f"that (n_series, n_samples). Got shape: {data.shape}")
             return [np.asarray(row, dtype=float) for row in data]
         else:
             raise ValueError("NumPy array must be 1D or 2D.")
@@ -84,8 +83,8 @@ def _standardise_inputs(data) -> list[np.ndarray]:
         raise ValueError(
         "Input must be a 1D series, a list of 1D series, or a 2D array "
         "with shape (n_series, n_samples)")
-      
-def _format_param_value(val, key=None) -> str: 
+   
+def _format_param_value(val, key=None) -> str:
     """ 
     Format parameter value for label: 
     - For bools: if True, return the key name.
@@ -96,51 +95,73 @@ def _format_param_value(val, key=None) -> str:
     if isinstance(val, bool):
         return key if val and key else ""
 
-    if isinstance(val, list): 
-        # Check if it's a contiguous range 
-        if len(val) > 1 and all(isinstance(x, (int, float)) for x in val): 
-            diffs = [val[i+1] - val[i] for i in range(len(val)-1)] 
-            if all(d == 1 for d in diffs): 
+    if isinstance(val, list):
+        # Check if it's a contiguous range
+        if len(val) > 1 and all(isinstance(x, (int, float)) for x in val):
+            diffs = [val[i+1] - val[i] for i in range(len(val)-1)]
+            if all(d == 1 for d in diffs):
                 # Pass key down for recursion if needed, though usually lists aren't bools
-                return f"{_format_param_value(val[0])}_{_format_param_value(val[-1])}" 
-        return "_".join(_format_param_value(x) for x in val) 
+                return f"{_format_param_value(val[0])}_{_format_param_value(val[-1])}"
+        return "_".join(_format_param_value(x) for x in val)
 
-    if isinstance(val, (float, int)): 
-        if val < 0: 
-            return 'm' + _format_param_value(-val) 
-        elif val == int(val): 
-            return str(int(val)) 
-        elif 0 < val < 1: 
-            return '0p' + str(val).split(".")[1].rstrip('0') 
-        else: 
-            return str(val).replace('.', 'p').rstrip('0').rstrip('p') 
-            
+    if isinstance(val, (float, int)):
+        if val < 0:
+            return 'm' + _format_param_value(-val)
+        elif val == int(val):
+            return str(int(val))
+        elif 0 < val < 1:
+            return '0p' + str(val).split(".")[1].rstrip('0')
+        else:
+            return str(val).replace('.', 'p').rstrip('0').rstrip('p')
     return str(val)
 
 def _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval):
     """Constructs the feature string based on params and flags."""
     parts = []
-    
     # Process parameters
     if ordered_args:
         for arg in ordered_args:
             if arg in combo_dict:
                 formatted = _format_param_value(combo_dict[arg], key=arg)
-                if formatted: parts.append(formatted)
+                if formatted:
+                    parts.append(formatted)
     else:
         for k, v in combo_dict.items():
             formatted_v = _format_param_value(v, key=k)
             parts.append(formatted_v if isinstance(v, bool) else f"{k}{formatted_v}")
-    
     # join base and parts, filter out empty strings
     label = "_".join([base_name] + [p for p in parts if p])
-    
     # append suffix flags
-    if not do_zscore: label += '_raw'
-    if do_absval:    label += '_abs'
+    if not do_zscore:
+        label += '_raw'
+    if do_absval:
+        label += '_abs'
     return label
 
 class FeatureCalculator:
+    """
+    A configuration-driven feature extraction calculator for time series data.
+    
+    Attributes
+    ----------
+    config : dict
+        The parsed YAML configuration containing feature definitions.
+    feature_funcs : dict
+        A dictionary mapping feature labels to their corresponding callable functions.
+    
+    Parameters
+    ----------
+    config_path : str or None, optional
+        Path to the YAML configuration file. If None, uses the default 'hctsa.yaml'
+        configuration file in the package configurations directory.
+    
+    Examples
+    --------
+    >>> fc = FeatureCalculator()  # Load default configuration
+    >>> x = np.random.randn(1000)
+    >>> df = fc.extract(x)
+    >>> print(fc.summary())
+    """
     def __init__(self, config_path : Union[str, None] = None):
         """
         Initialises a FeatureCalculator instance.  
@@ -154,7 +175,7 @@ class FeatureCalculator:
         if config_path is None:
             ROOT_DIR = Path(__file__).resolve().parent
             config_path = ROOT_DIR / "configurations" / "hctsa.yaml"
-        with open(config_path) as f:
+        with open(config_path, encoding='utf-8') as f:
             self.config = yaml.safe_load(f)
         self._operations_package = "pyhctsa.operations" # abs path
         self.feature_funcs = self._build_feature_funcs()
@@ -171,13 +192,11 @@ class FeatureCalculator:
             print(f"Skipping function '{full_name}' - missing dependencies: {', '.join(missing)}")
             self._skipped_functions.append((full_name, missing))
             return False
-        
         return True
     
     def _build_feature_funcs(self):
         feature_funcs = {}
-        skipped_functions = []
-        
+        skipped_functions = []       
         for module_key in self.config.keys():
 
             try:
@@ -234,15 +253,17 @@ class FeatureCalculator:
         Currently generates a summary for all instances.
         """
         # Check that extract has already been called. Otherwise return nothing...
-        print(f"Time taken to compute {len(self.feature_funcs)} master operations: {self._last_elapsed:.4f} seconds.")
-        codings = { "succesful" : 0, "fatal error(s)" : 1, "NaN(s)": 2, "+inf(s)": 3, "-inf(s)": 4, "complex": 5, "empty": 6}
+        print(f"Time taken to compute {len(self.feature_funcs)} master operations: "
+              f"{self._last_elapsed:.4f} seconds.")
+        codings = { "succesful" : 0, "fatal error(s)" : 1, "NaN(s)": 2, "+inf(s)": 3,
+                   "-inf(s)": 4, "complex": 5, "empty": 6}
         e_arr = self._errors.to_numpy()
         for c in codings:
-            print(f"{c} : {np.sum(e_arr == codings[c])}")
-            
+            print(f"{c} : {np.sum(e_arr == codings[c])}")           
         return e_arr
     
-    def extract(self, data : Union[ArrayLike, list[ArrayLike]], labels: Union[ArrayLike, list[ArrayLike], None] = None,
+    def extract(self, data : Union[ArrayLike, list[ArrayLike]],
+                labels: Union[ArrayLike, list[ArrayLike], None] = None,
                 verbose : bool = False, distributor = None) -> pd.DataFrame:
         """
         Run the configured feature extractor over one or more time series and
@@ -291,11 +312,11 @@ class FeatureCalculator:
         (1, 128)
         """
         series_list = _standardise_inputs(data)
-        is_valid = np.array([validate_data(t) for t in series_list]) # check each time series to see if valid...
-        invalid = np.argwhere(is_valid == False)
+        # check each time series to see if valid...
+        is_valid = np.array([validate_data(t) for t in series_list])
+        invalid = np.argwhere(~is_valid)
         if invalid.size > 0:
             raise ValueError(f"One or more time series instances are invalid: {invalid.flatten()}")
-        
         # check labels if provided
         if labels is not None:
             # allow single label for single series, otherwise require one label per series
@@ -305,7 +326,8 @@ class FeatureCalculator:
                 labels_list = list(labels)
 
             if len(labels_list) != len(series_list):
-                raise ValueError(f"Length of labels ({len(labels_list)}) must equal the number of series ({len(series_list)}).")
+                raise ValueError(f"Length of labels ({len(labels_list)}) must equal"
+                                 f"the number of series ({len(series_list)}).")
         else:
             # default names
             n = len(series_list)
@@ -313,12 +335,11 @@ class FeatureCalculator:
 
         print(f"Evaluating {len(self.feature_funcs)} partialed functions. Strap in!...")
         start_time = time.perf_counter()
-        
         if distributor:
             # parallel execution
             rows = distributor.map(
                 _compute_features_for_chunk,
-                series_list, 
+                series_list,
                 feature_funcs=self.feature_funcs
             )
         else:
@@ -336,14 +357,14 @@ class FeatureCalculator:
                         rows.append(_extract_features_single_series(ts, self.feature_funcs))
                         progress.advance(task)
             else:
-                rows = [_extract_features_single_series(ts, self.feature_funcs) for ts in series_list]
+                rows = [_extract_features_single_series(ts, self.feature_funcs) 
+                        for ts in series_list]
 
         elapsed = time.perf_counter() - start_time
         print(f"Feature extraction completed in {elapsed:.3f} seconds.")
         df = pd.json_normalize(rows)
         # assign row names
         df.index = pd.Index(labels_list, name="instance")
-        
         # meta data for summary
         self._last_elapsed = elapsed
         self._errors = df.map(classify_output)
