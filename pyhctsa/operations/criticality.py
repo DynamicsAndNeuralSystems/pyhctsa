@@ -29,7 +29,8 @@ def rad(x: ArrayLike, tau : Union[int, str] = 1, centre : bool = True) -> float:
         If a string, must be "tau", in which case the delay is set to the first
         crossing of the autocorrelation function.
     centre : bool, optional
-        Whether to center the time series at zero and take absolute values before analysis (default: True).
+        Whether to center the time series at zero and take absolute values before 
+        analysis (default: True).
 
     Returns
     -------
@@ -57,13 +58,13 @@ def rad(x: ArrayLike, tau : Union[int, str] = 1, centre : bool = True) -> float:
     x = x[:-tau]
 
     # Median split
-    subMedians = x < np.median(x)
-    superMedianSD = np.std(x[~subMedians], ddof=1)
-    subMedianSD = np.std(x[subMedians], ddof=1)
+    sub_medians = x < np.median(x)
+    super_median_sd = np.std(x[~sub_medians], ddof=1)
+    sub_median_sd = np.std(x[sub_medians], ddof=1)
 
     # Properties of the auto-density
     sigma_dx = np.std(y - x, ddof=1)
-    densityDifference = (1/superMedianSD) - (1/subMedianSD)
+    density_difference = (1/super_median_sd) - (1/sub_median_sd)
 
     # return RAD
-    return sigma_dx * densityDifference
+    return sigma_dx * density_difference
