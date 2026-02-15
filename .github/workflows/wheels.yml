@@ -38,8 +38,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Build sdist
-        run: pipx run build --sdist
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --sdist
+
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
@@ -64,25 +73,40 @@ jobs:
           name: all-dist-files
           path: dist/
   
-  publish_pypi:
+  publish_testpypi:
     name: Publish to TestPyPI
     needs: [merge_artifacts]
-    if: startsWith(github.ref, 'refs/tags/v')  # publish only on version tags
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
-      id-token: write   # required for PyPI trusted publishing (OIDC)
+      id-token: write
       contents: read
     steps:
-      - name: Download merged dist artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: all-dist-files
           path: dist
-
-      - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist
+
+  publish_pypi:
+    name: Publish to PyPI
+    needs: [merge_artifacts]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: all-dist-files
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
           packages-dir: dist
           
