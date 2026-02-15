@@ -88,13 +88,14 @@ def hmm_fit(y : ArrayLike, train_p : float = 0.8, num_states : int = 3, random_s
 
     return out
 
-def fit_subsegments(y : ArrayLike, model : str = 'ar', order : int = 2, subset_how : str = 'uniform', 
+def fit_subsegments(y : ArrayLike, model : str = 'ar', order : int = 2, subset_how : str = 'uniform',
                     sample_p : Union[list, tuple] = [20, 0.1]) -> dict:
     """
     Robustness of model parameters across different segments of a time series.
 
-    The spread of parameters obtained (including in-sample goodness of fit statistics) provides some
-    indication of stationarity. Values of goodness of fit provide some indication of model suitability.
+    The spread of parameters obtained (including in-sample goodness of fit statistics) 
+    provides some indication of stationarity. Values of goodness of fit provide some 
+    indication of model suitability.
 
     Parameters
     ----------
@@ -103,13 +104,15 @@ def fit_subsegments(y : ArrayLike, model : str = 'ar', order : int = 2, subset_h
     model : str, optional
         The model to fit in each segment of the time series:
             - 'ar': fits an AR model of a specified order.
-              Outputs are how the fitted AR parameters vary across the different segments of time series.
+              Outputs are how the fitted AR parameters vary across the different 
+              segments of time series.
             - 'arma': Not yet implemented.
             - 'ss': Not yet implemented.
     order : int, optional
         The order of the model to fit (used for 'ar', 'ss', or 'arma' models).
     subset_how : str, optional
-        How to choose segments from the time series, either 'uniform' (uniformly) or 'rand' (at random) [not implemented].
+        How to choose segments from the time series, either 'uniform' (uniformly) 
+        or 'rand' (at random) [not implemented].
     sample_p : list or tuple, optional
         A two-vector specifying how many segments to take and of what length.
         Of the form [n_samples, length], where length can be a proportion of the time-series length.
@@ -118,7 +121,8 @@ def fit_subsegments(y : ArrayLike, model : str = 'ar', order : int = 2, subset_h
     Returns
     -------
     dict
-        Dictionary of statistics on the spread and mean of fitted model parameters and goodness of fit across segments.
+        Dictionary of statistics on the spread and mean of fitted model parameters 
+        and goodness of fit across segments.
     """
     y = np.asarray(y)
     N = len(y)
@@ -126,7 +130,8 @@ def fit_subsegments(y : ArrayLike, model : str = 'ar', order : int = 2, subset_h
     r = np.zeros((num_pred, 2))
     if subset_how == 'uniform':
         if len(sample_p) == 1:  # size will depend on number of unique subsegments
-            spts = np.round(np.linspace(0, N, num_pred + 1)).astype(int)  # num_pred+1 boundaries = num_pred portions
+            # num_pred+1 boundaries = num_pred portions
+            spts = np.round(np.linspace(0, N, num_pred + 1)).astype(int)
             r = np.zeros((num_pred, 2), dtype=int)
             r[:, 0] = spts[:num_pred] + 1  # +1 for 1-based indexing (if needed)
             r[:, 1] = spts[1:]
@@ -135,15 +140,15 @@ def fit_subsegments(y : ArrayLike, model : str = 'ar', order : int = 2, subset_h
                 l = int(np.floor(N * sample_p[1]))
             else:  # specified an absolute interval
                 l = int(sample_p[1])
-            
-            spts = np.round(np.linspace(1, N - l + 1, num_pred)).astype(int)  # num_pred boundaries
+            # num_pred boundaries
+            spts = np.round(np.linspace(1, N - l + 1, num_pred)).astype(int)
             r = np.zeros((num_pred, 2), dtype=int)
             r[:, 0] = spts
             r[:, 1] = spts + l - 1
     elif subset_how == 'rand':
         raise NotImplementedError("Subset method not yet implemented.")
     else:
-        raise ValueError(f"Unknown subset method: {subset_how}")  
+        raise ValueError(f"Unknown subset method: {subset_how}")
     # Fit the model to each training set
     if model == 'ar':
         avals = np.zeros((num_pred,order))
@@ -152,8 +157,6 @@ def fit_subsegments(y : ArrayLike, model : str = 'ar', order : int = 2, subset_h
             m = AutoReg(dat, lags=order, trend='n')
             results = m.fit()
             avals[i, :] = -results.params
-
-        #TODO: % statistics on FPE
         #% Statistics on fitted AR parameters
         out = {}
         for i in range(order):
@@ -165,7 +168,6 @@ def fit_subsegments(y : ArrayLike, model : str = 'ar', order : int = 2, subset_h
         raise NotImplementedError("Model not yet implemented.")
     else:
         raise ValueError(f"Unknown model: {model}")
-    
     return out
 
 def loop_local_simple(y : ArrayLike, forecast_meth : str = 'mean') -> dict:
@@ -227,7 +229,6 @@ def loop_local_simple(y : ArrayLike, forecast_meth : str = 'mean') -> dict:
     else:
         wigv = np.min(stats_st[:, 0])
         wig = np.where(stats_st[:, 0] == wigv)[0][0]  # find first occurrence
-        
         if wig != 0 and stats_st[wig - 1, 0] < wigv:
             wig = np.nan  # minimum is not a local minimum; previous value is less
         elif wig != len(train_length_range) - 1 and stats_st[wig + 1, 0] < wigv:
@@ -243,8 +244,6 @@ def loop_local_simple(y : ArrayLike, forecast_meth : str = 'mean') -> dict:
     out['sws_chn'] = np.mean(np.diff(stats_st[:,1]))/(np.ptp(stats_st[:,1]))
     out['sws_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:,1])))
     out['sws_stdn'] = np.std(stats_st[:,1], ddof=1)/np.ptp(stats_st[:,1])
-
-    #TODO: Fit exponential decay
 
     #% (3) sliding window mean
     out['swm_chn'] = np.mean(np.diff(stats_st[:, 2]))/(np.ptp(stats_st[:, 2]))
@@ -263,7 +262,8 @@ def loop_local_simple(y : ArrayLike, forecast_meth : str = 'mean') -> dict:
 
     return out
 
-def local_simple(y : ArrayLike, forecast_meth : str = 'mean', train_length : Union[int, str] = 3) -> dict:
+def local_simple(y : ArrayLike, forecast_meth : str = 'mean',
+                 train_length : Union[int, str] = 3) -> dict:
     """
     Simple local time-series forecasting.
     
@@ -297,7 +297,8 @@ def local_simple(y : ArrayLike, forecast_meth : str = 'mean', train_length : Uni
     if train_length == 'ac':
         lp = first_crossing(y, 'ac', 0, 'discrete')
     else:
-        lp = train_length # the length of the subsegment preceeding to use to predict the subsequent value
+        #the e length of the subsegment preceeding to use to predict the subsequent value
+        lp = train_length 
     evalr = np.arange(lp, N) #range over which to evaluate the forecast
     if np.size(evalr) == 0:
         print("This time series is too short for forecasting")
@@ -336,7 +337,8 @@ def local_simple(y : ArrayLike, forecast_meth : str = 'mean', train_length : Uni
 
     return out
 
-def exp_smoothing(x : ArrayLike, n_train : Union[None, int, float] = None, alpha : Union[str, float] = 'best') -> dict:
+def exp_smoothing(x : ArrayLike, n_train : Union[None, int, float] = None, 
+                  alpha : Union[str, float] = 'best') -> dict:
     """
     Exponential smoothing time-series prediction model.
 
@@ -354,14 +356,17 @@ def exp_smoothing(x : ArrayLike, n_train : Union[None, int, float] = None, alpha
     x : array-like
         The input time series.
     n_train : int or float, optional
-        The number of samples to use for training. Can be an integer or a proportion of the time-series length.
+        The number of samples to use for training. Can be an integer or a 
+        proportion of the time-series length.
     alpha : str or float, optional
-        The exponential smoothing parameter. If 'best', the function optimizes alpha on the training set.
+        The exponential smoothing parameter. If 'best', the function
+        optimizes alpha on the training set.
 
     Returns
     -------
     dict
-        Dictionary including the fitted alpha and statistics on the residuals from the prediction phase.
+        Dictionary including the fitted alpha and statistics on the 
+        residuals from the prediction phase.
     """
     x = np.asarray(x, dtype=float)
     N = len(x)
@@ -480,7 +485,7 @@ def _fit_exp_smooth(x: np.ndarray, a: float) -> np.ndarray:
         
         # Smooth up to the current point `i`
         s_prev = s0
-        s_curr = 0.0 
+        s_curr = 0.0
         for j in range(1, i + 1):
             s_curr = a * x[j] + (1 - a) * s_prev
             s_prev = s_curr
@@ -527,29 +532,29 @@ def residual_analysis(e : ArrayLike) -> dict:
     
     # TODO: Identify any low-frequency trends in residuals
     # Analyze autocorrelation in residuals
-    maxLag = 25
-    autocorr_resid = autocorr(e, list(range(1, maxLag+1)), 'Fourier')
-    sqrt_N = np.sqrt(N)
+    max_lag = 25
+    autocorr_resid = autocorr(e, list(range(1, max_lag+1)), 'Fourier')
+    sqrt_n = np.sqrt(N)
 
     # Output first 3 ACs
     out['ac1'] = autocorr_resid[0]
     out['ac2'] = autocorr_resid[1]
     out['ac3'] = autocorr_resid[2]
-    out['ac1n'] = np.abs(autocorr_resid[0]) * sqrt_N
-    out['ac2n'] = np.abs(autocorr_resid[1]) * sqrt_N
-    out['ac3n'] = np.abs(autocorr_resid[2]) * sqrt_N
+    out['ac1n'] = np.abs(autocorr_resid[0]) * sqrt_n
+    out['ac2n'] = np.abs(autocorr_resid[1]) * sqrt_n
+    out['ac3n'] = np.abs(autocorr_resid[2]) * sqrt_n
 
     #% Median normalized distance from zero
-    out['acmnd0'] = np.median(np.abs(autocorr_resid)) * sqrt_N
-    out['acsnd0'] = np.std(np.abs(autocorr_resid), ddof=1) * sqrt_N
-    out['propbth'] = np.sum(np.abs(autocorr_resid) < 2.6/sqrt_N)/maxLag
+    out['acmnd0'] = np.median(np.abs(autocorr_resid)) * sqrt_n
+    out['acsnd0'] = np.std(np.abs(autocorr_resid), ddof=1) * sqrt_n
+    out['propbth'] = np.sum(np.abs(autocorr_resid) < 2.6/sqrt_n)/max_lag
 
     # % First time to get below the significance threshold
-    ftbth_indices = np.where(np.abs(autocorr_resid) < 2.6/sqrt_N)[0]
+    ftbth_indices = np.where(np.abs(autocorr_resid) < 2.6/sqrt_n)[0]
     if ftbth_indices.size > 0:  # Alternative way to check if array is empty
         out['ftbth'] = ftbth_indices[0] + 1
     else:
-        out['ftbth'] = maxLag + 1
+        out['ftbth'] = max_lag + 1
 
     # Durbin-Watson test statistic (like AC1)
     out['dwts'] = np.sum((e[1:] - e[:-1])**2) / np.sum(e**2)
@@ -626,21 +631,21 @@ def _arconf_from_arfit(fitted_ar, the_conf_interval : float = 0.95) -> dict:
         A_err = all_errs
         return {'A_err': A_err}
 
-def _get_criteria(sel, N, type = "aic"):
+def _get_criteria(sel, N, crit = "aic"):
     # pop the first key
     keys = None
     se = None
 
-    if type == "aic":
+    if crit == "aic":
         se = sel.aic
         se.pop(0)
         keys = se.keys()
-    elif type == "bic":
+    elif crit == "bic":
         se = sel.bic
         se.pop(0)
         keys = se.keys()
     else:
-        return ValueError(f"Unknown crtieria: {type}!")
+        return ValueError(f"Unknown crtieria: {crit}!")
     
     orlist = np.array([i[-1] for i in list(keys)])
     ps_len = len(keys)
@@ -742,7 +747,8 @@ def ar_fit(y : ArrayLike, p_min : int = 1, p_max : int = 10, selector : str = 's
     out['popt_fpe'] = popt_fpe
 
     #%% (II) Test Residuals
-    ljung_box_results = acorr_ljungbox(res.resid, lags=[20], model_df=p_optimal, return_df=False) # test of auto correlation in the residuals (test up to lag 20)
+    #test of auto correlation in the residuals (test up to lag 20)
+    ljung_box_results = acorr_ljungbox(res.resid, lags=[20], model_df=p_optimal, return_df=False)
     out['res_siglev'] = ljung_box_results.iloc[0]['lb_pvalue']
 
     # Correlation test of residuals
@@ -755,11 +761,9 @@ def ar_fit(y : ArrayLike, p_min : int = 1, p_max : int = 10, selector : str = 's
     out['pcorr_res'] = np.sum(np.abs(acf) > 1.96/np.sqrt(N))/20
 
     # Confidence Intervals
-    Aerr = _arconf_from_arfit(res, 0.95)['A_err']
-    out['aerr_min'] = np.min(Aerr)
-    out['aerr_max'] = np.max(Aerr)
-    out['aerr_mean'] = np.mean(Aerr)
-
-    # TODO: Add eigendecomposition analysis
+    a_err = _arconf_from_arfit(res, 0.95)['A_err']
+    out['aerr_min'] = np.min(a_err)
+    out['aerr_max'] = np.max(a_err)
+    out['aerr_mean'] = np.mean(a_err)
 
     return out

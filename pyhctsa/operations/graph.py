@@ -26,9 +26,9 @@ def _horiz_vgraph(ts_data : ArrayLike) -> ArrayLike:
             # If any taller nodes were found
             if taller_nodes_fwd.size > 0:
                 # The first element in this array corresponds to the nearest taller node
-                first_taller_relative_idx = taller_nodes_fwd[0]  
+                first_taller_relative_idx = taller_nodes_fwd[0]
                 # Convert the relative index (from the slice) to an absolute index (from the original series)
-                first_taller_absolute_idx = i + 1 + first_taller_relative_idx      
+                first_taller_absolute_idx = i + 1 + first_taller_relative_idx
                 # Set the connection in the adjacency matrix
                 A[i, first_taller_absolute_idx] = 1
         if i > 0:
@@ -49,7 +49,8 @@ def visibility_graph(y : ArrayLike, meth : str = 'horiz', max_l : int = 5000) ->
     """
     Visibility graph analysis of a time series.
 
-    Constructs a visibility graph of the time series and returns various statistics on the properties of the resulting network.
+    Constructs a visibility graph of the time series and returns various statistics 
+    on the properties of the resulting network.
     cf. [1] and [2].
 
     References
@@ -83,7 +84,8 @@ def visibility_graph(y : ArrayLike, meth : str = 'horiz', max_l : int = 5000) ->
     N = len(y)
     if N > max_l:
         # too long to store in memory
-        print(f"Time series ({N} > {max_l}) is too long for visibility graph. Analyzing the first {max_l} samples.")
+        print(f"Time series ({N} > {max_l}) is too long for visibility graph."
+              f"Analyzing the first {max_l} samples.")
         y = y[:max_l]
         N = len(y)
     y = y - np.min(y) # adjust so that the minimum of y is at zero
@@ -110,15 +112,15 @@ def visibility_graph(y : ArrayLike, meth : str = 'horiz', max_l : int = 5000) ->
     out['maxk'] = np.max(k)
     out['mink'] = np.min(k)
     out['rangek'] = np.ptp(k)
-    out['iqrk'] = np.quantile(k, .75, method='hazen') - np.quantile(k, .25, method='hazen') 
+    out['iqrk'] = np.quantile(k, .75, method='hazen') - np.quantile(k, .25, method='hazen')
     out['skewnessk'] = scipy.stats.skew(k)
     out['maxonmedian'] = np.max(k)/np.median(k) # max on median (indicator of outlier)
-    out['ol90'] = np.mean(k[(k >= np.quantile(k, 0.05, method='hazen')) & (k <= np.quantile(k, 0.95, method='hazen'))])/np.mean(k)
-    out['olu90'] = np.mean(k[k >= np.quantile(k, 0.95, method='hazen')] - np.mean(k))/np.std(k, ddof=1)
+    out['ol90'] = np.mean(k[(k >= np.quantile(k, 0.05, method='hazen')) &
+                            (k <= np.quantile(k, 0.95, method='hazen'))])/np.mean(k)
+    out['olu90'] = np.mean(k[k >= np.quantile(k, 0.95, method='hazen')]
+                           - np.mean(k))/np.std(k, ddof=1)
 
-    # Fit distributions to degree distribution
-
-    # Entropy of distribution 
+    # Entropy of distribution
     out['entropy'] = distribution_entropy(k, 'hist', 'sqrt')
 
     #Using likelihood now:

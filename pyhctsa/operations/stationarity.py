@@ -14,7 +14,8 @@ from ..operations.distribution import moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, sample_entropy
 from ..utils import make_mat_buffer, sign_change, z_score
 
-def local_distributions(y : ArrayLike, num_segs : int = 5, each_or_par : str = 'par', num_points : int = 200) -> dict:
+def local_distributions(y : ArrayLike, num_segs : int = 5, each_or_par : str = 'par',
+                        num_points : int = 200) -> dict:
     """
     Compares the distribution in consecutive time-series segments.
 
@@ -39,12 +40,13 @@ def local_distributions(y : ArrayLike, num_segs : int = 5, each_or_par : str = '
     dict
         Measures of the sum of absolute deviations between distributions across the different pairwise comparisons.
     """
-    # preliminaries 
+    # preliminaries
     y = np.asarray(y)
     N = len(y)
     lseg = int(np.floor(N / num_segs))
     dns = np.zeros((num_points, num_segs))
-    r = np.linspace(np.min(y), np.max(y), num_points) # Make range of ksdensity uniform across all subsegments
+    # Make range of ksdensity uniform across all subsegments
+    r = np.linspace(np.min(y), np.max(y), num_points)
     # Compute the kernel-smoothed distribution in all num_segs segments of the time series
     for i in range(num_segs):
         start_idx = i * lseg
@@ -52,7 +54,7 @@ def local_distributions(y : ArrayLike, num_segs : int = 5, each_or_par : str = '
         segment_data = y[start_idx:end_idx]
         #kde = KDEUnivariate(segment_data)
         kde = gaussian_kde(segment_data, bw_method="scott")
-        #kde.fit(bw="scott") # tune bw adjustment factor empiricially? 
+        #kde.fit(bw="scott") # tune bw adjustment factor empiricially?
         dns[:, i] = kde.evaluate(r)
     # Compare the local distributions
     if each_or_par in ["par", "parent"]:
@@ -152,7 +154,8 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
         fs[i, :num_features] = np.std(qs, ddof=1, axis=0)
 
     # fs contains std of quantities at all different 'scales' (segment lengths)
-    fs = np.std(fs, ddof=1, axis=0)  # how much does the 'std stationarity' vary over different scales?
+    # how much does the 'std stationarity' vary over different scales?
+    fs = np.std(fs, ddof=1, axis=0)
 
     # Outputs
     out = {}
@@ -170,8 +173,9 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
 
     return out
 
-def moment_corr(x : ArrayLike, window_length : Union[None, float] = None, w_overlap : Union[None, float] = None, 
-               mom_1 : str = 'mean', mom_2 : str = 'std', what_transform : str = 'none') -> dict:
+def moment_corr(x : ArrayLike, window_length : Union[None, float] = None,
+                w_overlap : Union[None, float] = None, mom_1 : str = 'mean',
+                mom_2 : str = 'std', what_transform : str = 'none') -> dict:
     """
     Correlations between simple statistics in local windows of a time series.
     The idea to implement this was that of Prof. Nick S. Jones (Imperial College London).
@@ -181,7 +185,8 @@ def moment_corr(x : ArrayLike, window_length : Union[None, float] = None, w_over
     x : array-like
         the input time series
     window_length : float, optional
-        the sliding window length (can be a fraction to specify or a proportion of the time-series length)
+        the sliding window length (can be a fraction to specify or a proportion of 
+        the time-series length)
     w_overlap : 
         the overlap between consecutive windows as a fraction of the window length
     mom_1, mom_2 : str, optional
@@ -233,14 +238,14 @@ def moment_corr(x : ArrayLike, window_length : Union[None, float] = None, w_over
     
     # create the windows
     x_buff = make_mat_buffer(x, window_length, w_overlap)
-    numWindows = (N/(window_length - w_overlap)) # number of windows
+    num_windows = (N/(window_length - w_overlap)) # number of windows
 
-    if np.size(x_buff, 1) > numWindows:
+    if np.size(x_buff, 1) > num_windows:
         x_buff = x_buff[:, :-1] # lose the last point
 
-    pointsPerWindow = np.size(x_buff, 0)
-    if pointsPerWindow == 1:
-        raise ValueError(f"This time series (N = {N}) is too short to extract {numWindows}")
+    points_per_window = np.size(x_buff, 0)
+    if points_per_window == 1:
+        raise ValueError(f"This time series (N = {N}) is too short to extract {num_windows}")
     
     # okay now we have the sliding window ('buffered') signal, x_buff
     # first calculate the first moment in all the windows
@@ -258,18 +263,18 @@ def moment_corr(x : ArrayLike, window_length : Union[None, float] = None, w_over
 
     return out
 
-def _calc_me_moments(x_buff, momType):
+def _calc_me_moments(x_buff, mom_type):
     """Helper function for `moment_corr`"""
-    if momType == 'mean':
+    if mom_type == 'mean':
         moms = np.mean(x_buff, axis=0)
-    elif momType == 'std':
+    elif mom_type == 'std':
         moms = np.std(x_buff, axis=0, ddof=1)
-    elif momType == 'median':
+    elif mom_type == 'median':
         moms = np.median(x_buff, axis=0)
-    elif momType == 'iqr':
+    elif mom_type == 'iqr':
         moms = np.percentile(x_buff, 75, method='hazen', axis=0) - np.percentile(x_buff, 25, method='hazen', axis=0)
     else:
-        raise ValueError(f"Unknown statistic {momType}")
+        raise ValueError(f"Unknown statistic {mom_type}")
     
     return moms
 
@@ -374,9 +379,7 @@ def local_extrema(y : ArrayLike, how_to_window : str = 'l', n : Union[int, None]
             n = 100 # 100 sample windows
         elif how_to_window == 'n':
             n = 5 # 5 windows
-    
     N = len(y)
-
     # Set the window length
     if how_to_window == 'l':
         window_length = n # window length
@@ -397,39 +400,39 @@ def local_extrema(y : ArrayLike, how_to_window : str = 'l', n : Union[int, None]
     if y_buff[-1, -1] == 0:
         y_buff = y_buff[:, :-1]  # remove last window if zero-padded
     
-    numWindows = np.size(y_buff, 1) # number of windows
+    num_windows = np.size(y_buff, 1) # number of windows
     # Find local extrema
-    locMax = np.max(y_buff, axis=0) # summary of local maxima
-    locMin = np.min(y_buff, axis=0) # summary of local minima
-    absLocMin = np.abs(locMin) # abs val of local minima
-    exti = np.where(absLocMin > locMax)
-    loc_ext = locMax.copy()
-    loc_ext[exti] = locMin[exti] # local extrema (furthest from mean; either maxs or mins)
+    loc_max = np.max(y_buff, axis=0) # summary of local maxima
+    loc_min = np.min(y_buff, axis=0) # summary of local minima
+    abs_loc_min = np.abs(loc_min) # abs val of local minima
+    exti = np.where(abs_loc_min > loc_max)
+    loc_ext = loc_max.copy()
+    loc_ext[exti] = loc_min[exti] # local extrema (furthest from mean; either maxs or mins)
     abs_loc_ext = np.abs(loc_ext) # the magnitude of the most extreme events in each window
 
     # Return Outputs
     out = {
-        'meanrat': np.mean(locMax) / np.mean(absLocMin),
-        'medianrat': np.median(locMax) / np.median(absLocMin),
-        'minmax': np.min(locMax),
-        'minabsmin': np.min(absLocMin),
-        'minmaxonminabsmin': np.min(locMax) / np.min(absLocMin),
-        'meanmax': np.mean(locMax),
-        'meanabsmin': np.mean(absLocMin),
+        'meanrat': np.mean(loc_max) / np.mean(abs_loc_min),
+        'medianrat': np.median(loc_max) / np.median(abs_loc_min),
+        'minmax': np.min(loc_max),
+        'minabsmin': np.min(abs_loc_min),
+        'minmaxonminabsmin': np.min(loc_max) / np.min(abs_loc_min),
+        'meanmax': np.mean(loc_max),
+        'meanabsmin': np.mean(abs_loc_min),
         'meanext': np.mean(loc_ext),
-        'medianmax': np.median(locMax),
-        'medianabsmin': np.median(absLocMin),
+        'medianmax': np.median(loc_max),
+        'medianabsmin': np.median(abs_loc_min),
         'medianext': np.median(loc_ext),
-        'stdmax': np.std(locMax, ddof=1),
-        'stdmin': np.std(locMin, ddof=1),
+        'stdmax': np.std(loc_max, ddof=1),
+        'stdmin': np.std(loc_min, ddof=1),
         'stdext': np.std(loc_ext, ddof=1),
-        'zcext': np.sum((loc_ext[:-1] * loc_ext[1:]) < 0) / numWindows,
+        'zcext': np.sum((loc_ext[:-1] * loc_ext[1:]) < 0) / num_windows,
         'meanabsext': np.mean(abs_loc_ext),
         'medianabsext': np.median(abs_loc_ext),
-        'diffmaxabsmin': np.sum(np.abs(locMax - absLocMin)) / numWindows,
-        'uord': np.sum(np.sign(loc_ext)) / numWindows,
-        'maxmaxmed': np.max(locMax) / np.median(locMax),
-        'minminmed': np.min(locMin) / np.median(locMin),
+        'diffmaxabsmin': np.sum(np.abs(loc_max - abs_loc_min)) / num_windows,
+        'uord': np.sum(np.sign(loc_ext)) / num_windows,
+        'maxmaxmed': np.max(loc_max) / np.median(loc_max),
+        'minminmed': np.min(loc_min) / np.median(loc_min),
         'maxabsext': np.max(abs_loc_ext) / np.median(abs_loc_ext)
     }
 
@@ -473,18 +476,18 @@ def kpss_test(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
     """
     if isinstance(lags, list):
         # evaluate kpss at multiple lags
-        pValue = np.zeros(len(lags))
+        p_value = np.zeros(len(lags))
         stat = np.zeros(len(lags))
         for (i, l) in enumerate(lags):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", category=InterpolationWarning)
                 s, pv, _, _ = kpss(y, nlags=l, regression='ct')
-            pValue[i] = pv
+            p_value[i] = pv
             stat[i] = s
         out = {}
         # return stats on outputs
-        out['maxpValue'] = np.max(pValue)
-        out['minpValue'] = np.min(pValue)
+        out['maxpValue'] = np.max(p_value)
+        out['minpValue'] = np.min(p_value)
         out['maxstat'] = np.max(stat)
         out['minstat'] = np.min(stat)
         out['lagmaxstat'] = lags[np.argmax(stat)]
@@ -493,12 +496,11 @@ def kpss_test(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
         if isinstance(lags, int):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", category=InterpolationWarning)
-                stat, pValue, _, _ = kpss(y, nlags=lags, regression='ct')
+                stat, p_value, _, _ = kpss(y, nlags=lags, regression='ct')
             # return the statistic and pvalue
-            out = {'stat': stat, 'pValue': pValue}
+            out = {'stat': stat, 'pValue': p_value}
         else:
             raise TypeError("Expected either a single lag (as an int) or list of lags.")
-    
     return out
 
 def range_evolve(y : ArrayLike) -> dict:
@@ -533,18 +535,18 @@ def range_evolve(y : ArrayLike) -> dict:
     lunique = lambda x : len(np.unique(x))
     out['totnuq'] = lunique(cums)
 
-    # how many of the unique extrema are in the first <proportions> of time series? 
+    # how many of the unique extrema are in the first <proportions> of time series?
     cumtox = lambda x : lunique(cums[:int(np.floor(N*x))])/out['totnuq']
     out['nuqp1'] = cumtox(0.01)
     out['nuqp10'] = cumtox(0.1)
     out['nuqp20'] = cumtox(0.2)
     out['nuqp50'] = cumtox(0.5)
 
-    # how many unique extrema are in the first <length> of time series? 
-    Ns = [10, 50, 100, 1000]
-    for Nval in Ns:
-        if N >= Nval:
-            out[f'nuql{Nval}'] = lunique(cums[:Nval])/out['totnuq']
+    # how many unique extrema are in the first <length> of time series?
+    ns = [10, 50, 100, 1000]
+    for n_val in ns:
+        if N >= n_val:
+            out[f'nuql{n_val}'] = lunique(cums[:n_val])/out['totnuq']
         else:
             out[f'nuql{N}'] = np.nan
     # (**2**) Actual proportion of full range captured at different points
@@ -553,11 +555,11 @@ def range_evolve(y : ArrayLike) -> dict:
     out['p20'] = cums[int(np.ceil(N * 0.2)) - 1]/fullr
     out['p50'] = cums[int(np.ceil(N * 0.5)) - 1]/fullr
 
-    for Nval in Ns:
-        if N >= Nval:
-            out[f'l{Nval}'] = cums[Nval-1]/fullr
+    for n_val in ns:
+        if N >= n_val:
+            out[f'l{n_val}'] = cums[n_val-1]/fullr
         else:
-            out[f'l{Nval}'] = np.nan
+            out[f'l{n_val}'] = np.nan
 
     return out
 
@@ -837,16 +839,16 @@ def trend(y : ArrayLike) -> dict:
     out['intercept'] = coeffs[1]
 
     # Stats on the cumulative sum
-    yC = np.cumsum(y)
-    out['meanYC'] = np.mean(yC)
-    out['stdYC'] = np.std(yC, ddof=1)
-    coeffs_yC = np.polyfit(range(1, N+1), yC, 1)
-    out['gradientYC'] = coeffs_yC[0]
-    out['interceptYC'] = coeffs_yC[1]
+    yc = np.cumsum(y)
+    out['meanYC'] = np.mean(yc)
+    out['stdYC'] = np.std(yc, ddof=1)
+    coeffs_yc = np.polyfit(range(1, N+1), yc, 1)
+    out['gradientYC'] = coeffs_yc[0]
+    out['interceptYC'] = coeffs_yc[1]
 
     # Mean cumsum in first and second half of the time series
-    out['meanYC12'] = np.mean(yC[:int(np.floor(N/2))])
-    out['meanYC22'] = np.mean(yC[int(np.floor(N/2)):])
+    out['meanYC12'] = np.mean(yc[:int(np.floor(N/2))])
+    out['meanYC22'] = np.mean(yc[int(np.floor(N/2)):])
 
     return out
 
@@ -908,7 +910,7 @@ def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float
 
     return float(out)
 
-def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str = 'std', 
+def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str = 'std',
                  num_seg: int = 5, inc_move: int = 2):
     """
     Sliding window measures of stationarity.
@@ -961,46 +963,46 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         Returns np.nan if time series is too short for specified segmentation.
     """
     y = np.asarray(y)
-    winLength = np.floor(len(y)/num_seg)
-    if winLength == 0:
+    win_length = np.floor(len(y)/num_seg)
+    if win_length == 0:
         logging.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
         return np.nan
-    inc = np.floor(winLength/inc_move) # increment to move at each step
-    # if incrment rounded down to zero, prop it up 
+    inc = np.floor(win_length/inc_move) # increment to move at each step
+    # if incrment rounded down to zero, prop it up
     if inc == 0:
         inc = 1
     
-    numSteps = int(np.floor((len(y)-winLength)/inc) + 1)
-    qs = np.zeros(numSteps)
+    num_steps = int(np.floor((len(y)-win_length)/inc) + 1)
+    qs = np.zeros(num_steps)
     
     if window_stat == 'mean':
-        for i in range(numSteps):
-            qs[i] = np.mean(y[_get_window(i, inc, winLength)])
+        for i in range(num_steps):
+            qs[i] = np.mean(y[_get_window(i, inc, win_length)])
     elif window_stat == 'std':
-        for i in range(numSteps):
-            qs[i] = np.std(y[_get_window(i, inc, winLength)], ddof=1)
+        for i in range(num_steps):
+            qs[i] = np.std(y[_get_window(i, inc, win_length)], ddof=1)
     elif window_stat == 'ent':
-        for i in range(numSteps):
-            qs[i] = distribution_entropy(y[_get_window(i, inc, winLength)], 'ks','[]')
+        for i in range(num_steps):
+            qs[i] = distribution_entropy(y[_get_window(i, inc, win_length)], 'ks','[]')
     elif window_stat == 'apen':
-        for i in range(numSteps):
-            qs[i] = approximate_entropy(y[_get_window(i, inc, winLength)], 1, 0.2)
+        for i in range(num_steps):
+            qs[i] = approximate_entropy(y[_get_window(i, inc, win_length)], 1, 0.2)
     elif window_stat == 'sampen':
-        for i in range(numSteps):
-            sampen_dict = sample_entropy(y[_get_window(i, inc, winLength)], 1, 0.1)
+        for i in range(num_steps):
+            sampen_dict = sample_entropy(y[_get_window(i, inc, win_length)], 1, 0.1)
             qs[i] = sampen_dict['sampen1']
     elif window_stat == 'mom3':
-        for i in range(numSteps):
-            qs[i] = moments(y[_get_window(i, inc, winLength)], 3)
+        for i in range(num_steps):
+            qs[i] = moments(y[_get_window(i, inc, win_length)], 3)
     elif window_stat == 'mom4':
-        for i in range(numSteps):
-            qs[i] = moments(y[_get_window(i, inc, winLength)], 4)
+        for i in range(num_steps):
+            qs[i] = moments(y[_get_window(i, inc, win_length)], 4)
     elif window_stat == 'mom5':
-        for i in range(numSteps):
-            qs[i] = moments(y[_get_window(i, inc, winLength)], 5)
+        for i in range(num_steps):
+            qs[i] = moments(y[_get_window(i, inc, win_length)], 5)
     elif window_stat == 'AC1':
-        for i in range(numSteps):
-            qs[i] = autocorr(y[_get_window(i, inc, winLength)], 1, 'Fourier')
+        for i in range(num_steps):
+            qs[i] = autocorr(y[_get_window(i, inc, win_length)], 1, 'Fourier')
     else:
         raise ValueError(f"Unknown statistic '{window_stat}'")
     
@@ -1026,9 +1028,9 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
     
     return out
 
-def _get_window(stepInd, inc, winLength):
+def _get_window(step_ind, inc, win_length):
     # helper funtion to convert a step index (stepInd) to a range of indices corresponding to that window
-    start_idx = (stepInd) * inc
-    end_idx = (stepInd) * inc + winLength
+    start_idx = (step_ind) * inc
+    end_idx = (step_ind) * inc + win_length
     
     return np.arange(start_idx, end_idx).astype(int)

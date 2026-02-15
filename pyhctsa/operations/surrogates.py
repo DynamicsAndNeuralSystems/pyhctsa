@@ -12,22 +12,22 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 def sd_give_me_stats(stat_x : float, stat_surr : ArrayLike, left_right_both : str) -> dict:
     """Compute statistiscs on the surrogate distribution."""
-    numSurrs = len(stat_surr)
+    num_surrs = len(stat_surr)
     out = {}
     if np.isnan(stat_surr).any():
         raise ValueError("SDgivemestats failed")
     #% ASSUME GAUSSIAN DISTRIBUTION:
     #% so can use 1/2-sided z-statistic
-    zStat = zmap(np.atleast_1d(stat_x), stat_surr, ddof=1)[0]
+    z_stat = zmap(np.atleast_1d(stat_x), stat_surr, ddof=1)[0]
     p = None
     if left_right_both == 'both':
-        p = 2 * norm.sf(np.abs(zStat))
+        p = 2 * norm.sf(np.abs(z_stat))
     elif left_right_both == 'right':
-        p = norm.sf(zStat)
+        p = norm.sf(z_stat)
     elif left_right_both == 'left':
-        p = norm.cdf(zStat)
+        p = norm.cdf(z_stat)
     out['p'] = p
-    out['zscore'] = zStat
+    out['zscore'] = z_stat
 
     # fit a kenerel distribution to zscored distributions
     sigma = np.std(stat_surr, ddof=1)
@@ -73,14 +73,14 @@ def sd_give_me_stats(stat_x : float, stat_surr : ArrayLike, left_right_both : st
     # Where did the original index 0 (i.e., stat_x) end up?
     xfitshere = np.where(ix == 0)[0][0]
     if left_right_both == 'right':  # x smaller than distribution → flip distance from top
-        xfitshere = numSurrs + 1 - xfitshere
+        xfitshere = num_surrs + 1 - xfitshere
     elif left_right_both == 'both':
-        xfitshere = min(xfitshere, numSurrs + 1 - xfitshere)
+        xfitshere = min(xfitshere, num_surrs + 1 - xfitshere)
 
     if xfitshere is None:  
-        prank = 1 / (numSurrs + 1)
+        prank = 1 / (num_surrs + 1)
     else:
-        prank = (1 + xfitshere) / (numSurrs + 1)
+        prank = (1 + xfitshere) / (num_surrs + 1)
 
     if left_right_both == 'both':
         prank *= 2
@@ -89,7 +89,8 @@ def sd_give_me_stats(stat_x : float, stat_surr : ArrayLike, left_right_both : st
 
     return out
 
-def make_surrogates(x : ArrayLike, surr_method : str, num_surrs : int = 1, random_seed : int = 42) -> ArrayLike:
+def make_surrogates(x : ArrayLike, surr_method : str, num_surrs : int = 1, 
+                    random_seed : int = 42) -> ArrayLike:
     """
     Generates surrogate time series.
 
@@ -212,7 +213,8 @@ def surrogate_test(
               D. L. Guarin Lopez et al., arXiv 1008.1804 (2010)).
               NOTE: **Not yet implemented.**
     num_surrs : int, optional
-        The number of surrogates to compute (default is 99 for a 0.01 significance level 1-sided test).
+        The number of surrogates to compute (default is 99 for a 0.01 significance 
+        level 1-sided test).
     the_test_stat : str or array-like, optional
         The test statistic(s) to evaluate on all surrogates and the original time series.
         Can specify multiple options and will return output for each specified test statistic:
@@ -228,7 +230,8 @@ def surrogate_test(
     Returns
     -------
     dict
-        Dictionary of statistics comparing the original time series to its surrogates for each test statistic.
+        Dictionary of statistics comparing the original time series to its 
+        surrogates for each test statistic.
     """
     x = np.asarray(x)
     n = len(x)
@@ -257,7 +260,7 @@ def surrogate_test(
         for i in range(num_surrs):
             try:
                 fmmi_surr[i] = first_min(z[:, i], 'mi')
-            except:
+            except Exception:
                 fmmi_surr[i] = np.nan
 
         if np.isnan(fmmi_surr).any():

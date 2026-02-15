@@ -95,7 +95,7 @@ def shannon_entropy(
 def distribution_entropy(
     y: ArrayLike,
     hist_or_ks: str = 'hist',
-    num_bins: int = 10,
+    num_bins: Union[str, int] = 10,
     olremp: float = 0
 ) -> float:
     """
@@ -222,8 +222,8 @@ def multi_scale_entropy(
     m = int(m)
     if scale_range is None:
         scale_range = range(1, 10)
-    minTsLength = 20
-    numScales = len(scale_range)
+    min_ts_length = 20
+    num_scales = len(scale_range)
 
     if pre_process_how is not None:
         if pre_process_how == 'diff1':
@@ -238,15 +238,15 @@ def multi_scale_entropy(
     
     # Coarse-graining across scales
     y_cg = []
-    for i in range(numScales):
+    for i in range(num_scales):
         buffer_size = scale_range[i]
         y_buffer = make_buffer(y, buffer_size)
         y_cg.append(np.mean(y_buffer, 1))
     
     # Run sample entropy for each m and r value at each scale
-    samp_ens = np.zeros(numScales)
-    for si in range(numScales):
-        if len(y_cg[si]) >= minTsLength:
+    samp_ens = np.zeros(num_scales)
+    for si in range(num_scales):
+        if len(y_cg[si]) >= min_ts_length:
             samp_en_struct = sample_entropy(y_cg[si], m, r)
             samp_ens[si] = samp_en_struct[f'sampen{m}']
         else:
@@ -263,7 +263,7 @@ def multi_scale_entropy(
         return {'out': np.nan}
 
     # Output raw values
-    out = {f'sampen_s{scale_range[i]}': samp_ens[i] for i in range(numScales)}
+    out = {f'sampen_s{scale_range[i]}': samp_ens[i] for i in range(num_scales)}
 
      # Summary statistics of the variation
     max_samp_en = np.nanmax(samp_ens)
@@ -284,7 +284,7 @@ def multi_scale_entropy(
 
     return out
 
-def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None, 
+def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
                     pre_process_how: Optional[str] = None) -> dict:
     """
     Compute Sample Entropy (SampEn) of a time series.
@@ -296,7 +296,8 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
 
     References
     ----------
-    .. [1] "Sample Entropy Estimation 1.0.0", https://physionet.org/content/sampen/1.0.0/c/sampen-1.1.c
+    .. [1] "Sample Entropy Estimation 1.0.0", 
+        https://physionet.org/content/sampen/1.0.0/c/sampen-1.1.c
     .. [2] "Control Entropy: A complexity measure for nonstationary signals"
         E. M. Bollt and J. Skufca, Math. Biosci. Eng., 6(1) 1 (2009).
 
@@ -328,7 +329,7 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
         y = np.diff(y)
 
     samp_en = _sampen_c.calculate(y, m+1, r)
-    samp_en = samp_en[:-1] # always that extra one for the M = 0 
+    samp_en = samp_en[:-1] # always that extra one for the M = 0
     out = {}
     for mi in range(m + 1):
         out[f'sampen{mi}'] = samp_en[mi]
@@ -346,11 +347,13 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
     as described in [1]. 
 
     This implementation modifies code from the antropy package:
-    https://github.com/raphaelvallat/antropy to provide both raw and normalised permutation entropy values.
+    https://github.com/raphaelvallat/antropy to provide both raw and 
+    normalised permutation entropy values.
 
     References
     ----------
-    .. [1] C. Bandt and B. Pompe, "Permutation Entropy: A Natural Complexity Measure for Time Series",
+    .. [1] C. Bandt and B. Pompe, "Permutation Entropy: A Natural 
+        Complexity Measure for Time Series",
         Phys. Rev. Lett. 88(17) 174102 (2002).
 
     Parameters
@@ -401,8 +404,8 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max : 
     References
     ----------
     .. [1] M. Little, P. McSharry, S. Roberts, D. Costello, I. Moroz (2007),
-        "Exploiting Nonlinear Recurrence and Fractal Scaling Properties for Voice Disorder Detection",
-        BioMedical Engineering OnLine 2007, 6:23.
+        "Exploiting Nonlinear Recurrence and Fractal Scaling Properties for 
+        Voice Disorder Detection", BioMedical Engineering OnLine 2007, 6:23.
 
     Parameters
     ----------
@@ -494,7 +497,6 @@ def _embed(x : ArrayLike, order : int, delay : int = 1) -> ArrayLike:
     N = x.shape[0]
     if N - (order - 1) * delay <= 0:
         raise ValueError("Time series is too short for the given order and delay.")
-    
     return np.array([x[i:i + order * delay:delay] for i in range(N - (order - 1) * delay)])
 
 def _app_samp_entropy(
@@ -511,10 +513,11 @@ def _app_samp_entropy(
     else:
         emb_data1 = emb_data1[:-1]
 
-    count1 = KDTree(emb_data1, metric=metric).query_radius(emb_data1, r, count_only=True).astype(np.float64)
+    count1 = KDTree(emb_data1, metric=metric).query_radius(emb_data1, r,
+                                                           count_only=True).astype(np.float64)
     emb_data2 = _embed(x, order + 1, 1)
-    count2 = KDTree(emb_data2, metric=metric).query_radius(emb_data2, r, count_only=True).astype(np.float64)
-
+    count2 = KDTree(emb_data2, metric=metric).query_radius(emb_data2, r,
+                                                           count_only=True).astype(np.float64)
     if approximate:
         phi[0] = np.mean(np.log(count1 / emb_data1.shape[0]))
         phi[1] = np.mean(np.log(count2 / emb_data2.shape[0]))
@@ -596,7 +599,8 @@ def complexity_invariant_distance(y : ArrayLike) -> dict:
 
     return out
 
-def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2, pre_proc: Union[str, None] = None, rng : int = 0) -> float:
+def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2, 
+                          pre_proc: Union[str, None] = None, rng : int = 0) -> float:
     """
     Compute the normalized Lempel-Ziv (LZ) complexity of an n-bit encoding of a time series.
 
@@ -679,11 +683,10 @@ def _symbolise_lz(x: np.ndarray, n_bins: int, rng) -> np.ndarray:
     """Helper function for lempel_ziv_complexity"""
     nx = x.size
     noisy = x + np.finfo(np.float64).eps * rng.randn(nx)
-    order = np.argsort(noisy, kind="mergesort") 
+    order = np.argsort(noisy, kind="mergesort")
     ranks = np.arange(1, nx + 1)
     symbols = np.floor(ranks * (n_bins / (nx + 1)))
 
     out = np.empty_like(symbols)
-    out[order] = symbols + 1     
-                         
+    out[order] = symbols + 1
     return out
