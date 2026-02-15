@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyhctsa"
-version = "0.1.0a2-test"
+version = "0.1.0a2"
 description = "Highly comparative time-series analysis in Python."
 readme = "README.md"
 license = {file = "LICENSE"}
