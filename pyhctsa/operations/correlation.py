@@ -839,7 +839,7 @@ def stick_angles(y : ArrayLike) -> dict:
     out['ac1_all'] = autocorr(zallAngles, 1, 'Fourier')[0]
     out['ac2_all'] = autocorr(zallAngles, 2, 'Fourier')[0]
 
-    # What does the distribution look like? 
+    # What does the distribution look like?
     # Some quantiles and moments
     if len(zangles[0]) > 0:
         out['q1_p'] = np.quantile(zangles[0], 0.01, method='hazen')
@@ -875,15 +875,14 @@ def stick_angles(y : ArrayLike) -> dict:
 
 def _sub_statav(x : ArrayLike, n : int) -> tuple:
     # helper function
-    NN = len(x)
-    if NN < 2 * n: # not long enough
+    nn = len(x)
+    if nn < 2 * n: # not long enough
         statavmean = np.nan
         statavstd = np.nan
-    x_buff = make_mat_buffer(x, int(np.floor(NN/n)))
+    x_buff = make_mat_buffer(x, int(np.floor(nn/n)))
     if x_buff.shape[1] > n:
         # remove final pt
         x_buff = x_buff[:, :n]
-    
     statavmean = np.std(np.mean(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
     statavstd = np.std(np.std(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
 
@@ -912,7 +911,8 @@ def nonlinear_autocorr(y : ArrayLike, taus : ArrayLike, absval : Union[bool, Non
             [0, 0, 1] computes <x_i^3 x_{i-1}>
     absval : bool or None, optional
         If True, takes the absolute value before the final mean (recommended for even-length taus).
-        If None (default), automatically sets absval=True for even-length taus and False for odd-length.
+        If None (default), automatically sets absval=True for even-length taus and False 
+        for odd-length.
 
     Returns
     -------
@@ -927,13 +927,13 @@ def nonlinear_autocorr(y : ArrayLike, taus : ArrayLike, absval : Union[bool, Non
         else:
             absval = True
 
-    N = len(y)
+    n = len(y)
     tmax = np.max(taus)
 
-    nlac = y[tmax:N]
+    nlac = y[tmax:n]
 
     for i in taus:
-        nlac = np.multiply(nlac,y[tmax - i:N - i])
+        nlac = np.multiply(nlac,y[tmax - i:n - i])
 
     if absval:
         out = np.mean(np.absolute(nlac))
@@ -1170,7 +1170,8 @@ def embed2_shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau',
     y : array-like
         The input time-series as a (z-scored) column vector.
     tau : int or str, optional
-        The time-delay. If 'tau', it's set to the first zero crossing of the autocorrelation function.
+        The time-delay. If 'tau', it's set to the first zero crossing of the 
+        autocorrelation function.
     shape : str, optional
         The shape to use. Currently only 'circle' is supported.
     r : float, optional
@@ -1187,7 +1188,6 @@ def embed2_shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau',
         # cannot set time delay > 10% of the length of the time series...
         if tau > len(y)/10:
             tau = int(np.floor(len(y)/10))
-        
     # Create the recurrence space, populated by points m
     m = np.column_stack((y[:-tau], y[tau:]))
     N = len(m)
@@ -1203,7 +1203,6 @@ def embed2_shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau',
             counts[i] = np.sum(m_c_d <= r**2) # number of pts enclosed in a circle of radius r
     else:
         raise ValueError(f"Unknown shape '{shape}'")
-    
     counts -= 1 # ignore self counts
 
     if np.all(counts == 0):
@@ -1220,7 +1219,8 @@ def embed2_shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau',
     out['std'] = np.std(counts, ddof=1)
     out['median'] = np.median(counts)
     out['mean'] = np.mean(counts)
-    out['iqr'] = np.percentile(counts, 75, method='hazen') - np.percentile(counts, 25, method='hazen')
+    out['iqr'] = np.percentile(counts, 75, method='hazen') - np.percentile(counts,
+                                                                           25, method='hazen')
     out['iqronrange'] = out['iqr']/np.ptp(counts)
 
     # distribution - using sqrt binning method
@@ -1236,7 +1236,8 @@ def embed2_shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau',
     out['mode_val'] = np.max(bin_counts_norm)
     out['mode'] = bin_centres[np.argmax(bin_counts_norm)]
     # histogram entropy
-    out['hist_ent'] = np.sum(bin_counts_norm[bin_counts_norm > 0] * np.log(bin_counts_norm[bin_counts_norm > 0]))
+    out['hist_ent'] = np.sum(bin_counts_norm[bin_counts_norm > 0] *
+                             np.log(bin_counts_norm[bin_counts_norm > 0]))
 
     # Stationarity measure for fifths of the time series
     afifth = int(np.floor(N/5))
@@ -1352,9 +1353,7 @@ def glscf(y : ArrayLike, alpha : float, beta : float, tau : Union[int, str] = 't
     p3 = np.sqrt(np.mean(y1 ** (2*alpha)) - (np.mean(y1 ** alpha))**2)
     p4 = np.sqrt(np.mean(y2 ** (2*beta)) - (np.mean(y2 ** beta))**2)
 
-    glscf = (p1 - p2) / (p3 * p4)
-
-    return glscf
+    return np.divide((p1-p2), (p3 * p4))
 
 def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
              method: str = 'Fourier') -> Union[float, np.ndarray]:

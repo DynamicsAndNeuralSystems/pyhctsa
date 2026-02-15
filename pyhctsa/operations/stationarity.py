@@ -173,8 +173,8 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
 
     return out
 
-def moment_corr(x : ArrayLike, window_length : Union[None, float] = None, 
-                w_overlap : Union[None, float] = None, mom_1 : str = 'mean', 
+def moment_corr(x : ArrayLike, window_length : Union[None, float] = None,
+                w_overlap : Union[None, float] = None, mom_1 : str = 'mean',
                 mom_2 : str = 'std', what_transform : str = 'none') -> dict:
     """
     Correlations between simple statistics in local windows of a time series.
@@ -968,7 +968,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         logging.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
         return np.nan
     inc = np.floor(win_length/inc_move) # increment to move at each step
-    # if incrment rounded down to zero, prop it up 
+    # if incrment rounded down to zero, prop it up
     if inc == 0:
         inc = 1
     
