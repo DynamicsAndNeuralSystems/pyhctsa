@@ -7,6 +7,10 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.utils.validation import check_array, check_is_fitted
+
+
 def check_optional_deps(dep: str) -> bool:
     """Check whether an optional dependency exists.
     Returns True if available, else False."""
@@ -572,3 +576,44 @@ def x_corr(x : ArrayLike, y : ArrayLike, normed : bool = True, max_lags : int = 
     lags = np.arange(-max_lags, max_lags + 1)
     c = c[nx - 1 - max_lags:nx + max_lags]
     return lags, c
+
+class SigmoidScaler(BaseEstimator, TransformerMixin):
+    def __init__(self, do_scale: bool = True, eps: float = 1e-12):
+        self.do_scale = do_scale
+        self.eps = eps
+
+    def fit(self, X, y=None):
+        X = check_array(X, accept_sparse=False)
+        
+        # Calculate moments ignoring NaNs
+        self.mean_ = np.nanmean(X, axis=0)
+        self.std_ = np.nanstd(X, axis=0)
+        
+        # Avoid division by zero
+        self.std_ = np.where(self.std_ > self.eps, self.std_, 1.0)
+
+        if self.do_scale:
+            # We transform X to find the empirical bounds of the sigmoid output
+            z = self._sigmoid_logic(X)
+            self.z_min_ = np.nanmin(z, axis=0)
+            self.z_max_ = np.nanmax(z, axis=0)
+            rng = self.z_max_ - self.z_min_
+            self.z_range_ = np.where(rng > self.eps, rng, 1.0)
+        
+        self.n_features_in_ = X.shape[1]
+        return self
+
+    def _sigmoid_logic(self, X):
+        t = (X - self.mean_) / self.std_
+        # Using expit for better numerical stability than 1/(1+np.exp(-t))
+        return 1.0 / (1.0 + np.exp(-np.clip(t, -709, 709)))
+
+    def transform(self, X):
+        check_is_fitted(self, ["mean_", "std_"])
+        X = check_array(X, accept_sparse=False)
+        
+        z = self._sigmoid_logic(X)
+        
+        if self.do_scale:
+            z = (z - self.z_min_) / self.z_range_
+        return z
