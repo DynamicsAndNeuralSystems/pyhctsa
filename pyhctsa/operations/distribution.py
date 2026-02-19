@@ -608,7 +608,7 @@ def moments(y : ArrayLike, the_mom : int = 0) -> float:
     ----------
     y : array-like
         Input time series or data vector.
-    theMom: int, optional
+    the_mom: int, optional
         The moment to calculate. Default is 0.
 
     Returns
@@ -743,7 +743,7 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01)
     
     return results
 
-def outlier_test(y: ArrayLike, p: float = 2, 
+def outlier_test(y: ArrayLike, p: float = 2,
                  just_me: Union[str, None] = None) -> Union[dict, float]:
     """
     How distributional statistics depend on distributional outliers.

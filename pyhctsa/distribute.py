@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Union
 import multiprocessing as mp
 import numpy as np
 from functools import partial
@@ -55,11 +56,11 @@ class LocalDistributor(BaseDistributor):
 
     Parameters
     ----------
-    n_workers : int, optional
+    n_workers: int, optional
         Number of worker processes to use. If ``None``, defaults to
         ``multiprocessing.cpu_count()``.
     """
-    def __init__(self, n_workers=None):
+    def __init__(self, n_workers : Union[int, None] = None):
         self.n_workers = n_workers or mp.cpu_count()
         try:
             pathos_mp.set_start_method('spawn', force=True)

@@ -63,17 +63,17 @@ def _load_csv(path: str) -> list:
                 continue
     return dataset
 
-def get_dataset(which : str = "e1000") -> list:
+def get_dataset(which: str = "e1000") -> list:
     """
     Load predefined datasets for testing and validation.
 
     Parameters
     ----------
-    which : str, default="e1000"
+    which: str, default="e1000"
         Dataset identifier. Options are:
-        - "e1000": Empirical 1000 dataset.
-        - "sinusoid": Sinusoidal test data.
-        - "noise": Gaussian noise data (T = 1000 sample length time series).
+        *  "e1000": Empirical 1000 dataset.
+        *  "sinusoid": Sinusoidal test data.
+        *  "noise": Gaussian noise data (T = 1000 sample length time series).
     
     Returns
     -------
