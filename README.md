@@ -124,5 +124,5 @@ The following codebases have been adapted directly into Python code within _pyhc
 - Danny Kaplan's Code for embedding statistics (GPL license).
 - Histogram code by Rudy Moddemeijer (unlicensed).
 
-# AI Usage Disclosure
+## AI Usage Disclosure
 Portions of this codebase (including tests and function documentation) were refactored and generated with the assistance of Large Language Models (LLMs). All AI-generated contributions have been reviewed and verified by the human maintainers.
