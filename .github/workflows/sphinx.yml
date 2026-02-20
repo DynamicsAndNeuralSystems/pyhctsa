@@ -1,6 +1,8 @@
 name: "Sphinx: Render docs"
 
-on: push
+on:
+  push:
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -36,3 +38,5 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: docs/build/html
+          publish_branch: gh-pages
+          force_orphan: true
