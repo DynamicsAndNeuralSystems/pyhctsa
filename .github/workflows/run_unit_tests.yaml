@@ -6,9 +6,14 @@ on:
   pull_request:
     branches: [ main ]
 
+# REQUIRED so the coverage job can push to coverage-badge branch
+permissions:
+  contents: write
+
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
@@ -16,20 +21,64 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'pip'
-      
+          cache: "pip"
+
       - name: Install pyhctsa dependencies
         run: |
           python -m pip install --upgrade pip
           pip install setuptools
           pip install -r requirements.txt
           pip install -e .[test]
-      
+          pip install pytest-cov
+
+      # Run normal tests everywhere EXCEPT the single coverage runner
       - name: Run pyhctsa unit tests
+        if: ${{ !(matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10') }}
         run: |
           pytest -v ./tests/
+
+      # Coverage run on ONE job only (ubuntu + py3.10)
+      - name: Run unit tests with coverage
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' }}
+        run: |
+          mkdir -p coverage
+          pytest -v ./tests/ \
+            --cov=pyhctsa \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:coverage/html
+
+      - name: Generate coverage badge (SVG)
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' }}
+        uses: tj-actions/coverage-badge-py@v2
+        with:
+          coverage_xml: coverage.xml
+          output: coverage/coverage.svg
+
+      - name: Add simple index page (optional)
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' }}
+        run: |
+          cat > coverage/index.html <<'EOF'
+          <!doctype html>
+          <html>
+            <head><meta charset="utf-8"><title>Coverage</title></head>
+            <body>
+              <p><img src="coverage.svg" alt="coverage badge"></p>
+              <p><a href="html/index.html">Open HTML coverage report</a></p>
+            </body>
+          </html>
+          EOF
+
+      - name: Publish coverage badge + report to coverage-badge branch
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' && github.event_name == 'push' }}
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: coverage-badge
+          folder: coverage
+          clean: true
+          single-commit: true

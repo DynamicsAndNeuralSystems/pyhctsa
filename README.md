@@ -17,6 +17,9 @@
   <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml">
     <img src="https://img.shields.io/github/actions/workflow/status/DynamicsAndNeuralSystems/pyhctsa/run_unit_tests.yaml?branch=main&style=flat-square" style="margin-right:8px;" />
   </a>
+  <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml">
+    <img src="https://raw.githubusercontent.com/DynamicsAndNeuralSystems/pyhctsa/coverage-badge/coverage.svg" style="margin-right:8px;" />
+  </a>
   <a href="https://doi.org/10.5281/zenodo.18529935">
     <img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529935-blue?style=flat-square" />
   </a>
