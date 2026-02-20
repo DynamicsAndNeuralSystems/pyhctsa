@@ -53,12 +53,13 @@ jobs:
             --cov-report=xml:coverage.xml \
             --cov-report=html:coverage/html
 
+      # Generate the badge WITHOUT tj-actions (it currently breaks due to pkg_resources/setuptools changes)
       - name: Generate coverage badge (SVG)
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' }}
-        uses: tj-actions/coverage-badge-py@v2
-        with:
-          coverage_xml: coverage.xml
-          output: coverage/coverage.svg
+        run: |
+          # coverage-badge currently expects pkg_resources, which is absent in newer setuptools
+          python -m pip install "setuptools<81" coverage-badge
+          coverage-badge -o coverage/coverage.svg
 
       - name: Add simple index page (optional)
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' }}
