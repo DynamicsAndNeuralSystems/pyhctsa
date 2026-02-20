@@ -115,8 +115,10 @@ def distribution_entropy(
     hist_or_ks : str
         Whether to use a histogram ('hist') or kernel-smoothed ('ks') distribution.
     num_bins : int or list of int, optional
-        (for 'hist'): an integer, uses a histogram with that many bins
-        (for 'ks'): a positive real number, for the bandwidth parameter for the kernel density estimate.
+
+        - (for 'hist'): an integer, uses a histogram with that many bins
+        - (for 'ks'): a positive real number, for the bandwidth parameter for the kernel density estimate.
+
     olremp : float, optional
         The proportion of outliers at both extremes to remove.
         (e.g., if olremp = 0.01; keeps only the middle 98% of data; 0 keeps all data. 
@@ -208,15 +210,14 @@ def multi_scale_entropy(
         Similarity threshold for sample entropy (default: 0.15).
     pre_process_how : str, optional
         Preprocessing method. Supported:
-            - 'diff1': Use z-scored first differences.
-            - 'rescale_tau': Rescale using autocorrelation time.
+
+        - 'diff1': Use z-scored first differences.
+        - 'rescale_tau': Rescale using autocorrelation time.
 
     Returns
     -------
     dict
-        Dictionary containing sample entropy at each scale and summary statistics:
-            - 'sampen_s{scale}': SampEn at each scale
-            - 'maxSampEn', 'maxScale', 'minSampEn', 'minScale', 'meanSampEn', 'stdSampEn', 'cvSampEn', 'meanch'
+        Dictionary containing sample entropy at each scale and summary statistics.
     """
     y = np.asarray(y)
     m = int(m)
@@ -292,7 +293,7 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
     This function calculates SampEn for embedding dimensions from 0 to m. The implementation
     uses the PhysioNet C code (sampen.c by Doug Lake) [1] for efficiency and accuracy.
     Can specify to first apply an incremental differencing of the time series
-    thus yielding the 'Control Entropy' [2]
+    thus yielding the 'Control Entropy' [2].
 
     References
     ----------
@@ -424,6 +425,7 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max : 
     -------
     dict
         Dictionary containing:
+
             - 'H_norm': Estimated normalized RPDE value.
             - 'H': Unnormalized entropy.
             - 'rpd': Recurrence period density (probability distribution).
@@ -454,34 +456,37 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max : 
     out['meanNonZero'] = np.mean(rpd[ip]) * N # mean value when rpd is non-zero (rescale by N)
     out['maxRPD'] = np.max(rpd) * N # maximum value of rpd (rescale by N)
 
-    return out 
+    return out
 
 def approximate_entropy(x : ArrayLike, mnom : int = 1, rth : float = 0.2) -> float:
     """
-    Approximate Entropy of a time series
+    Approximate entropy (ApEn) of a time series.
 
-    ApEn(m,r).
+    Computes :math:`\\mathrm{ApEn}(m, r)`.
 
-    For more information, cf. http://physionet.org/physiotools/ApEn/
+    For details, see the PhysioNet documentation:
+    https://physionet.org/physiotools/apen/
 
-    References:
-    -----------
-    .. [1] S. M. Pincus, "Approximate entropy as a measure of system complexity",
-        P. Natl. Acad. Sci. USA, 88(6) 2297 (1991)
+    References
+    ----------
+    .. [1] S. M. Pincus, "Approximate entropy as a measure of system complexity,"
+        *Proc. Natl. Acad. Sci. USA*, 88(6), 2297 (1991).
 
     Parameters
-    -----------
-    y : array-like
-        The input time series
+    ----------
+    x : array-like
+        Input time series.
+
     mnom : int, optional
-        The embedding dimension (default is 1)
+        Embedding dimension :math:`m`. Default is ``1``.
+
     rth : float, optional
-        The threshold for judging closeness/similarity (default is 0.2)
+        Similarity threshold :math:`r`. Default is ``0.2``.
 
     Returns
-    --------
+    -------
     float
-        The Approximate Entropy value
+        Approximate entropy value.
     """
     x = np.asarray(x)
     r = rth * np.std(x, ddof=1) # threshold of similarity

@@ -203,41 +203,66 @@ def walker(y : ArrayLike, walker_rule : str = 'prop',
 def force_potential(y : ArrayLike, what_potential : str = 'dblwell',
                     params : Union[list, None] = None) -> dict:
     """
-    Couples the values of the time series to a dynamical system.
+    Couple a time series to a driven dynamical system.
 
-    The input time series forces a particle in the given potential well.
+    The input time series acts as an external forcing term on a simulated
+    particle evolving in a specified potential well.
 
-    The time series contributes to a forcing term on a simulated particle in either:
-        (i) A quartic double-well potential with potential energy V(x) = x^4/4 - alpha^2 x^2/2,
-            or a force F(x) = -x^3 + alpha^2 x
-        (ii) A sinusoidal potential with V(x) = -cos(x/alpha),
-            or F(x) = sin(x/alpha)/alpha
+    Two potential functions are available:
+
+    1. **Quartic double-well potential**
+
+    .. math::
+
+        V(x) = \\frac{x^4}{4} - \\frac{\\alpha^2 x^2}{2},
+
+    with corresponding force
+
+    .. math::
+
+        F(x) = -\\frac{dV}{dx} = -x^3 + \\alpha^2 x.
+
+    2. **Sinusoidal potential**
+
+    .. math::
+
+        V(x) = -\\cos\\left(\\frac{x}{\\alpha}\\right),
+
+    with corresponding force
+
+    .. math::
+
+        F(x) = \\frac{1}{\\alpha}
+        \\sin\\left(\\frac{x}{\\alpha}\\right).
+
+    The time series provides a forcing contribution to the particle dynamics,
+    which are integrated numerically.
 
     Parameters
     ----------
     y : array-like
-        The input time series.
+        Input time series.
+
     what_potential : str, optional
-        The potential function to simulate:
-            - 'dblwell': a double well potential function
-            - 'sine': a sinusoidal potential function
-    params : list, optional
-        The parameters for simulation, should be in the form [alpha, kappa, deltat]:
-            For 'dblwell':
-                - alpha: controls the relative positions of the wells
-                - kappa: coefficient of friction
-                - deltat: time step for the simulation
-            For 'sine':
-                - alpha: controls the period of oscillations in the potential
-                - kappa: coefficient of friction
-                - deltat: time step for the simulation
+        Potential function to simulate.
+
+        - ``"dblwell"``: Quartic double-well potential.
+        - ``"sine"``: Sinusoidal potential.
+
+    params : list of float, optional
+        Simulation parameters in the form ``[alpha, kappa, deltat]``.
+
+        - ``alpha``: Controls the well separation (``"dblwell"``) or the
+        oscillation period (``"sine"``).
+        - ``kappa``: Friction (damping) coefficient.
+        - ``deltat``: Integration time step.
 
     Returns
-    --------
+    -------
     dict
-        Statistics summarizing the trajectory of the simulated particle,
-        including its mean, the range, proportion positive, proportion of times it
-        crosses zero, its autocorrelation, final position, and standard deviation.
+        Summary statistics of the simulated trajectory, including mean,
+        range, proportion of positive values, zero-crossing rate,
+        autocorrelation, final position, and standard deviation.
     """
     y = np.array(y)
     if params is None:

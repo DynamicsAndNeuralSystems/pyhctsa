@@ -3,7 +3,7 @@ import time
 from functools import partial
 from itertools import product
 from pathlib import Path
-from typing import Union
+from typing import Union, Any
 
 import numpy as np
 import pandas as pd
@@ -144,14 +144,14 @@ class FeatureCalculator:
     
     Attributes
     ----------
-    config : dict
+    config: dict
         The parsed YAML configuration containing feature definitions.
-    feature_funcs : dict
+    feature_funcs: dict
         A dictionary mapping feature labels to their corresponding callable functions.
     
     Parameters
     ----------
-    config_path : str or None, optional
+    config_path: str or None, optional
         Path to the YAML configuration file. If None, uses the default 'hctsa.yaml'
         configuration file in the package configurations directory.
     
@@ -162,7 +162,7 @@ class FeatureCalculator:
     >>> df = fc.extract(x)
     >>> print(fc.summary())
     """
-    def __init__(self, config_path : Union[str, None] = None):
+    def __init__(self, config_path: Union[str, None] = None):
         """
         Initialises a FeatureCalculator instance.  
 
@@ -249,8 +249,7 @@ class FeatureCalculator:
     
     def summary(self):
         """
-        Generate a summary of the last feature extraction call. 
-        Currently generates a summary for all instances.
+        Generate a summary of the last feature extraction call.
         """
         # Check that extract has already been called. Otherwise return nothing...
         print(f"Time taken to compute {len(self.feature_funcs)} master operations: "
@@ -262,54 +261,32 @@ class FeatureCalculator:
             print(f"{c} : {np.sum(e_arr == codings[c])}")           
         return e_arr
     
-    def extract(self, data : Union[ArrayLike, list[ArrayLike]],
+    def extract(self, data: Union[ArrayLike, list[ArrayLike]],
                 labels: Union[ArrayLike, list[ArrayLike], None] = None,
-                verbose : bool = False, distributor = None) -> pd.DataFrame:
+                verbose: bool = False, distributor: Any = None) -> pd.DataFrame:
         """
         Run the configured feature extractor over one or more time series and
         return a single tidy `pandas.DataFrame`.
 
         Parameters
         ----------
-        data : ArrayLike
+        data: ArrayLike or list[ArrayLike]
             The input time series data. Two forms are accepted:
-
-            * **Single series**: a 1-D array-like of real values
-            (e.g., list[float] or `np.ndarray` of shape ``(n_samples,)``).
-            * **Multiple series**: a 2-D `np.ndarray` of shape ``(n_series, n_samples)``
-            or a list of 1-D array-likes (e.g., list[np.ndarray]), where
-            each element is a 1-D real-valued series of shape ``(n_samples_i,)``.
-        labels : array-like, list, str, int, or None, optional
-            Labels for each time series. The order of labels is assumed to match the order 
-            of the time series as passed in the `data` argument. Can be:
             
-            * A single label (str or int) for a single series.
-            * A list or array of labels, one per series.
-            * None (default), in which case series are labeled as 'ts_1', 'ts_2', etc.
-        verbose : bool, optional
-            Whether to show a progress bar of the features being computed.
-            Default is `False`.
-        distributor : object, optional
-            Optional distributor for parallel computation. The distributor must
-            implement a `map(func, iterable, **kwargs)` method that applies
-            `func` to chunks of `iterable` (or to items) and returns a
-            flattened list of results.
+            * **Single series**: a 1-D array-like of real values.
+            * **Multiple series**: a 2-D array or list of 1-D array-likes.
+        labels: ArrayLike, list, str, int, or None, optional
+            Labels for each time series. The order of labels is assumed to match 
+            the order of the time series as passed in the `data` argument.
+        verbose: bool, optional
+            Whether to show a progress bar. Default is ``False``.
+        distributor: object, optional
+            Optional distributor for parallel computation.
         
         Returns
         -------
         pd.DataFrame
-            A DataFrame with one row per input series and one column per computed
-            feature. 
-
-        Examples
-        --------
-        >>> fc = FeatureCalculator()
-        >>> x = np.random.randn(1000)
-        >>> df = fc.extract(x)
-        Evaluating 128 partialed functions. Strap in!...
-        Feature extraction completed in 0.237 seconds.
-        >>> df.shape
-        (1, 128)
+            A DataFrame with one row per input series and one column per feature
         """
         series_list = _standardise_inputs(data)
         # check each time series to see if valid...

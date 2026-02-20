@@ -187,6 +187,7 @@ def wfbm(x : ArrayLike) -> dict:
     -------
     dict
         Dictionary containing the three estimates of the fractal index H of the signal x: 
+
         - (i) using a second order discrete derivative, 
         - (ii) using a second order discrete derivative with wavelets, 
         - (iii) using wavelet variance versus wavelet level.
@@ -540,10 +541,11 @@ def wl_coeffs(y : ArrayLike, w_name : str = 'db3', level : Union[int, str] = 3) 
     -------
     dict
         Dictionary containing statistics of the wavelet coefficients, including:
-            - 'mean_coeff': Mean of sorted absolute detail coefficients.
-            - 'max_coeff': Maximum of sorted absolute detail coefficients.
-            - 'med_coeff': Median of sorted absolute detail coefficients.
-            - 'wb75m', 'wb50m', 'wb25m', 'wb10m', 'wb1m': Decay rate statistics (fraction of coefficients below a threshold of the maximum).
+
+        - 'mean_coeff': Mean of sorted absolute detail coefficients.
+        - 'max_coeff': Maximum of sorted absolute detail coefficients.
+        - 'med_coeff': Median of sorted absolute detail coefficients.
+        - 'wb75m', 'wb50m', 'wb25m', 'wb10m', 'wb1m': Decay rate statistics (fraction of coefficients below a threshold of the maximum).
     """
     y = np.asarray(y)
     N = len(y)

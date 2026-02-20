@@ -99,12 +99,14 @@ def hypothesis_test(x : ArrayLike, the_test: str = "signtest") -> float:
         Input time series
     the_test : str, optional
         Type of hypothesis test to perform:
+
         - 'signtest': Tests if median equals zero
         - 'runstest': Tests for randomness in sequence
         - 'ztest': Tests if mean equals zero (assumes unit variance)
         - 'signrank': Wilcoxon signed rank test for zero median
         - 'jbtest': Jarque-Bera test for normality
         - 'lbq': Ljung-Box Q-test for autocorrelation
+        
         Default is 'signtest'.
 
     Returns

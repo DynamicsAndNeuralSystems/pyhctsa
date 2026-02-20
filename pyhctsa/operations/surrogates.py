@@ -201,29 +201,33 @@ def surrogate_test(
         The input time series.
     surr_meth : str, optional
         The method for generating surrogate time series:
-            - 'RP': random phase surrogates that maintain linear correlations in
-              the data but destroy any nonlinear structure through phase randomization.
-            - 'AAFT': amplitude-adjusted Fourier transform method maintains
-              linear correlations but destroys nonlinear structure through phase
-              randomization, yet preserves the approximate amplitude distribution.
-              NOTE: **Not yet implemented.**
-            - 'TFT': preserves low-frequency phases but randomizes high-frequency phases
-              (as a way of dealing with non-stationarity, cf. [2]
-              "A new surrogate data method for nonstationary time series",
-              D. L. Guarin Lopez et al., arXiv 1008.1804 (2010)).
-              NOTE: **Not yet implemented.**
+        
+        - 'RP': random phase surrogates that maintain linear correlations in
+            the data but destroy any nonlinear structure through phase randomization.
+        - 'AAFT': amplitude-adjusted Fourier transform method maintains
+            linear correlations but destroys nonlinear structure through phase
+            randomization, yet preserves the approximate amplitude distribution.
+            NOTE: **Not yet implemented.**
+        - 'TFT': preserves low-frequency phases but randomizes high-frequency phases
+            (as a way of dealing with non-stationarity, cf. [2]
+            "A new surrogate data method for nonstationary time series",
+            D. L. Guarin Lopez et al., arXiv 1008.1804 (2010)).
+            NOTE: **Not yet implemented.**
+
     num_surrs : int, optional
         The number of surrogates to compute (default is 99 for a 0.01 significance 
         level 1-sided test).
     the_test_stat : str or array-like, optional
         The test statistic(s) to evaluate on all surrogates and the original time series.
         Can specify multiple options and will return output for each specified test statistic:
-            - 'ami': the automutual information at lag 1, cf. [2]
-            - 'fmmi': the first minimum of the automutual information function.
-            - 'o3': a third-order statistic used in [3].
-            - 'tc3': a time-reversal asymmetry measure.
+
+        - 'ami': the automutual information at lag 1, cf. [2]
+        - 'fmmi': the first minimum of the automutual information function.
+        - 'o3': a third-order statistic used in [3].
+        - 'tc3': a time-reversal asymmetry measure.
         Outputs of the function include a z-test between the two distributions, and
         some comparative rank-based statistics.
+        
     random_seed : int, optional
         Random seed for reproducibility.
 

@@ -51,41 +51,53 @@ def _safe_divide(num, denom):
 
 def preproc_compare(y : ArrayLike, detrend_meth : str = 'medianf') -> dict:
     """
-    Compare how time-series properties change after pre-processing.
+    Compare time-series properties before and after pre-processing.
 
-    Applies a pre-processing transformation to the time series and analyzes how
-    various statistical properties change as a result.
+    Applies a specified pre-processing transformation to the input time series
+    and evaluates how selected statistical properties change relative to the
+    original series.
 
     Parameters
     ----------
-    y : ArrayLike
-        Input time series
+    y : array-like
+        Input time series.
+
     detrend_meth : str, optional
-        Method for pre-processing. Options include:
-        
-        1. Polynomial detrending ('poly<n>'):
-           - n = 1-9: polynomial order (e.g., 'poly1' for linear)
-        
-        2. Differencing ('diff<n>'):
-           - n: number of differences (e.g., 'diff1')
-        
-        3. Median filtering ('medianf<n>'):
-           - n: window length, must be odd (e.g., 'medianf3')
-        
-        4. Running average ('rav<n>'):
-           - n: window size (e.g., 'rav4')
-        
-        5. Resampling ('resample_<P>_<Q>'):
-           - P: upsampling factor
-           - Q: downsampling factor
-           (e.g., 'resample_1_2' for half rate)
-        
-        Default is 'medianf'.
-    
+        Pre-processing method to apply.
+
+        Polynomial detrending:
+
+        - ``"poly<n>"``: Polynomial detrending of order ``n`` (``1 ≤ n ≤ 9``),
+        e.g., ``"poly1"`` for linear detrending.
+
+        Differencing:
+
+        - ``"diff<n>"``: Apply ``n`` successive differences,
+        e.g., ``"diff1"``.
+
+        Median filtering:
+
+        - ``"medianf<n>"``: Median filter with window length ``n`` (must be odd),
+        e.g., ``"medianf3"``.
+
+        Running average:
+
+        - ``"rav<n>"``: Moving average with window size ``n``,
+        e.g., ``"rav4"``.
+
+        Resampling:
+
+        - ``"resample_<P>_<Q>"``: Resample by a factor of ``P/Q``,
+        where ``P`` is the upsampling factor and ``Q`` is the
+        downsampling factor (e.g., ``"resample_1_2"`` for half rate).
+
+        Default is ``"medianf"``.
+
     Returns
     -------
     dict
-        Comparisons of stationarity and distributional measures between the original and transformed time series.
+        Comparison of stationarity and distributional measures between the
+        original and transformed time series.
     """
     y = np.asarray(y)
     N = len(y)

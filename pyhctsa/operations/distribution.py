@@ -170,7 +170,7 @@ def _find_bounds(pdf_func, start_left, start_right, x_step, thresh):
 
     return xf
 
-def withinp(x : ArrayLike, p : float = 1.0, mean_or_median : str = 'mean') -> float:
+def withinp(x: ArrayLike, p: float = 1.0, mean_or_median: str = 'mean') -> float:
     """
     Proportion of data points within p standard deviations of the mean or median.
 
@@ -234,6 +234,7 @@ def spread(y : ArrayLike, spread_measure : str = 'std') -> float:
         The input time series or data vector.
     spread_measure : str, optional
         The spread measure to use (default is 'std'):
+
         - 'std': standard deviation
         - 'iqr': interquartile range 
         - 'mad': mean absolute deviation
@@ -294,6 +295,7 @@ def proportion_values(x : ArrayLike, prop_what : str = 'positive') -> float:
         Input time series or data vector
     prop_what : str, optional (default is 'positive')
         Type of values to count:
+
         - 'zeros': values equal to zero
         - 'positive': values strictly greater than zero
         - 'geq0': values greater than or equal to zero
@@ -322,8 +324,9 @@ def pleft(y : ArrayLike, th : float = 0.1) -> float:
     """
     Distance from the mean at which a given proportion of data are more distant.
     
-    Measures the maximum distance from the mean at which a given fixed proportion, `th`, of the time-series data points are further.
-    Normalizes by the standard deviation of the time series.
+    Measures the maximum distance from the mean at which a given fixed proportion, `th`, of 
+    the time-series data points are further. Normalizes by the standard deviation of the time 
+    series.
     
     Parameters
     ----------
@@ -354,6 +357,7 @@ def min_max(y : ArrayLike, min_or_max : str = 'max') -> float:
         Input time series or data vector
     minOrMax : str, optional
         Return either the minimum or maximum of y. Default is 'max':
+
         - 'min': minimum of y
         - 'max': maximum of y
 
@@ -382,6 +386,7 @@ def mean(y : ArrayLike, mean_type : str = 'arithmetic') -> float:
         Input time series or data vector
     mean_type : str, optional
         Type of mean to calculate. Default is 'arithmtic':
+
         - 'norm' or 'arithmetic': standard arithmetic mean
         - 'median': middle value (50th percentile)
         - 'geom': geometric mean (nth root of product)
@@ -419,16 +424,16 @@ def mean(y : ArrayLike, mean_type : str = 'arithmetic') -> float:
 
     return float(out)
 
-def high_low_mu(y: ArrayLike) -> float:
+def high_low_mu(y : ArrayLike) -> float:
     """
     The high_low_mu statistic.
 
     The high_low_mu statistic is the ratio of the mean of the data that is above the
     (global) mean compared to the mean of the data that is below the global mean.
 
-    Paramters
+    Parameters
     ----------
-    y : array-like
+    y: array-like
         The input data vector
 
     Returns
@@ -457,6 +462,7 @@ def fit_mle(y : ArrayLike, fit_what : str = 'gaussian') -> Union[Dict[str, float
         Input time series or data vector
     fit_what : {'gaussian', 'uniform', 'geometric'}, optional
         Distribution type to fit:
+
         - 'gaussian': Normal distribution (returns mean and std)
         - 'uniform': Uniform distribution (returns bounds a and b)
         - 'geometric': Geometric distribution (returns p parameter)
@@ -499,20 +505,27 @@ def cv(x : ArrayLike, k : int = 1) -> float:
     """
     Calculate the coefficient of variation of order k.
 
-    The coefficient of variation of order k is (sigma/mu)^k, where sigma is the
-    standard deviation and mu is the mean of the input data vector.
+    The coefficient of variation (CV) of order :math:`k` is defined as
+
+    .. math::
+
+        \\left( \\frac{\\sigma}{\\mu} \\right)^{k},
+
+    where :math:`\\sigma` is the standard deviation and :math:`\\mu` is the
+    mean of the input data.
 
     Parameters
     ----------
     x : array-like
         Input time series or data vector.
+
     k : int, optional
-        Order of the coefficient of variation. Default is 1.
+        Order of the coefficient of variation. Default is ``1``.
 
     Returns
     -------
     float
-        The coefficient of variation of order k.
+        The coefficient of variation of order :math:`k`.
     """
     if not isinstance(k, int) or k < 0:
         logging.warning('k should probably be a positive integer')
@@ -523,29 +536,50 @@ def cv(x : ArrayLike, k : int = 1) -> float:
 
 def custom_skewness(y : ArrayLike, what_skew : str = 'pearson') -> float:
     """
-    Calculate custom skewness measures of a time series.
+    Compute custom skewness measures of a time series.
 
-    Computes either the Pearson or Bowley skewness. The Pearson skewness uses mean, 
-    median and standard deviation, while the Bowley skewness (also known as quartile 
-    skewness) uses quartiles.
+    Calculates either the Pearson skewness or the Bowley (quartile)
+    skewness coefficient.
+
+    The Pearson skewness is defined as
+
+    .. math::
+
+        \\frac{3(\\mu - \\tilde{x})}{\\sigma},
+
+    where :math:`\\mu` is the mean, :math:`\\tilde{x}` is the median,
+    and :math:`\\sigma` is the standard deviation.
+
+    The Bowley skewness is defined as
+
+    .. math::
+
+        \\frac{Q_3 + Q_1 - 2Q_2}{Q_3 - Q_1},
+
+    where :math:`Q_1`, :math:`Q_2`, and :math:`Q_3` are the first,
+    second (median), and third quartiles, respectively.
 
     Parameters
     ----------
     y : array-like
-        Input time series
-    what_skew : {'pearson', 'bowley'}, optional
-        The skewness measure to calculate:
-        - 'pearson': (3 * mean - median) / std
-        - 'bowley': (Q3 + Q1 - 2*Q2) / (Q3 - Q1)
-        Default is 'pearson'.
+        Input time series.
+
+    what_skew : str, optional
+        Skewness measure to compute.
+
+        - ``"pearson"``: Pearson skewness coefficient.
+        - ``"bowley"``: Bowley (quartile) skewness coefficient.
+
+        Default is ``"pearson"``.
 
     Returns
     -------
     float
-        The calculated skewness measure:
-        - Positive values indicate right skew
-        - Negative values indicate left skew
-        - Zero indicates symmetry
+        The calculated skewness value.
+
+        - Positive values indicate right skew.
+        - Negative values indicate left skew.
+        - Zero indicates symmetry.
     """
     y = np.asarray(y)
     out = 0.0
@@ -577,8 +611,9 @@ def burstiness(y: ArrayLike) -> dict:
     Returns
     -------
     dict:
-        'B': Original burstiness statistic
-        'B_Kim': Improved burstiness for finite series
+
+        - 'B': Original burstiness statistic
+        - 'B_Kim': Improved burstiness for finite series
     """
     y = np.asarray(y)
     me = np.mean(y)
@@ -608,7 +643,7 @@ def moments(y : ArrayLike, the_mom : int = 0) -> float:
     ----------
     y : array-like
         Input time series or data vector.
-    theMom: int, optional
+    the_mom: int, optional
         The moment to calculate. Default is 0.
 
     Returns
@@ -637,9 +672,11 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01)
         The input time series.
     threshold_how : {'abs', 'pos', 'neg'}, optional
         The method for determining outliers:
+
             - 'abs': Outliers are furthest from the mean (default).
             - 'pos': Outliers are the greatest positive deviations from the mean.
             - 'neg': Outliers are the greatest negative deviations from the mean.
+
     inc : float, optional
         The increment to move through thresholds (as a fraction of the standard deviation).
         Default is 0.01.
@@ -743,7 +780,7 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01)
     
     return results
 
-def outlier_test(y: ArrayLike, p: float = 2, 
+def outlier_test(y: ArrayLike, p: float = 2,
                  just_me: Union[str, None] = None) -> Union[dict, float]:
     """
     How distributional statistics depend on distributional outliers.
@@ -760,8 +797,10 @@ def outlier_test(y: ArrayLike, p: float = 2,
         The percentage of values to remove beyond upper and lower percentiles.
     just_me : {'mean', 'std'}, optional
         If specified, just returns a number:
-            - 'mean': returns the mean of the middle portion of the data
-            - 'std': returns the std of the middle portion of the data
+
+        - 'mean': returns the mean of the middle portion of the data
+        - 'std': returns the std of the middle portion of the data
+
         If None (default), returns a dictionary.
 
     Returns
@@ -802,7 +841,7 @@ def trimmed_mean(x: ArrayLike, p_exclude: float = 0.0) -> float:
 
     Parameters
     ----------
-    y : array-like
+    x : array-like
         The input time series or data vector
     p_exclude : float, optional
         The percentage of highest and lowest values to exclude from the mean 
@@ -949,11 +988,13 @@ def remove_points(y : ArrayLike, remove_how : str = 'absfar', p : float = 0.1,
         The input time series.
     remove_how : {'absclose', 'absfar' (default), 'min', 'max', 'random'}, optional
         How to remove points from the time series:
-            - 'absclose': those that are the closest to the mean,
-            - 'absfar': those that are the furthest from the mean (default),
-            - 'min': the lowest values,
-            - 'max': the highest values,
-            - 'random': at random.
+
+        - 'absclose': those that are the closest to the mean,
+        - 'absfar': those that are the furthest from the mean (default),
+        - 'min': the lowest values,
+        - 'max': the highest values,
+        - 'random': at random.
+
     p : float, optional
         The proportion of points to remove (default: 0.1).
     remove_or_saturate : {'remove', 'saturate'}, optional

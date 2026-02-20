@@ -7,6 +7,10 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.utils.validation import check_array, check_is_fitted
+
+
 def check_optional_deps(dep: str) -> bool:
     """Check whether an optional dependency exists.
     Returns True if available, else False."""
@@ -59,18 +63,21 @@ def _load_csv(path: str) -> list:
                 continue
     return dataset
 
-def get_dataset(which : str = "e1000") -> list:
+def get_dataset(which: str = "e1000") -> list:
     """
     Load predefined datasets for testing and validation.
 
     Parameters
     ----------
     which : str, default="e1000"
-        Dataset identifier. Options are:
-        - "e1000": Empirical 1000 dataset.
-        - "sinusoid": Sinusoidal test data.
-        - "noise": Gaussian noise data (T = 1000 sample length time series).
-    
+        Dataset identifier.
+
+        Options are:
+
+        - ``"e1000"``: Empirical 1000 dataset.
+        - ``"sinusoid"``: Sinusoidal test data.
+        - ``"noise"``: Gaussian noise data (T = 1000 sample length time series).
+
     Returns
     -------
     list
