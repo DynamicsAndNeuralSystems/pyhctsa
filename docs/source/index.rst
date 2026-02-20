@@ -34,15 +34,23 @@
    :target: https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/LICENSE
    
 Install
-=======
+-------
 Before installing `pyhctsa <https://pypi.org/project/pyhctsa/>`_, we strongly recommend setting up a virtual environment to isolate dependencies: 
 
 .. code-block:: bash
 
-   > pip install pyhctsa
+   pip install pyhctsa
+
+Quickstart
+----------
+See :doc:`Getting started (Quickstart) <usage/getting_started>` for how to get up and running with `pyhctsa`.
+
+API Reference
+-------------
+See the :doc:`API reference <api>` for `pyhctsa`.
 
 License & Citation
-==================
+------------------
 **License**: GNU General Public License Version 3. See `LICENSE <https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/LICENSE>`_.
 
 © 2026 Joshua Moore and Ben Fulcher. You may use, modify, and distribute this software with appropriate attribution.
@@ -76,3 +84,4 @@ Or in BibTeX (version-agnostic):
    installation
    usage/index
    api
+   development/index
