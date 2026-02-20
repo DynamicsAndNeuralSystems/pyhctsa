@@ -21,17 +21,20 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
         The input time series.
     psd_meth : {'periodogram', 'fft', 'welch'}, optional
         The method for obtaining the spectrum from the signal:
-            - 'periodogram': periodogram
-            - 'fft': fast Fourier transform (default)
-            - 'welch': Welch's method
+
+        - 'periodogram': periodogram
+        - 'fft': fast Fourier transform (default)
+        - 'welch': Welch's method
+
     window_type : {'boxcar', 'rect', 'bartlett', 'hann', 'hamming', 'none'}, optional
         The window to use for spectral estimation:
-            - 'boxcar'
-            - 'rect'
-            - 'bartlett'
-            - 'hann'
-            - 'hamming'
-            - 'none' (default)
+            
+        - 'boxcar'
+        - 'rect'
+        - 'bartlett'
+        - 'hann'
+        - 'hamming'
+        - 'none' (default)
 
     Returns
     -------

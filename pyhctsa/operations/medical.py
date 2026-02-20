@@ -35,10 +35,11 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
     -------
     out : dict
         Dictionary containing the following HRV features   
+
         - 'tri10'   : Triangular histogram index using 10 bins.
         - 'tri20'   : Triangular histogram index using 20 bins.
         - 'trisqrt' : Triangular histogram index using a number of bins determined by 
-            the square root rule.
+                the square root rule.
         - 'SD1'     : Standard deviation of the Poincaré plot’s minor axis (short-term variability).
         - 'SD2'     : Standard deviation of the Poincaré plot’s major axis (long-term variability).
     """
@@ -312,8 +313,9 @@ def pnn(x : ArrayLike) -> dict:
     -------
     dict
         Dictionary containing pNNx values, such as:
-            - 'pNN20': Percentage of successive differences > 20 ms
-            - 'pNN50': Percentage of successive differences > 50 ms
+
+        - 'pNN20': Percentage of successive differences > 20 ms
+        - 'pNN50': Percentage of successive differences > 50 ms
 
     """
     x = np.asarray(x)

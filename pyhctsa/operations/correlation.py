@@ -32,29 +32,55 @@ def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even
         P. Natl. Acad. Sci. USA, 98(13) 7107 (2001)
 
     Parameters
-    -----------
+    ----------
     y : ArrayLike
-        Input time series (should be z-scored)
-    tau : Union[int, str], optional
-        Time delay for computing AMI. If 'ac' or 'tau', uses first zero-crossing 
-        of autocorrelation function. Default is 1.
+        Input time series (should be z-scored prior to analysis).
+
+    tau : int or str, optional
+        Time delay used to compute AMI.
+
+        - If an ``int``, computes AMI at that lag.
+        - If ``"ac"`` or ``"tau"``, uses the first zero-crossing of the
+        autocorrelation function.
+
+        Default is ``1``.
+
     ami_method : str, optional
-        Method for computing AMI:
-        - 'std1', 'std2', 'quantiles', 'even': Histogram-based estimation
-        - 'gaussian', 'kernel', 'kraskov1', 'kraskov2': JIDT-based estimation
-        Default is 'even'.
+        Estimation method for AMI.
+
+        Histogram-based estimators:
+
+        - ``"std1"``
+        - ``"std2"``
+        - ``"quantiles"``
+        - ``"even"``
+
+        JIDT-based estimators:
+
+        - ``"gaussian"``
+        - ``"kernel"``
+        - ``"kraskov1"``
+        - ``"kraskov2"``
+
+        Default is ``"even"``.
+
     extra_param : int, optional
-        Additional parameter for AMI calculation:
-        - For histogram methods: number of bins
-        - For JIDT methods: algorithm-specific parameter
-        Default is 10.
-    random_seed : int, optional
-        Seed for random number generator. If None, uses 0. Default is None.
+        Additional parameter for the AMI estimator.
+
+        - For histogram methods: number of bins.
+        - For JIDT methods: estimator-specific parameter.
+
+        Default is ``10``.
+
+    random_seed : int or None, optional
+        Seed controlling noise realisations. If ``None``, defaults internally
+        to ``0``.
 
     Returns
-    --------
-    dict: 
-        Statistics on the resulting set of automutual information estimates.
+    -------
+    dict
+        Summary statistics of the AMI–noise curve, including exponential
+        decay fit parameters and descriptive measures.
     """
     y = np.asarray(y)
     # Set tau to minimum of autocorrelation function if 'ac' or 'tau'
@@ -145,8 +171,8 @@ def theiler_q(y : ArrayLike) -> float:
     """
     Computes Theiler's Q statistic which quantifies asymmetry in time. 
 
-    Calculates Q = <(x_t + x_{t+1})^3> normalized by <x^2>^{3/2} on a vector x,
-    as proposed by James Theiler.
+    Calculates :math:`Q = \\langle (x_t + x_{t+1})^3 \\rangle / \\langle x^2 \\rangle^{3/2}`
+    on a vector :math:`x`, as proposed by James Theiler.
 
     Copyright (C) 1996, D. Kaplan <kaplan@macalester.edu>
 
@@ -173,12 +199,16 @@ def crinkle_statistic(y : ArrayLike) -> float:
     """
     Computes Theiler's crinkle statistic.
 
-    Calculates the "crinkle statistic" on a vector y:
-        <(y_{t-1} - 2*y_t + y_{t+1})^4> / <(y_t^2)>^2
-    as proposed by James Theiler.
+    The statistic is defined as
+
+
+    .. math::
+
+        \\frac{\\left\\langle (y_{t-1} - 2 y_t + y_{t+1})^4 \\right\\rangle}
+            {\\left\\langle y_t^2 \\right\\rangle^2}
 
     Copyright (C) 1996, D. Kaplan <kaplan@macalester.edu>
-
+    
     Parameters
     ----------
     y : array-like
@@ -444,17 +474,27 @@ def _histcounts(x: ArrayLike, bins: Union[int, None, str] = None,
 
 def periodicity_wang(y : ArrayLike) -> dict:
     """
-    Periodicity extraction measure of Wang et al. (2007) [1].
+    Periodicity extraction measure of Wang et al. (2007).
 
-    Implements an idea based on the periodicity extraction measure proposed in [1].
+    Implements an idea based on the periodicity extraction measure proposed in [1]_.
 
-    Detrends the time series using a three-knot cubic regression spline and then computes 
-    autocorrelations up to one third of the length of the time series. The frequency is the 
-    first peak in the autocorrelation function satisfying a set of conditions.
+    The time series is detrended using a three-knot cubic regression spline and
+    autocorrelations are computed up to one third of the time-series length. The
+    reported frequency corresponds to the first peak in the autocorrelation
+    function satisfying a set of conditions.
 
-    The single threshold of 0.01 was considered in the original paper, this code
-    uses a range of thresholds: 0, 0.01, 0.1, 0.2, 1/sqrt{N}, 5/sqrt{N}, and
-    10/sqrt{N}, where N is the length of the time series.
+    The original paper considered a single threshold of ``0.01``. This
+    implementation evaluates a range of thresholds:
+
+    - ``0``
+    - ``0.01``
+    - ``0.1``
+    - ``0.2``
+    - :math:`1/\\sqrt{N}`
+    - :math:`5/\\sqrt{N}`
+    - :math:`10/\\sqrt{N}`
+
+    where :math:`N` is the length of the time series.
 
     References
     ----------
@@ -579,10 +619,12 @@ def histogram_ami(
         first zero-crossing of autocorrelation function
     meth : str, optional
         The method for binning data (default: 'even'):
+
         - 'even': evenly-spaced bins through the range
         - 'std1': bins extending to ±1 standard deviation from mean
         - 'std2': bins extending to ±2 standard deviations from mean
         - 'quantiles': equiprobable bins using quantiles
+        
     num_bins : int, optional
         The number of bins to use (default: 10)
 
@@ -892,27 +934,43 @@ def nonlinear_autocorr(y : ArrayLike, taus : ArrayLike, absval : Union[bool, Non
     """
     Compute a custom nonlinear autocorrelation of a time series.
 
-    Nonlinear autocorrelations are of the form:
-        <x_i x_{i-tau_1} x_{i-tau_2} ...>
-    The usual two-point autocorrelation is:
-        <x_i x_{i-tau}>
+    Nonlinear autocorrelations generalize the usual (two-point) autocorrelation
+    to higher-order products evaluated at multiple lags. In general,
 
-    This function generalizes autocorrelation to higher-order products at multiple lags.
+    .. math::
+
+        \\left\\langle \\prod_{k=0}^{m} x_{i-\\tau_k} \\right\\rangle,
+
+    where :math:`\\langle \\cdot \\rangle` denotes the time average. The usual
+    two-point autocorrelation is recovered when :math:`m=1` with
+    :math:`\\tau_0 = 0` and :math:`\\tau_1 = \\tau`:
+
+    .. math::
+
+        \\langle x_i\\, x_{i-\\tau} \\rangle.
 
     Parameters
     ----------
     y : array-like
         The z-scored input time series (1D array).
-    taus : array-like
-        Vector of time delays (lags). For example:
-            [2] computes <x_i x_{i-2}>
-            [1, 2] computes <x_i x_{i-1} x_{i-2}>
-            [1, 1, 3] computes <x_i x_{i-1}^2 x_{i-3}>
-            [0, 0, 1] computes <x_i^3 x_{i-1}>
+
+    taus : array-like of int
+        Vector of time delays (lags) :math:`\\{\\tau_k\\}` defining the product.
+
+        Examples:
+
+        - ``[2]`` computes :math:`\\langle x_i\\, x_{i-2} \\rangle`.
+        - ``[1, 2]`` computes :math:`\\langle x_i\\, x_{i-1}\\, x_{i-2} \\rangle`.
+        - ``[1, 1, 3]`` computes :math:`\\langle x_i\\, x_{i-1}^2\\, x_{i-3} \\rangle`.
+        - ``[0, 0, 1]`` computes :math:`\\langle x_i^3\\, x_{i-1} \\rangle`.
+
     absval : bool or None, optional
-        If True, takes the absolute value before the final mean (recommended for even-length taus).
-        If None (default), automatically sets absval=True for even-length taus and False 
-        for odd-length.
+        Whether to apply an absolute value before the final mean.
+
+        - If ``True``, takes the absolute value before averaging (often useful when
+        the product has an even number of terms).
+        - If ``None`` (default), sets ``absval=True`` when ``len(taus)`` is even and
+        ``absval=False`` when ``len(taus)`` is odd.
 
     Returns
     -------
@@ -965,9 +1023,11 @@ def partial_autocorr(y : ArrayLike, max_tau : int = 10, what_method : str = 'ols
     -------
     dict
         Dictionary containing partial autocorrelations for each lag, with keys:
+
         - 'pac_1': PACF at lag 1
         - 'pac_2': PACF at lag 2
         ...up to maxTau
+
     """
     max_tau = int(max_tau)
     y = np.asarray(y)
@@ -1070,24 +1130,30 @@ def embed2_dist(y : ArrayLike, tau : Union[None, str, int] = None) -> dict:
 
 def embed2_basic(y : ArrayLike, tau : Union[int, str] = 1) -> dict:
     """
-    Point density statistics in a 2-d embedding space.
+    Point-density statistics in a two-dimensional delay embedding.
 
-    Computes a set of point-density statistics in a plot of y_i against y_{i-tau}. The function 
-    calculates the density of points near various geometric shapes in the embedding space, 
-    including diagonals, parabolas, rings, and circles.
+    Computes a set of point-density statistics in the embedding space formed by
+    :math:`(y_i, y_{i-\\tau})`. The method quantifies how points cluster around
+    specific geometric structures in this plane, including diagonals,
+    parabolas, rings, and circles.
+
+    The embedding corresponds to a standard two-dimensional delay
+    reconstruction with lag :math:`\\tau`.
 
     Parameters
-    -----------
+    ----------
     y : array-like
-        The input time series.
-    tau : int or str, optional
-        The time lag (can be set to 'tau' to set the time lag to the first zero
-        crossing of the autocorrelation function). Default is 1.
+        Input time series (1D array).
+
+    tau : int
+        Time delay used to construct the embedding
+        :math:`(y_i, y_{i-\\tau})`.
 
     Returns
-    --------
+    -------
     dict
-        Dictionary containing various point density statistics.
+        Dictionary of point-density statistics associated with different
+        geometric regions in the embedding space.
     """
     y = np.asarray(y)
     if tau == 'tau':
@@ -1304,41 +1370,68 @@ def fzcglscf(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int],
 
 def glscf(y : ArrayLike, alpha : float, beta : float, tau : Union[int, str] = 'tau') -> float:
     """
-    Compute the generalized linear self-correlation function (GLSCF) of a time series.
+    Compute the generalized linear self-correlation function (GLSCF)
+    of a time series.
 
-    This function implements the GLSCF as introduced by Queirós and Moyano (2007) to analyze
-    correlations in the magnitude of time series values at different scales. The GLSCF 
-    generalizes traditional autocorrelation by applying different exponents to earlier and 
-    later time points.
+    Implements the GLSCF introduced by Queirós and Moyano (2007) to
+    analyze correlations in the magnitude of time-series values at
+    different scales. The GLSCF generalizes the traditional
+    autocorrelation by applying distinct exponents to earlier and later
+    time points.
 
-    The function is defined as:
-        GLSCF = (E[|x(t)|^α |x(t+τ)|^β] - E[|x(t)|^α]E[|x(t+τ)|^β]) / 
-                (σ(|x(t)|^α)σ(|x(t+τ)|^β))
-    where E[] denotes expectation and σ() denotes standard deviation.
+    The GLSCF is defined as
+
+    .. math::
+
+        \\mathrm{GLSCF}(\\tau; \\alpha, \\beta)
+        =
+        \\frac{
+            \\mathbb{E}\\left[ |x(t)|^{\\alpha} |x(t+\\tau)|^{\\beta} \\right]
+            -
+            \\mathbb{E}\\left[ |x(t)|^{\\alpha} \\right]
+            \\mathbb{E}\\left[ |x(t+\\tau)|^{\\beta} \\right]
+        }{
+            \\sigma\\left(|x(t)|^{\\alpha}\\right)
+            \\sigma\\left(|x(t+\\tau)|^{\\beta}\\right)
+        },
+
+    where :math:`\\mathbb{E}[\\cdot]` denotes expectation and
+    :math:`\\sigma(\\cdot)` denotes the standard deviation.
 
     References
     ----------
-    .. [1] Queirós, S.M.D., Moyano, L.G. (2007) "Yet on statistical properties of 
-           traded volume: Correlation and mutual information at different value magnitudes"
-           Physica A, 383(1), pp. 10-15.
-           DOI: 10.1016/j.physa.2007.04.068
+    .. [1] S. M. D. Queirós and L. G. Moyano (2007),
+        "Yet on statistical properties of traded volume: Correlation
+        and mutual information at different value magnitudes,"
+        *Physica A*, 383(1), 10–15.
+        DOI: 10.1016/j.physa.2007.04.068
 
     Parameters
     ----------
     y : array-like
-        The input time series
-    alpha : float 
-        Exponent applied to the earlier time point x(t). Must be non-zero.
+        Input time series.
+
+    alpha : float
+        Exponent applied to the earlier time point :math:`x(t)`.
+        Must be non-zero.
+
     beta : float
-        Exponent applied to the later time point x(t+τ). Must be non-zero.
-    tau : Union[int, str], optional
-        The time delay (lag) between points. If 'tau', uses first zero-crossing
-        of autocorrelation function. Default is 'tau'.
+        Exponent applied to the later time point :math:`x(t+\\tau)`.
+        Must be non-zero.
+
+    tau : int or {"tau"}, optional
+        Time delay (lag) between points.
+
+        - If an ``int``, computes GLSCF at that lag.
+        - If ``"tau"``, uses the first zero-crossing of the
+        autocorrelation function.
+
+        Default is ``"tau"``.
 
     Returns
     -------
     float
-        The GLSCF value at the specified lag τ
+        The GLSCF value at the specified lag :math:`\\tau`.
     """
     # Set tau to first zero-crossing of the autocorrelation function with the input 'tau'
     if tau == 'tau':
@@ -1361,16 +1454,25 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
     Compute the autocorrelation of an input time series.
 
     Parameters
-    -----------
+    ----------
     y : array-like
-        A scalar time series column vector.
-    tau : int, list, optional
-        The time-delay. If tau is a scalar, returns autocorrelation for y at that
-        lag. If tau is a list, returns austocorrelations for y at that set of
-        lags. If empty list, returns the full function for the 'Fourier' estimation method.
-    method : str, optional
-        The method of computing the autocorrelation: 'Fourier',
-        'TimeDomainStat', or 'TimeDomain'.
+        A scalar time-series column vector.
+
+    tau : int or list of int, optional
+        The time delay(s).
+
+        - If an ``int``, returns the autocorrelation of ``y`` at that lag.
+        - If a ``list`` of integers, returns autocorrelations at those lags.
+        - If an empty list, returns the full autocorrelation function when
+        using the ``"Fourier"`` estimation method.
+
+    method : {"Fourier", "TimeDomainStat", "TimeDomain"}, optional
+        Method used to compute the autocorrelation.
+
+        - ``"Fourier"``: Computes autocorrelation via the Wiener–Khinchin
+            theorem using the Fourier transform.
+        - ``"TimeDomainStat"``: Statistical time-domain estimator.
+        - ``"TimeDomain"``: Direct time-domain computation.
 
     Returns
     --------
@@ -1881,11 +1983,13 @@ def tc3(y : list, tau : Union[int, str, None] = 'ac') -> dict:
     -------
     dict
         A dictionary containing:
+
         - 'raw': The raw tc3 expression
         - 'abs': The magnitude of the raw expression
         - 'num': The numerator
         - 'absnum': The magnitude of the numerator
         - 'denom': The denominator
+        
     """
     # Set the time lag as a measure of the time-series correlation length
     # Can set the time lag, tau, to be 'ac' or 'mi'

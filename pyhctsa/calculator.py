@@ -162,7 +162,7 @@ class FeatureCalculator:
     >>> df = fc.extract(x)
     >>> print(fc.summary())
     """
-    def __init__(self, config_path : Union[str, None] = None):
+    def __init__(self, config_path: Union[str, None] = None):
         """
         Initialises a FeatureCalculator instance.  
 

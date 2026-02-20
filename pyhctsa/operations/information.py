@@ -41,14 +41,27 @@ def first_min(
     ----------
     y : array-like
         The input time series.
+
     min_what : str, optional
-        The type of correlation to minimize. Options are 'ac' for autocorrelation,
-        or 'mi' for automutual information. By default, 'mi' specifies the
-        'gaussian' method from the Information Dynamics Toolkit. Other options
-        include 'mi-kernel', 'mi-kraskov1', 'mi-kraskov2' (from Information Dynamics Toolkit, JIDT),
-        or 'mi-hist' (histogram-based method). Default is 'mi'.
+        Correlation measure to minimize.
+
+        Autocorrelation:
+
+        - ``"ac"``: Autocorrelation.
+
+        Automutual information (AMI):
+
+        - ``"mi"``: AMI using the JIDT Gaussian estimator (default for AMI).
+        - ``"mi-kernel"``: AMI using the JIDT kernel estimator.
+        - ``"mi-kraskov1"``: AMI using the JIDT Kraskov estimator (variant 1).
+        - ``"mi-kraskov2"``: AMI using the JIDT Kraskov estimator (variant 2).
+        - ``"mi-hist"``: AMI using a histogram-based estimator.
+
+        Default is ``"mi"``.
+
     extra_param : any, optional
-        An additional parameter required for the specified `min_what` method (e.g., for Kraskov).
+        Additional parameter required by the chosen ``min_what`` method
+        (e.g., a k-nearest-neighbours parameter for Kraskov-based AMI).
 
     Returns
     -------
@@ -88,11 +101,21 @@ def first_max(
     y : array-like
         The input time series.
     max_what : str, optional
-        The type of correlation to minimize. Options are 'ac' for autocorrelation,
-        or 'mi' for automutual information. By default, 'mi' specifies the
-        'gaussian' method from the Information Dynamics Toolkit. Other options
-        include 'mi-kernel', 'mi-kraskov1', 'mi-kraskov2' (from Information Dynamics Toolkit, JIDT),
-        or 'mi-hist' (histogram-based method). Default is 'mi'.
+        Correlation measure to maximize.
+
+        Autocorrelation:
+
+        - ``"ac"``: Autocorrelation.
+
+        Automutual information (AMI):
+
+        - ``"mi"``: AMI using the JIDT Gaussian estimator (default for AMI).
+        - ``"mi-kernel"``: AMI using the JIDT kernel estimator.
+        - ``"mi-kraskov1"``: AMI using the JIDT Kraskov estimator (variant 1).
+        - ``"mi-kraskov2"``: AMI using the JIDT Kraskov estimator (variant 2).
+        - ``"mi-hist"``: AMI using a histogram-based estimator.
+
+        Default is ``"mi"``.
     extra_param : any, optional
         An additional parameter required for the specified `max_what` method (e.g., for Kraskov).
 
@@ -321,17 +344,22 @@ def automutual_info(
         Input time series (1D).
     time_delay : int, str, or list of int, optional
         Time lag(s) for automutual information calculation. Can be:
-            - int: a fixed lag
-            - list of int: multiple lags
-            - 'ac': first zero-crossing of autocorrelation
-            - 'tau': same as 'ac'
+
+        - int: a fixed lag
+        - list of int: multiple lags
+        - 'ac': first zero-crossing of autocorrelation
+        - 'tau': same as 'ac'
+        
         Default is 1.
+
     est_method : {'gaussian', 'kernel', 'kraskov1', 'kraskov2'}, optional
         Method for estimating mutual information:
-            - 'gaussian': Assumes Gaussian variables
-            - 'kernel': Kernel density estimation (default)
-            - 'kraskov1': Kraskov estimator 1 (KSG1)
-            - 'kraskov2': Kraskov estimator 2 (KSG2)
+
+        - 'gaussian': Assumes Gaussian variables
+        - 'kernel': Kernel density estimation (default)
+        - 'kraskov1': Kraskov estimator 1 (KSG1)
+        - 'kraskov2': Kraskov estimator 2 (KSG2)
+
     extra_param : int or str, optional
         Extra parameter for the estimator. For Kraskov estimators,
         this sets the number of nearest neighbors 'k' (default is 3).
@@ -554,7 +582,7 @@ def rm_automutual_information(y : ArrayLike, tau : int = 1) -> float:
     and translated to to python by Tucker Cullen.
 
     Parameters
-    ------
+    ----------
     y : array-like
         The input time series.
     tau: int

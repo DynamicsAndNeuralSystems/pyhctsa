@@ -27,9 +27,11 @@ def surprise(y : ArrayLike, what_prior : str = 'dist', memory : float = 0.2, num
         The input time series.
     what_prior : {'dist', 'T1', 'T2'}, optional
         The type of information to store in memory:
-            - 'dist': the values of the time series in the previous memory samples (default),
-            - 'T1': the one-point transition probabilities in the previous memory samples,
-            - 'T2': the two-point transition probabilities in the previous memory samples.
+
+        - 'dist': the values of the time series in the previous memory samples (default),
+        - 'T1': the one-point transition probabilities in the previous memory samples,
+        - 'T2': the two-point transition probabilities in the previous memory samples.
+
     memory : float, optional
         The memory length (either number of samples, or a proportion of the time-series length 
         if between 0 and 1). Default is 0.2.
@@ -37,10 +39,12 @@ def surprise(y : ArrayLike, what_prior : str = 'dist', memory : float = 0.2, num
         The number of groups to coarse-grain the time series into. Default is 3.
     coarse_grain_method : {'quantile', 'updown', 'embed2quadrants'}, optional
         The coarse-graining or symbolization method:
-            - 'quantile': equiprobable alphabet by value of each time-series datapoint (default),
-            - 'updown': equiprobable alphabet by incremental changes in the time-series values,
-            - 'embed2quadrants': 4-letter alphabet of the quadrant each data point resides in a 
+
+        - 'quantile': equiprobable alphabet by value of each time-series datapoint (default),
+        - 'updown': equiprobable alphabet by incremental changes in the time-series values,
+        - 'embed2quadrants': 4-letter alphabet of the quadrant each data point resides in a 
             2D embedding space.
+
     num_iters : int, optional
         The number of iterations to repeat the procedure for. Default is 500.
     random_seed : int, optional
@@ -152,18 +156,20 @@ def motif_two(y : ArrayLike, binarize_how : str = 'diff') -> dict:
 
     binarize_how : str, optional
         The method used for binary transformation. One of:
-            - 'diff': Encode increases in the time series as 1, and decreases as 0 (default).
-            - 'mean': Encode values above the mean as 1, and below as 0.
-            - 'median': Encode values above the median as 1, and below as 0.
+
+        - 'diff': Encode increases in the time series as 1, and decreases as 0 (default).
+        - 'mean': Encode values above the mean as 1, and below as 0.
+        - 'median': Encode values above the median as 1, and below as 0.
 
     Returns
     -------
     dict
         A dictionary containing:
-            - 'prob_len_1', 'prob_len_2', ..., 'prob_len_4': 
-              Lists of probabilities for each binary word of lengths 1 to 4.
-            - 'entropy_len_1', 'entropy_len_2', ..., 'entropy_len_4': 
-              Entropy values associated with the word distributions of lengths 1 to 4.
+
+        - 'prob_len_1', 'prob_len_2', ..., 'prob_len_4': 
+            Lists of probabilities for each binary word of lengths 1 to 4.
+        - 'entropy_len_1', 'entropy_len_2', ..., 'entropy_len_4': 
+            Entropy values associated with the word distributions of lengths 1 to 4.
 
     """
     # Generate a binarized version of the input time series
@@ -309,6 +315,7 @@ def motif_three(y : ArrayLike, cg_how : str = 'quantile') -> dict:
         Time series to analyze.
     cg_how : {'quantile', 'diffquant'}, optional
         The coarse-graining method to use:
+
         - 'quantile': equiprobable alphabet by time-series value (default)
         - 'diffquant': equiprobably alphabet by time-series increments
 
@@ -423,8 +430,9 @@ def binary_stretch(x : ArrayLike, stretch_what : str = 'lseq1') -> float:
 
     stretch_what : str, optional
         Specifies which binary symbol's stretch length to analyze:
-            - 'lseq1': Analyze stretches related to consecutive 1s (default).
-            - 'lseq0': Analyze stretches related to consecutive 0s.
+
+        - 'lseq1': Analyze stretches related to consecutive 1s (default).
+        - 'lseq0': Analyze stretches related to consecutive 0s.
 
     Returns
     -------
@@ -475,8 +483,9 @@ def binary_stats(y : ArrayLike, binary_method : str = 'diff') -> dict:
 
     binary_method : str, optional
         The binary symbolisation rule. One of:
-            - 'diff' : Encode as 1 if the time-series difference is positive, and 0 otherwise (default).
-            - 'mean' : Encode as 1 if the value is above the mean, 0 otherwise.
+
+        - 'diff' : Encode as 1 if the time-series difference is positive, and 0 otherwise (default).
+        - 'mean' : Encode as 1 if the value is above the mean, 0 otherwise.
 
     Returns
     -------
@@ -664,7 +673,12 @@ def coarse_grain(y : list, how_to_cg : str, num_groups : int) -> np.ndarray:
         The input time series.
     how_to_cg : str
         The method of coarse-graining.
-        Options: 'updown', 'quantile', 'embed2quadrants', 'embed2octants'
+        Options: 
+
+        - 'updown'
+        - 'quantile'
+        - 'embed2quadrants'
+        - 'embed2octants'
     num_groups : int
         Specifies the size of the alphabet for 'quantile' and 'updown',
         or sets the time delay for the embedding subroutines.

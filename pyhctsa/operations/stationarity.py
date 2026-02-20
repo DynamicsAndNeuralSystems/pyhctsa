@@ -29,9 +29,11 @@ def local_distributions(y : ArrayLike, num_segs : int = 5, each_or_par : str = '
     num_segs : int, optional
         The number of segments to break the time series into. Default is 5.
     each_or_par : {'par', 'each'}, optional
+
         - 'par': compares each local distribution to the parent (full time series) distribution.
         - 'each': compares each local distribution to all other local distributions.
         Default is 'par'.
+
     num_points : int, optional
         Number of points to compute the distribution across in each local segment. Default is 200.
 
@@ -103,18 +105,18 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
     series are calculated as an estimate of the stationarity in this quantity as a
     function of the number of splits, n_{seg}, of the time series.
 
-    Parameters:
+    Parameters
     -----------
-    y : array-like
+    y: array-like
         the time series to analyze.
-    max_num_segments : int, optional
+    max_num_segments: int, optional
         the maximum number of segments to consider. Sweeps from 2 to
         max_num_segments. Defaults to 10.
 
-    Returns:
-    --------
-    out : dict
-        the standard deviation of this set of 'stationarity' estimates across these window sizes
+    Returns
+    -------
+    out
+        The standard deviation of this set of 'stationarity' estimates across these window sizes
     """
     y = np.asarray(y)
     nsegr = np.arange(2, max_num_segments + 1, 1)  # range of nseg to sweep across
@@ -180,8 +182,8 @@ def moment_corr(x : ArrayLike, window_length : Union[None, float] = None,
     Correlations between simple statistics in local windows of a time series.
     The idea to implement this was that of Prof. Nick S. Jones (Imperial College London).
 
-    Paramters
-    ----------
+    Parameters
+    ---------
     x : array-like
         the input time series
     window_length : float, optional
@@ -195,9 +197,8 @@ def moment_corr(x : ArrayLike, window_length : Union[None, float] = None,
             (ii) 'median': median
             (iii) 'std': standard deviation (about the local mean)
             (iv) 'mean': mean
-    what_transform : str, optional
-        the pre-processing what_transform to apply to the time series before
-        analyzing it:
+    what_transform: str, optional
+        the pre-processing what_transform to apply to the time series before analyzing it:
            (i) 'abs': takes absolute values of all data points
            (ii) 'sqrt': takes the square root of absolute values of all data points
            (iii) 'sq': takes the square of every data point
@@ -205,8 +206,8 @@ def moment_corr(x : ArrayLike, window_length : Union[None, float] = None,
     
     Returns
     --------
-    out : dict
-        dictionary of statistics related to the correlation between simple statistics in local windows of the input time series. 
+    out
+        Dictionary of statistics related to the correlation between simple statistics in local windows of the input time series. 
     """
     x = np.asarray(x)
     N = len(x) # length of the time series
@@ -291,6 +292,7 @@ def simple_stats(x : ArrayLike, what_stat : str = 'zcross') -> dict:
         The input time series
     what_stat : str, optional
         The statistic to return (default is 'zcross'):
+
         - 'zcross': proportion of zero-crossings (for z-scored input, returns mean-crossings)
         - 'maxima': proportion of points that are local maxima
         - 'minima': proportion of points that are local minima
@@ -359,11 +361,13 @@ def local_extrema(y : ArrayLike, how_to_window : str = 'l', n : Union[int, None]
         The input time series
     how_to_window : str, optional
         Method to determine window size (default is 'l'):
+
         - 'l': windows of a given length (n specifies the window length)
         - 'n': specified number of windows to break the time series into (n specifies number of windows)
         - 'tau': sets window length equal to correlation length (first zero-crossing of autocorrelation)
     n : int, optional
         Specifies either:
+
         - Window length when how_to_window='l' (defaults to 100)
         - Number of windows when how_to_window='n' (defaults to 5)
         - Not used when how_to_window='tau'
@@ -465,6 +469,7 @@ def kpss_test(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
         The input time series to analyze for stationarity
     lags : Union[int, list], optional
         Either:
+
         - A single lag value (int) to compute the test statistic and p-value
         - A list of lag values to analyze how the test results vary across lags
         Default is 0.
@@ -587,10 +592,13 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
         The input time series
     segment_how : str, optional
         Method to segment the time series:
+
         - 'fix': fixed-length segments of length l (default)
         - 'num': splits into l number of segments
+
     l : int, optional
         Specifies either:
+
         - The length of segments when segment_how='fix' (default=20)
         - The number of segments when segment_how='num'
 
@@ -656,10 +664,11 @@ def local_global(y : ArrayLike, subset_how : str = 'l', n : Union[int, float, No
         The time series to analyse.
     subset_how : str, optional
         The method to select the local subset of time series:
-        'l': the first n points in a time series (default)
-        'p': an initial proportion of the full time series
-        'unicg': n evenly-spaced points throughout the time series
-        'randcg': n randomly-chosen points from the time series (chosen with replacement)
+
+        - 'l': the first n points in a time series (default)
+        - 'p': an initial proportion of the full time series
+        - 'unicg': n evenly-spaced points throughout the time series
+        - 'randcg': n randomly-chosen points from the time series (chosen with replacement)
     n : int or float, optional
         The parameter for the method specified by subset_how.
         Default is 100 samples or 0.1 (10% of time series length) if proportion. 
@@ -721,14 +730,14 @@ def fit_polynomial(y : ArrayLike, k : int = 1) -> float:
     Usually kind of a stupid thing to do with a time series, but it's sometimes
     somehow informative for time series with large trends.
 
-    Parameters:
+    Parameters
     -----------
     y : ArrayLike
         the time series to analyze.
     k : int, optional
         the order of the polynomial to fit to y.
 
-    Returns:
+    Returns
     --------
     float
         RMS error of the fit
@@ -864,9 +873,12 @@ def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float
     For mean-stationary data, the StatAv metric will approach zero, while
     higher values indicate non-stationarity in the mean.
 
-    This implementation is based on:
-    "Heart rate control in normal and aborted-SIDS infants", S. M. Pincus et al.
-    Am J. Physiol. Regul. Integr. Comp. Physiol. 264(3) R638 (1993)
+    This implementation is based on [1].
+
+    References
+    ----------
+    .. [1] "Heart rate control in normal and aborted-SIDS infants", S. M. Pincus et al.
+        Am J. Physiol. Regul. Integr. Comp. Physiol. 264(3) R638 (1993)
 
     Parameters
     ----------
@@ -874,10 +886,13 @@ def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float
         The input time series
     what_type : str, optional
         Method to segment the time series:
+
         - 'seg': divide into n segments (default)
         - 'len': divide into segments of length n
+
     extra_param : int, optional
         Specifies either:
+
         - Number of segments when what_type='seg' (default=5)
         - Segment length when what_type='len'
 
@@ -921,8 +936,11 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
     then summarizes the variation of these statistics across windows (across_win_stat).
 
     This implementation is based on:
-    "Heart rate control in normal and aborted-SIDS infants", S. M. Pincus et al.
-    Am J. Physiol. Regul. Integr. Comp. Physiol. 264(3) R638 (1993)
+
+    References
+    ----------
+    .. [1] "Heart rate control in normal and aborted-SIDS infants", S. M. Pincus et al.
+        Am J. Physiol. Regul. Integr. Comp. Physiol. 264(3) R638 (1993)
 
     Note: SlidingWindow(y,'mean','std',X,1) is equivalent to StatAv(y,'seg',X)
 
@@ -932,6 +950,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         The input time series to analyze
     window_stat : str, optional (default='mean')
         Statistic to calculate in each window:
+
         - 'mean': arithmetic mean
         - 'std': standard deviation
         - 'ent': distribution entropy (not implemented)
@@ -942,12 +961,15 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         - 'AC1': lag-1 autocorrelation
         - 'apen': Approximate Entropy with m=1, r=0.2
         - 'sampen': Sample Entropy with m=2, r=0.1
+
     across_win_stat : str, optional (default='std')
         Method to compare statistics across windows:
+
         - 'std': standard deviation (normalized by full series std)
         - 'ent': distribution entropy (not implemented)
         - 'apen': Approximate Entropy with m=1, r=0.2
         - 'sampen': Sample Entropy with m=2, r=0.15
+        
     num_seg : int, optional (default=5)
         Number of segments to divide the time series into
         (controls the window length)

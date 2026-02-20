@@ -103,16 +103,19 @@ def fit_subsegments(y : ArrayLike, model : str = 'ar', order : int = 2, subset_h
         The input time series.
     model : str, optional
         The model to fit in each segment of the time series:
+
             - 'ar': fits an AR model of a specified order.
               Outputs are how the fitted AR parameters vary across the different 
               segments of time series.
             - 'arma': Not yet implemented.
             - 'ss': Not yet implemented.
+
     order : int, optional
         The order of the model to fit (used for 'ar', 'ss', or 'arma' models).
     subset_how : str, optional
-        How to choose segments from the time series, either 'uniform' (uniformly) 
-        or 'rand' (at random) [not implemented].
+        How to choose segments from the time series, either:
+         - 'uniform' (uniformly) 
+         - 'rand' (at random) [not implemented].
     sample_p : list or tuple, optional
         A two-vector specifying how many segments to take and of what length.
         Of the form [n_samples, length], where length can be a proportion of the time-series length.
@@ -183,6 +186,7 @@ def loop_local_simple(y : ArrayLike, forecast_meth : str = 'mean') -> dict:
         The input time series
     forecast_meth : str, optional
         The prediction method:
+
         - 'mean': local mean prediction
         - 'median': local median prediction
         Default is 'mean'
@@ -276,10 +280,12 @@ def local_simple(y : ArrayLike, forecast_meth : str = 'mean',
         The input time series
     forecast_meth : str, optional
         The forecasting method:
+
         - 'mean': local mean prediction using the past trainLength time-series values
         - 'median': local median prediction using the past trainLength time-series values  
         - 'lfit': local linear prediction using the past trainLength time-series values
         Default is 'mean'
+
     train_length : int or str, optional
         The number of time-series values to use to forecast the next value.
         If 'ac', uses first zero-crossing of autocorrelation function.
@@ -347,7 +353,7 @@ def exp_smoothing(x : ArrayLike, n_train : Union[None, int, float] = None,
     predict the rest of the time series.
 
     References
-    ---------
+    ----------
     .. [1] "The Analysis of Time Series", C. Chatfield, CRC Press LLC (2004).
         Code adapted from Siddharth Arora (Siddharth.Arora@sbs.ox.ac.uk).
 
@@ -667,8 +673,8 @@ def ar_fit(y : ArrayLike, p_min : int = 1, p_max : int = 10, selector : str = 's
     selects the optimal model order using Schwartz's Bayesian Criterion (SBC), and returns statistics
     on the fitted model, residuals, and confidence intervals.
 
-    Reference
-    ----------
+    References
+    ---------
     .. [1] "Estimation of parameters and eigenmodes of multivariate autoregressive models",
         A. Neumaier and T. Schneider, ACM Trans. Math. Softw. 27, 27 (2001)
     .. [2] "Algorithm 808: ARFIT---a Matlab package for the estimation of parameters and eigenmodes of multivariate autoregressive models",

@@ -22,7 +22,7 @@ def fast_dfa(y: ArrayLike) -> float:
     ----------
     .. [1] Max A. Little, http://www.maxlittle.net/software/index.php
 
-    Parameterss
+    Parameters
     ----------
     y : array-like
         Input time series (1D array), fed straight into the fastdfa script.
@@ -51,11 +51,20 @@ def fluctuation_analysis(x: ArrayLike, q: Union[float, int] = 2,
     Implements fluctuation analysis by a variety of methods.
     
     Much of our implementation is based on the well-explained discussion of scaling
-    methods [1]_.
+    methods [1].
 
     The main difference between algorithms for estimating scaling exponents amount
     to differences in how fluctuations, F, are quantified in time-series segments.
     Many alternatives are implemented in this function.
+
+    References
+    ----------
+    .. [1] "Power spectrum and detrended fluctuation analysis: Application to daily
+        temperatures" P. Talkner and R. O. Weber, Phys. Rev. E 62(1) 150 (2000)
+    .. [2] D. C. Caccia et al., "Analyzing exact fractal time series: evaluating dispersional
+        analysis and rescaled range methods", Physica A 246(3-4) 609 (1997)
+    .. [3] J. Alvarez-Ramirez et al., "Using detrended fluctuation analysis for lagged 
+        correlation analysis of nonstationary signals", Phys. Rev. E 79(5) 057202 (2009)
     
     Parameters
     ----------
@@ -69,20 +78,20 @@ def fluctuation_analysis(x: ArrayLike, q: Union[float, int] = 2,
         
         - 'endptdiff': Calculates the differences in end points in each segment
         - 'range': Calculates the range in each segment
-        - 'std': Takes the standard deviation in each segment [1]_
+        - 'std': Takes the standard deviation in each segment [1]
         - 'iqr': Takes the interquartile range in each segment
         - 'dfa': Removes a polynomial trend of order k in each segment
-        - 'rsrange': Returns the range after removing a straight line fit [2]_
-        - 'rsrangefit': Fits a polynomial of order k and returns the range [2]_
+        - 'rsrange': Returns the range after removing a straight line fit [2]
+        - 'rsrangefit': Fits a polynomial of order k and returns the range [2]
         
         For 'rsrangefit', an optional timelag can be applied for computing the 
-        cumulative sum (integrated profile) [3]_.
+        cumulative sum (integrated profile) [3].
     tau_step : int, optional
         number of tau (locInc true), or increments in tau for linear range
     k : int, optional
         polynomial order of detrending (for 'dfa' & 'rsrangefit')
     lag : int or None, optional
-        optional time-lag, as in Alvarez-Ramirez [3]_
+        optional time-lag, as in Alvarez-Ramirez [3]
     log_inc : bool, optional
         whether to use logarithmic increments in tau (it should be logarithmic)
     
@@ -93,15 +102,7 @@ def fluctuation_analysis(x: ArrayLike, q: Union[float, int] = 2,
         a function of log(tau), and for fitting two straight lines to the same data,
         choosing the split point at tau = tau_{split} as that which minimizes the
         combined fitting errors.
-    
-    References
-    ----------
-    .. [1] "Power spectrum and detrended fluctuation analysis: Application to daily
-        temperatures" P. Talkner and R. O. Weber, Phys. Rev. E 62(1) 150 (2000)
-    .. [2] D. C. Caccia et al., "Analyzing exact fractal time series: evaluating dispersional
-        analysis and rescaled range methods", Physica A 246(3-4) 609 (1997)
-    .. [3] J. Alvarez-Ramirez et al., "Using detrended fluctuation analysis for lagged 
-        correlation analysis of nonstationary signals", Phys. Rev. E 79(5) 057202 (2009)
+
     """
     N = len(x)
 

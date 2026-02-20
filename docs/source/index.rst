@@ -70,6 +70,7 @@ Or in BibTeX (version-agnostic):
 
 .. toctree::
    :maxdepth: 3
+   :hidden:
 
    Home <self>
    installation

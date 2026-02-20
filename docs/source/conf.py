@@ -18,13 +18,20 @@ extensions = [
     'sphinx_immaterial',
     'sphinx.ext.autosummary',
     'nbsphinx',
-    'sphinx.ext.mathjax'
+    'sphinx.ext.mathjax',
+    'sphinx.ext.napoleon'
     ]
 
 templates_path = ['_templates']
-exclude_patterns = ['sphinx.ext.autodoc', 'sphinx.ext.napoleon']
+exclude_patterns = []
 
 nbsphinx_execute = 'never'
+
+autodoc_typehints = "description"
+autodoc_typehints_format = "short"
+
+napoleon_numpy_docstring = True
+napoleon_google_docstring = False
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
