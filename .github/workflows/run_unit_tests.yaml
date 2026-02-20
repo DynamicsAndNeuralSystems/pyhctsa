@@ -51,7 +51,12 @@ jobs:
             --cov=pyhctsa \
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml \
-            --cov-report=html:coverage/html
+            --cov-report=html
+      - name: Prepare coverage folder
+          if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10' && github.event_name == 'push' }}
+          run: |
+            mkdir -p coverage
+            cp -r htmlcov coverage/html
 
       # Generate the badge WITHOUT tj-actions (it currently breaks due to pkg_resources/setuptools changes)
       - name: Generate coverage badge (SVG)
