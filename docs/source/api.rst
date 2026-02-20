@@ -20,8 +20,8 @@ Utilities
    pyhctsa.utils.get_dataset
    pyhctsa.utils.z_score
 
-Operations
-----------
+Time-Series Analysis Method Modules
+-----------------------------------
 
 Correlation
 ~~~~~~~~~~~
