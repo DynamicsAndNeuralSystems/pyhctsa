@@ -2,10 +2,14 @@ import csv
 import os
 from functools import wraps
 from importlib.metadata import PackageNotFoundError, version
+from importlib import resources
 from typing import Union
+import yaml
+from pyhctsa import __version__
 
 import numpy as np
 from numpy.typing import ArrayLike
+import pandas as pd
 
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array, check_is_fitted
@@ -579,3 +583,45 @@ def x_corr(x : ArrayLike, y : ArrayLike, normed : bool = True, max_lags : int = 
     lags = np.arange(-max_lags, max_lags + 1)
     c = c[nx - 1 - max_lags:nx + max_lags]
     return lags, c
+
+def make_function_name_mappings(
+    yaml_file: Union[str, None] = None, csv_out_fpath: Union[None, str] = None) -> pd.DataFrame:
+    yaml.SafeLoader.add_constructor("!range", lambda loader, node: None)
+
+    if yaml_file is None:
+        yaml_file = resources.files("pyhctsa.configurations").joinpath("hctsa.yaml")
+
+    with open(yaml_file, "r", encoding="utf-8") as f:
+        yam = yaml.safe_load(f)
+    module_dfs = []
+    for module in yam:
+        corr_mod = yam[module]
+        python_funcs = []
+        ml_funcs = []
+
+        for pyfunc in corr_mod:
+            python_funcs.append(pyfunc)
+
+            # If legacy_name missing, use NaN
+            meta = corr_mod[pyfunc] or {}
+            ml_funcs.append(meta.get("legacy_name", np.nan))
+
+        df = pd.DataFrame(
+            {"pyhctsa_name": python_funcs, "legacy_name": ml_funcs}
+        )
+        df["pyhctsa_module"] = module
+        module_dfs.append(df)
+
+    df_all_modules = pd.concat(module_dfs, ignore_index=True)
+
+    # append version number
+    df_all_modules.attrs["feature_set_version"] = __version__
+
+    if csv_out_fpath:
+        # Write metadata as comment lines, then the CSV
+        with open(csv_out_fpath, "w", encoding="utf-8", newline="") as f:
+            f.write(f"# pyhctsa_version: {__version__}\n")
+            f.write(f"# source_yaml: {yaml_file}\n")
+            df_all_modules.to_csv(f, index=False)
+
+    return df_all_modules
