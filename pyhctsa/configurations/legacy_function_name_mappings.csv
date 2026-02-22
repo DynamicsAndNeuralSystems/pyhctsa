@@ -1,5 +1,4 @@
 # pyhctsa_version: 0.1.0a2
-# source_yaml: /Users/jmoo2880/Documents/pyhctsa-pre-release/pyhctsa/pyhctsa/configurations/hctsa.yaml
 pyhctsa_name,legacy_name,pyhctsa_module
 hrv_classic,MD_hrv_classic,medical
 pnn,MD_pNN,medical
