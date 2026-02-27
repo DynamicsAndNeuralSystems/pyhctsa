@@ -13,7 +13,7 @@ from pyhctsa.utils import get_dataset
     "medical", "extreme_events", "criticality", "correlation", "information", "entropy",
     "stationarity", "distribution", "scaling", "symbolic", "wavelet", 
     "hypothesis", "spectral", "model_fit", "graph", "physics", "pre_process",
-    "surrogates"])
+    "surrogates", "nonlinear"])
 def test_module_basic(x):
     # basic checks on medical module
     data = get_dataset(which="sinusoid")
