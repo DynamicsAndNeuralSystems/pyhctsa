@@ -79,4 +79,3 @@ The highly comparative framework implemented in `hctsa` has demonstrated broad r
 Some function docstrings in the software were generated with the assistance of Large Language Models (LLMs). All AI-generated contributions were reviewed, edited, and verified by the human maintainers.
 
 # References
-been applied broadly, including to problems in biology [@Jones:2023;@Phaniraj:2023;@He:2020], astronomy [@Barbara:2022], neuroimaging [@Faiman:2023;@Yang:2024], engineering [@Gorgannejad:2023;@Dabou:2021], and medicine [@Nahian:2021;@Kim:2022]
