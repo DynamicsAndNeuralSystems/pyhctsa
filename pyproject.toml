@@ -22,7 +22,7 @@ dependencies = [
   "scipy",
   "pyyaml",
   "statsmodels",
-  "jpype1",
+  "jpype1<1.7.0",
   "numba",
   "scikit-learn",
   "antropy",
@@ -48,7 +48,7 @@ classifiers = [
 test = ["pytest>=6.0", "pytest-cov", "pytest-mock"]
 
 [project.urls]
-Homepage = "https://github.com/DynamicsAndNeuralSystems/pyhctsa"
+Homepage = "https://dynamicsandneuralsystems.github.io/pyhctsa/"
 Repository = "https://github.com/DynamicsAndNeuralSystems/pyhctsa"
 
 [tool.setuptools.packages.find]

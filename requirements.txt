@@ -2,7 +2,7 @@ scipy
 numpy
 pyyaml
 statsmodels
-jpype1
+jpype1<1.7.0
 numba
 scikit-learn
 antropy
