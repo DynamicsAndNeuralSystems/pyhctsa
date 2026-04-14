@@ -48,7 +48,7 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
     out = {}
 
     # triangular histogram index
-    # 10 bins  
+    # 10 bins
     edges_10 = bin_picker(x.min(), x.max(), 10)
     hist_counts10 = histc(x, edges_10)
     out['tri10'] = N/np.max(hist_counts10)

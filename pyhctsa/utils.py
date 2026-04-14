@@ -3,7 +3,7 @@ import os
 from functools import wraps
 from importlib.metadata import PackageNotFoundError, version
 from importlib import resources
-from typing import Union
+from typing import Union, Callable
 import yaml
 from pyhctsa import __version__
 
@@ -121,7 +121,7 @@ def get_dataset(which: str = "e1000") -> list:
     print(f"Loaded dataset of {len(dataset)} time series.")
     return dataset
     
-def preprocess_decorator(zscore : bool = False, absval : bool = False):
+def preprocess_decorator(zscore : bool = False, absval : bool = False) -> Callable:
     """
     Decorator to preprocess time series data before feature computation.
     
@@ -343,7 +343,7 @@ def simple_binner(x_data : ArrayLike, num_bins : int) -> tuple:
     
     return N, bin_edges
 
-def point_of_crossing(x: ArrayLike, threshold: float):
+def point_of_crossing(x: ArrayLike, threshold: float) -> tuple:
     """
     Linearly interpolate to the point of crossing a threshold
 
@@ -370,23 +370,31 @@ def point_of_crossing(x: ArrayLike, threshold: float):
     if crossings.size == 0:
         # Never crosses
         n = len(x)
-        first_crossing = n
-        point_of_crossing = n
+        fc = n
+        poc = n
     else:
-        first_crossing = crossings[0]
-        # Continuous version
-        value_before = x[first_crossing - 1]
-        value_after = x[first_crossing]
-        point_of_crossing = (
-            first_crossing - 1
+        fc = crossings[0]
+        # continuous version
+        value_before = x[fc - 1]
+        value_after = x[fc]
+        poc = (
+            fc - 1
             + (threshold - value_before) / (value_after - value_before)
         )
 
-    return first_crossing, point_of_crossing
+    return fc, poc
 
-def sign_change(y : Union[list, np.ndarray], do_find = 0):
+def sign_change(y : Union[list, np.ndarray], do_find: int = 0) -> ArrayLike:
     """
     Where a data vector changes sign.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    do_find : int
+        - If 0, returns a logical vector with 1s where the input changes sign.
+        - If 1, returns a logical vector of indices where the input vector changes sign.
     """
     if do_find == 0:
         return np.multiply(y[1:],y[0:len(y)-1]) < 0
@@ -402,7 +410,7 @@ def make_buffer(y : ArrayLike, buffer_size : int) -> np.ndarray:
     ----------
     y : array-like
         The input time series.
-    bufferSize : int
+    buffer_size : int
         The length of each buffer segment.
 
     Returns
@@ -425,7 +433,6 @@ def make_buffer(y : ArrayLike, buffer_size : int) -> np.ndarray:
 
 def make_mat_buffer(x : ArrayLike, n : int, p : int = 0,
                     opt : Union[str, None] = None) -> np.ndarray:
-    # helper function
     '''
     Create a buffer array.
 
@@ -449,7 +456,7 @@ def make_mat_buffer(x : ArrayLike, n : int, p : int = 0,
     result : (n,n) ndarray
         Buffer array created from x
     '''
-
+    
     if opt not in [None, 'nodelay']:
         raise ValueError(f'{opt} not implemented')
 
