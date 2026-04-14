@@ -3,7 +3,7 @@ import time
 from functools import partial
 from itertools import product
 from pathlib import Path
-from typing import Union, Any
+from typing import Union, Any, Callable
 
 import numpy as np
 import pandas as pd
@@ -38,21 +38,38 @@ def classify_output(res) -> int:
         out = 4
     return out
 
-def apply_selection_wrapper(func, keep_keys):
+def _apply_selection_wrapper(func:Callable, filter_keys:Union[str, list[str]], keep:bool=True) -> Callable:
     """
-    Wraps a function to filter its output dictionary to specific keys.
-    
-    :param func: Original function
-    :param keep_keys: Features to keep as keys in a dict.
-    :return: Wrapped function.
-    :rtype: Any
+    Wraps a function to selectively filter keys from its dict output.
+
+    If the wrapped function does not return a dict, the result is passed through unchanged.
+
+    Parameters
+    ----------
+        func (Callable): The function to wrap.
+        filter_keys (str or list[str]): Key or keys to keep or discard from the output dict.
+        keep (bool): If True, only the specified keys are retained. If False, the specified
+                    keys are discarded and all remaining keys are returned. Defaults to True.
+
+    Returns
+    -------
+        Callable: Wrapped function with filtered dict output.
     """
     def wrapper(*args, **kwargs):
         result = func(*args, **kwargs)
-        # if result is a dict, then filter it according to the keys
-        if isinstance(result, dict):
-            return {k: result[k] for k in keep_keys if k in result}
-        return result
+    
+        if isinstance(filter_keys, str):
+            keys = [filter_keys]
+        elif isinstance(filter_keys, list):
+            keys = filter_keys
+        else:
+            raise ValueError(f'Unexpected type for filter_keys: {type(filter_keys)}. Must be str or list[str]')
+        
+        if keep is True:
+            return {k: result[k] for k in keys if k in result} if isinstance(result, dict) else result
+        else:
+            return {k: v for k, v in result.items() if k not in keys} if isinstance(result, dict) else result
+            
     return wrapper
 
 def _standardise_inputs(data) -> list[np.ndarray]:
@@ -236,7 +253,7 @@ class FeatureCalculator:
                         
                         final_func = partial(master_func, **combo_dict)
                         if select_features:
-                            final_func = apply_selection_wrapper(final_func, select_features)
+                            final_func = _apply_selection_wrapper(final_func, select_features)
                         
                         feature_funcs[label] = final_func
         
@@ -246,21 +263,7 @@ class FeatureCalculator:
             print(f"Total functions skipped due to missing dependencies: {len(skipped_functions)}")
         
         return feature_funcs
-    
-    def summary(self):
-        """
-        Generate a summary of the last feature extraction call.
-        """
-        # Check that extract has already been called. Otherwise return nothing...
-        print(f"Time taken to compute {len(self.feature_funcs)} master operations: "
-              f"{self._last_elapsed:.4f} seconds.")
-        codings = { "succesful" : 0, "fatal error(s)" : 1, "NaN(s)": 2, "+inf(s)": 3,
-                   "-inf(s)": 4, "complex": 5, "empty": 6}
-        e_arr = self._errors.to_numpy()
-        for c in codings:
-            print(f"{c} : {np.sum(e_arr == codings[c])}")           
-        return e_arr
-    
+
     def extract(self, data: Union[ArrayLike, list[ArrayLike]],
                 labels: Union[ArrayLike, list[ArrayLike], None] = None,
                 verbose: bool = False, distributor: Any = None) -> pd.DataFrame:
@@ -303,7 +306,7 @@ class FeatureCalculator:
                 labels_list = list(labels)
 
             if len(labels_list) != len(series_list):
-                raise ValueError(f"Length of labels ({len(labels_list)}) must equal"
+                raise ValueError(f"Length of labels ({len(labels_list)}) must equal "
                                  f"the number of series ({len(series_list)}).")
         else:
             # default names
