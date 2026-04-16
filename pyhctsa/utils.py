@@ -15,7 +15,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array, check_is_fitted
 
 
-def check_optional_deps(dep: str) -> bool:
+def _check_optional_deps(dep: str) -> bool:
     """Check whether an optional dependency exists.
     Returns True if available, else False."""
     try:
@@ -34,7 +34,7 @@ def check_optional_deps(dep: str) -> bool:
     except PackageNotFoundError:
         return False
 
-def validate_data(ts : np.ndarray) -> bool:
+def _validate_data(ts : np.ndarray) -> bool:
     """validate a time series before computing features"""
     if len(ts) < 100:
         print("Time series is too short!")
@@ -121,12 +121,15 @@ def get_dataset(which: str = "e1000") -> list:
     print(f"Loaded dataset of {len(dataset)} time series.")
     return dataset
     
-def preprocess_decorator(zscore : bool = False, absval : bool = False) -> Callable:
+def _preprocess_decorator(zscore : bool = False, absval : bool = False) -> Callable:
     """
     Decorator to preprocess time series data before feature computation.
     
     Applies optional z-score normalization and/or absolute value transformation
     to the input time series before passing it to the decorated function.
+
+    Note that by default, the zscore operation will always be applied **before** the absolute 
+    value operation if both are enabled.
 
     Parameters
     ----------
@@ -593,6 +596,9 @@ def x_corr(x : ArrayLike, y : ArrayLike, normed : bool = True, max_lags : int = 
 
 def make_function_name_mappings(
     yaml_file: Union[str, None] = None, csv_out_fpath: Union[None, str] = None) -> pd.DataFrame:
+    """
+    Map pyhctsa function names to their legacy counterparts in the MATLAB HCTSA.
+    """
     yaml.SafeLoader.add_constructor("!range", lambda loader, node: None)
 
     if yaml_file is None:

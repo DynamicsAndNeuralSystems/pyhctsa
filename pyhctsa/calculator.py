@@ -11,7 +11,7 @@ import yaml
 from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
-from .utils import check_optional_deps, preprocess_decorator, validate_data
+from .utils import _check_optional_deps, _preprocess_decorator, _validate_data
 from .distribute import _compute_features_for_chunk, _extract_features_single_series
 
 def range_constructor(loader, node) -> list:
@@ -65,16 +65,21 @@ def _apply_selection_wrapper(func:Callable, filter_keys:Union[str, list[str]],
             keys = filter_keys
         else:
             raise ValueError(f'Unexpected type for filter_keys: {type(filter_keys)}. Must be str or list[str]')
-        
-        if keep is True:
-            return {k: result[k] for k in keys if k in result} if isinstance(result, dict) else result
-        else:
-            return {k: v for k, v in result.items() if k not in keys} if isinstance(result, dict) else result
-            
+
+        if isinstance(result, dict):
+            missing = [k for k in keys if k not in result] # log all of the missing keys
+            if missing:
+                print(f'Warning: time-series features for func {func} not found {missing}')
+            if keep:
+                return {k: result[k] for k in keys if k in result}
+            else:
+                # discard instead of keep
+                return {k: v for k, v in result.items() if k not in keys}
+        return result
     return wrapper
 
 def _standardise_inputs(data) -> list[np.ndarray]:
-     # standardize the input into a list of 1D float arrays
+     # standardise the input into a list of 1D float arrays
     if isinstance(data, np.ndarray):
         if data.ndim == 1:
             return [np.asarray(data, dtype=float)]
@@ -204,7 +209,7 @@ class FeatureCalculator:
         if not raw_deps:
             return True
         deps_to_check = [raw_deps] if isinstance(raw_deps, str) else raw_deps
-        missing = [dep for dep in deps_to_check if not check_optional_deps(dep)]
+        missing = [dep for dep in deps_to_check if not _check_optional_deps(dep)]
         if missing:
             full_name = f"{module_key}.{feature_name}"
             print(f"Skipping function '{full_name}' - missing dependencies: {', '.join(missing)}")
@@ -236,10 +241,10 @@ class FeatureCalculator:
                     # extract and clean meta params
                     do_zscore = config_item.pop('zscore', False)
                     do_absval = config_item.pop('abs', False)
-                    select_features = config_item.pop('_select', None)
-                    
+                    select_features = config_item.pop('select', None)
+                    exclude_features = config_item.pop('exclude', None)
                     # setup base function
-                    master_func = preprocess_decorator(do_zscore, do_absval)(op_func)
+                    master_func = _preprocess_decorator(do_zscore, do_absval)(op_func)
                     
                     # standardise config_item into a list of combinations
                     # if config_item is empty, product(*) returns [()], allowing us to loop once
@@ -253,8 +258,11 @@ class FeatureCalculator:
                         label = _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval)
                         
                         final_func = partial(master_func, **combo_dict)
+                        # filter out certain features if specified by the user with the select/include keys
                         if select_features:
-                            final_func = _apply_selection_wrapper(final_func, select_features)
+                            final_func = _apply_selection_wrapper(final_func, filter_keys=select_features, keep=True)
+                        elif exclude_features:
+                            final_func = _apply_selection_wrapper(final_func, filter_keys=exclude_features, keep=False)
                         
                         feature_funcs[label] = final_func
         
@@ -294,7 +302,7 @@ class FeatureCalculator:
         """
         series_list = _standardise_inputs(data)
         # check each time series to see if valid...
-        is_valid = np.array([validate_data(t) for t in series_list])
+        is_valid = np.array([_validate_data(t) for t in series_list])
         invalid = np.argwhere(~is_valid)
         if invalid.size > 0:
             raise ValueError(f"One or more time series instances are invalid: {invalid.flatten()}")
