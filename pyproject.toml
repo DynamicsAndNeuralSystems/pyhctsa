@@ -62,30 +62,3 @@ pyhctsa = [
   "data/*.txt",
   "toolboxes/**/*",
 ]
-
-[tool.coverage.run]
-source = ["pyhctsa"]
-omit = [
-    "pyhctsa/__init__.py",
-    "pyhctsa/_build/*",
-    "pyhctsa/operations/__init__.py",
-    "pyhctsa/operations/*",
-    "pyhctsa/toolboxes/*",
-    "pyhctsa/distribute.py",
-    "*/tests/*",
-    "*/scripts/*",
-    "*/docs/*",
-]
-
-[tool.coverage.report]
-omit = [
-    "pyhctsa/__init__.py",
-    "pyhctsa/_build/*",
-    "pyhctsa/operations/__init__.py",
-    "pyhctsa/operations/*",
-    "pyhctsa/toolboxes/*",
-    "pyhctsa/distribute.py",
-    "*/tests/*",
-    "*/scripts/*",
-    "*/docs/*",
-]
