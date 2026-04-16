@@ -71,6 +71,7 @@ omit = [
     "pyhctsa/operations/__init__.py",
     "pyhctsa/operations/*",
     "pyhctsa/toolboxes/*",
+    "pyhctsa/distribute.py",
     "*/tests/*",
     "*/scripts/*",
     "*/docs/*",
@@ -83,12 +84,8 @@ omit = [
     "pyhctsa/operations/__init__.py",
     "pyhctsa/operations/*",
     "pyhctsa/toolboxes/*",
+    "pyhctsa/distribute.py",
     "*/tests/*",
     "*/scripts/*",
     "*/docs/*",
-]
-exclude_lines = [
-    "pragma: no cover",
-    "if __name__ == .__main__.:",
-    "raise NotImplementedError",
 ]
