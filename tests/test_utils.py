@@ -3,7 +3,7 @@ import pytest
 import os
 from pathlib import Path
 
-from pyhctsa.utils import get_dataset, z_score, check_optional_deps, validate_data, sign_change
+from pyhctsa.utils import get_dataset, z_score, _check_optional_deps, _validate_data, sign_change
 import pyhctsa.utils
 
 # 1. Dataset loading tests
@@ -77,26 +77,26 @@ class TestZScoring:
 # 3. Optional dep checks
 class TestOptionalDepChecks:
     def test_optional_dep_check_basic(self):
-        assert check_optional_deps('numpy') is True
-        assert check_optional_deps('test') is False
-        assert check_optional_deps('jpype1') is True
+        assert _check_optional_deps('numpy') is True
+        assert _check_optional_deps('test') is False
+        assert _check_optional_deps('jpype1') is True
     
 # 4. Validate data checks
 class TestValidateData:
     def test_data_too_short(self):
         dat = np.random.randn(10)
-        assert validate_data(dat) is False, "Expected False to be returned"
+        assert _validate_data(dat) is False, "Expected False to be returned"
     def test_data_constant(self):
         dat = np.ones(1000)
-        assert validate_data(dat) is False, "Expected False to be returned"
+        assert _validate_data(dat) is False, "Expected False to be returned"
     def test_data_nan(self):
         dat = np.random.randn(1000)
         dat[5] = np.nan
-        assert validate_data(dat) is False, "Expected False to be returned"
+        assert _validate_data(dat) is False, "Expected False to be returned"
     def test_data_inf(self):
         dat = np.random.randn(1000)
         dat[5] = np.inf
-        assert validate_data(dat) is False, "Expected False to be returned"
+        assert _validate_data(dat) is False, "Expected False to be returned"
 
 # 5. Periphery function checks
 class TestPeripheryFuncs:
