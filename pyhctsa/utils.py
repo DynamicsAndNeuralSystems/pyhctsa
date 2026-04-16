@@ -3,7 +3,7 @@ import os
 from functools import wraps
 from importlib.metadata import PackageNotFoundError, version
 from importlib import resources
-from typing import Union
+from typing import Union, Callable
 import yaml
 from pyhctsa import __version__
 
@@ -15,7 +15,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array, check_is_fitted
 
 
-def check_optional_deps(dep: str) -> bool:
+def _check_optional_deps(dep: str) -> bool:
     """Check whether an optional dependency exists.
     Returns True if available, else False."""
     try:
@@ -34,7 +34,7 @@ def check_optional_deps(dep: str) -> bool:
     except PackageNotFoundError:
         return False
 
-def validate_data(ts : np.ndarray) -> bool:
+def _validate_data(ts : np.ndarray) -> bool:
     """validate a time series before computing features"""
     if len(ts) < 100:
         print("Time series is too short!")
@@ -121,12 +121,15 @@ def get_dataset(which: str = "e1000") -> list:
     print(f"Loaded dataset of {len(dataset)} time series.")
     return dataset
     
-def preprocess_decorator(zscore : bool = False, absval : bool = False):
+def _preprocess_decorator(zscore : bool = False, absval : bool = False) -> Callable:
     """
     Decorator to preprocess time series data before feature computation.
     
     Applies optional z-score normalization and/or absolute value transformation
     to the input time series before passing it to the decorated function.
+
+    Note that by default, the zscore operation will always be applied **before** the absolute 
+    value operation if both are enabled.
 
     Parameters
     ----------
@@ -343,7 +346,7 @@ def simple_binner(x_data : ArrayLike, num_bins : int) -> tuple:
     
     return N, bin_edges
 
-def point_of_crossing(x: ArrayLike, threshold: float):
+def point_of_crossing(x: ArrayLike, threshold: float) -> tuple:
     """
     Linearly interpolate to the point of crossing a threshold
 
@@ -370,23 +373,31 @@ def point_of_crossing(x: ArrayLike, threshold: float):
     if crossings.size == 0:
         # Never crosses
         n = len(x)
-        first_crossing = n
-        point_of_crossing = n
+        fc = n
+        poc = n
     else:
-        first_crossing = crossings[0]
-        # Continuous version
-        value_before = x[first_crossing - 1]
-        value_after = x[first_crossing]
-        point_of_crossing = (
-            first_crossing - 1
+        fc = crossings[0]
+        # continuous version
+        value_before = x[fc - 1]
+        value_after = x[fc]
+        poc = (
+            fc - 1
             + (threshold - value_before) / (value_after - value_before)
         )
 
-    return first_crossing, point_of_crossing
+    return fc, poc
 
-def sign_change(y : Union[list, np.ndarray], do_find = 0):
+def sign_change(y : Union[list, np.ndarray], do_find: int = 0) -> ArrayLike:
     """
     Where a data vector changes sign.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    do_find : int
+        - If 0, returns a logical vector with 1s where the input changes sign.
+        - If 1, returns a logical vector of indices where the input vector changes sign.
     """
     if do_find == 0:
         return np.multiply(y[1:],y[0:len(y)-1]) < 0
@@ -402,7 +413,7 @@ def make_buffer(y : ArrayLike, buffer_size : int) -> np.ndarray:
     ----------
     y : array-like
         The input time series.
-    bufferSize : int
+    buffer_size : int
         The length of each buffer segment.
 
     Returns
@@ -425,7 +436,6 @@ def make_buffer(y : ArrayLike, buffer_size : int) -> np.ndarray:
 
 def make_mat_buffer(x : ArrayLike, n : int, p : int = 0,
                     opt : Union[str, None] = None) -> np.ndarray:
-    # helper function
     '''
     Create a buffer array.
 
@@ -449,7 +459,7 @@ def make_mat_buffer(x : ArrayLike, n : int, p : int = 0,
     result : (n,n) ndarray
         Buffer array created from x
     '''
-
+    
     if opt not in [None, 'nodelay']:
         raise ValueError(f'{opt} not implemented')
 
@@ -586,6 +596,9 @@ def x_corr(x : ArrayLike, y : ArrayLike, normed : bool = True, max_lags : int = 
 
 def make_function_name_mappings(
     yaml_file: Union[str, None] = None, csv_out_fpath: Union[None, str] = None) -> pd.DataFrame:
+    """
+    Map pyhctsa function names to their legacy counterparts in the MATLAB HCTSA.
+    """
     yaml.SafeLoader.add_constructor("!range", lambda loader, node: None)
 
     if yaml_file is None:
@@ -607,9 +620,9 @@ def make_function_name_mappings(
             ml_funcs.append(meta.get("legacy_name", np.nan))
 
         df = pd.DataFrame(
-            {"pyhctsa_name": python_funcs, "legacy_name": ml_funcs}
+            {"pyhctsa name": python_funcs, "hctsa legacy name": ml_funcs}
         )
-        df["pyhctsa_module"] = module
+        df["pyhctsa module"] = module
         module_dfs.append(df)
 
     df_all_modules = pd.concat(module_dfs, ignore_index=True)
@@ -620,8 +633,6 @@ def make_function_name_mappings(
     if csv_out_fpath:
         # Write metadata as comment lines, then the CSV
         with open(csv_out_fpath, "w", encoding="utf-8", newline="") as f:
-            f.write(f"# pyhctsa_version: {__version__}\n")
-            f.write(f"# source_yaml: {yaml_file}\n")
             df_all_modules.to_csv(f, index=False)
 
     return df_all_modules

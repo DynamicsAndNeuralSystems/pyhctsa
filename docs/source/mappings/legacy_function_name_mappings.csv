@@ -1,4 +1,4 @@
-pyhctsa_name,legacy_name,pyhctsa_module
+pyhctsa name,hctsa legacy name,pyhctsa module
 hrv_classic,MD_hrv_classic,medical
 pnn,MD_pNN,medical
 pol_var,MD_polvar,medical

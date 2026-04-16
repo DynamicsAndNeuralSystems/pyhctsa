@@ -5,7 +5,7 @@ Installation
 
 Using pip
 ---------
-The easiest way to install `pyhctsa` is using pip:
+The easiest way to install `pyhctsa` is using `pip <https://pypi.org/project/pyhctsa/>`_:
 
 .. code-block:: bash
 
