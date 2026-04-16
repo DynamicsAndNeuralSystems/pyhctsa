@@ -129,9 +129,9 @@ class TestPeripheryFuncs:
         assert len(res20) == 20, "Expected 20 counts for 20 bins"
     def test_preproc_decorator(self):
         simple_test_func = lambda x: sum(x)
-        zs_true_abs_false = pyhctsa.utils.preprocess_decorator(True, False)
-        zs_true_abs_true = pyhctsa.utils.preprocess_decorator(True, True)
-        zs_false_abs_true = pyhctsa.utils.preprocess_decorator(False, True)
+        zs_true_abs_false = pyhctsa.utils._preprocess_decorator(True, False)
+        zs_true_abs_true = pyhctsa.utils._preprocess_decorator(True, True)
+        zs_false_abs_true = pyhctsa.utils._preprocess_decorator(False, True)
         d = np.array([1, -3, -4, -8, 2, 3, 4, 2, 45, 10, 8, 6])
         assert simple_test_func(d) == 66, "Unexpected output for simple test function"
         assert pytest.approx(0) == zs_true_abs_false(simple_test_func)(d), "Expected near 0 output"
