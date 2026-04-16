@@ -85,7 +85,7 @@ jobs:
     name: Publish
     needs: [merge_artifacts]
     runs-on: ubuntu-latest
-    environment: ${{ inputs.target }}   # gate pypi if you set approvals on the pypi environment
+    environment: ${{ inputs.target }}
     permissions:
       id-token: write
       contents: read
