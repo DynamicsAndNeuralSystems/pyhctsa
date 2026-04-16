@@ -620,9 +620,9 @@ def make_function_name_mappings(
             ml_funcs.append(meta.get("legacy_name", np.nan))
 
         df = pd.DataFrame(
-            {"pyhctsa_name": python_funcs, "legacy_name": ml_funcs}
+            {"pyhctsa name": python_funcs, "hctsa legacy name": ml_funcs}
         )
-        df["pyhctsa_module"] = module
+        df["pyhctsa module"] = module
         module_dfs.append(df)
 
     df_all_modules = pd.concat(module_dfs, ignore_index=True)
@@ -633,8 +633,6 @@ def make_function_name_mappings(
     if csv_out_fpath:
         # Write metadata as comment lines, then the CSV
         with open(csv_out_fpath, "w", encoding="utf-8", newline="") as f:
-            f.write(f"# pyhctsa_version: {__version__}\n")
-            f.write(f"# source_yaml: {yaml_file}\n")
             df_all_modules.to_csv(f, index=False)
 
     return df_all_modules

@@ -35,7 +35,7 @@
    
 Install
 -------
-Before installing `pyhctsa <https://pypi.org/project/pyhctsa/>`_, we strongly recommend setting up a virtual environment to isolate dependencies: 
+Before installing `pyhctsa <https://pypi.org/project/pyhctsa/>`_, we strongly recommend setting up a `virtual environment <https://docs.conda.io/projects/conda/en/stable/user-guide/tasks/manage-environments.html>`_ to prevent dependency clashes: 
 
 .. code-block:: bash
 
@@ -85,3 +85,4 @@ Or in BibTeX (version-agnostic):
    usage/index
    api
    development/index
+   mappings/index

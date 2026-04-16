@@ -6,6 +6,9 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
+from pathlib import Path
+import subprocess
+
 project = 'pyhctsa'
 copyright = '2026, Joshua B. Moore'
 author = 'Joshua B. Moore'
@@ -32,6 +35,14 @@ autodoc_typehints_format = "short"
 
 napoleon_numpy_docstring = True
 napoleon_google_docstring = False
+
+# -- CSV generation ----------------------------------------------------------
+def generate_csv(app):
+    script = Path(__file__).parent / "scripts" / "generate_mappings.py"
+    subprocess.run(["python", str(script)], check=True)
+
+def setup(app):
+    app.connect("builder-inited", generate_csv)
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
