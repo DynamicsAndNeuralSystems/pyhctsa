@@ -3,6 +3,9 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 
+from ..operations.model_fit import residual_analysis
+from ..operations.correlation import first_crossing, first_min
+
 
 def _normed_single_curve_length(x: ArrayLike, lag: int, fs: Union[float, int],
                                 nrmdegree: int) -> tuple:
@@ -45,6 +48,90 @@ def _normed_single_curve_length_windowed(x: ArrayLike, win_len: int,
     frq = np.linspace(0, 0.5 * fs, lag+1)
 
     return r_mean, p_mean, frq, p_mean2
+
+def _ms_embed(z, v, w):
+    # helper function for nlpe
+    z = np.asarray(z, dtype=float).squeeze()
+    if z.ndim != 1:
+        raise ValueError("MS_embed requires a 1-D time series as first argument.")
+
+    n = z.size
+    if v is None:
+        lags = np.array([0, 1, 2])
+        auto_neg = False
+    elif w is not None:
+        # MS_embed(z, dim, lag)  →  lags = 0 : w : w*(v-1)
+        v = int(v)
+        lags = np.arange(0, w * v, w)          # length v
+        auto_neg = False
+    else:
+        lags = np.asarray(v, dtype=int).ravel()
+        auto_neg = False
+    has_neg_input = np.any(lags < 0)
+
+    lags = np.sort(lags)
+    dim  = len(lags)
+    if n <= lags[-1]:
+        print("Vector is too small to be embedded with the given lags.")
+        return np.full((dim, 1), np.nan), None
+
+    w_win = lags[-1] - lags[0]          # window width  (renamed to avoid shadowing arg)
+    m     = n - w_win                   # number of embeddable points
+    t     = np.arange(m) + lags[-1]    # embed times (0-indexed: t[i] = i + lags[-1])
+
+    x = np.zeros((dim, m), dtype=float)
+    for i, lag in enumerate(lags):
+        x[i, :] = z[t - lag]
+
+    # Split into past (x) and future (y) components
+    neg_mask = lags < 0
+    pos_mask = lags >= 0
+
+    if np.any(neg_mask):
+        y = x[neg_mask, :]
+        x = x[pos_mask, :]
+    else:
+        y = None
+
+    return x, y
+
+def _ms_nlpe(y: ArrayLike, de: int, tau: int) -> float:
+    # helper function for nlpe
+    y = np.asarray(y, dtype=float)
+
+    # Case 1: y is already a matrix (pre-embedded)
+    if y.ndim == 2 and min(y.shape) > 1:
+        x = y[:, :-1]
+        y = y[0, 1:]
+
+    # Case 2: de is a vector of embedding indices
+    elif de is not None and np.asarray(de).size > 1:
+        de = np.asarray(de)
+        v = de[de > 0]
+        x, y = _ms_embed(z=y, v=(v - 1), w=None)
+        y = y.squeeze()  # (1, m) -> (m,)
+
+    # Case 3: scalar de and tau
+    else:
+        lags = np.concatenate(([-1], np.arange(0, de * tau, tau)))
+        x, y = _ms_embed(z=y, v=lags, w=None)
+        y = y.squeeze()  # (1, m) -> (m,)
+
+    if x is None or x.size == 0:
+        raise ValueError("Error embedding the time series.")
+
+    de_dim, n = x.shape
+
+    dd = np.zeros((n, n))
+    for i in range(de_dim):
+        diff = x[i, :][np.newaxis, :] - x[i, :][:, np.newaxis]
+        dd += diff ** 2
+    np.fill_diagonal(dd, np.inf)
+
+    near = np.argmin(dd, axis=1)  # (n,) — nearest neighbour index per point
+    e = y[near] - y               # now y is (m,) so y[near] works correctly
+
+    return e
 
 def nsamdf(x: ArrayLike, fs: Union[float, int] = 1.0, win_len_rel: Union[int, float] = 14,
            shift_len_rel: Union[float, int] = 0.5, lag_rel: Union[int, float] = 1,
@@ -98,5 +185,76 @@ def nsamdf(x: ArrayLike, fs: Union[float, int] = 1.0, win_len_rel: Union[int, fl
     #% If you like, you can bandpass filter s2 and sd for the specific frequency band
     #% of nonlinear effect both to compute L and plot them as such
     out['L'] = np.linalg.norm(s2 - sd)
+
+    return out
+
+def nlpe(y: ArrayLike, de: int = 3, tau: Union[int, str] = 1, max_n: int = 5000) -> dict:
+    """
+    Normalized drop-one-out constant interpolation nonlinear prediction error.
+
+    Computes the nlpe for a time-delay embedded time series using Michael Small's
+    code, nlpe [1].
+
+    Modifications by Joshua B. Moore for incorporating into pyhctsa.
+
+    References
+    ----------
+    .. [1] M. Small, Applied Nonlinear Time Series Analysis: Applications in Physics,
+        Physiology, and Finance (book) World Scientific, Nonlinear Science Series A,
+        Vol. 52 (2005)
+    
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    de : int
+        The embedding dimension.
+    tau : int or str
+        The time-delay. Can be either an integer or 'ac' to be the first zero-crossing of the ACF 
+        or 'mi' to be the first minimum of the automutual information function.
+    max_n : int
+        The maximum length of the time series on which to compute the nlpe.
+    
+    Returns
+    -------
+    dict
+        Measures of the mean error of the nonlinear predictor, and a
+        set of measures on the correlation, Gaussianity, etc. of the residuals.
+    """
+
+    n = len(y)
+
+    if isinstance(tau, str):
+        if tau == 'ac':
+            tau = first_crossing(y, 'ac', 0, 'discrete')
+        elif tau == 'mi':
+            tau = first_min(y, 'mi')
+        else:
+            raise ValueError("tau can be either 'mi' or 'ac'")
+        # check the tau 
+        if np.isnan(tau):
+            raise ValueError('Time series cannot be embedded (too short?)')
+    #% nlpe can cause memory pains for long time series
+    #% Let's do this dirty cheat
+    if n > max_n:
+        # crop the time series to the first max_n samples
+        y = y[:max_n]
+        print(f"Michael Small's nlpe code is only being evaluated on the first {max_n} (/{n}) samples.")
+        n = max_n
+    
+    if n < 20: # short time series cause problems
+        print(f'Time series (N = {len(y)}) is too short.')
+    
+    #TODO: false nearest neigbours to compute an appropriate embedding dimension, if needed
+
+    # run the nonlinear prediction error code
+    res = _ms_nlpe(y, de, tau)
+
+    # compute outputs
+    out = {}
+    out['msqerr'] = np.mean(res**2)
+    res = residual_analysis(res)
+    # combine with residual analysis results
+    out = out | res
 
     return out

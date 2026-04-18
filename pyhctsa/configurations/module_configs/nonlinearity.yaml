@@ -8,3 +8,13 @@ nonlinearity:
       - {fs: 1, win_len_rel: 14, shift_len_rel: 0.5, lag_rel: 1, degree: 7, zscore: True}
     legacy_name: NL_nsamdf
     ordered_args: ['fs', 'win_len_rel', 'shift_len_rel', 'lag_rel', 'degree']
+
+  nlpe:
+    base_name: nlpe
+    depedencies:
+    configs:
+      - {de: 2, tau: 'mi', zscore: True}
+      - {de: 2, tau: 'ac', zscore: True}
+    legacy_name: NL_MS_nlpe
+    ordered_args: ['de', 'tau']
+    
