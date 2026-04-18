@@ -33,7 +33,7 @@ def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even
 
     Parameters
     ----------
-    y : ArrayLike
+    y : array-like
         Input time series (should be z-scored prior to analysis).
 
     tau : int or str, optional
