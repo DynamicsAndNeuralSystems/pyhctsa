@@ -13,8 +13,8 @@ from ..operations.information import automutual_info, first_min
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..utils import bin_picker, make_mat_buffer, point_of_crossing, sign_change, z_score, histc
 
-def add_noise(y : ArrayLike, tau : Union[int, str] = 1, ami_method : str = 'even',
-              extra_param : Union[int, None] = None, random_seed = None) -> dict:
+def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
+              extra_param: Union[int, None] = None, random_seed = None) -> dict:
     """
     Changes in the automutual information with the addition of noise.
 
@@ -167,7 +167,7 @@ def first_under_fn(x : ArrayLike, m : ArrayLike, p : ArrayLike):
     return first_i
 
 
-def theiler_q(y : ArrayLike) -> float:
+def theiler_q(y: ArrayLike) -> float:
     """
     Computes Theiler's Q statistic which quantifies asymmetry in time. 
 
@@ -195,7 +195,7 @@ def theiler_q(y : ArrayLike) -> float:
 
     return float(q)
 
-def crinkle_statistic(y : ArrayLike) -> float:
+def crinkle_statistic(y: ArrayLike) -> float:
     """
     Computes Theiler's crinkle statistic.
 
@@ -230,7 +230,7 @@ def crinkle_statistic(y : ArrayLike) -> float:
 
     return float(out)
 
-def time_rev_kaplan(y : ArrayLike, time_lag : int = 1) -> float:
+def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
     """
     Time reversal asymmetry statistic.
 
@@ -257,7 +257,7 @@ def time_rev_kaplan(y : ArrayLike, time_lag : int = 1) -> float:
 
     return float(res)
 
-def _lag_embed(x : ArrayLike, m : int, lag : int = 1) -> ArrayLike:
+def _lag_embed(x: ArrayLike, m: int, lag: int = 1) -> ArrayLike:
     """Constructs a time-delay embedding of a time series."""
     x = np.asarray(x).flatten()
     lx = len(x)
@@ -273,7 +273,7 @@ def _lag_embed(x : ArrayLike, m : int, lag : int = 1) -> ArrayLike:
 
     return y
 
-def embed2_angle_tau(y : ArrayLike, max_tau : int) -> dict:
+def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
     """
     Angle autocorrelation in a 2-dimensional embedding space.
 
@@ -472,7 +472,7 @@ def _histcounts(x: ArrayLike, bins: Union[int, None, str] = None,
 
     return n, edges
 
-def periodicity_wang(y : ArrayLike) -> dict:
+def periodicity_wang(y: ArrayLike) -> dict:
     """
     Periodicity extraction measure of Wang et al. (2007).
 
@@ -700,7 +700,7 @@ def histogram_ami(
     else:
         return {f'ami{i+1}': ami for i, ami in enumerate(amis)}
 
-def stick_angles(y : ArrayLike) -> dict:
+def stick_angles(y: ArrayLike) -> dict:
     """
     Analysis of the line-of-sight angles between time series data pts. 
 
@@ -915,7 +915,7 @@ def stick_angles(y : ArrayLike) -> dict:
 
     return out
 
-def _sub_statav(x : ArrayLike, n : int) -> tuple:
+def _sub_statav(x: ArrayLike, n : int) -> tuple:
     # helper function
     nn = len(x)
     if nn < 2 * n: # not long enough
@@ -930,7 +930,7 @@ def _sub_statav(x : ArrayLike, n : int) -> tuple:
 
     return statavmean, statavstd
 
-def nonlinear_autocorr(y : ArrayLike, taus : ArrayLike, absval : Union[bool, None] = None) -> float:
+def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] = None) -> float:
     """
     Compute a custom nonlinear autocorrelation of a time series.
 
@@ -1001,7 +1001,7 @@ def nonlinear_autocorr(y : ArrayLike, taus : ArrayLike, absval : Union[bool, Non
 
     return float(out)
 
-def partial_autocorr(y : ArrayLike, max_tau : int = 10, what_method : str = 'ols') -> dict:
+def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'ols') -> dict:
     """
     Compute the partial autocorrelation of an input time series.
     
@@ -1048,7 +1048,7 @@ def partial_autocorr(y : ArrayLike, max_tau : int = 10, what_method : str = 'ols
 
     return out
 
-def embed2_dist(y : ArrayLike, tau : Union[None, str, int] = None) -> dict:
+def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     """
     Analyzes distances in a 2-dimensional embedding space of a time series.
 
@@ -1128,7 +1128,7 @@ def embed2_dist(y : ArrayLike, tau : Union[None, str, int] = None) -> dict:
 
     return out
 
-def embed2_basic(y : ArrayLike, tau : Union[int, str] = 1) -> dict:
+def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     """
     Point-density statistics in a two-dimensional delay embedding.
 
@@ -1222,8 +1222,8 @@ def embed2_basic(y : ArrayLike, tau : Union[int, str] = 1) -> dict:
     
     return out
 
-def embed2_shapes(y : ArrayLike, tau : Union[str, int, None] = 'tau',
-                  shape : str = 'circle', r : float = 1.0) -> dict:
+def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
+                  shape: str = 'circle', r: float = 1.0) -> dict:
     """
     Shape-based statistics in a 2-d embedding space.
 
@@ -1368,7 +1368,7 @@ def fzcglscf(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int],
     
     return max_tau
 
-def glscf(y : ArrayLike, alpha : float, beta : float, tau : Union[int, str] = 'tau') -> float:
+def glscf(y: ArrayLike, alpha: float, beta: float, tau: Union[int, str] = 'tau') -> float:
     """
     Compute the generalized linear self-correlation function (GLSCF)
     of a time series.
@@ -1592,8 +1592,8 @@ def first_crossing(y: ArrayLike, corr_fun: str = 'ac', threshold: float = 0.0,
 
     return out
 
-def translate_shape(y : ArrayLike, shape : str = 'circle', d : int = 2,
-                    how_to_move : str = 'pts') -> dict:
+def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
+                    how_to_move: str = 'pts') -> dict:
     """
     Statistics on datapoints inside geometric shapes across the time series.
 
@@ -1731,7 +1731,7 @@ def _stat_av(y: ArrayLike, window_stat: str = 'mean', num_seg: int = 5, inc_move
 
     return np.std(qs, ddof=1)/np.std(y, ddof=1)
 
-def autocorr_shape(y : ArrayLike, stop_when : Union[int, str] = 'posDrown') -> dict:
+def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'posDrown') -> dict:
     """
     How the autocorrelation function changes with the time lag.
 
@@ -1894,7 +1894,7 @@ def autocorr_shape(y : ArrayLike, stop_when : Union[int, str] = 'posDrown') -> d
         out['fexpacf_stdres'] = np.nan
     return out
 
-def trev(y : ArrayLike, tau : Union[int, str] = 'ac') -> dict:
+def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
     """
     Normalized nonlinear autocorrelation (trev) function of a time series.
 
@@ -1959,7 +1959,7 @@ def trev(y : ArrayLike, tau : Union[int, str] = 'ac') -> dict:
 
     return out
 
-def tc3(y : list, tau : Union[int, str, None] = 'ac') -> dict:
+def tc3(y: list, tau: Union[int, str, None] = 'ac') -> dict:
     """
     Normalized nonlinear autocorrelation function, tc3.
 
