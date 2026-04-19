@@ -205,7 +205,7 @@ def withinp(x: ArrayLike, p: float = 1.0, mean_or_median: str = 'mean') -> float
     # The withinp statistic:
     return np.divide(np.sum((x >= mu - p * sig) & (x <= mu + p * sig)), N)
 
-def unique(y : ArrayLike) -> float:
+def unique(y: ArrayLike) -> float:
     """
     The proportion of the time series that are unique values.
 
@@ -222,7 +222,7 @@ def unique(y : ArrayLike) -> float:
     y = np.asarray(y)
     return np.divide(len(np.unique(y)), len(y))
 
-def spread(y : ArrayLike, spread_measure : str = 'std') -> float:
+def spread(y: ArrayLike, spread_measure: str = 'std') -> float:
     """
     Measure of spread of the input time series.
 
@@ -263,7 +263,7 @@ def spread(y : ArrayLike, spread_measure : str = 'std') -> float:
     
     return out
 
-def quantile(y : ArrayLike, p : float = 0.5) -> float:
+def quantile(y: ArrayLike, p: float = 0.5) -> float:
     """ 
     Calculates the quantile value at a specified proportion, p.
 
@@ -285,7 +285,7 @@ def quantile(y : ArrayLike, p : float = 0.5) -> float:
     
     return float(np.quantile(y, p, method = 'hazen'))
 
-def proportion_values(x : ArrayLike, prop_what : str = 'positive') -> float:
+def proportion_values(x: ArrayLike, prop_what: str = 'positive') -> float:
     """
     Calculate the proportion of values meeting specific conditions in a time series.
 
@@ -320,7 +320,7 @@ def proportion_values(x : ArrayLike, prop_what : str = 'positive') -> float:
 
     return out
 
-def pleft(y : ArrayLike, th : float = 0.1) -> float:
+def pleft(y: ArrayLike, th: float = 0.1) -> float:
     """
     Distance from the mean at which a given proportion of data are more distant.
     
@@ -347,7 +347,7 @@ def pleft(y : ArrayLike, th : float = 0.1) -> float:
 
     return float(out)
 
-def min_max(y : ArrayLike, min_or_max : str = 'max') -> float:
+def min_max(y: ArrayLike, min_or_max: str = 'max') -> float:
     """
     The maximum and minimum values of the input data vector.
 
@@ -376,7 +376,7 @@ def min_max(y : ArrayLike, min_or_max : str = 'max') -> float:
     
     return out
 
-def mean(y : ArrayLike, mean_type : str = 'arithmetic') -> float:
+def mean(y: ArrayLike, mean_type: str = 'arithmetic') -> float:
     """
     A given measure of location of a data vector.
 
@@ -424,7 +424,7 @@ def mean(y : ArrayLike, mean_type : str = 'arithmetic') -> float:
 
     return float(out)
 
-def high_low_mu(y : ArrayLike) -> float:
+def high_low_mu(y: ArrayLike) -> float:
     """
     The high_low_mu statistic.
 
@@ -449,7 +449,7 @@ def high_low_mu(y : ArrayLike) -> float:
 
     return out
 
-def fit_mle(y : ArrayLike, fit_what : str = 'gaussian') -> Union[Dict[str, float], float]:
+def fit_mle(y: ArrayLike, fit_what: str = 'gaussian') -> Union[Dict[str, float], float]:
     """
     Maximum likelihood distribution fit to data.
 
@@ -501,7 +501,7 @@ def fit_mle(y : ArrayLike, fit_what : str = 'gaussian') -> Union[Dict[str, float
 
     return out
 
-def cv(x : ArrayLike, k : int = 1) -> float:
+def cv(x: ArrayLike, k: int = 1) -> float:
     """
     Calculate the coefficient of variation of order k.
 
@@ -534,7 +534,7 @@ def cv(x : ArrayLike, k : int = 1) -> float:
     # Compute the coefficient of variation (of order k) of the data
     return (np.std(x, ddof=1) ** k) / (np.mean(x) ** k)
 
-def custom_skewness(y : ArrayLike, what_skew : str = 'pearson') -> float:
+def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     """
     Compute custom skewness measures of a time series.
 
@@ -634,7 +634,7 @@ def burstiness(y: ArrayLike) -> dict:
 
     return out
 
-def moments(y : ArrayLike, the_mom : int = 0) -> float:
+def moments(y: ArrayLike, the_mom: int = 0) -> float:
     """
     A moment of the distribution of the input time series.
     Normalizes by the standard deviation.
@@ -941,7 +941,7 @@ def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True
 
     return out
 
-def histogram_mode(y : ArrayLike, num_bins : int = 10, do_simple : bool = True) -> float:
+def histogram_mode(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> float:
     """
     Measures the mode of the data vector using histograms with a given number
     of bins.
@@ -974,8 +974,8 @@ def histogram_mode(y : ArrayLike, num_bins : int = 10, do_simple : bool = True) 
 
     return float(out)
 
-def remove_points(y : ArrayLike, remove_how : str = 'absfar', p : float = 0.1,
-                  remove_or_saturate : str = 'remove') -> dict:
+def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
+                  remove_or_saturate: str = 'remove') -> dict:
     """
     How time-series properties change as points are removed.
 
