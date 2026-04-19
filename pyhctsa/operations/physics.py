@@ -8,8 +8,8 @@ from statsmodels.sandbox.stats.runs import runstest_1samp
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
 
-def walker(y : ArrayLike, walker_rule : str = 'prop',
-           walker_params : Union[None, float, int, list] = None) -> dict:
+def walker(y: ArrayLike, walker_rule: str = 'prop',
+           walker_params: Union[None, float, int, list] = None) -> dict:
     """
     Simulates a hypothetical walker moving through the time domain.
     
@@ -200,8 +200,8 @@ def walker(y : ArrayLike, walker_rule : str = 'prop',
 
     return out
 
-def force_potential(y : ArrayLike, what_potential : str = 'dblwell',
-                    params : Union[list, None] = None) -> dict:
+def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
+                    params: Union[list, None] = None) -> dict:
     """
     Couple a time series to a driven dynamical system.
 

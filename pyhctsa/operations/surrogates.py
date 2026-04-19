@@ -10,7 +10,7 @@ from ..operations.information import automutual_info, first_min
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-def sd_give_me_stats(stat_x : float, stat_surr : ArrayLike, left_right_both : str) -> dict:
+def sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str) -> dict:
     """Compute statistiscs on the surrogate distribution."""
     num_surrs = len(stat_surr)
     out = {}
@@ -89,8 +89,8 @@ def sd_give_me_stats(stat_x : float, stat_surr : ArrayLike, left_right_both : st
 
     return out
 
-def make_surrogates(x : ArrayLike, surr_method : str, num_surrs : int = 1, 
-                    random_seed : int = 42) -> ArrayLike:
+def make_surrogates(x: ArrayLike, surr_method: str, num_surrs: int = 1, 
+                    random_seed: int = 42) -> ArrayLike:
     """
     Generates surrogate time series.
 

@@ -9,9 +9,9 @@ from scipy.signal import resample as ssre
 from ..operations.correlation import first_crossing
 from ..utils import binarize, sign_change
 
-def surprise(y : ArrayLike, what_prior : str = 'dist', memory : float = 0.2, num_groups : int = 3,
-             coarse_grain_method : str = 'quantile', num_iters : int = 500, 
-             random_seed : int = 0) -> dict:
+def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_groups: int = 3,
+             coarse_grain_method: str = 'quantile', num_iters: int = 500, 
+             random_seed: int = 0) -> dict:
     """
     Quantifies how surprised you would be of the next data point given recent memory.
 
@@ -141,7 +141,7 @@ def surprise(y : ArrayLike, what_prior : str = 'dist', memory : float = 0.2, num
 
     return out
 
-def motif_two(y : ArrayLike, binarize_how : str = 'diff') -> dict:
+def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
     """
     Compute local motifs in a binary symbolization of the input time series.
 
@@ -305,13 +305,13 @@ def motif_two(y : ArrayLike, binarize_how : str = 'diff') -> dict:
 
     return out
 
-def motif_three(y : ArrayLike, cg_how : str = 'quantile') -> dict:
+def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
     """
     Motifs in a coarse-graining of a time series to a 3-letter alphabet.
 
     Parameters
     ----------
-    y : np.ndarray
+    y : array-like
         Time series to analyze.
     cg_how : {'quantile', 'diffquant'}, optional
         The coarse-graining method to use:
@@ -409,7 +409,7 @@ def _f_entropy(x):
     return -np.sum(x[x > 0] * np.log(x[x > 0]))
 
 
-def binary_stretch(x : ArrayLike, stretch_what : str = 'lseq1') -> float:
+def binary_stretch(x: ArrayLike, stretch_what: str = 'lseq1') -> float:
     """
     Characterize stretches of 0s or 1s in a binarized time series.
 
@@ -467,7 +467,7 @@ def binary_stretch(x : ArrayLike, stretch_what : str = 'lseq1') -> float:
     
     return out if out is not None else 0
 
-def binary_stats(y : ArrayLike, binary_method : str = 'diff') -> dict:
+def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     """
     Compute statistics on a binary symbolisation of the input time series.
 
@@ -550,8 +550,8 @@ def binary_stats(y : ArrayLike, binary_method : str = 'diff') -> dict:
 
     return out
 
-def transition_matrix(y : ArrayLike, how_to_cg : str = 'quantile', 
-                      num_groups : int = 2, tau : Union[int, str] = 1) -> dict:
+def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
+                      num_groups: int = 2, tau: Union[int, str] = 1) -> dict:
     """
     Transition probabilities between time-series states. 
     The time series is coarse-grained according to a given method.
@@ -663,7 +663,7 @@ def transition_matrix(y : ArrayLike, how_to_cg : str = 'quantile',
 
     return out
 
-def coarse_grain(y : list, how_to_cg : str, num_groups : int) -> np.ndarray:
+def coarse_grain(y: list, how_to_cg: str, num_groups: int) -> np.ndarray:
     """
     Coarse-grains a continuous time series to a discrete alphabet.
 

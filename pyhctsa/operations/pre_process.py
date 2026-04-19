@@ -49,7 +49,7 @@ def _safe_divide(num, denom):
     """Return num/denom, or np.nan if denom is zero."""
     return num / denom if denom != 0 else np.nan
 
-def preproc_compare(y : ArrayLike, detrend_meth : str = 'medianf') -> dict:
+def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf') -> dict:
     """
     Compare time-series properties before and after pre-processing.
 

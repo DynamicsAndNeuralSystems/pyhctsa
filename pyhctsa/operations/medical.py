@@ -220,7 +220,7 @@ def hrv_classic(y: ArrayLike) -> dict:
 
     return out
 
-def pol_var(x : ArrayLike, d : float = 1, D : int = 6) -> float:
+def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
     """
     Compute the POLVARd measure of a time series.
 
@@ -284,7 +284,7 @@ def pol_var(x : ArrayLike, d : float = 1, D : int = 6) -> float:
 
     return p
 
-def pnn(x : ArrayLike) -> dict:
+def pnn(x: ArrayLike) -> dict:
     """
     Compute pNNx measures of heart rate variability (HRV).
 

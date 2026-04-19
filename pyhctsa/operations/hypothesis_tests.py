@@ -8,8 +8,8 @@ from statsmodels.sandbox.stats.runs import runstest_1samp
 from statsmodels.stats.descriptivestats import sign_test
 from statsmodels.stats.diagnostic import acorr_ljungbox
 
-def variance_ratio_test(y : ArrayLike, periods : Union[int, list[int], float] = 2,
-                        iids : Union[int, list[int]] = 0) -> dict:
+def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
+                        iids: Union[int, list[int]] = 0) -> dict:
     """
     Variance ratio test for random walk.
 
@@ -86,7 +86,7 @@ def variance_ratio_test(y : ArrayLike, periods : Union[int, list[int], float] = 
 
     return out
 
-def hypothesis_test(x : ArrayLike, the_test: str = "signtest") -> float:
+def hypothesis_test(x: ArrayLike, the_test: str = "signtest") -> float:
     """
     Perform statistical hypothesis testing on a time series.
 
@@ -95,7 +95,7 @@ def hypothesis_test(x : ArrayLike, the_test: str = "signtest") -> float:
 
     Parameters
     ----------
-    x : ArrayLike
+    x : array-like
         Input time series
     the_test : str, optional
         Type of hypothesis test to perform:

@@ -14,8 +14,8 @@ from ..operations.distribution import moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, sample_entropy
 from ..utils import make_mat_buffer, sign_change, z_score
 
-def local_distributions(y : ArrayLike, num_segs : int = 5, each_or_par : str = 'par',
-                        num_points : int = 200) -> dict:
+def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par',
+                        num_points: int = 200) -> dict:
     """
     Compares the distribution in consecutive time-series segments.
 
@@ -175,9 +175,9 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
 
     return out
 
-def moment_corr(x : ArrayLike, window_length : Union[None, float] = None,
-                w_overlap : Union[None, float] = None, mom_1 : str = 'mean',
-                mom_2 : str = 'std', what_transform : str = 'none') -> dict:
+def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
+                w_overlap: Union[None, float] = None, mom_1: str = 'mean',
+                mom_2: str = 'std', what_transform: str = 'none') -> dict:
     """
     Correlations between simple statistics in local windows of a time series.
     The idea to implement this was that of Prof. Nick S. Jones (Imperial College London).
@@ -279,7 +279,7 @@ def _calc_me_moments(x_buff, mom_type):
     
     return moms
 
-def simple_stats(x : ArrayLike, what_stat : str = 'zcross') -> dict:
+def simple_stats(x: ArrayLike, what_stat: str = 'zcross') -> dict:
     """
     Basic statistics about an input time series.
 
@@ -348,7 +348,7 @@ def simple_stats(x : ArrayLike, what_stat : str = 'zcross') -> dict:
     
     return out
 
-def local_extrema(y : ArrayLike, how_to_window : str = 'l', n : Union[int, None] = None) -> dict:
+def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = None) -> dict:
     """
     How local maximums and minimums vary across the time series.
 
@@ -442,7 +442,7 @@ def local_extrema(y : ArrayLike, how_to_window : str = 'l', n : Union[int, None]
 
     return out
 
-def kpss_test(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
+def kpss_test(y: ArrayLike, lags: Union[int, list] = 0) -> dict:
     """
     Performs the KPSS (Kwiatkowski-Phillips-Schmidt-Shin) stationarity test.
 
@@ -508,7 +508,7 @@ def kpss_test(y : ArrayLike, lags : Union[int, list] = 0) -> dict:
             raise TypeError("Expected either a single lag (as an int) or list of lags.")
     return out
 
-def range_evolve(y : ArrayLike) -> dict:
+def range_evolve(y: ArrayLike) -> dict:
     """
     Analyze how the time-series range changes across time.
 
@@ -654,7 +654,7 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
 
     return out
 
-def local_global(y : ArrayLike, subset_how : str = 'l', n : Union[int, float, None] = None) -> dict:
+def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None] = None) -> dict:
     """
     Compare local statistics to global statistics of a time series.
 
@@ -723,7 +723,7 @@ def local_global(y : ArrayLike, subset_how : str = 'l', n : Union[int, float, No
 
     return out
 
-def fit_polynomial(y : ArrayLike, k : int = 1) -> float:
+def fit_polynomial(y: ArrayLike, k: int = 1) -> float:
     """
     Goodness of a polynomial fit to a time series
 
@@ -753,7 +753,7 @@ def fit_polynomial(y : ArrayLike, k : int = 1) -> float:
 
     return float(out)
 
-def ts_length(y : ArrayLike) -> int:
+def ts_length(y: ArrayLike) -> int:
     """
     Length of an input data vector.
 
@@ -769,7 +769,7 @@ def ts_length(y : ArrayLike) -> int:
     """
     return len(np.asarray(y))
 
-def std_nth_deriv(y : ArrayLike, ndr : int = 2) -> float:
+def std_nth_deriv(y: ArrayLike, ndr: int = 2) -> float:
     """
     Standard deviation of the nth derivative of the time series.
 
@@ -811,7 +811,7 @@ def std_nth_deriv(y : ArrayLike, ndr : int = 2) -> float:
 
     return float(out)
 
-def trend(y : ArrayLike) -> dict:
+def trend(y: ArrayLike) -> dict:
     """
     Quantifies various measures of trend in a time series.
 

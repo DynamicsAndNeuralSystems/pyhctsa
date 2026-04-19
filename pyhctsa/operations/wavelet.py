@@ -174,7 +174,7 @@ def _custom_cwt(data, scales, wavelet, sampling_period=1., method='conv', axis=-
 
     return out, frequencies
 
-def wfbm(x : ArrayLike) -> dict:
+def wfbm(x: ArrayLike) -> dict:
     """
     Parameters of fractional Gaussian noise/Brownian motion in a time series.
 
@@ -225,7 +225,7 @@ def wfbm(x : ArrayLike) -> dict:
 
     return {"p1": H1, "p2": H2, "p3": H3}
 
-def scal_2_freq(y : ArrayLike, w_name : str = 'db3', a_max : int = 5, delta : int = 1) -> dict:
+def scal_2_freq(y: ArrayLike, w_name: str = 'db3', a_max: int = 5, delta: int = 1) -> dict:
     """
     Frequency components in a periodic time series.
 
@@ -278,7 +278,7 @@ def scal_2_freq(y : ArrayLike, w_name : str = 'db3', a_max : int = 5, delta : in
 
     return out
 
-def dwt_coeff(y : ArrayLike, w_name : str = 'db3', level : int = 3) -> dict:
+def dwt_coeff(y: ArrayLike, w_name: str = 'db3', level: int = 3) -> dict:
     """
     Discrete wavelet transform coefficients.
 
@@ -334,7 +334,7 @@ def dwt_coeff(y : ArrayLike, w_name : str = 'db3', level : int = 3) -> dict:
     
     return out
 
-def cwt(y : ArrayLike, w_name : str = 'db3', max_scale : int = 32) -> dict:
+def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     """
     Continuous wavelet transform of a time series.
 
@@ -436,7 +436,7 @@ def _slosr(xx : ArrayLike) -> int:
 
     return idx
 
-def detail_coeffs(y : ArrayLike, w_name : str = 'db3', max_level : Union[int, str] = 20) -> dict:
+def detail_coeffs(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] = 20) -> dict:
     """
     Detail coefficients of a wavelet decomposition.
 
@@ -519,7 +519,7 @@ def detail_coeffs(y : ArrayLike, w_name : str = 'db3', max_level : Union[int, st
 
     return out
 
-def wl_coeffs(y : ArrayLike, w_name : str = 'db3', level : Union[int, str] = 3) -> dict:
+def wl_coeffs(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 3) -> dict:
     """
     Wavelet decomposition of the time series.
 
@@ -578,7 +578,7 @@ def wl_coeffs(y : ArrayLike, w_name : str = 'db3', level : Union[int, str] = 3) 
 
     return out
 
-def wavedec(data : ArrayLike, wavelet : str, mode : str ='symmetric', level : int = 1, axis=-1):
+def wavedec(data: ArrayLike, wavelet: str, mode: str ='symmetric', level: int = 1, axis=-1):
     """
     Multiple level 1-D discrete fast wavelet decomposition.
     Taken from https://github.com/izlotnik/wavelet-wrcoef/blob/master/wrcoef.py
@@ -668,7 +668,7 @@ def wrcoef(coefs, lengths, wavelet, level):
 
     return data
 
-def find_my_threshold(x : ArrayLike, det_s : ArrayLike, N : int):
+def find_my_threshold(x: ArrayLike, det_s: ArrayLike, N: int):
     indices = np.argwhere(det_s < x * np.max(det_s))
     if indices.size == 0:
         return np.nan

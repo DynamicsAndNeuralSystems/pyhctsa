@@ -142,8 +142,8 @@ def first_max(
             
     return np.nan
 
-def _mi_bin(v1 : ArrayLike, v2 : ArrayLike, r1 : Union[str, list] = 'range',
-            r2 : Union[str, list] = 'range', num_bins : int = 10) -> float:
+def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
+            r2: Union[str, list] = 'range', num_bins: int = 10) -> float:
     """
     Compute mutual information between two data vectors using bin counting.
 
@@ -572,7 +572,7 @@ def _initialize_MI(
 
     return mi_calc
 
-def rm_automutual_information(y : ArrayLike, tau : int = 1) -> float:
+def rm_automutual_information(y: ArrayLike, tau: int = 1) -> float:
     """
     Estimates the mutual information of two stationary signals with 
     independent pairs of samples using various approaches.

@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.typing import ArrayLike
 
-def moving_threshold(y : ArrayLike, a : float = 1.0, b : float = 0.1) -> dict:
+def moving_threshold(y: ArrayLike, a: float = 1.0, b: float = 0.1) -> dict:
     """
     Moving threshold model for extreme events in a time series.
 
