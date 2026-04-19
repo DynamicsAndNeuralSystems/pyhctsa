@@ -246,5 +246,5 @@ Nonlinearity
 .. autosummary::
    :toctree: generated/
 
-   pyhtcsa.operations.nonlinearity.nsamdf
-   pyhtcsa.operations.nonlinearity.nlpe
+   pyhctsa.operations.nonlinearity.nsamdf
+   pyhctsa.operations.nonlinearity.nlpe
