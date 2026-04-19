@@ -13,7 +13,7 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
 from ..utils import z_score
 
-def hmm_fit(y : ArrayLike, train_p : float = 0.8, num_states : int = 3, random_seed : int = 0) -> dict:
+def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed: int = 0) -> dict:
     """
     Fits a Hidden Markov Model to sequential data.
 
@@ -88,8 +88,8 @@ def hmm_fit(y : ArrayLike, train_p : float = 0.8, num_states : int = 3, random_s
 
     return out
 
-def fit_subsegments(y : ArrayLike, model : str = 'ar', order : int = 2, subset_how : str = 'uniform',
-                    sample_p : Union[list, tuple] = [20, 0.1]) -> dict:
+def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how: str = 'uniform',
+                    sample_p: Union[list, tuple] = [20, 0.1]) -> dict:
     """
     Robustness of model parameters across different segments of a time series.
 
@@ -173,7 +173,7 @@ def fit_subsegments(y : ArrayLike, model : str = 'ar', order : int = 2, subset_h
         raise ValueError(f"Unknown model: {model}")
     return out
 
-def loop_local_simple(y : ArrayLike, forecast_meth : str = 'mean') -> dict:
+def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     """
     How simple local forecasting depends on window length.
     
@@ -266,8 +266,8 @@ def loop_local_simple(y : ArrayLike, forecast_meth : str = 'mean') -> dict:
 
     return out
 
-def local_simple(y : ArrayLike, forecast_meth : str = 'mean',
-                 train_length : Union[int, str] = 3) -> dict:
+def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
+                 train_length: Union[int, str] = 3) -> dict:
     """
     Simple local time-series forecasting.
     
@@ -343,8 +343,8 @@ def local_simple(y : ArrayLike, forecast_meth : str = 'mean',
 
     return out
 
-def exp_smoothing(x : ArrayLike, n_train : Union[None, int, float] = None, 
-                  alpha : Union[str, float] = 'best') -> dict:
+def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
+                  alpha: Union[str, float] = 'best') -> dict:
     """
     Exponential smoothing time-series prediction model.
 
@@ -501,7 +501,7 @@ def _fit_exp_smooth(x: np.ndarray, a: float) -> np.ndarray:
         
     return xf
 
-def residual_analysis(e : ArrayLike) -> dict:
+def residual_analysis(e: ArrayLike) -> dict:
     """
     Analysis of residuals from a model fit.
 
@@ -572,7 +572,7 @@ def residual_analysis(e : ArrayLike) -> dict:
 
     return out
 
-def ar_cov(y : ArrayLike, p : int = 2) -> dict:
+def ar_cov(y: ArrayLike, p: int = 2) -> dict:
     """
     Fits an autoregressive (AR) model of a given order p.
 
@@ -665,7 +665,7 @@ def _get_criteria(sel, N, crit = "aic"):
     
     return criteria_vals
 
-def ar_fit(y : ArrayLike, p_min : int = 1, p_max : int = 10, selector : str = 'sbc') -> dict:
+def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc') -> dict:
     """
     Statistics of a fitted AR model to a time series.
 

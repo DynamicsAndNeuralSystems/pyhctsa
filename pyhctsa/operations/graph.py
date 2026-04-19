@@ -7,7 +7,7 @@ from ts2vg import NaturalVG
 from pyhctsa.operations.correlation import autocorr, first_crossing
 from pyhctsa.operations.entropy import distribution_entropy
 
-def _horiz_vgraph(ts_data : ArrayLike) -> ArrayLike:
+def _horiz_vgraph(ts_data: ArrayLike) -> ArrayLike:
     """Helper function for `VisibilityGraph`."""
     # Ensure ts_data is a NumPy array
     ts_data = np.asarray(ts_data)
@@ -45,7 +45,7 @@ def _horiz_vgraph(ts_data : ArrayLike) -> ArrayLike:
     
     return A
 
-def visibility_graph(y : ArrayLike, meth : str = 'horiz', max_l : int = 5000) -> dict:
+def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: int = 5000) -> dict:
     """
     Visibility graph analysis of a time series.
 
@@ -64,7 +64,7 @@ def visibility_graph(y : ArrayLike, meth : str = 'horiz', max_l : int = 5000) ->
     
     Parameters
     ----------
-    y : ArrayLike
+    y : array-like
         Input time series
     meth : str, optional
         Method for constructing the visibility graph:
