@@ -241,3 +241,10 @@ Wavelet
    pyhctsa.operations.wavelet.scal_2_freq
    pyhctsa.operations.wavelet.wfbm
 
+Nonlinearity
+~~~~~~~~~~~~
+.. autosummary::
+   :toctree: generated/
+
+   pyhctsa.operations.nonlinearity.nsamdf
+   pyhctsa.operations.nonlinearity.nlpe
