@@ -395,7 +395,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
 
     return out
 
-def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max : int = -1) -> dict:
+def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: int = -1) -> dict:
     """
     Recurrence period density entropy (RPDE).
 
@@ -458,7 +458,7 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max : 
 
     return out
 
-def approximate_entropy(x : ArrayLike, mnom : int = 1, rth : float = 0.2) -> float:
+def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2) -> float:
     """
     Approximate entropy (ApEn) of a time series.
 
@@ -494,7 +494,7 @@ def approximate_entropy(x : ArrayLike, mnom : int = 1, rth : float = 0.2) -> flo
 
     return np.subtract(phi[0], phi[1])
 
-def _embed(x : ArrayLike, order : int, delay : int = 1) -> ArrayLike:
+def _embed(x: ArrayLike, order: int, delay: int = 1) -> ArrayLike:
     """Safe embedding that supports order=1."""
     x = np.asarray(x)
     if order < 1:
@@ -505,11 +505,11 @@ def _embed(x : ArrayLike, order : int, delay : int = 1) -> ArrayLike:
     return np.array([x[i:i + order * delay:delay] for i in range(N - (order - 1) * delay)])
 
 def _app_samp_entropy(
-        x : ArrayLike, 
-        order : int, 
-        r : float, 
-        metric : str = "chebyshev", 
-        approximate : bool = True) -> ArrayLike:
+        x: ArrayLike, 
+        order: int, 
+        r: float, 
+        metric: str = "chebyshev", 
+        approximate: bool = True) -> ArrayLike:
     """Modified version of `_app_samp_entropy` that supports order=1."""
     phi = np.zeros(2)
     emb_data1 = _embed(x, order, 1)
@@ -532,7 +532,7 @@ def _app_samp_entropy(
 
     return phi
 
-def complexity_invariant_distance(y : ArrayLike) -> dict:
+def complexity_invariant_distance(y: ArrayLike) -> dict:
     """
     Complexity-invariant distance
 
@@ -604,8 +604,8 @@ def complexity_invariant_distance(y : ArrayLike) -> dict:
 
     return out
 
-def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2, 
-                          pre_proc: Union[str, None] = None, rng : int = 0) -> float:
+def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2,
+                          pre_proc: Union[str, None] = None, rng: int = 0) -> float:
     """
     Compute the normalized Lempel-Ziv (LZ) complexity of an n-bit encoding of a time series.
 
