@@ -14,7 +14,7 @@ class TestOperations:
         "medical", "extreme_events", "criticality", "correlation", "information", "entropy",
         "stationarity", "distribution", "scaling", "symbolic", "wavelet", 
         "hypothesis", "spectral", "model_fit", "graph", "physics", "pre_process",
-        "surrogates"])
+        "surrogates", "nonlinearity"])
     def test_module_basic(self, x):
         # basic checks on each module
         data = get_dataset(which="sinusoid")
