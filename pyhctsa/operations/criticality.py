@@ -29,7 +29,7 @@ from numpy.typing import ArrayLike
 
 from ..operations.correlation import first_crossing
 
-def rad(x: ArrayLike, tau : Union[int, str] = 1, centre : bool = True) -> float:
+def rad(x: ArrayLike, tau: Union[int, str] = 1, centre: bool = True) -> float:
     """
     Compute the Rescaled Auto-Density (RAD) feature of a time series.
 
