@@ -76,7 +76,6 @@ docs/_build/
 docs/generated/
 docs/auto*/
 _build/
-_static/
 _templates/
 *.doctree
 *.pickle

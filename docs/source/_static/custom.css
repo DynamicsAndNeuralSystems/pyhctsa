@@ -1,0 +1,9 @@
+.md-nav__button.md-logo img {
+    height: 20px;
+    width: auto;
+    object-fit: contain;
+}
+
+.sd-dropdown .sd-summary-chevron-right {
+    display: none !important;
+}
