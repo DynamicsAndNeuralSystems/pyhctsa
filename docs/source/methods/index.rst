@@ -1,0 +1,117 @@
+Time-Series Analysis Methods
+============================
+
+Select a card below to explore a category of time-series analysis methods implemented in pyhctsa.
+
+.. warning::
+
+   The conceptual groupings of methods implemented in pyhctsa are loosely defined and intended as a convenience only.
+   They are **not** intended to serve as definitive classifications. Users intending to publish findings or make
+   substantive claims based on these groupings should do so with caution or define their own principled taxonomy.
+
+.. grid:: 4
+   :gutter: 2
+
+   .. grid-item-card:: Correlation
+      :link: correlationmeths
+      :link-type: ref
+      :img-bottom: ../_static/module_icons/correlation.png
+   
+   .. grid-item-card:: Criticality
+      :link: criticalitymeths
+      :link-type: ref
+      :img-bottom: ../_static/module_icons/RAD-2.png
+
+   .. grid-item-card:: Distribution
+      :link: distmeths
+      :link-type: ref
+      :img-bottom: ../_static/module_icons/distribution.png
+   
+   .. grid-item-card:: Entropy
+      :link: entropymeths
+      :link-type: ref
+
+   .. grid-item-card:: Extreme Events
+      :link: extemeeventsmeths
+      :link-type: ref
+      :img-bottom: ../_static/module_icons/extreme_events.svg
+   
+   .. grid-item-card:: Graph
+      :link: graphmeths
+      :link-type: ref
+
+      
+   
+   .. grid-item-card:: Hypothesis Tests
+      :link: hypothesistestsmeths
+      :link-type: ref
+
+      
+   
+   .. grid-item-card:: Information
+      :link: informationmeths
+      :link-type: ref
+
+      
+   
+   .. grid-item-card:: Medical
+      :link: medicalmeths
+      :link-type: ref
+      :img-bottom: ../_static/module_icons/medical.svg
+   
+   .. grid-item-card:: Model Fit
+      :link: modelfitmeths
+      :link-type: ref
+      :img-bottom: ../_static/module_icons/modelfit.png
+
+   .. grid-item-card:: Physics
+      :link: physicsmeths
+      :link-type: ref
+
+      
+   
+   .. grid-item-card:: Pre-Process
+      :link: preprocessmeths
+      :link-type: ref
+
+      
+   
+   .. grid-item-card:: Scaling
+      :link: scalingmeths
+      :link-type: ref
+      :img-bottom: ../_static/module_icons/scaling.png
+   
+   .. grid-item-card:: Spectral
+      :link: spectralmeths
+      :link-type: ref
+
+      
+   
+   .. grid-item-card:: Stationarity
+      :link: stationaritymeths
+      :link-type: ref
+
+      
+   
+   .. grid-item-card:: Surrogates
+      :link: surrogatesmeths
+      :link-type: ref
+
+      
+   
+   .. grid-item-card:: Symbolic
+      :link: symbolicmeths
+      :link-type: ref
+      :img-bottom: ../_static/module_icons/symbolic.svg
+   
+   .. grid-item-card:: Wavelet
+      :link: waveletmeths
+      :link-type: ref
+
+      
+   
+   .. grid-item-card:: Nonlinearity
+      :link: nonlinearitymeths
+      :link-type: ref
+      :img-bottom: ../_static/module_icons/nonlinear.png
+

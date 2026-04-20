@@ -20,8 +20,12 @@ Utilities
    pyhctsa.utils.get_dataset
    pyhctsa.utils.z_score
 
+.. _tsanalysismeths:
+
 Time-Series Analysis Method Modules
 -----------------------------------
+
+.. _correlationmeths:
 
 Correlation
 ~~~~~~~~~~~
@@ -53,6 +57,8 @@ Correlation
    pyhctsa.operations.correlation.trev
    pyhctsa.operations.correlation.tc3
 
+.. _criticalitymeths:
+
 Criticality
 ~~~~~~~~~~~
 .. autosummary::
@@ -60,8 +66,10 @@ Criticality
 
    pyhctsa.operations.criticality.rad
 
+.. _distmeths:
+
 Distribution
-~~~~~~~~~~~
+~~~~~~~~~~~~
 .. autosummary::
    :toctree: generated/
 
@@ -87,6 +95,8 @@ Distribution
    pyhctsa.operations.distribution.histogram_mode
    pyhctsa.operations.distribution.remove_points
 
+.. _entropymeths:
+
 Entropy
 ~~~~~~~~~~~
 .. autosummary::
@@ -102,12 +112,16 @@ Entropy
     pyhctsa.operations.entropy.complexity_invariant_distance
     pyhctsa.operations.entropy.lempel_ziv_complexity
 
+.. _extemeeventsmeths:
+
 Extreme Events
 ~~~~~~~~~~~~~~
 .. autosummary::
    :toctree: generated/
 
    pyhctsa.operations.extreme_events.moving_threshold
+
+.. _graphmeths:
 
 Graph
 ~~~~~
@@ -116,6 +130,8 @@ Graph
 
    pyhctsa.operations.graph.visibility_graph
 
+.. _hypothesistestsmeths:
+
 Hypothesis Tests
 ~~~~~~~~~~~~~~~~
 .. autosummary::
@@ -123,6 +139,8 @@ Hypothesis Tests
 
    pyhctsa.operations.hypothesis_tests.variance_ratio_test
    pyhctsa.operations.hypothesis_tests.hypothesis_test
+
+.. _informationmeths:
 
 Information
 ~~~~~~~~~~~
@@ -135,6 +153,8 @@ Information
    pyhctsa.operations.information.automutual_info
    pyhctsa.operations.information.rm_automutual_information
 
+.. _medicalmeths:
+
 Medical
 ~~~~~~~
 .. autosummary::
@@ -144,6 +164,8 @@ Medical
     pyhctsa.operations.medical.hrv_classic
     pyhctsa.operations.medical.pol_var
     pyhctsa.operations.medical.pnn
+
+.. _modelfitmeths:
 
 Model Fit
 ~~~~~~~~~
@@ -158,6 +180,8 @@ Model Fit
    pyhctsa.operations.model_fit.ar_cov
    pyhctsa.operations.model_fit.ar_fit
 
+.. _physicsmeths:
+
 Physics
 ~~~~~~~
 .. autosummary::
@@ -166,12 +190,16 @@ Physics
    pyhctsa.operations.physics.walker
    pyhctsa.operations.physics.force_potential
 
+.. _preprocessmeths:
+
 Pre-Process
 ~~~~~~~~~~~
 .. autosummary::
    :toctree: generated/
 
    pyhctsa.operations.pre_process.preproc_compare
+
+.. _scalingmeths:
 
 Scaling
 ~~~~~~~
@@ -181,12 +209,16 @@ Scaling
    pyhctsa.operations.scaling.fast_dfa
    pyhctsa.operations.scaling.fluctuation_analysis
 
+.. _spectralmeths:
+
 Spectral
 ~~~~~~~~
 .. autosummary::
    :toctree: generated/
 
     pyhctsa.operations.spectral.spectral_summaries
+
+.. _stationaritymeths:
 
 Stationarity
 ~~~~~~~~~~~~
@@ -209,12 +241,16 @@ Stationarity
     pyhctsa.operations.stationarity.stat_av
     pyhctsa.operations.stationarity.sliding_window
 
+.. _surrogatesmeths:
+
 Surrogates
 ~~~~~~~~~~
 .. autosummary::
    :toctree: generated/
 
    pyhctsa.operations.surrogates.surrogate_test
+
+.. _symbolicmeths:
 
 Symbolic
 ~~~~~~~~
@@ -229,6 +265,8 @@ Symbolic
    pyhctsa.operations.symbolic.transition_matrix
    pyhctsa.operations.symbolic.coarse_grain
 
+.. _waveletmeths:
+
 Wavelet
 ~~~~~~~
 .. autosummary::
@@ -240,6 +278,8 @@ Wavelet
    pyhctsa.operations.wavelet.dwt_coeff
    pyhctsa.operations.wavelet.scal_2_freq
    pyhctsa.operations.wavelet.wfbm
+
+.. _nonlinearitymeths:
 
 Nonlinearity
 ~~~~~~~~~~~~
