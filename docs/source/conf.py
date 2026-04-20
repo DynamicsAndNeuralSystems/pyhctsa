@@ -22,7 +22,8 @@ extensions = [
     'sphinx.ext.autosummary',
     'nbsphinx',
     'sphinx.ext.mathjax',
-    'sphinx.ext.napoleon'
+    'sphinx.ext.napoleon',
+    'sphinx_design'
     ]
 
 templates_path = ['_templates']
@@ -48,6 +49,8 @@ def setup(app):
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "sphinx_immaterial"
+html_logo = "_static/apps_113dp_FFFFFF.svg"
+html_css_files = ["custom.css"]
 pygments_style = "friendly"
 html_theme_options = {
     "features": [
@@ -61,7 +64,7 @@ html_theme_options = {
         "repo": "fontawesome/brands/github",
     },
     "repo_name": "pyhctsa",
-    "site_url": "https://your-site.com/",
+    "site_url": "https://dynamicsandneuralsystems.github.io/pyhctsa/",
     "repo_url": "https://github.com/DynamicsAndNeuralSystems/pyhctsa",
     "palette": [
         {

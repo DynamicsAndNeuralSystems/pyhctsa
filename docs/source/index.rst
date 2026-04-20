@@ -3,8 +3,8 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-**pyhctsa**: Python Toolkit of Highly Comparative Time-Series Analysis Features
-===============================================================================
+**Welcome to the pyhctsa documentation**.
+=========================================
 
 .. image:: _static/pyhctsa_logo.svg
    :width: 400
@@ -33,27 +33,67 @@
 .. |license| image:: https://img.shields.io/github/license/DynamicsAndNeuralSystems/pyhctsa.svg
    :target: https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/LICENSE
    
-Install
--------
+The PYthon toolkit of Highly Comparative Time-Series Analsyis (`pyhctsa`) is a living library of time-series analysis methods.
+With over 4500 time-series features derived from interpretable theory, `pyhctsa` is the most comprehensive feature set in native Python.
+
+
+Installation
+------------
 Before installing `pyhctsa <https://pypi.org/project/pyhctsa/>`_, we strongly recommend setting up a `virtual environment <https://docs.conda.io/projects/conda/en/stable/user-guide/tasks/manage-environments.html>`_ to prevent dependency clashes: 
 
 .. code-block:: bash
 
    pip install pyhctsa
 
-Quickstart
+Navigation
 ----------
-See :doc:`Getting started (Quickstart) <usage/getting_started>` for how to get up and running with `pyhctsa`.
+Select from the cards below to navigate the `pyhctsa` documentation:
 
-API Reference
--------------
-See the :doc:`API reference <api>` for `pyhctsa`.
+.. grid:: 3
+   :gutter: 3
 
-License & Citation
-------------------
-**License**: GNU General Public License Version 3. See `LICENSE <https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/LICENSE>`_.
+   .. grid-item-card:: :material-regular:`start;3em` Start Here
+      :link: installation
+      :link-type: doc
 
-© 2026 Joshua Moore and Ben Fulcher. You may use, modify, and distribute this software with appropriate attribution.
+      Install pyhctsa and get up and running quickly.
+   
+   .. grid-item-card:: :material-regular:`play_lesson;3em` Usage Guide
+      :link: usage/index
+      :link-type: doc
+
+      Tutorials and guides for using pyhctsa.
+   
+   .. grid-item-card:: :material-regular:`data_exploration;3em` Method List
+      :link: methods/index
+      :link-type: doc
+
+      List and description of the time-series analysis methods
+      included in pyhctsa.
+
+   .. grid-item-card:: :material-regular:`api;3em` API Reference
+      :link: api
+      :link-type: doc
+
+      General API reference for pyhctsa.
+
+   .. grid-item-card:: :material-regular:`code;3em` Development
+      :link: development/index
+      :link-type: doc
+
+      Developers guide for contributors.
+
+   .. grid-item-card:: :material-regular:`merge;3em` Mappings
+      :link: mappings/index
+      :link-type: doc
+
+      Function name mappings for existing hctsa (MATLAB) users.
+   
+   .. grid-item-card:: :material-regular:`attribution;3em` License
+      :link: license
+      :link-type: doc
+
+      GNU General Public License Version 3.
 
 Citation
 --------
@@ -65,16 +105,33 @@ If you use `pyhctsa` in your work or publications, please cite:
 
 Or in BibTeX (version-agnostic):
 
-.. code-block:: bibtex
+.. dropdown:: 
 
-   @software{pyhctsa:2026,
-     author       = {Moore, Joshua B. and Fulcher, Ben D.},
-     title        = {pyhctsa: Python Toolkit of Highly Comparative Time Series Analysis Features},
-     year         = {2026},
-     publisher    = {Zenodo},
-     doi          = {10.5281/zenodo.18529934},
-     url          = {https://doi.org/10.5281/zenodo.18529934}
-   }
+   .. code-block:: bibtex
+
+      @software{pyhctsa:2026,
+        author       = {Moore, Joshua B. and Fulcher, Ben D.},
+        title        = {pyhctsa: Python Toolkit of Highly Comparative Time Series Analysis Features},
+        year         = {2026},
+        publisher    = {Zenodo},
+        doi          = {10.5281/zenodo.18529934},
+        url          = {https://doi.org/10.5281/zenodo.18529934}
+      }
+
+News and updates
+----------------
+
+.. article-info::
+    :avatar: https://www.svgrepo.com/show/354057/medium-icon.svg
+    :avatar-link: https://medium.com/@joshua.moore_17408/pyhctsa-is-here-and-it-might-change-how-you-analyze-time-series-d01abdfbf6f5
+    :avatar-outline: white
+    :author: Joshua Moore
+    :date: Apr 18, 2026
+    :read-time: 8 min read
+    :class-container: sd-p-2 sd-outline-muted sd-rounded-0
+
+
+© 2026 Joshua Moore and Ben Fulcher. You may use, modify, and distribute this software with appropriate attribution.
 
 .. toctree::
    :maxdepth: 3
@@ -83,6 +140,8 @@ Or in BibTeX (version-agnostic):
    Home <self>
    installation
    usage/index
+   methods/index
    api
    development/index
    mappings/index
+   license
