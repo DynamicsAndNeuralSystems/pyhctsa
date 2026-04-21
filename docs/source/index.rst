@@ -41,9 +41,13 @@ Installation
 ------------
 Before installing `pyhctsa <https://pypi.org/project/pyhctsa/>`_, we strongly recommend setting up a `virtual environment <https://docs.conda.io/projects/conda/en/stable/user-guide/tasks/manage-environments.html>`_ to prevent dependency clashes: 
 
-.. code-block:: bash
+.. termynal:: 
 
-   pip install pyhctsa
+      $ conda create -n pyhctsa python=3.12 -y
+      $ conda activate pyhctsa
+      $ pip install pyhctsa
+      -->
+      pyhctsa installed
 
 Navigation
 ----------

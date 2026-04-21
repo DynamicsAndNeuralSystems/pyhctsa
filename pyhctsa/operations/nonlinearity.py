@@ -208,12 +208,14 @@ def nlpe(y: ArrayLike, de: int = 3, tau: Union[int, str] = 1, max_n: int = 5000)
     y : array-like
         Input time series.
     de : int
-        The embedding dimension.
-    tau : int or str
-        The time-delay. Can be either an integer or 'ac' to be the first zero-crossing of the ACF 
-        or 'mi' to be the first minimum of the automutual information function.
-    max_n : int
+        The embedding dimension. Default is 3.
+    tau : int or str, optional
+        The time-delay. Can be either an integer or ``'ac'`` to use the first
+        zero-crossing of the ACF, or ``'mi'`` to use the first minimum of the
+        automutual information function. Default is 1.
+    max_n : int, optional
         The maximum length of the time series on which to compute the nlpe.
+        Default is 5000.
     
     Returns
     -------

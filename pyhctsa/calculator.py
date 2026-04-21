@@ -11,7 +11,7 @@ import yaml
 from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
-from .utils import _check_optional_deps, _preprocess_decorator, _validate_data
+from .utils import _check_optional_deps, _preprocess_decorator, _validate_data, _build_repr_html
 from .distribute import _compute_features_for_chunk, _extract_features_single_series
 
 def range_constructor(loader, node) -> list:
@@ -198,11 +198,15 @@ class FeatureCalculator:
         if config_path is None:
             ROOT_DIR = Path(__file__).resolve().parent
             config_path = ROOT_DIR / "configurations" / "hctsa.yaml"
+        self.config_path = config_path
         with open(config_path, encoding='utf-8') as f:
             self.config = yaml.safe_load(f)
         self._operations_package = "pyhctsa.operations" # abs path
         self.feature_funcs = self._build_feature_funcs()
         print(f"Loaded {len(self.feature_funcs)} master operations.")
+    
+    def _repr_html_(self):
+        return _build_repr_html(self.feature_funcs, self._skipped_functions, self.config, self.config_path)
 
     def _check_deps(self, module_key, feature_name, config):
         raw_deps = config.get("dependencies")

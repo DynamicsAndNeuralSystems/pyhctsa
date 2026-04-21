@@ -3,3 +3,4 @@ furo
 sphinx-immaterial
 nbsphinx
 sphinx-design
+sphinx-termynal
