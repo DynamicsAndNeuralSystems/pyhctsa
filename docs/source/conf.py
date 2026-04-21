@@ -23,7 +23,8 @@ extensions = [
     'nbsphinx',
     'sphinx.ext.mathjax',
     'sphinx.ext.napoleon',
-    'sphinx_design'
+    'sphinx_design',
+    "sphinx_termynal"
     ]
 
 templates_path = ['_templates']
