@@ -49,12 +49,12 @@ def rad(x: ArrayLike, tau: Union[int, str] = 1, centre: bool = True) -> float:
     x : array-like
         The input time series (1D array).
     tau : int or str, optional
-        The embedding and differencing delay, in units of the time step (default: 1).
+        The embedding and differencing delay, in units of the time step.
         If a string, must be "tau", in which case the delay is set to the first
-        crossing of the autocorrelation function.
+        crossing of the autocorrelation function. Default is 1.
     centre : bool, optional
         Whether to center the time series at zero and take absolute values before 
-        analysis (default: True).
+        analysis. Default is `True`.
 
     Returns
     -------

@@ -42,9 +42,9 @@ def shannon_entropy(
     y : array-like
         The input time series.
     num_bins : int or list of int, optional
-        The number of bins to discretize the time series into (i.e., alphabet size).
+        The number of bins to discretize the time series into (i.e., alphabet size). Default is 2.
     depth : int or list of int, optional
-        The length of strings to analyze.
+        The length of strings to analyze. Default is 3.
 
     Returns
     -------
@@ -113,16 +113,18 @@ def distribution_entropy(
     y : array-like
         The input time series.
     hist_or_ks : str
-        Whether to use a histogram ('hist') or kernel-smoothed ('ks') distribution.
+        Whether to use a histogram ('hist') or kernel-smoothed ('ks') distribution. Default is ``'hist'``.
     num_bins : int or list of int, optional
 
         - (for 'hist'): an integer, uses a histogram with that many bins
         - (for 'ks'): a positive real number, for the bandwidth parameter for the kernel density estimate.
 
+        Default is 10.
+
     olremp : float, optional
         The proportion of outliers at both extremes to remove.
         (e.g., if olremp = 0.01; keeps only the middle 98% of data; 0 keeps all data. 
-        This parameter ought to be less than 0.5, which keeps none of the data).
+        This parameter ought to be less than 0.5, which keeps none of the data). Default is 0.
 
     Returns
     -------
@@ -201,18 +203,21 @@ def multi_scale_entropy(
     Parameters
     ----------
     y : array-like
-        Input time series (list or NumPy array).
+        Input time series.
     scale_range : list or range, optional
         List or range of scales (window sizes) to use for coarse-graining. Default is range(1, 11).
     m : int, optional
-        Embedding dimension for sample entropy (default: 2).
+        Embedding dimension for sample entropy. Default is 2.
     r : float, optional
-        Similarity threshold for sample entropy (default: 0.15).
+        Similarity threshold for sample entropy. Default is 0.15.
     pre_process_how : str, optional
         Preprocessing method. Supported:
 
         - 'diff1': Use z-scored first differences.
         - 'rescale_tau': Rescale using autocorrelation time.
+        - `None`: No pre-processing.
+
+        Default is `None`.
 
     Returns
     -------
@@ -305,14 +310,18 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
     Parameters
     ----------
     y : array-like
-        Input time series
+        Input time series.
     m : int, optional
-        Maximum embedding dimension (default: 2)
+        Maximum embedding dimension. Default is 2.
     r : float, optional
-        Similarity threshold. If None, set to 0.1 * std(y)
+        Similarity threshold. If None, set to 0.1 * std(y). Default is `None`.
     pre_process_how : str, optional
+
         Preprocessing method:
             - 'diff1': Use first differences
+            - `None`: No pre-processing.
+        
+        Default is `None`.
 
     Returns
     -------
@@ -362,9 +371,9 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
     y : array-like
         Input time series.
     m : int, optional
-        Embedding dimension (order of the permutation entropy, default: 2).
+        Embedding dimension (order of the permutation entropy). Default is 2.
     tau : int or str, optional
-        Time-delay for the embedding (default: 1).
+        Time-delay for the embedding. Default is 1.
 
     Returns
     -------
@@ -413,13 +422,13 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: i
     y : array-like
         Input signal (must be a 1D array or list).
     m : int, optional
-        Embedding dimension (default: 2).
+        Embedding dimension. Default is 2.
     tau : int or str, optional
-        Embedding time delay (default: 1).
+        Embedding time delay. Default is 1.
     epsilon : float, optional
-        Recurrence neighbourhood radius (default: 0.12).
+        Recurrence neighbourhood radius. Default is 0.12.
     t_max : int, optional
-        Maximum recurrence time. If not specified (default: -1), all recurrence times are returned.
+        Maximum recurrence time. If not specified, all recurrence times are returned. Default is -1.
 
     Returns
     -------
@@ -476,12 +485,10 @@ def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2) -> float:
     ----------
     x : array-like
         Input time series.
-
     mnom : int, optional
-        Embedding dimension :math:`m`. Default is ``1``.
-
+        Embedding dimension :math:`m`. Default is 1.0
     rth : float, optional
-        Similarity threshold :math:`r`. Default is ``0.2``.
+        Similarity threshold :math:`r`. Default is 0.2.
 
     Returns
     -------
@@ -505,9 +512,9 @@ def _embed(x: ArrayLike, order: int, delay: int = 1) -> ArrayLike:
     return np.array([x[i:i + order * delay:delay] for i in range(N - (order - 1) * delay)])
 
 def _app_samp_entropy(
-        x: ArrayLike, 
-        order: int, 
-        r: float, 
+        x: ArrayLike,
+        order: int,
+        r: float,
         metric: str = "chebyshev", 
         approximate: bool = True) -> ArrayLike:
     """Modified version of `_app_samp_entropy` that supports order=1."""
@@ -534,7 +541,7 @@ def _app_samp_entropy(
 
 def complexity_invariant_distance(y: ArrayLike) -> dict:
     """
-    Complexity-invariant distance
+    Complexity-invariant distance.
 
     Computes two estimates of the 'complexity' of a time series based on the 
     stretched-out length of the lines in its line graph. These features are 
@@ -619,13 +626,18 @@ def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2,
     x : array-like
         Input time series (1-D array or list).
     n_bits : int, optional
-        Number of bits (alphabet size) to encode the data into (default: 2).
+        Number of bits (alphabet size) to encode the data into. Default is 2.
     pre_proc : str, optional
         Preprocessing method to apply before symbolization. Currently supported:
+
             - 'diff': Use z-scored first differences of the time series.
+            - `None`: No pre-processing.
+
+        Default is `None`.
+
     rng : int, optional
-        Random seed for reproducibility (default: 0). Used for adding small random
-        noise to break ties during symbolization.
+        Random seed for reproducibility. Used for adding small random
+        noise to break ties during symbolization. Default is 0.
 
     Returns
     -------

@@ -23,10 +23,11 @@ def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
     y : array-like
         The input time series.
     periods : int or list of int, optional
-        A scalar or vector of period(s) to use for the test.
+        A scalar or vector of period(s) to use for the test. Default is 2.
     iids : int or list of int, optional
         A scalar or vector of boolean values (0 or 1) indicating whether to assume
         independent and identically distributed (IID) innovations for each period.
+        Default is 0.
 
     Returns
     -------
@@ -86,7 +87,7 @@ def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
 
     return out
 
-def hypothesis_test(x: ArrayLike, the_test: str = "signtest") -> float:
+def hypothesis_test(x: ArrayLike, the_test: str = 'signtest') -> float:
     """
     Perform statistical hypothesis testing on a time series.
 
@@ -96,7 +97,7 @@ def hypothesis_test(x: ArrayLike, the_test: str = "signtest") -> float:
     Parameters
     ----------
     x : array-like
-        Input time series
+        Input time series.
     the_test : str, optional
         Type of hypothesis test to perform:
 
@@ -107,7 +108,7 @@ def hypothesis_test(x: ArrayLike, the_test: str = "signtest") -> float:
         - 'jbtest': Jarque-Bera test for normality
         - 'lbq': Ljung-Box Q-test for autocorrelation
         
-        Default is 'signtest'.
+        Default is ``'signtest'``.
 
     Returns
     -------
@@ -117,22 +118,22 @@ def hypothesis_test(x: ArrayLike, the_test: str = "signtest") -> float:
     """
     x = np.asarray(x)
     p = np.nan
-    if the_test == "signtest":
+    if the_test == 'signtest':
         _, p = sign_test(x)
-    elif the_test == "runstest":
+    elif the_test == 'runstest':
         _, p = runstest_1samp(x, cutoff='mean', correction=True)
-    elif the_test == "jbtest":
+    elif the_test == 'jbtest':
         s = jarque_bera(x)
         p = s.pvalue
-    elif the_test == "ztest":
+    elif the_test == 'ztest':
         x_mean = np.mean(x)
         n = len(x)
         sigma = 1
         zval = (x_mean - 0) / (sigma / np.sqrt(n))
         p = 2 * norm.cdf(-abs(zval))
-    elif the_test == "signrank":
+    elif the_test == 'signrank':
         _, p = wilcoxon(x)
-    elif the_test == "lbq":
+    elif the_test == 'lbq':
         # Ljung-Box Q-test for residual autocorrelation
         t = np.sum(~np.isnan(x)) # get the effective sample size
         n_lags = min(20, t-1)

@@ -43,9 +43,11 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
            variance of time series by a multiplicative factor.
            walkerParams = [m, wl], where m is the inertial mass and wl
            is the window length.
+        
+        Default is ``'prop'``.
           
     walker_params : float, int, or list, optional
-        The parameters for the specified walker_rule, explained above.
+        The parameters for the specified walker_rule, explained above. Default is `None` (use pre-defined defaults).
         
     Returns
     -------
@@ -246,8 +248,10 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
     what_potential : str, optional
         Potential function to simulate.
 
-        - ``"dblwell"``: Quartic double-well potential.
-        - ``"sine"``: Sinusoidal potential.
+        - ``'dblwell'``: Quartic double-well potential.
+        - ``'sine'``: Sinusoidal potential.
+
+        Default is ``'dblwell'``
 
     params : list of float, optional
         Simulation parameters in the form ``[alpha, kappa, deltat]``.
@@ -256,6 +260,8 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
         oscillation period (``"sine"``).
         - ``kappa``: Friction (damping) coefficient.
         - ``deltat``: Integration time step.
+
+        Default is `None` (use pre-defined defaults).
 
     Returns
     -------

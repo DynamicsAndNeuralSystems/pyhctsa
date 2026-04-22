@@ -68,9 +68,12 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: int = 5000) -> di
         Input time series
     meth : str, optional
         Method for constructing the visibility graph:
+
         - 'horiz': Uses horizontal visibility (only horizontal lines link nodes)
         - 'norm': Uses natural visibility (standard visibility definition)
-        Default is 'horiz'.
+
+        Default is ``'horiz'``.
+
     max_l : int, optional
         Maximum number of samples to analyze. Longer time series are truncated
         to first max_l points. Default is 5000.

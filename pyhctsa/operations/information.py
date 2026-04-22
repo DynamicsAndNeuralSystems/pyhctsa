@@ -13,25 +13,25 @@ def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, No
     """Helper to return the correct correlation function based on method type."""
     from ..operations.correlation import autocorr, automutual_info
 
-    if min_what in ["ac", "corr"]:
-        return lambda x: autocorr(y, tau=x, method="Fourier")
-    elif min_what == "mi-hist":
+    if min_what in ['ac', 'corr']:
+        return lambda x: autocorr(y, tau=x, method='Fourier')
+    elif min_what == 'mi-hist':
         num_bins = int(extra_param) if extra_param else 10
-        return lambda x: _mi_bin(y[:-x], y[x:], "range", "range", num_bins)
-    elif min_what == "mi-kraskov2":
-        return lambda x: automutual_info(y, x, "kraskov2", extra_param)
-    elif min_what == "mi-kraskov1":
-        return lambda x: automutual_info(y, x, "kraskov1", extra_param)
-    elif min_what == "mi-kernel":
-        return lambda x: automutual_info(y, x, "kernel", extra_param)
-    elif min_what in ["mi", "mi-gaussian"]:
-        return lambda x: automutual_info(y, x, "gaussian", extra_param)
+        return lambda x: _mi_bin(y[:-x], y[x:], 'range', 'range', num_bins)
+    elif min_what == 'mi-kraskov2':
+        return lambda x: automutual_info(y, x, 'kraskov2', extra_param)
+    elif min_what == 'mi-kraskov1':
+        return lambda x: automutual_info(y, x, 'kraskov1', extra_param)
+    elif min_what == 'mi-kernel':
+        return lambda x: automutual_info(y, x, 'kernel', extra_param)
+    elif min_what in ['mi', 'mi-gaussian']:
+        return lambda x: automutual_info(y, x, 'gaussian', extra_param)
     else:
         raise ValueError(f"Unknown correlation type specified: {min_what}")
 
 def first_min(
     y: list,
-    min_what: str = "mi-gaussian",
+    min_what: str = 'mi-gaussian',
     extra_param: Union[int, float, None] = None,
 ) -> int:
     """
@@ -47,17 +47,17 @@ def first_min(
 
         Autocorrelation:
 
-        - ``"ac"``: Autocorrelation.
+        - ``'ac'``: Autocorrelation.
 
         Automutual information (AMI):
 
-        - ``"mi"``: AMI using the JIDT Gaussian estimator (default for AMI).
-        - ``"mi-kernel"``: AMI using the JIDT kernel estimator.
-        - ``"mi-kraskov1"``: AMI using the JIDT Kraskov estimator (variant 1).
-        - ``"mi-kraskov2"``: AMI using the JIDT Kraskov estimator (variant 2).
-        - ``"mi-hist"``: AMI using a histogram-based estimator.
+        - ``'mi'``: AMI using the JIDT Gaussian estimator (default for AMI).
+        - ``'mi-kernel'``: AMI using the JIDT kernel estimator.
+        - ``'mi-kraskov1'``: AMI using the JIDT Kraskov estimator (variant 1).
+        - ``'mi-kraskov2'``: AMI using the JIDT Kraskov estimator (variant 2).
+        - ``'mi-hist'``: AMI using a histogram-based estimator.
 
-        Default is ``"mi"``.
+        Default is ``'mi-gaussian'``.
 
     extra_param : any, optional
         Additional parameter required by the chosen ``min_what`` method
@@ -90,7 +90,7 @@ def first_min(
 
 def first_max(
     y: list,
-    max_what: str = "mi-gaussian",
+    max_what: str = 'mi-gaussian',
     extra_param: Union[int, float, None] = None,
 ) -> int:
     """
@@ -105,17 +105,18 @@ def first_max(
 
         Autocorrelation:
 
-        - ``"ac"``: Autocorrelation.
+        - ``'ac'``: Autocorrelation.
 
         Automutual information (AMI):
 
-        - ``"mi"``: AMI using the JIDT Gaussian estimator (default for AMI).
-        - ``"mi-kernel"``: AMI using the JIDT kernel estimator.
-        - ``"mi-kraskov1"``: AMI using the JIDT Kraskov estimator (variant 1).
-        - ``"mi-kraskov2"``: AMI using the JIDT Kraskov estimator (variant 2).
-        - ``"mi-hist"``: AMI using a histogram-based estimator.
+        - ``'mi'``: AMI using the JIDT Gaussian estimator (default for AMI).
+        - ``'mi-kernel'``: AMI using the JIDT kernel estimator.
+        - ``'mi-kraskov1'``: AMI using the JIDT Kraskov estimator (variant 1).
+        - ``'mi-kraskov2'``: AMI using the JIDT Kraskov estimator (variant 2).
+        - ``'mi-hist'``: AMI using a histogram-based estimator.
 
-        Default is ``"mi"``.
+        Default is ``'mi'``.
+
     extra_param : any, optional
         An additional parameter required for the specified `max_what` method (e.g., for Kraskov).
 
@@ -223,16 +224,16 @@ def automutual_info_stats(
     Parameters
     ----------
     y : array-like
-        Input time series (1D).
+        Input time series.
     max_tau : int, optional
         Maximum time delay to investigate. If None, uses N/4 where N is the length
-        of the time series, but won't exceed N/2.
+        of the time series, but won't exceed N/2. Default is `None`.
     est_method : {'gaussian', 'kernel', 'kraskov1', 'kraskov2'}, optional
         Method for estimating mutual information (passed to automutual_info).
-        Default is 'kernel'.
+        Default is ``'kernel'``.
     extra_param : int or str, optional
         Extra parameter for the estimator (passed to automutual_info).
-        For Kraskov estimators, sets the number of nearest neighbors 'k'.
+        For Kraskov estimators, sets the number of nearest neighbors 'k'. Default is `None`.
 
     Returns
     -------
@@ -341,7 +342,7 @@ def automutual_info(
     Parameters
     ----------
     y : array-like
-        Input time series (1D).
+        Input time series.
     time_delay : int, str, or list of int, optional
         Time lag(s) for automutual information calculation. Can be:
 
@@ -360,9 +361,12 @@ def automutual_info(
         - 'kraskov1': Kraskov estimator 1 (KSG1)
         - 'kraskov2': Kraskov estimator 2 (KSG2)
 
+        Default is `kernel`.
+
     extra_param : int or str, optional
         Extra parameter for the estimator. For Kraskov estimators,
-        this sets the number of nearest neighbors 'k' (default is 3).
+        this sets the number of nearest neighbors 'k'.
+        Default is 3.
 
     Returns
     -------
@@ -454,19 +458,26 @@ def mutual_info(
     Parameters
     ----------
     y1 : ArrayLike
-        First input time series
+        First input time series.
     y2 : ArrayLike
-        Second input time series
+        Second input time series.
     est_method : str, optional
         Estimation method to use:
+        
         - 'gaussian': Assumes Gaussian variables
         - 'kernel': Kernel density estimation (default)
         - 'kraskov1': Kraskov estimator 1 (KSG1)
         - 'kraskov2': Kraskov estimator 2 (KSG2)
+
+        Default is `kernel`.
+
     extra_param : Union[int, str], optional
         Extra parameter for the estimator:
+
         - For Kraskov estimators: number of nearest neighbors 'k' (default: 3)
         - For other methods: ignored
+
+        Default is `None`.
 
     Returns
     -------
@@ -486,7 +497,7 @@ def mutual_info(
     return out
 
 def _initialize_MI(
-    est_method: str = "gaussian",
+    est_method: str = 'gaussian',
     extra_param: Optional[Union[int, str]] = None,
     add_noise: bool = False,
     verbose: bool = False
@@ -500,26 +511,33 @@ def _initialize_MI(
     Parameters
     ----------
     est_method : str, optional
+
         Estimation method to use:
         - 'gaussian': Assumes Gaussian variables (simplest)
         - 'kernel': Kernel density estimation
         - 'kraskov1': Kraskov estimator 1 (KSG1)
         - 'kraskov2': Kraskov estimator 2 (KSG2)
-        Default is 'gaussian'.
+        
+        Default is ``'gaussian'``.
 
     extra_param : Union[int, str], optional
         Configuration parameter for the estimator:
+
         - For Kraskov methods: number of nearest neighbors 'k'
         - For other methods: ignored
-        Default is None (uses k=3 for Kraskov).
+
+        Default is `None` (uses k=3 for Kraskov).
 
     add_noise : bool, optional
         Whether to add small random noise for Kraskov estimators:
+
         - True: Add noise (helpful for deterministic signals)
-        - False: No noise (default)
+        - False: No noise.
+
+        Default is `False`.
     
     verbose : bool, optional
-        Display JVM debug info. 
+        Display JVM debug info. Default is `False`.
 
     Returns
     -------
@@ -586,7 +604,7 @@ def rm_automutual_information(y: ArrayLike, tau: int = 1) -> float:
     y : array-like
         The input time series.
     tau: int
-        Time lag for automutual information calculation
+        Time lag for automutual information calculation. Default is 1.
 
     Returns
     -------

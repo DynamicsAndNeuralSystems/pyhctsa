@@ -157,7 +157,7 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
     return out
 
-def first_under_fn(x : ArrayLike, m : ArrayLike, p : ArrayLike):
+def first_under_fn(x : ArrayLike, m : ArrayLike, p : ArrayLike) -> float:
     """
     Find the value of m for the first time p goes under the threshold, x. 
     p and m are vectors of the same length
@@ -242,7 +242,7 @@ def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
     y : array-like
         The input time series.
     time_lag : int, optional
-        The time scale (in samples) to use for the embedding (default is 1).
+        The time scale (in samples) to use for the embedding. Default is 1.
 
     Returns
     -------
@@ -284,7 +284,7 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
     Parameters
     ----------
     y : array-like
-        The input time series (column vector).
+        The input time series.
     max_tau : int
         The maximum time lag to consider.
 
@@ -353,10 +353,10 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     Parameters
     ----------
     y : array-like
-        The input time series (will be converted to a column vector).
+        The input time series.
     tau : int or str, optional
         The time-delay. If 'tau', it will be set to the first zero-crossing of 
-        the autocorrelation function (ACF).
+        the autocorrelation function (ACF). Default is ``'tau'``.
 
     Returns
     -------
@@ -504,7 +504,7 @@ def periodicity_wang(y: ArrayLike) -> dict:
     Parameters
     ----------
     y : array-like
-        The input time series
+        The input time series.
 
     Returns
     -------
@@ -515,7 +515,7 @@ def periodicity_wang(y: ArrayLike) -> dict:
 
     return periodicity_wang_wrapper.periodicity_wang(y)
 
-def compare_min_ami(y: ArrayLike, bin_method: str = 'std1', 
+def compare_min_ami(y: ArrayLike, bin_method: str = 'std1',
                     num_bins: Union[int, ArrayLike] = 10) -> dict:
     """
     Assess the variability in the first minimum of automutual 
@@ -612,21 +612,22 @@ def histogram_ami(
     Parameters
     ----------
     y : array-like
-        The input time series
+        The input time series.
     tau : int, list, or str, optional
-        The time-lag(s) (default: 1)
-        Can be an integer time lag, list of time lags, or 'ac'/'tau' to use
-        first zero-crossing of autocorrelation function
+        The time-lag(s). Can be an integer time lag, list of time lags, or 'ac'/'tau' to use
+        first zero-crossing of autocorrelation function. Default is 1.
     meth : str, optional
-        The method for binning data (default: 'even'):
+        The method for binning data:
 
         - 'even': evenly-spaced bins through the range
         - 'std1': bins extending to ±1 standard deviation from mean
         - 'std2': bins extending to ±2 standard deviations from mean
         - 'quantiles': equiprobable bins using quantiles
+
+        Default is ``'even'``.
         
     num_bins : int, optional
-        The number of bins to use (default: 10)
+        The number of bins to use. Default is 10.
 
     Returns
     -------
@@ -702,9 +703,9 @@ def histogram_ami(
 
 def stick_angles(y: ArrayLike) -> dict:
     """
-    Analysis of the line-of-sight angles between time series data pts. 
+    Analysis of the line-of-sight angles between time series data points. 
 
-    Line-of-sight angles between time-series pts treat each time-series value as a stick 
+    Line-of-sight angles between time-series pts. treat each time-series value as a stick 
     protruding from an opaque baseline level. Statistics are returned on the raw time series, 
     where sticks protrude from the zero-level, and the z-scored time series, where sticks
     protrude from the mean level of the time series.
@@ -712,7 +713,7 @@ def stick_angles(y: ArrayLike) -> dict:
     Parameters
     -----------
     y : array-like
-        The input time series
+        The input time series.
 
     Returns
     --------
@@ -952,7 +953,7 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
     Parameters
     ----------
     y : array-like
-        The z-scored input time series (1D array).
+        The z-scored input time series.
 
     taus : array-like of int
         Vector of time delays (lags) :math:`\\{\\tau_k\\}` defining the product.
@@ -968,9 +969,11 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
         Whether to apply an absolute value before the final mean.
 
         - If ``True``, takes the absolute value before averaging (often useful when
-        the product has an even number of terms).
-        - If ``None`` (default), sets ``absval=True`` when ``len(taus)`` is even and
-        ``absval=False`` when ``len(taus)`` is odd.
+            the product has an even number of terms).
+        - If ``None``, sets ``absval=True`` when ``len(taus)`` is even and
+            ``absval=False`` when ``len(taus)`` is odd.
+
+        Default is ``None``.
 
     Returns
     -------
@@ -1011,13 +1014,16 @@ def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'ols') 
     Parameters
     ----------
     y : array-like
-        The input time series as a scalar column vector
+        The input time series.
     max_tau : int, optional
-        The maximum time-delay to compute PACF values for (default=10)
-    what_method : {'ols', 'Yule-Walker'}, optional
-        Method to compute partial autocorrelation (default='ols'):
-        - 'ols': Ordinary least squares regression
-        - 'Yule-Walker': Yule-Walker equations method
+        Maximum time-delay to compute PACF values for. Default is 10.
+    method : {'ols', 'yule-walker'}, optional
+        Method to compute partial autocorrelation:
+
+        - ``'ols'``: Ordinary least squares regression.
+        - ``'yule-walker'``: Yule-Walker equations method.
+
+        Default is ``'ols'``.
 
     Returns
     -------
@@ -1063,9 +1069,10 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     Parameters
     ----------
     y : array-like
-        The z-scored input time series (1D array).
+        The z-scored input time series.
     tau : (int, optional)
         The time delay. If None, it's set to the first minimum of the autocorrelation function.
+        Default is ``None``.
 
     Returns
     -------
@@ -1143,11 +1150,12 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     Parameters
     ----------
     y : array-like
-        Input time series (1D array).
+        Input time series.
 
     tau : int
         Time delay used to construct the embedding
         :math:`(y_i, y_{i-\\tau})`.
+        Default is 1.
 
     Returns
     -------
@@ -1234,14 +1242,14 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     Parameters
     -----------
     y : array-like
-        The input time-series as a (z-scored) column vector.
+        The input time-series (z-scored).
     tau : int or str, optional
         The time-delay. If 'tau', it's set to the first zero crossing of the 
-        autocorrelation function.
+        autocorrelation function. Default is ``'tau'``.
     shape : str, optional
-        The shape to use. Currently only 'circle' is supported.
+        The shape to use. Currently only 'circle' is supported. Default is ``circle``.
     r : float, optional
-        The radius of the circle.
+        The radius of the circle. Default is 1.0.
 
     Returns
     --------
@@ -1334,14 +1342,14 @@ def fzcglscf(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int],
     Parameters
     ----------
     y : array-like
-        The input time series
+        The input time series.
     alpha : float 
         The parameter alpha for GLSCF calculation. Must be non-zero.
     beta : float
         The parameter beta for GLSCF calculation. Must be non-zero.
     max_tau : int, optional
         Maximum time delay to search up to. If None, uses the time-series length.
-        Default is None.
+        Default is ``None``.
 
     Returns
     -------
@@ -1426,7 +1434,7 @@ def glscf(y: ArrayLike, alpha: float, beta: float, tau: Union[int, str] = 'tau')
         - If ``"tau"``, uses the first zero-crossing of the
         autocorrelation function.
 
-        Default is ``"tau"``.
+        Default is ``'tau'``.
 
     Returns
     -------
@@ -1463,8 +1471,9 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
 
         - If an ``int``, returns the autocorrelation of ``y`` at that lag.
         - If a ``list`` of integers, returns autocorrelations at those lags.
-        - If an empty list, returns the full autocorrelation function when
+        - If an empty list, returns the full autocorrelation function when 
         using the ``"Fourier"`` estimation method.
+        Default is 1.
 
     method : {"Fourier", "TimeDomainStat", "TimeDomain"}, optional
         Method used to compute the autocorrelation.
@@ -1473,6 +1482,8 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
             theorem using the Fourier transform.
         - ``"TimeDomainStat"``: Statistical time-domain estimator.
         - ``"TimeDomain"``: Direct time-domain computation.
+
+        Default is ``'Fourier'``.
 
     Returns
     --------
@@ -1550,19 +1561,19 @@ def first_crossing(y: ArrayLike, corr_fun: str = 'ac', threshold: float = 0.0,
     Parameters
     -----------
     y : array-like
-        The input time series
+        The input time series.
     corr_fun : str, optional
         The self-correlation function to measure:
-        'ac': normal linear autocorrelation function
+        'ac': normal linear autocorrelation function. Default is ``'ac'``.
     threshold : float, optional
-        Threshold to cross. Examples: 0 [first zero crossing], 1/np.e [first 1/e crossing]
+        Threshold to cross. Examples: 0 [first zero crossing], 1/np.e [first 1/e crossing]. Default is 0.
     what_out : str, optional
-        Specifies the output format: 'both', 'discrete', or 'continuous'
+        Specifies the output format: 'both', 'discrete', or 'continuous'. Default is ``'both'``.
 
     Returns
     --------
     dict or float
-        The first crossing information, format depends on whatOut.
+        The first crossing information, format depends on what_out.
     """
     # Select the self-correlation function
     if threshold == '1/e':
@@ -1616,8 +1627,8 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
         Parameter specifying the size of the shape (e.g., radius for 'circle', 
             half-width for 'rectangle'). Default is 2.
     how_to_move : str, optional
-        Method for moving the shape. Currently, only 'pts' is supported, which places 
-            the shape on each point in the time series.
+        Method for moving the shape. Currently, only ``'pts'`` is supported, which places 
+        the shape on each point in the time series. Default is ``'pts'``.
 
     Returns
     -------
@@ -1637,7 +1648,7 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
 
     # add a time index
     # has increasing integers as time in the first column
-    ty = np.column_stack((np.arange(1, N+1), y[:, 0])) 
+    ty = np.column_stack((np.arange(1, N+1), y[:, 0]))
     if how_to_move == 'pts':
 
         if shape == 'circle':
@@ -1731,7 +1742,7 @@ def _stat_av(y: ArrayLike, window_stat: str = 'mean', num_seg: int = 5, inc_move
 
     return np.std(qs, ddof=1)/np.std(y, ddof=1)
 
-def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'posDrown') -> dict:
+def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> dict:
     """
     How the autocorrelation function changes with the time lag.
 
@@ -1741,10 +1752,10 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'posDrown') -> dic
     Parameters
     -----------
     y : array-like
-        The input time series
+        The input time series.
     stop_when : str or int, optional
         The criterion for the maximum lag to measure the ACF up to.
-        Default is 'posDrown'.
+        Default is ``'pos_drown'``.
 
     Returns
     --------
@@ -1766,10 +1777,10 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'posDrown') -> dic
         acf = autocorr(y, taus, 'Fourier')
         n_drown = stop_when
         
-    elif stop_when in ['posDrown', 'drown', 'doubleDrown']:
+    elif stop_when in ['pos_drown', 'drown', 'double_drown']:
         # Compute ACF up to a given threshold:
         n_drown = 0 # the point at which ACF ~ 0
-        if stop_when == 'posDrown':
+        if stop_when == 'pos_drown':
             # stop when ACF drops below threshold, th
             for i in range(1, N+1):
                 acf_val = autocorr(y, i-1, 'Fourier')[0]
@@ -1800,7 +1811,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'posDrown') -> dic
                     acf.append(acf_val)
                     break
                 acf.append(acf_val)
-        elif stop_when == 'doubleDrown':
+        elif stop_when == 'double_drown':
             # Stop at 2*tau, where tau is the lag where ACF ~ 0 (within 1/sqrt(N) threshold)
             for i in range(1, N+1):
                 acf_val = autocorr(y, i-1, 'Fourier')[0]
@@ -1827,7 +1838,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'posDrown') -> dic
     # Basic stats on the ACF
     out['sumacf'] = np.sum(acf)
     out['meanacf'] = np.mean(acf)
-    if stop_when != 'posDrown':
+    if stop_when != 'pos_drown':
         out['meanabsacf'] = np.mean(np.abs(acf))
         out['sumabsacf'] = np.sum(np.abs(acf))
 
@@ -1868,7 +1879,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'posDrown') -> dic
     fit_success = False
     min_pts_to_fit_exp = 4 # (need at least four points to fit exponential)
 
-    if stop_when == 'posDrown' and nac >= min_pts_to_fit_exp:
+    if stop_when == 'pos_drown' and nac >= min_pts_to_fit_exp:
         # Fit exponential decay to (absolute) ACF:
         # (kind of only makes sense for the first positive period)
         exp_func = lambda x, b : np.exp(-b * x)
@@ -1913,9 +1924,12 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
         Input time series.
     tau : int or str, optional
         Time lag. Can be:
+
             - int: Use the specified lag.
-            - 'ac': Use the first zero-crossing of the autocorrelation function (default).
+            - 'ac': Use the first zero-crossing of the autocorrelation function.
             - 'mi': Use the first minimum of the automutual information function.
+
+        Default is ``'ac'``.
 
     Returns
     -------
@@ -1975,9 +1989,12 @@ def tc3(y: list, tau: Union[int, str, None] = 'ac') -> dict:
         Input time series.
     tau : int or str, optional
         Time lag. Can be:
+        
             - int: Use the specified lag.
-            - 'ac': Use the first zero-crossing of the autocorrelation function. Default is 'ac'.
+            - 'ac': Use the first zero-crossing of the autocorrelation function.
             - 'mi': Use the first minimum of the automutual information function.
+
+            Default is 'ac'.
 
     Returns
     -------

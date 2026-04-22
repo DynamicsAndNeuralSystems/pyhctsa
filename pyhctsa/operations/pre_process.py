@@ -91,7 +91,7 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf') -> dict:
         where ``P`` is the upsampling factor and ``Q`` is the
         downsampling factor (e.g., ``"resample_1_2"`` for half rate).
 
-        Default is ``"medianf"``.
+        Default is ```medianf```.
 
     Returns
     -------

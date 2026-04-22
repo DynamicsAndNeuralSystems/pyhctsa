@@ -89,15 +89,18 @@ def sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str) 
 
     return out
 
-def make_surrogates(x: ArrayLike, surr_method: str, num_surrs: int = 1, 
+def make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
                     random_seed: int = 42) -> ArrayLike:
     """
     Generates surrogate time series.
 
     Method described relatively clearly in Guarin Lopez et al. (arXiv, 2010)
-    Used bits of aaft code that references (and presumably was obtained from)
-    "Surrogate data test for nonlinearity including monotonic
-    transformations", D. Kugiumtzis, Phys. Rev. E, vol. 62, no. 1, 2000.
+    Used bits of aaft code that references (and presumably was obtained from) [1].
+
+    References
+    ----------
+    .. [1] "Surrogate data test for nonlinearity including monotonic
+        transformations", D. Kugiumtzis, Phys. Rev. E, vol. 62, no. 1, 2000.
 
     Parameters
     ----------
@@ -105,15 +108,17 @@ def make_surrogates(x: ArrayLike, surr_method: str, num_surrs: int = 1,
         The input time series.
     surr_method : str
         The method for generating surrogates:
-            - 'RP' -- random phase surrogates
-            - 'AAFT' -- amplitude adjusted Fourier transform.
-                NOTE: **Not yet implemented.**
-            - 'TFT' -- truncated Fourier transform.
-                NOTE: **Not yet implemented.**
+
+        - 'RP': Random phase surrogates
+        - 'AAFT': Amplitude adjusted Fourier transform. NOTE: **Not yet implemented.**
+        - 'TFT': Truncated Fourier transform. NOTE: **Not yet implemented.**
+        
+        Default is ``'RP'``.
+            
     num_surrs : int, optional
-        The number of surrogates to generate.
+        The number of surrogates to generate. Default is 1.
     random_seed : int, optional
-        Random seed for reproducibility. 
+        Random seed for reproducibility. Default is 42.
 
     Returns
     -------
@@ -175,9 +180,9 @@ def make_surrogates(x: ArrayLike, surr_method: str, num_surrs: int = 1,
 
 def surrogate_test(
     x: ArrayLike,
-    surr_meth: str = "RP",
+    surr_meth: str = 'RP',
     num_surrs: int = 99,
-    the_test_stat: Union[str, ArrayLike] = "ami1",
+    the_test_stat: Union[str, ArrayLike] = 'ami1',
     random_seed: int = 42
 ) -> dict:
     """
@@ -213,10 +218,12 @@ def surrogate_test(
             "A new surrogate data method for nonstationary time series",
             D. L. Guarin Lopez et al., arXiv 1008.1804 (2010)).
             NOTE: **Not yet implemented.**
+        
+        Default is ``'RP'``.
 
     num_surrs : int, optional
-        The number of surrogates to compute (default is 99 for a 0.01 significance 
-        level 1-sided test).
+        The number of surrogates to compute. Default is 99 for a 0.01 significance 
+        level 1-sided test.
     the_test_stat : str or array-like, optional
         The test statistic(s) to evaluate on all surrogates and the original time series.
         Can specify multiple options and will return output for each specified test statistic:
@@ -225,11 +232,12 @@ def surrogate_test(
         - 'fmmi': the first minimum of the automutual information function.
         - 'o3': a third-order statistic used in [3].
         - 'tc3': a time-reversal asymmetry measure.
-        Outputs of the function include a z-test between the two distributions, and
+        
+        Default is ``'ami'``. Outputs of the function include a z-test between the two distributions, and
         some comparative rank-based statistics.
         
     random_seed : int, optional
-        Random seed for reproducibility.
+        Random seed for reproducibility. Default is 42.
 
     Returns
     -------
@@ -246,17 +254,17 @@ def surrogate_test(
     #% Evaluate test statistic on each surrogate
     out = {}
 
-    if "ami1" in the_test_stat:
+    if 'ami1' in the_test_stat:
         ami_fn = lambda time_series, time_delay: automutual_info(time_series, time_delay, 'gaussian')
         ami_x = ami_fn(x, 1)
         ami_surr = np.zeros(num_surrs)
         for i in range(num_surrs):
             ami_surr[i] = ami_fn(z[:, i], 1)
-        some_stats = sd_give_me_stats(ami_x, ami_surr, "right")
+        some_stats = sd_give_me_stats(ami_x, ami_surr, 'right')
         for (k, v) in zip(some_stats.keys(), some_stats.values()):
             out[f'ami_{k}'] = v
 
-    if "fmmi" in the_test_stat:
+    if 'fmmi' in the_test_stat:
         #% Investigate the first minimum of mutual information of surrogates compared to
         #% that of signal itself
         fmmi_x = first_min(x, 'mi')
@@ -270,22 +278,22 @@ def surrogate_test(
         if np.isnan(fmmi_surr).any():
             raise ValueError("fmmi failed")
         #% FMMI should be higher for signal than surrogates
-        some_stats = sd_give_me_stats(fmmi_x, fmmi_surr, "right")
+        some_stats = sd_give_me_stats(fmmi_x, fmmi_surr, 'right')
         for (k, v) in zip(some_stats.keys(), some_stats.values()):
             out[f'fmmi_{k}'] = v
 
-    if "o3" in the_test_stat:
+    if 'o3' in the_test_stat:
         #% Third-order statistic in Schreiber, Schmitz (Physica D)
         tau = 1
         o3_x = (1.0 / (n - tau)) * np.sum((x[tau:] - x[:n - tau]) ** 3)
         o3_surr = np.zeros(num_surrs, dtype=float)
         for i in range(num_surrs):
             o3_surr[i] = (1.0 / (n - tau)) * np.sum((z[tau:, i] - z[:n - tau, i]) ** 3)
-        some_stats = sd_give_me_stats(o3_x, o3_surr, "both")
+        some_stats = sd_give_me_stats(o3_x, o3_surr, 'both')
         for (k, v) in zip(some_stats.keys(), some_stats.values()):
             out[f'o3_{k}'] = v
 
-    if "tc3" in the_test_stat:
+    if 'tc3' in the_test_stat:
         # tc3 statistic -- another time-reversal asymmetry measure
         tau = 1
         tmp = tc3(x, tau)
@@ -294,7 +302,7 @@ def surrogate_test(
         for i in range(num_surrs):
             tmp = tc3(z[:, i], tau)
             tc3_surr[i] = tmp['raw']
-        some_stats = sd_give_me_stats(tc3_x, tc3_surr, "both")
+        some_stats = sd_give_me_stats(tc3_x, tc3_surr, 'both')
         for (k, v) in zip(some_stats.keys(), some_stats.values()):
             out[f'tc3_{k}'] = v
 

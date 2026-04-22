@@ -10,7 +10,7 @@ from ..operations.correlation import first_crossing
 from ..utils import binarize, sign_change
 
 def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_groups: int = 3,
-             coarse_grain_method: str = 'quantile', num_iters: int = 500, 
+             coarse_grain_method: str = 'quantile', num_iters: int = 500,
              random_seed: int = 0) -> dict:
     """
     Quantifies how surprised you would be of the next data point given recent memory.
@@ -32,6 +32,8 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
         - 'T1': the one-point transition probabilities in the previous memory samples,
         - 'T2': the two-point transition probabilities in the previous memory samples.
 
+        Default is ``'dist'``.
+
     memory : float, optional
         The memory length (either number of samples, or a proportion of the time-series length 
         if between 0 and 1). Default is 0.2.
@@ -44,6 +46,8 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
         - 'updown': equiprobable alphabet by incremental changes in the time-series values,
         - 'embed2quadrants': 4-letter alphabet of the quadrant each data point resides in a 
             2D embedding space.
+        
+        Default is ``'quantile'``.
 
     num_iters : int, optional
         The number of iterations to repeat the procedure for. Default is 500.
@@ -157,9 +161,11 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
     binarize_how : str, optional
         The method used for binary transformation. One of:
 
-        - 'diff': Encode increases in the time series as 1, and decreases as 0 (default).
+        - 'diff': Encode increases in the time series as 1, and decreases as 0.
         - 'mean': Encode values above the mean as 1, and below as 0.
         - 'median': Encode values above the median as 1, and below as 0.
+
+        Default is ``'diff'``.
 
     Returns
     -------
@@ -316,8 +322,10 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
     cg_how : {'quantile', 'diffquant'}, optional
         The coarse-graining method to use:
 
-        - 'quantile': equiprobable alphabet by time-series value (default)
+        - 'quantile': equiprobable alphabet by time-series value
         - 'diffquant': equiprobably alphabet by time-series increments
+
+        Default is ``'quantile'``.
 
     Returns
     -------
@@ -431,8 +439,10 @@ def binary_stretch(x: ArrayLike, stretch_what: str = 'lseq1') -> float:
     stretch_what : str, optional
         Specifies which binary symbol's stretch length to analyze:
 
-        - 'lseq1': Analyze stretches related to consecutive 1s (default).
+        - 'lseq1': Analyze stretches related to consecutive 1s.
         - 'lseq0': Analyze stretches related to consecutive 0s.
+
+        Default is ``'lseq1'``.
 
     Returns
     -------
@@ -484,8 +494,10 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     binary_method : str, optional
         The binary symbolisation rule. One of:
 
-        - 'diff' : Encode as 1 if the time-series difference is positive, and 0 otherwise (default).
-        - 'mean' : Encode as 1 if the value is above the mean, 0 otherwise.
+        - 'diff': Encode as 1 if the time-series difference is positive, and 0 otherwise.
+        - 'mean': Encode as 1 if the value is above the mean, 0 otherwise.
+
+        Default is ``'diff'``.
 
     Returns
     -------
@@ -572,15 +584,16 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     y : array-like
         Input time series.
     how_to_cg : str, optional
-        The method of discretization (currently 'quantile' is the only option)
+        The method of discretization. Default is ``'quantile'``.
     num_groups : int, optional
-        number of groups in the course-graining
+        number of groups in the course-graining. Default is 2.
     tau : int or str, optional
         analyze transition matricies corresponding to this lag. We
         could either downsample the time series at this lag and then do the
         discretization as normal, or do the discretization and then just
         look at this dicrete lag. Here we do the former. Can also set tau to 'ac'
         to set tau to the first zero-crossing of the autocorrelation function.
+        Default is 1.
 
     Returns
     -------
@@ -679,6 +692,7 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: int) -> np.ndarray:
         - 'quantile'
         - 'embed2quadrants'
         - 'embed2octants'
+        
     num_groups : int
         Specifies the size of the alphabet for 'quantile' and 'updown',
         or sets the time delay for the embedding subroutines.

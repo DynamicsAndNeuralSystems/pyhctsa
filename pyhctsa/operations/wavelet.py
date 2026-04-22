@@ -234,11 +234,11 @@ def scal_2_freq(y: ArrayLike, w_name: str = 'db3', a_max: int = 5, delta: int = 
     y : array-like
         The input time series.
     w_name : str, optional
-        The name of the mother wavelet to analyze the data with: e.g., 'db3', 'sym2'.
+        The name of the mother wavelet to analyze the data with: e.g., 'db3', 'sym2'. Default is ``'db3'``.
     a_max : int, optional
-        The maximum scale / level (can be 'max' to set according to wmaxlev)
+        The maximum scale / level (can be 'max' to set according to wmaxlev). Default is 5.
     delta: int, optional
-        The sampling period.
+        The sampling period. Default is 1.
             
     Returns
     -------
@@ -290,9 +290,9 @@ def dwt_coeff(y: ArrayLike, w_name: str = 'db3', level: int = 3) -> dict:
     y : array-like
         The input time series.
     w_name : str, optional
-        The mother wavelet, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), etc. Default is 'db3'.
+        The mother wavelet, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), etc. Default is ``'db3'``.
     level : int, optional
-        The level of wavelet decomposition (can be set to 'max' for the maximum level determined by wmaxlev)
+        The level of wavelet decomposition (can be set to 'max' for the maximum level determined by wmaxlev). Default is 3.
             
     Returns
     -------
@@ -346,7 +346,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     y : array-like
         The input time series.
     w_name : str, optional
-        The wavelet name, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), etc. Default is 'db3'.
+        The wavelet name, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), etc. Default is ``'db3'``.
     max_scale : int, optional
         The maximum scale of wavelet analysis. Default is 32.
 
@@ -448,8 +448,8 @@ def detail_coeffs(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] 
     y : array-like
         The input time series.
     w_name : str, optional
-        The name of the mother wavelet to analyze the data with (e.g., 'db3', 'sym2').
-        See the Wavelet Toolbox or PyWavelets documentation for details. Default is 'db3'.
+        The name of the mother wavelet to analyze the data with (e.g., ``'db3'``, ``'sym2'``).
+        See the Wavelet Toolbox or PyWavelets documentation for details. Default is ``'db3'``.
     max_level : int or 'max', optional
         The maximum wavelet decomposition level. If 'max', uses the maximum allowed level for the data length and wavelet.
         Default is 20.
@@ -532,7 +532,7 @@ def wl_coeffs(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 3) -> 
         The input time series.
     w_name : str, optional
         The wavelet name (e.g., 'db3'). See PyWavelets documentation for all options.
-        Default is 'db3'.
+        Default is ``'db3'``.
     level : int or 'max', optional
         The level of wavelet decomposition. If 'max', uses the maximum allowed level for the data length and wavelet.
         Default is 3.
