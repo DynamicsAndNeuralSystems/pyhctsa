@@ -8,6 +8,7 @@ from scipy.signal import lfilter
 from scipy.stats import ks_1samp, norm, t
 from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.tsa.ar_model import AutoReg, ar_select_order
+from lmfit.models import SineModel
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
@@ -783,4 +784,43 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
     out['aerr_max'] = np.max(a_err)
     out['aerr_mean'] = np.mean(a_err)
 
+    return out
+
+def is_seasonal(y: ArrayLike) -> int:
+    """
+    Fits a 'sin1' (single frequency sinusoid) model to the time series. 
+    The output is binary: 1 if the goodness of fit, R^2, exceeds 0.3 and
+    the amplitude of the fitted periodic component exceeds 0.5, and 0 otherwise.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    
+    Returns
+    -------
+    bool
+        Binary: 1 (= seasonal), 0 (= non-seasonal)
+    """
+    y = np.asarray(y).flatten()
+    N = len(y)
+    r = np.arange(1, N + 1)
+    
+    model = SineModel()
+    params = model.guess(y, x=r) 
+    
+    result = model.fit(y, params, x=r)
+    # extract the amplitude
+    a1 = result.params['amplitude'].value
+    r_squared = result.rsquared
+
+    #% Condition 1: fit is ok
+    th_fit = 0.3 # % r2 > th_fit
+    #% Condition 2: amplitude is not too small
+    th_ampl = 0.5 #% a1 > th_ampl
+
+    out = 0 # test thinks the time series doesn't have any strong periodicities
+    if r_squared > th_fit and abs(a1) > th_ampl:
+        out = 1 # test thinks the time series has strong periodicities
+    
     return out
