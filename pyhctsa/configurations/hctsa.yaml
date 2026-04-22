@@ -1504,6 +1504,14 @@ model_fit:
     legacy_name: MF_hmm_fit
     ordered_args: ['train_p', 'num_states']
   
+  is_seasonal:
+    base_name: is_seasonal
+    depedencies:
+      - lmfit
+    configs:
+      - {zscore: True}
+    legacy_name: DT_IsSeasonal
+  
 graph:
   visibility_graph:
     base_name: visibility_graph
