@@ -177,17 +177,17 @@ def withinp(x: ArrayLike, p: float = 1.0, mean_or_median: str = 'mean') -> float
     Parameters
     -----------
     x : array-like
-        The input data vector
+        The input time series.
     p : float
-        The number (proportion) of standard deviations
+        The number (proportion) of standard deviations. Default is 1.0
     mean_or_median : str 
         Whether to use units of 'mean' and standard deviation, or 'median' 
-        and rescaled interquartile range.
+        and rescaled interquartile range. Default is ``'mean'``.
 
     Returns
     --------
     float: 
-        The proportion of data points within p standard deviations
+        The proportion of data points within p standard deviations.
     """
     x = np.asarray(x)
     N = len(x)
@@ -231,14 +231,16 @@ def spread(y: ArrayLike, spread_measure: str = 'std') -> float:
     Parameters
     ----------
     y : array-like
-        The input time series or data vector.
+        The input time series.
     spread_measure : str, optional
-        The spread measure to use (default is 'std'):
+        The spread measure to use:
 
         - 'std': standard deviation
         - 'iqr': interquartile range 
         - 'mad': mean absolute deviation
         - 'mead': median absolute deviation
+
+        Default is ``'std'``.
 
     Returns
     -------
@@ -272,7 +274,7 @@ def quantile(y: ArrayLike, p: float = 0.5) -> float:
     y : array-like
         The input data vector.
     p : float 
-        The quantile proportion (default is 0.5, which is the median).
+        The quantile proportion. Default is 0.5, which is the median.
 
     Returns
     -------
@@ -292,13 +294,15 @@ def proportion_values(x: ArrayLike, prop_what: str = 'positive') -> float:
     Parameters
     ----------
     x : array-like
-        Input time series or data vector
-    prop_what : str, optional (default is 'positive')
+        Input time series.
+    prop_what : str, optional
         Type of values to count:
 
         - 'zeros': values equal to zero
         - 'positive': values strictly greater than zero
         - 'geq0': values greater than or equal to zero
+
+        Default is ``'positive'``.
 
     Returns
     -------
@@ -333,7 +337,7 @@ def pleft(y: ArrayLike, th: float = 0.1) -> float:
     y : array-like
         The input data vector.
     th : float, optional
-        The proportion of data further than `th` from the mean (default is 0.1).
+        The proportion of data further than `th` from the mean. Default is 0.1.
     
     Returns
     -------
@@ -355,11 +359,13 @@ def min_max(y: ArrayLike, min_or_max: str = 'max') -> float:
     ----------
     y : array-like
         Input time series or data vector
-    minOrMax : str, optional
-        Return either the minimum or maximum of y. Default is 'max':
+    min_or_max : str, optional
+        Return either the minimum or maximum of y:
 
         - 'min': minimum of y
         - 'max': maximum of y
+
+        Default is ``'max'``.
 
     Returns
     -------
@@ -385,7 +391,7 @@ def mean(y: ArrayLike, mean_type: str = 'arithmetic') -> float:
     y : array-like
         Input time series or data vector
     mean_type : str, optional
-        Type of mean to calculate. Default is 'arithmtic':
+        Type of mean to calculate:
 
         - 'norm' or 'arithmetic': standard arithmetic mean
         - 'median': middle value (50th percentile)
@@ -394,6 +400,8 @@ def mean(y: ArrayLike, mean_type: str = 'arithmetic') -> float:
         - 'rms': root mean square (quadratic mean)
         - 'iqm': interquartile mean (mean of values between Q1 and Q3)
         - 'midhinge': average of first and third quartiles
+
+        Default is ``'arithmtic'``.
 
     Returns
     -------
@@ -466,7 +474,8 @@ def fit_mle(y: ArrayLike, fit_what: str = 'gaussian') -> Union[Dict[str, float],
         - 'gaussian': Normal distribution (returns mean and std)
         - 'uniform': Uniform distribution (returns bounds a and b)
         - 'geometric': Geometric distribution (returns p parameter)
-        Default is 'gaussian'
+
+        Default is ``'gaussian'``.
 
     Returns
     -------
@@ -520,7 +529,7 @@ def cv(x: ArrayLike, k: int = 1) -> float:
         Input time series or data vector.
 
     k : int, optional
-        Order of the coefficient of variation. Default is ``1``.
+        Order of the coefficient of variation. Default is 1.
 
     Returns
     -------
@@ -794,7 +803,7 @@ def outlier_test(y: ArrayLike, p: float = 2,
     y : array-like
         The input data vector.
     p : float
-        The percentage of values to remove beyond upper and lower percentiles.
+        The percentage of values to remove beyond upper and lower percentiles. Default is 2.
     just_me : {'mean', 'std'}, optional
         If specified, just returns a number:
 
@@ -845,7 +854,7 @@ def trimmed_mean(x: ArrayLike, p_exclude: float = 0.0) -> float:
         The input time series or data vector
     p_exclude : float, optional
         The percentage of highest and lowest values to exclude from the mean 
-        calculation (default is 0.0, which gives the standard mean)
+        calculation. Default is 0.0, which gives the standard mean.
 
     Returns
     -------
@@ -896,9 +905,9 @@ def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True
     y : array-like
         Input time series
     num_bins : int, optional
-        Number of bins to use in histogram calculation. Default is 10
+        Number of bins to use in histogram calculation. Default is 10.
     do_simple : bool, optional
-        If True, uses linearly spaced bins. If False, uses optimized bin edges.
+        If True, uses linearly spaced bins. If False, uses optimized bin edges. Default is `True`.
 
     Returns
     -------
@@ -949,11 +958,11 @@ def histogram_mode(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> 
     Parameters
     -----------
     y : array-like
-        the input data vector
+        The input time series.
     num_bins : int, optional
-        the number of bins to use in the histogram
+        The number of bins to use in the histogram. Default is 10.
     do_simple : bool, optional
-        whether to use a simple binning method (linearly spaced bins)
+        Whether to use a simple binning method (linearly spaced bins). Default is `True`.
 
     Returns
     --------
@@ -995,11 +1004,13 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
         - 'max': the highest values,
         - 'random': at random.
 
+        Default is ``'absfar'``.
+
     p : float, optional
-        The proportion of points to remove (default: 0.1).
+        The proportion of points to remove. Default is 0.1.
     remove_or_saturate : {'remove', 'saturate'}, optional
         Whether to remove points ('remove') or saturate their values ('saturate').
-        Default is 'remove'.
+        Default is ``'remove'``.
 
     Returns
     -------

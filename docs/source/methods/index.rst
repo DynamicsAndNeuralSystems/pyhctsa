@@ -15,7 +15,7 @@ Select a card below to explore a category of time-series analysis methods implem
    .. grid-item-card:: Correlation
       :link: correlationmeths
       :link-type: ref
-      :img-bottom: ../_static/module_icons/correlation.png
+      :img-bottom: ../_static/module_icons/correlation.svg
    
    .. grid-item-card:: Criticality
       :link: criticalitymeths
@@ -25,7 +25,7 @@ Select a card below to explore a category of time-series analysis methods implem
    .. grid-item-card:: Distribution
       :link: distmeths
       :link-type: ref
-      :img-bottom: ../_static/module_icons/distribution.png
+      :img-bottom: ../_static/module_icons/distribution.svg
    
    .. grid-item-card:: Entropy
       :link: entropymeths
@@ -39,7 +39,7 @@ Select a card below to explore a category of time-series analysis methods implem
    .. grid-item-card:: Graph
       :link: graphmeths
       :link-type: ref
-
+      :img-bottom: ../_static/module_icons/graph.svg
       
    
    .. grid-item-card:: Hypothesis Tests
@@ -107,8 +107,8 @@ Select a card below to explore a category of time-series analysis methods implem
    .. grid-item-card:: Wavelet
       :link: waveletmeths
       :link-type: ref
+      :img-bottom: ../_static/module_icons/wavelet.svg
 
-      
    
    .. grid-item-card:: Nonlinearity
       :link: nonlinearitymeths

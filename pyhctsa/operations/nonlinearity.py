@@ -153,16 +153,15 @@ def nsamdf(x: ArrayLike, fs: Union[float, int] = 1.0, win_len_rel: Union[int, fl
     x : array-like
         Input time series.
     fs : float or int
-        Sampling frequency in Hz.
+        Sampling frequency in Hz. Default is 1.0.
     win_len_rel : float or int
-        Window length (a long enough segment is important to estimate the nonlinearity).
+        Window length (a long enough segment is important to estimate the nonlinearity). Default is 14.
     shift_len_rel : float or int
-        This amounts to window length - overlap length btw windows.
+        This amounts to window length - overlap length btw windows. Default is 0.5.
     lag_rel : float or int
-        TMaximum lag for nsAMDF, we chose it as 1.
+        TMaximum lag for nsAMDF, we chose it as 1. Default is 1.
     degree : The chosen degree p should ideally be large enough to capture the
-           highest order of nonlinearity within the data.
-           We chose p=7 for in our case of Parkinsonian data in the paper.
+           highest order of nonlinearity within the data. Default is 7.
     
     Returns
     -------

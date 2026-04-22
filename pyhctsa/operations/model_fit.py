@@ -22,9 +22,11 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     y : array-like
         The input time series.
     train_p : float
-        The proportion of data to train on, 0 < train_p < 1 (default is 0.8).
+        The proportion of data to train on, 0 < train_p < 1. Default is 0.8.
     num_states : int
-        The number of states in the HMM (default is 3).
+        The number of states in the HMM. Default is 3.
+    random_seed : int
+        Random seed. Default is 0.
 
     Returns
     -------
@@ -104,22 +106,29 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
     model : str, optional
         The model to fit in each segment of the time series:
 
-            - 'ar': fits an AR model of a specified order.
-              Outputs are how the fitted AR parameters vary across the different 
-              segments of time series.
-            - 'arma': Not yet implemented.
-            - 'ss': Not yet implemented.
+        - 'ar': fits an AR model of a specified order.
+            Outputs are how the fitted AR parameters vary across the different 
+            segments of time series.
+        - 'arma': Not yet implemented.
+        - 'ss': Not yet implemented.
+
+        Default is ``'ar'``.
 
     order : int, optional
-        The order of the model to fit (used for 'ar', 'ss', or 'arma' models).
+        The order of the model to fit (used for 'ar', 'ss', or 'arma' models). Default is 2.
     subset_how : str, optional
         How to choose segments from the time series, either:
-         - 'uniform' (uniformly) 
-         - 'rand' (at random) [not implemented].
+
+        - 'uniform' (uniformly) 
+        - 'rand' (at random) [not implemented].
+
+        Default is ``'uniform'``.
+         
     sample_p : list or tuple, optional
         A two-vector specifying how many segments to take and of what length.
         Of the form [n_samples, length], where length can be a proportion of the time-series length.
         For example, [20, 0.1] takes 20 segments of 10% the time-series length.
+        Default is [20, 0.1].
 
     Returns
     -------
@@ -183,13 +192,14 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     Parameters
     ----------
     y : array-like
-        The input time series
+        The input time series.
     forecast_meth : str, optional
         The prediction method:
 
         - 'mean': local mean prediction
         - 'median': local median prediction
-        Default is 'mean'
+
+        Default is ``'mean'``.
         
     Returns
     -------
@@ -277,19 +287,20 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     Parameters
     ----------
     y : array-like
-        The input time series
+        The input time series.
     forecast_meth : str, optional
         The forecasting method:
 
         - 'mean': local mean prediction using the past trainLength time-series values
         - 'median': local median prediction using the past trainLength time-series values  
         - 'lfit': local linear prediction using the past trainLength time-series values
-        Default is 'mean'
+
+        Default is ``'mean'``.
 
     train_length : int or str, optional
         The number of time-series values to use to forecast the next value.
         If 'ac', uses first zero-crossing of autocorrelation function.
-        Default is 1
+        Default is 1.
         
     Returns
     -------
@@ -363,10 +374,10 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
         The input time series.
     n_train : int or float, optional
         The number of samples to use for training. Can be an integer or a 
-        proportion of the time-series length.
+        proportion of the time-series length. Default is `None`.
     alpha : str or float, optional
-        The exponential smoothing parameter. If 'best', the function
-        optimizes alpha on the training set.
+        The exponential smoothing parameter. If ``'best'``, the function
+        optimizes alpha on the training set. Default is ``'best'``.
 
     Returns
     -------
@@ -689,7 +700,7 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
     p_max : int, optional
         The maximum AR model order to fit. Default is 10.
     selector : str, optional
-        Criterion to select optimal model order (e.g., 'sbc', cf. ARFIT package documentation). Default is 'sbc'.
+        Criterion to select optimal model order (e.g., 'sbc', cf. ARFIT package documentation). Default is ``'sbc'``.
 
     Returns
     -------

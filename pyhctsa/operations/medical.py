@@ -249,9 +249,9 @@ def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
     x : array-like
         The input time series.
     d : float
-        Symbolic coding threshold in units of standard deviation.
+        Symbolic coding threshold in units of standard deviation. Default is 1.
     D : int
-        Word length for detecting consecutive sequences (commonly D=6).
+        Word length for detecting consecutive sequences. Default is 6.
 
     Returns
     -------

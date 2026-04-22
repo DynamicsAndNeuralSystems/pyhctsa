@@ -16,7 +16,7 @@ def fast_dfa(y: ArrayLike) -> float:
     of detrended fluctuation analysis (DFA).
 
     This is a Python wrapper for Max Little's fastdfa code.
-    The original fastdfa code is by 
+    The original `fastdfa` code is by [1].
 
     References
     ----------
@@ -25,7 +25,7 @@ def fast_dfa(y: ArrayLike) -> float:
     Parameters
     ----------
     y : array-like
-        Input time series (1D array), fed straight into the fastdfa script.
+        Input time series (1D array), fed straight into the `fastdfa` script.
 
     Returns
     -------
@@ -71,7 +71,7 @@ def fluctuation_analysis(x: ArrayLike, q: Union[float, int] = 2,
     x : ArrayLike
         The input time series.
     q : Union[float, int], optional
-        The parameter in the fluctuation function. q = 2 (default) gives RMS 
+        The parameter in the fluctuation function. The default is q = 2 which gives RMS 
         fluctuations.
     wtf : str, optional
         What to fluctuate. Options are:
@@ -83,17 +83,19 @@ def fluctuation_analysis(x: ArrayLike, q: Union[float, int] = 2,
         - 'dfa': Removes a polynomial trend of order k in each segment
         - 'rsrange': Returns the range after removing a straight line fit [2]
         - 'rsrangefit': Fits a polynomial of order k and returns the range [2]
+
+        Default is ``'rsrange'``.
         
         For 'rsrangefit', an optional timelag can be applied for computing the 
         cumulative sum (integrated profile) [3].
     tau_step : int, optional
-        number of tau (locInc true), or increments in tau for linear range
+        Number of tau (locInc true), or increments in tau for linear range. Default is 1.
     k : int, optional
-        polynomial order of detrending (for 'dfa' & 'rsrangefit')
+        Polynomial order of detrending (for 'dfa' & 'rsrangefit'). Default is 1.
     lag : int or None, optional
-        optional time-lag, as in Alvarez-Ramirez [3]
+        Optional time-lag, as in Alvarez-Ramirez [3]. Default is `None`.
     log_inc : bool, optional
-        whether to use logarithmic increments in tau (it should be logarithmic)
+        Whether to use logarithmic increments in tau (it should be logarithmic). Default is `True`.
     
     Returns
     -------

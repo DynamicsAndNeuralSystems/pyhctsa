@@ -32,7 +32,8 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
 
         - 'par': compares each local distribution to the parent (full time series) distribution.
         - 'each': compares each local distribution to all other local distributions.
-        Default is 'par'.
+
+        Default is ``'par'``.
 
     num_points : int, optional
         Number of points to compute the distribution across in each local segment. Default is 200.
@@ -108,9 +109,9 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
     Parameters
     -----------
     y: array-like
-        the time series to analyze.
+        The time series to analyze.
     max_num_segments: int, optional
-        the maximum number of segments to consider. Sweeps from 2 to
+        The maximum number of segments to consider. Sweeps from 2 to
         max_num_segments. Defaults to 10.
 
     Returns
@@ -185,24 +186,31 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
     Parameters
     ---------
     x : array-like
-        the input time series
+        The input time series.
     window_length : float, optional
-        the sliding window length (can be a fraction to specify or a proportion of 
-        the time-series length)
+        The sliding window length (can be a fraction to specify or a proportion of 
+        the time-series length). Default is `None`.
     w_overlap : 
-        the overlap between consecutive windows as a fraction of the window length
+        The overlap between consecutive windows as a fraction of the window length. Default is `None`.
     mom_1, mom_2 : str, optional
-        the statistics to investigate correlations between (in each window):
-            (i) 'iqr': interquartile range
-            (ii) 'median': median
-            (iii) 'std': standard deviation (about the local mean)
-            (iv) 'mean': mean
+        The statistics to investigate correlations between (in each window)
+
+        - 'iqr': interquartile range
+        - 'median': median
+        - 'std': standard deviation (about the local mean)
+        - 'mean': mean
+
+        Default is ``'mean'``. 
+
     what_transform: str, optional
-        the pre-processing what_transform to apply to the time series before analyzing it:
-           (i) 'abs': takes absolute values of all data points
-           (ii) 'sqrt': takes the square root of absolute values of all data points
-           (iii) 'sq': takes the square of every data point
-           (iv) 'none': does no what_transform
+        The pre-processing what_transform to apply to the time series before analyzing it
+
+        - 'abs': takes absolute values of all data points
+        - 'sqrt': takes the square root of absolute values of all data points
+        - 'sq': takes the square of every data point
+        - 'none': does no what_transform
+
+        Default is ``'none'``.
     
     Returns
     --------
@@ -264,7 +272,7 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
 
     return out
 
-def _calc_me_moments(x_buff, mom_type):
+def _calc_me_moments(x_buff: ArrayLike, mom_type: str):
     """Helper function for `moment_corr`"""
     if mom_type == 'mean':
         moms = np.mean(x_buff, axis=0)
@@ -289,15 +297,17 @@ def simple_stats(x: ArrayLike, what_stat: str = 'zcross') -> dict:
     Parameters
     ----------
     x : array-like
-        The input time series
+        The input time series.
     what_stat : str, optional
-        The statistic to return (default is 'zcross'):
+        The statistic to return:
 
         - 'zcross': proportion of zero-crossings (for z-scored input, returns mean-crossings)
         - 'maxima': proportion of points that are local maxima
         - 'minima': proportion of points that are local minima
         - 'pmcross': ratio of crossings above +1σ to crossings below -1σ
         - 'zsczcross': ratio of zero-crossings in raw vs detrended time series
+
+        Default is `zcross`.
 
     Returns
     -------
@@ -365,12 +375,17 @@ def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = 
         - 'l': windows of a given length (n specifies the window length)
         - 'n': specified number of windows to break the time series into (n specifies number of windows)
         - 'tau': sets window length equal to correlation length (first zero-crossing of autocorrelation)
+
+        Default is ``'l'``.
+
     n : int, optional
         Specifies either:
 
         - Window length when how_to_window='l' (defaults to 100)
         - Number of windows when how_to_window='n' (defaults to 5)
         - Not used when how_to_window='tau'
+
+        Default is `None`.
 
     Returns
     -------
@@ -450,7 +465,7 @@ def kpss_test(y: ArrayLike, lags: Union[int, list] = 0) -> dict:
     is trend stationary. The null hypothesis is that the time series is trend stationary,
     while the alternative hypothesis is that it is a non-stationary unit-root process.
 
-    The test was introduced in [1]
+    The test was introduced in [1].
 
     The function can be used in two ways:
     1. With a single lag value - returns basic test statistic and p-value
@@ -472,6 +487,7 @@ def kpss_test(y: ArrayLike, lags: Union[int, list] = 0) -> dict:
 
         - A single lag value (int) to compute the test statistic and p-value
         - A list of lag values to analyze how the test results vary across lags
+
         Default is 0.
 
     Returns
@@ -520,7 +536,7 @@ def range_evolve(y: ArrayLike) -> dict:
     Parameters
     ----------
     y : array-like
-        The input time series to analyze
+        The input time series to analyze.
 
     Returns
     -------
@@ -593,14 +609,18 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
     segment_how : str, optional
         Method to segment the time series:
 
-        - 'fix': fixed-length segments of length l (default)
+        - 'fix': fixed-length segments of length l
         - 'num': splits into l number of segments
+
+        Default is ``'fix'``.
 
     l : int, optional
         Specifies either:
 
         - The length of segments when segment_how='fix' (default=20)
         - The number of segments when segment_how='num'
+
+        Default is 20.
 
     Returns
     -------
@@ -665,13 +685,17 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     subset_how : str, optional
         The method to select the local subset of time series:
 
-        - 'l': the first n points in a time series (default)
+        - 'l': the first n points in a time series
         - 'p': an initial proportion of the full time series
         - 'unicg': n evenly-spaced points throughout the time series
         - 'randcg': n randomly-chosen points from the time series (chosen with replacement)
+
+        Default is ``'l'``.
+
     n : int or float, optional
         The parameter for the method specified by subset_how.
-        Default is 100 samples or 0.1 (10% of time series length) if proportion. 
+        
+        Default `None` is 100 samples or 0.1 (10% of time series length) if proportion. 
 
     Returns
     --------
@@ -735,12 +759,12 @@ def fit_polynomial(y: ArrayLike, k: int = 1) -> float:
     y : ArrayLike
         the time series to analyze.
     k : int, optional
-        the order of the polynomial to fit to y.
+        the order of the polynomial to fit to y. Default is 1.
 
     Returns
     --------
     float
-        RMS error of the fit
+        RMS error of the fit.
     """
     y = np.asarray(y)
     N = len(y)
@@ -760,12 +784,12 @@ def ts_length(y: ArrayLike) -> int:
     Parameters
     -----------
     y : array-like
-        the time series to analyze.
+        The time series to analyze.
 
     Returns
     --------
     int
-        The length of the time series
+        The length of the time series.
     """
     return len(np.asarray(y))
 
@@ -792,15 +816,15 @@ def std_nth_deriv(y: ArrayLike, ndr: int = 2) -> float:
     Parameters
     ----------
     y : array-like
-        The input time series to analyze
+        The input time series to analyze.
     ndr : int, optional
-        The order of derivative to analyze (default=2)
-        Uses successive differences to estimate derivatives
+        The order of derivative to analyze.
+        Uses successive differences to estimate derivatives. Default is 2.
 
     Returns
     -------
     float
-        The standard deviation of the nth derivative of the time series
+        The standard deviation of the nth derivative of the time series.
     """
     # crude method of taking a derivative that could be improved upon in future...
     y = np.asarray(y)
@@ -826,7 +850,7 @@ def trend(y: ArrayLike) -> dict:
     Parameters
     ----------
     y : array-like
-        The input time series
+        The input time series.
 
     Returns
     -------
@@ -887,14 +911,18 @@ def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float
     what_type : str, optional
         Method to segment the time series:
 
-        - 'seg': divide into n segments (default)
+        - 'seg': divide into n segments
         - 'len': divide into segments of length n
+
+        Default is ``'seg'``.
 
     extra_param : int, optional
         Specifies either:
 
-        - Number of segments when what_type='seg' (default=5)
+        - Number of segments when what_type='seg'
         - Segment length when what_type='len'
+
+        Default is 5.
 
     Returns
     -------
@@ -947,7 +975,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
     Parameters
     ----------
     y : array-like
-        The input time series to analyze
+        The input time series to analyze.
     window_stat : str, optional (default='mean')
         Statistic to calculate in each window:
 
@@ -962,20 +990,24 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         - 'apen': Approximate Entropy with m=1, r=0.2
         - 'sampen': Sample Entropy with m=2, r=0.1
 
-    across_win_stat : str, optional (default='std')
+        Default is ``'mean'``.
+
+    across_win_stat : str, optional
         Method to compare statistics across windows:
 
         - 'std': standard deviation (normalized by full series std)
         - 'ent': distribution entropy (not implemented)
         - 'apen': Approximate Entropy with m=1, r=0.2
         - 'sampen': Sample Entropy with m=2, r=0.15
+
+        Default is ``'std'``.
         
-    num_seg : int, optional (default=5)
-        Number of segments to divide the time series into
+    num_seg : int, optional
+        Number of segments to divide the time series into. Default is 5.
         (controls the window length)
-    inc_move : int, optional (default=2)
+    inc_move : int, optional
         Controls window overlap - window moves by window_length/inc_move at each step
-        (e.g., inc_move=2 means 50% overlap between windows)
+        (e.g., inc_move=2 means 50% overlap between windows). Default is 2.
 
     Returns
     -------
