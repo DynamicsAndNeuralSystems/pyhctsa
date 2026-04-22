@@ -12,3 +12,4 @@ arch
 hmmlearn
 rich
 pathos
+lmfit

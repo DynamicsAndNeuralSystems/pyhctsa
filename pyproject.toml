@@ -31,7 +31,8 @@ dependencies = [
   "hmmlearn",
   "PyWavelets",
   "rich",
-  "pathos"
+  "pathos",
+  "lmfit"
 ]
 
 classifiers = [
