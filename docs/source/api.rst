@@ -289,3 +289,4 @@ Nonlinearity
 
    pyhctsa.operations.nonlinearity.nsamdf
    pyhctsa.operations.nonlinearity.nlpe
+   pyhctsa.operations.nonlinearity.embed_pca
