@@ -3,9 +3,20 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 
+from sklearn.decomposition import PCA
+
 from ..operations.model_fit import residual_analysis
 from ..operations.correlation import first_crossing, first_min
 
+def _first_fn(p, threshold, over_or_under='under'):
+    if over_or_under == 'under':
+        indices = np.where(p < threshold)[0]
+    elif over_or_under == 'over':
+        indices = np.where(p > threshold)[0]
+    else:
+        raise ValueError(f'Unknown setting: {over_or_under}')
+    
+    return indices[0] if len(indices) > 0 else len(p) + 1
 
 def _normed_single_curve_length(x: ArrayLike, lag: int, fs: Union[float, int],
                                 nrmdegree: int) -> tuple:
@@ -245,8 +256,6 @@ def nlpe(y: ArrayLike, de: int = 3, tau: Union[int, str] = 1, max_n: int = 5000)
     
     if n < 20: # short time series cause problems
         print(f'Time series (N = {len(y)}) is too short.')
-    
-    #TODO: false nearest neigbours to compute an appropriate embedding dimension, if needed
 
     # run the nonlinear prediction error code
     res = _ms_nlpe(y, de, tau)
@@ -257,5 +266,85 @@ def nlpe(y: ArrayLike, de: int = 3, tau: Union[int, str] = 1, max_n: int = 5000)
     res = residual_analysis(res)
     # combine with residual analysis results
     out = out | res
+
+    return out
+
+def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
+    """
+    Reconstructs the time series as a time-delay embedding, and performs Principal
+    Components Analysis on the result.
+    This technique is known as singular spectrum analysis [1].
+
+    References
+    ----------
+    .. [1] "Extracting qualitative dynamics from experimental data"
+        D. S. Broomhead and G. P. King, Physica D 20(2-3) 217 (1986)
+    
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    tau: str or int
+        The time-delay, can be an integer or 'ac', or 'mi' for first
+        zero-crossing of the autocorrelation function or first minimum
+        of the automutual information, respectively. Default is ``'ac'``.
+    m : int
+        The embedding dimension. Default is 3.
+    
+    Returns 
+    -------
+    dict 
+        Various statistics summarizing the obtained eigenvalue distribution.
+
+    """
+    n = len(y)
+    if isinstance(tau, str):
+        if tau == 'ac':
+            tau = first_crossing(y, 'ac', 0, 'discrete')
+            if np.isnan(tau):
+                print('Could not get time delay by ACF (time series too short?)')
+                return np.nan
+        elif tau == 'mi':
+            tau = first_min(y, 'mi')
+            if np.isnan(tau):
+                print('Could not get time delay by mutual information (time series too short?)')
+                return np.nan
+        else:
+            raise ValueError(f'Invalid time-delay method: {tau}. Choose either mi or ac.')
+    n_embed = n - (m-1)*tau
+    if n_embed <= 0:
+        print(f'Time series (N = {n}) too short to embed with these embedding parameters.')
+        return np.nan
+
+    y_embed = np.zeros((n_embed, m))
+    for i in range(m):
+        y_embed[:, i] = y[i*tau : n_embed + i*tau]
+    # do the PCA
+    pca = PCA().fit(y_embed)
+    #proportion of variance explained
+    perc = pca.explained_variance_/np.sum(pca.explained_variance_)
+    out = {}
+    for i in range(m):
+        out[f'perc_{i+1}'] = perc[i]
+    #%% Get statistics of the eigenvalue distribution
+    out['std'] = np.std(perc, ddof=1)
+    out['range'] = np.ptp(perc)
+    out['min'] = np.min(perc)
+    out['max'] = np.max(perc)
+    out['top2'] = np.sum(perc[:2]) # variance expl. in top two eigendirections
+
+    #% Number of eigenvalues you need to reconstruct X%
+    csperc = np.cumsum(perc)
+    out['nto50'] = _first_fn(csperc, 0.5, 'over')
+    out['nto60'] = _first_fn(csperc, 0.6, 'over')
+    out['nto70'] = _first_fn(csperc, 0.7, 'over')
+    out['nto80'] = _first_fn(csperc, 0.8, 'over')
+    out['nto90'] = _first_fn(csperc, 0.9, 'over')
+
+    #% When individual % variance explained goes below X for the first time:
+    out['fb05'] = _first_fn(perc, 0.5, 'under')
+    out['fb02'] = _first_fn(perc, 0.2, 'under')
+    out['fb01'] = _first_fn(perc, 0.1, 'under')
+    out['fb001'] = _first_fn(perc, 0.01, 'under')
 
     return out

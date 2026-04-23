@@ -179,6 +179,7 @@ Model Fit
    pyhctsa.operations.model_fit.exp_smoothing
    pyhctsa.operations.model_fit.ar_cov
    pyhctsa.operations.model_fit.ar_fit
+   pyhctsa.operations.model_fit.is_seasonal
 
 .. _physicsmeths:
 
@@ -288,3 +289,4 @@ Nonlinearity
 
    pyhctsa.operations.nonlinearity.nsamdf
    pyhctsa.operations.nonlinearity.nlpe
+   pyhctsa.operations.nonlinearity.embed_pca
