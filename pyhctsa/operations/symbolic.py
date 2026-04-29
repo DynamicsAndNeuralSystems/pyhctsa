@@ -81,8 +81,8 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
         if what_prior == 'dist':
             # uses the distribution up to memory to inform the next point
             # had to be careful with indexing, arange() works like matlab's : operator
-            store[i] = p
             p = np.sum(yth[rs[0, i]-memory:rs[0, i]] == yth[rs[0, i]])/memory
+            store[i] = p
         elif what_prior == 'T1':
             # uses one-point correlations in memory to inform the next point
             # estimate transition probabilites from data in memory
