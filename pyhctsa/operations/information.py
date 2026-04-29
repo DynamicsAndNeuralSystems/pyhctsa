@@ -14,7 +14,7 @@ def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, No
     from ..operations.correlation import autocorr, automutual_info
 
     if min_what in ['ac', 'corr']:
-        return lambda x: autocorr(y, tau=x, method='Fourier')
+        return lambda x: autocorr(y, tau=x, method='Fourier').item()
     elif min_what == 'mi-hist':
         num_bins = int(extra_param) if extra_param else 10
         return lambda x: _mi_bin(y[:-x], y[x:], 'range', 'range', num_bins)
