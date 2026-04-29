@@ -112,7 +112,7 @@ def _format_param_value(val, key=None) -> str:
     Format parameter value for label: 
     - For bools: if True, return the key name.
     - For floats/ints: as before. 
-    - For lists: if contiguous range, show as 'start_end', else join all values. 
+    - For lists: if contiguous range, show as 'start_to_end', else join all values. 
     """
     # New Logic for Booleans
     if isinstance(val, bool):
@@ -124,7 +124,7 @@ def _format_param_value(val, key=None) -> str:
             diffs = [val[i+1] - val[i] for i in range(len(val)-1)]
             if all(d == 1 for d in diffs):
                 # Pass key down for recursion if needed, though usually lists aren't bools
-                return f"{_format_param_value(val[0])}_{_format_param_value(val[-1])}"
+                return f"{_format_param_value(val[0])}_to_{_format_param_value(val[-1])}"
         return "_".join(_format_param_value(x) for x in val)
 
     if isinstance(val, (float, int)):
