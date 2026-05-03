@@ -1742,7 +1742,7 @@ def _stat_av(y: ArrayLike, window_stat: str = 'mean', num_seg: int = 5, inc_move
 
     return np.std(qs, ddof=1)/np.std(y, ddof=1)
 
-def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'posDrown') -> dict:
+def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> dict:
     """
     How the autocorrelation function changes with the time lag.
 
@@ -1755,7 +1755,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'posDrown') -> dic
         The input time series.
     stop_when : str or int, optional
         The criterion for the maximum lag to measure the ACF up to.
-        Default is ``'posDrown'``.
+        Default is ``'pos_drown'``.
 
     Returns
     --------
@@ -1777,10 +1777,10 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'posDrown') -> dic
         acf = autocorr(y, taus, 'Fourier')
         n_drown = stop_when
         
-    elif stop_when in ['posDrown', 'drown', 'doubleDrown']:
+    elif stop_when in ['pos_drown', 'drown', 'double_drown']:
         # Compute ACF up to a given threshold:
         n_drown = 0 # the point at which ACF ~ 0
-        if stop_when == 'posDrown':
+        if stop_when == 'pos_drown':
             # stop when ACF drops below threshold, th
             for i in range(1, N+1):
                 acf_val = autocorr(y, i-1, 'Fourier')[0]
@@ -1811,7 +1811,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'posDrown') -> dic
                     acf.append(acf_val)
                     break
                 acf.append(acf_val)
-        elif stop_when == 'doubleDrown':
+        elif stop_when == 'double_drown':
             # Stop at 2*tau, where tau is the lag where ACF ~ 0 (within 1/sqrt(N) threshold)
             for i in range(1, N+1):
                 acf_val = autocorr(y, i-1, 'Fourier')[0]
@@ -1838,7 +1838,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'posDrown') -> dic
     # Basic stats on the ACF
     out['sumacf'] = np.sum(acf)
     out['meanacf'] = np.mean(acf)
-    if stop_when != 'posDrown':
+    if stop_when != 'pos_drown':
         out['meanabsacf'] = np.mean(np.abs(acf))
         out['sumabsacf'] = np.sum(np.abs(acf))
 
@@ -1879,7 +1879,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'posDrown') -> dic
     fit_success = False
     min_pts_to_fit_exp = 4 # (need at least four points to fit exponential)
 
-    if stop_when == 'posDrown' and nac >= min_pts_to_fit_exp:
+    if stop_when == 'pos_drown' and nac >= min_pts_to_fit_exp:
         # Fit exponential decay to (absolute) ACF:
         # (kind of only makes sense for the first positive period)
         exp_func = lambda x, b : np.exp(-b * x)
