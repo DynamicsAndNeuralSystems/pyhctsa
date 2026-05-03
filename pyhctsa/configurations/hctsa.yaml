@@ -341,7 +341,7 @@ correlation:
     base_name: autocorr_shape
     configs:
       - {stop_when: 'drown', zscore: True}
-      - {stop_when: 'posDrown', zscore: True}
+      - {stop_when: 'pos_drown', zscore: True}
     legacy_name: CO_AutoCorrShape
     ordered_args: ['stop_when']
   

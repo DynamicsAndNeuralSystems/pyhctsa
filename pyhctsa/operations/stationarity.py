@@ -569,7 +569,7 @@ def range_evolve(y: ArrayLike) -> dict:
         if N >= n_val:
             out[f'nuql{n_val}'] = lunique(cums[:n_val])/out['totnuq']
         else:
-            out[f'nuql{N}'] = np.nan
+            out[f'nuql{n_val}'] = np.nan
     # (**2**) Actual proportion of full range captured at different points
     out['p1'] = cums[int(np.ceil(N * 0.01)) - 1]/fullr
     out['p10'] = cums[int(np.ceil(N * 0.1)) - 1]/fullr
@@ -1056,7 +1056,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
             qs[i] = moments(y[_get_window(i, inc, win_length)], 5)
     elif window_stat == 'AC1':
         for i in range(num_steps):
-            qs[i] = autocorr(y[_get_window(i, inc, win_length)], 1, 'Fourier')
+            qs[i] = np.asarray(autocorr(y[_get_window(i, inc, win_length)], 1, 'Fourier')).item()
     else:
         raise ValueError(f"Unknown statistic '{window_stat}'")
     
