@@ -112,7 +112,7 @@ def _format_param_value(val, key=None) -> str:
     Format parameter value for label: 
     - For bools: if True, return the key name.
     - For floats/ints: as before. 
-    - For lists: if contiguous range, show as 'start_end', else join all values. 
+    - For lists: if contiguous range, show as 'start_to_end', else join all values. 
     """
     # New Logic for Booleans
     if isinstance(val, bool):
