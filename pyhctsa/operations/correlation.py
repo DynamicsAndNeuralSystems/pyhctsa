@@ -1280,7 +1280,7 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     counts -= 1 # ignore self counts
 
     if np.all(counts == 0):
-        print("No counts detected!")
+        logging.warning("embed2_shapes: no counts detected!")
         return np.nan
 
     # Return basic statistics on the counts
@@ -1535,7 +1535,7 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
         for i, t in enumerate(tau):
             if np.any(np.isnan(y)):
                 good_r = (~np.isnan(y[:N-t])) & (~np.isnan(y[t:]))
-                print(f'NaNs in time series, computing for {np.sum(good_r)}/{len(good_r)} pairs of points')
+                logging.info(f'NaNs in time series, computing for {np.sum(good_r)}/{len(good_r)} pairs of points.')
                 y1 = y[:N-t]
                 y1n = y1[good_r] - np.mean(y1[good_r])
                 y2 = y[t:]
