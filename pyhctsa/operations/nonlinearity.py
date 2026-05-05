@@ -2,6 +2,7 @@ from typing import Union
 
 import numpy as np
 from numpy.typing import ArrayLike
+import logging
 
 from sklearn.decomposition import PCA
 
@@ -83,7 +84,7 @@ def _ms_embed(z, v, w):
     lags = np.sort(lags)
     dim  = len(lags)
     if n <= lags[-1]:
-        print("Vector is too small to be embedded with the given lags.")
+        logging.warning("Vector is too small to be embedded with the given lags.")
         return np.full((dim, 1), np.nan), None
 
     w_win = lags[-1] - lags[0]          # window width  (renamed to avoid shadowing arg)
@@ -251,11 +252,12 @@ def nlpe(y: ArrayLike, de: int = 3, tau: Union[int, str] = 1, max_n: int = 5000)
     if n > max_n:
         # crop the time series to the first max_n samples
         y = y[:max_n]
-        print(f"Michael Small's nlpe code is only being evaluated on the first {max_n} (/{n}) samples.")
+        logging.info(f"Michael Small's nlpe code is only being evaluated on the first {max_n} (/{n}) samples.")
         n = max_n
     
     if n < 20: # short time series cause problems
-        print(f'Time series (N = {len(y)}) is too short.')
+        logging.warning(f'Time series (N = {len(y)}) is too short.')
+        return np.nan
 
     # run the nonlinear prediction error code
     res = _ms_nlpe(y, de, tau)
@@ -302,18 +304,18 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
         if tau == 'ac':
             tau = first_crossing(y, 'ac', 0, 'discrete')
             if np.isnan(tau):
-                print('Could not get time delay by ACF (time series too short?)')
+                logging.warning('Could not get time delay by ACF (time series too short?)')
                 return np.nan
         elif tau == 'mi':
             tau = first_min(y, 'mi')
             if np.isnan(tau):
-                print('Could not get time delay by mutual information (time series too short?)')
+                logging.warning('Could not get time delay by mutual information (time series too short?)')
                 return np.nan
         else:
             raise ValueError(f'Invalid time-delay method: {tau}. Choose either mi or ac.')
     n_embed = n - (m-1)*tau
     if n_embed <= 0:
-        print(f'Time series (N = {n}) too short to embed with these embedding parameters.')
+        logging.warning(f'Time series (N = {n}) too short to embed with these embedding parameters.')
         return np.nan
 
     y_embed = np.zeros((n_embed, m))
