@@ -124,7 +124,6 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
         out['min'] = np.nan
         
     # Calculate statistics
-    #print(sum(store))
     out['max'] = np.max(store) # maximum amount of information you cna gain in this way
     out['mean'] = np.mean(store)
     out['sum'] = np.sum(store)
