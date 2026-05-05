@@ -7,6 +7,7 @@ from math import ceil, floor
 import numpy as np
 from numpy.typing import ArrayLike
 import pywt
+import logging
 
 from ..utils import sign_change
 from pywt._extensions._pywt import (
@@ -251,9 +252,9 @@ def scal_2_freq(y: ArrayLike, w_name: str = 'db3', a_max: int = 5, delta: int = 
     if a_max == 'max':
         a_max = max_level
     if max_level < a_max:
-        print(f'Chosen level {a_max} is too large for this wavelet on this signal...')
+        logging.info(f'Chosen level {a_max} is too large for this wavelet on this signal...')
         a_max = max_level # set to max allowed level
-        print(f'changed to maximum level computed with wmaxlev: {a_max}')
+        logging.info(f'changed to maximum level computed with wmaxlev: {a_max}')
 
     # % Define scales.
     scales = np.arange(1, a_max+1)
@@ -305,7 +306,7 @@ def dwt_coeff(y: ArrayLike, w_name: str = 'db3', level: int = 3) -> dict:
         level = pywt.dwt_max_level(N, w_name)
     max_level_allowed = pywt.dwt_max_level(N, w_name)
     if max_level_allowed < level:
-        print("Chosen level is too large for this wavelet on this signal....\n")
+        logging.warning("Chosen level is too large for this wavelet on this signal....\n")
     #%% Perform Wavelet Decomposition
     C, L = None, None
     if max_level_allowed < level: # if level exceeds max level, just use max level instead
@@ -464,9 +465,9 @@ def detail_coeffs(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] 
     if max_level == 'max':
         max_level = pywt.dwt_max_level(N, w_name)
     if pywt.dwt_max_level(N, w_name) < max_level:
-        print(f"Chosen wavelet level is too large for the {w_name} wavelet for this signal of length N = {N}")
+        logging.info(f"Chosen wavelet level is too large for the {w_name} wavelet for this signal of length N = {N}")
         max_level = pywt.dwt_max_level(N, w_name)
-        print(f"Using a wavelet level of {max_level} instead.")
+        logging.info(f"Using a wavelet level of {max_level} instead.")
     # Perform a single-level wavelet decomposition
     means = np.zeros(max_level) # mean detail coefficient magnitude at each level
     medians = np.zeros(max_level) # median detail coefficient magnitude at each level
