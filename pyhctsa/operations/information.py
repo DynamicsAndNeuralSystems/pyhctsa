@@ -189,7 +189,7 @@ def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
     if np.any(mask):
         mi = np.sum(p_ij[mask] * np.log(p_ij[mask] / p_ixp_j[mask]))
     else:
-        print("The histograms aren't catching any points. Perhaps due to an inappropriate custom range for binning the data.")
+        logging.warning("The histograms aren't catching any points. Perhaps due to an inappropriate custom range for binning the data.")
         mi = np.nan
 
     return mi
@@ -424,8 +424,8 @@ def automutual_info(
             amis[k] = mi_calc.computeAverageLocalOfObservations()
 
     if np.isnan(amis).any():
-        print(
-            f"Warning: Time series (n={n}) is too short for automutual information calculations "
+        logging.warning(
+            f"Time series (n={n}) is too short for automutual information calculations "
             f"up to lags of {max(time_delay)}"
         )
 
@@ -689,23 +689,23 @@ def _rm_info(*args):
     len_y = y_shape[0]
 
     if len(x_shape) != 1:  # makes sure x is a row vector
-        print("Error: invalid dimension of x")
+        logging.warning("Invalid dimension of x")
         return
 
     if len(y_shape) != 1:
-        print("Error: invalid dimension of y")
+        logging.warning("Invalid dimension of y")
         return
 
     if len_x != len_y:  # makes sure x and y have the same amount of elements
-        print("Error: unequal length of x and y")
+        logging.warning("Unequal length of x and y")
         return
 
     if n_args > 5:
-        print("Error: too many arguments")
+        logging.warning("Too many arguments")
         return
 
     if n_args < 2:
-        print("Error: not enough arguments")
+        logging.warning("Not enough arguments")
         return
 
     # setting up variables depending on amount of inputs
@@ -869,19 +869,19 @@ def _rm_histogram_2(*args):
     leny = yshape[0]
 
     if len(xshape) != 1:  # makes sure x is a row vector
-        print("Error: invalid dimension of x")
+        logging.warning("Invalid dimension of x")
         return
 
     if len(yshape) != 1:
-        print("Error: invalid dimension of y")
+        logging.warning("Invalid dimension of y")
         return
 
     if lenx != leny:  # makes sure x and y have the same amount of elements
-        print("Error: unequal length of x and y")
+        logging.warning("Unequal length of x and y")
         return
 
     if nargin > 3:
-        print("Error: too many arguments")
+        logging.warning("Too many arguments")
         return
 
     if nargin == 2:
@@ -909,16 +909,16 @@ def _rm_histogram_2(*args):
     # checking descriptor to make sure it is valid, otherwise print an error
 
     if ncellx < 1:
-        print("Error: invalid number of cells in X dimension")
+        logging.warning("Invalid number of cells in X dimension")
 
     if ncelly < 1:
-        print("Error: invalid number of cells in Y dimension")
+        logging.warning("Invalid number of cells in Y dimension")
 
     if upperx <= lowerx:
-        print("Error: invalid bounds in X dimension")
+        logging.warning("Ivalid bounds in X dimension")
 
     if uppery <= lowery:
-        print("Error: invalid bounds in Y dimension")
+        logging.warning("Invalid bounds in Y dimension")
 
     result = np.zeros([int(ncellx), int(ncelly)],
                       dtype=int)  # should do the same thing as matlab: result(1:ncellx,1:ncelly) = 0;
