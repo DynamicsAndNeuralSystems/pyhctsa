@@ -8,6 +8,7 @@ from typing import Union, Callable, Any
 import yaml
 from pyhctsa import __version__
 from pathlib import Path
+import logging
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -100,7 +101,7 @@ def _check_optional_deps(dep: str) -> bool:
             except (ImportError, AttributeError):
                 return False
             except jpype.JVMNotFoundException:
-                print("JVM not found. Please check your JAVA_HOME or installation.")
+                logging.warning("JVM not found. Please check your JAVA_HOME or installation.")
                 return False
         return True
     except PackageNotFoundError:
@@ -109,19 +110,19 @@ def _check_optional_deps(dep: str) -> bool:
 def _validate_data(ts : np.ndarray) -> bool:
     """validate a time series before computing features"""
     if len(ts) < 100:
-        print("Time series is too short!")
+        logging.warning("Time series is too short!")
         return False
     if np.all(ts == ts[0]):
         # constant time series
         # maybe do a tolerance instead?
-        print("Time series is constant")
+        logging.warning("Time series is constant.")
         return False
     if np.any(np.isnan(ts)):
         # data contains nans
-        print("Time series contains NaNs")
+        logging.warning("Time series contains NaNs.")
         return False
     if np.any(np.isinf(ts)):
-        print("Time series contains Inf")
+        logging.warning("Time series contains Inf.")
         return False
 
     return True
