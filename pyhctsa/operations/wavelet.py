@@ -426,7 +426,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
 
     return out
 
-def _slosr(xx : ArrayLike) -> int:
+def _slosr(xx: ArrayLike) -> int:
     # helper function for detail_coeffs
     the_max_level = len(xx)
     slosr = np.zeros(the_max_level-2)

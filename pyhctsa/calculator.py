@@ -39,8 +39,8 @@ def classify_output(res) -> int:
         out = 4
     return out
 
-def _apply_selection_wrapper(func:Callable, filter_keys:Union[str, list[str]],
-                             keep:bool=True) -> Callable:
+def _apply_selection_wrapper(func: Callable, filter_keys: Union[str, list[str]],
+                             keep: bool = True) -> Callable:
     """
     Wraps a function to selectively filter keys from its dict output.
 

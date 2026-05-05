@@ -157,7 +157,7 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
     return out
 
-def first_under_fn(x : ArrayLike, m : ArrayLike, p : ArrayLike) -> float:
+def first_under_fn(x: ArrayLike, m: ArrayLike, p: ArrayLike) -> float:
     """
     Find the value of m for the first time p goes under the threshold, x. 
     p and m are vectors of the same length
@@ -916,7 +916,7 @@ def stick_angles(y: ArrayLike) -> dict:
 
     return out
 
-def _sub_statav(x: ArrayLike, n : int) -> tuple:
+def _sub_statav(x: ArrayLike, n: int) -> tuple:
     # helper function
     nn = len(x)
     if nn < 2 * n: # not long enough

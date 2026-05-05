@@ -627,7 +627,7 @@ def ar_cov(y: ArrayLike, p: int = 2) -> dict:
 
     return out
 
-def _arconf_from_arfit(fitted_ar, the_conf_interval : float = 0.95) -> dict:
+def _arconf_from_arfit(fitted_ar, the_conf_interval: float = 0.95) -> dict:
     params = fitted_ar.params
     has_intercept = fitted_ar.model.trend == 'c'
     if has_intercept:
