@@ -403,7 +403,7 @@ def automutual_info(
     for k, delay in enumerate(time_delay):
         # check enough samples to compute automutual info
         if delay > n - min_samples:
-            # time sereis too short - keep the remaining values as NaNs
+            # time series too short - keep the remaining values as NaNs
             break
 
         # form the time-delay vectors y1 and y2
@@ -679,7 +679,7 @@ def _rm_info(*args):
         return
 
     # some initial tests on the input arguments
-    x = np.array(args[0])  # make sure the imputs are in numpy array form
+    x = np.array(args[0])  # make sure the inputs are in numpy array form
     y = np.array(args[1])
 
     x_shape = x.shape
@@ -915,7 +915,7 @@ def _rm_histogram_2(*args):
         logging.warning("Invalid number of cells in Y dimension")
 
     if upperx <= lowerx:
-        logging.warning("Ivalid bounds in X dimension")
+        logging.warning("Invalid bounds in X dimension")
 
     if uppery <= lowery:
         logging.warning("Invalid bounds in Y dimension")

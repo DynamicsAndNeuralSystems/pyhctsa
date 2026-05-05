@@ -307,7 +307,7 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     Returns
     -------
     dict
-        Dictionary containing output statistics on the residuals of the simple fortecasting method. 
+        Dictionary containing output statistics on the residuals of the simple forecasting method. 
 
     """
     y = np.asarray(y)
@@ -316,7 +316,7 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     if train_length == 'ac':
         lp = first_crossing(y, 'ac', 0, 'discrete')
     else:
-        #the e length of the subsegment preceeding to use to predict the subsequent value
+        #the e length of the subsegment preceding to use to predict the subsequent value
         lp = train_length 
     evalr = np.arange(lp, N) #range over which to evaluate the forecast
     if np.size(evalr) == 0:

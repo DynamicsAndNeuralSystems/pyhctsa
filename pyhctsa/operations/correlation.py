@@ -1719,7 +1719,7 @@ def _stat_av(y: ArrayLike, window_stat: str = 'mean', num_seg: int = 5, inc_move
         logging.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
         return np.nan
     inc = np.floor(win_length/inc_move) # increment to move at each step
-    # if incrment rounded down to zero, prop it up
+    # if increment rounded down to zero, prop it up
     if inc == 0:
         inc = 1
     
@@ -1829,7 +1829,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
 
     # Check for good behavior
     if np.any(np.isnan(acf)):
-        # This is an anomalous time series (e.g., all constant, or conatining NaNs)
+        # This is an anomalous time series (e.g., all constant, or containing NaNs)
         out = np.nan
     
     out = {}

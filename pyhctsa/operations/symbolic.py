@@ -85,7 +85,7 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
             store[i] = p
         elif what_prior == 'T1':
             # uses one-point correlations in memory to inform the next point
-            # estimate transition probabilites from data in memory
+            # estimate transition probabilities from data in memory
             # find where in memory this has been observbed before, and preceded it
             memory_data = yth[rs[0, i] - memory:rs[0, i]]
             inmem = np.where(memory_data[:-1] == yth[rs[0, i] - 1])[0]
@@ -124,7 +124,7 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
         out['min'] = np.nan
         
     # Calculate statistics
-    out['max'] = np.max(store) # maximum amount of information you cna gain in this way
+    out['max'] = np.max(store) # maximum amount of information you can gain in this way
     out['mean'] = np.mean(store)
     out['sum'] = np.sum(store)
     out['median'] = np.median(store)
@@ -587,7 +587,7 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     num_groups : int, optional
         number of groups in the course-graining. Default is 2.
     tau : int or str, optional
-        analyze transition matricies corresponding to this lag. We
+        analyze transition matrices corresponding to this lag. We
         could either downsample the time series at this lag and then do the
         discretization as normal, or do the discretization and then just
         look at this dicrete lag. Here we do the former. Can also set tau to 'ac'

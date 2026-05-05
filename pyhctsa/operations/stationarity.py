@@ -55,14 +55,11 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
         start_idx = i * lseg
         end_idx = (i + 1) * lseg
         segment_data = y[start_idx:end_idx]
-        #kde = KDEUnivariate(segment_data)
         kde = gaussian_kde(segment_data, bw_method="scott")
-        #kde.fit(bw="scott") # tune bw adjustment factor empiricially?
         dns[:, i] = kde.evaluate(r)
     # Compare the local distributions
     if each_or_par in ["par", "parent"]:
         #Compares each subdistribtuion to the parent (full signal) distribution
-        #kde = KDEUnivariate(y).fit(bw="scott")
         kde = gaussian_kde(y, bw_method="scott")
         pardn = kde.evaluate(r)
         divs = np.zeros(num_segs)
@@ -551,7 +548,7 @@ def range_evolve(y: ArrayLike) -> dict:
     
     fullr = np.ptp(y)
 
-    # return number of unqiue entries in a vector, x
+    # return number of unique entries in a vector, x
     lunique = lambda x : len(np.unique(x))
     out['totnuq'] = lunique(cums)
 
@@ -1081,7 +1078,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
     return out
 
 def _get_window(step_ind, inc, win_length):
-    # helper funtion to convert a step index (stepInd) to a range of indices corresponding to that window
+    # helper function to convert a step index (stepInd) to a range of indices corresponding to that window
     start_idx = (step_ind) * inc
     end_idx = (step_ind) * inc + win_length
     
