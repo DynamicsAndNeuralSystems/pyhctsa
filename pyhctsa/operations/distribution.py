@@ -73,11 +73,11 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     elif what_distn == 'exp':
         # Check positivity
         if np.any(x < 0):
-            print("The data contains negative values, but Exponential is a positive-only distribution.")
+            logging.warning("The data contains negative values, but Exponential is a positive-only distribution.")
             return np.nan
         # Check constant
         if np.all(x == x[0]):
-            print("Data are a constant")
+            logging.warning("Data are a constant.")
             return np.nan
         # Fit Exponential distribution (equivalent to expfit in MATLAB)
         _, lam = expon.fit(x, floc=0)  # force support at 0
@@ -91,7 +91,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     elif what_distn == 'logn':
         # Check positivity
         if np.any(x <= 0):
-            print("The data are not positive, but Log-Normal is a positive-only distribution.")
+            logging.warning("The data are not positive, but Log-Normal is a positive-only distribution.")
             return np.nan
         # Fit log-normal distribution
         shape, loc, scale = lognorm.fit(x, floc=0)  # sigma, 0, exp(mu)
@@ -107,7 +107,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         ffit_func = lambda xi: lognorm.pdf(xi, s=sigma, loc=0, scale=np.exp(mu))
 
     else:
-        raise ValueError(f"Unknown distribution:  {what_distn}.")
+        raise ValueError(f"Unknown distribution: {what_distn}.")
 
     # ----------------------------
     # Estimate smoothed empirical distribution

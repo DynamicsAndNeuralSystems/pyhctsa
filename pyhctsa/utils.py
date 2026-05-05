@@ -8,6 +8,7 @@ from typing import Union, Callable, Any
 import yaml
 from pyhctsa import __version__
 from pathlib import Path
+import logging
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -100,28 +101,28 @@ def _check_optional_deps(dep: str) -> bool:
             except (ImportError, AttributeError):
                 return False
             except jpype.JVMNotFoundException:
-                print("JVM not found. Please check your JAVA_HOME or installation.")
+                logging.warning("JVM not found. Please check your JAVA_HOME or installation.")
                 return False
         return True
     except PackageNotFoundError:
         return False
 
-def _validate_data(ts : np.ndarray) -> bool:
+def _validate_data(ts: np.ndarray) -> bool:
     """validate a time series before computing features"""
     if len(ts) < 100:
-        print("Time series is too short!")
+        logging.warning("Time series is too short!")
         return False
     if np.all(ts == ts[0]):
         # constant time series
         # maybe do a tolerance instead?
-        print("Time series is constant")
+        logging.warning("Time series is constant.")
         return False
     if np.any(np.isnan(ts)):
         # data contains nans
-        print("Time series contains NaNs")
+        logging.warning("Time series contains NaNs.")
         return False
     if np.any(np.isinf(ts)):
-        print("Time series contains Inf")
+        logging.warning("Time series contains Inf.")
         return False
 
     return True
@@ -193,7 +194,7 @@ def get_dataset(which: str = "e1000") -> list:
     print(f"Loaded dataset of {len(dataset)} time series.")
     return dataset
     
-def _preprocess_decorator(zscore : bool = False, absval : bool = False) -> Callable:
+def _preprocess_decorator(zscore: bool = False, absval: bool = False) -> Callable:
     """
     Decorator to preprocess time series data before feature computation.
     
@@ -230,7 +231,7 @@ def _preprocess_decorator(zscore : bool = False, absval : bool = False) -> Calla
         return wrapper
     return decorator
 
-def z_score(x : ArrayLike) -> np.ndarray:
+def z_score(x: ArrayLike) -> np.ndarray:
     """
     Z-score the input data vector.
 
@@ -277,7 +278,7 @@ def z_score(x : ArrayLike) -> np.ndarray:
 
     return zscored_data
 
-def histc(x : ArrayLike, bins : ArrayLike) -> int:
+def histc(x: ArrayLike, bins: ArrayLike) -> int:
     """Counts the number of values in x that are within each specified bin."""
     # Get indices of the bins to which each value in input array belongs.
     map_to_bins = np.digitize(x, bins)
@@ -286,8 +287,8 @@ def histc(x : ArrayLike, bins : ArrayLike) -> int:
         res[el-1] += 1 # Increment appropriate bin.
     return res
 
-def bin_picker(x_min : float, x_max : float, n_bins : Union[None, int],
-               bin_width_est : Union[None, float] = None) -> np.ndarray:
+def bin_picker(x_min: float, x_max: float, n_bins: Union[None, int],
+               bin_width_est: Union[None, float] = None) -> np.ndarray:
     """
     Choose histogram bins. 
 
@@ -386,7 +387,7 @@ def bin_picker(x_min : float, x_max : float, n_bins : Union[None, int],
 
     return edges
 
-def simple_binner(x_data : ArrayLike, num_bins : int) -> tuple:
+def simple_binner(x_data: ArrayLike, num_bins: int) -> tuple:
     """
     Generate a histogram from equally spaced bins.
    
@@ -459,7 +460,7 @@ def point_of_crossing(x: ArrayLike, threshold: float) -> tuple:
 
     return fc, poc
 
-def sign_change(y : Union[list, np.ndarray], do_find: int = 0) -> ArrayLike:
+def sign_change(y: Union[list, np.ndarray], do_find: int = 0) -> ArrayLike:
     """
     Where a data vector changes sign.
 
@@ -477,7 +478,7 @@ def sign_change(y : Union[list, np.ndarray], do_find: int = 0) -> ArrayLike:
 
     return indexs
 
-def make_buffer(y : ArrayLike, buffer_size : int) -> np.ndarray:
+def make_buffer(y: ArrayLike, buffer_size: int) -> np.ndarray:
     """
     Make a buffered version of a time series.
 
@@ -506,8 +507,8 @@ def make_buffer(y : ArrayLike, buffer_size : int) -> np.ndarray:
 
     return y_buffer
 
-def make_mat_buffer(x : ArrayLike, n : int, p : int = 0,
-                    opt : Union[str, None] = None) -> np.ndarray:
+def make_mat_buffer(x: ArrayLike, n: int, p: int = 0,
+                    opt: Union[str, None] = None) -> np.ndarray:
     '''
     Create a buffer array.
 
@@ -567,20 +568,20 @@ def make_mat_buffer(x : ArrayLike, n : int, p : int = 0,
 
     return result
 
-def binarize(y : ArrayLike, binarize_how : str = 'diff') -> ArrayLike:
+def binarize(y: ArrayLike, binarize_how: str = 'diff') -> ArrayLike:
     """
     Converts an input vector into a binarized version.
 
     Parameters
     -----------
-    y : array_like
+    y : array-like
         The input time series
     binarize_how : str, optional
         Method to binarize the time series: 'diff', 'mean', 'median', 'iqr'.
     
     Returns
     --------
-    y_bin : array_like
+    y_bin : array-like
         The binarized time series
     """
     if binarize_how == 'diff':
@@ -613,7 +614,7 @@ def _step_binary(x : ArrayLike) -> ArrayLike:
 
     return y
 
-def x_corr(x : ArrayLike, y : ArrayLike, normed : bool = True, max_lags : int = 10) -> tuple:
+def x_corr(x: ArrayLike, y: ArrayLike, normed: bool = True, max_lags: int = 10) -> tuple:
     """
     Calculates the cross-correlation coefficients or inner products between two
     signals at various lags. The function computes correlations up to a specified

@@ -157,7 +157,7 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
     return out
 
-def first_under_fn(x : ArrayLike, m : ArrayLike, p : ArrayLike) -> float:
+def first_under_fn(x: ArrayLike, m: ArrayLike, p: ArrayLike) -> float:
     """
     Find the value of m for the first time p goes under the threshold, x. 
     p and m are vectors of the same length
@@ -916,7 +916,7 @@ def stick_angles(y: ArrayLike) -> dict:
 
     return out
 
-def _sub_statav(x: ArrayLike, n : int) -> tuple:
+def _sub_statav(x: ArrayLike, n: int) -> tuple:
     # helper function
     nn = len(x)
     if nn < 2 * n: # not long enough
@@ -1280,7 +1280,7 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     counts -= 1 # ignore self counts
 
     if np.all(counts == 0):
-        print("No counts detected!")
+        logging.warning("embed2_shapes: no counts detected!")
         return np.nan
 
     # Return basic statistics on the counts
@@ -1535,7 +1535,7 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
         for i, t in enumerate(tau):
             if np.any(np.isnan(y)):
                 good_r = (~np.isnan(y[:N-t])) & (~np.isnan(y[t:]))
-                print(f'NaNs in time series, computing for {np.sum(good_r)}/{len(good_r)} pairs of points')
+                logging.info(f'NaNs in time series, computing for {np.sum(good_r)}/{len(good_r)} pairs of points.')
                 y1 = y[:N-t]
                 y1n = y1[good_r] - np.mean(y1[good_r])
                 y2 = y[t:]
@@ -1719,7 +1719,7 @@ def _stat_av(y: ArrayLike, window_stat: str = 'mean', num_seg: int = 5, inc_move
         logging.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
         return np.nan
     inc = np.floor(win_length/inc_move) # increment to move at each step
-    # if incrment rounded down to zero, prop it up
+    # if increment rounded down to zero, prop it up
     if inc == 0:
         inc = 1
     
@@ -1829,7 +1829,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
 
     # Check for good behavior
     if np.any(np.isnan(acf)):
-        # This is an anomalous time series (e.g., all constant, or conatining NaNs)
+        # This is an anomalous time series (e.g., all constant, or containing NaNs)
         out = np.nan
     
     out = {}

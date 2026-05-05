@@ -418,7 +418,7 @@ def _findpeaks(s, min_pk_dist=0, sort_str='none'):
 
     return pk_height, pk_loc
 
-def give_me_robust_stats(x_data, y_data, field_name) -> dict:
+def give_me_robust_stats(x_data: ArrayLike, y_data: ArrayLike, field_name: str) -> dict:
     """
     Statistics based on a robust linear fit
     """

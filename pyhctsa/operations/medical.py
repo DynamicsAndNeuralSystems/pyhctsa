@@ -271,7 +271,6 @@ def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
     i = 0
     pc = 0
 
-    # seqcnt = 0
     while i <= (N-D):
         x_seq = x_sym[i:(i+D)]
         if np.array_equal(x_seq, z_seq) or np.array_equal(x_seq, o_seq):

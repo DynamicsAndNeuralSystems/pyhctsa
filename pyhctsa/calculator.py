@@ -4,6 +4,7 @@ from functools import partial
 from itertools import product
 from pathlib import Path
 from typing import Union, Any, Callable
+import logging
 
 import numpy as np
 import pandas as pd
@@ -38,8 +39,8 @@ def classify_output(res) -> int:
         out = 4
     return out
 
-def _apply_selection_wrapper(func:Callable, filter_keys:Union[str, list[str]],
-                             keep:bool=True) -> Callable:
+def _apply_selection_wrapper(func: Callable, filter_keys: Union[str, list[str]],
+                             keep: bool = True) -> Callable:
     """
     Wraps a function to selectively filter keys from its dict output.
 
@@ -69,7 +70,7 @@ def _apply_selection_wrapper(func:Callable, filter_keys:Union[str, list[str]],
         if isinstance(result, dict):
             missing = [k for k in keys if k not in result] # log all of the missing keys
             if missing:
-                print(f'Warning: time-series features for func {func} not found {missing}')
+                logging.info(f'Warning: time-series features for func {func} not found {missing}')
             if keep:
                 return {k: result[k] for k in keys if k in result}
             else:
@@ -86,7 +87,7 @@ def _standardise_inputs(data) -> list[np.ndarray]:
         elif data.ndim == 2:
             if data.shape[0] > data.shape[1]:
                 # notify the user to check that the shapes make sense
-                print(f"Check that the shape of the 2D input is such "
+                logging.warning(f"Check that the shape of the 2D input is such "
                       f"that (n_series, n_samples). Got shape: {data.shape}")
             return [np.asarray(row, dtype=float) for row in data]
         else:
@@ -216,7 +217,7 @@ class FeatureCalculator:
         missing = [dep for dep in deps_to_check if not _check_optional_deps(dep)]
         if missing:
             full_name = f"{module_key}.{feature_name}"
-            print(f"Skipping function '{full_name}' - missing dependencies: {', '.join(missing)}")
+            logging.info(f"Skipping function '{full_name}' - missing dependencies: {', '.join(missing)}")
             self._skipped_functions.append((full_name, missing))
             return False
         return True
@@ -229,7 +230,7 @@ class FeatureCalculator:
             try:
                 module = importlib.import_module(f"{self._operations_package}.{module_key}")
             except ImportError as e:
-                print(f"Failed to import module '{module_key}': {e}")
+                logging.warning(f"Failed to import module '{module_key}': {e}")
                 # Skip all functions in this module since we can't import it
                 for feature_name in self.config[module_key].keys():
                     skipped_functions.append((f"{module_key}.{feature_name}", ["import_error"]))
@@ -273,7 +274,7 @@ class FeatureCalculator:
         # store information about skipped functions for later reference
         self._skipped_functions = skipped_functions
         if skipped_functions:
-            print(f"Total functions skipped due to missing dependencies: {len(skipped_functions)}")
+            logging.info(f"Total functions skipped due to missing dependencies: {len(skipped_functions)}")
         
         return feature_funcs
 

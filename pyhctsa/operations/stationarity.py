@@ -55,14 +55,11 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
         start_idx = i * lseg
         end_idx = (i + 1) * lseg
         segment_data = y[start_idx:end_idx]
-        #kde = KDEUnivariate(segment_data)
         kde = gaussian_kde(segment_data, bw_method="scott")
-        #kde.fit(bw="scott") # tune bw adjustment factor empiricially?
         dns[:, i] = kde.evaluate(r)
     # Compare the local distributions
     if each_or_par in ["par", "parent"]:
         #Compares each subdistribtuion to the parent (full signal) distribution
-        #kde = KDEUnivariate(y).fit(bw="scott")
         kde = gaussian_kde(y, bw_method="scott")
         pardn = kde.evaluate(r)
         divs = np.zeros(num_segs)
@@ -260,7 +257,6 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
     # first calculate the first moment in all the windows
     M1 = _calc_me_moments(x_buff, mom_1)
     M2 = _calc_me_moments(x_buff, mom_2)
-    #print(M1)
 
     out = {}
     rmat = np.corrcoef(M1, M2)
@@ -480,7 +476,7 @@ def kpss_test(y: ArrayLike, lags: Union[int, list] = 0) -> dict:
 
     Parameters
     ----------
-    y : ArrayLike
+    y : array-like
         The input time series to analyze for stationarity
     lags : Union[int, list], optional
         Either:
@@ -552,7 +548,7 @@ def range_evolve(y: ArrayLike) -> dict:
     
     fullr = np.ptp(y)
 
-    # return number of unqiue entries in a vector, x
+    # return number of unique entries in a vector, x
     lunique = lambda x : len(np.unique(x))
     out['totnuq'] = lunique(cums)
 
@@ -680,7 +676,7 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
 
     Parameters
     -----------
-    y : ArrayLike
+    y : array-like
         The time series to analyse.
     subset_how : str, optional
         The method to select the local subset of time series:
@@ -720,7 +716,6 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     elif subset_how == 'p':
         # take initial proportion n of time series
         r = np.arange(int(np.floor(N*n)))
-        #print(r)
     elif subset_how == 'unicg':
         r = np.round(np.linspace(1, N, n)).astype(int) - 1
     else:
@@ -756,7 +751,7 @@ def fit_polynomial(y: ArrayLike, k: int = 1) -> float:
 
     Parameters
     -----------
-    y : ArrayLike
+    y : array-like
         the time series to analyze.
     k : int, optional
         the order of the polynomial to fit to y. Default is 1.
@@ -942,10 +937,10 @@ def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float
             pn = int(np.floor(N / extra_param))
             M = np.array([np.mean(y[j*extra_param:(j+1)*extra_param]) for j in range(pn)])
         else:
-            print(f"This time series (N = {N}) is too short for StatAv({what_type},'{extra_param}')")
+            logging.warning(f"This time series (N = {N}) is too short for stat_av({what_type},'{extra_param}')")
             return np.nan
     else:
-        raise ValueError(f"Error evaluating StatAv of type '{what_type}', please select either 'seg' or 'len'")
+        raise ValueError(f"Error evaluating stat_av of type '{what_type}', please select either 'seg' or 'len'")
 
     s = np.std(y, ddof=1)  # should be 1 (for a z-scored time-series input)
     sdav = np.std(M, ddof=1)
@@ -954,7 +949,7 @@ def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float
     return float(out)
 
 def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str = 'std',
-                 num_seg: int = 5, inc_move: int = 2):
+                 num_seg: int = 5, inc_move: int = 2) -> dict:
     """
     Sliding window measures of stationarity.
 
@@ -1083,7 +1078,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
     return out
 
 def _get_window(step_ind, inc, win_length):
-    # helper funtion to convert a step index (stepInd) to a range of indices corresponding to that window
+    # helper function to convert a step index (stepInd) to a range of indices corresponding to that window
     start_idx = (step_ind) * inc
     end_idx = (step_ind) * inc + win_length
     
