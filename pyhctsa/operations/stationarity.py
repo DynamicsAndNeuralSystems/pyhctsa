@@ -260,7 +260,6 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
     # first calculate the first moment in all the windows
     M1 = _calc_me_moments(x_buff, mom_1)
     M2 = _calc_me_moments(x_buff, mom_2)
-    #print(M1)
 
     out = {}
     rmat = np.corrcoef(M1, M2)
@@ -720,7 +719,6 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     elif subset_how == 'p':
         # take initial proportion n of time series
         r = np.arange(int(np.floor(N*n)))
-        #print(r)
     elif subset_how == 'unicg':
         r = np.round(np.linspace(1, N, n)).astype(int) - 1
     else:
@@ -942,10 +940,10 @@ def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float
             pn = int(np.floor(N / extra_param))
             M = np.array([np.mean(y[j*extra_param:(j+1)*extra_param]) for j in range(pn)])
         else:
-            print(f"This time series (N = {N}) is too short for StatAv({what_type},'{extra_param}')")
+            logging.warning(f"This time series (N = {N}) is too short for stat_av({what_type},'{extra_param}')")
             return np.nan
     else:
-        raise ValueError(f"Error evaluating StatAv of type '{what_type}', please select either 'seg' or 'len'")
+        raise ValueError(f"Error evaluating stat_av of type '{what_type}', please select either 'seg' or 'len'")
 
     s = np.std(y, ddof=1)  # should be 1 (for a z-scored time-series input)
     sdav = np.std(M, ddof=1)
