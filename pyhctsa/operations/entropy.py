@@ -1,5 +1,6 @@
 from math import factorial
 from typing import Optional, Union
+import logging
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -265,7 +266,7 @@ def multi_scale_entropy(
             pp_text = f"after {pre_process_how} pre-processing"
         else:
             pp_text = ""
-        print(f"Warning: Not enough samples ({len(y)} {pp_text}) to compute SampEn at multiple scales")
+        logging.warning(f"Not enough samples ({len(y)} {pp_text}) to compute sample entropy at multiple scales")
         return {'out': np.nan}
 
     # Output raw values
