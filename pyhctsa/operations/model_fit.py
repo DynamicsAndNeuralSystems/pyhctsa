@@ -9,6 +9,7 @@ from scipy.stats import ks_1samp, norm, t
 from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.tsa.ar_model import AutoReg, ar_select_order
 from lmfit.models import SineModel
+import logging
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
@@ -319,7 +320,7 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
         lp = train_length 
     evalr = np.arange(lp, N) #range over which to evaluate the forecast
     if np.size(evalr) == 0:
-        print("This time series is too short for forecasting")
+        logging.warning("This time series is too short for forecasting")
         return np.nan
     res = np.zeros(len(evalr))
     if forecast_meth == 'mean':
@@ -400,15 +401,15 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
     min_train, max_train = 100, 1000
     
     if n_train > max_train:
-        print(f"Training set size reduced from {n_train} to {max_train}.")
+        logging.info(f"Training set size reduced from {n_train} to {max_train}.")
         n_train = max_train
         
     if n_train < min_train:
-        print(f"Training set size increased from {n_train} to {min_train}.")
+        logging.info(f"Training set size increased from {n_train} to {min_train}.")
         n_train = min_train
         
     if N < n_train:
-        print("Time series is too short for the specified training size.")
+        logging.warning("Time series is too short for the specified training size.")
         return np.nan
         
     # --- Find Optimal Alpha ---
@@ -427,7 +428,7 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
         # Check for valid RMSEs before fitting
         valid_indices = ~np.isnan(rmses)
         if np.sum(valid_indices) < 3:
-            print("Not enough valid points for quadratic fit; choosing best alpha from search.")
+            logging.info("Not enough valid points for quadratic fit; choosing best alpha from search.")
             alphamin = alphar[np.nanargmin(rmses)] if np.any(valid_indices) else 0.5
         else:
             # Fit quadratic to the 3 points with the lowest RMSE
@@ -463,7 +464,7 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
                 
                 valid_ref = ~np.isnan(rmses_ref)
                 if not np.any(valid_ref):
-                    print("Could not compute RMSE in refined search; using previous alpha.")
+                    logging.info("Could not compute RMSE in refined search; using previous alpha.")
                 else:
                     p2 = np.polyfit(alphar_ref[valid_ref], rmses_ref[valid_ref], 2)
                     if p2[0] < 0: # Bad fit, fallback to best alpha in search
@@ -482,7 +483,7 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
     yp, xp = y_fit[2:], x[2:]
     
     if len(yp) < 2:
-        print("Not enough points to calculate residual statistics.")
+        logging.warning("Not enough points to calculate residual statistics.")
         residout = {'mean': np.nan, 'std': np.nan, 'AC1': np.nan}
     else:
         residuals = yp - xp
