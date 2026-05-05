@@ -5,6 +5,7 @@ import numpy as np
 from scipy.stats import iqr
 from scipy.interpolate import interp1d
 import statsmodels.api as sm
+import logging
 
 from ..toolboxes.Max_Little import fastdfa
 from ..utils import make_mat_buffer
@@ -123,7 +124,7 @@ def fluctuation_analysis(x: ArrayLike, q: Union[float, int] = 2,
         taur = np.arange(5, np.floor(N/2) + 1, tau_step)  # maybe increased??
     ntau = len(taur)  # analyze the time series across this many timescales
     if ntau < 8:  # fewer than 8 points
-        print(f'This time series (N = {N}) is too short to analyze using this fluctuation analysis')
+        logging.warning(f'This time series (N = {N}) is too short to analyze using this fluctuation analysis.')
         out = np.nan
         return out
     
