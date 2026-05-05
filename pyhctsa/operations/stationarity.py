@@ -476,7 +476,7 @@ def kpss_test(y: ArrayLike, lags: Union[int, list] = 0) -> dict:
 
     Parameters
     ----------
-    y : ArrayLike
+    y : array-like
         The input time series to analyze for stationarity
     lags : Union[int, list], optional
         Either:
@@ -676,7 +676,7 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
 
     Parameters
     -----------
-    y : ArrayLike
+    y : array-like
         The time series to analyse.
     subset_how : str, optional
         The method to select the local subset of time series:
@@ -751,7 +751,7 @@ def fit_polynomial(y: ArrayLike, k: int = 1) -> float:
 
     Parameters
     -----------
-    y : ArrayLike
+    y : array-like
         the time series to analyze.
     k : int, optional
         the order of the polynomial to fit to y. Default is 1.
@@ -949,7 +949,7 @@ def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float
     return float(out)
 
 def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str = 'std',
-                 num_seg: int = 5, inc_move: int = 2):
+                 num_seg: int = 5, inc_move: int = 2) -> dict:
     """
     Sliding window measures of stationarity.
 

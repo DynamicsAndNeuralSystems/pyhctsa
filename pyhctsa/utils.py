@@ -574,14 +574,14 @@ def binarize(y: ArrayLike, binarize_how: str = 'diff') -> ArrayLike:
 
     Parameters
     -----------
-    y : array_like
+    y : array-like
         The input time series
     binarize_how : str, optional
         Method to binarize the time series: 'diff', 'mean', 'median', 'iqr'.
     
     Returns
     --------
-    y_bin : array_like
+    y_bin : array-like
         The binarized time series
     """
     if binarize_how == 'diff':

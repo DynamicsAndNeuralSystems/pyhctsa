@@ -47,7 +47,7 @@ def fast_dfa(y: ArrayLike) -> float:
 
 def fluctuation_analysis(x: ArrayLike, q: Union[float, int] = 2,
                          wtf: str = 'rsrange', tau_step: int = 1, k: int = 1,
-                         lag: Union[int, None] = None, log_inc: bool = True):
+                         lag: Union[int, None] = None, log_inc: bool = True) -> dict:
     """
     Implements fluctuation analysis by a variety of methods.
     
@@ -69,7 +69,7 @@ def fluctuation_analysis(x: ArrayLike, q: Union[float, int] = 2,
     
     Parameters
     ----------
-    x : ArrayLike
+    x : array-like
         The input time series.
     q : Union[float, int], optional
         The parameter in the fluctuation function. The default is q = 2 which gives RMS 

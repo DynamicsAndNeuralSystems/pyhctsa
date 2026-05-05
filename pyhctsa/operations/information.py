@@ -457,9 +457,9 @@ def mutual_info(
 
     Parameters
     ----------
-    y1 : ArrayLike
+    y1 : array-like
         First input time series.
-    y2 : ArrayLike
+    y2 : array-like
         Second input time series.
     est_method : str, optional
         Estimation method to use:

@@ -27,9 +27,9 @@ def _custom_cwt(data, scales, wavelet, sampling_period=1., method='conv', axis=-
 
     Parameters
     ----------
-    data : array_like
+    data : array-like
         Input signal
-    scales : array_like
+    scales : array-like
         The wavelet scales to use. One can use
         ``f = scale2frequency(wavelet, scale)/sampling_period`` to determine
         what physical frequency, ``f``. Here, ``f`` is in hertz when the
@@ -579,7 +579,7 @@ def wl_coeffs(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 3) -> 
 
     return out
 
-def wavedec(data: ArrayLike, wavelet: str, mode: str ='symmetric', level: int = 1, axis=-1):
+def wavedec(data: ArrayLike, wavelet: str, mode: str ='symmetric', level: int = 1, axis=-1) -> tuple:
     """
     Multiple level 1-D discrete fast wavelet decomposition.
     Taken from https://github.com/izlotnik/wavelet-wrcoef/blob/master/wrcoef.py
