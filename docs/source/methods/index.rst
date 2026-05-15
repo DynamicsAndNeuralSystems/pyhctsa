@@ -30,6 +30,7 @@ Select a card below to explore a category of time-series analysis methods implem
    .. grid-item-card:: Entropy
       :link: entropymeths
       :link-type: ref
+      :img-bottom: ../_static/module_icons/entropy.svg
 
    .. grid-item-card:: Extreme Events
       :link: extemeeventsmeths
@@ -45,13 +46,13 @@ Select a card below to explore a category of time-series analysis methods implem
    .. grid-item-card:: Hypothesis Tests
       :link: hypothesistestsmeths
       :link-type: ref
-
+      :img-bottom: ../_static/module_icons/hypothesis_tests.svg
       
    
    .. grid-item-card:: Information
       :link: informationmeths
       :link-type: ref
-
+      :img-bottom: ../_static/module_icons/info.svg
       
    
    .. grid-item-card:: Medical
@@ -67,15 +68,14 @@ Select a card below to explore a category of time-series analysis methods implem
    .. grid-item-card:: Physics
       :link: physicsmeths
       :link-type: ref
-
+      :img-bottom: ../_static/module_icons/physics.svg
       
    
    .. grid-item-card:: Pre-Process
       :link: preprocessmeths
       :link-type: ref
-
+      :img-bottom: ../_static/module_icons/preproc.svg
       
-   
    .. grid-item-card:: Scaling
       :link: scalingmeths
       :link-type: ref
@@ -84,19 +84,19 @@ Select a card below to explore a category of time-series analysis methods implem
    .. grid-item-card:: Spectral
       :link: spectralmeths
       :link-type: ref
+      :img-bottom: ../_static/module_icons/spectral.svg
 
-      
    
    .. grid-item-card:: Stationarity
       :link: stationaritymeths
       :link-type: ref
-
+      :img-bottom: ../_static/module_icons/stationarity.svg
       
    
    .. grid-item-card:: Surrogates
       :link: surrogatesmeths
       :link-type: ref
-
+      :img-bottom: ../_static/module_icons/surrogate.svg
       
    
    .. grid-item-card:: Symbolic
