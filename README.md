@@ -23,6 +23,9 @@
   <a href="https://doi.org/10.5281/zenodo.18529935">
     <img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529935-blue?style=flat-square" />
   </a>
+  <a href="https://joss.theoj.org/papers/98f474a523552a41749fe82e2ec04173">
+    <img src="https://joss.theoj.org/papers/98f474a523552a41749fe82e2ec04173/status.svg" />
+  </a>
 </p>
 
 
