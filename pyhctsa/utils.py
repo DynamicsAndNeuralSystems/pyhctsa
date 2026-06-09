@@ -98,11 +98,17 @@ def _check_optional_deps(dep: str) -> bool:
             try:
                 import jpype
                 jpype.getDefaultJVMPath()
-            except (ImportError, AttributeError):
+            except ImportError:
                 return False
             except jpype.JVMNotFoundException:
-                logging.warning("JVM not found. Please check your JAVA_HOME or installation.")
+                logging.warning("JVM not found. Please check your JAVA_HOME or Java installation.")
                 return False
+            except Exception:
+                # catch any other exception because there can be many related to java
+                logging.warning(
+                "jpype1 is installed but a working JVM could not be located. "
+                "Please check your Java installation.")
+                return True
         return True
     except PackageNotFoundError:
         return False

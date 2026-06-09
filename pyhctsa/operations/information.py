@@ -2,7 +2,6 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Union, Callable
 
-import jpype as jp
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy import stats
@@ -376,6 +375,7 @@ def automutual_info(
         If multiple time_delay:
             dict: Keys are f"ami{delay}", values are corresponding AMI values
     """
+    import jpype as jp
     from ..operations.distribution import first_crossing
 
     if isinstance(time_delay, str) and time_delay in ['ac', 'tau']:
@@ -484,6 +484,7 @@ def mutual_info(
     float
         Estimated mutual information between the input time series
     """
+    import jpype as jp
     # Initialize miCalc object (don't add noise!):
     mi_calc = _initialize_MI(est_method=est_method, extra_param=extra_param, add_noise=False)
     # Set observations to two time series:
@@ -546,6 +547,7 @@ def _initialize_MI(
         Type varies by estimation method chosen.
     """
 
+    import jpype as jp
     if not jp.isJVMStarted():
         jarloc = (
             os.path.dirname(os.path.abspath(__file__)) + "/../toolboxes/infodynamics-dist/infodynamics.jar"
@@ -553,8 +555,12 @@ def _initialize_MI(
         # change to debug info
         if verbose:
             logging.debug(f"Starting JVM with java class {jarloc}.")
-        jp.startJVM(jp.getDefaultJVMPath(), "-ea", "-Djava.class.path=" + jarloc, interrupt=False)
-
+        try:
+            jp.startJVM(jp.getDefaultJVMPath(), "-ea", "-Djava.class.path=" + jarloc, interrupt=False)
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to start JVM. Ensure Java is installed and JAVA_HOME is set correctly."
+            ) from e
 
     if est_method == 'gaussian':
         implementing_class = 'infodynamics.measures.continuous.gaussian'
