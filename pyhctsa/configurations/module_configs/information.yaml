@@ -26,7 +26,7 @@ information:
   
   first_max:
     base_name: first_max
-    depedencies:
+    dependencies:
       - jpype1
     configs:
       - {max_what: 'ac', zscore: True}
