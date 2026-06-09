@@ -184,7 +184,6 @@ class FeatureCalculator:
     >>> fc = FeatureCalculator()  # Load default configuration
     >>> x = np.random.randn(1000)
     >>> df = fc.extract(x)
-    >>> print(fc.summary())
     """
     def __init__(self, config_path: Union[str, None] = None):
         """
@@ -359,7 +358,7 @@ class FeatureCalculator:
         df = pd.json_normalize(rows)
         # assign row names
         df.index = pd.Index(labels_list, name="instance")
-        # meta data for summary
+        # metadata
         self._last_elapsed = elapsed
         self._errors = df.map(classify_output)
 

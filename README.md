@@ -60,8 +60,6 @@ res = calc.extract(data)
 Note that each time-series instances does *not* have to be the same length to compute a vector of features. 
 The results of the extraction will be returned in a pandas dataframe of shape $N \times F$, where $N$ is the number of time-series instances and $F$ is the number of time-series features.
 
-You can also inspect the quality of the extracted feature values by calling ```calc.summary()```.  
-
 # 📘 Tutorials
 New to _pyhctsa_? Step-by-step tutorials and example workflows are available in the repository
 👉 [`/tutorials`](./tutorials)
