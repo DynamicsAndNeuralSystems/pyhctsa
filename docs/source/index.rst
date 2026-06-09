@@ -33,7 +33,7 @@
 .. |license| image:: https://img.shields.io/github/license/DynamicsAndNeuralSystems/pyhctsa.svg
    :target: https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/LICENSE
    
-The **PY**\ thon toolkit for **H**\ ighly **C**\ omparative **T**\ ime-**S**\ eries **A**\ nalsyis (``pyhctsa``) is a living library of time-series analysis methods.
+The **PY**\ thon toolkit for **H**\ ighly **C**\ omparative **T**\ ime-**S**\ eries **A**\ nalysis (``pyhctsa``) is a living library of time-series analysis methods.
 With over 4500 time-series features derived from interpretable theory, ``pyhctsa`` is the most comprehensive feature set in native Python.
 
 
