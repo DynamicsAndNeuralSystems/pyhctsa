@@ -66,16 +66,18 @@ cores on your local machine using the `LocalDistributor`:
     # pass the distributor to the .extract() method
     res = calc.extract(data, distributor=dist)
 
-ℹ️ Note for Windows Users 
--------------------------
-Some features require Java (JDK) to be installed. If you encounter a JVM not found error:
-    1. Ensure Java Development Kit (JDK) is installed on your system
-        - Download from Oracle or use OpenJDK (Minimum version required: JDK 11)
-    2. Before importing `pyhctsa`, set the `JAVA_HOME` environment variable using the location of the JDK installation on your system:
+ℹ️ Java Support
+---------------
+A small subset of features (information-theoretic measures using `JIDT <https://github.com/jlizier/jidt>`_) require Java. If Java is not available, pyhctsa will automatically skip these functions and compute the remaining features without error.
 
-    .. code-block:: python
+To enable Java-dependent features, ensure Java Development Kit (JDK) 11 or later is installed (download from `Oracle <https://www.oracle.com/java/technologies/downloads/>`_ or use OpenJDK).
 
-        import os
-        os.environ['JAVA_HOME'] = "C:\Program Files\Java\jdk-11" # replace with relevant path
-        from pyhctsa.calculator import FeatureCalculator
-        # rest of your code...
+On some systems (particularly Windows), you may also need to set the ``JAVA_HOME`` environment variable before importing ``pyhctsa``:
+
+.. code-block:: python
+
+    import os
+    os.environ['JAVA_HOME'] = "C:\Program Files\Java\jdk-11" # replace with relevant path
+    from pyhctsa.calculator import FeatureCalculator
+    # rest of your code...
+    

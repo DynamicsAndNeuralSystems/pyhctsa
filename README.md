@@ -94,14 +94,14 @@ dist = LocalDistributor(n_workers=4)
 res = calc.extract(data, distributor=dist)
 ```
 
-## ℹ️ Note for Windows users
-Some features require Java (JDK) to be installed. If you encounter a `JVM not found` error:
+## ℹ️ Java support
 
-1. Ensure Java Development Kit (JDK) is installed on your system
-   - Download from [Oracle](https://www.oracle.com/java/technologies/downloads/) or use OpenJDK
-   - Minimum version required: JDK 11
+A small subset of features (information-theoretic measures using [JIDT](https://github.com/jlizier/jidt)) require Java. If Java is not available, pyhctsa will automatically skip these functions and compute the remaining features without error.
 
-2. Before importing pyhctsa, set the `JAVA_HOME` environment variable using the location of the JDK installation on your system:
+To enable Java-dependent features, ensure Java Development Kit (JDK) 11 or later is installed:
+- Download from [Oracle](https://www.oracle.com/java/technologies/downloads/) or use OpenJDK
+
+On some systems (particularly Windows), you may also need to set the `JAVA_HOME` environment variable before importing pyhctsa:
 ```Python
 import os
 os.environ['JAVA_HOME'] = "C:\Program Files\Java\jdk-11" # replace with relevant path
