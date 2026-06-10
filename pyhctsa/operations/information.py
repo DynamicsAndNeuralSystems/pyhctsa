@@ -1,4 +1,5 @@
 import logging
+logger = logging.getLogger('pyhctsa')
 import os
 from typing import Any, Dict, List, Optional, Union, Callable
 
@@ -76,7 +77,7 @@ def first_min(
         auto_corr[i - 1] = corrfn(i)
         
         if np.isnan(auto_corr[i - 1]):
-            logging.warning(f"No minimum in {min_what}: encountered NaN.")
+            logger.warning(f"No minimum in {min_what}: encountered NaN.")
             return np.nan
         
         # Check for minimum
@@ -133,7 +134,7 @@ def first_max(
         auto_corr[i - 1] = corrfn(i)
         
         if np.isnan(auto_corr[i - 1]):
-            logging.warning(f"No maximum in {max_what}: encountered NaN.")
+            logger.warning(f"No maximum in {max_what}: encountered NaN.")
             return np.nan
 
         # Check for maximum
@@ -188,7 +189,7 @@ def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
     if np.any(mask):
         mi = np.sum(p_ij[mask] * np.log(p_ij[mask] / p_ixp_j[mask]))
     else:
-        logging.warning("The histograms aren't catching any points. Perhaps due to an inappropriate custom range for binning the data.")
+        logger.warning("The histograms aren't catching any points. Perhaps due to an inappropriate custom range for binning the data.")
         mi = np.nan
 
     return mi
@@ -424,7 +425,7 @@ def automutual_info(
             amis[k] = mi_calc.computeAverageLocalOfObservations()
 
     if np.isnan(amis).any():
-        logging.warning(
+        logger.warning(
             f"Time series (n={n}) is too short for automutual information calculations "
             f"up to lags of {max(time_delay)}"
         )
@@ -581,7 +582,7 @@ def _initialize_MI(
     if est_method in ['kraskov1', 'kraskov2']:
         if extra_param is not None:
             if isinstance(extra_param, int):
-                logging.warning("Number of nearest neighbors needs to be a string. Setting this for you...")
+                logger.warning("Number of nearest neighbors needs to be a string. Setting this for you...")
                 extra_param = str(extra_param)
             mi_calc.setProperty('k', extra_param) # 4th input specifies number of nearest neighbors for KSG estimator
         else:
@@ -695,23 +696,23 @@ def _rm_info(*args):
     len_y = y_shape[0]
 
     if len(x_shape) != 1:  # makes sure x is a row vector
-        logging.warning("Invalid dimension of x")
+        logger.warning("Invalid dimension of x")
         return
 
     if len(y_shape) != 1:
-        logging.warning("Invalid dimension of y")
+        logger.warning("Invalid dimension of y")
         return
 
     if len_x != len_y:  # makes sure x and y have the same amount of elements
-        logging.warning("Unequal length of x and y")
+        logger.warning("Unequal length of x and y")
         return
 
     if n_args > 5:
-        logging.warning("Too many arguments")
+        logger.warning("Too many arguments")
         return
 
     if n_args < 2:
-        logging.warning("Not enough arguments")
+        logger.warning("Not enough arguments")
         return
 
     # setting up variables depending on amount of inputs
@@ -875,19 +876,19 @@ def _rm_histogram_2(*args):
     leny = yshape[0]
 
     if len(xshape) != 1:  # makes sure x is a row vector
-        logging.warning("Invalid dimension of x")
+        logger.warning("Invalid dimension of x")
         return
 
     if len(yshape) != 1:
-        logging.warning("Invalid dimension of y")
+        logger.warning("Invalid dimension of y")
         return
 
     if lenx != leny:  # makes sure x and y have the same amount of elements
-        logging.warning("Unequal length of x and y")
+        logger.warning("Unequal length of x and y")
         return
 
     if nargin > 3:
-        logging.warning("Too many arguments")
+        logger.warning("Too many arguments")
         return
 
     if nargin == 2:
@@ -915,16 +916,16 @@ def _rm_histogram_2(*args):
     # checking descriptor to make sure it is valid, otherwise print an error
 
     if ncellx < 1:
-        logging.warning("Invalid number of cells in X dimension")
+        logger.warning("Invalid number of cells in X dimension")
 
     if ncelly < 1:
-        logging.warning("Invalid number of cells in Y dimension")
+        logger.warning("Invalid number of cells in Y dimension")
 
     if upperx <= lowerx:
-        logging.warning("Invalid bounds in X dimension")
+        logger.warning("Invalid bounds in X dimension")
 
     if uppery <= lowery:
-        logging.warning("Invalid bounds in Y dimension")
+        logger.warning("Invalid bounds in Y dimension")
 
     result = np.zeros([int(ncellx), int(ncelly)],
                       dtype=int)  # should do the same thing as matlab: result(1:ncellx,1:ncelly) = 0;

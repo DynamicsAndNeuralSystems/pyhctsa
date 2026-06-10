@@ -2,6 +2,7 @@ import numpy as np
 from typing import Union
 from numpy.typing import ArrayLike
 import logging
+logger = logging.getLogger('pyhctsa')
 
 from scipy.stats import mstats
 from scipy.signal import resample as ssre
@@ -185,7 +186,7 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
     N = len(y_bin)
 
     if N < 5:
-        logging.warning("Time series too short!")
+        logger.warning("Time series too short!")
         return np.nan
     # Binary sequences of length 1
     r1 = (y_bin == 1) # 1
@@ -604,12 +605,14 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     # check inputs
     y = np.asarray(y)
     if num_groups < 2:
-        raise ValueError("Too few groups for coarse-graining")
+        logger.warning("Too few groups for coarse-graining")
+        return np.nan
     if tau == 'ac':
         # determine the tau from first zero of the ACF
         tau = first_crossing(y, 'ac', 0, 'discrete')
         if np.isnan(tau):
-            raise ValueError("Time series too short to estimate tau")
+            logger.warning("Time series too short to estimate tau")
+            return np.nan
     if tau > 1: # calculate transition matrix at a non-unit lag
         # downsample at rate 1:tau
         y = ssre(y, int(np.ceil(len(y) / tau)))

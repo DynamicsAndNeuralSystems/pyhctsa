@@ -1,4 +1,5 @@
 import logging
+logger = logging.getLogger('pyhctsa')
 from typing import Union
 
 import numpy as np
@@ -107,12 +108,14 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
         for i in range(num_repeats):
             amis[i] = histogram_ami(y + noise_range[i]*noise, tau, ami_method, extra_param)
             if np.isnan(amis[i]):
-                raise ValueError('Error computing AMI: Time series too short (?)')
+                logger.warning('Error computing AMI: Time series too short (?)')
+                return np.nan
     if ami_method in ['gaussian','kernel','kraskov1','kraskov2']:
         for i in range(num_repeats):
             amis[i] = automutual_info(y + noise_range[i]*noise, tau, ami_method, str(extra_param))
             if np.isnan(amis[i]):
-                raise ValueError('Error computing AMI: Time series too short (?)')
+                logger.warning('Error computing AMI: Time series too short (?)')
+                return np.nan
     # Output statistics
     out = {}
     # Proportion decreases
@@ -250,6 +253,9 @@ def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
         The time reversal asymmetry statistic.
     """
     embedded = _lag_embed(np.asarray(y), 3, time_lag)
+    if np.isscalar(embedded):
+        # a scalar (nan) has been returned instead of an array
+        return np.nan
     a = embedded[:, 0]
     b = embedded[:, 1]
     c = embedded[:, 2]
@@ -262,7 +268,8 @@ def _lag_embed(x: ArrayLike, m: int, lag: int = 1) -> ArrayLike:
     x = np.asarray(x).flatten()
     lx = len(x)
     if lx < lag * (m - 1) + 1:
-        raise ValueError("Time series is too short for the given dimension and lag.")
+        logger.warning("Time series is too short for the given dimension and lag.")
+        return np.nan
     new_size = lx - lag * (m - 1)
     y = np.zeros((new_size, m))
     for i in range(m):
@@ -314,7 +321,8 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
         theta = np.arctan(theta)
 
         if len(theta) == 0:
-            raise ValueError(f'Time series (N={len(y)}) too short for embedding')
+            logger.warning(f'Time series (N={len(y)}) too short for embedding')
+            return np.nan
 
         stats_store[0, i] = autocorr(theta, 1, 'Fourier')[0]
         stats_store[1, i] = autocorr(theta, 2, 'Fourier')[0]
@@ -1280,7 +1288,7 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     counts -= 1 # ignore self counts
 
     if np.all(counts == 0):
-        logging.warning("embed2_shapes: no counts detected!")
+        logger.warning("embed2_shapes: no counts detected!")
         return np.nan
 
     # Return basic statistics on the counts
@@ -1497,9 +1505,9 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
     if tau:
         # if list is not empty
         if np.max(tau) > N - 1:  # -1 because acf(1) is lag 0
-            logging.warning(f"Time lag {np.max(tau)} is too long for time-series length {N}.")
+            logger.warning(f"Time lag {np.max(tau)} is too long for time-series length {N}.")
         if np.any(np.array(tau) < 0):
-            logging.warning('Negative time lags not applicable.')
+            logger.warning('Negative time lags not applicable.')
     if method == 'Fourier':
         n_fft = 2 ** (int(np.ceil(np.log2(N))) + 1)
         F = np.fft.fft(y - np.mean(y), n_fft)
@@ -1535,7 +1543,7 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
         for i, t in enumerate(tau):
             if np.any(np.isnan(y)):
                 good_r = (~np.isnan(y[:N-t])) & (~np.isnan(y[t:]))
-                logging.info(f'NaNs in time series, computing for {np.sum(good_r)}/{len(good_r)} pairs of points.')
+                logger.info(f'NaNs in time series, computing for {np.sum(good_r)}/{len(good_r)} pairs of points.')
                 y1 = y[:N-t]
                 y1n = y1[good_r] - np.mean(y1[good_r])
                 y2 = y[t:]
@@ -1716,7 +1724,7 @@ def _stat_av(y: ArrayLike, window_stat: str = 'mean', num_seg: int = 5, inc_move
     y = np.asarray(y)
     win_length = np.floor(len(y)/num_seg)
     if win_length == 0:
-        logging.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
+        logger.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
         return np.nan
     inc = np.floor(win_length/inc_move) # increment to move at each step
     # if increment rounded down to zero, prop it up
@@ -1785,7 +1793,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
             for i in range(1, N+1):
                 acf_val = autocorr(y, i-1, 'Fourier')[0]
                 if np.isnan(acf_val):
-                    logging.warning("Weird time series (constant?)")
+                    logger.warning("Weird time series (constant?)")
                     out = np.nan
                 if acf_val < th:
                     # Ensure ACF is all positive
@@ -1949,7 +1957,8 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
         # tau is the first minimum of the automutual information function
         tau = first_min(y, 'mi')
     if np.isnan(tau):
-        raise ValueError("No valid setting for time delay. (Is the time series too short?)")
+        logger.warning("No valid setting for time delay. (Is the time series too short?)")
+        return np.nan
 
     # Compute trev quantities
     yn = y[:-tau]
@@ -2018,7 +2027,8 @@ def tc3(y: list, tau: Union[int, str, None] = 'ac') -> dict:
         tau = first_min(y, 'mi')
     
     if np.isnan(tau):
-        raise ValueError("No valid setting for time delay (time series too short?)")
+        logger.warning("No valid setting for time delay (time series too short?)")
+        return np.nan
     
     # Compute tc3 statistic
     yn = y[:-2*tau]

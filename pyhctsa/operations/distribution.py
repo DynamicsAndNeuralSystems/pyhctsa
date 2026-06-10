@@ -1,4 +1,5 @@
 import logging
+logger = logging.getLogger('pyhctsa')
 from typing import Dict, Union
 
 import numpy as np
@@ -73,11 +74,11 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     elif what_distn == 'exp':
         # Check positivity
         if np.any(x < 0):
-            logging.warning("The data contains negative values, but Exponential is a positive-only distribution.")
+            logger.warning("The data contains negative values, but Exponential is a positive-only distribution.")
             return np.nan
         # Check constant
         if np.all(x == x[0]):
-            logging.warning("Data are a constant.")
+            logger.warning("Data are a constant.")
             return np.nan
         # Fit Exponential distribution (equivalent to expfit in MATLAB)
         _, lam = expon.fit(x, floc=0)  # force support at 0
@@ -91,7 +92,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     elif what_distn == 'logn':
         # Check positivity
         if np.any(x <= 0):
-            logging.warning("The data are not positive, but Log-Normal is a positive-only distribution.")
+            logger.warning("The data are not positive, but Log-Normal is a positive-only distribution.")
             return np.nan
         # Fit log-normal distribution
         shape, loc, scale = lognorm.fit(x, floc=0)  # sigma, 0, exp(mu)
@@ -537,7 +538,7 @@ def cv(x: ArrayLike, k: int = 1) -> float:
         The coefficient of variation of order :math:`k`.
     """
     if not isinstance(k, int) or k < 0:
-        logging.warning('k should probably be a positive integer')
+        logger.warning('k should probably be a positive integer')
         # carry on with just this warning, though
     
     # Compute the coefficient of variation (of order k) of the data
@@ -718,7 +719,8 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01)
         raise ValueError(f"Invalid thresholdHow: '{threshold_how}'. Must be 'abs', 'pos', or 'neg'.")
     
     if len(thresholds) == 0:
-        raise ValueError("Error setting increments through the time-series values")
+        logger.warning("Error setting increments through the time-series values")
+        return np.nan
     
     # Initialize statistics matrix
     # Columns: [mean_diff, std_err, percentage, median_pos, mean_pos, std_pos]

@@ -4,6 +4,7 @@ import scipy
 from scipy.stats import expon, norm
 from ts2vg import NaturalVG
 import logging
+logger = logging.getLogger('pyhctsa')
 
 from pyhctsa.operations.correlation import autocorr, first_crossing
 from pyhctsa.operations.entropy import distribution_entropy
@@ -88,7 +89,7 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: int = 5000) -> di
     N = len(y)
     if N > max_l:
         # too long to store in memory
-        logging.info(f"Time series ({N} > {max_l}) is too long for visibility graph."
+        logger.info(f"Time series ({N} > {max_l}) is too long for visibility graph."
               f"Analyzing the first {max_l} samples.")
         y = y[:max_l]
         N = len(y)

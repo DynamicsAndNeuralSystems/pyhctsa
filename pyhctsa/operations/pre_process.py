@@ -3,6 +3,7 @@ from numpy.typing import ArrayLike
 from scipy.signal import lfilter, resample_poly
 from statsmodels.tsa.tsatools import detrend
 import logging
+logger = logging.getLogger('pyhctsa')
 
 from ..operations.distribution import outlier_test
 from ..operations.stationarity import sliding_window, stat_av
@@ -115,7 +116,7 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf') -> dict:
         try:
             order = int(order)
         except ValueError:
-            logging.warning(f"Could not convert order: `{order}' to integer.")
+            logger.warning(f"Could not convert order: `{order}' to integer.")
         y_d = detrend(y, order=order, axis=0)
 
     # 2) Differencing
@@ -127,7 +128,7 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf') -> dict:
         try:
             ndiff = int(ndiff)
         except ValueError:
-            logging.warning(f"Could not convert ndiff: `{ndiff}' to integer.")
+            logger.warning(f"Could not convert ndiff: `{ndiff}' to integer.")
         y_d = np.diff(y, n=ndiff, axis=0)
     
     # 3) Median filter
@@ -139,7 +140,7 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf') -> dict:
         try:
             med_ord = int(med_ord)
         except ValueError:
-            logging.warning(f"Could not convert median order: `{med_ord}' to integer.")
+            logger.warning(f"Could not convert median order: `{med_ord}' to integer.")
         y_d = _med_filt_1d(y, med_ord)
     
     # 4) Running average
@@ -151,7 +152,7 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf') -> dict:
         try:
             rav_wsize = int(rav_wsize)
         except ValueError:
-            logging.warning(f"Could not running average window size: `{rav_wsize}' to integer.")
+            logger.warning(f"Could not running average window size: `{rav_wsize}' to integer.")
         y_d = lfilter(np.ones(rav_wsize)/rav_wsize, [1], y)
     
     elif 'resample' in detrend_meth:

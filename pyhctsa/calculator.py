@@ -7,6 +7,8 @@ from typing import Union, Any, Callable
 import logging
 
 logger = logging.getLogger('pyhctsa')
+logger.setLevel(logging.CRITICAL) # only log critical warnings by default
+logger.addHandler(logging.NullHandler())
 
 import numpy as np
 import pandas as pd
