@@ -8,6 +8,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 import pywt
 import logging
+logger = logging.getLogger('pyhctsa')
 
 from ..utils import sign_change
 from pywt._extensions._pywt import (
@@ -252,9 +253,9 @@ def scal_2_freq(y: ArrayLike, w_name: str = 'db3', a_max: int = 5, delta: int = 
     if a_max == 'max':
         a_max = max_level
     if max_level < a_max:
-        logging.info(f'Chosen level {a_max} is too large for this wavelet on this signal...')
+        logger.info(f'Chosen level {a_max} is too large for this wavelet on this signal...')
         a_max = max_level # set to max allowed level
-        logging.info(f'changed to maximum level computed with wmaxlev: {a_max}')
+        logger.info(f'changed to maximum level computed with wmaxlev: {a_max}')
 
     # % Define scales.
     scales = np.arange(1, a_max+1)
@@ -306,7 +307,7 @@ def dwt_coeff(y: ArrayLike, w_name: str = 'db3', level: int = 3) -> dict:
         level = pywt.dwt_max_level(N, w_name)
     max_level_allowed = pywt.dwt_max_level(N, w_name)
     if max_level_allowed < level:
-        logging.warning("Chosen level is too large for this wavelet on this signal....\n")
+        logger.warning("Chosen level is too large for this wavelet on this signal....\n")
     #%% Perform Wavelet Decomposition
     C, L = None, None
     if max_level_allowed < level: # if level exceeds max level, just use max level instead
@@ -465,9 +466,9 @@ def detail_coeffs(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] 
     if max_level == 'max':
         max_level = pywt.dwt_max_level(N, w_name)
     if pywt.dwt_max_level(N, w_name) < max_level:
-        logging.info(f"Chosen wavelet level is too large for the {w_name} wavelet for this signal of length N = {N}")
+        logger.info(f"Chosen wavelet level is too large for the {w_name} wavelet for this signal of length N = {N}")
         max_level = pywt.dwt_max_level(N, w_name)
-        logging.info(f"Using a wavelet level of {max_level} instead.")
+        logger.info(f"Using a wavelet level of {max_level} instead.")
     # Perform a single-level wavelet decomposition
     means = np.zeros(max_level) # mean detail coefficient magnitude at each level
     medians = np.zeros(max_level) # median detail coefficient magnitude at each level
@@ -553,10 +554,12 @@ def wl_coeffs(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 3) -> 
     if level == 'max':
         level = pywt.dwt_max_level(N, w_name)
         if level == 0:
-            raise ValueError("Cannot compute wavelet coefficients (short time series)")
+            logger.warning("Cannot compute wavelet coefficients (short time series)")
+            return np.nan
     
     if pywt.dwt_max_level(N, w_name) < level:
-        raise ValueError(f"Chosen level, {level}, is too large for this wavelet on this signal.")
+        logger.warning(f"Chosen level, {level}, is too large for this wavelet on this signal.")
+        return np.nan
     
     C, L = wavedec(y, wavelet=w_name, level=level)
     det = wrcoef(C, L, w_name, level)

@@ -3,6 +3,7 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 import logging
+logger = logging.getLogger('pyhctsa')
 
 from sklearn.decomposition import PCA
 
@@ -84,7 +85,7 @@ def _ms_embed(z, v, w):
     lags = np.sort(lags)
     dim  = len(lags)
     if n <= lags[-1]:
-        logging.warning("Vector is too small to be embedded with the given lags.")
+        logger.warning("Vector is too small to be embedded with the given lags.")
         return np.full((dim, 1), np.nan), None
 
     w_win = lags[-1] - lags[0]          # window width  (renamed to avoid shadowing arg)
@@ -130,7 +131,8 @@ def _ms_nlpe(y: ArrayLike, de: int, tau: int) -> float:
         y = y.squeeze()  # (1, m) -> (m,)
 
     if x is None or x.size == 0:
-        raise ValueError("Error embedding the time series.")
+        logger.warning("Error embedding the time series.")
+        return np.nan
 
     de_dim, n = x.shape
 
@@ -246,21 +248,25 @@ def nlpe(y: ArrayLike, de: int = 3, tau: Union[int, str] = 1, max_n: int = 5000)
             raise ValueError("tau can be either 'mi' or 'ac'")
         # check the tau 
         if np.isnan(tau):
-            raise ValueError('Time series cannot be embedded (too short?)')
+            logger.warning('Time series cannot be embedded (too short?)')
+            return np.nan
     #% nlpe can cause memory pains for long time series
     #% Let's do this dirty cheat
     if n > max_n:
         # crop the time series to the first max_n samples
         y = y[:max_n]
-        logging.info(f"Michael Small's nlpe code is only being evaluated on the first {max_n} (/{n}) samples.")
+        logger.info(f"Michael Small's nlpe code is only being evaluated on the first {max_n} (/{n}) samples.")
         n = max_n
     
     if n < 20: # short time series cause problems
-        logging.warning(f'Time series (N = {len(y)}) is too short.')
+        logger.warning(f'Time series (N = {len(y)}) is too short.')
         return np.nan
 
     # run the nonlinear prediction error code
     res = _ms_nlpe(y, de, tau)
+    if np.isscalar(res) and np.isnan(res):
+        # a scalar nan has been returned instead of expected array
+        return np.nan
 
     # compute outputs
     out = {}
@@ -304,18 +310,18 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
         if tau == 'ac':
             tau = first_crossing(y, 'ac', 0, 'discrete')
             if np.isnan(tau):
-                logging.warning('Could not get time delay by ACF (time series too short?)')
+                logger.warning('Could not get time delay by ACF (time series too short?)')
                 return np.nan
         elif tau == 'mi':
             tau = first_min(y, 'mi')
             if np.isnan(tau):
-                logging.warning('Could not get time delay by mutual information (time series too short?)')
+                logger.warning('Could not get time delay by mutual information (time series too short?)')
                 return np.nan
         else:
             raise ValueError(f'Invalid time-delay method: {tau}. Choose either mi or ac.')
     n_embed = n - (m-1)*tau
     if n_embed <= 0:
-        logging.warning(f'Time series (N = {n}) too short to embed with these embedding parameters.')
+        logger.warning(f'Time series (N = {n}) too short to embed with these embedding parameters.')
         return np.nan
 
     y_embed = np.zeros((n_embed, m))

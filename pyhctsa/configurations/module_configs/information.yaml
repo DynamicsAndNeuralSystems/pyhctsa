@@ -2,38 +2,35 @@ information:
   automutual_info_stats:
     base_name: automutual_info_stats
     dependencies:
-      - jpype1
     configs:
       - {max_tau: 40, est_method: 'gaussian', zscore: True}
       - {max_tau: 20, est_method: 'gaussian', zscore: True}
-      - {max_tau: 40, est_method: 'kraskov1', extra_param: '4', zscore: True}
-      - {max_tau: 20, est_method: 'kraskov1', extra_param: '4', zscore: True}
+      - {max_tau: 40, est_method: 'kraskov1', extra_param: 4, zscore: True}
+      - {max_tau: 20, est_method: 'kraskov1', extra_param: 4, zscore: True}
     legacy_name: IN_AutoMutualInfoStats
     ordered_args: ['max_tau', 'est_method', 'extra_param']
 
   first_min:
     base_name: first_min
     dependencies:
-      - jpype1
     configs:
       - {min_what: 'ac', zscore: True}
       - {min_what: 'mi-gaussian', zscore: True}
-      - {min_what: 'mi-kraskov2', extra_param: '4', zscore: True}
-      - {min_what: 'mi-hist', extra_param: '5', zscore: True}
-      - {min_what: 'mi-hist', extra_param: '10', zscore: True}
+      - {min_what: 'mi-kraskov2', extra_param: 4, zscore: True}
+      - {min_what: 'mi-hist', extra_param: 5, zscore: True}
+      - {min_what: 'mi-hist', extra_param: 10, zscore: True}
     legacy_name: CO_FirstMin
     ordered_args: ['min_what', 'extra_param']
   
   first_max:
     base_name: first_max
-    depedencies:
-      - jpype1
+    dependencies:
     configs:
       - {max_what: 'ac', zscore: True}
       - {max_what: 'mi-gaussian', zscore: True}
-      - {max_what: 'mi-kraskov2', extra_param: '4', zscore: True}
-      - {max_what: 'mi-hist', extra_param: '5', zscore: True}
-      - {max_what: 'mi-hist', extra_param: '10', zscore: True}
+      - {max_what: 'mi-kraskov2', extra_param: 4, zscore: True}
+      - {max_what: 'mi-hist', extra_param: 5, zscore: True}
+      - {max_what: 'mi-hist', extra_param: 10, zscore: True}
     legacy_name: CO_FirstMin
     ordered_args: ['max_what', 'extra_param']
   

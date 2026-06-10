@@ -79,7 +79,6 @@ class TestOptionalDepChecks:
     def test_optional_dep_check_basic(self):
         assert _check_optional_deps('numpy') is True
         assert _check_optional_deps('test') is False
-        assert _check_optional_deps('jpype1') is True
     
 # 4. Validate data checks
 class TestValidateData:

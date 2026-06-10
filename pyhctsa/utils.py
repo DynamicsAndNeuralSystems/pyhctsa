@@ -9,6 +9,8 @@ import yaml
 from pyhctsa import __version__
 from pathlib import Path
 import logging
+logger = logging.getLogger('pyhctsa')
+import warnings
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -93,16 +95,6 @@ def _check_optional_deps(dep: str) -> bool:
     Returns True if available, else False."""
     try:
         version(dep)
-        # special check for JPype dependency
-        if dep == "jpype1":
-            try:
-                import jpype
-                jpype.getDefaultJVMPath()
-            except (ImportError, AttributeError):
-                return False
-            except jpype.JVMNotFoundException:
-                logging.warning("JVM not found. Please check your JAVA_HOME or installation.")
-                return False
         return True
     except PackageNotFoundError:
         return False
@@ -110,19 +102,19 @@ def _check_optional_deps(dep: str) -> bool:
 def _validate_data(ts: np.ndarray) -> bool:
     """validate a time series before computing features"""
     if len(ts) < 100:
-        logging.warning("Time series is too short!")
+        logger.warning("Time series is too short!")
         return False
     if np.all(ts == ts[0]):
         # constant time series
         # maybe do a tolerance instead?
-        logging.warning("Time series is constant.")
+        logger.warning("Time series is constant.")
         return False
     if np.any(np.isnan(ts)):
         # data contains nans
-        logging.warning("Time series contains NaNs.")
+        logger.warning("Time series contains NaNs.")
         return False
     if np.any(np.isinf(ts)):
-        logging.warning("Time series contains Inf.")
+        logger.warning("Time series contains Inf.")
         return False
 
     return True

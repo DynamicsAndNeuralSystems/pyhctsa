@@ -1,4 +1,5 @@
 import logging
+logger = logging.getLogger('pyhctsa')
 import warnings
 from typing import Union
 
@@ -251,7 +252,8 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
 
     points_per_window = np.size(x_buff, 0)
     if points_per_window == 1:
-        raise ValueError(f"This time series (N = {N}) is too short to extract {num_windows}")
+        logger.warning(f"This time series (N = {N}) is too short to extract {num_windows}")
+        return np.nan
     
     # okay now we have the sliding window ('buffered') signal, x_buff
     # first calculate the first moment in all the windows
@@ -264,7 +266,6 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
     #out['R'] = R
     out['absR'] = np.abs(rmat[0, 1])
     out['density'] = np.ptp(M1) * np.ptp(M2) / N
-    #out['mi'] = MutualInfo(M1, M2, 'gaussian')
 
     return out
 
@@ -723,7 +724,7 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
 
     if len(r) < 5:
         # It's not really appropriate to compute statistics on less than 5 datapoints
-        logging.warning(f"Time series (of length {N}) is too short")
+        logger.warning(f"Time series (of length {N}) is too short")
         return np.nan
     
     # Compare statistics of this subset to those obtained from the full time series
@@ -825,7 +826,8 @@ def std_nth_deriv(y: ArrayLike, ndr: int = 2) -> float:
     y = np.asarray(y)
     yd = np.diff(y, n=ndr)
     if len(yd) == 0:
-        raise ValueError(f"Time series (N = {len(y)}) too short to compute differences at n = {n}")
+        logger.warning(f"Time series (N = {len(y)}) too short to compute differences at n = {n}")
+        return np.nan
     out = np.std(yd, ddof=1)
 
     return float(out)
@@ -937,7 +939,7 @@ def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float
             pn = int(np.floor(N / extra_param))
             M = np.array([np.mean(y[j*extra_param:(j+1)*extra_param]) for j in range(pn)])
         else:
-            logging.warning(f"This time series (N = {N}) is too short for stat_av({what_type},'{extra_param}')")
+            logger.warning(f"This time series (N = {N}) is too short for stat_av({what_type},'{extra_param}')")
             return np.nan
     else:
         raise ValueError(f"Error evaluating stat_av of type '{what_type}', please select either 'seg' or 'len'")
@@ -1014,7 +1016,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
     y = np.asarray(y)
     win_length = np.floor(len(y)/num_seg)
     if win_length == 0:
-        logging.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
+        logger.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
         return np.nan
     inc = np.floor(win_length/inc_move) # increment to move at each step
     # if incrment rounded down to zero, prop it up

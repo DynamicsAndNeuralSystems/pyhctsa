@@ -53,7 +53,7 @@ cores on your local machine using the `LocalDistributor`:
 
 .. code-block:: python
     
-    from pyhctsa.distributed import LocalDistributor
+    from pyhctsa.distribute import LocalDistributor
     from pyhctsa.calculator import FeatureCalculator
 
     # initialize the calculator
@@ -66,16 +66,4 @@ cores on your local machine using the `LocalDistributor`:
     # pass the distributor to the .extract() method
     res = calc.extract(data, distributor=dist)
 
-ℹ️ Note for Windows Users 
--------------------------
-Some features require Java (JDK) to be installed. If you encounter a JVM not found error:
-    1. Ensure Java Development Kit (JDK) is installed on your system
-        - Download from Oracle or use OpenJDK (Minimum version required: JDK 11)
-    2. Before importing `pyhctsa`, set the `JAVA_HOME` environment variable using the location of the JDK installation on your system:
-
-    .. code-block:: python
-
-        import os
-        os.environ['JAVA_HOME'] = "C:\Program Files\Java\jdk-11" # replace with relevant path
-        from pyhctsa.calculator import FeatureCalculator
-        # rest of your code...
+    

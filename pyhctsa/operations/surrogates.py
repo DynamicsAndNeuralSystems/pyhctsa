@@ -1,12 +1,14 @@
 import warnings
 from typing import Union
+import logging
+logger = logging.getLogger('pyhctsa')
 
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.stats import gaussian_kde, norm, zmap
 
 from ..operations.correlation import tc3
-from ..operations.information import automutual_info, first_min
+from ..operations.information import automutual_info, first_min, automutual_info
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -15,7 +17,8 @@ def sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str) 
     num_surrs = len(stat_surr)
     out = {}
     if np.isnan(stat_surr).any():
-        raise ValueError("SDgivemestats failed")
+        logger.warning("SDgivemestats failed")
+        return np.nan
     #% ASSUME GAUSSIAN DISTRIBUTION:
     #% so can use 1/2-sided z-statistic
     z_stat = zmap(np.atleast_1d(stat_x), stat_surr, ddof=1)[0]
@@ -276,7 +279,8 @@ def surrogate_test(
                 fmmi_surr[i] = np.nan
 
         if np.isnan(fmmi_surr).any():
-            raise ValueError("fmmi failed")
+            logger.warning("fmmi failed")
+            return np.nan
         #% FMMI should be higher for signal than surrogates
         some_stats = sd_give_me_stats(fmmi_x, fmmi_surr, 'right')
         for (k, v) in zip(some_stats.keys(), some_stats.values()):

@@ -1,13 +1,14 @@
 import logging
+logger = logging.getLogger('pyhctsa')
 import os
 from typing import Any, Dict, List, Optional, Union, Callable
 
-import jpype as jp
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy import stats
 
 from ..utils import sign_change
+from ..toolboxes.infotheory.mutual_info import KraskovMI, GaussianMI
 
 def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, None]) -> Callable:
     """Helper to return the correct correlation function based on method type."""
@@ -22,8 +23,6 @@ def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, No
         return lambda x: automutual_info(y, x, 'kraskov2', extra_param)
     elif min_what == 'mi-kraskov1':
         return lambda x: automutual_info(y, x, 'kraskov1', extra_param)
-    elif min_what == 'mi-kernel':
-        return lambda x: automutual_info(y, x, 'kernel', extra_param)
     elif min_what in ['mi', 'mi-gaussian']:
         return lambda x: automutual_info(y, x, 'gaussian', extra_param)
     else:
@@ -51,10 +50,9 @@ def first_min(
 
         Automutual information (AMI):
 
-        - ``'mi'``: AMI using the JIDT Gaussian estimator (default for AMI).
-        - ``'mi-kernel'``: AMI using the JIDT kernel estimator.
-        - ``'mi-kraskov1'``: AMI using the JIDT Kraskov estimator (variant 1).
-        - ``'mi-kraskov2'``: AMI using the JIDT Kraskov estimator (variant 2).
+        - ``'mi'``: AMI using the Gaussian estimator (default for AMI).
+        - ``'mi-kraskov1'``: AMI using the Kraskov estimator (variant 1).
+        - ``'mi-kraskov2'``: AMI using the Kraskov estimator (variant 2).
         - ``'mi-hist'``: AMI using a histogram-based estimator.
 
         Default is ``'mi-gaussian'``.
@@ -77,7 +75,7 @@ def first_min(
         auto_corr[i - 1] = corrfn(i)
         
         if np.isnan(auto_corr[i - 1]):
-            logging.warning(f"No minimum in {min_what}: encountered NaN.")
+            logger.warning(f"No minimum in {min_what}: encountered NaN.")
             return np.nan
         
         # Check for minimum
@@ -109,10 +107,9 @@ def first_max(
 
         Automutual information (AMI):
 
-        - ``'mi'``: AMI using the JIDT Gaussian estimator (default for AMI).
-        - ``'mi-kernel'``: AMI using the JIDT kernel estimator.
-        - ``'mi-kraskov1'``: AMI using the JIDT Kraskov estimator (variant 1).
-        - ``'mi-kraskov2'``: AMI using the JIDT Kraskov estimator (variant 2).
+        - ``'mi'``: AMI using the Gaussian estimator (default for AMI).
+        - ``'mi-kraskov1'``: AMI using the Kraskov estimator (variant 1).
+        - ``'mi-kraskov2'``: AMI using the Kraskov estimator (variant 2).
         - ``'mi-hist'``: AMI using a histogram-based estimator.
 
         Default is ``'mi'``.
@@ -134,7 +131,7 @@ def first_max(
         auto_corr[i - 1] = corrfn(i)
         
         if np.isnan(auto_corr[i - 1]):
-            logging.warning(f"No maximum in {max_what}: encountered NaN.")
+            logger.warning(f"No maximum in {max_what}: encountered NaN.")
             return np.nan
 
         # Check for maximum
@@ -189,7 +186,7 @@ def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
     if np.any(mask):
         mi = np.sum(p_ij[mask] * np.log(p_ij[mask] / p_ixp_j[mask]))
     else:
-        logging.warning("The histograms aren't catching any points. Perhaps due to an inappropriate custom range for binning the data.")
+        logger.warning("The histograms aren't catching any points. Perhaps due to an inappropriate custom range for binning the data.")
         mi = np.nan
 
     return mi
@@ -228,7 +225,7 @@ def automutual_info_stats(
     max_tau : int, optional
         Maximum time delay to investigate. If None, uses N/4 where N is the length
         of the time series, but won't exceed N/2. Default is `None`.
-    est_method : {'gaussian', 'kernel', 'kraskov1', 'kraskov2'}, optional
+    est_method : {'gaussian', 'kraskov1', 'kraskov2'}, optional
         Method for estimating mutual information (passed to automutual_info).
         Default is ``'kernel'``.
     extra_param : int or str, optional
@@ -321,18 +318,17 @@ def automutual_info_stats(
     out['amiac1'] = autocorr(ami, 1, 'Fourier')[0]
 
     return out
-
+    
 def automutual_info(
-    y: ArrayLike,
-    time_delay: Union[int, str, List[int]] = 1,
-    est_method: str = 'kernel',
-    extra_param: Optional[Union[int, str]] = None
-) -> Union[float, Dict[str, float]]:
+        y: ArrayLike,
+        time_delay: Union[int, str, List[int]] = 1,
+        est_method: str = 'gaussian',
+        extra_param: Optional[Union[int, str]] = None) -> Any:
     """
     Compute time-delayed automutual information of a time series.
 
     Calculates the mutual information between a time series and its time-delayed version
-    using various estimation methods from the JIDT (Java Information Dynamics Toolkit).
+    using various estimation methods.
 
     References
     ----------
@@ -353,11 +349,10 @@ def automutual_info(
         
         Default is 1.
 
-    est_method : {'gaussian', 'kernel', 'kraskov1', 'kraskov2'}, optional
+    est_method : {'gaussian', 'kraskov1', 'kraskov2'}, optional
         Method for estimating mutual information:
 
         - 'gaussian': Assumes Gaussian variables
-        - 'kernel': Kernel density estimation (default)
         - 'kraskov1': Kraskov estimator 1 (KSG1)
         - 'kraskov2': Kraskov estimator 2 (KSG2)
 
@@ -366,7 +361,7 @@ def automutual_info(
     extra_param : int or str, optional
         Extra parameter for the estimator. For Kraskov estimators,
         this sets the number of nearest neighbors 'k'.
-        Default is 3.
+        Default is 4.
 
     Returns
     -------
@@ -376,7 +371,7 @@ def automutual_info(
         If multiple time_delay:
             dict: Keys are f"ami{delay}", values are corresponding AMI values
     """
-    from ..operations.distribution import first_crossing
+    from ..operations.distribution import first_crossing # zzzz
 
     if isinstance(time_delay, str) and time_delay in ['ac', 'tau']:
         time_delay = first_crossing(y, corr_fun='ac', threshold=0, what_out='discrete')
@@ -384,6 +379,9 @@ def automutual_info(
     y = np.asarray(y).flatten()
     n = len(y)
     min_samples = 5  # minimum 5 samples to compute mutual information (could make higher?)
+    kval = 4 # default 
+    if extra_param:
+        kval = extra_param
 
     # Loop over time delays if a vector
     if not isinstance(time_delay, list):
@@ -394,14 +392,17 @@ def automutual_info(
 
     if num_time_delays > 1:
         time_delay = np.sort(time_delay)
-
-    # initialise the MI calculator object if using non-Gaussian estimator
-    if est_method != 'gaussian':
-        # assumes the JVM has already been started up
-        mi_calc = _initialize_MI(est_method=est_method, extra_param=extra_param, add_noise=False)  # NO ADDED NOISE!
-
+    
+    if est_method == 'kraskov1':
+        mi_calc = KraskovMI(k=kval, algorithm=1, add_noise=False) # no added noise
+    elif est_method == 'kraskov2':
+        mi_calc = KraskovMI(k=kval, algorithm=2, add_noise=False)
+    elif est_method == 'gaussian':
+        mi_calc = GaussianMI()
+    else:
+        raise ValueError(f'Unknown estimator: {est_method}')
+    
     for k, delay in enumerate(time_delay):
-        # check enough samples to compute automutual info
         if delay > n - min_samples:
             # time series too short - keep the remaining values as NaNs
             break
@@ -410,185 +411,21 @@ def automutual_info(
         y1 = y[:-delay]
         y2 = y[delay:]
 
-        if est_method == 'gaussian':
-            r, _ = stats.pearsonr(y1, y2)
-            amis[k] = -0.5 * np.log(1 - r**2)
-        else:
-            # Reinitialize for Kraskov:
-            mi_calc.initialise(1, 1)
-            # Set observations to time-delayed versions of the time series:
-            y1_jp = jp.JArray(jp.JDouble)(y1)  # convert observations to java double
-            y2_jp = jp.JArray(jp.JDouble)(y2)
-            mi_calc.setObservations(y1_jp, y2_jp)
-            # compute
-            amis[k] = mi_calc.computeAverageLocalOfObservations()
-
+        amis[k] = mi_calc.compute(y1, y2)
+        
     if np.isnan(amis).any():
-        logging.warning(
+        logger.warning(
             f"Time series (n={n}) is too short for automutual information calculations "
             f"up to lags of {max(time_delay)}"
         )
-
+    
     if num_time_delays == 1:
         # return a scalar if only one time delay
         return amis[0]
+    
     else:
         # return a dict for multiple time delays
         return {f"ami{delay}": ami for delay, ami in zip(time_delay, amis)}
-
-def mutual_info(
-    y1: ArrayLike,
-    y2: ArrayLike,
-    est_method: str = 'kernel',
-    extra_param: Optional[Union[int, str]] = None
-) -> float:
-    """
-    Compute mutual information between two time series using JIDT estimators.
-
-    This function calculates the mutual information between two time series using
-    various estimators from the Java Information Dynamics Toolkit (JIDT).
-
-    Note: This function requires the infodynamics.jar Java library and JPype.
-
-    References
-    ----------
-    .. [1] Kraskov, A., Stoegbauer, H., Grassberger, P. (2004). Estimating mutual information.
-        Physical Review E, 69(6), 066138. https://doi.org/10.1103/PhysRevE.69.066138
-
-    Parameters
-    ----------
-    y1 : array-like
-        First input time series.
-    y2 : array-like
-        Second input time series.
-    est_method : str, optional
-        Estimation method to use:
-        
-        - 'gaussian': Assumes Gaussian variables
-        - 'kernel': Kernel density estimation (default)
-        - 'kraskov1': Kraskov estimator 1 (KSG1)
-        - 'kraskov2': Kraskov estimator 2 (KSG2)
-
-        Default is `kernel`.
-
-    extra_param : Union[int, str], optional
-        Extra parameter for the estimator:
-
-        - For Kraskov estimators: number of nearest neighbors 'k' (default: 3)
-        - For other methods: ignored
-
-        Default is `None`.
-
-    Returns
-    -------
-    float
-        Estimated mutual information between the input time series
-    """
-    # Initialize miCalc object (don't add noise!):
-    mi_calc = _initialize_MI(est_method=est_method, extra_param=extra_param, add_noise=False)
-    # Set observations to two time series:
-    y1_jp = jp.JArray(jp.JDouble)(y1) # convert observations to java double
-    y2_jp = jp.JArray(jp.JDouble)(y2) # convert observations to java double
-    mi_calc.setObservations(y1_jp, y2_jp)
-
-    # Compute mutual information
-    out = mi_calc.computeAverageLocalOfObservations()
-
-    return out
-
-def _initialize_MI(
-    est_method: str = 'gaussian',
-    extra_param: Optional[Union[int, str]] = None,
-    add_noise: bool = False,
-    verbose: bool = False
-) -> Any:  # Returns a Java object, use Any since we can't type hint JPype objects
-    """
-    Initialize a mutual information calculator from JIDT (Java Information Dynamics Toolkit).
-    
-    Creates and configures a mutual information estimator by starting the JVM if needed,
-    loading the appropriate JIDT class, and setting up the calculation parameters.
-
-    Parameters
-    ----------
-    est_method : str, optional
-
-        Estimation method to use:
-        - 'gaussian': Assumes Gaussian variables (simplest)
-        - 'kernel': Kernel density estimation
-        - 'kraskov1': Kraskov estimator 1 (KSG1)
-        - 'kraskov2': Kraskov estimator 2 (KSG2)
-        
-        Default is ``'gaussian'``.
-
-    extra_param : Union[int, str], optional
-        Configuration parameter for the estimator:
-
-        - For Kraskov methods: number of nearest neighbors 'k'
-        - For other methods: ignored
-
-        Default is `None` (uses k=3 for Kraskov).
-
-    add_noise : bool, optional
-        Whether to add small random noise for Kraskov estimators:
-
-        - True: Add noise (helpful for deterministic signals)
-        - False: No noise.
-
-        Default is `False`.
-    
-    verbose : bool, optional
-        Display JVM debug info. Default is `False`.
-
-    Returns
-    -------
-    Any
-        Initialized JIDT mutual information calculator object.
-        Type varies by estimation method chosen.
-    """
-
-    if not jp.isJVMStarted():
-        jarloc = (
-            os.path.dirname(os.path.abspath(__file__)) + "/../toolboxes/infodynamics-dist/infodynamics.jar"
-        )
-        # change to debug info
-        if verbose:
-            logging.debug(f"Starting JVM with java class {jarloc}.")
-        jp.startJVM(jp.getDefaultJVMPath(), "-ea", "-Djava.class.path=" + jarloc, interrupt=False)
-
-
-    if est_method == 'gaussian':
-        implementing_class = 'infodynamics.measures.continuous.gaussian'
-        mi_calc = jp.JPackage(implementing_class).MutualInfoCalculatorMultiVariateGaussian()
-    elif est_method == 'kernel':
-        implementing_class = 'infodynamics.measures.continuous.kernel'
-        mi_calc = jp.JPackage(implementing_class).MutualInfoCalculatorMultiVariateKernel()
-    elif est_method == 'kraskov1':
-        implementing_class = 'infodynamics.measures.continuous.kraskov'
-        mi_calc = jp.JPackage(implementing_class).MutualInfoCalculatorMultiVariateKraskov1()
-    elif est_method == 'kraskov2':
-        implementing_class = 'infodynamics.measures.continuous.kraskov'
-        mi_calc = jp.JPackage(implementing_class).MutualInfoCalculatorMultiVariateKraskov2()
-    else:
-        raise ValueError(f"Unknown mutual information estimation method '{est_method}'")
-
-    # Add neighest neighbor option for KSG estimator
-    if est_method in ['kraskov1', 'kraskov2']:
-        if extra_param is not None:
-            if isinstance(extra_param, int):
-                logging.warning("Number of nearest neighbors needs to be a string. Setting this for you...")
-                extra_param = str(extra_param)
-            mi_calc.setProperty('k', extra_param) # 4th input specifies number of nearest neighbors for KSG estimator
-        else:
-            mi_calc.setProperty('k', '3') # use 3 nearest neighbors for KSG estimator as default
-        
-    # Make deterministic if kraskov1 or 2 (which adds a small amount of noise to the signal by default)
-    if (est_method in ['kraskov1', 'kraskov2']) and (add_noise is False):
-        mi_calc.setProperty('NOISE_LEVEL_TO_ADD','0')
-    
-    # Specify a univariate calculation
-    mi_calc.initialise(1,1)
-
-    return mi_calc
 
 def rm_automutual_information(y: ArrayLike, tau: int = 1) -> float:
     """
@@ -689,23 +526,23 @@ def _rm_info(*args):
     len_y = y_shape[0]
 
     if len(x_shape) != 1:  # makes sure x is a row vector
-        logging.warning("Invalid dimension of x")
+        logger.warning("Invalid dimension of x")
         return
 
     if len(y_shape) != 1:
-        logging.warning("Invalid dimension of y")
+        logger.warning("Invalid dimension of y")
         return
 
     if len_x != len_y:  # makes sure x and y have the same amount of elements
-        logging.warning("Unequal length of x and y")
+        logger.warning("Unequal length of x and y")
         return
 
     if n_args > 5:
-        logging.warning("Too many arguments")
+        logger.warning("Too many arguments")
         return
 
     if n_args < 2:
-        logging.warning("Not enough arguments")
+        logger.warning("Not enough arguments")
         return
 
     # setting up variables depending on amount of inputs
@@ -869,19 +706,19 @@ def _rm_histogram_2(*args):
     leny = yshape[0]
 
     if len(xshape) != 1:  # makes sure x is a row vector
-        logging.warning("Invalid dimension of x")
+        logger.warning("Invalid dimension of x")
         return
 
     if len(yshape) != 1:
-        logging.warning("Invalid dimension of y")
+        logger.warning("Invalid dimension of y")
         return
 
     if lenx != leny:  # makes sure x and y have the same amount of elements
-        logging.warning("Unequal length of x and y")
+        logger.warning("Unequal length of x and y")
         return
 
     if nargin > 3:
-        logging.warning("Too many arguments")
+        logger.warning("Too many arguments")
         return
 
     if nargin == 2:
@@ -909,16 +746,16 @@ def _rm_histogram_2(*args):
     # checking descriptor to make sure it is valid, otherwise print an error
 
     if ncellx < 1:
-        logging.warning("Invalid number of cells in X dimension")
+        logger.warning("Invalid number of cells in X dimension")
 
     if ncelly < 1:
-        logging.warning("Invalid number of cells in Y dimension")
+        logger.warning("Invalid number of cells in Y dimension")
 
     if upperx <= lowerx:
-        logging.warning("Invalid bounds in X dimension")
+        logger.warning("Invalid bounds in X dimension")
 
     if uppery <= lowery:
-        logging.warning("Invalid bounds in Y dimension")
+        logger.warning("Invalid bounds in Y dimension")
 
     result = np.zeros([int(ncellx), int(ncelly)],
                       dtype=int)  # should do the same thing as matlab: result(1:ncellx,1:ncelly) = 0;
