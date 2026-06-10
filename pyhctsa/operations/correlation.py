@@ -10,7 +10,7 @@ from scipy.stats import expon, gaussian_kde, kurtosis, skew
 from scipy.stats import mode as smode
 from statsmodels.tsa.stattools import pacf
 
-from ..operations.information import automutual_info, first_min
+from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..utils import bin_picker, make_mat_buffer, point_of_crossing, sign_change, z_score, histc
 
@@ -21,8 +21,8 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
     Adds Gaussian-distributed noise to the time series with increasing standard deviation, eta, 
     across the range eta = 0, 0.1, ..., 2, and measures the mutual information at each point. 
-    Can be measured using histograms with extra_param bins or using the Information Dynamics 
-    Toolkit. The output is a set of statistics on the resulting set of automutual information
+    Can be measured using histograms with extra_param bins, or Kraskov estimators with k = extra_param.
+    The output is a set of statistics on the resulting set of automutual information
     estimates, including a fit to an exponential decay, since the automutual information 
     decreases with the added white noise. This algorithm is quite different, but was based 
     on the idea in [1].
@@ -56,10 +56,9 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
         - ``"quantiles"``
         - ``"even"``
 
-        JIDT-based estimators:
+        Alternative estimators:
 
         - ``"gaussian"``
-        - ``"kernel"``
         - ``"kraskov1"``
         - ``"kraskov2"``
 
@@ -69,7 +68,7 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
         Additional parameter for the AMI estimator.
 
         - For histogram methods: number of bins.
-        - For JIDT methods: estimator-specific parameter.
+        - For alternative methods: estimator-specific parameter.
 
         Default is ``10``.
 
@@ -87,9 +86,6 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     # Set tau to minimum of autocorrelation function if 'ac' or 'tau'
     if tau in ['ac', 'tau']:
         tau = first_crossing(y, 'ac', 0, 'discrete')
-    if extra_param is None:
-        # JIDT expects empty string for no extra params
-        extra_param = ''
     # Generate noise
     if random_seed is not None:
         np.random.seed(random_seed)
@@ -110,9 +106,9 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
             if np.isnan(amis[i]):
                 logger.warning('Error computing AMI: Time series too short (?)')
                 return np.nan
-    if ami_method in ['gaussian','kernel','kraskov1','kraskov2']:
+    if ami_method in ['gaussian','kraskov1','kraskov2']:
         for i in range(num_repeats):
-            amis[i] = automutual_info(y + noise_range[i]*noise, tau, ami_method, str(extra_param))
+            amis[i] = automutual_info(y + noise_range[i]*noise, tau, ami_method, extra_param)
             if np.isnan(amis[i]):
                 logger.warning('Error computing AMI: Time series too short (?)')
                 return np.nan

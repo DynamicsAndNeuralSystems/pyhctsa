@@ -80,7 +80,7 @@ Note that individual operations can only be called directly on individual time-s
 Time-series feature extraction is computationally intensive. 
 To speed up processing, pyhctsa allows you to distribute the workload across multiple CPU cores on your local machine using the `LocalDistributor`:
 ```Python
-from pyhctsa.distributed import LocalDistributor
+from pyhctsa.distribute import LocalDistributor
 from pyhctsa.calculator import FeatureCalculator
 
 # initialize the calculator
@@ -94,21 +94,6 @@ dist = LocalDistributor(n_workers=4)
 res = calc.extract(data, distributor=dist)
 ```
 
-## ℹ️ Java support
-
-A small subset of features (information-theoretic measures using [JIDT](https://github.com/jlizier/jidt)) require Java. If Java is not available, pyhctsa will automatically skip these functions and compute the remaining features without error.
-
-To enable Java-dependent features, ensure Java Development Kit (JDK) 11 or later is installed:
-- Download from [Oracle](https://www.oracle.com/java/technologies/downloads/) or use OpenJDK
-
-On some systems (particularly Windows), you may also need to set the `JAVA_HOME` environment variable before importing pyhctsa:
-```Python
-import os
-os.environ['JAVA_HOME'] = "C:\Program Files\Java\jdk-11" # replace with relevant path
-from pyhctsa.calculator import FeatureCalculator
-# rest of your code...
-```
-
 # 🔑 Licenses
 
 ## Internal licenses
@@ -119,7 +104,6 @@ While the majority of features in _pyhctsa_ rely on standard Python libraries, a
 
 The following external time-series analysis code packages are provided with the software (in the `toolboxes` directory), and are used by our main feature-extraction calculator to compute meaningful structural features from time series:
 
-- Joseph T. Lizier's [Java Information Dynamics Toolkit (JIDT)](https://github.com/jlizier/jidt) for studying  information-theoretic measures of computation in complex systems, version 1.3 (GPL license).
 - Time-series analysis code developed by [Michael Small](https://github.com/m-small) (unlicensed).
 - Max Little's [time-series analysis code](http://www.maxlittle.net/software/index.php) (GPL License).
 - [TISEAN package for nonlinear time-series analysis](http://www.mpipks-dresden.mpg.de/~tisean/Tisean_3.0.1/index.html), version 3.0.1 (GPL license).

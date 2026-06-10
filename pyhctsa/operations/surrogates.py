@@ -8,7 +8,7 @@ from numpy.typing import ArrayLike
 from scipy.stats import gaussian_kde, norm, zmap
 
 from ..operations.correlation import tc3
-from ..operations.information import automutual_info, first_min
+from ..operations.information import automutual_info, first_min, automutual_info
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 

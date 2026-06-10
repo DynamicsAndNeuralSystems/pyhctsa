@@ -95,29 +95,6 @@ def _check_optional_deps(dep: str) -> bool:
     Returns True if available, else False."""
     try:
         version(dep)
-        # special check for JPype dependency
-        if dep == "jpype1":
-            try:
-                import jpype
-                jpype.getDefaultJVMPath()
-            except ImportError:
-                return False
-            except jpype.JVMNotFoundException:
-                warnings.warn(
-                    "JVM not found. Please check your JAVA_HOME or Java installation.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-                return False
-            except Exception:
-                # catch any other exception because there can be many related to java
-                warnings.warn(
-                    "jpype1 is installed but a working JVM could not be located. "
-                    "Please check your Java installation.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-                return True
         return True
     except PackageNotFoundError:
         return False

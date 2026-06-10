@@ -266,7 +266,6 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
     #out['R'] = R
     out['absR'] = np.abs(rmat[0, 1])
     out['density'] = np.ptp(M1) * np.ptp(M2) / N
-    #out['mi'] = MutualInfo(M1, M2, 'gaussian')
 
     return out
 
