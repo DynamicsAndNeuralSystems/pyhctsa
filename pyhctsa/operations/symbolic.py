@@ -5,7 +5,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 from scipy.stats import mstats
-from scipy.signal import resample as ssre
+from scipy.signal import resample_poly
 
 from ..operations.correlation import first_crossing
 from ..utils import binarize, sign_change
@@ -613,9 +613,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
         if np.isnan(tau):
             logger.warning("Time series too short to estimate tau")
             return np.nan
-    if tau > 1: # calculate transition matrix at a non-unit lag
-        # downsample at rate 1:tau
-        y = ssre(y, int(np.ceil(len(y) / tau)))
+    if tau > 1:
+        y = resample_poly(y, 1, int(tau))
     
     N = len(y)
 
