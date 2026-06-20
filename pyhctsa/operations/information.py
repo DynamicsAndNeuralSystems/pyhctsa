@@ -28,6 +28,46 @@ def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, No
     else:
         raise ValueError(f"Unknown correlation type specified: {min_what}")
 
+def _first_min_mi_gaussian(y: np.ndarray):
+    """Vectorised path for ``first_min(y, 'mi')`` / ``'mi-gaussian'``.
+
+    Evaluates the Gaussian automutual information at every lag in a single
+    O(n log n) pass. Reproduces the windowed Pearson estimate.
+    """
+    y = np.asarray(y, dtype=float)
+    n = y.size
+    if n < 3:
+        return np.nan
+    yc = y - y.mean()                      
+    # linear autocorrelation  C[tau] = sum_t yc[t]*yc[t+tau]  via zero-padded FFT
+    nfft = 1 << (2 * n - 1).bit_length()
+    fy = np.fft.rfft(yc, nfft)
+    C_all = np.fft.irfft(fy * np.conj(fy), nfft)[:n]
+    # per-window sums for the two delayed segments y[:-tau] and y[tau:]
+    P = np.concatenate(([0.0], np.cumsum(yc)))         # P[k] = sum_{t<k} yc[t]
+    Q = np.concatenate(([0.0], np.cumsum(yc * yc)))    # Q[k] = sum_{t<k} yc[t]^2
+    taus = np.arange(1, n)
+    m = (n - taus).astype(float)
+    S1 = P[n - taus]; S2 = P[n] - P[taus]
+    Q1 = Q[n - taus]; Q2 = Q[n] - Q[taus]
+    C = C_all[taus]
+    num = m * C - S1 * S2
+    den = (m * Q1 - S1 * S1) * (m * Q2 - S2 * S2)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        r = np.clip(num / np.sqrt(den), -1.0, 1.0)
+        auto_corr = -0.5 * np.log(1.0 - r * r)         # AMI(tau), Gaussian estimator
+    auto_corr[~(den > 0.0)] = np.nan                   # degenerate window -> NaN
+    # identical first-minimum scan: lags 1..n-1 map to auto_corr[0..n-2]
+    for i in range(1, n):
+        if np.isnan(auto_corr[i - 1]):
+            logger.warning("No minimum in mi: encountered NaN.")
+            return np.nan
+        if (i == 2) and (auto_corr[1] > auto_corr[0]):
+            return 1
+        elif (i > 2) and auto_corr[i - 3] > auto_corr[i - 2] < auto_corr[i - 1]:
+            return i - 1
+    return np.nan
+
 def first_min(
     y: list,
     min_what: str = 'mi-gaussian',
@@ -68,6 +108,8 @@ def first_min(
     """
     y = np.asarray(y)
     n = len(y)
+    if min_what in ('mi', 'mi-gaussian'):          # vectorised drop-in, identical lag
+        return _first_min_mi_gaussian(y)
     corrfn = _get_corr_fn(y, min_what, extra_param)
     
     auto_corr = np.zeros(n - 1)
