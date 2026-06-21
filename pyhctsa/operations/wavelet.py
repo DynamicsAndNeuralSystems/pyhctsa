@@ -474,10 +474,12 @@ def detail_coeffs(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] 
     medians = np.zeros(max_level) # median detail coefficient magnitude at each level
     maxs = np.zeros(max_level) # max detail coefficient magnitude at each level
     
+    # Decompose once at the maximum level; wavedec is prefix-stable, so the level-k
+    # detail branch is identical whether decomposed to level k or to max_level. Reusing
+    # one (c, l) is bit-identical to re-running wavedec at each level.
+    c, l = wavedec(data=y, wavelet=w_name, level=max_level)
     for k in range(1, max_level+1):
-        level = k
-        c, l = wavedec(data=y, wavelet=w_name, level=level)
-        det = wrcoef(coefs=c, lengths=l, wavelet=w_name, level=level)
+        det = wrcoef(coefs=c, lengths=l, wavelet=w_name, level=k)
         absdet = np.abs(det)
         means[k-1] = np.mean(absdet)
         medians[k-1] = np.median(absdet)

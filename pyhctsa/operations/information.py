@@ -853,14 +853,11 @@ def _rm_histogram_2(*args):
     xx = xx.astype(int)  # cast all the values in xx and yy to ints for use in indexing, already rounded in previous step
     yy = yy.astype(int)
 
-    for n in range(0, lenx):
-        indexx = xx[n]
-        indexy = yy[n]
-
-        indexx -= 1  # adjust indices to start at zero, not one like in MATLAB
-        indexy -= 1
-
-        if indexx >= 0 and indexx <= ncellx - 1 and indexy >= 0 and indexy <= ncelly - 1:
-            result[indexx, indexy] = result[indexx, indexy] + 1
+    # Vectorised scatter-add. xx/yy are already rounded ints; subtract 1 for 0-based
+    # indices, mask to the in-bounds cells (same test as the loop), accumulate once.
+    ix = xx - 1
+    iy = yy - 1
+    in_bounds = (ix >= 0) & (ix <= ncellx - 1) & (iy >= 0) & (iy <= ncelly - 1)
+    np.add.at(result, (ix[in_bounds], iy[in_bounds]), 1)
 
     return result, descriptor

@@ -352,13 +352,14 @@ def _findpeaks(s, min_pk_dist=0, sort_str='none'):
     inf_peaks = np.where(np.isinf(s) & (s > 0))[0]
 
     # Find finite peaks by checking if each point is greater than both neighbors
-    finite_peaks = []
-    for i in range(1, len(s) - 1):
-        if not np.isinf(s[i]) and not np.isnan(s[i]):
-            if s[i] > s[i - 1] and s[i] > s[i + 1]:
-                finite_peaks.append(i)
-
-    finite_peaks = np.array(finite_peaks, dtype=int)
+    # Vectorised: a finite interior point strictly greater than both neighbours.
+    # np.isfinite excludes +/-inf and nan, matching `not isinf and not isnan`.
+    if len(s) < 3:
+        finite_peaks = np.array([], dtype=int)
+    else:
+        mid = s[1:-1]
+        cond = np.isfinite(mid) & (mid > s[:-2]) & (mid > s[2:])
+        finite_peaks = (np.flatnonzero(cond) + 1).astype(int)
 
     # Combine finite and infinite peaks
     all_peaks = np.concatenate([finite_peaks, inf_peaks]) if len(inf_peaks) > 0 else finite_peaks
@@ -392,11 +393,9 @@ def _findpeaks(s, min_pk_dist=0, sort_str='none'):
         # keep only non-deleted peaks
         final_peaks = sorted_peaks[~to_delete]
 
-        # convert back to original indices for sorting
-        back_to_original = np.zeros(len(final_peaks), dtype=int)
-        for i, peak in enumerate(final_peaks):
-            back_to_original[i] = np.where(all_peaks == peak)[0][0]
-
+        # convert back to original indices for sorting. all_peaks is sorted-ascending
+        # and unique, so positions come from one searchsorted instead of an O(p^2) scan.
+        back_to_original = np.searchsorted(all_peaks, final_peaks)
         final_peaks = all_peaks[np.sort(back_to_original)]
     else:
         final_peaks = all_peaks
