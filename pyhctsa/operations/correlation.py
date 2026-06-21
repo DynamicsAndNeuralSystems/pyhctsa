@@ -926,12 +926,13 @@ def _sub_statav(x: ArrayLike, n: int) -> tuple:
     if nn < 2 * n: # not long enough
         statavmean = np.nan
         statavstd = np.nan
-    x_buff = make_mat_buffer(x, int(np.floor(nn/n)))
-    if x_buff.shape[1] > n:
-        # remove final pt
-        x_buff = x_buff[:, :n]
-    statavmean = np.std(np.mean(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
-    statavstd = np.std(np.std(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
+    else:
+        x_buff = make_mat_buffer(x, int(np.floor(nn/n)))
+        if x_buff.shape[1] > n:
+            # remove final pt
+            x_buff = x_buff[:, :n]
+        statavmean = np.std(np.mean(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
+        statavstd = np.std(np.std(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
 
     return statavmean, statavstd
 
