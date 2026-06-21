@@ -28,16 +28,15 @@ def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, No
     else:
         raise ValueError(f"Unknown correlation type specified: {min_what}")
 
-def _first_min_mi_gaussian(y: np.ndarray):
-    """Vectorised path for ``first_min(y, 'mi')`` / ``'mi-gaussian'``.
+def _ami_gaussian_curve(y: np.ndarray):
+    """Gaussian automutual information at every lag 1..n-1 in one O(n log n) pass.
 
-    Evaluates the Gaussian automutual information at every lag in a single
-    O(n log n) pass. Reproduces the windowed Pearson estimate.
+    Reproduces the windowed Pearson estimate (== ``GaussianMI`` on the 1-D delay
+    pair); a degenerate (constant) delay window gives NaN at that lag. Assumes
+    ``n >= 3`` (guarded by ``_self_corr_curve``).
     """
     y = np.asarray(y, dtype=float)
     n = y.size
-    if n < 3:
-        return np.nan
     yc = y - y.mean()                      
     # linear autocorrelation  C[tau] = sum_t yc[t]*yc[t+tau]  via zero-padded FFT
     nfft = 1 << (2 * n - 1).bit_length()
@@ -57,16 +56,58 @@ def _first_min_mi_gaussian(y: np.ndarray):
         r = np.clip(num / np.sqrt(den), -1.0, 1.0)
         auto_corr = -0.5 * np.log(1.0 - r * r)         # AMI(tau), Gaussian estimator
     auto_corr[~(den > 0.0)] = np.nan                   # degenerate window -> NaN
-    # identical first-minimum scan: lags 1..n-1 map to auto_corr[0..n-2]
-    for i in range(1, n):
-        if np.isnan(auto_corr[i - 1]):
-            logger.warning("No minimum in mi: encountered NaN.")
+    return auto_corr
+
+
+
+_VECTORISED_CORR = ('ac', 'mi', 'mi-gaussian')
+
+def _self_corr_curve(y: np.ndarray, what: str):
+    """Full self-correlation curve at lags 1..n-1 for a vectorisable estimator.
+
+    ``'ac'`` -> the FFT autocorrelation, computed once (cf. ``first_crossing``);
+    ``'mi'`` / ``'mi-gaussian'`` -> the Gaussian AMI curve. Returns ``None`` when
+    the series is too short to have an interior extremum (``n < 3``).
+    """
+    y = np.asarray(y, dtype=float)
+    n = y.size
+    if n < 3:
+        return None
+    if what == 'ac':
+        from ..operations.correlation import autocorr
+        c = np.asarray(autocorr(y, [], 'Fourier'), dtype=float).ravel()
+        return c[1:n]                                  # drop lag 0 -> lags 1..n-1
+    return _ami_gaussian_curve(y)                       # 'mi' / 'mi-gaussian'
+
+
+def _first_min_from_curve(c: np.ndarray):
+    """First strict local minimum of a precomputed lag-curve (lags 1..len(c))."""
+    for i in range(1, len(c) + 1):
+        if np.isnan(c[i - 1]):
+            logger.warning("No minimum: encountered NaN.")
             return np.nan
-        if (i == 2) and (auto_corr[1] > auto_corr[0]):
+        if (i == 2) and (c[1] > c[0]):
             return 1
-        elif (i > 2) and auto_corr[i - 3] > auto_corr[i - 2] < auto_corr[i - 1]:
+        elif (i > 2) and c[i - 3] > c[i - 2] < c[i - 1]:
             return i - 1
     return np.nan
+
+
+def _first_max_from_curve(c: np.ndarray):
+    """First strict local maximum of a precomputed lag-curve (lags 1..len(c))."""
+    for i in range(1, len(c) + 1):
+        if np.isnan(c[i - 1]):
+            logger.warning("No maximum: encountered NaN.")
+            return np.nan
+        if (i > 2) and c[i - 3] < c[i - 2] > c[i - 1]:
+            return i - 1
+    return np.nan
+
+
+def _first_min_mi_gaussian(y: np.ndarray):
+    """First minimum of the Gaussian AMI (vectorised); see ``_ami_gaussian_curve``."""
+    c = _self_corr_curve(np.asarray(y), 'mi')
+    return np.nan if c is None else _first_min_from_curve(c)
 
 def first_min(
     y: list,
@@ -108,8 +149,9 @@ def first_min(
     """
     y = np.asarray(y)
     n = len(y)
-    if min_what in ('mi', 'mi-gaussian'):          # vectorised drop-in, identical lag
-        return _first_min_mi_gaussian(y)
+    if min_what in _VECTORISED_CORR:               # vectorised drop-in, identical lag
+        c = _self_corr_curve(y, min_what)
+        return np.nan if c is None else _first_min_from_curve(c)
     corrfn = _get_corr_fn(y, min_what, extra_param)
     
     auto_corr = np.zeros(n - 1)
@@ -166,6 +208,9 @@ def first_max(
     """
     y = np.asarray(y)
     n = len(y)
+    if max_what in _VECTORISED_CORR:               # vectorised drop-in, identical lag
+        c = _self_corr_curve(y, max_what)
+        return np.nan if c is None else _first_max_from_curve(c)
     corrfn = _get_corr_fn(y, max_what, extra_param)
     
     auto_corr = np.zeros(n - 1)
