@@ -86,6 +86,7 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     #% Within-sample log-likelihood
     train_ll = model.score(y_train_reshaped)
     out['LLtrainpersample'] = train_ll / n_train
+    out['nit'] = model.monitor_.iter
 
     #Calculate log likelihood for the test data
     out['LLtestpersample'] = model.score(y_test_reshaped)/n_test
