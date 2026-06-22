@@ -77,7 +77,7 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     if random_seed is not None:
         np.random.seed(random_seed)
     rs = np.random.permutation(int(N - memory)) + memory
-    rs = np.sort(rs[0:min(num_iters, len(rs) - 1)])
+    rs = np.sort(rs[0:min(num_iters, len(rs))])
     rs = np.array([rs])
 
     # COMPUTE EMPIRICAL PROBABILITIES FROM TIME SERIES
@@ -737,12 +737,17 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: int) -> np.ndarray:
     # Do the coarse graining
     yth = None  # Ensure yth is always defined
     if how_to_cg == 'quantile':
-        th = np.quantile(y, np.linspace(0, 1, num_groups + 1), method='hazen') # thresholds for dividing the time-series values
-        th[0] -= 1  # Ensure the first point is included
-        # turn the time series into a set of numbers from 1:num_groups
+        th = np.quantile(y, np.linspace(0, 1, num_groups + 1), method='linear') # thresholds for dividing the time-series values
         yth = np.zeros(N, dtype=int)
+        # turn the time series into a set of numbers from 1:num_groups
         for i in range(num_groups):
-            yth[(y > th[i]) & (y <= th[i+1])] = i + 1
+            if i == num_groups - 1:
+                # Right-inclusive logic for the final boundary to catch the absolute max
+                yth[(y >= th[i]) & (y <= th[i+1])] = i + 1
+            else:
+                # Left-inclusive logic [>=, <) for all other boundaries
+                yth[(y >= th[i]) & (y < th[i+1])] = i + 1
+        return yth
 
     elif how_to_cg == 'embed2quadrants': # divides based on quadrants in a 2-D embedding space
         # create alphabet in quadrants -- {1,2,3,4}
