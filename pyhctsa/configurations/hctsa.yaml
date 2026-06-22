@@ -453,7 +453,7 @@ information:
     configs:
       - {min_what: 'ac', zscore: True}
       - {min_what: 'mi-gaussian', zscore: True}
-      - {min_what: 'mi-kraskov2', extra_param: 4, zscore: True}
+      - {min_what: 'mi-kraskov1', extra_param: 4, zscore: True}
       - {min_what: 'mi-hist', extra_param: 5, zscore: True}
       - {min_what: 'mi-hist', extra_param: 10, zscore: True}
     legacy_name: CO_FirstMin
@@ -465,7 +465,7 @@ information:
     configs:
       - {max_what: 'ac', zscore: True}
       - {max_what: 'mi-gaussian', zscore: True}
-      - {max_what: 'mi-kraskov2', extra_param: 4, zscore: True}
+      - {max_what: 'mi-kraskov1', extra_param: 4, zscore: True}
       - {max_what: 'mi-hist', extra_param: 5, zscore: True}
       - {max_what: 'mi-hist', extra_param: 10, zscore: True}
     legacy_name: CO_FirstMin
@@ -1564,11 +1564,6 @@ pre_process:
 
       - {detrend_meth: 'diff1', zscore: False}
       - {detrend_meth: 'diff2', zscore: False}
-
-      - {detrend_meth: 'medianf3', zscore: False}
-      - {detrend_meth: 'medianf4', zscore: False}
-      - {detrend_meth: 'medianf10', zscore: False}
-
 
       - {detrend_meth: 'rav2', zscore: False}
       - {detrend_meth: 'rav3', zscore: False}
