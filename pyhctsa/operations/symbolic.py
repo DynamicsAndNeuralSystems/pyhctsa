@@ -66,8 +66,12 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
 
     # COURSE GRAIN
     # a coarse-grained time series using the numbers 1:num_groups
+    if isinstance(num_groups, (int, float)):
+        num_groups = int(num_groups)
     yth = coarse_grain(y, coarse_grain_method, num_groups)
     N = int(len(yth))
+    num_iters = int(num_iters)
+    memory = int(memory)
 
     # Use random sampling (original behavior)
     if random_seed is not None:
@@ -134,14 +138,6 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     uq = mstats.mquantiles(store, 0.75, alphap=0.5, betap=0.5)
     out['uq'] = uq[0]
     out['std'] = np.std(store, ddof=1)
-
-    # t-statistic to information gain of 1. Note due to division of std which can 
-    # be very effectively 0, this value can explode. 
-    # Should fix w/ a NaN but want to replicate MATLAB func for now.
-    if out['std'] == 0:
-        out['tstat'] = np.nan
-    else:
-        out['tstat'] = abs((out['mean']-1)/(out['std']/np.sqrt(num_iters)))
 
     return out
 

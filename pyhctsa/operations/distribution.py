@@ -37,7 +37,24 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         overlap integral, and relative entropy.
     """
     x = np.asarray(x)
+    n = len(x)
     x_step = np.std(x, ddof=1) / 100  # set a step size
+
+    # ----------------------------
+    # KDE bandwidth matching MATLAB's ksdensity default
+    # (robust MAD-based sigma + Silverman's rule), expressed as a scipy
+    # bw_method factor (scipy multiplies the factor by std(x, ddof=1)).
+    # ----------------------------
+    med = np.median(x)
+    sig = np.median(np.abs(x - med)) / 0.6745
+    if sig <= 0:
+        sig = np.ptp(x)
+    matlab_bw = sig * (4 / (3 * n)) ** (1 / 5)
+    std_x = np.std(x, ddof=1)
+    bw_factor = matlab_bw / std_x if std_x > 0 else None
+
+    def _make_kde(data):
+        return gaussian_kde(data, bw_method=bw_factor)
 
     # ----------------------------
     # Fit distribution & thresholds
@@ -86,7 +103,9 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         peaky = expon.pdf(0, loc=0, scale=lam)
         thresh = peaky / 100.0
         pdf_func = lambda z: expon.pdf(z, loc=0, scale=lam)
-        xf = _find_bounds(pdf_func, 0.0, 0.0, x_step, thresh)
+        # MATLAB pins the left bound at 0 (only expands right) for positive-only dists
+        xf = _find_bounds(pdf_func, None, 0.0, x_step, thresh)
+        xf[0] = 0.0
         ffit_func = lambda xi: expon.pdf(xi, loc=0, scale=lam)
 
     elif what_distn == 'logn':
@@ -104,7 +123,9 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         peaky = lognorm.pdf(mode, s=sigma, loc=0, scale=np.exp(mu))
         thresh = peaky / 100.0
         pdf_func = lambda z: lognorm.pdf(z, s=sigma, loc=0, scale=np.exp(mu))
-        xf = _find_bounds(pdf_func, 0.0, mode, x_step, thresh)
+        # MATLAB pins the left bound at 0 (only expands right) for positive-only dists
+        xf = _find_bounds(pdf_func, None, mode, x_step, thresh)
+        xf[0] = 0.0
         ffit_func = lambda xi: lognorm.pdf(xi, s=sigma, loc=0, scale=np.exp(mu))
 
     else:
@@ -113,9 +134,10 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     # ----------------------------
     # Estimate smoothed empirical distribution
     # ----------------------------
-    xi = np.linspace(np.min(x), np.max(x), 100)
+    # MATLAB's default ksdensity grid extends ~3 bandwidths beyond the data range.
+    xi = np.linspace(np.min(x) - 3 * matlab_bw, np.max(x) + 3 * matlab_bw, 100)
     # Calculate the Kernel Density Estimate (KDE) for the first angle distribution.
-    kde = gaussian_kde(x)
+    kde = _make_kde(x)
     f = kde(xi)
     xi = xi[f > 1e-6]  # only keep values greater than 1E-6
     if xi.size == 0:
@@ -151,6 +173,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     out['relent'] = np.sum(f[r] * np.log(f[r] / ffit[r]) * dx)
 
     return out
+
 
 def _find_bounds(pdf_func, start_left, start_right, x_step, thresh):
     """Expand left/right until pdf falls below threshold."""
@@ -791,6 +814,14 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01)
     
     return results
 
+def _prctile(y, p):
+    y = np.sort(np.asarray(y, dtype=float))
+    n = y.size
+    if n == 0:
+        return np.nan
+    pos = 100.0 * (np.arange(1, n + 1) - 0.5) / n
+    return np.interp(p, pos, y)
+
 def outlier_test(y: ArrayLike, p: float = 2,
                  just_me: Union[str, None] = None) -> Union[dict, float]:
     """
@@ -823,8 +854,8 @@ def outlier_test(y: ArrayLike, p: float = 2,
 
     # mean of the middle (100-2*p)% of the data
     y = np.array(y)
-    lower_bound = np.percentile(y, p, method='hazen')
-    upper_bound = np.percentile(y, (100 - p), method='hazen')
+    lower_bound = _prctile(y, p) #np.percentile(y, p, method='hazen')
+    upper_bound = _prctile(y, (100-p)) #np.percentile(y, (100 - p), method='hazen')
     
     middle_portion = y[(y > lower_bound) & (y < upper_bound)]
     
@@ -1024,13 +1055,13 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
 
     is_ = None
     if remove_how == 'absclose':
-        is_ = np.argsort(np.abs(y))[::-1] # descending
+        is_ = np.argsort(-np.abs(y), kind='stable')   # descending abs, ties stable
     elif remove_how == 'absfar':
-        is_ = np.argsort(np.abs(y)) # ascending
+        is_ = np.argsort(np.abs(y), kind='stable')     # ascending abs
     elif remove_how == 'min':
-        is_ = np.argsort(y)[::-1]
+        is_ = np.argsort(-y, kind='stable')            # descending y
     elif remove_how == 'max':
-        is_ = np.argsort(y)
+        is_ = np.argsort(y, kind='stable')             # ascending y
     elif remove_how == 'random':
         is_ = np.random.permutation(N)
     else:

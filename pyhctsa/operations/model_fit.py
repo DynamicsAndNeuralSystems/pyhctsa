@@ -53,6 +53,7 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     y_test = y[n_train:]
     y_train_reshaped = y_train.reshape(-1, 1)
     y_test_reshaped = y_test.reshape(-1, 1)
+    num_states = int(num_states)
 
     model = GaussianHMM(n_components=num_states,
                     covariance_type='tied',
@@ -318,6 +319,7 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
         lp = first_crossing(y, 'ac', 0, 'discrete')
     else:
         #the e length of the subsegment preceding to use to predict the subsequent value
+        train_length = int(train_length)
         lp = train_length 
     evalr = np.arange(lp, N) #range over which to evaluate the forecast
     if np.size(evalr) == 0:
@@ -544,14 +546,12 @@ def residual_analysis(e: ArrayLike) -> dict:
     std_e = np.std(e, ddof=1)
     out['stde'] = std_e
     out['mms'] = np.abs(np.mean(e)) + np.abs(np.std(e, ddof=1))
-    out['maxonmean'] = np.max(e)/np.abs(np.mean(e))
 
     if std_e == 0:
         e = np.zeros(len(e))
     else:
         e = z_score(e)
     
-    # TODO: Identify any low-frequency trends in residuals
     # Analyze autocorrelation in residuals
     max_lag = 25
     autocorr_resid = autocorr(e, list(range(1, max_lag+1)), 'Fourier')
@@ -713,6 +713,8 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
     """
     y = np.asarray(y)
     N = len(y)
+    p_min = int(p_min)
+    p_max = int(p_max)
     if selector in ['bic', 'sbc']: # bic and sbc are the same metrics
         selector = 'bic'
     #(I) Fit AR model)
@@ -774,8 +776,6 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
 
     # Correlation test of residuals
     resids = res.resid
-    out['res_ac1'] = autocorr(resids, 1, 'Fourier')[0]
-    out['res_ac1_norm'] = out['res_ac1']/np.sqrt(N)
 
     #Calculate correlations up to 20, return how many exceed significance threshold
     acf = autocorr(resids, list(range(1, 21)), 'Fourier')

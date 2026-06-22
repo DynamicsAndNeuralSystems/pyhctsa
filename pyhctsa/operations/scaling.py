@@ -120,9 +120,9 @@ def fluctuation_analysis(x: ArrayLike, q: Union[float, int] = 2,
     
     # perform scaling over a range of tau, up to a fifth of the time-series length
     if log_inc:
-        taur = np.unique(np.floor(np.exp(np.linspace(np.log(5), np.log(np.floor(N/2)), tau_step)) + 0.5))
+        taur = np.unique(np.floor(np.exp(np.linspace(np.log(5), np.log(np.floor(N/2)), int(tau_step))) + 0.5))
     else:
-        taur = np.arange(5, np.floor(N/2) + 1, tau_step)  # maybe increased??
+        taur = np.arange(5, np.floor(N/2) + 1, int(tau_step))  # maybe increased??
     ntau = len(taur)  # analyze the time series across this many timescales
     if ntau < 8:  # fewer than 8 points
         logger.warning(f'This time series (N = {N}) is too short to analyze using this fluctuation analysis.')
