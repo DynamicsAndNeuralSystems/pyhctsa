@@ -71,9 +71,13 @@ def moving_threshold(y: ArrayLike, a: float = 1.0, b: float = 0.1) -> dict:
 
     # Kicks (when the barrier is changed due to extreme event)
     f_kicks = np.argwhere(kicks > 0).flatten()
-    i_kicks = np.diff(f_kicks)
-    out['stdkicks'] = np.std(i_kicks, ddof=1)
-    out['meankickf'] = np.mean(i_kicks)
-    out['mediankicksf'] = np.median(i_kicks)
-
+    i_kicks = np.diff(f_kicks) # time intervals between successive kicks
+    if i_kicks.size > 0:
+        out.update({
+            'stdkickf': np.std(i_kicks, ddof=1) if i_kicks.size > 1 else np.nan,
+            'meankickf': np.mean(i_kicks),
+            'mediankickf': np.median(i_kicks),
+        })
+    else:
+        out.update({'stdkickf': np.nan, 'meankickf': np.nan, 'mediankickf': np.nan})
     return out

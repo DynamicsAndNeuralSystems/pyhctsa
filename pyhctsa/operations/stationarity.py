@@ -47,6 +47,8 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     # preliminaries
     y = np.asarray(y)
     N = len(y)
+    num_points = int(num_points)
+    num_segs = int(num_segs)
     lseg = int(np.floor(N / num_segs))
     dns = np.zeros((num_points, num_segs))
     # Make range of ksdensity uniform across all subsegments
@@ -56,12 +58,12 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
         start_idx = i * lseg
         end_idx = (i + 1) * lseg
         segment_data = y[start_idx:end_idx]
-        kde = gaussian_kde(segment_data, bw_method="scott")
+        kde = gaussian_kde(segment_data, bw_method='scott')
         dns[:, i] = kde.evaluate(r)
     # Compare the local distributions
-    if each_or_par in ["par", "parent"]:
+    if each_or_par in ['par', 'parent']:
         #Compares each subdistribtuion to the parent (full signal) distribution
-        kde = gaussian_kde(y, bw_method="scott")
+        kde = gaussian_kde(y, bw_method='scott')
         pardn = kde.evaluate(r)
         divs = np.zeros(num_segs)
         for i in range(num_segs):
@@ -85,10 +87,8 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     # segments of the time series
     out = {}
     out['meandiv'] = np.mean(divs)
-    out['mediandiv'] = np.median(divs)
-    #out['mindiv'] = np.min(divs)
     out['maxdiv'] = np.max(divs)
-    out['stddiv'] = np.std(divs)
+    out['stddiv'] = np.std(divs, ddof=1)
 
     return out
 
@@ -171,7 +171,6 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
     out['stdskew'] = fs[2]
     out['stdkurt'] = fs[3]
     out['stdsampen1_015'] = fs[4]
-    out['stdsampen2_015'] = fs[5]
     out['stdac1'] = fs[6]
     out['stdac2'] = fs[7]
     out['stdactaug'] = fs[8]
@@ -417,7 +416,7 @@ def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = 
         return np.nan
     
     # Buffer the time series
-    y_buff = make_mat_buffer(y, window_length) # no overlap
+    y_buff = make_mat_buffer(y, int(window_length)) # no overlap
     # each column is a window of samples
     if y_buff[-1, -1] == 0:
         y_buff = y_buff[:, :-1]  # remove last window if zero-padded
@@ -517,7 +516,8 @@ def kpss_test(y: ArrayLike, lags: Union[int, list] = 0) -> dict:
         out['lagmaxstat'] = lags[np.argmax(stat)]
         out['lagminstat'] = lags[np.argmin(stat)]
     else:
-        if isinstance(lags, int):
+        if isinstance(lags, (int, float)):
+            lags = int(lags)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", category=InterpolationWarning)
                 stat, p_value, _, _ = kpss(y, nlags=lags, regression='ct')
@@ -636,7 +636,7 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
     # Set default segment parameters
     if l is None:
         l = 200 if segment_how == 'fix' else 5
-    
+    l = int(l)
     # Calculate segment length
     if segment_how == 'num':
         segment_length = int(np.floor(N/l))
@@ -740,12 +740,15 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     out['median'] = np.median(y[r]) # if median is very small then normalization could be very noisy
     raw_iqr_yr = np.percentile(y[r], 75, method='hazen') - np.percentile(y[r], 25, method='hazen')
     raw_iqr_y = np.percentile(y, 75, method='hazen') - np.percentile(y, 25, method='hazen')
-    out['iqr'] = np.abs(1 - (raw_iqr_yr/raw_iqr_y))
+    out['iqr'] = np.abs(1 - (raw_iqr_yr/raw_iqr_y)) if raw_iqr_y > 0 else np.nan
     out['skewness'] = np.abs(1 - (skew(y[r])/skew(y)))
     # use Pearson definition (normal ==> 3.0)
     out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/kurtosis(y, fisher=False)))
     out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')[0]/autocorr(y, 1, 'Fourier')[0]))
-    out['sampen101'] = sample_entropy(y[r], 1, 0.1)['sampen1']/sample_entropy(y, 1, 0.1)['sampen1']
+
+    sampen_full = sample_entropy(y, 1, 0.1)['sampen1']
+    sampen_r = sample_entropy(y[r], 1, 0.1)['sampen1']
+    out['sampen101'] = sampen_r / sampen_full if sampen_full > 0 else np.nan
 
     return out
 
@@ -973,7 +976,6 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
     .. [1] "Heart rate control in normal and aborted-SIDS infants", S. M. Pincus et al.
         Am J. Physiol. Regul. Integr. Comp. Physiol. 264(3) R638 (1993)
 
-    Note: SlidingWindow(y,'mean','std',X,1) is equivalent to StatAv(y,'seg',X)
 
     Parameters
     ----------

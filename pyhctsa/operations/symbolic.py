@@ -5,7 +5,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 from scipy.stats import mstats
-from scipy.signal import resample as ssre
+from scipy.signal import resample_poly
 
 from ..operations.correlation import first_crossing
 from ..utils import binarize, sign_change
@@ -66,14 +66,18 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
 
     # COURSE GRAIN
     # a coarse-grained time series using the numbers 1:num_groups
+    if isinstance(num_groups, (int, float)):
+        num_groups = int(num_groups)
     yth = coarse_grain(y, coarse_grain_method, num_groups)
     N = int(len(yth))
+    num_iters = int(num_iters)
+    memory = int(memory)
 
     # Use random sampling (original behavior)
     if random_seed is not None:
         np.random.seed(random_seed)
     rs = np.random.permutation(int(N - memory)) + memory
-    rs = np.sort(rs[0:min(num_iters, len(rs) - 1)])
+    rs = np.sort(rs[0:min(num_iters, len(rs))])
     rs = np.array([rs])
 
     # COMPUTE EMPIRICAL PROBABILITIES FROM TIME SERIES
@@ -134,14 +138,6 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     uq = mstats.mquantiles(store, 0.75, alphap=0.5, betap=0.5)
     out['uq'] = uq[0]
     out['std'] = np.std(store, ddof=1)
-
-    # t-statistic to information gain of 1. Note due to division of std which can 
-    # be very effectively 0, this value can explode. 
-    # Should fix w/ a NaN but want to replicate MATLAB func for now.
-    if out['std'] == 0:
-        out['tstat'] = np.nan
-    else:
-        out['tstat'] = abs((out['mean']-1)/(out['std']/np.sqrt(num_iters)))
 
     return out
 
@@ -613,9 +609,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
         if np.isnan(tau):
             logger.warning("Time series too short to estimate tau")
             return np.nan
-    if tau > 1: # calculate transition matrix at a non-unit lag
-        # downsample at rate 1:tau
-        y = ssre(y, int(np.ceil(len(y) / tau)))
+    if tau > 1:
+        y = resample_poly(y, 1, int(tau))
     
     N = len(y)
 
@@ -742,12 +737,17 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: int) -> np.ndarray:
     # Do the coarse graining
     yth = None  # Ensure yth is always defined
     if how_to_cg == 'quantile':
-        th = np.quantile(y, np.linspace(0, 1, num_groups + 1), method='hazen') # thresholds for dividing the time-series values
-        th[0] -= 1  # Ensure the first point is included
-        # turn the time series into a set of numbers from 1:num_groups
+        th = np.quantile(y, np.linspace(0, 1, num_groups + 1), method='linear') # thresholds for dividing the time-series values
         yth = np.zeros(N, dtype=int)
+        # turn the time series into a set of numbers from 1:num_groups
         for i in range(num_groups):
-            yth[(y > th[i]) & (y <= th[i+1])] = i + 1
+            if i == num_groups - 1:
+                # Right-inclusive logic for the final boundary to catch the absolute max
+                yth[(y >= th[i]) & (y <= th[i+1])] = i + 1
+            else:
+                # Left-inclusive logic [>=, <) for all other boundaries
+                yth[(y >= th[i]) & (y < th[i+1])] = i + 1
+        return yth
 
     elif how_to_cg == 'embed2quadrants': # divides based on quadrants in a 2-D embedding space
         # create alphabet in quadrants -- {1,2,3,4}

@@ -8,7 +8,7 @@ from numpy.typing import ArrayLike
 from scipy.stats import gaussian_kde, norm, zmap
 
 from ..operations.correlation import tc3
-from ..operations.information import automutual_info, first_min, automutual_info
+from ..operations.information import automutual_info, first_min
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -54,11 +54,11 @@ def sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str) 
         zscstatsurr = (stat_surr - mu) / sigma
         zscstatx = (stat_x - mu) / sigma
         kde = gaussian_kde(zscstatsurr)  # Scott's rule
-        xi = np.linspace(zscstatsurr.min(), zscstatsurr.max(), 1000)
+        xi = np.linspace(zscstatsurr.min(), zscstatsurr.max(), 100)
         f = kde(xi)
         xval = float(zscstatx)
         if (xval < xi.min()) or (xval > xi.max()):
-            out["f"] = 0.0  # out of range → assume p=0 (as in the MATLAB comment)
+            out["f"] = 0.0
         else:
             minhere = int(np.argmin(np.abs(xval - xi)))
             out["f"] = float(f[minhere])

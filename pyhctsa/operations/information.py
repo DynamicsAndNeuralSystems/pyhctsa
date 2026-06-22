@@ -296,7 +296,7 @@ def _give_me_edges(r, v, n_bins):
 def automutual_info_stats(
     y: ArrayLike,
     max_tau: Optional[int] = None,
-    est_method: str = 'kernel',
+    est_method: str = 'gaussian',
     extra_param: Optional[Union[int, str]] = None
 ) -> Dict[str, float]:
     """
@@ -314,7 +314,7 @@ def automutual_info_stats(
         of the time series, but won't exceed N/2. Default is `None`.
     est_method : {'gaussian', 'kraskov1', 'kraskov2'}, optional
         Method for estimating mutual information (passed to automutual_info).
-        Default is ``'kernel'``.
+        Default is ``'gaussian'``.
     extra_param : int or str, optional
         Extra parameter for the estimator (passed to automutual_info).
         For Kraskov estimators, sets the number of nearest neighbors 'k'. Default is `None`.
@@ -467,7 +467,7 @@ def automutual_info(
     n = len(y)
     min_samples = 5  # minimum 5 samples to compute mutual information (could make higher?)
     kval = 4 # default 
-    if extra_param:
+    if extra_param is not None:
         kval = extra_param
 
     # Loop over time delays if a vector

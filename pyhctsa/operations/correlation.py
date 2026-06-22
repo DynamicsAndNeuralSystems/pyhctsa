@@ -15,7 +15,8 @@ from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..utils import bin_picker, make_mat_buffer, point_of_crossing, sign_change, z_score, histc
 
 def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
-              extra_param: Union[int, None] = None, random_seed = None) -> dict:
+              extra_param: Union[int, None] = None, random_seed = None,
+              noise = None) -> dict:
     """
     Changes in the automutual information with the addition of noise.
 
@@ -87,11 +88,11 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     if tau in ['ac', 'tau']:
         tau = first_crossing(y, 'ac', 0, 'discrete')
     # Generate noise
-    if random_seed is not None:
-        np.random.seed(random_seed)
+    if noise is not None:
+        noise = np.asarray(noise)
     else:
-        np.random.seed(0)
-    noise = np.random.randn(len(y)) # generate uncorrelated additive noise
+        np.random.seed(0 if random_seed is None else random_seed)
+        noise = np.random.randn(len(y))  # generate uncorrelated additive noise
 
     # Set up noise range
     noise_range = np.linspace(0, 3, 50) # compare properties across this noise range
@@ -135,17 +136,19 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
         out[f'ami_at_{int(nlvl*10)}'] = amis[np.argmax(noise_range >= nlvl)]
 
     # Count number of times the AMI function crosses its mean
-    out['pcrossmean'] = np.sum(np.diff(np.sign(amis - np.mean(amis))) != 0) / (num_repeats - 1)
+    c = amis - np.mean(amis)
+    out['pcrossmean'] = np.sum(c[:-1] * c[1:] < 0) / (num_repeats - 1)
 
     # Fit exponential decay model
     exp_func = lambda x, a, b : a * np.exp(b * x)
-    popt, pcov = curve_fit(exp_func, noise_range, amis, p0=[amis[0], -1])
+    popt, pcov = curve_fit(exp_func, noise_range, amis, p0=[amis[0], -1],
+                       method='trf', ftol=1e-6, xtol=1e-6, max_nfev=600)
     out['fitexpa'], out['fitexpb'] = popt
     residuals = amis - exp_func(noise_range, *popt)
     ss_res = np.sum(residuals**2)
     ss_tot = np.sum((amis - np.mean(amis))**2)
     out['fitexpr2'] = 1 - (ss_res / ss_tot)
-    out['fitexpadjr2'] = 1 - (1-out['fitexpr2'])*(len(amis)-1)/(len(amis)-2-1)
+    out['fitexpadjr2'] = 1 - (1 - out['fitexpr2']) * (len(amis) - 1) / (len(amis) - 2)
     out['fitexprmse'] = np.sqrt(np.mean(residuals**2))
 
     # Fit linear function
@@ -335,8 +338,6 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
         'max_thetaac2': np.max(stats_store[1, :]),
         'min_thetaac2': np.min(stats_store[1, :]),
         'mean_thetaac3': np.mean(stats_store[2, :]),
-        'max_thetaac3': np.max(stats_store[2, :]),
-        'min_thetaac3': np.min(stats_store[2, :]),
     }
 
     out['meanrat_thetaac12'] = out['mean_thetaac1'] / out['mean_thetaac2']
@@ -1072,9 +1073,9 @@ def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'ols') 
     if max_tau <= 0:
         raise ValueError('Negative or zero time lags not applicable')
 
-    method_map = {'ols': 'ols', 'Yule-Walker': 'ywm'} 
+    method_map = {'ols': 'ols-inefficient', 'yule-walker': 'ywm'} 
     if what_method not in method_map:
-        raise ValueError(f"Invalid method: {what_method}. Use 'ols' or 'Yule-Walker'.")
+        raise ValueError(f"Invalid method: {what_method}. Use 'ols' or 'yule-walker'.")
 
     # Compute partial autocorrelation
     pacf_values = pacf(y, nlags=max_tau, method=method_map[what_method])
@@ -1703,7 +1704,7 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
 
         elif shape == 'rectangle':
 
-            w = d
+            w = int(d)
             rnge = np.arange(1 + w, N - w + 1)
             NN = len(rnge)
             np_counts = np.zeros(NN, dtype=int)
