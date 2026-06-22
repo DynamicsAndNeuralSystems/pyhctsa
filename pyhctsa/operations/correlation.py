@@ -1299,14 +1299,15 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     N = len(m)
 
     # Start the analysis
-    counts = np.zeros(N)
     if shape == 'circle':
         # Puts a circle around each point in the embedding space in turn
-        # counts how many pts are inside this shape, looks at the time series thus formed
-        for i in range(N): # across all pts in the time series
-            m_c = m - m[i] # pts wrt current pt i
-            m_c_d = np.sum(m_c**2, axis=1) # Euclidean distances from pt i
-            counts[i] = np.sum(m_c_d <= r**2) # number of pts enclosed in a circle of radius r
+        # counts how many pts are inside this shape, looks at the time series thus formed.
+        # Vectorised: one pairwise squared-distance matrix (sqeuclidean == the loop's
+        # sum of squared diffs exactly), then count <= r**2 per row. Diagonal is 0, so
+        # the self-count subtraction below is preserved. O(N^2) memory.
+        from scipy.spatial.distance import cdist
+        m_c_d = cdist(m, m, metric='sqeuclidean')
+        counts = np.sum(m_c_d <= r**2, axis=1).astype(float)
     else:
         raise ValueError(f"Unknown shape '{shape}'")
     counts -= 1 # ignore self counts
@@ -1812,10 +1813,14 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
     elif stop_when in ['pos_drown', 'drown', 'double_drown']:
         # Compute ACF up to a given threshold:
         n_drown = 0 # the point at which ACF ~ 0
+        # The Fourier ACF depends only on N, so compute the whole (lag-indexed) curve
+        # once and read acf_full[i-1] instead of recomputing a full FFT every lag.
+        # acf_full[i-1] is bit-identical to autocorr(y, i-1, 'Fourier')[0].
+        acf_full = autocorr(y, [], 'Fourier')
         if stop_when == 'pos_drown':
             # stop when ACF drops below threshold, th
             for i in range(1, N+1):
-                acf_val = autocorr(y, i-1, 'Fourier')[0]
+                acf_val = acf_full[i-1]
                 if np.isnan(acf_val):
                     logger.warning("Weird time series (constant?)")
                     out = np.nan
@@ -1836,7 +1841,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
         elif stop_when == 'drown':
             # Stop when ACF is very close to 0 (within threshold, th = 2/sqrt(N))
             for i in range(1, N+1):
-                acf_val = autocorr(y, i-1, 'Fourier')[0] # acf vector indicies are not lags
+                acf_val = acf_full[i-1] # acf vector indicies are not lags
                 # if positive and less than thresh
                 if i > 0 and abs(acf_val) < th:
                     n_drown = i
@@ -1846,7 +1851,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
         elif stop_when == 'double_drown':
             # Stop at 2*tau, where tau is the lag where ACF ~ 0 (within 1/sqrt(N) threshold)
             for i in range(1, N+1):
-                acf_val = autocorr(y, i-1, 'Fourier')[0]
+                acf_val = acf_full[i-1]
                 if n_drown > 0 and i == n_drown * 2:
                     acf.append(acf_val)
                     break

@@ -145,11 +145,17 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
             sampen_out = sample_entropy(y_sub, 2, 0.15)
             qs[j, 4] = sampen_out['quadSampEn1']  # SampEn_1_015
             #qs[j, 5] = sampen_out['quadSampEn2'] # SampEn_2_015
-            qs[j, 6] = autocorr(y_sub, 1, 'Fourier')[0]  # AC1
-            qs[j, 7] = autocorr(y_sub, 2, 'Fourier')[0]  # AC2
+            # One FFT autocorrelation per window instead of four; index the lags.
+            # acf_w[t] is bit-identical to autocorr(y_sub, t, 'Fourier')[0]; the guards
+            # reproduce autocorr's out-of-range -> NaN behaviour exactly.
+            acf_w = autocorr(y_sub, [], 'Fourier')
+            Lw = len(acf_w)
+            _pick = lambda t: acf_w[t] if 0 <= t <= Lw - 1 else np.nan
+            qs[j, 6] = acf_w[1] if Lw > 1 else np.nan  # AC1
+            qs[j, 7] = acf_w[2] if Lw > 2 else np.nan  # AC2
             # (Sometimes tau_g or taul can be longer than ySub; then these will output NaNs:)
-            qs[j, 8] = autocorr(y_sub, tau_g, 'Fourier')[0]  # AC_glob_tau
-            qs[j, 9] = autocorr(y_sub, tau_l, 'Fourier')[0]  # AC_loc_tau
+            qs[j, 8] = _pick(tau_g)  # AC_glob_tau
+            qs[j, 9] = _pick(tau_l)  # AC_loc_tau
             qs[j, 10] = tau_l
 
         fs[i, :num_features] = np.std(qs, ddof=1, axis=0)
@@ -543,10 +549,10 @@ def range_evolve(y: ArrayLike) -> dict:
     y = np.asarray(y)
     N = len(y)
     out = {} # initialise storage
-    cums = np.zeros(N)
-    for i in range(N):
-        cums[i] = np.ptp(y[:i+1])  # np.ptp calculates the range (peak to peak)
-    
+    # Running peak-to-peak == cumulative max minus cumulative min: O(N) one pass
+    # instead of O(N^2) np.ptp over growing prefixes. Picks the same values.
+    cums = (np.maximum.accumulate(y) - np.minimum.accumulate(y)).astype(float)
+
     fullr = np.ptp(y)
 
     # return number of unique entries in a vector, x

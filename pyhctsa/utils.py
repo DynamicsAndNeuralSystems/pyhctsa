@@ -274,9 +274,11 @@ def histc(x: ArrayLike, bins: ArrayLike) -> int:
     """Counts the number of values in x that are within each specified bin."""
     # Get indices of the bins to which each value in input array belongs.
     map_to_bins = np.digitize(x, bins)
-    res = np.zeros(bins.shape)
-    for el in map_to_bins:
-        res[el-1] += 1 # Increment appropriate bin.
+    # Vectorised count. (idx - 1) % nbins reproduces the original loop's res[el-1]
+    # wrap-around exactly: below-range (el==0) -> -1 -> last bin; above-range
+    # (el==nbins) -> nbins-1 -> last bin.
+    nbins = bins.shape[0]
+    res = np.bincount((map_to_bins - 1) % nbins, minlength=nbins).astype(float)
     return res
 
 def bin_picker(x_min: float, x_max: float, n_bins: Union[None, int],
@@ -400,15 +402,12 @@ def simple_binner(x_data: ArrayLike, num_bins: int) -> tuple:
     
     # Linearly spaced bins:
     bin_edges = np.linspace(min_x, max_x, num_bins + 1)
-    N = np.zeros(num_bins, dtype=int)
-    
-    for i in range(num_bins):
-        if i < num_bins - 1:
-            N[i] = np.sum((x_data >= bin_edges[i]) & (x_data < bin_edges[i+1]))
-        else:
-            # the final bin
-            N[i] = np.sum((x_data >= bin_edges[i]) & (x_data <= bin_edges[i+1]))
-    
+    # Vectorised: searchsorted against the interior edges gives each point's bin in
+    # one pass (half-open interior bins; the max value equals the last edge so it
+    # lands in the final inclusive bin, matching the loop).
+    idx = np.searchsorted(bin_edges[1:-1], x_data, side='right')
+    N = np.bincount(idx, minlength=num_bins).astype(int)
+
     return N, bin_edges
 
 def point_of_crossing(x: ArrayLike, threshold: float) -> tuple:

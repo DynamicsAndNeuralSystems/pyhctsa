@@ -160,44 +160,14 @@ def hrv_classic(y: ArrayLike) -> dict:
 
     f_bin_size = f[1] - f[0]
 
-    ind_l = []
-    for x in f:
-        if x >= lf_lo and x <= lf_hi:
-            ind_l.append(1)
-        else:
-            ind_l.append(0)
-
-    ind_h = []
-    for x in f:
-        if x >= hf_lo and x <= hf_hi:
-            ind_h.append(1)
-        else:
-            ind_h.append(0)
-
-    ind_v = []
-    for x in f:
-        if x <= lf_lo:
-            ind_v.append(1)
-        else:
-            ind_v.append(0)
-
-    ind_l_pxx = []
-    for i in range(0, len(pxx)):
-        if ind_l[i] == 1:
-            ind_l_pxx.append(pxx[i])
-    lf_p = f_bin_size * np.sum(ind_l_pxx)
-
-    ind_h_pxx = []
-    for i in range(0, len(pxx)):
-        if ind_h[i] == 1:
-            ind_h_pxx.append(pxx[i])
-    hf_p = f_bin_size * np.sum(ind_h_pxx)
-
-    ind_v_pxx = []
-    for i in range(0, len(pxx)):
-        if ind_v[i] == 1:
-            ind_v_pxx.append(pxx[i])
-    vlf_p = f_bin_size * np.sum(ind_v_pxx)
+    # Vectorised band selection. pxx[mask] keeps ascending-index order, so the
+    # masked np.sum matches the original loop's summation order.
+    ind_l = (f >= lf_lo) & (f <= lf_hi)
+    ind_h = (f >= hf_lo) & (f <= hf_hi)
+    ind_v = (f <= lf_lo)
+    lf_p = f_bin_size * np.sum(pxx[ind_l])
+    hf_p = f_bin_size * np.sum(pxx[ind_h])
+    vlf_p = f_bin_size * np.sum(pxx[ind_v])
 
     out['lfhf'] = lf_p / hf_p
     total = f_bin_size * np.sum(pxx)
