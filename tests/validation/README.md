@@ -19,9 +19,6 @@ the end of this file.
 | `validation_results_HCTSA.csv` | Full precomputed results (correlation per feature). |
 | `lessthan0p9.csv` | Subset of features below the r ≥ 0.9 threshold, with rationale. |
 
-> **Note:** adjust the filenames above to match the actual repository layout if
-> they differ.
-
 ## Inspecting the results without MATLAB
 
 **You do not need MATLAB to verify the validation claim.** The complete
@@ -62,27 +59,14 @@ dependencies:
    ```matlab
    addpath(genpath('/path/to/hctsa'))
    ```
-4. **The pyhctsa Python dependencies**, including the optional validation extras:
-
-   ```bash
-   pip install -e ".[validation]"
-   ```
-
-   > Adjust the extra name to match `pyproject.toml` if it differs.
 
 ## Running the harness
 
 With the requirements above in place:
 
 ```bash
-python run_validation.py --config validation_config.yaml --dataset e1000
+python run_validation.py
 ```
-
-The harness spins up one isolated MATLAB engine per worker process (via
-`ProcessPoolExecutor`) and evaluates every configured feature on both sides,
-writing the per-feature correlations to `validation_results_HCTSA.csv`.
-
-> Adjust the flags to match `run_validation.py`'s actual argument names.
 
 ## Regenerating the MATLAB reference
 
