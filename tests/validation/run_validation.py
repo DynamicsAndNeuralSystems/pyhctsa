@@ -13,8 +13,9 @@ from sklearn.metrics import mean_absolute_percentage_error, median_absolute_erro
 import importlib
 import numpy as np
 from collections import defaultdict
-from scipy.stats import pearsonr, ks_2samp
+from scipy.stats import pearsonr
 import pandas as pd
+import argparse
  
 try:
     from tqdm import tqdm
@@ -41,20 +42,12 @@ def _distribution_parity(py_dist, mat_dist):
     """Compare two per-series seed distributions for one feature."""
     py_dist = np.asarray(py_dist, float); py_dist = py_dist[np.isfinite(py_dist)]
     mat_dist = np.asarray(mat_dist, float); mat_dist = mat_dist[np.isfinite(mat_dist)]
-    out = {
+    return {
         "py":  np.mean(py_dist)  if py_dist.size  else np.nan,
         "mat": np.mean(mat_dist) if mat_dist.size else np.nan,
         "std_py":  np.std(py_dist,  ddof=1) if py_dist.size  > 1 else np.nan,
         "std_mat": np.std(mat_dist, ddof=1) if mat_dist.size > 1 else np.nan,
     }
-    if py_dist.size >= 2 and mat_dist.size >= 2:
-        if np.ptp(py_dist) == 0 and np.ptp(mat_dist) == 0:
-            out["ks_p"] = 1.0 if np.isclose(py_dist[0], mat_dist[0]) else 0.0
-        else:
-            out["ks_p"] = ks_2samp(py_dist, mat_dist).pvalue
-    else:
-        out["ks_p"] = np.nan
-    return out
  
  
 def generate_test_cases(yaml_file):
@@ -240,7 +233,7 @@ def test_matlab_parity(matlab_engine, data, suite_name, settings, params):
         py_once = op_func(test_data, **run_args)
         py_once = py_once if isinstance(py_once, dict) else {"output": py_once}
         for k in _flatten(_normalize(py_once)):
-            results[f"{base_name}::{k}"] = {"py": np.nan, "mat": np.nan, "ks_p": np.nan}
+            results[f"{base_name}::{k}"] = {"py": np.nan, "mat": np.nan}
         return results
  
     all_keys = set().union(*(set(d) for d in seed_py), *(set(d) for d in seed_mat))
@@ -276,8 +269,6 @@ def _accumulate(aggregator, res):
             continue
         aggregator[full_key]["py"].append(values["py"])
         aggregator[full_key]["mat"].append(values["mat"])
-        if "ks_p" in values and np.isfinite(values["ks_p"]):
-            aggregator[full_key]["ks_p"].append(values["ks_p"])
  
  
 def _finalize_param(settings, aggregator):
@@ -299,9 +290,6 @@ def _finalize_param(settings, aggregator):
         else:
             mae = mape = np.nan
  
-        ks = lists["ks_p"]
-        ks_pass_frac = float(np.mean(np.asarray(ks) > 0.05)) if ks else np.nan
- 
         fname = feature_name.split(":")[2]
         if fname == 'output':
             fname = feature_name.split(":")[0]
@@ -312,12 +300,10 @@ def _finalize_param(settings, aggregator):
             "matlab_func": settings["matlab_func"],
             "python_module": settings["python_module"],
             "corr": r, "mae": mae, "mape": mape,
-            "ks_pass_frac": ks_pass_frac,
-            "n_stochastic_series": len(ks) if ks else 0,
             "nan_count_py": int(np.sum(~np.isfinite(py_vec))),
             "nan_count_ml": int(np.sum(~np.isfinite(mat_vec))),
         })
-        print(f"{settings['python_func']}-{feature_name}: corr={r:.4f} ks_pass={ks_pass_frac}")
+        print(f"{settings['python_func']}-{feature_name}: corr={r:.4f}")
     return records, raw_outputs
  
  
@@ -325,7 +311,7 @@ def get_correlations(eng, data, params):
     """Serial path (kept as a reference / single-engine fallback)."""
     records, raw_outputs = [], {}
     for suite_name, settings, param_dict in params:
-        aggregator = defaultdict(lambda: {"py": [], "mat": [], "ks_p": []})
+        aggregator = defaultdict(lambda: {"py": [], "mat": []})
         for series in data:
             res = test_matlab_parity(eng, series, suite_name, settings, param_dict)
             _accumulate(aggregator, res)
@@ -434,7 +420,7 @@ def get_correlations_shared_noise(eng, data, params):
     """Serial shared-noise parity. Returns (df, raw_outputs) in the main-table schema."""
     records, raw_outputs = [], {}
     for suite_name, settings, param_dict in params:
-        aggregator = defaultdict(lambda: {"py": [], "mat": [], "ks_p": []})
+        aggregator = defaultdict(lambda: {"py": [], "mat": []})
         for series in data:
             res = _shared_noise_parity(eng, series, suite_name, settings, param_dict)
             _accumulate(aggregator, res)
@@ -489,7 +475,7 @@ def _parallel_driver(task_fn, hctsa_path, jidt_path, dataset_name, yaml_file,
         max_workers = min(os.cpu_count() or 4, 8)
 
     tasks = [(pi, si) for pi in range(n_params) for si in range(n_series)]
-    aggregators = {pi: defaultdict(lambda: {"py": [], "mat": [], "ks_p": []})
+    aggregators = {pi: defaultdict(lambda: {"py": [], "mat": []})
                    for pi in range(n_params)}
 
     ctx = mp.get_context("spawn")
@@ -529,27 +515,38 @@ def get_correlations_shared_noise_parallel(hctsa_path, jidt_path, dataset_name, 
     in the main-table schema. The YAML here should contain ONLY noise-injectable ops."""
     return _parallel_driver(_run_task_shared_noise, hctsa_path, jidt_path, dataset_name,
                             yaml_file, max_workers=max_workers)
- 
+
+def main():
+    parser = argparse.ArgumentParser(description="Run pyhctsa numerical-parity validation against MATLAB HCTSA.")
+
+    parser.add_argument("--config", required=True, help="Path to validation YAML config (e.g., validate_deterministic/.yaml)")
+    parser.add_argument("--dataset", default='e1000', help='Dataset name passed to get_dataset (default: e1000)')
+    parser.add_argument("--mode", choices=['deterministic', 'shared-noise'], default='deterministic', help="Validation path to run (default: deterministic).")
+    parser.add_argument("--output", default=None, help="Output .pkl path (default: validation_<mode>.pkl).")
+    parser.add_argument("--max-workers", type=int, default=1,
+                        help="Number of parallel MATLAB-engine workers.")
+    parser.add_argument("--hctsa-path",
+                        default=os.environ.get("HCTSA_PATH"),
+                        help="Path to hctsa (or set HCTSA_PATH env var).")
+    parser.add_argument("--jidt-path",
+                        default=os.environ.get("JIDT_PATH"),
+                        help="Path to infodynamics.jar (or set JIDT_PATH env var).")
+    args = parser.parse_args()
+    if not args.hctsa_path or not args.jidt_path:
+        parser.error("hctsa and jidt paths are required "
+                     "(pass --hctsa-path/--jidt-path or set HCTSA_PATH/JIDT_PATH).")
+    driver = (get_correlations_parallel if args.mode == "deterministic"
+              else get_correlations_shared_noise_parallel)
+    df, _ = driver(
+        args.hctsa_path, args.jidt_path, args.dataset, args.config,
+        max_workers=args.max_workers,
+    )
+    out = args.output or f"validation_{args.mode.replace('-', '_')}.pkl"
+    df.to_pickle(out)
+    print(f"Wrote {len(df)} rows to {out}")
 
 if __name__ == "__main__":
-    HCTSA_PATH = None # '/Users/jmoo2880/Documents/hctsa' -> REPLACE WITH ACTUAL LOCATION
-    JIDT_PATH = None # '/Users/jmoo2880/Documents/hctsa/Toolboxes/infodynamics-dist/infodynamics.jar' -> REPLACE WITH ACTUAL LOCATION
-    YAML_FILE_DETERM = './validate_deterministic.yaml'
-    YAML_FILE_STOCHASTIC = "./validate_stochastic.yaml"
-    DATASET = 'e1000'
-    
-    
-    df_determ, _ = get_correlations_parallel(
-        HCTSA_PATH, JIDT_PATH, DATASET, YAML_FILE_DETERM,
-        max_workers=8,
-    )
-
-    df_determ.to_pickle('./validation_deterministic.pkl')
-
-    df_stoch, _ = get_correlations_shared_noise_parallel(
-        HCTSA_PATH, JIDT_PATH, DATASET, YAML_FILE_STOCHASTIC, 
-        max_workers=8,
-    )
- 
-    df_stoch.to_pickle('./validation_stochastic.pkl')
+    main()
+    # HCTSA_PATH =  '/Users/jmoo2880/Documents/hctsa' #-> REPLACE WITH ACTUAL LOCATION
+    # JIDT_PATH =  '/Users/jmoo2880/Documents/hctsa/Toolboxes/infodynamics-dist/infodynamics.jar' #-> REPLACE WITH ACTUAL LOCATION
 
