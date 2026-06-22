@@ -15,12 +15,11 @@ the end of this file.
 | File | Description |
 | --- | --- |
 | `run_validation.py` | Entry point: runs the harness and writes the results CSV. |
-| `validation_config.yaml` | Per-feature test configuration (signatures, arg maps, test cases). |
+| `validate_deterministic.yaml` | Per-feature test configuration (signatures, arg maps, test cases) for deterministic functions. |
+| `validate_stochastic.yaml` | Per-feature test configuration for stochastic functions. |
 | `validation_results_HCTSA.csv` | Full precomputed results (correlation per feature). |
 | `lessthan0p9.csv` | Subset of features below the r ≥ 0.9 threshold, with rationale. |
 
-> **Note:** adjust the filenames above to match the actual repository layout if
-> they differ.
 
 ## Inspecting the results without MATLAB
 
@@ -62,27 +61,25 @@ dependencies:
    ```matlab
    addpath(genpath('/path/to/hctsa'))
    ```
-4. **The pyhctsa Python dependencies**, including the optional validation extras:
-
-   ```bash
-   pip install -e ".[validation]"
-   ```
-
-   > Adjust the extra name to match `pyproject.toml` if it differs.
 
 ## Running the harness
 
-With the requirements above in place:
+With the requirements above in place, you can run the deterministic validation using:
 
 ```bash
-python run_validation.py --config validation_config.yaml --dataset e1000
+python run_validation.py --config validate_deterministic.yaml --dataset e1000 --mode deterministic --hctsa-path <path> --jidt-path <path> --max-workers 6
+```
+It is recommended to set the max workers to no more than the number of physical cores on your computer.
+
+Similarly, the stochastic validation can be run using:
+```bash
+python run_validation.py --config validate_stochastic.yaml --dataset e1000 --mode stochastic --hctsa-path <path> --jidt-path <path> --max-workers 6
 ```
 
 The harness spins up one isolated MATLAB engine per worker process (via
 `ProcessPoolExecutor`) and evaluates every configured feature on both sides,
 writing the per-feature correlations to `validation_results_HCTSA.csv`.
 
-> Adjust the flags to match `run_validation.py`'s actual argument names.
 
 ## Regenerating the MATLAB reference
 
@@ -111,5 +108,4 @@ A small subset of features (~117) sit below the threshold and are documented in
 categories: realization dependence under independent RNG draws; ill-posed or
 near-singular numerics (e.g. high-lag partial autocorrelation, chaotic
 integration); third-party wrapper behaviour (e.g. `hmmlearn`, `statsmodels`); and
-unavoidable KDE-bandwidth differences between SciPy and MATLAB. See the project
-paper and `lessthan0p9.csv` for the per-feature rationale.
+unavoidable KDE-bandwidth differences between SciPy and MATLAB.
