@@ -254,6 +254,15 @@ def z_score(x: ArrayLike) -> np.ndarray:
     if not np.isfinite(x).all():
         raise ValueError(f"data contains non-finite values (NaN/inf) at "
                          f"idxs: {np.argwhere(np.isfinite(x) == False)}")
+    
+    # robust checks for constant values
+    var_x = np.var(x, ddof=1)
+    if var_x < 1e-10:
+        raise ValueError(f"Data has sample variance {var_x:.2e} < 1e-10. "
+                         "Values appear to be constant.")
+    data_range = np.ptp(x)  # peak-to-peak (max - min)
+    if data_range < 1e-10:
+        raise ValueError(f"Data range {data_range:.2e} < 1e-10. Values appear to be constant.")
 
     # Z-score twice to reduce numerical error
     zscored_data = np.divide((x - np.mean(x)), np.std(x, ddof=1))
