@@ -521,7 +521,10 @@ def _embed(x: ArrayLike, order: int, delay: int = 1) -> ArrayLike:
     N = x.shape[0]
     if N - (order - 1) * delay <= 0:
         raise ValueError("Time series is too short for the given order and delay.")
-    return np.array([x[i:i + order * delay:delay] for i in range(N - (order - 1) * delay)])
+    # Build the delay-embedding by one broadcast gather instead of a per-row comprehension
+    nrows = N - (order - 1) * delay
+    idx = np.arange(nrows)[:, None] + delay * np.arange(order)[None, :]
+    return x[idx]
 
 def _app_samp_entropy(
         x: ArrayLike,

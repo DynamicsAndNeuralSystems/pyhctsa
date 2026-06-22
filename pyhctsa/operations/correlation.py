@@ -561,9 +561,10 @@ def compare_min_ami(y: ArrayLike, bin_method: str = 'std1',
 
     # Calculate automutual information
     for i in range(num_bins_range):  # vary over number of bins in histogram
+        idx, valid, nb = _ami_hist_binning(y, bin_method, num_bins[i])
         amis = np.zeros(num_taus)
         for j in range(num_taus):  # vary over time lags, tau
-            amis[j] = histogram_ami(y, tau_range[j], bin_method, num_bins[i])
+            amis[j] = _ami_from_binning(idx, valid, nb, tau_range[j])
             if (j > 1) and ((amis[j] - amis[j - 1]) * (amis[j - 1] - amis[j - 2]) < 0):
                 ami_mins[i] = tau_range[j - 1]
                 break
@@ -601,6 +602,77 @@ def compare_min_ami(y: ArrayLike, bin_method: str = 'std1',
     out['nlocmax'] = len(big_loc_extr)
 
     return out
+
+def _ami_hist_binning(y: ArrayLike, meth: str, num_bins: int):
+    """Per-sample bin index for the histogram-AMI estimators.
+
+    The binning depends only on ``y``, ``meth`` and ``num_bins`` --- not on the time
+    lag --- so callers that sweep lags (e.g. ``compare_min_ami``) can compute this once
+    and reuse it. Returns ``(idx, valid, num_bins)`` where ``idx[k]`` is the 0-based bin
+    of ``y[k]`` and ``valid[k]`` is False if the point falls outside the bin range. The
+    assignment reproduces ``np.histogram2d``'s bins exactly (last bin right-inclusive).
+    """
+    y = np.asarray(y)
+    if meth == 'even':
+        b = np.linspace(np.min(y), np.max(y), num_bins + 1)
+        # Add increment buffer to ensure all points are included
+        inc = 0.1
+        b[0] -= inc
+        b[-1] += inc
+    elif meth == 'std1':  # bins out to +/- 1 std
+        b = np.linspace(-1, 1, num_bins + 1)
+        if np.min(y) < -1:
+            b = np.concatenate(([np.min(y) - 0.1], b))
+        if np.max(y) > 1:
+            b = np.concatenate((b, [np.max(y) + 0.1]))
+    elif meth == 'std2':  # bins out to +/- 2 std
+        b = np.linspace(-2, 2, num_bins + 1)
+        if np.min(y) < -2:
+            b = np.concatenate(([np.min(y) - 0.1], b))
+        if np.max(y) > 2:
+            b = np.concatenate((b, [np.max(y) + 0.1]))
+    elif meth == 'quantiles':  # use quantiles with ~equal number in each bin
+        b = np.quantile(y, np.linspace(0, 1, num_bins + 1), method='hazen')
+        b[0] -= 0.1
+        b[-1] += 0.1
+    else:
+        raise ValueError(f"Unknown method '{meth}'")
+
+    # Sometimes bins can be added (e.g., with std1 and std2), so redefine num_bins
+    num_bins = len(b) - 1
+    idx = np.digitize(y, b) - 1
+    idx[y == b[-1]] = num_bins - 1                 # histogram2d's last bin is right-inclusive
+    valid = (idx >= 0) & (idx <= num_bins - 1)
+    return idx, valid, num_bins
+
+
+def _ami_from_binning(idx: np.ndarray, valid: np.ndarray, num_bins: int, t: int) -> float:
+    """AMI at lag ``t`` from precomputed bin indices.
+
+    Bit-identical to histogram_ami's per-lag value: the joint histogram of the binned
+    delay pair is one ``bincount`` of paired indices instead of re-running histogram2d.
+    """
+    if t == 0:
+        # for tau = 0, y1 and y2 are identical to y
+        bi = bj = idx
+        m = valid
+    else:
+        bi = idx[:-t]
+        bj = idx[t:]
+        m = valid[:-t] & valid[t:]
+    # Joint distribution of the (binned) delay pair
+    pij = np.bincount(bi[m] * num_bins + bj[m],
+                      minlength=num_bins * num_bins).reshape(num_bins, num_bins).astype(float)
+    pij = pij / np.sum(pij)  # normalize
+    pi = np.sum(pij, axis=1)  # marginal
+    pj = np.sum(pij, axis=0)  # other marginal
+
+    pii = np.tile(pi, (num_bins, 1)).T
+    pjj = np.tile(pj, (num_bins, 1))
+
+    r = pij > 0  # Defining the range in this way, we set log(0) = 0
+    return np.sum(pij[r] * np.log(pij[r] / pii[r] / pjj[r]))
+
 
 def histogram_ami(
     y: ArrayLike,
@@ -645,61 +717,16 @@ def histogram_ami(
     if isinstance(tau, str) and tau in ['ac', 'tau']:
         tau = first_crossing(y, 'ac', 0, 'discrete')
 
-    # Bins for the data
-    # same for both -- assume same distribution (true for stationary processes, or small lags)
-    if meth == 'even':
-        b = np.linspace(np.min(y), np.max(y), num_bins + 1)
-        # Add increment buffer to ensure all points are included
-        inc = 0.1
-        b[0] -= inc
-        b[-1] += inc
-    elif meth == 'std1':  # bins out to +/- 1 std
-        b = np.linspace(-1, 1, num_bins + 1)
-        if np.min(y) < -1:
-            b = np.concatenate(([np.min(y) - 0.1], b))
-        if np.max(y) > 1:
-            b = np.concatenate((b, [np.max(y) + 0.1]))
-    elif meth == 'std2':  # bins out to +/- 2 std
-        b = np.linspace(-2, 2, num_bins + 1)
-        if np.min(y) < -2:
-            b = np.concatenate(([np.min(y) - 0.1], b))
-        if np.max(y) > 2:
-            b = np.concatenate((b, [np.max(y) + 0.1]))
-    elif meth == 'quantiles':  # use quantiles with ~equal number in each bin
-        b = np.quantile(y, np.linspace(0, 1, num_bins + 1), method='hazen')
-        b[0] -= 0.1
-        b[-1] += 0.1
-    else:
-        raise ValueError(f"Unknown method '{meth}'")
-
-    # Sometimes bins can be added (e.g., with std1 and std2), so need to redefine numBins
-    num_bins = len(b) - 1
+    # Bin the data once (the binning is the same for both delay vectors and does not
+    # depend on the lag), then evaluate each lag from the precomputed bin indices.
+    idx, valid, num_bins = _ami_hist_binning(y, meth, num_bins)
 
     # Form the time-delay vectors y1 and y2
     if not isinstance(tau, (list, np.ndarray)):
         # if only single time delay as integer, make into a one element list
         tau = [tau]
 
-    amis = np.zeros(len(tau))
-    for i, t in enumerate(tau):
-        if t == 0:
-            # for tau = 0, y1 and y2 are identical to y
-            y1 = y2 = y
-        else:
-            y1 = y[:-t]
-            y2 = y[t:]
-        # Joint distribution of y1 and y2
-        pij, _, _ = np.histogram2d(y1, y2, bins=(b, b))
-        pij = pij[:num_bins, :num_bins]  # joint
-        pij = pij / np.sum(pij)  # normalize
-        pi = np.sum(pij, axis=1)  # marginal
-        pj = np.sum(pij, axis=0)  # other marginal
-
-        pii = np.tile(pi, (num_bins, 1)).T
-        pjj = np.tile(pj, (num_bins, 1))
-
-        r = pij > 0  # Defining the range in this way, we set log(0) = 0
-        amis[i] = np.sum(pij[r] * np.log(pij[r] / pii[r] / pjj[r]))
+    amis = np.array([_ami_from_binning(idx, valid, num_bins, t) for t in tau])
 
     if len(tau) == 1:
         return amis[0]
@@ -1273,14 +1300,15 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     N = len(m)
 
     # Start the analysis
-    counts = np.zeros(N)
     if shape == 'circle':
         # Puts a circle around each point in the embedding space in turn
-        # counts how many pts are inside this shape, looks at the time series thus formed
-        for i in range(N): # across all pts in the time series
-            m_c = m - m[i] # pts wrt current pt i
-            m_c_d = np.sum(m_c**2, axis=1) # Euclidean distances from pt i
-            counts[i] = np.sum(m_c_d <= r**2) # number of pts enclosed in a circle of radius r
+        # counts how many pts are inside this shape, looks at the time series thus formed.
+        # Vectorised: one pairwise squared-distance matrix (sqeuclidean == the loop's
+        # sum of squared diffs exactly), then count <= r**2 per row. Diagonal is 0, so
+        # the self-count subtraction below is preserved. O(N^2) memory.
+        from scipy.spatial.distance import cdist
+        m_c_d = cdist(m, m, metric='sqeuclidean')
+        counts = np.sum(m_c_d <= r**2, axis=1).astype(float)
     else:
         raise ValueError(f"Unknown shape '{shape}'")
     counts -= 1 # ignore self counts
@@ -1786,10 +1814,14 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
     elif stop_when in ['pos_drown', 'drown', 'double_drown']:
         # Compute ACF up to a given threshold:
         n_drown = 0 # the point at which ACF ~ 0
+        # The Fourier ACF depends only on N, so compute the whole (lag-indexed) curve
+        # once and read acf_full[i-1] instead of recomputing a full FFT every lag.
+        # acf_full[i-1] is bit-identical to autocorr(y, i-1, 'Fourier')[0].
+        acf_full = autocorr(y, [], 'Fourier')
         if stop_when == 'pos_drown':
             # stop when ACF drops below threshold, th
             for i in range(1, N+1):
-                acf_val = autocorr(y, i-1, 'Fourier')[0]
+                acf_val = acf_full[i-1]
                 if np.isnan(acf_val):
                     logger.warning("Weird time series (constant?)")
                     out = np.nan
@@ -1810,7 +1842,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
         elif stop_when == 'drown':
             # Stop when ACF is very close to 0 (within threshold, th = 2/sqrt(N))
             for i in range(1, N+1):
-                acf_val = autocorr(y, i-1, 'Fourier')[0] # acf vector indicies are not lags
+                acf_val = acf_full[i-1] # acf vector indicies are not lags
                 # if positive and less than thresh
                 if i > 0 and abs(acf_val) < th:
                     n_drown = i
@@ -1820,7 +1852,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
         elif stop_when == 'double_drown':
             # Stop at 2*tau, where tau is the lag where ACF ~ 0 (within 1/sqrt(N) threshold)
             for i in range(1, N+1):
-                acf_val = autocorr(y, i-1, 'Fourier')[0]
+                acf_val = acf_full[i-1]
                 if n_drown > 0 and i == n_drown * 2:
                     acf.append(acf_val)
                     break

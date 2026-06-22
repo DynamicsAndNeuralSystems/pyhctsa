@@ -3,6 +3,7 @@ from typing import Union
 import numba
 import numpy as np
 from numpy.typing import ArrayLike
+from numpy.lib.stride_tricks import sliding_window_view
 from hmmlearn.hmm import GaussianHMM
 from scipy.signal import lfilter
 from scipy.stats import ks_1samp, norm, t
@@ -327,11 +328,13 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
         return np.nan
     res = np.zeros(len(evalr))
     if forecast_meth == 'mean':
-        for i in range(len(evalr)):
-            res[i] = np.mean(y[evalr[i]-lp:evalr[i]]) - y[evalr[i]] # prediction - value
+        # All length-lp windows at once. W.mean(axis=1) reduces the same contiguous
+        # elements in the same order as np.mean(window), so it is bit-identical.
+        W = sliding_window_view(y, lp)[:len(evalr)]
+        res = W.mean(axis=1) - y[evalr]  # prediction - value
     elif forecast_meth == 'median':
-        for i in range(len(evalr)):
-            res[i] = np.median(y[evalr[i]-lp:evalr[i]]) - y[evalr[i]]  # prediction - value
+        W = sliding_window_view(y, lp)[:len(evalr)]
+        res = np.median(W, axis=1) - y[evalr]  # prediction - value
     elif forecast_meth == 'lfit':
         for i in range(len(evalr)):
             # Fit linear
