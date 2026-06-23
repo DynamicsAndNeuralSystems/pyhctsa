@@ -3,9 +3,11 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 from arch.unitroot import VarianceRatio
-from scipy.stats import jarque_bera, norm, wilcoxon, chi2
+from scipy.stats import jarque_bera, norm, wilcoxon
 from statsmodels.sandbox.stats.runs import runstest_1samp
 from statsmodels.stats.descriptivestats import sign_test
+
+from ..utils import ljung_box_pvalue
 
 def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
                         iids: Union[int, list[int]] = 0) -> dict:
@@ -133,19 +135,9 @@ def hypothesis_test(x: ArrayLike, the_test: str = 'signtest') -> float:
     elif the_test == 'signrank':
         _, p = wilcoxon(x)
     elif the_test == 'lbq':
-        # Ljung-Box Q-test for residual autocorrelation. Matches
-        # acorr_ljungbox(x, lags=[n_lags]) to ~1e-15 but is O(N*n_lags) not
-        # O(N^2): forms only the needed autocovariances instead of statsmodels'
-        # full acf(fft=False).
-        t = np.sum(~np.isnan(x)) # get the effective sample size
-        n_lags = min(20, t-1)
-        nobs = x.shape[0]
-        xo = x - x.mean()
-        acov = np.array([np.dot(xo[:nobs-k], xo[k:]) for k in range(n_lags+1)]) / nobs
-        sacf = acov / acov[0]
-        sacf2 = sacf[1:n_lags+1]**2 / (nobs - np.arange(1, n_lags+1))
-        q = nobs * (nobs+2) * np.cumsum(sacf2)[n_lags-1]
-        p = chi2.sf(q, n_lags)
+        # Ljung-Box Q-test for residual autocorrelation; O(N*n_lags), see
+        # utils.ljung_box_pvalue.
+        p = ljung_box_pvalue(x, n_lags=20)
     else:
         raise ValueError(f"Unknown test: {the_test}.")
     return p

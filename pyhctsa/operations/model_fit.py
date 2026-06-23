@@ -7,7 +7,6 @@ from numpy.lib.stride_tricks import sliding_window_view
 from hmmlearn.hmm import GaussianHMM
 from scipy.signal import lfilter
 from scipy.stats import ks_1samp, norm, t
-from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.tsa.ar_model import AutoReg, ar_select_order
 from lmfit.models import SineModel
 import logging
@@ -15,7 +14,7 @@ logger = logging.getLogger('pyhctsa')
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
-from ..utils import z_score
+from ..utils import z_score, ljung_box_pvalue
 
 def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed: int = 0) -> dict:
     """
@@ -775,14 +774,17 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
 
     #%% (II) Test Residuals
     #test of auto correlation in the residuals (test up to lag 20)
-    ljung_box_results = acorr_ljungbox(res.resid, lags=[20], model_df=p_optimal, return_df=False)
-    out['res_siglev'] = ljung_box_results.iloc[0]['lb_pvalue']
+    out['res_siglev'] = ljung_box_pvalue(res.resid, n_lags=20, model_df=p_optimal)
 
-    # Correlation test of residuals
+    # Correlation test of residuals.
+    # autocorr(...,'Fourier') computes the full FFT ACF internally, so compute
+    # lags 1..20 once and reuse lag 1 (acf[0]) rather than running two FFTs.
     resids = res.resid
+    acf = autocorr(resids, list(range(1, 21)), 'Fourier')
+    out['res_ac1'] = acf[0]
+    out['res_ac1_norm'] = out['res_ac1']/np.sqrt(N)
 
     #Calculate correlations up to 20, return how many exceed significance threshold
-    acf = autocorr(resids, list(range(1, 21)), 'Fourier')
     out['pcorr_res'] = np.sum(np.abs(acf) > 1.96/np.sqrt(N))/20
 
     # Confidence Intervals
