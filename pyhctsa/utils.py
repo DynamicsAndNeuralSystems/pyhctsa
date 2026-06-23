@@ -15,6 +15,7 @@ import warnings
 import numpy as np
 from numpy.typing import ArrayLike
 import pandas as pd
+from scipy.stats import chi2
 
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array, check_is_fitted
@@ -269,6 +270,45 @@ def z_score(x: ArrayLike) -> np.ndarray:
     zscored_data = np.divide((zscored_data - np.mean(zscored_data)), np.std(zscored_data, ddof=1))
 
     return zscored_data
+
+def ljung_box_pvalue(x: ArrayLike, n_lags: int = 20, model_df: int = 0) -> float:
+    """
+    P-value of the Ljung-Box Q-test for autocorrelation up to ``n_lags``.
+
+    Equivalent to ``statsmodels.stats.diagnostic.acorr_ljungbox(x,
+    lags=[n_lags], model_df=model_df)`` but O(N * n_lags) rather than O(N^2):
+    it forms only the ``n_lags + 1`` autocovariances actually needed instead of
+    statsmodels' full ``acf(fft=False)`` (which computes the entire N-lag
+    autocovariance via ``np.correlate(..., 'full')``). Matches statsmodels to
+    ~1e-15; not bit-identical, because ``np.dot`` (BLAS) rounds differently than
+    numpy's full-array correlation.
+
+    Parameters
+    ----------
+    x : array-like
+        Input series, e.g. model residuals.
+    n_lags : int, optional
+        Maximum lag tested. Default is 20.
+    model_df : int, optional
+        Degrees of freedom consumed by a fitted model; the chi-squared
+        reference distribution uses ``n_lags - model_df`` degrees of freedom.
+        Default is 0.
+
+    Returns
+    -------
+    float
+        The Ljung-Box p-value.
+    """
+    x = np.asarray(x)
+    t = np.sum(~np.isnan(x)) # effective sample size
+    n_lags = min(n_lags, t - 1)
+    nobs = x.shape[0]
+    xo = x - x.mean()
+    acov = np.array([np.dot(xo[:nobs-k], xo[k:]) for k in range(n_lags+1)]) / nobs
+    sacf = acov / acov[0]
+    sacf2 = sacf[1:n_lags+1]**2 / (nobs - np.arange(1, n_lags+1))
+    q = nobs * (nobs+2) * np.cumsum(sacf2)[n_lags-1]
+    return chi2.sf(q, n_lags - model_df)
 
 def histc(x: ArrayLike, bins: ArrayLike) -> int:
     """Counts the number of values in x that are within each specified bin."""
