@@ -7,27 +7,13 @@
 
 <h1 align="center"><em>pyhctsa</em>: Python Toolkit for Highly Comparative Time-Series Analysis</h1>
 
-<p align="center" style="font-size:0; line-height:0;">
-  <a href="https://pypi.org/project/pyhctsa/">
-    <img src="https://img.shields.io/pypi/v/pyhctsa?style=flat-square" style="margin-right:8px;" />
-  </a>
-  <a href="https://pypi.org/project/pyhctsa/">
-    <img src="https://img.shields.io/pypi/pyversions/pyhctsa?style=flat-square" style="margin-right:8px;" />
-  </a>
-  <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml">
-    <img src="https://img.shields.io/github/actions/workflow/status/DynamicsAndNeuralSystems/pyhctsa/run_unit_tests.yaml?branch=main&style=flat-square" style="margin-right:8px;" />
-  </a>
-  <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml">
-    <img src="https://raw.githubusercontent.com/DynamicsAndNeuralSystems/pyhctsa/coverage-badge/coverage.svg" style="margin-right:8px;" />
-  </a>
-  <a href="https://doi.org/10.5281/zenodo.18529935">
-    <img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529935-blue?style=flat-square" />
-  </a>
-  <a href="https://joss.theoj.org/papers/98f474a523552a41749fe82e2ec04173">
-    <img src="https://joss.theoj.org/papers/98f474a523552a41749fe82e2ec04173/status.svg" />
-  </a>
-</p>
-
+[![PyPI Version](https://img.shields.io/pypi/v/pyhctsa.svg)](https://pypi.org/project/pyhctsa/)
+[![Python Version](https://img.shields.io/pypi/pyversions/pyhctsa.svg)](https://pypi.org/project/pyhctsa/)
+[![CI](https://img.shields.io/github/actions/workflow/status/DynamicsAndNeuralSystems/pyhctsa/run_unit_tests.yaml?branch=main&label=CI)](https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml)
+[![codecov](https://raw.githubusercontent.com/DynamicsAndNeuralSystems/pyhctsa/coverage-badge/coverage.svg)](https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml)
+[![License](https://img.shields.io/badge/License-GPL_v3-orange.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.20820138-blue.svg)](https://doi.org/10.5281/zenodo.20820138)
+[![JOSS](https://joss.theoj.org/papers/98f474a523552a41749fe82e2ec04173/status.svg)](https://joss.theoj.org/papers/98f474a523552a41749fe82e2ec04173)
 
 # pyhctsa
 
@@ -74,7 +60,8 @@ from pyhctsa.operations.medical import raw_hrv_meas
 data = ... # your ArrayLike data
 res = raw_hrv_meas(data) # result as either a dictionary or scalar value
 ```
-Note that individual operations can only be called directly on individual time-series instances.
+> [!Note]
+Individual operations can only be called directly on individual time-series instances.
 
 ## 🏗️ Parallel Computing
 Time-series feature extraction is computationally intensive. 
