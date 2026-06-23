@@ -62,13 +62,13 @@ def shannon_entropy(
     if bin_range_size == 1:
         if depth_range_size == 1:
             # %% Evaluate the shannon entropy of discretization - scales with depth, so it's nice to normalize by this factor
-            out = shannon.entropy(y, num_bins, depth) / depth
+            out = shannon.entropy(y, int(num_bins), int(depth)) / int(depth)
         elif depth_range_size > 1:
             # % Range over depths specified in the vector and return statistics on results
             num_depths = depth_range_size
             ents = np.zeros(num_depths)
             for i in range(num_depths):
-                ents[i] = shannon.entropy(y, num_bins, depth[i]) / depth[i]
+                ents[i] = shannon.entropy(y, int(num_bins), int(depth[i])) / int(depth[i])
             out = {}
             #% Output statistics on variation across the range tested:
             out['maxent'] = np.max(ents)
@@ -82,7 +82,7 @@ def shannon_entropy(
             #%% (*) Statistics over different bin numbers (constant depth)
             ents = np.zeros(bin_range_size)
             for i in range(bin_range_size):
-                ents[i] = shannon.entropy(y, num_bins[i], depth)
+                ents[i] = shannon.entropy(y, int(num_bins[i]), int(depth))
             out = {}
             out['maxent'] = np.max(ents)
             out['minent'] = np.min(ents)
@@ -393,9 +393,14 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
     hash_mult = np.power(m, ran_order)
     assert tau > 0, "delay must be greater than zero."
 
-    sorted_idx = _embed(y, order=m, delay=tau).argsort(kind="quicksort")
+    try:
+        sorted_idx = _embed(y, order=m, delay=tau).argsort(kind="quicksort")
+    except ValueError:
+        return {"permEn": np.nan, "normPermEn": np.nan}
     nx = sorted_idx.shape[0]
-    assert nx > 5, "Time series too short to embed. Need at least 5 embedding vectors to compute permutation entropy."
+    if nx < 5:
+        logging.warning("Time series too short to embed. Need at least 5 embedding vectors to compute permutation entropy.")
+        return {"permEn": np.nan, "normPermEn": np.nan}
     
     hash_val = (np.multiply(sorted_idx, hash_mult)).sum(1)
     _, c = np.unique(hash_val, return_counts=True)
@@ -449,7 +454,12 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: i
         # use the first zero crossing of the ACF
         tau = int(first_crossing(y, 'ac', 0, 'discrete'))
     y = np.asarray(y)
-    rpd = np.array(_close_returns_c.close_returns(y, m, tau, epsilon))
+    m = int(m)
+    tau = int(tau)
+    try:
+        rpd = np.array(_close_returns_c.close_returns(y, m, tau, epsilon))
+    except:
+        return np.nan
     if t_max > -1:
         rpd = rpd[:t_max]
     rpd = np.divide(rpd, np.sum(rpd))
@@ -511,7 +521,10 @@ def _embed(x: ArrayLike, order: int, delay: int = 1) -> ArrayLike:
     N = x.shape[0]
     if N - (order - 1) * delay <= 0:
         raise ValueError("Time series is too short for the given order and delay.")
-    return np.array([x[i:i + order * delay:delay] for i in range(N - (order - 1) * delay)])
+    # Build the delay-embedding by one broadcast gather instead of a per-row comprehension
+    nrows = N - (order - 1) * delay
+    idx = np.arange(nrows)[:, None] + delay * np.arange(order)[None, :]
+    return x[idx]
 
 def _app_samp_entropy(
         x: ArrayLike,
@@ -520,6 +533,7 @@ def _app_samp_entropy(
         metric: str = "chebyshev", 
         approximate: bool = True) -> ArrayLike:
     """Modified version of `_app_samp_entropy` that supports order=1."""
+    order = int(order)
     phi = np.zeros(2)
     emb_data1 = _embed(x, order, 1)
     if approximate:

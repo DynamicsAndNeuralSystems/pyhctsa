@@ -1,0 +1,2010 @@
+functions:
+  autocorr:
+    python_func: autocorr
+    python_module: correlation
+    matlab_func: CO_AutoCorr
+    arg_map:
+      tau: tau
+    matlab_signature: ['y', 'tau']
+    output_type: array
+    test_cases:
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 3, zscore: True}
+      - {tau: 4, zscore: True}
+      - {tau: 5, zscore: True}
+      - {tau: 6, zscore: True}
+      - {tau: 7, zscore: True}
+      - {tau: 8, zscore: True}
+      - {tau: 9, zscore: True}
+      - {tau: 10, zscore: True}
+      - {tau: 11, zscore: True}
+      - {tau: 12, zscore: True}
+      - {tau: 13, zscore: True}
+      - {tau: 14, zscore: True}
+      - {tau: 15, zscore: True}
+      - {tau: 16, zscore: True}
+      - {tau: 17, zscore: True}
+      - {tau: 18, zscore: True}
+      - {tau: 19, zscore: True}
+      - {tau: 20, zscore: True}
+      - {tau: 21, zscore: True}
+      - {tau: 22, zscore: True}
+      - {tau: 23, zscore: True}
+      - {tau: 24, zscore: True}
+      - {tau: 25, zscore: True}
+      - {tau: 26, zscore: True}
+      - {tau: 27, zscore: True}
+      - {tau: 28, zscore: True}
+      - {tau: 29, zscore: True}
+      - {tau: 30, zscore: True}
+      - {tau: 31, zscore: True}
+      - {tau: 32, zscore: True}
+      - {tau: 33, zscore: True}
+      - {tau: 34, zscore: True}
+      - {tau: 35, zscore: True}
+      - {tau: 36, zscore: True}
+      - {tau: 37, zscore: True}
+      - {tau: 38, zscore: True}
+      - {tau: 39, zscore: True}
+      - {tau: 40, zscore: True}
+  
+  glscf:
+    python_func: glscf
+    python_module: correlation
+    matlab_func: CO_glscf
+    arg_map:
+      alpha: alpha
+      beta: beta
+      tau: tau
+    matlab_signature: ['y', 'alpha', 'beta', 'tau']
+    output_type: scalar
+    test_cases:
+      - {alpha: 1, beta: 1,  tau: 1,     zscore: True}
+      - {alpha: 1, beta: 1,  tau: 2,     zscore: True}
+      - {alpha: 1, beta: 1,  tau: 3,     zscore: True}
+      - {alpha: 1, beta: 1,  tau: 4,     zscore: True}
+      - {alpha: 1, beta: 1,  tau: 5,     zscore: True}
+      - {alpha: 1, beta: 1,  tau: 'tau', zscore: True}
+
+      - {alpha: 1, beta: 2,  tau: 1,     zscore: True}
+      - {alpha: 1, beta: 2,  tau: 2,     zscore: True}
+      - {alpha: 1, beta: 2,  tau: 3,     zscore: True}
+      - {alpha: 1, beta: 2,  tau: 4,     zscore: True}
+      - {alpha: 1, beta: 2,  tau: 5,     zscore: True}
+      - {alpha: 1, beta: 2,  tau: 'tau', zscore: True}
+
+      - {alpha: 1, beta: 5,  tau: 1,     zscore: True}
+      - {alpha: 1, beta: 5,  tau: 2,     zscore: True}
+      - {alpha: 1, beta: 5,  tau: 3,     zscore: True}
+      - {alpha: 1, beta: 5,  tau: 4,     zscore: True}
+      - {alpha: 1, beta: 5,  tau: 5,     zscore: True}
+      - {alpha: 1, beta: 5,  tau: 'tau', zscore: True}
+
+      - {alpha: 1, beta: 10, tau: 1,     zscore: True}
+      - {alpha: 1, beta: 10, tau: 2,     zscore: True}
+      - {alpha: 1, beta: 10, tau: 3,     zscore: True}
+      - {alpha: 1, beta: 10, tau: 4,     zscore: True}
+      - {alpha: 1, beta: 10, tau: 5,     zscore: True}
+      - {alpha: 1, beta: 10, tau: 'tau', zscore: True}
+
+      - {alpha: 2, beta: 2,  tau: 1,     zscore: True}
+      - {alpha: 2, beta: 2,  tau: 2,     zscore: True}
+      - {alpha: 2, beta: 2,  tau: 3,     zscore: True}
+      - {alpha: 2, beta: 2,  tau: 5,     zscore: True}
+      - {alpha: 2, beta: 2,  tau: 'tau', zscore: True}
+
+      - {alpha: 2, beta: 5,  tau: 1,     zscore: True}
+      - {alpha: 2, beta: 5,  tau: 2,     zscore: True}
+      - {alpha: 2, beta: 5,  tau: 3,     zscore: True}
+      - {alpha: 2, beta: 5,  tau: 4,     zscore: True}
+      - {alpha: 2, beta: 5,  tau: 5,     zscore: True}
+      - {alpha: 2, beta: 5,  tau: 'tau', zscore: True}
+  
+  fzcglscf:
+    python_func: fzcglscf
+    python_module: correlation
+    matlab_func: CO_fzcglscf
+    arg_map:
+      alpha: alpha
+      beta: beta
+    matlab_signature: ['y', 'alpha', 'beta']
+    output_type: scalar
+    test_cases:
+      - {alpha: 1.0, beta: 1,  zscore: True}
+      - {alpha: 1.0, beta: 2,  zscore: True}
+      - {alpha: 1.0, beta: 3,  zscore: True}
+      - {alpha: 1.0, beta: 4,  zscore: True}
+      - {alpha: 1.0, beta: 5,  zscore: True}
+      - {alpha: 1.0, beta: 6,  zscore: True}
+      - {alpha: 1.0, beta: 7,  zscore: True}
+      - {alpha: 1.0, beta: 8,  zscore: True}
+      - {alpha: 1.0, beta: 9,  zscore: True}
+      - {alpha: 1.0, beta: 10, zscore: True}
+
+      - {alpha: 2.0, beta: 2,  zscore: True}
+      - {alpha: 2.0, beta: 5,  zscore: True}
+      - {alpha: 2.0, beta: 10, zscore: True}
+
+      - {alpha: 5.0, beta: 5,  zscore: True}
+      - {alpha: 5.0, beta: 10, zscore: True}
+
+      - {alpha: 10,  beta: 10, zscore: True}
+  
+  embed2:
+    python_func: embed2
+    python_module: correlation
+    matlab_func: CO_Embed2
+    arg_map:
+      tau: tau
+    matlab_signature: ['y', 'tau']
+    output_type: array
+    test_cases:
+      - {tau: 'tau', zscore: True}
+  
+  embed2_shapes:
+    python_func: embed2_shapes
+    python_module: correlation
+    matlab_func: CO_Embed2_Shapes
+    arg_map:
+      tau: tau
+      shape: shape
+      r: r
+    matlab_signature: ['y', 'tau', 'shape', 'r']
+    output_type: array
+    test_cases:
+      - {tau: 'tau', shape: 'circle', r: 0.1, zscore: True}
+      - {tau: 'tau', shape: 'circle', r: 1,   zscore: True}
+  
+  embed2_basic:
+    python_func: embed2_basic
+    python_module: correlation
+    matlab_func: CO_Embed2_Basic
+    arg_map:
+      tau: tau
+    matlab_signature: ['y', 'tau']
+    output_type: array
+    test_cases:
+      - {tau: 1.0,     zscore: True}
+      - {tau: 'tau', zscore: True}
+
+  embed2_dist:
+    python_func: embed2_dist
+    python_module: correlation
+    matlab_func: CO_Embed2_Dist
+    arg_map:
+      tau: tau
+    matlab_signature: ['y', 'tau']
+    output_type: array
+    test_cases:
+      - {tau: 'tau', zscore: True}
+  
+  embed2_angle_tau:
+    python_func: embed2_angle_tau
+    python_module: correlation
+    matlab_func: CO_Embed2_AngleTau
+    arg_map:
+      max_tau: maxTau
+    matlab_signature: ['y', 'maxTau']
+    output_type: array
+    test_cases:
+      - {max_tau: 50, zscore: True}
+  
+  partial_autocorr:
+    python_func: partial_autocorr
+    python_module: correlation
+    matlab_func: CO_PartialAutoCorr
+    arg_map:
+      max_tau: maxTau
+      what_method: whatMethod
+    matlab_signature: ['y', 'maxTau', 'whatMethod']
+    output_type: array
+    test_cases:
+      - {max_tau: 20, what_method: 'ols', zscore: True}
+  
+  nonlinear_autocorr:
+    python_func: nonlinear_autocorr
+    python_module: correlation
+    matlab_func: CO_NonlinearAutocorr
+    arg_map:
+      taus: taus
+      absval: doAbs
+    matlab_signature: ['y', 'taus', 'doAbs']
+    output_type: scalar
+    test_cases:
+      - {taus: [1, 2],          absval: False, zscore: True}
+      - {taus: [1, 2],          absval: True,  zscore: True}
+      - {taus: [1, 2, 3],       absval: False, zscore: True}
+      - {taus: [1, 2, 3, 4],    absval: False, zscore: True}
+      - {taus: [1, 2, 3, 4],    absval: True,  zscore: True}
+      - {taus: [1, 2, 3, 4, 5], absval: False, zscore: True}
+      - {taus: [1, 2, 3, 4, 5, 6], absval: False, zscore: True}
+      - {taus: [1, 2, 3, 4, 5, 6], absval: True, zscore: True}
+      - {taus: [1, 2, 3, 4, 5, 6, 7], absval: False, zscore: True}
+      - {taus: [1, 2, 3, 4, 5, 6, 7, 8], absval: False, zscore: True}
+      - {taus: [1, 2, 3, 4, 5, 6, 7, 8], absval: True, zscore: True}
+
+
+      - {taus: [1, 3], absval: False, zscore: True}
+      - {taus: [1, 3], absval: True,  zscore: True}
+      - {taus: [2, 4], absval: False, zscore: True}
+      - {taus: [2, 4], absval: True,  zscore: True}
+
+      - {taus: [1, 3, 5], absval: False, zscore: True}
+      - {taus: [2, 4, 6], absval: False, zscore: True}
+
+      - {taus: [1, 3, 5, 7], absval: False, zscore: True}
+      - {taus: [1, 3, 5, 7], absval: True, zscore: True}
+
+      - {taus: [2, 4, 6, 8], absval: False, zscore: True}
+      - {taus: [2, 4, 6, 8], absval: True, zscore: True}
+
+      - {taus: [1, 2, 4], absval: False, zscore: True}
+      - {taus: [1, 3, 4], absval: False, zscore: True}
+
+      - {taus: [1, 4], absval: False, zscore: True}
+      - {taus: [1, 4], absval: True,  zscore: True}
+
+      - {taus: [1, 1], absval: False, zscore: True}
+      - {taus: [1, 1], absval: True,  zscore: True}
+
+      - {taus: [2, 2], absval: False, zscore: True}
+      - {taus: [2, 2], absval: True,  zscore: True}
+
+      - {taus: [3, 3], absval: False, zscore: True}
+      - {taus: [3, 3], absval: True,  zscore: True}
+
+      - {taus: [4, 4], absval: False, zscore: True}
+      - {taus: [4, 4], absval: True, zscore: True}
+
+      - {taus: [5, 5], absval: False, zscore: True}
+      - {taus: [5, 5], absval: True, zscore: True}
+
+      - {taus: [6, 6], absval: False, zscore: True}
+      - {taus: [6, 6], absval: True, zscore: True}
+
+      - {taus: [0, 1, 1], absval: False, zscore: True}
+      - {taus: [0, 2, 2], absval: False, zscore: True}
+      - {taus: [0, 3, 3], absval: False, zscore: True}
+      - {taus: [0, 4, 4], absval: False, zscore: True}
+      - {taus: [0, 5, 5], absval: False, zscore: True}
+      - {taus: [0, 6, 6], absval: False, zscore: True}
+
+      - {taus: [0, 0, 1], absval: False, zscore: True}
+      - {taus: [0, 0, 2], absval: False, zscore: True}
+      - {taus: [0, 0, 3], absval: False, zscore: True}
+      - {taus: [0, 0, 4], absval: False, zscore: True}
+      - {taus: [0, 0, 5], absval: False, zscore: True}
+      - {taus: [0, 0, 6], absval: False, zscore: True}
+
+      - {taus: [0, 1, 2], absval: False, zscore: True}
+      - {taus: [0, 1, 3], absval: False, zscore: True}
+      - {taus: [0, 2, 3], absval: False, zscore: True}
+      - {taus: [0, 1, 4], absval: False, zscore: True}
+      - {taus: [0, 2, 4], absval: False, zscore: True}
+      - {taus: [0, 3, 4], absval: False, zscore: True}
+      - {taus: [0, 1, 5], absval: False, zscore: True}
+      - {taus: [0, 2, 5], absval: False, zscore: True}
+      - {taus: [0, 3, 5], absval: False, zscore: True}
+      - {taus: [0, 4, 5], absval: False, zscore: True}
+      - {taus: [0, 1, 6], absval: False, zscore: True}
+      - {taus: [0, 2, 6], absval: False, zscore: True}
+      - {taus: [0, 3, 6], absval: False, zscore: True}
+      - {taus: [0, 4, 6], absval: False, zscore: True}
+      - {taus: [0, 5, 6], absval: False, zscore: True}
+      - {taus: [1, 1, 2], absval: False, zscore: True}
+      - {taus: [1, 1, 3], absval: False, zscore: True}
+      - {taus: [1, 2, 2], absval: False, zscore: True}
+      - {taus: [1, 3, 3], absval: False, zscore: True}
+      - {taus: [2, 2, 3], absval: False, zscore: True}
+      - {taus: [2, 3, 3], absval: False, zscore: True}
+
+  stick_angles:
+    python_func: stick_angles
+    python_module: correlation
+    matlab_func: CO_StickAngles
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - {zscore: True}
+  
+  first_crossing:
+    python_func: first_crossing
+    python_module: correlation
+    matlab_func: CO_FirstCrossing
+    arg_map:
+      corr_fun: corrFun
+      threshold: threshold
+      what_out: whatOut
+    matlab_signature: ['y', 'corrFun', 'threshold', 'whatOut']
+    output_type: array
+    test_cases:
+      - {corr_fun: 'ac', threshold: 0, what_out: 'both', zscore: True}
+      - {corr_fun: 'ac', threshold: 0.36787944117144233, what_out: 'both', zscore: True}
+  
+  translate_shape:
+    python_func: translate_shape
+    python_module: correlation
+    matlab_func: CO_TranslateShape
+    arg_map:
+      shape: shape
+      d: d
+      how_to_move: howToMove
+    matlab_signature: ['y', 'shape', 'd', 'howToMove']
+    output_type: array
+    test_cases:
+      - {shape: 'circle',    d: 1.5, how_to_move: 'pts', zscore: True}
+      - {shape: 'circle',    d: 2.5, how_to_move: 'pts', zscore: True}
+      - {shape: 'circle',    d: 3.5, how_to_move: 'pts', zscore: True}
+      - {shape: 'rectangle', d: 2.0,   how_to_move: 'pts', zscore: True}
+  
+  autocorr_shape:
+    python_func: autocorr_shape
+    python_module: correlation
+    matlab_func: CO_AutoCorrShape
+    arg_map:
+      stop_when: stopWhen
+    matlab_signature: ['y', 'stopWhen']
+    output_type: array
+    test_cases:
+      - {stop_when: 'drown',    zscore: True}
+      - {stop_when: 'pos_drown', zscore: True}
+  
+  histogram_ami:
+    python_func: histogram_ami
+    python_module: correlation
+    matlab_func: CO_HistogramAMI
+    arg_map:
+      tau: tau
+      meth: meth
+      num_bins: numBins
+    matlab_signature: ['y', 'tau', 'meth', 'numBins']
+    output_type: array
+    test_cases:
+      - {tau: [1, 2, 3, 4, 5], meth: 'std1',      num_bins: 2,  zscore: True}
+      - {tau: [1, 2, 3, 4, 5], meth: 'std2',      num_bins: 2,  zscore: True}
+      - {tau: [1, 2, 3, 4, 5], meth: 'even',      num_bins: 2,  zscore: True}
+      - {tau: [1, 2, 3, 4, 5], meth: 'quantiles', num_bins: 2,  zscore: True}
+
+      - {tau: [1, 2, 3, 4, 5], meth: 'std1',      num_bins: 5,  zscore: True}
+      - {tau: [1, 2, 3, 4, 5], meth: 'std2',      num_bins: 5,  zscore: True}
+      - {tau: [1, 2, 3, 4, 5], meth: 'even',      num_bins: 5,  zscore: True}
+      - {tau: [1, 2, 3, 4, 5], meth: 'quantiles', num_bins: 5,  zscore: True}
+
+      - {tau: [1, 2, 3, 4, 5], meth: 'std1',      num_bins: 10, zscore: True}
+      - {tau: [1, 2, 3, 4, 5], meth: 'std2',      num_bins: 10, zscore: True}
+      - {tau: [1, 2, 3, 4, 5], meth: 'even',      num_bins: 10, zscore: True}
+      - {tau: [1, 2, 3, 4, 5], meth: 'quantiles', num_bins: 10, zscore: True}
+
+  compare_min_ami:
+    python_func: compare_min_ami
+    python_module: correlation
+    matlab_func: CO_CompareMinAMI
+    arg_map:
+      bin_method: binMethod
+      num_bins: numBins
+    matlab_signature: ['y', 'binMethod', 'numBins']
+    output_type: array
+    test_cases:
+      - {bin_method: 'std1', num_bins: !list_range [2, 80], zscore: True}
+      - {bin_method: 'std2', num_bins: !list_range [2, 80], zscore: True}
+      - {bin_method: 'quantiles', num_bins: !list_range [2, 80], zscore: True}
+      - {bin_method: 'even', num_bins: !list_range [2, 80], zscore: True}
+
+  periodicity_wang:
+    python_func: periodicity_wang
+    python_module: correlation
+    matlab_func: PD_PeriodicityWang
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - {zscore: True}
+  
+  trev:
+    python_func: trev
+    python_module: correlation
+    matlab_func: CO_trev
+    arg_map:
+      tau: tau
+    matlab_signature: ['y', 'tau']
+    output_type: array
+    test_cases:
+      - {tau: 1,    zscore: True}
+      - {tau: 2,    zscore: True}
+      - {tau: 3,    zscore: True}
+      - {tau: 'ac', zscore: True}
+      - {tau: 'mi', zscore: True}
+  
+  tc3:
+    python_func: tc3
+    python_module: correlation
+    matlab_func: CO_tc3
+    arg_map:
+      tau: tau
+    matlab_signature: ['y', 'tau']
+    output_type: array
+    test_cases:
+      - {tau: 1,    zscore: True}
+      - {tau: 2,    zscore: True}
+      - {tau: 3,    zscore: True}
+      - {tau: 'ac', zscore: True}
+      - {tau: 'mi', zscore: True}
+  
+  time_rev_kaplan:
+    python_func: time_rev_kaplan
+    python_module: correlation
+    matlab_func: DK_timerev
+    arg_map:
+      time_lag: timeLag
+    matlab_signature: ['y', 'timeLag']
+    output_type: scalar
+    test_cases:
+      - {time_lag: 1, zscore: True}
+      - {time_lag: 2, zscore: True}
+      - {time_lag: 3, zscore: True}
+      - {time_lag: 4, zscore: True}
+
+  crinkle_statistic:
+    python_func: crinkle_statistic
+    python_module: correlation
+    matlab_func: DK_crinkle
+    arg_map:
+    matlab_signature: ['y']
+    output_type: scalar
+    test_cases:
+      - {zscore: True}
+
+  theiler_q:
+    python_func: theiler_q
+    python_module: correlation
+    matlab_func: DK_theilerQ
+    arg_map:
+    matlab_signature: ['y']
+    output_type: scalar
+    test_cases:
+      - {zscore: True}
+
+  rad:
+    python_func: rad
+    python_module: criticality
+    matlab_func: CR_RAD
+    arg_map:
+      tau: tau
+    matlab_signature: ['x', 'tau']
+    output_type: array
+    test_cases:
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 'tau', zscore: True}
+  
+  withinp:
+    python_func: withinp
+    python_module: distribution
+    matlab_func: DN_Withinp
+    arg_map:
+      p: p
+      mean_or_median: meanOrMedian
+    matlab_signature: ['y', 'p', 'meanOrMedian']
+    output_type: array
+    test_cases:
+      - {p: 0.5, mean_or_median: 'mean', zscore: True}
+      - {p: 0.5, mean_or_median: 'median', zscore: True}
+      - {p: 1.0, mean_or_median: 'mean', zscore: True}
+      - {p: 1.0, mean_or_median: 'median', zscore: True}
+      - {p: 1.5, mean_or_median: 'mean', zscore: True}
+      - {p: 1.5, mean_or_median: 'median', zscore: True}
+      - {p: 2.0, mean_or_median: 'mean', zscore: True}
+      - {p: 2.0, mean_or_median: 'median', zscore: True}
+      - {p: 2.5, mean_or_median: 'mean', zscore: True}
+      - {p: 2.5, mean_or_median: 'median', zscore: True}
+      - {p: 3.0, mean_or_median: 'mean', zscore: True}
+      - {p: 3.0, mean_or_median: 'median', zscore: True}
+  
+  unique:
+    python_func: unique
+    python_module: distribution
+    matlab_func: DN_Unique
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - {zscore: False}
+
+  spread:
+    python_func: spread
+    python_module: distribution
+    matlab_func: DN_Spread
+    arg_map:
+      spread_measure: spreadMeasure
+    matlab_signature: ['y', 'spreadMeasure']
+    output_type: array
+    test_cases:
+      - {spread_measure: 'std', zscore: False}
+      - {spread_measure: 'mad', zscore: False}
+      - {spread_measure: 'iqr', zscore: False}
+      - {spread_measure: 'mead', zscore: False}
+  
+  quantile:
+    python_func: quantile
+    python_module: distribution
+    matlab_func: DN_Quantile
+    arg_map:
+      p: p
+    matlab_signature: ['y', 'p']
+    output_type: array
+    test_cases:
+      - {p: 0.01, zscore: True}
+      - {p: 0.02, zscore: True}
+      - {p: 0.03, zscore: True}
+      - {p: 0.04, zscore: True}
+      - {p: 0.05, zscore: True}
+      - {p: 0.1, zscore: True}
+      - {p: 0.2, zscore: True}
+      - {p: 0.3, zscore: True}
+      - {p: 0.4, zscore: True}
+      - {p: 0.5, zscore: True}
+      - {p: 0.6, zscore: True}
+      - {p: 0.7, zscore: True}
+      - {p: 0.8, zscore: True}
+      - {p: 0.9, zscore: True}
+      - {p: 0.91, zscore: True}
+      - {p: 0.92, zscore: True}
+      - {p: 0.93, zscore: True}
+      - {p: 0.94, zscore: True}
+      - {p: 0.95, zscore: True}
+      - {p: 0.96, zscore: True}
+      - {p: 0.97, zscore: True}
+      - {p: 0.98, zscore: True}
+      - {p: 0.99, zscore: True}
+  
+  proportion_values:
+    python_func: proportion_values
+    python_module: distribution
+    matlab_func: DN_ProportionValues
+    arg_map:
+      prop_what: propWhat
+    matlab_signature: ['y', 'propWhat']
+    output_type: array
+    test_cases:
+      - {prop_what: 'zeros', zscore: False}
+      - {prop_what: 'positive', zscore: False}
+      - {prop_what: 'geq0', zscore: False}
+  
+  pleft:
+    python_func: pleft
+    python_module: distribution
+    matlab_func: DN_pleft
+    arg_map:
+      th: th
+    matlab_signature: ['y', 'th']
+    output_type: array
+    test_cases:
+      - {th: 0.05, zscore: True}
+      - {th: 0.1, zscore: True}
+      - {th: 0.2, zscore: True}
+      - {th: 0.3, zscore: True}
+      - {th: 0.4, zscore: True}
+      - {th: 0.5, zscore: True}
+  
+  min_max:
+    python_func: min_max
+    python_module: distribution
+    matlab_func: DN_MinMax
+    arg_map:
+      min_or_max: minOrMax
+    matlab_signature: ['y', 'minOrMax']
+    output_type: array
+    test_cases:
+      - {min_or_max: 'max', zscore: True}
+      - {min_or_max: 'min', zscore: True}
+  
+  mean:
+    python_func: mean
+    python_module: distribution
+    matlab_func: DN_Mean
+    arg_map:
+      mean_type: meanType
+    matlab_signature: ['y', 'meanType']
+    output_type: array
+    test_cases:
+      - {mean_type: 'norm', zscore: False}
+      - {mean_type: 'harm', zscore: False}
+      - {mean_type: 'rms', zscore: False}
+      - {mean_type: 'median', zscore: False}
+      - {mean_type: 'midhinge', zscore: False}
+  
+  high_low_mu:
+    python_func: high_low_mu
+    python_module: distribution
+    matlab_func: DN_HighLowMu
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - {zscore: False}
+  
+  fit_mle:
+    python_func: fit_mle
+    python_module: distribution
+    matlab_func: DN_Fit_mle
+    arg_map:
+      fit_what: fitWhat
+    matlab_signature: ['y', 'fitWhat']
+    output_type: array
+    test_cases:
+      - {fit_what: 'geometric', zscore: False}
+
+  cv:
+    python_func: cv
+    python_module: distribution
+    matlab_func: DN_cv
+    arg_map:
+      k: k
+    matlab_signature: ['y', 'k']
+    output_type: array
+    test_cases:
+      - {k: 1.0, zscore: False}
+      - {k: 2.0, zscore: False}
+  
+  custom_skewness:
+    python_func: custom_skewness
+    python_module: distribution
+    matlab_func: DN_CustomSkewness
+    arg_map:
+      what_skew: whatSkew
+    matlab_signature: ['y', 'whatSkew']
+    output_type: array
+    test_cases:
+      - {what_skew: 'pearson', zscore: False}
+      - {what_skew: 'bowley', zscore: True}
+  
+  burstiness:
+    python_func: burstiness
+    python_module: distribution
+    matlab_func: DN_Burstiness
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - {zscore: False}
+  
+  moments:
+    python_func: moments
+    python_module: distribution
+    matlab_func: DN_Moments
+    arg_map:
+      the_mom: theMom
+    matlab_signature: ['y', 'theMom']
+    output_type: array
+    test_cases:
+      - {the_mom: 3.0, zscore: True}
+      - {the_mom: 4.0, zscore: True}
+      - {the_mom: 5.0, zscore: True}
+      - {the_mom: 6.0, zscore: True}
+      - {the_mom: 7.0, zscore: True}
+      - {the_mom: 8.0, zscore: True}
+      - {the_mom: 9.0, zscore: True}
+      - {the_mom: 10.0, zscore: True}
+      - {the_mom: 11.0, zscore: True}
+
+      - {the_mom: 3.0, zscore: False}
+      - {the_mom: 4.0, zscore: False}
+      - {the_mom: 5.0, zscore: False}
+      - {the_mom: 6.0, zscore: False}
+      - {the_mom: 7.0, zscore: False}
+      - {the_mom: 8.0, zscore: False}
+      - {the_mom: 9.0, zscore: False}
+      - {the_mom: 10.0, zscore: False}
+      - {the_mom: 11.0, zscore: False}
+
+  outlier_include:
+    python_func: outlier_include
+    python_module: distribution
+    matlab_func: DN_OutlierInclude
+    arg_map:
+      threshold_how: thresholdHow
+      inc: inc
+    matlab_signature: ['y', 'thresholdHow', 'inc']
+    output_type: array
+    test_cases:
+      - {threshold_how: 'abs', inc: 0.01, zscore: True}
+      - {threshold_how: 'pos', inc: 0.01, zscore: True}
+      - {threshold_how: 'neg', inc: 0.01, zscore: True}
+  
+  outlier_test:
+    python_func: outlier_test
+    python_module: distribution
+    matlab_func: DN_OutlierTest
+    arg_map:
+      p: p
+    matlab_signature: ['y', 'p']
+    output_type: array
+    test_cases:
+      - {p: 2, zscore: True}
+      - {p: 5, zscore: True}
+      - {p: 10, zscore: True}
+  
+  trimmed_mean:
+    python_func: trimmed_mean
+    python_module: distribution
+    matlab_func: DN_TrimmedMean
+    arg_map:
+      p_exclude: n
+    matlab_signature: ['y', 'n']
+    output_type: array
+    test_cases:
+      - {p_exclude: 1.0}
+      - {p_exclude: 5.0}
+      - {p_exclude: 10.0}
+      - {p_exclude: 25.0}
+      - {p_exclude: 50.0}
+  
+  histogram_asymmetry:
+    python_func: histogram_asymmetry
+    python_module: distribution
+    matlab_func: DN_HistogramAsymmetry
+    arg_map:
+      num_bins: numBins
+      do_simple: doSimple
+    matlab_signature: ['y', 'numBins', 'doSimple']
+    output_type: array
+    test_cases:
+      - {num_bins: 11.0, do_simple: False, zscore: True}
+  
+  histogram_mode:
+    python_func: histogram_mode
+    python_module: distribution
+    matlab_func: DN_HistogramMode
+    arg_map:
+      num_bins: numBins
+      do_simple: doSimple
+    matlab_signature: ['y', 'numBins', 'doSimple']
+    output_type: array
+    test_cases:
+      - {num_bins: 5, do_simple: True, zscore: True, abs: False}
+      - {num_bins: 10, do_simple: True, zscore: True, abs: False}
+      - {num_bins: 21, do_simple: True, zscore: True, abs: False}
+      - {num_bins: 5, do_simple: True, zscore: True, abs: True}
+      - {num_bins: 10, do_simple: True, zscore: True, abs: True}
+      - {num_bins: 21, do_simple: True, zscore: True, abs: True}
+  
+  remove_points_check:
+    python_func: remove_points
+    python_module: distribution
+    matlab_func: DN_RemovePoints
+    arg_map:
+      remove_how: removeHow
+      p: p
+      remove_or_saturate: removeOrSaturate
+    matlab_signature: ['y', 'removeHow', 'p', 'removeOrSaturate']
+    output_type: array
+    test_cases:
+      - {remove_how: 'absclose', p: 0.1, remove_or_saturate: 'remove', zscore: True}
+      - {remove_how: 'absclose', p: 0.5, remove_or_saturate: 'remove', zscore: True}
+      - {remove_how: 'absclose', p: 0.8, remove_or_saturate: 'remove', zscore: True}
+
+      - {remove_how: 'absfar', p: 0.1, remove_or_saturate: 'remove', zscore: True}
+      - {remove_how: 'absfar', p: 0.8, remove_or_saturate: 'remove', zscore: True}
+      - {remove_how: 'absfar', p: 0.1, remove_or_saturate: 'saturate', zscore: True}
+      - {remove_how: 'absfar', p: 0.8, remove_or_saturate: 'saturate', zscore: True}
+
+      - {remove_how: 'min', p: 0.1, remove_or_saturate: 'saturate', zscore: True}
+      - {remove_how: 'min', p: 0.5, remove_or_saturate: 'saturate', zscore: True}
+      - {remove_how: 'min', p: 0.8, remove_or_saturate: 'saturate', zscore: True}
+
+      - {remove_how: 'max', p: 0.1, remove_or_saturate: 'saturate', zscore: True}
+      - {remove_how: 'max', p: 0.8, remove_or_saturate: 'saturate', zscore: True}
+  
+  compare_ks_fit:
+    python_func: compare_ks_fit
+    python_module: distribution
+    matlab_func: DN_CompareKSFit
+    arg_map:
+      what_distn: whatDistn
+    matlab_signature: ['y', 'whatDistn']
+    output_type: array
+    test_cases:
+      - {what_distn: 'norm', zscore: False}
+      - {what_distn: 'ev', zscore: False}
+      - {what_distn: 'uni', zscore: False}
+      - {what_distn: 'exp', zscore: False}
+      - {what_distn: 'logn', zscore: False}
+
+  distribution_entropy:
+    python_func: distribution_entropy
+    python_module: entropy
+    matlab_func: EN_DistributionEntropy
+    arg_map:
+      hist_or_ks: histOrKS
+      num_bins: numBins
+      olremp: olremp
+    matlab_signature: ['y', 'histOrKS', 'numBins', 'olremp']
+    output_type: array
+    test_cases:
+      - {hist_or_ks: 'ks', num_bins: 0.01, olremp: 0, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: 0.1, olremp: 0, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: 0.5, olremp: 0, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: 1.0, olremp: 0, zscore: True}
+
+      - {hist_or_ks: 'ks', num_bins: '', olremp: 0.01, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: '', olremp: 0.02, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: '', olremp: 0.05, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: '', olremp: 0.1, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: '', olremp: 0.2, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: '', olremp: 0.3, zscore: True}
+
+      - {hist_or_ks: 'hist', num_bins: 5, olremp: 0, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 20, olremp: 0, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 50, olremp: 0, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 'sqrt', olremp: 0, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 'fd', olremp: 0, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 'sturges', olremp: 0, zscore: True}
+      
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.01, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.02, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.05, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.1, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.2, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.3, zscore: True}
+  
+  permutation_entropy:
+    python_func: permutation_entropy
+    python_module: entropy
+    matlab_func: EN_PermEn
+    arg_map:
+      m: m
+      tau: tau
+    matlab_signature: ['y', 'm', 'tau']
+    output_type: array
+    test_cases:
+      - {m: 2.0, tau: 1.0, zscore: True}
+      - {m: 3.0, tau: 1.0, zscore: True}
+      - {m: 4.0, tau: 1.0, zscore: True}
+      - {m: 5.0, tau: 1.0, zscore: True}
+
+      - {m: 2.0, tau: 2.0, zscore: True}
+      - {m: 3.0, tau: 2.0, zscore: True}
+      - {m: 4.0, tau: 2.0, zscore: True}
+      - {m: 5.0, tau: 2.0, zscore: True}
+
+      - {m: 2.0, tau: 'ac', zscore: True}
+      - {m: 3.0, tau: 'ac', zscore: True}
+      - {m: 4.0, tau: 'ac', zscore: True}
+      - {m: 5.0, tau: 'ac', zscore: True}
+  
+  lempel_ziv_complexity:
+    python_func: lempel_ziv_complexity
+    python_module: entropy
+    matlab_func: EN_MS_LZcomplexity
+    arg_map:
+      n_bits: n
+      pre_proc: preProc
+    matlab_signature: ['y', 'n', 'preProc']
+    output_type: array
+    test_cases:
+      - {n_bits: 2.0, zscore: True}
+      - {n_bits: 3.0, zscore: True}
+      - {n_bits: 4.0, zscore: True}
+      - {n_bits: 5.0, zscore: True}
+      - {n_bits: 6.0, zscore: True}
+      - {n_bits: 7.0, zscore: True}
+      - {n_bits: 8.0, zscore: True}
+      - {n_bits: 9.0, zscore: True}
+      - {n_bits: 10.0, zscore: True}
+
+      - {n_bits: 2.0, pre_proc: 'diff', zscore: True}
+      - {n_bits: 3.0, pre_proc: 'diff', zscore: True}
+      - {n_bits: 4.0, pre_proc: 'diff', zscore: True}
+      - {n_bits: 5.0, pre_proc: 'diff', zscore: True}
+      - {n_bits: 6.0, pre_proc: 'diff', zscore: True}
+      - {n_bits: 7.0, pre_proc: 'diff', zscore: True}
+      - {n_bits: 8.0, pre_proc: 'diff', zscore: True}
+      - {n_bits: 9.0, pre_proc: 'diff', zscore: True}
+      - {n_bits: 10.0, pre_proc: 'diff',  zscore: True}
+  
+  complexity_invariant_distance:
+    python_func: complexity_invariant_distance
+    python_module: entropy
+    matlab_func: EN_CID
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - {zscore: True}
+  
+  approximate_entropy:
+    python_func: approximate_entropy
+    python_module: entropy
+    matlab_func: EN_ApEn
+    arg_map:
+      mnom: mnom
+      rth: rth
+    matlab_signature: ['y', 'mnom', 'rth']
+    output_type: array
+    test_cases:
+      - {mnom: 1.0, rth: 0.1, zscore: True}
+      - {mnom: 2.0, rth: 0.1, zscore: True}
+      - {mnom: 1.0, rth: 0.2, zscore: True}
+      - {mnom: 2.0, rth: 0.2, zscore: True}
+  
+  rpde:
+    python_func: rpde
+    python_module: entropy
+    matlab_func: EN_rpde
+    arg_map:
+      m: m
+      tau: tau
+    matlab_signature: ['y', 'm', 'tau']
+    output_type: array
+    test_cases:
+      - {m: 3.0, tau: 1.0, zscore: True}
+      - {m: 3.0, tau: 'ac', zscore: True}
+  
+  sample_entropy:
+    python_func: sample_entropy
+    python_module: entropy
+    matlab_func: EN_SampEn
+    arg_map:
+      m: m
+      r: r
+      pre_process_how: preProcessHow
+    matlab_signature: ['y', 'm', 'r', 'preProcessHow']
+    output_type: array
+    test_cases:
+      - {m: 5.0, r: 0.05, zscore: True}
+      - {m: 5.0, r: 0.1, zscore: True}
+      - {m: 5.0, r: 0.15, zscore: True}
+      - {m: 5.0, r: 0.2, zscore: True}
+      - {m: 5.0, r: 0.3, zscore: True}
+      - {m: 5.0, r: 0.1, pre_process_how: 'diff1', zscore: True}
+      - {m: 5.0, r: 0.2, pre_process_how: 'diff1', zscore: True}
+
+  multi_scale_entropy:
+    python_func: multi_scale_entropy
+    python_module: entropy
+    matlab_func: EN_mse
+    arg_map:
+      scale_range: scaleRange
+      m: m
+      r: r
+      pre_process_how: preProcessHow
+    matlab_signature: ['y', 'scaleRange', 'm', 'r', 'preProcessHow']
+    output_type: array
+    test_cases:
+      - {scale_range: !list_range [1, 11], m: 2.0, r: 0.15, pre_process_how: 'diff1', zscore: True}
+      - {scale_range: !list_range [1, 11], m: 2.0, r: 0.15, pre_process_how: 'rescale_tau', zscore: True}
+      - {scale_range: !list_range [1, 11], m: 2.0, r: 0.15, zscore: True}
+
+  shannon_entropy:
+    python_func: shannon_entropy
+    python_module: entropy
+    matlab_func: EN_MS_shannon
+    arg_map:
+      num_bins: numBins
+      depth: depth
+    matlab_signature: ['y', 'numBins', 'depth']
+    output_type: array
+    test_cases:
+      - {num_bins: 2.0, depth: 2.0, zscore: True}
+      - {num_bins: 2.0, depth: 3.0, zscore: True}
+      - {num_bins: 3.0, depth: 2.0, zscore: True}
+      - {num_bins: !list_range [2, 10], depth: 2.0, zscore: True}
+      - {num_bins: !list_range [2, 10], depth: 3.0, zscore: True}
+      - {num_bins: !list_range [2, 10], depth: 4.0, zscore: True}
+      - {num_bins: 2.0, depth: !list_range [1, 10], zscore: True}
+      - {num_bins: 3.0, depth: !list_range [1, 10], zscore: True}
+      - {num_bins: 4.0, depth: !list_range [1, 10], zscore: True}
+  
+  extreme_events:
+    python_func: moving_threshold
+    python_module: extreme_events
+    matlab_func: EX_MovingThreshold
+    arg_map:
+      a: a
+      b: b
+    matlab_signature: ['y', 'a', 'b']
+    output_type: array
+    test_cases:
+      - {a: 0.1, b: 0.1, zscore: True}
+      - {a: 0.1, b: 0.02, zscore: True}
+      - {a: 1.0, b: 0.1, zscore: True}
+      - {a: 1.0, b: 0.02, zscore: True}
+  
+  visibility_graph:
+    python_func: visibility_graph
+    python_module: graph
+    matlab_func: NW_VisibilityGraph
+    arg_map:
+      meth: meth
+    matlab_signature: ['y', 'meth']
+    output_type: array
+    test_cases:
+      - {meth: 'horiz', zscore: True}
+      - {meth: 'norm', zscore: True}
+  
+  hypothesis_test:
+    python_func: hypothesis_test
+    python_module: hypothesis_tests
+    matlab_func: HT_HypothesisTest
+    arg_map:
+      the_test: theTest
+    matlab_signature: ['y', 'theTest']
+    test_cases:
+      - {the_test: 'signtest', zscore: True}
+      - {the_test: 'lbq', zscore: True}
+      - {the_test: 'signrank', zscore: True}
+      - {the_test: 'ztest', zscore: True}
+
+      - {the_test: 'runstest', zscore: False}
+      - {the_test: 'lbq', zscore: False}
+      - {the_test: 'jbtest', zscore: False}
+
+  variance_ratio_test:
+    python_func: variance_ratio_test
+    python_module: hypothesis_tests
+    matlab_func: SY_VarRatioTest
+    arg_map:
+      the_test: periods
+      iids: IIDs
+    matlab_signature: ['y', 'periods', 'IIDs']
+    test_cases:
+      - {periods: 2.0, iids: 0.0, zscore: True}
+      - {periods: 4.0, iids: 0.0, zscore: True}
+      - {periods: 2.0, iids: 1.0, zscore: True}
+      - {periods: 4.0, iids: 1.0, zscore: True}
+  
+  automutual_info:
+    python_func: automutual_info_stats
+    python_module: information
+    matlab_func: IN_AutoMutualInfoStats
+    arg_map:
+      max_tau: maxTau
+      est_method: estMethod
+      extra_param: extraParam
+    matlab_signature: ['y', 'maxTau', 'estMethod', 'extraParam']
+    output_type: array
+    test_cases:
+      - {max_tau: 40.0, est_method: 'gaussian', zscore: True}
+      - {max_tau: 20.0, est_method: 'gaussian', zscore: True}
+      - {max_tau: 40.0, est_method: 'kraskov1', extra_param: 4, zscore: True}
+      - {max_tau: 20.0, est_method: 'kraskov1', extra_param: 4, zscore: True}
+  
+  rm_automutual_information_check:
+    python_func: rm_automutual_information
+    python_module: information
+    matlab_func: CO_RM_AMInformation
+    arg_map:
+      tau: tau
+    matlab_signature: ['y', 'tau']
+    output_type: array
+    test_cases:
+      - {tau: 0, zscore: True}
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 3, zscore: True}
+      - {tau: 4, zscore: True}
+      - {tau: 5, zscore: True}
+      - {tau: 6, zscore: True}
+      - {tau: 7, zscore: True}
+      - {tau: 8, zscore: True}
+      - {tau: 9, zscore: True}
+      - {tau: 10, zscore: True}
+
+  first_min:
+    python_func: first_min
+    python_module: information
+    matlab_func: CO_FirstMin
+    arg_map:
+      min_what: minWhat
+      extra_param: extraParam
+    matlab_signature: ['y', 'minWhat', 'extraParam']
+    output_type: array
+    test_cases:
+      - {min_what: 'ac', extra_param: '', zscore: True}
+      - {min_what: 'mi-gaussian', extra_param: '', zscore: True}
+      - {min_what: 'mi-kraskov1', extra_param: 4, zscore: True}
+      - {min_what: 'mi-hist', extra_param: 5, zscore: True}
+      - {min_what: 'mi-hist', extra_param: 10, zscore: True}
+  
+  first_max:
+    python_func: first_max
+    python_module: information
+    matlab_func: CO_FirstMin
+    arg_map:
+      max_what: minWhat
+      extra_param: extraParam
+    matlab_extra_args:
+      min_not_max: false
+    matlab_signature: ['y', 'minWhat', 'extraParam', 'minNotMax']
+    output_type: array
+    test_cases:
+     - {max_what: 'ac', extra_param: '', zscore: True}
+     - {max_what: 'mi-gaussian', extra_param: '', zscore: True}
+     - {max_what: 'mi-hist', extra_param: 5, zscore: True}
+     - {max_what: 'mi-kraskov1', extra_param: 4, zscore: True}
+     - {max_what: 'mi-hist', extra_param: 10, zscore: True}
+
+  hrv_classic:
+    python_func: hrv_classic
+    python_module: medical
+    matlab_func: MD_hrv_classic
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - zscore: True
+
+  pnn:
+    python_func: pnn
+    python_module: medical
+    matlab_func: MD_pNN
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - zscore: False
+
+  raw_hrv_measure:
+    python_func: raw_hrv_meas
+    python_module: medical
+    matlab_func: MD_rawHRVmeas
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - zscore: False
+
+  pol_var:
+    python_func: pol_var
+    python_module: medical
+    matlab_func: MD_polvar
+    arg_map:
+      d: d
+      D: D
+    matlab_signature: ['x', 'd', 'D']
+    output_type: array
+    test_cases:
+      - {d: 1.0, D: 3, zscore: True}
+      - {d: 1.0, D: 4, zscore: True}
+      - {d: 1.0, D: 5, zscore: True}
+      - {d: 1.0, D: 6, zscore: True}
+
+      - {d: 0.5, D: 3, zscore: True}
+      - {d: 0.5, D: 4, zscore: True}
+      - {d: 0.5, D: 5, zscore: True}
+      - {d: 0.5, D: 6, zscore: True}
+
+      - {d: 0.1, D: 3, zscore: True}
+      - {d: 0.1, D: 4, zscore: True}
+      - {d: 0.1, D: 5, zscore: True}
+      - {d: 0.1, D: 6, zscore: True}
+
+  hmm_fit:
+    python_func: hmm_fit
+    python_module: model_fit
+    matlab_func: MF_hmm_fit
+    matlab_orientation: column
+    arg_map:
+      train_p: trainp
+      num_states: numStates
+    matlab_signature: ['y', 'trainp', 'numStates']
+    output_type: array
+    test_cases:
+      - {train_p: 0.7, num_states: 3, zscore: True}
+      - {train_p: 0.7, num_states: 2, zscore: True}
+      - {train_p: 0.8, num_states: 3, zscore: True}
+      - {train_p: 0.8, num_states: 2, zscore: True}
+
+
+  ar_cov:
+    python_func: ar_cov
+    python_module: model_fit
+    matlab_func: MF_AR_arcov
+    arg_map:
+      p: p
+    matlab_signature: ['y', 'p']
+    output_type: array
+    test_cases:
+      - {p: 1, zscore: True}
+      - {p: 2, zscore: True}
+      - {p: 3, zscore: True}
+      - {p: 4, zscore: True}
+      - {p: 5, zscore: True}
+
+  exp_smoothing:
+    python_func: exp_smoothing
+    python_module: model_fit
+    matlab_func: MF_ExpSmoothing
+    arg_map:
+      n_train: ntrain
+      alpha: alpha
+    matlab_signature: ['y', 'ntrain', 'alpha']
+    output_type: array
+    test_cases:
+      - {n_train: 0.5, alpha: 'best', zscore: True}
+
+  ar_fit:
+    python_func: ar_fit
+    python_module: model_fit
+    matlab_func: MF_arfit
+    arg_map:
+      p_min: pmin 
+      p_max: pmax 
+      selector: selector
+    matlab_signature: ['y', 'pmin', 'pmax', 'selector']
+    output_type: array
+    test_cases:
+      - {p_min: 1.0, p_max: 8.0, selector: 'sbc', zscore: True}
+
+  local_simple:
+    python_func: local_simple
+    python_module: model_fit
+    matlab_func: FC_LocalSimple
+    arg_map:
+      forecast_meth: forecastMeth
+      train_length: trainLength
+    matlab_signature: ['y', 'forecastMeth', 'trainLength']
+    output_type: array
+    test_cases:
+      - {forecast_meth: 'mean', train_length: 1,    zscore: True}
+      - {forecast_meth: 'mean', train_length: 2,    zscore: True}
+      - {forecast_meth: 'mean', train_length: 3,    zscore: True}
+      - {forecast_meth: 'mean', train_length: 4,    zscore: True}
+      - {forecast_meth: 'mean', train_length: 'ac', zscore: True}
+
+      - {forecast_meth: 'median', train_length: 3, zscore: True}
+      - {forecast_meth: 'median', train_length: 5, zscore: True}
+      - {forecast_meth: 'median', train_length: 7, zscore: True}
+      - {forecast_meth: 'median', train_length: 'ac', zscore: True}
+
+      - {forecast_meth: 'lfit', train_length: 2.0, zscore: True}
+      - {forecast_meth: 'lfit', train_length: 3.0, zscore: True}
+      - {forecast_meth: 'lfit', train_length: 4.0, zscore: True}
+      - {forecast_meth: 'lfit', train_length: 5.0, zscore: True}
+      - {forecast_meth: 'lfit', train_length: 'ac', zscore: True}
+
+  loop_local_simple:
+    python_func: loop_local_simple
+    python_module: model_fit        
+    matlab_func: FC_LoopLocalSimple
+    arg_map:
+      forecast_meth: forecastMeth       
+    matlab_signature: ['y', 'forecastMeth']
+    output_type: array
+    test_cases:
+      - {forecast_meth: 'mean', zscore: True}
+
+  fit_subsegments:
+    python_func: fit_subsegments
+    python_module: model_fit      
+    matlab_func: MF_FitSubsegments
+    arg_map:
+      model: model
+      order: order
+      subset_how: subsetHow
+      sample_p: samplep
+    matlab_signature: ['y', 'model', 'order', 'subsetHow', 'samplep']
+    output_type: array
+    test_cases:
+      - {model: 'ar', order: 2, subset_how: 'uniform', sample_p: [25, 0.1], zscore: True}
+
+  is_seasonal:
+    python_func: is_seasonal
+    python_module: model_fit 
+    matlab_func: DT_IsSeasonal
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - {zscore: True}
+  
+  nsamdf:
+    python_func: nsamdf
+    python_module: nonlinearity
+    matlab_func: NL_nsamdf
+    arg_map:
+      fs: fs
+      win_len_rel: winLenRel
+      shift_len_rel: shiftLenRel
+      lag_rel: lagRel
+      degree: degree
+    matlab_signature: ['y', 'fs', 'winLenRel', 'shiftLenRel', 'lagRel', 'degree']
+    test_cases:
+      - {fs: 1.0, win_len_rel: 14.0, shift_len_rel: 0.5, lag_rel: 1.0, degree: 7.0, zscore: False}
+      - {fs: 1.0, win_len_rel: 14.0, shift_len_rel: 0.5, lag_rel: 1.0, degree: 7.0, zscore: True}
+  
+  nlpe:
+    python_func: nlpe
+    python_module: nonlinearity
+    matlab_func: NL_MS_nlpe
+    arg_map:
+      de: de
+      tau: tau
+    matlab_signature: ['y', 'de', 'tau']
+    test_cases:
+      - {de: 2.0, tau: 'mi', zscore: True}
+      - {de: 2.0, tau: 'ac', zscore: True}
+  
+  embed_pca:
+    python_func: embed_pca
+    python_module: nonlinearity
+    matlab_func: NL_embed_PCA
+    arg_map:
+      tau: tau
+      m: m
+    matlab_signature: ['y', 'tau', 'm']
+    test_cases:
+      - {tau: 'mi', m: 10, zscore: True}
+      - {tau: 1, m: 10, zscore: True}
+      - {tau: 'ac', m: 3, zscore: True}
+
+  force_potential_check:
+    python_func: force_potential
+    python_module: physics
+    matlab_func: PH_ForcePotential
+    arg_map:
+      what_potential: whatPotential
+      params: params
+    matlab_signature: ['y', 'whatPotential', 'params']
+    output_type: array
+    test_cases:
+      - {what_potential: 'dblwell', params: [1.0, 0.2, 0.1], zscore: True}
+      - {what_potential: 'dblwell', params: [1, 0.5, 0.2], zscore: True}
+      - {what_potential: 'dblwell', params: [2, 0.05, 0.2], zscore: True}
+      - {what_potential: 'dblwell', params: [3, 0.01, 0.1], zscore: True}
+
+      - {what_potential: 'sine', params: [3, 0.5, 1], zscore: True}
+      - {what_potential: 'sine', params: [1, 1, 1], zscore: True}
+      - {what_potential: 'sine', params: [10, 0.04, 10], zscore: True}
+  
+  walker_check:
+    python_func: walker
+    python_module: physics
+    matlab_func: PH_Walker
+    arg_map:
+      walker_rule: walkerRule
+      walker_params: walkerParams
+    matlab_signature: ['y', 'walkerRule', 'walkerParams']
+    test_cases:
+      - {walker_rule: 'prop', walker_params: 0.1, zscore: True}
+      - {walker_rule: 'prop', walker_params: 0.5, zscore: True}
+      - {walker_rule: 'prop', walker_params: 0.9, zscore: True}
+      - {walker_rule: 'prop', walker_params: 1.1, zscore: True}
+
+      - {walker_rule: 'biasprop', walker_params: [0.5, 0.1], zscore: True}
+      - {walker_rule: 'biasprop', walker_params: [0.1, 0.5], zscore: True}
+
+      - {walker_rule: 'momentum', walker_params: 2.0, zscore: True}
+      - {walker_rule: 'momentum', walker_params: 5.0, zscore: True}
+      - {walker_rule: 'runningvar', walker_params: [1.5, 50], zscore: True}
+  
+  pre_process_check:
+    python_func: preproc_compare
+    python_module: pre_process
+    matlab_func: PP_Compare
+    arg_map:
+      detrend_meth: detrendMeth
+    matlab_signature: ['y', 'detrendMeth']
+    test_cases:
+      - {detrend_meth: 'poly1', zscore: False}
+      - {detrend_meth: 'poly2', zscore: False}
+
+      - {detrend_meth: 'diff1', zscore: False}
+      - {detrend_meth: 'diff2', zscore: False}
+
+      - {detrend_meth: 'medianf3', zscore: False}
+      - {detrend_meth: 'medianf4', zscore: False}
+      - {detrend_meth: 'medianf10', zscore: False}
+
+      - {detrend_meth: 'rav2', zscore: False}
+      - {detrend_meth: 'rav3', zscore: False}
+      - {detrend_meth: 'rav4', zscore: False}
+      - {detrend_meth: 'rav10', zscore: False}
+
+      - {detrend_meth: 'resample_1_2', zscore: False}
+      - {detrend_meth: 'resample_2_1', zscore: False}
+  
+  fast_dfa:
+    python_func: fast_dfa
+    python_module: scaling
+    matlab_func: SC_fastdfa
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - {zscore: True}
+    
+  fluctuation_analysis:
+    python_func: fluctuation_analysis
+    python_module: scaling
+    matlab_func: SC_FluctAnal
+    arg_map:
+      q: q
+      wtf: wtf
+      tau_step: tauStep
+      k: k
+      lag: lag
+      log_inc: logInc
+    matlab_signature: ['y', 'q', 'wtf', 'tauStep', 'k', 'lag', 'logInc']
+    test_cases:
+      - {q: 2.0, wtf: 'nothing', tau_step: 50, log_inc: True, zscore: True}
+      - {q: 2.0, wtf: 'endptdiff', tau_step: 50,  log_inc: True, zscore: True}
+      - {q: 2.0, wtf: 'range', tau_step: 50,  log_inc: True, zscore: True}
+
+      - {q: 2.0, wtf: 'rsrange', tau_step: 50,  log_inc: True, zscore: True}
+      - {q: 2.0, wtf: 'rsrangefit', tau_step: 50,  log_inc: True, zscore: True}
+
+      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 0, log_inc: True, zscore: True}
+      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 1, log_inc: True, zscore: True}
+      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 2, log_inc: True, zscore: True}
+      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 3, log_inc: True, zscore: True}
+      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 2, log_inc: True, zscore: True, abs: True}
+
+  spectral_summaries:
+    python_func: spectral_summaries
+    python_module: spectral
+    matlab_func: SP_Summaries
+    arg_map:
+      psd_meth: psdMeth
+      window_type: windowType
+    matlab_signature: ['y', 'psdMeth', 'windowType']
+    test_cases:
+      - {psd_meth: 'welch', window_type: 'rect', zscore: True}
+      - {psd_meth: 'fft', window_type: 'none', zscore: True}
+  
+  stat_av:
+    python_func: stat_av
+    python_module: stationarity
+    matlab_func: SY_StatAv
+    arg_map:
+      what_type: whatType
+      extra_param: n
+    matlab_signature: ['y', 'whatType', 'n']
+    output_type: array
+    test_cases:
+      - {what_type: 'len', extra_param: 25, zscore: True}
+      - {what_type: 'len', extra_param: 50, zscore: True}
+      - {what_type: 'len', extra_param: 100, zscore: True}
+      - {what_type: 'len', extra_param: 150, zscore: True}
+      - {what_type: 'len', extra_param: 200, zscore: True}
+      - {what_type: 'len', extra_param: 250, zscore: True}
+      - {what_type: 'len', extra_param: 500, zscore: True}
+      - {what_type: 'len', extra_param: 1000, zscore: True}
+  
+  trend:
+    python_func: trend
+    python_module: stationarity
+    matlab_func: SY_Trend
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - {zscore: True}
+  
+  std_nth_deriv:
+    python_func: std_nth_deriv
+    python_module: stationarity
+    matlab_func: SY_StdNthDer
+    arg_map:
+      ndr: n
+    matlab_signature: ['y', 'n']
+    output_type: array
+    test_cases:
+      - {ndr: 1, zscore: True}
+      - {ndr: 2, zscore: True}
+      - {ndr: 3, zscore: True}
+      - {ndr: 4, zscore: True}
+      - {ndr: 5, zscore: True}
+      - {ndr: 10, zscore: True}
+  
+  ts_length:
+    python_func: ts_length
+    python_module: stationarity
+    matlab_func: ST_Length
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - {zscore: False}
+
+  fit_polynomial:
+    python_func: fit_polynomial
+    python_module: stationarity
+    matlab_func: ST_FitPolynomial
+    arg_map:
+      k: k
+    matlab_signature: ['y', 'k']
+    output_type: array
+    test_cases:
+      - {k: 1, zscore: True}
+      - {k: 2, zscore: True}
+      - {k: 3, zscore: True}
+      - {k: 4, zscore: True}
+
+  sliding_window:
+    python_func: sliding_window
+    python_module: stationarity
+    matlab_func: SY_SlidingWindow
+    arg_map:
+      window_stat: windowStat
+      across_win_stat: acrossWinStat
+      num_seg: numSeg
+      inc_move: incMove
+    matlab_signature: ['y', 'windowStat', 'acrossWinStat', 'numSeg', 'incMove']
+    output_type: array
+    test_cases:
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 2.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 3.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 4.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 5.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 6.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 7.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 8.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 9.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 10.0, inc_move: 1.0, zscore: True}
+
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 2.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 2.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 5.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 5.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 10.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 10.0, inc_move: 10.0, zscore: True}
+
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 10.0, zscore: True}
+
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 2.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'sampen', num_seg: 5.0, inc_move: 10.0, zscore: True}
+
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 2.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 2.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 2.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 5.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 5.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 5.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 10.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 10.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'std', num_seg: 10.0, inc_move: 10.0, zscore: True}
+
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 2.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 5.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 10.0, zscore: True}
+
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 2.0, zscore: True}
+
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 2.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 2.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 2.0, inc_move: 10.0, zscore: True}
+
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 5.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 5.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 5.0, inc_move: 10.0, zscore: True}
+
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 2.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 5.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 2.0, zscore: True}
+
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 2.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 2.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 2.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 5.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 5.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 5.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 10.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 10.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'std', num_seg: 10.0, inc_move: 10.0, zscore: True}
+
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 2.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 5.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'mom4', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 2.0, zscore: True}
+
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 2.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 2.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 2.0, inc_move: 10.0, zscore: True}
+
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 5.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 5.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 5.0, inc_move: 10.0, zscore: True}
+
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 10.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 10.0, inc_move: 2.0, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 10.0, inc_move: 10.0, zscore: True}
+
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 2.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 5.0, inc_move: 10.0, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 10.0, zscore: True}
+
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 1.0, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'sampen', num_seg: 10.0, inc_move: 2.0, zscore: True}
+
+      - {window_stat: 'mean', across_win_stat: 'ent', num_seg: 2, inc_move: 1, zscore: True}
+
+  local_global:
+    python_func: local_global
+    python_module: stationarity
+    matlab_func: SY_LocalGlobal
+    arg_map:
+      subset_how: subsetHow
+      n: n
+    matlab_signature: ['y', 'subsetHow', 'n']
+    output_type: array
+    test_cases:
+      - {subset_how: 'l', n: 10, zscore: True}
+      - {subset_how: 'l', n: 20, zscore: True}
+      - {subset_how: 'l', n: 50, zscore: True}
+      - {subset_how: 'l', n: 100, zscore: True}
+      - {subset_how: 'l', n: 500, zscore: True}
+
+      - {subset_how: 'unicg', n: 10, zscore: True}
+      - {subset_how: 'unicg', n: 20, zscore: True}
+      - {subset_how: 'unicg', n: 50, zscore: True}
+      - {subset_how: 'unicg', n: 100, zscore: True}
+      - {subset_how: 'unicg', n: 500, zscore: True}
+
+      - {subset_how: 'p', n: 0.01, zscore: True}
+      - {subset_how: 'p', n: 0.05, zscore: True}
+      - {subset_how: 'p', n: 0.1, zscore: True}
+      - {subset_how: 'p', n: 0.5, zscore: True}
+
+  drifting_mean:
+    python_func: drifting_mean
+    python_module: stationarity
+    matlab_func: SY_DriftingMean
+    arg_map:
+      segment_how: segmentHow
+      l: l
+    matlab_signature: ['y', 'segmentHow', 'l']
+    output_type: array
+    test_cases:
+      - {segment_how: 'fix', l: 20.0, zscore: True}
+      - {segment_how: 'fix', l: 50.0, zscore: True}
+      - {segment_how: 'fix', l: 100.0, zscore: True}
+      - {segment_how: 'num', l: 5.0, zscore: True}
+      - {segment_how: 'num', l: 10.0, zscore: True}
+
+  range_evolve:
+    python_func: range_evolve
+    python_module: stationarity
+    matlab_func: SY_RangeEvolve
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - {zscore: True}
+  
+  kpss_test:
+    python_func: kpss_test
+    python_module: stationarity
+    matlab_func: SY_KPSStest
+    arg_map:
+      lags: lags
+    matlab_signature: ['y', 'lags']
+    output_type: array
+    test_cases:
+      - {lags: 0.0, zscore: True}
+      - {lags: 1.0, zscore: True}
+      - {lags: 2.0, zscore: True}
+      - {lags: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], zscore: True}
+
+  local_extrema:
+    python_func: local_extrema
+    python_module: stationarity
+    matlab_func: ST_LocalExtrema
+    arg_map:
+      how_to_window: howToWindow
+      n: n
+    matlab_signature: ['y', 'howToWindow', 'n']
+    output_type: array
+    test_cases:
+      - {how_to_window: 'l', n: 50.0, zscore: True}
+      - {how_to_window: 'l', n: 100.0, zscore: True}
+      - {how_to_window: 'n', n: 25.0, zscore: True}
+      - {how_to_window: 'n', n: 50.0, zscore: True}
+      - {how_to_window: 'n', n: 100.0, zscore: True}
+  
+  simple_stats:
+    python_func: simple_stats
+    python_module: stationarity
+    matlab_func: ST_SimpleStats
+    arg_map: 
+      what_stat: whatStat
+    matlab_signature: ['y', 'whatStat']
+    output_type: array
+    test_cases:
+      - {what_stat: 'zcross', zscore: True}
+      - {what_stat: 'pmcross', zscore: True}
+
+  moment_corr:
+    python_func: moment_corr
+    python_module: stationarity
+    matlab_func: ST_MomentCorr
+    arg_map:
+      window_length: windowLength
+      w_overlap: wOverlap
+      mom_1: mom1
+      mom_2: mom2
+      what_transform: whatTransform
+    matlab_signature: ['y', 'windowLength', 'wOverlap', 'mom1', 'mom2', 'whatTransform']
+    output_type: array
+    test_cases:
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'std', what_transform: 'none', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'iqr', what_transform: 'none', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'std', what_transform: 'abs', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'iqr', what_transform: 'abs', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'std', what_transform: 'sqrt', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'iqr', what_transform: 'sqrt', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'std', what_transform: 'none', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'iqr', what_transform: 'none', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'std', what_transform: 'abs', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'iqr', what_transform: 'abs', zscore: True}
+
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'std', what_transform: 'sqrt', zscore: True}
+      - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'iqr', what_transform: 'sqrt', zscore: True}
+
+  dyn_win:
+    python_func: dyn_win
+    python_module: stationarity
+    matlab_func: SY_DynWin
+    arg_map: 
+      max_num_segments: maxNumSegments
+    matlab_signature: ['y', 'maxNumSegments']
+    output_type: array
+    test_cases:
+      - {max_num_segments: 10.0, zscore: True}
+
+  local_distributions:
+    python_func: local_distributions
+    python_module: stationarity
+    matlab_func: SY_LocalDistributions
+    arg_map:
+      num_segs: numSegs
+      each_or_par: eachOrPar
+    matlab_signature: ['y', 'numSegs', 'eachOrPar']
+    output_type: array
+    test_cases:
+      - {num_segs: 2.0, each_or_par: 'par', zscore: True}
+      - {num_segs: 3.0, each_or_par: 'par', zscore: True}
+      - {num_segs: 4.0, each_or_par: 'par', zscore: True}
+      - {num_segs: 5.0, each_or_par: 'par', zscore: True}
+
+      - {num_segs: 2.0, each_or_par: 'each', zscore: True}
+      - {num_segs: 3.0, each_or_par: 'each', zscore: True}
+      - {num_segs: 4.0, each_or_par: 'each', zscore: True}
+      - {num_segs: 5.0, each_or_par: 'each', zscore: True}
+
+  surprise:
+    python_func: surprise
+    python_module: symbolic
+    matlab_func: FC_Surprise
+    arg_map:
+      what_prior: whatPrior
+      memory: memory
+      num_groups: numGroups
+      coarse_grain_method: coarseGrainMethod
+      num_iters: numIters
+      random_seed: randomSeed
+    matlab_signature: ['y', 'whatPrior', 'memory', 'numGroups', 'coarseGrainMethod', 'numIters', 'randomSeed']
+    output_type: array
+    test_cases:
+      - {what_prior: 'dist', memory: 5.0, num_groups: 2.0, coarse_grain_method: 'quantile', num_iters: 500.0, zscore: True}
+      - {what_prior: 'dist', memory: 20.0, num_groups: 2.0, coarse_grain_method: 'quantile', num_iters: 500.0, zscore: True}
+      - {what_prior: 'dist', memory: 50.0, num_groups: 3.0, coarse_grain_method: 'quantile', num_iters: 500.0, zscore: True}
+      - {what_prior: 'dist', memory: 100.0, num_groups: 4.0, coarse_grain_method: 'quantile', num_iters: 500.0, zscore: True}
+      - {what_prior: 'dist', memory: 100.0, num_groups: 5.0, coarse_grain_method: 'quantile', num_iters: 500.0, zscore: True}
+
+      - {what_prior: 'T1', memory: 20, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 4, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 5, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T2', memory: 20, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 50, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 4, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 5, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
+
+      - {what_prior: 'dist', memory: 5, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 50, num_groups: 3, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T1', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 3, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T2', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 50, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+
+      - {what_prior: 'dist', memory: 5, num_groups: 1, coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 5, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 10, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 20, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+
+      - {what_prior: 'T1', memory: 10, num_groups: 1, coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 10, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 20, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 50, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100.0, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500.0, zscore: True}
+
+  surrogate_test:
+    python_func: surrogate_test
+    python_module: surrogates
+    matlab_func: SD_SurrogateTest
+    arg_map:
+      surr_meth: surrMeth
+      num_surrs: numSurrs
+      the_test_stat: theTestStat
+    matlab_extra_args:                  
+      extrap: []                       
+    matlab_signature: ['y', 'surrMeth', 'numSurrs', 'extrap', 'theTestStat']
+    output_type: array
+    test_cases:
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'ami1', zscore: True}
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'o3',   zscore: True}
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'tc3',  zscore: True}
+      - {surr_meth: 'RP', num_surrs: 99, the_test_stat: 'fmmi', zscore: True}
+
+  transition_matrix:
+    python_func: transition_matrix
+    python_module: symbolic
+    matlab_func: SB_TransitionMatrix
+    arg_map:
+      how_to_cg: howToCg
+      num_groups: numGroups
+      tau: tau
+    matlab_signature: ['y', 'howToCg', 'numGroups', 'tau']
+    output_type: array
+    test_cases:
+      - {how_to_cg: 'quantile', num_groups: 2, tau: 1, zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 3, tau: 1, zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 4, tau: 1, zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 5, tau: 1, zscore: True}
+
+      - {how_to_cg: 'quantile', num_groups: 2, tau: 'ac', zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 3, tau: 'ac', zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 4, tau: 'ac', zscore: True}
+      - {how_to_cg: 'quantile', num_groups: 5, tau: 'ac', zscore: True}
+  
+  binary_stats:
+    python_func: binary_stats
+    python_module: symbolic
+    matlab_func: SB_BinaryStats
+    arg_map:
+      binary_method: binaryMethod
+    matlab_signature: ['y', 'binaryMethod']
+    output_type: array
+    test_cases:
+      - {binary_method: 'mean', zscore: True}
+      - {binary_method: 'diff', zscore: True}
+  
+  motif_three:
+    python_func: motif_three
+    python_module: symbolic
+    matlab_func: SB_MotifThree
+    arg_map:
+      cg_how: cgHow
+    matlab_signature: ['y', 'cgHow']
+    output_type: array
+    test_cases:
+      - {cg_how: 'quantile', zscore: True}
+      - {cg_how: 'diffquant', zscore: True}
+  
+  motif_two:
+    python_func: motif_two
+    python_module: symbolic
+    matlab_func: SB_MotifTwo
+    arg_map:
+      binarize_how: 'binarizeHow'
+    matlab_signature: ['y', 'binarizeHow']
+    output_type: array
+    test_cases:
+      - {binarize_how: 'diff', zscore: True}
+      - {binarize_how: 'mean', zscore: True}
+      - {binarize_how: 'median', zscore: True}
+
+  binary_stretch:
+    python_func: binary_stretch
+    python_module: symbolic
+    matlab_func: SB_BinaryStretch
+    arg_map:
+      stretch_what: stretchWhat
+    matlab_signature: ['y', 'stretchWhat']
+    output_type: array
+    test_cases:
+      - {stretch_what: 'lseq1', zscore: True}
+      - {stretch_what: 'lseq0', zscore: True}
+
+  wl_coeffs:
+    python_func: wl_coeffs
+    python_module: wavelet
+    matlab_func: WL_coeffs
+    arg_map:
+      w_name: wName
+      level: level
+    matlab_signature: ['y', 'wName', 'level']
+    output_type: array
+    test_cases:
+      - {w_name: 'db3', level: 1, zscore: True}
+      - {w_name: 'db3', level: 2, zscore: True}
+      - {w_name: 'db3', level: 3, zscore: True}
+      - {w_name: 'db3', level: 4, zscore: True}
+      - {w_name: 'db3', level: 5, zscore: True}
+      - {w_name: 'db3', level: 'max', zscore: True}
+
+  detail_coeffs:
+    python_func: detail_coeffs
+    python_module: wavelet
+    matlab_func: WL_DetailCoeffs
+    arg_map:
+      w_name: wName
+      max_level: maxLevel
+    matlab_signature: ['y', 'wName', 'maxLevel']
+    output_type: array
+    test_cases:
+      - {w_name: 'db3', max_level: 'max', zscore: True}
+
+  cwt:
+    python_func: cwt
+    python_module: wavelet
+    matlab_func: WL_cwt
+    arg_map:
+      w_name: wName
+      max_scale: maxScale
+    matlab_signature: ['y', 'wName', 'maxScale']
+    output_type: array
+    test_cases:
+    - {w_name: 'db3', max_scale: 32.0, zscore: True}
+    - {w_name: 'sym2', max_scale: 32.0, zscore: True}
+
+  dwt_coeff:
+    python_func: dwt_coeff
+    python_module: wavelet
+    matlab_func: WL_dwtcoeff
+    arg_map:
+      w_name: wname
+      level: level
+    matlab_signature: ['y', 'wname', 'level']
+    output_type: array
+    test_cases:
+      - {w_name: 'db3', level: 5, zscore: True}
+      - {w_name: 'sym2', level: 5, zscore: True}
+  
+  scal_2_freq:
+    python_func: scal_2_freq
+    python_module: wavelet
+    matlab_func: WL_scal2frq
+    arg_map:
+      w_name: wname
+      a_max: amax
+      delta: delta
+    matlab_signature: ['y', 'wname', 'amax', 'delta']
+    output_type: array
+    test_cases:
+      - {w_name: 'db3', a_max: 'max', delta: 1.0, zscore: True}
+  
+  wfbm:
+    python_func: wfbm
+    python_module: wavelet
+    matlab_func: WL_fBM
+    arg_map:
+    matlab_signature: ['y']
+    output_type: array
+    test_cases:
+      - {zscore: True}
+  

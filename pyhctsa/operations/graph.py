@@ -125,9 +125,6 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: int = 5000) -> di
     out['olu90'] = np.mean(k[k >= np.quantile(k, 0.95, method='hazen')]
                            - np.mean(k))/np.std(k, ddof=1)
 
-    # Entropy of distribution
-    out['entropy'] = distribution_entropy(k, 'hist', 'sqrt')
-
     #Using likelihood now:
     out['gaussnlogL'] = -np.sum(norm.logpdf(k, loc=np.mean(k), scale=np.std(k, ddof=1)))
     out['expnlogL'] = -np.sum(expon.logpdf(k, scale=np.mean(k)))

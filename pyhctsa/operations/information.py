@@ -28,6 +28,87 @@ def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, No
     else:
         raise ValueError(f"Unknown correlation type specified: {min_what}")
 
+def _ami_gaussian_curve(y: np.ndarray):
+    """Gaussian automutual information at every lag 1..n-1 in one O(n log n) pass.
+
+    Reproduces the windowed Pearson estimate (== ``GaussianMI`` on the 1-D delay
+    pair); a degenerate (constant) delay window gives NaN at that lag. Assumes
+    ``n >= 3`` (guarded by ``_self_corr_curve``).
+    """
+    y = np.asarray(y, dtype=float)
+    n = y.size
+    yc = y - y.mean()                      
+    # linear autocorrelation  C[tau] = sum_t yc[t]*yc[t+tau]  via zero-padded FFT
+    nfft = 1 << (2 * n - 1).bit_length()
+    fy = np.fft.rfft(yc, nfft)
+    C_all = np.fft.irfft(fy * np.conj(fy), nfft)[:n]
+    # per-window sums for the two delayed segments y[:-tau] and y[tau:]
+    P = np.concatenate(([0.0], np.cumsum(yc)))         # P[k] = sum_{t<k} yc[t]
+    Q = np.concatenate(([0.0], np.cumsum(yc * yc)))    # Q[k] = sum_{t<k} yc[t]^2
+    taus = np.arange(1, n)
+    m = (n - taus).astype(float)
+    S1 = P[n - taus]; S2 = P[n] - P[taus]
+    Q1 = Q[n - taus]; Q2 = Q[n] - Q[taus]
+    C = C_all[taus]
+    num = m * C - S1 * S2
+    den = (m * Q1 - S1 * S1) * (m * Q2 - S2 * S2)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        r = np.clip(num / np.sqrt(den), -1.0, 1.0)
+        auto_corr = -0.5 * np.log(1.0 - r * r)         # AMI(tau), Gaussian estimator
+    auto_corr[~(den > 0.0)] = np.nan                   # degenerate window -> NaN
+    return auto_corr
+
+
+
+_VECTORISED_CORR = ('ac', 'mi', 'mi-gaussian')
+
+def _self_corr_curve(y: np.ndarray, what: str):
+    """Full self-correlation curve at lags 1..n-1 for a vectorisable estimator.
+
+    ``'ac'`` -> the FFT autocorrelation, computed once (cf. ``first_crossing``);
+    ``'mi'`` / ``'mi-gaussian'`` -> the Gaussian AMI curve. Returns ``None`` when
+    the series is too short to have an interior extremum (``n < 3``).
+    """
+    y = np.asarray(y, dtype=float)
+    n = y.size
+    if n < 3:
+        return None
+    if what == 'ac':
+        from ..operations.correlation import autocorr
+        c = np.asarray(autocorr(y, [], 'Fourier'), dtype=float).ravel()
+        return c[1:n]                                  # drop lag 0 -> lags 1..n-1
+    return _ami_gaussian_curve(y)                       # 'mi' / 'mi-gaussian'
+
+
+def _first_min_from_curve(c: np.ndarray):
+    """First strict local minimum of a precomputed lag-curve (lags 1..len(c))."""
+    for i in range(1, len(c) + 1):
+        if np.isnan(c[i - 1]):
+            logger.warning("No minimum: encountered NaN.")
+            return np.nan
+        if (i == 2) and (c[1] > c[0]):
+            return 1
+        elif (i > 2) and c[i - 3] > c[i - 2] < c[i - 1]:
+            return i - 1
+    return np.nan
+
+
+def _first_max_from_curve(c: np.ndarray):
+    """First strict local maximum of a precomputed lag-curve (lags 1..len(c))."""
+    for i in range(1, len(c) + 1):
+        if np.isnan(c[i - 1]):
+            logger.warning("No maximum: encountered NaN.")
+            return np.nan
+        if (i > 2) and c[i - 3] < c[i - 2] > c[i - 1]:
+            return i - 1
+    return np.nan
+
+
+def _first_min_mi_gaussian(y: np.ndarray):
+    """First minimum of the Gaussian AMI (vectorised); see ``_ami_gaussian_curve``."""
+    c = _self_corr_curve(np.asarray(y), 'mi')
+    return np.nan if c is None else _first_min_from_curve(c)
+
 def first_min(
     y: list,
     min_what: str = 'mi-gaussian',
@@ -68,6 +149,9 @@ def first_min(
     """
     y = np.asarray(y)
     n = len(y)
+    if min_what in _VECTORISED_CORR:               # vectorised drop-in, identical lag
+        c = _self_corr_curve(y, min_what)
+        return np.nan if c is None else _first_min_from_curve(c)
     corrfn = _get_corr_fn(y, min_what, extra_param)
     
     auto_corr = np.zeros(n - 1)
@@ -124,6 +208,9 @@ def first_max(
     """
     y = np.asarray(y)
     n = len(y)
+    if max_what in _VECTORISED_CORR:               # vectorised drop-in, identical lag
+        c = _self_corr_curve(y, max_what)
+        return np.nan if c is None else _first_max_from_curve(c)
     corrfn = _get_corr_fn(y, max_what, extra_param)
     
     auto_corr = np.zeros(n - 1)
@@ -209,7 +296,7 @@ def _give_me_edges(r, v, n_bins):
 def automutual_info_stats(
     y: ArrayLike,
     max_tau: Optional[int] = None,
-    est_method: str = 'kernel',
+    est_method: str = 'gaussian',
     extra_param: Optional[Union[int, str]] = None
 ) -> Dict[str, float]:
     """
@@ -227,7 +314,7 @@ def automutual_info_stats(
         of the time series, but won't exceed N/2. Default is `None`.
     est_method : {'gaussian', 'kraskov1', 'kraskov2'}, optional
         Method for estimating mutual information (passed to automutual_info).
-        Default is ``'kernel'``.
+        Default is ``'gaussian'``.
     extra_param : int or str, optional
         Extra parameter for the estimator (passed to automutual_info).
         For Kraskov estimators, sets the number of nearest neighbors 'k'. Default is `None`.
@@ -380,7 +467,7 @@ def automutual_info(
     n = len(y)
     min_samples = 5  # minimum 5 samples to compute mutual information (could make higher?)
     kval = 4 # default 
-    if extra_param:
+    if extra_param is not None:
         kval = extra_param
 
     # Loop over time delays if a vector
@@ -766,14 +853,11 @@ def _rm_histogram_2(*args):
     xx = xx.astype(int)  # cast all the values in xx and yy to ints for use in indexing, already rounded in previous step
     yy = yy.astype(int)
 
-    for n in range(0, lenx):
-        indexx = xx[n]
-        indexy = yy[n]
-
-        indexx -= 1  # adjust indices to start at zero, not one like in MATLAB
-        indexy -= 1
-
-        if indexx >= 0 and indexx <= ncellx - 1 and indexy >= 0 and indexy <= ncelly - 1:
-            result[indexx, indexy] = result[indexx, indexy] + 1
+    # Vectorised scatter-add. xx/yy are already rounded ints; subtract 1 for 0-based
+    # indices, mask to the in-bounds cells (same test as the loop), accumulate once.
+    ix = xx - 1
+    iy = yy - 1
+    in_bounds = (ix >= 0) & (ix <= ncellx - 1) & (iy >= 0) & (iy <= ncelly - 1)
+    np.add.at(result, (ix[in_bounds], iy[in_bounds]), 1)
 
     return result, descriptor
