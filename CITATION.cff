@@ -11,9 +11,9 @@ authors:
     given-names: Ben D.
     orcid: "https://orcid.org/0000-0002-3003-4055"
 
-doi: 10.5281/zenodo.18529935
+doi: 10.5281/zenodo.20820138
 version: 1.0.0
-date-released: 2026-02-09
+date-released: 2026-06-23
 url: https://github.com/DynamicsAndNeuralSystems/pyhctsa
 repository-code: https://github.com/DynamicsAndNeuralSystems/pyhctsa
 license: GPL-3.0-only
