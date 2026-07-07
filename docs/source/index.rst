@@ -26,6 +26,10 @@
    :target: https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml
    :alt: Unit Test Status
 
+.. |joss| image:: https://joss.theoj.org/papers/10.21105/joss.10581/status.svg
+   :target: https://doi.org/10.21105/joss.10581
+   :alt: JOSS publication
+
 .. |zenodo| image:: https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529935-blue?style=flat-square
    :target: https://doi.org/10.5281/zenodo.18529935
    :alt: Zenodo DOI
