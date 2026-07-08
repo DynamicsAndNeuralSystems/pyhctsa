@@ -26,6 +26,10 @@
    :target: https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml
    :alt: Unit Test Status
 
+.. |joss| image:: https://joss.theoj.org/papers/10.21105/joss.10581/status.svg
+   :target: https://doi.org/10.21105/joss.10581
+   :alt: JOSS publication
+
 .. |zenodo| image:: https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529935-blue?style=flat-square
    :target: https://doi.org/10.5281/zenodo.18529935
    :alt: Zenodo DOI
@@ -101,11 +105,11 @@ Select from the cards below to navigate the `pyhctsa` documentation:
 
 Citation
 --------
-If you use `pyhctsa` in your work or publications, please cite:
+If you use `pyhctsa` in your work or publications, please cite our JOSS paper:
 
 
-   Moore, J. B., & Fulcher, B. D. (2026). pyhctsa: Python Toolkit of Highly Comparative Time Series Analysis Features [Software]. Zenodo. 
-   https://doi.org/10.5281/zenodo.18652238
+   Moore et al., (2026). pyhctsa: A Python package for highly comparative time-series analysis. 
+   Journal of Open Source Software, 11(123), 10581, https://doi.org/10.21105/joss.10581
 
 Or in BibTeX (version-agnostic):
 
@@ -113,14 +117,17 @@ Or in BibTeX (version-agnostic):
 
    .. code-block:: bibtex
 
-      @software{pyhctsa:2026,
-        author       = {Moore, Joshua B. and Fulcher, Ben D.},
-        title        = {pyhctsa: Python Toolkit of Highly Comparative Time Series Analysis Features},
-        year         = {2026},
-        publisher    = {Zenodo},
-        doi          = {10.5281/zenodo.18529934},
-        url          = {https://doi.org/10.5281/zenodo.18529934}
-      }
+      @article{Moore2026, 
+         doi = {10.21105/joss.10581}, 
+         url = {https://doi.org/10.21105/joss.10581}, 
+         year = {2026}, 
+         publisher = {The Open Journal}, 
+         volume = {11}, 
+         number = {123}, 
+         pages = {10581}, 
+         author = {Moore, Joshua B. and Fulcher, Ben D.}, 
+         title = {pyhctsa: A Python package for highly comparative time-series analysis}, 
+         journal = {Journal of Open Source Software}}
 
 News and updates
 ----------------
