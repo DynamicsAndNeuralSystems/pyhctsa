@@ -14,6 +14,7 @@
 [![License](https://img.shields.io/badge/License-GPL_v3-orange.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.20820138-blue.svg)](https://doi.org/10.5281/zenodo.20820138)
 [![JOSS](https://joss.theoj.org/papers/98f474a523552a41749fe82e2ec04173/status.svg)](https://joss.theoj.org/papers/98f474a523552a41749fe82e2ec04173)
+[![pyOpenSci Peer-Reviewed](https://pyopensci.org/badges/peer-reviewed.svg)](https://github.com/pyOpenSci/software-submission/issues/282)
 
 # pyhctsa
 
