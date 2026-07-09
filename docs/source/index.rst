@@ -12,7 +12,7 @@
    :align: center
    :target: https://github.com/DynamicsAndNeuralSystems/pyhctsa
 
-|pypi| |pyversions| |tests| |zenodo| |license|
+|pypi| |pyversions| |tests| |joss| |pyOpenSci| |zenodo| |license|
 
 .. |pypi| image:: https://img.shields.io/pypi/v/pyhctsa?style=flat-square
    :target: https://pypi.org/project/pyhctsa/
@@ -29,6 +29,10 @@
 .. |joss| image:: https://joss.theoj.org/papers/10.21105/joss.10581/status.svg
    :target: https://doi.org/10.21105/joss.10581
    :alt: JOSS publication
+
+.. |pyOpenSci| image:: https://pyopensci.org/badges/peer-reviewed.svg
+   :target: https://github.com/pyOpenSci/software-submission/issues/282
+   :alt: pyOpenSci publication
 
 .. |zenodo| image:: https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529935-blue?style=flat-square
    :target: https://doi.org/10.5281/zenodo.18529935
