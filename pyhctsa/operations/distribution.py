@@ -272,22 +272,23 @@ def spread(y: ArrayLike, spread_measure: str = 'std') -> float:
         The calculated spread measure.
     """
     y = np.asarray(y)
-    if spread_measure == 'std':
-        out = np.std(y, ddof=1)
-    elif spread_measure == 'iqr':
-        q75 = np.quantile(y, 0.75, method='hazen')
-        q25 = np.quantile(y, 0.25, method='hazen')
-        out = q75 - q25
-    elif spread_measure == 'mad':
-        # mean absolute deviation
-        out = np.mean(np.absolute(y - np.mean(y, None)), None)
-    elif spread_measure == 'mead':
-        # median absolute deviation
-        out = np.median(np.absolute(y - np.median(y, None)), None)
-    else:
-        raise ValueError('spread must be one of std, iqr, mad or mead')
-    
-    return out
+    if spread_measure == "std":
+        return np.std(y, ddof=1)
+
+    if spread_measure == "iqr":
+        q25, q75 = np.percentile(y, [25, 75], method="hazen")
+        return q75 - q25
+
+    if spread_measure == "mad":
+        return np.mean(np.abs(y - np.mean(y)))
+
+    if spread_measure == "mead":
+        return np.median(np.abs(y - np.median(y)))
+
+    raise ValueError(
+        f"Unknown spread_measure={spread_measure!r}. "
+        "Expected one of: 'std', 'iqr', 'mad', 'mead'."
+    )
 
 def quantile(y: ArrayLike, p: float = 0.5) -> float:
     """ 
