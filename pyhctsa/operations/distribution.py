@@ -395,14 +395,12 @@ def min_max(y: ArrayLike, min_or_max: str = 'max') -> float:
         The calculated min or max value.
     """
     y = np.asarray(y)
-    if min_or_max == 'max':
-        out = max(y)
-    elif min_or_max == 'min':
-        out = min(y)
-    else:
-        raise ValueError(f"Unknown method '{min_or_max}'")
-    
-    return out
+    if min_or_max == "max":
+        return np.max(y)
+    if min_or_max == "min":
+        return np.min(y)
+
+    raise ValueError(f"Unknown method {min_or_max!r}")
 
 def mean(y: ArrayLike, mean_type: str = 'arithmetic') -> float:
     """
