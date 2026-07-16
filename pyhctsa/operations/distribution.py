@@ -611,14 +611,12 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
         - Zero indicates symmetry.
     """
     y = np.asarray(y)
-    out = 0.0
     if what_skew == 'pearson':
-        out = ((3 * np.mean(y) - np.median(y)) / np.std(y, ddof=1))
-    elif what_skew == 'bowley':
+        return ((3 * np.mean(y) - np.median(y)) / np.std(y, ddof=1))
+    if what_skew == 'bowley':
         qs = np.quantile(y, [0.25, 0.5, 0.75], method='hazen')
-        out = (qs[2]+qs[0] - 2 * qs[1]) / (qs[2] - qs[0]) 
-    
-    return float(out)
+        return (qs[2]+qs[0] - 2 * qs[1]) / (qs[2] - qs[0]) 
+    raise ValueError(f'Unknown what_skew: {what_skew}')
 
 def burstiness(y: ArrayLike) -> dict:
     """
@@ -645,21 +643,20 @@ def burstiness(y: ArrayLike) -> dict:
         - 'B_Kim': Improved burstiness for finite series
     """
     y = np.asarray(y)
-    me = np.mean(y)
-    std = np.std(y, ddof=1)
 
-    r = np.divide(std,me) # coefficient of variation
-    b = np.divide((r - 1), (r + 1)) # Original Goh and Barabasi burstiness statistic, B
+    N = y.size
+    r = y.std(ddof=1) / y.mean()
+
+    B = (r - 1.0) / (r + 1.0) # Original Goh and Barabasi burstiness statistic, B
+
+    a = np.sqrt(N + 1.0)
+    b = np.sqrt(N - 1.0)
 
     # improved burstiness statistic, accounting for scaling for finite time series
     # Kim and Jo, 2016, http://arxiv.org/pdf/1604.01125v1.pdf
-    N = len(y)
-    p1 = np.sqrt(N+1)*r - np.sqrt(N-1)
-    p2 = (np.sqrt(N+1)-2)*r + np.sqrt(N-1)
+    B_Kim = (a * r - b) / ((a - 2.0) * r + b)
 
-    b_kim = np.divide(p1, p2)
-
-    out = {'B': b, 'B_Kim': b_kim}
+    out = {'B': B, 'B_Kim': B_Kim}
 
     return out
 
