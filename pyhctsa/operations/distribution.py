@@ -556,12 +556,12 @@ def cv(x: ArrayLike, k: int = 1) -> float:
     float
         The coefficient of variation of order :math:`k`.
     """
+    x = np.asarray(x)
     if not isinstance(k, int) or k < 0:
         logger.warning('k should probably be a positive integer')
         # carry on with just this warning, though
-    
     # Compute the coefficient of variation (of order k) of the data
-    return (np.std(x, ddof=1) ** k) / (np.mean(x) ** k)
+    return (x.std(ddof=1)/x.mean())**k
 
 def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     """
