@@ -335,19 +335,16 @@ def proportion_values(x: ArrayLike, prop_what: str = 'positive') -> float:
         Proportion of values meeting the specified condition.
     """
     x = np.asarray(x)
-    N = len(x)
-
+    x = np.asarray(x)
     if prop_what == 'zeros':
         # returns the proportion of zeros in the input vector
-        out = sum(x == 0) / N
+        return np.mean(x==0)
     elif prop_what == 'positive':
-        out = sum(x > 0) / N
+        return np.mean(x > 0)
     elif prop_what == 'geq0':
-        out = sum(x >= 0) / N
-    else:
-        raise ValueError(f"Unknown condition to measure: {prop_what}")
-
-    return out
+        return np.mean(x >= 0)
+    
+    raise ValueError(f"Unknown condition to measure: {prop_what}")
 
 def pleft(y: ArrayLike, th: float = 0.1) -> float:
     """
