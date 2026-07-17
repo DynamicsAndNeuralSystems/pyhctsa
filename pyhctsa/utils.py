@@ -557,40 +557,46 @@ def make_mat_buffer(x: ArrayLike, n: int, p: int = 0,
         Buffer array created from x
     '''
     
-    if opt not in [None, 'nodelay']:
+    if opt not in (None, 'nodelay'):
         raise ValueError(f'{opt} not implemented')
 
-    i = 0
-    first_iter = True
-    while i < len(x):
-        if first_iter:
-            if opt == 'nodelay':
-                # No zeros at array start
-                result = x[:n]
-                i = n
-            else:
-                # Start with `p` zeros
-                result = np.hstack([np.zeros(p), x[:n-p]])
-                i = n-p
-            # Make 2D array and pivot
-            result = np.expand_dims(result, axis=0).T
-            first_iter = False
-            continue
+    x = np.asarray(x)
+    N = x.size
+    step = n - p
 
-        # Create next column, add `p` results from last col if given
-        col = x[i:i+(n-p)]
-        if p != 0:
-            col = np.hstack([result[:,-1][-p:], col])
-        i += n-p
+    # Number of columns
+    if opt == 'nodelay':
+        first_start = 0
+    else:
+        first_start = -p
 
-        # Append zeros if last row and not length `n`
-        if len(col) < n:
-            col = np.hstack([col, np.zeros(n-len(col))])
+    n_cols = max(1, (N - first_start + step - 1) // step)
 
-        # Combine result with next row
-        result = np.hstack([result, np.expand_dims(col, axis=0).T])
+    result = np.zeros((n, n_cols), dtype=x.dtype)
 
-    return result
+    if opt == 'nodelay':
+        length = min(n, N)
+        result[:length, 0] = x[:length]
+        pos = n
+    else:
+        length = min(n - p, N)
+        result[p:p + length, 0] = x[:length]
+        pos = n - p
+
+    col = 1
+
+    while pos < N:
+        length = min(step, N - pos)
+
+        if p:
+            result[:p, col] = result[-p:, col - 1]
+
+        result[p:p + length, col] = x[pos:pos + length]
+
+        pos += step
+        col += 1
+
+    return result[:, :col]
 
 def binarize(y: ArrayLike, binarize_how: str = 'diff') -> ArrayLike:
     """
