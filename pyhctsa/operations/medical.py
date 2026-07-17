@@ -44,31 +44,34 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
         - 'SD2'     : Standard deviation of the Poincaré plot’s major axis (long-term variability).
     """
     x = np.asarray(x)
-    N = len(x)
-    out = {}
+    N = x.size
 
-    # triangular histogram index
-    # 10 bins
-    edges_10 = bin_picker(x.min(), x.max(), 10)
-    hist_counts10 = histc(x, edges_10)
-    out['tri10'] = N/np.max(hist_counts10)
+    xmin = x.min()
+    xmax = x.max()
 
-    # 20 bins
-    edges_20 = bin_picker(x.min(), x.max(), 20)
-    hist_counts20 = histc(x, edges_20)
-    out['tri20'] = N/np.max(hist_counts20)
+    # Triangular histogram indices
+    edges_10 = bin_picker(xmin, xmax, 10)
+    max_count_10 = np.max(histc(x, edges_10))
 
-    # (sqrt samples) bins
-    edges_sqrt = bin_picker(x.min(), x.max(), int(np.ceil(np.sqrt(N))))
-    hist_counts_sqrt = histc(x, edges_sqrt)
-    out['trisqrt'] = N/np.max(hist_counts_sqrt)
+    edges_20 = bin_picker(xmin, xmax, 20)
+    max_count_20 = np.max(histc(x, edges_20))
 
-    # Poincare plot measures
-    diff_x = np.diff(x)
-    out['SD1'] = 1/np.sqrt(2) * np.std(diff_x, ddof=1) * 1000
-    out['SD2'] = np.sqrt(2 * np.var(x, ddof=1) - (1/2) * np.std(diff_x, ddof=1)**2) * 1000
+    n_bins_sqrt = int(np.ceil(np.sqrt(N)))
+    edges_sqrt = bin_picker(xmin, xmax, n_bins_sqrt)
+    max_count_sqrt = np.max(histc(x, edges_sqrt))
 
-    return out
+    # Poincaré measures
+    dx = np.diff(x)
+    sd_diff = np.std(dx, ddof=1)
+    var_x = np.var(x, ddof=1)
+
+    return {
+        'tri10': N / max_count_10,
+        'tri20': N / max_count_20,
+        'trisqrt': N / max_count_sqrt,
+        'SD1': (1 / np.sqrt(2)) * sd_diff * 1000,
+        'SD2': np.sqrt(2.0 * var_x - 0.5 * sd_diff**2) * 1000
+    }
 
 def hrv_classic(y: ArrayLike) -> dict:
     """
@@ -132,7 +135,7 @@ def hrv_classic(y: ArrayLike) -> dict:
 
     out = {}
 
-    out['pnn5'] = pnn_x_fn(5)  # 0.0055*sigma
+    out['pnn5'] = pnn_x_fn(5)  # 0.005*sigma
     out['pnn10'] = pnn_x_fn(10)  # 0.01*sigma
     out['pnn20'] = pnn_x_fn(20)  # 0.02*sigma
     out['pnn30'] = pnn_x_fn(30)  # 0.03*sigma
@@ -288,15 +291,16 @@ def pnn(x: ArrayLike) -> dict:
 
     """
     x = np.asarray(x)
-    diff_x = np.diff(x)
-    N = len(x)
 
-    # Calculate pNNx percentage
-    Dx = np.abs(diff_x) * 1000 # assume milliseconds as for RR intervals
+    Dx = np.abs(np.diff(x)) * 1000
+    N = Dx.size
+
     pnns = np.array([5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
 
-    out = {}
-    for x in pnns:
-        out["pnn" + str(x) ] = sum(Dx > x) / (N-1)
+    counts = np.sum(Dx[:, None] > pnns, axis=0)
+    values = counts / N
 
-    return out
+    return dict(zip(
+        ("pnn" + pnns.astype(str)),
+        values
+    ))
