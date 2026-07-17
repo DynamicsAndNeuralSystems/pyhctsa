@@ -4,6 +4,7 @@ from typing import Union
 
 import numpy as np
 from numpy.typing import ArrayLike
+from numpy.lib.stride_tricks import sliding_window_view
 from scipy.linalg import LinAlgError
 from scipy.optimize import curve_fit
 from scipy.stats import expon, gaussian_kde, kurtosis, skew
@@ -159,11 +160,13 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
     return out
 
-def first_under_fn(x: ArrayLike, m: ArrayLike, p: ArrayLike) -> float:
+def first_under_fn(x: float, m: np.ndarray, p: np.ndarray) -> float:
     """
     Find the value of m for the first time p goes under the threshold, x. 
     p and m are vectors of the same length
     """
+    m = np.asarray(m)
+    p = np.asarray(p)
     first_i = next((m_val for m_val, p_val in zip(m, p) if p_val < x), m[-1])
 
     return first_i
@@ -232,7 +235,7 @@ def crinkle_statistic(y: ArrayLike) -> float:
 
     return float(out)
 
-def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
+def time_rev_kaplan(y: np.ndarray, time_lag: int = 1) -> float:
     """
     Time reversal asymmetry statistic.
 
@@ -300,52 +303,42 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
         Dictionary containing statistics of the autocorrelation of angles for each tau,
         including mean, max, min, and autocorrelation at different lags.
     """
+    y = np.asarray(y).ravel()
+    dy = np.diff(y)
+
     tau_range = np.arange(1, max_tau + 1)
     num_tau = len(tau_range)
-
-    # Ensure y is a column vector
-    y = np.atleast_2d(y)
-    if y.shape[0] < y.shape[1]:
-        y = y.T
-
     stats_store = np.zeros((3, num_tau))
 
     for i, tau in enumerate(tau_range):
-        m = np.column_stack((y[:-tau], y[tau:]))
-        diff_x = np.diff(m[:, 0])
-        diff_y = np.diff(m[:, 1])
-        # Handle division by zero
-        with np.errstate(divide='ignore', invalid='ignore'):
-            theta = diff_y / diff_x
-        theta = np.arctan(theta)
+        # theta_t = arctan((y[t+tau+1]-y[t+tau]) / (y[t+1]-y[t])) = arctan(dy[t+tau]/dy[t])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            theta = np.arctan(dy[tau:] / dy[:-tau])
 
-        if len(theta) == 0:
-            logger.warning(f'Time series (N={len(y)}) too short for embedding')
+        if theta.size == 0:
+            logger.warning(f"Time series (N={len(y)}) too short for embedding")
             return np.nan
 
-        stats_store[0, i] = autocorr(theta, 1, 'Fourier')[0]
-        stats_store[1, i] = autocorr(theta, 2, 'Fourier')[0]
-        stats_store[2, i] = autocorr(theta, 3, 'Fourier')[0]
-    # Compute output statistics
-    out = {
-        'ac1_thetaac1': autocorr(stats_store[0, :], 1, 'Fourier')[0],
-        'ac1_thetaac2': autocorr(stats_store[1, :], 1, 'Fourier')[0],
-        'ac1_thetaac3': autocorr(stats_store[2, :], 1, 'Fourier')[0],
-        'mean_thetaac1': np.mean(stats_store[0, :]),
-        'max_thetaac1': np.max(stats_store[0, :]),
-        'min_thetaac1': np.min(stats_store[0, :]),
-        'mean_thetaac2': np.mean(stats_store[1, :]),
-        'max_thetaac2': np.max(stats_store[1, :]),
-        'min_thetaac2': np.min(stats_store[1, :]),
-        'mean_thetaac3': np.mean(stats_store[2, :]),
-    }
+        stats_store[:, i] = autocorr(theta, [1, 2, 3], "Fourier")
 
-    out['meanrat_thetaac12'] = out['mean_thetaac1'] / out['mean_thetaac2']
-    out['diff_thetaac12'] = np.sum(np.abs(stats_store[1, :] - stats_store[0, :]))
+    out = {
+        "ac1_thetaac1": autocorr(stats_store[0, :], 1, "Fourier")[0],
+        "ac1_thetaac2": autocorr(stats_store[1, :], 1, "Fourier")[0],
+        "ac1_thetaac3": autocorr(stats_store[2, :], 1, "Fourier")[0],
+        "mean_thetaac1": np.mean(stats_store[0, :]),
+        "max_thetaac1": np.max(stats_store[0, :]),
+        "min_thetaac1": np.min(stats_store[0, :]),
+        "mean_thetaac2": np.mean(stats_store[1, :]),
+        "max_thetaac2": np.max(stats_store[1, :]),
+        "min_thetaac2": np.min(stats_store[1, :]),
+        "mean_thetaac3": np.mean(stats_store[2, :]),
+    }
+    out["meanrat_thetaac12"] = out["mean_thetaac1"] / out["mean_thetaac2"]
+    out["diff_thetaac12"] = np.sum(np.abs(stats_store[1, :] - stats_store[0, :]))
 
     return out
 
-def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
+def embed2(y: np.ndarray, tau: Union[int, str] = 'tau') -> dict:
     """
     Statistics of the time series in a 2-dimensional embedding space.
 
@@ -374,87 +367,74 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     """
 
     # Set tau to the first zero-crossing of the autocorrelation function with the 'tau' input
-    if tau == 'tau':
-        tau = first_crossing(y, 'ac', 0, 'discrete')
+    if tau == "tau":
+        tau = first_crossing(y, "ac", 0, "discrete")
         if tau > len(y) / 10:
             tau = len(y) // 10
-    # Ensure that y is a column vector
-    y = np.array(y).reshape(-1, 1)
-
-    # Construct the two-dimensional recurrence space
-    m = np.hstack((y[:-tau], y[tau:]))
-    N = m.shape[0] # number of points in the recurrence space
-
-    # 1) Distribution of angles time series; angles between successive points in this space
-    theta = np.divide(np.diff(m[:, 1]), np.diff(m[:, 0]))
-    theta = np.arctan(theta) # measured as deviation from the horizontal
-
+ 
+    y = np.asarray(y).ravel()
+    m = np.column_stack((y[:-tau], y[tau:]))
+    N = m.shape[0]
+ 
+    # 1) Distribution of angles between successive points
+    dy = np.diff(y)
+    theta = np.arctan(dy[tau:] / dy[:-tau])
+ 
     out = {}
-
-    out['theta_ac1'] = autocorr(theta, 1, 'Fourier')[0]
-    out['theta_ac2'] = autocorr(theta, 2, 'Fourier')[0]
-    out['theta_ac3'] = autocorr(theta, 3, 'Fourier')[0]
-
-    out['theta_mean'] = np.mean(theta)
-    out['theta_std'] = np.std(theta, ddof=1)
-    
-    bin_edges = np.linspace(-np.pi/2, np.pi/2, 11) # 10 bins in the histogram
+    theta_acs = autocorr(theta, [1, 2, 3], "Fourier")
+    out["theta_ac1"], out["theta_ac2"], out["theta_ac3"] = theta_acs
+ 
+    out["theta_mean"] = np.mean(theta)
+    out["theta_std"] = np.std(theta, ddof=1)
+ 
+    bin_edges = np.linspace(-np.pi / 2, np.pi / 2, 11)
     px, _ = _histcounts(theta, bin_edges=bin_edges)
     bin_widths = np.diff(bin_edges)
-    out['hist10std'] = np.std(px, ddof=1)
-    out['histent'] = -np.sum(px[px>0] * np.log(px[px>0] / bin_widths[px>0]))
-    
-    # Stationarity in fifths of the time series
-    # Use histograms with 4 bins
-    x = np.linspace(-np.pi/2, np.pi/2, 5) # 4 bins
-    afifth = (N-1) // 5 # -1 because angles are correlations *between* points
-    n = np.zeros((len(x)-1, 5))
+    out["hist10std"] = np.std(px, ddof=1)
+    out["histent"] = -np.sum(px[px > 0] * np.log(px[px > 0] / bin_widths[px > 0]))
+ 
+    # Stationarity of angles in fifths
+    x_edges = np.linspace(-np.pi / 2, np.pi / 2, 5)
+    afifth = (N - 1) // 5
+    n = np.zeros((len(x_edges) - 1, 5))
     for i in range(5):
-        n[:, i], _ = np.histogram(theta[afifth*i:afifth*(i+1)], bins=x)
-        
+        n[:, i], _ = np.histogram(theta[afifth * i : afifth * (i + 1)], bins=x_edges)
     n = n / afifth
-    
     for i in range(4):
-        out[f'stdb{i+1}'] = np.std(n[:, i], ddof=1)
-
-    # STATIONARITY of points in the space (do they move around in the space)
-    # (1) in terms of distance from origin
+        out[f"stdb{i+1}"] = np.std(n[:, i], ddof=1)
+ 
+    # Stationarity of points in the space — distances computed once
+    d = np.sqrt(m[:, 0] ** 2 + m[:, 1] ** 2)
     afifth = N // 5
-    buffer_m = [m[afifth*i:afifth*(i+1), :] for i in range(5)]
-
-    # Mean euclidean distance in each segment
-    eucdm = [np.mean(np.sqrt(x[:, 0]**2 + x[:, 1]**2)) for x in buffer_m]
+    segs = [slice(afifth * i, afifth * (i + 1)) for i in range(5)]
+ 
+    eucdm = [np.mean(d[s]) for s in segs]
     for i in range(5):
-        out[f'eucdm{i+1}'] = eucdm[i]
-    out['std_eucdm'] = np.std(eucdm, ddof=1)
-    out['mean_eucdm'] = np.mean(eucdm)
-
-    # Standard deviation of Euclidean distances in each segment
-    eucds = [np.std(np.sqrt(x[:, 0]**2 + x[:, 1]**2), ddof=1) for x in buffer_m]
+        out[f"eucdm{i+1}"] = eucdm[i]
+    out["std_eucdm"] = np.std(eucdm, ddof=1)
+    out["mean_eucdm"] = np.mean(eucdm)
+ 
+    eucds = [np.std(d[s], ddof=1) for s in segs]
     for i in range(5):
-        out[f'eucds{i+1}'] = eucds[i]
-    out['std_eucds'] = np.std(eucds, ddof=1)
-    out['mean_eucds'] = np.mean(eucds)
-
-    # Maximum volume in each segment (defined as area of rectangle of max span in each direction)
-    maxspanx = [np.ptp(x[:, 0]) for x in buffer_m]
-    maxspany = [np.ptp(x[:, 1]) for x in buffer_m]
+        out[f"eucds{i+1}"] = eucds[i]
+    out["std_eucds"] = np.std(eucds, ddof=1)
+    out["mean_eucds"] = np.mean(eucds)
+ 
+    maxspanx = [np.ptp(m[s, 0]) for s in segs]
+    maxspany = [np.ptp(m[s, 1]) for s in segs]
     spanareas = np.multiply(maxspanx, maxspany)
-    out['stdspana'] = np.std(spanareas, ddof=1)
-    out['meanspana'] = np.mean(spanareas)
-
-    # Outliers in the embedding space
-    # area of max span of all points; versus area of max span of 50% of points closest to origin
-    d = np.sqrt(m[:, 0]**2 + m[:, 1]**2)
+    out["stdspana"] = np.std(spanareas, ddof=1)
+    out["meanspana"] = np.mean(spanareas)
+ 
+    # Outliers: closest 50%
     ix = np.argsort(d)
-    
-    out['areas_all'] = np.ptp(m[:, 0]) * np.ptp(m[:, 1])
-    r50 = ix[:int(np.ceil(len(ix)/2))] # ceil to match MATLAB's round fn output
-    
-    out['areas_50'] = np.ptp(m[r50, 0]) * np.ptp(m[r50, 1])
-    out['arearat'] = out['areas_50'] / out['areas_all']
+    r50 = ix[:int(np.ceil(N / 2))]
 
-    return out 
+    out["areas_all"] = np.ptp(m[:, 0]) * np.ptp(m[:, 1])
+    out["areas_50"] = np.ptp(m[r50, 0]) * np.ptp(m[r50, 1])
+    out["arearat"] = out["areas_50"] / out["areas_all"]
+ 
+    return out
 
 def _histcounts(x: ArrayLike, bins: Union[int, None, str] = None, 
                 bin_edges: Union[ArrayLike, None] = None) -> tuple:
@@ -1015,27 +995,21 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
     """
     y = np.asarray(y)
     taus = np.asarray(taus)
+
     if absval is None:
-        if len(taus) % 2 == 1:
-            absval = False
-        else:
-            absval = True
+        absval = (len(taus) % 2 == 0)   # True for even len, False for odd
 
     n = len(y)
-    tmax = np.max(taus)
-
-    nlac = y[tmax:n]
-
-    for i in taus:
-        nlac = np.multiply(nlac,y[tmax - i:n - i])
+    tmax = int(taus.max())
+    t0 = int(taus[0])
+    nlac = y[tmax:n] * y[tmax - t0:n - t0]     
+    for i in taus[1:]:
+        i = int(i)
+        nlac *= y[tmax - i:n - i]               
 
     if absval:
-        out = np.mean(np.absolute(nlac))
-
-    else:
-        out = np.mean(nlac)
-
-    return float(out)
+        np.abs(nlac, out=nlac)                
+    return float(nlac.mean())
 
 def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'ols') -> dict:
     """
@@ -1115,56 +1089,58 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
         and statistics from an exponential fit to the distribution of distances.
     """
     y = np.asarray(y)
-    N = len(y) # time-series length
+    N = len(y)  # time-series length
 
     if tau is None:
-        tau = 'tau' # set to the first minimum of autocorrelation function
-    
+        tau = 'tau'  # set to the first minimum of autocorrelation function
+
     if tau == 'tau':
         tau = first_crossing(y, 'ac', 0, 'discrete')
         if tau > N / 10:
-            tau = N//10
+            tau = N // 10
 
-    # Make sure the time series is a column vector
-    y = np.asarray(y).reshape(-1, 1)
+    # Successive Euclidean distances in the 2-D delay embedding reduce to
+    #   d[i] = sqrt( dy[i]^2 + dy[i+tau]^2 ),  dy = diff(y)
+    # so we never materialise the (N-tau, 2) embedding or its row-differences.
+    dy = np.diff(np.ravel(y))
+    sq = dy * dy
+    d = np.sqrt(sq[:-tau] + sq[tau:])
 
-    # Construct a 2-dimensional time-delay embedding (delay of tau)
-    m = np.hstack((y[:-tau], y[tau:]))
-
-    # Calculate Euclidean distances between successive points in this space, d:
     out = {}
-    d = np.sqrt(np.sum(np.diff(m, axis=0)**2, axis=1))
-    
-    # Calculate autocorrelations
-    out['d_ac1'] = autocorr(d, 1, 'Fourier')[0] # lag 1 ac
-    out['d_ac2'] = autocorr(d, 2, 'Fourier')[0] # lag 2 ac
-    out['d_ac3'] = autocorr(d, 3, 'Fourier')[0] # lag 3 ac
 
-    out['d_mean'] = np.mean(d) # Mean distance
-    out['d_median'] = np.median(d) # Median distance
-    out['d_std'] = np.std(d, ddof=1) # Standard deviation of distances
+    # Autocorrelations: one Fourier pass covers all three lags
+    d_ac = autocorr(d, [1, 2, 3], 'Fourier')
+    out['d_ac1'] = d_ac[0]  # lag 1 ac
+    out['d_ac2'] = d_ac[1]  # lag 2 ac
+    out['d_ac3'] = d_ac[2]  # lag 3 ac
+
+    d_mean = np.mean(d)
+    d_std = np.std(d, ddof=1)
+    out['d_mean'] = d_mean                 # Mean distance
+    out['d_median'] = np.median(d)         # Median distance
+    out['d_std'] = d_std                   # Standard deviation of distances
     # need to use Hazen method of computing percentiles to get IQR consistent with MATLAB
     q75 = np.percentile(d, 75, method='hazen')
     q25 = np.percentile(d, 25, method='hazen')
-    iqr_val = q75 - q25
-    out['d_iqr'] = iqr_val # Interquartile range of distances
-    out['d_max'] = np.max(d) # Maximum distance
-    out['d_min'] = np.min(d) # Minimum distance
-    out['d_cv'] = np.mean(d) / np.std(d, ddof=1) # Coefficient of variation of distances
+    out['d_iqr'] = q75 - q25               # Interquartile range of distances
+    d_max = np.max(d)
+    d_min = np.min(d)
+    out['d_max'] = d_max                   # Maximum distance
+    out['d_min'] = d_min                   # Minimum distance
+    out['d_cv'] = d_mean / d_std           # Coefficient of variation of distances
 
     # Empirical distances distribution often fits Exponential distribution quite well
     # Fit to all values (often some extreme outliers, but oh well)
-    l = 1 / np.mean(d)
-    n_log_l = -np.sum(expon.logpdf(d, scale=1/l))
-    out['d_expfit_nlogL'] = n_log_l
+    l = 1 / d_mean
+    out['d_expfit_nlogL'] = -np.sum(expon.logpdf(d, scale=1 / l))
 
     # Calculate histogram
     # % Sum of abs differences between exp fit and observed:
-    bin_edges = bin_picker(x_min=d.min(), x_max=d.max(), n_bins=np.floor(np.sqrt(len(d))))
-    N, bin_edges = np.histogram(d, bins=bin_edges, density=True)
+    bin_edges = bin_picker(x_min=d_min, x_max=d_max, n_bins=np.floor(np.sqrt(len(d))))
+    counts, bin_edges = np.histogram(d, bins=bin_edges, density=True)
     bin_centers = np.mean(np.vstack([bin_edges[:-1], bin_edges[1:]]), axis=0)
-    exp_fit = expon.pdf(bin_centers, scale=1/l)
-    out['d_expfit_meandiff'] = np.mean(np.abs(N - exp_fit))
+    exp_fit = expon.pdf(bin_centers, scale=1 / l)
+    out['d_expfit_meandiff'] = np.mean(np.abs(counts - exp_fit))
 
     return out
 
@@ -1201,66 +1177,79 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
         # Make tau the first zero crossing of the autocorrelation function
         tau = first_crossing(y, 'ac', 0, 'discrete')
     tau = int(tau)
-    xt = y[:-tau]  # part of the time series
-    xtp = y[tau:]  # time-lagged time series
-    N = len(y) - tau  # Length of each time series subsegment
+    xt = y[:-tau]      # view, no copy
+    xtp = y[tau:]      # view, no copy
+    N = len(y) - tau
+    nz = np.count_nonzero
 
     out = {}
 
-    # Points in a thick bottom-left -- top-right diagonal
-    out['updiag01'] = np.divide(np.sum(np.abs(xtp - xt) < 0.1), N)
-    out['updiag05'] = np.divide(np.sum(np.abs(xtp - xt) < 0.5), N)
+    # One reusable working buffer, seeded from a real op so the dtype matches
+    # whatever `xtp - xt` would produce (int inputs stay int, float stay float).
+    # The whole diagonal+parabola block writes into `buf` in place, so it never
+    # holds more than one float array plus a tiny boolean mask.
+    buf = np.abs(xtp - xt)                                     # |xtp - xt|
+    out['updiag01'] = np.divide(nz(buf < 0.1), N)
+    out['updiag05'] = np.divide(nz(buf < 0.5), N)
 
-    # Points in a thick bottom-right -- top-left diagonal
-    out['downdiag01'] = np.divide(np.sum(np.abs(xtp + xt) < 0.1), N)
-    out['downdiag05'] = np.divide(np.sum(np.abs(xtp + xt) < 0.5), N)
+    np.add(xtp, xt, out=buf); np.abs(buf, out=buf)            # |xtp + xt|
+    out['downdiag01'] = np.divide(nz(buf < 0.1), N)
+    out['downdiag05'] = np.divide(nz(buf < 0.5), N)
 
-    # Ratio of these
     out['ratdiag01'] = np.divide(out['updiag01'], out['downdiag01'])
     out['ratdiag05'] = np.divide(out['updiag05'], out['downdiag05'])
 
-    # In a thick parabola concave up
-    out['parabup01'] = np.divide(np.sum(np.abs(xtp - xt**2) < 0.1), N)
-    out['parabup05'] = np.divide(np.sum(np.abs(xtp - xt**2) < 0.5), N)
+    np.multiply(xt, xt, out=buf); np.subtract(xtp, buf, out=buf); np.abs(buf, out=buf)  # |xtp - xt**2|
+    out['parabup01'] = np.divide(nz(buf < 0.1), N)
+    out['parabup05'] = np.divide(nz(buf < 0.5), N)
 
-    # In a thick parabola concave down
-    out['parabdown01'] = np.divide(np.sum(np.abs(xtp + xt**2) < 0.1), N)
-    out['parabdown05'] = np.divide(np.sum(np.abs(xtp + xt**2) < 0.5), N)
+    np.multiply(xt, xt, out=buf); np.add(xtp, buf, out=buf); np.abs(buf, out=buf)       # |xtp + xt**2|
+    out['parabdown01'] = np.divide(nz(buf < 0.1), N)
+    out['parabdown05'] = np.divide(nz(buf < 0.5), N)
 
-    # In a thick parabola concave up, shifted up 1
-    out['parabup01_1'] = np.divide(np.sum(np.abs(xtp - (xt**2 + 1)) < 0.1), N)
-    out['parabup05_1'] = np.divide(np.sum(np.abs(xtp - (xt**2 + 1)) < 0.5), N)
+    np.multiply(xt, xt, out=buf); np.add(buf, 1, out=buf)                               # xt**2 + 1
+    np.subtract(xtp, buf, out=buf); np.abs(buf, out=buf)                                # |xtp - (xt**2+1)|
+    out['parabup01_1'] = np.divide(nz(buf < 0.1), N)
+    out['parabup05_1'] = np.divide(nz(buf < 0.5), N)
 
-    # In a thick parabola concave down, shifted up 1 
-    out['parabdown01_1'] = np.divide(np.sum(np.abs(xtp + (xt**2 - 1)) < 0.1), N)
-    out['parabdown05_1'] = np.divide(np.sum(np.abs(xtp + (xt**2 - 1)) < 0.5), N)
+    np.multiply(xt, xt, out=buf); np.subtract(buf, 1, out=buf)                          # xt**2 - 1
+    np.add(xtp, buf, out=buf); np.abs(buf, out=buf)                                     # |xtp + (xt**2-1)|
+    out['parabdown01_1'] = np.divide(nz(buf < 0.1), N)
+    out['parabdown05_1'] = np.divide(nz(buf < 0.5), N)
 
-    # In a thick parabola concave up, shifted down 1
-    out['parabup01_n1'] = np.divide(np.sum(np.abs(xtp - (xt**2 - 1)) < 0.1), N)
-    out['parabup05_n1'] = np.divide(np.sum(np.abs(xtp - (xt**2 - 1)) < 0.5), N)
+    np.multiply(xt, xt, out=buf); np.subtract(buf, 1, out=buf)                          # xt**2 - 1
+    np.subtract(xtp, buf, out=buf); np.abs(buf, out=buf)                                # |xtp - (xt**2-1)|
+    out['parabup01_n1'] = np.divide(nz(buf < 0.1), N)
+    out['parabup05_n1'] = np.divide(nz(buf < 0.5), N)
 
-    # In a thick parabola concave down, shifted down 1
-    out['parabdown01_n1'] = np.divide(np.sum(np.abs(xtp + (xt**2 + 1)) < 0.1), N)
-    out['parabdown05_n1'] = np.divide(np.sum(np.abs(xtp + (xt**2 + 1)) < 0.5), N)
+    np.multiply(xt, xt, out=buf); np.add(buf, 1, out=buf)                               # xt**2 + 1
+    np.add(xtp, buf, out=buf); np.abs(buf, out=buf)                                     # |xtp + (xt**2+1)|
+    out['parabdown01_n1'] = np.divide(nz(buf < 0.1), N)
+    out['parabdown05_n1'] = np.divide(nz(buf < 0.5), N)
+    del buf
 
-    # RINGS (points within a radius range)
-    out['ring1_01'] = np.divide(np.sum(np.abs(xtp**2 + xt**2 - 1) < 0.1), N)
-    out['ring1_02'] = np.divide(np.sum(np.abs(xtp**2 + xt**2 - 1) < 0.2), N)
-    out['ring1_05'] = np.divide(np.sum(np.abs(xtp**2 + xt**2 - 1) < 0.5), N)
+    # Rings & circles share c = xtp**2 + xt**2 — built once (was rebuilt 9x),
+    # in place, and the ring |c-1| is done in place too so peak stays at 2 arrays.
+    c = xtp * xtp
+    c += xt * xt
+    ring = c - 1
+    np.abs(ring, out=ring)
+    out['ring1_01'] = np.divide(nz(ring < 0.1), N)
+    out['ring1_02'] = np.divide(nz(ring < 0.2), N)
+    out['ring1_05'] = np.divide(nz(ring < 0.5), N)
+    del ring
 
-    # CIRCLES (points inside a given circular boundary)
-    out['incircle_01'] = np.divide(np.sum(xtp**2 + xt**2 < 0.1), N)
-    out['incircle_02'] = np.divide(np.sum(xtp**2 + xt**2 < 0.2), N)
-    out['incircle_05'] = np.divide(np.sum(xtp**2 + xt**2 < 0.5), N)
-    out['incircle_1'] = np.divide(np.sum(xtp**2 + xt**2 < 1), N)
-    out['incircle_2'] = np.divide(np.sum(xtp**2 + xt**2 < 2), N)
-    out['incircle_3'] = np.divide(np.sum(xtp**2 + xt**2 < 3), N)
-    
+    out['incircle_01'] = np.divide(nz(c < 0.1), N)
+    out['incircle_02'] = np.divide(nz(c < 0.2), N)
+    out['incircle_05'] = np.divide(nz(c < 0.5), N)
+    out['incircle_1']  = np.divide(nz(c < 1), N)
+    out['incircle_2']  = np.divide(nz(c < 2), N)
+    out['incircle_3']  = np.divide(nz(c < 3), N)
+
     incircle_values = [out['incircle_01'], out['incircle_02'], out['incircle_05'],
                        out['incircle_1'], out['incircle_2'], out['incircle_3']]
     out['medianincircle'] = np.median(incircle_values)
     out['stdincircle'] = np.std(incircle_values, ddof=1)
-    
     return out
 
 def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
@@ -1396,19 +1385,31 @@ def fzcglscf(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int],
 
     if max_tau is None:
         max_tau = N
-    
-    glscfs = np.zeros(max_tau)
 
-    for i in range(1, max_tau+1):
+    # glscf(tau) only ever uses |y|**alpha, |y|**beta and their squares over
+    # sub-segments of y. Compute those four power-arrays ONCE over the full
+    # series; every lag is then just slices + means (no re-exponentiation).
+    ay = np.abs(y)
+    A = ay ** alpha          # |y|**alpha
+    B = ay ** beta           # |y|**beta
+    A2 = ay ** (2 * alpha)   # kept as its own power (matches glscf's rounding)
+    B2 = ay ** (2 * beta)
+
+    prev = 0.0
+    for i in range(1, max_tau + 1):
         tau = i
+        a1 = A[:-tau];  b2 = B[tau:]
+        m1 = a1.mean(); m2 = b2.mean()
+        p1 = np.mean(a1 * b2)
+        p3 = np.sqrt(np.mean(A2[:-tau]) - m1 ** 2)
+        p4 = np.sqrt(np.mean(B2[tau:]) - m2 ** 2)
+        g = np.divide((p1 - m1 * m2), (p3 * p4))
 
-        glscfs[i-1] = glscf(y, alpha, beta, tau)
-        if (i > 1) and (glscfs[i-1]*glscfs[i-2] < 0):
-            # Draw a straight line between these two and look at where it hits zero
-            out = i - 1 + glscfs[i-1]/(glscfs[i-1]-glscfs[i-2])
-            return out
-    
-    return max_tau
+        if (i > 1) and (g * prev < 0):
+            return i - 1 + g / (g - prev)
+        prev = g
+
+    return max_tau 
 
 def glscf(y: ArrayLike, alpha: float, beta: float, tau: Union[int, str] = 'tau') -> float:
     """
@@ -1483,12 +1484,17 @@ def glscf(y: ArrayLike, alpha: float, beta: float, tau: Union[int, str] = 'tau')
     y1 = np.abs(y[:-tau])
     y2 = np.abs(y[tau:])
 
-    p1 = np.mean(np.multiply((y1 ** alpha), (y2 ** beta)))
-    p2 = np.multiply(np.mean(y1 ** alpha), np.mean(y2 ** beta))
-    p3 = np.sqrt(np.mean(y1 ** (2*alpha)) - (np.mean(y1 ** alpha))**2)
-    p4 = np.sqrt(np.mean(y2 ** (2*beta)) - (np.mean(y2 ** beta))**2)
+    a1 = y1 ** alpha
+    b2 = y2 ** beta
+    m1 = np.mean(a1)
+    m2 = np.mean(b2)
 
-    return np.divide((p1-p2), (p3 * p4))
+    p1 = np.mean(a1 * b2)
+    p2 = m1 * m2
+    p3 = np.sqrt(np.mean(y1 ** (2 * alpha)) - m1 ** 2)
+    p4 = np.sqrt(np.mean(y2 ** (2 * beta)) - m2 ** 2)
+
+    return np.divide((p1 - p2), (p3 * p4))
 
 def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
              method: str = 'Fourier') -> Union[float, np.ndarray]:
@@ -1525,66 +1531,78 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
         The autocorrelation at the given time lag(s).
 
     """
-    y = np.array(y)
+    y = np.asarray(y)
     N = len(y)  # time-series length
 
-    if tau:
-        # if list is not empty
+    # Using np.size ensures that tau=0 is properly caught as a valid lag
+    is_tau_provided = tau is not None and np.size(tau) > 0
+
+    if is_tau_provided:
+        tau = np.atleast_1d(tau)
         if np.max(tau) > N - 1:  # -1 because acf(1) is lag 0
             logger.warning(f"Time lag {np.max(tau)} is too long for time-series length {N}.")
-        if np.any(np.array(tau) < 0):
+        if np.any(tau < 0):
             logger.warning('Negative time lags not applicable.')
+
+        # Bypasses O(N log N) FFT overhead for an O(N) direct dot-product
+        if len(tau) == 1:
+            t = int(tau[0])
+            if 0 <= t < N:
+                y_c = y - np.mean(y)
+                var = np.sum(y_c ** 2)
+                
+                if t == 0:
+                    return np.array([1.0])
+                cov = np.dot(y_c[:-t], y_c[t:])
+                return np.array([cov / var])
+            else:
+                return np.array([np.nan])
+
     if method == 'Fourier':
-        n_fft = 2 ** (int(np.ceil(np.log2(N))) + 1)
-        F = np.fft.fft(y - np.mean(y), n_fft)
-        F = F * np.conj(F)
-        acf = np.fft.ifft(F)  # Wiener–Khinchin
-        acf = acf / acf[0]  # Normalize
-        acf = np.real(acf)
-        acf = acf[:N]
-        
-        if not tau:  # list empty, return the full function
+        n_fft = next_fast_len(2 * N - 1)
+        F = np.fft.rfft(y - np.mean(y), n_fft)  # real input -> half-spectrum
+        S = F.real ** 2 + F.imag ** 2           # |F|^2 (real)
+        acf = np.fft.irfft(S, n_fft)[:N]        # Hermitian inverse -> real ACF
+        acf = acf / acf[0]
+
+        if not is_tau_provided:
             out = acf
-        else:  # return a specific set of values
-            tau = np.atleast_1d(tau)
+        else:
             out = np.zeros(len(tau))
-            for i, t in enumerate(tau):
-                if (t > len(acf) - 1) or (t < 0):
-                    out[i] = np.nan
-                else:
-                    out[i] = acf[t]
+            valid = (tau >= 0) & (tau <= len(acf) - 1)
+            out[valid] = acf[tau[valid]]
+            out[~valid] = np.nan
+            
+        return out
     elif method == 'TimeDomainStat':
-        sigma2 = np.std(y, ddof=1)**2  # time-series variance
-        mu = np.mean(y)  # time-series mean
-        
-        def acf_y(t):
-            return np.mean((y[:N-t] - mu) * (y[t:] - mu)) / sigma2
-        
+        mu = np.mean(y) # time-series mean
+        sigma2 = np.std(y, ddof=1) ** 2  # time-series variance
+        yc = y - mu # centre once, not twice per lag
         tau = np.atleast_1d(tau)
-        out = np.array([acf_y(t) for t in tau])
+        out = np.array([np.mean(yc[:N - t] * yc[t:]) / sigma2 for t in tau])
     elif method == 'TimeDomain':
         tau = np.atleast_1d(tau)
         out = np.zeros(len(tau))
-        
+        has_nan = np.any(np.isnan(y))    # invariant across lags: hoist out of loop
+
         for i, t in enumerate(tau):
-            if np.any(np.isnan(y)):
-                good_r = (~np.isnan(y[:N-t])) & (~np.isnan(y[t:]))
+            if has_nan:
+                good_r = (~np.isnan(y[:N - t])) & (~np.isnan(y[t:]))
                 logger.info(f'NaNs in time series, computing for {np.sum(good_r)}/{len(good_r)} pairs of points.')
-                y1 = y[:N-t]
+                y1 = y[:N - t]
                 y1n = y1[good_r] - np.mean(y1[good_r])
                 y2 = y[t:]
                 y2n = y2[good_r] - np.mean(y2[good_r])
                 # std() ddof adjusted to be consistent with numerator's N normalization
                 out[i] = np.mean(y1n * y2n) / np.std(y1[good_r], ddof=0) / np.std(y2[good_r], ddof=0)
             else:
-                y1 = y[:N-t]
+                y1 = y[:N - t]
                 y2 = y[t:]
                 # std() ddof adjusted to be consistent with numerator's N normalization
                 out[i] = np.mean((y1 - np.mean(y1)) * (y2 - np.mean(y2))) / np.std(y1, ddof=0) / np.std(y2, ddof=0)
-    
     else:
         raise ValueError(f"Unknown autocorrelation estimation method {method}")
-    
+
     return out
 
 def first_crossing(y: ArrayLike, corr_fun: str = 'ac', threshold: float = 0.0,
@@ -1672,52 +1690,51 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
         for various counts.
 
     """
-    y = np.array(y, dtype=float)
+    y = np.asarray(y, dtype=float).flatten()
     N = len(y)
 
-    if y.ndim == 1:
-        y = y.reshape(-1, 1)
-    elif y.shape[1] > y.shape[0]:
-        y = y.T
+    if how_to_move != 'pts':
+        raise ValueError(f"Unknown setting for 'howToMove' input: '{how_to_move}'. Only option is currently 'pts'.")
 
-    # add a time index
-    # has increasing integers as time in the first column
-    ty = np.column_stack((np.arange(1, N+1), y[:, 0]))
-    if how_to_move == 'pts':
+    # Set parameters based on shape
+    w = int(np.floor(d)) if shape == 'circle' else int(d)
+    window_size = 2 * w + 1
+
+    # Ensure signal is long enough for the window
+    if window_size > N:
+        NN = 0
+        np_counts = np.zeros(0, dtype=int)
+    else:
+        # Create an O(1) memory view of all rolling windows at once
+        windows = sliding_window_view(y, window_shape=window_size)
+        NN = windows.shape[0]  # Equivalent to len(rnge)
 
         if shape == 'circle':
-
-            r = d # set radius
-            w = int(np.floor(r))
-            rnge = np.arange(1 + w, N - w + 1)
-            NN = len(rnge) # number of admissible points
-            np_counts = np.zeros(NN, dtype=int)
-
-            for i in range(NN):
-                idx = rnge[i]
-                start = idx - w - 1
-                end = idx + w
-                win = ty[start:end, :]
-                difwin = win - ty[idx - 1, :]
-                squared_dists = np.sum(difwin**2, axis=1)
-                np_counts[i] = np.sum(squared_dists <= r**2)
+            r = d
+            
+            # 1. The squared time differences are identical for every window
+            #    e.g., if w=2, dt_sq = [4, 1, 0, 1, 4]
+            dt_sq = np.arange(-w, w + 1)**2
+            
+            # 2. Extract the center values from all windows simultaneously
+            centers = windows[:, w]
+            
+            # 3. Compute squared y differences (broadcasting the centers)
+            dy_sq = (windows - centers[:, None])**2
+            
+            # 4. Total squared Euclidean distance and threshold check
+            dist_sq = dy_sq + dt_sq
+            np_counts = np.sum(dist_sq <= r**2, axis=1)
 
         elif shape == 'rectangle':
+            windows_abs = np.abs(windows)
+            centers_abs = windows_abs[:, w]
+            
+            # Vectorized logical comparison across all windows
+            np_counts = np.sum(windows_abs <= centers_abs[:, None], axis=1)
 
-            w = int(d)
-            rnge = np.arange(1 + w, N - w + 1)
-            NN = len(rnge)
-            np_counts = np.zeros(NN, dtype=int)
-
-            for i in range(NN):
-                idx = rnge[i]
-                start = (idx - w) - 1
-                end = (idx + w)
-                np_counts[i] = np.sum(np.abs(y[start:end, 0]) <= np.abs(y[idx-1, 0]))
         else:
             raise ValueError(f"Unknown shape {shape}. Choose either 'circle' or 'rectangle'")
-    else:
-        raise ValueError(f"Unknown setting for 'howToMove' input: '{how_to_move}'. Only option is currently 'pts'.")
 
     # compute stats on number of hits inside the shape
     out = {}
@@ -1725,17 +1742,18 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
     out["std"] = np.std(np_counts, ddof=1)
     out["mean"] = np.mean(np_counts)
     
-    # count the hits
+    # count the hits (requires NumPy 2.0+)
     vals, hits = np.unique_counts(np_counts)
     max_val = np.argmax(hits)
-    out["npatmode"] = hits[max_val]/NN
+    out["npatmode"] = hits[max_val] / NN
     out["mode"] = vals[max_val]
 
     count_types = ["ones", "twos", "threes", "fours", "fives", "sixes", "sevens", "eights", "nines", "tens", "elevens"]
     for i in range(1, 12):
-        if 2*w + 1 >= i:
+        if window_size >= i:
             out[f"{count_types[i-1]}"] = np.mean(np_counts == i)
     
+    # Output _stat_av helper calls exactly as originally formulated
     out['statav2_m'] = _stat_av(np_counts, 'mean', 2, 1)
     out['statav2_s'] = _stat_av(np_counts, 'std', 2, 1)
     out['statav3_m'] = _stat_av(np_counts, 'mean', 3, 1)
@@ -1746,35 +1764,40 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
     return out
 
 def _stat_av(y: ArrayLike, window_stat: str = 'mean', num_seg: int = 5, inc_move: int = 2) -> float:
-    """helper function to compute sliding winow stats for `TranslateShape`"""
+    """helper function to compute sliding winow stats for `translate_shape`"""
     y = np.asarray(y)
-    win_length = np.floor(len(y)/num_seg)
+    N = len(y)
+    
+    # Use integer division directly instead of np.floor for performance
+    win_length = int(N // num_seg)
+    
     if win_length == 0:
-        logger.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
+        logger.warning(f"Time-series of length {N} is too short for {num_seg} windows")
         return np.nan
-    inc = np.floor(win_length/inc_move) # increment to move at each step
-    # if increment rounded down to zero, prop it up
+        
+    inc = int(win_length // inc_move)
     if inc == 0:
         inc = 1
+        
+    # 1. Create O(1) sliding window view for the entire array
+    # 2. Slice the view by the step increment [::inc] to get exactly `num_steps` windows
+    windows = sliding_window_view(y, window_shape=win_length)[::inc]
     
-    num_steps = int(np.floor((len(y)-win_length)/inc) + 1)
-    qs = np.zeros(num_steps)
-
-    # convert a step index (stepInd) to a range of indices corresponding to that window
-    def get_window(step_ind: int):
-        start_idx = (step_ind) * inc
-        end_idx = (step_ind) * inc + win_length
-
-        return np.arange(start_idx, end_idx).astype(int)
-    
+    # Compute the statistic across all windows simultaneously via axis=1
     if window_stat == 'mean':
-        for i in range(num_steps):
-            qs[i] = np.mean(y[get_window(i)])
+        qs = np.mean(windows, axis=1)
     elif window_stat == 'std':
-        for i in range(num_steps):
-            qs[i] = np.std(y[get_window(i)], ddof=1)
+        qs = np.std(windows, axis=1, ddof=1)
+    else:
+        raise ValueError(f"Unknown window_stat '{window_stat}'")
 
-    return np.std(qs, ddof=1)/np.std(y, ddof=1)
+    std_y = np.std(y, ddof=1)
+    
+    # Safeguard against division by zero if the time series is constant
+    if std_y == 0:
+        return np.nan
+        
+    return np.std(qs, ddof=1) / std_y
 
 def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> dict:
     """
@@ -1979,38 +2002,40 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
             - 'absnum': The magnitude of the numerator.
             - 'denom': The denominator.
     """
-    # Can set the time lag, tau, to be 'ac' or 'mi'
+    y = np.asarray(y)
+
     if tau == 'ac':
-        # tau is first zero crossing of the autocorrelation function
         tau = first_crossing(y, 'ac', 0, 'discrete')
     elif tau == 'mi':
-        # tau is the first minimum of the automutual information function
         tau = first_min(y, 'mi')
-    if np.isnan(tau):
+        
+    if np.isnan(tau) or tau >= len(y):
         logger.warning("No valid setting for time delay. (Is the time series too short?)")
         return np.nan
 
-    # Compute trev quantities
-    yn = y[:-tau]
-    yn1 = y[tau:] # yn, tau steps ahead
-    out = {}
+    tau = int(tau)
+    
+    diff = y[tau:] - y[:-tau]
 
-    # The trev expression used in TSTOOL
-    raw = np.mean((yn1 - yn)**3) / (np.mean((yn1 - yn)**2))**(3/2)
-    out['raw'] = raw
+    num = np.mean(diff**3)
+    
+    mean_sq = np.mean(diff**2)
+    
+    denom = mean_sq**(3/2)
 
-    # The magnitude
-    out['abs'] = np.abs(raw)
+    # 4. Build output safely
+    if denom > 0:
+        raw = num / denom
+    else:
+        raw = np.nan
 
-    # The numerator
-    num = np.mean((yn1-yn)**3)
-    out['num'] = num
-    out['absnum'] = np.abs(num)
-
-    # the denominator
-    out['denom'] = (np.mean((yn1-yn)**2))**(3/2)
-
-    return out
+    return {
+        'raw': raw,
+        'abs': np.abs(raw),
+        'num': num,
+        'absnum': np.abs(num),
+        'denom': denom
+    }
 
 def tc3(y: list, tau: Union[int, str, None] = 'ac') -> dict:
     """

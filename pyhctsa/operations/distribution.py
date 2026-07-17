@@ -214,20 +214,20 @@ def withinp(x: ArrayLike, p: float = 1.0, mean_or_median: str = 'mean') -> float
         The proportion of data points within p standard deviations.
     """
     x = np.asarray(x)
-    N = len(x)
+    N = x.shape[0]
 
     if mean_or_median == 'mean':
-        mu = np.mean(x)
-        sig = np.std(x, ddof=1)
+        mu = x.mean()
+        sig = x.std(ddof=1)
     elif mean_or_median == 'median':
-        mu = np.median(x)
-        iqr_val = np.percentile(x, 75, method='hazen') - np.percentile(x, 25, method='hazen')
-        sig = 1.35 * iqr_val
+        # single sort for all three quantiles; hazen@50 == np.median
+        q25, mu, q75 = np.percentile(x, [25, 50, 75], method='hazen')
+        sig = 1.35 * (q75 - q25)
     else:
         raise ValueError(f"Unknown setting: '{mean_or_median}'")
 
-    # The withinp statistic:
-    return np.divide(np.sum((x >= mu - p * sig) & (x <= mu + p * sig)), N)
+    d = p * sig
+    return np.count_nonzero((x >= mu - d) & (x <= mu + d)) / N
 
 def unique(y: ArrayLike) -> float:
     """

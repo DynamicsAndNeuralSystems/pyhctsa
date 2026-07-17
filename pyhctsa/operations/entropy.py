@@ -450,10 +450,10 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: i
             - 'maxRPD': Maximum value of rpd (rescaled by N).
 
     """
+    y = np.asarray(y)
     if tau == 'ac':
         # use the first zero crossing of the ACF
         tau = int(first_crossing(y, 'ac', 0, 'discrete'))
-    y = np.asarray(y)
     m = int(m)
     tau = int(tau)
     try:
@@ -595,37 +595,26 @@ def complexity_invariant_distance(y: ArrayLike) -> dict:
         - 'CE2_norm' : float
             Normalized CE2: CE2 / minCE2.
     """
-    y = np.asarray(y)
-    #% Original definition (in Table 2 of paper cited above)
-    # % sum -> mean to deal with non-equal time-series lengths
-    # % (now scales properly with length)
+    y = np.asarray(y, dtype=np.float64)
 
-    f_CE1 = lambda y: np.sqrt(np.mean(np.power(np.diff(y), 2)))
-    #% Definition corresponding to the line segment example in Fig. 9 of the paper
-    #% cited above (using Pythagoras's theorum):
-    f_CE2 = lambda y: np.mean(np.sqrt(1 + np.power(np.diff(y), 2)))
+    def _ce(arr):
+        d = np.diff(arr)
+        d2 = d * d             
+        ce1 = np.sqrt(d2.mean())
+        ce2 = np.sqrt(1.0 + d2).mean()
+        return ce1, ce2
 
-    CE1 = f_CE1(y)
-    CE2 = f_CE2(y)
+    CE1, CE2 = _ce(y)
+    min_CE1, min_CE2 = _ce(np.sort(y))
 
-    # % Defined as a proportion of the minimum such value possible for this time series,
-    # % this would be attained from putting close values close; i.e., sorting the time
-    # % series
-    y_sorted = np.sort(y)
-    min_CE1 = f_CE1(y_sorted)
-    min_CE2 = f_CE2(y_sorted)
-
-    CE1_norm = CE1 / min_CE1
-    CE2_norm = CE2 / min_CE2
-
-    out = {'CE1':       CE1,
-           'CE2':       CE2,
-           'minCE1':    min_CE1,
-           'minCE2':    min_CE2,
-           'CE1_norm':  CE1_norm,
-           'CE2_norm':  CE2_norm}
-
-    return out
+    return {
+        'CE1':      CE1,
+        'CE2':      CE2,
+        'minCE1':   min_CE1,
+        'minCE2':   min_CE2,
+        'CE1_norm': CE1 / min_CE1,
+        'CE2_norm': CE2 / min_CE2,
+    }
 
 def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2,
                           pre_proc: Union[str, None] = None, rng: int = 0) -> float:
