@@ -527,16 +527,9 @@ def make_buffer(y: ArrayLike, buffer_size: int) -> np.ndarray:
         corresponding to consecutive, non-overlapping segments of the input time series.
     """
     y = np.asarray(y)
-    N = len(y)
+    n = y.size // buffer_size
 
-    num_buffers = int(np.floor(N/buffer_size))
-
-    # may need trimming
-    y_buffer = y[:num_buffers*buffer_size]
-    # then reshape
-    y_buffer = y_buffer.reshape((num_buffers,buffer_size))
-
-    return y_buffer
+    return y[:n * buffer_size].reshape(n, buffer_size)
 
 def make_mat_buffer(x: ArrayLike, n: int, p: int = 0,
                     opt: Union[str, None] = None) -> np.ndarray:
