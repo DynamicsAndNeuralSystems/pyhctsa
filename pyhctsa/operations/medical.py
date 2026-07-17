@@ -232,29 +232,27 @@ def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
         The probability of obtaining a sequence of D consecutive ones or zeros.
     """
     x = np.asarray(x)
-    dx = np.abs(np.diff(x)) # abs diff in consecutive values of the time series
-    N = len(dx) # number of diffs in the input time series
 
-    # binary representation of time series based on consecutive changes being greater than d/1000...
-    x_sym = dx >= d # consec. diffs exceed some threshold, d
-    z_seq = np.zeros(D)
-    o_seq = np.ones(D)
+    dx = np.abs(np.diff(x))
+    x_sym = dx >= d
+    N = x_sym.size
 
-    # search for D consecutive zeros/ones
-    i = 0
-    pc = 0
+    if N == 0:
+        return 0.0
 
-    while i <= (N-D):
-        x_seq = x_sym[i:(i+D)]
-        if np.array_equal(x_seq, z_seq) or np.array_equal(x_seq, o_seq):
-            pc += 1
-            i += D
-        else:
-            i += 1
-    
-    p = pc / N
+    # Locations where the binary sequence changes
+    change = np.flatnonzero(x_sym[1:] != x_sym[:-1]) + 1
 
-    return p
+    # Run boundaries
+    boundaries = np.r_[0, change, N]
+
+    # Length of each run
+    run_lengths = np.diff(boundaries)
+
+    # Number of non-overlapping groups of D equal bits
+    pc = np.sum(run_lengths // D)
+
+    return pc / N
 
 def pnn(x: ArrayLike) -> dict:
     """
