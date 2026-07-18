@@ -146,7 +146,7 @@ def fluctuation_analysis(x: "ArrayLike", q: "Union[float, int]" = 2,
         nn = y_buff.shape[1] * tau
  
         if wtf == 'nothing':
-            y_dt = y_buff.reshape(nn, 1, order='F')  # FIX [5]: column-major to match MATLAB
+            y_dt = y_buff.reshape(nn, 1, order='F')
         elif wtf == 'endptdiff':
             y_dt = y_buff[-1, :] - y_buff[0, :]
         elif wtf == "range":
@@ -164,7 +164,7 @@ def fluctuation_analysis(x: "ArrayLike", q: "Union[float, int]" = 2,
                 y_buff[:, j] = y_buff[:, j] - np.polyval(p, tt.flatten())
  
             # reshape to a column vector, y_dt (detrended)
-            y_dt = y_buff.reshape(nn, 1, order='F')  # FIX [5]: column-major to match MATLAB
+            y_dt = y_buff.reshape(nn, 1, order='F')
         elif wtf == 'rsrange':
             b = y_buff[0, :]
             m = y_buff[-1, :] - b

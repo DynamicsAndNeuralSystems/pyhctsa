@@ -289,7 +289,7 @@ def _calc_me_moments(x_buff: ArrayLike, mom_type: str):
     
     return moms
 
-def simple_stats(x: ArrayLike, what_stat: str = 'zcross') -> dict:
+def simple_stats(x: ArrayLike, what_stat: str = 'zcross') -> float:
     """
     Basic statistics about an input time series.
 
@@ -317,48 +317,53 @@ def simple_stats(x: ArrayLike, what_stat: str = 'zcross') -> dict:
         The calculated statistic based on what_stat
     """
     x = np.asarray(x)
-    N = len(x)
+    N = x.size
 
-    out = None
     if what_stat == 'zcross':
-        # Proportion of zero-crossings of the time series
-        # (% in the case of z-scored input, crosses its mean)
-        xch = x[:-1] * x[1:]
-        out = np.sum(xch < 0)/N
+        return np.count_nonzero(
+            x[:-1] * x[1:] < 0
+        ) / N
 
     elif what_stat == 'maxima':
-        # proportion of local maxima in the time series
         dx = np.diff(x)
-        out = np.sum((dx[:-1] > 0) & (dx[1:] < 0)) / (N - 1)
+        return np.count_nonzero(
+            (dx[:-1] > 0) & (dx[1:] < 0)
+        ) / (N - 1)
+
     elif what_stat == 'minima':
-        # proportion of local minima in the time series
         dx = np.diff(x)
-        out = np.sum((dx[:-1] < 0) & (dx[1:] > 0)) / (N-1)
+        return np.count_nonzero(
+            (dx[:-1] < 0) & (dx[1:] > 0)
+        ) / (N - 1)
+
     elif what_stat == 'pmcross':
-        # ratio of times cross 1 to -1
-        c1sig = np.sum(sign_change(x-1)) # num times cross 1
-        c2sig = np.sum(sign_change(x+1)) # num times cross -1
-        if c2sig == 0:
-            out = np.nan
-        else:
-            out = c1sig/c2sig
+        c1sig = np.count_nonzero(
+            sign_change(x - 1)
+        )
+
+        c2sig = np.count_nonzero(
+            sign_change(x + 1)
+        )
+
+        return np.nan if c2sig == 0 else c1sig / c2sig
+
     elif what_stat == 'zsczcross':
-        # ratio of zero crossings of raw to detrended time series
-        # where the raw has zero mean
         x = z_score(x)
-        xch = x[:-1] * x[1:]
-        h1 = np.sum(xch < 0) # num of zscross of raw series
+
+        h1 = np.count_nonzero(
+            x[:-1] * x[1:] < 0
+        )
+
         y = detrend(x)
-        ych = y[:-1] * y[1:]
-        h2 = np.sum(ych < 0) # % of detrended series
-        if h1 == 0:
-            out = np.nan
-        else:
-            out = h2/h1
-    else:
-        raise(ValueError(f"Unknown statistic {what_stat}"))
-    
-    return out
+
+        h2 = np.count_nonzero(
+            y[:-1] * y[1:] < 0
+        )
+
+        return np.nan if h1 == 0 else h2 / h1
+
+    raise ValueError(f"Unknown statistic: {what_stat}")
+
 
 def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = None) -> dict:
     """

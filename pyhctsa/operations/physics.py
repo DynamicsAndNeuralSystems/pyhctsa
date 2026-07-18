@@ -46,8 +46,8 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     dict
         Summaries of the walker's trajectory and its relationship to the series.
     """
-    N = len(y)
     y = np.asarray(y, dtype=float)
+    N = len(y)
 
     # Default values and type requirements for each rule
     WALKER_CONFIGS = {
@@ -91,54 +91,64 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     # Do the walk
     # ------------------------------------------------------------------
     w = np.zeros(N)
+    yl = y.tolist()
 
     if walker_rule == 'prop':
         # walker narrows the gap between its position and the series value
         # by the proportion walker_params at each step
         p = walker_params
-        w[0] = 0
+        w_prev = 0.0  # w[0] = 0
         for i in range(1, N):
-            w[i] = w[i-1] + p * (y[i-1] - w[i-1])
+            w_prev = w_prev + p * (yl[i-1] - w_prev)
+            w[i] = w_prev
 
     elif walker_rule == 'biasprop':
         # biased motion: [p_up, p_down]
         pup, pdown = walker_params
-        w[0] = 0
+        w_prev = 0.0  # w[0] = 0
+        yprev = yl[0]
         for i in range(1, N):
-            if y[i] > y[i-1]:  # time series increases
-                w[i] = w[i-1] + pup * (y[i-1] - w[i-1])
-            else:
-                w[i] = w[i-1] + pdown * (y[i-1] - w[i-1])
+            ycur = yl[i]
+            p = pup if ycur > yprev else pdown  # time series increases -> pup
+            w_prev = w_prev + p * (yprev - w_prev)
+            w[i] = w_prev
+            yprev = ycur
 
     elif walker_rule == 'momentum':
         # walker moves with inertia; the series acts as a force
         m = walker_params  # 'inertial mass'
-        w[0] = y[0]
-        w[1] = y[1]
+        w0 = yl[0]
+        w1 = yl[1]
+        w[0] = w0
+        w[1] = w1
+        w_pp = w0    # w[i-2]
+        w_prev = w1  # w[i-1]
         for i in range(2, N):
-            w_inert = w[i-1] + (w[i-1] - w[i-2])
-            w[i] = w_inert + (y[i] - w_inert) / m  # dissipative term
+            w_inert = w_prev + (w_prev - w_pp)
+            cur = w_inert + (yl[i] - w_inert) / m  # dissipative term
+            w[i] = cur
+            w_pp = w_prev
+            w_prev = cur
 
     elif walker_rule == 'runningvar':
-        # inertial motion rescaled by local standard deviation
         m, wl = walker_params
         wl = int(wl)
         w[0] = y[0]
         w[1] = y[1]
+        w_pp = yl[0]    # w[i-2]
+        w_prev = yl[1]  # w[i-1]
         for i in range(2, N):
-            w_inert = w[i-1] + (w[i-1] - w[i-2])
-            w_mom = w_inert + (y[i] - w_inert) / m  # dissipative term
-            # MATLAB: if im > wl, with im the 1-based index (= i + 1 here).
+            w_inert = w_prev + (w_prev - w_pp)
+            w_mom = w_inert + (yl[i] - w_inert) / m  # dissipative term
             if i + 1 > wl:
-                # MATLAB windows are y(im-wl:im) / w(im-wl:im): inclusive of the
-                # current index -> wl+1 samples. w[i] is still 0 at this point
-                # (not yet assigned), exactly mirroring MATLAB reading the
-                # unwritten w(i). Slicing i-wl : i+1 reproduces both.
                 sy = np.std(y[i-wl:i+1], ddof=1)
                 sw = np.std(w[i-wl:i+1], ddof=1)
-                w[i] = w_mom * (sy / sw)
+                cur = w_mom * (sy / sw)
             else:
-                w[i] = w_mom
+                cur = w_mom
+            w[i] = cur
+            w_pp = w_prev
+            w_prev = cur
     else:
         raise ValueError(f"Unknown rule : {walker_rule}")
 
@@ -147,36 +157,34 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     # ------------------------------------------------------------------
     out = {}
 
+    w_std = np.std(w, ddof=1)
+    w_min = np.min(w)
+    w_max = np.max(w)
+    w_tau = first_crossing(w, 'ac', 0, 'continuous')
+
     # (i) The walk itself
     out['w_mean'] = np.mean(w)
     out['w_median'] = np.median(w)
-    out['w_std'] = np.std(w, ddof=1)
+    out['w_std'] = w_std
     out['w_ac1'] = autocorr(w, 1, 'Fourier')[0]
     out['w_ac2'] = autocorr(w, 2, 'Fourier')[0]
-    out['w_tau'] = first_crossing(w, 'ac', 0, 'continuous')
-    out['w_min'] = np.min(w)
-    out['w_max'] = np.max(w)
+    out['w_tau'] = w_tau
+    out['w_min'] = w_min
+    out['w_max'] = w_max
     out['w_propzcross'] = np.sum((w[:-1] * w[1:]) < 0) / (N - 1)
 
     # (ii) Differences between the walk and the signal
     out['sw_meanabsdiff'] = np.mean(np.abs(y - w))
-    out['sw_taudiff'] = (first_crossing(y, 'ac', 0, 'continuous')
-                         - first_crossing(w, 'ac', 0, 'continuous'))
-    out['sw_stdrat'] = np.std(w, ddof=1) / np.std(y, ddof=1)
+    out['sw_taudiff'] = first_crossing(y, 'ac', 0, 'continuous') - w_tau
+    out['sw_stdrat'] = w_std / np.std(y, ddof=1)
     out['sw_ac1rat'] = out['w_ac1'] / autocorr(y, 1)[0]
-    out['sw_minrat'] = np.min(w) / np.min(y)
-    out['sw_maxrat'] = np.max(w) / np.max(y)
+    out['sw_minrat'] = w_min / np.min(y)
+    out['sw_maxrat'] = w_max / np.max(y)
     out['sw_propcross'] = np.sum((w[:-1] - y[:-1]) * (w[1:] - y[1:]) < 0) / (N - 1)
 
     # Ansari-Bradley test: same distribution?
     _, pval = ansari(w, y)
     out['sw_ansarib_pval'] = pval
-
-    r = np.linspace(
-        min(min(y), min(w)),
-        max(max(y), max(w)),
-        200
-    )
 
     # (iii) Residuals between time series and walker
     res = w - y

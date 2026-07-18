@@ -5,6 +5,7 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 from numpy.lib.stride_tricks import sliding_window_view
+from scipy.fft import next_fast_len
 from scipy.linalg import LinAlgError
 from scipy.optimize import curve_fit
 from scipy.stats import expon, gaussian_kde, kurtosis, skew

@@ -61,11 +61,9 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
         Summaries of the series of information gains.
     """
 
-    if (memory > 0) and (memory < 1): #specify memory as a proportion of the time series length
-        memory = int(np.round(memory*len(y)))
+    if (memory > 0) and (memory < 1):
+        memory = int(np.round(memory * len(y)))
 
-    # COURSE GRAIN
-    # a coarse-grained time series using the numbers 1:num_groups
     if isinstance(num_groups, (int, float)):
         num_groups = int(num_groups)
     yth = coarse_grain(y, coarse_grain_method, num_groups)
@@ -73,68 +71,75 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     num_iters = int(num_iters)
     memory = int(memory)
 
-    # Use random sampling (original behavior)
+    # rs and the RNG are left exactly as-is so sampling is byte-for-byte identical.
     if random_seed is not None:
         np.random.seed(random_seed)
     rs = np.random.permutation(int(N - memory)) + memory
     rs = np.sort(rs[0:min(num_iters, len(rs))])
     rs = np.array([rs])
 
-    # COMPUTE EMPIRICAL PROBABILITIES FROM TIME SERIES
-    store = np.zeros([num_iters, 1])
-    for i in range(0, rs.size): # rs.size
-        if what_prior == 'dist':
-            # uses the distribution up to memory to inform the next point
-            # had to be careful with indexing, arange() works like matlab's : operator
-            p = np.sum(yth[rs[0, i]-memory:rs[0, i]] == yth[rs[0, i]])/memory
-            store[i] = p
-        elif what_prior == 'T1':
-            # uses one-point correlations in memory to inform the next point
-            # estimate transition probabilities from data in memory
-            # find where in memory this has been observbed before, and preceded it
-            memory_data = yth[rs[0, i] - memory:rs[0, i]]
-            inmem = np.where(memory_data[:-1] == yth[rs[0, i] - 1])[0]
-            if len(inmem) == 0:
-                p = 0
-            else:
-                p = np.mean(memory_data[inmem + 1] == yth[rs[0, i]])
-            store[i] = p
+    targets = rs[0]
+    n = targets.size
 
-        elif what_prior == 'T2':
-            # Uses two-point correlations in memory to inform the next point
-            memory_data = yth[rs[0, i] - memory:rs[0, i]]
-            # Previous value observed in memory here
-            inmem1 = np.where(memory_data[1:-1] == yth[rs[0, i] - 1])[0]
-            inmem2 = np.where(memory_data[inmem1] == yth[rs[0, i] - 2])[0]
+    store = np.zeros((num_iters, 1))
+
+    if what_prior == 'dist':
+        # p[t] = (#{ yth[t-memory:t] == yth[t] }) / memory
+        # Computed via per-symbol cumulative counts: O(S*N), no big window matrix.
+        symbols, inv = np.unique(yth, return_inverse=True)
+        inv = np.asarray(inv).ravel()
+        S = symbols.shape[0]
+        cum = np.zeros((S, N + 1), dtype=np.int64)
+        cum[:, 1:] = np.cumsum(inv[None, :] == np.arange(S)[:, None], axis=1)
+        tv = inv[targets]                                   # symbol index of yth[t]
+        counts = cum[tv, targets] - cum[tv, targets - memory]
+        store[:n, 0] = counts / memory
+
+    elif what_prior == 'T1':
+        # p[t] = mean( md[j+1]==yth[t]  over j where md[j]==yth[t-1] )
+        offs = np.arange(memory)
+        W = yth[(targets - memory)[:, None] + offs[None, :]]   # (n, memory) windows
+        tvals = yth[targets]
+        prev1 = W[:, -1]                                        # == yth[t-1]
+        mp = W[:, :-1] == prev1[:, None]
+        mn = W[:, 1:]  == tvals[:, None]
+        den = mp.sum(axis=1)
+        num = (mp & mn).sum(axis=1)
+        p_vec = np.zeros(n)
+        nz = den != 0
+        p_vec[nz] = num[nz] / den[nz]
+        store[:n, 0] = p_vec
+
+    elif what_prior == 'T2':
+        # Left as the original per-target loop (indexing semantics are fragile).
+        for i in range(n):
+            t = targets[i]
+            memory_data = yth[t - memory:t]
+            inmem1 = np.where(memory_data[1:-1] == yth[t - 1])[0]
+            inmem2 = np.where(memory_data[inmem1] == yth[t - 2])[0]
             if len(inmem2) == 0:
                 p = 0
             else:
-                p = np.sum(memory_data[inmem2 + 2] == yth[rs[0, i]]) / len(inmem2)
+                p = np.sum(memory_data[inmem2 + 2] == yth[t]) / len(inmem2)
             store[i] = p
-        else:
-            raise ValueError(f"Unknown method: {what_prior}")
-    # INFORMATION GAINED FROM NEXT OBSERVATION IS log(1/p) = -log(p)
-    store[store == 0] = 1 # so that we set log[0] == 0
+    else:
+        raise ValueError(f"Unknown method: {what_prior}")
 
-    out = {} # dictionary for outputs
-    for i in range(0, len(store)):
-        if store[i] == 0:
-            store[i] = 1
-
+    # log(1/p); zeros (and any unfilled trailing rows) map to log(1)=0.
+    store[store == 0] = 1
     store = -(np.log(store))
-    #minimum amount of information you can gain in this way
+
+    out = {}
     if np.any(store > 0):
-        out['min'] = min(store[store > 0]) # find the minimum value in the array, excluding zero
+        out['min'] = min(store[store > 0])
     else:
         out['min'] = np.nan
-        
-    # Calculate statistics
-    out['max'] = np.max(store) # maximum amount of information you can gain in this way
+    out['max'] = np.max(store)
     out['mean'] = np.mean(store)
     out['sum'] = np.sum(store)
     out['median'] = np.median(store)
-    lq = mstats.mquantiles(store, 0.25, alphap=0.5, betap=0.5) # outputs an array of size one
-    out['lq'] = lq[0] #convert array to int
+    lq = mstats.mquantiles(store, 0.25, alphap=0.5, betap=0.5)
+    out['lq'] = lq[0]
     uq = mstats.mquantiles(store, 0.75, alphap=0.5, betap=0.5)
     out['uq'] = uq[0]
     out['std'] = np.std(store, ddof=1)
@@ -178,132 +183,46 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
     y = np.asarray(y)
     y_bin = binarize(y, binarize_how)
 
-    # Define the length of the new, symbolized sequence, N
     N = len(y_bin)
-
     if N < 5:
         logger.warning("Time series too short!")
         return np.nan
-    # Binary sequences of length 1
-    r1 = (y_bin == 1) # 1
-    r0 = (y_bin == 0) # 0
 
-    # ------ Record these -------
-    # (Will be dependent outputs since signal is binary, sum to 1)
+    b = y_bin.astype(np.intp)  # 0/1 symbols
+
+    # First symbol = most-significant bit, so bincount index order matches the original
+    # key order exactly: 0->dd,1->du,2->ud,3->uu (and analogously for lengths 3, 4).
+    w2 = (b[:-1] << 1) | b[1:]
+    w3 = (b[:-2] << 2) | (b[1:-1] << 1) | b[2:]
+    w4 = (b[:-3] << 3) | (b[1:-2] << 2) | (b[2:-1] << 1) | b[3:]
+
+    c1 = np.bincount(b,  minlength=2)
+    c2 = np.bincount(w2, minlength=4)
+    c3 = np.bincount(w3, minlength=8)
+    c4 = np.bincount(w4, minlength=16)
+
+    # Denominators = the original's shrinking window counts: N, N-1, N-2, N-3.
+    p1 = c1 / N          # [d, u]
+    p2 = c2 / (N - 1)    # [dd, du, ud, uu]
+    p3 = c3 / (N - 2)
+    p4 = c4 / (N - 3)
+
     out = {}
-    out['u'] = np.mean(r1) # proportion 1 (corresponds to a movement up for 'diff')
-    out['d'] = np.mean(r0) # proportion 0 (corresponds to a movement down for 'diff')
-    pp = np.array([out['d'], out['u']])
-    out['h'] = _f_entropy(pp)
+    out['d'], out['u'] = p1[0], p1[1]
+    out['h'] = _f_entropy(p1)
 
-    # Binary sequences of length 2:
-    r1 = r1[:-1]
-    r0 = r0[:-1]
+    out['dd'], out['du'], out['ud'], out['uu'] = p2
+    out['hh'] = _f_entropy(p2)
 
-    r00 = np.logical_and(r0, y_bin[1:] == 0)
-    r01 = np.logical_and(r0, y_bin[1:] == 1)
-    r10 = np.logical_and(r1, y_bin[1:] == 0)
-    r11 = np.logical_and(r1, y_bin[1:] == 1)
+    (out['ddd'], out['ddu'], out['dud'], out['duu'],
+     out['udd'], out['udu'], out['uud'], out['uuu']) = p3
+    out['hhh'] = _f_entropy(p3)
 
-    out['dd'] = np.mean(r00)  # down, down
-    out['du'] = np.mean(r01)  # down, up
-    out['ud'] = np.mean(r10)  # up, down
-    out['uu'] = np.mean(r11)  # up, up
-
-    pp = np.array([out['dd'], out['du'], out['ud'], out['uu']])
-    out['hh'] = _f_entropy(pp)
-
-    # -----------------------------
-    # Binary sequences of length 3:
-    # -----------------------------
-    # Make sure ranges are valid for looking at the next one
-    r00 = r00[:-1]
-    r01 = r01[:-1]
-    r10 = r10[:-1]
-    r11 = r11[:-1]
-
-    # 000
-    r000 = np.logical_and(r00, y_bin[2:] == 0)
-    # 001 
-    r001 = np.logical_and(r00, y_bin[2:] == 1)
-    r010 = np.logical_and(r01, y_bin[2:] == 0)
-    r011 = np.logical_and(r01, y_bin[2:] == 1)
-    r100 = np.logical_and(r10, y_bin[2:] == 0)
-    r101 = np.logical_and(r10, y_bin[2:] == 1)
-    r110 = np.logical_and(r11, y_bin[2:] == 0)
-    r111 = np.logical_and(r11, y_bin[2:] == 1)
-
-    # ----- Record these -----
-    out['ddd'] = np.mean(r000)
-    out['ddu'] = np.mean(r001)
-    out['dud'] = np.mean(r010)
-    out['duu'] = np.mean(r011)
-    out['udd'] = np.mean(r100)
-    out['udu'] = np.mean(r101)
-    out['uud'] = np.mean(r110)
-    out['uuu'] = np.mean(r111)
-
-    ppp = np.array([out['ddd'], out['ddu'], out['dud'], 
-                    out['duu'], out['udd'], out['udu'], 
-                    out['uud'], out['uuu']])
-    out['hhh'] = _f_entropy(ppp)
-
-    # -------------------
-    # 4
-    # -------------------
-    # Make sure ranges are valid for looking at the next one
-
-    r000 = r000[:-1]
-    r001 = r001[:-1]
-    r010 = r010[:-1]
-    r011 = r011[:-1]
-    r100 = r100[:-1]
-    r101 = r101[:-1]
-    r110 = r110[:-1]
-    r111 = r111[:-1]
-
-    r0000 = np.logical_and(r000, y_bin[3:] == 0)
-    r0001 = np.logical_and(r000, y_bin[3:] == 1)
-    r0010 = np.logical_and(r001, y_bin[3:] == 0)
-    r0011 = np.logical_and(r001, y_bin[3:] == 1)
-    r0100 = np.logical_and(r010, y_bin[3:] == 0)
-    r0101 = np.logical_and(r010, y_bin[3:] == 1)
-    r0110 = np.logical_and(r011, y_bin[3:] == 0)
-    r0111 = np.logical_and(r011, y_bin[3:] == 1)
-    r1000 = np.logical_and(r100, y_bin[3:] == 0)
-    r1001 = np.logical_and(r100, y_bin[3:] == 1)
-    r1010 = np.logical_and(r101, y_bin[3:] == 0)
-    r1011 = np.logical_and(r101, y_bin[3:] == 1)
-    r1100 = np.logical_and(r110, y_bin[3:] == 0)
-    r1101 = np.logical_and(r110, y_bin[3:] == 1)
-    r1110 = np.logical_and(r111, y_bin[3:] == 0)
-    r1111 = np.logical_and(r111, y_bin[3:] == 1)
-
-    # ----- Record these -----
-    out['dddd'] = np.mean(r0000)
-    out['dddu'] = np.mean(r0001)
-    out['ddud'] = np.mean(r0010)
-    out['dduu'] = np.mean(r0011)
-    out['dudd'] = np.mean(r0100)
-    out['dudu'] = np.mean(r0101)
-    out['duud'] = np.mean(r0110)
-    out['duuu'] = np.mean(r0111)
-    out['uddd'] = np.mean(r1000)
-    out['uddu'] = np.mean(r1001)
-    out['udud'] = np.mean(r1010)
-    out['uduu'] = np.mean(r1011)
-    out['uudd'] = np.mean(r1100)
-    out['uudu'] = np.mean(r1101)
-    out['uuud'] = np.mean(r1110)
-    out['uuuu'] = np.mean(r1111)
-
-    pppp = np.array([out['dddd'], out['dddu'], out['ddud'], 
-                     out['dduu'], out['dudd'], out['dudu'], 
-                     out['duud'], out['duuu'], out['uddd'], 
-                     out['uddu'], out['udud'], out['uduu'], 
-                     out['uudd'], out['uudu'], out['uuud'], 
-                     out['uuuu']])
-    out['hhhh'] = _f_entropy(pppp)
+    (out['dddd'], out['dddu'], out['ddud'], out['dduu'],
+     out['dudd'], out['dudu'], out['duud'], out['duuu'],
+     out['uddd'], out['uddu'], out['udud'], out['uduu'],
+     out['uudd'], out['uudu'], out['uuud'], out['uuuu']) = p4
+    out['hhhh'] = _f_entropy(p4)
 
     return out
 
@@ -339,70 +258,44 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
     else:
         raise ValueError(f"Unknown coarse-graining method {cg_how}")
 
-    # So we have a vectory yt with entries in {1, 2, 3}
-    N = len(yt) # length of the symbolized sequence derived from the time series
+    N = len(yt)
 
-    # ------------------------------------------------------------------------------
-    # Words of length 1
-    # ------------------------------------------------------------------------------
-    out1 = np.zeros(3)
-    r1 = [np.where(yt == i + 1)[0] for i in range(3)]
-    for i in range(3):
-        out1[i] = len(r1[i]) / N
+    # Symbols in {0,1,2}. Encode each length-k window in base 3 with the FIRST symbol
+    # as the most-significant digit, so bincount index == i*3^(k-1)+... matches the
+    # C-order layout of the original out2/out3/out4 arrays (and thus the dict keys).
+    s = np.asarray(yt).astype(np.intp) - 1
 
-    out = {
-        'a': out1[0], 'b': out1[1], 'c': out1[2],
-        'h': _f_entropy(out1)
-    }
+    # Slicing to full windows (s[:-1], s[:-2], s[:-3]) reproduces the original's
+    # trailing-index trimming exactly: only start positions with a complete window remain.
+    w2 = s[:-1] * 3 + s[1:]
+    w3 = s[:-2] * 9 + s[1:-1] * 3 + s[2:]
+    w4 = s[:-3] * 27 + s[1:-2] * 9 + s[2:-1] * 3 + s[3:]
 
-    # ------------------------------------------------------------------------------
-    # Words of length 2
-    # ------------------------------------------------------------------------------
+    c1 = np.bincount(s,  minlength=3)
+    c2 = np.bincount(w2, minlength=9)
+    c3 = np.bincount(w3, minlength=27)
+    c4 = np.bincount(w4, minlength=81)
 
-    r1 = [r[:-1] if len(r) > 0 and r[-1] == N - 1 else r for r in r1]
-    out2 = np.zeros((3, 3))
-    r2 = [[r1[i][yt[r1[i] + 1] == j + 1] for j in range(3)] for i in range(3)]
-    for i in range(3):
-        for j in range(3):
-            out2[i, j] = len(r2[i][j]) / (N - 1)
+    # Same denominators as the original: N, N-1, N-2, N-3.
+    out1 = c1 / N
+    out2 = (c2 / (N - 1)).reshape(3, 3)
+    out3 = (c3 / (N - 2)).reshape(3, 3, 3)
+    out4 = (c4 / (N - 3)).reshape(3, 3, 3, 3)
+
+    out = {'a': out1[0], 'b': out1[1], 'c': out1[2], 'h': _f_entropy(out1)}
 
     out.update({
         'aa': out2[0, 0], 'ab': out2[0, 1], 'ac': out2[0, 2],
         'ba': out2[1, 0], 'bb': out2[1, 1], 'bc': out2[1, 2],
         'ca': out2[2, 0], 'cb': out2[2, 1], 'cc': out2[2, 2],
-        'hh': _f_entropy(out2)
+        'hh': _f_entropy(out2),
     })
 
-    # ------------------------------------------------------------------------------
-    # Words of length 3
-    # ------------------------------------------------------------------------------
-
-    r2 = [[r[:-1] if len(r) > 0 and r[-1] == N - 2 else r for r in row] for row in r2]
-    out3 = np.zeros((3, 3, 3))
-    r3 = [[[r2[i][j][yt[r2[i][j] + 2] == k + 1] for k in range(3)] for j in range(3)] for i in range(3)]
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                out3[i, j, k] = len(r3[i][j][k]) / (N - 2)
-
-    out.update({f'{chr(97+i)}{chr(97+j)}{chr(97+k)}': out3[i, j, k] 
+    out.update({f'{chr(97+i)}{chr(97+j)}{chr(97+k)}': out3[i, j, k]
                 for i in range(3) for j in range(3) for k in range(3)})
     out['hhh'] = _f_entropy(out3)
 
-    # ------------------------------------------------------------------------------
-    # Words of length 4
-    # ------------------------------------------------------------------------------
-
-    r3 = [[[r[:-1] if len(r) > 0 and r[-1] == N - 3 else r for r in plane] for plane in cube] for cube in r3]
-    out4 = np.zeros((3, 3, 3, 3))
-    r4 = [[[[r3[i][j][k][yt[r3[i][j][k] + 3] == l + 1] for l in range(3)] for k in range(3)] for j in range(3)] for i in range(3)]
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                for l in range(3):
-                    out4[i, j, k, l] = len(r4[i][j][k][l]) / (N - 3)
-
-    out.update({f'{chr(97+i)}{chr(97+j)}{chr(97+k)}{chr(97+l)}': out4[i, j, k, l] 
+    out.update({f'{chr(97+i)}{chr(97+j)}{chr(97+k)}{chr(97+l)}': out4[i, j, k, l]
                 for i in range(3) for j in range(3) for k in range(3) for l in range(3)})
     out['hhhh'] = _f_entropy(out4)
 
@@ -410,8 +303,8 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
 
 def _f_entropy(x):
     """Entropy of a set of counts, log(0) = 0"""
-    return -np.sum(x[x > 0] * np.log(x[x > 0]))
-
+    xpos = x[x > 0]
+    return -np.sum(xpos * np.log(xpos))
 
 def binary_stretch(x: ArrayLike, stretch_what: str = 'lseq1') -> float:
     """
@@ -506,21 +399,20 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     y_bin = binarize(y, binarize_how=binary_method)
     N = len(y_bin)
 
-    # Stationarity of binarised time series
     out = {}
-    out['pupstat2'] = np.sum(y_bin[N//2:] == 1) / np.sum(y_bin[:N//2] == 1)
+    out['pupstat2'] = np.count_nonzero(y_bin[N//2:] == 1) / np.count_nonzero(y_bin[:N//2] == 1)
 
-    # Consecutive strings of ones/zeros (normalized by length)
-    diff_y = np.diff(np.where(np.concatenate(([1], y_bin, [1])))[0])
+    # Stretch of 0s: gaps between consecutive 1-positions (with 1-sentinels), minus 1.
+    diff_y = np.diff(np.flatnonzero(np.concatenate(([1], y_bin, [1]))))
     stretch0 = diff_y[diff_y != 1] - 1
 
-    diff_y = np.diff(np.where(np.concatenate(([0], y_bin, [0])) == 0)[0])
+    # Stretch of 1s: gaps between consecutive 0-positions (with 0-sentinels), minus 1.
+    diff_y = np.diff(np.flatnonzero(np.concatenate(([0], y_bin, [0])) == 0))
     stretch1 = diff_y[diff_y != 1] - 1
 
-    # pstretches
-    # Number of different stretches as proportion of the time-series length
     out['pstretch1'] = len(stretch1) / N
 
+    # --- stretch0: compute each reduction once, reuse for the /N variants ---
     if len(stretch0) == 0:
         out['longstretch0'] = 0
         out['longstretch0norm'] = 0
@@ -529,13 +421,17 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
         out['stdstretch0'] = np.nan
         out['stdstretch0norm'] = np.nan
     else:
-        out['longstretch0'] = np.max(stretch0)
-        out['longstretch0norm'] = np.max(stretch0) / N
-        out['meanstretch0'] = np.mean(stretch0)
-        out['meanstretch0norm'] = np.mean(stretch0) / N
-        out['stdstretch0'] = np.std(stretch0, ddof=1)
-        out['stdstretch0norm'] = np.std(stretch0, ddof=1) / N
+        max0 = np.max(stretch0)
+        mean0 = np.mean(stretch0)
+        std0 = np.std(stretch0, ddof=1)
+        out['longstretch0'] = max0
+        out['longstretch0norm'] = max0 / N
+        out['meanstretch0'] = mean0
+        out['meanstretch0norm'] = mean0 / N
+        out['stdstretch0'] = std0
+        out['stdstretch0norm'] = std0 / N
 
+    # --- stretch1 ---
     if len(stretch1) == 0:
         out['longstretch1'] = 0
         out['longstretch1norm'] = 0
@@ -543,13 +439,16 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
         out['meanstretch1norm'] = 0
         out['stdstretch1'] = np.nan
     else:
-        out['longstretch1'] = np.max(stretch1)
-        out['longstretch1norm'] = np.max(stretch1) / N
-        out['meanstretch1'] = np.mean(stretch1)
-        out['meanstretch1norm'] = np.mean(stretch1) / N
-        out['stdstretch1'] = np.std(stretch1, ddof=1)
-        out['stdstretch1norm'] = np.std(stretch1, ddof=1) / N
-    
+        max1 = np.max(stretch1)
+        mean1 = np.mean(stretch1)
+        std1 = np.std(stretch1, ddof=1)
+        out['longstretch1'] = max1
+        out['longstretch1norm'] = max1 / N
+        out['meanstretch1'] = mean1
+        out['meanstretch1norm'] = mean1 / N
+        out['stdstretch1'] = std1
+        out['stdstretch1norm'] = std1 / N
+
     out['meanstretchdiff'] = (out['meanstretch1'] - out['meanstretch0']) / N
     out['stdstretchdiff'] = (out['stdstretch1'] - out['stdstretch0']) / N
 
@@ -598,40 +497,31 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
         of the transition matrix, measures of asymmetry, and eigenvalues of the
         transition matrix.
     """
-    # check inputs
     y = np.asarray(y)
     if num_groups < 2:
         logger.warning("Too few groups for coarse-graining")
         return np.nan
     if tau == 'ac':
-        # determine the tau from first zero of the ACF
         tau = first_crossing(y, 'ac', 0, 'discrete')
         if np.isnan(tau):
             logger.warning("Time series too short to estimate tau")
             return np.nan
     if tau > 1:
         y = resample_poly(y, 1, int(tau))
-    
+
     N = len(y)
 
     yth = coarse_grain(y, how_to_cg, num_groups)
-    # At this point we should have:
-    # (*) yth: a thresholded y containing integers from 1 to num_groups
     yth = np.ravel(yth)
 
-    T = np.zeros((num_groups,num_groups))
-    for i in range(num_groups):
-        ri = (yth == i + 1)
-        if sum(ri) == 0:
-            T[i,:] = 0
-        else:
-            ri_next = np.r_[False, ri[:-1]]
-            for j in range(num_groups):
-                T[i, j] = np.sum(yth[ri_next] == j + 1)
+    a = yth[:-1] - 1
+    b = yth[1:] - 1
+    idx = a * num_groups + b
+    T = np.bincount(idx, minlength=num_groups * num_groups).astype(float)
+    T = T.reshape(num_groups, num_groups)
 
     out = {}
-    # Normalize from counts to probabilities:
-    T = T/(N - 1) # N-1 is appropriate because it's a 1-time transition matrix
+    T = T / (N - 1)
 
     if num_groups == 2:
         for i in range(4):
@@ -645,27 +535,21 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
         for i in range(num_groups):
             out[f'TD{i+1}'] = T.transpose()[i, i]
 
-    # (ii) Measures on the diagonal
-    out['ondiag'] = np.trace(T) # trace
-    out['stddiag'] = np.std(np.diag(T), ddof=1) # std of diagonal elements
+    out['ondiag'] = np.trace(T)
+    out['stddiag'] = np.std(np.diag(T), ddof=1)
 
-    # (iii) Measures of symmetry:
-    out['symdiff'] = np.sum(np.abs(T - T.T)) # sum of differences of individual elements
-    # difference in sums of upper and lower triangular parts of T
+    out['symdiff'] = np.sum(np.abs(T - T.T))
     out['symsumdiff'] = np.sum(np.tril(T, -1)) - np.sum(np.triu(T, 1))
 
-    # Measures from eigenvalues of T
     eig_t = np.linalg.eigvals(T)
     out['stdeig'] = np.std(eig_t, ddof=1)
     out['maxeig'] = np.max(np.real(eig_t))
     out['mineig'] = np.min(np.real(eig_t))
     out['maximeig'] = np.max(np.imag(eig_t))
 
-    # Measures from covariance matrix
     cov_t = np.cov(T.transpose())
     out['sumdiagcov'] = np.trace(cov_t)
 
-    # Eigenvalues of covariance matrix
     eig_cov_t = np.linalg.eigvals(cov_t)
     out['stdeigcov'] = np.std(eig_cov_t, ddof=1)
     out['maxeigcov'] = np.max(np.real(eig_cov_t))
