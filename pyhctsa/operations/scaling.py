@@ -4,6 +4,7 @@ from numpy.typing import ArrayLike
 import numpy as np
 from scipy.stats import iqr
 from scipy.interpolate import interp1d
+from scipy.linalg import qr, solve_triangular
 import statsmodels.api as sm
 import logging
 logger = logging.getLogger('pyhctsa')
@@ -268,4 +269,261 @@ def _robust_linear_fit(log_tt, log_ff, the_range, field_name):
     out[f'{field_name}se2'] = results.bse[1]  # standard error in slope
     out[f'{field_name}ssr'] = np.mean(results.resid ** 2)  # mean squares residual
     out[f'{field_name}resac1'] = autocorr(results.resid, 1, 'Fourier')[0]  # autocorr at lag 1
+    return out
+
+
+def _colon(base, step, limit):
+    base = float(base)
+    step = float(step)
+    limit = float(limit)
+    if step == 0 or (step > 0 and base > limit) or (step < 0 and base < limit):
+        return np.zeros(0)
+
+    n = int(np.floor((limit - base) / step + 0.5))
+    # Guard against the rounding above overshooting the limit:
+    while n > 0 and abs(base + n * step) > abs(limit) + abs(step) * 0.5:
+        n -= 1
+
+    i = np.arange(n + 1, dtype=float)
+    out = np.empty(n + 1)
+    lower = i <= n / 2.0
+    out[lower] = base + i[lower] * step
+    out[~lower] = limit - (n - i[~lower]) * step
+    out[0] = base
+    if n > 0:
+        out[n] = limit
+    return out
+
+def _linspace(d1, d2, n):
+    d1 = float(d1)
+    d2 = float(d2)
+    n1 = n - 1
+    if np.isinf((d2 - d1) * (n1 - 1)):
+        i = np.arange(n1 + 1, dtype=float)
+        y = d1 + (d2 / n1) * i - (d1 / n1) * i
+    else:
+        y = d1 + np.arange(n1 + 1, dtype=float) * (d2 - d1) / n1
+    if y.size:
+        if d1 == d2:
+            y[:] = d1
+        else:
+            y[n - 1] = d2
+    return y
+
+def _round(x):
+    x = np.asarray(x, dtype=float)
+    return np.sign(x) * np.floor(np.abs(x) + 0.5)
+
+def _polyfit(x, y, deg):
+    x = np.asarray(x, dtype=float).ravel()
+    y = np.asarray(y, dtype=float).ravel()
+
+    n = deg + 1
+    V = np.ones((x.size, n))
+    for j in range(deg - 1, -1, -1):
+        V[:, j] = x * V[:, j + 1]
+
+    Q, R, perm = qr(V, mode="economic", pivoting=True)
+
+    # Rank from the pivoted diagonal, using Matlab's mldivide tolerance:
+    diagR = np.abs(np.diag(R))
+    if diagR.size == 0 or diagR[0] == 0:
+        return np.zeros(n)
+    tol = max(V.shape) * np.spacing(diagR[0])
+    rank = int(np.sum(diagR > tol))
+
+    p = np.zeros(n)
+    p[perm[:rank]] = solve_triangular(
+        R[:rank, :rank], (Q.T @ y)[:rank], lower=False
+    )
+    return p
+
+def _polyval(p, x):
+    x = np.asarray(x, dtype=float)
+    y = np.zeros_like(x)
+    for coeff in p:
+        y = x * y + coeff
+    return y
+
+def _std(x, axis=None):
+    x = np.asarray(x, dtype=float)
+    n = x.size if axis is None else x.shape[axis]
+    if n < 2:
+        return np.zeros(()) if axis is None else np.zeros(
+            tuple(d for i, d in enumerate(x.shape) if i != axis % x.ndim)
+        )
+    return np.std(x, axis=axis, ddof=1)
+
+def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None, q_range: None | list = None):
+    """Multiscale multifractal analysis of a time series.
+
+    Parameters
+    ----------
+    y : array_like
+        Input time series (a 1-D vector).
+    do_overlap : bool, optional
+        False (default): partition into non-overlapping windows of analysis.
+        True: overlapping windows with a step of 1 (much longer calculations).
+    scale_range : sequence of 2 numbers, optional
+        [min_scale, max_scale]. Defaults to [10, round(N/40)]. max_scale must be
+        a multiple of 5 and is rounded to one if it is not.
+    q_range : sequence of 2 numbers, optional
+        [q_min, q_max] multifractal parameter range. Defaults to [-5, 5].
+
+    Returns
+    -------
+    dict of summary statistics, or float('nan') if the series is too short.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+
+    # Time-series length:
+    n = y.size
+
+    # --------------------------------------------------------------------------
+    # Check inputs:
+    # --------------------------------------------------------------------------
+    if scale_range is None:
+        scale_range = [10, float(_round(n / 40))]
+    min_scale = scale_range[0]
+    max_scale = scale_range[1]
+
+    if (max_scale / 5) < min_scale:
+        logging.warning(
+            "Time-series (N=%u) too short for multiscale multifractal analysis" % n
+        )
+        return float("nan")
+    elif max_scale % 5 != 0:
+        max_scale = float(_round(max_scale / 5)) * 5
+        print("adjusted max_scale to %u" % max_scale)
+
+    if q_range is None:
+        q_range = [-5, 5]
+    q_min = q_range[0]
+    q_max = q_range[1]
+
+    q_list = _colon(q_min, 0.1, q_max)
+    q_list[q_list == 0] = 0.0001
+
+    # --------------------------------------------------------------------------
+
+    prof = np.cumsum(y)
+    slength = prof.size
+
+    num_increments = 20
+    s_list_full = np.unique(_round(_linspace(min_scale, max_scale, num_increments)))
+
+    # Preallocate fqs (one row per scale x q combination):
+    fqs = np.zeros((s_list_full.size * q_list.size, 3))
+    row_idx = 0
+
+    for s in s_list_full:
+        s = int(s)
+
+        if do_overlap:
+            # Sliding windows of length s, step 1:
+            num_segments = slength - s + 1
+            segments = np.lib.stride_tricks.sliding_window_view(prof, s)
+        else:
+            num_segments = slength // s
+            segments = prof[: num_segments * s].reshape(num_segments, s)
+
+        x_base = _colon(1, 1, s)
+        f2_nis = np.zeros(num_segments)
+
+        for ni in range(num_segments):
+            seg = segments[ni, :]
+            fit = _polyfit(x_base, seg, 2)
+            f2_nis[ni] = np.mean((seg - _polyval(fit, x_base)) ** 2)
+
+        for q in q_list:
+            fqs[row_idx, :] = [q, s, np.mean(f2_nis ** (q / 2)) ** (1 / q)]
+            row_idx += 1
+
+    fqs_ll = np.column_stack(
+        (fqs[:, 0], fqs[:, 1], np.log(fqs[:, 1]), np.log(fqs[:, 2]))
+    )
+
+    # --------------------------------------------------------------------------
+    # Now compute Hurst exponents as the gradients of F(q) curves
+    # --------------------------------------------------------------------------
+    if np.sum(s_list_full <= max_scale / 5) >= 10:
+        s_list = s_list_full[s_list_full <= max_scale / 5]
+    elif min_scale == max_scale / 5:
+        # Single-point range: min_scale:0:(max_scale/5) would otherwise silently
+        # return empty (a zero-step colon range is always empty in Matlab, even
+        # when start == stop), so just take the one point directly:
+        s_list = np.array([float(min_scale)])
+    else:
+        # Sample higher in the scale dimension:
+        s_spacing = ((max_scale / 5) - min_scale) / 10
+        s_list = _colon(min_scale, s_spacing, max_scale / 5)
+
+    # Coarser sampling of q space:
+    q_list = _colon(q_min, 0.5, q_max)
+    q_list[q_list == 0] = 0.0001
+
+    hqs = np.zeros((q_list.size, s_list.size))
+    for si, s_val in enumerate(s_list):
+        for qi, q_val in enumerate(q_list):
+            mask = (
+                (fqs_ll[:, 0] == q_val)
+                & (fqs_ll[:, 1] >= s_val)
+                & (fqs_ll[:, 1] <= 5 * s_val)
+            )
+            fit_temp = fqs_ll[mask, :]
+            hqs[qi, si] = _polyfit(fit_temp[:, 2], fit_temp[:, 3], 1)[0]
+
+    # Not completely on top of the algorithm, but for some reason this was
+    # recorded as a multiple of 3 in the original algorithm:
+    s_list_scaled = s_list * 3
+
+    # --------------------------------------------------------------------------
+    # Output statistics:
+    # --------------------------------------------------------------------------
+
+    give_me_grad = lambda x_data, y_data : _polyfit(x_data, y_data, 1)[0]
+
+    out = {}
+
+    # Global properties (hqs(:) is column-major in Matlab):
+    all_exponents = hqs.ravel(order="F")
+    out["meanHurstExponent"] = np.mean(all_exponents)
+    out["stdHurstExponent"] = _std(all_exponents)
+    out["minHurstExponent"] = np.min(all_exponents)
+    out["maxHurstExponent"] = np.max(all_exponents)
+
+    # Changes with scale (mean(hqs,1) is the mean down each column):
+    mean_over_q = np.mean(hqs, axis=0)
+    out["scaleHurstStd"] = _std(mean_over_q)
+    out["scaleHurstTrend"] = give_me_grad(s_list_scaled, mean_over_q)
+
+    # Changes with q:
+    mean_over_scale = np.mean(hqs, axis=1)
+    out["qHurstStd"] = _std(mean_over_scale)
+    out["qHurstTrend"] = give_me_grad(q_list, mean_over_scale)
+
+    # max/min points are where in scale/q space?
+    # `find(...,1)` takes the first hit in column-major order:
+    qi, si = np.unravel_index(
+        np.argmax(hqs.ravel(order="F") == np.max(all_exponents)),
+        hqs.shape,
+        order="F",
+    )
+    out["maxHurstQ"] = q_list[qi]
+    out["maxHurstScale"] = s_list_scaled[si]
+    qi, si = np.unravel_index(
+        np.argmax(hqs.ravel(order="F") == np.min(all_exponents)),
+        hqs.shape,
+        order="F",
+    )
+    out["minHurstQ"] = q_list[qi]
+    out["minHurstScale"] = s_list_scaled[si]
+
+    # Phase transitions: there is some peak or trough somewhere, so the standard
+    # deviation across scales or q is inconsistent
+    std_s = _std(hqs, axis=0)
+    std_q = _std(hqs, axis=1)
+    out["stdStdHurstQ"] = _std(std_q)  # large if variance changes a lot with q
+    out["stdStdHurstScale"] = _std(std_s)  # large if variance changes a lot with scale
+
     return out

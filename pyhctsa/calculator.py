@@ -19,10 +19,46 @@ from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, T
 from .utils import _check_optional_deps, _preprocess_decorator, _validate_data, _build_repr_html
 from .distribute import _compute_features_for_chunk, _extract_features_single_series
 
-def range_constructor(loader, node) -> list:
-    """Construct a range from a YAML config."""
-    start, end = loader.construct_sequence(node)
-    return list(range(start, end + 1))
+class RangeList(list):
+    """A list produced by the ``!range`` YAML constructor.
+
+    Behaves exactly like a plain ``list`` but remembers the ``(start, stop, step)``
+    it was built from so it can be rendered compactly in feature labels.
+    """
+    def __init__(self, values, start, stop, step):
+        super().__init__(values)
+        self.start = start
+        self.stop = stop
+        self.step = step
+
+def range_constructor(loader, node) -> RangeList:
+    """Construct an (inclusive) range from a YAML config.
+
+    Usage in YAML:
+        !range [start, stop]          # integer step of 1, inclusive of stop
+        !range [start, stop, step]    # custom step (int or float), inclusive of stop
+
+    Examples:
+        !range [1, 40]          -> [1, 2, ..., 40]
+        !range [0, 0.95, 0.05]  -> [0.0, 0.05, ..., 0.95]
+    """
+    seq = loader.construct_sequence(node)
+    if len(seq) == 2:
+        start, stop = seq
+        step = 1
+    elif len(seq) == 3:
+        start, stop, step = seq
+    else:
+        raise ValueError(
+            "!range expects [start, stop] or [start, stop, step], "
+            f"got {len(seq)} values"
+        )
+    if step == 0:
+        raise ValueError("!range step must be non-zero")
+    n = int(round((stop - start) / step)) + 1
+    # round to mitigate floating-point drift (e.g. 0.30000000000000004)
+    values = [round(start + i * step, 10) for i in range(n)]
+    return RangeList(values, start, stop, step)
 yaml.SafeLoader.add_constructor("!range", range_constructor)
 
 def classify_output(res) -> int:
@@ -112,6 +148,17 @@ def _standardise_inputs(data) -> list[np.ndarray]:
         "Input must be a 1D series, a list of 1D series, or a 2D array "
         "with shape (n_series, n_samples)")
    
+def _format_range_bound(val) -> str:
+    """Render a single !range bound for a label by dropping the decimal point.
+
+    0 -> '0', 0.05 -> '005', 0.95 -> '095', 1.0 -> '1'.
+    """
+    if isinstance(val, float) and val.is_integer():
+        val = int(val)
+    if isinstance(val, int):
+        return str(val)
+    return str(val).replace(".", "")
+
 def _format_param_value(val, key=None) -> str:
     """ 
     Format parameter value for label: 
@@ -122,6 +169,12 @@ def _format_param_value(val, key=None) -> str:
     # New Logic for Booleans
     if isinstance(val, bool):
         return key if val and key else ""
+
+    # A !range with a known start/stop/step renders compactly as
+    # 'start_step_stop', dropping the decimal point (e.g. 0 to 0.95 in
+    # steps of 0.05 -> '0_005_095').
+    if isinstance(val, RangeList):
+        return "_".join(_format_range_bound(v) for v in (val.start, val.step, val.stop))
 
     if isinstance(val, list):
         # Check if it's a contiguous range

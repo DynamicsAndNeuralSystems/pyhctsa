@@ -1,6 +1,9 @@
 import numpy as np
+import math
 
 from ..toolboxes.Max_Little.ML_l1pwc import l1pwc, l1pwc_lmax
+from ..operations.wavelet import wavedec, wrcoef
+from pywt import dwt_max_level
 
 def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -> dict:
     """
