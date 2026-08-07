@@ -294,7 +294,7 @@ Nonlinearity
    pyhctsa.operations.nonlinearity.local_density
    pyhctsa.operations.nonlinearity.tisean_d2
 
-.. _chnagepointmeths:
+.. _changepointmeths:
 
 Changepoint
 ~~~~~~~~~~~
@@ -302,4 +302,5 @@ Changepoint
    :toctree: generated/
 
    pyhctsa.operations.changepoint.stepdetect
-   
+   pyhctsa.operations.changepoint.l1pwc_sweep_lambda
+

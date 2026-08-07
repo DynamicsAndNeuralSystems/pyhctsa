@@ -1,5 +1,5 @@
 📘 Getting Started
-===============
+==================
 
 Computing features
 ------------------
@@ -33,7 +33,7 @@ Note that each time-series instances does not have to be the same length to comp
 N×F, where N is the number of time-series instances and F is the number of time-series features.
 
 🤖 Calling Individual Operations
------------------------------
+--------------------------------
 If you would like to run individual operations on your data, you can access the corresponding functions from their respective modules directly. 
 For example, to compute the `raw_hrv_meas` features on your data, the `raw_hrv_meas` master operation can be accessed from the `medical` module:
 

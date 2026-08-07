@@ -12,6 +12,23 @@ from ..operations.model_fit import residual_analysis
 from ..operations.correlation import first_crossing, first_min, autocorr
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
 
+def _resolve_time_delay(y: ArrayLike, tau: Union[int, str]) -> Union[int, float]:
+    """Resolve a string time-delay spec to a lag.
+
+    ``'ac'`` uses the first zero-crossing of the autocorrelation function and
+    ``'mi'`` the first minimum of the automutual information. An integer is
+    returned unchanged. The resolved value may be NaN (time series too short);
+    callers are responsible for handling that.
+    """
+    if not isinstance(tau, str):
+        return tau
+    if tau == 'ac':
+        return first_crossing(y, 'ac', 0, 'discrete')
+    if tau == 'mi':
+        return first_min(y, 'mi')
+    raise ValueError(f'Invalid time-delay method: {tau}. Choose either mi or ac.')
+
+
 def _first_fn(p, threshold, over_or_under='under'):
     if over_or_under == 'under':
         indices = np.where(p < threshold)[0]
@@ -75,7 +92,6 @@ def _ms_embed(z, v, w):
         lags = np.array([0, 1, 2])
         auto_neg = False
     elif w is not None:
-        # MS_embed(z, dim, lag)  →  lags = 0 : w : w*(v-1)
         v = int(v)
         lags = np.arange(0, w * v, w)          # length v
         auto_neg = False
@@ -242,13 +258,8 @@ def nlpe(y: ArrayLike, de: int = 3, tau: Union[int, str] = 1, max_n: int = 5000)
     n = len(y)
 
     if isinstance(tau, str):
-        if tau == 'ac':
-            tau = first_crossing(y, 'ac', 0, 'discrete')
-        elif tau == 'mi':
-            tau = first_min(y, 'mi')
-        else:
-            raise ValueError("tau can be either 'mi' or 'ac'")
-        # check the tau 
+        tau = _resolve_time_delay(y, tau)
+        # check the tau
         if np.isnan(tau):
             logger.warning('Time series cannot be embedded (too short?)')
             return np.nan
@@ -307,28 +318,16 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
         Various statistics summarizing the obtained eigenvalue distribution.
 
     """
-    n = len(y)
     if isinstance(tau, str):
-        if tau == 'ac':
-            tau = first_crossing(y, 'ac', 0, 'discrete')
-            if np.isnan(tau):
-                logger.warning('Could not get time delay by ACF (time series too short?)')
-                return np.nan
-        elif tau == 'mi':
-            tau = first_min(y, 'mi')
-            if np.isnan(tau):
-                logger.warning('Could not get time delay by mutual information (time series too short?)')
-                return np.nan
-        else:
-            raise ValueError(f'Invalid time-delay method: {tau}. Choose either mi or ac.')
-    n_embed = n - (m-1)*tau
-    if n_embed <= 0:
-        logger.warning(f'Time series (N = {n}) too short to embed with these embedding parameters.')
+        tau = _resolve_time_delay(y, tau)
+        if np.isnan(tau):
+            logger.warning('Could not get time delay (time series too short?)')
+            return np.nan
+    try:
+        y_embed = _time_delay_embed(y, int(tau), m)
+    except ValueError as e:  # embedding failed (time series too short)
+        logger.warning(str(e))
         return np.nan
-
-    y_embed = np.zeros((n_embed, m))
-    for i in range(m):
-        y_embed[:, i] = y[i*tau : n_embed + i*tau]
     # do the PCA
     pca = PCA().fit(y_embed)
     #proportion of variance explained
@@ -396,15 +395,7 @@ def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
     point of the time-delay embedding: density(i) is proportional to
     1/r_NNR(i)^m, where r_NNR(i) is the distance from point i to its NNR-th
     nearest neighbor (excluding temporally-close points within a Theiler
-    window of "past" samples) and m is the embedding dimension. This
-    operation previously used TSTOOL's 'localdensity', which the original
-    author noted was "very poorly documented in the TSTOOL package" -- its
-    exact algorithm was never confirmed, only assumed to be some form of
-    local density estimate in the embedding space, which is what's computed
-    here natively (no toolbox dependency at all). The missing normalizing
-    constant (relating 1/r^m to a true probability density) is the same for
-    every point in a given call, so it cancels out of all of the relative
-    statistics below (min/max/std/mean/median/autocorrelation).
+    window of "past" samples) and m is the embedding dimension. 
 
     Parameters
     ----------
@@ -483,7 +474,7 @@ def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
     return out
 
 def _argmin_first_colmajor(m: np.ndarray):
-    """First index of the minimum in MATLAB's column-major order; NaNs ignored."""
+    """First index of the minimum in column-major order; NaNs ignored."""
     flat = m.ravel(order='F')
     if flat.size == 0 or np.all(np.isnan(flat)):
         return None, None, np.nan
@@ -630,7 +621,7 @@ def _sub_celltomat(blocks: list, column: int) -> tuple:
     thematrix = np.zeros((len(blocks), ee))
     for i, b in enumerate(blocks):
         if b.shape[0] != ee:
-            break  # MATLAB bails out here, leaving the remaining rows zero
+            break
         thematrix[i, :] = b[:, column - 1]
     return thevector, thematrix
 
@@ -644,7 +635,7 @@ def _sub_getslopes(x: np.ndarray, Y: np.ndarray) -> np.ndarray:
     l = Y.shape[1] - 1
     stptr, endptr = _scaling_range_endpoints(l)
     if stptr.size == 0 or endptr.size == 0:
-        return None  # MATLAB hits a dimension mismatch here and returns NaN
+        return None
 
     results = np.full((ndim, 4), np.nan)
     for c in range(ndim):
@@ -691,6 +682,43 @@ def _sub_doesflatten(x: np.ndarray, Y: np.ndarray) -> np.ndarray:
             continue
         results[c] = [best, np.mean(Y[c, stptr[a] - 1:endptr[b]])]
     return results
+
+
+def _summarise_d2_scaling(dat_v: np.ndarray, dat_M: np.ndarray, p: str,
+                          out: dict) -> None:
+    # Summarise local slopes of the correlation integral for one variant of the
+    # D2 estimate (raw ``d2`` or Gaussian-smoothed ``d2g``). ``p`` prefixes the
+    # output keys; results are written into ``out`` in place.
+    try:
+        benfind = _findscalingr_ind(dat_M)
+    except Exception as exc:
+        raise ValueError('Error finding scaling range') from exc
+
+    # rows: increasing embedding m; columns: stpt, endpt, goodness, dim
+    out[f'ben{p}_mindim'] = np.min(benfind[:, 3])
+    out[f'ben{p}_maxdim'] = np.max(benfind[:, 3])
+    out[f'ben{p}_meandim'] = np.mean(benfind[:, 3])
+    out[f'ben{p}_meangoodness'] = np.mean(benfind[:, 2])
+
+    mmin = _sub_findmmin(benfind[:, 3])
+    # minimum scale at which a scaling range is observed:
+    out[f'benmmin{p}_logminl'] = (np.nan if mmin['ri1'] is None
+                                  else np.log(dat_v[mmin['ri1'] - 1]))
+    out[f'benmmin{p}_goodness'] = mmin['goodness']
+    out[f'benmmin{p}_stabledim'] = mmin['stabled']
+    out[f'benmmin{p}_linrmserr'] = mmin['linrmserr']
+
+    # Reshaped: only for large enough m (as determined by the criteria above),
+    # then find a scaling region across m for a saturated range of m.
+    sc = _findscalingr(dat_M[mmin['ri1'] - 1:, :])
+    out[f'{p}_logminscr'] = (np.nan if sc['ri1'] is None
+                             else np.log(dat_v[sc['ri1'] - 1]))
+    out[f'{p}_logmaxscr'] = (np.nan if sc['ri2'] is None
+                             else np.log(dat_v[sc['ri2'] - 1]))
+    out[f'{p}_logscr'] = out[f'{p}_logmaxscr'] - out[f'{p}_logminscr']
+    out[f'{p}_goodness'] = sc['goodness']
+    out[f'{p}_dimest'] = sc['dimest']
+    out[f'{p}_dimstd'] = sc['dimstd']
 
 
 def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
@@ -752,13 +780,7 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         return np.nan
 
     # Time delay, tau
-    if isinstance(tau, str):
-        if tau == 'ac':
-            tau = first_crossing(y, 'ac', 0, 'discrete')
-        elif tau == 'mi':
-            tau = first_min(y, 'mi')
-        else:
-            raise ValueError(f'Invalid time-delay method: {tau}. Choose either mi or ac.')
+    tau = _resolve_time_delay(y, tau)
     if np.isnan(tau):
         raise ValueError('Time series cannot be embedded (too short?)')
     tau = int(tau)
@@ -805,71 +827,13 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     if all(b.size == 0 for b in d2dat):
         raise ValueError('No data...')
     d2dat_v, d2dat_M = _sub_celltomat(d2dat, 2)
-
-    try:
-        benfindd2 = _findscalingr_ind(d2dat_M)
-    except Exception as exc:
-        raise ValueError('Error finding scaling range') from exc
-
-    # rows: increasing embedding m; columns: stpt, endpt, goodness, dim
-    out['bend2_mindim'] = np.min(benfindd2[:, 3])
-    out['bend2_maxdim'] = np.max(benfindd2[:, 3])
-    out['bend2_meandim'] = np.mean(benfindd2[:, 3])
-    out['bend2_meangoodness'] = np.mean(benfindd2[:, 2])
-
-    mminfulcherd2 = _sub_findmmin(benfindd2[:, 3])
-    # minimum scale at which a scaling range is observed:
-    out['benmmind2_logminl'] = (np.nan if mminfulcherd2['ri1'] is None
-                                else np.log(d2dat_v[mminfulcherd2['ri1'] - 1]))
-    out['benmmind2_goodness'] = mminfulcherd2['goodness']
-    out['benmmind2_stabledim'] = mminfulcherd2['stabled']
-    out['benmmind2_linrmserr'] = mminfulcherd2['linrmserr']
-
-    # Reshaped: only for large enough m (as determined by the criteria above),
-    # then find a scaling region across m for a saturated range of m.
-    scd2 = _findscalingr(d2dat_M[mminfulcherd2['ri1'] - 1:, :])
-
-    out['d2_logminscr'] = (np.nan if scd2['ri1'] is None
-                           else np.log(d2dat_v[scd2['ri1'] - 1]))
-    out['d2_logmaxscr'] = (np.nan if scd2['ri2'] is None
-                           else np.log(d2dat_v[scd2['ri2'] - 1]))
-    out['d2_logscr'] = out['d2_logmaxscr'] - out['d2_logminscr']
-    out['d2_goodness'] = scd2['goodness']
-    out['d2_dimest'] = scd2['dimest']
-    out['d2_dimstd'] = scd2['dimstd']
+    _summarise_d2_scaling(d2dat_v, d2dat_M, 'd2', out)
 
     # --------------------------------------------------------------------------
     # (3) Gaussian-smoothed estimates: as for D2, on c2g's third column
     # --------------------------------------------------------------------------
     d2gdat_v, d2gdat_M = _sub_celltomat(c2gdat, 3)
-
-    try:
-        benfindd2g = _findscalingr_ind(d2gdat_M)
-    except Exception as exc:
-        raise ValueError('Error finding scaling range') from exc
-
-    out['bend2g_mindim'] = np.min(benfindd2g[:, 3])
-    out['bend2g_maxdim'] = np.max(benfindd2g[:, 3])
-    out['bend2g_meandim'] = np.mean(benfindd2g[:, 3])
-    out['bend2g_meangoodness'] = np.mean(benfindd2g[:, 2])
-
-    mminfulcherd2g = _sub_findmmin(benfindd2g[:, 3])
-    out['benmmind2g_logminl'] = (np.nan if mminfulcherd2g['ri1'] is None
-                                 else np.log(d2gdat_v[mminfulcherd2g['ri1'] - 1]))
-    out['benmmind2g_goodness'] = mminfulcherd2g['goodness']
-    out['benmmind2g_stabledim'] = mminfulcherd2g['stabled']
-    out['benmmind2g_linrmserr'] = mminfulcherd2g['linrmserr']
-
-    scd2g = _findscalingr(d2gdat_M[mminfulcherd2g['ri1'] - 1:, :])
-
-    out['d2g_logminscr'] = (np.nan if scd2g['ri1'] is None
-                            else np.log(d2gdat_v[scd2g['ri1'] - 1]))
-    out['d2g_logmaxscr'] = (np.nan if scd2g['ri2'] is None
-                            else np.log(d2gdat_v[scd2g['ri2'] - 1]))
-    out['d2g_logscr'] = out['d2g_logmaxscr'] - out['d2g_logminscr']
-    out['d2g_goodness'] = scd2g['goodness']
-    out['d2g_dimest'] = scd2g['dimest']
-    out['d2g_dimstd'] = scd2g['dimstd']
+    _summarise_d2_scaling(d2gdat_v, d2gdat_M, 'd2g', out)
 
     # --------------------------------------------------------------------------
     # (4) H2: a flat region indicates determinism/deterministic chaos
@@ -904,6 +868,3 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     out['flatsh2min_linrmserr'] = flatsh2min['linrmserr']
 
     return out
-
-
-    
