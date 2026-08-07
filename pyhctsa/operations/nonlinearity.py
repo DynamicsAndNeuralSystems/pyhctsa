@@ -6,7 +6,6 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 from sklearn.decomposition import PCA
-from scipy.linalg import lapack, qr, solve_triangular
 from sklearn.neighbors import NearestNeighbors
 
 from ..operations.model_fit import residual_analysis

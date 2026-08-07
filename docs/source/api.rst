@@ -209,6 +209,7 @@ Scaling
 
    pyhctsa.operations.scaling.fast_dfa
    pyhctsa.operations.scaling.fluctuation_analysis
+   pyhctsa.operations.scaling.mma
 
 .. _spectralmeths:
 
@@ -290,3 +291,15 @@ Nonlinearity
    pyhctsa.operations.nonlinearity.nsamdf
    pyhctsa.operations.nonlinearity.nlpe
    pyhctsa.operations.nonlinearity.embed_pca
+   pyhctsa.operations.nonlinearity.local_density
+   pyhctsa.operations.nonlinearity.tisean_d2
+
+.. _chnagepointmeths:
+
+Changepoint
+~~~~~~~~~~~
+.. autosummary::
+   :toctree: generated/
+
+   pyhctsa.operations.changepoint.stepdetect
+   

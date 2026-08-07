@@ -115,3 +115,9 @@ Select a card below to explore a category of time-series analysis methods implem
       :link-type: ref
       :img-bottom: ../_static/module_icons/nonlinear.png
 
+   
+   .. grid-item-card:: Changepoint
+      :link: _changepointmeths
+      :link-type: ref
+      :img-bottom: ../_static/module_icons/nonlinear.png
+
