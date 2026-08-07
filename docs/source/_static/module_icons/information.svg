@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 160 100"
+   width="160"
+   height="100"
+   version="1.1"
+   id="svg4"
+   sodipodi:docname="information.svg"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview4"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="5.3375"
+     inkscape:cx="71.569087"
+     inkscape:cy="49.180328"
+     inkscape:window-width="1920"
+     inkscape:window-height="1022"
+     inkscape:window-x="0"
+     inkscape:window-y="152"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg4" />
+  <defs
+     id="defs2">
+    <pattern
+       id="hR"
+       width="5"
+       height="5"
+       patternTransform="rotate(45)"
+       patternUnits="userSpaceOnUse">
+      <line
+         x1="0"
+         y1="0"
+         x2="0"
+         y2="5"
+         stroke="#c0453f"
+         stroke-width="1"
+         id="line1" />
+    </pattern>
+    <pattern
+       id="hC"
+       width="5"
+       height="5"
+       patternTransform="rotate(-45)"
+       patternUnits="userSpaceOnUse">
+      <line
+         x1="0"
+         y1="0"
+         x2="0"
+         y2="5"
+         stroke="#00a0d7"
+         stroke-width="1"
+         id="line2" />
+    </pattern>
+  </defs>
+  <circle
+     cx="64"
+     cy="50"
+     r="32"
+     fill="url(#hR)"
+     fill-opacity="0.55"
+     stroke="#727272"
+     stroke-width="1.3"
+     id="circle2" />
+  <circle
+     cx="96"
+     cy="50"
+     r="32"
+     fill="url(#hC)"
+     fill-opacity="0.55"
+     stroke="#727272"
+     stroke-width="1.3"
+     id="circle3" />
+  <rect
+     style="fill:#ffffff;fill-opacity:1;stroke-width:1.333;stroke-linecap:square"
+     id="rect4"
+     width="27.540983"
+     height="14.332553"
+     x="35.503513"
+     y="43.365707"
+     rx="2.1481903" />
+  <text
+     x="49.245903"
+     y="54"
+     text-anchor="middle"
+     font-family="system-ui, sans-serif"
+     font-size="12px"
+     fill="#c0453f"
+     id="text3">H(X)</text>
+  <rect
+     style="fill:#ffffff;fill-opacity:1;stroke-width:1.333;stroke-linecap:square"
+     id="rect5"
+     width="27.540983"
+     height="14.332553"
+     x="98.96096"
+     y="43.365707"
+     rx="2.1481903" />
+  <text
+     x="113.08546"
+     y="54"
+     text-anchor="middle"
+     font-family="system-ui, sans-serif"
+     font-size="12px"
+     fill="#00a0d7"
+     id="text4">H(Y)</text>
+</svg>
