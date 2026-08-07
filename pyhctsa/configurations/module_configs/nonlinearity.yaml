@@ -18,3 +18,20 @@ nonlinearity:
     legacy_name: NL_MS_nlpe
     ordered_args: ['de', 'tau']
     
+  local_density:
+    base_name: local_density
+    depedencies:
+    configs:
+      - {nnr: 5, past: 40, tau: 'ac', m: 2, zscore: True}
+      - {nnr: 5, past: 40, tau: 1, m: 3, zscore: True}
+    legacy_name: NL_localdensity
+    ordered_args: ['nnr', 'past', 'tau', 'm']
+
+  tisean_d2:
+    base_name: tisean_d2
+    depedencies:
+    configs:
+      - {tau: 1, maxm: 10, theiler_win: 0, zscore: True}
+      - {tau: 'ac', maxm: 10, theiler_win: 0.01, zscore: True}
+    legacy_name: NL_TISEAN_d2
+    ordered_args: ['tau', 'maxm', 'theiler_win']

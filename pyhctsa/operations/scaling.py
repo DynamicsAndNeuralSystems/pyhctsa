@@ -47,9 +47,9 @@ def fast_dfa(y: ArrayLike) -> float:
     
     return alpha
 
-def fluctuation_analysis(x: "ArrayLike", q: "Union[float, int]" = 2,
+def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
                          wtf: str = 'rsrange', tau_step: int = 1, k: int = 1,
-                         lag: "Union[int, None]" = None, log_inc: bool = True,
+                         lag: int | None = None, log_inc: bool = True,
                          guard_ratsplit: bool = False, ssr_tol: float = 1e-12) -> dict:
     """
     Implements fluctuation analysis by a variety of methods.
@@ -239,12 +239,9 @@ def fluctuation_analysis(x: "ArrayLike", q: "Union[float, int]" = 2,
     return out_final
  
  
-def _robust_linear_fit(log_tt, log_ff, the_range, field_name):
+def _robust_linear_fit(log_tt: np.ndarray, log_ff: np.ndarray, the_range, field_name):
     """
     Robust linear fit using Tukey's biweight function for M-estimation.
- 
-    Mirrors MATLAB's DoRobustLinearFit, including the short-segment / all-NaN
-    guard that returns NaN-valued fields rather than fitting.
     """
     seg = log_ff[the_range]
     if np.size(the_range) < 8 or np.all(np.isnan(seg)):
@@ -354,8 +351,25 @@ def _std(x, axis=None):
         )
     return np.std(x, axis=axis, ddof=1)
 
-def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None, q_range: None | list = None):
-    """Multiscale multifractal analysis of a time series.
+def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None, 
+        q_range: None | list = None) -> dict:
+    """Scale-dependent estimates of multifractal scaling in a time series.
+
+    Physionet implementation of multiscale multifractal analysis (MMA). Method was first proposed in [1].
+    Original author is Jan Gieraltowski, % Warsaw University of Technology, Faculty of Physics 
+    gieraltowski@if.pw.edu.pl http://gieraltowski.fizyka.pw.edu.pl/
+
+    References
+    ----------
+    .. [1] J. Gieraltowski, J. J. Zebrowski, and R. Baranowski,
+        Multiscale multifractal analysis of heart rate variability recordings
+        with a large number of occurrences of arrhythmia,
+        Phys. Rev. E 85, 021915 (2012).
+        http://dx.doi.org/10.1103/PhysRevE.85.021915
+    .. [2] Goldberger AL, Amaral LAN, Glass L, Hausdorff JM, Ivanov PCh, Mark RG,
+        Mietus JE, Moody GB, Peng C-K, Stanley HE (2000)
+        PhysioBank, PhysioToolkit, and PhysioNet: Components of a New Research Resource
+        for Complex Physiologic Signals. Circulation 101(23):e215-e220
 
     Parameters
     ----------
@@ -372,7 +386,8 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
 
     Returns
     -------
-    dict of summary statistics, or float('nan') if the series is too short.
+    dict
+        Summary statistics.
     """
     y = np.asarray(y, dtype=float).ravel()
 
@@ -394,7 +409,7 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
         return float("nan")
     elif max_scale % 5 != 0:
         max_scale = float(_round(max_scale / 5)) * 5
-        print("adjusted max_scale to %u" % max_scale)
+        logging.warning("adjusted max_scale to %u" % max_scale)
 
     if q_range is None:
         q_range = [-5, 5]
