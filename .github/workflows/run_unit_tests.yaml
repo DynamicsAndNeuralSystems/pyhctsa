@@ -2,9 +2,6 @@ name: Unit Testing Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
 
 # REQUIRED so the coverage job can push to coverage-badge branch
 permissions:
