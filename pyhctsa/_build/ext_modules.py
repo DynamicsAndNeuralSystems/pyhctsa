@@ -8,6 +8,14 @@ def _compile_args():
         return ["/O2"]
     return ["-O3", "-fPIC", "-std=c99", "-ffast-math"]
 
+def _strict_compile_args():
+    # TISEAN's d2 truncates log()-derived length-scale indices to int, so a
+    # reassociated or approximated expression can shift a pair into the
+    # neighbouring bin. Keep IEEE semantics here (no -ffast-math).
+    if platform.system() == "Windows":
+        return ["/O2", "/fp:precise"]
+    return ["-O2", "-fPIC", "-std=c99"]
+
 def _libraries():
     return [] if platform.system() == "Windows" else ["m"]
 
@@ -59,4 +67,12 @@ def build_extensions():
         libraries=_libraries(),
     )
 
-    return [periodicity_wang, close_returns, sampen, fastdfa, shannon]
+    tisean_d2 = Extension(
+        "pyhctsa.toolboxes.Tisean_3_0_1.d2",
+        sources=["pyhctsa/toolboxes/Tisean_3_0_1/TS_d2.c"],
+        include_dirs=["pyhctsa/toolboxes/Tisean_3_0_1", np_inc],
+        extra_compile_args=_strict_compile_args(),
+        libraries=_libraries(),
+    )
+
+    return [periodicity_wang, close_returns, sampen, fastdfa, shannon, tisean_d2]
