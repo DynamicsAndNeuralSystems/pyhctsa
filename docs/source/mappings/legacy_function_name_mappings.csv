@@ -81,6 +81,7 @@ fast_dfa,SC_fastdfa,scaling
 fluctuation_analysis,SC_FluctAnal,scaling
 mma,SC_MMA,scaling
 transition_matrix,SB_TransitionMatrix,symbolic
+transition_p_alphabet,SB_TransitionpAlphabet,symbolic
 binary_stats,SB_BinaryStats,symbolic
 motif_three,SB_MotifThree,symbolic
 motif_two,SB_MotifTwo,symbolic
