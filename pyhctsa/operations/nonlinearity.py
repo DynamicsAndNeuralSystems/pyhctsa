@@ -30,56 +30,38 @@ def _resolve_time_delay(y: ArrayLike, tau: Union[int, str]) -> Union[int, float]
 
 
 def _first_fn(p, threshold, over_or_under='under'):
+    """Position (counting from one) of the first element of ``p`` on the given
+    side of ``threshold``, or ``len(p) + 1`` if there is none."""
     if over_or_under == 'under':
         indices = np.where(p < threshold)[0]
     elif over_or_under == 'over':
         indices = np.where(p > threshold)[0]
     else:
         raise ValueError(f'Unknown setting: {over_or_under}')
-    
-    return indices[0] if len(indices) > 0 else len(p) + 1
 
-def _normed_single_curve_length(x: ArrayLike, lag: int, fs: Union[float, int],
-                                nrmdegree: int) -> tuple:
+    return indices[0] + 1 if len(indices) > 0 else len(p) + 1
+
+def _normed_single_curve_length(x: np.ndarray, lag: int, nrmdegree: int) -> np.ndarray:
     # helper function for _normed_single_curve_length_windowed and nsamdf
-    # compute crossed curve length for a single time series x
-    x = np.asarray(x, dtype=float)
+    # crossed curve length of x at each delay 0, 1, ..., lag
     rx1 = np.zeros(lag+1)
-    for delay in range(0, lag+1):
-        if delay == 0:
-            rx1[delay] = np.linalg.norm(x - x, ord=nrmdegree)
-        else:
-            rx1[delay] = np.linalg.norm(x[:-delay] - x[delay:], ord=nrmdegree)
-    # mirror to form full symmetric sequence [rx1_reversed, rx1[1:]]
-    rx = np.concatenate([rx1[::-1], rx1[1:]])
-
-    pxy = np.abs(np.fft.fft(rx))
-    frq = np.linspace(0, 0.5 * fs, lag + 1)
-    return rx1, pxy, frq
+    for delay in range(1, lag+1):  # rx1[0] is the norm of a zero vector, i.e., zero
+        rx1[delay] = np.linalg.norm(x[:-delay] - x[delay:], ord=nrmdegree)
+    return rx1
 
 def _normed_single_curve_length_windowed(x: ArrayLike, win_len: int,
                                          shift_len: int, lag: int,
-                                         fs: Union[float, int], nrmdegree: int) -> tuple:
+                                         nrmdegree: int) -> np.ndarray:
     # helper function for nsamdf
-    # shiftlen is winlen - overlaplen
+    # mean curve length over sliding windows; shiftlen is winlen - overlaplen
+    x = np.asarray(x, dtype=float)
     m = int(np.floor((len(x) - win_len)/shift_len) + 1)
-    
-    p_sum = np.zeros(2*lag+1)
+
     r_sum = np.zeros(lag+1)
+    for start in range(0, m*shift_len, shift_len):
+        r_sum += _normed_single_curve_length(x[start:start+win_len], lag, nrmdegree)
 
-    for ii in range(1, m+1):
-        x_seg = x[(ii-1)*shift_len:(ii-1)*shift_len+win_len]
-        rx, px, _ = _normed_single_curve_length(x_seg, lag=lag, fs=fs, nrmdegree=nrmdegree)
-        p_sum += px
-        r_sum += rx
-    
-    p_mean = p_sum / m
-    r_mean = r_sum / m
-
-    p_mean2 = np.abs(np.fft.fft(np.concatenate([r_mean[::-1], r_mean[1:]])))
-    frq = np.linspace(0, 0.5 * fs, lag+1)
-
-    return r_mean, p_mean, frq, p_mean2
+    return r_sum / m
 
 def _ms_embed(z, v, w):
     # helper function for nlpe
@@ -90,15 +72,10 @@ def _ms_embed(z, v, w):
     n = z.size
     if v is None:
         lags = np.array([0, 1, 2])
-        auto_neg = False
     elif w is not None:
-        v = int(v)
-        lags = np.arange(0, w * v, w)          # length v
-        auto_neg = False
+        lags = np.arange(0, w * int(v), w) # length v
     else:
         lags = np.asarray(v, dtype=int).ravel()
-        auto_neg = False
-    has_neg_input = np.any(lags < 0)
 
     lags = np.sort(lags)
     dim  = len(lags)
@@ -106,21 +83,17 @@ def _ms_embed(z, v, w):
         logger.warning("Vector is too small to be embedded with the given lags.")
         return np.full((dim, 1), np.nan), None
 
-    w_win = lags[-1] - lags[0]          # window width  (renamed to avoid shadowing arg)
-    m     = n - w_win                   # number of embeddable points
-    t     = np.arange(m) + lags[-1]    # embed times (0-indexed: t[i] = i + lags[-1])
+    w_win = lags[-1] - lags[0] # window width  (renamed to avoid shadowing arg)
+    m = n - w_win # number of embeddable points
+    t = np.arange(m) + lags[-1]    # embed times (0-indexed: t[i] = i + lags[-1])
 
-    x = np.zeros((dim, m), dtype=float)
-    for i, lag in enumerate(lags):
-        x[i, :] = z[t - lag]
+    x = z[t[np.newaxis, :] - lags[:, np.newaxis]] # (dim, m)
 
     # Split into past (x) and future (y) components
     neg_mask = lags < 0
-    pos_mask = lags >= 0
-
     if np.any(neg_mask):
         y = x[neg_mask, :]
-        x = x[pos_mask, :]
+        x = x[~neg_mask, :]
     else:
         y = None
 
@@ -154,14 +127,24 @@ def _ms_nlpe(y: ArrayLike, de: int, tau: int) -> float:
 
     de_dim, n = x.shape
 
-    dd = np.zeros((n, n))
-    for i in range(de_dim):
-        diff = x[i, :][np.newaxis, :] - x[i, :][:, np.newaxis]
-        dd += diff ** 2
-    np.fill_diagonal(dd, np.inf)
+    # Nearest neighbour of each point under the squared Euclidean distance.
+    # The full n-by-n distance matrix is never held in memory at once: rows are
+    # processed in blocks of at most ~32MB, which is both kinder on memory for
+    # long time series and friendlier to cache.
+    block = max(1, 4_000_000 // n)
+    near = np.empty(n, dtype=np.intp)  # nearest neighbour index per point
+    dd = np.empty((min(block, n), n))
+    for start in range(0, n, block):
+        stop = min(start + block, n)
+        rows = dd[:stop - start]
+        rows.fill(0.0)
+        for i in range(de_dim):
+            diff = x[i, np.newaxis, :] - x[i, start:stop, np.newaxis]
+            rows += diff ** 2
+        rows[np.arange(stop - start), np.arange(start, stop)] = np.inf # exclude self
+        near[start:stop] = np.argmin(rows, axis=1)
 
-    near = np.argmin(dd, axis=1)  # (n,) — nearest neighbour index per point
-    e = y[near] - y               # now y is (m,) so y[near] works correctly
+    e = y[near] - y  # now y is (m,) so y[near] works correctly
 
     return e
 
@@ -206,11 +189,11 @@ def nsamdf(x: ArrayLike, fs: Union[float, int] = 1.0, win_len_rel: Union[int, fl
 
     out = {}
     # nsAMDF for p = 2
-    s2, _, _, _ = _normed_single_curve_length_windowed(x, win_len=window_length, shift_len=shift_length, lag=lag, fs=fs, nrmdegree=2)
+    s2 = _normed_single_curve_length_windowed(x, win_len=window_length, shift_len=shift_length, lag=lag, nrmdegree=2)
     #out['s2'] = s2 / np.max(s2) # normalized
 
     # nsAMDF for p = degree:
-    sd, _, _, _ = _normed_single_curve_length_windowed(x, win_len=window_length, shift_len=shift_length, lag=lag, fs=fs, nrmdegree=degree)
+    sd = _normed_single_curve_length_windowed(x, win_len=window_length, shift_len=shift_length, lag=lag, nrmdegree=degree)
     #out['sd'] = sd / np.max(sd) # normalized
     
     #% If you like, you can bandpass filter s2 and sd for the specific frequency band
@@ -358,21 +341,12 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
 
     return out
 
-def _time_delay_embed(y: ArrayLike, tau: Union[str, int], m: int) -> np.ndarray:
+def _time_delay_embed(y: ArrayLike, tau: int, m: int) -> np.ndarray:
     """
     Time-delay embedding of a univariate time series into an m-dimensional space.
     """
     y = np.asarray(y, dtype=float)
     n = len(y)
-
-    if isinstance(tau, str):
-        if tau == 'ac':
-            tau = first_crossing(y, 'ac', 0, 'discrete')
-            if np.isnan(tau):
-                raise ValueError('Could not get time delay by ACF (time series too short?)')
-            tau = int(tau)
-        else:
-            raise ValueError(f"Invalid time-delay method: '{tau}'. Only 'ac' (or an integer) is supported.")
     tau = int(tau)
     m = int(m)
 
@@ -421,8 +395,12 @@ def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
     """
     if isinstance(tau, str) and tau != 'ac':
         raise ValueError(f"Invalid time-delay method: '{tau}'. Only 'ac' (or an integer) is supported.")
+    tau = _resolve_time_delay(y, tau)
+    if np.isnan(tau):
+        logger.warning('Could not get time delay by ACF (time series too short?)')
+        return np.nan
     try:
-        y_embed = _time_delay_embed(y, tau, m)
+        y_embed = _time_delay_embed(y, int(tau), m)
     except ValueError as e:  # embedding failed (time series too short)
         logger.warning(str(e))
         return np.nan
@@ -437,7 +415,8 @@ def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
     dist, idx = nbrs.kneighbors(y_embed)
 
     valid = np.abs(idx - np.arange(n_embed)[:, None]) > past
-    valid_dists = np.sort(np.where(valid, dist, np.inf), axis=1)
+    # only the nnr-th smallest valid distance is needed, so partition rather than sort
+    valid_dists = np.partition(np.where(valid, dist, np.inf), nnr-1, axis=1)
     r_nnr = valid_dists[:, nnr-1]
 
     # Fall back to a full pairwise search wherever the over-fetch wasn't enough:
@@ -478,10 +457,9 @@ def _argmin_first_colmajor(m: np.ndarray):
     flat = m.ravel(order='F')
     if flat.size == 0 or np.all(np.isnan(flat)):
         return None, None, np.nan
-    best = np.nanmin(flat)
-    k = int(np.flatnonzero(flat == best)[0])
+    k = int(np.nanargmin(flat))
     i, j = np.unravel_index(k, m.shape, order='F')
-    return int(i), int(j), float(best)
+    return int(i), int(j), float(flat[k])
 
 
 def _scaling_range_endpoints(l: int) -> tuple:
@@ -489,6 +467,25 @@ def _scaling_range_endpoints(l: int) -> tuple:
     stptr = np.arange(1, int(np.floor(l / 2)))
     endptr = np.arange(int(np.ceil(l / 2)) + 1, l + 1)
     return stptr, endptr
+
+
+def _best_flat_range(v: np.ndarray, gamma: float, stptr: np.ndarray,
+                     endptr: np.ndarray) -> tuple:
+    """Scaling range over which ``v`` is most nearly constant.
+
+    Rescales ``v`` to [0,1] so the comparison is independent of its range, then
+    scores each candidate range by the spread of ``v`` across it, less a bonus
+    (``gamma``) per additional point spanned. Returns the winning
+    ``(start index, end index, score)`` into ``stptr``/``endptr``.
+    """
+    with np.errstate(invalid='ignore', divide='ignore'):
+        vnorm = (v - v.min()) / (v.max() - v.min())
+    mybad = np.empty((stptr.size, endptr.size))
+    for i, s in enumerate(stptr):
+        for j, e in enumerate(endptr):
+            mybad[i, j] = np.std(vnorm[s - 1:e], ddof=1)
+    mybad -= gamma * (endptr[np.newaxis, :] - stptr[:, np.newaxis] + 1)
+    return _argmin_first_colmajor(mybad)
 
 
 def _sub_takens(dat: list, eup: float) -> np.ndarray:
@@ -511,9 +508,9 @@ def _sub_findmmin(ds: ArrayLike) -> dict:
     l = ds.size
     gamma = 0.1  # regularizer, chosen ad hoc; rewards a longer constant region
     dsraw = ds
-    spread = np.max(ds) - np.min(ds)
+    dsmin = np.min(ds)
     with np.errstate(invalid='ignore', divide='ignore'):
-        dsn = (ds - np.min(ds)) / spread  # rescale to [0,1] so weights are consistent
+        dsn = (ds - dsmin) / (np.max(ds) - dsmin)  # rescale to [0,1] so weights are consistent
 
     out = {'ri1': None, 'goodness': np.nan, 'stabled': np.nan, 'linrmserr': np.nan}
     if l < 2:
@@ -522,10 +519,9 @@ def _sub_findmmin(ds: ArrayLike) -> dict:
     mybad = np.array([np.std(dsn[i - 1:], ddof=1) - gamma * (l - i + 1)
                       for i in range(1, l)])
     if not np.all(np.isnan(mybad)):
-        best = np.nanmin(mybad)
-        a = int(np.flatnonzero(mybad == best)[0])  # 0-based
+        a = int(np.nanargmin(mybad))  # 0-based
         out['ri1'] = a + 1
-        out['goodness'] = float(best)
+        out['goodness'] = float(mybad[a])
         out['stabled'] = float(np.mean(dsraw[a:]))
 
     # How linear is it?
@@ -549,13 +545,13 @@ def _findscalingr(x: np.ndarray) -> dict:
     if stptr.size == 0 or endptr.size == 0:
         return out
 
+    # mean squared deviation from the middle value (the exponent estimate) over
+    # each candidate range, less a bonus for a longer range
     mybad = np.empty((stptr.size, endptr.size))
     for i, s in enumerate(stptr):
         for j, e in enumerate(endptr):
-            sub = x[:, s - 1:e]
-            mm = sub.mean()  # middle value for this range: exponent estimate
-            # mean squared deviation from mm, minus a bonus for a longer range
-            mybad[i, j] = ((sub - mm) ** 2).mean() - gamma * (e - s + 1)
+            mybad[i, j] = x[:, s - 1:e].var()
+    mybad -= gamma * (endptr[np.newaxis, :] - stptr[:, np.newaxis] + 1)
 
     a, b, best = _argmin_first_colmajor(mybad)
     if a is None:
@@ -584,13 +580,7 @@ def _findscalingr_ind(x: np.ndarray) -> np.ndarray:
     results = np.full((ndim, 4), np.nan)
     for c in range(ndim):
         v = x[c, :]
-        with np.errstate(invalid='ignore', divide='ignore'):
-            vnorm = (v - v.min()) / (v.max() - v.min())  # normalize regardless of range
-        mybad = np.empty((stptr.size, endptr.size))
-        for i, s in enumerate(stptr):
-            for j, e in enumerate(endptr):
-                mybad[i, j] = np.std(vnorm[s - 1:e], ddof=1) - gamma * (e - s + 1)
-        a, b, best = _argmin_first_colmajor(mybad)
+        a, b, best = _best_flat_range(v, gamma, stptr, endptr)
         if a is None:
             continue
         results[c] = [stptr[a], endptr[b], best, np.mean(v[stptr[a] - 1:endptr[b]])]
@@ -640,13 +630,7 @@ def _sub_getslopes(x: np.ndarray, Y: np.ndarray) -> np.ndarray:
     results = np.full((ndim, 4), np.nan)
     for c in range(ndim):
         v = np.diff(Y[c, :]) * dx  # vector of local gradients
-        with np.errstate(invalid='ignore', divide='ignore'):
-            vnorm = (v - v.min()) / (v.max() - v.min())
-        mybad = np.empty((stptr.size, endptr.size))
-        for i, s in enumerate(stptr):
-            for j, e in enumerate(endptr):
-                mybad[i, j] = np.std(vnorm[s - 1:e], ddof=1) - gamma * (e - s + 1)
-        a, b, best = _argmin_first_colmajor(mybad)
+        a, b, best = _best_flat_range(v, gamma, stptr, endptr)
         if a is None:
             continue
         results[c] = [stptr[a], endptr[b], best, np.mean(v[stptr[a] - 1:endptr[b]])]
@@ -671,12 +655,16 @@ def _sub_doesflatten(x: np.ndarray, Y: np.ndarray) -> np.ndarray:
         v = np.diff(Y[c, :]) * dx
         with np.errstate(invalid='ignore', divide='ignore'):
             vnorm = np.abs(v) / np.abs(v).max()
+        # the two outside regions each depend on a single endpoint, so they only
+        # need computing once per candidate rather than once per (start, end) pair
+        left = np.array([abs(np.mean(vnorm[0:s])) for s in stptr])
+        right = np.array([abs(np.mean(vnorm[e - 1:])) for e in endptr])
         mybad = np.empty((stptr.size, endptr.size))
         for i, s in enumerate(stptr):
             for j, e in enumerate(endptr):
-                mybad[i, j] = (abs(np.mean(vnorm[s - 1:e]))       # deviation from zero inside
-                               - abs(np.mean(vnorm[0:s]))         # minus that of the outside regions
-                               - abs(np.mean(vnorm[e - 1:])))
+                mybad[i, j] = abs(np.mean(vnorm[s - 1:e]))  # deviation from zero inside
+        mybad -= left[:, np.newaxis]  # minus that of the outside regions
+        mybad -= right[np.newaxis, :]
         a, b, best = _argmin_first_colmajor(mybad)
         if a is None:
             continue

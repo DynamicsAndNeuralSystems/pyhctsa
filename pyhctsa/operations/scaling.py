@@ -356,8 +356,7 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
     """Scale-dependent estimates of multifractal scaling in a time series.
 
     Physionet implementation of multiscale multifractal analysis (MMA). Method was first proposed in [1].
-    Original author is Jan Gieraltowski, % Warsaw University of Technology, Faculty of Physics 
-    gieraltowski@if.pw.edu.pl http://gieraltowski.fizyka.pw.edu.pl/
+    Original author is Jan Gieraltowski (Warsaw University of Technology, Faculty of Physics). 
 
     References
     ----------
