@@ -14,7 +14,7 @@ from ..operations.correlation import first_crossing
 from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
 from ..toolboxes.physionet import sampen as _sampen_c
-from ..utils import bin_picker, histc, make_buffer, z_score
+from ..utils import bin_picker, histc, make_buffer, time_delay_embed, z_score
 
 def shannon_entropy(
     y: ArrayLike,
@@ -394,7 +394,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
     assert tau > 0, "delay must be greater than zero."
 
     try:
-        sorted_idx = _embed(y, order=m, delay=tau).argsort(kind="quicksort")
+        sorted_idx = time_delay_embed(y, m, tau).argsort(kind="quicksort")
     except ValueError:
         return {"permEn": np.nan, "normPermEn": np.nan}
     nx = sorted_idx.shape[0]
@@ -513,19 +513,6 @@ def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2) -> float:
 
     return np.subtract(phi[0], phi[1])
 
-def _embed(x: ArrayLike, order: int, delay: int = 1) -> ArrayLike:
-    """Safe embedding that supports order=1."""
-    x = np.asarray(x)
-    if order < 1:
-        raise ValueError("Order must be at least 1.")
-    N = x.shape[0]
-    if N - (order - 1) * delay <= 0:
-        raise ValueError("Time series is too short for the given order and delay.")
-    # Build the delay-embedding by one broadcast gather instead of a per-row comprehension
-    nrows = N - (order - 1) * delay
-    idx = np.arange(nrows)[:, None] + delay * np.arange(order)[None, :]
-    return x[idx]
-
 def _app_samp_entropy(
         x: ArrayLike,
         order: int,
@@ -535,7 +522,7 @@ def _app_samp_entropy(
     """Modified version of `_app_samp_entropy` that supports order=1."""
     order = int(order)
     phi = np.zeros(2)
-    emb_data1 = _embed(x, order, 1)
+    emb_data1 = time_delay_embed(x, order, 1)
     if approximate:
         pass
     else:
@@ -543,7 +530,7 @@ def _app_samp_entropy(
 
     count1 = KDTree(emb_data1, metric=metric).query_radius(emb_data1, r,
                                                            count_only=True).astype(np.float64)
-    emb_data2 = _embed(x, order + 1, 1)
+    emb_data2 = time_delay_embed(x, order + 1, 1)
     count2 = KDTree(emb_data2, metric=metric).query_radius(emb_data2, r,
                                                            count_only=True).astype(np.float64)
     if approximate:

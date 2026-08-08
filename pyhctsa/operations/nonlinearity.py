@@ -11,6 +11,7 @@ from sklearn.neighbors import NearestNeighbors
 from ..operations.model_fit import residual_analysis
 from ..operations.correlation import first_crossing, first_min, autocorr
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
+from ..utils import time_delay_embed
 
 def _resolve_time_delay(y: ArrayLike, tau: Union[int, str]) -> Union[int, float]:
     """Resolve a string time-delay spec to a lag.
@@ -307,7 +308,7 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
             logger.warning('Could not get time delay (time series too short?)')
             return np.nan
     try:
-        y_embed = _time_delay_embed(y, int(tau), m)
+        y_embed = time_delay_embed(y, m, int(tau))
     except ValueError as e:  # embedding failed (time series too short)
         logger.warning(str(e))
         return np.nan
@@ -340,25 +341,6 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
     out['fb001'] = _first_fn(perc, 0.01, 'under')
 
     return out
-
-def _time_delay_embed(y: ArrayLike, tau: int, m: int) -> np.ndarray:
-    """
-    Time-delay embedding of a univariate time series into an m-dimensional space.
-    """
-    y = np.asarray(y, dtype=float)
-    n = len(y)
-    tau = int(tau)
-    m = int(m)
-
-    n_embed = n - (m-1)*tau
-    if n_embed <= 0:
-        raise ValueError(f'Time series (N = {n}) too short to embed with these embedding parameters.')
-
-    y_embed = np.zeros((n_embed, m))
-    for i in range(m):
-        y_embed[:, i] = y[i*tau : n_embed + i*tau]
-
-    return y_embed
 
 def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
                   tau: Union[str, int] = 'ac', m: int = 2) -> dict:
@@ -400,7 +382,7 @@ def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
         logger.warning('Could not get time delay by ACF (time series too short?)')
         return np.nan
     try:
-        y_embed = _time_delay_embed(y, int(tau), m)
+        y_embed = time_delay_embed(y, m, int(tau))
     except ValueError as e:  # embedding failed (time series too short)
         logger.warning(str(e))
         return np.nan

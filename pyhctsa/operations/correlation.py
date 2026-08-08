@@ -12,7 +12,8 @@ from statsmodels.tsa.stattools import pacf
 
 from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
-from ..utils import bin_picker, make_mat_buffer, point_of_crossing, sign_change, z_score, histc
+from ..utils import (bin_picker, histc, make_mat_buffer, point_of_crossing,
+                     sign_change, time_delay_embed, z_score)
 
 def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
               extra_param: Union[int, None] = None, random_seed = None,
@@ -251,9 +252,11 @@ def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
     float
         The time reversal asymmetry statistic.
     """
-    embedded = _lag_embed(np.asarray(y), 3, time_lag)
-    if np.isscalar(embedded):
-        # a scalar (nan) has been returned instead of an array
+    try:
+        # columns ordered most- to least-delayed
+        embedded = time_delay_embed(y, 3, time_lag, reverse=True)
+    except ValueError:
+        logger.warning("Time series is too short for the given dimension and lag.")
         return np.nan
     a = embedded[:, 0]
     b = embedded[:, 1]
@@ -261,23 +264,6 @@ def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
     res = np.mean(a * a * b - b*c*c)
 
     return float(res)
-
-def _lag_embed(x: ArrayLike, m: int, lag: int = 1) -> ArrayLike:
-    """Constructs a time-delay embedding of a time series."""
-    x = np.asarray(x).flatten()
-    lx = len(x)
-    if lx < lag * (m - 1) + 1:
-        logger.warning("Time series is too short for the given dimension and lag.")
-        return np.nan
-    new_size = lx - lag * (m - 1)
-    y = np.zeros((new_size, m))
-    for i in range(m):
-        # The first column (i=0) should be the most delayed data
-        start_index = (m - 1 - i) * lag
-        end_index = start_index + new_size
-        y[:, i] = x[start_index:end_index]
-
-    return y
 
 def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
     """

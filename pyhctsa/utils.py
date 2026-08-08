@@ -1,13 +1,11 @@
 import csv
 import os
 from functools import wraps
-from itertools import product
 from importlib.metadata import PackageNotFoundError, version
 from importlib import resources
-from typing import Union, Callable, Any
+from typing import Union, Callable
 import yaml
 from pyhctsa import __version__
-from pathlib import Path
 import logging
 logger = logging.getLogger('pyhctsa')
 
@@ -16,77 +14,6 @@ from numpy.typing import ArrayLike
 import pandas as pd
 from scipy.stats import chi2
 
-
-def _build_repr_html(feature_funcs: dict[str, Callable],
-    skipped_functions: list[tuple[str, list[str]]],
-    config: dict[str, Any],
-    config_path: str) -> str:
-    """
-    Construct an sklearn-like information box when instantiating a FeatureCalculator object.
-
-    Contains information about the modules and feature functions loaded for a given
-    configuration YAML file.
-
-    """
-
-    config_name = Path(config_path).name # extract the name of the module
-    n_feature_funcs = len(feature_funcs)
-    n_skipped = len(skipped_functions)
-    module_counts = {}
-    for module_key, module_cfg in config.items():
-        count = 0
-        for feature_name, feature_config in module_cfg.items():
-            configs = feature_config.get("configs", [{}])
-            for config_item in configs:
-                clean = {k: v for k, v in config_item.items()
-                         if k not in ("zscore", "abs", "select", "exclude")}
-                keys = list(clean.keys())
-                values = [v if isinstance(v, list) else [v] for v in clean.values()]
-                combos = list(product(*values)) if keys else [()]
-                count += len(combos)
-        if count > 0:
-            module_counts[module_key] = count
-    module_counts = dict(sorted(module_counts.items(), key=lambda x: -x[1]))
-    total = sum(module_counts.values())
-    max_count = max(module_counts.values(), default=1)
-    rows = ""
-    skipped_color = "#A32D2D" if n_skipped > 0 else "#412402"
-    for mod, count in module_counts.items():
-        pct = count / max_count * 100
-        pct_of_total = count / total * 100
-        rows += (
-            f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
-            f'<span style="font-size:12px;color:#633806;width:140px;'
-            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{mod}</span>'
-            f'<div style="flex:1;background:#FAC775;border-radius:2px;height:6px;overflow:hidden;">'
-            f'<div style="width:{pct:.1f}%;height:100%;background:#BA7517;"></div>'
-            f'</div>'
-            f'<span style="font-size:12px;color:#412402;min-width:32px;text-align:right;">{count}</span>'
-            f'<span style="font-size:11px;color:#633806;min-width:36px;text-align:right;">({pct_of_total:.1f}%)</span>'
-            f'</div>'
-        )
-    return (
-        f'<div style="display:inline-block;border:0.5px solid #EF9F27;border-left:4px solid #BA7517;'
-        f'border-radius:8px;padding:1rem 1.25rem;background:#FAEEDA;'
-        f'font-family:monospace;min-width:340px;max-width:560px;">'
-        f'<div style="font-size:13px;font-weight:500;color:#412402;margin-bottom:12px;">FeatureCalculator</div>'
-        f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">'
-        f'<div style="background:#FAC775;border-radius:8px;padding:10px 12px;">'
-        f'<div style="font-size:11px;color:#633806;margin-bottom:2px;">operations loaded</div>'
-        f'<div style="font-size:20px;font-weight:500;color:#412402;">{n_feature_funcs}</div>'
-        f'</div>'
-        f'<div style="background:#FAC775;border-radius:8px;padding:10px 12px;">'
-        f'<div style="font-size:11px;color:#633806;margin-bottom:2px;">operations skipped</div>'
-        f'<div style="font-size:20px;font-weight:500;color:{skipped_color};">{n_skipped}</div>'
-        f'</div>'
-        f'</div>'
-        f'<div style="font-size:11px;color:#633806;margin-bottom:6px;">operations per module</div>'
-        f'{rows}'
-        f'<div style="font-size:11px;color:#633806;margin-top:10px;border-top:0.5px solid #EF9F27;padding-top:8px;word-break:break-all;">'
-        f'config: {config_name}'
-        f'</div>'
-        f'</div>'
-    )
 
 def _check_optional_deps(dep: str) -> bool:
     """Check whether an optional dependency exists.
@@ -636,6 +563,56 @@ def make_mat_buffer(x: ArrayLike, n: int, p: int = 0,
         result = np.hstack([result, np.expand_dims(col, axis=0).T])
 
     return result
+
+def time_delay_embed(y: ArrayLike, m: int, tau: int = 1,
+                     reverse: bool = False) -> np.ndarray:
+    """
+    Time-delay embedding of a univariate time series into an `m`-dimensional space.
+
+    Row ``k`` of the result is ``[y[k], y[k + tau], ..., y[k + (m-1)*tau]]``, so the
+    columns run from the least- to the most-delayed copy of the series.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    m : int
+        The embedding dimension. Must be at least 1.
+    tau : int, optional
+        The time delay between successive coordinates. Default is 1.
+    reverse : bool, optional
+        If True, order the columns from the most- to the least-delayed copy
+        (i.e. reverse the column order). Default is False.
+
+    Returns
+    -------
+    numpy.ndarray
+        The embedded time series, of shape ``(len(y) - (m-1)*tau, m)``.
+
+    Raises
+    ------
+    ValueError
+        If `m` is less than 1, or the time series is too short to embed with the
+        given parameters.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    m = int(m)
+    tau = int(tau)
+
+    if m < 1:
+        raise ValueError(f'Embedding dimension must be at least 1, got {m}.')
+
+    n_embed = n - (m - 1) * tau
+    if n_embed <= 0:
+        raise ValueError(f'Time series (N = {n}) too short to embed with these '
+                         'embedding parameters.')
+
+    # one broadcast gather rather than a per-column copy
+    idx = np.arange(n_embed)[:, None] + tau * np.arange(m)[None, :]
+    embedded = y[idx]
+
+    return embedded[:, ::-1] if reverse else embedded
 
 def binarize(y: ArrayLike, binarize_how: str = 'diff') -> ArrayLike:
     """
