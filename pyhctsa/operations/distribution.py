@@ -8,7 +8,7 @@ from scipy import stats
 from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, uniform
 
 from ..operations.correlation import autocorr, first_crossing
-from ..utils import bin_picker, histc, simple_binner, x_corr
+from ..utils import bin_picker, histc, matlab_quantile, simple_binner, x_corr
 
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """
@@ -814,14 +814,6 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01)
     
     return results
 
-def _prctile(y, p):
-    y = np.sort(np.asarray(y, dtype=float))
-    n = y.size
-    if n == 0:
-        return np.nan
-    pos = 100.0 * (np.arange(1, n + 1) - 0.5) / n
-    return np.interp(p, pos, y)
-
 def outlier_test(y: ArrayLike, p: float = 2,
                  just_me: Union[str, None] = None) -> Union[dict, float]:
     """
@@ -854,8 +846,7 @@ def outlier_test(y: ArrayLike, p: float = 2,
 
     # mean of the middle (100-2*p)% of the data
     y = np.array(y)
-    lower_bound = _prctile(y, p) #np.percentile(y, p, method='hazen')
-    upper_bound = _prctile(y, (100-p)) #np.percentile(y, (100 - p), method='hazen')
+    lower_bound, upper_bound = matlab_quantile(y, [p / 100, (100 - p) / 100])
     
     middle_portion = y[(y > lower_bound) & (y < upper_bound)]
     
