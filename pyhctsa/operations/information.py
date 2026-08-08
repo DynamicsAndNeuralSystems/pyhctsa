@@ -103,12 +103,6 @@ def _first_max_from_curve(c: np.ndarray):
             return i - 1
     return np.nan
 
-
-def _first_min_mi_gaussian(y: np.ndarray):
-    """First minimum of the Gaussian AMI (vectorised); see ``_ami_gaussian_curve``."""
-    c = _self_corr_curve(np.asarray(y), 'mi')
-    return np.nan if c is None else _first_min_from_curve(c)
-
 def first_min(
     y: list,
     min_what: str = 'mi-gaussian',
