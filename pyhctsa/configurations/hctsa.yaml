@@ -1644,7 +1644,7 @@ nonlinearity:
 
 changepoint:
   stepdetect:
-    base_name: step_detect
+    base_name: stepdetect
     dependencies:
     configs:
       - {method: 'l1pwc', params: 10, zscore: True}
