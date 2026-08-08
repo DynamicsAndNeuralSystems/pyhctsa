@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Union
+from typing import Optional, Union
 from numpy.typing import ArrayLike
 import logging
 logger = logging.getLogger('pyhctsa')
@@ -8,7 +8,8 @@ from scipy.stats import mstats
 from scipy.signal import resample_poly
 
 from ..operations.correlation import first_crossing
-from ..utils import binarize, sign_change
+from ..toolboxes.matlab.matlab_fit import fit_exp1, fit_poly1, goodness_of_fit
+from ..utils import binarize, matlab_quantile, sign_change
 
 def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_groups: int = 3,
              coarse_grain_method: str = 'quantile', num_iters: int = 500,
@@ -672,6 +673,280 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     out['mineigcov'] = np.min(np.real(eig_cov_t))
 
     return out
+
+
+def _seq_sum(x: ArrayLike) -> complex:
+    """
+    Sequential summation, as MATLAB's `sum` performs it over a short vector.
+    NumPy sums pairwise instead, which can differ in the last bit -- enough to flip a
+    downstream `>` comparison against a threshold derived from these same sums.
+    """
+    total = 0.0
+    for v in np.asarray(x).ravel():
+        total = total + v
+    return total
+
+
+def _seq_mean(x: ArrayLike) -> complex:
+    """MATLAB's `mean`, i.e. its sequential `sum` divided by the count."""
+    x = np.asarray(x)
+    return _seq_sum(x) / x.size if x.size else np.nan
+
+
+def _seq_std(x: ArrayLike) -> float:
+    """
+    MATLAB's sample standard deviation: sqrt(sum(abs(x - mean(x)).^2)/(n-1)), where the
+    std of a scalar is 0 and the std of an empty vector is NaN. Accepts complex input,
+    for which it returns the real spread about the complex mean.
+    """
+    x = np.asarray(x)
+    if x.size == 0:
+        return np.nan
+    if x.size == 1:
+        return 0.0
+    xc = x - _seq_mean(x)
+    return float(np.sqrt(np.real(_seq_sum(xc * np.conj(xc))) / (x.size - 1)))
+
+
+def _exp_fit_gof(x: np.ndarray, y: np.ndarray, start_point) -> dict:
+    """
+    Fit ``a*exp(b*x)`` by nonlinear least squares and return the coefficients along
+    with the goodness-of-fit statistics reported by MATLAB's Curve Fitting Toolbox.
+    """
+    a, b = fit_exp1(x, y, start_point)
+    gof = goodness_of_fit(y, a * np.exp(b * x), num_coeffs=2)
+    return {'a': a, 'b': b, 'r2': gof['rsquare'],
+            'adjr2': gof['adjrsquare'], 'rmse': gof['rmse']}
+
+
+def _discretize_quantile(y: np.ndarray, num_groups: int) -> np.ndarray:
+    """
+    Discretize a time series into `num_groups` equiprobable groups by quantile separation.
+
+    This mirrors the (right-inclusive) binning of SB_TransitionpAlphabet's SUB_discretize,
+    which differs from the (left-inclusive) binning used by `coarse_grain`.
+    """
+    # thresholds for dividing the time-series values
+    th = matlab_quantile(y, np.linspace(0, 1, num_groups + 1))
+    th[0] = th[0] - 1  # ensures the first point is included
+
+    # turn the time series into a set of numbers from 1:num_groups
+    yth = np.zeros(len(y), dtype=int)
+    for li in range(num_groups):
+        yth[(y > th[li]) & (y <= th[li + 1])] = li + 1
+
+    if np.any(yth == 0):
+        raise ValueError('Some values were not assigned to a group')
+
+    return yth
+
+
+def _transition_measures(yth: np.ndarray, num_groups: int) -> np.ndarray:
+    """A set of metrics on the one-time transition matrix of a symbolized time series."""
+    N = len(yth)
+
+    # 1) Calculate the one-time transition matrix
+    T = np.zeros((num_groups, num_groups))
+    for j in range(num_groups):
+        ri = (yth == j + 1)
+        if not np.any(ri):
+            T[j, :] = 0  # yth is never j
+        else:
+            # looking at the next element, so shift the indices forward by one
+            ri_next = np.r_[False, ri[:-1]]
+            for k in range(num_groups):
+                T[j, k] = np.sum(yth[ri_next] == k + 1)
+    T = T / (N - 1)  # N-1 is appropriate because it's a 1-time transition matrix
+
+    # 2) return some quantities on the transition matrix, T
+    out = np.zeros(8)
+    #   (i) diagonal elements
+    diag_t = np.diag(T)
+    out[0] = _seq_sum(diag_t) / num_groups  # mean
+    out[1] = np.max(diag_t)
+    out[2] = _seq_sum(diag_t)  # trace
+
+    #  (ii) measures of symmetry:
+    # sum of differences of individual elements; MATLAB's sum(sum(M)) reduces down
+    # the columns first, then across the resulting row vector
+    asym = np.abs(T - T.T)
+    out[3] = _seq_sum([_seq_sum(asym[:, j]) for j in range(num_groups)])
+
+    # (iii) measures from covariance matrix:
+    xc = T - np.array([_seq_sum(T[:, j]) for j in range(num_groups)]) / num_groups
+    out[4] = _seq_sum(np.diag(xc.T @ xc) / (num_groups - 1))
+
+    # (iv) measures from eigenvalues of T
+    eig_t = np.linalg.eigvals(T)
+    out[5] = _seq_std(eig_t)
+    out[6] = np.max(np.real(eig_t))
+    out[7] = np.min(np.real(eig_t))
+
+    return out
+
+
+def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
+                          tau: Union[int, str] = 1) -> dict:
+    """
+    How transition probabilities change with alphabet size.
+
+    The time series is discretized by quantile separation into alphabets of a range
+    of sizes, and the one-time transition matrix is computed for each. Statistics of
+    those transition matrices are then tracked as a function of the alphabet size.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    num_groups : array-like, optional
+        The range of alphabet sizes to compare across. Must contain more than one
+        value, each at least 2. Default is ``range(2, 11)``.
+    tau : int or str, optional
+        The time-delay. The time series is downsampled at this lag before being
+        discretized. Can also be set to ``'ac'`` to use the first zero-crossing of
+        the autocorrelation function. Default is 1.
+
+    Returns
+    -------
+    dict
+        The decay rate of the sum, mean, and maximum of the diagonal elements of the
+        transition matrices, changes in symmetry, and statistics of their eigenvalues.
+    """
+    y = np.asarray(y, dtype=float)
+    N = len(y)  # time-series length
+
+    if num_groups is None:
+        num_groups = np.arange(2, 11)  # compare across alphabet sizes from 2 to 10
+    num_groups = np.atleast_1d(np.asarray(num_groups, dtype=int))
+
+    if isinstance(tau, str):
+        if tau != 'ac':
+            raise ValueError(f"Unknown tau '{tau}'")
+        # determine tau from first zero of autocorrelation
+        tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):
+            raise ValueError('Time series too short to estimate tau')
+        if tau > N / 50:  # for highly-correlated signals
+            tau = np.floor(N / 50)
+
+    if np.size(tau) > 1 or num_groups.size == 1:
+        raise NotImplementedError('Only a scalar tau with a range of alphabet sizes is '
+                                  'supported.')
+    tau = int(tau)
+
+    if np.min(num_groups) < 2:
+        raise ValueError('Need more than 2 groups')
+
+    num_groups_range = num_groups
+    if tau > 1:
+        y = resample_poly(y, 1, tau)  # resample
+
+    nfeat = 8  # the number of features calculated at each point
+    store = np.zeros((len(num_groups_range), nfeat))
+    for i, ng in enumerate(num_groups_range):
+        yth = _discretize_quantile(y, int(ng))  # thresholded data: yth
+        store[i, :] = _transition_measures(yth, int(ng))
+
+    x = num_groups_range.astype(float)
+    n = len(x)
+    out = {}
+
+    # 1) mean of diagonal elements of the transition matrix: shows an exponential
+    # decay to zero
+    fit = _exp_fit_gof(x, store[:, 0], [1, -0.2])
+    out['meandiagfexp_a'] = fit['a']
+    out['meandiagfexp_b'] = fit['b']
+    out['meandiagfexp_r2'] = fit['r2']
+    out['meandiagfexp_adjr2'] = fit['adjr2']
+    out['meandiagfexp_rmse'] = fit['rmse']
+
+    # 2) maximum of diagonal elements of the transition matrix: shows an exponential
+    # decay to zero
+    fit = _exp_fit_gof(x, store[:, 1], [1, -0.2])
+    out['maxdiagfexp_a'] = fit['a']
+    out['maxdiagfexp_b'] = fit['b']
+    out['maxdiagfexp_r2'] = fit['r2']
+    out['maxdiagfexp_adjr2'] = fit['adjr2']
+    out['maxdiagfexp_rmse'] = fit['rmse']
+
+    # 3) trace of T -- fit exponential
+    fit = _exp_fit_gof(x, store[:, 2], [1, -0.2])
+    out['trfexp_a'] = fit['a']
+    out['trfexp_b'] = fit['b']
+    out['trfexp_r2'] = fit['r2']
+    out['trfexp_adjr2'] = fit['adjr2']
+    out['trfexp_rmse'] = fit['rmse']
+
+    # Also fit linear from the start to a fifth, a tenth of the starting value
+    for thresh, name in ((5, 'trflin5_adjr2'), (10, 'trflin10adjr2')):
+        r = np.flatnonzero(store[:, 2] > store[0, 2] / thresh)
+        if len(r) > 2:
+            a, b = fit_poly1(x[r], store[r, 2], [-0.05, 1])
+            out[name] = goodness_of_fit(store[r, 2], a * x[r] + b, num_coeffs=2)['adjrsquare']
+        else:
+            out[name] = np.nan
+
+    # 4) Symmetry; differences in diagonal elements -- return the slope
+    out['symd_a'] = fit_poly1(x, store[:, 3], [0.1, 0])[0]
+
+    # return approximately when starts to rise; where means before and
+    # after a moving dividing point are most different
+    if np.all(store[:, 3] == store[0, 3]):  # all the same
+        out['symd_risept'] = np.nan
+    else:
+        mba = np.zeros((n, 2))  # means before and after
+        sba = np.zeros((n, 2))  # standard deviation before and after
+        for i in range(2, n):
+            mba[i, 0] = _seq_mean(store[:i, 3])
+            sba[i, 0] = _seq_std(store[:i, 3]) / np.sqrt(i)
+            after = store[i + 1:, 3]
+            mba[i, 1] = _seq_mean(after)
+            sba[i, 1] = _seq_std(after) / np.sqrt(n - i)
+        with np.errstate(invalid='ignore', divide='ignore'):
+            tstats = np.abs((mba[:, 0] - mba[:, 1]) / np.sqrt(sba[:, 0]**2 + sba[:, 1]**2))
+        if np.all(np.isnan(tstats)):
+            out['symd_risept'] = np.nan
+        else:
+            # MATLAB's max ignores NaNs; report the 1-based index of the first maximum
+            out['symd_risept'] = float(np.nanargmax(tstats) + 1)
+
+    # 5) trace of covariance matrix -- check jump:
+    out['trcov_jump'] = store[1, 4] - store[0, 4]
+    r1 = np.arange(1, n) if store[1, 4] > store[0, 4] else np.arange(n)
+    # fit exponential decay to range without possible first jump
+    fit = _exp_fit_gof(x[r1], store[r1, 4], [1, -0.5])
+    out['trcovfexp_a'] = fit['a']
+    out['trcovfexp_b'] = fit['b']
+    out['trcovfexp_r2'] = fit['r2']
+    out['trcovfexp_adjr2'] = fit['adjr2']
+    out['trcovfexp_rmse'] = fit['rmse']
+
+    # 6) Standard deviation of eigenvalues of T -- fit an exponential decay
+    fit = _exp_fit_gof(x, store[:, 5], [1, -0.2])
+    out['stdeigfexp_a'] = fit['a']
+    out['stdeigfexp_b'] = fit['b']
+    out['stdeigfexp_r2'] = fit['r2']
+    out['stdeigfexp_adjr2'] = fit['adjr2']
+    out['stdeigfexp_rmse'] = fit['rmse']
+
+    # 7) maximum (real) eigenvalue of T -- fit an exponential decay
+    fit = _exp_fit_gof(x, store[:, 6], [1, -0.2])
+    out['maxeig_fexpa'] = fit['a']
+    out['maxeig_fexpb'] = fit['b']
+    out['maxeig_fexpr2'] = fit['r2']
+    out['maxeig_fexpadjr2'] = fit['adjr2']
+    out['maxeig_fexprmse'] = fit['rmse']
+
+    # 8) minimum (real) eigenvalue of T -- fit an exponential decay
+    fit = _exp_fit_gof(x, store[:, 7], [1, -0.2])
+    out['mineigfexp_a'] = fit['a']
+    out['mineigfexp_b'] = fit['b']
+    out['mineigfexp_r2'] = fit['r2']
+    out['mineigfexp_adjr2'] = fit['adjr2']
+    out['mineigfexp_rmse'] = fit['rmse']
+
+    return out
+
 
 def coarse_grain(y: list, how_to_cg: str, num_groups: int) -> np.ndarray:
     """

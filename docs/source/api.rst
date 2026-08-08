@@ -265,6 +265,7 @@ Symbolic
    pyhctsa.operations.symbolic.binary_stretch
    pyhctsa.operations.symbolic.binary_stats
    pyhctsa.operations.symbolic.transition_matrix
+   pyhctsa.operations.symbolic.transition_p_alphabet
    pyhctsa.operations.symbolic.coarse_grain
 
 .. _waveletmeths:
