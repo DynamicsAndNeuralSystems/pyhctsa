@@ -335,13 +335,6 @@ def _polyfit(x, y, deg):
     )
     return p
 
-def _polyval(p, x):
-    x = np.asarray(x, dtype=float)
-    y = np.zeros_like(x)
-    for coeff in p:
-        y = x * y + coeff
-    return y
-
 def _std(x, axis=None):
     x = np.asarray(x, dtype=float)
     n = x.size if axis is None else x.shape[axis]
@@ -447,7 +440,7 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
         for ni in range(num_segments):
             seg = segments[ni, :]
             fit = _polyfit(x_base, seg, 2)
-            f2_nis[ni] = np.mean((seg - _polyval(fit, x_base)) ** 2)
+            f2_nis[ni] = np.mean((seg - np.polyval(fit, x_base)) ** 2)
 
         for q in q_list:
             fqs[row_idx, :] = [q, s, np.mean(f2_nis ** (q / 2)) ** (1 / q)]
