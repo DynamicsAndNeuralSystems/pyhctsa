@@ -1711,8 +1711,7 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
     out["std"] = np.std(np_counts, ddof=1)
     out["mean"] = np.mean(np_counts)
     
-    # count the hits
-    vals, hits = np.unique_counts(np_counts)
+    vals, hits = np.unique(np_counts, return_counts=True)
     max_val = np.argmax(hits)
     out["npatmode"] = hits[max_val]/NN
     out["mode"] = vals[max_val]
