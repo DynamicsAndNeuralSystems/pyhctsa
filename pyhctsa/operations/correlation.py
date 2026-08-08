@@ -12,6 +12,7 @@ from statsmodels.tsa.stattools import pacf
 
 from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
+from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit
 from ..utils import (bin_picker, histc, make_mat_buffer, point_of_crossing,
                      sign_change, time_delay_embed, z_score)
 
@@ -141,16 +142,13 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     out['pcrossmean'] = np.sum(c[:-1] * c[1:] < 0) / (num_repeats - 1)
 
     # Fit exponential decay model
-    exp_func = lambda x, a, b : a * np.exp(b * x)
-    popt, pcov = curve_fit(exp_func, noise_range, amis, p0=[amis[0], -1],
-                       method='trf', ftol=1e-6, xtol=1e-6, max_nfev=600)
-    out['fitexpa'], out['fitexpb'] = popt
-    residuals = amis - exp_func(noise_range, *popt)
-    ss_res = np.sum(residuals**2)
-    ss_tot = np.sum((amis - np.mean(amis))**2)
-    out['fitexpr2'] = 1 - (ss_res / ss_tot)
-    out['fitexpadjr2'] = 1 - (1 - out['fitexpr2']) * (len(amis) - 1) / (len(amis) - 2)
-    out['fitexprmse'] = np.sqrt(np.mean(residuals**2))
+    a, b = fit_exp1(noise_range, amis, start_point=(amis[0], -1))
+    gof = goodness_of_fit(amis, a * np.exp(b * noise_range), num_coeffs=2)
+    out['fitexpa'] = a
+    out['fitexpb'] = b
+    out['fitexpr2'] = gof['rsquare']
+    out['fitexpadjr2'] = gof['adjrsquare']
+    out['fitexprmse'] = gof['rmse']
 
     # Fit linear function
     p = np.polyfit(noise_range, amis, 1)
