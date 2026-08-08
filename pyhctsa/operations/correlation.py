@@ -1722,45 +1722,15 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
         if 2*w + 1 >= i:
             out[f"{count_types[i-1]}"] = np.mean(np_counts == i)
     
-    out['statav2_m'] = _stat_av(np_counts, 'mean', 2, 1)
-    out['statav2_s'] = _stat_av(np_counts, 'std', 2, 1)
-    out['statav3_m'] = _stat_av(np_counts, 'mean', 3, 1)
-    out['statav3_s'] = _stat_av(np_counts, 'std', 3, 1)
-    out['statav4_m'] = _stat_av(np_counts, 'mean', 4, 1)
-    out['statav4_s'] = _stat_av(np_counts, 'std', 4, 1)
+    # imported here rather than at module scope: stationarity imports from this
+    # module, so a top-level import would close the cycle
+    from ..operations.stationarity import sliding_window
+
+    for num_seg in (2, 3, 4):
+        out[f'statav{num_seg}_m'] = sliding_window(np_counts, 'mean', 'std', num_seg, 1)
+        out[f'statav{num_seg}_s'] = sliding_window(np_counts, 'std', 'std', num_seg, 1)
 
     return out
-
-def _stat_av(y: ArrayLike, window_stat: str = 'mean', num_seg: int = 5, inc_move: int = 2) -> float:
-    """helper function to compute sliding winow stats for `TranslateShape`"""
-    y = np.asarray(y)
-    win_length = np.floor(len(y)/num_seg)
-    if win_length == 0:
-        logger.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
-        return np.nan
-    inc = np.floor(win_length/inc_move) # increment to move at each step
-    # if increment rounded down to zero, prop it up
-    if inc == 0:
-        inc = 1
-    
-    num_steps = int(np.floor((len(y)-win_length)/inc) + 1)
-    qs = np.zeros(num_steps)
-
-    # convert a step index (stepInd) to a range of indices corresponding to that window
-    def get_window(step_ind: int):
-        start_idx = (step_ind) * inc
-        end_idx = (step_ind) * inc + win_length
-
-        return np.arange(start_idx, end_idx).astype(int)
-    
-    if window_stat == 'mean':
-        for i in range(num_steps):
-            qs[i] = np.mean(y[get_window(i)])
-    elif window_stat == 'std':
-        for i in range(num_steps):
-            qs[i] = np.std(y[get_window(i)], ddof=1)
-
-    return np.std(qs, ddof=1)/np.std(y, ddof=1)
 
 def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> dict:
     """
