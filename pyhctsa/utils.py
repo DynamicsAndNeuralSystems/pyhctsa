@@ -10,15 +10,12 @@ from pyhctsa import __version__
 from pathlib import Path
 import logging
 logger = logging.getLogger('pyhctsa')
-import warnings
 
 import numpy as np
 from numpy.typing import ArrayLike
 import pandas as pd
 from scipy.stats import chi2
 
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils.validation import check_array, check_is_fitted
 
 def _build_repr_html(feature_funcs: dict[str, Callable],
     skipped_functions: list[tuple[str, list[str]]],
@@ -309,6 +306,47 @@ def ljung_box_pvalue(x: ArrayLike, n_lags: int = 20, model_df: int = 0) -> float
     sacf2 = sacf[1:n_lags+1]**2 / (nobs - np.arange(1, n_lags+1))
     q = nobs * (nobs+2) * np.cumsum(sacf2)[n_lags-1]
     return chi2.sf(q, n_lags - model_df)
+
+def matlab_quantile(x: ArrayLike, p: ArrayLike) -> np.ndarray:
+    """
+    Quantiles of `x` at the proportions `p`, bit-for-bit as MATLAB's ``quantile``.
+
+    MATLAB's linear-interpolation scheme is the one NumPy calls ``method='hazen'``,
+    but the two evaluate it with different floating-point arithmetic and can disagree
+    in the last bit. That is enough to move a point across a bin edge when a quantile
+    lands on an order statistic, so this reproduces the arithmetic of MATLAB's
+    ``prctile`` (which ``quantile`` calls as ``prctile(x, 100*p)``) exactly.
+
+    Parameters
+    ----------
+    x : array-like
+        The input data.
+    p : array-like
+        The quantile proportions, in [0, 1].
+
+    Returns
+    -------
+    numpy.ndarray
+        The quantiles of `x`.
+    """
+    xs = np.sort(np.asarray(x, dtype=float).ravel())
+    n = xs.size
+    # quantile() defers to prctile() with percentages; the round trip through 100 is
+    # part of the arithmetic being reproduced
+    r = (100.0 * np.atleast_1d(np.asarray(p, dtype=float)) / 100.0) * n
+    k = np.floor(r + 0.5)  # index of the row just before r
+    kp1 = k + 1            # index of the row just after r
+    r = r - k              # the ratio between the two rows
+
+    # Cap indices that fall outside the range 1 to n
+    k = np.where((k < 1) | np.isnan(k), 1, k).astype(int)
+    kp1 = np.minimum(kp1, n).astype(int)
+    xk, xkp1 = xs[k - 1], xs[kp1 - 1]
+
+    y = (0.5 + r) * xkp1 + (0.5 - r) * xk
+    y = np.where(r == -0.5, xk, y)   # values hit exactly are copied, not interpolated
+    return np.where(xk == xkp1, xk, y)  # as are identical values
+
 
 def histc(x: ArrayLike, bins: ArrayLike) -> int:
     """Counts the number of values in x that are within each specified bin."""
