@@ -76,7 +76,7 @@ correlation:
   
   add_noise:
     base_name: add_noise
-    depedencies:
+    dependencies:
     configs:
       - {tau: 1,   ami_method: 'quantiles', extra_param: 10, zscore: True}
       - {tau: 1,   ami_method: 'even',      extra_param: 10, zscore: True}
@@ -175,7 +175,7 @@ correlation:
 
   embed2_shapes:
     base_name: embed2_shapes
-    depedencies:
+    dependencies:
     configs:
       - {tau: 'tau', shape: 'circle', r: 0.1, zscore: True}
       - {tau: 'tau', shape: 'circle', r: 1, zscore: True}
@@ -421,7 +421,7 @@ correlation:
 
   crinkle_statistic:
     base_name: crinkle_statistic
-    depedencies:
+    dependencies:
     configs:
       - {zscore: True}
     legacy_name: DK_crinkle
@@ -429,7 +429,7 @@ correlation:
   
   theiler_q:
     base_name: theiler_q
-    depedencies:
+    dependencies:
     configs:
       - {zscore: True}
     legacy_name: DK_theilerQ
@@ -461,7 +461,7 @@ information:
   
   first_max:
     base_name: first_max
-    depedencies:
+    dependencies:
     configs:
       - {max_what: 'ac', zscore: True}
       - {max_what: 'mi-gaussian', zscore: True}
@@ -1189,14 +1189,14 @@ distribution:
 scaling:
   fast_dfa:
     base_name: fast_dfa
-    depedencies:
+    dependencies:
     configs:
       - {zscore: True}
     legacy_name: SC_fastdfa
     
   fluctuation_analysis:
     base_name: fluctuation_analysis
-    depedencies:
+    dependencies:
     configs:
       - {q: 2.0, wtf: 'nothing', tau_step: 50,  log_inc: True, zscore: True}
       - {q: 2.0, wtf: 'endptdiff', tau_step: 50,  log_inc: True, zscore: True}
@@ -1220,9 +1220,6 @@ scaling:
       - {do_overlap: False, scale_range: null, q_range: [[-5, 5]], zscore: True}
     legacy_name: SC_MMA
     ordered_args: ['do_overlap', 'scale_range', 'q_range']
-
-  
-
 
 symbolic:
   transition_matrix:
@@ -1374,7 +1371,7 @@ wavelet:
   
   scal_2_freq:
     base_name: scal_2_freq
-    depedencies:
+    dependencies:
       - PyWavelets
     configs:
       - {w_name: 'db3', a_max: 'max', delta: 1, zscore: True}
@@ -1383,7 +1380,7 @@ wavelet:
   
   wfbm:
     base_name: wfbm
-    depedencies:
+    dependencies:
       - pywt
       - PyWavelets
     configs:
@@ -1422,7 +1419,7 @@ hypothesis_tests:
 spectral:
   spectral_summaries:
     base_name: spectral_summaries
-    depedencies:
+    dependencies:
     configs:
       - {psd_meth: 'welch', window_type: 'rect', zscore: True}
       - {psd_meth: 'fft', window_type: 'none', zscore: True}
@@ -1513,7 +1510,7 @@ model_fit:
   
   is_seasonal:
     base_name: is_seasonal
-    depedencies:
+    dependencies:
       - lmfit
     configs:
       - {zscore: True}
@@ -1601,7 +1598,7 @@ surrogates:
 nonlinearity:
   nsamdf:
     base_name: nsamdf
-    depedencies:
+    dependencies:
     configs:
       - {fs: 1, win_len_rel: 14, shift_len_rel: 0.5, lag_rel: 1, degree: 7, zscore: False}
       - {fs: 1, win_len_rel: 14, shift_len_rel: 0.5, lag_rel: 1, degree: 7, zscore: True}
@@ -1610,7 +1607,7 @@ nonlinearity:
 
   nlpe:
     base_name: nlpe
-    depedencies:
+    dependencies:
     configs:
       - {de: 2, tau: 'mi', zscore: True}
       - {de: 2, tau: 'ac', zscore: True}
@@ -1619,7 +1616,7 @@ nonlinearity:
   
   embed_pca:
     base_name: embed_pca
-    depedencies:
+    dependencies:
     configs:
       - {tau: 'mi', m: 10, zscore: True}
       - {tau: 1, m: 10, zscore: True}
@@ -1629,7 +1626,7 @@ nonlinearity:
   
   local_density:
     base_name: local_density
-    depedencies:
+    dependencies:
     configs:
       - {nnr: 5, past: 40, tau: 'ac', m: 2, zscore: True}
       - {nnr: 5, past: 40, tau: 1, m: 3, zscore: True}
@@ -1638,7 +1635,7 @@ nonlinearity:
   
   tisean_d2:
     base_name: tisean_d2
-    depedencies:
+    dependencies:
     configs:
       - {tau: 1, maxm: 10, theiler_win: 0, zscore: True}
       - {tau: 'ac', maxm: 10, theiler_win: 0.01, zscore: True}
@@ -1648,7 +1645,7 @@ nonlinearity:
 changepoint:
   stepdetect:
     base_name: step_detect
-    depedencies:
+    dependencies:
     configs:
       - {method: 'l1pwc', params: 10, zscore: True}
       - {method: 'l1pwc', params: 0.05, zscore: True}
@@ -1658,7 +1655,7 @@ changepoint:
   
   l1pwc_sweep_lambda:
     base_name: l1pwc_sweep_lambda
-    depedencies:
+    dependencies:
     configs:
       - {lambdar: [!range [0, 0.95, 0.05]], zscore: True}
     legacy_name: CP_l1pwc_sweep_lambda
