@@ -14,6 +14,8 @@ logger = logging.getLogger('pyhctsa')
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
+from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
+from ..toolboxes.matlab.optimizers import minimize
 from ..utils import z_score, ljung_box_pvalue
 
 def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed: int = 0) -> dict:
@@ -833,3 +835,338 @@ def is_seasonal(y: ArrayLike) -> int:
         out = 1 # test thinks the time series has strong periodicities
     
     return out
+
+def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50) -> np.ndarray:
+    """
+    learn GP hyperparameters for the time series ``(tt, yt)``.
+
+    The GP is a mean-zero process with a Gaussian likelihood and Laplace
+    inference; ``nfevals`` is negative, so it caps the number of function
+    evaluations rather than the number of line searches.
+
+    Returns the flattened hyperparameter vector ``[cov..., lik]`` -- gpml
+    unwraps the hyperparameter struct with its fields alphabetised (cov, lik,
+    mean), and the mean is empty for a mean-zero process.
+
+    Raises ``numpy.linalg.LinAlgError`` if the covariance loses positive
+    definiteness, the counterpart of gpml's ``MATLAB:posdef`` error.
+    """
+    nhps = cov.n_hyp
+    # Initial values: the length parameter is in the ballpark of the difference
+    # between time elements; the remaining log-hyperparameters start at zero and
+    # the likelihood noise at log(0.1).
+    hyp0 = np.concatenate([[np.log(np.mean(np.diff(tt)))],
+                           np.zeros(nhps - 1), [np.log(0.1)]])
+
+    def _nlz(theta):
+        hyp = {'cov': theta[:nhps], 'lik': theta[nhps], 'mean': np.zeros(0)}
+        nlZ, dnlZ = gp_train(hyp, cov, tt, yt)
+        return nlZ, np.concatenate([dnlZ['cov'], dnlZ['lik'], dnlZ['mean']])
+
+    theta, _, _ = minimize(hyp0, _nlz, nfevals)
+    return theta
+
+
+def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
+                  npoints: int = 20) -> dict:
+    """
+    Gaussian Process time-series modeling for local prediction.
+
+    Trains a Gaussian Process model on equally-spaced points throughout the time
+    series and uses the model to predict its intermediate values.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    cov_func : str
+        The covariance function. Only ``'covSEiso_covNoise'``, the gpml
+        ``covSum`` of a squared exponential and a noise term, is supported -- it
+        is the only configuration hctsa instantiates. Default is
+        ``'covSEiso_covNoise'``.
+    npoints : int
+        The number of points through the time series to fit the GP model to.
+        Default is 20.
+
+    Returns
+    -------
+    dict
+        Dictionary summarising the error and the fitted hyperparameters.
+    """
+    if cov_func != 'covSEiso_covNoise':
+        raise ValueError(
+            "Only cov_func='covSEiso_covNoise' is supported "
+            f"(got {cov_func!r}); it is the only variant used by hctsa.")
+
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    npoints = int(npoints)
+
+    cov = CovSEisoNoise
+    nhps = cov.n_hyp
+
+    # Get the points (1-based time indices, as in MATLAB)
+    tt = np.floor(_linspace(1, N, npoints))
+    yt = y[tt.astype(int) - 1]
+
+    try:
+        theta = _gp_learn_hyperp(tt, yt, cov)
+    except np.linalg.LinAlgError:
+        logger.warning('Lack of positive definite matrix for this time series')
+        return {k: np.nan for k in
+                ('rmserr', 'meanstderr', 'stdmu', 'meanS', 'stdS', 'mlikelihood',
+                 'logh1', 'logh2', 'logh3', 'h_lonN')}
+
+    loghyper = theta[:nhps]
+    hyp = {'cov': loghyper, 'lik': theta[nhps], 'mean': np.zeros(0)}
+
+    # Evaluate over the whole space now, predicting at the test times ts
+    if N <= 2000:
+        ts = np.arange(1, N + 1, dtype=float)
+    else:  # memory constraints force us to crudely resample
+        ts = np.floor(_linspace(1, N, 2000) + 0.5)  # MATLAB round()
+    y_ts = y[ts.astype(int) - 1]
+
+    mu, S2, _, _ = gp_predict(hyp, cov, tt, yt, ts)
+
+    # Output statistics
+    S = np.sqrt(S2)  # standard deviation function, S
+    out = {}
+    # rms error from mean function, mu
+    out['rmserr'] = np.mean(np.sqrt((y_ts - mu) ** 2))
+    out['meanstderr'] = np.mean(np.abs(y_ts - mu) / S)
+    out['stdmu'] = np.std(mu, ddof=1)
+    out['meanS'] = np.mean(S)
+    out['stdS'] = np.std(S, ddof=1)
+
+    # Marginal likelihood
+    try:
+        out['mlikelihood'] = gp_train(hyp, cov, ts, y_ts, want_dnlZ=False)[0]
+    except Exception:
+        out['mlikelihood'] = np.nan
+
+    # Log-hyperparameters
+    for i in range(nhps):
+        out[f'logh{i + 1}'] = loghyper[i]
+
+    # Give extra output based on length parameter on length of time series
+    out['h_lonN'] = np.exp(loghyper[0]) / N
+
+    return out
+
+
+def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
+                        num_train: int = 10, num_test: int = 3,
+                        num_preds: int = 20, pmode: str = 'randomgap',
+                        random_seed: int = 0) -> dict:
+    """
+    Gaussian Process time-series model for local prediction.
+
+    Fits a Gaussian Process model to a section of the time series and uses it to
+    predict the subsequent datapoints, repeated at equally-spaced positions
+    through the time series.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    cov_func : str
+        The covariance function. Only ``'covSEiso_covNoise'``, the gpml
+        ``covSum`` of a squared exponential and a noise term, is supported -- it
+        is the only configuration hctsa instantiates. Default is
+        ``'covSEiso_covNoise'``.
+    num_train : int
+        The number of training samples (for each iteration). Default is 20.
+    num_test : int
+        The number of testing samples (for each iteration). Default is 5.
+    num_preds : int
+        The number of predictions to make. Default is 10.
+    pmode : str
+        The prediction mode, one of:
+
+        - ``'frombefore'``: predicts the following values of the time series by
+          training on preceding values,
+        - ``'beforeafter'``: predicts the preceding time series values by
+          training on the following values,
+        - ``'randomgap'``: predicts random values within a segment of time
+          series by training on the other values in that segment.
+
+        Default is ``'frombefore'``.
+    random_seed : int or None
+        Seed for the Mersenne Twister, reset before each prediction (as
+        ``BF_ResetSeed`` does), used by the ``'randomgap'`` mode. ``None``
+        leaves the stream alone, matching ``BF_ResetSeed('none')``. Default
+        is 0.
+
+    Returns
+    -------
+    dict
+        Summaries of the quality of the predictions made, the mean and spread of
+        the obtained hyperparameter values, and the marginal likelihoods.
+    """
+    if cov_func != 'covSEiso_covNoise':
+        raise ValueError(
+            "Only cov_func='covSEiso_covNoise' is supported "
+            f"(got {cov_func!r}); it is the only variant used by hctsa.")
+
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    num_train, num_test, num_preds = int(num_train), int(num_test), int(num_preds)
+
+    cov = CovSEisoNoise
+    nhps = cov.n_hyp
+
+    # Starting positions (1-based, as in MATLAB)
+    if pmode in ('frombefore', 'randomgap'):
+        spns = np.floor(_linspace(1, N - (num_test + num_train), num_preds))
+    elif pmode == 'beforeafter':
+        spns = np.floor(_linspace(1, N - (num_test + num_train * 2), num_preds))
+    else:
+        raise ValueError(f"Unknown prediction mode {pmode!r}")
+    spns = spns.astype(int)
+
+    out_keys = (
+        'maxstderr', 'maxabserr', 'minstderr', 'minabserr', 'meanstderr',
+        'meanabserr', 'meanstderr_run', 'meanabserr_run', 'maxstderr_run',
+        'maxabserr_run', 'minstderr_run', 'minabserr_run', 'maxerrbar',
+        'meanerrbar', 'minerrbar',
+        *(f'{s}logh{i + 1}' for i in range(nhps) for s in ('mean', 'std')),
+        'maxmlik', 'minmlik', 'stdmlik',
+    )
+
+    mus = np.zeros((num_test, num_preds))        # predicted values
+    stderrs = np.zeros((num_test, num_preds))    # standard errors on predictions
+    yss = np.zeros((num_test, num_preds))        # test values
+    mlikelihoods = np.zeros(num_preds)           # marginal likelihoods of model
+    loghypers = np.zeros((nhps, num_preds))      # log-hyperparameters
+
+    rng = np.random.RandomState() if random_seed is None else None
+
+    for i in range(num_preds):
+        # (0) Set up test and training sets
+        sp = spns[i]
+        if pmode == 'frombefore':
+            tt = np.arange(1, num_train + 1, dtype=float)          # times (from 1)
+            yt = y[sp - 1:sp - 1 + num_train]                      # training data
+            ts = np.arange(num_train + 1, num_train + num_test + 1, dtype=float)
+            ys = y[sp - 1 + num_train:sp - 1 + num_train + num_test]  # test data
+
+        elif pmode == 'randomgap':
+            if random_seed is not None:
+                rng = _ml_rng(random_seed)
+            n = num_train + num_test
+            t = np.arange(1, n + 1, dtype=float)
+            r = _ml_randperm(n, rng)
+            yy = y[sp - 1:sp - 1 + n]
+
+            rt = np.sort(r[:num_train])
+            tt, yt = t[rt - 1], yy[rt - 1]
+
+            rs = np.sort(r[num_train:])
+            ts, ys = t[rs - 1], yy[rs - 1]
+
+        else:  # 'beforeafter'
+            n = 2 * num_train + num_test
+            t = np.arange(1, n + 1, dtype=float)
+            yy = y[sp - 1:sp - 1 + n]
+
+            rt = np.concatenate([np.arange(1, num_train + 1),
+                                 np.arange(num_train + num_test + 1, n + 1)])
+            tt, yt = t[rt - 1], yy[rt - 1]
+
+            rs = np.arange(num_train + 1, num_train + num_test + 1)
+            ts, ys = t[rs - 1], yy[rs - 1]
+
+        # Process to normalize scales (the same transformation for both sets)
+        yt_mean, yt_std = np.mean(yt), np.std(yt, ddof=1)
+        ys = (ys - yt_mean) / yt_std
+        yt = (yt - yt_mean) / yt_std
+
+        # (1) Learn hyperparameters from the training set
+        try:
+            theta = _gp_learn_hyperp(tt, yt, cov)
+        except np.linalg.LinAlgError:
+            logger.warning('Unable to learn hyperparameters for this time series')
+            return {k: np.nan for k in out_keys}
+
+        loghyper = theta[:nhps]
+        loghypers[:, i] = loghyper
+        hyp = {'cov': loghyper, 'lik': theta[nhps], 'mean': np.zeros(0)}
+
+        # Marginal likelihood for this model, with hyperparameters optimized
+        # over the training data
+        mlikelihoods[i] = -gp_train(hyp, cov, tt, yt, want_dnlZ=False)[0]
+
+        # (2) Evaluate at the test points, based on the training time/data
+        mu, S2, _, _ = gp_predict(hyp, cov, tt, yt, ts)
+
+        mus[:, i] = mu                     # ~predicted values for time-series points
+        stderrs[:, i] = 2 * np.sqrt(S2)    # ~errors on those predictions
+        yss[:, i] = ys
+
+    # (1) Prediction error measures
+    allabserrs = np.abs(mus - yss)                 # absolute errors
+    allstderrs = allabserrs / stderrs   # in units of 95% confidence-interval bars
+
+    out = {}
+    # Largest/smallest/mean error across all runs:
+    out['maxstderr'] = np.max(allstderrs)
+    out['maxabserr'] = np.max(allabserrs)
+    out['minstderr'] = np.min(allstderrs)
+    out['minabserr'] = np.min(allabserrs)
+    out['meanstderr'] = np.mean(allstderrs)
+    out['meanabserr'] = np.mean(allabserrs)
+
+    # Summary of how it did on each run:
+    stderr_run = np.mean(allstderrs, axis=0)
+    abserr_run = np.mean(allabserrs, axis=0)
+
+    out['meanstderr_run'] = np.mean(stderr_run)
+    out['meanabserr_run'] = np.mean(abserr_run)
+    out['maxstderr_run'] = np.max(stderr_run)
+    out['maxabserr_run'] = np.max(abserr_run)
+    out['minstderr_run'] = np.min(stderr_run)
+    out['minabserr_run'] = np.min(abserr_run)
+
+    # Error bar stats:
+    out['maxerrbar'] = np.max(stderrs)     # largest error bar
+    out['meanerrbar'] = np.mean(stderrs)   # mean error bar length
+    out['minerrbar'] = np.min(stderrs)     # minimum error bar length
+
+    # (2) Hyperparameter measures: mean and std for each hyperparameter
+    for i in range(nhps):
+        out[f'meanlogh{i + 1}'] = np.mean(loghypers[i, :])
+        out[f'stdlogh{i + 1}'] = np.std(loghypers[i, :], ddof=1)
+
+    # (3) Marginal likelihood measures
+    out['maxmlik'] = np.max(mlikelihoods)
+    out['minmlik'] = np.min(mlikelihoods)
+    out['stdmlik'] = np.std(mlikelihoods, ddof=1)
+
+    return out
+
+
+def _ml_rng(seed: int) -> np.random.RandomState:
+    """
+    ``rng(seed, 'twister')``, as a numpy ``RandomState``.
+    """
+    return np.random.RandomState(5489 if seed == 0 else seed)
+
+
+def _ml_randperm(n: int, rng: np.random.RandomState) -> np.ndarray:
+    """
+    MATLAB's ``randperm(n)``: the 1-based ordering that sorts ``rand(1, n)``.
+    """
+    return np.argsort(rng.random_sample(n), kind='stable') + 1
+
+
+def _linspace(d1: float, d2: float, n: int) -> np.ndarray:
+    """
+    Helper function for gp_fit_across
+    """
+    n1 = n - 1
+    y = d1 + np.arange(n) * (d2 - d1) / n1
+    y[0] = d1
+    if n1 > 0:
+        y[n - 1] = d2
+    return y

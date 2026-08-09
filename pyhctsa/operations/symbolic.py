@@ -600,77 +600,71 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
         transition matrix.
     """
     # check inputs
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float)
     if num_groups < 2:
-        logger.warning("Too few groups for coarse-graining")
-        return np.nan
-    if tau == 'ac':
-        # determine the tau from first zero of the ACF
+        raise ValueError('Too few groups for coarse-graining')
+    if isinstance(tau, str):
+        if tau != 'ac':
+            raise ValueError(f"Unknown tau '{tau}'")
+        # determine tau from the first zero-crossing of the ACF
         tau = first_crossing(y, 'ac', 0, 'discrete')
-        if np.isnan(tau):
-            logger.warning("Time series too short to estimate tau")
-            return np.nan
-    if tau > 1:
-        y = resample_poly(y, 1, int(tau))
-    
-    N = len(y)
+    if np.isnan(tau):
+        raise ValueError('Time series too short to estimate tau')
+    tau = int(tau)
 
+    if tau > 1:  # calculate the transition matrix at a non-unit lag
+        y = resample_poly(y, 1, tau)  # downsample at rate 1:tau
+
+    N = len(y)  # time-series length
+
+    # (((1))) Discretize the time series to a symbolic string, containing
+    # integers from 1 to num_groups
     yth = coarse_grain(y, how_to_cg, num_groups)
-    # At this point we should have:
-    # (*) yth: a thresholded y containing integers from 1 to num_groups
-    yth = np.ravel(yth)
 
-    T = np.zeros((num_groups,num_groups))
-    for i in range(num_groups):
-        ri = (yth == i + 1)
-        if sum(ri) == 0:
-            T[i,:] = 0
-        else:
-            ri_next = np.r_[False, ri[:-1]]
-            for j in range(num_groups):
-                T[i, j] = np.sum(yth[ri_next] == j + 1)
+    # (((2))) Compute the tau-step transition matrix (Markov for tau = 1)
+    T = _transition_matrix(yth, num_groups)
 
+    # (((3))) Output measures from the transition matrix
     out = {}
-    # Normalize from counts to probabilities:
-    T = T/(N - 1) # N-1 is appropriate because it's a 1-time transition matrix
 
-    if num_groups == 2:
-        for i in range(4):
-            out[f'T{i+1}'] = T.transpose().flatten()[i]
-
-    elif num_groups == 3:
-        for i in range(9):
-            out[f'T{i+1}'] = T.transpose().flatten()[i]
-
-    elif num_groups > 3:
+    # (i) Raw values of the transition matrix; only for num_groups = 2, 3 are all
+    # elements returned (in MATLAB's column-major order), otherwise just the diagonal
+    if num_groups in (2, 3):
+        for i, v in enumerate(T.flatten(order='F')):
+            out[f'T{i+1}'] = v
+    else:
         for i in range(num_groups):
-            out[f'TD{i+1}'] = T.transpose()[i, i]
+            out[f'TD{i+1}'] = T[i, i]
 
     # (ii) Measures on the diagonal
-    out['ondiag'] = np.trace(T) # trace
-    out['stddiag'] = np.std(np.diag(T), ddof=1) # std of diagonal elements
+    diag_t = np.diag(T)
+    out['ondiag'] = _seq_sum(diag_t)  # trace
+    out['stddiag'] = _seq_std(diag_t)  # std of diagonal elements
 
     # (iii) Measures of symmetry:
-    out['symdiff'] = np.sum(np.abs(T - T.T)) # sum of differences of individual elements
+    out['symdiff'] = _seq_sum2(np.abs(T - T.T))  # sum of differences of individual elements
     # difference in sums of upper and lower triangular parts of T
-    out['symsumdiff'] = np.sum(np.tril(T, -1)) - np.sum(np.triu(T, 1))
+    out['symsumdiff'] = _seq_sum2(np.tril(T, -1)) - _seq_sum2(np.triu(T, 1))
 
-    # Measures from eigenvalues of T
+    # (iv) Measures from eigenvalues of T
     eig_t = np.linalg.eigvals(T)
-    out['stdeig'] = np.std(eig_t, ddof=1)
-    out['maxeig'] = np.max(np.real(eig_t))
-    out['mineig'] = np.min(np.real(eig_t))
-    out['maximeig'] = np.max(np.imag(eig_t))
+    out['stdeig'] = _seq_std(eig_t)  # std of eigenvalues
+    out['maxeig'] = np.max(np.real(eig_t))  # maximum eigenvalue
+    out['mineig'] = np.min(np.real(eig_t))  # minimum eigenvalue
+    # mean eigenvalue is equivalent to the trace
+    out['maximeig'] = np.max(np.imag(eig_t))  # maximum imaginary part of eigenvalues
 
-    # Measures from covariance matrix
-    cov_t = np.cov(T.transpose())
-    out['sumdiagcov'] = np.trace(cov_t)
+    # (v) Measures from the covariance matrix:
+    cov_t = _ml_cov(T)
+    out['sumdiagcov'] = _seq_sum(np.diag(cov_t))  # trace of covariance matrix
 
-    # Eigenvalues of covariance matrix
-    eig_cov_t = np.linalg.eigvals(cov_t)
-    out['stdeigcov'] = np.std(eig_cov_t, ddof=1)
-    out['maxeigcov'] = np.max(np.real(eig_cov_t))
-    out['mineigcov'] = np.min(np.real(eig_cov_t))
+    # (vi) Eigenvalues of the covariance matrix. It is symmetric, so MATLAB's `eig`
+    # takes its symmetric path and returns real eigenvalues -- as `eigvalsh` does here
+    # (these measures don't make much sense in the case of 2 groups):
+    eig_cov_t = np.linalg.eigvalsh(cov_t)
+    out['stdeigcov'] = _seq_std(eig_cov_t)  # std of eigenvalues of covariance matrix
+    out['maxeigcov'] = np.max(eig_cov_t)  # max eigenvalue of covariance matrix
+    out['mineigcov'] = np.min(eig_cov_t)  # min eigenvalue of covariance matrix
 
     return out
 
@@ -688,7 +682,6 @@ def _seq_sum(x: ArrayLike) -> complex:
 
 
 def _seq_mean(x: ArrayLike) -> complex:
-    """MATLAB's `mean`, i.e. its sequential `sum` divided by the count."""
     x = np.asarray(x)
     return _seq_sum(x) / x.size if x.size else np.nan
 
@@ -719,46 +712,48 @@ def _exp_fit_gof(x: np.ndarray, y: np.ndarray, start_point) -> dict:
             'adjr2': gof['adjrsquare'], 'rmse': gof['rmse']}
 
 
-def _discretize_quantile(y: np.ndarray, num_groups: int) -> np.ndarray:
+def _seq_sum2(x: ArrayLike) -> complex:
     """
-    Discretize a time series into `num_groups` equiprobable groups by quantile separation.
-
-    This mirrors the (right-inclusive) binning of SB_TransitionpAlphabet's SUB_discretize,
-    which differs from the (left-inclusive) binning used by `coarse_grain`.
+    MATLAB's `sum(sum(M))` over a matrix: it reduces down the columns first, then
+    across the resulting row vector, each reduction sequential (see `_seq_sum`).
     """
-    # thresholds for dividing the time-series values
-    th = matlab_quantile(y, np.linspace(0, 1, num_groups + 1))
-    th[0] = th[0] - 1  # ensures the first point is included
+    x = np.atleast_2d(np.asarray(x))
+    return _seq_sum([_seq_sum(x[:, j]) for j in range(x.shape[1])])
 
-    # turn the time series into a set of numbers from 1:num_groups
-    yth = np.zeros(len(y), dtype=int)
-    for li in range(num_groups):
-        yth[(y > th[li]) & (y <= th[li + 1])] = li + 1
 
-    if np.any(yth == 0):
-        raise ValueError('Some values were not assigned to a group')
+def _ml_cov(x: np.ndarray) -> np.ndarray:
+    m = x.shape[0]
+    xc = x - x.sum(axis=0) / m  # remove the mean
+    c = np.empty((m, m))
+    for a in range(m):
+        for b in range(m):
+            c[a, b] = _seq_sum(xc[:, a] * xc[:, b])
+    return c / (m - 1)
 
-    return yth
+
+def _transition_matrix(yth: np.ndarray, num_groups: int) -> np.ndarray:
+    """
+    The one-time transition matrix of a symbolized time series: the probability of a
+    transition from state i to state j, for states 1 to `num_groups`.
+    """
+    N = len(yth)
+    T = np.zeros((num_groups, num_groups))
+    for i in range(num_groups):
+        ri = (yth == i + 1)  # indices where the time series is in state i
+        if not np.any(ri):
+            T[i, :] = 0  # never in state i, so all transition probabilities are zero
+        else:
+            # indices of the states immediately following a state i
+            ri_next = np.r_[False, ri[:-1]]
+            for j in range(num_groups):
+                T[i, j] = np.sum(yth[ri_next] == j + 1)  # the next element is of this class
+    return T / (N - 1)  # N-1 is appropriate because it's a 1-time transition matrix
 
 
 def _transition_measures(yth: np.ndarray, num_groups: int) -> np.ndarray:
     """A set of metrics on the one-time transition matrix of a symbolized time series."""
-    N = len(yth)
+    T = _transition_matrix(yth, num_groups)
 
-    # 1) Calculate the one-time transition matrix
-    T = np.zeros((num_groups, num_groups))
-    for j in range(num_groups):
-        ri = (yth == j + 1)
-        if not np.any(ri):
-            T[j, :] = 0  # yth is never j
-        else:
-            # looking at the next element, so shift the indices forward by one
-            ri_next = np.r_[False, ri[:-1]]
-            for k in range(num_groups):
-                T[j, k] = np.sum(yth[ri_next] == k + 1)
-    T = T / (N - 1)  # N-1 is appropriate because it's a 1-time transition matrix
-
-    # 2) return some quantities on the transition matrix, T
     out = np.zeros(8)
     #   (i) diagonal elements
     diag_t = np.diag(T)
@@ -767,14 +762,10 @@ def _transition_measures(yth: np.ndarray, num_groups: int) -> np.ndarray:
     out[2] = _seq_sum(diag_t)  # trace
 
     #  (ii) measures of symmetry:
-    # sum of differences of individual elements; MATLAB's sum(sum(M)) reduces down
-    # the columns first, then across the resulting row vector
-    asym = np.abs(T - T.T)
-    out[3] = _seq_sum([_seq_sum(asym[:, j]) for j in range(num_groups)])
+    out[3] = _seq_sum2(np.abs(T - T.T))  # sum of differences of individual elements
 
     # (iii) measures from covariance matrix:
-    xc = T - np.array([_seq_sum(T[:, j]) for j in range(num_groups)]) / num_groups
-    out[4] = _seq_sum(np.diag(xc.T @ xc) / (num_groups - 1))
+    out[4] = _seq_sum(np.diag(_ml_cov(T)))  # trace
 
     # (iv) measures from eigenvalues of T
     eig_t = np.linalg.eigvals(T)
@@ -844,7 +835,7 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
     nfeat = 8  # the number of features calculated at each point
     store = np.zeros((len(num_groups_range), nfeat))
     for i, ng in enumerate(num_groups_range):
-        yth = _discretize_quantile(y, int(ng))  # thresholded data: yth
+        yth = coarse_grain(y, 'quantile', int(ng))  # thresholded data: yth
         store[i, :] = _transition_measures(yth, int(ng))
 
     x = num_groups_range.astype(float)
@@ -1012,17 +1003,12 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: int) -> np.ndarray:
     # Do the coarse graining
     yth = None  # Ensure yth is always defined
     if how_to_cg == 'quantile':
-        th = np.quantile(y, np.linspace(0, 1, num_groups + 1), method='linear') # thresholds for dividing the time-series values
+        th = matlab_quantile(y, np.linspace(0, 1, num_groups + 1)) # thresholds for dividing the time-series values
+        th[0] = th[0] - 1 # this ensures the first point is included
         yth = np.zeros(N, dtype=int)
         # turn the time series into a set of numbers from 1:num_groups
         for i in range(num_groups):
-            if i == num_groups - 1:
-                # Right-inclusive logic for the final boundary to catch the absolute max
-                yth[(y >= th[i]) & (y <= th[i+1])] = i + 1
-            else:
-                # Left-inclusive logic [>=, <) for all other boundaries
-                yth[(y >= th[i]) & (y < th[i+1])] = i + 1
-        return yth
+            yth[(y > th[i]) & (y <= th[i+1])] = i + 1
 
     elif how_to_cg == 'embed2quadrants': # divides based on quadrants in a 2-D embedding space
         # create alphabet in quadrants -- {1,2,3,4}
