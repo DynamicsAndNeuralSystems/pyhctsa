@@ -1,6 +1,7 @@
 import numpy as np
 from numpy.typing import ArrayLike
 import scipy.fft
+from scipy.optimize import curve_fit
 import statsmodels.api as sm
 
 from ..operations.correlation import autocorr, first_crossing
@@ -84,13 +85,14 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
         w = 2 * np.pi * f  # angular frequency
         s = s / (2 * np.pi)  # adjust so that area remains normalized in angular frequency space
     elif psd_meth == 'periodogram':
-        raise NotImplementedError("Periodogram is not yet available.")
-    # elif psd_meth == 'periodogram':
-    #     if nf:
-    #         w = np.linspace(0, np.pi, nf)
-    #         S, w = scipy.signal.periodogram(y, window=window, )
-    #     else:
-    #         w, S = scipy.signal.periodogram(y, window=window)
+        win = np.ones(ny) if (window is None or len(window) == 0) else np.asarray(window)
+        nfft = max(256, 2 ** int(np.ceil(np.log2(ny))))
+        f, s = scipy.signal.periodogram(
+            y, fs=1, window=win, nfft=nfft, detrend=False,
+            return_onesided=True, scaling='density'
+        )
+        w = 2 * np.pi * f  # angular frequency (rad/sample)
+        s = s / (2 * np.pi)  # normalized in angular frequency space
     else:
         raise ValueError(f"Unknown spectral estimation method: {psd_meth}.")
 
@@ -221,15 +223,15 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['fpoly2_r2'] = 1 - (sum_sq_err / (np.sum((cs_s - np.mean(cs_s))**2)))
 
     # Fit polysat a*x^2/(b+x^2) (has zero derivative at zero, though)
-    # polysat = lambda x, a, b : (a*(x**2))/(b + x**2)
-    # popt, _ = curve_fit(polysat, w, csS, p0=[csS[-1], 100])
-    # a, b = popt
-    # out['fpolysat_a'] = a
-    # out['fpolysat_b'] = b
-    # residuals = polysat(w, a, b) - csS
-    # sum_sq_err = np.sum(residuals**2)
-    # out['fpolysat_r2'] = 1 - (sum_sq_err/(np.sum((csS - np.mean(csS))**2)))
-    # out['fpolysat_rmse'] = np.sqrt(np.mean(residuals**2))
+    polysat = lambda x, a, b : (a*(x**2))/(b + x**2)
+    popt, _ = curve_fit(polysat, w, cs_s, p0=[cs_s[-1], 100])
+    a, b = popt
+    out['fpolysat_a'] = a
+    out['fpolysat_b'] = b
+    residuals = polysat(w, a, b) - cs_s
+    sum_sq_err = np.sum(residuals**2)
+    out['fpolysat_r2'] = 1 - (sum_sq_err/(np.sum((cs_s - np.mean(cs_s))**2)))
+    out['fpolysat_rmse'] = np.sqrt(np.mean(residuals**2))
 
     # Shannon spectral entropy
     h_shann = -s * np.log(s)
