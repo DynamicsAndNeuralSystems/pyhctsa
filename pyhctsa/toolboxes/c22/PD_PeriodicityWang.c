@@ -15,18 +15,46 @@
 #include "splinefit.h"
 #include "stats.h"
 
-// Structure to hold multiple threshold results
-typedef struct {
-    int th1;  // threshold 0
-    int th2;  // threshold 0.01
-    int th3;  // threshold 0.1
-    int th4;  // threshold 0.2
-    int th5;  // threshold 1/sqrt(N)
-    int th6;  // threshold 5/sqrt(N)
-    int th7;  // threshold 10/sqrt(N)
-} PD_PeriodicityWang_Results;
+#ifndef ACF_B
+#define ACF_B 4
+#endif
 
-// Your existing C function (keep exactly as is)
+static void PD_acf_block(const double * restrict y, const int n, const int tLo,
+                         const int tHi, double * restrict acf)
+{
+    int t = tLo;
+
+    for (; t + (ACF_B-1) <= tHi; t += ACF_B) {
+        const int tmax = t + (ACF_B-1);
+
+        int iEnd = n - tmax;
+        if (iEnd < 0) iEnd = 0;
+
+        double a[ACF_B];
+        for (int k = 0; k < ACF_B; k++) a[k] = 0.0;
+
+        for (int i = 0; i < iEnd; i++) {
+            const double v = y[i];
+            const double * restrict w = y + i + t;
+            for (int k = 0; k < ACF_B; k++) a[k] += v * w[k];
+        }
+
+        for (int k = 0; k < ACF_B; k++) {
+            const int tau = t + k;
+            const int m   = n - tau;
+            for (int i = iEnd; i < m; i++) a[k] += y[i] * y[i+tau];
+            acf[tau-1] = a[k] / m;
+        }
+    }
+
+    for (; t <= tHi; t++) {
+        const int m = n - t;
+        double acc = 0.0;
+        for (int i = 0; i < m; i++) acc += y[i] * y[i+t];
+        acf[t-1] = acc / m;
+    }
+}
+
 PD_PeriodicityWang_Results PD_PeriodicityWang(const double * y, const int size){
     
     // Initialize results structure with default value 1 (matching MATLAB)
@@ -53,87 +81,87 @@ PD_PeriodicityWang_Results PD_PeriodicityWang(const double * y, const int size){
     double * ySpline = malloc(size * sizeof(double));
     // fit a spline with 3 nodes to the data
     splinefit(y, size, ySpline);
-    
+
     // subtract spline from data to remove trend
     double * ySub = malloc(size * sizeof(double));
     for(int i = 0; i < size; i++){
         ySub[i] = y[i] - ySpline[i];
     }
-    
-    // compute autocorrelations up to 1/3 of the length of the time series
-    int acmax = (int)ceil((double)size/3);
+    free(ySpline);
+
+    const int acmax = (int)ceil((double)size/3);
     double * acf = malloc(acmax*sizeof(double));
-    for(int tau = 1; tau <= acmax; tau++){
-        // correlation/ covariance the same, don't care for scaling (cov would be more efficient)
-        acf[tau-1] = autocov_lag(ySub, size, tau);
-    }
-    
-    // find troughs and peaks
     int * troughs = malloc(acmax * sizeof(int));
-    int * peaks = malloc(acmax * sizeof(int));
-    int nTroughs = 0;
-    int nPeaks = 0;
-    
-    double slopeIn = 0;
-    double slopeOut = 0;
-    for(int i = 1; i < acmax-1; i ++){
-        slopeIn = acf[i] - acf[i-1];
-        slopeOut = acf[i+1] - acf[i];
-        if(slopeIn < 0 && slopeOut > 0) {
-            troughs[nTroughs] = i + 1; // +1 to match MATLAB 1-based indexing
-            nTroughs += 1;
-        }
-        else if(slopeIn > 0 && slopeOut < 0) {
-            peaks[nPeaks] = i + 1; // +1 to match MATLAB 1-based indexing
-            nPeaks += 1;
-        }
-    }
-    
+
     // Array to store results for each threshold
     int theFreqs[7];
-    
-    // Process each threshold
+    int resolved[7];
     for(int k = 0; k < numThresholds; k++) {
         theFreqs[k] = 1; // default value matching MATLAB
-        
-        // search through all peaks for one that meets the conditions
-        for(int i = 0; i < nPeaks; i++){
-            int iPeak = peaks[i];
-            double thePeak = acf[iPeak-1]; // -1 because acf is 0-based but peaks are stored as 1-based
-            
-            // find trough before this peak
-            int iTrough = -1;
-            for(int j = 0; j < nTroughs; j++) {
-                if(troughs[j] < iPeak) {
-                    iTrough = troughs[j];
-                } else {
-                    break;
-                }
-            }
-            
-            if(iTrough == -1) {
-                continue; // no trough before this peak
-            }
-            
-            double theTrough = acf[iTrough-1]; // -1 because acf is 0-based but troughs are stored as 1-based
-            
-            // (a) should be implicit - there's a trough before it
-            // (b) difference between peak and trough is at least threshold
-            if(thePeak - theTrough < ths[k]) {
-                continue;
-            }
-            
-            // (c) peak corresponds to positive correlation
-            if(thePeak < 0) {
-                continue;
-            }
-            
-            // use this frequency that first fulfils all conditions
-            theFreqs[k] = iPeak;
-            break;
-        }
+        resolved[k] = 0;
     }
-    
+    int nResolved = 0;
+
+    int nTroughs = 0;
+    int jT    = -1;
+    int have  = 0;
+    int nextI = 1;
+
+    const int CHUNK = 256;
+
+    while(nResolved < numThresholds && have < acmax){
+
+        int upto = have + CHUNK;
+        if(upto > acmax) upto = acmax;
+
+        PD_acf_block(ySub, size, have+1, upto, acf);
+        have = upto;
+
+        for(int i = nextI; i <= have-2; i++){
+
+            const double slopeIn  = acf[i] - acf[i-1];
+            const double slopeOut = acf[i+1] - acf[i];
+
+            if(slopeIn < 0 && slopeOut > 0) {
+                troughs[nTroughs] = i + 1; // +1 to match MATLAB 1-based indexing
+                nTroughs += 1;
+            }
+            else if(slopeIn > 0 && slopeOut < 0) {
+                const int iPeak = i + 1; // +1 to match MATLAB 1-based indexing
+                const double thePeak = acf[iPeak-1];
+
+                // (c) peak corresponds to positive correlation
+                if(thePeak < 0) {
+                    continue;
+                }
+
+                // find trough before this peak
+                while(jT+1 < nTroughs && troughs[jT+1] < iPeak) jT++;
+                if(jT == -1) {
+                    continue; // no trough before this peak
+                }
+
+                const double theTrough = acf[troughs[jT]-1];
+                const double diff = thePeak - theTrough;
+
+                // (a) should be implicit - there's a trough before it
+                // (b) difference between peak and trough is at least threshold
+                for(int k = 0; k < numThresholds; k++){
+                    if(!resolved[k] && diff >= ths[k]){
+                        // use this frequency that first fulfils all conditions
+                        theFreqs[k] = iPeak;
+                        resolved[k] = 1;
+                        nResolved += 1;
+                    }
+                }
+
+                if(nResolved == numThresholds) break;
+            }
+        }
+
+        if(have-1 > nextI) nextI = have-1;
+    }
+
     // Assign results to structure
     results.th1 = theFreqs[0];
     results.th2 = theFreqs[1];
@@ -143,12 +171,10 @@ PD_PeriodicityWang_Results PD_PeriodicityWang(const double * y, const int size){
     results.th6 = theFreqs[5];
     results.th7 = theFreqs[6];
     
-    free(ySpline);
     free(ySub);
     free(acf);
     free(troughs);
-    free(peaks);
-    
+
     return results;
 }
 
