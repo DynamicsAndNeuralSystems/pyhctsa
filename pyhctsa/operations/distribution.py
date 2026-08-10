@@ -1,5 +1,4 @@
 import logging
-logger = logging.getLogger('pyhctsa')
 from typing import Dict, Union
 
 import numpy as np
@@ -9,6 +8,8 @@ from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, uniform
 
 from ..operations.correlation import autocorr, first_crossing
 from ..utils import bin_picker, histc, matlab_quantile, simple_binner, x_corr
+
+logger = logging.getLogger('pyhctsa')
 
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """
@@ -57,79 +58,64 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         return gaussian_kde(data, bw_method=bw_factor)
 
     # ----------------------------
-    # Fit distribution & thresholds
+    # Fit distribution & find the support bounds over which to compare
     # ----------------------------
+    # Each branch defines the fitted PDF `pdf_func`, its peak value `peaky`, and
+    # the starting points for the left/right bound search. A left start of None
+    # pins the left bound at 0 (used by the positive-only distributions).
     if what_distn == 'norm':
-        # Fit a normal distribution
-        a, b = norm.fit(x)
-        peaky = norm.pdf(a, loc=a, scale=b)
-        thresh = peaky / 100.0  # stop when gets to 1/100 of peak value
-        pdf_func = lambda z: norm.pdf(z, loc=a, scale=b)
-        xf = _find_bounds(pdf_func, np.mean(x), np.mean(x), x_step, thresh)
-        ffit_func = lambda xi: norm.pdf(xi, loc=a, scale=b)
+        # Normal distribution
+        loc, scale = norm.fit(x)
+        pdf_func = lambda z: norm.pdf(z, loc=loc, scale=scale)
+        peaky = pdf_func(loc)
+        left_start = right_start = np.mean(x)
 
     elif what_distn == 'ev':
-        # Fit an extreme value (Gumbel, left) distribution
+        # Extreme value (left Gumbel) distribution
         loc, scale = gumbel_l.fit(x)
-        peaky = gumbel_l.pdf(loc, loc=loc, scale=scale)
-        thresh = peaky / 100.0
         pdf_func = lambda z: gumbel_l.pdf(z, loc=loc, scale=scale)
-        xf = _find_bounds(pdf_func, 0.0, 0.0, x_step, thresh)
-        ffit_func = lambda xi: gumbel_l.pdf(xi, loc=loc, scale=scale)
+        peaky = pdf_func(loc)
+        left_start = right_start = 0.0
 
     elif what_distn == 'uni':
-        # Fit a uniform distribution
+        # Uniform distribution (peak of PDF = 1 / (b - a))
         loc, scale = uniform.fit(x)
-        a, b = loc, loc + scale
-        # Peak of uniform PDF = 1 / (b - a)
-        peaky = uniform.pdf(np.mean(x), loc=a, scale=(b - a))
-        thresh = peaky / 100.0
-        pdf_func = lambda z: uniform.pdf(z, loc=a, scale=(b - a))
-        xf = _find_bounds(pdf_func, 0.0, 0.0, x_step, thresh)
-        ffit_func = lambda xi: uniform.pdf(xi, loc=a, scale=(b - a))
+        pdf_func = lambda z: uniform.pdf(z, loc=loc, scale=scale)
+        peaky = pdf_func(np.mean(x))
+        left_start = right_start = 0.0
 
     elif what_distn == 'exp':
-        # Check positivity
         if np.any(x < 0):
             logger.warning("The data contains negative values, but Exponential is a positive-only distribution.")
             return np.nan
-        # Check constant
         if np.all(x == x[0]):
             logger.warning("Data are a constant.")
             return np.nan
-        # Fit Exponential distribution (equivalent to expfit in MATLAB)
+        # Exponential distribution (equivalent to MATLAB's expfit); peak is at 0
         _, lam = expon.fit(x, floc=0)  # force support at 0
-        # Peak of PDF occurs at 0
-        peaky = expon.pdf(0, loc=0, scale=lam)
-        thresh = peaky / 100.0
         pdf_func = lambda z: expon.pdf(z, loc=0, scale=lam)
-        # MATLAB pins the left bound at 0 (only expands right) for positive-only dists
-        xf = _find_bounds(pdf_func, None, 0.0, x_step, thresh)
-        xf[0] = 0.0
-        ffit_func = lambda xi: expon.pdf(xi, loc=0, scale=lam)
+        peaky = pdf_func(0)
+        left_start, right_start = None, 0.0
 
     elif what_distn == 'logn':
-        # Check positivity
         if np.any(x <= 0):
             logger.warning("The data are not positive, but Log-Normal is a positive-only distribution.")
             return np.nan
-        # Fit log-normal distribution
-        shape, loc, scale = lognorm.fit(x, floc=0)  # sigma, 0, exp(mu)
-        sigma = shape
+        # Log-normal distribution; peak is at the mode
+        sigma, _, scale = lognorm.fit(x, floc=0)  # sigma, 0, exp(mu)
         mu = np.log(scale)
-        # Mode of log-normal
-        mode = np.exp(mu - sigma**2)
-        # Peak PDF value at the mode
-        peaky = lognorm.pdf(mode, s=sigma, loc=0, scale=np.exp(mu))
-        thresh = peaky / 100.0
+        mode = np.exp(mu - sigma ** 2)
         pdf_func = lambda z: lognorm.pdf(z, s=sigma, loc=0, scale=np.exp(mu))
-        # MATLAB pins the left bound at 0 (only expands right) for positive-only dists
-        xf = _find_bounds(pdf_func, None, mode, x_step, thresh)
-        xf[0] = 0.0
-        ffit_func = lambda xi: lognorm.pdf(xi, s=sigma, loc=0, scale=np.exp(mu))
+        peaky = pdf_func(mode)
+        left_start, right_start = None, mode
 
     else:
         raise ValueError(f"Unknown distribution: {what_distn}.")
+
+    thresh = peaky / 100.0  # stop expanding when the PDF drops to 1/100 of its peak
+    xf = _find_bounds(pdf_func, left_start, right_start, x_step, thresh)
+    if xf[0] is None:  # positive-only distributions pin the left bound at 0
+        xf[0] = 0.0
 
     # ----------------------------
     # Estimate smoothed empirical distribution
@@ -151,7 +137,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     # Rerun both over the same range
     xi = np.linspace(x1, x2, 1000)
     f = kde(xi)
-    ffit = ffit_func(xi)
+    ffit = pdf_func(xi)
 
     # ----------------------------
     # Statistics
