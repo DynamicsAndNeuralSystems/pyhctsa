@@ -1,6 +1,5 @@
 import logging
 logger = logging.getLogger('pyhctsa')
-import os
 from typing import Any, Dict, List, Optional, Union, Callable
 
 import numpy as np
@@ -542,316 +541,117 @@ def rm_automutual_information(y: ArrayLike, tau: int = 1) -> float:
 
     return out
 
-def _rm_info(*args):
-    """
-    Estimates the mutual information of two stationary signals with independent 
-    pairs of samples using various approaches.
+def _rm_info(x: ArrayLike, y: ArrayLike):
+    """Unbiased mutual-information estimate of two equal-length signals via a 2D histogram.
+
+    Moddemeijer's histogram estimator (natural-log base, unbiased correction).
+    Original MATLAB by R. Moddemeijer; Python translation by Tucker Cullen.
 
     Parameters
     ----------
-    x : array-like
-        First input time series (row vector).
-    y : array-like
-        Second input time series (row vector).
-    descriptor : array-like, optional
-        Histogram descriptor array of shape (2, 3):
-            [[LOWERBOUNDX, UPPERBOUNDX, NCELLX],
-             [LOWERBOUNDY, UPPERBOUNDY, NCELLY]]
-        If not provided, will be computed automatically.
-    approach : {'unbiased', 'mmse', 'biased'}, optional
-        Method for estimating mutual information:
-            - 'unbiased': The unbiased estimate (default)
-            - 'mmse': The minimum mean square error estimate
-            - 'biased': The biased estimate
-    base : float, optional
-        The base of the logarithm (default: e).
+    x, y : array-like
+        Equal-length 1-D input vectors.
 
     Returns
     -------
     estimate : float
-        The mutual information estimate.
+        The (unbiased) mutual information estimate in nats.
     nbias : float
-        The N-bias of the estimate.
+        The N-bias of the estimate (0 after the unbiased correction).
     sigma : float
         The standard error of the estimate.
     descriptor : np.ndarray
-        The descriptor of the histogram used, see also _rm_histogram_2.
-
-    Notes
-    -----
-    - See also: http://www.cs.rug.nl/~rudy/matlab/
-    - Original MATLAB function by R. Moddemeijer, minor modifications by Ben Fulcher.
-    - Python translation by Tucker Cullen.
+        The histogram descriptor used (see :func:`_rm_histogram_2`).
     """
-    n_args = len(args)
-    if n_args < 1:
-        print("Takes in 2-5 parameters: ")
-        print("rm_information(x, y)")
-        print("rm_information(x, y, descriptor)")
-        print("rm_information(x, y, descriptor, approach)")
-        print("rm_information(x, y, descriptor, approach, base)")
-        print()
+    x = np.asarray(x)
+    y = np.asarray(y)
+    if x.ndim != 1 or y.ndim != 1:
+        raise ValueError("x and y must be 1-D vectors")
+    if x.size != y.size:
+        raise ValueError("Unequal length of x and y")
 
-        print("Returns a tuple containing: ")
-        print("estimate, nbias, sigma, descriptor")
-        return
+    h, descriptor = _rm_histogram_2(x, y)
+    n_cell_x = int(descriptor[0, 2])
+    n_cell_y = int(descriptor[1, 2])
 
-    # some initial tests on the input arguments
-    x = np.array(args[0])  # make sure the inputs are in numpy array form
-    y = np.array(args[1])
+    # marginal (row/column) sums
+    h_x = h.sum(axis=1)
+    h_y = h.sum(axis=0)
 
-    x_shape = x.shape
-    y_shape = y.shape
+    # log_f = log(h / h_x / h_y) where h != 0, else 0 (vectorised over all cells)
+    hf = h.astype(float)
+    nz = hf != 0
+    log_f = np.zeros_like(hf)
+    denom = np.outer(h_x, h_y)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        log_f[nz] = np.log(hf[nz] / denom[nz])
 
-    len_x = x_shape[0]  # how many elements are in the row vector
-    len_y = y_shape[0]
+    count = hf.sum()
+    estimate = np.sum(hf * log_f)
+    sigma = np.sum(hf * log_f ** 2)
 
-    if len(x_shape) != 1:  # makes sure x is a row vector
-        logger.warning("Invalid dimension of x")
-        return
-
-    if len(y_shape) != 1:
-        logger.warning("Invalid dimension of y")
-        return
-
-    if len_x != len_y:  # makes sure x and y have the same amount of elements
-        logger.warning("Unequal length of x and y")
-        return
-
-    if n_args > 5:
-        logger.warning("Too many arguments")
-        return
-
-    if n_args < 2:
-        logger.warning("Not enough arguments")
-        return
-
-    # setting up variables depending on amount of inputs
-    if n_args == 2:
-        hist = _rm_histogram_2(x, y)  # call outside function from rm_histogram2.py
-        h = hist[0]
-        descriptor = hist[1]
-
-    if n_args >= 3:
-        hist = _rm_histogram_2(
-            x, y, args[2]
-        )  # call outside function from rm_histogram2.py, args[2] represents the given descriptor
-        h = hist[0]
-        descriptor = hist[1]
-
-    if n_args < 4:
-        approach = 'unbiased'
-    else:
-        approach = args[3]
-
-    if n_args < 5:
-        base = np.e  # as in e = 2.71828
-    else:
-        base = args[4]
-
-    # not sure why most of these were included in the matlab script, most of them go unused
-    lower_bound_x = descriptor[0, 0]
-    upper_bound_x = descriptor[0, 1]
-    n_cell_x = descriptor[0, 2]
-    lower_bound_y = descriptor[1, 0]
-    upper_bound_y = descriptor[1, 1]
-    n_cell_y = descriptor[1, 2]
-
-    estimate = 0
-    sigma = 0
-    count = 0
-
-    # determine row and column sums
-    h_y = np.sum(h, 0)
-    h_x = np.sum(h, 1)
-
-    n_cell_x = n_cell_x.astype(int)
-    n_cell_y = n_cell_y.astype(int)
-
-    for n_x in range(0, n_cell_x):
-        for n_y in range(0, n_cell_y):
-            if h[n_x, n_y] != 0:
-                log_f = np.log(h[n_x, n_y] / h_x[n_x] / h_y[n_y])
-            else:
-                log_f = 0
-
-            count = count + h[n_x, n_y]
-            estimate = estimate + h[n_x, n_y] * log_f
-            sigma = sigma + h[n_x, n_y] * (log_f**2)
-
-    # biased estimate
+    # biased estimate, then unbiased correction
     estimate = estimate / count
-    sigma = np.sqrt((sigma / count - estimate**2) / (count - 1))
+    sigma = np.sqrt((sigma / count - estimate ** 2) / (count - 1))
     estimate = estimate + np.log(count)
     nbias = (n_cell_x - 1) * (n_cell_y - 1) / (2 * count)
-
-    # conversion to unbiased estimate
-    if approach[0] == 'u':
-        estimate = estimate - nbias
-        nbias = 0
-
-    # conversion to minimum mse estimate
-    if approach[0] == 'm':
-        estimate = estimate - nbias
-        nbias = 0
-        lamda = (estimate**2) / ((estimate**2) + (sigma**2))
-        nbias = (1 - lamda) * estimate
-        estimate = lamda * estimate
-        sigma = lamda * sigma
-
-    # base transformations
-    estimate = estimate / np.log(base)
-    nbias = nbias / np.log(base)
-    sigma = sigma / np.log(base)
+    estimate = estimate - nbias
+    nbias = 0
 
     return estimate, nbias, sigma, descriptor
 
 
-def _rm_histogram_2(*args):
-    """
-    Compute a two-dimensional frequency histogram from two row vectors.
-    
-    Computes the two-dimensional frequency histogram of two row vectors x and y,
-    optionally using a provided histogram descriptor to specify bin boundaries and counts.
+def _rm_histogram_2(x: ArrayLike, y: ArrayLike):
+    """Two-dimensional frequency histogram of two equal-length row vectors.
+
+    Bin bounds and counts are chosen automatically following Moddemeijer's rule
+    (``ncell = ceil(n ** (1/3))`` per dimension, bounds padded by half a bin).
 
     Parameters
     ----------
-    *args : variable length argument list
-        Can be called with 2 or 3 arguments:
-        
-        - _rm_histogram_2(x, y): Auto-computes histogram descriptor
-        - _rm_histogram_2(x, y, descriptor): Uses provided descriptor
-        
-        Where:
-        
-        x : array-like
-            First row vector to be analyzed.
-        y : array-like
-            Second row vector to be analyzed. Must be equal length to x.
-        descriptor : np.ndarray, optional
-            Histogram descriptor of shape (2, 3) specifying bin parameters:
-            [[lower_x, upper_x, ncell_x],
-             [lower_y, upper_y, ncell_y]]
-            where:
-            - lower_?: lower bound of the ? dimension
-            - upper_?: upper bound of the ? dimension
-            - ncell_?: number of bins in the ? dimension
+    x, y : array-like
+        Equal-length 1-D input vectors.
 
     Returns
     -------
-    tuple
-        A tuple containing:
-        - result : np.ndarray
-            2D frequency histogram of shape (ncell_x, ncell_y).
-        - descriptor : np.ndarray
-            The histogram descriptor used (auto-computed if not provided).
-
-    Raises
-    ------
-    ValueError
-        If x and y have different lengths.
-        If descriptor dimensions are invalid.
+    result : np.ndarray
+        2D frequency histogram of shape ``(ncell_x, ncell_y)``.
+    descriptor : np.ndarray
+        Histogram descriptor ``[[lower_x, upper_x, ncell_x], [lower_y, upper_y, ncell_y]]``.
 
     Notes
     -----
-    This is a helper function for mutual information calculations.
-    
-    Original MATLAB function and logic by Rudy Moddemeijer.
-    Translated to Python by Tucker Cullen.
-
-    See Also
-    --------
-    _rm_info : Mutual information estimation using histograms.
-
-    References
-    ----------
-    .. [1] http://www.cs.rug.nl/~rudy/matlab/
+    Original MATLAB by R. Moddemeijer; Python translation by Tucker Cullen.
     """
+    x = np.asarray(x)
+    y = np.asarray(y)
+    if x.ndim != 1 or y.ndim != 1:
+        raise ValueError("x and y must be 1-D vectors")
+    if x.size != y.size:
+        raise ValueError("Unequal length of x and y")
+    n = x.size
 
-    nargin = len(args)
+    minx, maxx = np.amin(x), np.amax(x)
+    miny, maxy = np.amin(y), np.amax(y)
+    deltax = (maxx - minx) / (n - 1)
+    deltay = (maxy - miny) / (n - 1)
+    ncell = np.ceil(n ** (1 / 3))
+    descriptor = np.array([
+        [minx - deltax / 2, maxx + deltax / 2, ncell],
+        [miny - deltay / 2, maxy + deltay / 2, ncell],
+    ])
 
-    if nargin < 1:
-        print("Usage: result = rm_histogram2(X, Y)")
-        print("       result = rm_histogram2(X,Y)")
-        print("Where: descriptor = [lowerX, upperX, ncellX; lowerY, upperY, ncellY")
+    lowerx, upperx, ncellx = descriptor[0]
+    lowery, uppery, ncelly = descriptor[1]
+    ncellx, ncelly = int(ncellx), int(ncelly)
 
-    # some initial tests on the input arguments
+    # cell indices (1-based rounding as in the original), then vectorised scatter-add
+    xx = np.around((x - lowerx) / (upperx - lowerx) * ncellx + 0.5).astype(int) - 1
+    yy = np.around((y - lowery) / (uppery - lowery) * ncelly + 0.5).astype(int) - 1
 
-    x = np.array(args[0])  # make sure the imputs are in numpy array form
-    y = np.array(args[1])
-
-    xshape = x.shape
-    yshape = y.shape
-
-    lenx = xshape[0]  # how many elements are in the row vector
-    leny = yshape[0]
-
-    if len(xshape) != 1:  # makes sure x is a row vector
-        logger.warning("Invalid dimension of x")
-        return
-
-    if len(yshape) != 1:
-        logger.warning("Invalid dimension of y")
-        return
-
-    if lenx != leny:  # makes sure x and y have the same amount of elements
-        logger.warning("Unequal length of x and y")
-        return
-
-    if nargin > 3:
-        logger.warning("Too many arguments")
-        return
-
-    if nargin == 2:
-        minx = np.amin(x)
-        maxx = np.amax(x)
-        deltax = (maxx - minx) / (lenx - 1)
-        ncellx = np.ceil(lenx ** (1 / 3))
-
-        miny = np.amin(y)
-        maxy = np.amax(y)
-        deltay = (maxy - miny) / (leny - 1)
-        ncelly = ncellx
-        descriptor = np.array(
-            [[minx - deltax / 2, maxx + deltax / 2, ncellx], [miny - deltay / 2, maxy + deltay / 2, ncelly]])
-    else:
-        descriptor = args[2]
-
-    lowerx = descriptor[0, 0]  # python indexes one less then matlab indexes, since starts at zero
-    upperx = descriptor[0, 1]
-    ncellx = descriptor[0, 2]
-    lowery = descriptor[1, 0]
-    uppery = descriptor[1, 1]
-    ncelly = descriptor[1, 2]
-
-    # checking descriptor to make sure it is valid, otherwise print an error
-
-    if ncellx < 1:
-        logger.warning("Invalid number of cells in X dimension")
-
-    if ncelly < 1:
-        logger.warning("Invalid number of cells in Y dimension")
-
-    if upperx <= lowerx:
-        logger.warning("Invalid bounds in X dimension")
-
-    if uppery <= lowery:
-        logger.warning("Invalid bounds in Y dimension")
-
-    result = np.zeros([int(ncellx), int(ncelly)],
-                      dtype=int)  # should do the same thing as matlab: result(1:ncellx,1:ncelly) = 0;
-
-    xx = np.around((x - lowerx) / (upperx - lowerx) * ncellx + 1 / 2)
-    yy = np.around((y - lowery) / (uppery - lowery) * ncelly + 1 / 2)
-
-    xx = xx.astype(int)  # cast all the values in xx and yy to ints for use in indexing, already rounded in previous step
-    yy = yy.astype(int)
-
-    # Vectorised scatter-add. xx/yy are already rounded ints; subtract 1 for 0-based
-    # indices, mask to the in-bounds cells (same test as the loop), accumulate once.
-    ix = xx - 1
-    iy = yy - 1
-    in_bounds = (ix >= 0) & (ix <= ncellx - 1) & (iy >= 0) & (iy <= ncelly - 1)
-    np.add.at(result, (ix[in_bounds], iy[in_bounds]), 1)
+    result = np.zeros((ncellx, ncelly), dtype=int)
+    in_bounds = (xx >= 0) & (xx < ncellx) & (yy >= 0) & (yy < ncelly)
+    np.add.at(result, (xx[in_bounds], yy[in_bounds]), 1)
 
     return result, descriptor
+
