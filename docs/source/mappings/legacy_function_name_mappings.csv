@@ -103,6 +103,8 @@ local_simple,FC_LocalSimple,model_fit
 loop_local_simple,FC_LoopLocalSimple,model_fit
 fit_subsegments,MF_FitSubsegments,model_fit
 hmm_fit,MF_hmm_fit,model_fit
+gp_fit_across,MF_GP_FitAcross,model_fit
+gp_local_prediction,MF_GP_LocalPrediction,model_fit
 is_seasonal,DT_IsSeasonal,model_fit
 visibility_graph,NW_VisibilityGraph,graph
 force_potential,PH_ForcePotential,physics
