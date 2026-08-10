@@ -905,7 +905,6 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     cov = CovSEisoNoise
     nhps = cov.n_hyp
 
-    # Get the points (1-based time indices, as in MATLAB)
     tt = np.floor(_linspace(1, N, npoints))
     yt = y[tt.astype(int) - 1]
 
@@ -1016,7 +1015,6 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     cov = CovSEisoNoise
     nhps = cov.n_hyp
 
-    # Starting positions (1-based, as in MATLAB)
     if pmode in ('frombefore', 'randomgap'):
         spns = np.floor(_linspace(1, N - (num_test + num_train), num_preds))
     elif pmode == 'beforeafter':
