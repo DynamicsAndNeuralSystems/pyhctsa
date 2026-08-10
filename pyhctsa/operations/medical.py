@@ -47,26 +47,31 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
     N = len(x)
     out = {}
 
+    # min/max are reused across all three binnings
+    x_min = x.min()
+    x_max = x.max()
+
     # triangular histogram index
     # 10 bins
-    edges_10 = bin_picker(x.min(), x.max(), 10)
+    edges_10 = bin_picker(x_min, x_max, 10)
     hist_counts10 = histc(x, edges_10)
     out['tri10'] = N/np.max(hist_counts10)
 
     # 20 bins
-    edges_20 = bin_picker(x.min(), x.max(), 20)
+    edges_20 = bin_picker(x_min, x_max, 20)
     hist_counts20 = histc(x, edges_20)
     out['tri20'] = N/np.max(hist_counts20)
 
     # (sqrt samples) bins
-    edges_sqrt = bin_picker(x.min(), x.max(), int(np.ceil(np.sqrt(N))))
+    edges_sqrt = bin_picker(x_min, x_max, int(np.ceil(np.sqrt(N))))
     hist_counts_sqrt = histc(x, edges_sqrt)
     out['trisqrt'] = N/np.max(hist_counts_sqrt)
 
     # Poincare plot measures
     diff_x = np.diff(x)
-    out['SD1'] = 1/np.sqrt(2) * np.std(diff_x, ddof=1) * 1000
-    out['SD2'] = np.sqrt(2 * np.var(x, ddof=1) - (1/2) * np.std(diff_x, ddof=1)**2) * 1000
+    sd_diff = np.std(diff_x, ddof=1)
+    out['SD1'] = 1/np.sqrt(2) * sd_diff * 1000
+    out['SD2'] = np.sqrt(2 * np.var(x, ddof=1) - (1/2) * sd_diff**2) * 1000
 
     return out
 
@@ -160,14 +165,15 @@ def hrv_classic(y: ArrayLike) -> dict:
 
     f_bin_size = f[1] - f[0]
 
-    # Vectorised band selection. pxx[mask] keeps ascending-index order, so the
-    # masked np.sum matches the original loop's summation order.
-    ind_l = (f >= lf_lo) & (f <= lf_hi)
-    ind_h = (f >= hf_lo) & (f <= hf_hi)
-    ind_v = (f <= lf_lo)
-    lf_p = f_bin_size * np.sum(pxx[ind_l])
-    hf_p = f_bin_size * np.sum(pxx[ind_h])
-    vlf_p = f_bin_size * np.sum(pxx[ind_v])
+    i_lf = np.searchsorted(f, lf_lo, side='left')
+    j_lf = np.searchsorted(f, lf_hi, side='right')
+    i_hf = np.searchsorted(f, hf_lo, side='left')
+    j_hf = np.searchsorted(f, hf_hi, side='right')
+    j_vlf = np.searchsorted(f, lf_lo, side='right')
+
+    lf_p = f_bin_size * np.sum(pxx[i_lf:j_lf])
+    hf_p = f_bin_size * np.sum(pxx[i_hf:j_hf])
+    vlf_p = f_bin_size * np.sum(pxx[:j_vlf])
 
     out['lfhf'] = lf_p / hf_p
     total = f_bin_size * np.sum(pxx)
@@ -234,21 +240,11 @@ def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
 
     # binary representation of time series based on consecutive changes being greater than d/1000...
     x_sym = dx >= d # consec. diffs exceed some threshold, d
-    z_seq = np.zeros(D)
-    o_seq = np.ones(D)
 
-    # search for D consecutive zeros/ones
-    i = 0
-    pc = 0
+    change = np.flatnonzero(x_sym[1:] != x_sym[:-1]) + 1
+    run_lengths = np.diff(np.concatenate(([0], change, [N])))
+    pc = int(np.sum(run_lengths // D))
 
-    while i <= (N-D):
-        x_seq = x_sym[i:(i+D)]
-        if np.array_equal(x_seq, z_seq) or np.array_equal(x_seq, o_seq):
-            pc += 1
-            i += D
-        else:
-            i += 1
-    
     p = pc / N
 
     return p
@@ -295,8 +291,11 @@ def pnn(x: ArrayLike) -> dict:
     Dx = np.abs(diff_x) * 1000 # assume milliseconds as for RR intervals
     pnns = np.array([5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
 
+    dx_sorted = np.sort(Dx)
+    counts = (N - 1) - np.searchsorted(dx_sorted, pnns, side='right')
+
     out = {}
-    for x in pnns:
-        out["pnn" + str(x) ] = sum(Dx > x) / (N-1)
+    for threshold, count in zip(pnns, counts):
+        out["pnn" + str(threshold)] = np.int64(count) / (N - 1)
 
     return out
