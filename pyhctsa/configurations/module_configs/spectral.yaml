@@ -3,6 +3,7 @@ spectral:
     base_name: spectral_summaries
     depedencies:
     configs:
+      - {psd_meth: 'periodogram', window_type: 'hamming', zscore: True}
       - {psd_meth: 'welch', window_type: 'rect', zscore: True}
       - {psd_meth: 'fft', window_type: 'none', zscore: True}
     legacy_name: SP_Summaries
