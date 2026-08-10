@@ -25,6 +25,16 @@ Utilities
 Time-Series Analysis Method Modules
 -----------------------------------
 
+.. _changepointmeths:
+
+Changepoint
+~~~~~~~~~~~
+.. autosummary::
+   :toctree: generated/
+
+   pyhctsa.operations.changepoint.stepdetect
+   pyhctsa.operations.changepoint.l1pwc_sweep_lambda
+
 .. _correlationmeths:
 
 Correlation
@@ -181,6 +191,19 @@ Model Fit
    pyhctsa.operations.model_fit.ar_fit
    pyhctsa.operations.model_fit.is_seasonal
 
+.. _nonlinearitymeths:
+
+Nonlinearity
+~~~~~~~~~~~~
+.. autosummary::
+   :toctree: generated/
+
+   pyhctsa.operations.nonlinearity.nsamdf
+   pyhctsa.operations.nonlinearity.nlpe
+   pyhctsa.operations.nonlinearity.embed_pca
+   pyhctsa.operations.nonlinearity.local_density
+   pyhctsa.operations.nonlinearity.tisean_d2
+   
 .. _physicsmeths:
 
 Physics
@@ -281,27 +304,3 @@ Wavelet
    pyhctsa.operations.wavelet.dwt_coeff
    pyhctsa.operations.wavelet.scal_2_freq
    pyhctsa.operations.wavelet.wfbm
-
-.. _nonlinearitymeths:
-
-Nonlinearity
-~~~~~~~~~~~~
-.. autosummary::
-   :toctree: generated/
-
-   pyhctsa.operations.nonlinearity.nsamdf
-   pyhctsa.operations.nonlinearity.nlpe
-   pyhctsa.operations.nonlinearity.embed_pca
-   pyhctsa.operations.nonlinearity.local_density
-   pyhctsa.operations.nonlinearity.tisean_d2
-
-.. _changepointmeths:
-
-Changepoint
-~~~~~~~~~~~
-.. autosummary::
-   :toctree: generated/
-
-   pyhctsa.operations.changepoint.stepdetect
-   pyhctsa.operations.changepoint.l1pwc_sweep_lambda
-

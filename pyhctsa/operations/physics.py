@@ -2,7 +2,7 @@ from typing import Union
 
 import numpy as np
 from numpy.typing import ArrayLike
-from scipy.stats import ansari, gaussian_kde
+from scipy.stats import ansari
 from statsmodels.sandbox.stats.runs import runstest_1samp
 
 from ..operations.correlation import autocorr, first_crossing
@@ -46,8 +46,8 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     dict
         Summaries of the walker's trajectory and its relationship to the series.
     """
-    N = len(y)
     y = np.asarray(y, dtype=float)
+    N = len(y)
 
     # Default values and type requirements for each rule
     WALKER_CONFIGS = {
@@ -96,14 +96,12 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
         # walker narrows the gap between its position and the series value
         # by the proportion walker_params at each step
         p = walker_params
-        w[0] = 0
         for i in range(1, N):
             w[i] = w[i-1] + p * (y[i-1] - w[i-1])
 
     elif walker_rule == 'biasprop':
         # biased motion: [p_up, p_down]
         pup, pdown = walker_params
-        w[0] = 0
         for i in range(1, N):
             if y[i] > y[i-1]:  # time series increases
                 w[i] = w[i-1] + pup * (y[i-1] - w[i-1])
@@ -139,8 +137,6 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
                 w[i] = w_mom * (sy / sw)
             else:
                 w[i] = w_mom
-    else:
-        raise ValueError(f"Unknown rule : {walker_rule}")
 
     # ------------------------------------------------------------------
     # Statistics on the walk
@@ -171,12 +167,6 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     # Ansari-Bradley test: same distribution?
     _, pval = ansari(w, y)
     out['sw_ansarib_pval'] = pval
-
-    r = np.linspace(
-        min(min(y), min(w)),
-        max(max(y), max(w)),
-        200
-    )
 
     # (iii) Residuals between time series and walker
     res = w - y
@@ -256,35 +246,28 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
         autocorrelation, final position, and standard deviation.
     """
     y = np.asarray(y, dtype=np.float64)
-    if params is None:
-        if what_potential == 'dblwell':
-            params = [2, 0.1, 0.1]
-        elif what_potential == 'sine':
-            params = [1, 1, 1]
-        else:
-            raise ValueError(f"Unknown system {what_potential}")
-    else:
-        # check params
-        if not isinstance(params, list):
-            raise ValueError("Expected list of parameters.")
-        else:
-            if len(params) != 3:
-                raise ValueError("Expected 3 parameters.")
-    
-    N = len(y) # length of the time series
 
+    DEFAULT_PARAMS = {'dblwell': [2, 0.1, 0.1], 'sine': [1, 1, 1]}
+    if what_potential not in DEFAULT_PARAMS:
+        raise ValueError(f"Unknown potential function {what_potential}")
+
+    if params is None:
+        params = DEFAULT_PARAMS[what_potential]
+    if not isinstance(params, list):
+        raise ValueError("Expected list of parameters.")
+    if len(params) != 3:
+        raise ValueError("Expected 3 parameters.")
+
+    N = len(y) # length of the time series
     alpha, kappa, deltat = params
 
-    # specify potential function
+    # force F(x) = -dV/dx for the chosen potential V(x)
     if what_potential == 'sine':
-        V = lambda x: -np.cos(x/alpha)
+        # V(x) = -cos(x / alpha)
         F = lambda x: np.sin(x/alpha)/alpha
-    elif what_potential == 'dblwell':
+    else:  # 'dblwell': V(x) = x^4 / 4 - alpha^2 x^2 / 2
         F = lambda x: -x**3 + alpha**2 * x
-        V = lambda x: ((x**4) / 4) - (alpha**2) * ((x**2) / 2)
-    else:
-        raise ValueError(f"Unknown potential function {what_potential}")
-    
+
     x = np.zeros(N) # position
     v = np.zeros(N) # velocity
 
