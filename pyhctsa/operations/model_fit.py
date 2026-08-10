@@ -146,7 +146,6 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
     y = np.asarray(y)
     N = len(y)
     num_pred = sample_p[0]
-    r = np.zeros((num_pred, 2))
     if subset_how == 'uniform':
         if len(sample_p) == 1:  # size will depend on number of unique subsegments
             # num_pred+1 boundaries = num_pred portions
@@ -223,11 +222,7 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         raise ValueError(f"Unknown prediction method: {forecast_meth}")
     stats_st = np.zeros((len(train_length_range), 5))
     for i in range(len(train_length_range)):
-        outtmp = None
-        if forecast_meth == 'mean':
-            outtmp = local_simple(y, 'mean', train_length_range[i])
-        elif forecast_meth == 'median':
-            outtmp = local_simple(y, 'median', train_length_range[i])
+        outtmp = local_simple(y, forecast_meth, train_length_range[i])
         stats_st[i, 0] = outtmp['stderr']
         stats_st[i, 1] = outtmp['sws']
         stats_st[i, 2] = outtmp['swm']
@@ -261,25 +256,13 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         out['stderr_peakpos'] = np.nan
         out['stderr_peaksize'] = np.nan
 
-    #% (2) Sliding Window Stationarity
-    out['sws_chn'] = np.mean(np.diff(stats_st[:,1]))/(np.ptp(stats_st[:,1]))
-    out['sws_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:,1])))
-    out['sws_stdn'] = np.std(stats_st[:,1], ddof=1)/np.ptp(stats_st[:,1])
-
-    #% (3) sliding window mean
-    out['swm_chn'] = np.mean(np.diff(stats_st[:, 2]))/(np.ptp(stats_st[:, 2]))
-    out['swm_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:,2])))
-    out['swm_stdn'] = np.std(stats_st[:,2], ddof=1)/np.ptp(stats_st[:,2])
-    
-    # (4) AC1
-    out['ac1_chn'] = np.mean(np.diff(stats_st[:, 3]))/(np.ptp(stats_st[:, 3]))
-    out['ac1_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:,3])))
-    out['ac1_stdn'] = np.std(stats_st[:,3], ddof=1)/np.ptp(stats_st[:,3])
-
-    # (5) AC2
-    out['ac2_chn'] = np.mean(np.diff(stats_st[:, 4]))/(np.ptp(stats_st[:, 4]))
-    out['ac2_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:,4])))
-    out['ac2_stdn'] = np.std(stats_st[:,4], ddof=1)/np.ptp(stats_st[:,4])
+    #% (2)-(5) Curve statistics for the remaining metrics:
+    #%   sws (sliding window stationarity), swm (sliding window mean), ac1, ac2
+    for name, col in (('sws', 1), ('swm', 2), ('ac1', 3), ('ac2', 4)):
+        curve = stats_st[:, col]
+        out[f'{name}_chn'] = np.mean(np.diff(curve)) / np.ptp(curve)
+        out[f'{name}_meansgndiff'] = np.mean(np.sign(np.diff(curve)))
+        out[f'{name}_stdn'] = np.std(curve, ddof=1) / np.ptp(curve)
 
     return out
 
@@ -328,16 +311,14 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     if np.size(evalr) == 0:
         logger.warning("This time series is too short for forecasting")
         return np.nan
-    res = np.zeros(len(evalr))
-    if forecast_meth == 'mean':
+    if forecast_meth in ('mean', 'median'):
         # All length-lp windows at once. W.mean(axis=1) reduces the same contiguous
         # elements in the same order as np.mean(window), so it is bit-identical.
         W = sliding_window_view(y, lp)[:len(evalr)]
-        res = W.mean(axis=1) - y[evalr]  # prediction - value
-    elif forecast_meth == 'median':
-        W = sliding_window_view(y, lp)[:len(evalr)]
-        res = np.median(W, axis=1) - y[evalr]  # prediction - value
+        pred = W.mean(axis=1) if forecast_meth == 'mean' else np.median(W, axis=1)
+        res = pred - y[evalr]  # prediction - value
     elif forecast_meth == 'lfit':
+        res = np.zeros(len(evalr))
         for i in range(len(evalr)):
             # Fit linear
             p = np.polyfit(np.arange(1, lp+1), y[evalr[i]-lp:evalr[i]], 1)
@@ -359,8 +340,9 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     #% Autocorrelation structure of the residuals:
     out['ac1'] = autocorr(res, 1, 'Fourier')[0]
     out['ac2'] = autocorr(res, 2, 'Fourier')[0]
-    out['taures'] = first_crossing(res, 'ac', 0, 'continuous')
-    out['tauresrat'] = first_crossing(res, 'ac', 0, 'continuous')/first_crossing(y, 'ac', 0, 'continuous')
+    taures = first_crossing(res, 'ac', 0, 'continuous')
+    out['taures'] = taures
+    out['tauresrat'] = taures / first_crossing(y, 'ac', 0, 'continuous')
 
     return out
 
@@ -423,15 +405,15 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
     # --- Find Optimal Alpha ---
     if alpha == 'best':
         xtrain = x[:n_train]
-        
+
+        def _rmse_for_alpha(a):
+            xf = _fit_exp_smooth(xtrain, a)
+            fore, orig = xf[2:], xtrain[2:]
+            return np.sqrt(np.mean((fore - orig)**2)) if len(fore) > 0 else np.nan
+
         # (1) Initial coarse search
         alphar = np.linspace(0.1, 0.9, 5)
-        rmses = np.zeros_like(alphar)
-        
-        for i, a in enumerate(alphar):
-            xf = +_fit_exp_smooth(xtrain, a)
-            fore, orig = xf[2:], xtrain[2:]
-            rmses[i] = np.sqrt(np.mean((fore - orig)**2)) if len(fore) > 0 else np.nan
+        rmses = np.array([_rmse_for_alpha(a) for a in alphar])
 
         # Check for valid RMSEs before fitting
         valid_indices = ~np.isnan(rmses)
@@ -463,13 +445,8 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
                 elif high_b >= 1: low_b, high_b = min(alphamin, 1) - 0.1, 1.0
                 
                 alphar_ref = np.linspace(low_b, high_b, 5)
-                rmses_ref = np.zeros_like(alphar_ref)
+                rmses_ref = np.array([_rmse_for_alpha(a) for a in alphar_ref])
 
-                for i, a in enumerate(alphar_ref):
-                    xf = _fit_exp_smooth(xtrain, a)
-                    fore, orig = xf[2:], xtrain[2:]
-                    rmses_ref[i] = np.sqrt(np.mean((fore - orig)**2)) if len(fore) > 0 else np.nan
-                
                 valid_ref = ~np.isnan(rmses_ref)
                 if not np.any(valid_ref):
                     logger.info("Could not compute RMSE in refined search; using previous alpha.")
@@ -550,7 +527,7 @@ def residual_analysis(e: ArrayLike) -> dict:
     out['rmse'] = np.sqrt(np.mean(e**2))
     std_e = np.std(e, ddof=1)
     out['stde'] = std_e
-    out['mms'] = np.abs(np.mean(e)) + np.abs(np.std(e, ddof=1))
+    out['mms'] = np.abs(out['meane']) + np.abs(std_e)
 
     if std_e == 0:
         e = np.zeros(len(e))
@@ -657,33 +634,20 @@ def _arconf_from_arfit(fitted_ar, the_conf_interval: float = 0.95) -> dict:
         A_err = all_errs
         return {'A_err': A_err}
 
-def _get_criteria(sel, N, crit = "aic"):
-    # pop the first key
-    keys = None
-    se = None
-
+def _get_criteria(sel, N, crit="aic"):
     if crit == "aic":
         se = sel.aic
-        se.pop(0)
-        keys = se.keys()
     elif crit == "bic":
         se = sel.bic
-        se.pop(0)
-        keys = se.keys()
     else:
         raise ValueError(f"Unknown criteria: {crit}!")
-    
-    orlist = np.array([i[-1] for i in list(keys)])
-    ps_len = len(keys)
-    orlist_sorted_idxs = np.argsort(orlist)
-    criteria_vals = np.zeros(ps_len)
-    
-    for i in range(ps_len):
-        key_i = list(keys)[orlist_sorted_idxs[i]] # both aic and bic ordered the same way
-        val = se.get(key_i)/N # normalise by num observations
-        criteria_vals[i] = val
-    
-    return criteria_vals
+
+    se.pop(0)  # drop the zero-lag (intercept-only) model
+    keys = list(se.keys())
+    # Order by AR order (the last element of each lag-tuple key); aic and bic
+    # are keyed identically, so this ordering is shared.
+    order = np.argsort([k[-1] for k in keys])
+    return np.array([se[keys[i]] / N for i in order])  # normalise by num observations
 
 def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc') -> dict:
     """
@@ -752,7 +716,6 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
     # In our case of a univariate time series, just a scalar for the noise magnitude.
     Cest = res.sigma2
     out['C'] = Cest
-
 
     # #(4) Schwartz's Bayesian Criterion, SBC (BIC)
     bics = _get_criteria(sel, N, "bic")
