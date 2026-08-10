@@ -2,7 +2,6 @@ from typing import Union
 
 from numpy.typing import ArrayLike
 import numpy as np
-from scipy.stats import iqr
 from scipy.interpolate import interp1d
 from scipy.linalg import qr, solve_triangular
 import statsmodels.api as sm
