@@ -1137,3 +1137,164 @@ def goodness_of_fit(y, y_fit, num_coeffs):
         "adjrsquare": 1 - (1 - rsquare) * (n - 1) / dfe,
         "rmse": np.sqrt(sse / dfe),
     }
+
+# ------------------------------------------------------------------------------
+# Robust linear fitting (MATLAB's robustfit)
+# ------------------------------------------------------------------------------
+
+
+def _bisquare(u):
+    """Tukey's bisquare weight function, as used by MATLAB's ``robustfit``."""
+    u = np.asarray(u, dtype=float)
+    return (np.abs(u) < 1) * (1 - u**2) ** 2
+
+
+def _madsigma(r, p):
+    """MAD-based scale estimate (``madsigma`` in MATLAB's ``statrobustfit``)."""
+    rs = np.sort(np.abs(r))
+    return np.median(rs[max(1, p) - 1:]) / 0.6745
+
+
+def _robustsigma(r, p, s, tune, h):
+    """
+    Robust residual scale estimate of DuMouchel & O'Brien (1989), following
+    MATLAB's ``statrobustsigma``.
+    """
+    st = s * tune
+    n = len(r)
+    u = r / st
+
+    phi = u * _bisquare(u)
+    delta = 0.0001
+    u1 = u - delta
+    phi0 = u1 * _bisquare(u1)
+    u1 = u + delta
+    phi1 = u1 * _bisquare(u1)
+
+    dphi = (phi1 - phi0) / (2 * delta)
+    m1 = np.mean(dphi)
+    m2 = np.sum((1 - h) * phi**2) / (n - p)
+    K = 1 + (p / n) * (1 - m1) / m1
+
+    return K * np.sqrt(m2) * st / m1
+
+
+def robustfit(x, y, tune=4.685):
+    """
+    Iteratively reweighted least-squares linear fit, a port of MATLAB's
+    ``robustfit(x, y)`` with the default bisquare weight function and a
+    constant term.
+
+    Parameters
+    ----------
+    x : array-like
+        Predictor (a single column; the constant term is added internally).
+
+    y : array-like
+        Response.
+
+    tune : float, optional
+        Tuning constant of the bisquare weight function (MATLAB default
+        4.685).
+
+    Returns
+    -------
+    b : ndarray
+        Coefficient estimates, ``[intercept, gradient]``.
+
+    stats : dict
+        Keys are ``ols_s`` (sigma estimate from ordinary least squares),
+        ``robust_s`` (robust sigma estimate), ``mad_s`` (MAD-based sigma
+        estimate), ``s`` (the larger of ``robust_s`` and a weighted average
+        of ``ols_s`` and ``robust_s``) and ``se`` (standard errors of the
+        coefficient estimates).
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    y = np.asarray(y, dtype=float).ravel()
+
+    n = len(y)
+    X = np.column_stack((np.ones(n), x))
+    p = X.shape[1]
+    if n <= p:
+        raise ValueError("Not enough data points for a robust fit.")
+
+    from scipy.linalg import qr as _qr
+
+    Q, R, perm = _qr(X, mode="economic", pivoting=True)
+
+    eps = np.finfo(float).eps
+    tol = abs(R[0, 0]) * max(n, p) * eps
+    xrank = int(np.sum(np.abs(np.diag(R)) > tol))
+
+    R1 = R[:xrank, :xrank]
+    b = np.zeros(p)
+    if xrank == p:
+        b[perm] = np.linalg.solve(R1, Q.T @ y)
+    else:
+        b[perm[:xrank]] = np.linalg.solve(R1, Q[:, :xrank].T @ y)
+        perm = perm[:xrank]
+
+    E = np.linalg.solve(R1.T, X[:, perm].T).T
+    h = np.minimum(0.9999, np.sum(E * E, axis=1))
+    adjfactor = 1 / np.sqrt(1 - h)
+    dfe = n - xrank
+
+    ols_s = np.linalg.norm(y - X @ b) / np.sqrt(dfe)
+
+    tiny_s = 1e-6 * np.std(y, ddof=1)
+    if tiny_s == 0:
+        tiny_s = 1
+
+    D = np.sqrt(eps)
+    iterlim = 50
+    it = 0
+    wxrank = xrank
+    b0 = np.zeros(p)
+    w = np.ones(n)
+    while it == 0 or np.any(np.abs(b - b0) > D * np.maximum(np.abs(b), np.abs(b0))):
+        it += 1
+        if it > iterlim:
+            break
+        # Residuals from the previous fit give the new scale estimate:
+        r = y - X @ b
+        radj = r * adjfactor
+        s = _madsigma(radj, wxrank)
+        # New weights from these residuals, then re-fit:
+        w = _bisquare(radj / (max(s, tiny_s) * tune))
+        b0 = b.copy()
+        sw = np.sqrt(w)
+        bfit, _, wxrank, _ = np.linalg.lstsq(X[:, perm] * sw[:, None], y * sw, rcond=None)
+        b = np.zeros(p)
+        b[perm] = bfit
+
+    r = y - X @ b
+    radj = r * adjfactor
+    mad_s = _madsigma(radj, xrank)
+
+    if np.all((w < D) | (w > 1 - D)):
+        # All weights 0 or 1: ordinary least squares on a subset of the data
+        included = w > 1 - D
+        robust_s = np.linalg.norm(r[included]) / np.sqrt(np.sum(included) - xrank)
+    else:
+        robust_s = _robustsigma(radj, xrank, max(mad_s, tiny_s), tune, h)
+
+    # Shrink the robust value toward the ols value if it's smaller, but never
+    # decrease it if it's larger than the ols value:
+    sigma = max(
+        robust_s,
+        np.sqrt((ols_s**2 * xrank**2 + robust_s**2 * n) / (xrank**2 + n)),
+    )
+
+    RI = np.linalg.solve(R1, np.eye(xrank))
+    tempC = (RI @ RI.T) * sigma**2
+    tempse = np.sqrt(np.maximum(eps, np.diag(tempC)))
+    se = np.zeros(p)
+    se[perm] = tempse
+
+    return b, {
+        "ols_s": ols_s,
+        "robust_s": robust_s,
+        "mad_s": mad_s,
+        "s": sigma,
+        "se": se,
+    }

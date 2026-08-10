@@ -1,9 +1,8 @@
 import numpy as np
 from numpy.typing import ArrayLike
 import scipy.fft
-import statsmodels.api as sm
 
-from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit
+from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit, robustfit
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
@@ -218,10 +217,10 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['fpoly2csS_p2'] = b
     out['fpoly2csS_p3'] = c
     quad = lambda x, a, b, c: a * x**2 + b * x + c
-    residuals = quad(w, a, b, c) - cs_s
-    sum_sq_err = np.sum(residuals**2)
-    out['fpoly2_sse'] = sum_sq_err
-    out['fpoly2_r2'] = 1 - (sum_sq_err / (np.sum((cs_s - np.mean(cs_s))**2)))
+    gof = goodness_of_fit(cs_s, quad(w, a, b, c), 3)
+    out['fpoly2_sse'] = gof['sse']
+    out['fpoly2_r2'] = gof['rsquare']
+    out['fpoly2_rmse'] = gof['rmse']
 
     # Fit polysat a*x^2/(b+x^2) (has zero derivative at zero, though)
     polysat = lambda p, x: (p[0] * (x**2)) / (p[1] + x**2)
@@ -422,19 +421,18 @@ def give_me_robust_stats(x_data: ArrayLike, y_data: ArrayLike, field_name: str) 
     """
     Statistics based on a robust linear fit
     """
-    x = sm.add_constant(x_data)
-    rlm = sm.RLM(y_data, x, M=sm.robust.norms.TukeyBiweight())
     out = {}
     try:
-        results = rlm.fit()
-        linfit = results.params  # [intercept, slope]
-        out[f'{field_name}_a1'] = linfit[0]  # linear fit intercept
-        out[f'{field_name}_a2'] = linfit[1]  # linear fit gradient
-        out[f'{field_name}_sea1'] = results.bse[0]  # standard error in intercept
-        out[f'{field_name}_sea2'] = results.bse[1]  # standard error in slope
+        a, stats = robustfit(x_data, y_data)
+        out[f'{field_name}_a1'] = a[0]  # robust intercept
+        out[f'{field_name}_a2'] = a[1]  # robust gradient
+        # ratio of sigma estimates between ordinary least squares and the robust fit:
+        out[f'{field_name}_sigrat'] = stats['ols_s'] / stats['robust_s']
+        # sigma as the larger of robust_s and a weighted average of ols_s and robust_s:
+        out[f'{field_name}_sigma'] = stats['s']
+        out[f'{field_name}_sea1'] = stats['se'][0]  # standard error in intercept
+        out[f'{field_name}_sea2'] = stats['se'][1]  # standard error in slope
     except Exception:
-        out[f'{field_name}_a1'] = np.nan
-        out[f'{field_name}_a2'] = np.nan
-        out[f'{field_name}_sea1'] = np.nan
-        out[f'{field_name}_sea2'] = np.nan
+        for key in ('a1', 'a2', 'sigrat', 'sigma', 'sea1', 'sea2'):
+            out[f'{field_name}_{key}'] = np.nan
     return out
