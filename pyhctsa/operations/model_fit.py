@@ -87,7 +87,6 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     out['std_p'] = np.std(p_matrix, ddof=1)
 
     #% Within-sample log-likelihood
-    train_ll = model.score(y_train_reshaped)
     out['LLtrainpersample'] = model.monitor_.history[-1] / n_train
     out['nit'] = model.monitor_.iter
 

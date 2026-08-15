@@ -268,7 +268,7 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
     out = {}
     rmat = np.corrcoef(M1, M2)
     R = rmat[0, 1] # correlation coeff
-    #out['R'] = R
+    out['R'] = R
     out['absR'] = np.abs(rmat[0, 1])
     out['density'] = np.ptp(M1) * np.ptp(M2) / N
 

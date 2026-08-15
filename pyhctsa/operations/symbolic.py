@@ -615,8 +615,6 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     if tau > 1:  # calculate the transition matrix at a non-unit lag
         y = resample_poly(y, 1, tau)  # downsample at rate 1:tau
 
-    N = len(y)  # time-series length
-
     # (((1))) Discretize the time series to a symbolic string, containing
     # integers from 1 to num_groups
     yth = coarse_grain(y, how_to_cg, num_groups)

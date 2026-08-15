@@ -1,7 +1,5 @@
 import numpy as np
 import pytest
-import os
-from pathlib import Path
 
 from pyhctsa.utils import get_dataset, z_score, _check_optional_deps, _validate_data, sign_change
 import pyhctsa.utils

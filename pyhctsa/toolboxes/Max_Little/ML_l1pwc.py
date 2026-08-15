@@ -287,9 +287,6 @@ def l1pwc(y: np.ndarray, lam: float | np.ndarray, display: bool = True,
 
     return x, energy, status, lambda_max
 
-from scipy.linalg import solveh_banded
-
-
 def l1pwc_lmax(y: np.ndarray) -> float:
     """Maximum useful regularisation parameter for L1-PWC denoising.
 
