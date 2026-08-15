@@ -12,16 +12,14 @@ from pyhctsa.utils import get_dataset
 class TestOperations:
     @pytest.mark.parametrize("x", [
         "medical", "extreme_events", "criticality", "correlation", "information", "entropy",
-        "stationarity", "distribution", "scaling", "symbolic", "wavelet", 
-        "hypothesis", "spectral", "model_fit", "graph", "physics", "pre_process",
+        "stationarity", "distribution", "scaling", "symbolic", "wavelet",
+        "hypothesis_tests", "spectral", "model_fit", "graph", "physics", "pre_process",
         "surrogates", "nonlinearity", "changepoint"])
     def test_module_basic(self, x):
         # basic checks on each module
         data = get_dataset(which="sinusoid")
-        config_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "configurations", "module_configs", f"{x}.yaml")
-        assert os.path.exists(config_path), f"Config file not found: {config_path}"
-        calc = FeatureCalculator(config_path)
+        calc = FeatureCalculator(modules=[x])
+        assert list(calc.config) == [x], f"Expected only the '{x}' module to be loaded."
         fvec = calc.extract(data)
         # Check that something is returned and it's not empty
         assert fvec is not None, "No output returned"
@@ -49,10 +47,23 @@ class TestCalculator:
         assert len(hctsa_yaml) == len(calc.config), f"Expected {len(hctsa_yaml)} modules to be loaded, got {len(hctsa_yaml)} instead."
     # test the loading of a single module e.g. correlation
     def test_calculator_custom(self):
-        confpath = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "configurations", "module_configs", "correlation.yaml")
-        calc = FeatureCalculator(config_path=confpath)
+        calc = FeatureCalculator(modules=["correlation"])
         assert len(calc.config) == 1, f"Expected only a single module, got {len(calc.config)} instead."
+        assert list(calc.config) == ["correlation"]
+    # a single module may also be given as a bare string
+    def test_calculator_modules_str(self):
+        calc = FeatureCalculator(modules="correlation")
+        assert list(calc.config) == ["correlation"]
+    # selecting several modules keeps exactly those
+    def test_calculator_modules_subset(self):
+        wanted = ["correlation", "entropy"]
+        calc = FeatureCalculator(modules=wanted)
+        assert list(calc.config) == wanted
+    # an unknown module name is rejected rather than silently ignored
+    def test_calculator_modules_unknown(self):
+        with pytest.raises(ValueError) as excinfo:
+            FeatureCalculator(modules=["not_a_module"])
+        assert "Unknown module(s) ['not_a_module']" in str(excinfo.value)
     # test sucessful instantiation of calculator
     def test_instantiation(self):
         calc = FeatureCalculator()

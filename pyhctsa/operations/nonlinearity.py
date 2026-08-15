@@ -9,9 +9,10 @@ from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 
 from ..operations.model_fit import residual_analysis
-from ..operations.correlation import first_crossing, first_min, autocorr
+from ..operations.correlation import first_crossing, autocorr
+from ..operations.information import first_min
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
-from ..utils import matlab_quantile, time_delay_embed
+from ..utils import _first_index_past_threshold, matlab_quantile, time_delay_embed
 
 def _resolve_time_delay(y: ArrayLike, tau: Union[int, str]) -> Union[int, float]:
     """Resolve a string time-delay spec to a lag.
@@ -33,14 +34,9 @@ def _resolve_time_delay(y: ArrayLike, tau: Union[int, str]) -> Union[int, float]
 def _first_fn(p, threshold, over_or_under='under'):
     """Position (counting from one) of the first element of ``p`` on the given
     side of ``threshold``, or ``len(p) + 1`` if there is none."""
-    if over_or_under == 'under':
-        indices = np.where(p < threshold)[0]
-    elif over_or_under == 'over':
-        indices = np.where(p > threshold)[0]
-    else:
-        raise ValueError(f'Unknown setting: {over_or_under}')
+    idx = _first_index_past_threshold(p, threshold, over_or_under)
 
-    return indices[0] + 1 if len(indices) > 0 else len(p) + 1
+    return len(p) + 1 if idx is None else idx + 1
 
 def _normed_single_curve_length(x: np.ndarray, lag: int, nrmdegree: int) -> np.ndarray:
     # helper function for _normed_single_curve_length_windowed and nsamdf

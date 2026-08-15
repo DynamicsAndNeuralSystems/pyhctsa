@@ -16,7 +16,7 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..toolboxes.matlab.optimizers import minimize
-from ..utils import z_score, ljung_box_pvalue
+from ..utils import _matlab_linspace, z_score, ljung_box_pvalue
 
 def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed: int = 0) -> dict:
     """
@@ -867,7 +867,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     cov = CovSEisoNoise
     nhps = cov.n_hyp
 
-    tt = np.floor(_linspace(1, N, npoints))
+    tt = np.floor(_matlab_linspace(1, N, npoints))
     yt = y[tt.astype(int) - 1]
 
     try:
@@ -885,7 +885,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     if N <= 2000:
         ts = np.arange(1, N + 1, dtype=float)
     else:  # memory constraints force us to crudely resample
-        ts = np.floor(_linspace(1, N, 2000) + 0.5)  # MATLAB round()
+        ts = np.floor(_matlab_linspace(1, N, 2000) + 0.5)  # MATLAB round()
     y_ts = y[ts.astype(int) - 1]
 
     mu, S2, _, _ = gp_predict(hyp, cov, tt, yt, ts)
@@ -978,9 +978,9 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     nhps = cov.n_hyp
 
     if pmode in ('frombefore', 'randomgap'):
-        spns = np.floor(_linspace(1, N - (num_test + num_train), num_preds))
+        spns = np.floor(_matlab_linspace(1, N - (num_test + num_train), num_preds))
     elif pmode == 'beforeafter':
-        spns = np.floor(_linspace(1, N - (num_test + num_train * 2), num_preds))
+        spns = np.floor(_matlab_linspace(1, N - (num_test + num_train * 2), num_preds))
     else:
         raise ValueError(f"Unknown prediction mode {pmode!r}")
     spns = spns.astype(int)
@@ -1120,13 +1120,3 @@ def _ml_randperm(n: int, rng: np.random.RandomState) -> np.ndarray:
     return np.argsort(rng.random_sample(n), kind='stable') + 1
 
 
-def _linspace(d1: float, d2: float, n: int) -> np.ndarray:
-    """
-    Helper function for gp_fit_across
-    """
-    n1 = n - 1
-    y = d1 + np.arange(n) * (d2 - d1) / n1
-    y[0] = d1
-    if n1 > 0:
-        y[n - 1] = d2
-    return y

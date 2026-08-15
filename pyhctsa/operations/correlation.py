@@ -13,8 +13,9 @@ from statsmodels.tsa.stattools import pacf
 from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit
-from ..utils import (bin_picker, histc, make_mat_buffer, point_of_crossing,
-                     sign_change, time_delay_embed, z_score)
+from ..utils import (_first_index_past_threshold, bin_picker, histc,
+                     make_mat_buffer, point_of_crossing, sign_change,
+                     time_delay_embed, z_score)
 
 def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
               extra_param: Union[int, None] = None, random_seed = None,
@@ -160,12 +161,14 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
 def first_under_fn(x: ArrayLike, m: ArrayLike, p: ArrayLike) -> float:
     """
-    Find the value of m for the first time p goes under the threshold, x. 
+    Find the value of m for the first time p goes under the threshold, x.
     p and m are vectors of the same length
-    """
-    first_i = next((m_val for m_val, p_val in zip(m, p) if p_val < x), m[-1])
 
-    return first_i
+    Falls back to the last element of `m` when `p` never goes under `x`.
+    """
+    idx = _first_index_past_threshold(p, x, 'under')
+
+    return m[-1] if idx is None else m[idx]
 
 
 def theiler_q(y: ArrayLike) -> float:

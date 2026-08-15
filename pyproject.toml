@@ -58,7 +58,6 @@ where = ["."]
 [tool.setuptools.package-data]
 pyhctsa = [
   "configurations/*.yaml",
-  "configurations/module_configs/*.yaml",
   "data/*.csv",
   "data/*.txt",
   "toolboxes/**/*",

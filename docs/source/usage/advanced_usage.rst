@@ -156,7 +156,31 @@ Once a YAML configuration has been created (i.e., as a `.yaml` file), it can be 
     calc = FeatureCalculator(config_path='<path_to_custom_yaml>.yaml')
     calc.extract(data)
 
-☰ (2) Feature filtering
+🧩 (2) Selecting modules
+------------------------
+Writing a custom YAML file is unnecessary if all you want is a subset of the
+*modules* in an existing configuration. The ``modules`` argument restricts the
+calculator to the given top-level keys:
+
+.. code-block:: python
+
+    from pyhctsa.calculator import FeatureCalculator
+
+    # only the correlation features from the default hctsa.yaml
+    calc = FeatureCalculator(modules=['correlation'])
+
+    # several modules at once
+    calc = FeatureCalculator(modules=['correlation', 'entropy', 'distribution'])
+
+    # a single module may also be given as a bare string
+    calc = FeatureCalculator(modules='correlation')
+
+This works with a custom ``config_path`` too, in which case the names are matched
+against that file's modules rather than the default set. Passing a module name
+that is not present in the configuration raises a ``ValueError`` listing the
+available modules, rather than silently returning an empty feature set.
+
+☰ (3) Feature filtering
 -----------------------
 When constructing custom feature subsets, users may wish to control which time-series features are returned by an operation.
 Consider the `binary_stats` function located in the `Symbolic` module. See :func:`binary_stats <pyhctsa.operations.symbolic.binary_stats>` for details.

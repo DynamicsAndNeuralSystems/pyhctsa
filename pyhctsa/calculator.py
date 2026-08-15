@@ -235,21 +235,36 @@ class FeatureCalculator:
     config_path: str or None, optional
         Path to the YAML configuration file. If None, uses the default 'hctsa.yaml'
         configuration file in the package configurations directory.
-    
+    modules: list[str] or None, optional
+        Restrict the calculator to these modules (top-level keys of the
+        configuration), e.g. ``['correlation', 'entropy']``. If None, every
+        module in the configuration is used.
+
     Examples
     --------
     >>> fc = FeatureCalculator()  # Load default configuration
     >>> x = np.random.randn(1000)
     >>> df = fc.extract(x)
+
+    >>> fc = FeatureCalculator(modules=['correlation'])  # correlation features only
     """
-    def __init__(self, config_path: Union[str, None] = None):
+    def __init__(self, config_path: Union[str, None] = None,
+                 modules: Union[list[str], None] = None):
         """
-        Initialises a FeatureCalculator instance.  
+        Initialises a FeatureCalculator instance.
 
         Parameters
         ----------
         config_path : str or None, optional
             Path to the YAML configuration file. If None, uses the default configuration.
+        modules : list[str] or None, optional
+            Restrict the calculator to these modules (top-level keys of the
+            configuration). If None, every module in the configuration is used.
+
+        Raises
+        ------
+        ValueError
+            If any name in `modules` is not a top-level key of the configuration.
         """
         # set the default config path
         if config_path is None:
@@ -258,6 +273,16 @@ class FeatureCalculator:
         self.config_path = config_path
         with open(config_path, encoding='utf-8') as f:
             self.config = yaml.safe_load(f)
+        if modules is not None:
+            if isinstance(modules, str):
+                modules = [modules]
+            unknown = [m for m in modules if m not in self.config]
+            if unknown:
+                raise ValueError(
+                    f"Unknown module(s) {unknown} for config '{config_path}'. "
+                    f"Available modules: {sorted(self.config)}")
+            self.config = {m: self.config[m] for m in modules}
+        self.modules = modules
         self._operations_package = "pyhctsa.operations" # abs path
         self.feature_funcs = self._build_feature_funcs()
         print(f"Loaded {len(self.feature_funcs)} master operations.")

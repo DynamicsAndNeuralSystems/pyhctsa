@@ -275,6 +275,86 @@ def matlab_quantile(x: ArrayLike, p: ArrayLike) -> np.ndarray:
     return np.where(xk == xkp1, xk, y)  # as are identical values
 
 
+def _first_index_past_threshold(p: ArrayLike, threshold: float,
+                                side: str = 'under') -> Union[int, None]:
+    """
+    Index of the first element of `p` strictly past `threshold`, or None.
+
+    The shared predicate behind the several "first time this curve drops below
+    (or rises above) a level" features. Callers differ only in what they report
+    for that index and what they fall back to when there is no crossing, so
+    those policies stay with the callers rather than being folded in here.
+
+    NaNs never satisfy either comparison, so a curve that is all-NaN returns
+    None rather than an arbitrary index.
+
+    Parameters
+    ----------
+    p : array-like
+        The curve to scan.
+    threshold : float
+        The level to compare against.
+    side : {'under', 'over'}, optional
+        Whether to look for the first element below or above `threshold`.
+        Default is ``'under'``.
+
+    Returns
+    -------
+    int or None
+        The 0-based index of the first qualifying element, or None if there
+        is none.
+    """
+    p = np.asarray(p)
+    if side == 'under':
+        hits = np.flatnonzero(p < threshold)
+    elif side == 'over':
+        hits = np.flatnonzero(p > threshold)
+    else:
+        raise ValueError(f'Unknown setting: {side}')
+
+    return int(hits[0]) if hits.size > 0 else None
+
+
+def _matlab_linspace(d1: float, d2: float, n: int) -> np.ndarray:
+    """
+    MATLAB's ``linspace``.
+
+    Differs from ``numpy.linspace`` in the endpoint arithmetic: MATLAB forms
+    ``d1 + (0:n-1)*(d2-d1)/(n-1)`` and then *overwrites* the last element with
+    ``d2``, rather than computing it. The two agree to within a bit almost
+    everywhere, but the difference is visible once the result is passed through
+    ``floor`` (as every caller here does), where a last-bit discrepancy moves an
+    index by one.
+
+    Parameters
+    ----------
+    d1, d2 : float
+        First and last values of the generated vector.
+    n : int
+        Number of points. Must be at least 2.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``n`` evenly spaced values from `d1` to `d2` inclusive.
+    """
+    d1 = float(d1)
+    d2 = float(d2)
+    n1 = n - 1
+    if np.isinf((d2 - d1) * (n1 - 1)):
+        # the naive product overflows; distribute the division instead
+        i = np.arange(n1 + 1, dtype=float)
+        y = d1 + (d2 / n1) * i - (d1 / n1) * i
+    else:
+        y = d1 + np.arange(n1 + 1, dtype=float) * (d2 - d1) / n1
+    if y.size:
+        if d1 == d2:
+            y[:] = d1
+        else:
+            y[n - 1] = d2
+    return y
+
+
 def histc(x: ArrayLike, bins: ArrayLike) -> int:
     """Counts the number of values in x that are within each specified bin."""
     # Get indices of the bins to which each value in input array belongs.

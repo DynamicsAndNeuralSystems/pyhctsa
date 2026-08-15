@@ -1,6 +1,7 @@
 import numpy as np
 
 from ..toolboxes.Max_Little.ML_l1pwc import l1pwc, l1pwc_lmax
+from ..utils import _first_index_past_threshold
 
 def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -> dict:
     """
@@ -177,9 +178,8 @@ def l1pwc_sweep_lambda(y: np.ndarray, lambdar: np.ndarray) -> dict:
     # threshold (y). This function does it:
  
     def FirstUnder(x, thresh):
-        idx = np.flatnonzero(x < thresh)
-        return idx[0] if idx.size > 0 else None
- 
+        return _first_index_past_threshold(x, thresh, 'under')
+
     def NaNIfEmpty(idx):
         # Returns a NaN if idx is empty, otherwise returns lambdar at idx.
         return np.nan if idx is None else lambdar[idx]
