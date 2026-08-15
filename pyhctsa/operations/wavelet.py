@@ -2,7 +2,6 @@
 # Copyright (c) 2006-2024 PyWavelets contributors.
 # Licensed under the MIT License.
 from typing import Union
-from math import ceil, floor
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -17,45 +16,20 @@ from pywt._extensions._pywt import (
     Wavelet,
     _check_dtype,
 )
-from pywt._functions import integrate_wavelet, scale2frequency
-from pywt._utils import AxisError
-from pywt._cwt import next_fast_len
+from pywt._functions import integrate_wavelet
 
-def _custom_cwt(data, scales, wavelet, sampling_period=1., method='conv', axis=-1,
-        *, precision=12):
+def _custom_cwt(data, scales, wavelet, *, precision=12):
     """
     One dimensional Continuous Wavelet Transform.
 
     Parameters
     ----------
     data : array-like
-        Input signal
+        Input signal (1-D).
     scales : array-like
-        The wavelet scales to use. One can use
-        ``f = scale2frequency(wavelet, scale)/sampling_period`` to determine
-        what physical frequency, ``f``. Here, ``f`` is in hertz when the
-        ``sampling_period`` is given in seconds.
+        The wavelet scales to use.
     wavelet : Wavelet object or name
-        Wavelet to use
-    sampling_period : float
-        Sampling period for the frequencies output (optional).
-        The values computed for ``coefs`` are independent of the choice of
-        ``sampling_period`` (i.e. ``scales`` is not scaled by the sampling
-        period).
-    method : {'conv', 'fft'}, optional
-        The method used to compute the CWT. Can be any of:
-            - ``conv`` uses ``numpy.convolve``.
-            - ``fft`` uses frequency domain convolution.
-            - ``auto`` uses automatic selection based on an estimate of the
-              computational complexity at each scale.
-
-        The ``conv`` method complexity is ``O(len(scale) * len(data))``.
-        The ``fft`` method is ``O(N * log2(N))`` with
-        ``N = len(scale) + len(data) - 1``. It is well suited for large size
-        signals but slightly slower than ``conv`` on small ones.
-    axis: int, optional
-        Axis over which to compute the CWT. If not given, the last axis is
-        used.
+        Wavelet to use.
     precision: int, optional
         Length of wavelet (``2 ** precision``) used to compute the CWT. Greater
         will increase resolution, especially for higher scales, but will
@@ -65,23 +39,21 @@ def _custom_cwt(data, scales, wavelet, sampling_period=1., method='conv', axis=-
 
     Returns
     -------
-    coefs : array_like
+    coefs : ndarray
         Continuous wavelet transform of the input signal for the given scales
-        and wavelet. The first axis of ``coefs`` corresponds to the scales.
-        The remaining axes match the shape of ``data``.
-    frequencies : array_like
-        If the unit of sampling period are seconds and given, then frequencies
-        are in hertz. Otherwise, a sampling period of 1 is assumed.
+        and wavelet, shape ``(len(scales), len(data))``.
 
     Note
     ----
-    This is a modified version of `pywt.cwt` from the PyWavelets 
-    package, adapted to handle complex-type casting.
+    This is a cut-down version of `pywt.cwt` from the PyWavelets package,
+    adapted to handle complex-type casting. It keeps only the direct
+    convolution method on 1-D input, and does not compute the pseudo-
+    frequencies (which callers here do not use).
     """
-
-    # accept array-like input; make a copy to ensure a contiguous array
     dt = _check_dtype(data)
     data = np.asarray(data, dtype=dt)
+    if data.ndim != 1:
+        raise ValueError("`data` must be one dimensional")
     dt_cplx = np.result_type(dt, np.complex64)
     if not isinstance(wavelet, (ContinuousWavelet, Wavelet)):
         wavelet = DiscreteContinuousWavelet(wavelet)
@@ -90,91 +62,44 @@ def _custom_cwt(data, scales, wavelet, sampling_period=1., method='conv', axis=-
     if np.any(scales <= 0):
         raise ValueError("`scales` must only include positive values")
 
-    if not np.isscalar(axis):
-        raise AxisError("axis must be a scalar.")
-
-    dt_out = dt_out = dt_cplx if (isinstance(wavelet, ContinuousWavelet) and wavelet.complex_cwt) else dt
-    out = np.empty((np.size(scales),) + data.shape, dtype=dt_out)
+    is_complex = isinstance(wavelet, ContinuousWavelet) and wavelet.complex_cwt
+    dt_out = dt_cplx if is_complex else dt
+    n = data.size
+    out = np.empty((scales.size, n), dtype=dt_out)
 
     int_psi, x = integrate_wavelet(wavelet, precision=precision)
-    int_psi = np.conj(int_psi) if (isinstance(wavelet, ContinuousWavelet) and wavelet.complex_cwt) else int_psi
+    if is_complex:
+        int_psi = np.conj(int_psi)
 
     # convert int_psi, x to the same precision as the data
     dt_psi = dt_cplx if int_psi.dtype.kind == 'c' else dt
     int_psi = np.asarray(int_psi, dtype=dt_psi)
     x = np.asarray(x, dtype=data.real.dtype)
 
-    if method == 'fft':
-        size_scale0 = -1
-        fft_data = None
-    elif method != "conv":
-        raise ValueError("method must be 'conv' or 'fft'")
-
-    if data.ndim > 1:
-        # move axis to be transformed last (so it is contiguous)
-        data = data.swapaxes(-1, axis)
-
-        # reshape to (n_batch, data.shape[-1])
-        data_shape_pre = data.shape
-        data = data.reshape((-1, data.shape[-1]))
+    # loop invariants: the sampling grid `x` does not depend on the scale
+    step = x[1] - x[0]
+    span = x[-1] - x[0]
+    int_psi_size = int_psi.size
 
     for i, scale in enumerate(scales):
-        step = x[1] - x[0]
-        j = np.arange(scale * (x[-1] - x[0]) + 1) / (scale * step)
-        j = j.astype(int)  # floor
-        if j[-1] >= int_psi.size:
-            j = np.extract(j < int_psi.size, j)
+        j = (np.arange(scale * span + 1) / (scale * step)).astype(int)  # floor
+        if j[-1] >= int_psi_size:
+            j = np.extract(j < int_psi_size, j)
         int_psi_scale = int_psi[j][::-1]
 
-        if method == 'conv':
-            if data.ndim == 1:
-                conv = np.convolve(data, int_psi_scale)
-            else:
-                # batch convolution via loop
-                conv_shape = list(data.shape)
-                conv_shape[-1] += int_psi_scale.size - 1
-                conv_shape = tuple(conv_shape)
-                conv = np.empty(conv_shape, dtype=dt_out)
-                for n in range(data.shape[0]):
-                    conv[n, :] = np.convolve(data[n], int_psi_scale)
-        else:
-            # The padding is selected for:
-            # - optimal FFT complexity
-            # - to be larger than the two signals length to avoid circular
-            #   convolution
-            size_scale = next_fast_len(
-                data.shape[-1] + int_psi_scale.size - 1
-            )
-            if size_scale != size_scale0:
-                # Must recompute fft_data when the padding size changes.
-                fft_data = np.fft.fft(data, size_scale, axis=-1)
-            size_scale0 = size_scale
-            fft_wav = np.fft.fft(int_psi_scale, size_scale, axis=-1)
-            conv = np.fft.ifft(fft_wav * fft_data, axis=-1)
-            conv = conv[..., :data.shape[-1] + int_psi_scale.size - 1]
+        m = int_psi_scale.size
+        if m < 2:
+            raise ValueError(f"Selected scale of {scale} too small.")
+        conv = np.convolve(data, int_psi_scale)
 
-        coef = - np.sqrt(scale) * np.diff(conv, axis=-1)
-        if out.dtype.kind != 'c':
-            coef = coef.real
-        # transform axis is always -1 due to the data reshape above
-        d = (coef.shape[-1] - data.shape[-1]) / 2.
-        if d > 0:
-            coef = coef[..., floor(d):-ceil(d)]
-        elif d < 0:
-            raise ValueError(
-                f"Selected scale of {scale} too small.")
-        if data.ndim > 1:
-            # restore original data shape and axis position
-            coef = coef.reshape(data_shape_pre)
-            coef = coef.swapaxes(axis, -1)
-        out[i, ...] = coef
+        # np.diff() of the full convolution followed by a symmetric trim to
+        # len(data); differencing only the retained window is bit-identical
+        # and avoids materialising the full-length temporary.
+        start = (m - 2) // 2
+        coef = -np.sqrt(scale) * (conv[start + 1:start + 1 + n] - conv[start:start + n])
+        out[i, :] = coef.real if out.dtype.kind != 'c' else coef
 
-    frequencies = scale2frequency(wavelet, scales, precision)
-    if np.isscalar(frequencies):
-        frequencies = np.array([frequencies])
-    frequencies /= sampling_period
-
-    return out, frequencies
+    return out
 
 def wfbm(x: ArrayLike) -> dict:
     """
@@ -219,7 +144,7 @@ def wfbm(x: ArrayLike) -> dict:
     all_levels = np.arange(1, level_decomp+1)
     stdc = np.zeros(len(all_levels))
     for i in range(len(all_levels)):
-        d = detcoef(coefs=C, lengths=L, levels=all_levels[i])
+        d = detcoef(coefs=C, lengths=L, level=all_levels[i])
         stdc_val = np.median(np.abs(d)) / 0.67448975
         stdc[i] = stdc_val
     po = np.polyfit(all_levels, np.log2(stdc**2), 1)
@@ -269,7 +194,7 @@ def scal_2_freq(y: ArrayLike, w_name: str = 'db3', a_max: int = 5, delta: int = 
     #Estimate standard deviation of detail coefficients.
     stdc = []
     for k in range(1, a_max+1):
-        d = detcoef(coefs=C, lengths=L, levels=k)
+        d = detcoef(coefs=C, lengths=L, level=k)
         stdc_val = np.median(np.abs(d)) / 0.67448975
         stdc.append(stdc_val)
     #% Compute identified period.
@@ -318,7 +243,7 @@ def dwt_coeff(y: ArrayLike, w_name: str = 'db3', level: int = 3) -> dict:
     out = {}
     for k in range(1, level+1):
         if k <= max_level_allowed:
-            d = detcoef(coefs=C, lengths=L, levels=k) # detail coeffs at level k
+            d = detcoef(coefs=C, lengths=L, level=k) # detail coeffs at level k
             # max coeff at this level
             out[f'maxd_l{k}'] = np.max(d)
             #% minimum coefficient at this level:
@@ -360,46 +285,48 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     y = np.asarray(y)
     N = len(y)
     scales = np.arange(1, max_scale+1)
-    coeffs, _ = _custom_cwt(data=y, scales=scales, wavelet=w_name)
+    coeffs = _custom_cwt(data=y, scales=scales, wavelet=w_name)
     S = np.abs(coeffs * coeffs)
     SC = 100*S/np.sum(S)
 
     # Get statistics from CWT
-    num_entries = SC.shape[0] * SC.shape[1]
+    num_entries = SC.size
+    max_SC = np.max(SC)
+    mean_SC = np.mean(SC)
+    std_SC = np.std(SC, ddof=1)
+
     # 1) Coefficients, coeffs
     all_coeffs = coeffs if pywt.Wavelet(w_name).symmetry == 'asymmetric' else -coeffs
+    abs_coeffs = np.abs(all_coeffs)
     out = {}
     out['meanC'] = np.mean(all_coeffs)
 
-    out['meanabsC'] = np.mean(abs(all_coeffs))
-    out['medianabsC'] = np.median(abs(all_coeffs))
-    out['maxabsC'] = np.max(abs(all_coeffs))
+    out['meanabsC'] = np.mean(abs_coeffs)
+    out['medianabsC'] = np.median(abs_coeffs)
+    out['maxabsC'] = np.max(abs_coeffs)
     out['maxonmeanC'] = out['maxabsC']/out['meanabsC']
 
-    out['maxonmeanSC'] = np.max(SC)/np.mean(SC)
+    out['maxonmeanSC'] = max_SC/mean_SC
 
     #% Proportion of coeffs matrix over ___ maximum (thresholded)
-    poverfn = lambda x : np.sum(SC[SC > x * np.max(SC)])/num_entries
+    poverfn = lambda x : np.sum(SC[SC > x * max_SC])/num_entries
     out['pover99'] = poverfn(0.99)
-    out['pover98'] = poverfn(0.88)
+    out['pover98'] = poverfn(0.88)  # threshold as in hctsa's WL_cwt
     out['pover95'] = poverfn(0.95)
     out['pover90'] = poverfn(0.90)
     out['pover80'] = poverfn(0.80)
 
-    # Distribution of scaled power
-    #shape, loc, scale = gamma.fit(SC, floc=0, method="MM")
-    # out['gam1'] = shape
-    # out['gam2'] = scale
     # 2D entropy
     SC_a = SC/np.sum(SC)
     out['SC_h'] = -np.sum(SC_a * np.log(SC_a))
 
     # Sum across scales
     SSC = sum(SC)
-    out['max_ssc'] = np.max(SSC)
+    max_SSC = np.max(SSC)
+    out['max_ssc'] = max_SSC
     out['min_ssc'] = np.min(SSC)
-    out['maxonmed_ssc'] = np.max(SSC) / np.median(SSC)
-    out['pcross_maxssc50'] = np.sum(sign_change(SSC - 0.5 * np.max(SSC))) / (N - 1)
+    out['maxonmed_ssc'] = max_SSC / np.median(SSC)
+    out['pcross_maxssc50'] = np.sum(sign_change(SSC - 0.5 * max_SSC)) / (N - 1)
     out['std_ssc'] = np.std(SSC)
 
     #Stationarity
@@ -413,30 +340,34 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     std2_1 = SC_1.std(ddof=1)
     std2_2 = SC_2.std(ddof=1)
 
-    out['stat_2_m_s'] = np.mean([std2_1, std2_2]) / SC.mean()
-    out['stat_2_s_m'] = np.std([mean2_1, mean2_2], ddof=1) / SC.std(ddof=1)
-    out['stat_2_s_s'] = np.std([std2_1, std2_2], ddof=1) / SC.std(ddof=1)
-    SCs = np.array_split(SC, 5, axis=1)
-    for i in range(1, 6):
-        out[f'mean5_{i}'] = np.mean(SCs[i-1])
-        out[f'std5_{i}'] = np.std(SCs[i-1], ddof=1)
-    
-    out['stat_5_m_s'] = np.mean([out['std5_1'], out['std5_2'], out['std5_3'], out['std5_4'], out['std5_5']])/np.mean(SC)
-    out['stat_5_s_m'] = np.std([out['mean5_1'], out['mean5_2'], out['mean5_3'], out['mean5_4'], out['mean5_5']], ddof=1)/np.std(SC, ddof=1)
-    out['stat_5_s_s'] = np.std([out['std5_1'], out['std5_2'], out['std5_3'], out['std5_4'], out['std5_5']], ddof=1)/np.std(SC, ddof=1)
+    out['stat_2_m_s'] = np.mean([std2_1, std2_2]) / mean_SC
+    out['stat_2_s_m'] = np.std([mean2_1, mean2_2], ddof=1) / std_SC
+    out['stat_2_s_s'] = np.std([std2_1, std2_2], ddof=1) / std_SC
+
+    means5, stds5 = [], []
+    for i, SC_i in enumerate(np.array_split(SC, 5, axis=1), start=1):
+        means5.append(np.mean(SC_i))
+        stds5.append(np.std(SC_i, ddof=1))
+        out[f'mean5_{i}'] = means5[-1]
+        out[f'std5_{i}'] = stds5[-1]
+
+    out['stat_5_m_s'] = np.mean(stds5)/mean_SC
+    out['stat_5_s_m'] = np.std(means5, ddof=1)/std_SC
+    out['stat_5_s_s'] = np.std(stds5, ddof=1)/std_SC
 
     return out
 
 def _slosr(xx: ArrayLike) -> int:
-    # helper function for detail_coeffs
+    """
+    Helper for :func:`detail_coeffs`: the level at which the sum of values to
+    the left most nearly equals the sum of values to the right.
+    """
     the_max_level = len(xx)
     slosr = np.zeros(the_max_level-2)
     for i in range(2, the_max_level):
         slosr[i-2] = np.sum(xx[:i-1])/np.sum(xx[i:])
-    absm1 = np.abs(slosr - 1)
-    idx = np.argwhere(absm1 == np.min(absm1).flatten())[0][0] + 1
 
-    return idx
+    return np.argmin(np.abs(slosr - 1)) + 1
 
 def detail_coeffs(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] = 20) -> dict:
     """
@@ -587,6 +518,11 @@ def wl_coeffs(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 3) -> 
 def wavedec(data: ArrayLike, wavelet: str, mode: str ='symmetric', level: int = 1, axis=-1) -> tuple:
     """
     Multiple level 1-D discrete fast wavelet decomposition.
+
+    Returns the concatenated coefficient vector ``[cA_n, cD_n, ..., cD_1]``
+    and the bookkeeping vector of lengths ``[len(cA_n), len(cD_n), ...,
+    len(cD_1), len(data)]``, matching MATLAB's ``wavedec``.
+
     Taken from https://github.com/izlotnik/wavelet-wrcoef/blob/master/wrcoef.py
     """
     data = np.asarray(data)
@@ -594,15 +530,9 @@ def wavedec(data: ArrayLike, wavelet: str, mode: str ='symmetric', level: int = 
     if not isinstance(wavelet, pywt.Wavelet):
         wavelet = pywt.Wavelet(wavelet)
 
-    # Initialization
-    coefs, lengths = [], []
-
-    # Decomposition
-    lengths.append(len(data))
-    for i in range(level):
+    coefs, lengths = [], [len(data)]
+    for _ in range(level):
         data, d = pywt.dwt(data, wavelet, mode, axis)
-
-        # Store detail and its length
         coefs.append(d)
         lengths.append(len(d))
 
@@ -614,53 +544,38 @@ def wavedec(data: ArrayLike, wavelet: str, mode: str ='symmetric', level: int = 
     coefs.reverse()
     lengths.reverse()
 
-    return np.concatenate(coefs).ravel(), lengths
+    return np.concatenate(coefs), lengths
 
-def detcoef(coefs, lengths, levels=None):
+def detcoef(coefs, lengths, level):
     """
-    1-D detail coefficients extraction
+    1-D detail coefficients extraction: returns the level-``level`` detail
+    branch (``cD_level``) from a :func:`wavedec` decomposition.
     """
-    if not levels:
-        levels = range(len(lengths) - 2)
+    # coefs is laid out as blocks with sizes lengths[0], ..., lengths[-2];
+    # the level-k detail block is at position len(lengths) - 1 - k.
+    idx = len(lengths) - 1 - level
+    start = sum(lengths[:idx])
 
-    if not isinstance(levels, list):
-        levels = [levels]
-
-    first = np.cumsum(lengths) + 1
-    first = first[-3::-1]
-    last = first + lengths[-2:0:-1] - 1
-
-    x = []
-    for level in levels:
-        d = coefs[first[level - 1] - 1:last[level - 1]]
-        x.append(d)
-
-    if len(x) == 1:
-        x = x[0]
-
-    return x
+    return coefs[start:start + lengths[idx]]
 
 
 def wrcoef(coefs, lengths, wavelet, level):
     """
-    Restruction from single branch from multiple level decomposition
+    Reconstruction from a single branch of a multiple level decomposition
     """
     def upsconv(x, f, s):
         # returns an extended copy of vector x obtained by inserting zeros
         # as even-indexed elements of data: y(2k-1) = data(k), y(2k) = 0.
-        y_len = 2 * len(x) + 1
-        y = np.zeros(y_len)
-        y[1:y_len:2] = x
+        y = np.zeros(2 * len(x) + 1)
+        y[1::2] = x
 
         # performs the 1-D convolution of the vectors y and f
         y = np.convolve(y, f, 'full')
 
-        # extracts the vector y from the input vector
-        sy = len(y)
-        d = (sy - s) / 2.0
-        y = y[int(np.floor(d)):(sy - int(np.ceil(d)))]
+        # extracts the central portion of length s
+        d = (len(y) - s) // 2
 
-        return y
+        return y[d:d + s]
 
     if not isinstance(wavelet, pywt.Wavelet):
         wavelet = pywt.Wavelet(wavelet)
@@ -674,10 +589,13 @@ def wrcoef(coefs, lengths, wavelet, level):
 
     return data
 
-def find_my_threshold(x: ArrayLike, det_s: ArrayLike, N: int):
-    indices = np.argwhere(det_s < x * np.max(det_s))
-    if indices.size == 0:
+def find_my_threshold(x: float, det_s: ArrayLike, N: int):
+    """
+    Fraction of the way into ``det_s`` (sorted descending) at which the
+    coefficients first drop below ``x`` times the maximum.
+    """
+    below = det_s < x * np.max(det_s)
+    if not below.any():
         return np.nan
-    else:
-        pr = indices[0]/N
-        return pr[0]
+
+    return np.argmax(below)/N

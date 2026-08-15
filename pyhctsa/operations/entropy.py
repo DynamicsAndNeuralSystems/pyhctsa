@@ -14,7 +14,19 @@ from ..operations.correlation import first_crossing
 from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
 from ..toolboxes.physionet import sampen as _sampen_c
-from ..utils import bin_picker, histc, make_buffer, z_score
+from ..utils import bin_picker, histc, make_buffer, time_delay_embed, z_score
+
+
+def _entropy_summary(ents: np.ndarray) -> dict:
+    """Summary statistics on a set of entropy values."""
+    return {
+        'maxent': np.max(ents),
+        'minent': np.min(ents),
+        'medent': np.median(ents),
+        'meanent': np.mean(ents),
+        'stdent': np.std(ents, ddof=1),
+    }
+
 
 def shannon_entropy(
     y: ArrayLike,
@@ -61,34 +73,22 @@ def shannon_entropy(
 
     if bin_range_size == 1:
         if depth_range_size == 1:
-            # %% Evaluate the shannon entropy of discretization - scales with depth, so it's nice to normalize by this factor
+            # Entropy scales with depth, so normalize by this factor
             out = shannon.entropy(y, int(num_bins), int(depth)) / int(depth)
         elif depth_range_size > 1:
-            # % Range over depths specified in the vector and return statistics on results
-            num_depths = depth_range_size
-            ents = np.zeros(num_depths)
-            for i in range(num_depths):
-                ents[i] = shannon.entropy(y, int(num_bins), int(depth[i])) / int(depth[i])
-            out = {}
-            #% Output statistics on variation across the range tested:
-            out['maxent'] = np.max(ents)
-            out['minent'] = np.min(ents)
-            out['medent'] = np.median(ents)
-            out['meanent'] = np.mean(ents)
-            out['stdent'] = np.std(ents, ddof=1)
+            # Range over depths and return statistics on the results
+            ents = np.array([
+                shannon.entropy(y, int(num_bins), int(d)) / int(d) for d in depth
+            ])
+            out = _entropy_summary(ents)
 
     elif bin_range_size > 1:
         if depth_range_size == 1:
-            #%% (*) Statistics over different bin numbers (constant depth)
-            ents = np.zeros(bin_range_size)
-            for i in range(bin_range_size):
-                ents[i] = shannon.entropy(y, int(num_bins[i]), int(depth))
-            out = {}
-            out['maxent'] = np.max(ents)
-            out['minent'] = np.min(ents)
-            out['medent'] = np.median(ents)
-            out['meanent'] = np.mean(ents)
-            out['stdent'] = np.std(ents, ddof=1)
+            # Statistics over different bin numbers (constant depth)
+            ents = np.array([
+                shannon.entropy(y, int(n), int(depth)) for n in num_bins
+            ])
+            out = _entropy_summary(ents)
         elif depth_range_size > 1:
             raise NotImplementedError("Comparing both bins and depth not implemented.")
 
@@ -142,12 +142,10 @@ def distribution_entropy(
         ]
         if y_hat.size == 0:
             return np.nan
-        else:
-            out = (
-                distribution_entropy(y, hist_or_ks, num_bins)
-                - distribution_entropy(y_hat, hist_or_ks, num_bins)
-            )
-            return out
+        return (
+            distribution_entropy(y, hist_or_ks, num_bins)
+            - distribution_entropy(y_hat, hist_or_ks, num_bins)
+        )
 
     # (2) Form the histogram
     if hist_or_ks == 'hist':
@@ -186,9 +184,13 @@ def distribution_entropy(
             )
         bin_widths = np.ones(len(px)) * (xr[1] - xr[0])
 
+    else:
+        raise ValueError(f"Unknown distribution estimator: {hist_or_ks}. Use 'hist' or 'ks'.")
+
     # (3) Compute the entropy sum and return it as output
-    p = px[px > 0]
-    log_p = np.log(px[px > 0] / bin_widths[px > 0])
+    mask = px > 0
+    p = px[mask]
+    log_p = np.log(p / bin_widths[mask])
 
     return -np.sum(p * log_p)
 
@@ -245,21 +247,15 @@ def multi_scale_entropy(
             raise ValueError(f"Unknown preprocessing setting: {pre_process_how}")    
     
     # Coarse-graining across scales
-    y_cg = []
-    for i in range(num_scales):
-        buffer_size = scale_range[i]
-        y_buffer = make_buffer(y, buffer_size)
-        y_cg.append(np.mean(y_buffer, 1))
-    
-    # Run sample entropy for each m and r value at each scale
+    y_cg = [np.mean(make_buffer(y, buffer_size), 1) for buffer_size in scale_range]
+
+    # Run sample entropy at each scale
     samp_ens = np.zeros(num_scales)
     for si in range(num_scales):
         if len(y_cg[si]) >= min_ts_length:
-            samp_en_struct = sample_entropy(y_cg[si], m, r)
-            samp_ens[si] = samp_en_struct[f'sampen{m}']
+            samp_ens[si] = sample_entropy(y_cg[si], m, r)[f'sampen{m}']
         else:
             samp_ens[si] = np.nan
-
 
     # Outputs: multiscale entropy
     if np.all(np.isnan(samp_ens)):
@@ -273,7 +269,7 @@ def multi_scale_entropy(
     # Output raw values
     out = {f'sampen_s{scale_range[i]}': samp_ens[i] for i in range(num_scales)}
 
-     # Summary statistics of the variation
+    # Summary statistics of the variation
     max_samp_en = np.nanmax(samp_ens)
     max_ind = np.nanargmax(samp_ens)
     min_samp_en = np.nanmin(samp_ens)
@@ -394,12 +390,12 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
     assert tau > 0, "delay must be greater than zero."
 
     try:
-        sorted_idx = _embed(y, order=m, delay=tau).argsort(kind="quicksort")
+        sorted_idx = time_delay_embed(y, m, tau).argsort(kind="quicksort")
     except ValueError:
         return {"permEn": np.nan, "normPermEn": np.nan}
     nx = sorted_idx.shape[0]
     if nx < 5:
-        logging.warning("Time series too short to embed. Need at least 5 embedding vectors to compute permutation entropy.")
+        logger.warning("Time series too short to embed. Need at least 5 embedding vectors to compute permutation entropy.")
         return {"permEn": np.nan, "normPermEn": np.nan}
     
     hash_val = (np.multiply(sorted_idx, hash_mult)).sum(1)
@@ -458,7 +454,7 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: i
     tau = int(tau)
     try:
         rpd = np.array(_close_returns_c.close_returns(y, m, tau, epsilon))
-    except:
+    except Exception:
         return np.nan
     if t_max > -1:
         rpd = rpd[:t_max]
@@ -466,18 +462,15 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: i
     N = len(rpd)
     ip = rpd > 0
     H = -np.sum(rpd[ip] * np.log(rpd[ip]))
-    H_norm = np.divide(H, np.log(N)) # log(N) is the H for an i.i.d. process
-    out = {}
-    #% Entropy and normalized entropy:
-    out['H'] = H
-    out["H_norm"] = H_norm
+    H_norm = np.divide(H, np.log(N))  # log(N) is the H for an i.i.d. process
 
-    # prop of non-zero entries
-    out['propNonZero'] = np.mean(rpd > 0) # proportion of rpds that are non-zero
-    out['meanNonZero'] = np.mean(rpd[ip]) * N # mean value when rpd is non-zero (rescale by N)
-    out['maxRPD'] = np.max(rpd) * N # maximum value of rpd (rescale by N)
-
-    return out
+    return {
+        'H': H,
+        'H_norm': H_norm,
+        'propNonZero': np.mean(ip),        # proportion of rpds that are non-zero
+        'meanNonZero': np.mean(rpd[ip]) * N,  # mean value when rpd is non-zero (rescaled by N)
+        'maxRPD': np.max(rpd) * N,         # maximum value of rpd (rescaled by N)
+    }
 
 def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2) -> float:
     """
@@ -513,19 +506,6 @@ def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2) -> float:
 
     return np.subtract(phi[0], phi[1])
 
-def _embed(x: ArrayLike, order: int, delay: int = 1) -> ArrayLike:
-    """Safe embedding that supports order=1."""
-    x = np.asarray(x)
-    if order < 1:
-        raise ValueError("Order must be at least 1.")
-    N = x.shape[0]
-    if N - (order - 1) * delay <= 0:
-        raise ValueError("Time series is too short for the given order and delay.")
-    # Build the delay-embedding by one broadcast gather instead of a per-row comprehension
-    nrows = N - (order - 1) * delay
-    idx = np.arange(nrows)[:, None] + delay * np.arange(order)[None, :]
-    return x[idx]
-
 def _app_samp_entropy(
         x: ArrayLike,
         order: int,
@@ -535,15 +515,13 @@ def _app_samp_entropy(
     """Modified version of `_app_samp_entropy` that supports order=1."""
     order = int(order)
     phi = np.zeros(2)
-    emb_data1 = _embed(x, order, 1)
-    if approximate:
-        pass
-    else:
+    emb_data1 = time_delay_embed(x, order, 1)
+    if not approximate:
         emb_data1 = emb_data1[:-1]
 
     count1 = KDTree(emb_data1, metric=metric).query_radius(emb_data1, r,
                                                            count_only=True).astype(np.float64)
-    emb_data2 = _embed(x, order + 1, 1)
+    emb_data2 = time_delay_embed(x, order + 1, 1)
     count2 = KDTree(emb_data2, metric=metric).query_radius(emb_data2, r,
                                                            count_only=True).astype(np.float64)
     if approximate:
@@ -596,36 +574,34 @@ def complexity_invariant_distance(y: ArrayLike) -> dict:
             Normalized CE2: CE2 / minCE2.
     """
     y = np.asarray(y)
-    #% Original definition (in Table 2 of paper cited above)
-    # % sum -> mean to deal with non-equal time-series lengths
-    # % (now scales properly with length)
 
-    f_CE1 = lambda y: np.sqrt(np.mean(np.power(np.diff(y), 2)))
-    #% Definition corresponding to the line segment example in Fig. 9 of the paper
-    #% cited above (using Pythagoras's theorum):
-    f_CE2 = lambda y: np.mean(np.sqrt(1 + np.power(np.diff(y), 2)))
+    # Original definition (Table 2 of the cited paper). sum -> mean to deal with
+    # non-equal time-series lengths (now scales properly with length).
+    def f_CE1(v):
+        return np.sqrt(np.mean(np.power(np.diff(v), 2)))
+
+    # Definition corresponding to the line segment example in Fig. 9 of the cited
+    # paper (using Pythagoras's theorem).
+    def f_CE2(v):
+        return np.mean(np.sqrt(1 + np.power(np.diff(v), 2)))
 
     CE1 = f_CE1(y)
     CE2 = f_CE2(y)
 
-    # % Defined as a proportion of the minimum such value possible for this time series,
-    # % this would be attained from putting close values close; i.e., sorting the time
-    # % series
+    # Defined as a proportion of the minimum value possible for this time series,
+    # attained by placing close values close together; i.e., sorting the series.
     y_sorted = np.sort(y)
     min_CE1 = f_CE1(y_sorted)
     min_CE2 = f_CE2(y_sorted)
 
-    CE1_norm = CE1 / min_CE1
-    CE2_norm = CE2 / min_CE2
-
-    out = {'CE1':       CE1,
-           'CE2':       CE2,
-           'minCE1':    min_CE1,
-           'minCE2':    min_CE2,
-           'CE1_norm':  CE1_norm,
-           'CE2_norm':  CE2_norm}
-
-    return out
+    return {
+        'CE1': CE1,
+        'CE2': CE2,
+        'minCE1': min_CE1,
+        'minCE2': min_CE2,
+        'CE1_norm': CE1 / min_CE1,
+        'CE2_norm': CE2 / min_CE2,
+    }
 
 def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2,
                           pre_proc: Union[str, None] = None, rng: int = 0) -> float:

@@ -2,7 +2,7 @@
 =================
 
 ⚙️ (1) Custom YAML configurations
-------------------------------
+---------------------------------
 The YAML configuration file provides the flexibility for users to specify their own feature subsets as well as incorporate new time-series features and feature-computing functions.
 Below, the general structure of a `pyhctsa` YAML file is specified.
 In general, a YAML file follows a systematic nested structure. If a field is not applicable (e.g., no dependencies), 
@@ -157,7 +157,7 @@ Once a YAML configuration has been created (i.e., as a `.yaml` file), it can be 
     calc.extract(data)
 
 ☰ (2) Feature filtering
----------------------
+-----------------------
 When constructing custom feature subsets, users may wish to control which time-series features are returned by an operation.
 Consider the `binary_stats` function located in the `Symbolic` module. See :func:`binary_stats <pyhctsa.operations.symbolic.binary_stats>` for details.
 The default configuration for this function in `pyhctsa` is:

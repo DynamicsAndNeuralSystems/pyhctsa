@@ -7,45 +7,82 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 from pyhctsa.operations.correlation import autocorr, first_crossing
-from pyhctsa.operations.entropy import distribution_entropy
 
-def _horiz_vgraph(ts_data: ArrayLike) -> ArrayLike:
-    """Helper function for `VisibilityGraph`."""
-    # Ensure ts_data is a NumPy array
-    ts_data = np.asarray(ts_data)
-    N = len(ts_data)
-    # Initialize an empty adjacency matrix
-    A = np.zeros((N, N), dtype=int)
+
+def _hvg_links(x: np.ndarray) -> tuple:
+    """
+    Nearest strictly-taller neighbour to the left and to the right of every node.
+
+    Returns
+    -------
+    prev, nxt : ndarray of intp, shape (N,)
+        ``prev[i]`` is the largest ``j < i`` with ``x[j] > x[i]``, or -1 if none.
+        ``nxt[i]`` is the smallest ``j > i`` with ``x[j] > x[i]``, or -1 if none.
+
+    Notes
+    -----
+    Two monotonic-stack passes, O(N) total.
+    NaN nodes neither block visibility nor count as taller neighbours, matching
+    the all-False semantics of ``slice > nan``.
+    """
+    N = x.shape[0]
+    prev = np.full(N, -1, dtype=np.intp)
+    nxt = np.full(N, -1, dtype=np.intp)
+    if N == 0:
+        return prev, nxt
+
+    # list access is markedly faster than repeated numpy scalar indexing
+    xl = x.tolist()
+    stack = []
+
     for i in range(N):
-        # --- Look forward for the first taller neighbor ---
-        # We only need to look forward if we are not the last node
-        if i < N - 1:
-            # Create a slice of the data from the next element to the end
-            forward_slice = ts_data[i+1:]
-            # Find the indices of all nodes in the slice that are taller than the current node
-            # np.where returns a tuple of arrays, we take the first element [0]
-            taller_nodes_fwd = np.where(forward_slice > ts_data[i])[0]
-            # If any taller nodes were found
-            if taller_nodes_fwd.size > 0:
-                # The first element in this array corresponds to the nearest taller node
-                first_taller_relative_idx = taller_nodes_fwd[0]
-                # Convert the relative index (from the slice) to an absolute index (from the original series)
-                first_taller_absolute_idx = i + 1 + first_taller_relative_idx
-                # Set the connection in the adjacency matrix
-                A[i, first_taller_absolute_idx] = 1
-        if i > 0:
-            # Create a slice of the data from the beginning up to the current node
-            backward_slice = ts_data[:i]
-            # Find the indices of all nodes in the slice that are taller than the current node
-            taller_nodes_bwd = np.where(backward_slice > ts_data[i])[0]
-            # If any taller nodes were found
-            if taller_nodes_bwd.size > 0:
-                closest_taller_absolute_idx = taller_nodes_bwd[-1]
-                A[closest_taller_absolute_idx, i] = 1
+        v = xl[i]
+        if v != v:  # NaN: never taller, never occluding
+            continue
+        while stack and not (xl[stack[-1]] > v):
+            stack.pop()
+        if stack:
+            prev[i] = stack[-1]
+        stack.append(i)
 
-    A = np.maximum(A, A.T)
-    
-    return A
+    stack.clear()
+    for i in range(N - 1, -1, -1):
+        v = xl[i]
+        if v != v:
+            continue
+        while stack and not (xl[stack[-1]] > v):
+            stack.pop()
+        if stack:
+            nxt[i] = stack[-1]
+        stack.append(i)
+
+    return prev, nxt
+
+
+def _horiz_vgraph_degrees(ts_data: ArrayLike) -> np.ndarray:
+    """
+    Degree sequence of the horizontal visibility graph, without materialising
+    the N x N adjacency matrix.
+
+    The forward and backward link sets are disjoint as unordered pairs --
+    ``nxt[i] == j`` requires ``x[j] > x[i]`` while ``prev[j] == i`` requires
+    ``x[i] > x[j]`` -- so no edge is double counted and a bincount over edge
+    endpoints gives the degrees exactly.
+    """
+    x = np.asarray(ts_data)
+    N = x.shape[0]
+    if N < 2:
+        return np.zeros(N, dtype=np.int64)
+
+    prev, nxt = _hvg_links(x)
+    pm = prev >= 0
+    nm = nxt >= 0
+    endpoints = np.concatenate((
+        np.flatnonzero(pm), prev[pm],
+        np.flatnonzero(nm), nxt[nm],
+    ))
+    return np.bincount(endpoints, minlength=N)
+
 
 def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: int = 5000) -> dict:
     """
@@ -92,42 +129,45 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: int = 5000) -> di
         logger.info(f"Time series ({N} > {max_l}) is too long for visibility graph."
               f"Analyzing the first {max_l} samples.")
         y = y[:max_l]
-        N = len(y)
     y = y - np.min(y) # adjust so that the minimum of y is at zero
 
     # Compute the visibility graph:
     k = np.zeros(1)
     if meth == 'horiz':
-        A = _horiz_vgraph(y)
-        k = A.sum(axis=0)
+        # degrees directly: O(N) time and memory instead of the O(N^2) matrix
+        k = _horiz_vgraph_degrees(y)
 
     elif meth == 'norm':
         vg = NaturalVG()
-        vg.build(y,only_degrees=True)
+        vg.build(y, only_degrees=True)
         k = vg._degrees
+
+    # statistics of k are reused throughout; compute each exactly once
+    meank = np.mean(k)
+    stdk = np.std(k, ddof=1)
+    mediank = np.median(k)
+    maxk = np.max(k)
+    q05, q25, q75, q95 = np.quantile(k, [0.05, 0.25, 0.75, 0.95], method='hazen')
 
     out = {}
     # Degree distribution: basic statistics
-    m, c = scipy.stats.mode(k)
-    out['mode'] = m
-    out['propmode'] = sum(k == out['mode'])/sum(k)
-    out['meank'] = np.mean(k) # mean number of links per node
-    out['mediank'] = np.median(k)
-    out['stdk'] = np.std(k, ddof=1)
-    out['maxk'] = np.max(k)
+    out['mode'] = scipy.stats.mode(k).mode
+    out['propmode'] = np.sum(k == out['mode'])/np.sum(k)
+    out['meank'] = meank # mean number of links per node
+    out['mediank'] = mediank
+    out['stdk'] = stdk
+    out['maxk'] = maxk
     out['mink'] = np.min(k)
     out['rangek'] = np.ptp(k)
-    out['iqrk'] = np.quantile(k, .75, method='hazen') - np.quantile(k, .25, method='hazen')
+    out['iqrk'] = q75 - q25
     out['skewnessk'] = scipy.stats.skew(k)
-    out['maxonmedian'] = np.max(k)/np.median(k) # max on median (indicator of outlier)
-    out['ol90'] = np.mean(k[(k >= np.quantile(k, 0.05, method='hazen')) &
-                            (k <= np.quantile(k, 0.95, method='hazen'))])/np.mean(k)
-    out['olu90'] = np.mean(k[k >= np.quantile(k, 0.95, method='hazen')]
-                           - np.mean(k))/np.std(k, ddof=1)
+    out['maxonmedian'] = maxk/mediank # max on median (indicator of outlier)
+    out['ol90'] = np.mean(k[(k >= q05) & (k <= q95)])/meank
+    out['olu90'] = np.mean(k[k >= q95] - meank)/stdk
 
     #Using likelihood now:
-    out['gaussnlogL'] = -np.sum(norm.logpdf(k, loc=np.mean(k), scale=np.std(k, ddof=1)))
-    out['expnlogL'] = -np.sum(expon.logpdf(k, scale=np.mean(k)))
+    out['gaussnlogL'] = -np.sum(norm.logpdf(k, loc=meank, scale=stdk))
+    out['expnlogL'] = -np.sum(expon.logpdf(k, scale=meank))
 
     # Autocorr
     out['kac1'] = autocorr(k, 1, 'Fourier')[0]

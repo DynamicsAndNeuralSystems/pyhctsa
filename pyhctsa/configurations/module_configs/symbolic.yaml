@@ -15,6 +15,15 @@ symbolic:
     legacy_name: SB_TransitionMatrix
     ordered_args: ['how_to_cg', 'num_groups', 'tau']
 
+  transition_p_alphabet:
+    base_name: transition_p_alphabet
+    dependencies:
+    configs:
+      - {num_groups: [!range [2, 40]], tau: 1, zscore: True}
+      - {num_groups: [!range [2, 20]], tau: 'ac', zscore: True}
+    legacy_name: SB_TransitionpAlphabet
+    ordered_args: ['num_groups', 'tau']
+
   binary_stats:
     base_name: binary_stats
     dependencies:

@@ -12,7 +12,9 @@ from statsmodels.tsa.stattools import pacf
 
 from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
-from ..utils import bin_picker, make_mat_buffer, point_of_crossing, sign_change, z_score, histc
+from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit
+from ..utils import (bin_picker, histc, make_mat_buffer, point_of_crossing,
+                     sign_change, time_delay_embed, z_score)
 
 def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
               extra_param: Union[int, None] = None, random_seed = None,
@@ -140,16 +142,13 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     out['pcrossmean'] = np.sum(c[:-1] * c[1:] < 0) / (num_repeats - 1)
 
     # Fit exponential decay model
-    exp_func = lambda x, a, b : a * np.exp(b * x)
-    popt, pcov = curve_fit(exp_func, noise_range, amis, p0=[amis[0], -1],
-                       method='trf', ftol=1e-6, xtol=1e-6, max_nfev=600)
-    out['fitexpa'], out['fitexpb'] = popt
-    residuals = amis - exp_func(noise_range, *popt)
-    ss_res = np.sum(residuals**2)
-    ss_tot = np.sum((amis - np.mean(amis))**2)
-    out['fitexpr2'] = 1 - (ss_res / ss_tot)
-    out['fitexpadjr2'] = 1 - (1 - out['fitexpr2']) * (len(amis) - 1) / (len(amis) - 2)
-    out['fitexprmse'] = np.sqrt(np.mean(residuals**2))
+    a, b = fit_exp1(noise_range, amis, start_point=(amis[0], -1))
+    gof = goodness_of_fit(amis, a * np.exp(b * noise_range), num_coeffs=2)
+    out['fitexpa'] = a
+    out['fitexpb'] = b
+    out['fitexpr2'] = gof['rsquare']
+    out['fitexpadjr2'] = gof['adjrsquare']
+    out['fitexprmse'] = gof['rmse']
 
     # Fit linear function
     p = np.polyfit(noise_range, amis, 1)
@@ -251,9 +250,11 @@ def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
     float
         The time reversal asymmetry statistic.
     """
-    embedded = _lag_embed(np.asarray(y), 3, time_lag)
-    if np.isscalar(embedded):
-        # a scalar (nan) has been returned instead of an array
+    try:
+        # columns ordered most- to least-delayed
+        embedded = time_delay_embed(y, 3, time_lag, reverse=True)
+    except ValueError:
+        logger.warning("Time series is too short for the given dimension and lag.")
         return np.nan
     a = embedded[:, 0]
     b = embedded[:, 1]
@@ -261,23 +262,6 @@ def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
     res = np.mean(a * a * b - b*c*c)
 
     return float(res)
-
-def _lag_embed(x: ArrayLike, m: int, lag: int = 1) -> ArrayLike:
-    """Constructs a time-delay embedding of a time series."""
-    x = np.asarray(x).flatten()
-    lx = len(x)
-    if lx < lag * (m - 1) + 1:
-        logger.warning("Time series is too short for the given dimension and lag.")
-        return np.nan
-    new_size = lx - lag * (m - 1)
-    y = np.zeros((new_size, m))
-    for i in range(m):
-        # The first column (i=0) should be the most delayed data
-        start_index = (m - 1 - i) * lag
-        end_index = start_index + new_size
-        y[:, i] = x[start_index:end_index]
-
-    return y
 
 def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
     """
@@ -1725,8 +1709,7 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
     out["std"] = np.std(np_counts, ddof=1)
     out["mean"] = np.mean(np_counts)
     
-    # count the hits
-    vals, hits = np.unique_counts(np_counts)
+    vals, hits = np.unique(np_counts, return_counts=True)
     max_val = np.argmax(hits)
     out["npatmode"] = hits[max_val]/NN
     out["mode"] = vals[max_val]
@@ -1736,45 +1719,15 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
         if 2*w + 1 >= i:
             out[f"{count_types[i-1]}"] = np.mean(np_counts == i)
     
-    out['statav2_m'] = _stat_av(np_counts, 'mean', 2, 1)
-    out['statav2_s'] = _stat_av(np_counts, 'std', 2, 1)
-    out['statav3_m'] = _stat_av(np_counts, 'mean', 3, 1)
-    out['statav3_s'] = _stat_av(np_counts, 'std', 3, 1)
-    out['statav4_m'] = _stat_av(np_counts, 'mean', 4, 1)
-    out['statav4_s'] = _stat_av(np_counts, 'std', 4, 1)
+    # imported here rather than at module scope: stationarity imports from this
+    # module, so a top-level import would close the cycle
+    from ..operations.stationarity import sliding_window
+
+    for num_seg in (2, 3, 4):
+        out[f'statav{num_seg}_m'] = sliding_window(np_counts, 'mean', 'std', num_seg, 1)
+        out[f'statav{num_seg}_s'] = sliding_window(np_counts, 'std', 'std', num_seg, 1)
 
     return out
-
-def _stat_av(y: ArrayLike, window_stat: str = 'mean', num_seg: int = 5, inc_move: int = 2) -> float:
-    """helper function to compute sliding winow stats for `TranslateShape`"""
-    y = np.asarray(y)
-    win_length = np.floor(len(y)/num_seg)
-    if win_length == 0:
-        logger.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
-        return np.nan
-    inc = np.floor(win_length/inc_move) # increment to move at each step
-    # if increment rounded down to zero, prop it up
-    if inc == 0:
-        inc = 1
-    
-    num_steps = int(np.floor((len(y)-win_length)/inc) + 1)
-    qs = np.zeros(num_steps)
-
-    # convert a step index (stepInd) to a range of indices corresponding to that window
-    def get_window(step_ind: int):
-        start_idx = (step_ind) * inc
-        end_idx = (step_ind) * inc + win_length
-
-        return np.arange(start_idx, end_idx).astype(int)
-    
-    if window_stat == 'mean':
-        for i in range(num_steps):
-            qs[i] = np.mean(y[get_window(i)])
-    elif window_stat == 'std':
-        for i in range(num_steps):
-            qs[i] = np.std(y[get_window(i)], ddof=1)
-
-    return np.std(qs, ddof=1)/np.std(y, ddof=1)
 
 def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> dict:
     """

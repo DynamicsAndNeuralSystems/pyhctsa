@@ -80,3 +80,21 @@ model_fit:
     legacy_name: MF_hmm_fit
     ordered_args: ['train_p', 'num_states']
     
+  
+  gp_fit_across:
+    base_name: gp_fit_across
+    dependencies:
+    configs:
+      - {cov_func: 'covSEiso_covNoise', npoints: 20, zscore: True}
+    legacy_name: MF_GP_FitAcross
+    ordered_args: ['cov_func', 'npoints']
+
+  gp_local_prediction:
+    base_name: gp_local_prediction
+    dependencies:
+    configs:
+      - {cov_func: 'covSEiso_covNoise', num_train: 5, num_test: 3, num_preds: 10, pmode: 'beforeafter', zscore: True}
+      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'frombefore', zscore: True}
+      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'randomgap', zscore: True}
+    legacy_name: MF_GP_LocalPrediction
+    ordered_args: ['cov_func', 'num_train', 'num_test', 'num_preds', 'pmode']

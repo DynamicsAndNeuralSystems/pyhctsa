@@ -36,57 +36,44 @@ def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
         Dictionary of test results.
     """
     y = np.asarray(y)
-    out = {}
-    def logical_check(lst):
-        return all(x in (0, 1) for x in lst)
-    if isinstance(periods, list):
-        # Return statistics on multiple outputs for multiple periods/IIDs
-        # check that IIDS is also a list
-        if isinstance(iids, list):
-            # some checks on the data types...
-            if len(iids) != len(periods):
-                raise ValueError(f"Length of IIDs list ({len(iids)}) does not match "
-                    "the list of periods ({len(periods)}).")
-            if not logical_check(iids):
-                raise ValueError("List of IIDs must only be logicals (0 or 1).")
 
-            vrs = []
-            for (i, p) in enumerate(periods):
-                robust = True if iids[i] == 0 else False 
-                vr = VarianceRatio(y, lags=p, robust=robust)
-                vrs.append(vr)
-            all_pvals = np.array([p.pvalue for p in vrs])
-            all_stats = np.array([s.stat for s in vrs])
-            out['maxpValue'] = np.max(all_pvals)
-            out['minpValue'] = np.min(all_pvals)
-            out['meanpValue'] = np.mean(all_pvals)
+    # Single period: return the raw test statistics.
+    if isinstance(periods, (int, float, np.number)):
+        vr = VarianceRatio(y, lags=int(periods), robust=(iids == 0))
+        return {'pValue': vr.pvalue, 'stat': vr.stat, 'ratio': vr.vr}
 
-            imaxp = np.argmax(all_pvals)
-            iminp = np.argmin(all_pvals)
-            out['periodmaxpValue'] = periods[imaxp]
-            out['periodminpValue'] = periods[iminp]
-            out['IIDperiodmaxpValue'] = iids[imaxp]
-            out['IIDperiodminpValue'] = iids[iminp]
-
-            out['meanstat'] = np.mean(all_stats)
-            out['maxstat'] = np.max(all_stats)
-            out['minstat'] = np.min(all_stats)
-        else:
-            raise ValueError(f"Expected iids to be a list of bools, since periods "
-                             f"are also a list. Got data type: {type(iids)} instead.")
-    elif isinstance(periods, (int, float, np.number)):
-        periods = int(periods)
-        robust = True if iids == 0 else False 
-        vr = VarianceRatio(y, lags=periods, robust=robust)
-        out = {}
-        out['pValue'] = vr.pvalue
-        out['stat'] = vr.stat
-        out['ratio'] = vr.vr
-    else:
+    if not isinstance(periods, list):
         raise ValueError(f"Unknown data type for periods: {type(periods)}, "
                          "select either integer or list of integers.")
 
-    return out
+    # Multiple periods: iids must be a matching list of logicals (0 or 1).
+    if not isinstance(iids, list):
+        raise ValueError("Expected iids to be a list of bools, since periods "
+                         f"are also a list. Got data type: {type(iids)} instead.")
+    if len(iids) != len(periods):
+        raise ValueError(f"Length of IIDs list ({len(iids)}) does not match "
+                         f"the list of periods ({len(periods)}).")
+    if not all(i in (0, 1) for i in iids):
+        raise ValueError("List of IIDs must only be logicals (0 or 1).")
+
+    vrs = [VarianceRatio(y, lags=p, robust=(iid == 0))
+           for p, iid in zip(periods, iids)]
+    pvals = np.array([vr.pvalue for vr in vrs])
+    stats = np.array([vr.stat for vr in vrs])
+    imax, imin = np.argmax(pvals), np.argmin(pvals)
+
+    return {
+        'maxpValue': np.max(pvals),
+        'minpValue': np.min(pvals),
+        'meanpValue': np.mean(pvals),
+        'periodmaxpValue': periods[imax],
+        'periodminpValue': periods[imin],
+        'IIDperiodmaxpValue': iids[imax],
+        'IIDperiodminpValue': iids[imin],
+        'meanstat': np.mean(stats),
+        'maxstat': np.max(stats),
+        'minstat': np.min(stats),
+    }
 
 def hypothesis_test(x: ArrayLike, the_test: str = 'signtest') -> float:
     """

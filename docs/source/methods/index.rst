@@ -11,7 +11,12 @@ Select a card below to explore a category of time-series analysis methods implem
 
 .. grid:: 4
    :gutter: 2
-
+   
+   .. grid-item-card:: Changepoint
+      :link: changepointmeths
+      :link-type: ref
+      :img-bottom: ../_static/module_icons/changepoint.svg
+      
    .. grid-item-card:: Correlation
       :link: correlationmeths
       :link-type: ref
@@ -20,7 +25,7 @@ Select a card below to explore a category of time-series analysis methods implem
    .. grid-item-card:: Criticality
       :link: criticalitymeths
       :link-type: ref
-      :img-bottom: ../_static/module_icons/RAD-2.png
+      :img-bottom: ../_static/module_icons/rad.svg
 
    .. grid-item-card:: Distribution
       :link: distmeths
@@ -41,19 +46,16 @@ Select a card below to explore a category of time-series analysis methods implem
       :link: graphmeths
       :link-type: ref
       :img-bottom: ../_static/module_icons/graph.svg
-      
    
    .. grid-item-card:: Hypothesis Tests
       :link: hypothesistestsmeths
       :link-type: ref
       :img-bottom: ../_static/module_icons/hypothesis_tests.svg
-      
    
    .. grid-item-card:: Information
       :link: informationmeths
       :link-type: ref
-      :img-bottom: ../_static/module_icons/info.svg
-      
+      :img-bottom: ../_static/module_icons/information.svg
    
    .. grid-item-card:: Medical
       :link: medicalmeths
@@ -63,42 +65,43 @@ Select a card below to explore a category of time-series analysis methods implem
    .. grid-item-card:: Model Fit
       :link: modelfitmeths
       :link-type: ref
-      :img-bottom: ../_static/module_icons/modelfit.png
+      :img-bottom: ../_static/module_icons/model_fit.svg
+   
+   .. grid-item-card:: Nonlinearity
+      :link: nonlinearitymeths
+      :link-type: ref
+      :img-bottom: ../_static/module_icons/nonlinear.svg
 
    .. grid-item-card:: Physics
       :link: physicsmeths
       :link-type: ref
       :img-bottom: ../_static/module_icons/physics.svg
-      
    
    .. grid-item-card:: Pre-Process
       :link: preprocessmeths
       :link-type: ref
-      :img-bottom: ../_static/module_icons/preproc.svg
+      :img-bottom: ../_static/module_icons/pre_process.svg
       
    .. grid-item-card:: Scaling
       :link: scalingmeths
       :link-type: ref
-      :img-bottom: ../_static/module_icons/scaling.png
+      :img-bottom: ../_static/module_icons/scaling.svg
    
    .. grid-item-card:: Spectral
       :link: spectralmeths
       :link-type: ref
       :img-bottom: ../_static/module_icons/spectral.svg
 
-   
    .. grid-item-card:: Stationarity
       :link: stationaritymeths
       :link-type: ref
       :img-bottom: ../_static/module_icons/stationarity.svg
       
-   
    .. grid-item-card:: Surrogates
       :link: surrogatesmeths
       :link-type: ref
-      :img-bottom: ../_static/module_icons/surrogate.svg
+      :img-bottom: ../_static/module_icons/surrogates.svg
       
-   
    .. grid-item-card:: Symbolic
       :link: symbolicmeths
       :link-type: ref
@@ -108,10 +111,3 @@ Select a card below to explore a category of time-series analysis methods implem
       :link: waveletmeths
       :link-type: ref
       :img-bottom: ../_static/module_icons/wavelet.svg
-
-   
-   .. grid-item-card:: Nonlinearity
-      :link: nonlinearitymeths
-      :link-type: ref
-      :img-bottom: ../_static/module_icons/nonlinear.png
-

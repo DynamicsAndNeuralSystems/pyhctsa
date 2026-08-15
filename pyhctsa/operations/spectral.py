@@ -1,7 +1,8 @@
 import numpy as np
 from numpy.typing import ArrayLike
 import scipy.fft
-import statsmodels.api as sm
+
+from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit, robustfit
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
@@ -84,13 +85,14 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
         w = 2 * np.pi * f  # angular frequency
         s = s / (2 * np.pi)  # adjust so that area remains normalized in angular frequency space
     elif psd_meth == 'periodogram':
-        raise NotImplementedError("Periodogram is not yet available.")
-    # elif psd_meth == 'periodogram':
-    #     if nf:
-    #         w = np.linspace(0, np.pi, nf)
-    #         S, w = scipy.signal.periodogram(y, window=window, )
-    #     else:
-    #         w, S = scipy.signal.periodogram(y, window=window)
+        win = np.ones(ny) if (window is None or len(window) == 0) else np.asarray(window)
+        nfft = max(256, 2 ** int(np.ceil(np.log2(ny))))
+        f, s = scipy.signal.periodogram(
+            y, fs=1, window=win, nfft=nfft, detrend=False,
+            return_onesided=True, scaling='density'
+        )
+        w = 2 * np.pi * f  # angular frequency (rad/sample)
+        s = s / (2 * np.pi)  # normalized in angular frequency space
     else:
         raise ValueError(f"Unknown spectral estimation method: {psd_meth}.")
 
@@ -215,21 +217,19 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['fpoly2csS_p2'] = b
     out['fpoly2csS_p3'] = c
     quad = lambda x, a, b, c: a * x**2 + b * x + c
-    residuals = quad(w, a, b, c) - cs_s
-    sum_sq_err = np.sum(residuals**2)
-    out['fpoly2_sse'] = sum_sq_err
-    out['fpoly2_r2'] = 1 - (sum_sq_err / (np.sum((cs_s - np.mean(cs_s))**2)))
+    gof = goodness_of_fit(cs_s, quad(w, a, b, c), 3)
+    out['fpoly2_sse'] = gof['sse']
+    out['fpoly2_r2'] = gof['rsquare']
+    out['fpoly2_rmse'] = gof['rmse']
 
     # Fit polysat a*x^2/(b+x^2) (has zero derivative at zero, though)
-    # polysat = lambda x, a, b : (a*(x**2))/(b + x**2)
-    # popt, _ = curve_fit(polysat, w, csS, p0=[csS[-1], 100])
-    # a, b = popt
-    # out['fpolysat_a'] = a
-    # out['fpolysat_b'] = b
-    # residuals = polysat(w, a, b) - csS
-    # sum_sq_err = np.sum(residuals**2)
-    # out['fpolysat_r2'] = 1 - (sum_sq_err/(np.sum((csS - np.mean(csS))**2)))
-    # out['fpolysat_rmse'] = np.sqrt(np.mean(residuals**2))
+    polysat = lambda p, x: (p[0] * (x**2)) / (p[1] + x**2)
+    a, b = lsqcurvefit_trr(polysat, [cs_s[-1], 100], w, cs_s)
+    out['fpolysat_a'] = a
+    out['fpolysat_b'] = b
+    gof = goodness_of_fit(cs_s, polysat([a, b], w), 2)
+    out['fpolysat_r2'] = gof['rsquare']
+    out['fpolysat_rmse'] = gof['rmse']
 
     # Shannon spectral entropy
     h_shann = -s * np.log(s)
@@ -421,19 +421,18 @@ def give_me_robust_stats(x_data: ArrayLike, y_data: ArrayLike, field_name: str) 
     """
     Statistics based on a robust linear fit
     """
-    x = sm.add_constant(x_data)
-    rlm = sm.RLM(y_data, x, M=sm.robust.norms.TukeyBiweight())
     out = {}
     try:
-        results = rlm.fit()
-        linfit = results.params  # [intercept, slope]
-        out[f'{field_name}_a1'] = linfit[0]  # linear fit intercept
-        out[f'{field_name}_a2'] = linfit[1]  # linear fit gradient
-        out[f'{field_name}_sea1'] = results.bse[0]  # standard error in intercept
-        out[f'{field_name}_sea2'] = results.bse[1]  # standard error in slope
+        a, stats = robustfit(x_data, y_data)
+        out[f'{field_name}_a1'] = a[0]  # robust intercept
+        out[f'{field_name}_a2'] = a[1]  # robust gradient
+        # ratio of sigma estimates between ordinary least squares and the robust fit:
+        out[f'{field_name}_sigrat'] = stats['ols_s'] / stats['robust_s']
+        # sigma as the larger of robust_s and a weighted average of ols_s and robust_s:
+        out[f'{field_name}_sigma'] = stats['s']
+        out[f'{field_name}_sea1'] = stats['se'][0]  # standard error in intercept
+        out[f'{field_name}_sea2'] = stats['se'][1]  # standard error in slope
     except Exception:
-        out[f'{field_name}_a1'] = np.nan
-        out[f'{field_name}_a2'] = np.nan
-        out[f'{field_name}_sea1'] = np.nan
-        out[f'{field_name}_sea2'] = np.nan
+        for key in ('a1', 'a2', 'sigrat', 'sigma', 'sea1', 'sea2'):
+            out[f'{field_name}_{key}'] = np.nan
     return out
