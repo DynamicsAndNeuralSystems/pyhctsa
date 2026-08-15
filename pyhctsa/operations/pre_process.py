@@ -5,7 +5,7 @@ from statsmodels.tsa.tsatools import detrend
 import logging
 logger = logging.getLogger('pyhctsa')
 
-from ..operations.distribution import outlier_test
+from ..operations.distribution import outlier_test, compare_ks_fit
 from ..operations.stationarity import sliding_window, stat_av
 from ..operations.hypothesis_tests import distribution_test
 from ..utils import z_score
@@ -187,10 +187,19 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf') -> dict:
         denom = sliding_window(y, 'std', 'std', win, step)
         out[f'swss{win}_{step}'] = _safe_divide(num, denom)
     
+    # compare distribution to fitted normal distribution
+    me1 = compare_ks_fit(y_d, 'norm')
+    me2 = compare_ks_fit(y, 'norm')
+
+    out['kscn_adiff'] = me1['adiff'] / me2['adiff']
+    out['kscn_peaksepy'] = me1['peaksepy'] / me2['peaksepy']
+    out['kscn_peaksepx'] = me1['peaksepx'] / me2['peaksepx']
+    out['kscn_olapint'] = me1['olapint'] / me2['olapint']
+    out['kscn_relent'] = me1['relent'] / me2['relent']
+    
     # p-vals from gof tests
     out['htdt_chi2n'] = distribution_test(y_d, 'chi2gof', 'norm', 10)/distribution_test(y, 'chi2gof', 'norm', 10) # chi2
     out['htdt_ksn'] = distribution_test(y_d, 'ks', 'norm')/distribution_test(y, 'ks', 'norm') # Kolmogorov-Smirnov
-
 
     # 3) Outliers
     for thresh, method in [(2, 'mean'), (5, 'mean'), (5, 'std')]:
