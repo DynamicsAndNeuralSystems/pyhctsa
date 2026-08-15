@@ -44,7 +44,7 @@ wavelet:
   
   scal_2_freq:
     base_name: scal_2_freq
-    depedencies:
+    dependencies:
       - PyWavelets
     configs:
       - {w_name: 'db3', a_max: 'max', delta: 1, zscore: True}
@@ -53,7 +53,7 @@ wavelet:
   
   wfbm:
     base_name: wfbm
-    depedencies:
+    dependencies:
       - pywt
       - PyWavelets
     configs:

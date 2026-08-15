@@ -16,7 +16,7 @@ information:
     configs:
       - {min_what: 'ac', zscore: True}
       - {min_what: 'mi-gaussian', zscore: True}
-      - {min_what: 'mi-kraskov2', extra_param: 4, zscore: True}
+      - {min_what: 'mi-kraskov1', extra_param: 4, zscore: True}
       - {min_what: 'mi-hist', extra_param: 5, zscore: True}
       - {min_what: 'mi-hist', extra_param: 10, zscore: True}
     legacy_name: CO_FirstMin
@@ -26,11 +26,11 @@ information:
     base_name: first_max
     dependencies:
     configs:
-      - {max_what: 'ac', zscore: True}
-      - {max_what: 'mi-gaussian', zscore: True}
-      - {max_what: 'mi-kraskov2', extra_param: 4, zscore: True}
-      - {max_what: 'mi-hist', extra_param: 5, zscore: True}
-      - {max_what: 'mi-hist', extra_param: 10, zscore: True}
+      - {min_what: 'ac', zscore: True}
+      - {min_what: 'mi-gaussian', zscore: True}
+      - {min_what: 'mi-kraskov1', extra_param: 4, zscore: True}
+      - {min_what: 'mi-hist', extra_param: 5, zscore: True}
+      - {min_what: 'mi-hist', extra_param: 10, zscore: True}
     legacy_name: CO_FirstMin
     ordered_args: ['max_what', 'extra_param']
   
