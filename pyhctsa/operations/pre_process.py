@@ -7,6 +7,7 @@ logger = logging.getLogger('pyhctsa')
 
 from ..operations.distribution import outlier_test
 from ..operations.stationarity import sliding_window, stat_av
+from ..operations.hypothesis_tests import distribution_test
 from ..utils import z_score
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
@@ -185,6 +186,11 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf') -> dict:
         num = sliding_window(y_d, 'std', 'std', win, step)
         denom = sliding_window(y, 'std', 'std', win, step)
         out[f'swss{win}_{step}'] = _safe_divide(num, denom)
+    
+    # p-vals from gof tests
+    out['htdt_chi2n'] = distribution_test(y_d, 'chi2gof', 'norm', 10)/distribution_test(y, 'chi2gof', 'norm', 10) # chi2
+    out['htdt_ksn'] = distribution_test(y_d, 'ks', 'norm')/distribution_test(y, 'ks', 'norm') # Kolmogorov-Smirnov
+
 
     # 3) Outliers
     for thresh, method in [(2, 'mean'), (5, 'mean'), (5, 'std')]:
