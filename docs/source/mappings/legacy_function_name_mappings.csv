@@ -116,5 +116,6 @@ nlpe,NL_MS_nlpe,nonlinearity
 embed_pca,NL_embed_PCA,nonlinearity
 local_density,NL_localdensity,nonlinearity
 tisean_d2,NL_TISEAN_d2,nonlinearity
+poincare_section,NL_PoincareSection,nonlinearity
 stepdetect,CP_ML_StepDetect,changepoint
 l1pwc_sweep_lambda,CP_l1pwc_sweep_lambda,changepoint
