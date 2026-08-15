@@ -26,11 +26,9 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from . import d2 as _d2_c
-from . import false_nearest as _false_nearest_c
-from . import lyap_r as _lyap_r_c
 from . import poincare as _poincare_c
 
-__all__ = ["d2", "c2g", "c2t", "poincare", "lyap_r", "false_nearest"]
+__all__ = ["d2", "c2g", "c2t", "poincare"]
 
 
 # 15-point Gauss-Kronrod rule, as tabulated in SLATEC's dqk15.f (which is what
