@@ -835,7 +835,7 @@ def std_nth_deriv(y: ArrayLike, ndr: int = 2) -> float:
     y = np.asarray(y)
     yd = np.diff(y, n=ndr)
     if len(yd) == 0:
-        logger.warning(f"Time series (N = {len(y)}) too short to compute differences at n = {n}")
+        logger.warning(f"Time series (N = {len(y)}) too short to compute differences.")
         return np.nan
     out = np.std(yd, ddof=1)
 
