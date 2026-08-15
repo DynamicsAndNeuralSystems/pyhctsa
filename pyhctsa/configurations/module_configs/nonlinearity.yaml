@@ -35,3 +35,13 @@ nonlinearity:
       - {tau: 'ac', maxm: 10, theiler_win: 0.01, zscore: True}
     legacy_name: NL_TISEAN_d2
     ordered_args: ['tau', 'maxm', 'theiler_win']
+
+  poincare_section:
+    base_name: poincare_section
+    depedencies:
+    configs:
+      - {ref: 'max', tau: 'mi', zscore: True}
+      - {ref: 'max', tau: 'ac', zscore: True}
+      - {ref: 'max', tau: 1, zscore: True}
+    legacy_name: NL_PoincareSection
+    ordered_args: ['ref', 'tau']

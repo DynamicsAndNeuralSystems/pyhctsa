@@ -9,8 +9,8 @@ import numpy as np
 from numpy.linalg import LinAlgError
 from scipy.linalg import get_lapack_funcs
 
-_dtrtrs, _dgeqrf = get_lapack_funcs(
-    ("trtrs", "geqrf"),
+_dtrtrs, _dgeqrf, _dgeqp3, _dormqr = get_lapack_funcs(
+    ("trtrs", "geqrf", "geqp3", "ormqr"),
     (np.empty(0, dtype=np.float64),),
 )
 
@@ -764,7 +764,6 @@ def _findiff_jac(
     for j in range(n):
         xj = float(x[j])
 
-        # MATLAB sign'(0) behaviour here is +1.
         sgn = -1.0 if xj < 0.0 else 1.0
 
         chg = sgn * sqrt_eps * (abs(xj) if abs(xj) > 1.0 else 1.0)
@@ -1083,6 +1082,81 @@ def fit_poly1(x, y, start_point=(0.1, 0.0)):
 
 
 # ------------------------------------------------------------------------------
+# Polynomial fitting
+# ------------------------------------------------------------------------------
+
+
+def polyfit(x, y, deg):
+    """
+    MATLAB's ``polyfit``.
+
+    MATLAB builds the *unscaled* Vandermonde matrix and hands it to
+    ``matlab.internal.math.leastSquaresFit``: a rank-revealing QR with column
+    pivoting (LAPACK's ``dgeqp3``), ``Q'`` applied to ``y`` as Householder
+    reflectors (``dormqr``), and a triangular solve on the leading
+    rank-by-rank block, with the pivoted-out coefficients left at zero. That is
+    a *basic* solution rather than the minimum-norm one, which is what
+    distinguishes it whenever the fit is rank-deficient.
+
+    Both details matter: ``numpy.polyfit`` column-scales the matrix and solves
+    via SVD -- a different answer when rank-deficient, and a different rounding
+    path always -- while forming ``Q`` explicitly and multiplying by it (what
+    ``scipy.linalg.qr``'s economy mode gives) rounds differently from applying
+    the reflectors, which shows up in the last couple of digits.
+
+    Parameters
+    ----------
+    x, y : array-like
+        Data to fit.
+
+    deg : int
+        Degree of the fitted polynomial.
+
+    Returns
+    -------
+    numpy.ndarray
+        Coefficients in order of descending power, as MATLAB returns them.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    y = np.asarray(y, dtype=float).ravel()
+
+    n = deg + 1
+
+    V = np.ones((x.size, n))
+
+    for j in range(deg - 1, -1, -1):
+        V[:, j] = x * V[:, j + 1]
+
+    qr, jpvt, tau = _dgeqp3(V)[:3]
+
+    perm = jpvt - 1  # dgeqp3 reports 1-based pivots
+
+    # Rank from the pivoted diagonal, using MATLAB's mldivide tolerance:
+    diag_r = np.abs(np.diag(qr)[:n])
+
+    if diag_r.size == 0 or diag_r[0] == 0:
+        return np.zeros(n)
+
+    tol = max(V.shape) * np.spacing(diag_r[0])
+
+    rank = int(np.sum(diag_r > tol))
+
+    lwork = max(64, y.size)
+
+    qty = _dormqr("L", "T", qr, tau, y.reshape(-1, 1), lwork)[0]
+
+    p = np.zeros(n)
+
+    p[perm[:rank]] = _solve_tri(
+        np.triu(qr[:rank, :rank]),
+        qty[:rank, 0],
+        trans=0,
+    )
+
+    return p
+
+
+# ------------------------------------------------------------------------------
 # Goodness of fit
 # ------------------------------------------------------------------------------
 
@@ -1139,9 +1213,8 @@ def goodness_of_fit(y, y_fit, num_coeffs):
     }
 
 # ------------------------------------------------------------------------------
-# Robust linear fitting (MATLAB's robustfit)
+# Robust linear fitting
 # ------------------------------------------------------------------------------
-
 
 def _bisquare(u):
     """Tukey's bisquare weight function, as used by MATLAB's ``robustfit``."""

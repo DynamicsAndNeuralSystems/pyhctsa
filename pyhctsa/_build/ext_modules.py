@@ -9,9 +9,13 @@ def _compile_args():
     return ["-O3", "-fPIC", "-std=c99", "-ffast-math"]
 
 def _strict_compile_args():
-    # TISEAN's d2 truncates log()-derived length-scale indices to int, so a
-    # reassociated or approximated expression can shift a pair into the
-    # neighbouring bin. Keep IEEE semantics here (no -ffast-math).
+    # The TISEAN kernels turn floating-point values into discrete decisions:
+    # d2 truncates log()-derived length-scale indices to int, poincare tests
+    # samples against a crossing level, and lyap_r both truncates coordinates
+    # into boxes and compares squared distances against a search radius, so a
+    # reassociated or approximated expression moves a pair to the neighbouring
+    # bin, drops a cut entirely, or picks a different nearest neighbour.
+    # Keep IEEE semantics here (no -ffast-math).
     if platform.system() == "Windows":
         return ["/O2", "/fp:precise"]
     return ["-O2", "-fPIC", "-std=c99"]
@@ -75,4 +79,13 @@ def build_extensions():
         libraries=_libraries(),
     )
 
-    return [periodicity_wang, close_returns, sampen, fastdfa, shannon, tisean_d2]
+    tisean_poincare = Extension(
+        "pyhctsa.toolboxes.Tisean_3_0_1.poincare",
+        sources=["pyhctsa/toolboxes/Tisean_3_0_1/TS_poincare.c"],
+        include_dirs=["pyhctsa/toolboxes/Tisean_3_0_1", np_inc],
+        extra_compile_args=_strict_compile_args(),
+        libraries=_libraries(),
+    )
+
+    return [periodicity_wang, close_returns, sampen, fastdfa, shannon, tisean_d2,
+            tisean_poincare]

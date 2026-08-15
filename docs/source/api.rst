@@ -203,7 +203,8 @@ Nonlinearity
    pyhctsa.operations.nonlinearity.embed_pca
    pyhctsa.operations.nonlinearity.local_density
    pyhctsa.operations.nonlinearity.tisean_d2
-   
+   pyhctsa.operations.nonlinearity.poincare_section
+
 .. _physicsmeths:
 
 Physics

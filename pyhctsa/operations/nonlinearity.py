@@ -11,7 +11,9 @@ from sklearn.neighbors import NearestNeighbors
 from ..operations.model_fit import residual_analysis
 from ..operations.correlation import first_crossing, first_min, autocorr
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
-from ..utils import time_delay_embed
+from ..toolboxes.matlab.matlab_fit import (goodness_of_fit, lsqcurvefit_trr,
+                                           polyfit as _matlab_polyfit)
+from ..utils import matlab_quantile, time_delay_embed
 
 def _resolve_time_delay(y: ArrayLike, tau: Union[int, str]) -> Union[int, float]:
     """Resolve a string time-delay spec to a lag.
@@ -836,5 +838,167 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     out['flatsh2min_goodness'] = flatsh2min['goodness']
     out['flatsh2min_stabled'] = flatsh2min['stabled']
     out['flatsh2min_linrmserr'] = flatsh2min['linrmserr']
+
+    return out
+
+def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
+    """Counts of points per box, where the boxes are quantiles along each axis."""
+    props = np.arange(nbox + 1) / nbox
+    xbox = matlab_quantile(x, props)
+    ybox = matlab_quantile(y, props)
+    # Nudge the top edge so the largest point falls inside the last box.
+    xbox[-1] += 1
+    ybox[-1] += 1
+
+    boxcounts = np.zeros((nbox, nbox))
+    for ii in range(nbox):  # x
+        rx = (x >= xbox[ii]) & (x < xbox[ii + 1])  # these x are in range
+        # only need to look at those ys for which the xs are in range
+        yr = y[rx]
+        for jj in range(nbox):  # y
+            boxcounts[ii, jj] = np.sum((yr >= ybox[jj]) & (yr < ybox[jj + 1]))
+    return boxcounts
+
+
+def poincare_section(y: ArrayLike, ref: str = 'max',
+                     tau: Union[int, str] = 'mi') -> Union[dict, float]:
+    """
+    Poincare section analysis of a time series.
+
+    Time-delay embeds the time series and computes a Poincare section using
+    TISEAN's ``poincare``, which cuts the trajectory on a fixed embedding
+    coordinate (the last, by convention) held at its own mean, in a single
+    crossing direction. The embedding dimension is fixed at 3, so that the
+    section is two-dimensional.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    ref : {'max', 'min'}, optional
+        Which of the two crossing directions to use: ``'max'`` takes crossings
+        heading toward a local maximum (ascending through the mean, TISEAN's
+        "from below", ``-C0``) and ``'min'`` those heading toward a local
+        minimum (descending, ``-C1``). Default is ``'max'``.
+
+        hctsa's operation previously used TSTOOL's ``poincare``, which cut a
+        hyperplane orthogonal to the local tangent vector at a chosen reference
+        point -- a construction TISEAN has no equivalent for -- and ``ref`` was
+        repurposed to pick the crossing direction when it moved to TISEAN.
+    tau : int or str, optional
+        The time-delay of the embedding. Can be an integer, or ``'ac'`` for the
+        first zero-crossing of the autocorrelation function, or ``'mi'`` for the
+        first minimum of the automutual information. Default is ``'mi'``.
+
+    Returns
+    -------
+    dict or float
+        Statistics on the x- and y-components of the vectors on the Poincare
+        surface, on distances between adjacent points and from the mean
+        position, and on the entropy of the boxed vector cloud. Returns NaN if
+        fewer than two section points were found.
+    """
+    if ref == 'max':
+        direction = 0  # crossing from below (heading toward a local maximum)
+    elif ref == 'min':
+        direction = 1  # crossing from above (heading toward a local minimum)
+    else:
+        raise ValueError(f"ref must be 'max' or 'min', got '{ref}'. TISEAN's "
+                         'poincare has no reference-point concept, only a '
+                         'choice of crossing direction.')
+
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size  # length of the time series
+
+    tau = _resolve_time_delay(y, tau)
+    if np.isnan(tau):
+        logger.warning('Could not get time delay (time series too short?)')
+        return np.nan
+    tau = int(tau)
+
+    # Embed in three dimensions, and cut on the last coordinate at TISEAN's own
+    # default threshold (that coordinate's mean). hctsa reads the .poin file
+    # back, so the section points are the ones TISEAN printed.
+    v = _tisean.poincare(y, dim=3, delay=tau, comp=3, direction=direction,
+                         as_written=True)
+
+    # Columns are the two uncut embedding coordinates, followed by the
+    # (interpolated) crossing time -- only the first two are point coordinates:
+    v = v[:, :2]
+    nn = v.shape[0]
+    if nn < 2:
+        logger.warning('No section points found to run poincare_section')
+        return np.nan
+
+    # Labeling poincare surface plane x-y
+    x, yy = v[:, 0], v[:, 1]
+
+    out = {}
+
+    # Basic statistics:
+    out['pcross'] = nn / n  # proportion of time series that crosses poincare surface
+
+    for lab, u in (('x', x), ('y', yy)):
+        q25, q75 = matlab_quantile(u, [0.25, 0.75])
+        out[f'max{lab}'] = np.max(u)
+        out[f'min{lab}'] = np.min(u)
+        out[f'std{lab}'] = np.std(u, ddof=1)
+        out[f'iqr{lab}'] = q75 - q25
+        out[f'mean{lab}'] = np.mean(u)
+        out[f'ac1{lab}'] = autocorr(u, 1, 'Fourier')[0]
+        out[f'ac2{lab}'] = autocorr(u, 2, 'Fourier')[0]
+        out[f'tauac{lab}'] = first_crossing(u, 'ac', 0, 'continuous')
+
+    out['boxarea'] = np.ptp(x) * np.ptp(yy)
+
+    # Statistics on distance between adjacent points, ds
+    vdiff = np.diff(v, axis=0)
+    ds = np.sqrt(vdiff[:, 0]**2 + vdiff[:, 1]**2)
+
+    # Probability that next point in series is within radius r of current point
+    # in the poincare section:
+    out['pwithinr01'] = np.sum(ds < 0.1) / (nn - 1)
+    out['pwithin02'] = np.sum(ds < 0.2) / (nn - 1)
+    out['pwithin03'] = np.sum(ds < 0.3) / (nn - 1)
+    out['pwithin05'] = np.sum(ds < 0.5) / (nn - 1)
+    out['pwithin1'] = np.sum(ds < 1) / (nn - 1)
+    out['pwithin2'] = np.sum(ds < 2) / (nn - 1)
+    out['meands'] = np.mean(ds)
+    out['maxds'] = np.max(ds)
+    out['minds'] = np.min(ds)
+    q25, q75 = matlab_quantile(ds, [0.25, 0.75])
+    out['iqrds'] = q75 - q25
+
+    # Now normalize both axes and look for structure in the cloud of points.
+    # Don't normalize for standard deviation -- this probably reveals some
+    # structure...? But location is already noted.
+    x = x - np.mean(x)
+    yy = yy - np.mean(yy)
+
+    # Statistics on distance on Poincare surface from (mean,mean)
+    d = np.sqrt(x**2 + yy**2)
+    q25, q75 = matlab_quantile(d, [0.25, 0.75])
+    out['maxD'] = np.max(d)
+    out['minD'] = np.min(d)
+    out['stdD'] = np.std(d, ddof=1)
+    out['iqrD'] = q75 - q25
+    out['meanD'] = np.mean(d)
+    out['ac1D'] = autocorr(d, 1, 'Fourier')[0]
+    out['ac2D'] = autocorr(d, 2, 'Fourier')[0]
+    out['tauacD'] = first_crossing(d, 'ac', 0, 'continuous')
+
+    # Statistics of the boxed distribution, with 5 and then 10 partitions per axis:
+    for num_partitions in (5, 10):
+        pbox = _count_boxes(x, yy, num_partitions) / nn
+        pos = pbox[pbox > 0]
+
+        out[f'maxpbox{num_partitions}'] = np.max(pbox)
+        out[f'minpbox{num_partitions}'] = np.min(pbox)
+        out[f'zerospbox{num_partitions}'] = np.sum(pbox == 0)
+        out[f'meanpbox{num_partitions}'] = np.mean(pbox)
+        out[f'rangepbox{num_partitions}'] = np.ptp(pbox)
+        # This probably needs to be normalized:
+        out[f'hboxcounts{num_partitions}'] = -np.sum(pos * np.log(pos))
+        out[f'tracepbox{num_partitions}'] = np.sum(np.diag(pbox))  # trace
 
     return out

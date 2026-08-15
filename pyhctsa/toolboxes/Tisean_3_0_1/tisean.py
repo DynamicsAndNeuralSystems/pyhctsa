@@ -26,8 +26,11 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from . import d2 as _d2_c
+from . import false_nearest as _false_nearest_c
+from . import lyap_r as _lyap_r_c
+from . import poincare as _poincare_c
 
-__all__ = ["d2", "c2g", "c2t"]
+__all__ = ["d2", "c2g", "c2t", "poincare", "lyap_r", "false_nearest"]
 
 
 # 15-point Gauss-Kronrod rule, as tabulated in SLATEC's dqk15.f (which is what
@@ -159,6 +162,84 @@ def d2(
             h2_blocks.append(np.array(rows, dtype=float).reshape(-1, 2))
 
     return {"c2": c2_blocks, "d2": d2_blocks, "h2": h2_blocks}
+
+
+def poincare(
+    y: ArrayLike,
+    dim: int = 2,
+    delay: int = 1,
+    comp: Optional[int] = None,
+    direction: int = 0,
+    where: Optional[float] = None,
+    write_precision: Optional[int] = 7,
+    as_written: bool = False,
+) -> np.ndarray:
+    """
+    Make a Poincare section of a scalar time series (TISEAN's ``poincare``).
+
+    The series is delay-embedded, and the section is taken where one component
+    of the delay vector crosses a given level. Each crossing yields the
+    remaining ``dim - 1`` coordinates of the delay vector, linearly interpolated
+    to the crossing, and the time since the previous crossing.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    dim : int, optional
+        Embedding dimension (``poincare -m``). Default is 2.
+    delay : int, optional
+        Time delay of the embedding (``poincare -d``). Default is 1.
+    comp : int, optional
+        Which component of the delay vector to cut, 1-based (``poincare -q``);
+        must not exceed ``dim``. ``None`` (the default) cuts the last one, as
+        TISEAN does.
+    direction : int, optional
+        Direction of the cut: 0 crosses from below, 1 from above
+        (``poincare -C``). Default is 0.
+    where : float, optional
+        Level to cut at (``poincare -a``). ``None`` (the default) reproduces
+        TISEAN's own default, the mean of the series. Must lie within the range
+        of the data.
+    write_precision : int or None, optional
+        Round the series to this many significant digits before running, which
+        is what hctsa's ``BF_WriteTempFile`` does on its way through a text
+        file. Pass ``None`` to use the series as given. Default is 7.
+    as_written : bool, optional
+        Round each value through ``%e``, the format ``poincare.c`` prints with.
+        Set this when reproducing a pipeline that read the ``.poin`` file back,
+        as hctsa does. Default is False, i.e. keep full precision.
+
+    Returns
+    -------
+    ndarray
+        One row per crossing, of shape ``(n_cuts, dim)``: the ``dim - 1``
+        coordinates at the crossing, then the time since the previous crossing.
+        These are the lines TISEAN would have written to its ``.poin`` file, at
+        full double precision unless ``as_written`` asks for the printed values.
+        The first crossing only starts the clock, so it has no row.
+
+    Raises
+    ------
+    ValueError
+        If the series is constant, or if ``where`` lies outside the data.
+        ``poincare.c`` exits in both cases.
+    """
+    y = np.ascontiguousarray(np.asarray(y, dtype=float).ravel())
+    if write_precision is not None:
+        y = _round_significant(y, write_precision)
+
+    # poincare.c defaults -q to the dimension, i.e. cuts the last component.
+    if comp is None:
+        comp = int(dim)
+
+    cuts, _ = _poincare_c.section(
+        y, int(dim), int(delay), int(comp), int(direction),
+        None if where is None else float(where),
+    )
+    if as_written and cuts.size:
+        cuts = np.array([_e(v) for v in cuts.ravel()]).reshape(cuts.shape)
+    return cuts
 
 
 def _tisean_argsort(x: np.ndarray) -> np.ndarray:

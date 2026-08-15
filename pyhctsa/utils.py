@@ -440,10 +440,12 @@ def point_of_crossing(x: ArrayLike, threshold: float) -> tuple:
         crossings = np.where((x - threshold) > 0)[0]
 
     if crossings.size == 0:
-        # Never crosses
+        # Never crosses: report the last element. BF_PointOfCrossing returns
+        # N here, an index its caller converts to the lag N-1, so the lags
+        # returned from this branch stop one short of the array length.
         n = len(x)
-        fc = n
-        poc = n
+        fc = n - 1
+        poc = n - 1
     else:
         fc = crossings[0]
         # continuous version
