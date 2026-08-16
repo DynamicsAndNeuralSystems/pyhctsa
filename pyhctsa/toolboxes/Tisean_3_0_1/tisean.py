@@ -2,16 +2,20 @@
 Python front-end to the TISEAN 3.0.1 routines used by pyhctsa.
 
 hctsa drives TISEAN through the shell: it writes the time series to a temporary
-file, runs ``d2``, and then pipes the resulting ``.c2`` file through ``c2g`` and
-``c2t``.  Here the same three steps happen in-process:
+file, runs ``d2`` or ``c1``, and then pipes the resulting ``.c2``/``.c1`` file
+through ``c2g``, ``c2t`` or ``c2d``.  Here the same steps happen in-process:
 
 * :func:`d2` calls the C kernel in ``TS_d2.c`` (a re-entrant transcription of
   TISEAN's ``d2.c``) and assembles the ``.c2``/``.d2``/``.h2`` tables from the
   raw pair counts, using the expressions ``d2.c`` prints.
-* :func:`c2g` and :func:`c2t` are ports of ``source_f/c2g.f`` and
-  ``source_f/c2t.f``.  Those are Fortran, so they are reimplemented rather than
-  wrapped -- both are short, and this keeps the package free of a Fortran
-  toolchain.
+* :func:`c1` calls the C kernel in ``TS_c1.c``, a re-entrant transcription of
+  ``source_f/c1.f`` and its estimator ``source_f/d1.f``.  Those are Fortran, and
+  single-precision Fortran at that, so the kernel is written in ``float``; see
+  the header of ``TS_c1.c`` for what else that transcription has to pin down
+  (in particular the random draw of the reference points).
+* :func:`c2g`, :func:`c2t` and :func:`c2d` are ports of ``source_f/c2g.f``,
+  ``source_f/c2t.f`` and ``source_f/c2d.f``.  Those are Fortran too, but short
+  enough to reimplement, which keeps the package free of a Fortran toolchain.
 
 TISEAN is Copyright (c) 1998-2007 Rainer Hegger, Holger Kantz, Thomas
 Schreiber, and is distributed under the GNU General Public License v2 or later.
@@ -25,10 +29,11 @@ from typing import List, Optional
 import numpy as np
 from numpy.typing import ArrayLike
 
+from . import c1 as _c1_c
 from . import d2 as _d2_c
 from . import poincare as _poincare_c
 
-__all__ = ["d2", "c2g", "c2t", "poincare"]
+__all__ = ["c1", "c2d", "d2", "c2g", "c2t", "poincare"]
 
 
 # 15-point Gauss-Kronrod rule, as tabulated in SLATEC's dqk15.f (which is what
@@ -160,6 +165,142 @@ def d2(
             h2_blocks.append(np.array(rows, dtype=float).reshape(-1, 2))
 
     return {"c2": c2_blocks, "d2": d2_blocks, "h2": h2_blocks}
+
+
+def c1(
+    y: ArrayLike,
+    delay: int = 1,
+    mmin: int = 2,
+    mmax: int = 10,
+    tsep: int = 1,
+    nref: int = 100,
+    resolution: float = 2.0,
+    kmax: int = 100,
+    seed: int = 1,
+    write_precision: Optional[int] = 7,
+) -> List[np.ndarray]:
+    """
+    Fixed-mass curves for the information dimension (TISEAN's ``c1``).
+
+    For a geometrically spaced sequence of neighbour masses, and for each
+    embedding dimension, this reports the mean radius that encloses that mass
+    around a set of randomly chosen reference points. The local slope of the
+    resulting curve -- see :func:`c2d` -- estimates the information dimension
+    D1.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    delay : int, optional
+        Time delay of the embedding (``c1 -d``). Default is 1.
+    mmin, mmax : int, optional
+        Minimal and maximal embedding dimension (``c1 -m`` / ``c1 -M``).
+        Defaults are 2 and 10.
+    tsep : int, optional
+        Minimal time separation between a reference point and the neighbours
+        counted around it, in samples (``c1 -t``). Default is 1.
+    nref : int, optional
+        Number of reference points (``c1 -n``). Default is 100.
+    resolution : float, optional
+        Mass levels per octave (``c1 -#``). Default is 2.
+    kmax : int, optional
+        Maximum number of neighbours to look for; masses that would need more
+        are computed on a proportionally shortened series instead
+        (``c1 -K``). Default is 100.
+    seed : int, optional
+        Initial state of the random stream the reference points are drawn with.
+        Default is 1, which is where TISEAN starts.
+    write_precision : int or None, optional
+        Round the series to this many significant digits before running, which
+        is what hctsa's ``BF_WriteTempFile`` does on its way through a text
+        file. Pass ``None`` to use the series as given. Default is 7.
+
+    Returns
+    -------
+    list of ndarray
+        One ``(n_i, 2)`` array per embedding dimension from ``mmin`` to
+        ``mmax``: the radius in the first column, and the neighbour mass it
+        encloses in the second. These are the ``#m=`` blocks TISEAN would have
+        written to its ``.c1`` file. The values are single precision, as the
+        Fortran computes them.
+
+    Raises
+    ------
+    ValueError
+        If the settings leave no embedding vectors, no admissible neighbours,
+        or fewer embedding vectors than reference points.
+    """
+    y = np.ascontiguousarray(np.asarray(y, dtype=float).ravel())
+    if write_precision is not None:
+        y = _round_significant(y, write_precision)
+
+    return _c1_c.fixed_mass(y, int(delay), int(mmin), int(mmax), int(tsep),
+                            int(nref), float(resolution), int(kmax), int(seed))
+
+
+def _slope(x: np.ndarray, y: np.ndarray) -> np.float32:
+    """Least-squares slope of `y` against `x`, as ``c2d.f``'s ``slope`` finds it."""
+    n = x.size
+    sx = np.float32(0.0)
+    for v in x:
+        sx = sx + v
+    sa = np.float32(0.0)
+    a = np.float32(0.0)
+    for i in range(n):
+        dev = x[i] - sx / np.float32(n)
+        sa = sa + dev * dev
+        a = a + y[i] * dev
+    return a / sa
+
+
+def c2d(blocks: List[np.ndarray], average: int = 1) -> List[np.ndarray]:
+    """
+    Local slopes of a correlation sum or fixed-mass curve (``c2d``).
+
+    Each slope is a straight-line fit through ``2 * average + 1`` consecutive
+    points of ``log C`` against ``log r``, reported at the geometric mean of the
+    two length scales at the ends of that window. Non-positive slopes are
+    dropped, as ``c2d.f`` drops them.
+
+    Parameters
+    ----------
+    blocks : list of ndarray
+        One ``(n_i, 2)`` array per embedding dimension: length scale in the
+        first column, correlation sum or mass in the second -- i.e. the output
+        of :func:`c1`, or the ``'c2'`` entry of :func:`d2`.
+    average : int, optional
+        Half-width of the fitting window, in points (``c2d -a``). Default is 1.
+
+    Returns
+    -------
+    list of ndarray
+        One ``(n_i, 2)`` array per embedding dimension: the length scale, and
+        the local slope there.
+    """
+    iav = int(average)
+    if iav < 1:
+        raise ValueError('average must be at least 1')
+
+    out: List[np.ndarray] = []
+    for block in blocks:
+        # c2d.f stops the block at the first non-positive value, then works in
+        # logarithms of what it kept.
+        vals = []
+        for ee, cc in block:
+            if cc <= 0.0:
+                break
+            vals.append((ee, cc))
+        pairs = np.array(vals, dtype=np.float32).reshape(-1, 2)
+        e, c = np.log(pairs[:, 0]), np.log(pairs[:, 1])
+
+        rows = []
+        for j in range(iav, e.size - iav):
+            s = _slope(e[j - iav:j + iav + 1], c[j - iav:j + iav + 1])
+            if s > np.float32(0.0):
+                rows.append((np.exp(np.float32(0.5) * (e[j + iav] + e[j - iav])), s))
+        out.append(np.array(rows, dtype=float).reshape(-1, 2))
+    return out
 
 
 def poincare(

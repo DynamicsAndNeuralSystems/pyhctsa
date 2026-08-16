@@ -836,6 +836,156 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
 
     return out
 
+def _findscalingr_c1(x: np.ndarray) -> np.ndarray:
+    # As _findscalingr_ind, but for the fixed-mass curves: the candidate ranges
+    # start in the first quarter rather than the first half, the reward for a
+    # longer range is larger, and the spread is measured on the raw values
+    # rather than on a rescaled copy. Returns
+    # [start, end, goodness, dimension, dimension std].
+    v = np.asarray(x, dtype=float).ravel()
+    l = v.size
+    gamma = 0.005  # regularization parameter, chosen empirically
+    stptr = np.arange(1, int(np.floor(l / 4)))         # must be in the first quarter
+    endptr = np.arange(int(np.ceil(l / 4)) + 1, l + 1)  # and in the last three
+    if stptr.size == 0 or endptr.size == 0:
+        raise ValueError('Error finding scaling range')
+
+    mybad = np.empty((stptr.size, endptr.size))
+    for i, s in enumerate(stptr):
+        for j, e in enumerate(endptr):
+            mybad[i, j] = np.std(v[s - 1:e], ddof=1)
+    mybad -= gamma * (endptr[np.newaxis, :] - stptr[:, np.newaxis] + 1)
+
+    a, b, best = _argmin_first_colmajor(mybad)
+    if a is None:
+        raise ValueError('Error finding scaling range')
+    ri1, ri2 = int(stptr[a]), int(endptr[b])
+    sub = v[ri1 - 1:ri2]
+    return np.array([ri1, ri2, best, np.mean(sub), np.std(sub, ddof=1)])
+
+
+def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: tuple = (2, 10),
+              tsep: Union[int, float] = 0.02,
+              nref: Union[int, float] = 0.5) -> Union[dict, float]:
+    """
+    Information dimension from the TISEAN package's ``c1`` routine.
+
+    Runs the fixed-mass computation of the information dimension [1]_: for a
+    geometrically spaced sequence of neighbour masses, ``c1`` reports the mean
+    radius that encloses that mass, and ``c2d`` turns each curve into local
+    slopes. Every embedding dimension then gets its own scaling range, found by
+    a penalized search that trades the flatness of the slopes against the span
+    of scales they hold over, and the returned statistics summarise the
+    dimension estimates and the scaling ranges across dimensions.
+
+    References
+    ----------
+    .. [1] R. Hegger, H. Kantz and T. Schreiber, "Practical implementation of
+        nonlinear time series methods: The TISEAN package", Chaos 9(2) 413 (1999)
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    tau : int or str, optional
+        The time-delay. Can be an integer, or ``'ac'`` for the first
+        zero-crossing of the autocorrelation function, or ``'mi'`` for the first
+        minimum of the automutual information. Default is 1.
+    mmm : tuple of int, optional
+        Minimum and maximum embedding dimension. Default is ``(2, 10)``.
+    tsep : int or float, optional
+        Time separation between a reference point and the neighbours counted
+        around it. A value in ``(0, 1)`` is taken as a proportion of the
+        time-series length. Default is 0.02, i.e. 2% of the data length.
+    nref : int or float, optional
+        Number of reference points. A value in ``(0, 1]`` is taken as a
+        proportion of the time-series length, and the result is held between 100
+        and 2500. Default is 0.5, i.e. half the data.
+
+    Returns
+    -------
+    dict or float
+        Dimension estimates and scaling-range statistics across embedding
+        dimensions. Returns NaN if the time series is too short or constant.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size  # time-series length (number of samples)
+
+    if n < 100:
+        logger.warning(f'N = {n} too short for c1')
+        return np.nan
+
+    # TISEAN's c1 stalls on lengths just past a multiple of 128, so hctsa drops
+    # the last few points in that case; kept here so the two agree on which
+    # samples are analysed.
+    freaky_stat = n % 128
+    if freaky_stat <= 6:
+        y = y[:n - (freaky_stat + 1)]
+        n = y.size
+
+    if np.unique(y).size == 1:  # c1 also freezes on constant data
+        return np.nan
+
+    # Time delay, tau
+    tau = _resolve_time_delay(y, tau)
+    if np.isnan(tau):
+        raise ValueError('Time series cannot be embedded (too short?)')
+    tau = int(tau)
+
+    if len(mmm) != 2:
+        raise ValueError('Please set a minimum and maximum embedding dimension '
+                         'as a length-2 tuple')
+
+    # Time separation, tsep
+    if 0 < tsep < 1:  # specify proportion of time-series length
+        tsep = _round(tsep * n)
+    tsep = int(tsep)
+
+    # Number of reference points, Nref
+    if 0 < nref <= 1:  # specify proportion of time-series length
+        nref = np.ceil(nref * n)
+    nref = int(nref)
+    nref = min(nref, 2500)  # for time reasons, don't use more than 2500
+    if nref < 100 and n > 100:
+        nref = 100          # and can't have fewer than 100
+
+    c1dat = _tisean.c2d(_tisean.c1(y, delay=tau, mmin=int(mmm[0]),
+                                   mmax=int(mmm[1]), tsep=tsep, nref=nref),
+                        average=2)
+
+    # Rows: increasing embedding m. Columns: start and end of the scaling range
+    # (as length scales), its goodness, and the dimension estimate over it with
+    # its standard deviation.
+    c1sc = np.zeros((len(c1dat), 6))
+    for i, block in enumerate(c1dat):
+        c1sc[i, :5] = _findscalingr_c1(block[:, 1])
+        c1sc[i, 0] = block[int(c1sc[i, 0]) - 1, 0]
+        c1sc[i, 1] = block[int(c1sc[i, 1]) - 1, 0]
+    c1sc[:, 5] = c1sc[:, 1] - c1sc[:, 0]  # length of the scaling range
+
+    out = {}
+
+    # Best fit embedding dimension:
+    where_best_est = int(np.argmin(c1sc[:, 2]))
+    out['bestestd'] = c1sc[where_best_est, 3]
+    out['bestestdstd'] = c1sc[where_best_est, 4]
+    out['bestgoodness'] = np.min(c1sc[:, 2])
+
+    out['mediand'] = np.median(c1sc[:, 3])
+    out['mind'] = np.min(c1sc[:, 3])
+    out['maxd'] = np.max(c1sc[:, 3])
+    out['ranged'] = np.max(c1sc[:, 3]) - np.min(c1sc[:, 3])
+    out['maxmd'] = c1sc[-1, 3]
+    out['meanstd'] = np.mean(c1sc[:, 4])
+
+    # Longest scaling range estimate of the embedding dimension:
+    where_longest_scr = int(np.argmax(c1sc[:, 5]))
+    out['bestscrd'] = c1sc[where_longest_scr, 3]
+    out['longestscr'] = np.max(c1sc[:, 5])
+
+    return out
+
+
 def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
     """Counts of points per box, where the boxes are quantiles along each axis."""
     props = np.arange(nbox + 1) / nbox

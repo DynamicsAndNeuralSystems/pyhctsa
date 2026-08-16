@@ -79,6 +79,14 @@ def build_extensions():
         libraries=_libraries(),
     )
 
+    tisean_c1 = Extension(
+        "pyhctsa.toolboxes.Tisean_3_0_1.c1",
+        sources=["pyhctsa/toolboxes/Tisean_3_0_1/TS_c1.c"],
+        include_dirs=["pyhctsa/toolboxes/Tisean_3_0_1", np_inc],
+        extra_compile_args=_strict_compile_args(),
+        libraries=_libraries(),
+    )
+
     tisean_poincare = Extension(
         "pyhctsa.toolboxes.Tisean_3_0_1.poincare",
         sources=["pyhctsa/toolboxes/Tisean_3_0_1/TS_poincare.c"],
@@ -88,4 +96,4 @@ def build_extensions():
     )
 
     return [periodicity_wang, close_returns, sampen, fastdfa, shannon, tisean_d2,
-            tisean_poincare]
+            tisean_c1, tisean_poincare]

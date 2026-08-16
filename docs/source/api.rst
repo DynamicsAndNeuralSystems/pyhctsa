@@ -204,6 +204,7 @@ Nonlinearity
    pyhctsa.operations.nonlinearity.embed_pca
    pyhctsa.operations.nonlinearity.local_density
    pyhctsa.operations.nonlinearity.tisean_d2
+   pyhctsa.operations.nonlinearity.tisean_c1
    pyhctsa.operations.nonlinearity.poincare_section
    pyhctsa.operations.nonlinearity.delay_time
 
