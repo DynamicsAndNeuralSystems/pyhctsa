@@ -94,6 +94,7 @@ dwt_coeff,WL_dwtcoeff,wavelet
 scal_2_freq,WL_scal2frq,wavelet
 wfbm,WL_fBM,wavelet
 hypothesis_test,HT_HypothesisTest,hypothesis_tests
+distribution_test,HT_DistributionTest,hypothesis_tests
 variance_ratio_test,SY_VarRatioTest,hypothesis_tests
 spectral_summaries,SP_Summaries,spectral
 ar_cov,MF_AR_arcov,model_fit
@@ -116,5 +117,7 @@ nlpe,NL_MS_nlpe,nonlinearity
 embed_pca,NL_embed_PCA,nonlinearity
 local_density,NL_localdensity,nonlinearity
 tisean_d2,NL_TISEAN_d2,nonlinearity
+poincare_section,NL_PoincareSection,nonlinearity
+delay_time,NL_delaytime,nonlinearity
 stepdetect,CP_ML_StepDetect,changepoint
 l1pwc_sweep_lambda,CP_l1pwc_sweep_lambda,changepoint

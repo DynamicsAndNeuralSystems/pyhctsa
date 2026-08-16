@@ -1744,6 +1744,14 @@ nonlinearity:
     legacy_name: NL_PoincareSection
     ordered_args: ['ref', 'tau']
 
+  delay_time:
+    base_name: delay_time
+    dependencies:
+    configs:
+      - {max_delay: 0.1, past: 1, zscore: True}
+    legacy_name: NL_delaytime
+    ordered_args: ['max_delay', 'past']
+
 changepoint:
   stepdetect:
     base_name: stepdetect
