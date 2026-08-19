@@ -110,7 +110,7 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
             if len(inmem2) == 0:
                 p = 0
             else:
-                p = np.sum(memory_data[inmem2 + 2] == yth[rs[0, i]]) / len(inmem2)
+                p = np.sum(memory_data[inmem1[inmem2]+2] == yth[rs[0, i]]) / len(inmem2)
             store[i] = p
         else:
             raise ValueError(f"Unknown method: {what_prior}")
