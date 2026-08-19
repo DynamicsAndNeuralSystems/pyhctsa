@@ -41,11 +41,6 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     n = len(x)
     x_step = np.std(x, ddof=1) / 100  # set a step size
 
-    # ----------------------------
-    # KDE bandwidth matching MATLAB's ksdensity default
-    # (robust MAD-based sigma + Silverman's rule), expressed as a scipy
-    # bw_method factor (scipy multiplies the factor by std(x, ddof=1)).
-    # ----------------------------
     med = np.median(x)
     sig = np.median(np.abs(x - med)) / 0.6745
     if sig <= 0:
@@ -120,7 +115,6 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     # ----------------------------
     # Estimate smoothed empirical distribution
     # ----------------------------
-    # MATLAB's default ksdensity grid extends ~3 bandwidths beyond the data range.
     xi = np.linspace(np.min(x) - 3 * matlab_bw, np.max(x) + 3 * matlab_bw, 100)
     # Calculate the Kernel Density Estimate (KDE) for the first angle distribution.
     kde = _make_kde(x)
@@ -902,6 +896,154 @@ def trimmed_mean(x: ArrayLike, p_exclude: float = 0.0) -> float:
     out = np.mean(trimmed_x)
 
     return float(out)
+
+def _matlab_ksdensity(x: np.ndarray, num_points: int = 100):
+    """
+    MATLAB's default ``ksdensity``: a normal-kernel density estimate on
+    ``num_points`` equally spaced points spanning the data +/- 3 bandwidths.
+
+    The bandwidth is MATLAB's default: a MAD-based robust sigma combined with
+    Silverman's rule. Note that MATLAB *truncates* the normal kernel at 4
+    bandwidths (``kernelInfo.Cutoff = 4``); ignoring that leaves the density a
+    few percent high in the tails, which is more than enough to move a fit.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    n = len(x)
+    med = np.median(x)
+    sig = np.median(np.abs(x - med)) / 0.6745
+    if sig <= 0:
+        sig = np.ptp(x)
+    bw = sig * (4 / (3 * n)) ** (1 / 5)
+    if bw <= 0:
+        bw = 1.0
+
+    xi = np.linspace(np.min(x) - 3 * bw, np.max(x) + 3 * bw, num_points)
+
+    cutoff = 4.0
+    xs = np.sort(x)
+    lo = np.searchsorted(xs, xi - cutoff * bw, side='left')
+    hi = np.minimum(np.searchsorted(xs, xi + cutoff * bw, side='right') + 1, n)
+
+    f = np.empty(num_points)
+    norm_const = 1.0 / (n * bw * np.sqrt(2 * np.pi))
+    for i in range(num_points):
+        z = (xi[i] - xs[lo[i]:hi[i]]) / bw
+        f[i] = norm_const * np.sum(np.exp(-0.5 * z * z))
+
+    return f, xi
+
+
+def simple_fit(x: ArrayLike, dmodel: str = 'gauss1',
+               num_bins: Union[int, str, None] = None) -> Union[dict, float]:
+    """
+    Fit a simple model to the data or to its distribution.
+
+    Two kinds of model are supported. *Distribution* models (``'gauss1'``,
+    ``'gauss2'``, ``'exp1'``, ``'power1'``) are fitted to an estimate of the
+    data's probability density -- either a histogram or a kernel-smoothed
+    density. *Time-series* models (``'sin1'``, ``'sin2'``, ``'sin3'``,
+    ``'fourier1'``, ``'fourier2'``, ``'fourier3'``) are fitted to the series
+    itself against evenly sampled time.
+
+
+    Parameters
+    ----------
+    x : array-like
+        The input time series.
+    dmodel : str, optional
+        The model to fit. Default is ``'gauss1'``.
+    num_bins : int or str or None, optional
+        Only used for distribution models. An integer uses a histogram with
+        that many bins; a string ('sqrt', 'fd', 'sturges', ...) selects a
+        binning rule; ``0`` uses a kernel-smoothed density instead of a
+        histogram. Defaults to ``'sqrt'``.
+
+    Returns
+    -------
+    dict or float
+        Goodness-of-fit statistics: ``r2``, ``adjr2``, ``rmse``, the lag-1 and
+        lag-2 autocorrelation of the residuals (``resAC1``, ``resAC2``) and the
+        p-value of a runs test on the residuals (``resruns``). Returns
+        ``numpy.nan`` when the model cannot be fitted to the data, matching
+        MATLAB's behaviour on a failed fit.
+    """
+    from ..operations.hypothesis_tests import hypothesis_test
+    from ..toolboxes.matlab.curvefit_library import fit_library_model
+    from ..toolboxes.matlab.matlab_fit import goodness_of_fit
+
+    x = np.asarray(x, dtype=float).ravel()
+
+    dist_models = ('gauss1', 'gauss2', 'exp1', 'power1')
+    ts_models = ('sin1', 'sin2', 'sin3', 'fourier1', 'fourier2', 'fourier3')
+
+    if dmodel in dist_models:
+        if num_bins is None:
+            num_bins = 'sqrt'  # use sqrt of number of data points
+
+        if isinstance(num_bins, str):
+            x_min, x_max = float(np.min(x)), float(np.max(x))
+            if num_bins == 'sqrt':
+                n_target = np.sqrt(len(x))
+            elif num_bins == 'sturges':
+                n_target = 1 + np.log2(len(x))
+            else:
+                raise ValueError(f"Unsupported binning rule '{num_bins}'.")
+            edges = bin_picker(x_min=x_min, x_max=x_max, n_bins=None,
+                               bin_width_est=(x_max - x_min) / n_target)
+            dny, _ = np.histogram(x, bins=edges)
+            dnx = 0.5 * (edges[:-1] + edges[1:])
+        elif num_bins == 0:
+            # Use ksdensity instead of a histogram
+            dny, dnx = _matlab_ksdensity(x)
+        else:
+            edges = bin_picker(x_min=float(np.min(x)), x_max=float(np.max(x)),
+                               n_bins=int(num_bins))
+            dny, _ = np.histogram(x, bins=edges)
+            dnx = 0.5 * (edges[:-1] + edges[1:])
+
+        fit_x = np.asarray(dnx, dtype=float)
+        fit_y = np.asarray(dny, dtype=float)
+
+    elif dmodel in ts_models:
+        if dmodel.startswith('fourier'):
+            raise NotImplementedError(
+                f"The '{dmodel}' model is not implemented (it is not used by the "
+                "default hctsa library).")
+        # Time variable for equal sampling of the univariate time series
+        fit_x = np.arange(1.0, len(x) + 1.0)
+        fit_y = x
+    else:
+        raise ValueError(
+            f"Invalid distribution or time-series model '{dmodel}' specified.")
+
+    num_coeffs = {'gauss1': 3, 'gauss2': 6, 'exp1': 2, 'power1': 2,
+                  'sin1': 3, 'sin2': 6, 'sin3': 9}[dmodel]
+
+    try:
+        fitted = fit_library_model(fit_x, fit_y, dmodel)
+    except (ValueError, FloatingPointError, np.linalg.LinAlgError) as err:
+        # MATLAB returns NaN when the model cannot be fitted at all, e.g. a
+        # power law on non-positive x, or NaN/Inf computed by the model.
+        logger.warning("Could not fit the model '%s' to this data: %s", dmodel, err)
+        return np.nan
+
+    if not np.all(np.isfinite(fitted['yhat'])):
+        logger.warning("The model '%s' failed for this data.", dmodel)
+        return np.nan
+
+    residuals = fitted['residuals']
+    gof = goodness_of_fit(fit_y, fitted['yhat'], num_coeffs)
+
+    return {
+        # Not included in the hctsa library (redundancy with rmse):
+        'r2': gof['rsquare'],
+        'adjr2': gof['adjrsquare'],
+
+        'rmse': gof['rmse'],
+        'resAC1': autocorr(residuals, 1, 'Fourier')[0],
+        'resAC2': autocorr(residuals, 2, 'Fourier')[0],
+        'resruns': hypothesis_test(residuals, 'runstest'),
+    }
 
 def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> dict:
     """

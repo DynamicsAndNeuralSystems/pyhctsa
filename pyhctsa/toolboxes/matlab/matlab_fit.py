@@ -739,6 +739,247 @@ def _trdog(g, A, delta, Z):
 
 
 # ------------------------------------------------------------------------------
+# The bounded (reflective) trial step -- trdog.m in full
+# ------------------------------------------------------------------------------
+
+
+def _definev(g, x, l, u):
+    """
+    Scaling vector and its derivative sign vector (``definev.m``).
+
+    ``v[i]`` is the signed distance from ``x[i]`` to whichever bound the
+    gradient points at, or +/-1 when that bound is infinite.
+    """
+    n = len(x)
+    v = np.zeros(n)
+    dv = np.zeros(n)
+
+    arg1 = (g < 0) & np.isfinite(u)
+    arg2 = (g >= 0) & np.isfinite(l)
+    arg3 = (g < 0) & ~np.isfinite(u)
+    arg4 = (g >= 0) & ~np.isfinite(l)
+
+    v[arg1] = x[arg1] - u[arg1]
+    dv[arg1] = 1
+    v[arg2] = x[arg2] - l[arg2]
+    dv[arg2] = 1
+    v[arg3] = -1
+    v[arg4] = 1
+
+    return v, dv
+
+
+def _scaled_newton_direction(A, grad, dm, dg):
+    """
+    Newton direction for the scaled subproblem ``M p = -grad`` where
+    ``M = DM A'A DM + DG``.
+
+    The exact QR preconditioner reduces ``pcgr``'s single CG iteration to a
+    direct solve, exactly as in the unbounded case.
+    """
+    n = len(grad)
+    r = -grad
+
+    # R'R = DM A'A DM + DG
+    B = np.vstack([A * dm, np.diag(np.sqrt(dg))])
+
+    def M_apply(z):
+        return dm * (A.T @ (A @ (dm * z))) + dg * z
+
+    try:
+        R = _qr_r(B)
+        tmp = _solve_tri(R, r, 1)
+        z = _solve_tri(R, tmp, 0, overwrite_b=True)
+    except (LinAlgError, ValueError):
+        return r, 1
+
+    if not np.isfinite(z).all():
+        return r, 1
+
+    ww = M_apply(z)
+    denom = z @ ww
+
+    if denom <= 0:
+        nz = _norm(z)
+        return (z if nz == 0 else z / nz), 0
+
+    return ((r @ z) / denom * z), 1
+
+
+def _quad1d(x, ss, delta):
+    """1-D quadratic zero finder for the reflected step (``quad1d``)."""
+    a = x @ x
+    b = 2 * (ss @ x)
+    c = ss @ ss - delta ** 2
+
+    disc = b ** 2 - 4 * a * c
+    numer = -(b + np.sign(b) * np.sqrt(disc))
+    r1 = numer / (2 * a)
+    r2 = c / (a * r1)
+
+    tau = min(1.0, max(r1, r2))
+    if tau <= 0:
+        raise FloatingPointError("Square root error in the reflected step")
+
+    return tau * x, tau
+
+
+def _truncate(step, x, l, u, theta):
+    """
+    Scale ``step`` back so ``x + step`` stays strictly inside the bounds.
+
+    Returns the scale factor and the index of the blocking coefficient.
+    """
+    arg = np.abs(step) > 0
+    if not np.any(arg):
+        return 1.0, 1.0, None
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        dis = np.maximum((u[arg] - x[arg]) / step[arg], (l[arg] - x[arg]) / step[arg])
+
+    k = int(np.argmin(dis))
+    mmdis = dis[k]
+    ipt = int(np.flatnonzero(arg)[k])
+    alpha = min(1.0, theta * mmdis)
+
+    return alpha, mmdis, ipt
+
+
+def _trdog_bounded(x, g, A, delta, Z, l, u, v, dv, theta):
+    """
+    Reflected (2-D) trust-region trial step subject to box constraints.
+
+    A full port of ``trdog.m``: the step is the best of three candidates -- the
+    scaled 2-D trust-region solution, its reflection off the blocking bound, and
+    the scaled gradient direction -- each truncated to remain strictly feasible.
+    """
+    n = len(g)
+    dm = np.sqrt(np.abs(v))          # diag(D)
+    dg = np.abs(g) * dv              # diag(DG)
+    grad = dm * g
+    posdef = 1
+    qpval2 = np.inf
+    qpval3 = np.inf
+
+    def M_of(Zc):
+        """Z' (DM A'A DM + DG) Z for a subspace basis Zc."""
+        W = dm[:, None] * Zc
+        W = dm[:, None] * (A.T @ (A @ W))
+        return Zc.T @ W + Zc.T @ (dg[:, None] * Zc)
+
+    if Z is None:
+        v1, posdef = _scaled_newton_direction(A, grad, dm, dg)
+        nv1 = _norm(v1)
+        if nv1 > 0:
+            v1 = v1 / nv1
+        cols = [v1]
+
+        if n > 1:
+            if posdef < 1:
+                v2 = dm * np.sign(grad)
+                nrm = _norm(v2)
+                if nrm > 0:
+                    v2 = v2 / nrm
+            else:
+                gn = _norm(grad)
+                v2 = grad / gn if gn > 0 else grad
+            v2 = v2 - v1 * (v1 @ v2)
+            nrmv2 = _norm(v2)
+            if nrmv2 > _SQRT_EPS:
+                cols.append(v2 / nrmv2)
+
+        Z = np.column_stack(cols)
+
+    MM = M_of(Z)
+    rhs = Z.T @ grad
+
+    st, _ = _trust(rhs, MM, delta)
+    ss = Z @ st
+    s = dm * ss
+
+    if np.isnan(s).any():
+        raise FloatingPointError("NaN in the trust region step")
+
+    ssave, sssave, stsave = s.copy(), ss.copy(), st.copy()
+
+    alpha, mmdis, ipt = _truncate(s, x, l, u, theta)
+    s = alpha * s
+    st = alpha * st
+    ss = alpha * ss
+
+    qpval1 = rhs @ st + 0.5 * (st @ (MM @ st))
+
+    if n <= 1:
+        return s, ss, qpval1, posdef, Z
+
+    r = None
+    nss = None
+    ssssave = None
+
+    # Evaluate along the reflected direction. When nothing blocks the step
+    # mmdis is infinite; the norm test below then fails and the branch is
+    # skipped, exactly as in MATLAB.
+    with np.errstate(invalid='ignore'):
+        ssssave = mmdis * sssave
+    if ipt is not None and np.isfinite(mmdis) and _norm(ssssave) < 0.9 * delta:
+        r = mmdis * ssave
+        nx = x + r
+        stsave = mmdis * stsave
+        qpval0 = rhs @ stsave + 0.5 * (stsave @ (MM @ stsave))
+
+        ng = A.T @ (A @ r) + g
+        ngrad = dm * ng + dg * ssssave
+
+        nss = sssave.copy()
+        nss[ipt] = -nss[ipt]
+        ZZ = (nss / _norm(nss)).reshape(-1, 1)
+
+        MMr = M_of(ZZ)
+        nrhs = ZZ.T @ ngrad
+
+        nss, tau = _quad1d(nss, ssssave, delta)
+        nst = np.array([tau / _norm(nss)])
+        ns = dm * nss
+
+        if np.isnan(ns).any():
+            raise FloatingPointError("NaN in the reflected trust region step")
+
+        alpha_r, _, _ = _truncate(ns, nx, l, u, theta)
+        ns = alpha_r * ns
+        nst = alpha_r * nst
+        nss = alpha_r * nss
+
+        qpval3 = qpval0 + nrhs @ nst + 0.5 * (nst @ (MMr @ nst))
+
+    # Evaluate along the gradient direction
+    gnorm = _norm(grad)
+    ZZg = (grad / (gnorm + (gnorm == 0))).reshape(-1, 1)
+    MMg = M_of(ZZg)
+    rhsg = ZZg.T @ grad
+
+    stg, _ = _trust(rhsg, MMg, delta)
+    ssg = ZZg @ stg
+    sg = dm * ssg
+
+    if np.isnan(sg).any():
+        raise FloatingPointError("NaN in the gradient direction")
+
+    alpha_g, _, _ = _truncate(sg, x, l, u, theta)
+    sg = alpha_g * sg
+    stg = alpha_g * stg
+    ssg = alpha_g * ssg
+
+    qpval2 = rhsg @ stg + 0.5 * (stg @ (MMg @ stg))
+
+    # Choose the best of s, sg, ns
+    if qpval2 <= min(qpval1, qpval3):
+        return sg, ssg, qpval2, posdef, Z
+    if qpval1 <= min(qpval2, qpval3):
+        return s, ss, qpval1, posdef, Z
+    return ns + r, nss + ssssave, qpval3, posdef, Z
+
+
+# ------------------------------------------------------------------------------
 # Finite-difference Jacobian
 # ------------------------------------------------------------------------------
 
@@ -815,6 +1056,9 @@ def lsqcurvefit_trr(
     max_fun_evals=600,
     diff_min_change=1e-8,
     diff_max_change=0.1,
+    jac=None,
+    lower=None,
+    upper=None,
 ):
     """
     Minimize
@@ -823,9 +1067,7 @@ def lsqcurvefit_trr(
 
     over ``p`` the way MATLAB's ``lsqcurvefit`` does with
 
-        Algorithm = 'trust-region-reflective'
-
-    and no bounds.
+        Algorithm = 'trust-region-reflective'.
 
     Parameters
     ----------
@@ -856,10 +1098,30 @@ def lsqcurvefit_trr(
     diff_max_change : float
         Maximum finite-difference perturbation.
 
+    jac : callable, optional
+        ``jac(p, xdata)`` returning the model Jacobian, shape ``(len(xdata),
+        len(p))``. When omitted the Jacobian is estimated by finite differences,
+        which is what MATLAB does whenever ``Jacobian`` is ``'off'`` -- notably
+        for every separable library fit (see ``fit.m``).
+
+    lower, upper : array-like, optional
+        Bounds on the coefficients; ``None`` (or an all-infinite vector) means
+        unbounded, which is the case this solver reproduces exactly. When finite
+        bounds are supplied, iterates are held strictly inside them; see the
+        note below.
+
     Returns
     -------
     numpy.ndarray
         Fitted coefficients.
+
+    Notes
+    -----
+    With finite bounds this follows the reflective branch of ``snls.m`` and
+    ``trdog.m``: a diagonal scaling built from each coefficient's distance to
+    its bounds reshapes the trust region, the trial step is the best of the
+    2-D subspace solution, its reflection off the blocking bound, and the
+    scaled gradient, and every iterate is kept strictly feasible.
     """
     xdata = np.asarray(xdata, dtype=float)
     ydata = np.asarray(ydata, dtype=float)
@@ -867,6 +1129,35 @@ def lsqcurvefit_trr(
     x = np.asarray(x0, dtype=float).ravel().copy()
 
     n = len(x)
+
+    lower = np.full(n, -np.inf) if lower is None else np.asarray(lower, dtype=float).ravel()
+    upper = np.full(n, np.inf) if upper is None else np.asarray(upper, dtype=float).ravel()
+    bounded = np.isfinite(lower).any() or np.isfinite(upper).any()
+
+    def perturb(p):
+        """
+        Nudge an iterate that has landed on a bound back inside it
+        (``perturbTrustRegionReflective``).
+        """
+        if not bounded:
+            return p
+        dl = 100 * _EPS
+        if np.min(np.abs(upper - p)) < dl or np.min(np.abs(p - lower)) < dl:
+            p = p.copy()
+            upperi = (upper - p) < dl
+            loweri = (p - lower) < dl
+            p[upperi] = p[upperi] - dl
+            p[loweri] = p[loweri] + dl
+        return p
+
+    x = perturb(x)
+
+    if jac is None:
+        def jacobian(p, fv):
+            return _findiff_jac(resid, p, fv, diff_min_change, diff_max_change)
+    else:
+        def jacobian(p, fv):
+            return np.asarray(jac(p, xdata), dtype=float).reshape(len(ydata), n), 0
 
     def resid(p):
         v = fun(p, xdata)
@@ -890,13 +1181,7 @@ def lsqcurvefit_trr(
 
     fvec = resid(x)
 
-    A, fdevals = _findiff_jac(
-        resid,
-        x,
-        fvec,
-        diff_min_change,
-        diff_max_change,
-    )
+    A, fdevals = jacobian(x, fvec)
 
     num_fun_evals += fdevals
 
@@ -914,9 +1199,14 @@ def lsqcurvefit_trr(
     ex = 0
 
     while not ex:
-        # With no finite bounds, definev returns v = +/-1 and dv = 0,
-        # therefore |v| = 1.
-        optnrm = np.abs(g).max()
+        if bounded:
+            v, dv = _definev(g, x, lower, upper)
+            optnrm = np.abs(v * g).max()
+        else:
+            # With no finite bounds, definev returns v = +/-1 and dv = 0,
+            # therefore |v| = 1.
+            v = dv = None
+            optnrm = np.abs(g).max()
 
         # --------------------------------------------------------------
         # Test for convergence
@@ -949,11 +1239,16 @@ def lsqcurvefit_trr(
         # Determine trust-region correction
         # --------------------------------------------------------------
 
-        sx, snod, qp, posdef, Z = _trdog(g, A, delta, Z)
+        if bounded:
+            theta = max(0.95, 1 - optnrm)
+            sx, snod, qp, posdef, Z = _trdog_bounded(
+                x, g, A, delta, Z, lower, upper, v, dv, theta)
+        else:
+            sx, snod, qp, posdef, Z = _trdog(g, A, delta, Z)
 
         nrmsx = _norm(snod)
 
-        newx = x + sx
+        newx = perturb(x + sx)
 
         # --------------------------------------------------------------
         # Evaluate trial point
@@ -963,11 +1258,12 @@ def lsqcurvefit_trr(
 
         newval = newfvec @ newfvec
 
-        # The original implementation evaluates 1 residual plus n residuals for
-        # a finite-difference Jacobian at every trial point, even when the point
-        # is rejected. Match that logical evaluation count so the max_fun_evals
-        # stopping behaviour of the original solver is preserved.
-        num_fun_evals += 1 + n
+        # The original implementation evaluates 1 residual plus the cost of the
+        # Jacobian at every trial point, even when the point is rejected. With a
+        # finite-difference Jacobian that is n extra residuals; with an analytic
+        # one it is free (``findiffevals = 0`` in snls.m). Match that logical
+        # count so max_fun_evals stops at the same iteration.
+        num_fun_evals += 1 + (0 if jac is not None else n)
 
         # --------------------------------------------------------------
         # Update trust-region radius
@@ -978,7 +1274,8 @@ def lsqcurvefit_trr(
 
         else:
             # ``aug`` involves dv, which is zero without finite bounds.
-            ratio = (0.5 * (newval - val)) / qp
+            aug = 0.5 * (snod @ ((dv * np.abs(g)) * snod)) if bounded else 0.0
+            ratio = (0.5 * (newval - val) + aug) / qp
 
             if ratio >= 0.75 and nrmsx >= 0.9 * delta:
                 delta = 2 * delta
@@ -994,13 +1291,7 @@ def lsqcurvefit_trr(
             # The finite-difference Jacobian is required only for accepted
             # trial points. On rejected points it is discarded immediately
             # by the original algorithm.
-            newA, _ = _findiff_jac(
-                resid,
-                newx,
-                newfvec,
-                diff_min_change,
-                diff_max_change,
-            )
+            newA, _ = jacobian(newx, newfvec)
 
             g = newA.T @ newfvec
 

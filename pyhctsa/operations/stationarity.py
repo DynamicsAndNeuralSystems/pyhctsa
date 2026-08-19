@@ -13,6 +13,7 @@ from statsmodels.tsa.stattools import kpss
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, sample_entropy
+from ..toolboxes.matlab._pptest_tables import PP_CV_TABLES, PP_SAMP_SIZES, PP_SIG_LEVELS
 from ..utils import make_mat_buffer, sign_change, z_score
 
 def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par',
@@ -526,6 +527,202 @@ def kpss_test(y: ArrayLike, lags: Union[int, list] = 0) -> dict:
         else:
             raise TypeError("Expected either a single lag (as an int) or list of lags.")
     return out
+
+def _pp_regression(y: np.ndarray, test_lags: int, model: str) -> dict:
+    """
+    OLS regression and Newey-West long-run variance underlying the PP test.
+
+    Reproduces the ``runReg`` subfunction of MATLAB's ``pptest``; follows
+    Hamilton (1994), p. 514.
+    """
+    T = len(y) - 1
+    y_lag = y[:-1]
+    test_y = y[1:]
+
+    if model == 'ar':
+        # y(t) = a*y(t-1) + e(t)
+        X = y_lag[:, None]
+    elif model == 'ard':
+        # y(t) = c + a*y(t-1) + e(t)
+        X = np.column_stack([np.ones(T), y_lag])
+    elif model == 'ts':
+        # y(t) = c + d*t + a*y(t-1) + e(t)
+        X = np.column_stack([np.ones(T), np.arange(1, T + 1, dtype=float), y_lag])
+    else:
+        raise ValueError(f"Unknown model '{model}'. Use 'ar', 'ard' or 'ts'.")
+
+    # The AR(1) coefficient is always the last column by construction
+    Q, R = np.linalg.qr(X)
+    coeff = np.linalg.solve(R, Q.T @ test_y)
+    num_params = len(coeff)
+    res = test_y - X @ coeff
+    SSE = res @ res
+    dfe = T - num_params
+    MSE = SSE / dfe
+    S = np.linalg.solve(R, np.eye(num_params))
+    cov = S @ S.T * MSE
+
+    # Estimated residual autocovariances:
+    gamma = np.array([(res[j:] @ res[:len(res) - j]) / T for j in range(test_lags + 1)])
+
+    # Newey-West estimator:
+    lambda_sq = gamma[0] + 2 * np.sum(
+        [(1 - j / (test_lags + 1)) * gamma[j] for j in range(1, test_lags + 1)])
+
+    sigma = np.sqrt(MSE)
+    # Loglikelihood of the residuals under Gaussian innovations, N(0, sigma)
+    LL = -(T / 2) * np.log(2 * np.pi) - T * np.log(sigma) - SSE / (2 * MSE)
+
+    return {
+        'coeff': coeff,
+        'a': coeff[-1],
+        'se_a': np.sqrt(np.diag(cov))[-1],
+        'MSE': MSE,
+        'RMSE': sigma,
+        'gamma0': gamma[0],
+        'NWEst': lambda_sq,
+        'LL': LL,
+        'AIC': 2 * num_params - 2 * LL,
+        'BIC': num_params * np.log(T) - 2 * LL,
+        'HQC': 2 * num_params * np.log(np.log(T)) - 2 * LL,
+    }
+
+
+def _pp_pvalue(stat: float, T: int, model: str, test_statistic: str) -> float:
+    """
+    Interpolate a p-value from the tabulated Phillips-Perron critical values.
+
+    Two successive 1-D interpolations, matching MATLAB's ``getPValue``: first
+    across sample sizes to get the critical-value row for this T, then across
+    that row to get the cumulative probability of the observed statistic.
+    """
+    samp_sizes = PP_SAMP_SIZES.copy()
+    # MATLAB forces max(T, 10000) into the final row rather than extrapolating
+    samp_sizes[-1] = max(samp_sizes[-1], T)
+    table = PP_CV_TABLES[(model, test_statistic)]
+
+    # interp2(...,'linear') over the sample-size axis at this T
+    cv_row = np.array([np.interp(T, samp_sizes, table[:, j], left=np.nan, right=np.nan)
+                       for j in range(table.shape[1])])
+
+    if stat <= cv_row[0]:
+        return PP_SIG_LEVELS[0]
+    if stat >= cv_row[-1]:
+        return PP_SIG_LEVELS[-1]
+    return float(np.interp(stat, cv_row, PP_SIG_LEVELS))
+
+
+def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
+            test_statistic: str = 't1') -> dict:
+    """
+    Phillips-Perron unit root test.
+
+    The null hypothesis is that the series contains a unit root (i.e., is a random walk, 
+    possibly with drift); the alternative is that it is stationary about the specified
+    deterministic trend.
+
+    The test statistic is a non-parametric correction of the Dickey-Fuller
+    statistic, using a Newey-West estimate of the long-run variance in place of
+    the augmenting lagged differences.
+
+    References
+    ----------
+    .. [1] P. C. B. Phillips and P. Perron, "Testing for a unit root in time series
+        regression", *Biometrika*, 75(2), 335 (1988).
+    .. [2] J. D. Hamilton, *Time Series Analysis*, Princeton University Press (1994),
+        p. 514.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    lags : int or list of int, optional
+        The number of autocovariance lags to include in the Newey-West estimator
+        of the long-run variance. A list runs one test per lag and returns
+        summary statistics across them. Default is ``range(0, 6)``.
+    model : {'ar', 'ard', 'ts'}, optional
+        The regression model: 'ar' (autoregressive, no deterministic terms),
+        'ard' (autoregressive with drift) or 'ts' (trend stationary).
+        Default is 'ar'.
+    test_statistic : {'t1', 't2'}, optional
+        't1' is the standard t-statistic; 't2' is a lag-adjusted,
+        'unStudentized' statistic. Default is 't1'.
+
+    Returns
+    -------
+    dict
+        For a single lag: the p-value, statistic, first regression coefficient
+        and regression fit statistics. For multiple lags: summary statistics on
+        the p-values, statistics and regression fit statistics across lags.
+    """
+    y = np.asarray(y, dtype=float)
+    y = y[~np.isnan(y)]  # remove missing values
+    if not np.all(np.isfinite(y)):
+        raise ValueError("The input time series must be real and finite.")
+
+    model = model.lower()
+    test_statistic = test_statistic.lower()
+    if test_statistic not in ('t1', 't2'):
+        raise ValueError(f"Unknown test statistic '{test_statistic}'. Use 't1' or 't2'.")
+
+    if lags is None:
+        lags = list(range(0, 6))  # 5 autoregressive lags
+    single = np.isscalar(lags)
+    lag_list = [int(lags)] if single else [int(l) for l in lags]
+
+    T = len(y) - 1
+    p_values, stats, regs = [], [], []
+    for l in lag_list:
+        reg = _pp_regression(y, l, model)
+        a, se_a, MSE = reg['a'], reg['se_a'], reg['MSE']
+        gamma0, lambda_sq = reg['gamma0'], reg['NWEst']
+
+        if test_statistic == 't1':
+            stat = (np.sqrt(gamma0 / lambda_sq) * (a - 1) / se_a
+                    - 0.5 * (lambda_sq - gamma0) / np.sqrt(lambda_sq) * T * se_a / np.sqrt(MSE))
+        else:
+            stat = T * (a - 1) - 0.5 * ((T * se_a) ** 2 / MSE) * (lambda_sq - gamma0)
+
+        stats.append(stat)
+        p_values.append(_pp_pvalue(stat, T, model, test_statistic))
+        regs.append(reg)
+
+    if single:
+        reg = regs[0]
+        return {
+            'pvalue': p_values[0],
+            'stat': stats[0],
+            'coeff1': reg['coeff'][0],  # could be multiple, depending on the model
+            'loglikelihood': reg['LL'],
+            'AIC': reg['AIC'],
+            'BIC': reg['BIC'],
+            'HQC': reg['HQC'],
+            'rmse': reg['RMSE'],
+        }
+
+    # Return statistics on the set of outputs
+    p_values = np.asarray(p_values)
+    stats = np.asarray(stats)
+    return {
+        'maxpValue': np.max(p_values),
+        'minpValue': np.min(p_values),
+        'meanpValue': np.mean(p_values),
+        'stdpValue': np.std(p_values, ddof=1),
+        'lagmaxp': lag_list[int(np.argmax(p_values))],
+        'lagminp': lag_list[int(np.argmin(p_values))],
+
+        'meanstat': np.mean(stats),
+        'maxstat': np.max(stats),
+        'minstat': np.min(stats),
+
+        'meanloglikelihood': np.mean([r['LL'] for r in regs]),
+        'minAIC': np.min([r['AIC'] for r in regs]),
+        'minBIC': np.min([r['BIC'] for r in regs]),
+        'minHQC': np.min([r['HQC'] for r in regs]),
+
+        'minrmse': np.min([r['RMSE'] for r in regs]),
+        'maxrmse': np.max([r['RMSE'] for r in regs]),
+    }
 
 def range_evolve(y: ArrayLike) -> dict:
     """

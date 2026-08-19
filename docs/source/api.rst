@@ -84,6 +84,7 @@ Distribution
    :toctree: generated/
 
    pyhctsa.operations.distribution.compare_ks_fit
+   pyhctsa.operations.distribution.simple_fit
    pyhctsa.operations.distribution.withinp
    pyhctsa.operations.distribution.unique
    pyhctsa.operations.distribution.spread
@@ -120,6 +121,7 @@ Entropy
     pyhctsa.operations.entropy.rpde
     pyhctsa.operations.entropy.approximate_entropy
     pyhctsa.operations.entropy.complexity_invariant_distance
+    pyhctsa.operations.entropy.wavelet_entropy
     pyhctsa.operations.entropy.lempel_ziv_complexity
 
 .. _extemeeventsmeths:
@@ -149,6 +151,7 @@ Hypothesis Tests
 
    pyhctsa.operations.hypothesis_tests.variance_ratio_test
    pyhctsa.operations.hypothesis_tests.hypothesis_test
+   pyhctsa.operations.hypothesis_tests.runs_test
    pyhctsa.operations.hypothesis_tests.distribution_test
 
 .. _informationmeths:
@@ -260,6 +263,7 @@ Stationarity
     pyhctsa.operations.stationarity.simple_stats
     pyhctsa.operations.stationarity.local_extrema
     pyhctsa.operations.stationarity.kpss_test
+    pyhctsa.operations.stationarity.pp_test
     pyhctsa.operations.stationarity.range_evolve
     pyhctsa.operations.stationarity.drifting_mean
     pyhctsa.operations.stationarity.local_global

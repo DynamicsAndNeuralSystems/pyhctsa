@@ -7,10 +7,10 @@ from arch.unitroot import VarianceRatio
 from scipy.interpolate import PchipInterpolator
 from scipy.optimize import brentq, minimize
 from scipy.stats import beta as beta_dist
+from scipy.special import gammaln
 from scipy.stats import chi2, expon
 from scipy.stats import gamma as gamma_dist
 from scipy.stats import gumbel_l, jarque_bera, kstwo, lognorm, norm, rayleigh, uniform, weibull_min, wilcoxon
-from statsmodels.sandbox.stats.runs import runstest_1samp
 from statsmodels.stats.descriptivestats import sign_test
 
 from ..utils import ljung_box_pvalue
@@ -18,6 +18,106 @@ from ..toolboxes.distribution_fits._lilliefors_tables import LILLIE_ALPHAS, LILL
 from ..toolboxes.distribution_fits.distfits import betafit, evfit
 
 logger = logging.getLogger('pyhctsa')
+
+
+def _log_n_choose_k(N, n):
+    """log of the binomial coefficient (``logNchooseK``); -inf outside range."""
+    N = np.asarray(N, dtype=float)
+    n = np.asarray(n, dtype=float)
+    with np.errstate(invalid='ignore'):
+        out = gammaln(N + 1) - gammaln(n + 1) - gammaln(N - n + 1)
+    # gammaln of a non-positive integer is +inf, giving -inf here, i.e. p = 0
+    return np.where((n < 0) | (n > N), -np.inf, out)
+
+
+def _runs_test_probs(N, m, n, R):
+    """
+    Exact distribution of the number of runs (``statrunstestprob``).
+
+    Probability of ``R`` runs in a random arrangement of ``m`` zeros and
+    ``n`` ones.
+    """
+    R = np.asarray(R, dtype=int)
+    if m == 0 or n == 0:
+        return (R == 1).astype(float)
+
+    p = np.zeros(R.shape, dtype=float)
+    logdenom = _log_n_choose_k(N, n)
+
+    even = (R % 2) == 0
+    if np.any(even):
+        # R = 2k: 2*C(m-1,k-1)*C(n-1,k-1)/C(N,n)
+        k = R[even] // 2
+        p[even] = 2 * np.exp(_log_n_choose_k(m - 1, k - 1)
+                             + _log_n_choose_k(n - 1, k - 1) - logdenom)
+    odd = ~even
+    if np.any(odd):
+        # R = 2k+1: (C(m-1,k-1)*C(n-1,k) + C(m-1,k)*C(n-1,k-1))/C(N,n)
+        k = R[odd] // 2
+        p[odd] = (np.exp(_log_n_choose_k(m - 1, k - 1)
+                         + _log_n_choose_k(n - 1, k) - logdenom)
+                  + np.exp(_log_n_choose_k(m - 1, k)
+                           + _log_n_choose_k(n - 1, k - 1) - logdenom))
+    return p
+
+
+def runs_test(x: ArrayLike, v: Union[float, None] = None) -> float:
+    """
+    Two-sided runs test for randomness, as MATLAB's ``runstest``.
+
+    Tests the null hypothesis that the values in ``x`` occur in random order,
+    against the alternative that they do not, based on the number of runs of
+    consecutive values above and below ``v``.
+
+    MATLAB always uses the *exact* distribution of the run count for
+    above/below runs -- never the normal approximation -- so the p-value is
+    ``min(1, 2*(P[R = r] + min(P[R < r], P[R > r])))``. This matters in the
+    tails, where the asymptotic approximation used by
+    ``statsmodels.sandbox.stats.runs.runstest_1samp`` is wrong by many orders
+    of magnitude. Values exactly equal to ``v`` are dropped, as MATLAB does.
+
+    Parameters
+    ----------
+    x : array-like
+        The input data.
+    v : float, optional
+        The cutoff separating 'above' from 'below'. Defaults to the mean of
+        ``x``, which is MATLAB's default.
+
+    Returns
+    -------
+    float
+        The two-sided p-value.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    x = x[~np.isnan(x)]
+
+    if v is None:
+        v = np.mean(x) if x.size else np.nan
+
+    # Convert to a binary sequence, dropping values exactly at the cutoff
+    if np.any(x == v):
+        x = x[x != v]
+    b = (x > v).astype(int)
+
+    N = b.size
+    if N == 0:
+        return 1.0
+
+    n1 = int(np.sum(b == 1))
+    n0 = N - n1
+    nruns = 1 + int(np.sum(b[:-1] != b[1:]))
+
+    # doexact is always true for above/below runs in MATLAB
+    maxruns = 2 * min(n1, n0) + 1
+    plist = _runs_test_probs(N, n0, n1, np.arange(1, maxruns + 1))
+
+    pexact = 1.0 if plist.size == 0 else float(plist[nruns - 1])
+    plo = float(np.sum(plist[:nruns - 1]))
+    phi = float(np.sum(plist[nruns:]))
+
+    return min(1.0, 2 * (pexact + min(plo, phi)))
+
 
 def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
                         iids: Union[int, list[int]] = 0) -> dict:
@@ -119,7 +219,7 @@ def hypothesis_test(x: ArrayLike, the_test: str = 'signtest') -> float:
     if the_test == 'signtest':
         _, p = sign_test(x)
     elif the_test == 'runstest':
-        _, p = runstest_1samp(x, cutoff='mean', correction=True)
+        p = runs_test(x)
     elif the_test == 'jbtest':
         s = jarque_bera(x)
         p = s.pvalue

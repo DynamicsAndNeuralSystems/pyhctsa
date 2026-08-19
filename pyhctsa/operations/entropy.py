@@ -603,6 +603,62 @@ def complexity_invariant_distance(y: ArrayLike) -> dict:
         'CE2_norm': CE2 / min_CE2,
     }
 
+def wavelet_entropy(y: ArrayLike, whaten: str = 'shannon',
+                    p: Optional[float] = None) -> float:
+    """
+    Wavelet-toolbox entropy of a time series.
+
+    For a series :math:`y` of length :math:`N` the four entropy types are
+
+    - ``'shannon'``: :math:`-\\frac{1}{N}\\sum_i y_i^2 \\log(y_i^2)`,
+      using the convention :math:`0\\log 0 = 0`.
+    - ``'logenergy'``: :math:`\\frac{1}{N}\\sum_i \\log(y_i^2)`,
+      using the convention :math:`\\log 0 = 0`.
+    - ``'threshold'``: :math:`\\frac{1}{N}\\#\\{i : |y_i| > p\\}`.
+    - ``'sure'``: Stein's Unbiased Risk Estimate,
+      :math:`\\frac{1}{N}\\left(N - 2\\#\\{i : |y_i| \\leq p\\} +
+      \\sum_i \\min(y_i^2, p^2)\\right)`.
+
+    Parameters
+    ----------
+    y : array-like
+        One-dimensional time series input.
+    whaten : {'shannon', 'logenergy', 'threshold', 'sure'}, optional
+        The entropy type. Default is 'shannon'.
+    p : float, optional
+        The additional parameter required by the 'threshold' and 'sure'
+        entropy types. Ignored otherwise.
+
+    Returns
+    -------
+    float
+        The (length-normalised) entropy value.
+    """
+    y = np.asarray(y, dtype=float)
+    N = len(y)
+    y2 = y ** 2
+
+    if whaten == 'shannon':
+        # 0*log(0) = 0
+        out = -np.sum(_xlogx(y2, base=np.e))
+    elif whaten == 'logenergy':
+        # log(0) = 0
+        nz = y2 > 0
+        out = np.sum(np.log(y2[nz]))
+    elif whaten == 'threshold':
+        if p is None:
+            raise ValueError("A threshold, p, is required for 'threshold' entropy.")
+        out = np.sum(np.abs(y) > p)
+    elif whaten == 'sure':
+        if p is None:
+            raise ValueError("A parameter, p, is required for 'sure' entropy.")
+        n_below = np.sum(np.abs(y) <= p)
+        out = N - 2 * n_below + np.sum(np.minimum(y2, p ** 2))
+    else:
+        raise ValueError(f"Unknown entropy type '{whaten}'.")
+
+    return out / N  # scales with N for large N
+
 def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2,
                           pre_proc: Union[str, None] = None, rng: int = 0) -> float:
     """

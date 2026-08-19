@@ -578,6 +578,15 @@ entropy:
     configs:
       - {zscore: True}
     legacy_name: EN_CID
+
+  wavelet_entropy:
+    base_name: wavelet_entropy
+    dependencies:
+    configs:
+      - {whaten: 'shannon', zscore: True}
+      - {whaten: 'logenergy', zscore: True}
+    legacy_name: EN_wentropy
+    ordered_args: ['whaten']
   
   approximate_entropy:
     base_name: approximate_entropy
@@ -844,9 +853,17 @@ stationarity:
       - {lags: 0, zscore: True}
       - {lags: 1, zscore: True}
       - {lags: 2, zscore: True}
-      - {lags: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], zscore: True}
+      - {lags: [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], zscore: True}
     legacy_name: SY_KPSStest
     ordered_args: ['lags']
+
+  pp_test:
+    base_name: pp_test
+    dependencies:
+    configs:
+      - {lags: [[0, 1, 2, 3, 4, 5]], model: 'ar', test_statistic: 't1', zscore: True}
+    legacy_name: SY_PPtest
+    ordered_args: ['lags', 'model', 'test_statistic']
 
   local_extrema:
     base_name: local_extrema
@@ -918,6 +935,23 @@ stationarity:
     ordered_args: ['num_segs', 'each_or_par']
   
 distribution:
+
+  simple_fit:
+    base_name: simple_fit
+    dependencies:
+    configs:
+      - {dmodel: 'gauss1', num_bins: 0, zscore: True}
+      - {dmodel: 'gauss1', num_bins: 'sqrt', zscore: True}
+      - {dmodel: 'gauss2', num_bins: 0, zscore: True}
+      - {dmodel: 'gauss2', num_bins: 'sqrt', zscore: True}
+      - {dmodel: 'exp1', num_bins: 0, zscore: True}
+      - {dmodel: 'exp1', num_bins: 'sqrt', zscore: True}
+      - {dmodel: 'power1', num_bins: 'sqrt', zscore: False}
+      - {dmodel: 'sin1', zscore: True}
+      - {dmodel: 'sin2', zscore: True}
+      - {dmodel: 'sin3', zscore: True}
+    legacy_name: DN_SimpleFit
+    ordered_args: ['dmodel', 'num_bins']
 
   withinp:
     base_name: withinp
