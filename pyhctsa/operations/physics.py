@@ -115,7 +115,9 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
         w[1] = y[1]
         for i in range(2, N):
             w_inert = w[i-1] + (w[i-1] - w[i-2])
-            w[i] = w_inert + (y[i] - w_inert) / m  # dissipative term
+            # Driven by y[i-1], matching the one-step-lagged convention that
+            # 'prop'/'biasprop' already use.
+            w[i] = w_inert + (y[i-1] - w_inert) / m  # dissipative term
 
     elif walker_rule == 'runningvar':
         # inertial motion rescaled by local standard deviation
@@ -125,15 +127,17 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
         w[1] = y[1]
         for i in range(2, N):
             w_inert = w[i-1] + (w[i-1] - w[i-2])
-            w_mom = w_inert + (y[i] - w_inert) / m  # dissipative term
+            # Driven by y[i-1], as for 'momentum' above.
+            w_mom = w_inert + (y[i-1] - w_inert) / m  # dissipative term
             # MATLAB: if im > wl, with im the 1-based index (= i + 1 here).
             if i + 1 > wl:
-                # MATLAB windows are y(im-wl:im) / w(im-wl:im): inclusive of the
-                # current index -> wl+1 samples. w[i] is still 0 at this point
-                # (not yet assigned), exactly mirroring MATLAB reading the
-                # unwritten w(i). Slicing i-wl : i+1 reproduces both.
+                # The y window y(im-wl:im) is inclusive of the current index.
+                # The walker window must be built from the provisional value
+                # w_mom rather than w[i], which has not been assigned yet:
+                # reading it pulled the zeros-initialised value into the local
+                # std denominator at every step (~19% shift in walker std).
                 sy = np.std(y[i-wl:i+1], ddof=1)
-                sw = np.std(w[i-wl:i+1], ddof=1)
+                sw = np.std(np.append(w[i-wl:i], w_mom), ddof=1)
                 w[i] = w_mom * (sy / sw)
             else:
                 w[i] = w_mom

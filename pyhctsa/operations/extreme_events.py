@@ -134,11 +134,15 @@ def moving_threshold(y: ArrayLike, a: float = 1.0, b: float = 0.1) -> dict:
         'minq': sq[0],
         'stdq': np.std(q, ddof=1),
         'meanqover': np.mean(q - y),
-        'pkick': np.sum(kicks) / (N - 1),  # probability of a kick
     }
 
     # Kicks (when the barrier is changed due to extreme event)
     f_kicks = np.flatnonzero(kicks > 0)
+    # `kicks` stores the size of each barrier jump, not a 0/1 flag, so summing it
+    # conflates how often kicks happen with how big they are. Frequency and
+    # magnitude are now reported separately.
+    out['pkick'] = len(f_kicks) / (N - 1)  # probability of a kick
+    out['meankicksize'] = np.mean(kicks[f_kicks]) if f_kicks.size > 0 else np.nan
     i_kicks = np.diff(f_kicks)  # time intervals between successive kicks
     if i_kicks.size > 0:
         out.update({

@@ -311,7 +311,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     #% Proportion of coeffs matrix over ___ maximum (thresholded)
     poverfn = lambda x : np.sum(SC[SC > x * max_SC])/num_entries
     out['pover99'] = poverfn(0.99)
-    out['pover98'] = poverfn(0.88)  # threshold as in hctsa's WL_cwt
+    out['pover98'] = poverfn(0.98)
     out['pover95'] = poverfn(0.95)
     out['pover90'] = poverfn(0.90)
     out['pover80'] = poverfn(0.80)

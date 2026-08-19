@@ -1800,21 +1800,27 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
             for i in range(1, N+1):
                 acf_val = acf_full[i-1] # acf vector indicies are not lags
                 # if positive and less than thresh
-                if i > 0 and abs(acf_val) < th:
-                    n_drown = i
+                if i > 1 and abs(acf_val) < th:
+                    n_drown = i - 1 # convert from index to the corresponding lag
                     acf.append(acf_val)
                     break
                 acf.append(acf_val)
+            if n_drown == 0:
+                # ACF never entered the significance band across available lags
+                n_drown = N - 1
         elif stop_when == 'double_drown':
             # Stop at 2*tau, where tau is the lag where ACF ~ 0 (within 1/sqrt(N) threshold)
             for i in range(1, N+1):
                 acf_val = acf_full[i-1]
-                if n_drown > 0 and i == n_drown * 2:
+                if n_drown > 0 and i == 2 * n_drown + 1:
                     acf.append(acf_val)
                     break
                 elif i > 1 and abs(acf_val) < th:
-                    n_drown = i
+                    n_drown = i - 1 # convert from index to the corresponding lag
                 acf.append(acf_val)
+            if n_drown == 0:
+                # ACF never entered the significance band across available lags
+                n_drown = N - 1
     else:
         raise ValueError(f"Unknown ACF decay criterion: '{stop_when}'")
 

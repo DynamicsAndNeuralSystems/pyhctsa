@@ -722,9 +722,15 @@ def _lz_complexity(symbols: np.ndarray) -> int:
 
     while k < n:
         is_substring = False
-        max_i = ns - nq
-        # brute-force search
-        for i in range(max_i + 1):
+        # The reference sequence is SQpi = symbols[0 : ns+nq-1] (S concatenated
+        # with Q less Q's last symbol), so a length-nq window may start anywhere
+        # up to i = ns-1: a growing phrase is allowed to match against the part
+        # of itself already matched, per Kaspar & Schuster (1987). The previous
+        # bound, i <= ns-nq, kept the search strictly inside S and so forbade
+        # self-overlap, systematically overcounting phrases (2-2.5x) on
+        # periodic/self-similar input. Random input was already correct.
+        # NB: the loop invariant ns+nq == k < n keeps every index below in range.
+        for i in range(ns):
             match = True
             for j in range(nq):
                 if symbols[i + j] != symbols[ns + j]:

@@ -975,7 +975,7 @@ def fit_polynomial(y: ArrayLike, k: int = 1) -> float:
     # Fit a polynomial to the time series
     cf = np.polyfit(t, y, k)
     f = np.polyval(cf, t) # evaluate the fitted poly
-    out = np.mean((y - f)**2) # mean RMS error of fit
+    out = np.sqrt(np.mean((y - f)**2)) # RMS error of fit
 
     return float(out)
 

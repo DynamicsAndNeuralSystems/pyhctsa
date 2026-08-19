@@ -195,33 +195,56 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
     out = _robust_linear_fit(logtt, logFF, np.arange(0, num_timescales), '')
  
     sserr = np.full(num_timescales, np.nan)  # don't choose the end points
-    min_points = 6
- 
-    for i in range(min_points - 1, num_timescales - min_points):
-        r1 = slice(0, i + 1)  # first segment: points 0..i  (i+1 points)
-        p1 = np.polyfit(logtt[r1], logFF[r1], 1)
- 
-        r2 = slice(i, num_timescales)  # second segment: points i..end
-        p2 = np.polyfit(logtt[r2], logFF[r2], 1)
- 
-        # Sum of errors from fitting lines to both segments:
-        sserr[i] = (np.linalg.norm(np.polyval(p1, logtt[r1]) - logFF[r1]) +
-                    np.linalg.norm(np.polyval(p2, logtt[r2]) - logFF[r2]))
- 
-    break_pt = np.where(sserr == np.nanmin(sserr))[0][0]  # find first occurrence of minimum
-    r1 = np.arange(0, break_pt + 1)
-    r2 = np.arange(break_pt, num_timescales)
- 
-    out['prop_r1'] = len(r1) / num_timescales
-    out['logtausplit'] = logtt[break_pt]
- 
-    if guard_ratsplit and (not np.isfinite(out['ssr']) or out['ssr'] < ssr_tol):
+    # min_points scales with num_timescales rather than being a fixed 6. A fixed
+    # small min_points lets the search reach breakpoints right at the edges of
+    # the domain: with no penalty for segment shortness the raw fit-error curve
+    # is monotonic for monofractal input, so "best split" was always whichever
+    # boundary the search could reach, not a genuine interior minimum. It also
+    # keeps the threshold consistent with _robust_linear_fit's own >= 8 point
+    # requirement. MATLAB rounds half away from zero, unlike Python's round().
+    min_points = max(8, int(np.floor(0.25 * num_timescales + 0.5)))
+
+    if num_timescales >= 2 * min_points:
+        for i in range(min_points - 1, num_timescales - min_points):
+            r1 = slice(0, i + 1)  # first segment: points 0..i  (i+1 points)
+            p1 = np.polyfit(logtt[r1], logFF[r1], 1)
+
+            r2 = slice(i, num_timescales)  # second segment: points i..end
+            p2 = np.polyfit(logtt[r2], logFF[r2], 1)
+
+            # Mean squared error pooled across both segments and normalised by
+            # the total number of points sampled, so that ratsplitminerr (which
+            # divides by out['ssr'], itself a mean squared error) is a genuinely
+            # comparable, tau_step-invariant ratio. Previously an unnormalised
+            # sum of L2 norms, which scales with sqrt(#points).
+            e1 = np.polyval(p1, logtt[r1]) - logFF[r1]
+            e2 = np.polyval(p2, logtt[r2]) - logFF[r2]
+            sserr[i] = (np.sum(e1**2) + np.sum(e2**2)) / num_timescales
+
+    if np.all(np.isnan(sserr)):
+        # Too few timescales to fit two distinct linear regimes meaningfully
+        r1 = np.array([], dtype=int)
+        r2 = np.array([], dtype=int)
+        out['prop_r1'] = np.nan
+        out['logtausplit'] = np.nan
         out['ratsplitminerr'] = np.nan
+        out['meanssr'] = np.nan
+        out['stdssr'] = np.nan
     else:
-        out['ratsplitminerr'] = np.nanmin(sserr) / out['ssr']
- 
-    out['meanssr'] = np.nanmean(sserr)
-    out['stdssr'] = np.nanstd(sserr, ddof=1)  # FIX [4]: MATLAB nanstd normalises by N-1
+        break_pt = np.where(sserr == np.nanmin(sserr))[0][0]  # first occurrence of minimum
+        r1 = np.arange(0, break_pt + 1)
+        r2 = np.arange(break_pt, num_timescales)
+
+        out['prop_r1'] = len(r1) / num_timescales
+        out['logtausplit'] = logtt[break_pt]
+
+        if guard_ratsplit and (not np.isfinite(out['ssr']) or out['ssr'] < ssr_tol):
+            out['ratsplitminerr'] = np.nan
+        else:
+            out['ratsplitminerr'] = np.nanmin(sserr) / out['ssr']
+
+        out['meanssr'] = np.nanmean(sserr)
+        out['stdssr'] = np.nanstd(sserr, ddof=1)  # MATLAB nanstd normalises by N-1
  
     out2 = _robust_linear_fit(logtt, logFF, r1, 'r1_')
     out3 = _robust_linear_fit(logtt, logFF, r2, 'r2_')

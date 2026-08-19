@@ -50,20 +50,39 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     y = np.asarray(y)
     ny = len(y)
 
-    window = None
+    # Welch's method needs a window *shorter* than the full series so that the
+    # signal is actually split into multiple overlapping segments to average
+    # over -- that segment-averaging is the entire point of the method. A window
+    # spanning the whole series (correct for a periodogram, a genuine
+    # single-segment whole-series estimate) collapses Welch to one segment with
+    # no averaging, making it near-indistinguishable from an unwindowed
+    # periodogram.
+    #
+    # Capping the length at a fixed 256 rather than a fraction of ny keeps the
+    # segment COUNT growing with N at FIXED frequency resolution, which is
+    # Welch's actual convergence guarantee. Tying it to ny/4 instead held the
+    # count fixed and let the resolution grow without bound, which is what made
+    # maxWidth (and other bandwidth-like fields) drift with series length.
+    # 256 matches both scipy's and MATLAB's own default segment length.
+    if psd_meth == 'welch':
+        win_length = max(min(256, int(np.floor(ny / 4 + 0.5))), 16)
+    else:
+        win_length = ny
+
     # Set window (for periodogram and welch):
     if window_type == 'none':
-        window = []
+        # MATLAB's pwelch falls back to a Hamming window when passed []
+        window = np.hamming(win_length) if psd_meth == 'welch' else []
     elif window_type == 'hamming':
-        window = np.hamming(ny)
+        window = np.hamming(win_length)
     elif window_type == 'hann':
-        window = np.hanning(ny)
+        window = np.hanning(win_length)
     elif window_type == 'bartlett':
-        window = np.bartlett(ny)
+        window = np.bartlett(win_length)
     elif window_type == 'boxcar':
-        window = scipy.signal.windows.boxcar(ny)
+        window = scipy.signal.windows.boxcar(win_length)
     elif window_type == 'rect':
-        window = np.ones(ny)
+        window = np.ones(win_length)
     else:
         raise ValueError(f"Unknown window: {window_type}")
 
@@ -80,8 +99,17 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     elif psd_meth == 'welch':
         # welch power spectral density estimate
         fs = 1
-        n = 2 ** (int(np.ceil(np.log2(ny))))
-        f, s = scipy.signal.welch(y, window=window, noverlap=0, nfft=n, fs=fs)
+        # nfft was previously tied to ny, independently of the window length, so
+        # even with the window capped the frequency GRID kept getting finer with
+        # N while the smoothing bandwidth stayed fixed. That mismatch shows up as
+        # its own N-dependence in bin-lag statistics (ac1/ac2, which correlate
+        # adjacent *bins*, not a physical frequency lag) and inflates bin-count
+        # sums that are meant to describe the spectrum's shape, not its number of
+        # samples. MATLAB's pwelch default is max(256, 2^nextpow2(winLength)),
+        # i.e. resolution set by the window, not the series.
+        n = max(256, 2 ** int(np.ceil(np.log2(len(window)))))
+        # noverlap=None gives the standard 50% overlap
+        f, s = scipy.signal.welch(y, window=window, noverlap=None, nfft=n, fs=fs)
         w = 2 * np.pi * f  # angular frequency
         s = s / (2 * np.pi)  # adjust so that area remains normalized in angular frequency space
     elif psd_meth == 'periodogram':
@@ -108,65 +136,81 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out = {}
     i_max_s = np.argmax(s)
     out = {'maxS': s[i_max_s], 'maxw': w[i_max_s]}
-    r, l = np.where(s[i_max_s + 1:] < s[i_max_s])[0], np.where(s[:i_max_s] < s[i_max_s])[0]
-    out['maxWidth'] = w[i_max_s + 1 + r[0]] - w[l[-1]] if len(r) > 0 and len(l) > 0 else 0
 
-    right_indices = np.where(s[i_max_s + 1:] < out['maxS'])[0]
-    if len(right_indices) > 0:
-        right_idx = i_max_s + 1 + right_indices[0]
-    else:
-        right_idx = None
-
-    # Find last index before i_maxS where S < maxS
-    left_indices = np.where(s[:i_max_s] < out['maxS'])[0]
-    if len(left_indices) > 0:
-        left_idx = left_indices[-1]
-    else:
-        left_idx = None
-
-    # Calculate maxWidth
-    if right_idx is not None and left_idx is not None:
-        out['maxWidth'] = w[right_idx] - w[left_idx]
-    else:
-        out['maxWidth'] = 0
+    # Half-power (-3 dB) bandwidth of the dominant peak: the frequency interval
+    # around the maximum over which the spectrum stays above half its peak value.
+    #
+    # This previously thresholded against maxS itself. Since maxS *is* the
+    # maximum, every neighbouring bin satisfies s < maxS, so the search always
+    # terminated on the immediately adjacent bins and the field was identically
+    # 2*dw -- a pure function of transform length carrying no information about
+    # the data.
+    half_power = out['maxS'] / 2
+    right_indices = np.where(s[i_max_s + 1:] < half_power)[0]
+    # Never drops below half power above the peak -> saturate at the last bin
+    i_upper = i_max_s + 1 + right_indices[0] if len(right_indices) > 0 else len(s) - 1
+    left_indices = np.where(s[:i_max_s] < half_power)[0]
+    # Never drops below half power below the peak -> saturate at the first bin
+    i_lower = left_indices[-1] if len(left_indices) > 0 else 0
+    out['maxWidth'] = w[i_upper] - w[i_lower]
 
     min_dist_w = 0.02
     pts_per_w = len(s) / np.pi
     min_pk_dist = np.ceil(min_dist_w * pts_per_w)
-    pk_height, pk_loc = _findpeaks(s, min_pk_dist, 'descend')
-    pk_width = scipy.signal.peak_widths(s, pk_loc)[0]
-    pk_prom = (scipy.signal.peak_prominences(s, pk_loc)[0])
+    # Peak detection runs on log_s rather than s: a linear-scale power spectrum
+    # is extremely heavy-tailed (a single dominant peak can be >100x the mean
+    # level), so prominence-based detection on raw s systematically buries
+    # smaller-but-genuine peaks such as harmonics under the dominant one. This
+    # also matches MATLAB's own convention of plotting spectra in dB.
+    #
+    # The fixed prominence thresholds below are in log-power units and are
+    # calibrated for a Welch-smoothed spectrum. A single-segment fft/periodogram
+    # estimate is statistically inconsistent (per-bin variance does not shrink
+    # with more data), so its log spectrum has a much noisier peak structure and
+    # these fields are left uncalibrated for those methods.
+    pk_height, pk_loc = _findpeaks(log_s, min_pk_dist, 'descend')
+    pk_width = scipy.signal.peak_widths(log_s, pk_loc)[0]
+    pk_prom = (scipy.signal.peak_prominences(log_s, pk_loc)[0])
     pk_width = pk_width / pts_per_w
     pk_loc = pk_loc / pts_per_w  # diff due to indexing difference
 
-    # Characterize mean peak prominence
-    out['numPeaks'] = len(pk_height)
-    out['numPromPeaks_1'] = np.sum(pk_prom > 1)  # number of peaks with prominence of at least 1
-    out['numPromPeaks_2'] = np.sum(pk_prom > 2)  # number of peaks with prominence of at least 2
-    out['numPromPeaks_5'] = np.sum(pk_prom > 5)  # number of peaks with prominence of at least 5
+    # Characterize mean peak prominence (thresholds in log-power units)
+    num_peaks = len(pk_height)
+    out['numPeaks'] = num_peaks
+    out['numPromPeaks_3'] = np.sum(pk_prom > 3)  # ~90-95th pctile of the white-noise null
+    out['numPromPeaks_5'] = np.sum(pk_prom > 5)  # clearly above the null's observed max (~3.8)
+    out['numPromPeaks_8'] = np.sum(pk_prom > 8)  # matches the weakest peak of a validated harmonic test signal
     # number of peaks with prominence greater than the mean (low for skewed distn)
-    out['numPeaks_overmean'] = np.sum(pk_prom > np.mean(pk_prom))
-    out['maxProm'] = np.max(pk_prom)
-    # mean peak prominence of those with prominence of at least 2
-    out['meanProm_2'] = np.mean(pk_prom[pk_prom > 2])
-    out['meanPeakWidth_prom2'] = np.mean(pk_width[pk_prom > 2])
-    out['width_weighted_prom'] = np.sum(pk_width * pk_prom) / np.sum(pk_prom)
+    out['numPeaks_overmean'] = np.sum(pk_prom > np.mean(pk_prom)) if num_peaks > 0 else np.nan
+    out['maxProm'] = np.max(pk_prom) if num_peaks > 0 else np.nan
+    # mean peak prominence of those with log-prominence of at least 5
+    out['meanProm_5'] = np.mean(pk_prom[pk_prom > 5]) if np.any(pk_prom > 5) else np.nan
+    out['meanPeakWidth_prom5'] = np.mean(pk_width[pk_prom > 5]) if np.any(pk_prom > 5) else np.nan
+    out['width_weighted_prom'] = np.sum(pk_width * pk_prom) / np.sum(pk_prom) if num_peaks > 0 else np.nan
 
-    # Power in top N peaks
-    nn = lambda x: np.arange(0, np.minimum(x, out['numPeaks'] - 1))
+    # Power in top N peaks. MATLAB's 1:min(x, numPeaks) selects min(x, numPeaks)
+    # peaks; the previous arange(0, min(x, numPeaks-1)) selected one fewer
+    # whenever numPeaks <= x.
+    nn = lambda x: np.arange(0, min(x, num_peaks))
     out['peakPower_2'] = np.sum(pk_height[nn(2)] * pk_width[nn(2)])
     out['peakPower_5'] = np.sum(pk_height[nn(5)] * pk_width[nn(5)])
-    # power in peaks with prominence of at least 2
-    out['peakPower_prom2'] = np.sum(pk_height[pk_prom > 2] * pk_width[pk_prom > 2])
+    # power in peaks with log-prominence of at least 5
+    out['peakPower_prom5'] = np.sum(pk_height[pk_prom > 5] * pk_width[pk_prom > 5])
     # note any features which depend on pKLoc will yield slightly diff answers due to one-indexing,
     # but should be perfectly correlated
-    out['w_weighted_peak_prom'] = np.sum(pk_loc * pk_prom) / np.sum(pk_prom)
+    out['w_weighted_peak_prom'] = np.sum(pk_loc * pk_prom) / np.sum(pk_prom) if num_peaks > 0 else np.nan
     #where are prominent peaks located on average (weighted by height)
-    out['w_weighted_peak_height'] = np.sum(pk_loc * pk_height) / np.sum(pk_height)
+    out['w_weighted_peak_height'] = np.sum(pk_loc * pk_height) / np.sum(pk_height) if num_peaks > 0 else np.nan
     # Number of peaks required to get to 50% of power in peaks
     peak_power = pk_height * pk_width
-    out['numPeaks_50power'] = np.where(np.cumsum(peak_power) > 0.5 * np.sum(peak_power))[0][0]
-    out['peakpower_1'] = peak_power[0] / sum(peak_power)
+    if peak_power.size == 0:
+        # No peaks at all (e.g. a monotonic power spectrum). Previously
+        # peakpower_1 raised IndexError here and numPeaks_50power failed silently.
+        out['numPeaks_50power'] = np.nan
+        out['peakpower_1'] = np.nan
+    else:
+        out['numPeaks_50power'] = np.where(np.cumsum(peak_power) > 0.5 * np.sum(peak_power))[0][0]
+        out['peakpower_1'] = peak_power[0] / np.sum(peak_power)
 
     # Distribution
     # quantiles
@@ -191,7 +235,14 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     auto_corrs_s = autocorr(s, [1, 2, 3, 4], 'Fourier')
     out['ac1'] = auto_corrs_s[0]
     out['ac2'] = auto_corrs_s[1]
-    out['tau'] = first_crossing(s, 'ac', 0, 'continuous')  # first zero crossing
+    # first_crossing returns a lag measured in *bins*, and the number of bins
+    # scales with series length independently of any real spectral structure, so
+    # left unconverted tau is partly just re-deriving N (upstream measured
+    # R^2 = 0.70 against hctsa's own `length` feature). Multiplying by dw (the bin
+    # spacing in angular frequency) gives a resolution-independent physical unit:
+    # doubling the grid halves dw but doubles the bin-count of any fixed physical
+    # width, so the product is invariant to N.
+    out['tau'] = first_crossing(s, 'ac', 0, 'continuous') * dw  # first zero crossing
 
     # Shape of cumulative sum curve
     cs_s = np.cumsum(s)
@@ -329,10 +380,13 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     # Count crossings:
     # Get a horizontal line and count the number of crossings with the power spectrum
     ncrossfn_rel = lambda frac: np.sum(sign_change(s - frac * np.max(s)))
+    # ncross_f05 was previously assigned twice, the 5% threshold immediately
+    # overwritten by the 50% one -- so the field has always held the 50% count
+    # its name does not promise, and the 5% count was never computed at all.
     out['ncross_f05'] = ncrossfn_rel(0.05)
     out['ncross_f01'] = ncrossfn_rel(0.1)
     out['ncross_f02'] = ncrossfn_rel(0.2)
-    out['ncross_f05'] = ncrossfn_rel(0.5)
+    out['ncross_f50'] = ncrossfn_rel(0.5)
 
     return out
 

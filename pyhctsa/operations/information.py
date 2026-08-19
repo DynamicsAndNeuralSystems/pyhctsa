@@ -360,7 +360,12 @@ def automutual_info_stats(
     dami = np.diff(ami)
     extrema_i = np.where((dami[:-1] * dami[1:]) < 0)[0]
     out['pextrema'] = len(extrema_i) / (lami - 1)
-    out['fmmi'] = min(extrema_i) + 1 if len(extrema_i) > 0 else lami
+    # extrema_i holds both minima and maxima. A minimum is where ami is still
+    # decreasing into the sign change (dami < 0), and it sits at ami-index
+    # extrema_i + 1 (0-based) because dami[j] = ami[j+1] - ami[j]; the extra +1
+    # converts to the 1-based index hctsa reports.
+    minima_i = extrema_i[dami[extrema_i] < 0] + 2
+    out['fmmi'] = int(np.min(minima_i)) if minima_i.size > 0 else lami
 
     # Look for periodicities in local maxima
     maxima_i = np.where((dami[:-1] > 0) & (dami[1:] < 0))[0] + 1

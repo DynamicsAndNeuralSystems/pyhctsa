@@ -750,7 +750,7 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01)
         
         # Store statistics
         statistics[i, 0] = np.mean(time_diffs)  # Mean time between events
-        statistics[i, 1] = np.std(time_diffs, ddof=1) / np.sqrt(len(over_threshold_idx))  # Standard error
+        statistics[i, 1] = np.std(time_diffs, ddof=1) / np.sqrt(len(time_diffs))  # Standard error (time_diffs is one shorter than over_threshold_idx)
         statistics[i, 2] = len(time_diffs) / total_points * 100  # Percentage of events
         statistics[i, 3] = (np.median(over_threshold_idx) / (N / 2)) - 1  # Median position deviation
         statistics[i, 4] = np.mean(over_threshold_idx) / (N / 2) - 1  # Mean position deviation
