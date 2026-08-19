@@ -670,7 +670,7 @@ def moments(y: ArrayLike, the_mom: int = 0, do_normalize: bool = True) -> float:
     y = np.asarray(y)
 
     if do_normalize:
-        return stats.moment(y, the_mom) /( np.std(y, ddof=1)**the_mom)
+        return stats.moment(y, the_mom) /(np.std(y, ddof=1)**the_mom)
     
     return stats.moment(y, the_mom) / np.std(y, ddof=1)
 

@@ -1111,27 +1111,27 @@ distribution:
     base_name: moments
     dependencies:
     configs:
-      - {the_mom: 3, zscore: True}
-      - {the_mom: 4, zscore: True}
-      - {the_mom: 5, zscore: True}
-      - {the_mom: 6, zscore: True}
-      - {the_mom: 7, zscore: True}
-      - {the_mom: 8, zscore: True}
-      - {the_mom: 9, zscore: True}
-      - {the_mom: 10, zscore: True}
-      - {the_mom: 11, zscore: True}
+      - {the_mom: 3, do_normalize: True, zscore: True}
+      - {the_mom: 4, do_normalize: True, zscore: True}
+      - {the_mom: 5, do_normalize: True, zscore: True}
+      - {the_mom: 6, do_normalize: True, zscore: True}
+      - {the_mom: 7, do_normalize: True, zscore: True}
+      - {the_mom: 8, do_normalize: True, zscore: True}
+      - {the_mom: 9, do_normalize: True, zscore: True}
+      - {the_mom: 10, do_normalize: True, zscore: True}
+      - {the_mom: 11, do_normalize: True, zscore: True}
       
-      - {the_mom: 3, zscore: False}
-      - {the_mom: 4, zscore: False}
-      - {the_mom: 5, zscore: False}
-      - {the_mom: 6, zscore: False}
-      - {the_mom: 7, zscore: False}
-      - {the_mom: 8, zscore: False}
-      - {the_mom: 9, zscore: False}
-      - {the_mom: 10, zscore: False}
-      - {the_mom: 11, zscore: False}
+      - {the_mom: 3, do_normalize: False, zscore: False}
+      - {the_mom: 4, do_normalize: False, zscore: False}
+      - {the_mom: 5, do_normalize: False, zscore: False}
+      - {the_mom: 6, do_normalize: False, zscore: False}
+      - {the_mom: 7, do_normalize: False, zscore: False}
+      - {the_mom: 8, do_normalize: False, zscore: False}
+      - {the_mom: 9, do_normalize: False, zscore: False}
+      - {the_mom: 10, do_normalize: False, zscore: False}
+      - {the_mom: 11, do_normalize: False, zscore: False}
     legacy_name: DN_Moments
-    ordered_args: ['the_mom']
+    ordered_args: ['the_mom', 'do_normalize']
 
   outlier_include:
     base_name: outlier_include
