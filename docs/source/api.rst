@@ -93,7 +93,6 @@ Distribution
    pyhctsa.operations.distribution.pleft
    pyhctsa.operations.distribution.min_max
    pyhctsa.operations.distribution.mean
-   pyhctsa.operations.distribution.high_low_mu
    pyhctsa.operations.distribution.fit_mle
    pyhctsa.operations.distribution.cv
    pyhctsa.operations.distribution.custom_skewness

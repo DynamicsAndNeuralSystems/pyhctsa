@@ -1064,14 +1064,6 @@ distribution:
       - {mean_type: 'midhinge', zscore: False}
     legacy_name: DN_Mean
     ordered_args: ['mean_type']
-  
-  high_low_mu:
-    base_name: high_low_mu
-    dependencies:
-    configs:
-      - {zscore: False}
-    legacy_name: DN_HighLowMu
-    ordered_args:
 
   fit_mle:
     base_name: fit_mle
