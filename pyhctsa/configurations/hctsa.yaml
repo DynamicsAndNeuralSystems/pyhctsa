@@ -910,14 +910,6 @@ stationarity:
     legacy_name: ST_MomentCorr
     ordered_args: ['window_length', 'w_overlap', 'mom_1', 'mom_2', 'what_transform']
   
-  dyn_win:
-    base_name: dyn_win
-    dependencies:
-    configs:
-      - {max_num_segments: 10, zscore: True}
-    legacy_name: SY_DynWin
-    ordered_args: ['max_num_segments']
-  
   local_distributions:
     base_name: local_distributions
     dependencies:

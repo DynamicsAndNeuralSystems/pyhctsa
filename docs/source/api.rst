@@ -257,7 +257,6 @@ Stationarity
    :toctree: generated/
 
     pyhctsa.operations.stationarity.local_distributions
-    pyhctsa.operations.stationarity.dyn_win
     pyhctsa.operations.stationarity.moment_corr
     pyhctsa.operations.stationarity.simple_stats
     pyhctsa.operations.stationarity.local_extrema
