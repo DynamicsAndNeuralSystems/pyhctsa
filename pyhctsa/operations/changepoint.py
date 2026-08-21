@@ -133,12 +133,13 @@ def l1pwc_sweep_lambda(y: np.ndarray, lambdar: np.ndarray) -> dict:
     Dependence of step detection on regularization parameter.
  
     Gives information about discrete steps in the signal across a range of
-    regularization parameters lambda, using the function l1pwc from Max Little's
-    step detection toolkit.
+    regularization parameters lambda, using the function `l1pwc` from Max Little's
+    step detection toolkit [1]. 
  
-    cf.,
-    "Sparse Bayesian Step-Filtering for High-Throughput Analysis of Molecular
-    Machine Dynamics", Max A. Little, and Nick S. Jones, Proc. ICASSP (2010)
+    References
+    ----------
+    .. [1] "Sparse Bayesian Step-Filtering for High-Throughput Analysis of Molecular
+        Machine Dynamics", Max A. Little, and Nick S. Jones, Proc. ICASSP (2010)
  
     Parameters
     ----------
@@ -150,7 +151,7 @@ def l1pwc_sweep_lambda(y: np.ndarray, lambdar: np.ndarray) -> dict:
     Returns
     -------
     dict
-        At each iteration, the CP_ML_StepDetect code was run with a given
+        At each iteration, the `stepdetect` code was run with a given
         lambda, and the number of segments, and reduction in root mean square
         error from removing the piecewise constants was recorded. Outputs
         summarize how these quantities vary with lambda.
@@ -158,12 +159,12 @@ def l1pwc_sweep_lambda(y: np.ndarray, lambdar: np.ndarray) -> dict:
     y = np.asarray(y, dtype=float)
     lambdar = np.atleast_1d(np.asarray(lambdar, dtype=float))
  
-    Llambdar = len(lambdar)
-    nsegs = np.zeros(Llambdar)
-    rmserrs = np.zeros(Llambdar)
-    rmserrpsegs = np.zeros(Llambdar)
- 
-    for i in range(Llambdar):
+    n_lambda = len(lambdar)
+    nsegs = np.zeros(n_lambda)
+    rmserrs = np.zeros(n_lambda)
+    rmserrpsegs = np.zeros(n_lambda)
+
+    for i in range(n_lambda):
         lam = lambdar[i]
         # Run the (stochastic) step detection algorithm:
         outi = stepdetect(y, method='l1pwc', params=lam)
@@ -171,36 +172,23 @@ def l1pwc_sweep_lambda(y: np.ndarray, lambdar: np.ndarray) -> dict:
         rmserrs[i] = outi['rmsoff']
         rmserrpsegs[i] = outi['rmsoffpstep']
  
-    # ------------------------------------------------------------------------------
-    # Define the FirstUnder function:
-    # ------------------------------------------------------------------------------
-    # Often finding the first time a certain vector (x) drops under a given
-    # threshold (y). This function does it:
- 
-    def FirstUnder(x, thresh):
+    # First time a vector drops under a given threshold:
+    def first_under(x, thresh):
         return _first_index_past_threshold(x, thresh, 'under')
 
-    def NaNIfEmpty(idx):
-        # Returns a NaN if idx is empty, otherwise returns lambdar at idx.
+    def nan_if_empty(idx):
         return np.nan if idx is None else lambdar[idx]
  
     out = {}
  
-    # ------------------------------------------------------------------------------
-    # (*) Use rmsunderx subfunction to analyze when RMS errors drop under a set of
-    # thresholds, *x*, for the first time:
-    # ------------------------------------------------------------------------------
-    out['rmserrsu05'] = NaNIfEmpty(FirstUnder(rmserrs, 0.5))
-    out['rmserrsu02'] = NaNIfEmpty(FirstUnder(rmserrs, 0.2))
-    out['rmserrsu01'] = NaNIfEmpty(FirstUnder(rmserrs, 0.1))
+    # When RMS errors first drop under a set of thresholds:
+    out['rmserrsu05'] = nan_if_empty(first_under(rmserrs, 0.5))
+    out['rmserrsu02'] = nan_if_empty(first_under(rmserrs, 0.2))
+    out['rmserrsu01'] = nan_if_empty(first_under(rmserrs, 0.1))
  
-    # ------------------------------------------------------------------------------
-    # (*) Use the nsegsunderx subfunction to analyze when nseg drops under a set of
-    # thresholds, *x*, for the first time:
-    # nsegunderx = @(x) find(nsegs < x, 1, 'first');
-    # ------------------------------------------------------------------------------
-    out['nsegsu005'] = NaNIfEmpty(FirstUnder(nsegs, 0.05))
-    out['nsegsu001'] = NaNIfEmpty(FirstUnder(nsegs, 0.01))
+    # When nsegments first drops under a set of thresholds:
+    out['nsegsu005'] = nan_if_empty(first_under(nsegs, 0.05))
+    out['nsegsu001'] = nan_if_empty(first_under(nsegs, 0.01))
  
     # Calculate the correlation between the number of segments and rmserrs
     with np.errstate(invalid='ignore', divide='ignore'):
@@ -208,7 +196,7 @@ def l1pwc_sweep_lambda(y: np.ndarray, lambdar: np.ndarray) -> dict:
     out['corrsegerr'] = R[1, 0]
  
     # Maximum rmserrpsegment
-    indbest = int(np.argmax(rmserrpsegs))  # where the maximum occurs
+    indbest = int(np.argmax(rmserrpsegs))
     out['bestrmserrpseg'] = rmserrpsegs[indbest]
     out['bestlambda'] = lambdar[indbest]
  
