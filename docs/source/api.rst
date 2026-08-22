@@ -56,6 +56,7 @@ Correlation
    pyhctsa.operations.correlation.stick_angles
    pyhctsa.operations.correlation.falling_sticks
    pyhctsa.operations.correlation.oversampling
+   pyhctsa.operations.correlation.pos_neg_asymmetry
    pyhctsa.operations.correlation.joint_non_gaussianity
    pyhctsa.operations.correlation.nonlinear_autocorr
    pyhctsa.operations.correlation.autocorr_x2_shape

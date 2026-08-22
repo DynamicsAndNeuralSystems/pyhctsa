@@ -1491,6 +1491,141 @@ def oversampling(y: ArrayLike) -> dict:
 
     return out
 
+def _pn_corr(x: np.ndarray, y: np.ndarray) -> float:
+    """The off-diagonal entry of MATLAB's ``corrcoef(x, y)``.
+
+    Mirrors the arithmetic of MATLAB's ``correl`` subfunction: build the
+    covariance matrix with the (n-1) normalisation, take the square root of
+    the diagonal first (to avoid under/overflow) and divide twice, then limit
+    the result to [-1, 1].
+
+    A constant input has no defined correlation, and is reported as NaN. The
+    regime subsets here are routinely constant on quantised series (a whole
+    regime sitting on one level), and centring such a subset leaves only
+    rounding dust, so dividing it through -- as MATLAB does -- returns a sign
+    determined entirely by summation order rather than by the data.
+    """
+    if x[0] == x.min() and x[0] == x.max():
+        return np.nan
+    if y[0] == y.min() and y[0] == y.max():
+        return np.nan
+    n = x.size
+    xc = x - np.mean(x)
+    yc = y - np.mean(y)
+    cxy = np.dot(xc, yc) / (n - 1)
+    cxx = np.dot(xc, xc) / (n - 1)
+    cyy = np.dot(yc, yc) / (n - 1)
+    r = cxy / np.sqrt(cyy) / np.sqrt(cxx)
+    if abs(r) > 1:
+        r = np.sign(r)
+    return float(r)
+
+
+def _pn_std(x: np.ndarray) -> float:
+    """MATLAB's ``std``: zero for a single observation, NaN for none."""
+    if x.size == 0:
+        return np.nan
+    if x.size == 1:
+        return 0.0
+    return float(np.std(x, ddof=1))
+
+
+def pos_neg_asymmetry(y: ArrayLike) -> dict:
+    """
+    Asymmetry of local dynamics between positive and negative regimes.
+
+    Splits the time series by the sign of each value (assumes y is z-scored, so
+    the split is around the mean) and asks whether the one-step-ahead dynamics
+    differ between the two regimes: is the series more volatile, or more
+    persistent (higher one-step autocorrelation), when the current value is
+    above vs. below its mean? This targets a form of distribution-dynamics
+    interaction not captured by ``stick_angles``, which instead compares the
+    distribution of local slopes *within* each same-sign subsequence.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (assumed z-scored: the regime split threshold
+        is 0).
+
+    Returns
+    -------
+    dict
+        The conditional volatility and one-step autocorrelation of the
+        positive/negative regimes, and normalized contrasts between them (the
+        volatility contrast is a leverage-effect-style statistic; the
+        autocorrelation contrast is a threshold-AR(1)-style statistic). Also
+        isolates the two zero-crossing transition types (positive-to-negative,
+        negative-to-positive) -- posMask/negMask are conditioned on the current
+        value only, so they mix crossing and non-crossing steps together; the
+        crossing-specific fields ask instead whether the jump *at* a regime
+        switch is itself asymmetric (e.g. sharper downward crossings than
+        upward ones).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+
+    # Regime-conditioned one-step-ahead pairs: yLag(t) = y(t), yNext(t) = y(t+1)
+    y_lag = y[:-1]
+    y_next = y[1:]
+    dy = y_next - y_lag
+
+    pos_mask = (y_lag >= 0)
+    neg_mask = ~pos_mask
+    n_pos = int(np.count_nonzero(pos_mask))
+    n_neg = pos_mask.size - n_pos
+
+    out = {}
+
+    m = pos_mask.size
+    # proportion of time spent in the positive regime
+    out['propPos'] = n_pos / m if m > 0 else np.nan
+
+    # Conditional volatility (leverage-effect-style asymmetry)
+    out['volPos'] = _pn_std(dy[pos_mask]) if n_pos >= 2 else np.nan
+    out['volNeg'] = _pn_std(dy[neg_mask]) if n_neg >= 2 else np.nan
+    vol_all = _pn_std(dy)
+    if n_pos >= 2 and n_neg >= 2 and vol_all > 0:
+        # Normalized contrast: positive when the positive regime is more volatile.
+        out['volAsym'] = (out['volPos'] - out['volNeg']) / vol_all
+    else:
+        out['volAsym'] = np.nan
+
+    # Conditional one-step autocorrelation (threshold-AR(1)-style asymmetry)
+    out['ac1Pos'] = _pn_corr(y_lag[pos_mask], y_next[pos_mask]) if n_pos >= 2 else np.nan
+    out['ac1Neg'] = _pn_corr(y_lag[neg_mask], y_next[neg_mask]) if n_neg >= 2 else np.nan
+    # Difference on the (already bounded, comparable) correlation scale:
+    out['ac1Asym'] = out['ac1Pos'] - out['ac1Neg']
+
+    # Zero-crossing transitions: positive-to-negative (PN) and negative-to-
+    # positive (NP). Unlike posMask/negMask (conditioned on the current value
+    # only), these isolate the step *at* which the regime actually switches.
+    next_neg = y_next < 0
+    pn_mask = pos_mask & next_neg # downward crossing
+    np_mask = neg_mask & ~next_neg # upward crossing
+    n_pn = int(np.count_nonzero(pn_mask))
+    n_np = int(np.count_nonzero(np_mask))
+
+    # proportion of steps that are downward / upward crossings
+    out['propPN'] = n_pn / m if m > 0 else np.nan
+    out['propNP'] = n_np / m if m > 0 else np.nan
+
+    # Crossing-jump volatility:
+    out['volPN'] = _pn_std(dy[pn_mask]) if n_pn >= 2 else np.nan
+    out['volNP'] = _pn_std(dy[np_mask]) if n_np >= 2 else np.nan
+    if n_pn >= 2 and n_np >= 2 and vol_all > 0:
+        # Positive when downward crossings are more violent than upward ones.
+        out['volAsymCross'] = (out['volPN'] - out['volNP']) / vol_all
+    else:
+        out['volAsymCross'] = np.nan
+
+    # Does the pre-crossing value predict the post-crossing value (i.e. does a
+    # deeper excursion before crossing predict a deeper overshoot after it)?
+    out['ac1PN'] = _pn_corr(y_lag[pn_mask], y_next[pn_mask]) if n_pn >= 2 else np.nan
+    out['ac1NP'] = _pn_corr(y_lag[np_mask], y_next[np_mask]) if n_np >= 2 else np.nan
+    out['ac1AsymCross'] = out['ac1PN'] - out['ac1NP']
+
+    return out
+
 def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] = None) -> float:
     """
     Compute a custom nonlinear autocorrelation of a time series.

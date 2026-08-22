@@ -370,6 +370,14 @@ correlation:
     legacy_name: CO_Oversampling
     ordered_args:
   
+  pos_neg_asymmetry:
+    base_name: pos_neg_asymmetry
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: CO_PosNegAsymmetry
+    ordered_args:
+  
   autocorr_shape:
     base_name: autocorr_shape
     configs:
