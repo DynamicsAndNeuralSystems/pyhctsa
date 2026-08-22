@@ -40,6 +40,15 @@ medical:
     configs:
       - {zscore: False}
     legacy_name: MD_rawHRVmeas
+
+  porta:
+    base_name: porta
+    dependencies:
+    configs:
+      - {num_levels: 3, zscore: True}
+      - {num_levels: 4, zscore: True}
+      - {num_levels: 6, zscore: True}
+    legacy_name: MD_Porta
     
 extreme_events:
   moving_threshold:
