@@ -4,6 +4,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 import numpy as np
+import pywt
 from numpy.typing import ArrayLike
 from numba import njit
 from antropy.entropy import _xlogx
@@ -603,61 +604,91 @@ def complexity_invariant_distance(y: ArrayLike) -> dict:
         'CE2_norm': CE2 / min_CE2,
     }
 
-def wavelet_entropy(y: ArrayLike, whaten: str = 'shannon',
-                    p: Optional[float] = None) -> float:
+def _modwt(x: np.ndarray, wavelet_name: str, level: int) -> np.ndarray:
+    """Maximal-overlap discrete wavelet transform, with periodic boundary handling.
+
+    Returns a ``(level + 1, len(x))`` array whose rows are the wavelet
+    coefficients at scales ``1, ..., level`` followed by the scaling
+    (approximation) coefficients at scale ``level``.
     """
-    Wavelet-toolbox entropy of a time series.
+    w = pywt.Wavelet(wavelet_name)
+    # MODWT filters are the DWT filters scaled by 1/sqrt(2), applied without
+    # downsampling (the filters are reversed for a convolution, which leaves
+    # each scale's energy unchanged):
+    h = np.asarray(w.dec_hi[::-1], dtype=float) / np.sqrt(2)
+    g = np.asarray(w.dec_lo[::-1], dtype=float) / np.sqrt(2)
 
-    For a series :math:`y` of length :math:`N` the four entropy types are
+    v = np.asarray(x, dtype=float)
+    coeffs = np.empty((level + 1, v.size))
+    for j in range(level):
+        up = 1 << j # the filters are upsampled by 2^(j-1) at scale j
+        wj = np.zeros(v.size)
+        vj = np.zeros(v.size)
+        for ell, (hl, gl) in enumerate(zip(h, g)):
+            shifted = np.roll(v, up * ell)
+            wj += hl * shifted
+            vj += gl * shifted
+        coeffs[j] = wj
+        v = vj
+    coeffs[level] = v
 
-    - ``'shannon'``: :math:`-\\frac{1}{N}\\sum_i y_i^2 \\log(y_i^2)`,
-      using the convention :math:`0\\log 0 = 0`.
-    - ``'logenergy'``: :math:`\\frac{1}{N}\\sum_i \\log(y_i^2)`,
-      using the convention :math:`\\log 0 = 0`.
-    - ``'threshold'``: :math:`\\frac{1}{N}\\#\\{i : |y_i| > p\\}`.
-    - ``'sure'``: Stein's Unbiased Risk Estimate,
-      :math:`\\frac{1}{N}\\left(N - 2\\#\\{i : |y_i| \\leq p\\} +
-      \\sum_i \\min(y_i^2, p^2)\\right)`.
+    return coeffs
+
+
+def wavelet_entropy(y: ArrayLike, wavelet_name: str = 'sym4',
+                    level: int = 5) -> float:
+    """
+    Wavelet entropy of a time series.
+
+    Decomposes y via the maximal-overlap discrete wavelet transform (MODWT)
+    into a set of scales, computes each scale's share of the signal's total
+    energy, p_j = E_j / sum(E), and returns the Shannon entropy of this
+    relative-energy distribution across scales, normalized to [0,1] by its
+    maximum possible value, log2(numLevels).
+
+    References
+    ----------
+    .. [1] O.A. Rosso, S. Blanco, J. Yordanova, V. Kolev, A. Figliola, M.
+           Schuermann, E. Basar, "Wavelet entropy: a new tool for analysis of
+           short duration brain electrical signals", J. Neurosci. Methods
+           105(1) 65 (2001).
 
     Parameters
     ----------
     y : array-like
-        One-dimensional time series input.
-    whaten : {'shannon', 'logenergy', 'threshold', 'sure'}, optional
-        The entropy type. Default is 'shannon'.
-    p : float, optional
-        The additional parameter required by the 'threshold' and 'sure'
-        entropy types. Ignored otherwise.
+        The input time series.
+    wavelet_name : str, optional
+        The wavelet used for the MODWT decomposition. Default is 'sym4'.
+    level : int, optional
+        The number of decomposition levels. Default is 5.
 
     Returns
     -------
     float
-        The (length-normalised) entropy value.
+        The relative-energy Shannon entropy across scales, normalized to
+        [0,1].
     """
-    y = np.asarray(y, dtype=float)
-    N = len(y)
-    y2 = y ** 2
+    y = np.asarray(y, dtype=float).ravel()
+    level = int(level)
 
-    if whaten == 'shannon':
-        # 0*log(0) = 0
-        out = -np.sum(_xlogx(y2, base=np.e))
-    elif whaten == 'logenergy':
-        # log(0) = 0
-        nz = y2 > 0
-        out = np.sum(np.log(y2[nz]))
-    elif whaten == 'threshold':
-        if p is None:
-            raise ValueError("A threshold, p, is required for 'threshold' entropy.")
-        out = np.sum(np.abs(y) > p)
-    elif whaten == 'sure':
-        if p is None:
-            raise ValueError("A parameter, p, is required for 'sure' entropy.")
-        n_below = np.sum(np.abs(y) <= p)
-        out = N - 2 * n_below + np.sum(np.minimum(y2, p ** 2))
-    else:
-        raise ValueError(f"Unknown entropy type '{whaten}'.")
+    # Compute the (scaled, global) wavelet entropy
+    if y.size < 2 or level < 1 or level > np.floor(np.log2(y.size)):
+        # Data-dependent (e.g., series too short for the requested/default level):
+        return np.nan
+    try:
+        coeffs = _modwt(y, wavelet_name, level)
+    except ValueError:
+        return np.nan
 
-    return out / N  # scales with N for large N
+    energy = np.sum(coeffs ** 2, axis=1)
+    total = energy.sum()
+    if not np.isfinite(total):
+        return np.nan
+    if total == 0:
+        return 0.0
+
+    p = energy / total
+    return float(-np.sum(_xlogx(p, base=2)) / np.log2(coeffs.shape[0]))
 
 def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2,
                           pre_proc: Union[str, None] = None, rng: int = 0) -> float:

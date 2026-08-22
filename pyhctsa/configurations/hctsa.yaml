@@ -634,10 +634,9 @@ entropy:
     base_name: wavelet_entropy
     dependencies:
     configs:
-      - {whaten: 'shannon', zscore: True}
-      - {whaten: 'logenergy', zscore: True}
+      - {wavelet_name: 'sym4', level: 5, zscore: True}
     legacy_name: EN_wentropy
-    ordered_args: ['whaten']
+    ordered_args: ['wavelet_name', 'level']
   
   approximate_entropy:
     base_name: approximate_entropy
