@@ -7,6 +7,7 @@ from numpy.typing import ArrayLike
 from scipy.linalg import LinAlgError
 from scipy.linalg import solve_triangular
 from scipy.optimize import curve_fit
+from scipy.spatial import cKDTree
 from scipy.stats import chi2, expon, gaussian_kde, kurtosis, skew
 from scipy.stats import mode as smode
 from statsmodels.tsa.stattools import pacf
@@ -1169,6 +1170,204 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
                        for k in range(-theiler_win, theiler_win + 1)
                        if abs(k) < n_skew)
         out['mardiaSkew'] = float((G3.sum() - band_sum) / n_off_band)
+
+    return out
+
+def _theiler_kth(idx: np.ndarray, dist: np.ndarray, k: int, theiler_win: int,
+                 ref_set: np.ndarray, query_set: np.ndarray) -> np.ndarray:
+    # For each query point i, returns the k-th nearest-neighbor distance within
+    # ref_set, excluding any candidate with |i-j| <= theiler_win. Falls back to an
+    # exact brute-force search for any point whose over-fetched candidate list
+    # (idx, dist) didn't leave at least k valid (non-excluded) neighbors.
+    n = idx.shape[0]
+    n_ref = ref_set.shape[0]
+    i = np.arange(n)[:, None]
+    valid = np.abs(idx - i) > theiler_win
+    # position of the k-th valid candidate in each (distance-sorted) row:
+    kth_hit = valid & (np.cumsum(valid, axis=1) == k)
+    has_kth = kth_hit.any(axis=1)
+    pos = np.argmax(kth_hit, axis=1)
+
+    kth = np.full(n, np.nan)
+    rows = np.flatnonzero(has_kth)
+    kth[rows] = dist[rows, pos[rows]]
+
+    time_idx = np.arange(n_ref)
+    for i in np.flatnonzero(~has_kth):
+        all_dists = np.sqrt(np.sum((ref_set - query_set[i]) ** 2, axis=1))
+        all_dists[np.abs(time_idx - i) <= theiler_win] = np.inf
+        kth_dist = np.partition(all_dists, k - 1)[k - 1]
+        if np.isfinite(kth_dist):
+            kth[i] = kth_dist
+
+    return kth
+
+
+def _knn_kld(A: np.ndarray, B: np.ndarray, k: int, theiler_win: int) -> float:
+    # Wang-Kulkarni-Verdu (2009) k-NN estimator of KL(P_A||P_B), where A and B
+    # are equal-sized (n x d) point sets whose rows are in temporal
+    # correspondence (row i of A and row i of B share the same underlying time
+    # index), so a Theiler window can be applied consistently in both searches.
+    n, d = A.shape
+    k_fetch = min(n - 1, k + 2 * theiler_win + 5)
+
+    # Self-search within A (for r_k(x_i), the k-th NN of x_i within A\{x_i}):
+    dist_a, idx_a = cKDTree(A).query(A, k=k_fetch + 1, workers=-1)
+    rk = _theiler_kth(idx_a, dist_a, k, theiler_win, A, A)
+
+    # Cross-search from A into B (for s_k(x_i), the k-th NN of x_i within B):
+    dist_b, idx_b = cKDTree(B).query(A, k=k_fetch, workers=-1)
+    sk = _theiler_kth(idx_b, dist_b, k, theiler_win, B, A)
+
+    good = np.isfinite(rk) & np.isfinite(sk) & (rk > 0) & (sk > 0)
+    n_good = int(np.count_nonzero(good))
+    if n_good < 0.5 * n:
+        return np.nan
+
+    return float((d / n_good) * np.sum(np.log(sk[good] / rk[good]))
+                 + np.log(n / (n - 1)))
+
+
+def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int = 3,
+                 theiler_win: int = 1, max_n: Union[int, str] = 'full') -> dict:
+    """
+    Kullback-Leibler divergence between forward and time-reversed embeddings.
+
+    Embeds the time series in m dimensions at time delay tau (e.g., the pair
+    (x_t,x_{t+tau}) for m=2, or the triple (x_t,x_{t+tau},x_{t+2tau}) for
+    m=3), and estimates the Kullback-Leibler divergence between the
+    distribution of these embedded points and the distribution of the same
+    points with their coordinate order reversed (equivalent to embedding
+    the time-reversed series). For a (statistically) time-reversible
+    process, these two distributions coincide and the divergence is zero in
+    the population; departures reflect time-irreversibility.
+
+    cf. trev/tc3, which probe irreversibility via a single third-moment
+    statistic of lagged pairs/triples; this is the natural full-density
+    generalization (in the same sense that joint_non_gaussianity generalizes
+    moments' skewness/kurtosis to the whole joint embedding shape), able to
+    detect any asymmetry between the forward and reversed distributions, not
+    just a third-moment one.
+
+    cf. also Diks, van Houwelingen, Takens & DeGoede (1995), who compare
+    forward and reverse embedding distributions via a different
+    (U-statistic-based) route; the approach here instead estimates the
+    Kullback-Leibler divergence directly using the k-NN estimator of Wang,
+    Kulkarni & Verdu (2009), which needs no binning or KDE grid and remains
+    usable at hctsa-scale sample sizes in m = 2 or 3 dimensions.
+
+    The k-NN search follows the same over-fetch-then-Theiler-filter pattern as
+    local_density: candidate neighbors are fetched via a KD-tree and any
+    within a Theiler window of the query point's time index are discarded (a
+    point and its temporal neighbors are strongly autocorrelated, so treating
+    them as informative near-neighbors would understate the local spread);
+    the rare point left with too few valid candidates falls back to an exact
+    brute-force search.
+
+    NOTE ON DIRECTIONALITY: KL(P||Q) and KL(Q||P) are generally different
+    quantities, but *not* here: the reversed embedding Q is built by flipping
+    the coordinate order of each row of P, an isometry (it preserves all
+    pairwise distances, including cross-set ones), applied identically at
+    every matching time index. Any purely distance-based two-sample
+    divergence estimator -- like the k-NN one used here -- is therefore
+    forced to return numerically identical values for KL(P||Q) and KL(Q||P)
+    (verified to match to machine precision on synthetic test series); only
+    one direction is computed.
+
+    NOTE ON SIGNIFICANCE: only a raw divergence estimate is returned, not a
+    p-value -- consecutive embedded points overlap in m-1 coordinates and are
+    not independent, the same reason trev/tc3/joint_non_gaussianity report
+    raw statistics only. For significance testing against a null that
+    respects the series' own autocorrelation structure, compare this
+    statistic to its distribution over surrogates (cf. make_surrogates,
+    surrogate_test).
+
+    References
+    ----------
+    .. [1] C. Diks, J.C. van Houwelingen, F. Takens, J. DeGoede, "Reversibility
+           as a criterion for discriminating time series", Phys. Lett. A
+           201(4-5) 221 (1995).
+    .. [2] Q. Wang, S.R. Kulkarni, S. Verdu, "Divergence Estimation for
+           Multidimensional Densities via k-Nearest-Neighbor Distances", IEEE
+           Trans. Inf. Theory 55(5) 2392 (2009).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tau : int or str, optional
+        The time delay for the embedding (can be 'ac' or 'mi', or an
+        integer). Default: 'ac'.
+    m : int, optional
+        The embedding dimension. Default: 2, for the pairwise joint
+        distribution (x_t,x_{t+tau}); set to 3 for the triple-wise joint
+        distribution (x_t,x_{t+tau},x_{t+2tau}).
+    k : int, optional
+        The number of nearest neighbors used by the k-NN divergence estimator.
+        Default: 3 (matches local_density's default).
+    theiler_win : int, optional
+        The number of temporally-adjacent points excluded from both the
+        within-set and cross-set neighbor searches (|i-j| <= theiler_win),
+        applied at matching time indices in both the forward and reversed
+        embeddings. Default: 1.
+    max_n : int or str, optional
+        The maximum number of embedded points used. The k-NN searches are
+        KD-tree-based, not the O(N^2) cost of joint_non_gaussianity's
+        skewness statistic (which needs this kind of cap). A warning is issued
+        whenever cropping actually happens. Default: 'full' (no cropping); set
+        to an integer to cap runtime on unusually long series.
+
+    Returns
+    -------
+    dict
+        The raw k-NN estimate of KL(forward || reversed) and its magnitude. A
+        unitless departure-from-reversibility measure, zero up to estimation
+        noise for a reversible process (the k-NN estimator can dip slightly
+        negative near a true value of zero -- expected behavior of this
+        nonparametric estimator, not a bug), with no attached significance
+        level (see note above).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+
+    # Embed the signal
+    tau = _resolve_time_delay(y, tau)
+    if np.isnan(tau):
+        logger.warning('Embedding failed')
+        return np.nan
+    try:
+        Y = time_delay_embed(y, m, int(tau))
+    except ValueError:
+        logger.warning('Embedding failed')
+        return np.nan
+    n_emb, d = Y.shape
+
+    min_n = max(50, 10 * (k + theiler_win))
+    if n_emb < min_n:
+        logger.warning(f'Too few embedded points ({n_emb}) for a meaningful '
+                       f'time-reversal KLD estimate at m = {d}')
+        return np.nan
+
+    if isinstance(max_n, str) and max_n == 'full':
+        pass # no cropping
+    elif n_emb > max_n:
+        logger.warning(f'Cropping to the first {max_n} of {n_emb} embedded points '
+                       "(runtime cap; raise max_n or use 'full' to disable)")
+        Y = Y[:max_n, :]
+        n_emb = max_n
+
+    # Forward and time-reversed embeddings
+    # Reversing the coordinate order of each embedded row is equivalent to
+    # embedding the time-reversed series (up to the boundary points, which this
+    # avoids re-deriving from scratch):
+    P = Y
+    Q = Y[:, ::-1]
+
+    # k-NN estimate of KL(P||Q)
+    # (KL(Q||P) is numerically identical -- see NOTE ON DIRECTIONALITY above --
+    # so only one direction is computed.)
+    out = {}
+    out['raw'] = _knn_kld(P, np.ascontiguousarray(Q), k, theiler_win)
+    out['abs'] = abs(out['raw'])
 
     return out
 

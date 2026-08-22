@@ -370,6 +370,15 @@ correlation:
     legacy_name: CO_Oversampling
     ordered_args:
   
+  time_rev_kld:
+    base_name: time_rev_kld
+    dependencies:
+    configs:
+      - {tau: 'ac', m: 2, k: 3, theiler_win: 1, max_n: 'full', zscore: True}
+      - {tau: 'ac', m: 3, k: 3, theiler_win: 1, max_n: 'full', zscore: True}
+    legacy_name: CO_TimeRevKLD
+    ordered_args: ['tau', 'm', 'k', 'theiler_win', 'max_n']
+  
   pos_neg_asymmetry:
     base_name: pos_neg_asymmetry
     dependencies:

@@ -58,6 +58,7 @@ Correlation
    pyhctsa.operations.correlation.oversampling
    pyhctsa.operations.correlation.pos_neg_asymmetry
    pyhctsa.operations.correlation.joint_non_gaussianity
+   pyhctsa.operations.correlation.time_rev_kld
    pyhctsa.operations.correlation.nonlinear_autocorr
    pyhctsa.operations.correlation.autocorr_x2_shape
    pyhctsa.operations.correlation.partial_autocorr
