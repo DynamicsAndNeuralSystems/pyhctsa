@@ -412,10 +412,10 @@ def _ks_statistic(counts: np.ndarray, null_cdf: np.ndarray, n: int) -> float:
     delta2 = sample_cdf[1:] - null_cdf  # jumps approached from the right
     return float(np.max(np.abs(np.concatenate((delta1, delta2)))))
 
-def _kstest_pvalue(x: np.ndarray, cdf_func) -> float:
-    """One-sample two-sided KS test p-value, matching MATLAB's kstest as
-    called by HT_DistributionTest (null CDF tabulated on the data values
-    rounded to 6 decimal places, then linearly interpolated)."""
+def _kstest_statistic(x: np.ndarray, cdf_func) -> float:
+    """Two-sided KS D-statistic against a tabulated null CDF, matching MATLAB's
+    kstest called with a two-column CDF argument (null CDF tabulated on the data
+    values rounded to 6 decimal places, then linearly interpolated)."""
     n = len(x)
     xmin, xmax = np.min(x), np.max(x)
     grid = np.unique(np.round(x * 1e6) / 1e6)
@@ -430,7 +430,15 @@ def _kstest_pvalue(x: np.ndarray, cdf_func) -> float:
         null_cdf = y_grid
     else:
         null_cdf = np.interp(ux, grid, y_grid)
-    ks_stat = _ks_statistic(counts, null_cdf, n)
+    return _ks_statistic(counts, null_cdf, n)
+
+
+def _kstest_pvalue(x: np.ndarray, cdf_func) -> float:
+    """One-sample two-sided KS test p-value, matching MATLAB's kstest as
+    called by HT_DistributionTest (null CDF tabulated on the data values
+    rounded to 6 decimal places, then linearly interpolated)."""
+    n = len(x)
+    ks_stat = _kstest_statistic(x, cdf_func)
 
     s = n * ks_stat ** 2
     if (s > 7.24) or ((s > 3.76) and (n > 99)):

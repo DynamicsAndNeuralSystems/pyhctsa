@@ -9,28 +9,11 @@ from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 
 from ..operations.model_fit import residual_analysis, _ml_rng
-from ..operations.correlation import first_crossing, autocorr
+from ..operations.correlation import first_crossing, autocorr, _resolve_time_delay
 from ..operations.information import first_min
 from ..operations.scaling import _round
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
 from ..utils import _first_index_past_threshold, matlab_quantile, time_delay_embed
-
-def _resolve_time_delay(y: ArrayLike, tau: Union[int, str]) -> Union[int, float]:
-    """Resolve a string time-delay spec to a lag.
-
-    ``'ac'`` uses the first zero-crossing of the autocorrelation function and
-    ``'mi'`` the first minimum of the automutual information. An integer is
-    returned unchanged. The resolved value may be NaN (time series too short);
-    callers are responsible for handling that.
-    """
-    if not isinstance(tau, str):
-        return tau
-    if tau == 'ac':
-        return first_crossing(y, 'ac', 0, 'discrete')
-    if tau == 'mi':
-        return first_min(y, 'mi')
-    raise ValueError(f'Invalid time-delay method: {tau}. Choose either mi or ac.')
-
 
 def _first_fn(p, threshold, over_or_under='under'):
     """Position (counting from one) of the first element of ``p`` on the given

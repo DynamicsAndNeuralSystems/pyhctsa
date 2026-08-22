@@ -5,17 +5,36 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.linalg import LinAlgError
+from scipy.linalg import solve_triangular
 from scipy.optimize import curve_fit
-from scipy.stats import expon, gaussian_kde, kurtosis, skew
+from scipy.stats import chi2, expon, gaussian_kde, kurtosis, skew
 from scipy.stats import mode as smode
 from statsmodels.tsa.stattools import pacf
 
+from ..operations.hypothesis_tests import _kstest_statistic
 from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit
 from ..utils import (_first_index_past_threshold, bin_picker, histc,
-                     make_mat_buffer, point_of_crossing, sign_change,
-                     time_delay_embed, z_score)
+                     make_mat_buffer, matlab_quantile, point_of_crossing,
+                     sign_change, time_delay_embed, z_score)
+
+def _resolve_time_delay(y: ArrayLike, tau: Union[int, str]) -> Union[int, float]:
+    """Resolve a string time-delay spec to a lag.
+
+    ``'ac'`` uses the first zero-crossing of the autocorrelation function and
+    ``'mi'`` the first minimum of the automutual information. An integer is
+    returned unchanged. The resolved value may be NaN (time series too short);
+    callers are responsible for handling that.
+    """
+    if not isinstance(tau, str):
+        return tau
+    if tau == 'ac':
+        return first_crossing(y, 'ac', 0, 'discrete')
+    if tau == 'mi':
+        return first_min(y, 'mi')
+    raise ValueError(f'Invalid time-delay method: {tau}. Choose either mi or ac.')
+
 
 def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
               extra_param: Union[int, None] = None, random_seed = None,
@@ -950,6 +969,209 @@ def _sub_statav(x: ArrayLike, n: int) -> tuple:
 
     return statavmean, statavstd
 
+def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
+                          theiler_win: int = 1,
+                          max_n: Union[int, str] = 10000) -> dict:
+    """
+    Tests for non-Gaussianity of the joint, time-lagged embedding distribution.
+
+    Embeds the time series in m dimensions at time delay tau (e.g., the pair
+    (x_t,x_{t+tau}) for m=2, or the triple (x_t,x_{t+tau},x_{t+2tau}) for
+    m=3) and tests whether the resulting point cloud is consistent with a
+    multivariate Gaussian.
+
+    cf. existing Gaussianity tests acting on marginal distribution
+    (distribution_test, compare_ks_fit), which all
+    A linear (e.g., AR(1)) Gaussian process has a Gaussian marginal
+    *and* a Gaussian joint embedding distribution;
+    a nonlinear or non-reversible process can look
+    Gaussian marginally while its lagged joint distribution is visibly
+    non-elliptical (curved, multimodal, or heavy/light-tailed along
+    directions the marginal alone cannot see).
+    cf. also time-irreversibility metrics like trev/tc3
+    (which use a single third-moment statistic of lagged
+    pairs/triples as a nonlinearity probe) but this is perhaps more general as
+    : it tests the whole joint shape rather than one moment combination.
+
+    Two complementary statistics are computed, both based on Mardia's
+    (1970) classical multivariate normality measures, chosen because they
+    generalize to any embedding dimension m via the same formula (so m=2
+    and m=3 are the same code path) and because they reduce, at m=1, to
+    ordinary skewness/kurtosis -- the natural multivariate extension of
+    what moments already computes:
+
+      (i)  Mardia's multivariate skewness, b1 -- detects asymmetry/curvature
+           of the joint distribution (e.g., a banana-shaped point cloud).
+           Population value is 0 for any joint Gaussian.
+      (ii) Mardia's multivariate kurtosis, b2 -- detects joint tail weight/
+           peakedness relative to a Gaussian ellipsoid. Population value is
+           m(m+2) for any joint Gaussian (e.g., 8 at m=2, 15 at m=3).
+
+    As a complementary, distribution-shape-sensitive check, the squared
+    Mahalanobis distances of each embedded point to the sample mean (which
+    are exactly the per-point terms underlying Mardia's kurtosis) are
+    compared against their theoretical shape under joint Gaussianity,
+    chi^2_m, via a Kolmogorov-Smirnov D-statistic -- this can catch
+    departures (e.g., a bimodal or ring-shaped cloud) that the two summary
+    moments can miss.
+
+    NOTE ON SIGNIFICANCE: only *raw* statistics are returned, not p-values.
+    Mardia's classical asymptotic null distributions assume the N embedded
+    points are iid draws, but consecutive embedded vectors overlap in m-1
+    coordinates and are therefore strongly autocorrelated, which inflates
+    the naive asymptotic test statistics (empirically, up to ~30% false
+    positives at a nominal 5% level on a purely linear-Gaussian AR(1)
+    process, worse at higher m). This is the same reason trev/tc3
+    report raw statistics rather than p-values; for significance
+    testing against a null that respects the series' own autocorrelation
+    structure, compare these statistics to their distribution over
+    surrogates (cf. surrogate_test, make_surrogates).
+
+    The skewness statistic additionally excludes near-diagonal pairs
+    (|i-j| <= theiler_win) from its double sum: for correlated (not just
+    independent) jointly-Gaussian points, the third moment of their
+    Mahalanobis inner product is *not* zero (only the independent case has
+    this symmetry), so nearby, strongly-autocorrelated pairs bias the raw
+    statistic away from zero even under true joint Gaussianity. (The
+    same rationale as rqa's Theiler window, but applied to a third-moment sum
+    instead of a distance threshold).
+    Empirically this removes most, but not
+    all, of the bias (e.g., at m=7 on an AR(1) process, ~0.18 -> ~0.07); the
+    residual is the classical small-sample bias of using the *sample*
+    covariance to whiten the same points being tested (present even for iid
+    data), which widening the window further does not touch.
+
+    References
+    ----------
+    .. [1] K.V. Mardia, "Measures of multivariate skewness and kurtosis with
+        applications", Biometrika 57(3) 519 (1970).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tau : int or str, optional
+        The time delay for the embedding (can be 'ac' or 'mi', or an
+        integer). Default: 'ac'.
+    m : int, optional
+        The embedding dimension. Default: 2, for the pairwise joint
+        distribution (x_t,x_{t+tau}); set to 3 for the triple-wise joint
+        distribution (x_t,x_{t+tau},x_{t+2tau}).
+    theiler_win : int, optional
+        The number of temporally-adjacent embedded points excluded from the
+        skewness double sum (|i-j| <= theiler_win), to reduce the
+        correlated-pair bias described above. Default: 1.
+    max_n : int or str, optional
+        The maximum number of embedded points used for the skewness
+        statistic, whose cost is O(N^2) (it involves all pairwise
+        Mahalanobis inner products, unlike the kurtosis and KS statistics,
+        which are both O(N)). The mean, covariance, kurtosis, and KS
+        statistic always use the full embedded series; only the skewness
+        statistic is computed from the first max_n embedded points when the
+        series is longer than this (default: 10000, i.e., an 800MB Gram
+        matrix, ~1s; a warning is issued whenever this cropping actually
+        happens, since the skewness estimate is still visibly noisy even at
+        10000 points and keeps improving with more -- this is a memory/time
+        cap, not a convergence point. Can be set to 'full' to disable, with
+        a second warning above 20000 points where the ~3.2GB+ Gram matrix
+        becomes a serious memory cost).
+
+    Returns
+    -------
+    dict
+        Mardia's raw multivariate skewness (Theiler-windowed) and multivariate
+        kurtosis, and the Mahalanobis-distance-vs-chi^2 Kolmogorov-Smirnov
+        D-statistic. All are unitless departure-from-joint-Gaussianity
+        magnitudes with no attached significance level (see note above).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+
+    # Embed the signal
+    tau = _resolve_time_delay(y, tau)
+    if np.isnan(tau):
+        logger.warning('Embedding failed')
+        return np.nan
+    try:
+        Y = time_delay_embed(y, m, int(tau))
+    except ValueError:
+        logger.warning('Embedding failed')
+        return np.nan
+    n_emb, d = Y.shape
+
+    # Need enough points to reliably estimate a d x d covariance matrix and
+    # for the higher-moment statistics below to be reasonably stable:
+    min_n = max(30, 10 * d * (d + 2))
+    if n_emb < min_n:
+        logger.warning(f'Too few embedded points ({n_emb}) for a meaningful '
+                       f'joint-Gaussianity test at m = {d}')
+        return np.nan
+
+    # Center and whiten
+    mu = np.mean(Y, axis=0)
+    Yc = Y - mu
+    S = (Yc.T @ Yc) / n_emb # Mardia's convention: divide by N, not N-1
+
+    try:
+        L = np.linalg.cholesky(S)
+        near_singular = 1.0 / np.linalg.cond(S, 1) < 1e-10
+    except np.linalg.LinAlgError:
+        near_singular = True
+    if near_singular:
+        # Near-singular covariance -- typically means tau is too small relative
+        # to the series' correlation length, so consecutive embedded
+        # coordinates are nearly collinear
+        logger.warning('Embedded covariance matrix is near-singular (tau too small?)')
+        return np.nan
+
+    X = solve_triangular(L, Yc.T, lower=True) # d x n_emb; column i is the whitened point L^{-1}*(Y[i,:]-mu)'
+    D2 = np.sum(X**2, axis=0) # squared Mahalanobis distances, n_emb
+
+    out = {}
+
+    # Mardia's multivariate kurtosis (O(N), uses all embedded points)
+    # Raw statistic; population value under joint Gaussianity is d*(d+2)
+    # regardless of dimension or sample dependence structure.
+    out['mardiaKurt'] = float(np.mean(D2**2))
+
+    # Mahalanobis-distance-vs-chi^2_d Kolmogorov-Smirnov statistic (O(N))
+    out['mahalKSstat'] = _kstest_statistic(D2, lambda v: chi2.cdf(v, d))
+
+    # Mardia's multivariate skewness (O(N^2): subsample if needed)
+    if isinstance(max_n, str) and max_n == 'full':
+        slow_threshold = 20000
+        if n_emb > slow_threshold:
+            logger.warning(f'{n_emb} embedded points exceeds {slow_threshold} with '
+                           f"max_n='full'; skewness Gram matrix may use substantial "
+                           f'memory (>{8 * n_emb**2 / 1e9:.1f}GB)')
+        X_skew = X
+    elif n_emb > max_n:
+        logger.warning(f'Cropping to the first {max_n} of {n_emb} embedded points for '
+                       'the skewness statistic (memory/time cap, not a convergence '
+                       'point -- the estimate is still noisy at this size and would '
+                       'keep improving with more data; raise max_n or use \'full\' '
+                       'for a more precise, more expensive estimate)')
+        X_skew = X[:, :max_n]
+    else:
+        X_skew = X
+    n_skew = X_skew.shape[1]
+
+    n_band = sum(n_skew - abs(k) for k in range(-theiler_win, theiler_win + 1)
+                 if abs(k) < n_skew)
+    n_off_band = n_skew**2 - n_band
+    if n_off_band <= 0:
+        logger.warning('theiler_win too large relative to the (possibly subsampled) '
+                       'skewness sample size')
+        out['mardiaSkew'] = np.nan
+    else:
+        G = X_skew.T @ X_skew # n_skew x n_skew Gram matrix of Mahalanobis inner products
+        G3 = np.power(G, 3, out=G)
+        band_sum = sum(np.trace(G3, offset=k)
+                       for k in range(-theiler_win, theiler_win + 1)
+                       if abs(k) < n_skew)
+        out['mardiaSkew'] = float((G3.sum() - band_sum) / n_off_band)
+
+    return out
+
 def falling_sticks(y: ArrayLike) -> dict:
     """
     Physical falling-sticks model of line-of-sight interaction.
@@ -1168,6 +1390,106 @@ def _fall_prop_case2(case_counts: ArrayLike) -> float:
     if total == 0:
         return np.nan
     return case_counts[1] / total
+
+def oversampling(y: ArrayLike) -> dict:
+    """
+    Detects temporal oversampling relative to a series' own dynamics.
+
+    Implements the oversampling-detection statistic eta (and its downsampling
+    correction) from the 'oversampling' stage of the Chaos Decision Tree
+    Algorithm [1]:
+
+    .. math::
+
+        \\eta = \\frac{\\mathrm{range}(y)}{\\langle |\\Delta y| \\rangle}
+
+    A large eta means consecutive samples are, on average, tiny relative to
+    the full dynamic range the series explores -- i.e., the series is sampled
+    much faster than its own dynamics move, so consecutive points are close
+    to redundant. Toker et al. flag eta > 10 as 'oversampled': this inflates
+    the apparent smoothness/determinism of a series and can bias downstream
+    nonlinear statistics (their motivation: left uncorrected, it distorts
+    their 0-1 test for chaos -- cf. ``zero_one_test``). Their correction is to
+    iteratively halve the sampling rate (keep every second point) until
+    eta <= 10 or fewer than 100 points remain.
+
+    cf. ``zero_one_test`` for the chaos-classification stage of the same
+    pipeline, and ``permutation_entropy``/``surrogate_test`` for its
+    stochasticity-testing stage; this function covers the
+    oversampling-diagnosis stage instead. Note eta is scale- and
+    location-invariant (a ratio of two amplitude-unit quantities), so
+    z-scored or raw y give identical results.
+
+    References
+    ----------
+    .. [1] Toker, D. et al. "A simple method for detecting chaos in nature",
+        Commun. Biol. 3, 11 (2020). DOI: 10.1038/s42003-019-0715-9
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+            - 'eta': The oversampling statistic, range(y)/mean(|diff(y)|).
+            - 'etaRobust': The same ratio with range replaced by a 5th-95th
+              percentile range, since eta's numerator (a global max-min) is a
+              single-outlier-sensitive statistic; etaRobust asks the same
+              oversampling question without letting one extreme point set the
+              scale.
+            - 'numHalvings': The number of times Toker et al.'s halving
+              procedure would downsample y before eta <= 10 (or fewer than 100
+              points would remain) -- a direct, interpretable severity measure.
+            - 'etaAfterDownsampling': The value of eta after applying
+              numHalvings halvings (<=10, unless the series was too short to
+              fully correct).
+    """
+    # Check inputs:
+    y = np.asarray(y, dtype=float).ravel()
+    N = y.size
+    if N < 10:
+        # Data-dependent (series too short to assess sampling adequacy), not a code error.
+        logger.warning('Time series too short to assess oversampling')
+        return {'eta': np.nan, 'etaRobust': np.nan,
+                'numHalvings': np.nan, 'etaAfterDownsampling': np.nan}
+
+    mean_abs_diff = float(np.mean(np.abs(np.diff(y))))
+    if mean_abs_diff == 0:
+        # Data-dependent (constant time series), not a code error.
+        logger.warning('Zero mean absolute difference (constant time series?)')
+        return {'eta': np.nan, 'etaRobust': np.nan,
+                'numHalvings': np.nan, 'etaAfterDownsampling': np.nan}
+
+    out = {}
+
+    # eta and its outlier-robust companion:
+    out['eta'] = float(np.ptp(y) / mean_abs_diff)
+
+    q05, q95 = matlab_quantile(y, [0.05, 0.95])
+    robust_range = q95 - q05
+    out['etaRobust'] = float(robust_range / mean_abs_diff)
+
+    # Iterative halving-downsampling correction (Toker et al., 2020):
+    eta_threshold = 10
+    min_points = 100
+
+    y_ds = y
+    num_halvings = 0
+    eta_curr = out['eta']
+    while eta_curr > eta_threshold and y_ds.size // 2 >= min_points:
+        y_ds = y_ds[::2]
+        num_halvings += 1
+        m_ds = float(np.mean(np.abs(np.diff(y_ds))))
+        if m_ds == 0:
+            break # degenerate downsampled segment -- keep prior eta_curr
+        eta_curr = float(np.ptp(y_ds) / m_ds)
+    out['numHalvings'] = float(num_halvings)
+    out['etaAfterDownsampling'] = float(eta_curr)
+
+    return out
 
 def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] = None) -> float:
     """

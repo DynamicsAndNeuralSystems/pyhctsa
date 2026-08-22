@@ -325,6 +325,15 @@ correlation:
     legacy_name: CO_StickAngles
     ordered_args:
   
+  # joint_non_gaussianity:
+  #   base_name: joint_non_gaussianity
+  #   dependencies:
+  #   configs:
+  #     - {tau: 'ac', m: 2, theiler_win: 1, max_n: 10000, zscore: True}
+  #     - {tau: 'ac', m: 3, theiler_win: 1, max_n: 10000, zscore: True}
+  #   legacy_name: CO_JointNonGaussianity
+  #   ordered_args: ['tau', 'm', 'theiler_win', 'max_n']
+  
   falling_sticks:
     base_name: falling_sticks
     dependencies:
@@ -352,6 +361,14 @@ correlation:
       - {shape: 'rectangle', d: 2, how_to_move: 'pts', zscore: True}
     legacy_name: CO_TranslateShape
     ordered_args: ['shape', 'd', 'how_to_move']
+  
+  oversampling:
+    base_name: oversampling
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: CO_Oversampling
+    ordered_args:
   
   autocorr_shape:
     base_name: autocorr_shape
