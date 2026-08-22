@@ -116,7 +116,6 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     # Estimate smoothed empirical distribution
     # ----------------------------
     xi = np.linspace(np.min(x) - 3 * matlab_bw, np.max(x) + 3 * matlab_bw, 100)
-    # Calculate the Kernel Density Estimate (KDE) for the first angle distribution.
     kde = _make_kde(x)
     f = kde(xi)
     xi = xi[f > 1e-6]  # only keep values greater than 1E-6
@@ -206,7 +205,6 @@ def withinp(x: ArrayLike, p: float = 1.0, mean_or_median: str = 'mean') -> float
     else:
         raise ValueError(f"Unknown setting: '{mean_or_median}'")
 
-    # The withinp statistic:
     return np.divide(np.sum((x >= mu - p * sig) & (x <= mu + p * sig)), N)
 
 def unique(y: ArrayLike) -> float:
@@ -436,31 +434,6 @@ def mean(y: ArrayLike, mean_type: str = 'arithmetic') -> float:
 
     return float(out)
 
-def high_low_mu(y: ArrayLike) -> float:
-    """
-    The high_low_mu statistic.
-
-    The high_low_mu statistic is the ratio of the mean of the data that is above the
-    (global) mean compared to the mean of the data that is below the global mean.
-
-    Parameters
-    ----------
-    y: array-like
-        The input data vector
-
-    Returns
-    --------
-    float
-        The high_low_mu statistic.
-    """
-    y = np.asarray(y)
-    mu = np.mean(y) # mean of data
-    mhi = np.mean(y[y > mu]) # mean of data above the mean
-    mlo = np.mean(y[y < mu]) # mean of data below the mean
-    out = np.divide((mhi-mu), (mu-mlo)) # ratio of the differences
-
-    return out
-
 def fit_mle(y: ArrayLike, fit_what: str = 'gaussian') -> Union[Dict[str, float], float]:
     """
     Maximum likelihood distribution fit to data.
@@ -542,9 +515,7 @@ def cv(x: ArrayLike, k: int = 1) -> float:
     """
     if not isinstance(k, int) or k < 0:
         logger.warning('k should probably be a positive integer')
-        # carry on with just this warning, though
-    
-    # Compute the coefficient of variation (of order k) of the data
+
     return (np.std(x, ddof=1) ** k) / (np.mean(x) ** k)
 
 def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
@@ -830,17 +801,14 @@ def outlier_test(y: ArrayLike, p: float = 2,
         Otherwise, returns a dictionary.
     """
 
-    # mean of the middle (100-2*p)% of the data
     y = np.array(y)
     lower_bound, upper_bound = matlab_quantile(y, [p / 100, (100 - p) / 100])
-    
+
     middle_portion = y[(y > lower_bound) & (y < upper_bound)]
-    
-    # Mean of the middle (100-2*p)% of the data
+
+    # Mean and std of the middle (100-2*p)% of the data
     mean_middle = np.mean(middle_portion)
-    
-    # Std of the middle (100-2*p)% of the data
-    std_middle = np.std(middle_portion, ddof=1) / np.std(y, ddof=1)  # [although std(y) should be 1]
+    std_middle = np.std(middle_portion, ddof=1) / np.std(y, ddof=1)
 
     out = {'mean': mean_middle, 'std': std_middle}
 

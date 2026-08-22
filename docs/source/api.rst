@@ -54,7 +54,9 @@ Correlation
    pyhctsa.operations.correlation.compare_min_ami
    pyhctsa.operations.correlation.histogram_ami
    pyhctsa.operations.correlation.stick_angles
+   pyhctsa.operations.correlation.falling_sticks
    pyhctsa.operations.correlation.nonlinear_autocorr
+   pyhctsa.operations.correlation.autocorr_x2_shape
    pyhctsa.operations.correlation.partial_autocorr
    pyhctsa.operations.correlation.embed2_dist
    pyhctsa.operations.correlation.embed2_basic

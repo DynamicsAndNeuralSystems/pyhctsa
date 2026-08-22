@@ -73,6 +73,15 @@ correlation:
       - {tau: !range [1, 40], zscore: True}
     legacy_name: CO_AutoCorr
     ordered_args: ['tau']
+
+  autocorr_x2_shape:
+    base_name: acx2_shape
+    dependencies:
+    configs:
+      - {max_lag: 15, exclude: ['maxLag'], zscore: True}
+      - {max_lag: 'double_drown', zscore: True}
+    legacy_name: CO_AutoCorrX2Shape
+    ordered_args: ['max_lag']
   
   add_noise:
     base_name: add_noise
@@ -314,6 +323,14 @@ correlation:
     configs:
       - {zscore: True}
     legacy_name: CO_StickAngles
+    ordered_args:
+  
+  falling_sticks:
+    base_name: falling_sticks
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: CO_FallingSticks
     ordered_args:
   
   first_crossing:

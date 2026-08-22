@@ -760,11 +760,11 @@ def stick_angles(y: ArrayLike) -> dict:
 
     # Initialise output dictionary
     out = {}
-    out['std_p'] = np.nanstd(angles[0], ddof=1) 
+    # std_p/std_n dropped: r=0.98 with pos_neg_asymmetry's volPos/volNeg on
+    # real EEG data, which measures regime-conditional volatility more directly.
     out['mean_p'] = np.nanmean(angles[0]) 
     out['median_p'] = np.nanmedian(angles[0])
 
-    out['std_n'] = np.nanstd(angles[1], ddof=1)
     out['mean_n'] = np.nanmean(angles[1])
     out['median_n'] = np.nanmedian(angles[1])
 
@@ -869,37 +869,36 @@ def stick_angles(y: ArrayLike) -> dict:
     
     # All angles
     
+    # statav2_all_s/statav3_all_s/statav4_all_s dropped: mutually r=0.97-0.98
+    # with statav5_all_s (and each other) on real EEG data, so only one
+    # representative of the StatAv-spread-of-all-angles family is kept.
     # StatAv2
-    out['statav2_all_m'], out['statav2_all_s'] = _sub_statav(zallAngles, 2)
+    out['statav2_all_m'], _ = _sub_statav(zallAngles, 2)
     # StatAv3
-    out['statav3_all_m'], out['statav3_all_s'] = _sub_statav(zallAngles, 3)
+    out['statav3_all_m'], _ = _sub_statav(zallAngles, 3)
     # StatAv4
-    out['statav4_all_m'], out['statav4_all_s'] = _sub_statav(zallAngles, 4)
+    out['statav4_all_m'], _ = _sub_statav(zallAngles, 4)
     # StatAv5
     out['statav5_all_m'], out['statav5_all_s'] = _sub_statav(zallAngles, 5)
     
     # correlations? 
+    # Note: ac2_p/ac2_n/ac2_all dropped (r=0.96-0.99 with the corresponding
+    # ac1_*), and tau_all/ac1_all dropped (each r=0.95-0.97 with its own p/n
+    # split) -- keeping the p/n split (rather than the pooled 'all') preserves
+    # the asymmetry signal that's the actual point of this feature.
     if len(zangles[0]) > 0:
         out['tau_p'] = first_crossing(zangles[0], 'ac', 0, 'continuous')
         out['ac1_p'] = autocorr(zangles[0], 1, 'Fourier')[0]
-        out['ac2_p'] = autocorr(zangles[0], 2, 'Fourier')[0]
     else:
         out['tau_p'] = np.nan
         out['ac1_p'] = np.nan
-        out['ac2_p'] = np.nan
     
     if len(zangles[1]) > 0:
         out['tau_n'] = first_crossing(zangles[1], 'ac', 0, 'continuous')
         out['ac1_n'] = autocorr(zangles[1], 1, 'Fourier')[0]
-        out['ac2_n'] = autocorr(zangles[1], 2, 'Fourier')[0]
     else:
         out['tau_n'] = np.nan
         out['ac1_n'] = np.nan
-        out['ac2_n'] = np.nan
-    
-    out['tau_all'] = first_crossing(zallAngles, 'ac', 0, 'continuous')
-    out['ac1_all'] = autocorr(zallAngles, 1, 'Fourier')[0]
-    out['ac2_all'] = autocorr(zallAngles, 2, 'Fourier')[0]
 
     # What does the distribution look like?
     # Some quantiles and moments
@@ -950,6 +949,225 @@ def _sub_statav(x: ArrayLike, n: int) -> tuple:
         statavstd = np.std(np.std(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
 
     return statavmean, statavstd
+
+def falling_sticks(y: ArrayLike) -> dict:
+    """
+    Physical falling-sticks model of line-of-sight interaction.
+
+    As in stick_angles, each time-series value is treated as a rigid stick
+    standing on the zero baseline, with sticks grouped by sign into a
+    'positive' set (protruding up from the zero level) and a 'negative' set
+    (protruding down). Here, sticks are toppled: each stick rotates about its
+    base towards later same-sign sticks and stops at whichever angle first
+    brings it into contact with one -- either its trunk striking the side of
+    a taller later stick, or its underside striking the tip of a shorter one
+    it topples clean over -- or else it falls flat (angle = pi/2) if no
+    later same-sign stick lies within reach (a stick of height h can only
+    ever reach as far as horizontal distance h).
+
+    This differs from stick_angles, which only ever compares a stick to
+    its immediate same-sign successor via the slope between them.
+    falling_sticks instead allows a stick to skip over intervening sticks
+    to hit a farther one, so it is sensitive to range-dependent local-
+    extremum structure (e.g. a tall stick toppling clean over an
+    intervening short one) that the purely local (i, i+1) comparison cannot
+    see.
+
+    Adapted from a Python 'FALLstick' reference implementation by Eugene Chon
+    <eugenechon04@gmail.com>.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (assumed z-scored: the sign split is around the
+        mean, matching stick_angles's convention).
+
+    Returns
+    -------
+    dict
+        Statistics on the resulting fall-angle sequence (location, spread,
+        shape, persistence), on the asymmetry between the positive and
+        negative branches, and on the three collision types a fall can end in
+        -- falling flat, hitting the immediately next stick, or skipping over
+        one or more sticks to hit a farther one -- and the two ways a hit can
+        occur -- trunk-strike (case 1) vs. tip-strike/topple-over (case 2).
+    """
+    y = np.asarray(y).flatten()
+
+    ix_pos = np.where(y >= 0)[0]
+    ix_neg = np.where(y < 0)[0]
+
+    angles_pos, colour_pos, case_pos = _fall_branch(ix_pos, y)
+    angles_neg, colour_neg, case_neg = _fall_branch(ix_neg, y)
+
+    all_angles = np.concatenate((angles_pos, angles_neg))
+
+    out = {}
+
+    # Location and spread of the fall-angle distribution
+    out['mean_p'] = _fall_safe_stat(np.mean, angles_pos)
+    out['median_p'] = _fall_safe_stat(np.median, angles_pos)
+    out['mean_n'] = _fall_safe_stat(np.mean, angles_neg)
+    out['median_n'] = _fall_safe_stat(np.median, angles_neg)
+
+    out['mean_all'] = _fall_safe_stat(np.mean, all_angles)
+    out['median_all'] = _fall_safe_stat(np.median, all_angles)
+    out['std_all'] = _fall_safe_stat(
+        lambda x: np.std(x, ddof=1) if len(x) > 1 else 0.0, all_angles)
+
+    # Asymmetry between the positive- and negative-branch fall angles:
+    if not np.isnan(out['mean_p']) and not np.isnan(out['mean_n']):
+        out['diff_pn'] = out['mean_p'] - out['mean_n']
+    else:
+        out['diff_pn'] = np.nan
+
+    # Collision-type proportions: flat / immediate-hit / skip-hit
+    out['propFlat_p'] = _fall_prop_first(colour_pos)
+    out['propFlat_n'] = _fall_prop_first(colour_neg)
+    out['propFlat_all'] = _fall_prop_first(colour_pos + colour_neg)
+
+    out['propSkip_p'] = _fall_prop_skip(colour_pos)
+    out['propSkip_n'] = _fall_prop_skip(colour_neg)
+    out['propSkip_all'] = _fall_prop_skip(colour_pos + colour_neg)
+
+    # Hit-type proportions: trunk-strike (case 1) vs. tip-strike/topple-over (case 2)
+    out['propCase2_p'] = _fall_prop_case2(case_pos)
+    out['propCase2_n'] = _fall_prop_case2(case_neg)
+    out['propCase2_all'] = _fall_prop_case2(case_pos + case_neg)
+
+    # Distribution shape
+    # (The 90th percentile is omitted: across two independent redundancy-check
+    # datasets it landed exactly on the pi/2 flat-fall spike every time, since
+    # most series have >=10% flat falls -- it carries no information.)
+    if len(all_angles) >= 2:
+        out['skewness_all'] = skew(all_angles)
+        out['kurtosis_all'] = kurtosis(all_angles, fisher=False)
+        out['q10_all'] = np.quantile(all_angles, 0.1, method='hazen')
+    else:
+        out['skewness_all'] = np.nan
+        out['kurtosis_all'] = np.nan
+        out['q10_all'] = np.nan
+
+    # Persistence of the fall-angle sequence
+    if len(angles_pos) >= 2 and np.std(angles_pos, ddof=1) > 0:
+        z_angles_pos = z_score(angles_pos)
+        out['tau_p'] = first_crossing(z_angles_pos, 'ac', 0, 'continuous')
+        out['ac1_p'] = autocorr(z_angles_pos, 1, 'Fourier')[0]
+    else:
+        out['tau_p'] = np.nan
+        out['ac1_p'] = np.nan
+
+    if len(angles_neg) >= 2 and np.std(angles_neg, ddof=1) > 0:
+        z_angles_neg = z_score(angles_neg)
+        out['tau_n'] = first_crossing(z_angles_neg, 'ac', 0, 'continuous')
+        out['ac1_n'] = autocorr(z_angles_neg, 1, 'Fourier')[0]
+    else:
+        out['tau_n'] = np.nan
+        out['ac1_n'] = np.nan
+
+    return out
+
+def _fall_branch(ix: ArrayLike, y: ArrayLike) -> tuple:
+    # Topples each stick in a same-sign index list ix towards later sticks in
+    # the same list, and returns:
+    #   angles       -- fall angle for each processed stick (all but the last,
+    #                    which trivially always falls flat and so contributes
+    #                    no angle of its own)
+    #   colour_counts -- [num_flat, num_immediate_hit, num_skip_hit], summing to
+    #                    len(ix) (the forced-flat last stick included)
+    #   case_counts   -- [num_case1, num_case2], summing to len(ix) (the
+    #                    forced-flat last stick counted as case 1)
+    nj = len(ix)
+    if nj == 0:
+        # No sticks at all in this branch (e.g. an all-positive or
+        # all-negative series): nothing falls, so there is no phantom
+        # 'last bar' to count as a flat fall either.
+        return np.zeros(0), np.array([0, 0, 0]), np.array([0, 0])
+    if nj == 1:
+        # the lone stick always falls flat
+        return np.zeros(0), np.array([1, 0, 0]), np.array([1, 0])
+
+    angles = np.zeros(nj - 1)
+    colour_flag = np.zeros(nj - 1, dtype=int) # 0 = flat, 1 = immediate hit, 2 = skip hit
+    case_flag = np.zeros(nj - 1, dtype=int) # 1 or 2
+
+    for i in range(nj - 1):
+        x1 = ix[i]
+        y1 = y[x1]
+        height1 = abs(y1)
+
+        min_angle = np.pi/2 # default: falls flat
+        fall_k = i # lands on itself if flat
+        min_case1 = True
+
+        if height1 > 0: # a zero-height stick is already lying flat
+            for k in range(i + 1, nj):
+                x2 = ix[k]
+                y2 = y[x2]
+                dx = x2 - x1 # a stick of height1 can reach at most height1
+                if dx > height1:
+                    break # all later sticks are farther still -- out of reach
+
+                # Case 1 (trunk-strike): stick 1's tip hits the side of stick
+                # 2. Case 2 (tip-strike): stick 1 is taller than stick 2 and
+                # would clear its top before reaching dx, so instead its
+                # underside comes down onto stick 2's tip.
+                is_case1 = True
+                if abs(y1) > abs(y2) and height1 * np.sin(np.arccos(y2 / y1)) > dx:
+                    is_case1 = False
+
+                if is_case1:
+                    angle = np.arcsin(dx / height1)
+                else:
+                    angle = np.arctan(dx / abs(y2))
+                angle = min(angle, np.pi - angle)
+
+                if angle < min_angle:
+                    min_angle = angle
+                    fall_k = k
+                    min_case1 = is_case1
+
+        angles[i] = min_angle
+        if fall_k == i:
+            colour_flag[i] = 0
+        elif fall_k == i + 1:
+            colour_flag[i] = 1
+        else:
+            colour_flag[i] = 2
+        case_flag[i] = 2 - int(min_case1) # True (case 1) -> 1, False (case 2) -> 2
+
+    colour_counts = np.array([np.sum(colour_flag == 0) + 1, np.sum(colour_flag == 1),
+                              np.sum(colour_flag == 2)])
+    case_counts = np.array([np.sum(case_flag == 1) + 1, np.sum(case_flag == 2)])
+
+    return angles, colour_counts, case_counts
+
+def _fall_safe_stat(f, x: ArrayLike):
+    # helper function
+    if len(x) == 0:
+        return np.nan
+    return f(x)
+
+def _fall_prop_first(colour_counts: ArrayLike) -> float:
+    # helper function
+    total = np.sum(colour_counts)
+    if total == 0:
+        return np.nan
+    return colour_counts[0] / total
+
+def _fall_prop_skip(colour_counts: ArrayLike) -> float:
+    # helper function
+    non_flat = colour_counts[1] + colour_counts[2]
+    if non_flat == 0:
+        return np.nan
+    return colour_counts[2] / non_flat
+
+def _fall_prop_case2(case_counts: ArrayLike) -> float:
+    # helper function
+    total = np.sum(case_counts)
+    if total == 0:
+        return np.nan
+    return case_counts[1] / total
 
 def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] = None) -> float:
     """
@@ -1023,6 +1241,236 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
         out = np.mean(nlac)
 
     return float(out)
+
+def autocorr_x2(y: ArrayLike, taus: ArrayLike = 1,
+                what_direction: str = 'forward') -> np.ndarray:
+    """
+    Asymmetric squared cross-correlation of a time series.
+
+    Computes a lag-resolved generalization of the 'leverage effect' correlation
+    used to detect asymmetric volatility feedback [1]_: instead of the usual
+    autocorrelation :math:`\\langle x_t\\, x_{t+\\tau} \\rangle`, one term is
+    squared:
+
+    .. math::
+
+        \\text{forward:}\\quad \\langle x_t\\, x_{t+\\tau}^2 \\rangle
+
+        \\text{backward:}\\quad \\langle x_t^2\\, x_{t+\\tau} \\rangle
+
+    The forward statistic asks whether the (signed) value now predicts the
+    squared (unsigned/energy) value later; the backward statistic asks whether
+    the squared value now predicts the (signed) value later. For time-reversible,
+    linear processes the two are equal (up to sampling noise); a systematic
+    difference between them is a signature of nonlinear, time-irreversible
+    structure such as volatility clustering with a leverage (asymmetric)
+    feedback.
+
+    Note that ``nonlinear_autocorr(y, [0, tau], False)`` and
+    ``nonlinear_autocorr(y, [tau, tau], False)`` already compute the forward and
+    backward statistics (respectively) at a single lag; this function computes
+    both directions efficiently across a whole vector of lags.
+
+    References
+    ----------
+    .. [1] J.-P. Bouchaud, A. Matacz and M. Potters, "Leverage effect in financial
+        markets: The retarded volatility model", Phys. Rev. Lett. 87, 228701 (2001)
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (should be z-scored: zero mean, unit variance).
+
+    taus : array-like of int, optional
+        A vector of (non-negative, integer) time lags to compute the statistic at.
+        ``tau = 0`` reduces to the skewness, ``mean(y**3)``, for both directions.
+        Default is ``1``.
+
+    what_direction : {"forward", "backward"}, optional
+        Which direction to compute.
+
+        - ``"forward"``: :math:`\\langle x_t\\, x_{t+\\tau}^2 \\rangle`
+        - ``"backward"``: :math:`\\langle x_t^2\\, x_{t+\\tau} \\rangle`
+
+        Default is ``'forward'``.
+
+    Returns
+    -------
+    array
+        The requested statistic at each lag (same length as ``taus``).
+    """
+    y = np.asarray(y)
+    taus = np.atleast_1d(np.asarray(taus))
+    N = len(y)
+
+    if np.max(taus) > N - 1:
+        logger.warning(f"Time lag {np.max(taus)} is too long for time-series length {N}.")
+    if np.any(taus < 0):
+        raise ValueError("taus must be non-negative (this is an asymmetric statistic -- "
+                         "use what_direction to choose the direction).")
+    if what_direction not in ('forward', 'backward'):
+        raise ValueError(f"Unknown what_direction '{what_direction}' "
+                         "(should be 'forward' or 'backward').")
+
+    out = np.zeros(len(taus))
+    for i, tau in enumerate(taus):
+        tau = int(tau)
+        y_later = y[tau:N]     # x_{t+tau}
+        y_earlier = y[:N-tau]  # x_t
+        if what_direction == 'forward':
+            # <x_t.x_{t+tau}^2>
+            out[i] = np.mean(y_earlier * y_later**2)
+        else:
+            # <x_t^2.x_{t+tau}>
+            out[i] = np.mean(y_earlier**2 * y_later)
+
+    return out
+
+def autocorr_x2_shape(y: ArrayLike, max_lag: Union[int, str] = 'double_drown') -> dict:
+    """
+    Shape of the time-reversibility profile of a time series.
+
+    :func:`autocorr_x2` computes two asymmetric, 'leverage'-type lag-profiles:
+
+    .. math::
+
+        \\text{forward}(\\tau) = \\langle x_t\\, x_{t+\\tau}^2 \\rangle
+        \\quad\\text{(signed value now, energy later)}
+
+        \\text{backward}(\\tau) = \\langle x_t^2\\, x_{t+\\tau} \\rangle
+        \\quad\\text{(energy now, signed value later)}
+
+    For a time-reversible process these coincide at every lag (any shared linear
+    correlation structure contributes equally to both); a systematic difference,
+    :math:`\\text{diff}(\\tau) = \\text{forward}(\\tau) - \\text{backward}(\\tau)`,
+    is therefore a lag-resolved time-irreversibility statistic, generalizing the
+    single-lag ``trev``/``tc3``-style statistics to a full profile, cf. the
+    leverage-effect correlation function of [1]_.
+
+    This function characterizes the *shape* of :math:`\\text{diff}(\\tau)` across
+    lags -- its decay, persistence, and extrema -- mirroring how
+    :func:`autocorr_shape` characterizes the shape of the ordinary ACF. (An
+    earlier version of this function instead characterized the forward and
+    backward profiles' shapes separately, but on 300 real time series from
+    ``INP_Empirical1000.mat`` their shape descriptors were correlated at
+    r = 0.84-0.97 with each other -- i.e., overwhelmingly redundant, since both
+    profiles inherit most of their shape from whatever ordinary linear
+    correlation the series has. The difference profile cancels that shared
+    component and isolates the genuinely asymmetric/nonlinear structure.)
+
+    References
+    ----------
+    .. [1] J.-P. Bouchaud, A. Matacz and M. Potters, "Leverage effect in financial
+        markets: The retarded volatility model", Phys. Rev. Lett. 87, 228701 (2001)
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (should be z-scored: zero mean, unit variance).
+
+    max_lag : int or str, optional
+        The maximum lag to compute the profile up to.
+
+        - If an ``int``, a positive maximum lag.
+        - If ``"double_drown"``, uses twice the first zero-crossing of the
+          ordinary (linear) autocorrelation function (cf. the ``'double_drown'``
+          option of :func:`autocorr_shape`), bounded to lie in
+          ``[10, floor(N/4)]``.
+
+        Default is ``'double_drown'``.
+
+    Returns
+    -------
+    dict
+        Statistics on the shape of the forward-minus-backward difference profile,
+        including its lag-1 value, basic summaries, centroid decay timescale,
+        self-autocorrelation, local extrema, first sign change, the correlation
+        between the forward and backward profiles, and the maximum lag used.
+        All fields are NaN if the profile is too short or ill-defined.
+    """
+    y = np.asarray(y)
+    N = len(y)
+
+    fields = ['diff1', 'sumdiff', 'meandiff', 'meanabsdiff', 'rmsdiff', 'centroiddiff',
+              'ac1diff', 'nminima', 'nmaxima', 'pextrema', 'firstsignchangediff',
+              'corrfwdbwd', 'maxLag']
+
+    if isinstance(max_lag, str):
+        if max_lag == 'double_drown':
+            tau0 = first_crossing(y, 'ac', 0, 'discrete')
+            if np.isnan(tau0) or tau0 == 0:
+                tau0 = 10  # fallback for pathological/near-constant series
+            max_lag = min(int(np.floor(N / 4)), max(10, 2 * int(tau0)))
+        else:
+            raise ValueError(f"Unknown max_lag setting: '{max_lag}'")
+
+    if max_lag < 5:
+        # Too short a series/profile to say anything meaningful
+        return {f: np.nan for f in fields}
+
+    # Compute the forward and backward lag-profiles, and their difference:
+    taus = np.arange(1, max_lag + 1)
+    g_fwd = autocorr_x2(y, taus, 'forward')
+    g_bwd = autocorr_x2(y, taus, 'backward')
+
+    if np.any(np.isnan(g_fwd)) or np.any(np.isnan(g_bwd)):
+        return {f: np.nan for f in fields}
+
+    diff_profile = g_fwd - g_bwd
+
+    out = {}
+
+    # Lag-1 difference: the single-lag time-irreversibility statistic, comparable
+    # to trev. (Note: the raw lag-1 and lag-0 values themselves -- g_fwd[0],
+    # g_bwd[0], and mean(y**3) -- are not included as outputs here since they
+    # duplicate existing operations exactly: ac_nl_0_1, ac_nl_1_1, and the third
+    # moment, respectively.)
+    out['diff1'] = diff_profile[0]
+
+    # Basic stats on the difference profile
+    out['sumdiff'] = np.sum(diff_profile)
+    out['meandiff'] = np.mean(diff_profile)
+    out['meanabsdiff'] = np.mean(np.abs(diff_profile))
+    out['rmsdiff'] = np.sqrt(np.mean(diff_profile**2))
+
+    # Characteristic (centroid) decay timescale of the difference profile -- how
+    # many lags the time-irreversibility signature persists over. Centroid-based
+    # (rather than an exponential fit) to remain well-defined for non-monotonic
+    # profiles.
+    sum_abs = np.sum(np.abs(diff_profile))
+    if sum_abs > 0:
+        out['centroiddiff'] = np.sum(taus * np.abs(diff_profile)) / sum_abs
+    else:
+        out['centroiddiff'] = np.nan
+
+    # Autocorrelation of the difference profile (smoothness/persistence of the
+    # irreversibility signature itself), cf. the ac1 field of autocorr_shape
+    out['ac1diff'] = autocorr(diff_profile, 1, 'Fourier')[0]
+
+    # Local extrema of the difference profile, cf. autocorr_shape
+    ddiff = np.diff(diff_profile)
+    dddiff = np.diff(ddiff)
+    extrr = sign_change(ddiff, 1)
+    sdsp = dddiff[extrr]
+    out['nminima'] = np.sum(sdsp > 0)
+    out['nmaxima'] = np.sum(sdsp < 0)
+    out['pextrema'] = len(sdsp) / max_lag
+
+    # How quickly the time-irreversibility signature changes sign
+    sign_change_idx = np.flatnonzero(np.sign(diff_profile[:-1]) != np.sign(diff_profile[1:]))
+    if sign_change_idx.size == 0:
+        out['firstsignchangediff'] = max_lag  # no sign change within the window measured
+    else:
+        # convert from 0-based index space to 1-based lag space
+        out['firstsignchangediff'] = int(sign_change_idx[0]) + 1
+
+    # Shape similarity of the two profiles (a different angle from their
+    # difference: do they have a similar shape regardless of overall magnitude?)
+    out['corrfwdbwd'] = np.corrcoef(g_fwd, g_bwd)[0, 1]
+
+    out['maxLag'] = max_lag  # record how far the profile was measured
+
+    return out
 
 def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'ols') -> dict:
     """
