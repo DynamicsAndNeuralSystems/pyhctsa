@@ -1120,3 +1120,21 @@ def _ml_randperm(n: int, rng: np.random.RandomState) -> np.ndarray:
     return np.argsort(rng.random_sample(n), kind='stable') + 1
 
 
+def _ml_randperm_k(n: int, k: int, rng: np.random.RandomState) -> np.ndarray:
+    """
+    MATLAB's ``randperm(n, k)``: ``k`` of the values ``1, ..., n``, drawn
+    without replacement.
+    """
+    r = rng.random_sample(k)
+    pool = np.arange(1, n + 1)
+    out = np.empty(k, dtype=np.int64)
+    size = n
+    for i in range(k):
+        j = int(r[i] * size)
+        out[i] = pool[j]
+        pool[j] = pool[size - 1]
+        size -= 1
+
+    return out
+
+

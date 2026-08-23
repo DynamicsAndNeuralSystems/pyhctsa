@@ -1837,6 +1837,15 @@ nonlinearity:
     legacy_name: NL_delaytime
     ordered_args: ['max_delay', 'past']
 
+  evt_local_dim:
+    base_name: evt_local_dim
+    dependencies:
+    configs:
+      - {tau: 'ac', m: 3, q: 0.98, theiler_win: 0.01, n_poles: 200, m_order: 5, max_n: 10000, zscore: True}
+      - {tau: 'mi', m: 5, q: 0.98, theiler_win: 0.01, n_poles: 200, m_order: 5, max_n: 10000, zscore: True}
+    legacy_name: NL_EVTLocalDim
+    ordered_args: ['tau', 'm', 'q', 'theiler_win', 'n_poles', 'm_order', 'max_n']
+
 changepoint:
   stepdetect:
     base_name: stepdetect

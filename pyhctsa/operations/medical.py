@@ -73,6 +73,15 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
     out['SD1'] = 1/np.sqrt(2) * sd_diff * 1000
     out['SD2'] = np.sqrt(2 * np.var(x, ddof=1) - (1/2) * sd_diff**2) * 1000
 
+    #% CVI: Cardiac Vagal Index, derived from the Poincare plot
+    # % cf. Toichi et al., "A new method of assessing cardiac autonomic function
+    # % and its comparison with spectral analysis and coefficient of variation
+    # % of R-R interval", J. Auton. Nerv. Syst. 62(1-2) 79 (1997)
+    # % (CSI = SD2/SD1, the companion Cardiac Sympathetic Index, was tested but
+    # % found highly redundant (r > 0.95 on 2 independent datasets) with
+    # % existing hctsa features and was not included.)
+    out['CVI'] = np.log10(out['SD1'] * out['SD2'] * 16)
+
     return out
 
 def hrv_classic(y: ArrayLike) -> dict:

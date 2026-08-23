@@ -8,7 +8,9 @@ logger = logging.getLogger('pyhctsa')
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 
-from ..operations.model_fit import residual_analysis, _ml_rng
+from scipy.spatial.distance import cdist
+
+from ..operations.model_fit import residual_analysis, _ml_rng, _ml_randperm_k
 from ..operations.correlation import first_crossing, autocorr, _resolve_time_delay
 from ..operations.information import first_min
 from ..operations.scaling import _round
@@ -1222,5 +1224,216 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float] = 0.2, past: int = 1,
     out['stdtau'] = np.std(tau, ddof=1)
     out['mintau'] = np.min(tau)
     out['maxtau'] = np.max(tau)
+
+    return out
+
+
+_EVT_POLE_BLOCK = 64  # poles per distance-matrix block
+
+def _evt_quantile(x: np.ndarray, p: float) -> float:
+    """The `p`-quantile of `x`, from the two order statistics it interpolates."""
+    n = x.size
+    r = (100.0*p/100.0)*n
+    k = np.floor(r + 0.5)
+    kp1 = k + 1
+    r = r - k
+
+    k = 1 if (k < 1 or np.isnan(k)) else int(k)
+    kp1 = min(int(kp1), n)
+    xs = np.partition(x, (k - 1, kp1 - 1))
+    xk, xkp1 = xs[k - 1], xs[kp1 - 1]
+
+    if xk == xkp1 or r == -0.5:
+        return xk
+
+    return (0.5 + r)*xkp1 + (0.5 - r)*xk
+
+def _omitnan_mean(x: np.ndarray) -> float:
+    x = x[~np.isnan(x)]
+
+    return float(np.mean(x)) if x.size > 0 else np.nan
+
+def _omitnan_std(x: np.ndarray) -> float:
+    x = x[~np.isnan(x)]
+    if x.size == 0:
+        return np.nan
+
+    return float(np.std(x, ddof=1)) if x.size > 1 else 0.0
+
+def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
+                  q: float = 0.98, theiler_win: Union[int, float] = 0.01,
+                  n_poles: int = 200, m_order: int = 5, max_n: int = 10000,
+                  random_seed: Union[int, None] = 0) -> dict:
+    """
+    Extreme value theory local dimension and persistence of the attractor.
+
+    Time-delay embeds the series and, for a sample of reference points
+    ("poles") on the reconstructed orbit, treats close returns of the orbit
+    to each pole as extreme events: g_i = -log(||Y_i - pole||) is large
+    exactly when the orbit passes close to the pole. Extreme value theory
+    applied to this observable gives two local quantities per pole
+    (Freitas, Freitas & Todd 2010; Lucarini et al., "Extremes and
+    Recurrence in Dynamical Systems", 2016; Faranda, Messori & Yiou 2017):
+
+      - a local dimension d(pole): under the Freitas-Freitas-Todd theorem,
+        the Gumbel-law scale parameter of the extreme value law for g_i
+        equals the local dimension of the attractor at that pole exactly
+        (Faranda, Freitas, Guiraud & Vaienti 2014, Props 1-2). In practice
+        this is estimated by a peaks-over-threshold fit: take the
+        exceedances of g_i above a high quantile q, and set
+        d(pole) = 1/mean(exceedances) (the reciprocal of the exponential
+        MLE scale, i.e. the GPD fit with shape fixed at its ansatz-implied
+        value of 0 -- appropriate here because g_i = -log(distance) is
+        unbounded above, putting it in the Gumbel/exponential-tail domain).
+      - a persistence theta(pole) (the "extremal index" of g_i at that
+        pole): whether close returns to the pole arrive as isolated events
+        (theta near 1) or cluster into runs where the orbit lingers nearby
+        (theta << 1, i.e. long average residence time near that point of
+        phase space -- 1/theta is the average cluster/sojourn size).
+        Estimated with the O'Brien order-m estimator (Caby, Faranda,
+        Vaienti & Yiou, J. Stat. Phys. 2019, Eqs 19/21), which that paper's
+        own comparison against the alternative Suveges (2007) likelihood
+        estimator found more reliable for this observable, particularly
+        near near-periodic (sticky) poles.
+
+    This differs mechanistically from the other attractor-dimension
+    operations (fractal_dimensions' nearest-neighbour-moment generalized
+    dimensions): those pool all pairwise distances/neighbour ranks into one
+    global scaling exponent, whereas this estimates a genuinely *local*
+    dimension and persistence separately at each of several poles and
+    reports how they're distributed (and covary) across the attractor --
+    capturing multifractal-style local heterogeneity that a single global
+    exponent cannot.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (assumed z-scored).
+    tau : int or str, optional
+        Embedding time delay ('ac', the first zero-crossing of the
+        autocorrelation function, or 'mi', the first minimum of the
+        automutual information, or an integer). Default: 'ac'.
+    m : int, optional
+        The embedding dimension. Default: 3.
+    q : float, optional
+        The quantile level defining "extreme" close returns: exceedances of
+        g_i = -log(distance) above its q-quantile are treated as events.
+        Default: 0.98, i.e. the closest 2% of returns to each pole.
+    theiler_win : int or float, optional
+        Theiler window excluding temporally-correlated neighbours of each
+        pole from being treated as (trivially close) returns (a proportion
+        of the embedded length if in (0,1)). Default: 0.01.
+    n_poles : int, optional
+        Number of reference points (poles) to sample from the embedded
+        orbit (cost is O(n_poles*Nemb)). Default: 200.
+    m_order : int, optional
+        The order m of the O'Brien persistence estimator -- how many steps
+        ahead to check for a further exceedance before counting a given
+        exceedance as "isolated". Default: 5, following Caby et al.
+    max_n : int, optional
+        Maximum number of samples to consider; longer series are cropped to
+        their first max_n points. Default: 10000.
+    random_seed : int or None, optional
+        Seed for the Mersenne Twister used to sample the poles. ``None``
+        leaves the stream alone. Default: 0.
+
+    Returns
+    -------
+    dict
+        Mean and standard deviation of the local dimension and persistence
+        across poles, their correlation across poles, and the proportion of
+        poles that yielded a valid estimate (too few exceedances otherwise
+        -- a diagnostic of whether q/n_poles/series length were adequate,
+        not a property of the dynamics itself).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+
+    if N > max_n:
+        y = y[:max_n]
+
+    # Embed the signal
+    tau = _resolve_time_delay(y, tau)
+    if np.isnan(tau):
+        logger.warning('Embedding failed')
+        return np.nan
+    try:
+        Y = time_delay_embed(y, m, int(tau))
+    except ValueError:
+        logger.warning('Embedding failed')
+        return np.nan
+    n_emb = Y.shape[0]
+
+    if 0 < theiler_win < 1:  # specify a proportion
+        theiler_win = _round(theiler_win * n_emb)
+    theiler_win = int(theiler_win)
+
+    min_exceed = 15  # minimum exceedances required for a pole's estimate to be trusted
+    min_n_emb = np.ceil(min_exceed/(1 - q)) + 2*theiler_win + m_order + 1
+    if n_emb < max(min_n_emb, 100):
+        return np.nan
+
+    # Sample poles (reference points) from the embedded orbit
+    rng = np.random.RandomState() if random_seed is None else _ml_rng(random_seed)
+    n_poles = min(n_poles, n_emb)
+    pole_idx = _ml_randperm_k(n_emb, n_poles, rng) - 1
+
+    local_dim = np.full(n_poles, np.nan)
+    theta = np.full(n_poles, np.nan)
+
+    min_valid = min_exceed/(1 - q)
+    for block in range(0, n_poles, _EVT_POLE_BLOCK):
+        idx = pole_idx[block:block + _EVT_POLE_BLOCK]
+        dists = cdist(Y[idx, :], Y)
+        for b, j in enumerate(idx):
+            # Exclude the Theiler window around this pole, keeping the rest of
+            # the orbit in its original chronological order:
+            lo, hi = max(0, j - theiler_win), min(n_emb - 1, j + theiler_win)
+            dist_j = np.concatenate((dists[b, :lo], dists[b, hi+1:]))
+
+            is_valid = dist_j > 0  # excludes exact duplicate embedded points
+            if np.count_nonzero(is_valid) < min_valid:
+                continue
+            g = -np.log(dist_j[is_valid])  # chronological order preserved
+
+            u = _evt_quantile(g, q)
+            E = g > u  # exceedance indicator, in chronological order
+            n_u = np.count_nonzero(E)
+            if n_u < min_exceed:
+                continue
+
+            p = block + b
+            # Local dimension: reciprocal of the mean exceedance (exponential/GPD-
+            # with-shape-0 scale MLE), per the Freitas-Freitas-Todd theorem:
+            local_dim[p] = 1/np.mean(g[E] - u)
+
+            # Persistence: O'Brien order-m_order estimator (Caby et al. 2019, Eq 19),
+            # vectorized via a cumulative sum of the exceedance indicator.
+            n_tot = len(E)
+            if n_tot > m_order + 1:
+                cum_e = np.concatenate(([0], np.cumsum(E)))
+                n_valid = n_tot - m_order
+                future_sum = cum_e[m_order+1:m_order+1+n_valid] - cum_e[1:1+n_valid]
+                is_isolated = E[:n_valid] & (future_sum == 0)
+                numer = np.count_nonzero(is_isolated)/n_valid
+                denom = n_u/n_tot
+                theta[p] = min(numer/denom, 1)  # clip finite-sample overshoot above 1
+
+    # Outputs
+    valid_poles = ~np.isnan(local_dim) & ~np.isnan(theta)
+    out = {}
+    out['propValidPoles'] = np.mean(~np.isnan(local_dim))
+
+    out['meanLocalDim'] = _omitnan_mean(local_dim)
+    out['stdLocalDim'] = _omitnan_std(local_dim)
+    out['meanTheta'] = _omitnan_mean(theta)
+    out['stdTheta'] = _omitnan_std(theta)
+
+    if (np.count_nonzero(valid_poles) >= 10 and _omitnan_std(local_dim[valid_poles]) > 0
+            and _omitnan_std(theta[valid_poles]) > 0):
+        out['corrDimTheta'] = float(np.corrcoef(local_dim[valid_poles],
+                                                theta[valid_poles])[0, 1])
+    else:
+        out['corrDimTheta'] = np.nan
 
     return out

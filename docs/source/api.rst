@@ -216,6 +216,7 @@ Nonlinearity
    pyhctsa.operations.nonlinearity.tisean_c1
    pyhctsa.operations.nonlinearity.poincare_section
    pyhctsa.operations.nonlinearity.delay_time
+   pyhctsa.operations.nonlinearity.evt_local_dim
 
 .. _physicsmeths:
 
