@@ -115,6 +115,7 @@ surrogate_test,SD_SurrogateTest,surrogates
 nsamdf,NL_nsamdf,nonlinearity
 nlpe,NL_MS_nlpe,nonlinearity
 embed_pca,NL_embed_PCA,nonlinearity
+ssa,NL_SSA,nonlinearity
 local_density,NL_localdensity,nonlinearity
 tisean_d2,NL_TISEAN_d2,nonlinearity
 poincare_section,NL_PoincareSection,nonlinearity

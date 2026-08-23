@@ -1,4 +1,5 @@
 import importlib
+import re
 import time
 from functools import partial
 from itertools import product
@@ -17,7 +18,7 @@ from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
 from .utils import _check_optional_deps, _preprocess_decorator, _validate_data
-from .distribute import _compute_features_for_chunk, _extract_features_single_series
+from .distribute import _extract_features_single_series
 
 class RangeList(list):
     """A list produced by the ``!range`` YAML constructor.
@@ -61,23 +62,62 @@ def range_constructor(loader, node) -> RangeList:
     return RangeList(values, start, stop, step)
 yaml.SafeLoader.add_constructor("!range", range_constructor)
 
+#: Status codes used by :func:`classify_output` and ``FeatureCalculator.errors``.
+OK, ERRORED, NAN, POSINF, NEGINF, COMPLEX, NONE = range(7)
+
 def classify_output(res) -> int:
-    """classify the type of output"""
-    out = 0
-    if isinstance(res, str) and res.startswith("Error:"):
-        out = 1
-    elif res is None:
-        out = 6
-    elif np.iscomplexobj(res):
+    """Classify a single feature value into a status code.
+
+    Returns one of ``OK``, ``NAN``, ``POSINF``, ``NEGINF``, ``COMPLEX`` or
+    ``NONE``. ``ERRORED`` is not returned here: a feature that raised
+    contributes no value at all, and is marked separately from the error
+    record collected during extraction.
+    """
+    if res is None:
+        return NONE
+    if isinstance(res, str):
+        # a string is a legitimate feature value, not an error marker
+        return OK
+    try:
+        arr = np.asarray(res)
+    except Exception:
+        return OK
+    if arr.dtype == object or arr.size != 1:
+        # array- and object-valued cells carry no single status
+        return OK
+    if np.iscomplexobj(arr):
         # non-zero imaginary component
-        out = 5
-    elif np.isnan(res):
-        out = 2
-    elif np.isposinf(res):
-        out = 3
-    elif np.isneginf(res):
-        out = 4
-    return out
+        return COMPLEX
+    try:
+        if np.isnan(arr):
+            return NAN
+        if np.isposinf(arr):
+            return POSINF
+        if np.isneginf(arr):
+            return NEGINF
+    except TypeError:
+        # dtype has no notion of NaN/Inf (e.g. datetime, str)
+        return OK
+    return OK
+
+def _feature_label_for_column(column: str, labels) -> Union[str, None]:
+    """Recover the feature label that produced a given DataFrame column.
+
+    Inverts the naming scheme applied in
+    :func:`pyhctsa.distribute._flatten_into`: ``name`` for a scalar,
+    ``name.key`` for a dict entry and ``name_i`` for an inlined array element.
+    An exact match wins, so that a label which itself ends in ``_<digits>``
+    is not mistaken for an array element of a shorter label.
+    """
+    if column in labels:
+        return column
+    head = column.split(".", 1)[0]
+    if head in labels:
+        return head
+    match = re.fullmatch(r"(.+)_\d+", column)
+    if match and match.group(1) in labels:
+        return match.group(1)
+    return None
 
 def _apply_selection_wrapper(func: Callable, filter_keys: Union[str, list[str]],
                              keep: bool = True) -> Callable:
@@ -373,14 +413,20 @@ class FeatureCalculator:
             Labels for each time series. The order of labels is assumed to match 
             the order of the time series as passed in the `data` argument.
         verbose: bool, optional
-            Whether to show a progress bar. Default is ``False``.
+            Whether to show a progress bar. Honoured by both the sequential and
+            the parallel path. Default is ``False``.
         distributor: object, optional
-            Optional distributor for parallel computation.
-        
+            Optional distributor for parallel computation, e.g.
+            :class:`pyhctsa.distribute.LocalDistributor`.
+
         Returns
         -------
         pd.DataFrame
-            A DataFrame with one row per input series and one column per feature
+            A DataFrame with one row per input series and one column per feature.
+            The column set is determined by the configuration alone: a feature
+            that raises yields ``NaN`` rather than a differently-shaped row. The
+            failures themselves are recorded in ``self._error_messages`` and
+            flagged as ``ERRORED`` in ``self._errors``.
         """
         series_list = _standardise_inputs(data)
         # check each time series to see if valid...
@@ -408,9 +454,10 @@ class FeatureCalculator:
         start_time = time.perf_counter()
         if distributor:
             # parallel execution
-            rows = distributor.map(
-                _compute_features_for_chunk,
+            results = distributor.map(
+                _extract_features_single_series,
                 series_list,
+                progress=verbose,
                 feature_funcs=self.feature_funcs
             )
         else:
@@ -423,21 +470,57 @@ class FeatureCalculator:
                     TimeElapsedColumn(),
                 ) as progress:
                     task = progress.add_task("Sequential Extraction", total=len(series_list))
-                    rows = []
+                    results = []
                     for ts in series_list:
-                        rows.append(_extract_features_single_series(ts, self.feature_funcs))
+                        results.append(_extract_features_single_series(ts, self.feature_funcs))
                         progress.advance(task)
             else:
-                rows = [_extract_features_single_series(ts, self.feature_funcs) 
-                        for ts in series_list]
+                results = [_extract_features_single_series(ts, self.feature_funcs)
+                           for ts in series_list]
 
         elapsed = time.perf_counter() - start_time
         print(f"Feature extraction completed in {elapsed:.3f} seconds.")
-        df = pd.json_normalize(rows)
+        value_rows = [values for values, _ in results]
+        error_rows = [errors for _, errors in results]
+        df = pd.json_normalize(value_rows)
         # assign row names
         df.index = pd.Index(labels_list, name="instance")
         # metadata
         self._last_elapsed = elapsed
-        self._errors = df.map(classify_output)
+        self._errors = self._build_error_frame(df, error_rows)
+        self._error_messages = {
+            label: errors for label, errors in zip(labels_list, error_rows) if errors
+        }
+        if self._error_messages:
+            n_failures = sum(len(e) for e in self._error_messages.values())
+            print(f"{n_failures} feature evaluation(s) failed across "
+                  f"{len(self._error_messages)} series; their columns are NaN. "
+                  f"See <calculator>._error_messages for the reasons.")
+            for label, errors in self._error_messages.items():
+                for feature, message in errors.items():
+                    logger.warning("[%s] %s: %s", label, feature, message)
 
         return df
+
+    def _build_error_frame(self, df: pd.DataFrame, error_rows: list[dict]) -> pd.DataFrame:
+        """Build the per-cell status frame aligned with ``df``.
+
+        Every cell is classified by :func:`classify_output`; cells belonging to
+        a feature that raised for that series are then overwritten with
+        ``ERRORED``.
+        """
+        status = df.map(classify_output)
+        if not any(error_rows):
+            return status
+        # group the produced columns, by position, under the label that made them
+        labels = set(self.feature_funcs)
+        positions_by_label: dict[str, list[int]] = {}
+        for position, column in enumerate(df.columns):
+            label = _feature_label_for_column(column, labels)
+            if label is not None:
+                positions_by_label.setdefault(label, []).append(position)
+        for row, errors in enumerate(error_rows):
+            for label in errors:
+                for column in positions_by_label.get(label, ()):
+                    status.iat[row, column] = ERRORED
+        return status

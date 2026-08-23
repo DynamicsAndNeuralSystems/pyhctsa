@@ -211,6 +211,7 @@ Nonlinearity
    pyhctsa.operations.nonlinearity.nsamdf
    pyhctsa.operations.nonlinearity.nlpe
    pyhctsa.operations.nonlinearity.embed_pca
+   pyhctsa.operations.nonlinearity.ssa
    pyhctsa.operations.nonlinearity.local_density
    pyhctsa.operations.nonlinearity.tisean_d2
    pyhctsa.operations.nonlinearity.tisean_c1

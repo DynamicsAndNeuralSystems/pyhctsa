@@ -136,13 +136,27 @@ workload across multiple CPU cores on your local machine using the `LocalDistrib
 from pyhctsa.calculator import FeatureCalculator
 from pyhctsa.distribute import LocalDistributor
 
-calc = FeatureCalculator()
+def main():
+    calc = FeatureCalculator()
 
-# it is generally recommended to set n_workers to the number of physical CPU cores
-dist = LocalDistributor(n_workers=4)
+    # it is generally recommended to set n_workers to the number of physical CPU cores
+    with LocalDistributor(n_workers=4) as dist:
+        return calc.extract(data, distributor=dist, verbose=True)
 
-res = calc.extract(data, distributor=dist)
+if __name__ == "__main__":   # required: workers re-import the calling module
+    res = main()
 ```
+
+Worker processes are started with the `spawn` method, which re-imports the module that launched
+them. Scripts must therefore guard their entry point with `if __name__ == "__main__":`, as above,
+and keep expensive module-level work (such as loading a dataset) inside `main()` so that it is not
+repeated by every worker; in a notebook or REPL no guard is needed. Using the distributor as a context manager (or calling
+`dist.close()`) shuts the worker processes down when you are finished with them.
+
+By default each worker is restricted to a single BLAS/OpenMP thread, so that `n_workers`
+processes do not oversubscribe the machine with nested thread pools. Pass
+`LocalDistributor(n_workers=4, worker_threads=None)` to leave the ambient thread configuration
+untouched.
 
 Coming from MATLAB _hctsa_? A mapping between legacy operation names and their _pyhctsa_ equivalents is available in
 the [name mappings table](https://dynamicsandneuralsystems.github.io/pyhctsa/mappings/index.html).

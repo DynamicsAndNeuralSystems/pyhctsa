@@ -31,6 +31,7 @@ dependencies = [
   "PyWavelets",
   "rich",
   "pathos",
+  "threadpoolctl",
   "lmfit"
 ]
 
