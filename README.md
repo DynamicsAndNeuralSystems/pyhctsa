@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source srcset="https://raw.githubusercontent.com/DynamicsAndNeuralSystems/pyhctsa/main/img/pyhctsa_logo_dark.png" media="(prefers-color-scheme: dark)">
-    <img src="https://raw.githubusercontent.com/DynamicsAndNeuralSystems/pyhctsa/main/img/pyhctsa_logo.png" alt="pyhctsa logo" height="220"/>
+    <img src="https://raw.githubusercontent.com/DynamicsAndNeuralSystems/pyhctsa/main/img/pyhctsa_logo.png" alt="pyhctsa logo" height="320"/>
   </picture>
 </p>
 
