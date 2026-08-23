@@ -9,6 +9,7 @@
 <p align="center"><strong>Highly comparative time-series analysis in Python</strong></p>
 
 <p align="center">
+  <a href="https://pepy.tech/projects/pyhctsa"><img src="https://static.pepy.tech/personalized-badge/pyhctsa?period=total&units=INTERNATIONAL_SYSTEM&left_color=GREY&right_color=GREEN&left_text=downloads" alt="PyPI Downloads"></a>
   <a href="https://pypi.org/project/pyhctsa/"><img src="https://img.shields.io/pypi/v/pyhctsa.svg" alt="PyPI Version"></a>
   <a href="https://pypi.org/project/pyhctsa/"><img src="https://img.shields.io/pypi/pyversions/pyhctsa.svg" alt="Python Version"></a>
   <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa/actions/workflows/run_unit_tests.yaml"><img src="https://img.shields.io/github/actions/workflow/status/DynamicsAndNeuralSystems/pyhctsa/run_unit_tests.yaml?branch=main&label=CI" alt="CI"></a>
