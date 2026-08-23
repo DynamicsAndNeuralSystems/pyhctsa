@@ -36,10 +36,6 @@ series — spanning distributional shape, autocorrelation, entropy and informati
 nonlinear dynamics, spectral and wavelet properties, model fits, and more — making it the most comprehensive feature
 set available in native Python.
 
-_pyhctsa_ ports the majority of the MATLAB-based [_hctsa_](https://github.com/benfulcher/hctsa) library to native
-Python — 119 algorithms, 73% of the original — bringing the highly comparative approach to the open-source ecosystem
-with no MATLAB dependency.
-
 <p align="center">
   <img src="https://raw.githubusercontent.com/DynamicsAndNeuralSystems/pyhctsa/main/paper/pyhctsa_graphical_abstract.png" alt="Overview of the pyhctsa workflow" width="750"/>
 </p>
@@ -99,8 +95,7 @@ custom_calc = FeatureCalculator(config_path="subset.yaml")
 ```
 
 The number of master operations (callable functions) specified by the `.yaml` is displayed for verification, e.g.
-`Loaded 700 master operations.` Per-module configurations that can be used as a starting point are bundled in
-[`pyhctsa/configurations/module_configs`](https://github.com/DynamicsAndNeuralSystems/pyhctsa/tree/main/pyhctsa/configurations/module_configs).
+`Loaded 700 master operations.`.
 
 ### Calling individual operations
 
@@ -172,18 +167,6 @@ If you use _pyhctsa_ in your work, please cite the accompanying JOSS paper:
 ```
 
 Machine-readable metadata is provided in [`CITATION.cff`](https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/CITATION.cff).
-
-## Contributing
-
-Contributions of all kinds are welcome — bug reports, feature requests, documentation, and code. Please read the
-[contributing guide](https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/.github/CONTRIBUTING.md) and the [code of conduct](https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/.github/CODE_OF_CONDUCT.md) before opening a
-pull request, along with the
-[coding conventions](https://dynamicsandneuralsystems.github.io/pyhctsa/development/conventions.html) followed by this
-project.
-
-- 🐛 [Report a bug](https://github.com/DynamicsAndNeuralSystems/pyhctsa/issues/new)
-- 💡 [Request a feature](https://github.com/DynamicsAndNeuralSystems/pyhctsa/issues/new)
-- 🔒 [Report a security issue](https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/.github/SECURITY.md)
 
 ## Licenses
 
