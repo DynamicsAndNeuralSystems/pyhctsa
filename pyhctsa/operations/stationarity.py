@@ -1,12 +1,13 @@
 import logging
 logger = logging.getLogger('pyhctsa')
 import warnings
+from itertools import permutations
 from typing import Union
 
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.signal import detrend
-from scipy.stats import gaussian_kde, kurtosis, skew
+from scipy.stats import gaussian_kde, kurtosis, norm, pearsonr, rankdata, skew
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 from statsmodels.tsa.stattools import kpss
 
@@ -1203,3 +1204,208 @@ def _get_window(step_ind, inc, win_length):
     end_idx = (step_ind) * inc + win_length
     
     return np.arange(start_idx, end_idx).astype(int)
+
+def _kendall_tie_adj(r: np.ndarray) -> np.ndarray:
+    # Tie adjustments accompanying the midranks, as returned by MATLAB's tiedrank:
+    # [sum(t*(t-1))/2, sum(t*(t-1)*(t-2)), sum(t*(t-1)*(2*t+5))] over tied-group sizes t
+    _, counts = np.unique(r, return_counts=True)
+    t = counts[counts > 1].astype(float)
+    return np.array([np.sum(t * (t - 1)) / 2,
+                     np.sum(t * (t - 1) * (t - 2)),
+                     np.sum(t * (t - 1) * (2 * t + 5))])
+
+def _kendall(x: np.ndarray, y: np.ndarray) -> tuple:
+    # Kendall's tau-b and its two-tailed p-value, following MATLAB's corr(...,'type','Kendall'):
+    # the p-value is exact (permutation distribution of K) for small samples and a
+    # continuity-corrected normal approximation otherwise
+    n = len(x)
+    xrank, yrank = rankdata(x), rankdata(y)
+    xadj, yadj = _kendall_tie_adj(xrank), _kendall_tie_adj(yrank)
+    n2const = n * (n - 1) // 2
+
+    K = int(round(np.sum(np.sign(xrank[:, None] - xrank[None, :])
+                         * np.sign(yrank[:, None] - yrank[None, :])) / 2))
+
+    denom = np.sqrt((n2const - xadj[0]) * (n2const - yadj[0]))
+    tau = K / denom if denom > 0 else np.nan
+
+    ties = (xadj[0] > 0) or (yadj[0] > 0)
+    if (xadj[0] == n2const) or (yadj[0] == n2const):
+        return tau, np.nan
+
+    exact = (n < 10) if ties else (n < 50)
+    if exact:
+        nfact = 1.0
+        for i in range(2, n + 1):
+            nfact *= i
+        if ties:
+            # With ties, take permutations of the midranks
+            yperms = np.array(list(permutations(yrank)))
+            kperm = np.zeros(yperms.shape[0])
+            for w in range(n - 1):
+                U = np.sign(xrank[w] - xrank[w+1:])
+                V = np.sign(yperms[:, [w]] - yperms[:, w+1:])
+                kperm += V @ U
+            freq = np.bincount(np.rint(kperm).astype(int) + n2const,
+                               minlength=2*n2const+1).astype(float)[:-1]
+        else:
+            # No ties, use recursion to get the cumulative distribution of the number, C,
+            # of positive (xi-xj)*(yi-yj), i<j. K = #pos-#neg = C-Q, and C+Q = n(n-1)/2
+            freq = np.array([1.0, 1.0])
+            for i in range(3, n + 1):
+                freq = np.convolve(freq, np.ones(i))
+            interleaved = np.zeros(2 * freq.size)
+            interleaved[::2] = freq  # bins at integers, starting at -n2const
+            freq = interleaved[:-1]
+        # Use twice the smaller of the tail area above and below the observed value
+        cum = np.cumsum(freq)
+        rcum = nfact - np.concatenate(([0.0], cum[:-1]))
+        tail_prob = np.minimum(2 * np.minimum(cum, rcum) / nfact, 1)  # don't count the center bin twice
+        pval = tail_prob[K + n2const]
+    else:
+        if ties:
+            std_k = np.sqrt(n2const * (2*n + 5) / 9
+                            + xadj[0] * yadj[0] / n2const
+                            + xadj[1] * yadj[1] / (18 * n2const * (n - 2))
+                            - (xadj[2] + yadj[2]) / 18)
+        else:
+            std_k = np.sqrt(n * (n - 1) * (2*n + 5) / 18)
+        pval = min(1, 2 * norm.cdf(-(abs(K) - 1) / std_k))
+
+    return tau, pval
+
+def _pearson(x: np.ndarray, y: np.ndarray) -> tuple:
+    # Pearson's linear correlation and its two-tailed p-value (NaN for constant input,
+    # matching MATLAB's corr)
+    if np.std(x, ddof=1) == 0 or np.std(y, ddof=1) == 0:
+        return np.nan, np.nan
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r, pval = pearsonr(x, y)
+
+    return r, pval
+
+def ramping_windows(y: ArrayLike, num_seg: int = 10) -> dict:
+    """
+    Monotonic trend ('ramping') in windowed statistics.
+
+    Splits the time series into ``num_seg`` non-overlapping segments, computes the
+    mean, variance, skewness, kurtosis, and lag-1 autocorrelation (AC1) within each
+    segment, and quantifies whether each of these quantities trends monotonically
+    across the segments (e.g., a variance that ramps up steadily across the series,
+    rather than merely fluctuating).
+
+    Existing hctsa stationarity operations (:func:`sliding_window`,
+    :func:`drifting_mean`, :func:`stat_av`, :func:`local_distributions`) summarize
+    the *spread* of windowed statistics (std, range, entropy) -- order-agnostic
+    measures that don't distinguish a monotonic ramp from random fluctuation of the
+    same magnitude. This operation targets that gap directly.
+
+    Kendall's rank correlation tau, and Pearson's linear correlation r (each with its
+    p-value), are computed between segment index and each windowed statistic.
+    Kendall's tau is scale-invariant and detects any monotonic trend, not just a
+    linear one -- matching "ramping" more directly than a slope would, and more
+    robust to outlying segments. Pearson's r is included alongside it as a
+    complementary, effect-size-like measure of specifically *linear* ramping (r^2 is
+    the fraction of across-segment variance explained by a linear trend); expect the
+    two to agree closely for a clean linear ramp and diverge for a
+    monotonic-but-nonlinear one (e.g. a ramp that plateaus). Skewness/kurtosis are
+    standardized in the usual sense (normalized by std^3/std^4 respectively, rather
+    than :func:`~pyhctsa.operations.distribution.moments`' convention of normalizing
+    by std^1 regardless of moment order) so that a shape trend isn't conflated with
+    the (separately tracked) scale trend in the segment variance.
+
+    asymAC1 is a nonlinear, asymmetric variant of the lag-1 autocorrelation:
+    ``mean(x_t * x_{t+1} * (x_{t+1} - x_t))``, with x z-scored *within* each segment
+    (unlike the other statistics above, this one needs the explicit per-segment
+    z-scoring, since it's neither scale-invariant like AC1/skewness/kurtosis nor a raw
+    moment tracked deliberately like mean/variance). This is the difference between
+    the statistic computed forwards (``mean(x_t * x_{t+1}^2)``) and on the
+    time-reversed segment (``mean(x_{t+1} * x_t^2)``): swapping x_t <-> x_{t+1}
+    negates the expression, so it is manifestly antisymmetric under time reversal and
+    hence zero in expectation for any time-reversible process (same spirit as
+    :func:`~pyhctsa.operations.correlation.trev`'s third-moment reversibility
+    statistic, computed densely at a single lag over the whole series rather than
+    trended across segments). A ramp in asymAC1 therefore flags a trend specifically
+    in the series' local time-asymmetry/nonlinearity, distinct from a trend in any of
+    the other (symmetric) segment statistics above.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    num_seg : int, optional
+        The number of non-overlapping segments to divide the time series into.
+        Non-overlapping segments are used deliberately (rather than
+        :func:`sliding_window`'s overlapping windows): overlap between windows would
+        induce artificial serial correlation between adjacent window-statistics,
+        which would inflate the apparent monotonic trend independent of any real
+        ramping in the data. Default is 10.
+
+    Returns
+    -------
+    dict
+        Kendall's tau and Pearson's r (each with its p-value) between segment index
+        and each windowed statistic. Returns NaN if the time series is too short for
+        the requested number of segments.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    num_seg = int(num_seg)
+
+    minNumSeg = 5 # need enough segments for a meaningful trend statistic
+    minSegLength = 20 # heuristic minimum for meaningful skewness/kurtosis/AC1 estimates
+
+    if num_seg < minNumSeg:
+        raise ValueError(f"num_seg = {num_seg} is too few segments for a meaningful "
+                         f"trend statistic (need >= {minNumSeg})")
+
+    segLength = N // num_seg
+    if segLength < minSegLength:
+        logger.warning(f"Time series (N = {N}) too short for {num_seg} segments of a meaningful length")
+        return np.nan
+
+    # ------------------------------------------------------------------------------
+    # Segment the time series (non-overlapping, discarding any remainder)
+    # ------------------------------------------------------------------------------
+    z = y[:segLength * num_seg].reshape(num_seg, segLength) # num_seg x segLength
+
+    # ------------------------------------------------------------------------------
+    # Within-segment statistics
+    # ------------------------------------------------------------------------------
+    segMean = np.mean(z, axis=1)
+    segVar = np.var(z, axis=1, ddof=1)
+    # Standardized (not moments-style raw/std) skewness and kurtosis: keeps the
+    # shape-trend signal from being conflated with the (separately tracked)
+    # scale-trend signal in segVar, since moments normalizes by std^1 regardless of
+    # moment order rather than std^3/std^4.
+    segSkew = skew(z, axis=1)
+    segKurt = kurtosis(z, axis=1, fisher=False)
+    segAC1 = np.zeros(num_seg)
+    segAsymAC1 = np.zeros(num_seg)
+    for i in range(num_seg):
+        segAC1[i] = autocorr(z[i, :], 1, 'Fourier')[0]
+        zseg = (z[i, :] - np.mean(z[i, :])) / np.std(z[i, :], ddof=1) # z-scored *within* this segment
+        segAsymAC1[i] = np.mean(zseg[:-1] * zseg[1:] * (zseg[1:] - zseg[:-1]))
+
+    # ------------------------------------------------------------------------------
+    # Kendall's tau and Pearson's r (each with p-value) against segment index
+    # ------------------------------------------------------------------------------
+    segIdx = np.arange(1, num_seg + 1, dtype=float)
+
+    out = {}
+    out['mean_tau'], out['mean_p'] = _kendall(segIdx, segMean)
+    out['var_tau'], out['var_p'] = _kendall(segIdx, segVar)
+    out['skew_tau'], out['skew_p'] = _kendall(segIdx, segSkew)
+    out['kurt_tau'], out['kurt_p'] = _kendall(segIdx, segKurt)
+    out['ac1_tau'], out['ac1_p'] = _kendall(segIdx, segAC1)
+    out['asymac1_tau'], out['asymac1_p'] = _kendall(segIdx, segAsymAC1)
+
+    out['mean_pearson_r'], out['mean_pearson_p'] = _pearson(segIdx, segMean)
+    out['var_pearson_r'], out['var_pearson_p'] = _pearson(segIdx, segVar)
+    out['skew_pearson_r'], out['skew_pearson_p'] = _pearson(segIdx, segSkew)
+    out['kurt_pearson_r'], out['kurt_pearson_p'] = _pearson(segIdx, segKurt)
+    out['ac1_pearson_r'], out['ac1_pearson_p'] = _pearson(segIdx, segAC1)
+    out['asymac1_pearson_r'], out['asymac1_pearson_p'] = _pearson(segIdx, segAsymAC1)
+
+    return out

@@ -283,6 +283,7 @@ Stationarity
     pyhctsa.operations.stationarity.trend
     pyhctsa.operations.stationarity.stat_av
     pyhctsa.operations.stationarity.sliding_window
+    pyhctsa.operations.stationarity.ramping_windows
 
 .. _surrogatesmeths:
 

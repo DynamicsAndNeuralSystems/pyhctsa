@@ -984,6 +984,14 @@ stationarity:
       - {num_segs: 5, each_or_par: 'each', zscore: True}
     legacy_name: SY_LocalDistributions
     ordered_args: ['num_segs', 'each_or_par']
+
+  ramping_windows:
+    base_name: ramping_windows
+    dependencies:
+    configs:
+      - {num_seg: 10, zscore: True}
+    legacy_name: SY_RampingWindows
+    ordered_args: ['num_seg']
   
 distribution:
 
