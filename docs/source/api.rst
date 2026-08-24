@@ -247,6 +247,7 @@ Scaling
 
    pyhctsa.operations.scaling.fast_dfa
    pyhctsa.operations.scaling.fluctuation_analysis
+   pyhctsa.operations.scaling.higuchi_fd
    pyhctsa.operations.scaling.mma
 
 .. _spectralmeths:
@@ -257,6 +258,8 @@ Spectral
    :toctree: generated/
 
     pyhctsa.operations.spectral.spectral_summaries
+    pyhctsa.operations.spectral.spectral_summaries_phase
+    pyhctsa.operations.spectral.specparam
 
 .. _stationaritymeths:
 

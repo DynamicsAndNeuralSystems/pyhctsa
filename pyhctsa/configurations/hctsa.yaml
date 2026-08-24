@@ -1290,6 +1290,14 @@ scaling:
     legacy_name: SC_FluctAnal
     ordered_args: ['q', 'wtf', 'tau_step', 'k', 'lag', 'log_inc']
 
+  higuchi_fd:
+    base_name: higuchi_fd
+    dependencies:
+    configs:
+      - {kmax: 8, zscore: True}
+    legacy_name: SC_HiguchiFD
+    ordered_args: ['kmax']
+
   mma:
     base_name: mma
     dependencies:
@@ -1577,6 +1585,22 @@ spectral:
     legacy_name: SP_Summaries
     ordered_args: ['psd_meth', 'window_type']
 
+  spectral_summaries_phase:
+    base_name: spectral_summaries_phase
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: SP_SummariesPhase
+    ordered_args:
+
+  specparam:
+    base_name: specparam
+    dependencies:
+    configs:
+      - {aperiodic_mode: 'fixed', max_n_peaks: 4, peak_threshold: 1, zscore: True}
+    legacy_name: SP_Specparam
+    ordered_args: ['aperiodic_mode', 'max_n_peaks', 'peak_threshold']
+
 model_fit:
   ar_cov:
     base_name: ar_cov
@@ -1802,6 +1826,14 @@ nonlinearity:
       - {L: 100, zscore: True}
     legacy_name: NL_SSA
     ordered_args: ['L']
+  
+  zero_one_test:
+    base_name: zero_one_test
+    dependencies:
+    configs:
+      - {num_c: 20, max_n: 'full', zscore: True}
+    legacy_name: NL_ZeroOneTest
+    ordered_args: ['num_c', 'max_n']
   
   local_density:
     base_name: local_density
