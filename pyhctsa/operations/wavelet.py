@@ -684,10 +684,6 @@ def modwt_var(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 5) -> 
     if wvar.size == 0:
         logger.warning("No boundary-unaffected coefficients for an unbiased MODWT variance estimate")
         return np.nan
-    # _modwt_var silently drops levels whose unbiased estimate has no
-    # boundary-unaffected coefficients left (short series relative to the
-    # wavelet filter length), so wvar can be shorter than level+1 -- always
-    # work from its actual length rather than the requested level.
     numLevelsReturned = wvar.size - 1 # number of detail levels actually returned
 
     #%% Return statistics

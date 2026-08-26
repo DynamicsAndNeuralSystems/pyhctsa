@@ -323,3 +323,4 @@ Wavelet
    pyhctsa.operations.wavelet.dwt_coeff
    pyhctsa.operations.wavelet.scal_2_freq
    pyhctsa.operations.wavelet.wfbm
+   pyhctsa.operations.wavelet.modwt_var
