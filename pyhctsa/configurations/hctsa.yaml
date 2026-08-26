@@ -1489,6 +1489,15 @@ wavelet:
       - {zscore: True}
     legacy_name: WL_fBM
     ordered_args: 
+
+  modwt_var:
+    base_name: modwt_var
+    dependencies:
+      - PyWavelets
+    configs:
+      - {w_name: 'db3', level: 5, zscore: True}
+    legacy_name: WL_modwtvar
+    ordered_args: ['w_name', 'level']
   
 hypothesis_tests:
   hypothesis_test:
