@@ -1409,3 +1409,164 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10) -> dict:
     out['asymac1_pearson_r'], out['asymac1_pearson_p'] = _pearson(segIdx, segAsymAC1)
 
     return out
+
+def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
+    """
+    Slow feature analysis of windowed statistics.
+
+    Splits the time series into ``num_windows`` non-overlapping segments (same
+    segmentation and per-segment statistics as :func:`ramping_windows`: mean,
+    variance, skewness, and lag-1 autocorrelation, forming a ``num_windows`` x 4
+    matrix), then applies Slow Feature Analysis (SFA) to find the linear combination
+    of these four statistics that varies as *slowly* as possible across the sequence
+    of windows -- i.e., minimizes the variance of its own increments, subject to unit
+    variance. This is a fundamentally different criterion to :func:`ramping_windows`'
+    per-statistic monotonic-trend tests: SFA is multivariate (can find a slow
+    combination spread across mean/variance/skewness/AC1 that no single one of them
+    shows individually) and detects any slow, low-frequency evolution, not just a
+    monotonic ramp (e.g., a slow rise-then-fall hump across the series, invisible to
+    Kendall's tau/Pearson's r, still registers as "slow" here). Validated on
+    Empirical1000 to be essentially uncorrelated (max \\|r\\| ~ 0.14) with all
+    ``ramping_windows`` (numSeg = 10) trend fields.
+
+    The companion comparison to ordinary PCA addresses a different question: PCA
+    finds the combination of the four statistics with *maximal variance* across
+    windows, which need not be the slowest one -- a large-amplitude but choppy/noisy
+    statistic can dominate variance while a small-amplitude but smooth, genuinely
+    slow drift is buried underneath it and missed by PCA. ``pc1VarFrac`` and
+    ``slowPCA1corr`` quantify this: how concentrated the variance is in a single PCA
+    direction, and whether the slow direction found by SFA coincides with that
+    high-variance PCA direction (high overlap) or is a separate, lower-variance mode
+    that ordinary variance-based analysis would miss (low overlap).
+
+    Let ``z(t)`` be the ``num_windows`` x 4 matrix of [mean, variance, skewness, AC1]
+    computed per window, whitened (centered, then linearly transformed to unit
+    covariance). SFA finds the orthogonal directions ``u_i`` that minimize
+    ``var(diff(z*u_i))``, i.e. the "slowness" eigenvalues ``eta_i = var(diff(z*u_i))``
+    of the covariance of the whitened derivative signal (ascending: ``eta_1`` is the
+    slowest direction). For reference, i.i.d. (white-noise) windows give ``eta ~ 2``
+    on average; substantially smaller values indicate genuinely slow (smooth,
+    low-frequency) structure in some combination of the four per-window statistics.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    num_windows : int, optional
+        The number of non-overlapping segments to divide the time series into.
+        Non-overlapping segments are used for the same reason as
+        :func:`ramping_windows`: overlap would induce artificial serial correlation
+        between adjacent window statistics, which would make the derivative-based
+        slowness measure spuriously small regardless of any real slow structure in
+        the data. 20 was chosen (rather than :func:`ramping_windows`' default of 10)
+        because SFA needs enough windows to estimate the underlying 4x4 covariance
+        matrices (of the statistics, and of their increments) reasonably reliably --
+        at ``num_windows = 10`` the null-distribution spread of the slowness
+        eigenvalues is considerably wider, making individual values a noisier signal.
+        Default is 20.
+
+    Returns
+    -------
+    dict
+        - ``eta1``: the smallest (slowest) SFA eigenvalue.
+        - ``etaEnd``: the largest (fastest/noisiest) SFA eigenvalue.
+        - ``etaStd``: the standard deviation of all four SFA eigenvalues (spread of
+          the slowness spectrum).
+        - ``pc1VarFrac``: the fraction of total variance (across the four statistics)
+          explained by the leading PCA component.
+        - ``slowPCA1corr``: the absolute correlation between the slowest SFA
+          component's scores and the leading PCA component's scores -- near 1 means
+          the slow direction is simply the dominant (highest-variance) direction PCA
+          would already find; near 0 means SFA has isolated a genuinely separate,
+          low-variance slow mode.
+
+        Returns NaN if the time series is too short for the requested number of
+        windows, or if fewer than two directions survive the whitening threshold.
+
+    References
+    ----------
+    Wiskott, L. & Sejnowski, T.J. "Slow feature analysis: unsupervised learning of
+    invariances." Neural Computation 14(4), 715-770 (2002).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    num_windows = int(num_windows)
+
+    minNumWindows = 10 # need enough windows to estimate the 4x4 covariance matrices reliably
+    minWindowLength = 20 # heuristic minimum for meaningful skewness/AC1 estimates
+
+    if num_windows < minNumWindows:
+        raise ValueError(f"num_windows = {num_windows} is too few for a reliable slow "
+                         f"feature analysis (need >= {minNumWindows})")
+
+    winLength = N // num_windows
+    if winLength < minWindowLength:
+        logger.warning(f"Time series (N = {N}) too short for {num_windows} windows of a meaningful length")
+        return np.nan
+
+    # ------------------------------------------------------------------------------
+    # Segment the time series (non-overlapping, discarding any remainder)
+    # ------------------------------------------------------------------------------
+    z = y[:winLength * num_windows].reshape(num_windows, winLength) # num_windows x winLength
+
+    # ------------------------------------------------------------------------------
+    # Per-window statistics: mean, variance, skewness, AC1 (same as ramping_windows)
+    # ------------------------------------------------------------------------------
+    winMean = np.mean(z, axis=1)
+    winVar = np.var(z, axis=1, ddof=1)
+    winSkew = skew(z, axis=1)
+    winAC1 = np.zeros(num_windows)
+    for i in range(num_windows):
+        winAC1[i] = autocorr(z[i, :], 1, 'Fourier')[0]
+    X = np.column_stack((winMean, winVar, winSkew, winAC1)) # num_windows x 4
+
+    # ------------------------------------------------------------------------------
+    # PCA (variance-maximizing directions) and SFA (slowness-minimizing directions)
+    # ------------------------------------------------------------------------------
+    Xc = X - np.mean(X, axis=0)
+    Cx = np.cov(Xc, rowvar=False) # 4 x 4
+    if not np.all(np.isfinite(Cx)):
+        # a degenerate (e.g. constant) window leaves its skewness/AC1 -- and hence
+        # the covariance -- undefined
+        return np.nan
+
+    eigVals, Vp = np.linalg.eigh(Cx)
+    ord_ = np.argsort(-eigVals, kind='stable')
+    pcaEigs = eigVals[ord_]
+    Vp = Vp[:, ord_]
+    pcScores = Xc @ Vp # num_windows x 4, PC1 = pcScores[:, 0]
+
+    # Whitening (symmetric/ZCA, avoids an arbitrary rotation among near-degenerate
+    # directions). Directions with near-zero variance relative to the leading one
+    # (e.g. a per-window statistic that barely varies across windows) are dropped
+    # rather than whitened: full whitening would divide by their near-zero std and
+    # amplify what is essentially estimation noise into a spuriously enormous
+    # "fast" eigenvalue. pcaEigs[0] (the leading, largest eigenvalue) is never
+    # itself dropped by this relative threshold.
+    relFloor = 1e-2
+    keep = pcaEigs > relFloor * pcaEigs[0]
+    if np.sum(keep) < 2:
+        return np.nan
+    Vk = Vp[:, keep]
+    Zw = Xc @ Vk / np.sqrt(pcaEigs[keep]) # num_windows x sum(keep), approx unit covariance
+
+    dZ = np.diff(Zw, axis=0) # (num_windows-1) x sum(keep), the whitened derivative signal
+    Cd = np.cov(dZ, rowvar=False)
+    etaVals, Us = np.linalg.eigh(Cd)
+    ord2 = np.argsort(etaVals, kind='stable') # slowness eigenvalues, ascending = slowest first
+    etas = etaVals[ord2]
+    Us = Us[:, ord2]
+    slowScores = Zw @ Us # num_windows x sum(keep), slowest component = slowScores[:, 0]
+
+    # ------------------------------------------------------------------------------
+    # Output statistics
+    # ------------------------------------------------------------------------------
+    out = {}
+    out['eta1'] = etas[0]
+    out['etaEnd'] = etas[-1]
+    out['etaStd'] = np.std(etas, ddof=1)
+
+    out['pc1VarFrac'] = pcaEigs[0] / np.sum(pcaEigs)
+    out['slowPCA1corr'] = abs(_pearson(slowScores[:, 0], pcScores[:, 0])[0])
+
+    return out

@@ -992,6 +992,14 @@ stationarity:
       - {num_seg: 10, zscore: True}
     legacy_name: SY_RampingWindows
     ordered_args: ['num_seg']
+
+  slow_feature_analysis:
+    base_name: slow_feature_analysis
+    dependencies:
+    configs:
+      - {num_windows: 20, zscore: True}
+    legacy_name: SY_SlowFeatureAnalysis
+    ordered_args: ['num_windows']
   
 distribution:
 
