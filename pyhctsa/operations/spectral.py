@@ -6,7 +6,7 @@ from numpy.typing import ArrayLike
 import scipy.fft
 import scipy.signal
 
-from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit, robustfit
+from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit, polyfit, robustfit
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
@@ -766,3 +766,120 @@ def _fit_gaussian(log_f: ArrayLike, resid: ArrayLike, i_pk: int,
         'width': w,
         'pred': h * np.exp(-(log_f - m) ** 2 / (2 * w ** 2)),
     }
+
+def cepstrum(y: ArrayLike, max_period: int = 100, min_period: int = 4) -> dict:
+    """
+    Cepstral statistics: harmonic (comb) structure of the power spectrum.
+
+    Computes the real cepstrum, the inverse Fourier transform of the log magnitude
+    spectrum, and summarizes the structure of its dominant peak.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    max_period : int, optional
+        The longest fundamental period (in samples) to search for. Default is
+        100.
+    min_period : int, optional
+        The shortest fundamental period (in samples) to search for. Default is 4.
+
+    Returns
+    -------
+    dict
+        - ``period``: the estimated fundamental period (quefrency of the dominant
+          cepstral peak), in samples.
+        - ``peak``: the height of that peak.
+        - ``meanCeps``, ``stdCeps``: the mean and standard deviation of the cepstrum
+          over the search range.
+        - ``peakRatio``: the peak height in units of the standard deviation of the
+          cepstrum over the search range.
+        - ``CPP``: the cepstral peak prominence, the standard robust measure, being
+          the peak height above a linear regression fit through the cepstrum across
+          the search range (this normalizes away the overall cepstral trend, so it
+          does not simply track the spectrum's dynamic range).
+        - ``rahmonicRatio``: comparing the cepstrum at twice the peak quefrency to
+          the peak itself (a genuine harmonic comb repeats at multiples of the
+          fundamental period, so a real periodicity shows a secondary 'rahmonic'
+          peak, whereas an isolated fluke does not).
+
+        Returns NaN if the time series is too short for the requested search range,
+        or is constant.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+
+    max_period, min_period = int(max_period), int(min_period)
+    if min_period < 2:
+        raise ValueError(f"min_period = {min_period} is below the Nyquist limit "
+                         f"(a period needs >= 2 samples)")
+    if max_period <= min_period:
+        raise ValueError(f"max_period ({max_period}) must exceed min_period ({min_period})")
+
+    N = len(y)
+    minCycles = 4 # need several cycles of the longest period searched for a meaningful estimate
+    if N < minCycles * max_period:
+        warnings.warn(f"Time series (N = {N}) too short to search for periods up to "
+                      f"{max_period} samples (need >= {minCycles * max_period})")
+        return np.nan
+
+    if np.all(y == y[0]): # constant series has an all-zero spectrum -> log(0)
+        warnings.warn("Constant time series has no spectral (or cepstral) structure")
+        return np.nan
+
+    # ------------------------------------------------------------------------------
+    # Real cepstrum
+    # ------------------------------------------------------------------------------
+    NFFT = 2 ** int(np.ceil(np.log2(N)))
+    X = scipy.fft.fft(y, NFFT)
+    logMag = np.log(np.abs(X) + np.finfo(float).eps) # eps guards spectral nulls (|X| exactly 0)
+
+    envOrder = 4
+    nHalf = NFFT // 2 + 1
+    halfLogMag = logMag[:nHalf]
+    fIdx = np.arange(nHalf, dtype=float) / (nHalf - 1) # normalized frequency axis for conditioning
+    pEnv = polyfit(fIdx, halfLogMag, envOrder)
+    halfDetrended = halfLogMag - np.polyval(pEnv, fIdx)
+
+    # Mirror back to a full Hermitian-symmetric spectrum so the cepstrum is real:
+    logMagDetrended = np.concatenate((halfDetrended, halfDetrended[1:-1][::-1]))
+    c = np.real(scipy.fft.ifft(logMagDetrended))
+
+    # Quefrency index q corresponds to a period of q samples:
+    periods = np.arange(min_period, max_period + 1)
+    if periods[-1] + 1 > NFFT // 2:
+        # Shouldn't be reachable given the length check above, but the cepstrum is
+        # only meaningful over its first half (it is symmetric):
+        periods = periods[periods + 1 <= NFFT // 2]
+    cSearch = c[periods]
+
+    iPeak = int(np.argmax(cSearch))
+    peakVal = cSearch[iPeak]
+
+    out = {}
+    out['period'] = float(periods[iPeak]) # estimated fundamental period, in samples
+    out['peak'] = peakVal
+
+    # Basic distributional context over the search range:
+    out['meanCeps'] = np.mean(cSearch)
+    out['stdCeps'] = np.std(cSearch, ddof=1)
+
+    # Peak height in units of the cepstrum's own spread over the search range
+    # (scale-free, unlike `peak` itself):
+    if out['stdCeps'] > 0:
+        out['peakRatio'] = (peakVal - out['meanCeps']) / out['stdCeps']
+    else:
+        out['peakRatio'] = np.nan
+
+    pFit = polyfit(periods.astype(float), cSearch, 1)
+    baseline = np.polyval(pFit, periods)
+    out['CPP'] = peakVal - baseline[iPeak]
+
+    q2 = 2 * periods[iPeak] + 1
+    peakAboveBase = peakVal - baseline[iPeak]
+    if q2 <= NFFT // 2 and peakAboveBase > 0:
+        rahmonicAboveBase = c[q2 - 1] - np.polyval(pFit, 2 * periods[iPeak])
+        out['rahmonicRatio'] = rahmonicAboveBase / peakAboveBase
+    else:
+        out['rahmonicRatio'] = np.nan
+
+    return out

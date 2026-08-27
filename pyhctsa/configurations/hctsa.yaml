@@ -1643,6 +1643,14 @@ spectral:
     legacy_name: SP_Specparam
     ordered_args: ['aperiodic_mode', 'max_n_peaks', 'peak_threshold']
 
+  cepstrum:
+    base_name: cepstrum
+    dependencies:
+    configs:
+      - {max_period: 100, min_period: 4, zscore: True}
+    legacy_name: SP_Cepstrum
+    ordered_args: ['max_period', 'min_period']
+
 model_fit:
   ar_cov:
     base_name: ar_cov
