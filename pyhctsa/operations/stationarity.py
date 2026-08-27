@@ -1354,60 +1354,60 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10) -> dict:
     N = len(y)
     num_seg = int(num_seg)
 
-    minNumSeg = 5 # need enough segments for a meaningful trend statistic
-    minSegLength = 20 # heuristic minimum for meaningful skewness/kurtosis/AC1 estimates
+    min_num_seg = 5 # need enough segments for a meaningful trend statistic
+    min_seg_length = 20 # heuristic minimum for meaningful skewness/kurtosis/AC1 estimates
 
-    if num_seg < minNumSeg:
+    if num_seg < min_num_seg:
         raise ValueError(f"num_seg = {num_seg} is too few segments for a meaningful "
-                         f"trend statistic (need >= {minNumSeg})")
+                         f"trend statistic (need >= {min_num_seg})")
 
-    segLength = N // num_seg
-    if segLength < minSegLength:
+    seg_length = N // num_seg
+    if seg_length < min_seg_length:
         logger.warning(f"Time series (N = {N}) too short for {num_seg} segments of a meaningful length")
         return np.nan
 
     # ------------------------------------------------------------------------------
     # Segment the time series (non-overlapping, discarding any remainder)
     # ------------------------------------------------------------------------------
-    z = y[:segLength * num_seg].reshape(num_seg, segLength) # num_seg x segLength
+    z = y[:seg_length * num_seg].reshape(num_seg, seg_length) # num_seg x seg_length
 
     # ------------------------------------------------------------------------------
     # Within-segment statistics
     # ------------------------------------------------------------------------------
-    segMean = np.mean(z, axis=1)
-    segVar = np.var(z, axis=1, ddof=1)
+    seg_mean = np.mean(z, axis=1)
+    seg_var = np.var(z, axis=1, ddof=1)
     # Standardized (not moments-style raw/std) skewness and kurtosis: keeps the
     # shape-trend signal from being conflated with the (separately tracked)
-    # scale-trend signal in segVar, since moments normalizes by std^1 regardless of
+    # scale-trend signal in seg_var, since moments normalizes by std^1 regardless of
     # moment order rather than std^3/std^4.
-    segSkew = skew(z, axis=1)
-    segKurt = kurtosis(z, axis=1, fisher=False)
-    segAC1 = np.zeros(num_seg)
-    segAsymAC1 = np.zeros(num_seg)
+    seg_skew = skew(z, axis=1)
+    seg_kurt = kurtosis(z, axis=1, fisher=False)
+    seg_ac1 = np.zeros(num_seg)
+    seg_asym_ac1 = np.zeros(num_seg)
     for i in range(num_seg):
-        segAC1[i] = autocorr(z[i, :], 1, 'Fourier')[0]
+        seg_ac1[i] = autocorr(z[i, :], 1, 'Fourier')[0]
         zseg = (z[i, :] - np.mean(z[i, :])) / np.std(z[i, :], ddof=1) # z-scored *within* this segment
-        segAsymAC1[i] = np.mean(zseg[:-1] * zseg[1:] * (zseg[1:] - zseg[:-1]))
+        seg_asym_ac1[i] = np.mean(zseg[:-1] * zseg[1:] * (zseg[1:] - zseg[:-1]))
 
     # ------------------------------------------------------------------------------
     # Kendall's tau and Pearson's r (each with p-value) against segment index
     # ------------------------------------------------------------------------------
-    segIdx = np.arange(1, num_seg + 1, dtype=float)
+    seg_idx = np.arange(1, num_seg + 1, dtype=float)
 
     out = {}
-    out['mean_tau'], out['mean_p'] = _kendall(segIdx, segMean)
-    out['var_tau'], out['var_p'] = _kendall(segIdx, segVar)
-    out['skew_tau'], out['skew_p'] = _kendall(segIdx, segSkew)
-    out['kurt_tau'], out['kurt_p'] = _kendall(segIdx, segKurt)
-    out['ac1_tau'], out['ac1_p'] = _kendall(segIdx, segAC1)
-    out['asymac1_tau'], out['asymac1_p'] = _kendall(segIdx, segAsymAC1)
+    out['mean_tau'], out['mean_p'] = _kendall(seg_idx, seg_mean)
+    out['var_tau'], out['var_p'] = _kendall(seg_idx, seg_var)
+    out['skew_tau'], out['skew_p'] = _kendall(seg_idx, seg_skew)
+    out['kurt_tau'], out['kurt_p'] = _kendall(seg_idx, seg_kurt)
+    out['ac1_tau'], out['ac1_p'] = _kendall(seg_idx, seg_ac1)
+    out['asymac1_tau'], out['asymac1_p'] = _kendall(seg_idx, seg_asym_ac1)
 
-    out['mean_pearson_r'], out['mean_pearson_p'] = _pearson(segIdx, segMean)
-    out['var_pearson_r'], out['var_pearson_p'] = _pearson(segIdx, segVar)
-    out['skew_pearson_r'], out['skew_pearson_p'] = _pearson(segIdx, segSkew)
-    out['kurt_pearson_r'], out['kurt_pearson_p'] = _pearson(segIdx, segKurt)
-    out['ac1_pearson_r'], out['ac1_pearson_p'] = _pearson(segIdx, segAC1)
-    out['asymac1_pearson_r'], out['asymac1_pearson_p'] = _pearson(segIdx, segAsymAC1)
+    out['mean_pearson_r'], out['mean_pearson_p'] = _pearson(seg_idx, seg_mean)
+    out['var_pearson_r'], out['var_pearson_p'] = _pearson(seg_idx, seg_var)
+    out['skew_pearson_r'], out['skew_pearson_p'] = _pearson(seg_idx, seg_skew)
+    out['kurt_pearson_r'], out['kurt_pearson_p'] = _pearson(seg_idx, seg_kurt)
+    out['ac1_pearson_r'], out['ac1_pearson_p'] = _pearson(seg_idx, seg_ac1)
+    out['asymac1_pearson_r'], out['asymac1_pearson_p'] = _pearson(seg_idx, seg_asym_ac1)
 
     return out
 
@@ -1493,33 +1493,33 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     N = len(y)
     num_windows = int(num_windows)
 
-    minNumWindows = 10 # need enough windows to estimate the 4x4 covariance matrices reliably
-    minWindowLength = 20 # heuristic minimum for meaningful skewness/AC1 estimates
+    min_num_windows = 10 # need enough windows to estimate the 4x4 covariance matrices reliably
+    min_window_length = 20 # heuristic minimum for meaningful skewness/AC1 estimates
 
-    if num_windows < minNumWindows:
+    if num_windows < min_num_windows:
         raise ValueError(f"num_windows = {num_windows} is too few for a reliable slow "
-                         f"feature analysis (need >= {minNumWindows})")
+                         f"feature analysis (need >= {min_num_windows})")
 
-    winLength = N // num_windows
-    if winLength < minWindowLength:
+    win_length = N // num_windows
+    if win_length < min_window_length:
         logger.warning(f"Time series (N = {N}) too short for {num_windows} windows of a meaningful length")
         return np.nan
 
     # ------------------------------------------------------------------------------
     # Segment the time series (non-overlapping, discarding any remainder)
     # ------------------------------------------------------------------------------
-    z = y[:winLength * num_windows].reshape(num_windows, winLength) # num_windows x winLength
+    z = y[:win_length * num_windows].reshape(num_windows, win_length) # num_windows x win_length
 
     # ------------------------------------------------------------------------------
     # Per-window statistics: mean, variance, skewness, AC1 (same as ramping_windows)
     # ------------------------------------------------------------------------------
-    winMean = np.mean(z, axis=1)
-    winVar = np.var(z, axis=1, ddof=1)
-    winSkew = skew(z, axis=1)
-    winAC1 = np.zeros(num_windows)
+    win_mean = np.mean(z, axis=1)
+    win_var = np.var(z, axis=1, ddof=1)
+    win_skew = skew(z, axis=1)
+    win_ac1 = np.zeros(num_windows)
     for i in range(num_windows):
-        winAC1[i] = autocorr(z[i, :], 1, 'Fourier')[0]
-    X = np.column_stack((winMean, winVar, winSkew, winAC1)) # num_windows x 4
+        win_ac1[i] = autocorr(z[i, :], 1, 'Fourier')[0]
+    X = np.column_stack((win_mean, win_var, win_skew, win_ac1)) # num_windows x 4
 
     # ------------------------------------------------------------------------------
     # PCA (variance-maximizing directions) and SFA (slowness-minimizing directions)
@@ -1531,33 +1531,33 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
         # the covariance -- undefined
         return np.nan
 
-    eigVals, Vp = np.linalg.eigh(Cx)
-    ord_ = np.argsort(-eigVals, kind='stable')
-    pcaEigs = eigVals[ord_]
+    eig_vals, Vp = np.linalg.eigh(Cx)
+    ord_ = np.argsort(-eig_vals, kind='stable')
+    pca_eigs = eig_vals[ord_]
     Vp = Vp[:, ord_]
-    pcScores = Xc @ Vp # num_windows x 4, PC1 = pcScores[:, 0]
+    pc_scores = Xc @ Vp # num_windows x 4, PC1 = pc_scores[:, 0]
 
     # Whitening (symmetric/ZCA, avoids an arbitrary rotation among near-degenerate
     # directions). Directions with near-zero variance relative to the leading one
     # (e.g. a per-window statistic that barely varies across windows) are dropped
     # rather than whitened: full whitening would divide by their near-zero std and
     # amplify what is essentially estimation noise into a spuriously enormous
-    # "fast" eigenvalue. pcaEigs[0] (the leading, largest eigenvalue) is never
+    # "fast" eigenvalue. pca_eigs[0] (the leading, largest eigenvalue) is never
     # itself dropped by this relative threshold.
-    relFloor = 1e-2
-    keep = pcaEigs > relFloor * pcaEigs[0]
+    rel_floor = 1e-2
+    keep = pca_eigs > rel_floor * pca_eigs[0]
     if np.sum(keep) < 2:
         return np.nan
     Vk = Vp[:, keep]
-    Zw = Xc @ Vk / np.sqrt(pcaEigs[keep]) # num_windows x sum(keep), approx unit covariance
+    Zw = Xc @ Vk / np.sqrt(pca_eigs[keep]) # num_windows x sum(keep), approx unit covariance
 
     dZ = np.diff(Zw, axis=0) # (num_windows-1) x sum(keep), the whitened derivative signal
     Cd = np.cov(dZ, rowvar=False)
-    etaVals, Us = np.linalg.eigh(Cd)
-    ord2 = np.argsort(etaVals, kind='stable') # slowness eigenvalues, ascending = slowest first
-    etas = etaVals[ord2]
+    eta_vals, Us = np.linalg.eigh(Cd)
+    ord2 = np.argsort(eta_vals, kind='stable') # slowness eigenvalues, ascending = slowest first
+    etas = eta_vals[ord2]
     Us = Us[:, ord2]
-    slowScores = Zw @ Us # num_windows x sum(keep), slowest component = slowScores[:, 0]
+    slow_scores = Zw @ Us # num_windows x sum(keep), slowest component = slow_scores[:, 0]
 
     # ------------------------------------------------------------------------------
     # Output statistics
@@ -1567,73 +1567,59 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     out['etaEnd'] = etas[-1]
     out['etaStd'] = np.std(etas, ddof=1)
 
-    out['pc1VarFrac'] = pcaEigs[0] / np.sum(pcaEigs)
-    out['slowPCA1corr'] = abs(_pearson(slowScores[:, 0], pcScores[:, 0])[0])
+    out['pc1VarFrac'] = pca_eigs[0] / np.sum(pca_eigs)
+    out['slowPCA1corr'] = abs(_pearson(slow_scores[:, 0], pc_scores[:, 0])[0])
 
     return out
 
-def _is_zscored(x: np.ndarray) -> bool:
-    numericThreshold = 100 * np.finfo(float).eps
-    return (abs(np.mean(x)) < numericThreshold) and (abs(np.std(x, ddof=1) - 1) < numericThreshold)
-
 def _cum_sum_bridge_stats(p: np.ndarray) -> Union[dict, float]:
-    # CUSUM/bridge stationarity statistics on a cumulative sum.
-    #
-    # Given a series p_t whose mean is being tested for stationarity, forms
-    # cumsum(p) and computes: linear-fit statistics on the cumsum (cf. trend),
-    # a CUSUM 'bridge' relative to the endpoint-to-endpoint line (cf. Inclan-Tiao's
-    # test for a change point in variance), and a comparison between an ordinary
-    # least-squares and a robust (bisquare) linear fit to the cumsum -- large
-    # disagreement between the two indicates the OLS trend is either outlier-driven
-    # or genuinely curved (accelerating/decelerating drift) rather than a clean
-    # linear trend.
     p = np.asarray(p, dtype=float).ravel()
     Np = len(p)
     if Np < 20:
         return np.nan
 
     t = np.arange(1, Np + 1, dtype=float)
-    yC = np.cumsum(p)
+    y_c = np.cumsum(p)
 
     out = {}
-    out['meanYC'] = np.mean(yC)
-    coeffsOLS = polyfit(t, yC, 1)
-    out['gradient'] = coeffsOLS[0] # ~ std(yC) too (r > 0.99 empirically); kept as the interpretable one
-    out['intercept'] = coeffsOLS[1]
-    residOLS = yC - np.polyval(coeffsOLS, t)
+    out['meanYC'] = np.mean(y_c)
+    coeffs_ols = polyfit(t, y_c, 1)
+    out['gradient'] = coeffs_ols[0] # ~ std(y_c) too (r > 0.99 empirically); kept as the interpretable one
+    out['intercept'] = coeffs_ols[1]
+    resid_ols = y_c - np.polyval(coeffs_ols, t)
 
-    out['meanYC12'] = np.mean(yC[:Np // 2])
-    out['meanYC22'] = np.mean(yC[Np // 2:])
+    out['meanYC12'] = np.mean(y_c[:Np // 2])
+    out['meanYC22'] = np.mean(y_c[Np // 2:])
 
-    bridge = yC - (t / Np) * yC[-1]
-    scaleFactor = np.std(p, ddof=1) * np.sqrt(Np)
-    if scaleFactor > 0:
-        out['maxBridge'] = np.max(np.abs(bridge)) / scaleFactor
+    bridge = y_c - (t / Np) * y_c[-1]
+    scale_factor = np.std(p, ddof=1) * np.sqrt(Np)
+    if scale_factor > 0:
+        out['maxBridge'] = np.max(np.abs(bridge)) / scale_factor
     else:
         out['maxBridge'] = np.nan
-    idxMax = int(np.argmax(np.abs(bridge))) + 1
-    out['posMaxBridge'] = idxMax / Np # where the largest deviation from stationarity occurs
+    idx_max = int(np.argmax(np.abs(bridge))) + 1
+    out['posMaxBridge'] = idx_max / Np # where the largest deviation from stationarity occurs
     out['stdBridge'] = np.std(bridge, ddof=1)
 
-    robCoeffs, robStats = robustfit(t, yC)
-    robustGradient = robCoeffs[1] # not output directly: r > 0.98 with out['gradient']
-    robResid = yC - (robCoeffs[0] + robCoeffs[1] * t)
-    if robStats['se'][1] > 0:
-        out['gradientDiffSE'] = (out['gradient'] - robustGradient) / robStats['se'][1]
+    rob_coeffs, rob_stats = robustfit(t, y_c)
+    robust_gradient = rob_coeffs[1] # not output directly: r > 0.98 with out['gradient']
+    rob_resid = y_c - (rob_coeffs[0] + rob_coeffs[1] * t)
+    if rob_stats['se'][1] > 0:
+        out['gradientDiffSE'] = (out['gradient'] - robust_gradient) / rob_stats['se'][1]
     else:
         out['gradientDiffSE'] = np.nan
-    if np.std(robResid, ddof=1) > 0:
-        out['residStdRatio'] = np.std(residOLS, ddof=1) / np.std(robResid, ddof=1)
+    if np.std(rob_resid, ddof=1) > 0:
+        out['residStdRatio'] = np.std(resid_ols, ddof=1) / np.std(rob_resid, ddof=1)
     else:
         out['residStdRatio'] = np.nan
 
-    varP = np.var(p, ddof=1)
-    if varP > 0 and Np > 21:
-        tInterior = t[:-1]
-        nullVar = varP * tInterior * (Np - tInterior) / Np
-        stdResid = bridge[:-1] ** 2 / nullVar # ~chi-square(1), mean 1, under the null
-        logStdResid = np.log(stdResid + np.finfo(float).eps) # chi-square(1) is heavy-tailed; log stabilizes the trend estimate
-        out['varRatioTrend'] = _kendall(tInterior, logStdResid)[0]
+    var_p = np.var(p, ddof=1)
+    if var_p > 0 and Np > 21:
+        t_interior = t[:-1]
+        null_var = var_p * t_interior * (Np - t_interior) / Np
+        std_resid = bridge[:-1] ** 2 / null_var # ~chi-square(1), mean 1, under the null
+        log_std_resid = np.log(std_resid + np.finfo(float).eps) # chi-square(1) is heavy-tailed; log stabilizes the trend estimate
+        out['varRatioTrend'] = _kendall(t_interior, log_std_resid)[0]
     else:
         out['varRatioTrend'] = np.nan
 
@@ -1650,16 +1636,6 @@ def drifting_mean_cusum(y: ArrayLike) -> dict:
     statistics on it, including a comparison between an ordinary least-squares and a
     robust linear fit to flag whether any apparent drift is outlier-driven or a
     genuine trend.
-
-    Note that the basic cumsum trend statistics (meanYC, gradient, intercept,
-    meanYC12, meanYC22) duplicate what :func:`trend` already computes on y's own
-    cumsum (confirmed by \\|r\\| >= 0.79 on real EEG data, several essentially exact),
-    so are dropped here. stdBridge is also dropped: since the input is always
-    z-scored (mean exactly 0), the linear detrending step barely changes anything for
-    the raw-y case (the fitted slope is ~mean(y) ~ 0), so ``std(bridge)`` tracks
-    :func:`trend`'s stdYC almost exactly (r = 1.000 on Empirical1000) rather than
-    adding new information. Only maxBridge, posMaxBridge, and the robust-vs-OLS
-    comparison statistics, which :func:`trend` does not provide, are returned.
 
     Parameters
     ----------
@@ -1686,9 +1662,6 @@ def drifting_mean_cusum(y: ArrayLike) -> dict:
         Returns NaN if the time series is shorter than 20 samples.
     """
     y = np.asarray(y, dtype=float).ravel()
-    if not _is_zscored(y):
-        logger.warning("The input time series should be z-scored")
-
     out = _cum_sum_bridge_stats(y)
     if isinstance(out, dict):
         for k in ('meanYC', 'gradient', 'intercept', 'meanYC12', 'meanYC22', 'stdBridge'):
