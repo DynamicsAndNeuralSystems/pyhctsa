@@ -1449,6 +1449,11 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     on average; substantially smaller values indicate genuinely slow (smooth,
     low-frequency) structure in some combination of the four per-window statistics.
 
+    References
+    ----------
+    Wiskott, L. & Sejnowski, T.J. "Slow feature analysis: unsupervised learning of
+    invariances." Neural Computation 14(4), 715-770 (2002).
+
     Parameters
     ----------
     y : array-like
@@ -1483,11 +1488,6 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
 
         Returns NaN if the time series is too short for the requested number of
         windows, or if fewer than two directions survive the whitening threshold.
-
-    References
-    ----------
-    Wiskott, L. & Sejnowski, T.J. "Slow feature analysis: unsupervised learning of
-    invariances." Neural Computation 14(4), 715-770 (2002).
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)

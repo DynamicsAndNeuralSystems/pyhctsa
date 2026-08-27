@@ -262,6 +262,7 @@ Spectral
     pyhctsa.operations.spectral.spectral_summaries_phase
     pyhctsa.operations.spectral.specparam
     pyhctsa.operations.spectral.cepstrum
+    pyhctsa.operations.spectral.phase_amp_coupling
 
 .. _stationaritymeths:
 
@@ -288,6 +289,7 @@ Stationarity
     pyhctsa.operations.stationarity.ramping_windows
     pyhctsa.operations.stationarity.slow_feature_analysis
     pyhctsa.operations.stationarity.drifting_mean_cusum
+    pyhctsa.operations.stationarity.drifting_autocorr
 
 .. _surrogatesmeths:
 

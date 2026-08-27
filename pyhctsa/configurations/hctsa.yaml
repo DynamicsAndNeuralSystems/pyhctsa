@@ -1651,6 +1651,14 @@ spectral:
     legacy_name: SP_Cepstrum
     ordered_args: ['max_period', 'min_period']
 
+  phase_amp_coupling:
+    base_name: phase_amp_coupling
+    dependencies:
+    configs:
+      - {n_bands: 5, max_n: 'full', n_phase_bins: 18, zscore: True}
+    legacy_name: SP_PhaseAmpCoupling
+    ordered_args: ['n_bands', 'max_n', 'n_phase_bins']
+
 model_fit:
   ar_cov:
     base_name: ar_cov
