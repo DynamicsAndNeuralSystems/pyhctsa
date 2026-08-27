@@ -89,6 +89,7 @@ Distribution
 .. autosummary::
    :toctree: generated/
 
+   pyhctsa.operations.distribution.cumulants
    pyhctsa.operations.distribution.compare_ks_fit
    pyhctsa.operations.distribution.simple_fit
    pyhctsa.operations.distribution.withinp
@@ -285,6 +286,7 @@ Stationarity
     pyhctsa.operations.stationarity.sliding_window
     pyhctsa.operations.stationarity.ramping_windows
     pyhctsa.operations.stationarity.slow_feature_analysis
+    pyhctsa.operations.stationarity.drifting_mean_cusum
 
 .. _surrogatesmeths:
 

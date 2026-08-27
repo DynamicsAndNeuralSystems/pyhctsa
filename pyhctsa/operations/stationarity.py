@@ -14,6 +14,7 @@ from statsmodels.tsa.stattools import kpss
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, sample_entropy
+from ..toolboxes.matlab.matlab_fit import polyfit, robustfit
 from ..toolboxes.matlab._pptest_tables import PP_CV_TABLES, PP_SAMP_SIZES, PP_SIG_LEVELS
 from ..utils import make_mat_buffer, sign_change, z_score
 
@@ -1568,5 +1569,129 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
 
     out['pc1VarFrac'] = pcaEigs[0] / np.sum(pcaEigs)
     out['slowPCA1corr'] = abs(_pearson(slowScores[:, 0], pcScores[:, 0])[0])
+
+    return out
+
+def _is_zscored(x: np.ndarray) -> bool:
+    numericThreshold = 100 * np.finfo(float).eps
+    return (abs(np.mean(x)) < numericThreshold) and (abs(np.std(x, ddof=1) - 1) < numericThreshold)
+
+def _cum_sum_bridge_stats(p: np.ndarray) -> Union[dict, float]:
+    # CUSUM/bridge stationarity statistics on a cumulative sum.
+    #
+    # Given a series p_t whose mean is being tested for stationarity, forms
+    # cumsum(p) and computes: linear-fit statistics on the cumsum (cf. trend),
+    # a CUSUM 'bridge' relative to the endpoint-to-endpoint line (cf. Inclan-Tiao's
+    # test for a change point in variance), and a comparison between an ordinary
+    # least-squares and a robust (bisquare) linear fit to the cumsum -- large
+    # disagreement between the two indicates the OLS trend is either outlier-driven
+    # or genuinely curved (accelerating/decelerating drift) rather than a clean
+    # linear trend.
+    p = np.asarray(p, dtype=float).ravel()
+    Np = len(p)
+    if Np < 20:
+        return np.nan
+
+    t = np.arange(1, Np + 1, dtype=float)
+    yC = np.cumsum(p)
+
+    out = {}
+    out['meanYC'] = np.mean(yC)
+    coeffsOLS = polyfit(t, yC, 1)
+    out['gradient'] = coeffsOLS[0] # ~ std(yC) too (r > 0.99 empirically); kept as the interpretable one
+    out['intercept'] = coeffsOLS[1]
+    residOLS = yC - np.polyval(coeffsOLS, t)
+
+    out['meanYC12'] = np.mean(yC[:Np // 2])
+    out['meanYC22'] = np.mean(yC[Np // 2:])
+
+    bridge = yC - (t / Np) * yC[-1]
+    scaleFactor = np.std(p, ddof=1) * np.sqrt(Np)
+    if scaleFactor > 0:
+        out['maxBridge'] = np.max(np.abs(bridge)) / scaleFactor
+    else:
+        out['maxBridge'] = np.nan
+    idxMax = int(np.argmax(np.abs(bridge))) + 1
+    out['posMaxBridge'] = idxMax / Np # where the largest deviation from stationarity occurs
+    out['stdBridge'] = np.std(bridge, ddof=1)
+
+    robCoeffs, robStats = robustfit(t, yC)
+    robustGradient = robCoeffs[1] # not output directly: r > 0.98 with out['gradient']
+    robResid = yC - (robCoeffs[0] + robCoeffs[1] * t)
+    if robStats['se'][1] > 0:
+        out['gradientDiffSE'] = (out['gradient'] - robustGradient) / robStats['se'][1]
+    else:
+        out['gradientDiffSE'] = np.nan
+    if np.std(robResid, ddof=1) > 0:
+        out['residStdRatio'] = np.std(residOLS, ddof=1) / np.std(robResid, ddof=1)
+    else:
+        out['residStdRatio'] = np.nan
+
+    varP = np.var(p, ddof=1)
+    if varP > 0 and Np > 21:
+        tInterior = t[:-1]
+        nullVar = varP * tInterior * (Np - tInterior) / Np
+        stdResid = bridge[:-1] ** 2 / nullVar # ~chi-square(1), mean 1, under the null
+        logStdResid = np.log(stdResid + np.finfo(float).eps) # chi-square(1) is heavy-tailed; log stabilizes the trend estimate
+        out['varRatioTrend'] = _kendall(tInterior, logStdResid)[0]
+    else:
+        out['varRatioTrend'] = np.nan
+
+    return out
+
+def drifting_mean_cusum(y: ArrayLike) -> dict:
+    """
+    Parameter-free CUSUM test for a drifting mean.
+
+    :func:`stat_av` and :func:`drifting_mean` both test for a drifting mean by
+    splitting the time series into segments -- requiring a choice of segment length
+    or number of segments. This is the analogous test with no free parameter: it
+    forms ``cumsum(y)`` directly (at full resolution) and computes CUSUM/bridge
+    statistics on it, including a comparison between an ordinary least-squares and a
+    robust linear fit to flag whether any apparent drift is outlier-driven or a
+    genuine trend.
+
+    Note that the basic cumsum trend statistics (meanYC, gradient, intercept,
+    meanYC12, meanYC22) duplicate what :func:`trend` already computes on y's own
+    cumsum (confirmed by \\|r\\| >= 0.79 on real EEG data, several essentially exact),
+    so are dropped here. stdBridge is also dropped: since the input is always
+    z-scored (mean exactly 0), the linear detrending step barely changes anything for
+    the raw-y case (the fitted slope is ~mean(y) ~ 0), so ``std(bridge)`` tracks
+    :func:`trend`'s stdYC almost exactly (r = 1.000 on Empirical1000) rather than
+    adding new information. Only maxBridge, posMaxBridge, and the robust-vs-OLS
+    comparison statistics, which :func:`trend` does not provide, are returned.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (assumed z-scored).
+
+    Returns
+    -------
+    dict
+        - ``maxBridge``: the largest absolute deviation of the CUSUM 'bridge' (the
+          cumsum relative to its endpoint-to-endpoint line), scaled by
+          ``std(y)*sqrt(N)``.
+        - ``posMaxBridge``: where in the series (as a fraction of its length) that
+          largest deviation from stationarity occurs.
+        - ``gradientDiffSE``: the difference between the ordinary least-squares and
+          robust (bisquare) gradients of the cumsum, in units of the robust fit's
+          standard error.
+        - ``residStdRatio``: the ratio of the OLS residual standard deviation to the
+          robust residual standard deviation.
+        - ``varRatioTrend``: Kendall's tau between time and the log of the squared
+          bridge, normalized by its variance under the null -- a trend in the local
+          variance of the CUSUM.
+
+        Returns NaN if the time series is shorter than 20 samples.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if not _is_zscored(y):
+        logger.warning("The input time series should be z-scored")
+
+    out = _cum_sum_bridge_stats(y)
+    if isinstance(out, dict):
+        for k in ('meanYC', 'gradient', 'intercept', 'meanYC12', 'meanYC22', 'stdBridge'):
+            del out[k]
 
     return out

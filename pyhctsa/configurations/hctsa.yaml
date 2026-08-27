@@ -1000,6 +1000,14 @@ stationarity:
       - {num_windows: 20, zscore: True}
     legacy_name: SY_SlowFeatureAnalysis
     ordered_args: ['num_windows']
+
+  drifting_mean_cusum:
+    base_name: drifting_mean_cusum
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: SY_DriftingMeanCUSUM
+    ordered_args: []
   
 distribution:
 
@@ -1019,6 +1027,15 @@ distribution:
       - {dmodel: 'sin3', zscore: True}
     legacy_name: DN_SimpleFit
     ordered_args: ['dmodel', 'num_bins']
+  
+  cumulants:
+    base_name: cumulants
+    dependencies:
+    configs:
+      - {cum_what_may: 'skew1', zscore: False}
+      - {cum_what_may: 'skew2', zscore: False}
+      - {cum_what_may: 'kurt1', zscore: False}
+      - {cum_what_may: 'kurt2', zscore: False}
 
   withinp:
     base_name: withinp
