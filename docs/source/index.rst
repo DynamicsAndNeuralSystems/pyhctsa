@@ -101,6 +101,12 @@ Select from the cards below to navigate the `pyhctsa` documentation:
 
       Function name mappings for existing hctsa (MATLAB) users.
    
+   .. grid-item-card:: :material-regular:`groups;3em` Authors
+      :link: authors
+      :link-type: doc
+
+      The people behind pyhctsa and how to cite it.
+
    .. grid-item-card:: :material-regular:`attribution;3em` License
       :link: license
       :link-type: doc
@@ -146,6 +152,16 @@ News and updates
     :class-container: sd-p-2 sd-outline-muted sd-rounded-0
 
 
+Developed and maintained by the
+`Dynamics and Neural Systems Group <https://dynamicsandneuralsystems.github.io/>`_
+at the University of Sydney.
+
+.. image:: _static/dns_logo_horizontal.svg
+   :alt: Dynamics and Neural Systems Group
+   :target: https://dynamicsandneuralsystems.github.io/
+   :width: 300px
+   :align: center
+
 © 2026 Joshua Moore and Ben Fulcher. You may use, modify, and distribute this software with appropriate attribution.
 
 .. toctree::
@@ -159,4 +175,5 @@ News and updates
    api
    development/index
    mappings/index
+   authors
    license
