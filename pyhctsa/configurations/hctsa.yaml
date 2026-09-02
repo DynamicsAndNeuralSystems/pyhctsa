@@ -1279,6 +1279,14 @@ scaling:
       - {do_overlap: False, scale_range: null, q_range: [[-5, 5]], zscore: True}
     legacy_name: SC_MMA
     ordered_args: ['do_overlap', 'scale_range', 'q_range']
+  
+  higuchi_fd:
+    base_name: higuchi_fd
+    dependencies:
+    configs:
+      - {kmax: 8, zscore: True}
+    legacy_name: SC_HiguchiFD
+    ordered_args: ['kmax']
 
 symbolic:
   transition_matrix:
