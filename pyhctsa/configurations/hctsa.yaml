@@ -66,6 +66,14 @@ criticality:
     
 correlation:
 
+  oversampling:
+    base_name: oversampling
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: CO_Oversampling
+    ordered_args:
+
   autocorr:
     base_name: ac
     dependencies:

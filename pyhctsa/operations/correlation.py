@@ -14,7 +14,107 @@ from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit
 from ..utils import (bin_picker, histc, make_mat_buffer, point_of_crossing,
-                     sign_change, time_delay_embed, z_score)
+                     sign_change, time_delay_embed, z_score, mquantile)
+
+def oversampling(y: ArrayLike) -> dict:
+    """
+    Detects temporal oversampling relative to a series' own dynamics.
+
+    Implements the oversampling-detection statistic eta (and its downsampling
+    correction) from the 'oversampling' stage of the Chaos Decision Tree
+    Algorithm [1]:
+
+    .. math::
+
+        \\eta = \\frac{\\mathrm{range}(y)}{\\langle |\\Delta y| \\rangle}
+
+    A large eta means consecutive samples are, on average, tiny relative to
+    the full dynamic range the series explores -- i.e., the series is sampled
+    much faster than its own dynamics move, so consecutive points are close
+    to redundant. Toker et al. flag eta > 10 as 'oversampled': this inflates
+    the apparent smoothness/determinism of a series and can bias downstream
+    nonlinear statistics (their motivation: left uncorrected, it distorts
+    their 0-1 test for chaos -- cf. ``zero_one_test``). Their correction is to
+    iteratively halve the sampling rate (keep every second point) until
+    eta <= 10 or fewer than 100 points remain.
+
+    cf. ``zero_one_test`` for the chaos-classification stage of the same
+    pipeline, and ``permutation_entropy``/``surrogate_test`` for its
+    stochasticity-testing stage; this function covers the
+    oversampling-diagnosis stage instead. Note eta is scale- and
+    location-invariant (a ratio of two amplitude-unit quantities), so
+    z-scored or raw y give identical results.
+
+    References
+    ----------
+    .. [1] Toker, D. et al. "A simple method for detecting chaos in nature",
+        Commun. Biol. 3, 11 (2020). DOI: 10.1038/s42003-019-0715-9
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+            - 'eta': The oversampling statistic, range(y)/mean(|diff(y)|).
+            - 'etaRobust': The same ratio with range replaced by a 5th-95th
+              percentile range, since eta's numerator (a global max-min) is a
+              single-outlier-sensitive statistic; etaRobust asks the same
+              oversampling question without letting one extreme point set the
+              scale.
+            - 'numHalvings': The number of times Toker et al.'s halving
+              procedure would downsample y before eta <= 10 (or fewer than 100
+              points would remain) -- a direct, interpretable severity measure.
+            - 'etaAfterDownsampling': The value of eta after applying
+              numHalvings halvings (<=10, unless the series was too short to
+              fully correct).
+    """
+    # Check inputs:
+    y = np.asarray(y, dtype=float).ravel()
+    N = y.size
+    if N < 10:
+        # Data-dependent (series too short to assess sampling adequacy), not a code error.
+        logger.warning('Time series too short to assess oversampling')
+        return {'eta': np.nan, 'etaRobust': np.nan,
+                'numHalvings': np.nan, 'etaAfterDownsampling': np.nan}
+
+    mean_abs_diff = float(np.mean(np.abs(np.diff(y))))
+    if mean_abs_diff == 0:
+        # Data-dependent (constant time series), not a code error.
+        logger.warning('Zero mean absolute difference (constant time series?)')
+        return {'eta': np.nan, 'etaRobust': np.nan,
+                'numHalvings': np.nan, 'etaAfterDownsampling': np.nan}
+
+    out = {}
+
+    # eta and its outlier-robust companion:
+    out['eta'] = float(np.ptp(y) / mean_abs_diff)
+
+    q05, q95 = mquantile(y, [0.05, 0.95])
+    robust_range = q95 - q05
+    out['etaRobust'] = float(robust_range / mean_abs_diff)
+
+    # Iterative halving-downsampling correction (Toker et al., 2020):
+    eta_threshold = 10
+    min_points = 100
+
+    y_ds = y
+    num_halvings = 0
+    eta_curr = out['eta']
+    while eta_curr > eta_threshold and y_ds.size // 2 >= min_points:
+        y_ds = y_ds[::2]
+        num_halvings += 1
+        m_ds = float(np.mean(np.abs(np.diff(y_ds))))
+        if m_ds == 0:
+            break # degenerate downsampled segment -- keep prior eta_curr
+        eta_curr = float(np.ptp(y_ds) / m_ds)
+    out['numHalvings'] = float(num_halvings)
+    out['etaAfterDownsampling'] = float(eta_curr)
+
+    return out
 
 def falling_sticks(y: ArrayLike) -> dict:
     """

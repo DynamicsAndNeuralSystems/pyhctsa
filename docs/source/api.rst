@@ -42,7 +42,8 @@ Correlation
 
 .. autosummary::
    :toctree: generated/
-
+   
+   pyhctsa.operations.correlation.oversampling
    pyhctsa.operations.correlation.autocorr
    pyhctsa.operations.correlation.autocorr_x2_shape
    pyhctsa.operations.correlation.add_noise
