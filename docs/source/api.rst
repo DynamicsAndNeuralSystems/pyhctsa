@@ -178,6 +178,7 @@ Medical
     pyhctsa.operations.medical.hrv_classic
     pyhctsa.operations.medical.pol_var
     pyhctsa.operations.medical.pnn
+    pyhctsa.operations.medical.porta
 
 .. _modelfitmeths:
 
