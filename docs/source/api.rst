@@ -240,6 +240,7 @@ Scaling
    pyhctsa.operations.scaling.fast_dfa
    pyhctsa.operations.scaling.fluctuation_analysis
    pyhctsa.operations.scaling.mma
+   operations.scaling.higuchi_fd
 
 .. _spectralmeths:
 

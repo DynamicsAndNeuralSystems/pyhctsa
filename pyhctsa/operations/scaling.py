@@ -9,6 +9,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 from ..toolboxes.Max_Little import fastdfa
+from ..toolboxes.matlab.matlab_fit import robustfit
 from ..utils import make_mat_buffer
 from ..operations.correlation import autocorr
 
@@ -531,5 +532,82 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
     std_q = _std(hqs, axis=1)
     out["stdStdHurstQ"] = _std(std_q)  # large if variance changes a lot with q
     out["stdStdHurstScale"] = _std(std_s)  # large if variance changes a lot with scale
+
+    return out
+
+def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
+    """
+    Higuchi's fractal dimension of a time series.
+
+    Estimates the fractal dimension of the time series' waveform (its graph in
+    the (index,value) plane) via Higuchi's curve-length method: at each scale
+    k, the series is split into k interleaved subsequences, each subsequence's
+    normalized curve length is measured, and the k lengths are averaged to
+    give L(k). The fractal dimension is (minus) the slope of log(L(k)) against
+    log(1/k).
+
+    References
+    ----------
+    .. [1] T. Higuchi, "Approach to an irregular time series on the basis of the
+        fractal theory", Physica D 31(2) 277-283 (1988).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    kmax : int, optional
+        The maximum interleaving scale to include in the fit (default: a
+        small, fixed value -- see Notes above for why a large kmax is
+        actively harmful, not just unnecessary).
+
+    Returns
+    -------
+    dict
+        The fitted (Higuchi) log-log slope and diagnostics of the linear fit's
+        quality.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = y.size
+
+    if kmax is None:
+        kmax = min(8, max(5, N // 10))
+    kmax = int(kmax)
+
+    # --------------------------------------------------------------------------
+    # Compute the curve length L(k) at each scale k = 1,...,kmax
+    # --------------------------------------------------------------------------
+    log_l = np.full(kmax, np.nan)
+    log_invk = np.full(kmax, np.nan)
+    for k in range(1, kmax + 1):
+        lk = np.full(k, np.nan)
+        for m in range(1, k + 1):
+            n_max = (N - m) // k
+            if n_max < 1:
+                continue
+            idx = np.arange(m - 1, m + n_max * k, k)
+            lk[m - 1] = np.sum(np.abs(np.diff(y[idx]))) * (N - 1) / (n_max * k) / k
+        if np.all(np.isnan(lk)):
+            continue
+        l_bar = np.nanmean(lk)
+        if not np.isnan(l_bar) and l_bar > 0:
+            log_l[k - 1] = np.log(l_bar)
+            log_invk[k - 1] = np.log(1 / k)
+
+    good_k = ~np.isnan(log_l)
+    if np.sum(good_k) < 5:
+        return float("nan")
+
+    # --------------------------------------------------------------------------
+    # Robust linear fit of log(L(k)) against log(1/k)
+    # --------------------------------------------------------------------------
+    linfit, stats = robustfit(log_invk[good_k], log_l[good_k])
+    resid = log_l[good_k] - (linfit[0] + linfit[1] * log_invk[good_k])
+
+    out = {}
+    out["HFD"] = linfit[1]  # the Higuchi fractal dimension estimate (log-log slope)
+    out["intercept"] = linfit[0]
+    out["se_HFD"] = stats["se"][1]  # standard error on the dimension estimate
+    out["ssr"] = np.mean(resid ** 2)  # mean squared residual of the linear fit
+    out["resac1"] = autocorr(resid, 1, 'Fourier')[0]  # residual autocorrelation
 
     return out
