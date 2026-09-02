@@ -452,6 +452,14 @@ correlation:
       - {time_lag: 4, zscore: True}
     legacy_name: DK_timerev
     ordered_args: ['time_lag']
+  
+  pos_neg_asymmetry:
+    base_name: pos_neg_asymmetry
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: CO_PosNegAsymmetry
+    ordered_args:
 
   crinkle_statistic:
     base_name: crinkle_statistic
