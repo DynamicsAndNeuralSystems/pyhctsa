@@ -14,6 +14,119 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, sample_entropy
 from ..utils import make_mat_buffer, sign_change, z_score
+from ..toolboxes.matlab._pptest_tables import _pp_pvalue, _pp_regression
+
+def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
+            test_statistic: str = 't1') -> dict:
+    """
+    Phillips-Perron unit root test.
+
+    The null hypothesis is that the series contains a unit root (i.e., is a random walk, 
+    possibly with drift); the alternative is that it is stationary about the specified
+    deterministic trend.
+
+    The test statistic is a non-parametric correction of the Dickey-Fuller
+    statistic, using a Newey-West estimate of the long-run variance in place of
+    the augmenting lagged differences.
+
+    References
+    ----------
+    .. [1] P. C. B. Phillips and P. Perron, "Testing for a unit root in time series
+        regression", *Biometrika*, 75(2), 335 (1988).
+    .. [2] J. D. Hamilton, *Time Series Analysis*, Princeton University Press (1994),
+        p. 514.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    lags : int or list of int, optional
+        The number of autocovariance lags to include in the Newey-West estimator
+        of the long-run variance. A list runs one test per lag and returns
+        summary statistics across them. Default is ``range(0, 6)``.
+    model : {'ar', 'ard', 'ts'}, optional
+        The regression model: 'ar' (autoregressive, no deterministic terms),
+        'ard' (autoregressive with drift) or 'ts' (trend stationary).
+        Default is 'ar'.
+    test_statistic : {'t1', 't2'}, optional
+        't1' is the standard t-statistic; 't2' is a lag-adjusted,
+        'unStudentized' statistic. Default is 't1'.
+
+    Returns
+    -------
+    dict
+        For a single lag: the p-value, statistic, first regression coefficient
+        and regression fit statistics. For multiple lags: summary statistics on
+        the p-values, statistics and regression fit statistics across lags.
+    """
+    y = np.asarray(y, dtype=float)
+    y = y[~np.isnan(y)]  # remove missing values
+    if not np.all(np.isfinite(y)):
+        raise ValueError("The input time series must be real and finite.")
+
+    model = model.lower()
+    test_statistic = test_statistic.lower()
+    if test_statistic not in ('t1', 't2'):
+        raise ValueError(f"Unknown test statistic '{test_statistic}'. Use 't1' or 't2'.")
+
+    if lags is None:
+        lags = list(range(0, 6))  # 5 autoregressive lags
+    single = np.isscalar(lags)
+    lag_list = [int(lags)] if single else [int(l) for l in lags]
+
+    T = len(y) - 1
+    p_values, stats, regs = [], [], []
+    for l in lag_list:
+        reg = _pp_regression(y, l, model)
+        a, se_a, MSE = reg['a'], reg['se_a'], reg['MSE']
+        gamma0, lambda_sq = reg['gamma0'], reg['NWEst']
+
+        if test_statistic == 't1':
+            stat = (np.sqrt(gamma0 / lambda_sq) * (a - 1) / se_a
+                    - 0.5 * (lambda_sq - gamma0) / np.sqrt(lambda_sq) * T * se_a / np.sqrt(MSE))
+        else:
+            stat = T * (a - 1) - 0.5 * ((T * se_a) ** 2 / MSE) * (lambda_sq - gamma0)
+
+        stats.append(stat)
+        p_values.append(_pp_pvalue(stat, T, model, test_statistic))
+        regs.append(reg)
+
+    if single:
+        reg = regs[0]
+        return {
+            'pvalue': p_values[0],
+            'stat': stats[0],
+            'coeff1': reg['coeff'][0],  # could be multiple, depending on the model
+            'loglikelihood': reg['LL'],
+            'AIC': reg['AIC'],
+            'BIC': reg['BIC'],
+            'HQC': reg['HQC'],
+            'rmse': reg['RMSE'],
+        }
+
+    # Return statistics on the set of outputs
+    p_values = np.asarray(p_values)
+    stats = np.asarray(stats)
+    return {
+        'maxpValue': np.max(p_values),
+        'minpValue': np.min(p_values),
+        'meanpValue': np.mean(p_values),
+        'stdpValue': np.std(p_values, ddof=1),
+        'lagmaxp': lag_list[int(np.argmax(p_values))],
+        'lagminp': lag_list[int(np.argmin(p_values))],
+
+        'meanstat': np.mean(stats),
+        'maxstat': np.max(stats),
+        'minstat': np.min(stats),
+
+        'meanloglikelihood': np.mean([r['LL'] for r in regs]),
+        'minAIC': np.min([r['AIC'] for r in regs]),
+        'minBIC': np.min([r['BIC'] for r in regs]),
+        'minHQC': np.min([r['HQC'] for r in regs]),
+
+        'minrmse': np.min([r['RMSE'] for r in regs]),
+        'maxrmse': np.max([r['RMSE'] for r in regs]),
+    }
 
 def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par',
                         num_points: int = 200) -> dict:
