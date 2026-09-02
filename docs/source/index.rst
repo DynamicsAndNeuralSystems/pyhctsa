@@ -105,7 +105,7 @@ Select from the cards below to navigate the `pyhctsa` documentation:
       :link: authors
       :link-type: doc
 
-      The people behind pyhctsa and how to cite it.
+      The people behind pyhctsa.
 
    .. grid-item-card:: :material-regular:`attribution;3em` License
       :link: license
