@@ -1503,6 +1503,14 @@ spectral:
       - {zscore: True}
     legacy_name: SP_SummariesPhase
     ordered_args:
+  
+  cepstrum:
+    base_name: cepstrum
+    dependencies:
+    configs:
+      - {max_period: 100, min_period: 4, zscore: True}
+    legacy_name: SP_Cepstrum
+    ordered_args: ['max_period', 'min_period']
 
 model_fit:
   ar_cov:
