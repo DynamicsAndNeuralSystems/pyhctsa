@@ -1865,14 +1865,7 @@ def autocorr_x2_shape(y: ArrayLike, max_lag: Union[int, str] = 'double_drown') -
 
     This function characterizes the *shape* of :math:`\\text{diff}(\\tau)` across
     lags -- its decay, persistence, and extrema -- mirroring how
-    :func:`autocorr_shape` characterizes the shape of the ordinary ACF. (An
-    earlier version of this function instead characterized the forward and
-    backward profiles' shapes separately, but on 300 real time series from
-    ``INP_Empirical1000.mat`` their shape descriptors were correlated at
-    r = 0.84-0.97 with each other -- i.e., overwhelmingly redundant, since both
-    profiles inherit most of their shape from whatever ordinary linear
-    correlation the series has. The difference profile cancels that shared
-    component and isolates the genuinely asymmetric/nonlinear structure.)
+    :func:`autocorr_shape` characterizes the shape of the ordinary ACF.
 
     References
     ----------
