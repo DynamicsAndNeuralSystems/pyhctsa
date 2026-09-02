@@ -436,3 +436,102 @@ def give_me_robust_stats(x_data: ArrayLike, y_data: ArrayLike, field_name: str) 
         for key in ('a1', 'a2', 'sigrat', 'sigma', 'sea1', 'sea2'):
             out[f'{field_name}_{key}'] = np.nan
     return out
+
+def spectral_summaries_phase(y: ArrayLike) -> dict:
+    """
+    Statistics of the Fourier phase spectrum of a time series.
+
+    cf. :func:`spectral_summaries`, which characterizes the *magnitude* spectrum in
+    detail but discards phase entirely. For a linear, Gaussian stochastic process,
+    Fourier phases are theoretically i.i.d. uniform on (-pi, pi] -- that's exactly why
+    phase randomization works as a surrogate null model (cf. J. Theiler et al.,
+    "Testing for nonlinearity in time series: the method of surrogate data",
+    Physica D 58(1-4), 77 (1992)). This operation characterizes the phase spectrum
+    directly: deviations from uniformity/independence across frequency are a direct
+    signature of determinism, nonlinearity, or transient/localized structure that the
+    magnitude spectrum alone cannot see.
+
+    Phases are weighted by their bin's magnitude throughout (a standard approach in
+    circular statistics for data of uneven reliability): a single pure tone
+    concentrates essentially all energy in 1-2 bins, and every other bin's magnitude
+    is set by numerical noise, so its "phase" is meaningless and must not be allowed
+    to swamp an unweighted average. The DC and Nyquist bins (both purely real, phase
+    undefined in the usual oscillatory sense) are excluded throughout.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+
+    Returns
+    -------
+    dict
+        Statistics of the phase spectrum.
+    """
+    # Compute the FFT (same convention as spectral_summaries: Fs=1, NFFT a power of 2)
+    y = np.asarray(y).ravel()
+    ny = len(y)
+    nfft = 2 ** int(np.ceil(np.log2(ny)))
+    fs = 1
+    f = fs / 2 * np.linspace(0, 1, nfft // 2 + 1)
+    w = 2 * np.pi * f
+
+    sc = scipy.fft.fft(y - np.mean(y), nfft)  # mean-subtracted, so the DC bin is (numerically) exactly zero
+    sc = sc[:nfft // 2 + 1]  # single-sided
+    mag = np.abs(sc)
+    ph = np.angle(sc)
+
+    # Exclude DC (bin 1) and Nyquist (last bin): both purely real, phase undefined
+    # in the usual oscillatory sense.
+    idx = slice(1, len(ph) - 1)
+    ph = ph[idx]
+    mag = mag[idx]
+    ww = w[idx]
+
+    if not np.any(mag > 0) or not np.all(np.isfinite(mag)):
+        return np.nan
+
+    wgt = mag / np.sum(mag)
+
+    out = {}
+
+    # Magnitude-weighted circular concentration
+    r_vec = np.sum(wgt * np.exp(1j * ph))
+    out['R'] = np.abs(r_vec)
+
+    # Magnitude-weighted, normalized phase entropy (20-bin histogram)
+    n_bins = 20
+    edges = np.linspace(-np.pi, np.pi, n_bins + 1)
+    bin_idx = np.digitize(ph, edges)
+    bin_idx = np.clip(bin_idx, 1, n_bins)  # guard the (rare) ph == pi edge case
+    p_bin = np.bincount(bin_idx - 1, weights=wgt, minlength=n_bins)
+    p_bin_nz = p_bin[p_bin > 0]
+    out['phEnt'] = -np.sum(p_bin_nz * np.log(p_bin_nz)) / np.log(n_bins)
+
+    # Group delay: magnitude-weighted linear fit of unwrapped phase vs frequency
+    ph_unwrap = np.unwrap(ph)
+    X = np.column_stack((np.ones(len(ww)), ww))
+    XtW = X.T * wgt
+    beta = np.linalg.solve(XtW @ X, XtW @ ph_unwrap)
+    out['groupDelay'] = -beta[1]
+    resid = ph_unwrap - X @ beta
+    out['phaseLinearity'] = np.sqrt(np.sum(wgt * resid ** 2))
+
+    # Magnitude-phase correlation
+    out['magPhaseCorr'] = np.corrcoef(mag, ph)[0, 1]
+
+    # Weighted lag-1 autocorrelation of unwrapped-phase increments across frequency
+    d_phi = np.diff(ph_unwrap)
+    d1 = d_phi[:-1]
+    d2 = d_phi[1:]
+    wgt3 = wgt[:-2]
+    wgt3 = wgt3 / np.sum(wgt3)
+    m1 = np.sum(wgt3 * d1)
+    m2 = np.sum(wgt3 * d2)
+    cov12 = np.sum(wgt3 * (d1 - m1) * (d2 - m2))
+    v1 = np.sum(wgt3 * (d1 - m1) ** 2)
+    v2 = np.sum(wgt3 * (d2 - m2) ** 2)
+    out['phaseUnwrapAC1'] = cov12 / np.sqrt(v1 * v2)
+
+    return out
+

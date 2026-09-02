@@ -249,6 +249,7 @@ Spectral
    :toctree: generated/
 
     pyhctsa.operations.spectral.spectral_summaries
+    pyhctsa.operations.spectral.spectral_summaries_phase
 
 .. _stationaritymeths:
 
@@ -311,3 +312,4 @@ Wavelet
    pyhctsa.operations.wavelet.dwt_coeff
    pyhctsa.operations.wavelet.scal_2_freq
    pyhctsa.operations.wavelet.wfbm
+   pyhctsa.operations.wavelet.modwt_var

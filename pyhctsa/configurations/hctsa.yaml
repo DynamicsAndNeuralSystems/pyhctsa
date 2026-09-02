@@ -1448,6 +1448,15 @@ wavelet:
     legacy_name: WL_fBM
     ordered_args: 
   
+  modwt_var:
+    base_name: modwt_var
+    dependencies:
+      - PyWavelets
+    configs:
+      - {w_name: 'db3', level: 5, zscore: True}
+    legacy_name: WL_modwtvar
+    ordered_args: ['w_name', 'level']
+  
 hypothesis_tests:
   hypothesis_test:
     base_name: hypothesis_test
@@ -1486,6 +1495,14 @@ spectral:
       - {psd_meth: 'fft', window_type: 'none', zscore: True}
     legacy_name: SP_Summaries
     ordered_args: ['psd_meth', 'window_type']
+  
+  spectral_summaries_phase:
+    base_name: spectral_summaries_phase
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: SP_SummariesPhase
+    ordered_args:
 
 model_fit:
   ar_cov:

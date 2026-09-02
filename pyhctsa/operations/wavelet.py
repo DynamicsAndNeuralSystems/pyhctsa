@@ -599,3 +599,190 @@ def find_my_threshold(x: float, det_s: ArrayLike, N: int):
         return np.nan
 
     return np.argmax(below)/N
+
+def _modwt(x: ArrayLike, w_name: str, level: int) -> np.ndarray:
+    """
+    Maximal overlap discrete wavelet transform.
+
+    Parameters
+    ----------
+    x : array-like
+        The input time series.
+    w_name : str
+        The name of the orthogonal mother wavelet (e.g., ``'db3'``, ``'sym2'``).
+    level : int
+        The level of the transform.
+
+    Returns
+    -------
+    numpy.ndarray
+        A ``(level+1, len(x))`` array whose first ``level`` rows are the wavelet
+        (detail) coefficients by level and whose final row holds the level-``level``
+        scaling coefficients.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    siglen = x.size
+    wavelet = pywt.Wavelet(w_name)
+
+    # Scale the scaling and wavelet filters for the MODWT
+    Lo = np.asarray(wavelet.rec_lo, dtype=float)/np.sqrt(2)
+    Hi = np.asarray(wavelet.rec_hi, dtype=float)/np.sqrt(2)
+
+    # If the signal length is less than the filter length, need to
+    # periodize the signal in order to use the DFT algorithm
+    if siglen < Lo.size:
+        x = np.tile(x, 1 + (Lo.size - siglen))
+    Nrep = x.size
+
+    # Obtain the DFT of the filters
+    G = np.fft.fft(Lo, Nrep)
+    H = np.fft.fft(Hi, Nrep)
+
+    # Obtain the DFT of the data
+    Vhat = np.fft.fft(x)
+    w = np.zeros((level+1, Nrep))
+    idx0 = np.arange(Nrep)
+
+    # Main MODWT algorithm
+    for jj in range(1, level+1):
+        upfactor = 2**(jj-1)
+        # Dilated filters modulo N
+        idx = (upfactor*idx0) % Nrep
+        What = H[idx]*Vhat
+        Vhat = G[idx]*Vhat
+        w[jj-1] = np.fft.ifft(What).real
+    w[level] = np.fft.ifft(Vhat).real
+
+    # Truncate data to length of boundary condition
+    return w[:, :siglen]
+
+def _modwt_var(w: np.ndarray, w_name: str) -> np.ndarray:
+    """
+    Unbiased multiscale variance estimates from a MODWT.
+
+    Parameters
+    ----------
+    w : numpy.ndarray
+        MODWT coefficients, as returned by :func:`_modwt`.
+    w_name : str
+        The name of the orthogonal mother wavelet used for the transform.
+
+    Returns
+    -------
+    numpy.ndarray
+        The unbiased wavelet variance by scale, computed from the boundary-unaffected
+        coefficients only. Levels with no such coefficients are omitted, and the
+        scaling variance is appended only when every requested level is retained.
+    """
+    L = pywt.Wavelet(w_name).dec_len
+
+    # Get the level -- the final row of w are the scaling coefficients
+    level = w.shape[0] - 1
+
+    # Extract scaling coefficients
+    VJ = w[-1]
+
+    # Extract wavelet coefficients
+    w = w[:-1]
+    N = w.shape[1]
+
+    # For an unbiased estimate
+    Jmax = int(np.floor(np.log2((N-1)/(L-1) + 1)))
+    if Jmax < 1:
+        return np.array([])
+    Jmax = min(Jmax, level)
+    w = w[:Jmax]
+
+    # Determine if we use the scaling coefficients
+    scalingvar = (Jmax == level)
+
+    # Remove boundary coefficients for unbiased estimate
+    cfs, MJ = [], []
+    M = 1
+    for jj in range(1, Jmax+1):
+        LJ = (2**jj - 1)*(L - 1)
+        M = min(LJ, N)
+        cfs.append(w[jj-1, M:])
+        MJ.append(N - M)
+    if scalingvar:
+        cfs.append(VJ[M:])
+        MJ.append(N - M)
+
+    # Calculate the estimate of the wavelet variance
+    return np.array([np.sum((c - np.mean(c))**2)/m for c, m in zip(cfs, MJ)])
+
+def modwt_var(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 5) -> dict:
+    """
+    Multiscale variance decomposition via the maximal overlap DWT.
+
+    Decomposes the time series into octave-scale bands using the maximal
+    overlap discrete wavelet transform (MODWT) and computes summary statistics
+    on how variance is distributed across scales. Unlike the standard
+    (decimated) DWT used elsewhere in this codebase, the MODWT is shift-invariant
+    and its associated variance estimator is unbiased and accounts
+    for boundary-affected coefficients at each level -- the standard approach
+    for a scale-wise variance decomposition (Percival & Walden).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    w_name : str, optional
+        The mother wavelet, e.g., ``'db3'``, ``'sym2'``. Default is ``'db3'``.
+    level : int or 'max', optional
+        The level of wavelet decomposition (can be set to 'max' for the maximum
+        level supported by the series length, ``floor(log2(N))``). Default is 5.
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+
+        - 'scalingFrac': the fraction of variance in the lowest-frequency
+          (scaling/trend) band -- the part of the signal not resolved by any detail level.
+        - 'domlevel': the level (1 = highest frequency, ..., level+1 = scaling/trend
+          band) that carries the most variance.
+        - 'decaySlope': the slope of log2(variance) vs. level across the detail bands --
+          a wavelet-based scaling exponent, analogous to a Hurst estimate but using the
+          MODWT's unbiased, boundary-corrected variance rather than an ad hoc regression
+          on raw coefficients.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y) # length of the time series
+
+    maxLevelAllowed = int(np.floor(np.log2(N)))
+    if level == 'max':
+        level = maxLevelAllowed
+    if maxLevelAllowed < level:
+        logger.info(f"Chosen level ({level}) is too large for a series of length N = {N}")
+        level = maxLevelAllowed
+        logger.info(f"Using a level of {level} instead.")
+    if level < 1:
+        logger.warning("Time series too short for a MODWT decomposition")
+        return np.nan
+
+    #%% MODWT and its unbiased multiscale variance decomposition
+    w = _modwt(y, w_name, level)
+    wvar = _modwt_var(w, w_name) # nominally length level+1: levels 1..level (detail), then scaling/trend
+    if wvar.size == 0:
+        logger.warning("No boundary-unaffected coefficients for an unbiased MODWT variance estimate")
+        return np.nan
+    numLevelsReturned = wvar.size - 1 # number of detail levels actually returned
+
+    #%% Return statistics
+    out = {}
+    totalVar = np.sum(wvar)
+    out['scalingFrac'] = wvar[-1]/totalVar # variance fraction in the trend/scaling band
+
+    out['domlevel'] = int(np.argmax(wvar)) + 1 # level (1..numLevelsReturned+1) carrying the most variance
+
+    # Scaling exponent: log2(variance) vs. level, across detail bands only
+    detailVar = wvar[:numLevelsReturned]
+    validLevels = np.flatnonzero(detailVar > 0) + 1
+    if validLevels.size >= 2:
+        p = np.polyfit(validLevels, np.log2(detailVar[validLevels-1]), 1)
+        out['decaySlope'] = p[0]
+    else:
+        out['decaySlope'] = np.nan
+
+    return out
