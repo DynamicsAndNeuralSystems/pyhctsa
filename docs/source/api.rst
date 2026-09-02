@@ -50,6 +50,7 @@ Correlation
    pyhctsa.operations.correlation.theiler_q
    pyhctsa.operations.correlation.crinkle_statistic
    pyhctsa.operations.correlation.time_rev_kaplan
+   pyhctsa.operations.correlation.pos_neg_asymmetry
    pyhctsa.operations.correlation.embed2_angle_tau
    pyhctsa.operations.correlation.embed2
    pyhctsa.operations.correlation.periodicity_wang
@@ -178,6 +179,7 @@ Medical
     pyhctsa.operations.medical.hrv_classic
     pyhctsa.operations.medical.pol_var
     pyhctsa.operations.medical.pnn
+    pyhctsa.operations.medical.porta
 
 .. _modelfitmeths:
 

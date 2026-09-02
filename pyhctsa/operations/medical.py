@@ -299,3 +299,70 @@ def pnn(x: ArrayLike) -> dict:
         out["pnn" + str(threshold)] = np.int64(count) / (N - 1)
 
     return out
+
+def porta(x: ArrayLike, num_levels: int = 6) -> dict:
+    """
+    Compute Porta's symbolic-dynamics word-type indices.
+
+    Quantizes the time series into a small number of levels and classifies
+    consecutive length-3 "words" of symbols by their pattern of variation:
+
+    - ``0V``  : no variation (all three symbols equal)
+    - ``1V``  : one variation (exactly one of the two transitions is flat)
+    - ``2LV`` : two like variations (both transitions move the same direction)
+    - ``2UV`` : two unlike variations (transitions move in opposite directions)
+
+    Originally developed for heart-rate-variability analysis, quantifying the
+    complexity/regularity of the symbolic dynamics of RR interval sequences.
+
+    References
+    ----------
+    .. [1] A. Porta et al., "Quantifying the strength of the linear and
+           nonlinear relationships between heart period and arterial pressure",
+           IEEE Trans. Biomed. Eng. 45(8) 1017 (1998).
+
+    Parameters
+    ----------
+    x : array-like
+        The input time series.
+    num_levels : int, optional
+        The number of quantization levels. Default is 6, as in the original papers.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the percentage of length-3 words of each type:
+
+        - 'pV0'   : percentage of 0V words
+        - 'pV1'   : percentage of 1V words
+        - 'pV2LV' : percentage of 2LV words
+        - 'pV2UV' : percentage of 2UV words
+    """
+    x = np.asarray(x, dtype=float)
+    num_words = x.size - 2
+
+    if num_words < 1 or np.std(x) == 0:
+        # Constant series: quantization is undefined
+        return {'pV0': np.nan, 'pV1': np.nan, 'pV2LV': np.nan, 'pV2UV': np.nan}
+
+    # quantize into 1:num_levels
+    edges = bin_picker(float(x.min()), float(x.max()), int(num_levels))
+    sym = np.searchsorted(edges, x, side='right')
+    np.clip(sym, 1, len(edges) - 1, out=sym)
+
+    # transitions between consecutive symbols
+    s = np.sign(np.diff(sym))
+
+    codes = np.bincount((s[:-1] + 1) * 3 + (s[1:] + 1), minlength=9)
+
+    n0V = codes[4]
+    n1V = codes[1] + codes[3] + codes[5] + codes[7]
+    n2LV = codes[0] + codes[8]
+    n2UV = codes[2] + codes[6]
+
+    return {
+        'pV0': 100 * n0V / num_words,
+        'pV1': 100 * n1V / num_words,
+        'pV2LV': 100 * n2LV / num_words,
+        'pV2UV': 100 * n2UV / num_words,
+    }
