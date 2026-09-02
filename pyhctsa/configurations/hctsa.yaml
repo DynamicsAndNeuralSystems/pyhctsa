@@ -1495,6 +1495,14 @@ spectral:
       - {psd_meth: 'fft', window_type: 'none', zscore: True}
     legacy_name: SP_Summaries
     ordered_args: ['psd_meth', 'window_type']
+  
+  spectral_summaries_phase:
+    base_name: spectral_summaries_phase
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: SP_SummariesPhase
+    ordered_args:
 
 model_fit:
   ar_cov:

@@ -249,6 +249,7 @@ Spectral
    :toctree: generated/
 
     pyhctsa.operations.spectral.spectral_summaries
+    pyhctsa.operations.spectral.spectral_summaries_phase
 
 .. _stationaritymeths:
 
