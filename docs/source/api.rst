@@ -85,6 +85,7 @@ Distribution
 .. autosummary::
    :toctree: generated/
 
+   pyhctsa.operations.distribution.cumulants
    pyhctsa.operations.distribution.compare_ks_fit
    pyhctsa.operations.distribution.withinp
    pyhctsa.operations.distribution.unique

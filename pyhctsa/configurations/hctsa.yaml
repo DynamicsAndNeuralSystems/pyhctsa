@@ -936,6 +936,15 @@ stationarity:
   
 distribution:
 
+  cumulants:
+    base_name: cumulants
+    dependencies:
+    configs:
+      - {cum_what_may: 'skew1', zscore: False}
+      - {cum_what_may: 'skew2', zscore: False}
+      - {cum_what_may: 'kurt1', zscore: False}
+      - {cum_what_may: 'kurt2', zscore: False}
+  
   withinp:
     base_name: withinp
     dependencies:
