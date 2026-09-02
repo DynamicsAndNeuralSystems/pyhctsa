@@ -4,12 +4,43 @@ from typing import Dict, Union
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy import stats
-from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, uniform
+from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, uniform, skew, kurtosis
 
 from ..operations.correlation import autocorr, first_crossing
 from ..utils import bin_picker, histc, matlab_quantile, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')
+
+def cumulants(x: ArrayLike, cum_what_may: str = 'skew1') -> float:
+    """
+    Distributional moments of the input data.
+
+    Parameters
+    ----------
+    x : array-like
+        The input time series.
+    cum_what_may : str
+        The type of higher order moment:
+            - 'skew1': skewness
+            - 'skew2': skewness correcting for bias
+            - 'kurt1': kurtosis
+            - 'kurt2': kurtosis correcting for bias
+
+    Returns
+    -------
+    float
+        The specified higher order moment.
+    """
+    if cum_what_may == 'skew1':
+        return skew(x, bias=False)
+    if cum_what_may == 'skew2':
+        return skew(x, bias=True)
+    if cum_what_may == 'kurt1':
+        return kurtosis(x, bias=True, fisher=True)
+    if cum_what_may == 'kurt2':
+        return kurtosis(x, bias=False, fisher=True)
+    else:
+        return ValueError('Unknown cumulant. Choose either skew1, skew2, kurt1, or kurt2.')
 
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """
