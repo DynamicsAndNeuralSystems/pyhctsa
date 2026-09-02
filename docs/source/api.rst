@@ -44,6 +44,7 @@ Correlation
    :toctree: generated/
 
    pyhctsa.operations.correlation.autocorr
+   pyhctsa.operations.correlation.autocorr_x2_shape
    pyhctsa.operations.correlation.add_noise
    pyhctsa.operations.correlation.theiler_q
    pyhctsa.operations.correlation.crinkle_statistic

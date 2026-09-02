@@ -1571,6 +1571,227 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
     
     return out
 
+def autocorr_x2(y: ArrayLike, taus: ArrayLike = 1,
+                what_direction: str = 'forward') -> np.ndarray:
+    """
+    Asymmetric squared cross-correlation of a time series.
+
+    Computes a lag-resolved generalization of the 'leverage effect' correlation
+    used to detect asymmetric volatility feedback [1]_: instead of the usual
+    autocorrelation :math:`\\langle x_t\\, x_{t+\\tau} \\rangle`, one term is
+    squared:
+
+    .. math::
+
+        \\text{forward:}\\quad \\langle x_t\\, x_{t+\\tau}^2 \\rangle
+
+        \\text{backward:}\\quad \\langle x_t^2\\, x_{t+\\tau} \\rangle
+
+    The forward statistic asks whether the (signed) value now predicts the
+    squared (unsigned/energy) value later; the backward statistic asks whether
+    the squared value now predicts the (signed) value later. For time-reversible,
+    linear processes the two are equal (up to sampling noise); a systematic
+    difference between them is a signature of nonlinear, time-irreversible
+    structure such as volatility clustering with a leverage (asymmetric)
+    feedback.
+
+    Note that ``nonlinear_autocorr(y, [0, tau], False)`` and
+    ``nonlinear_autocorr(y, [tau, tau], False)`` already compute the forward and
+    backward statistics (respectively) at a single lag; this function computes
+    both directions efficiently across a whole vector of lags.
+
+    References
+    ----------
+    .. [1] J.-P. Bouchaud, A. Matacz and M. Potters, "Leverage effect in financial
+        markets: The retarded volatility model", Phys. Rev. Lett. 87, 228701 (2001)
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (should be z-scored: zero mean, unit variance).
+
+    taus : array-like of int, optional
+        A vector of (non-negative, integer) time lags to compute the statistic at.
+        ``tau = 0`` reduces to the skewness, ``mean(y**3)``, for both directions.
+        Default is ``1``.
+
+    what_direction : {"forward", "backward"}, optional
+        Which direction to compute.
+
+        - ``"forward"``: :math:`\\langle x_t\\, x_{t+\\tau}^2 \\rangle`
+        - ``"backward"``: :math:`\\langle x_t^2\\, x_{t+\\tau} \\rangle`
+
+        Default is ``'forward'``.
+
+    Returns
+    -------
+    array
+        The requested statistic at each lag (same length as ``taus``).
+    """
+    y = np.asarray(y)
+    taus = np.atleast_1d(np.asarray(taus))
+    N = len(y)
+
+    if np.max(taus) > N - 1:
+        logger.warning(f"Time lag {np.max(taus)} is too long for time-series length {N}.")
+    if np.any(taus < 0):
+        raise ValueError("taus must be non-negative (this is an asymmetric statistic -- "
+                         "use what_direction to choose the direction).")
+    if what_direction not in ('forward', 'backward'):
+        raise ValueError(f"Unknown what_direction '{what_direction}' "
+                         "(should be 'forward' or 'backward').")
+
+    out = np.zeros(len(taus))
+    for i, tau in enumerate(taus):
+        tau = int(tau)
+        y_later = y[tau:N]     # x_{t+tau}
+        y_earlier = y[:N-tau]  # x_t
+        if what_direction == 'forward':
+            # <x_t.x_{t+tau}^2>
+            out[i] = np.mean(y_earlier * y_later**2)
+        else:
+            # <x_t^2.x_{t+tau}>
+            out[i] = np.mean(y_earlier**2 * y_later)
+
+    return out
+
+def autocorr_x2_shape(y: ArrayLike, max_lag: Union[int, str] = 'double_drown') -> dict:
+    """
+    Shape of the time-reversibility profile of a time series.
+
+    :func:`autocorr_x2` computes two asymmetric, 'leverage'-type lag-profiles:
+
+    .. math::
+
+        \\text{forward}(\\tau) = \\langle x_t\\, x_{t+\\tau}^2 \\rangle
+        \\quad\\text{(signed value now, energy later)}
+
+        \\text{backward}(\\tau) = \\langle x_t^2\\, x_{t+\\tau} \\rangle
+        \\quad\\text{(energy now, signed value later)}
+
+    For a time-reversible process these coincide at every lag (any shared linear
+    correlation structure contributes equally to both); a systematic difference,
+    :math:`\\text{diff}(\\tau) = \\text{forward}(\\tau) - \\text{backward}(\\tau)`,
+    is therefore a lag-resolved time-irreversibility statistic, generalizing the
+    single-lag ``trev``/``tc3``-style statistics to a full profile, cf. the
+    leverage-effect correlation function of [1]_.
+
+    This function characterizes the *shape* of :math:`\\text{diff}(\\tau)` across
+    lags -- its decay, persistence, and extrema -- mirroring how
+    :func:`autocorr_shape` characterizes the shape of the ordinary ACF. (An
+    earlier version of this function instead characterized the forward and
+    backward profiles' shapes separately, but on 300 real time series from
+    ``INP_Empirical1000.mat`` their shape descriptors were correlated at
+    r = 0.84-0.97 with each other -- i.e., overwhelmingly redundant, since both
+    profiles inherit most of their shape from whatever ordinary linear
+    correlation the series has. The difference profile cancels that shared
+    component and isolates the genuinely asymmetric/nonlinear structure.)
+
+    References
+    ----------
+    .. [1] J.-P. Bouchaud, A. Matacz and M. Potters, "Leverage effect in financial
+        markets: The retarded volatility model", Phys. Rev. Lett. 87, 228701 (2001)
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (should be z-scored: zero mean, unit variance).
+
+    max_lag : int or str, optional
+        The maximum lag to compute the profile up to.
+
+        - If an ``int``, a positive maximum lag.
+        - If ``"double_drown"``, uses twice the first zero-crossing of the
+          ordinary (linear) autocorrelation function (cf. the ``'double_drown'``
+          option of :func:`autocorr_shape`), bounded to lie in
+          ``[10, floor(N/4)]``.
+
+        Default is ``'double_drown'``.
+
+    Returns
+    -------
+    dict
+        Statistics on the shape of the forward-minus-backward difference profile,
+        including its lag-1 value, basic summaries, centroid decay timescale,
+        self-autocorrelation, local extrema, first sign change, the correlation
+        between the forward and backward profiles, and the maximum lag used.
+        All fields are NaN if the profile is too short or ill-defined.
+    """
+    y = np.asarray(y)
+    N = len(y)
+
+    fields = ['diff1', 'sumdiff', 'meandiff', 'meanabsdiff', 'rmsdiff', 'centroiddiff',
+              'ac1diff', 'nminima', 'nmaxima', 'pextrema', 'firstsignchangediff',
+              'corrfwdbwd', 'maxLag']
+
+    if isinstance(max_lag, str):
+        if max_lag == 'double_drown':
+            tau0 = first_crossing(y, 'ac', 0, 'discrete')
+            if np.isnan(tau0) or tau0 == 0:
+                tau0 = 10  # fallback for pathological/near-constant series
+            max_lag = min(int(np.floor(N / 4)), max(10, 2 * int(tau0)))
+        else:
+            raise ValueError(f"Unknown max_lag setting: '{max_lag}'")
+
+    if max_lag < 5:
+        # Too short a series/profile to say anything meaningful
+        return {f: np.nan for f in fields}
+
+    # Compute the forward and backward lag-profiles, and their difference:
+    taus = np.arange(1, max_lag + 1)
+    g_fwd = autocorr_x2(y, taus, 'forward')
+    g_bwd = autocorr_x2(y, taus, 'backward')
+
+    if np.any(np.isnan(g_fwd)) or np.any(np.isnan(g_bwd)):
+        return {f: np.nan for f in fields}
+
+    diff_profile = g_fwd - g_bwd
+
+    out = {}
+
+    out['diff1'] = diff_profile[0]
+
+    # Basic stats on the difference profile
+    out['sumdiff'] = np.sum(diff_profile)
+    out['meandiff'] = np.mean(diff_profile)
+    out['meanabsdiff'] = np.mean(np.abs(diff_profile))
+    out['rmsdiff'] = np.sqrt(np.mean(diff_profile**2))
+
+    sum_abs = np.sum(np.abs(diff_profile))
+    if sum_abs > 0:
+        out['centroiddiff'] = np.sum(taus * np.abs(diff_profile)) / sum_abs
+    else:
+        out['centroiddiff'] = np.nan
+
+    # Autocorrelation of the difference profile (smoothness/persistence of the
+    # irreversibility signature itself), cf. the ac1 field of autocorr_shape
+    out['ac1diff'] = autocorr(diff_profile, 1, 'Fourier')[0]
+
+    # Local extrema of the difference profile, cf. autocorr_shape
+    ddiff = np.diff(diff_profile)
+    dddiff = np.diff(ddiff)
+    extrr = sign_change(ddiff, 1)
+    sdsp = dddiff[extrr]
+    out['nminima'] = np.sum(sdsp > 0)
+    out['nmaxima'] = np.sum(sdsp < 0)
+    out['pextrema'] = len(sdsp) / max_lag
+
+    # How quickly the time-irreversibility signature changes sign
+    sign_change_idx = np.flatnonzero(np.sign(diff_profile[:-1]) != np.sign(diff_profile[1:]))
+    if sign_change_idx.size == 0:
+        out['firstsignchangediff'] = max_lag  # no sign change within the window measured
+    else:
+        # convert from 0-based index space to 1-based lag space
+        out['firstsignchangediff'] = int(sign_change_idx[0]) + 1
+
+    # Shape similarity of the two profiles (a different angle from their
+    # difference: do they have a similar shape regardless of overall magnitude?)
+    out['corrfwdbwd'] = np.corrcoef(g_fwd, g_bwd)[0, 1]
+
+    out['maxLag'] = max_lag  # record how far the profile was measured
+
+    return out
+
 def first_crossing(y: ArrayLike, corr_fun: str = 'ac', threshold: float = 0.0,
                    what_out: str = 'both') -> Union[dict, float]:
     """

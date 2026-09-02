@@ -74,6 +74,15 @@ correlation:
     legacy_name: CO_AutoCorr
     ordered_args: ['tau']
   
+  autocorr_x2_shape:
+    base_name: acx2_shape
+    dependencies:
+    configs:
+      - {max_lag: 15, exclude: ['maxLag'], zscore: True}
+      - {max_lag: 'double_drown', zscore: True}
+    legacy_name: CO_AutoCorrX2Shape
+    ordered_args: ['max_lag']
+  
   add_noise:
     base_name: add_noise
     dependencies:
