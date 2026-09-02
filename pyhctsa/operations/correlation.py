@@ -16,6 +16,193 @@ from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit
 from ..utils import (bin_picker, histc, make_mat_buffer, point_of_crossing,
                      sign_change, time_delay_embed, z_score)
 
+def falling_sticks(y: ArrayLike) -> dict:
+    """
+    Physical falling-sticks model of line-of-sight interaction.
+
+    As in stick_angles, each time-series value is treated as a rigid stick
+    standing on the zero baseline, with sticks grouped by sign into a
+    'positive' set (protruding up from the zero level) and a 'negative' set
+    (protruding down). Here, sticks are toppled: each stick rotates about its
+    base towards later same-sign sticks and stops at whichever angle first
+    brings it into contact with one -- either its trunk striking the side of
+    a taller later stick, or its underside striking the tip of a shorter one
+    it topples clean over -- or else it falls flat (angle = pi/2) if no
+    later same-sign stick lies within reach (a stick of height h can only
+    ever reach as far as horizontal distance h).
+
+    This differs from stick_angles, which only ever compares a stick to
+    its immediate same-sign successor via the slope between them.
+    falling_sticks instead allows a stick to skip over intervening sticks
+    to hit a farther one, so it is sensitive to range-dependent local-
+    extremum structure (e.g. a tall stick toppling clean over an
+    intervening short one) that the purely local (i, i+1) comparison cannot
+    see.
+
+    Adapted from a Python 'FALLstick' reference implementation by Eugene Chon
+    <eugenechon04@gmail.com>.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (assumed z-scored: the sign split is around the
+        mean, matching stick_angles's convention).
+
+    Returns
+    -------
+    dict
+        Statistics on the resulting fall-angle sequence (location, spread,
+        shape, persistence), on the asymmetry between the positive and
+        negative branches, and on the three collision types a fall can end in
+        -- falling flat, hitting the immediately next stick, or skipping over
+        one or more sticks to hit a farther one -- and the two ways a hit can
+        occur -- trunk-strike (case 1) vs. tip-strike/topple-over (case 2).
+    """
+    y = np.asarray(y).flatten()
+
+    ix_pos = np.where(y >= 0)[0]
+    ix_neg = np.where(y < 0)[0]
+
+    angles_pos, colour_pos, case_pos = _fall_branch(ix_pos, y)
+    angles_neg, colour_neg, case_neg = _fall_branch(ix_neg, y)
+
+    all_angles = np.concatenate((angles_pos, angles_neg))
+
+    out = {}
+
+    # Small helpers for guarded statistics/proportions over the branch counts
+    _fall_safe_stat = lambda f, x: np.nan if len(x) == 0 else f(x)
+    _fall_prop_first = lambda c: np.nan if np.sum(c) == 0 else c[0] / np.sum(c)
+    _fall_prop_skip = lambda c: np.nan if (c[1] + c[2]) == 0 else c[2] / (c[1] + c[2])
+    _fall_prop_case2 = lambda c: np.nan if np.sum(c) == 0 else c[1] / np.sum(c)
+
+    # Location and spread of the fall-angle distribution
+    out['mean_p'] = _fall_safe_stat(np.mean, angles_pos)
+    out['median_p'] = _fall_safe_stat(np.median, angles_pos)
+    out['mean_n'] = _fall_safe_stat(np.mean, angles_neg)
+    out['median_n'] = _fall_safe_stat(np.median, angles_neg)
+
+    out['mean_all'] = _fall_safe_stat(np.mean, all_angles)
+    out['median_all'] = _fall_safe_stat(np.median, all_angles)
+    out['std_all'] = _fall_safe_stat(
+        lambda x: np.std(x, ddof=1) if len(x) > 1 else 0.0, all_angles)
+
+    # Asymmetry between the positive- and negative-branch fall angles:
+    if not np.isnan(out['mean_p']) and not np.isnan(out['mean_n']):
+        out['diff_pn'] = out['mean_p'] - out['mean_n']
+    else:
+        out['diff_pn'] = np.nan
+
+    # Collision-type proportions: flat / immediate-hit / skip-hit
+    out['propFlat_p'] = _fall_prop_first(colour_pos)
+    out['propFlat_n'] = _fall_prop_first(colour_neg)
+    out['propFlat_all'] = _fall_prop_first(colour_pos + colour_neg)
+
+    out['propSkip_p'] = _fall_prop_skip(colour_pos)
+    out['propSkip_n'] = _fall_prop_skip(colour_neg)
+    out['propSkip_all'] = _fall_prop_skip(colour_pos + colour_neg)
+
+    # Hit-type proportions: trunk-strike (case 1) vs. tip-strike/topple-over (case 2)
+    out['propCase2_p'] = _fall_prop_case2(case_pos)
+    out['propCase2_n'] = _fall_prop_case2(case_neg)
+    out['propCase2_all'] = _fall_prop_case2(case_pos + case_neg)
+
+    # Distribution shape
+    # (The 90th percentile is omitted: across two independent redundancy-check
+    # datasets it landed exactly on the pi/2 flat-fall spike every time, since
+    # most series have >=10% flat falls -- it carries no information.)
+    if len(all_angles) >= 2:
+        out['skewness_all'] = skew(all_angles)
+        out['kurtosis_all'] = kurtosis(all_angles, fisher=False)
+        out['q10_all'] = np.quantile(all_angles, 0.1, method='hazen')
+    else:
+        out['skewness_all'] = np.nan
+        out['kurtosis_all'] = np.nan
+        out['q10_all'] = np.nan
+
+    # Persistence of the fall-angle sequence
+    if len(angles_pos) >= 2 and np.std(angles_pos, ddof=1) > 0:
+        z_angles_pos = z_score(angles_pos)
+        out['tau_p'] = first_crossing(z_angles_pos, 'ac', 0, 'continuous')
+        out['ac1_p'] = autocorr(z_angles_pos, 1, 'Fourier')[0]
+    else:
+        out['tau_p'] = np.nan
+        out['ac1_p'] = np.nan
+
+    if len(angles_neg) >= 2 and np.std(angles_neg, ddof=1) > 0:
+        z_angles_neg = z_score(angles_neg)
+        out['tau_n'] = first_crossing(z_angles_neg, 'ac', 0, 'continuous')
+        out['ac1_n'] = autocorr(z_angles_neg, 1, 'Fourier')[0]
+    else:
+        out['tau_n'] = np.nan
+        out['ac1_n'] = np.nan
+
+    return out
+
+
+def _fall_branch(ix: ArrayLike, y: ArrayLike) -> tuple:
+    nj = len(ix)
+    if nj == 0:
+        return np.zeros(0), np.array([0, 0, 0]), np.array([0, 0])
+    if nj == 1:
+        # the lone stick always falls flat
+        return np.zeros(0), np.array([1, 0, 0]), np.array([1, 0])
+
+    angles = np.zeros(nj - 1)
+    colour_flag = np.zeros(nj - 1, dtype=int) # 0 = flat, 1 = immediate hit, 2 = skip hit
+    case_flag = np.zeros(nj - 1, dtype=int) # 1 or 2
+
+    for i in range(nj - 1):
+        x1 = ix[i]
+        y1 = y[x1]
+        height1 = abs(y1)
+
+        min_angle = np.pi/2 # default: falls flat
+        fall_k = i # lands on itself if flat
+        min_case1 = True
+
+        if height1 > 0: # a zero-height stick is already lying flat
+            for k in range(i + 1, nj):
+                x2 = ix[k]
+                y2 = y[x2]
+                dx = x2 - x1 # a stick of height1 can reach at most height1
+                if dx > height1:
+                    break # all later sticks are farther still -- out of reach
+
+                # Case 1 (trunk-strike): stick 1's tip hits the side of stick
+                # 2. Case 2 (tip-strike): stick 1 is taller than stick 2 and
+                # would clear its top before reaching dx, so instead its
+                # underside comes down onto stick 2's tip.
+                is_case1 = True
+                if abs(y1) > abs(y2) and height1 * np.sin(np.arccos(y2 / y1)) > dx:
+                    is_case1 = False
+
+                if is_case1:
+                    angle = np.arcsin(dx / height1)
+                else:
+                    angle = np.arctan(dx / abs(y2))
+                angle = min(angle, np.pi - angle)
+
+                if angle < min_angle:
+                    min_angle = angle
+                    fall_k = k
+                    min_case1 = is_case1
+
+        angles[i] = min_angle
+        if fall_k == i:
+            colour_flag[i] = 0
+        elif fall_k == i + 1:
+            colour_flag[i] = 1
+        else:
+            colour_flag[i] = 2
+        case_flag[i] = 2 - int(min_case1) # True (case 1) -> 1, False (case 2) -> 2
+
+    colour_counts = np.array([np.sum(colour_flag == 0) + 1, np.sum(colour_flag == 1),
+                              np.sum(colour_flag == 2)])
+    case_counts = np.array([np.sum(case_flag == 1) + 1, np.sum(case_flag == 2)])
+
+    return angles, colour_counts, case_counts
+
 def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
               extra_param: Union[int, None] = None, random_seed = None,
               noise = None) -> dict:
@@ -1678,14 +1865,7 @@ def autocorr_x2_shape(y: ArrayLike, max_lag: Union[int, str] = 'double_drown') -
 
     This function characterizes the *shape* of :math:`\\text{diff}(\\tau)` across
     lags -- its decay, persistence, and extrema -- mirroring how
-    :func:`autocorr_shape` characterizes the shape of the ordinary ACF. (An
-    earlier version of this function instead characterized the forward and
-    backward profiles' shapes separately, but on 300 real time series from
-    ``INP_Empirical1000.mat`` their shape descriptors were correlated at
-    r = 0.84-0.97 with each other -- i.e., overwhelmingly redundant, since both
-    profiles inherit most of their shape from whatever ordinary linear
-    correlation the series has. The difference profile cancels that shared
-    component and isolates the genuinely asymmetric/nonlinear structure.)
+    :func:`autocorr_shape` characterizes the shape of the ordinary ACF.
 
     References
     ----------
