@@ -325,6 +325,14 @@ correlation:
     legacy_name: CO_StickAngles
     ordered_args:
   
+  falling_sticks:
+    base_name: falling_sticks
+    dependencies:
+    configs:
+      - {zscore: True}
+    legacy_name: CO_FallingSticks
+    ordered_args:
+  
   first_crossing:
     base_name: first_crossing
     dependencies:
