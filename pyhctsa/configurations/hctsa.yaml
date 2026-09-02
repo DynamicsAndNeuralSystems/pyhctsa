@@ -889,6 +889,14 @@ stationarity:
       - {lags: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], zscore: True}
     legacy_name: SY_KPSStest
     ordered_args: ['lags']
+  
+  pp_test:
+    base_name: pp_test
+    dependencies:
+    configs:
+      - {lags: [[0, 1, 2, 3, 4, 5]], model: 'ar', test_statistic: 't1', zscore: True}
+    legacy_name: SY_PPtest
+    ordered_args: ['lags', 'model', 'test_statistic']
 
   local_extrema:
     base_name: local_extrema
