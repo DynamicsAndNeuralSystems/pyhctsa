@@ -959,6 +959,14 @@ stationarity:
     legacy_name: SY_LocalDistributions
     ordered_args: ['num_segs', 'each_or_par']
   
+  slow_feature_analysis:
+    base_name: slow_feature_analysis
+    dependencies:
+    configs:
+      - {num_windows: 20, zscore: True}
+    legacy_name: SY_SlowFeatureAnalysis
+    ordered_args: ['num_windows']
+  
 distribution:
 
   cumulants:
@@ -1503,6 +1511,14 @@ spectral:
       - {zscore: True}
     legacy_name: SP_SummariesPhase
     ordered_args:
+  
+  cepstrum:
+    base_name: cepstrum
+    dependencies:
+    configs:
+      - {max_period: 100, min_period: 4, zscore: True}
+    legacy_name: SP_Cepstrum
+    ordered_args: ['max_period', 'min_period']
 
 model_fit:
   ar_cov:

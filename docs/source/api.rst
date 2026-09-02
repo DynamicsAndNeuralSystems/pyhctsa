@@ -250,6 +250,7 @@ Spectral
 
     pyhctsa.operations.spectral.spectral_summaries
     pyhctsa.operations.spectral.spectral_summaries_phase
+    pyhctsa.operations.spectral.cepstrum
 
 .. _stationaritymeths:
 
@@ -273,6 +274,7 @@ Stationarity
     pyhctsa.operations.stationarity.trend
     pyhctsa.operations.stationarity.stat_av
     pyhctsa.operations.stationarity.sliding_window
+    pyhctsa.operations.stationarity.slow_feature_analysis
 
 .. _surrogatesmeths:
 
