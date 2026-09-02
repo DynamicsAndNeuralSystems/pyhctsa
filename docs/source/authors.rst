@@ -20,6 +20,7 @@ Core team
    .. grid-item-card:: Joshua B. Moore
       :link: https://orcid.org/0000-0002-5237-1087
       :link-type: url
+      :img-top: https://avatars.githubusercontent.com/u/102399896?v=4
 
       Author and maintainer.
 
@@ -30,6 +31,7 @@ Core team
    .. grid-item-card:: Ben D. Fulcher
       :link: https://orcid.org/0000-0002-3003-4055
       :link-type: url
+      :img-top: https://avatars.githubusercontent.com/u/4446070?v=4
 
       Author and maintainer.
 
