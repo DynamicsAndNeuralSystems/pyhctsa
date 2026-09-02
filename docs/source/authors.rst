@@ -14,11 +14,11 @@ at the University of Sydney.
 Core team
 ---------
 
-.. grid:: 2
-   :gutter: 3
+.. grid:: 3
+   :gutter: 2
 
    .. grid-item-card:: Joshua B. Moore
-      :link: https://orcid.org/0000-0002-5237-1087
+      :link: https://github.com/joshuabmoore 
       :link-type: url
       :img-top: https://avatars.githubusercontent.com/u/102399896?v=4
 
@@ -29,7 +29,7 @@ Core team
       :material-regular:`fingerprint;1.2em` `ORCID 0000-0002-5237-1087 <https://orcid.org/0000-0002-5237-1087>`_
 
    .. grid-item-card:: Ben D. Fulcher
-      :link: https://orcid.org/0000-0002-3003-4055
+      :link: https://github.com/benfulcher
       :link-type: url
       :img-top: https://avatars.githubusercontent.com/u/4446070?v=4
 
@@ -38,6 +38,18 @@ Core team
       :material-regular:`mail;1.2em` ben.fulcher@sydney.edu.au
 
       :material-regular:`fingerprint;1.2em` `ORCID 0000-0002-3003-4055 <https://orcid.org/0000-0002-3003-4055>`_
+   
+   .. grid-item-card:: Brendan J. Harris
+      :link: https://github.com/brendanjohnharris
+      :link-type: url
+      :img-top: https://avatars.githubusercontent.com/u/42064608?v=4
+
+      Author and maintainer.
+
+      :material-regular:`mail;1.2em` brendanjohnharris@gmail.com
+
+      :material-regular:`fingerprint;1.2em` `ORCID 0000-0003-3412-4186 <https://orcid.org/0000-0003-3412-4186>`_
+
 
 Contributors
 ------------
