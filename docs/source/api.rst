@@ -212,7 +212,7 @@ Nonlinearity
    pyhctsa.operations.nonlinearity.local_density
    pyhctsa.operations.nonlinearity.tisean_d2
    pyhctsa.operations.nonlinearity.poincare_section
-   pyhtcsa.operations.nonlinearity.delay_time
+   pyhctsa.operations.nonlinearity.delay_time
 
 .. _physicsmeths:
 
