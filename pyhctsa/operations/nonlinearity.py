@@ -7,12 +7,12 @@ logger = logging.getLogger('pyhctsa')
 
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
+from scipy.stats import spearmanr
 
 from ..operations.model_fit import residual_analysis
 from ..operations.correlation import first_crossing, first_min, autocorr
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
-from ..toolboxes.matlab.matlab_fit import (goodness_of_fit, lsqcurvefit_trr,
-                                           polyfit as _matlab_polyfit)
+from ..toolboxes.matlab.matlab_fit import polyfit
 from ..utils import matlab_quantile, time_delay_embed
 
 def _resolve_time_delay(y: ArrayLike, tau: Union[int, str]) -> Union[int, float]:
