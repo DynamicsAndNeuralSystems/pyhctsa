@@ -1770,6 +1770,14 @@ nonlinearity:
     legacy_name: NL_SSA
     ordered_args: ['L']
   
+  zero_one_test:
+    base_name: zero_one_test
+    dependencies:
+    configs:
+      - {num_c: 20, max_n: 'full', zscore: True}
+    legacy_name: NL_ZeroOneTest
+    ordered_args: ['num_c', 'max_n']
+    
   local_density:
     base_name: local_density
     dependencies:

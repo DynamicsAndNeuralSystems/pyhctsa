@@ -8,12 +8,206 @@ logger = logging.getLogger('pyhctsa')
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 from scipy.stats import spearmanr
+from scipy.signal import correlate
+
 
 from ..operations.model_fit import residual_analysis
 from ..operations.correlation import first_crossing, first_min, autocorr
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
 from ..toolboxes.matlab.matlab_fit import polyfit
 from ..utils import matlab_quantile, time_delay_embed
+
+def zero_one_test(y, num_c=20, max_n=10000):
+    """Modified 0-1 test for chaos.
+
+    Parameters
+    ----------
+    y : array_like
+        Input scalar time series.
+    num_c : int, default=20
+        Number of frequencies c over which the statistics are computed.
+    max_n : int or "full", default=10000
+        Maximum number of samples to analyze. If "full", use the complete
+        time series.
+
+    Returns
+    -------
+    out : dict
+        K : float
+            Median correlation statistic across frequencies.
+        Kstd : float
+            Standard deviation of K across frequencies.
+        D : float
+            Median diffusion rate across frequencies.
+        Dstd : float
+            Standard deviation of D across frequencies.
+
+    Notes
+    -----
+    K ~ 0 indicates bounded/regular dynamics, whereas K ~ 1 indicates
+    unbounded dynamics. Unbounded dynamics may be deterministic chaos
+    or stochastic noise; the 0-1 test alone does not distinguish them.
+    """
+
+    y = np.asarray(y, dtype=float).reshape(-1)
+    n = y.size
+
+    # ------------------------------------------------------------------
+    # Input handling
+    # ------------------------------------------------------------------
+    if isinstance(max_n, str):
+        if max_n != "full":
+            raise ValueError("maxN must be an integer or 'full'.")
+
+        if n > 50_000:
+            logger.warning(
+                f"Time series ({n} samples) exceeds 50000 with "
+                "maxN='full'; computation may be slow.",
+                RuntimeWarning,
+            )
+
+    else:
+        max_n = int(max_n)
+
+        if n > max_n:
+            logger.warning(
+                f"Time series ({n} samples) exceeds maxN={max_n}; "
+                f"analyzing the first {max_n} samples.",
+                RuntimeWarning,
+            )
+            y = y[:max_n]
+            n = max_n
+
+    if n < 200:
+        logger.warning(
+            f"Time series (N={n}) too short for a meaningful "
+            "0-1 test (need >= 200).",
+            RuntimeWarning,
+        )
+
+        return {
+            "K": np.nan,
+            "Kstd": np.nan,
+            "D": np.nan,
+            "Dstd": np.nan,
+        }
+
+    # ------------------------------------------------------------------
+    # Set up test
+    # ------------------------------------------------------------------
+    tcut = n // 10
+
+    # Number of displacement pairs used for every lag.
+    n_pairs = n - tcut
+
+    # j is a mathematical index in cos(j*c), not a Python array index.
+    j = np.arange(1, n + 1, dtype=float)
+
+    lags_idx = np.arange(1, tcut + 1)
+    lags = lags_idx.astype(float)
+
+    mean_y = np.mean(y)
+
+    cs = np.linspace(
+        np.pi / 5,
+        4 * np.pi / 5,
+        num_c,
+    )
+
+    k_c = np.empty(num_c)
+    d_c = np.empty(num_c)
+
+    # Quantities required for both Pearson correlation and OLS slope.
+    lags_centered = lags - np.mean(lags)
+    ss_lags = np.dot(lags_centered, lags_centered)
+
+    # ------------------------------------------------------------------
+    # 0-1 test
+    # ------------------------------------------------------------------
+    for k, c in enumerate(cs):
+
+        phase = j * c
+
+        # Translation variables.
+        p = np.cumsum(y * np.cos(phase))
+        q = np.cumsum(y * np.sin(phase))
+
+        energy_cumsum = np.empty(n + 1)
+        energy_cumsum[0] = 0.0
+
+        np.cumsum(
+            p * p + q * q,
+            out=energy_cumsum[1:],
+        )
+
+        # Energy of the common starting interval i=0,...,n_pairs-1.
+        base_energy = energy_cumsum[n_pairs]
+
+        # Energy of the lagged intervals
+        # i=n,...,n+n_pairs-1 for all n simultaneously.
+        shifted_energy = (
+            energy_cumsum[lags_idx + n_pairs]
+            - energy_cumsum[lags_idx]
+        )
+
+        p_cross = correlate(
+            p,
+            p[:n_pairs],
+            mode="valid",
+            method="fft",
+        )
+
+        q_cross = correlate(
+            q,
+            q[:n_pairs],
+            mode="valid",
+            method="fft",
+        )
+
+        # Element 0 corresponds to zero lag; we need lags 1:tcut.
+        cross = p_cross[1:] + q_cross[1:]
+
+        m_c = (
+            base_energy
+            + shifted_energy
+            - 2.0 * cross
+        ) / n_pairs
+
+        v_osc = (
+            mean_y**2
+            * (1.0 - np.cos(lags * c))
+            / (1.0 - np.cos(c))
+        )
+
+        m_c_mod = m_c - v_osc
+
+        m_c_centered = m_c_mod - np.mean(m_c_mod)
+
+        covariance = np.dot(
+            lags_centered,
+            m_c_centered,
+        )
+
+        ss_m_c = np.dot(
+            m_c_centered,
+            m_c_centered,
+        )
+
+        if ss_m_c == 0:
+            k_c[k] = np.nan
+        else:
+            k_c[k] = covariance / np.sqrt(
+                ss_lags * ss_m_c
+            )
+
+        d_c[k] = covariance / ss_lags
+
+    return {
+        "K": np.median(k_c),
+        "Kstd": np.std(k_c, ddof=1),
+        "D": np.median(d_c),
+        "Dstd": np.std(d_c, ddof=1),
+    }
 
 def _resolve_time_delay(y: ArrayLike, tau: Union[int, str]) -> Union[int, float]:
     """Resolve a string time-delay spec to a lag.

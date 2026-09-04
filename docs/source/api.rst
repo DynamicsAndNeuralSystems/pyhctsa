@@ -208,6 +208,7 @@ Nonlinearity
    pyhctsa.operations.nonlinearity.nlpe
    pyhctsa.operations.nonlinearity.embed_pca
    pyhctsa.operations.nonlinearity.ssa
+   pyhctsa.operations.nonlinearity.zero_one_test
    pyhctsa.operations.nonlinearity.local_density
    pyhctsa.operations.nonlinearity.tisean_d2
    pyhctsa.operations.nonlinearity.poincare_section
