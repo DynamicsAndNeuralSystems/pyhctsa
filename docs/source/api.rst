@@ -253,6 +253,7 @@ Spectral
 
     pyhctsa.operations.spectral.spectral_summaries
     pyhctsa.operations.spectral.spectral_summaries_phase
+    pyhctsa.operations.spectral.specparam
     pyhctsa.operations.spectral.cepstrum
 
 .. _stationaritymeths:
