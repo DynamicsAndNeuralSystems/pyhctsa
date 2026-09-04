@@ -42,7 +42,7 @@ Correlation
 
 .. autosummary::
    :toctree: generated/
-   
+
    pyhctsa.operations.correlation.oversampling
    pyhctsa.operations.correlation.autocorr
    pyhctsa.operations.correlation.autocorr_x2_shape
@@ -117,15 +117,15 @@ Entropy
 .. autosummary::
    :toctree: generated/
 
-    pyhctsa.operations.entropy.shannon_entropy
-    pyhctsa.operations.entropy.distribution_entropy
-    pyhctsa.operations.entropy.multi_scale_entropy
-    pyhctsa.operations.entropy.sample_entropy
-    pyhctsa.operations.entropy.permutation_entropy
-    pyhctsa.operations.entropy.rpde
-    pyhctsa.operations.entropy.approximate_entropy
-    pyhctsa.operations.entropy.complexity_invariant_distance
-    pyhctsa.operations.entropy.lempel_ziv_complexity
+   pyhctsa.operations.entropy.shannon_entropy
+   pyhctsa.operations.entropy.distribution_entropy
+   pyhctsa.operations.entropy.multi_scale_entropy
+   pyhctsa.operations.entropy.sample_entropy
+   pyhctsa.operations.entropy.permutation_entropy
+   pyhctsa.operations.entropy.rpde
+   pyhctsa.operations.entropy.approximate_entropy
+   pyhctsa.operations.entropy.complexity_invariant_distance
+   pyhctsa.operations.entropy.lempel_ziv_complexity
 
 .. _extemeeventsmeths:
 
@@ -175,11 +175,11 @@ Medical
 .. autosummary::
    :toctree: generated/
 
-    pyhctsa.operations.medical.raw_hrv_meas
-    pyhctsa.operations.medical.hrv_classic
-    pyhctsa.operations.medical.pol_var
-    pyhctsa.operations.medical.pnn
-    pyhctsa.operations.medical.porta
+   pyhctsa.operations.medical.raw_hrv_meas
+   pyhctsa.operations.medical.hrv_classic
+   pyhctsa.operations.medical.pol_var
+   pyhctsa.operations.medical.pnn
+   pyhctsa.operations.medical.porta
 
 .. _modelfitmeths:
 
@@ -250,11 +250,12 @@ Spectral
 ~~~~~~~~
 .. autosummary::
    :toctree: generated/
-    pyhctsa.operations.spectral.phase_amp_coupling
-    pyhctsa.operations.spectral.spectral_summaries
-    pyhctsa.operations.spectral.spectral_summaries_phase
-    pyhctsa.operations.spectral.specparam
-    pyhctsa.operations.spectral.cepstrum
+
+   pyhctsa.operations.spectral.phase_amp_coupling
+   pyhctsa.operations.spectral.spectral_summaries
+   pyhctsa.operations.spectral.spectral_summaries_phase
+   pyhctsa.operations.spectral.specparam
+   pyhctsa.operations.spectral.cepstrum
 
 .. _stationaritymeths:
 
@@ -263,24 +264,24 @@ Stationarity
 .. autosummary::
    :toctree: generated/
 
-    pyhctsa.operations.stationarity.local_distributions
-    pyhctsa.operations.stationarity.dyn_win
-    pyhctsa.operations.stationarity.moment_corr
-    pyhctsa.operations.stationarity.simple_stats
-    pyhctsa.operations.stationarity.local_extrema
-    pyhctsa.operations.stationarity.kpss_test
-    pyhctsa.operations.stationarity.range_evolve
-    pyhctsa.operations.stationarity.drifting_mean
-    pyhctsa.operations.stationarity.local_global
-    pyhctsa.operations.stationarity.fit_polynomial
-    pyhctsa.operations.stationarity.ts_length
-    pyhctsa.operations.stationarity.std_nth_deriv
-    pyhctsa.operations.stationarity.trend
-    pyhctsa.operations.stationarity.stat_av
-    pyhctsa.operations.stationarity.sliding_window
-    pyhctsa.operations.stationarity.ramping_windows
-    pyhctsa.operations.stationarity.slow_feature_analysis
-    pyhctsa.operations.stationarity.pp_test
+   pyhctsa.operations.stationarity.local_distributions
+   pyhctsa.operations.stationarity.dyn_win
+   pyhctsa.operations.stationarity.moment_corr
+   pyhctsa.operations.stationarity.simple_stats
+   pyhctsa.operations.stationarity.local_extrema
+   pyhctsa.operations.stationarity.kpss_test
+   pyhctsa.operations.stationarity.range_evolve
+   pyhctsa.operations.stationarity.drifting_mean
+   pyhctsa.operations.stationarity.local_global
+   pyhctsa.operations.stationarity.fit_polynomial
+   pyhctsa.operations.stationarity.ts_length
+   pyhctsa.operations.stationarity.std_nth_deriv
+   pyhctsa.operations.stationarity.trend
+   pyhctsa.operations.stationarity.stat_av
+   pyhctsa.operations.stationarity.sliding_window
+   pyhctsa.operations.stationarity.ramping_windows
+   pyhctsa.operations.stationarity.slow_feature_analysis
+   pyhctsa.operations.stationarity.pp_test
 
 .. _surrogatesmeths:
 
