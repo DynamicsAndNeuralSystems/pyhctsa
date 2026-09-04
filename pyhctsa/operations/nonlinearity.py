@@ -7,13 +7,207 @@ logger = logging.getLogger('pyhctsa')
 
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
+from scipy.stats import spearmanr
+from scipy.signal import correlate
+
 
 from ..operations.model_fit import residual_analysis
 from ..operations.correlation import first_crossing, first_min, autocorr
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
-from ..toolboxes.matlab.matlab_fit import (goodness_of_fit, lsqcurvefit_trr,
-                                           polyfit as _matlab_polyfit)
+from ..toolboxes.matlab.matlab_fit import polyfit
 from ..utils import matlab_quantile, time_delay_embed
+
+def zero_one_test(y, num_c=20, max_n=10000):
+    """Modified 0-1 test for chaos.
+
+    Parameters
+    ----------
+    y : array_like
+        Input scalar time series.
+    num_c : int, default=20
+        Number of frequencies c over which the statistics are computed.
+    max_n : int or "full", default=10000
+        Maximum number of samples to analyze. If "full", use the complete
+        time series.
+
+    Returns
+    -------
+    out : dict
+        K : float
+            Median correlation statistic across frequencies.
+        Kstd : float
+            Standard deviation of K across frequencies.
+        D : float
+            Median diffusion rate across frequencies.
+        Dstd : float
+            Standard deviation of D across frequencies.
+
+    Notes
+    -----
+    K ~ 0 indicates bounded/regular dynamics, whereas K ~ 1 indicates
+    unbounded dynamics. Unbounded dynamics may be deterministic chaos
+    or stochastic noise; the 0-1 test alone does not distinguish them.
+    """
+
+    y = np.asarray(y, dtype=float).reshape(-1)
+    n = y.size
+
+    # ------------------------------------------------------------------
+    # Input handling
+    # ------------------------------------------------------------------
+    if isinstance(max_n, str):
+        if max_n != "full":
+            raise ValueError("maxN must be an integer or 'full'.")
+
+        if n > 50_000:
+            logger.warning(
+                f"Time series ({n} samples) exceeds 50000 with "
+                "maxN='full'; computation may be slow.",
+                RuntimeWarning,
+            )
+
+    else:
+        max_n = int(max_n)
+
+        if n > max_n:
+            logger.warning(
+                f"Time series ({n} samples) exceeds maxN={max_n}; "
+                f"analyzing the first {max_n} samples.",
+                RuntimeWarning,
+            )
+            y = y[:max_n]
+            n = max_n
+
+    if n < 200:
+        logger.warning(
+            f"Time series (N={n}) too short for a meaningful "
+            "0-1 test (need >= 200).",
+            RuntimeWarning,
+        )
+
+        return {
+            "K": np.nan,
+            "Kstd": np.nan,
+            "D": np.nan,
+            "Dstd": np.nan,
+        }
+
+    # ------------------------------------------------------------------
+    # Set up test
+    # ------------------------------------------------------------------
+    tcut = n // 10
+
+    # Number of displacement pairs used for every lag.
+    n_pairs = n - tcut
+
+    # j is a mathematical index in cos(j*c), not a Python array index.
+    j = np.arange(1, n + 1, dtype=float)
+
+    lags_idx = np.arange(1, tcut + 1)
+    lags = lags_idx.astype(float)
+
+    mean_y = np.mean(y)
+
+    cs = np.linspace(
+        np.pi / 5,
+        4 * np.pi / 5,
+        num_c,
+    )
+
+    k_c = np.empty(num_c)
+    d_c = np.empty(num_c)
+
+    # Quantities required for both Pearson correlation and OLS slope.
+    lags_centered = lags - np.mean(lags)
+    ss_lags = np.dot(lags_centered, lags_centered)
+
+    # ------------------------------------------------------------------
+    # 0-1 test
+    # ------------------------------------------------------------------
+    for k, c in enumerate(cs):
+
+        phase = j * c
+
+        # Translation variables.
+        p = np.cumsum(y * np.cos(phase))
+        q = np.cumsum(y * np.sin(phase))
+
+        energy_cumsum = np.empty(n + 1)
+        energy_cumsum[0] = 0.0
+
+        np.cumsum(
+            p * p + q * q,
+            out=energy_cumsum[1:],
+        )
+
+        # Energy of the common starting interval i=0,...,n_pairs-1.
+        base_energy = energy_cumsum[n_pairs]
+
+        # Energy of the lagged intervals
+        # i=n,...,n+n_pairs-1 for all n simultaneously.
+        shifted_energy = (
+            energy_cumsum[lags_idx + n_pairs]
+            - energy_cumsum[lags_idx]
+        )
+
+        p_cross = correlate(
+            p,
+            p[:n_pairs],
+            mode="valid",
+            method="fft",
+        )
+
+        q_cross = correlate(
+            q,
+            q[:n_pairs],
+            mode="valid",
+            method="fft",
+        )
+
+        # Element 0 corresponds to zero lag; we need lags 1:tcut.
+        cross = p_cross[1:] + q_cross[1:]
+
+        m_c = (
+            base_energy
+            + shifted_energy
+            - 2.0 * cross
+        ) / n_pairs
+
+        v_osc = (
+            mean_y**2
+            * (1.0 - np.cos(lags * c))
+            / (1.0 - np.cos(c))
+        )
+
+        m_c_mod = m_c - v_osc
+
+        m_c_centered = m_c_mod - np.mean(m_c_mod)
+
+        covariance = np.dot(
+            lags_centered,
+            m_c_centered,
+        )
+
+        ss_m_c = np.dot(
+            m_c_centered,
+            m_c_centered,
+        )
+
+        if ss_m_c == 0:
+            k_c[k] = np.nan
+        else:
+            k_c[k] = covariance / np.sqrt(
+                ss_lags * ss_m_c
+            )
+
+        d_c[k] = covariance / ss_lags
+
+    return {
+        "K": np.median(k_c),
+        "Kstd": np.std(k_c, ddof=1),
+        "D": np.median(d_c),
+        "Dstd": np.std(d_c, ddof=1),
+    }
 
 def _resolve_time_delay(y: ArrayLike, tau: Union[int, str]) -> Union[int, float]:
     """Resolve a string time-delay spec to a lag.
@@ -1000,5 +1194,143 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         # This probably needs to be normalized:
         out[f'hboxcounts{num_partitions}'] = -np.sum(pos * np.log(pos))
         out[f'tracepbox{num_partitions}'] = np.sum(np.diag(pbox))  # trace
+
+    return out
+
+def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
+    """
+    Singular Spectrum Analysis of a time series.
+
+    Constructs the trajectory (Hankel) matrix of the time series using a
+    window length L (i.e., a time-delay embedding with delay tau = 1), and
+    performs an uncentered singular value decomposition of the result.
+
+    Unlike ``embed_pca`` (which centers the embedded data before decomposing it,
+    and allows a general embedding delay), this implements classic "Basic SSA":
+    a fixed delay of 1, no centering (so that a genuine trend is not removed
+    before decomposition), and diagonal averaging ("Hankelization") of the
+    leading elementary matrices back into component time series. Statistics
+    are computed on the singular-value pairing structure, and on the
+    reconstructed leading trend/oscillatory components themselves, rather than
+    on the raw eigenvalue spectrum (which ``embed_pca`` already covers).
+
+    References
+    ----------
+    .. [1] "Extracting qualitative dynamics from experimental data"
+        D. S. Broomhead and G. P. King, Physica D 20(2-3) 217 (1986)
+    .. [2] "Analysis of Time Series Structure: SSA and Related Techniques"
+        N. Golyandina, V. Nekrutkin, A. Zhigljavsky, Chapman & Hall/CRC (2001)
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    L : int, optional
+        The window length (default: floor(N/4)). Must satisfy
+        ``4 <= L <= floor(N/2)``.
+
+    Returns
+    -------
+    dict
+        Statistics on the singular-value pairing/decay structure (gap1-gap5,
+        sepIdx), and on the reconstructed leading block of components as a
+        whole (trend strength trend_r2/trend_rho, dominant period of its most
+        tightly-paired internal mode pairperiod, and w-correlation-based
+        separability from the residual wcorr_leadresid). Individual
+        eigentriples within a near-degenerate pair are not uniquely determined
+        by the SVD, so all outputs are computed from basis-independent
+        quantities: singular-value gaps, or sums of whole blocks of components
+        rather than single components.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+
+    if L is None:
+        max_default_L = 200
+        L = min(N//4, max_default_L)
+    L = int(L)
+
+    if L < 4 or L > N//2:
+        logger.warning(f'Window length L = {L} is not suitable for a series '
+                       f'of length {N}')
+        return np.nan
+
+    # Build the trajectory matrix (an embedding with delay tau = 1):
+    try:
+        X = time_delay_embed(y, L, 1)  # K x L, K = N - L + 1
+    except ValueError:
+        logger.warning('Could not construct a trajectory matrix for this time series')
+        return np.nan
+
+    U, sigma, Vt = np.linalg.svd(X, full_matrices=False)
+    V = Vt.T
+    d = len(sigma)
+
+    if d < 4:
+        logger.warning(f'Not enough singular values ({d}) obtained for this '
+                       f'window length')
+        return np.nan
+
+    max_check = min(6, d-1)
+    all_gaps = (sigma[:max_check] - sigma[1:max_check+1])/sigma[:max_check]
+    out = {}
+    for i in range(1, 6):
+        out[f'gap{i}'] = all_gaps[i-1] if i <= max_check else np.nan
+
+    #%% Leading structured block vs. residual
+    # sepIdx locates the largest relative drop in the spectrum: components
+    # 1:sepIdx are taken as the "structured" leading block, the rest as residual.
+    sep_idx = int(np.argmax(all_gaps)) + 1
+    out['sepIdx'] = sep_idx
+
+    t = np.arange(1, N+1, dtype=float)
+    # The number of matrix entries on each anti-diagonal (which is also the
+    # w-correlation weight vector below):
+    w = np.minimum(np.minimum(t, L), N - t + 1)
+
+    def diagonal_average(components):
+        """
+        Reconstructs a length-N component series from an elementary matrix
+        by averaging over its anti-diagonals ("Hankelization").
+        """
+        # The anti-diagonal sums of the rank-one matrix sigma_i*u_i*v_i' are the
+        # (linear) convolution of u_i with v_i, so the elementary matrices never
+        # have to be formed:
+        diag_sums = np.zeros(len(w))
+        for i in components:
+            diag_sums += sigma[i]*np.convolve(U[:, i], V[:, i])
+        return diag_sums/w
+
+    c_lead = diagonal_average(range(sep_idx))
+    resid = y - c_lead  # exact, since diagonal-averaging the full X recovers y
+
+    #%% Trend diagnostics on the leading block
+    out['trend_rho'] = spearmanr(c_lead, t).statistic
+
+    A = np.column_stack((t, np.ones(N)))
+    lin_fit = np.linalg.lstsq(A, c_lead, rcond=None)[0]
+    c_leadhat = A @ lin_fit
+    ss_res = np.sum((c_lead - c_leadhat)**2)
+    ss_tot = np.sum((c_lead - np.mean(c_lead))**2)
+    if ss_tot > 0:
+        out['trend_r2'] = 1 - ss_res/ss_tot
+    else:
+        out['trend_r2'] = np.nan
+
+    #%% Period of the most tightly-paired mode within the leading block
+    if sep_idx >= 2:
+        i_star = int(np.argmin(all_gaps[:sep_idx-1]))
+        c_pair = diagonal_average((i_star, i_star+1))
+        c_pair = c_pair - np.mean(c_pair)
+        num_sign_changes = np.count_nonzero(np.diff(np.sign(c_pair)) != 0)
+        if num_sign_changes > 0:
+            out['pairperiod'] = 2*(N-1)/num_sign_changes
+        else:
+            out['pairperiod'] = np.nan
+    else:
+        out['pairperiod'] = np.nan
+
+    out['wcorr_leadresid'] = (np.sum(w*c_lead*resid)
+                              / np.sqrt(np.sum(w*c_lead**2)*np.sum(w*resid**2)))
 
     return out

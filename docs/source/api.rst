@@ -207,6 +207,8 @@ Nonlinearity
    pyhctsa.operations.nonlinearity.nsamdf
    pyhctsa.operations.nonlinearity.nlpe
    pyhctsa.operations.nonlinearity.embed_pca
+   pyhctsa.operations.nonlinearity.ssa
+   pyhctsa.operations.nonlinearity.zero_one_test
    pyhctsa.operations.nonlinearity.local_density
    pyhctsa.operations.nonlinearity.tisean_d2
    pyhctsa.operations.nonlinearity.poincare_section
@@ -251,6 +253,7 @@ Spectral
 
     pyhctsa.operations.spectral.spectral_summaries
     pyhctsa.operations.spectral.spectral_summaries_phase
+    pyhctsa.operations.spectral.specparam
     pyhctsa.operations.spectral.cepstrum
 
 .. _stationaritymeths:
@@ -275,6 +278,7 @@ Stationarity
     pyhctsa.operations.stationarity.trend
     pyhctsa.operations.stationarity.stat_av
     pyhctsa.operations.stationarity.sliding_window
+    pyhctsa.operations.stationarity.ramping_windows
     pyhctsa.operations.stationarity.slow_feature_analysis
     pyhctsa.operations.stationarity.pp_test
 

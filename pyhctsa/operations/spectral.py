@@ -1,6 +1,7 @@
 import warnings
 import numpy as np
 from numpy.typing import ArrayLike
+from typing import Union
 import scipy.fft
 
 from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit, robustfit, polyfit
@@ -8,6 +9,287 @@ from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit, robu
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
 from ..utils import make_mat_buffer, sign_change
+
+def specparam(y: ArrayLike, aperiodic_mode: str = 'fixed', max_n_peaks: int = 4,
+              peak_threshold: float = 1.0,
+              peak_width_limits: ArrayLike = (0.02, 0.5),
+              seg_length: Union[int, None] = None,
+              max_segments: float = np.inf) -> Union[dict, float]:
+    """
+    Separates the power spectrum into aperiodic (1/f) and periodic (oscillatory)
+    components.
+
+    Parameterizes the power spectrum as a smooth aperiodic '1/f' background plus a
+    small number of Gaussian peaks sitting on top of it, in the spirit of the
+    FOOOF/specparam algorithm [1].
+
+    References
+    ----------
+    .. [1] T. Donoghue et al., "Parameterizing neural power spectra into periodic and aperiodic components", Nat. Neurosci. 23: 1655 (2020)
+    
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    aperiodic_mode : {'fixed', 'knee'}, optional
+        The form of the aperiodic component:
+
+        - 'fixed': ``b - chi*log10(f)``, a straight line in log-log, i.e. pure
+          power-law.
+        - 'knee': ``b - log10(k + f**chi)``, which additionally allows the spectrum to
+          flatten off below a 'knee' frequency, as real spectra commonly do. Note the
+          knee model is not identifiable when the data has no actual knee (k -> 0), so
+          it falls back to the 'fixed' fit if the optimization fails or returns a
+          degenerate knee.
+
+        Default is ``'fixed'``.
+    max_n_peaks : int, optional
+        The maximum number of Gaussian peaks to extract. Default is 4.
+    peak_threshold : float, optional
+        How far above the noise a candidate peak must stand to be accepted (default 1).
+        This is expressed as a multiple of the largest deviation that noise alone would
+        be expected to produce.
+    peak_width_limits : array-like, optional
+        Two-element ``[min, max]`` on Gaussian peak standard deviation, in
+        log10-frequency units (default ``(0.02, 0.5)``).
+    seg_length : int, optional
+        Length of the Welch segments. ``None`` (default) adapts to the series length,
+        as ``max(round(N/8), 32)``, so that longer series buy both finer frequency
+        resolution and more segments to average over.
+    max_segments : float, optional
+        Maximum number of Welch segments to use. ``np.inf`` (default) uses all the
+        available data.
+
+    Returns
+    -------
+    dict
+        The aperiodic parameters (``apExponent``, ``apOffset``, and for 'knee' mode
+        ``apKnee``); the number of peaks found above threshold (``numPeaks``) and the
+        centre frequency, height and bandwidth of the largest (``maxPeakFreq``,
+        ``maxPeakPower``, ``maxPeakBW``); the total power in the periodic component
+        (``totalPeakPower``) and the fraction of spectral power it accounts for
+        (``periodicFraction``); and the quality of the combined fit (``modelR2`` and
+        ``modelMAE``).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+
+    if aperiodic_mode not in ('fixed', 'knee'):
+        raise ValueError(f"Unknown aperiodic_mode '{aperiodic_mode}' "
+                         "(expected 'fixed' or 'knee')")
+    peak_width_limits = np.asarray(peak_width_limits, dtype=float)
+
+    N = len(y)
+    if seg_length is None:
+        # Scale the segment length with the series, so that longer series buy
+        # both finer frequency resolution and more segments to average over.
+        seg_length = max(int(np.floor(N / 8 + 0.5)), 32)
+    min_segments = 4  # need several segments to average over for a usable estimate
+    min_length = seg_length + (min_segments - 1) * (seg_length // 2)
+    if N < min_length:
+        warnings.warn(f"Time series (N = {N}) too short for a spectral parameterization "
+                      f"with segLength = {seg_length} (need >= {min_length})")
+        return np.nan
+    if np.all(y == y[0]):
+        warnings.warn("Constant time series has no spectral structure")
+        return np.nan
+
+    win_length = seg_length
+    max_samples = win_length + (max_segments - 1) * (win_length // 2)
+    if N > max_samples:
+        y = y[:int(max_samples)]  # use a fixed amount of data so features stay comparable
+    nfft = 2 ** int(np.ceil(np.log2(win_length)))
+    f, s = scipy.signal.welch(y, fs=1, window=np.hamming(win_length),
+                              noverlap=win_length // 2, nfft=nfft, detrend=False)
+
+    # Restrict to the frequencies this estimate can actually resolve. A
+    # frequency only completing one or two cycles within a Welch segment is
+    # essentially unestimated, and on a log-frequency axis those lowest bins
+    # sit isolated far to the left, where a straight-line fit is
+    # unconstrained -- so any wiggle there reads as a huge 'peak'.
+    min_cycles_per_segment = 5
+    f_min = min_cycles_per_segment / win_length
+
+    # Also exclude DC (log10(0) = -Inf) and any non-positive/non-finite power:
+    valid = (f >= f_min) & (s > 0) & np.isfinite(s)
+    if np.sum(valid) < 10:
+        warnings.warn("Too few valid spectral points for a parameterization")
+        return np.nan
+    fv = f[valid]
+    log_f = np.log10(fv)
+    log_s = np.log10(s[valid])
+
+    # Peaks bias this first fit; that is expected and is corrected by the
+    # refit at the end, once the peaks have been identified and removed.
+    ap0 = _fit_aperiodic(fv, log_f, log_s, aperiodic_mode)
+
+    resid = log_s - ap0['pred']
+    peak_list = []
+    peak_sum = np.zeros(log_s.shape)
+
+    n_bins = len(resid)
+    # The acceptance threshold has to account for the fact that we are testing
+    # the *maximum* over all nBins frequency bins, not one pre-specified bin:
+    # the largest of nBins noise samples is expected to sit around
+    # sqrt(2*log(nBins)) standard deviations up (~3.5 for a few hundred bins),
+    # so any fixed small multiple of sigma fires on pure noise essentially
+    # always.
+    null_max_factor = np.sqrt(2 * np.log(n_bins))
+
+    for _ in range(max_n_peaks):
+        # Robust spread: the residual still contains the very peaks we are
+        # looking for, and those positive outliers inflate a plain std --
+        # which would make the test *less* sensitive exactly when there is
+        # real structure. A MAD-based sigma is not pulled about by them.
+        resid_sd = 1.4826 * np.median(np.abs(resid - np.median(resid)))
+        if resid_sd <= 0:
+            break
+        i_pk = int(np.argmax(resid))
+        pk_height = resid[i_pk]
+        if pk_height < peak_threshold * null_max_factor * resid_sd:
+            break  # nothing left standing above what noise alone would give
+
+        g = _fit_gaussian(log_f, resid, i_pk, peak_width_limits)
+        if g is None:
+            break  # fit failed or returned a degenerate/out-of-bounds peak
+
+        peak_list.append(g)
+        peak_sum = peak_sum + g['pred']
+        resid = resid - g['pred']  # peel this peak off and look for the next
+
+    # This is the step that decouples the two components: with the oscillatory
+    # peaks subtracted, the background fit is no longer dragged by them, so
+    # the exponent estimates the true 1/f background rather than a blend of
+    # background and oscillations.
+    ap_final = _fit_aperiodic(fv, log_f, log_s - peak_sum, aperiodic_mode)
+
+    out = {}
+    out['apExponent'] = ap_final['exponent']
+    # Report the background level at a reference frequency *inside* the fitted
+    # band, rather than the raw intercept. The intercept is the fitted value at
+    # log10(f) = 0, i.e. f = 1 -- above the Nyquist frequency of 0.5, so it is
+    # a pure extrapolation whose value swings with both the fitted slope and
+    # wherever the fitted range happens to start.
+    ref_freq = 0.1
+    out['apOffset'] = _eval_aperiodic(ap_final, ref_freq)
+    if aperiodic_mode == 'knee':
+        out['apKnee'] = ap_final['knee']
+
+    out['numPeaks'] = len(peak_list)
+    if len(peak_list) == 0:
+        out['maxPeakFreq'] = np.nan
+        out['maxPeakPower'] = np.nan
+        out['maxPeakBW'] = np.nan
+        out['totalPeakPower'] = 0
+    else:
+        heights = np.array([p['height'] for p in peak_list])
+        i_max = int(np.argmax(heights))
+        out['maxPeakFreq'] = 10 ** peak_list[i_max]['centre']  # back to linear frequency
+        out['maxPeakPower'] = heights[i_max]  # height above the aperiodic background, in log10 power
+        out['maxPeakBW'] = peak_list[i_max]['width']
+        out['totalPeakPower'] = np.sum(heights)
+
+    # Share of the (log-)spectrum's variation accounted for by the periodic
+    # component, rather than by the aperiodic background:
+    total_var = np.sum((log_s - np.mean(log_s)) ** 2)
+    if total_var > 0:
+        out['periodicFraction'] = np.sum(peak_sum ** 2) / total_var
+    else:
+        out['periodicFraction'] = np.nan
+
+    model = ap_final['pred'] + peak_sum
+    resid_final = log_s - model
+    if total_var > 0:
+        out['modelR2'] = 1 - np.sum(resid_final ** 2) / total_var
+    else:
+        out['modelR2'] = np.nan
+    out['modelMAE'] = np.mean(np.abs(resid_final))
+
+    return out
+
+def _eval_aperiodic(ap: dict, fq: float) -> float:
+    # Value of the fitted aperiodic curve at frequency fq.
+    if 'knee' in ap and ap['knee'] > 0:
+        return ap['offset'] - np.log10(ap['knee'] + fq ** ap['exponent'])
+    return ap['offset'] - ap['exponent'] * np.log10(fq)
+
+
+def _fit_aperiodic(fv: ArrayLike, log_f: ArrayLike, log_s: ArrayLike,
+                   aperiodic_mode: str) -> dict:
+    # Fit the smooth aperiodic background of the log10 spectrum.
+    # 'fixed': logS = offset - exponent*log10(f)
+    # 'knee' : logS = offset - log10(knee + f^exponent)
+
+    # Robust straight-line fit in log-log, used directly for 'fixed' mode
+    # and as the starting point for the nonlinear 'knee' fit:
+    b, _ = robustfit(log_f, log_s)
+    ap = {
+        'offset': b[0],
+        'exponent': -b[1],  # conventionally reported as a positive falling slope
+        'pred': b[0] + b[1] * log_f,
+    }
+
+    if aperiodic_mode == 'fixed':
+        return ap
+
+    # 'knee' mode: a nonlinear fit, seeded from the linear one. The knee
+    # is only identifiable when the spectrum actually flattens at low
+    # frequency; when it does not, the optimizer drives knee -> 0 (or
+    # fails outright), in which case the model degenerates to the 'fixed'
+    # form and we keep the robust linear fit rather than a bogus knee.
+    try:
+        # fittype('a - log10(k + x^c)') names its coefficients in alphabetical
+        # order, so the fitted vector is [a, c, k]:
+        knee_model = lambda p, x: p[0] - np.log10(p[2] + x ** p[1])
+        p = lsqcurvefit_trr(knee_model,
+                            [ap['offset'], 1e-3, max(ap['exponent'], 0.1)],
+                            fv, log_s,
+                            lower=[-np.inf, 0, 0], upper=[np.inf, np.inf, 10],
+                            max_iter=400)
+        knee_val = p[2]
+        pred_knee = p[0] - np.log10(knee_val + fv ** p[1])
+        if np.isfinite(knee_val) and knee_val > 1e-10 and np.all(np.isfinite(pred_knee)):
+            ap['offset'] = p[0]
+            ap['knee'] = knee_val
+            ap['exponent'] = p[1]
+            ap['pred'] = pred_knee
+        else:
+            ap['knee'] = 0  # degenerate: no detectable knee, keep the linear fit
+    except Exception:
+        ap['knee'] = 0  # optimization failed: fall back to the linear fit
+
+    return ap
+
+
+def _fit_gaussian(log_f: ArrayLike, resid: ArrayLike, i_pk: int,
+                  peak_width_limits: ArrayLike) -> Union[dict, None]:
+    # Fit a single Gaussian to the flattened spectrum, centred near the
+    # current maximum at index iPk. Returns None if the fit fails or lands
+    # outside the permitted width range.
+    x0 = log_f[i_pk]
+    h0 = resid[i_pk]
+    if not np.isfinite(h0) or h0 <= 0:
+        return None
+    w0 = np.mean(peak_width_limits)
+
+    try:
+        gauss_model = lambda p, x: p[0] * np.exp(-(x - p[1]) ** 2 / (2 * p[2] ** 2))
+        p = lsqcurvefit_trr(gauss_model, [h0, x0, w0], log_f, resid,
+                            lower=[0, np.min(log_f), peak_width_limits[0]],
+                            upper=[np.inf, np.max(log_f), peak_width_limits[1]],
+                            max_iter=400)
+    except Exception:
+        return None
+
+    h, m, w = p[0], p[1], p[2]
+    if not np.isfinite(h) or not np.isfinite(m) or not np.isfinite(w) or h <= 0:
+        return None
+    return {
+        'height': h,
+        'centre': m,
+        'width': w,
+        'pred': h * np.exp(-(log_f - m) ** 2 / (2 * w ** 2)),
+    }
 
 def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = 'none') -> dict:
     """
