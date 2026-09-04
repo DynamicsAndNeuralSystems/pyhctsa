@@ -720,6 +720,127 @@ def give_me_robust_stats(x_data: ArrayLike, y_data: ArrayLike, field_name: str) 
             out[f'{field_name}_{key}'] = np.nan
     return out
 
+def phase_amp_coupling(y: ArrayLike, n_bands: int = 5, max_n: Union[int, str] = 'full',
+                       n_phase_bins: int = 18) -> dict:
+    """
+    Cross-frequency phase-amplitude coupling.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    n_bands : int, optional
+        The number of equal-width frequency bands to split the spectrum into
+        (default: 5, matching :func:`spectral_summaries`' 5-band split).
+        Phase-amplitude pairs are formed from every pair of bands i < j (phase
+        from the slower band, amplitude from the faster), giving
+        ``comb(n_bands, 2)`` pairs.
+    max_n : int or str, optional
+        The maximum number of samples to consider; longer series are cropped to
+        their first ``max_n`` points. Can be ``'full'`` to disable cropping
+        (default).
+    n_phase_bins : int, optional
+        The number of phase bins used to estimate each band pair's modulation
+        index (default: 18, i.e. 20-degree bins, the standard choice from Tort
+        et al. 2010).
+
+    Returns
+    -------
+    dict
+        - ``maxMI``: the maximum modulation index across all band pairs -- the
+          comodulogram peak, i.e. whether *any* band pair shows real coupling.
+        - ``entropyMI``: the normalized Shannon entropy of the MI values across
+          pairs (0 = coupling concentrated in a single band pair, 1 = uniformly
+          diffuse across all pairs).
+
+        Returns NaN if the time series is too short for the requested number of
+        bands.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n_bands, n_phase_bins = int(n_bands), int(n_phase_bins)
+
+    n = len(y)
+    if isinstance(max_n, str) and max_n == 'full':
+        pass # No cropping
+    elif n > max_n:
+        warnings.warn(f"Time series ({n} samples) exceeds max_n = {int(max_n)}; "
+                      f"analyzing the first {int(max_n)} samples")
+        y = y[:int(max_n)]
+        n = int(max_n)
+
+    # ------------------------------------------------------------------------------
+    # Equal-width frequency bands (DC and Nyquist bins excluded, as in
+    # spectral_summaries_phase -- neither carries meaningful oscillatory phase)
+    # ------------------------------------------------------------------------------
+    half_n = n // 2 + 1 # one-sided bins: DC (0) up to Nyquist (half_n - 1, if n even)
+    is_nyquist_bin = (n % 2 == 0)
+    if is_nyquist_bin:
+        usable_bins = np.arange(1, half_n - 1)
+    else:
+        usable_bins = np.arange(1, half_n)
+
+    min_bins_per_band = 2 # need >=2 FFT bins per band for a non-degenerate analytic signal
+    if len(usable_bins) < n_bands * min_bins_per_band:
+        warnings.warn(f"Time series too short (N = {n}) for {n_bands} usable frequency bands")
+        return np.nan
+
+    edges = np.floor(np.linspace(0, len(usable_bins), n_bands + 1) + 0.5).astype(int)
+    band_bins = [usable_bins[edges[b]:edges[b + 1]] for b in range(n_bands)]
+
+    # ------------------------------------------------------------------------------
+    # Per-band analytic signal (FFT-domain Hilbert trick, band-limited in one step)
+    # ------------------------------------------------------------------------------
+    y_fft = scipy.fft.fft(y)
+    phase_band, amp_band = [], []
+    for b in range(n_bands):
+        yb = np.zeros(n, dtype=complex)
+        yb[band_bins[b]] = 2 * y_fft[band_bins[b]]
+        zb = scipy.fft.ifft(yb)
+        phase_band.append(np.angle(zb))
+        amp_band.append(np.abs(zb))
+
+    # ------------------------------------------------------------------------------
+    # Modulation index (Tort et al. 2010) for every phase(i)-amplitude(j) pair, i < j
+    # ------------------------------------------------------------------------------
+    phase_edges = np.linspace(-np.pi, np.pi, n_phase_bins + 1)
+    h_max = np.log(n_phase_bins)
+    mi = []
+    for i in range(n_bands - 1):
+        for j in range(i + 1, n_bands):
+            phi = phase_band[i]
+            amp = amp_band[j]
+            bin_idx = np.digitize(phi, phase_edges) - 1
+            bin_idx[bin_idx == n_phase_bins] = n_phase_bins - 1 # phi == pi edge case
+            counts = np.bincount(bin_idx, minlength=n_phase_bins)
+            sums = np.bincount(bin_idx, weights=amp, minlength=n_phase_bins)
+            mean_amp = np.divide(sums, counts, out=np.zeros(n_phase_bins), where=counts > 0)
+            p = mean_amp / np.sum(mean_amp)
+            p = p[p > 0]
+            h = -np.sum(p * np.log(p))
+            mi.append((h_max - h) / h_max)
+    mi = np.asarray(mi)
+    num_pairs = len(mi)
+
+    if not np.any(np.isfinite(mi)):
+        return np.nan
+
+    # ------------------------------------------------------------------------------
+    # Summary statistics across band pairs
+    # ------------------------------------------------------------------------------
+    out = {}
+    out['maxMI'] = np.max(mi)
+
+    # Normalized Shannon entropy of the MI values across pairs (0 = coupling
+    # concentrated in one pair, 1 = uniformly diffuse):
+    p = mi[mi > 0]
+    if p.size == 0:
+        out['entropyMI'] = np.nan
+    else:
+        p = p / np.sum(p)
+        out['entropyMI'] = -np.sum(p * np.log(p)) / np.log(num_pairs)
+
+    return out
+
 def spectral_summaries_phase(y: ArrayLike) -> dict:
     """
     Statistics of the Fourier phase spectrum of a time series.
