@@ -10,11 +10,10 @@ from sklearn.neighbors import NearestNeighbors
 from scipy.stats import spearmanr
 from scipy.signal import correlate
 
-
 from ..operations.model_fit import residual_analysis
 from ..operations.correlation import first_crossing, first_min, autocorr
+from ..operations.scaling import _round
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
-from ..toolboxes.matlab.matlab_fit import polyfit
 from ..utils import matlab_quantile, time_delay_embed
 
 def zero_one_test(y, num_c=20, max_n=10000):
@@ -467,6 +466,97 @@ def nlpe(y: ArrayLike, de: int = 3, tau: Union[int, str] = 1, max_n: int = 5000)
     res = residual_analysis(res)
     # combine with residual analysis results
     out = out | res
+
+    return out
+
+def delay_time(y: ArrayLike, max_delay: Union[int, float] = 0.2, past: int = 1,
+               random_seed: Union[int, None] = 0) -> dict:
+    """
+    Optimal delay time using the method of Parlitz and Wichard.
+
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    max_delay : int or float, optional
+        Maximum value of the delay to consider. Values in (0, 1) are
+        interpreted as a proportion of the time-series length. Delays below 10
+        are raised to 10. Default is 0.2.
+    past : int, optional
+        Number of time-correlated points to discard (samples) when searching
+        for value-neighbours, i.e., the Theiler window. Default is 1.
+    random_seed : int or None, optional
+        Seed for the Mersenne Twister used to draw the reference points.
+
+    Returns
+    -------
+    dict
+        The first three values of ``tau``, the differences between them, and
+        the mean, standard deviation, minimum and maximum of ``tau``. Returns
+        NaN if ``max_delay`` is too long for the given time series, or if no
+        reference point clears the Theiler window.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+
+    if 0 < max_delay < 1:
+        max_delay = _round(N * max_delay)  # a proportion of the time-series length
+    max_delay = int(max_delay)
+
+    if max_delay < 10:
+        max_delay = 10
+        logger.warning('Max delay set to its minimum: delaytime = 10')
+    if max_delay >= N/2:
+        # Heuristic for appropriate time delay
+        logger.warning(f'Max delay, {max_delay}, too long for time series of length {N}')
+        return np.nan
+
+    iterations = 64
+    max_attempts = 10000
+    length = N - max_delay
+    # index[r] is the position in the time series of the (r+1)th smallest value
+    index = np.argsort(y[:length], kind='stable')
+
+    rng = np.random.RandomState() if random_seed is None else _ml_rng(random_seed)
+
+    err = np.zeros(max_delay + 1)
+    for _ in range(iterations):
+        # Redraw until the reference point has a value-neighbour on both sides
+        # that clears the Theiler window (MATLAB retries forever; the attempt
+        # cap here only bites when almost no rank qualifies, i.e. when the
+        # original would spin rather than terminate).
+        for _ in range(max_attempts):
+            ref = int(np.ceil(rng.random_sample()*length))  # a random value-rank (from one)
+            actual = index[ref-1]
+            below, above = index[:ref-1], index[ref:]
+            pre_candidates = below[np.abs(below - actual) > past]
+            post_candidates = above[np.abs(above - actual) > past]
+            if pre_candidates.size > 0 and post_candidates.size > 0:
+                pre = pre_candidates[-1]   # nearest-in-value candidate below ref
+                post = post_candidates[0]  # nearest-in-value candidate above ref
+                break
+        else:
+            logger.warning('No reference point with value-neighbours outside a '
+                           f'Theiler window of {past} samples was found in '
+                           f'{max_attempts} draws')
+            return np.nan
+        y_ref = y[actual:actual + max_delay + 1]
+        err += np.abs(y[pre:pre + max_delay + 1] - y_ref)
+        err += np.abs(y[post:post + max_delay + 1] - y_ref)
+
+    tau = err/iterations
+
+    out = {}
+    out['tau1'] = tau[0]
+    out['tau2'] = tau[1]
+    out['tau3'] = tau[2]
+    out['difftau12'] = tau[1] - tau[0]
+    out['difftau13'] = tau[2] - tau[0]
+    out['meantau'] = np.mean(tau)
+    out['stdtau'] = np.std(tau, ddof=1)
+    out['mintau'] = np.min(tau)
+    out['maxtau'] = np.max(tau)
 
     return out
 
