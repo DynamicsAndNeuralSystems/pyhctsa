@@ -32,7 +32,7 @@
 ---
 
 The **PY**thon toolkit for **H**ighly **C**omparative **T**ime-**S**eries **A**nalysis (_pyhctsa_) is a living library of
-time-series analysis methods. It computes **over 4500 interpretable time-series features** from a single univariate
+time-series analysis methods. It computes **over 5000 interpretable time-series features** from a single univariate
 series — spanning distributional shape, autocorrelation, entropy and information theory, scaling, stationarity,
 nonlinear dynamics, spectral and wavelet properties, model fits, and more — making it the most comprehensive feature
 set available in native Python.
