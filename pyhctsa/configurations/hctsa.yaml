@@ -1752,6 +1752,16 @@ nonlinearity:
     legacy_name: NL_embed_PCA
     ordered_args: ['tau', 'm']
   
+  ssa:
+    base_name: ssa
+    dependencies:
+    configs:
+      - {L: 10, zscore: True}
+      - {L: 30, zscore: True}
+      - {L: 100, zscore: True}
+    legacy_name: NL_SSA
+    ordered_args: ['L']
+  
   local_density:
     base_name: local_density
     dependencies:

@@ -1002,3 +1002,141 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         out[f'tracepbox{num_partitions}'] = np.sum(np.diag(pbox))  # trace
 
     return out
+
+def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
+    """
+    Singular Spectrum Analysis of a time series.
+
+    Constructs the trajectory (Hankel) matrix of the time series using a
+    window length L (i.e., a time-delay embedding with delay tau = 1), and
+    performs an uncentered singular value decomposition of the result.
+
+    Unlike ``embed_pca`` (which centers the embedded data before decomposing it,
+    and allows a general embedding delay), this implements classic "Basic SSA":
+    a fixed delay of 1, no centering (so that a genuine trend is not removed
+    before decomposition), and diagonal averaging ("Hankelization") of the
+    leading elementary matrices back into component time series. Statistics
+    are computed on the singular-value pairing structure, and on the
+    reconstructed leading trend/oscillatory components themselves, rather than
+    on the raw eigenvalue spectrum (which ``embed_pca`` already covers).
+
+    References
+    ----------
+    .. [1] "Extracting qualitative dynamics from experimental data"
+        D. S. Broomhead and G. P. King, Physica D 20(2-3) 217 (1986)
+    .. [2] "Analysis of Time Series Structure: SSA and Related Techniques"
+        N. Golyandina, V. Nekrutkin, A. Zhigljavsky, Chapman & Hall/CRC (2001)
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    L : int, optional
+        The window length (default: floor(N/4)). Must satisfy
+        ``4 <= L <= floor(N/2)``.
+
+    Returns
+    -------
+    dict
+        Statistics on the singular-value pairing/decay structure (gap1-gap5,
+        sepIdx), and on the reconstructed leading block of components as a
+        whole (trend strength trend_r2/trend_rho, dominant period of its most
+        tightly-paired internal mode pairperiod, and w-correlation-based
+        separability from the residual wcorr_leadresid). Individual
+        eigentriples within a near-degenerate pair are not uniquely determined
+        by the SVD, so all outputs are computed from basis-independent
+        quantities: singular-value gaps, or sums of whole blocks of components
+        rather than single components.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+
+    if L is None:
+        max_default_L = 200
+        L = min(N//4, max_default_L)
+    L = int(L)
+
+    if L < 4 or L > N//2:
+        logger.warning(f'Window length L = {L} is not suitable for a series '
+                       f'of length {N}')
+        return np.nan
+
+    # Build the trajectory matrix (an embedding with delay tau = 1):
+    try:
+        X = time_delay_embed(y, L, 1)  # K x L, K = N - L + 1
+    except ValueError:
+        logger.warning('Could not construct a trajectory matrix for this time series')
+        return np.nan
+
+    U, sigma, Vt = np.linalg.svd(X, full_matrices=False)
+    V = Vt.T
+    d = len(sigma)
+
+    if d < 4:
+        logger.warning(f'Not enough singular values ({d}) obtained for this '
+                       f'window length')
+        return np.nan
+
+    max_check = min(6, d-1)
+    all_gaps = (sigma[:max_check] - sigma[1:max_check+1])/sigma[:max_check]
+    out = {}
+    for i in range(1, 6):
+        out[f'gap{i}'] = all_gaps[i-1] if i <= max_check else np.nan
+
+    #%% Leading structured block vs. residual
+    # sepIdx locates the largest relative drop in the spectrum: components
+    # 1:sepIdx are taken as the "structured" leading block, the rest as residual.
+    sep_idx = int(np.argmax(all_gaps)) + 1
+    out['sepIdx'] = sep_idx
+
+    t = np.arange(1, N+1, dtype=float)
+    # The number of matrix entries on each anti-diagonal (which is also the
+    # w-correlation weight vector below):
+    w = np.minimum(np.minimum(t, L), N - t + 1)
+
+    def diagonal_average(components):
+        """
+        Reconstructs a length-N component series from an elementary matrix
+        by averaging over its anti-diagonals ("Hankelization").
+        """
+        # The anti-diagonal sums of the rank-one matrix sigma_i*u_i*v_i' are the
+        # (linear) convolution of u_i with v_i, so the elementary matrices never
+        # have to be formed:
+        diag_sums = np.zeros(len(w))
+        for i in components:
+            diag_sums += sigma[i]*np.convolve(U[:, i], V[:, i])
+        return diag_sums/w
+
+    c_lead = diagonal_average(range(sep_idx))
+    resid = y - c_lead  # exact, since diagonal-averaging the full X recovers y
+
+    #%% Trend diagnostics on the leading block
+    out['trend_rho'] = spearmanr(c_lead, t).statistic
+
+    A = np.column_stack((t, np.ones(N)))
+    lin_fit = np.linalg.lstsq(A, c_lead, rcond=None)[0]
+    c_leadhat = A @ lin_fit
+    ss_res = np.sum((c_lead - c_leadhat)**2)
+    ss_tot = np.sum((c_lead - np.mean(c_lead))**2)
+    if ss_tot > 0:
+        out['trend_r2'] = 1 - ss_res/ss_tot
+    else:
+        out['trend_r2'] = np.nan
+
+    #%% Period of the most tightly-paired mode within the leading block
+    if sep_idx >= 2:
+        i_star = int(np.argmin(all_gaps[:sep_idx-1]))
+        c_pair = diagonal_average((i_star, i_star+1))
+        c_pair = c_pair - np.mean(c_pair)
+        num_sign_changes = np.count_nonzero(np.diff(np.sign(c_pair)) != 0)
+        if num_sign_changes > 0:
+            out['pairperiod'] = 2*(N-1)/num_sign_changes
+        else:
+            out['pairperiod'] = np.nan
+    else:
+        out['pairperiod'] = np.nan
+
+    out['wcorr_leadresid'] = (np.sum(w*c_lead*resid)
+                              / np.sqrt(np.sum(w*c_lead**2)*np.sum(w*resid**2)))
+
+    return out
