@@ -250,7 +250,7 @@ Spectral
 ~~~~~~~~
 .. autosummary::
    :toctree: generated/
-
+    pyhctsa.operations.spectral.phase_amp_coupling
     pyhctsa.operations.spectral.spectral_summaries
     pyhctsa.operations.spectral.spectral_summaries_phase
     pyhctsa.operations.spectral.specparam

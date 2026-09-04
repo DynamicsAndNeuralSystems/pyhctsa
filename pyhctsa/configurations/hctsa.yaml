@@ -1518,6 +1518,15 @@ hypothesis_tests:
     ordered_args: ['periods', 'iids']
 
 spectral:
+
+  phase_amp_coupling:
+    base_name: phase_amp_coupling
+    dependencies:
+    configs:
+      - {n_bands: 5, max_n: 'full', n_phase_bins: 18, zscore: True}
+    legacy_name: SP_PhaseAmpCoupling
+    ordered_args: ['n_bands', 'max_n', 'n_phase_bins']
+
   spectral_summaries:
     base_name: spectral_summaries
     dependencies:
