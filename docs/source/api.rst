@@ -155,6 +155,7 @@ Hypothesis Tests
 
    pyhctsa.operations.hypothesis_tests.variance_ratio_test
    pyhctsa.operations.hypothesis_tests.hypothesis_test
+   pyhctsa.operations.hypothesis_tests.distribution_test
 
 .. _informationmeths:
 
