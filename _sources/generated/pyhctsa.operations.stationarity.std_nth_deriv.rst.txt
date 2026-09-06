@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.std\_nth\_deriv
+===============================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: std_nth_deriv

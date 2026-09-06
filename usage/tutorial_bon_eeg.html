@@ -1,0 +1,2349 @@
+
+
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="getting_started.html">
+      
+      
+        <link rel="next" href="advanced_usage.html">
+      
+      
+      <link rel="icon" href="">
+    
+    
+      
+        <title>✨ Tutorial: Bonn EEG (end-to-end pyhctsa workflow) - pyhctsa  documentation</title>
+      
+    
+    
+      
+        
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+        <link rel="stylesheet" type="text/css" href="../_static/sphinx_immaterial_theme.cf2c65c97ee1b6f01.min.css?v=0a68cab4" />
+        <link rel="stylesheet" type="text/css" href="../_static/termynal.css" />
+        <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+        <link rel="stylesheet" type="text/css" href="../_static/nbsphinx-code-cells.css?v=2aa19091" />
+        <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=d69b33a3" />
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#⬇️-(1)-Download-the-Bonn-EEG-Dataset" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../index.html" title="pyhctsa  documentation" class="md-header__button md-logo" aria-label="pyhctsa  documentation" data-md-component="logo">
+      <img src="../_static/apps_113dp_FFFFFF.svg" alt="logo">
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            pyhctsa  documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              ✨ Tutorial: Bonn EEG (end-to-end pyhctsa workflow)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    pyhctsa
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../index.html" title="pyhctsa  documentation" class="md-nav__button md-logo" aria-label="pyhctsa  documentation" data-md-component="logo">
+      <img src="../_static/apps_113dp_FFFFFF.svg" alt="logo">
+    </a>
+    pyhctsa  documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    pyhctsa
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/index.rst (reference label)"><span>Home</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/installation.rst (reference label)"><span>Installation</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="index.html" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    <span title="/usage/index.rst (reference label)"><span>Usage Guide</span></span>
+    
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            <span title="/usage/index.rst (reference label)"><span>Usage Guide</span></span>
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="getting_started.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/usage/getting_started.rst (reference label)"><span>📘 Getting Started</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    <span title="/usage/tutorial_bon_eeg.ipynb (reference label)"><span>✨ Tutorial:<wbr> Bonn EEG <wbr>(end-<wbr>to-<wbr>end pyhctsa workflow)</span></span>
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="#" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/usage/tutorial_bon_eeg.ipynb (reference label)"><span>✨ Tutorial:<wbr> Bonn EEG <wbr>(end-<wbr>to-<wbr>end pyhctsa workflow)</span></span>
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary">
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#⬇️-(1)-Download-the-Bonn-EEG-Dataset" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#⬇️-(1)-download-the-bonn-eeg-dataset (reference label)"><span>⬇️ <wbr>(1) Download the Bonn EEG Dataset</span></span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#🗳-(2)-Pre-process-the-EEG-recordings" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#🗳-(2)-pre-process-the-eeg-recordings (reference label)"><span>🗳 <wbr>(2) Pre-<wbr>process the EEG recordings</span></span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#⚙️-(3)-Instantiate-a-calculator-in-pyhctsa" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#⚙️-(3)-instantiate-a-calculator-in-pyhctsa (reference label)"><span>⚙️ <wbr>(3) Instantiate a calculator in pyhctsa</span></span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="⚙️ (3) Instantiate a calculator in pyhctsa">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#[OPTIONAL]-(3.5)" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#[optional]-(3.5) (reference label)"><span><wbr>[OPTIONAL] <wbr>(3.<wbr>5)</span></span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[OPTIONAL] (3.5)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#[OPTIONAL]-Load-results-from-the-full-feature-set" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#[optional]-load-results-from-the-full-feature-set (reference label)"><span><wbr>[OPTIONAL] Load results from the full feature set</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#(4)-Clean-the-results-table" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#(4)-clean-the-results-table (reference label)"><span><wbr>(4) Clean the results table</span></span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#🖥-(5)-Visualisation" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#🖥-(5)-visualisation (reference label)"><span>🖥 <wbr>(5) Visualisation</span></span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#Seizure-vs-Eyes-Open" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#seizure-vs-eyes-open (reference label)"><span>Seizure vs Eyes Open</span></span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#📂-Classification-Problem" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#📂-classification-problem (reference label)"><span>📂 Classification Problem</span></span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="advanced_usage.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/usage/advanced_usage.rst (reference label)"><span>📕 Advanced usage</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../methods/index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/methods/index.rst (reference label)"><span>Time-<wbr>Series Analysis Methods</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst (reference label)"><span>API Reference</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/development/index.rst (reference label)"><span>Development</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mappings/index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/mappings/index.rst (reference label)"><span>HCTSA function mappings</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../authors.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/authors.rst (reference label)"><span>Authors</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/license.rst (reference label)"><span>License</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary">
+  
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#⬇️-(1)-Download-the-Bonn-EEG-Dataset" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#⬇️-(1)-download-the-bonn-eeg-dataset (reference label)"><span>⬇️ <wbr>(1) Download the Bonn EEG Dataset</span></span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#🗳-(2)-Pre-process-the-EEG-recordings" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#🗳-(2)-pre-process-the-eeg-recordings (reference label)"><span>🗳 <wbr>(2) Pre-<wbr>process the EEG recordings</span></span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#⚙️-(3)-Instantiate-a-calculator-in-pyhctsa" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#⚙️-(3)-instantiate-a-calculator-in-pyhctsa (reference label)"><span>⚙️ <wbr>(3) Instantiate a calculator in pyhctsa</span></span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="⚙️ (3) Instantiate a calculator in pyhctsa">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#[OPTIONAL]-(3.5)" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#[optional]-(3.5) (reference label)"><span><wbr>[OPTIONAL] <wbr>(3.<wbr>5)</span></span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[OPTIONAL] (3.5)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#[OPTIONAL]-Load-results-from-the-full-feature-set" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#[optional]-load-results-from-the-full-feature-set (reference label)"><span><wbr>[OPTIONAL] Load results from the full feature set</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#(4)-Clean-the-results-table" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#(4)-clean-the-results-table (reference label)"><span><wbr>(4) Clean the results table</span></span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#🖥-(5)-Visualisation" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#🖥-(5)-visualisation (reference label)"><span>🖥 <wbr>(5) Visualisation</span></span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#Seizure-vs-Eyes-Open" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#seizure-vs-eyes-open (reference label)"><span>Seizure vs Eyes Open</span></span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#📂-Classification-Problem" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span title="/usage/tutorial_bon_eeg.ipynb#📂-classification-problem (reference label)"><span>📂 Classification Problem</span></span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset" role="main">
+                
+                
+                  
+
+
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[90]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code># Install tutorial-specific dependencies (e.g., matplotlib for plotting)
+%pip install matplotlib seaborn kagglehub --quiet
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Note: you may need to restart the kernel to use updated packages.
+</pre></div></div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[1]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>import kagglehub
+import numpy as np
+import pandas as pd
+import os
+from pyhctsa.calculator import FeatureCalculator
+from scipy.signal import filtfilt, butter
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import StratifiedKFold
+from sklearn.manifold import TSNE
+from sklearn.decomposition import PCA
+from sklearn.svm import LinearSVC
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+</code></pre></div>
+</div>
+</div>
+<h1 id="✨-Tutorial:-Bonn-EEG-(end-to-end-pyhctsa-workflow)">✨ Tutorial: Bonn EEG (end-to-end pyhctsa workflow)<a class="headerlink" href="#✨-Tutorial:-Bonn-EEG-(end-to-end-pyhctsa-workflow)" title="Link to this heading">¶</a></h1>
+<p>This tutorial provides a hands-on walkthrough of the standard pyhctsa pipeline using data from the Bonn EEG dataset. We will move through the entire research cycle—starting with raw time-series data and ending with interpreted classification results.</p>
+<p><em>What You Will Learn</em></p>
+<p>The workflow is divided into four key phases:</p>
+<ol class="arabic simple">
+<li><p>Data Preparation: Structuring your time-series data and associated metadata into the required pyhctsa format.</p></li>
+<li><p>Feature Extraction: Leveraging the massive feature library to compute thousands of properties for each time series.</p></li>
+<li><p>Data Processing &amp; Cleaning: Handling missing values, normalizing features, and preparing the resulting feature matrix for analysis.</p></li>
+<li><p>Analysis &amp; Visualization: Implementing classification algorithms to distinguish between data classes and using built-in visualization tools to interpret which features drive those differences.</p></li>
+</ol>
+<h2 id="⬇️-(1)-Download-the-Bonn-EEG-Dataset">⬇️ (1) Download the Bonn EEG Dataset<a class="headerlink" href="#⬇️-(1)-Download-the-Bonn-EEG-Dataset" title="Link to this heading">¶</a></h2>
+<p>Download the Bonn EEG dataset directly from kaggle</p>
+<ul class="simple">
+<li><p>EEG recordings from healthy individuals and patients with epilepsy</p></li>
+<li><p>Five distinct classes: A, B, C, D and E</p></li>
+<li><p>Each class has 100 single-channel EEG segments, with each segment comprising 23.6 seconds of EEG data, sampled at 173.61 Hz, yielding a length 4096 sample time series</p></li>
+</ul>
+<p>A = Z, B = O, C = N, D = F, E = S</p>
+<ul class="simple">
+<li><p>A/Z = eyes open healthy (eyesOpen)</p></li>
+<li><p>B/O = eyes closed healthy (eyesClosed)</p></li>
+<li><p>C/N = seizure free interval for epileptic patient (hippocampus)</p></li>
+<li><p>D/F = seizure free interval epileptic patient, non-seizure epileptogenic zone (epileptogenic)</p></li>
+<li><p>E/S = During seizure epileptic patient (seizure)</p></li>
+</ul>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[2]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>path = kagglehub.dataset_download("quands/eeg-dataset") # download from kagglehub
+print(os.listdir(os.path.join(path, 'Dataset'))) # display the subfolders
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+[&#39;N&#39;, &#39;Z&#39;, &#39;S&#39;, &#39;F&#39;, &#39;O&#39;]
+</pre></div></div>
+</div>
+<p>Define the class mappings</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[3]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>mappings = {'Z': 'eyesOpen', 'N': 'hippocampus', 'F': 'epileptogenic', 'S': 'seizure', 'O': 'eyesClosed'}
+</code></pre></div>
+</div>
+</div>
+<h2 id="🗳-(2)-Pre-process-the-EEG-recordings">🗳 (2) Pre-process the EEG recordings<a class="headerlink" href="#🗳-(2)-Pre-process-the-EEG-recordings" title="Link to this heading">¶</a></h2>
+<p>Pre-filter with a 40Hz low pass</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[4]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>def unpack_subfolder(base_path : str, which_folder : str) -&gt; pd.DataFrame:
+    cutoff_freq = 40.0 # 40 Hz
+    fs = 173.61 # sample rate in Hz
+    order = 4 # 4th order butterworth filter
+    nyq = 0.5 * fs
+    normal_cutoff = cutoff_freq/nyq
+    b, a = butter(order, normal_cutoff, btype='lowpass')
+    if which_folder.lower() in ['n', 'z', 's', 'f', 'o']:
+        label = mappings[which_folder.upper()]
+        path = os.path.join(base_path, 'Dataset', which_folder)
+        assert(os.path.exists(path))
+        # check number of files
+        subfiles = os.listdir(path)
+        num_subfiles = len(subfiles)
+        if num_subfiles != 100:
+            print(f'More files than expected. Expected 100, got {num_subfiles}')
+        all_series = []
+        for subfile in subfiles:
+            data = np.loadtxt(os.path.join(path, subfile))
+            filtered_data = filtfilt(b, a, data)
+            all_series.append(filtered_data)
+        df = pd.DataFrame(all_series)
+        df['label'] = label
+    else:
+        raise ValueError(f"Unknown folder: {which_folder}")
+    return df
+</code></pre></div>
+</div>
+</div>
+<p>Concatenate all time-series instances into a single dataframe</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[5]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>df_series = pd.concat([unpack_subfolder(path, c) for c in ['N', 'Z', 'S', 'F', 'O']])
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[6]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>df_series.head(3)
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[6]:
+</code></pre></div>
+</div>
+<div class="output_area rendered_html docutils container">
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>...</th>
+      <th>4088</th>
+      <th>4089</th>
+      <th>4090</th>
+      <th>4091</th>
+      <th>4092</th>
+      <th>4093</th>
+      <th>4094</th>
+      <th>4095</th>
+      <th>4096</th>
+      <th>label</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>0</th>
+      <td>-76.002880</td>
+      <td>-8.160361</td>
+      <td>36.130147</td>
+      <td>37.625116</td>
+      <td>0.235783</td>
+      <td>-41.989949</td>
+      <td>-54.718865</td>
+      <td>-38.386317</td>
+      <td>-20.373990</td>
+      <td>-17.291749</td>
+      <td>...</td>
+      <td>180.432287</td>
+      <td>164.583116</td>
+      <td>150.705251</td>
+      <td>157.809372</td>
+      <td>194.080194</td>
+      <td>235.464085</td>
+      <td>228.103199</td>
+      <td>127.476462</td>
+      <td>-51.043101</td>
+      <td>hippocampus</td>
+    </tr>
+    <tr>
+      <th>1</th>
+      <td>34.000406</td>
+      <td>31.416358</td>
+      <td>27.038342</td>
+      <td>21.346209</td>
+      <td>15.747189</td>
+      <td>10.304919</td>
+      <td>4.426019</td>
+      <td>-1.259340</td>
+      <td>-5.333748</td>
+      <td>-7.425735</td>
+      <td>...</td>
+      <td>-22.703815</td>
+      <td>-16.919187</td>
+      <td>-13.739674</td>
+      <td>-12.329390</td>
+      <td>-8.005106</td>
+      <td>1.240274</td>
+      <td>7.273179</td>
+      <td>-2.612481</td>
+      <td>-28.999855</td>
+      <td>hippocampus</td>
+    </tr>
+    <tr>
+      <th>2</th>
+      <td>-56.990550</td>
+      <td>-71.547664</td>
+      <td>-75.119898</td>
+      <td>-67.728569</td>
+      <td>-58.999405</td>
+      <td>-56.182465</td>
+      <td>-56.529083</td>
+      <td>-53.060212</td>
+      <td>-44.914053</td>
+      <td>-38.376826</td>
+      <td>...</td>
+      <td>-70.041801</td>
+      <td>-60.266899</td>
+      <td>-43.302333</td>
+      <td>-26.943180</td>
+      <td>-24.632308</td>
+      <td>-40.924329</td>
+      <td>-56.324522</td>
+      <td>-40.254580</td>
+      <td>10.991437</td>
+      <td>hippocampus</td>
+    </tr>
+  </tbody>
+</table>
+<p>3 rows × 4098 columns</p>
+</div></div>
+</div>
+<p>Plot first example from each class:</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[7]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>fs = 173.61
+fix = False
+t = np.arange(df_series.drop(columns=['label']).shape[1])/fs
+fig, ax = plt.subplots(5, 1, sharex=True, figsize=(12, 10))
+df_series[df_series['label'] == 'eyesOpen'].drop(columns=['label']).iloc[0 if fix else np.random.randint(0, 99)].plot(x=t, ax=ax[0], title="eyesOpen", c='magenta')
+df_series[df_series['label'] == 'eyesClosed'].drop(columns=['label']).iloc[0 if fix else np.random.randint(0, 99)].plot(x=t, ax=ax[1], title="eyesClosed", c='lightblue')
+df_series[df_series['label'] == 'epileptogenic'].drop(columns=['label']).iloc[0 if fix else np.random.randint(0, 99)].plot(x=t, ax=ax[2], title="epileptogenic", c='lightgreen')
+df_series[df_series['label'] == 'hippocampus'].drop(columns=['label']).iloc[0 if fix else np.random.randint(0, 99)].plot(x=t, ax=ax[3], title="hippocampus", c='orange')
+df_series[df_series['label'] == 'seizure'].drop(columns=['label']).iloc[0 if fix else np.random.randint(0, 99)].plot(x=t, ax=ax[4], title="seizure", c='red')
+plt.xlabel("time (s)")
+ax[0].set_ylabel(rf"amplitude ($\mu v$)")
+ax[1].set_ylabel(rf"amplitude ($\mu v$)")
+ax[2].set_ylabel(rf"amplitude ($\mu v$)")
+ax[3].set_ylabel(rf"amplitude ($\mu v$)")
+ax[4].set_ylabel(rf"amplitude ($\mu v$)")
+plt.tight_layout()
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/usage_tutorial_bon_eeg_20_0.png" src="../_images/usage_tutorial_bon_eeg_20_0.png" />
+</div>
+</div>
+<h2 id="⚙️-(3)-Instantiate-a-calculator-in-pyhctsa">⚙️ (3) Instantiate a calculator in <em>pyhctsa</em><a class="headerlink" href="#⚙️-(3)-Instantiate-a-calculator-in-pyhctsa" title="Link to this heading">¶</a></h2>
+<p>While you can run the calculator with the full <em>hctsa</em> feature set, for the sake of brevity, we will use a custom yaml file with a selected subset of 110 “fast” feature functions:</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[8]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>calc = FeatureCalculator(config_path="./custom.yaml")
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Loaded 110 master operations.
+</pre></div></div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[9]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>bonn_eeg = df_series
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[10]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>data_df = bonn_eeg.drop(columns=['label']).to_numpy() # drop the labels column for computing features on the time-series data
+</code></pre></div>
+</div>
+</div>
+<p>To ensure everything is working as expected, we will first run the calculator on the first instance/time-series of the data frame</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[11]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>res = calc.extract(data_df[0, :])
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Evaluating 110 partialed functions. Strap in!...
+Feature extraction completed in 0.120 seconds.
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[12]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>res
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[12]:
+</code></pre></div>
+</div>
+<div class="output_area rendered_html docutils container">
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>hrv_classic.pnn5</th>
+      <th>hrv_classic.pnn10</th>
+      <th>hrv_classic.pnn20</th>
+      <th>hrv_classic.pnn30</th>
+      <th>hrv_classic.pnn40</th>
+      <th>hrv_classic.lfhf</th>
+      <th>hrv_classic.vlf</th>
+      <th>hrv_classic.lf</th>
+      <th>hrv_classic.hf</th>
+      <th>hrv_classic.tri</th>
+      <th>...</th>
+      <th>ac_nl_0_2_6</th>
+      <th>ac_nl_0_3_6</th>
+      <th>ac_nl_0_4_6</th>
+      <th>ac_nl_0_5_6</th>
+      <th>ac_nl_1_1_2</th>
+      <th>ac_nl_1_1_3</th>
+      <th>ac_nl_1_2_2</th>
+      <th>ac_nl_1_3_3</th>
+      <th>ac_nl_2_2_3</th>
+      <th>ac_nl_2_3_3</th>
+    </tr>
+    <tr>
+      <th>instance</th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>ts_1</th>
+      <td>0.988037</td>
+      <td>0.975098</td>
+      <td>0.943359</td>
+      <td>0.915039</td>
+      <td>0.887207</td>
+      <td>1.438589</td>
+      <td>16.373641</td>
+      <td>38.574764</td>
+      <td>26.814297</td>
+      <td>3.080451</td>
+      <td>...</td>
+      <td>1.634811</td>
+      <td>1.597856</td>
+      <td>1.577479</td>
+      <td>1.561968</td>
+      <td>3.240279</td>
+      <td>2.838081</td>
+      <td>3.121141</td>
+      <td>2.618175</td>
+      <td>2.834442</td>
+      <td>2.684552</td>
+    </tr>
+  </tbody>
+</table>
+<p>1 rows × 347 columns</p>
+</div></div>
+</div>
+<p>Now that everything is working, let’s scale up to the full dataset:</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[33]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>res = calc.extract(data_df)
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Evaluating 110 partialed functions. Strap in!...
+</pre></div></div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area stderr docutils container">
+<div class="highlight"><pre>
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:92: RuntimeWarning: divide by zero encountered in log
+  log_s = np.log(s)
+/opt/anaconda3/envs/pyhctsa-latest/lib/python3.12/site-packages/numpy/_core/_methods.py:190: RuntimeWarning: invalid value encountered in subtract
+  x = asanyarray(arr - arrmean)
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:221: RuntimeWarning: divide by zero encountered in log
+  h_shann = -s * np.log(s)
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:221: RuntimeWarning: invalid value encountered in multiply
+  h_shann = -s * np.log(s)
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:228: RuntimeWarning: divide by zero encountered in log
+  out[&#39;sfm&#39;] = 10 * np.log10(np.exp(np.mean(np.log(s))) / np.mean(s))
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:228: RuntimeWarning: divide by zero encountered in log10
+  out[&#39;sfm&#39;] = 10 * np.log10(np.exp(np.mean(np.log(s))) / np.mean(s))
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:242: RuntimeWarning: divide by zero encountered in log
+  out[&#39;logarea_2_1&#39;] = np.sum(np.log(split[:, 0])) * dw
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:253: RuntimeWarning: divide by zero encountered in log
+  out[&#39;logarea_3_1&#39;] = np.sum(np.log(split[:, 0])) * dw
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:266: RuntimeWarning: divide by zero encountered in log
+  out[&#39;logarea_4_1&#39;] = np.sum(np.log(split[:, 0])) * dw
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:281: RuntimeWarning: divide by zero encountered in log
+  out[&#39;logarea_5_1&#39;] = np.sum(np.log(split[:, 0])) * dw
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Feature extraction completed in 31.016 seconds.
+</pre></div></div>
+</div>
+<h3 id="[OPTIONAL]-(3.5)">[OPTIONAL] (3.5)<a class="headerlink" href="#[OPTIONAL]-(3.5)" title="Link to this heading">¶</a></h3>
+<p>Time-series feature extraction is computationally intensive. To speed up processing, pyhctsa allows you to distribute the workload across multiple CPU cores on your local machine using the <code class="docutils literal notranslate"><span class="pre">LocalDistributor</span></code>:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[36]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>from pyhctsa.distribute import LocalDistributor
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[ ]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code># create a LocalDistributor
+dist = LocalDistributor(n_workers=6) # set to the number of physical cores available on your local machine...
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[38]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>res = calc.extract(data_df, distributor=dist)
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<script type="application/vnd.jupyter.widget-view+json">{"model_id": "6d12374777b24f3c969380116711d46a", "version_major": 2, "version_minor": 0}</script></div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Evaluating 110 partialed functions. Strap in!...
+</pre></div></div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area stderr docutils container">
+<div class="highlight"><pre>
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:92: RuntimeWarning: divide by zero encountered in log
+  log_s = np.log(s)
+/opt/anaconda3/envs/pyhctsa-latest/lib/python3.12/site-packages/numpy/_core/_methods.py:190: RuntimeWarning: invalid value encountered in subtract
+  x = asanyarray(arr - arrmean)
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:221: RuntimeWarning: divide by zero encountered in log
+  h_shann = -s * np.log(s)
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:221: RuntimeWarning: invalid value encountered in multiply
+  h_shann = -s * np.log(s)
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:228: RuntimeWarning: divide by zero encountered in log
+  out[&#39;sfm&#39;] = 10 * np.log10(np.exp(np.mean(np.log(s))) / np.mean(s))
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:228: RuntimeWarning: divide by zero encountered in log10
+  out[&#39;sfm&#39;] = 10 * np.log10(np.exp(np.mean(np.log(s))) / np.mean(s))
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:242: RuntimeWarning: divide by zero encountered in log
+  out[&#39;logarea_2_1&#39;] = np.sum(np.log(split[:, 0])) * dw
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:253: RuntimeWarning: divide by zero encountered in log
+  out[&#39;logarea_3_1&#39;] = np.sum(np.log(split[:, 0])) * dw
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:266: RuntimeWarning: divide by zero encountered in log
+  out[&#39;logarea_4_1&#39;] = np.sum(np.log(split[:, 0])) * dw
+/Users/jmoo2880/Documents/pyhctsa-latest/pyhctsa/pyhctsa/operations/spectral.py:281: RuntimeWarning: divide by zero encountered in log
+  out[&#39;logarea_5_1&#39;] = np.sum(np.log(split[:, 0])) * dw
+</pre></div></div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area rendered_html docutils container">
+<pre style="white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace"></pre></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Feature extraction completed in 6.369 seconds.
+</pre></div></div>
+</div>
+<p>Here we can see that by utilising parallel computing, we can reduce our feature extraction time by a factor of ~4.</p>
+<h4 id="[OPTIONAL]-Load-results-from-the-full-feature-set">[OPTIONAL] Load results from the full feature set<a class="headerlink" href="#[OPTIONAL]-Load-results-from-the-full-feature-set" title="Link to this heading">¶</a></h4>
+<p>If you wish to access the results from the full hctsa feature set, but do not want to run the full feature set locally due to time contraints, you can download and import the pre-computed results from <a class="reference external" href="https://doi.org/10.6084/m9.figshare.31290259">https://doi.org/10.6084/m9.figshare.31290259</a></p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[8]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>LOAD_PRECALCULATED_RESULTS = True # set to true to load the results
+if LOAD_PRECALCULATED_RESULTS:
+    res = pd.read_pickle("./bonn_eeg_results.pkl") # point to the path where the downloaded results exist
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[9]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>res.head(5)
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[9]:
+</code></pre></div>
+</div>
+<div class="output_area rendered_html docutils container">
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>hrv_classic.pnn5</th>
+      <th>hrv_classic.pnn10</th>
+      <th>hrv_classic.pnn20</th>
+      <th>hrv_classic.pnn30</th>
+      <th>hrv_classic.pnn40</th>
+      <th>hrv_classic.lfhf</th>
+      <th>hrv_classic.vlf</th>
+      <th>hrv_classic.lf</th>
+      <th>hrv_classic.hf</th>
+      <th>hrv_classic.tri</th>
+      <th>...</th>
+      <th>surrogate_test_RP_99_o3.o3_zscore</th>
+      <th>surrogate_test_RP_99_o3.o3_f</th>
+      <th>surrogate_test_RP_99_o3.o3_mediqr</th>
+      <th>surrogate_test_RP_99_o3.o3_prank</th>
+      <th>surrogate_test_RP_99_tc3.tc3_p</th>
+      <th>surrogate_test_RP_99_tc3.tc3_zscore</th>
+      <th>surrogate_test_RP_99_tc3.tc3_f</th>
+      <th>surrogate_test_RP_99_tc3.tc3_mediqr</th>
+      <th>surrogate_test_RP_99_tc3.tc3_prank</th>
+      <th>multi_scale_entropy_1_10_2_0p15_rescale_tau.out</th>
+    </tr>
+    <tr>
+      <th>instance</th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>ts_1</th>
+      <td>0.988037</td>
+      <td>0.975098</td>
+      <td>0.943359</td>
+      <td>0.915039</td>
+      <td>0.887207</td>
+      <td>1.438589</td>
+      <td>16.373641</td>
+      <td>38.574764</td>
+      <td>26.814297</td>
+      <td>3.080451</td>
+      <td>...</td>
+      <td>-2.217531</td>
+      <td>0.000000</td>
+      <td>1.393878</td>
+      <td>0.02</td>
+      <td>0.004159</td>
+      <td>2.865863</td>
+      <td>0.011524</td>
+      <td>2.146499</td>
+      <td>0.06</td>
+      <td>NaN</td>
+    </tr>
+    <tr>
+      <th>ts_2</th>
+      <td>0.979736</td>
+      <td>0.959473</td>
+      <td>0.916504</td>
+      <td>0.875244</td>
+      <td>0.831299</td>
+      <td>1.910163</td>
+      <td>16.994118</td>
+      <td>50.579037</td>
+      <td>26.478908</td>
+      <td>2.559026</td>
+      <td>...</td>
+      <td>0.237313</td>
+      <td>0.345205</td>
+      <td>0.250219</td>
+      <td>0.78</td>
+      <td>0.010484</td>
+      <td>-2.559445</td>
+      <td>0.000000</td>
+      <td>1.908045</td>
+      <td>0.02</td>
+      <td>NaN</td>
+    </tr>
+    <tr>
+      <th>ts_3</th>
+      <td>0.979492</td>
+      <td>0.960938</td>
+      <td>0.929443</td>
+      <td>0.891602</td>
+      <td>0.852295</td>
+      <td>2.321853</td>
+      <td>26.072435</td>
+      <td>47.009691</td>
+      <td>20.246629</td>
+      <td>3.590710</td>
+      <td>...</td>
+      <td>0.532657</td>
+      <td>0.331571</td>
+      <td>0.448411</td>
+      <td>0.64</td>
+      <td>0.523415</td>
+      <td>-0.638090</td>
+      <td>0.325449</td>
+      <td>0.515422</td>
+      <td>0.52</td>
+      <td>NaN</td>
+    </tr>
+    <tr>
+      <th>ts_4</th>
+      <td>0.976807</td>
+      <td>0.953125</td>
+      <td>0.906738</td>
+      <td>0.856689</td>
+      <td>0.813721</td>
+      <td>3.314088</td>
+      <td>47.505651</td>
+      <td>36.356375</td>
+      <td>10.970250</td>
+      <td>3.584427</td>
+      <td>...</td>
+      <td>9.644766</td>
+      <td>0.000000</td>
+      <td>7.529028</td>
+      <td>0.04</td>
+      <td>0.240547</td>
+      <td>-1.173620</td>
+      <td>0.245583</td>
+      <td>0.819281</td>
+      <td>0.22</td>
+      <td>NaN</td>
+    </tr>
+    <tr>
+      <th>ts_5</th>
+      <td>0.979492</td>
+      <td>0.957764</td>
+      <td>0.914795</td>
+      <td>0.870605</td>
+      <td>0.833008</td>
+      <td>2.491926</td>
+      <td>17.374024</td>
+      <td>55.482169</td>
+      <td>22.264773</td>
+      <td>2.873072</td>
+      <td>...</td>
+      <td>6.303317</td>
+      <td>0.000000</td>
+      <td>4.622768</td>
+      <td>0.04</td>
+      <td>0.400100</td>
+      <td>-0.841443</td>
+      <td>0.257640</td>
+      <td>0.789540</td>
+      <td>0.40</td>
+      <td>NaN</td>
+    </tr>
+  </tbody>
+</table>
+<p>5 rows × 4573 columns</p>
+</div></div>
+</div>
+<h2 id="(4)-Clean-the-results-table">(4) Clean the results table<a class="headerlink" href="#(4)-Clean-the-results-table" title="Link to this heading">¶</a></h2>
+<p>Not all features returned by <em>pyhctsa</em> will be well-behaved on every dataset. To perform downstream analyses such as classification, we must first filter out special-valued features and NaNs:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[10]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>res_clean = (
+    res.replace([np.inf, -np.inf], np.nan)
+      .dropna(axis=1)
+)
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[11]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>res_filtered = res_clean.dropna(axis=1)
+</code></pre></div>
+</div>
+</div>
+<p>Filter out non-numeric</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[12]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>res_num = res_filtered.apply(pd.to_numeric, errors="coerce")
+good_cols = res_num.notna().eq(res.notna()).all(axis=0)
+res_num_strict = res_num.loc[:, good_cols]
+</code></pre></div>
+</div>
+</div>
+<p>Filter out zero variance (constant) columns</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[13]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>zero_var_cols = res_num_strict.columns[res_num_strict.var(axis=0, skipna=True) == 0]
+zero_var_cols
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[13]:
+</code></pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Index([&#39;add_noise_1_quantiles_10.pcrossmean&#39;, &#39;add_noise_1_even_10.pcrossmean&#39;,
+       &#39;add_noise_1_std1_10.pcrossmean&#39;, &#39;add_noise_1_gaussian.pdec&#39;,
+       &#39;add_noise_1_gaussian.pcrossmean&#39;, &#39;add_noise_1_kraskov1_4.pcrossmean&#39;,
+       &#39;translate_shape_circle_1p5_pts.max&#39;,
+       &#39;translate_shape_circle_1p5_pts.mode&#39;,
+       &#39;translate_shape_circle_2p5_pts.max&#39;,
+       &#39;translate_shape_circle_2p5_pts.mode&#39;,
+       ...
+       &#39;ar_fit_1_8_sbc.popt_sbc&#39;, &#39;ar_fit_1_8_sbc.popt_fpe&#39;,
+       &#39;ar_fit_1_8_sbc.res_siglev&#39;, &#39;walker_prop_0p1.res_runstest&#39;,
+       &#39;walker_prop_0p5.res_runstest&#39;, &#39;walker_prop_0p9.res_runstest&#39;,
+       &#39;walker_prop_1p1.res_runstest&#39;, &#39;walker_biasprop_0p5_0p1.res_runstest&#39;,
+       &#39;walker_biasprop_0p1_0p5.res_runstest&#39;,
+       &#39;walker_momentum_5.res_runstest&#39;],
+      dtype=&#39;str&#39;, length=103)
+</pre></div></div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[14]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>good_features_df = res_num_strict.drop(columns=zero_var_cols)
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[15]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>good_features_df
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[15]:
+</code></pre></div>
+</div>
+<div class="output_area rendered_html docutils container">
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>hrv_classic.pnn5</th>
+      <th>hrv_classic.pnn10</th>
+      <th>hrv_classic.pnn20</th>
+      <th>hrv_classic.pnn30</th>
+      <th>hrv_classic.pnn40</th>
+      <th>hrv_classic.lfhf</th>
+      <th>hrv_classic.vlf</th>
+      <th>hrv_classic.lf</th>
+      <th>hrv_classic.hf</th>
+      <th>hrv_classic.tri</th>
+      <th>...</th>
+      <th>surrogate_test_RP_99_o3.o3_p</th>
+      <th>surrogate_test_RP_99_o3.o3_zscore</th>
+      <th>surrogate_test_RP_99_o3.o3_f</th>
+      <th>surrogate_test_RP_99_o3.o3_mediqr</th>
+      <th>surrogate_test_RP_99_o3.o3_prank</th>
+      <th>surrogate_test_RP_99_tc3.tc3_p</th>
+      <th>surrogate_test_RP_99_tc3.tc3_zscore</th>
+      <th>surrogate_test_RP_99_tc3.tc3_f</th>
+      <th>surrogate_test_RP_99_tc3.tc3_mediqr</th>
+      <th>surrogate_test_RP_99_tc3.tc3_prank</th>
+    </tr>
+    <tr>
+      <th>instance</th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>ts_1</th>
+      <td>0.988037</td>
+      <td>0.975098</td>
+      <td>0.943359</td>
+      <td>0.915039</td>
+      <td>0.887207</td>
+      <td>1.438589</td>
+      <td>16.373641</td>
+      <td>38.574764</td>
+      <td>26.814297</td>
+      <td>3.080451</td>
+      <td>...</td>
+      <td>2.658684e-02</td>
+      <td>-2.217531</td>
+      <td>0.000000</td>
+      <td>1.393878</td>
+      <td>0.02</td>
+      <td>0.004159</td>
+      <td>2.865863</td>
+      <td>0.011524</td>
+      <td>2.146499</td>
+      <td>0.06</td>
+    </tr>
+    <tr>
+      <th>ts_2</th>
+      <td>0.979736</td>
+      <td>0.959473</td>
+      <td>0.916504</td>
+      <td>0.875244</td>
+      <td>0.831299</td>
+      <td>1.910163</td>
+      <td>16.994118</td>
+      <td>50.579037</td>
+      <td>26.478908</td>
+      <td>2.559026</td>
+      <td>...</td>
+      <td>8.124138e-01</td>
+      <td>0.237313</td>
+      <td>0.345205</td>
+      <td>0.250219</td>
+      <td>0.78</td>
+      <td>0.010484</td>
+      <td>-2.559445</td>
+      <td>0.000000</td>
+      <td>1.908045</td>
+      <td>0.02</td>
+    </tr>
+    <tr>
+      <th>ts_3</th>
+      <td>0.979492</td>
+      <td>0.960938</td>
+      <td>0.929443</td>
+      <td>0.891602</td>
+      <td>0.852295</td>
+      <td>2.321853</td>
+      <td>26.072435</td>
+      <td>47.009691</td>
+      <td>20.246629</td>
+      <td>3.590710</td>
+      <td>...</td>
+      <td>5.942707e-01</td>
+      <td>0.532657</td>
+      <td>0.331571</td>
+      <td>0.448411</td>
+      <td>0.64</td>
+      <td>0.523415</td>
+      <td>-0.638090</td>
+      <td>0.325449</td>
+      <td>0.515422</td>
+      <td>0.52</td>
+    </tr>
+    <tr>
+      <th>ts_4</th>
+      <td>0.976807</td>
+      <td>0.953125</td>
+      <td>0.906738</td>
+      <td>0.856689</td>
+      <td>0.813721</td>
+      <td>3.314088</td>
+      <td>47.505651</td>
+      <td>36.356375</td>
+      <td>10.970250</td>
+      <td>3.584427</td>
+      <td>...</td>
+      <td>5.172918e-22</td>
+      <td>9.644766</td>
+      <td>0.000000</td>
+      <td>7.529028</td>
+      <td>0.04</td>
+      <td>0.240547</td>
+      <td>-1.173620</td>
+      <td>0.245583</td>
+      <td>0.819281</td>
+      <td>0.22</td>
+    </tr>
+    <tr>
+      <th>ts_5</th>
+      <td>0.979492</td>
+      <td>0.957764</td>
+      <td>0.914795</td>
+      <td>0.870605</td>
+      <td>0.833008</td>
+      <td>2.491926</td>
+      <td>17.374024</td>
+      <td>55.482169</td>
+      <td>22.264773</td>
+      <td>2.873072</td>
+      <td>...</td>
+      <td>2.913416e-10</td>
+      <td>6.303317</td>
+      <td>0.000000</td>
+      <td>4.622768</td>
+      <td>0.04</td>
+      <td>0.400100</td>
+      <td>-0.841443</td>
+      <td>0.257640</td>
+      <td>0.789540</td>
+      <td>0.40</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>ts_496</th>
+      <td>0.984375</td>
+      <td>0.970215</td>
+      <td>0.944824</td>
+      <td>0.917725</td>
+      <td>0.889648</td>
+      <td>0.336630</td>
+      <td>13.870277</td>
+      <td>18.356541</td>
+      <td>54.530277</td>
+      <td>3.028086</td>
+      <td>...</td>
+      <td>8.572270e-02</td>
+      <td>-1.718405</td>
+      <td>0.108641</td>
+      <td>1.331643</td>
+      <td>0.10</td>
+      <td>0.525572</td>
+      <td>-0.634780</td>
+      <td>0.314154</td>
+      <td>0.460967</td>
+      <td>0.58</td>
+    </tr>
+    <tr>
+      <th>ts_497</th>
+      <td>0.989990</td>
+      <td>0.981934</td>
+      <td>0.962158</td>
+      <td>0.946045</td>
+      <td>0.925537</td>
+      <td>0.197599</td>
+      <td>2.498134</td>
+      <td>6.366314</td>
+      <td>32.218319</td>
+      <td>4.028515</td>
+      <td>...</td>
+      <td>8.857211e-24</td>
+      <td>-10.053599</td>
+      <td>0.000000</td>
+      <td>9.243120</td>
+      <td>0.02</td>
+      <td>0.384554</td>
+      <td>0.869537</td>
+      <td>0.297431</td>
+      <td>0.481377</td>
+      <td>0.48</td>
+    </tr>
+    <tr>
+      <th>ts_498</th>
+      <td>0.987549</td>
+      <td>0.976074</td>
+      <td>0.952881</td>
+      <td>0.928955</td>
+      <td>0.905029</td>
+      <td>0.297679</td>
+      <td>8.875599</td>
+      <td>16.243974</td>
+      <td>54.568739</td>
+      <td>3.149116</td>
+      <td>...</td>
+      <td>5.731781e-11</td>
+      <td>-6.550570</td>
+      <td>0.000000</td>
+      <td>4.600939</td>
+      <td>0.02</td>
+      <td>0.039565</td>
+      <td>2.058260</td>
+      <td>0.065244</td>
+      <td>1.510814</td>
+      <td>0.12</td>
+    </tr>
+    <tr>
+      <th>ts_499</th>
+      <td>0.990723</td>
+      <td>0.982178</td>
+      <td>0.962891</td>
+      <td>0.941406</td>
+      <td>0.926270</td>
+      <td>0.487491</td>
+      <td>6.891783</td>
+      <td>12.990598</td>
+      <td>26.647876</td>
+      <td>3.158828</td>
+      <td>...</td>
+      <td>5.604103e-05</td>
+      <td>-4.028889</td>
+      <td>0.000000</td>
+      <td>3.096691</td>
+      <td>0.02</td>
+      <td>0.241729</td>
+      <td>1.170676</td>
+      <td>0.277370</td>
+      <td>0.641031</td>
+      <td>0.24</td>
+    </tr>
+    <tr>
+      <th>ts_500</th>
+      <td>0.990723</td>
+      <td>0.978516</td>
+      <td>0.961914</td>
+      <td>0.946289</td>
+      <td>0.928955</td>
+      <td>0.773377</td>
+      <td>5.006532</td>
+      <td>16.483592</td>
+      <td>21.313790</td>
+      <td>3.330894</td>
+      <td>...</td>
+      <td>9.240631e-02</td>
+      <td>-1.682839</td>
+      <td>0.093285</td>
+      <td>1.497840</td>
+      <td>0.16</td>
+      <td>0.753890</td>
+      <td>-0.313514</td>
+      <td>0.369732</td>
+      <td>0.328641</td>
+      <td>0.64</td>
+    </tr>
+  </tbody>
+</table>
+<p>500 rows × 4374 columns</p>
+</div></div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[32]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>from pyhctsa.utils import SigmoidScaler
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[33]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>ss = SigmoidScaler(do_scale=True)
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[34]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>ss_fit = ss.fit(good_features_df)
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[35]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>good_features_df_N = ss.transform(good_features_df)
+</code></pre></div>
+</div>
+</div>
+<p>Normalise features to standardise their respective scales</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[ ]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code># good_features_df_N = MinMaxScaler().fit_transform(good_features_df)
+</code></pre></div>
+</div>
+</div>
+<h2 id="🖥-(5)-Visualisation">🖥 (5) Visualisation<a class="headerlink" href="#🖥-(5)-Visualisation" title="Link to this heading">¶</a></h2>
+<p>To get a sense of how the <em>pyhctsa</em> features capture dimensions along which different types of dynamics can be distinguished, we can use linear dimensionality reduction methods such as PCA, or non-linear methods such as t-SNE to visualise how time-series instances cluster or separate:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[36]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>pc_fit = PCA(n_components=2).fit(good_features_df_N)
+pc = pc_fit.transform(good_features_df_N)
+pc_df = pd.DataFrame(pc, columns=['PC1', 'PC2'])
+pc_df['label'] = df_series['label'].to_numpy()
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[37]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>tsne_fit = TSNE(n_components=2, perplexity=30, random_state=42).fit_transform(good_features_df_N)
+tsne_df = pd.DataFrame(tsne_fit, columns=['tSNE1', 'tSNE2'])
+tsne_df['label'] = df_series['label'].to_numpy()
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[38]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>fig, ax = plt.subplots(1, 2, figsize=(15, 5))
+palette = {
+    "epileptogenic": "#d62728",
+    "eyesClosed":    "#1f77b4",
+    "eyesOpen":      "#2ca02c",
+    "hippocampus":   "#9467bd",
+    "seizure":       "#ff7f0e",
+}
+#sns.kdeplot(data=pc_df, x='PC1', y='PC2', hue='label', alpha=0.4)
+sns.scatterplot(data=pc_df, x='PC1', y='PC2', hue='label', palette=palette, ax=ax[0], s=10, linewidth=0)
+ax[0].set_xlabel(f'PC-1 ({np.round(pc_fit.explained_variance_[0], 2)} % var)')
+ax[0].set_ylabel(f'PC-1 ({np.round(pc_fit.explained_variance_[1], 2)} % var)')
+ax[0].set_title("PCA")
+
+sns.scatterplot(data=tsne_df, x='tSNE1', y='tSNE2', hue='label', palette=palette, ax=ax[1], s=10, linewidth=0)
+ax[1].set_title('tSNE')
+ax[1].set_xlabel('tSNE-1')
+ax[1].set_ylabel('tSNE-2')
+ax[1].legend().remove()
+plt.show()
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/usage_tutorial_bon_eeg_61_0.png" src="../_images/usage_tutorial_bon_eeg_61_0.png" />
+</div>
+</div>
+<h2 id="Seizure-vs-Eyes-Open">Seizure vs Eyes Open<a class="headerlink" href="#Seizure-vs-Eyes-Open" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[39]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>subset_df = pc_df[(pc_df['label'] == 'eyesOpen') | (pc_df['label'] == 'seizure')]
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[40]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>palette2 = {
+    "eyesOpen":      "#d62728",
+    "seizure":       "#1f77b4",
+}
+sns.scatterplot(data=subset_df, x='PC1', y='PC2', hue='label', palette=palette2, s=20, linewidth=0)
+plt.show()
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/usage_tutorial_bon_eeg_64_0.png" src="../_images/usage_tutorial_bon_eeg_64_0.png" />
+</div>
+</div>
+<h2 id="📂-Classification-Problem">📂 Classification Problem<a class="headerlink" href="#📂-Classification-Problem" title="Link to this heading">¶</a></h2>
+<p>Let’s now try to classify between the five groups using a simple linear SVM classifier. Here we will use 10-fold cross validation with a linear SVM and default parameters</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[28]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code># create source dataset
+df_source = good_features_df
+df_source['label'] = df_series['label'].to_numpy()
+X = df_source.drop(columns=['label']).to_numpy()
+y = df_source['label'].to_numpy() # classes
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[29]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>skf = StratifiedKFold(n_splits=10, random_state=0, shuffle=True)
+</code></pre></div>
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[31]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>per_fold_accuracy = {}
+for i, (train_index, test_index) in enumerate(skf.split(X, y)):
+    print(f"Fold {i}:")
+    # construct training set and test set
+    X_train, y_train = X[train_index, :], y[train_index]
+    X_test, y_test = X[test_index, :], y[test_index]
+    # fit the scaler to the training set
+    ss = SigmoidScaler(do_scale=False).fit(X_train)
+    X_train_N = ss.transform(X_train)
+    X_test_N = ss.transform(X_test)
+    # fit the linear SVM
+    sv = LinearSVC(max_iter=10_000).fit(X_train_N, y_train)
+    # because classes are balance, acc is automatically the bal acc
+    score = sv.score(X_test_N, y_test)
+    print(f'Classifcation accuracy: {score}')
+    per_fold_accuracy[f'fold {i+1}'] = score
+# print overall mean accuracy across the 10 folds
+mean_fold_acc = np.mean([per_fold_accuracy[v] for v in per_fold_accuracy])
+print(f'Mean (across folds) accuracy (5-class) using 10-fold svm_linear classification: {mean_fold_acc*100}%')
+</code></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Fold 0:
+Classifcation accuracy: 0.88
+Fold 1:
+Classifcation accuracy: 0.92
+Fold 2:
+Classifcation accuracy: 0.96
+Fold 3:
+Classifcation accuracy: 0.94
+Fold 4:
+Classifcation accuracy: 0.98
+Fold 5:
+Classifcation accuracy: 0.88
+Fold 6:
+Classifcation accuracy: 0.96
+Fold 7:
+Classifcation accuracy: 0.96
+Fold 8:
+Classifcation accuracy: 0.88
+Fold 9:
+Classifcation accuracy: 0.94
+Mean (across folds) accuracy (5-class) using 10-fold svm_linear classification: 93.0%
+</pre></div></div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span><code>[ ]:
+</code></pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><code>
+</code></pre></div>
+</div>
+</div>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  
+  
+  <div class="md-footer-meta md-typeset">
+    
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-footer-copyright__highlight">
+        &#169; Copyright 2026, Joshua B. Moore.
+        
+    </div>
+  
+    Created using
+    <a href="https://www.sphinx-doc.org/" target="_blank" rel="noopener">Sphinx</a>
+    9.0.4.
+     and
+    <a href="https://github.com/jbms/sphinx-immaterial/" target="_blank" rel="noopener">Sphinx-Immaterial</a>
+  
+</div>
+      
+    </div>
+    
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.expand", "navigation.sections", "navigation.top", "header.autohide"], "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+      
+        <script src="../_static/sphinx_immaterial_theme.32136f45f91ae6956.min.js?v=a7a9472a"></script>
+        <script defer="defer" src="../_static/termynal.js"></script>
+        <script src="../_static/design-tabs.js?v=f930bc37"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script id="MathJax-script" src="../_static/mathjax/tex-mml-chtml.js"></script>
+    
+  </body>
+</html>

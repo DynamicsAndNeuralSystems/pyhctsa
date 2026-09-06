@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.kpss\_test
+==========================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: kpss_test

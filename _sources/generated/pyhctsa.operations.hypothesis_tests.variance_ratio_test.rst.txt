@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.hypothesis\_tests.variance\_ratio\_test
+==========================================================
+
+.. currentmodule:: pyhctsa.operations.hypothesis_tests
+
+.. autofunction:: variance_ratio_test

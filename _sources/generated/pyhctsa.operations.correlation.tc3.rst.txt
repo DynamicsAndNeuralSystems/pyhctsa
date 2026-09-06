@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.tc3
+==================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: tc3

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.shannon\_entropy
+===========================================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: shannon_entropy

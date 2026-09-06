@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.information.rm\_automutual\_information
+==========================================================
+
+.. currentmodule:: pyhctsa.operations.information
+
+.. autofunction:: rm_automutual_information

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.information.first\_max
+=========================================
+
+.. currentmodule:: pyhctsa.operations.information
+
+.. autofunction:: first_max

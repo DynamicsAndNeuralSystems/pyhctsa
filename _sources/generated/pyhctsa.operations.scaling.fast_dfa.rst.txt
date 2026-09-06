@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.scaling.fast\_dfa
+====================================
+
+.. currentmodule:: pyhctsa.operations.scaling
+
+.. autofunction:: fast_dfa

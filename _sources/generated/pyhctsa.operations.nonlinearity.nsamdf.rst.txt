@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.nonlinearity.nsamdf
+======================================
+
+.. currentmodule:: pyhctsa.operations.nonlinearity
+
+.. autofunction:: nsamdf

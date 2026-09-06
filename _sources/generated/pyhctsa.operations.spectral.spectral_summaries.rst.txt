@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.spectral.spectral\_summaries
+===============================================
+
+.. currentmodule:: pyhctsa.operations.spectral
+
+.. autofunction:: spectral_summaries

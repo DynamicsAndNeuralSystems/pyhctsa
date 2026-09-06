@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.embed2\_dist
+===========================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: embed2_dist

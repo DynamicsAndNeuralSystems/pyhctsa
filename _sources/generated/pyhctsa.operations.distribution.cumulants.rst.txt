@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.cumulants
+=========================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: cumulants

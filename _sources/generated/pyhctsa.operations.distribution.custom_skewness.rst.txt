@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.custom\_skewness
+================================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: custom_skewness

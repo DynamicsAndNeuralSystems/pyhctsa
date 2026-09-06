@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.first\_crossing
+==============================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: first_crossing

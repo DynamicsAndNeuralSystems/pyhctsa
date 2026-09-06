@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.extreme\_events.moving\_threshold
+====================================================
+
+.. currentmodule:: pyhctsa.operations.extreme_events
+
+.. autofunction:: moving_threshold

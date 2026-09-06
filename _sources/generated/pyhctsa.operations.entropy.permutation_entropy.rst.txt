@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.permutation\_entropy
+===============================================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: permutation_entropy

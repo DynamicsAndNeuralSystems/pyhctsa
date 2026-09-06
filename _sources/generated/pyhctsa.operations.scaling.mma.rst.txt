@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.scaling.mma
+==============================
+
+.. currentmodule:: pyhctsa.operations.scaling
+
+.. autofunction:: mma

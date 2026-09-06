@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.dyn\_win
+========================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: dyn_win

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.trimmed\_mean
+=============================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: trimmed_mean

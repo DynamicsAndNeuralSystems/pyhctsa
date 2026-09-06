@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.fit\_subsegments
+==============================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: fit_subsegments

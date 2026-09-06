@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.histogram\_ami
+=============================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: histogram_ami

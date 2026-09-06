@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.hypothesis\_tests.distribution\_test
+=======================================================
+
+.. currentmodule:: pyhctsa.operations.hypothesis_tests
+
+.. autofunction:: distribution_test

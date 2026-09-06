@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.local\_global
+=============================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: local_global

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.symbolic.transition\_matrix
+==============================================
+
+.. currentmodule:: pyhctsa.operations.symbolic
+
+.. autofunction:: transition_matrix

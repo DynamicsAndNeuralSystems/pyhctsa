@@ -1,0 +1,1130 @@
+
+
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="../development/conventions.html">
+      
+      
+        <link rel="next" href="../authors.html">
+      
+      
+      <link rel="icon" href="">
+    
+    
+      
+        <title>HCTSA function mappings - pyhctsa  documentation</title>
+      
+    
+    
+      
+        
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+        <link rel="stylesheet" type="text/css" href="../_static/sphinx_immaterial_theme.cf2c65c97ee1b6f01.min.css?v=0a68cab4" />
+        <link rel="stylesheet" type="text/css" href="../_static/termynal.css" />
+        <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+        <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=d69b33a3" />
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../index.html" title="pyhctsa  documentation" class="md-header__button md-logo" aria-label="pyhctsa  documentation" data-md-component="logo">
+      <img src="../_static/apps_113dp_FFFFFF.svg" alt="logo">
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            pyhctsa  documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              HCTSA function mappings
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    pyhctsa
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../index.html" title="pyhctsa  documentation" class="md-nav__button md-logo" aria-label="pyhctsa  documentation" data-md-component="logo">
+      <img src="../_static/apps_113dp_FFFFFF.svg" alt="logo">
+    </a>
+    pyhctsa  documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    pyhctsa
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/index.rst (reference label)"><span>Home</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/installation.rst (reference label)"><span>Installation</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/usage/index.rst (reference label)"><span>Usage Guide</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../methods/index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/methods/index.rst (reference label)"><span>Time-<wbr>Series Analysis Methods</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst (reference label)"><span>API Reference</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/development/index.rst (reference label)"><span>Development</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      <a href="#" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/mappings/index.rst (reference label)"><span>HCTSA function mappings</span></span>
+    
+  </span>
+  
+
+      </a>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../authors.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/authors.rst (reference label)"><span>Authors</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/license.rst (reference label)"><span>License</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary">
+  
+  
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset" role="main">
+                
+                
+                  
+
+
+<h1 id="hctsa-function-mappings">HCTSA function mappings<a class="headerlink" href="#hctsa-function-mappings" title="Link to this heading">¶</a></h1>
+<p>For existing <cite>hctsa</cite> users, the following table provides a mapping between existing <cite>hctsa</cite>
+functions and equivalent <cite>pyhctsa</cite> implementations for reference.</p>
+<div class="warning admonition">
+<p class="admonition-title">Warning</p>
+<p>The conceptual groupings in pyhctsa modules (e.g., <code class="docutils literal notranslate"><span class="pre">medical</span></code>, <code class="docutils literal notranslate"><span class="pre">distribution</span></code>, etc.) do not always
+correspond to the same groupings in the original <a class="reference external" href="https://github.com/benfulcher/hctsa/tree/main/Operations">HCTSA</a>.</p>
+</div>
+<table class="docutils data align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>pyhctsa name</p></th>
+<th class="head"><p>hctsa legacy name</p></th>
+<th class="head"><p>pyhctsa module</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>hrv_classic</p></td>
+<td><p>MD_hrv_classic</p></td>
+<td><p>medical</p></td>
+</tr>
+<tr class="row-odd"><td><p>pnn</p></td>
+<td><p>MD_pNN</p></td>
+<td><p>medical</p></td>
+</tr>
+<tr class="row-even"><td><p>pol_var</p></td>
+<td><p>MD_polvar</p></td>
+<td><p>medical</p></td>
+</tr>
+<tr class="row-odd"><td><p>raw_hrv_meas</p></td>
+<td><p>MD_rawHRVmeas</p></td>
+<td><p>medical</p></td>
+</tr>
+<tr class="row-even"><td><p>porta</p></td>
+<td><p>MD_Porta</p></td>
+<td><p>medical</p></td>
+</tr>
+<tr class="row-odd"><td><p>moving_threshold</p></td>
+<td><p>EX_MovingThreshold</p></td>
+<td><p>extreme_events</p></td>
+</tr>
+<tr class="row-even"><td><p>rad</p></td>
+<td><p>CR_RAD</p></td>
+<td><p>criticality</p></td>
+</tr>
+<tr class="row-odd"><td><p>oversampling</p></td>
+<td><p>CO_Oversampling</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>time_rev_kld</p></td>
+<td><p>CO_TimeRevKLD</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>autocorr</p></td>
+<td><p>CO_AutoCorr</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>autocorr_x2_shape</p></td>
+<td><p>CO_AutoCorrX2Shape</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>add_noise</p></td>
+<td><p>CO_AddNoise</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>glscf</p></td>
+<td><p>CO_glscf</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>fzcglscf</p></td>
+<td><p>CO_fzcglscf</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>embed2</p></td>
+<td><p>CO_Embed2</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>embed2_shapes</p></td>
+<td><p>CO_Embed2_Shapes</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>embed2_basic</p></td>
+<td><p>CO_Embed2_Basic</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>embed2_dist</p></td>
+<td><p>CO_Embed2_Dist</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>embed2_angle_tau</p></td>
+<td><p>CO_Embed2_AngleTau</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>partial_autocorr</p></td>
+<td><p>CO_PartialAutoCorr</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>nonlinear_autocorr</p></td>
+<td><p>CO_NonlinearAutocorr</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>stick_angles</p></td>
+<td><p>CO_StickAngles</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>falling_sticks</p></td>
+<td><p>CO_FallingSticks</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>first_crossing</p></td>
+<td><p>CO_FirstCrossing</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>translate_shape</p></td>
+<td><p>CO_TranslateShape</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>autocorr_shape</p></td>
+<td><p>CO_AutoCorrShape</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>histogram_ami</p></td>
+<td><p>CO_HistogramAMI</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>compare_min_ami</p></td>
+<td><p>CO_CompareMinAMI</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>periodicity_wang</p></td>
+<td><p>PD_PeriodicityWang</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>trev</p></td>
+<td><p>CO_trev</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>tc3</p></td>
+<td><p>CO_tc3</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>time_rev_kaplan</p></td>
+<td><p>DK_timerev</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>pos_neg_asymmetry</p></td>
+<td><p>CO_PosNegAsymmetry</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>crinkle_statistic</p></td>
+<td><p>DK_crinkle</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-even"><td><p>theiler_q</p></td>
+<td><p>DK_theilerQ</p></td>
+<td><p>correlation</p></td>
+</tr>
+<tr class="row-odd"><td><p>automutual_info_stats</p></td>
+<td><p>IN_AutoMutualInfoStats</p></td>
+<td><p>information</p></td>
+</tr>
+<tr class="row-even"><td><p>first_min</p></td>
+<td><p>CO_FirstMin</p></td>
+<td><p>information</p></td>
+</tr>
+<tr class="row-odd"><td><p>first_max</p></td>
+<td><p>CO_FirstMin</p></td>
+<td><p>information</p></td>
+</tr>
+<tr class="row-even"><td><p>rm_automutual_information</p></td>
+<td><p>CO_RM_AMInformation</p></td>
+<td><p>information</p></td>
+</tr>
+<tr class="row-odd"><td><p>distribution_entropy</p></td>
+<td><p>EN_DistributionEntropy</p></td>
+<td><p>entropy</p></td>
+</tr>
+<tr class="row-even"><td><p>permutation_entropy</p></td>
+<td><p>EN_PermEn</p></td>
+<td><p>entropy</p></td>
+</tr>
+<tr class="row-odd"><td><p>lempel_ziv_complexity</p></td>
+<td><p>EN_MS_LZcomplexity</p></td>
+<td><p>entropy</p></td>
+</tr>
+<tr class="row-even"><td><p>complexity_invariant_distance</p></td>
+<td><p>EN_CID</p></td>
+<td><p>entropy</p></td>
+</tr>
+<tr class="row-odd"><td><p>approximate_entropy</p></td>
+<td><p>EN_ApEn</p></td>
+<td><p>entropy</p></td>
+</tr>
+<tr class="row-even"><td><p>rpde</p></td>
+<td><p>EN_rpde</p></td>
+<td><p>entropy</p></td>
+</tr>
+<tr class="row-odd"><td><p>sample_entropy</p></td>
+<td><p>EN_SampEn</p></td>
+<td><p>entropy</p></td>
+</tr>
+<tr class="row-even"><td><p>multi_scale_entropy</p></td>
+<td><p>EN_mse</p></td>
+<td><p>entropy</p></td>
+</tr>
+<tr class="row-odd"><td><p>shannon_entropy</p></td>
+<td><p>EN_MS_shannon</p></td>
+<td><p>entropy</p></td>
+</tr>
+<tr class="row-even"><td><p>stat_av</p></td>
+<td><p>SY_StatAv</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-odd"><td><p>trend</p></td>
+<td><p>SY_Trend</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-even"><td><p>std_nth_deriv</p></td>
+<td><p>SY_StdNthDer</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-odd"><td><p>ts_length</p></td>
+<td><p>ST_Length</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-even"><td><p>fit_polynomial</p></td>
+<td><p>ST_FitPolynomial</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-odd"><td><p>sliding_window</p></td>
+<td><p>SY_SlidingWindow</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-even"><td><p>local_global</p></td>
+<td><p>SY_LocalGlobal</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-odd"><td><p>drifting_mean</p></td>
+<td><p>SY_DriftingMean</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-even"><td><p>range_evolve</p></td>
+<td><p>SY_RangeEvolve</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-odd"><td><p>kpss_test</p></td>
+<td><p>SY_KPSStest</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-even"><td><p>pp_test</p></td>
+<td><p>SY_PPtest</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-odd"><td><p>local_extrema</p></td>
+<td><p>ST_LocalExtrema</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-even"><td><p>simple_stats</p></td>
+<td><p>ST_SimpleStats</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-odd"><td><p>moment_corr</p></td>
+<td><p>ST_MomentCorr</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-even"><td><p>dyn_win</p></td>
+<td><p>SY_DynWin</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-odd"><td><p>local_distributions</p></td>
+<td><p>SY_LocalDistributions</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-even"><td><p>ramping_windows</p></td>
+<td><p>SY_RampingWindows</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-odd"><td><p>slow_feature_analysis</p></td>
+<td><p>SY_SlowFeatureAnalysis</p></td>
+<td><p>stationarity</p></td>
+</tr>
+<tr class="row-even"><td><p>cumulants</p></td>
+<td></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-odd"><td><p>withinp</p></td>
+<td><p>DN_Withinp</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-even"><td><p>unique</p></td>
+<td><p>DN_Unique</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-odd"><td><p>spread</p></td>
+<td><p>DN_Spread</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-even"><td><p>quantile</p></td>
+<td><p>DN_Quantile</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-odd"><td><p>proportion_values</p></td>
+<td><p>DN_ProportionValues</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-even"><td><p>pleft</p></td>
+<td><p>DN_pleft</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-odd"><td><p>min_max</p></td>
+<td><p>DN_MinMax</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-even"><td><p>mean</p></td>
+<td><p>DN_Mean</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-odd"><td><p>high_low_mu</p></td>
+<td><p>DN_HighLowMu</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-even"><td><p>fit_mle</p></td>
+<td><p>DN_Fit_mle</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-odd"><td><p>cv</p></td>
+<td><p>DN_cv</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-even"><td><p>custom_skewness</p></td>
+<td><p>DN_CustomSkewness</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-odd"><td><p>burstiness</p></td>
+<td><p>DN_Burstiness</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-even"><td><p>moments</p></td>
+<td><p>DN_Moments</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-odd"><td><p>outlier_include</p></td>
+<td><p>DN_OutlierInclude</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-even"><td><p>outlier_test</p></td>
+<td><p>DN_OutlierTest</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-odd"><td><p>trimmed_mean</p></td>
+<td><p>DN_TrimmedMean</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-even"><td><p>histogram_asymmetry</p></td>
+<td><p>DN_HistogramAsymmetry</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-odd"><td><p>histogram_mode</p></td>
+<td><p>DN_HistogramMode</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-even"><td><p>remove_points</p></td>
+<td><p>DN_RemovePoints</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-odd"><td><p>compare_ks_fit</p></td>
+<td><p>DN_CompareKSFit</p></td>
+<td><p>distribution</p></td>
+</tr>
+<tr class="row-even"><td><p>fast_dfa</p></td>
+<td><p>SC_fastdfa</p></td>
+<td><p>scaling</p></td>
+</tr>
+<tr class="row-odd"><td><p>fluctuation_analysis</p></td>
+<td><p>SC_FluctAnal</p></td>
+<td><p>scaling</p></td>
+</tr>
+<tr class="row-even"><td><p>mma</p></td>
+<td><p>SC_MMA</p></td>
+<td><p>scaling</p></td>
+</tr>
+<tr class="row-odd"><td><p>higuchi_fd</p></td>
+<td><p>SC_HiguchiFD</p></td>
+<td><p>scaling</p></td>
+</tr>
+<tr class="row-even"><td><p>transition_matrix</p></td>
+<td><p>SB_TransitionMatrix</p></td>
+<td><p>symbolic</p></td>
+</tr>
+<tr class="row-odd"><td><p>transition_p_alphabet</p></td>
+<td><p>SB_TransitionpAlphabet</p></td>
+<td><p>symbolic</p></td>
+</tr>
+<tr class="row-even"><td><p>binary_stats</p></td>
+<td><p>SB_BinaryStats</p></td>
+<td><p>symbolic</p></td>
+</tr>
+<tr class="row-odd"><td><p>motif_three</p></td>
+<td><p>SB_MotifThree</p></td>
+<td><p>symbolic</p></td>
+</tr>
+<tr class="row-even"><td><p>motif_two</p></td>
+<td><p>SB_MotifTwo</p></td>
+<td><p>symbolic</p></td>
+</tr>
+<tr class="row-odd"><td><p>binary_stretch</p></td>
+<td><p>SB_BinaryStretch</p></td>
+<td><p>symbolic</p></td>
+</tr>
+<tr class="row-even"><td><p>surprise</p></td>
+<td><p>FC_Surprise</p></td>
+<td><p>symbolic</p></td>
+</tr>
+<tr class="row-odd"><td><p>wl_coeffs</p></td>
+<td><p>WL_coeffs</p></td>
+<td><p>wavelet</p></td>
+</tr>
+<tr class="row-even"><td><p>detail_coeffs</p></td>
+<td><p>WL_DetailCoeffs</p></td>
+<td><p>wavelet</p></td>
+</tr>
+<tr class="row-odd"><td><p>cwt</p></td>
+<td><p>WL_cwt</p></td>
+<td><p>wavelet</p></td>
+</tr>
+<tr class="row-even"><td><p>dwt_coeff</p></td>
+<td><p>WL_dwtcoeff</p></td>
+<td><p>wavelet</p></td>
+</tr>
+<tr class="row-odd"><td><p>scal_2_freq</p></td>
+<td><p>WL_scal2frq</p></td>
+<td><p>wavelet</p></td>
+</tr>
+<tr class="row-even"><td><p>wfbm</p></td>
+<td><p>WL_fBM</p></td>
+<td><p>wavelet</p></td>
+</tr>
+<tr class="row-odd"><td><p>modwt_var</p></td>
+<td><p>WL_modwtvar</p></td>
+<td><p>wavelet</p></td>
+</tr>
+<tr class="row-even"><td><p>hypothesis_test</p></td>
+<td><p>HT_HypothesisTest</p></td>
+<td><p>hypothesis_tests</p></td>
+</tr>
+<tr class="row-odd"><td><p>distribution_test</p></td>
+<td><p>HT_DistributionTest</p></td>
+<td><p>hypothesis_tests</p></td>
+</tr>
+<tr class="row-even"><td><p>variance_ratio_test</p></td>
+<td><p>SY_VarRatioTest</p></td>
+<td><p>hypothesis_tests</p></td>
+</tr>
+<tr class="row-odd"><td><p>phase_amp_coupling</p></td>
+<td><p>SP_PhaseAmpCoupling</p></td>
+<td><p>spectral</p></td>
+</tr>
+<tr class="row-even"><td><p>spectral_summaries</p></td>
+<td><p>SP_Summaries</p></td>
+<td><p>spectral</p></td>
+</tr>
+<tr class="row-odd"><td><p>spectral_summaries_phase</p></td>
+<td><p>SP_SummariesPhase</p></td>
+<td><p>spectral</p></td>
+</tr>
+<tr class="row-even"><td><p>specparam</p></td>
+<td><p>SP_Specparam</p></td>
+<td><p>spectral</p></td>
+</tr>
+<tr class="row-odd"><td><p>cepstrum</p></td>
+<td><p>SP_Cepstrum</p></td>
+<td><p>spectral</p></td>
+</tr>
+<tr class="row-even"><td><p>ar_cov</p></td>
+<td><p>MF_AR_arcov</p></td>
+<td><p>model_fit</p></td>
+</tr>
+<tr class="row-odd"><td><p>exp_smoothing</p></td>
+<td><p>MF_ExpSmoothing</p></td>
+<td><p>model_fit</p></td>
+</tr>
+<tr class="row-even"><td><p>ar_fit</p></td>
+<td><p>MF_arfit</p></td>
+<td><p>model_fit</p></td>
+</tr>
+<tr class="row-odd"><td><p>local_simple</p></td>
+<td><p>FC_LocalSimple</p></td>
+<td><p>model_fit</p></td>
+</tr>
+<tr class="row-even"><td><p>loop_local_simple</p></td>
+<td><p>FC_LoopLocalSimple</p></td>
+<td><p>model_fit</p></td>
+</tr>
+<tr class="row-odd"><td><p>fit_subsegments</p></td>
+<td><p>MF_FitSubsegments</p></td>
+<td><p>model_fit</p></td>
+</tr>
+<tr class="row-even"><td><p>hmm_fit</p></td>
+<td><p>MF_hmm_fit</p></td>
+<td><p>model_fit</p></td>
+</tr>
+<tr class="row-odd"><td><p>gp_fit_across</p></td>
+<td><p>MF_GP_FitAcross</p></td>
+<td><p>model_fit</p></td>
+</tr>
+<tr class="row-even"><td><p>gp_local_prediction</p></td>
+<td><p>MF_GP_LocalPrediction</p></td>
+<td><p>model_fit</p></td>
+</tr>
+<tr class="row-odd"><td><p>is_seasonal</p></td>
+<td><p>DT_IsSeasonal</p></td>
+<td><p>model_fit</p></td>
+</tr>
+<tr class="row-even"><td><p>visibility_graph</p></td>
+<td><p>NW_VisibilityGraph</p></td>
+<td><p>graph</p></td>
+</tr>
+<tr class="row-odd"><td><p>force_potential</p></td>
+<td><p>PH_ForcePotential</p></td>
+<td><p>physics</p></td>
+</tr>
+<tr class="row-even"><td><p>walker</p></td>
+<td><p>PH_Walker</p></td>
+<td><p>physics</p></td>
+</tr>
+<tr class="row-odd"><td><p>preproc_compare</p></td>
+<td><p>PP_Compare</p></td>
+<td><p>pre_process</p></td>
+</tr>
+<tr class="row-even"><td><p>surrogate_test</p></td>
+<td><p>SD_SurrogateTest</p></td>
+<td><p>surrogates</p></td>
+</tr>
+<tr class="row-odd"><td><p>nsamdf</p></td>
+<td><p>NL_nsamdf</p></td>
+<td><p>nonlinearity</p></td>
+</tr>
+<tr class="row-even"><td><p>nlpe</p></td>
+<td><p>NL_MS_nlpe</p></td>
+<td><p>nonlinearity</p></td>
+</tr>
+<tr class="row-odd"><td><p>embed_pca</p></td>
+<td><p>NL_embed_PCA</p></td>
+<td><p>nonlinearity</p></td>
+</tr>
+<tr class="row-even"><td><p>ssa</p></td>
+<td><p>NL_SSA</p></td>
+<td><p>nonlinearity</p></td>
+</tr>
+<tr class="row-odd"><td><p>zero_one_test</p></td>
+<td><p>NL_ZeroOneTest</p></td>
+<td><p>nonlinearity</p></td>
+</tr>
+<tr class="row-even"><td><p>local_density</p></td>
+<td><p>NL_localdensity</p></td>
+<td><p>nonlinearity</p></td>
+</tr>
+<tr class="row-odd"><td><p>tisean_d2</p></td>
+<td><p>NL_TISEAN_d2</p></td>
+<td><p>nonlinearity</p></td>
+</tr>
+<tr class="row-even"><td><p>poincare_section</p></td>
+<td><p>NL_PoincareSection</p></td>
+<td><p>nonlinearity</p></td>
+</tr>
+<tr class="row-odd"><td><p>delay_time</p></td>
+<td><p>NL_delaytime</p></td>
+<td><p>nonlinearity</p></td>
+</tr>
+<tr class="row-even"><td><p>stepdetect</p></td>
+<td><p>CP_ML_StepDetect</p></td>
+<td><p>changepoint</p></td>
+</tr>
+<tr class="row-odd"><td><p>l1pwc_sweep_lambda</p></td>
+<td><p>CP_l1pwc_sweep_lambda</p></td>
+<td><p>changepoint</p></td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  
+  
+  <div class="md-footer-meta md-typeset">
+    
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-footer-copyright__highlight">
+        &#169; Copyright 2026, Joshua B. Moore.
+        
+    </div>
+  
+    Created using
+    <a href="https://www.sphinx-doc.org/" target="_blank" rel="noopener">Sphinx</a>
+    9.0.4.
+     and
+    <a href="https://github.com/jbms/sphinx-immaterial/" target="_blank" rel="noopener">Sphinx-Immaterial</a>
+  
+</div>
+      
+    </div>
+    
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.expand", "navigation.sections", "navigation.top", "header.autohide"], "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+      
+        <script src="../_static/sphinx_immaterial_theme.32136f45f91ae6956.min.js?v=a7a9472a"></script>
+        <script defer="defer" src="../_static/termynal.js"></script>
+        <script src="../_static/design-tabs.js?v=f930bc37"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    
+  </body>
+</html>

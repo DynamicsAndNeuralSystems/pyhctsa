@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.mean
+====================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: mean

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.changepoint.l1pwc\_sweep\_lambda
+===================================================
+
+.. currentmodule:: pyhctsa.operations.changepoint
+
+.. autofunction:: l1pwc_sweep_lambda
