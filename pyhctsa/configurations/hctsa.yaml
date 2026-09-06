@@ -1499,6 +1499,7 @@ wavelet:
     ordered_args: ['w_name', 'level']
   
 hypothesis_tests:
+
   hypothesis_test:
     base_name: hypothesis_test
     dependencies:
@@ -1513,6 +1514,70 @@ hypothesis_tests:
       - {the_test: 'jbtest', zscore: False}
     legacy_name: HT_HypothesisTest
     ordered_args: ['the_test']
+  
+  distribution_test:
+    base_name: distribution_test
+    dependencies:
+    configs:
+      - {the_test: 'chi2gof', the_distn: 'norm', num_bins: 5, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'norm', num_bins: 10, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'norm', num_bins: 25, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'norm', num_bins: 50, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'norm', num_bins: 100, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'ev', num_bins: 5, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'ev', num_bins: 10, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'ev', num_bins: 25, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'ev', num_bins: 50, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'ev', num_bins: 100, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'uni', num_bins: 5, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'uni', num_bins: 10, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'uni', num_bins: 25, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'uni', num_bins: 50, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'uni', num_bins: 100, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'beta', num_bins: 5, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'beta', num_bins: 10, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'beta', num_bins: 25, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'beta', num_bins: 50, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'beta', num_bins: 100, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'rayleigh', num_bins: 5, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'rayleigh', num_bins: 10, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'rayleigh', num_bins: 25, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'rayleigh', num_bins: 50, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'rayleigh', num_bins: 100, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'exp', num_bins: 5, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'exp', num_bins: 10, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'exp', num_bins: 25, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'exp', num_bins: 50, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'exp', num_bins: 100, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'gamma', num_bins: 5, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'gamma', num_bins: 10, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'gamma', num_bins: 25, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'gamma', num_bins: 50, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'gamma', num_bins: 100, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'logn', num_bins: 5, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'logn', num_bins: 10, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'logn', num_bins: 25, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'logn', num_bins: 50, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'logn', num_bins: 100, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'wbl', num_bins: 5, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'wbl', num_bins: 10, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'wbl', num_bins: 25, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'wbl', num_bins: 50, zscore: False}
+      - {the_test: 'chi2gof', the_distn: 'wbl', num_bins: 100, zscore: False}
+      - {the_test: 'ks', the_distn: 'norm', zscore: False}
+      - {the_test: 'ks', the_distn: 'ev', zscore: False}
+      - {the_test: 'ks', the_distn: 'uni', zscore: False}
+      - {the_test: 'ks', the_distn: 'beta', zscore: False}
+      - {the_test: 'ks', the_distn: 'rayleigh', zscore: False}
+      - {the_test: 'ks', the_distn: 'exp', zscore: False}
+      - {the_test: 'ks', the_distn: 'gamma', zscore: False}
+      - {the_test: 'ks', the_distn: 'logn', zscore: False}
+      - {the_test: 'ks', the_distn: 'wbl', zscore: False}
+      - {the_test: 'lillie', the_distn: 'norm', zscore: False}
+      - {the_test: 'lillie', the_distn: 'ev', zscore: False}
+      - {the_test: 'lillie', the_distn: 'exp', zscore: False}
+    legacy_name: HT_DistributionTest
+    ordered_args: ['the_test', 'the_distn', 'num_bins']
   
   variance_ratio_test:
     base_name: variance_ratio_test
