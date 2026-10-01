@@ -10,7 +10,7 @@ wavelet:
       - {w_name: 'db3', level: 4, zscore: True}
       - {w_name: 'db3', level: 5, zscore: True}
       - {w_name: 'db3', level: 'max', zscore: True}
-    legacy_name: WL_coeffs
+    legacy_name: WL_Coeffs
     ordered_args: ['w_name', 'level']
   
   detail_coeffs:
@@ -39,7 +39,7 @@ wavelet:
     configs:
       - {w_name: 'db3', level: 5, zscore: True}
       - {w_name: 'sym2', level: 5, zscore: True}
-    legacy_name: WL_dwtcoeff
+    legacy_name: WL_DWTCoeff
     ordered_args: ['w_name', 'level']
   
   scal_2_freq:

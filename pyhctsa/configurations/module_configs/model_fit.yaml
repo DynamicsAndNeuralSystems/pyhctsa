@@ -77,7 +77,7 @@ model_fit:
       - {train_p: 0.7, num_states: 2, zscore: True}
       - {train_p: 0.8, num_states: 3, zscore: True}
       - {train_p: 0.8, num_states: 2, zscore: True}
-    legacy_name: MF_hmm_fit
+    legacy_name: MF_hmm_Fit
     ordered_args: ['train_p', 'num_states']
     
   

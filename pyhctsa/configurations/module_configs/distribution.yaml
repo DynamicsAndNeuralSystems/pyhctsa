@@ -15,7 +15,7 @@ distribution:
       - {p: 2.5, mean_or_median: 'median', zscore: True}
       - {p: 3.0, mean_or_median: 'mean', zscore: True}
       - {p: 3.0, mean_or_median: 'median', zscore: True}
-    legacy_name: DN_Withinp
+    legacy_name: DN_WithinP
     ordered_args: ['p', 'mean_or_median']
 
   unique:
@@ -87,7 +87,7 @@ distribution:
       - {th: 0.3, zscore: True}
       - {th: 0.4, zscore: True}
       - {th: 0.5, zscore: True}
-    legacy_name: DN_pleft
+    legacy_name: DN_PLeft
     ordered_args: ['th']
 
   min_max:
@@ -133,7 +133,7 @@ distribution:
     configs:
       - {k: 1, zscore: False}
       - {k: 2, zscore: False}
-    legacy_name: DN_cv
+    legacy_name: DN_CV
     ordered_args: ['k']
 
   custom_skewness:
