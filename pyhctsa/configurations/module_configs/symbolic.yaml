@@ -21,7 +21,7 @@ symbolic:
     configs:
       - {num_groups: [!range [2, 40]], tau: 1, zscore: True}
       - {num_groups: [!range [2, 20]], tau: 'ac', zscore: True}
-    legacy_name: SB_TransitionpAlphabet
+    legacy_name: SB_TransitionPAlphabet
     ordered_args: ['num_groups', 'tau']
 
   binary_stats:
@@ -58,7 +58,7 @@ symbolic:
     configs:
       - {stretch_what: 'lseq1', zscore: True}
       - {stretch_what: 'lseq0', zscore: True}
-    legacy_name: SB_BinaryStretch
+    legacy_name: SB_BinaryGapHomogeneity
     ordered_args: ['stretch_what']
   
   surprise:

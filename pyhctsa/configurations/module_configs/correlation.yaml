@@ -70,7 +70,7 @@ correlation:
       - {alpha: 2, beta: 5, tau: 4, zscore: True}
       - {alpha: 2, beta: 5, tau: 5, zscore: True}
       - {alpha: 2, beta: 5, tau: 'tau', zscore: True}
-    legacy_name: CO_glscf
+    legacy_name: CO_GLSCF
     ordered_args: ['alpha', 'beta', 'tau']
   
   fzcglscf:
@@ -96,7 +96,7 @@ correlation:
       - {alpha: 5.0, beta: 10, zscore: True}
 
       - {alpha: 10, beta: 10, zscore: True}
-    legacy_name: CO_fzcglscf
+    legacy_name: CO_FZCGLSCF
     ordered_args: ['alpha', 'beta']
 
   embed2:
@@ -339,7 +339,7 @@ correlation:
       - {tau: 3, zscore: True}
       - {tau: 'ac', zscore: True}
       - {tau: 'mi', zscore: True}
-    legacy_name: CO_tc3
+    legacy_name: CO_TC3
     ordered_args: ['tau']
   
   time_rev_kaplan:
