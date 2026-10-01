@@ -3,7 +3,7 @@ scaling:
     base_name: fast_dfa
     configs:
       - {zscore: True}
-    legacy_name: SC_fastdfa
+    legacy_name: SC_FastDFA
   
   fluctuation_analysis:
     base_name: fluctuation_analysis

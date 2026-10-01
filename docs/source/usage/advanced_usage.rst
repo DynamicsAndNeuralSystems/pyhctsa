@@ -16,7 +16,7 @@ it can either be left empty or excluded from the configuration altogether.
             dependencies:
             configs:
                 - {param1: 1.0, param2: 2.0, zscore: True, abs: True}
-            legacy_name: MD_polvar
+            legacy_name: MD_PolVar
             ordered_args: ['d', 'D']
 
 In plain English, the YAML configuration instructs `pyhctsa` to ::
@@ -134,7 +134,7 @@ To make the YAML structure example more concrete, consider the :func:`pol_var <p
             - {d: 1.0, D: 4, zscore: True}
             - {d: 1.0, D: 5, zscore: True}
             - {d: 1.0, D: 6, zscore: True}
-            legacy_name: MD_polvar
+            legacy_name: MD_PolVar
             ordered_args: ['d', 'D']
 
 As per the API, the :func:`pol_var <pyhctsa.operations.medical.pol_var>` function accepts two parameters: ``d`` and ``D``. A total of 4 unique configurations will be evaluated by

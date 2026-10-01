@@ -31,7 +31,7 @@ medical:
       - {d: 0.1, D: 4, zscore: True}
       - {d: 0.1, D: 5, zscore: True}
       - {d: 0.1, D: 6, zscore: True}
-    legacy_name: MD_polvar
+    legacy_name: MD_PolVar
     ordered_args: ['d', 'D']
 
   raw_hrv_meas:
@@ -39,7 +39,7 @@ medical:
     dependencies:
     configs:
       - {zscore: False}
-    legacy_name: MD_rawHRVmeas
+    legacy_name: MD_RawHRVMeas
   
   porta:
     base_name: porta
@@ -171,7 +171,7 @@ correlation:
       - {alpha: 2, beta: 5, tau: 4, zscore: True}
       - {alpha: 2, beta: 5, tau: 5, zscore: True}
       - {alpha: 2, beta: 5, tau: 'tau', zscore: True}
-    legacy_name: CO_glscf
+    legacy_name: CO_GLSCF
     ordered_args: ['alpha', 'beta', 'tau']
   
   fzcglscf:
@@ -197,7 +197,7 @@ correlation:
       - {alpha: 5.0, beta: 10, zscore: True}
 
       - {alpha: 10, beta: 10, zscore: True}
-    legacy_name: CO_fzcglscf
+    legacy_name: CO_FZCGLSCF
     ordered_args: ['alpha', 'beta']
 
   embed2:
@@ -448,7 +448,7 @@ correlation:
       - {tau: 3, zscore: True}
       - {tau: 'ac', zscore: True}
       - {tau: 'mi', zscore: True}
-    legacy_name: CO_tc3
+    legacy_name: CO_TC3
     ordered_args: ['tau']
   
   time_rev_kaplan:
@@ -620,7 +620,7 @@ entropy:
       - {n_bits: 8, pre_proc: 'diff', zscore: True}
       - {n_bits: 9, pre_proc: 'diff', zscore: True}
       - {n_bits: 10, pre_proc: 'diff',  zscore: True}
-    legacy_name: EN_MS_LZcomplexity
+    legacy_name: EN_LZComplexity
     ordered_args: ['n_bits', 'pre_proc']
   
   complexity_invariant_distance:
@@ -671,7 +671,7 @@ entropy:
       - {scale_range: [!range [1, 10]], m: 2, r: 0.15, pre_process_how: 'diff1', zscore: True}
       - {scale_range: [!range [1, 10]], m: 2, r: 0.15, pre_process_how: 'rescale_tau', zscore: True}
       - {scale_range: [!range [1, 10]], m: 2, r: 0.15, zscore: True}
-    legacy_name: EN_mse
+    legacy_name: EN_MSE
     ordered_args: ['scale_range', 'm', 'r', 'pre_process_how']
   
   shannon_entropy:
@@ -687,7 +687,7 @@ entropy:
       - {num_bins: 2, depth: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], zscore: True}
       - {num_bins: 3, depth: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], zscore: True}
       - {num_bins: 4, depth: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], zscore: True}
-    legacy_name: EN_MS_shannon
+    legacy_name: EN_Shannon
     ordered_args: ['num_bins', 'depth']
   
 stationarity:
@@ -1019,7 +1019,7 @@ distribution:
       - {p: 2.5, mean_or_median: 'median', zscore: True}
       - {p: 3.0, mean_or_median: 'mean', zscore: True}
       - {p: 3.0, mean_or_median: 'median', zscore: True}
-    legacy_name: DN_Withinp
+    legacy_name: DN_WithinP
     ordered_args: ['p', 'mean_or_median']
 
   unique:
@@ -1091,7 +1091,7 @@ distribution:
       - {th: 0.3, zscore: True}
       - {th: 0.4, zscore: True}
       - {th: 0.5, zscore: True}
-    legacy_name: DN_pleft
+    legacy_name: DN_PLeft
     ordered_args: ['th']
 
   min_max:
@@ -1137,7 +1137,7 @@ distribution:
     configs:
       - {k: 1, zscore: False}
       - {k: 2, zscore: False}
-    legacy_name: DN_cv
+    legacy_name: DN_CV
     ordered_args: ['k']
 
   custom_skewness:
@@ -1276,7 +1276,7 @@ scaling:
     dependencies:
     configs:
       - {zscore: True}
-    legacy_name: SC_fastdfa
+    legacy_name: SC_FastDFA
     
   fluctuation_analysis:
     base_name: fluctuation_analysis
@@ -1336,7 +1336,7 @@ symbolic:
     configs:
       - {num_groups: [!range [2, 40]], tau: 1, zscore: True}
       - {num_groups: [!range [2, 20]], tau: 'ac', zscore: True}
-    legacy_name: SB_TransitionpAlphabet
+    legacy_name: SB_TransitionPAlphabet
     ordered_args: ['num_groups', 'tau']
 
   binary_stats:
@@ -1373,7 +1373,7 @@ symbolic:
     configs:
       - {stretch_what: 'lseq1', zscore: True}
       - {stretch_what: 'lseq0', zscore: True}
-    legacy_name: SB_BinaryStretch
+    legacy_name: SB_BinaryGapHomogeneity
     ordered_args: ['stretch_what']
   
   surprise:
@@ -1438,7 +1438,7 @@ wavelet:
       - {w_name: 'db3', level: 4, zscore: True}
       - {w_name: 'db3', level: 5, zscore: True}
       - {w_name: 'db3', level: 'max', zscore: True}
-    legacy_name: WL_coeffs
+    legacy_name: WL_Coeffs
     ordered_args: ['w_name', 'level']
   
   detail_coeffs:
@@ -1467,7 +1467,7 @@ wavelet:
     configs:
       - {w_name: 'db3', level: 5, zscore: True}
       - {w_name: 'sym2', level: 5, zscore: True}
-    legacy_name: WL_dwtcoeff
+    legacy_name: WL_DWTCoeff
     ordered_args: ['w_name', 'level']
   
   scal_2_freq:
@@ -1714,7 +1714,7 @@ model_fit:
       - {train_p: 0.7, num_states: 2, zscore: True}
       - {train_p: 0.8, num_states: 3, zscore: True}
       - {train_p: 0.8, num_states: 2, zscore: True}
-    legacy_name: MF_hmm_fit
+    legacy_name: MF_hmm_Fit
     ordered_args: ['train_p', 'num_states']
   
   gp_fit_across:
@@ -1829,7 +1829,7 @@ nonlinearity:
     configs:
       - {fs: 1, win_len_rel: 14, shift_len_rel: 0.5, lag_rel: 1, degree: 7, zscore: False}
       - {fs: 1, win_len_rel: 14, shift_len_rel: 0.5, lag_rel: 1, degree: 7, zscore: True}
-    legacy_name: NL_nsamdf
+    legacy_name: NL_NSAMDF
     ordered_args: ['fs', 'win_len_rel', 'shift_len_rel', 'lag_rel', 'degree']
 
   nlpe:
@@ -1838,7 +1838,7 @@ nonlinearity:
     configs:
       - {de: 2, tau: 'mi', zscore: True}
       - {de: 2, tau: 'ac', zscore: True}
-    legacy_name: NL_MS_nlpe
+    legacy_name: NL_nlpe
     ordered_args: ['de', 'tau']
   
   embed_pca:
@@ -1848,7 +1848,7 @@ nonlinearity:
       - {tau: 'mi', m: 10, zscore: True}
       - {tau: 1, m: 10, zscore: True}
       - {tau: 'ac', m: 3, zscore: True}
-    legacy_name: NL_embed_PCA
+    legacy_name: NL_EmbedPCA
     ordered_args: ['tau', 'm']
   
   ssa:
@@ -1875,7 +1875,7 @@ nonlinearity:
     configs:
       - {nnr: 5, past: 40, tau: 'ac', m: 2, zscore: True}
       - {nnr: 5, past: 40, tau: 1, m: 3, zscore: True}
-    legacy_name: NL_localdensity
+    legacy_name: NL_LocalDensity
     ordered_args: ['nnr', 'past', 'tau', 'm']
   
   tisean_d2:
@@ -1884,7 +1884,7 @@ nonlinearity:
     configs:
       - {tau: 1, maxm: 10, theiler_win: 0, zscore: True}
       - {tau: 'ac', maxm: 10, theiler_win: 0.01, zscore: True}
-    legacy_name: NL_TISEAN_d2
+    legacy_name: NL_d2
     ordered_args: ['tau', 'maxm', 'theiler_win']
     
   poincare_section:
@@ -1902,7 +1902,7 @@ nonlinearity:
     dependencies:
     configs:
       - {max_delay: 0.1, past: 1, zscore: True}
-    legacy_name: NL_delaytime
+    legacy_name: NL_DelayTime
     ordered_args: ['max_delay', 'past']
 
 changepoint:
@@ -1921,5 +1921,5 @@ changepoint:
     dependencies:
     configs:
       - {lambdar: [!range [0, 0.95, 0.05]], zscore: True}
-    legacy_name: CP_l1pwc_sweep_lambda
+    legacy_name: CP_l1pwc_SweepLambda
     ordered_args: ['lambdar']

@@ -32,7 +32,7 @@ medical:
       - {d: 0.1, D: 4, zscore: True}
       - {d: 0.1, D: 5, zscore: True}
       - {d: 0.1, D: 6, zscore: True}
-    legacy_name: MD_polvar
+    legacy_name: MD_PolVar
     ordered_args: ['d', 'D']
 
   raw_hrv_meas:
@@ -40,5 +40,5 @@ medical:
     dependencies:
     configs:
       - {zscore: False}
-    legacy_name: MD_rawHRVmeas
+    legacy_name: MD_RawHRVMeas
     

@@ -14,5 +14,5 @@ changepoint:
     depedencies:
     configs:
       - {lambdar: [!range [0, 0.95, 0.05]], zscore: True}
-    legacy_name: CP_l1pwc_sweep_lambda
+    legacy_name: CP_l1pwc_SweepLambda
     ordered_args: ['lambdar']

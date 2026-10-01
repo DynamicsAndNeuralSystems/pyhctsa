@@ -77,7 +77,7 @@ entropy:
       - {n_bits: 8, pre_proc: 'diff', zscore: True}
       - {n_bits: 9, pre_proc: 'diff', zscore: True}
       - {n_bits: 10, pre_proc: 'diff',  zscore: True}
-    legacy_name: EN_MS_LZcomplexity
+    legacy_name: EN_LZComplexity
     ordered_args: ['n_bits', 'pre_proc']
   
   complexity_invariant_distance:
@@ -128,7 +128,7 @@ entropy:
       - {scale_range: [!range [1, 10]], m: 2, r: 0.15, pre_process_how: 'diff1', zscore: True}
       - {scale_range: [!range [1, 10]], m: 2, r: 0.15, pre_process_how: 'rescale_tau', zscore: True}
       - {scale_range: [!range [1, 10]], m: 2, r: 0.15, zscore: True}
-    legacy_name: EN_mse
+    legacy_name: EN_MSE
     ordered_args: ['scale_range', 'm', 'r', 'pre_process_how']
   
   shannon_entropy:
@@ -144,6 +144,6 @@ entropy:
       - {num_bins: 2, depth: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], zscore: True}
       - {num_bins: 3, depth: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], zscore: True}
       - {num_bins: 4, depth: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], zscore: True}
-    legacy_name: EN_MS_shannon
+    legacy_name: EN_Shannon
     ordered_args: ['num_bins', 'depth']
     
