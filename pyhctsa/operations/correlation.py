@@ -14,8 +14,8 @@ from statsmodels.tsa.stattools import pacf
 from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit
-from ..utils import (bin_picker, histc, make_mat_buffer, point_of_crossing,
-                     sign_change, time_delay_embed, z_score, mquantile)
+from ..utils import (bin_picker, histc, make_mat_buffer, matlab_quantile,
+                     point_of_crossing, sign_change, time_delay_embed, z_score)
 
 def _theiler_kth(idx: np.ndarray, dist: np.ndarray, k: int, theiler_win: int,
                  ref_set: np.ndarray, query_set: np.ndarray) -> np.ndarray:
@@ -362,7 +362,7 @@ def oversampling(y: ArrayLike) -> dict:
     # eta and its outlier-robust companion:
     out['eta'] = float(np.ptp(y) / mean_abs_diff)
 
-    q05, q95 = mquantile(y, [0.05, 0.95])
+    q05, q95 = matlab_quantile(y, [0.05, 0.95])
     robust_range = q95 - q05
     out['etaRobust'] = float(robust_range / mean_abs_diff)
 
@@ -686,7 +686,7 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     # Noise level required to reduce ami to proportion x of its initial value
     first_under_vals = [0.75, 0.50, 0.25]
     for val in first_under_vals:
-        out[f'firstUnder{int(val*100)}'] = first_under_fn(val * amis[0], noise_range, amis)
+        out[f'firstUnder{int(val*100)}'] = _first_under_fn(val * amis[0], noise_range, amis)
 
     # AMI at actual noise levels: 0.5, 1, 1.5 and 2
     noise_levels = [0.5, 1, 1.5, 2]
@@ -714,7 +714,7 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
     return out
 
-def first_under_fn(x: ArrayLike, m: ArrayLike, p: ArrayLike) -> float:
+def _first_under_fn(x: ArrayLike, m: ArrayLike, p: ArrayLike) -> float:
     """
     Find the value of m for the first time p goes under the threshold, x. 
     p and m are vectors of the same length

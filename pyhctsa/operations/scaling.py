@@ -1,5 +1,3 @@
-from typing import Union
-
 from numpy.typing import ArrayLike
 import numpy as np
 from scipy.interpolate import interp1d
@@ -10,7 +8,7 @@ logger = logging.getLogger('pyhctsa')
 
 from ..toolboxes.Max_Little import fastdfa
 from ..toolboxes.matlab.matlab_fit import robustfit
-from ..utils import make_mat_buffer
+from ..utils import _linspace, make_mat_buffer
 from ..operations.correlation import autocorr
 
 def fast_dfa(y: ArrayLike) -> float:
@@ -291,22 +289,6 @@ def _colon(base, step, limit):
         out[n] = limit
     return out
 
-def _linspace(d1, d2, n):
-    d1 = float(d1)
-    d2 = float(d2)
-    n1 = n - 1
-    if np.isinf((d2 - d1) * (n1 - 1)):
-        i = np.arange(n1 + 1, dtype=float)
-        y = d1 + (d2 / n1) * i - (d1 / n1) * i
-    else:
-        y = d1 + np.arange(n1 + 1, dtype=float) * (d2 - d1) / n1
-    if y.size:
-        if d1 == d2:
-            y[:] = d1
-        else:
-            y[n - 1] = d2
-    return y
-
 def _round(x):
     x = np.asarray(x, dtype=float)
     return np.sign(x) * np.floor(np.abs(x) + 0.5)
@@ -395,13 +377,13 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
     max_scale = scale_range[1]
 
     if (max_scale / 5) < min_scale:
-        logging.warning(
+        logger.warning(
             "Time-series (N=%u) too short for multiscale multifractal analysis" % n
         )
         return float("nan")
     elif max_scale % 5 != 0:
         max_scale = float(_round(max_scale / 5)) * 5
-        logging.warning("adjusted max_scale to %u" % max_scale)
+        logger.warning("adjusted max_scale to %u" % max_scale)
 
     if q_range is None:
         q_range = [-5, 5]

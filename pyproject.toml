@@ -58,8 +58,9 @@ where = ["."]
 [tool.setuptools.package-data]
 pyhctsa = [
   "configurations/*.yaml",
-  "configurations/module_configs/*.yaml",
   "data/*.csv",
   "data/*.txt",
-  "toolboxes/**/*",
+  "toolboxes/**/*.py",
+  "toolboxes/Tisean_3_0_1/COPYING",
+  "toolboxes/Tisean_3_0_1/README",
 ]

@@ -12,7 +12,7 @@ from ..operations.information import automutual_info, first_min
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-def sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str) -> dict:
+def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str) -> dict:
     """Compute statistiscs on the surrogate distribution."""
     num_surrs = len(stat_surr)
     out = {}
@@ -92,7 +92,7 @@ def sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str) 
 
     return out
 
-def make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
+def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
                     random_seed: int = 42) -> ArrayLike:
     """
     Generates surrogate time series.
@@ -193,7 +193,7 @@ def surrogate_test(
 
     This function is based on [1].
 
-    The generation of surrogates is done by the periphery function, `make_surrogates`.
+    The generation of surrogates is done by the periphery function, `_make_surrogates`.
 
     References
     ----------
@@ -252,7 +252,7 @@ def surrogate_test(
     n = len(x)
 
     #Generate surrogate time series
-    z = make_surrogates(x, surr_method=surr_meth, num_surrs=num_surrs, random_seed=random_seed)
+    z = _make_surrogates(x, surr_method=surr_meth, num_surrs=num_surrs, random_seed=random_seed)
     # z is matrix where each column is a surrogate time series
     #% Evaluate test statistic on each surrogate
     out = {}
@@ -263,7 +263,7 @@ def surrogate_test(
         ami_surr = np.zeros(num_surrs)
         for i in range(num_surrs):
             ami_surr[i] = ami_fn(z[:, i], 1)
-        some_stats = sd_give_me_stats(ami_x, ami_surr, 'right')
+        some_stats = _sd_give_me_stats(ami_x, ami_surr, 'right')
         for (k, v) in zip(some_stats.keys(), some_stats.values()):
             out[f'ami_{k}'] = v
 
@@ -282,7 +282,7 @@ def surrogate_test(
             logger.warning("fmmi failed")
             return np.nan
         #% FMMI should be higher for signal than surrogates
-        some_stats = sd_give_me_stats(fmmi_x, fmmi_surr, 'right')
+        some_stats = _sd_give_me_stats(fmmi_x, fmmi_surr, 'right')
         for (k, v) in zip(some_stats.keys(), some_stats.values()):
             out[f'fmmi_{k}'] = v
 
@@ -293,7 +293,7 @@ def surrogate_test(
         o3_surr = np.zeros(num_surrs, dtype=float)
         for i in range(num_surrs):
             o3_surr[i] = (1.0 / (n - tau)) * np.sum((z[tau:, i] - z[:n - tau, i]) ** 3)
-        some_stats = sd_give_me_stats(o3_x, o3_surr, 'both')
+        some_stats = _sd_give_me_stats(o3_x, o3_surr, 'both')
         for (k, v) in zip(some_stats.keys(), some_stats.values()):
             out[f'o3_{k}'] = v
 
@@ -306,7 +306,7 @@ def surrogate_test(
         for i in range(num_surrs):
             tmp = tc3(z[:, i], tau)
             tc3_surr[i] = tmp['raw']
-        some_stats = sd_give_me_stats(tc3_x, tc3_surr, 'both')
+        some_stats = _sd_give_me_stats(tc3_x, tc3_surr, 'both')
         for (k, v) in zip(some_stats.keys(), some_stats.values()):
             out[f'tc3_{k}'] = v
 

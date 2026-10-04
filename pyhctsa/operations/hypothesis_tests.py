@@ -1,11 +1,12 @@
 from typing import Union
 import logging
+logger = logging.getLogger('pyhctsa')
 
 import numpy as np
 from numpy.typing import ArrayLike
 from arch.unitroot import VarianceRatio
 from scipy.interpolate import PchipInterpolator
-from scipy.optimize import brentq, minimize
+from scipy.optimize import brentq
 from scipy.stats import beta as beta_dist
 from scipy.stats import gamma as gamma_dist
 from scipy.stats import jarque_bera, norm, wilcoxon, rayleigh, expon, gumbel_l, kstwo, lognorm, uniform, weibull_min, chi2
@@ -253,7 +254,7 @@ def distribution_test(x: ArrayLike, the_test: str = 'chi2gof', the_distn: str = 
     if the_test == 'lillie':
         if the_distn in ('norm', 'ev', 'exp'):
             return _lilliefors_pvalue(x, the_distn)
-        logging.warning("Lilliefors test is only defined for 'norm', 'ev', and 'exp' distributions.")
+        logger.warning("Lilliefors test is only defined for 'norm', 'ev', and 'exp' distributions.")
         return np.nan
 
     cdf_func, n_params = _fit_distribution_cdf(x, the_distn)

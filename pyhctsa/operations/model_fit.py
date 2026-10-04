@@ -16,7 +16,7 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..toolboxes.matlab.optimizers import minimize
-from ..utils import z_score, ljung_box_pvalue
+from ..utils import _linspace, _ml_randperm, _ml_rng, z_score, ljung_box_pvalue
 
 def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed: int = 0) -> dict:
     """
@@ -87,7 +87,6 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     out['std_p'] = np.std(p_matrix, ddof=1)
 
     #% Within-sample log-likelihood
-    train_ll = model.score(y_train_reshaped)
     out['LLtrainpersample'] = model.monitor_.history[-1] / n_train
     out['nit'] = model.monitor_.iter
 
@@ -612,14 +611,7 @@ def ar_cov(y: ArrayLike, p: int = 2) -> dict:
     return out
 
 def _arconf_from_arfit(fitted_ar, the_conf_interval: float = 0.95) -> dict:
-    params = fitted_ar.params
     has_intercept = fitted_ar.model.trend == 'c'
-    if has_intercept:
-        w = params[0]
-        A = params[1:]
-    else:
-        w = None
-        A = params
     # degress of freedom
     dof = fitted_ar.df_resid
     t_crit = t.ppf(0.5 + the_conf_interval / 2, df=dof) # quantiles of the t distrib
@@ -729,7 +721,6 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
     
     # Akiake Information Criteria (AIC) as a viable alternative to Akiake's FPE for final prediction error (FPE)
     aics = _get_criteria(sel, N, "aic")
-    n = aics.size
     for i in range(len(aics)):
         out[f'fpe_{ps[i]}'] = aics[i]
     # return minimum 
@@ -1105,29 +1096,3 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     out['stdmlik'] = np.std(mlikelihoods, ddof=1)
 
     return out
-
-
-def _ml_rng(seed: int) -> np.random.RandomState:
-    """
-    ``rng(seed, 'twister')``, as a numpy ``RandomState``.
-    """
-    return np.random.RandomState(5489 if seed == 0 else seed)
-
-
-def _ml_randperm(n: int, rng: np.random.RandomState) -> np.ndarray:
-    """
-    MATLAB's ``randperm(n)``: the 1-based ordering that sorts ``rand(1, n)``.
-    """
-    return np.argsort(rng.random_sample(n), kind='stable') + 1
-
-
-def _linspace(d1: float, d2: float, n: int) -> np.ndarray:
-    """
-    Helper function for gp_fit_across
-    """
-    n1 = n - 1
-    y = d1 + np.arange(n) * (d2 - d1) / n1
-    y[0] = d1
-    if n1 > 0:
-        y[n - 1] = d2
-    return y

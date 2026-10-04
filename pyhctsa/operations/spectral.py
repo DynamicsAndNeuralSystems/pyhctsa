@@ -531,25 +531,25 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     # Robust Fits
     # across full range
     r_all = w > 0
-    across_full_range_res = give_me_robust_stats(np.log(w[r_all]), np.log(s[r_all]), 'linfitloglog_all')
+    across_full_range_res = _give_me_robust_stats(np.log(w[r_all]), np.log(s[r_all]), 'linfitloglog_all')
     out = out | across_full_range_res
     # across first half (low frequency)
     r_lf = (w > 0)
     r_lf[int(np.floor(n/2)):] = 0 #% remove second half of angular frequenciesf
-    first_half_res = give_me_robust_stats(np.log(w[r_lf]), np.log(s[r_lf]), 'linfitloglog_lf')
+    first_half_res = _give_me_robust_stats(np.log(w[r_lf]), np.log(s[r_lf]), 'linfitloglog_lf')
     out = out | first_half_res
     # across second half (high frequency)
     r_hf = np.arange(n // 2, n)
-    second_half_res = give_me_robust_stats(np.log(w[r_hf]), np.log(s[r_hf]), 'linfitloglog_hf')
+    second_half_res = _give_me_robust_stats(np.log(w[r_hf]), np.log(s[r_hf]), 'linfitloglog_hf')
     out = out | second_half_res
     #Middle half (mid-frequencies)
     start = int(np.round(n / 4)) - 1
     stop = int(np.round(n * 3 / 4))
     r_mf = np.arange(start, stop)
-    middle_half_res = give_me_robust_stats(np.log(w[r_mf]), np.log(s[r_mf]), 'linfitloglog_mf')
+    middle_half_res = _give_me_robust_stats(np.log(w[r_mf]), np.log(s[r_mf]), 'linfitloglog_mf')
     out = out | middle_half_res
     #Fit linear to semilog plot (across full range)
-    res_semilog = give_me_robust_stats(w, np.log(s), 'linfitsemilog_all')
+    res_semilog = _give_me_robust_stats(w, np.log(s), 'linfitsemilog_all')
     out = out | res_semilog
 
     # Power in specific frequency bands
@@ -700,7 +700,7 @@ def _findpeaks(s, min_pk_dist=0, sort_str='none'):
 
     return pk_height, pk_loc
 
-def give_me_robust_stats(x_data: ArrayLike, y_data: ArrayLike, field_name: str) -> dict:
+def _give_me_robust_stats(x_data: ArrayLike, y_data: ArrayLike, field_name: str) -> dict:
     """
     Statistics based on a robust linear fit
     """

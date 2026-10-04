@@ -14,7 +14,7 @@ from ..operations.model_fit import residual_analysis
 from ..operations.correlation import first_crossing, first_min, autocorr
 from ..operations.scaling import _round
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
-from ..utils import matlab_quantile, time_delay_embed
+from ..utils import _ml_rng, matlab_quantile, time_delay_embed
 
 def zero_one_test(y, num_c=20, max_n=10000):
     """Modified 0-1 test for chaos.
