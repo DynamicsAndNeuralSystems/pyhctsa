@@ -306,7 +306,7 @@ def matlab_quantile(x: ArrayLike, p: ArrayLike) -> np.ndarray:
     return np.where(xk == xkp1, xk, y)  # as are identical values
 
 
-def histc(x: ArrayLike, bins: ArrayLike) -> int:
+def histc(x: ArrayLike, bins: ArrayLike) -> np.ndarray:
     """Counts the number of values in x that are within each specified bin."""
     # Get indices of the bins to which each value in input array belongs.
     map_to_bins = np.digitize(x, bins)

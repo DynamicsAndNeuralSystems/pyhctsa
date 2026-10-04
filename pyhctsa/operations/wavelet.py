@@ -140,11 +140,11 @@ def wfbm(x: ArrayLike) -> dict:
     H2 = 0.5*np.log2(cs2 / cs1)
 
     level_decomp = min(pywt.dwt_max_level(len(x), 'haar'), 6)
-    C, L = wavedec(x, wavelet='haar', level=level_decomp)
+    C, L = _wavedec(x, wavelet='haar', level=level_decomp)
     all_levels = np.arange(1, level_decomp+1)
     stdc = np.zeros(len(all_levels))
     for i in range(len(all_levels)):
-        d = detcoef(coefs=C, lengths=L, level=all_levels[i])
+        d = _detcoef(coefs=C, lengths=L, level=all_levels[i])
         stdc_val = np.median(np.abs(d)) / 0.67448975
         stdc[i] = stdc_val
     po = np.polyfit(all_levels, np.log2(stdc**2), 1)
@@ -190,11 +190,11 @@ def scal_2_freq(y: ArrayLike, w_name: str = 'db3', a_max: int = 5, delta: int = 
     # Compute associated pseudo-periods.
     per = 1/f
     #Decompose the time series at level specified as maximum
-    C, L = wavedec(y, wavelet=w_name, level=a_max)
+    C, L = _wavedec(y, wavelet=w_name, level=a_max)
     #Estimate standard deviation of detail coefficients.
     stdc = []
     for k in range(1, a_max+1):
-        d = detcoef(coefs=C, lengths=L, level=k)
+        d = _detcoef(coefs=C, lengths=L, level=k)
         stdc_val = np.median(np.abs(d)) / 0.67448975
         stdc.append(stdc_val)
     #% Compute identified period.
@@ -236,14 +236,14 @@ def dwt_coeff(y: ArrayLike, w_name: str = 'db3', level: int = 3) -> dict:
     #%% Perform Wavelet Decomposition
     C, L = None, None
     if max_level_allowed < level: # if level exceeds max level, just use max level instead
-        C, L = wavedec(y, wavelet=w_name, level=max_level_allowed)
+        C, L = _wavedec(y, wavelet=w_name, level=max_level_allowed)
     else:
-        C, L = wavedec(y, wavelet=w_name, level=level)
+        C, L = _wavedec(y, wavelet=w_name, level=level)
     #%% Get statistics on coefficients
     out = {}
     for k in range(1, level+1):
         if k <= max_level_allowed:
-            d = detcoef(coefs=C, lengths=L, level=k) # detail coeffs at level k
+            d = _detcoef(coefs=C, lengths=L, level=k) # detail coeffs at level k
             # max coeff at this level
             out[f'maxd_l{k}'] = np.max(d)
             #% minimum coefficient at this level:
@@ -408,9 +408,9 @@ def detail_coeffs(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] 
     # Decompose once at the maximum level; wavedec is prefix-stable, so the level-k
     # detail branch is identical whether decomposed to level k or to max_level. Reusing
     # one (c, l) is bit-identical to re-running wavedec at each level.
-    c, l = wavedec(data=y, wavelet=w_name, level=max_level)
+    c, l = _wavedec(data=y, wavelet=w_name, level=max_level)
     for k in range(1, max_level+1):
-        det = wrcoef(coefs=c, lengths=l, wavelet=w_name, level=k)
+        det = _wrcoef(coefs=c, lengths=l, wavelet=w_name, level=k)
         absdet = np.abs(det)
         means[k-1] = np.mean(absdet)
         medians[k-1] = np.median(absdet)
@@ -494,8 +494,8 @@ def wl_coeffs(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 3) -> 
         logger.warning(f"Chosen level, {level}, is too large for this wavelet on this signal.")
         return np.nan
     
-    C, L = wavedec(y, wavelet=w_name, level=level)
-    det = wrcoef(C, L, w_name, level)
+    C, L = _wavedec(y, wavelet=w_name, level=level)
+    det = _wrcoef(C, L, w_name, level)
     det_s = np.sort(np.abs(det))[::-1]
 
     #%% Return statistics
@@ -505,17 +505,17 @@ def wl_coeffs(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 3) -> 
     out['med_coeff'] = np.median(det_s)
 
     #% Decay rate stats ('where below _ maximum' = 'wb_m')
-    out['wb99m'] = find_my_threshold(0.99, det_s, N)
-    out['wb90m'] = find_my_threshold(0.90, det_s, N)
-    out['wb75m'] = find_my_threshold(0.75, det_s, N)
-    out['wb50m'] = find_my_threshold(0.50, det_s, N)
-    out['wb25m'] = find_my_threshold(0.25, det_s, N)
-    out['wb10m'] = find_my_threshold(0.10, det_s, N)
-    out['wb1m'] = find_my_threshold(0.01, det_s, N)
+    out['wb99m'] = _find_my_threshold(0.99, det_s, N)
+    out['wb90m'] = _find_my_threshold(0.90, det_s, N)
+    out['wb75m'] = _find_my_threshold(0.75, det_s, N)
+    out['wb50m'] = _find_my_threshold(0.50, det_s, N)
+    out['wb25m'] = _find_my_threshold(0.25, det_s, N)
+    out['wb10m'] = _find_my_threshold(0.10, det_s, N)
+    out['wb1m'] = _find_my_threshold(0.01, det_s, N)
 
     return out
 
-def wavedec(data: ArrayLike, wavelet: str, mode: str ='symmetric', level: int = 1, axis=-1) -> tuple:
+def _wavedec(data: ArrayLike, wavelet: str, mode: str ='symmetric', level: int = 1, axis=-1) -> tuple:
     """
     Multiple level 1-D discrete fast wavelet decomposition.
 
@@ -546,10 +546,10 @@ def wavedec(data: ArrayLike, wavelet: str, mode: str ='symmetric', level: int = 
 
     return np.concatenate(coefs), lengths
 
-def detcoef(coefs, lengths, level):
+def _detcoef(coefs, lengths, level):
     """
     1-D detail coefficients extraction: returns the level-``level`` detail
-    branch (``cD_level``) from a :func:`wavedec` decomposition.
+    branch (``cD_level``) from a :func:`_wavedec` decomposition.
     """
     # coefs is laid out as blocks with sizes lengths[0], ..., lengths[-2];
     # the level-k detail block is at position len(lengths) - 1 - k.
@@ -559,7 +559,7 @@ def detcoef(coefs, lengths, level):
     return coefs[start:start + lengths[idx]]
 
 
-def wrcoef(coefs, lengths, wavelet, level):
+def _wrcoef(coefs, lengths, wavelet, level):
     """
     Reconstruction from a single branch of a multiple level decomposition
     """
@@ -580,7 +580,7 @@ def wrcoef(coefs, lengths, wavelet, level):
     if not isinstance(wavelet, pywt.Wavelet):
         wavelet = pywt.Wavelet(wavelet)
 
-    data = detcoef(coefs, lengths, level)
+    data = _detcoef(coefs, lengths, level)
 
     idx = len(lengths) - level
     data = upsconv(data, wavelet.rec_hi, lengths[idx])
@@ -589,7 +589,7 @@ def wrcoef(coefs, lengths, wavelet, level):
 
     return data
 
-def find_my_threshold(x: float, det_s: ArrayLike, N: int):
+def _find_my_threshold(x: float, det_s: ArrayLike, N: int):
     """
     Fraction of the way into ``det_s`` (sorted descending) at which the
     coefficients first drop below ``x`` times the maximum.

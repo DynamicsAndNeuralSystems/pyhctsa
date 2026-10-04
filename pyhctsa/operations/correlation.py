@@ -686,7 +686,7 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     # Noise level required to reduce ami to proportion x of its initial value
     first_under_vals = [0.75, 0.50, 0.25]
     for val in first_under_vals:
-        out[f'firstUnder{int(val*100)}'] = first_under_fn(val * amis[0], noise_range, amis)
+        out[f'firstUnder{int(val*100)}'] = _first_under_fn(val * amis[0], noise_range, amis)
 
     # AMI at actual noise levels: 0.5, 1, 1.5 and 2
     noise_levels = [0.5, 1, 1.5, 2]
@@ -714,7 +714,7 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
     return out
 
-def first_under_fn(x: ArrayLike, m: ArrayLike, p: ArrayLike) -> float:
+def _first_under_fn(x: ArrayLike, m: ArrayLike, p: ArrayLike) -> float:
     """
     Find the value of m for the first time p goes under the threshold, x. 
     p and m are vectors of the same length

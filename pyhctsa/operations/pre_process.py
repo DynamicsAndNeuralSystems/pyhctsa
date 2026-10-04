@@ -81,8 +81,6 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf') -> dict:
         original and transformed time series.
     """
     y = np.asarray(y)
-    N = len(y)
-    r = np.arange(N)
 
     # ------------------------------------------------------------------
     # Apply preprocessing: y (raw) -> y_d (detrended/transformed)
