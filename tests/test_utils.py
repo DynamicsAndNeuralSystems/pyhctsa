@@ -156,6 +156,14 @@ class TestPeripheryFuncs:
         assert b3.shape[1] == 3, "expected there to be 3 columns"
         b2 = pyhctsa.utils.make_buffer(d, 2)
         assert b2.shape[0] == 500, "expected there to be "
+    def test_linspace(self):
+        # agrees with numpy, with both endpoints exact
+        for d1, d2, n in [(1, 1000, 20), (0, 1, 11), (-3, 7.5, 50)]:
+            out = pyhctsa.utils._linspace(d1, d2, n)
+            np.testing.assert_allclose(out, np.linspace(d1, d2, n), rtol=0, atol=1e-12)
+            assert out[0] == d1 and out[-1] == d2
+        # a single point is the end point, as in MATLAB
+        assert pyhctsa.utils._linspace(1, 10, 1).tolist() == [10.0]
     def test_binarize(self):
         d = get_dataset(which='e1000')[0]
         # test defaults

@@ -10,7 +10,7 @@ logger = logging.getLogger('pyhctsa')
 
 from ..toolboxes.Max_Little import fastdfa
 from ..toolboxes.matlab.matlab_fit import robustfit
-from ..utils import make_mat_buffer
+from ..utils import _linspace, make_mat_buffer
 from ..operations.correlation import autocorr
 
 def fast_dfa(y: ArrayLike) -> float:
@@ -290,22 +290,6 @@ def _colon(base, step, limit):
     if n > 0:
         out[n] = limit
     return out
-
-def _linspace(d1, d2, n):
-    d1 = float(d1)
-    d2 = float(d2)
-    n1 = n - 1
-    if np.isinf((d2 - d1) * (n1 - 1)):
-        i = np.arange(n1 + 1, dtype=float)
-        y = d1 + (d2 / n1) * i - (d1 / n1) * i
-    else:
-        y = d1 + np.arange(n1 + 1, dtype=float) * (d2 - d1) / n1
-    if y.size:
-        if d1 == d2:
-            y[:] = d1
-        else:
-            y[n - 1] = d2
-    return y
 
 def _round(x):
     x = np.asarray(x, dtype=float)

@@ -16,7 +16,7 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..toolboxes.matlab.optimizers import minimize
-from ..utils import _ml_randperm, _ml_rng, z_score, ljung_box_pvalue
+from ..utils import _linspace, _ml_randperm, _ml_rng, z_score, ljung_box_pvalue
 
 def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed: int = 0) -> dict:
     """
@@ -1105,15 +1105,3 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     out['stdmlik'] = np.std(mlikelihoods, ddof=1)
 
     return out
-
-
-def _linspace(d1: float, d2: float, n: int) -> np.ndarray:
-    """
-    Helper function for gp_fit_across
-    """
-    n1 = n - 1
-    y = d1 + np.arange(n) * (d2 - d1) / n1
-    y[0] = d1
-    if n1 > 0:
-        y[n - 1] = d2
-    return y
