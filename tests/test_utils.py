@@ -208,10 +208,10 @@ class TestRegressions:
         from pyhctsa.operations.stationarity import std_nth_deriv
         assert np.isnan(std_nth_deriv(np.arange(2.0), ndr=3))
 
-    def test_name_mappings_do_not_clobber_range(self, tmp_path):
+    def test_name_mappings_do_not_clobber_range(self, tmp_path, module_config):
         # building the mappings must not change how !range is parsed elsewhere
         from pyhctsa.calculator import FeatureCalculator
-        config_path = Path(__file__).resolve().parents[1] / "pyhctsa" / "configurations" / "module_configs" / "correlation.yaml"
+        config_path = module_config("correlation")
         before = FeatureCalculator(config_path).feature_funcs
         pyhctsa.utils.make_function_name_mappings(csv_out_fpath=str(tmp_path / "mappings.csv"))
         after = FeatureCalculator(config_path).feature_funcs

@@ -8,20 +8,19 @@ import pytest
 from pyhctsa.calculator import FeatureCalculator, classify_output, _standardise_inputs, _apply_selection_wrapper
 from pyhctsa.utils import get_dataset
 
+HCTSA_YAML = os.path.join(os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "configurations", "hctsa.yaml")
+
 # 1. Time-series feature module tests
 class TestOperations:
     @pytest.mark.parametrize("x", [
         "medical", "extreme_events", "criticality", "correlation", "information", "entropy",
         "stationarity", "distribution", "scaling", "symbolic", "wavelet", 
-        "hypothesis", "spectral", "model_fit", "graph", "physics", "pre_process",
+        "hypothesis_tests", "spectral", "model_fit", "graph", "physics", "pre_process",
         "surrogates", "nonlinearity", "changepoint"])
-    def test_module_basic(self, x):
+    def test_module_basic(self, x, module_config):
         # basic checks on each module
         data = get_dataset(which="sinusoid")
-        config_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "configurations", "module_configs", f"{x}.yaml")
-        assert os.path.exists(config_path), f"Config file not found: {config_path}"
-        calc = FeatureCalculator(config_path)
+        calc = FeatureCalculator(module_config(x))
         fvec = calc.extract(data)
         # Check that something is returned and it's not empty
         assert fvec is not None, "No output returned"
@@ -48,10 +47,8 @@ class TestCalculator:
             hctsa_yaml = yaml.safe_load(f)
         assert len(hctsa_yaml) == len(calc.config), f"Expected {len(hctsa_yaml)} modules to be loaded, got {len(hctsa_yaml)} instead."
     # test the loading of a single module e.g. correlation
-    def test_calculator_custom(self):
-        confpath = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "configurations", "module_configs", "correlation.yaml")
-        calc = FeatureCalculator(config_path=confpath)
+    def test_calculator_custom(self, module_config):
+        calc = FeatureCalculator(config_path=module_config("correlation"))
         assert len(calc.config) == 1, f"Expected only a single module, got {len(calc.config)} instead."
     # test sucessful instantiation of calculator
     def test_instantiation(self):
@@ -201,3 +198,25 @@ class TestFeatureFiltering:
         assert 'pcross' not in modified_output_keys_discard
 
     
+
+class TestConfigFiles:
+    ALLOWED_KEYS = {"base_name", "dependencies", "configs", "legacy_name", "ordered_args"}
+
+    def test_config_keys_are_known(self):
+        # misspelled keys (e.g. 'depedencies') are silently ignored by the calculator
+        with open(HCTSA_YAML, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        unknown = []
+        for module, features in config.items():
+            for name, entry in features.items():
+                for key in set(entry) - self.ALLOWED_KEYS:
+                    unknown.append(f"{module}.{name}.{key}")
+        assert not unknown, f"Unknown config keys: {unknown}"
+
+    def test_module_config_matches_hctsa_yaml(self, module_config):
+        # each single-module config cut from hctsa.yaml must parse to exactly that module
+        with open(HCTSA_YAML, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        for module, features in config.items():
+            with open(module_config(module), encoding="utf-8") as f:
+                assert yaml.safe_load(f) == {module: features}
