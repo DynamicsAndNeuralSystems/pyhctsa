@@ -379,13 +379,13 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
     max_scale = scale_range[1]
 
     if (max_scale / 5) < min_scale:
-        logging.warning(
+        logger.warning(
             "Time-series (N=%u) too short for multiscale multifractal analysis" % n
         )
         return float("nan")
     elif max_scale % 5 != 0:
         max_scale = float(_round(max_scale / 5)) * 5
-        logging.warning("adjusted max_scale to %u" % max_scale)
+        logger.warning("adjusted max_scale to %u" % max_scale)
 
     if q_range is None:
         q_range = [-5, 5]

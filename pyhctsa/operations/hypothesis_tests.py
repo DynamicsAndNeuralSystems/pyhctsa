@@ -1,5 +1,6 @@
 from typing import Union
 import logging
+logger = logging.getLogger('pyhctsa')
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -253,7 +254,7 @@ def distribution_test(x: ArrayLike, the_test: str = 'chi2gof', the_distn: str = 
     if the_test == 'lillie':
         if the_distn in ('norm', 'ev', 'exp'):
             return _lilliefors_pvalue(x, the_distn)
-        logging.warning("Lilliefors test is only defined for 'norm', 'ev', and 'exp' distributions.")
+        logger.warning("Lilliefors test is only defined for 'norm', 'ev', and 'exp' distributions.")
         return np.nan
 
     cdf_func, n_params = _fit_distribution_cdf(x, the_distn)

@@ -132,14 +132,14 @@ def get_dataset(which: str = "e1000") -> list:
     if which not in datasets:
         raise NotImplementedError(f"Dataset '{which}' not found. Available options: {list(datasets.keys())}")
 
-    print(f"Loading {datasets[which]['desc']} dataset...")
+    logger.info(f"Loading {datasets[which]['desc']} dataset...")
     data_path = os.path.normpath(os.path.join(utils_dir, datasets[which]['path']))
     
     if not os.path.exists(data_path):
         raise FileNotFoundError(f"Data file not found at: {data_path}")
     
     dataset = datasets[which]['loader'](data_path)
-    print(f"Loaded dataset of {len(dataset)} time series.")
+    logger.info(f"Loaded dataset of {len(dataset)} time series.")
     return dataset
     
 def _preprocess_decorator(zscore: bool = False, absval: bool = False) -> Callable:

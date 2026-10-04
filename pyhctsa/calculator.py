@@ -7,8 +7,6 @@ from typing import Union, Any, Callable
 import logging
 
 logger = logging.getLogger('pyhctsa')
-logger.setLevel(logging.CRITICAL) # only log critical warnings by default
-logger.addHandler(logging.NullHandler())
 
 import numpy as np
 import pandas as pd
@@ -260,7 +258,7 @@ class FeatureCalculator:
             self.config = yaml.safe_load(f)
         self._operations_package = "pyhctsa.operations" # abs path
         self.feature_funcs = self._build_feature_funcs()
-        print(f"Loaded {len(self.feature_funcs)} master operations.")
+        logger.info(f"Loaded {len(self.feature_funcs)} master operations.")
     
     def _check_deps(self, module_key, feature_name, config):
         raw_deps = config.get("dependencies", None)
@@ -348,7 +346,7 @@ class FeatureCalculator:
             Labels for each time series. The order of labels is assumed to match 
             the order of the time series as passed in the `data` argument.
         verbose: bool, optional
-            Whether to show a progress bar. Default is ``False``.
+            Whether to print progress and timing information. Default is ``False``.
         distributor: object, optional
             Optional distributor for parallel computation.
         
@@ -379,7 +377,8 @@ class FeatureCalculator:
             n = len(series_list)
             labels_list = [f"ts_{i}" for i in range(1, n + 1)]
 
-        print(f"Evaluating {len(self.feature_funcs)} partialed functions. Strap in!...")
+        if verbose:
+            print(f"Evaluating {len(self.feature_funcs)} partialed functions. Strap in!...")
         start_time = time.perf_counter()
         if distributor:
             # parallel execution
@@ -407,7 +406,8 @@ class FeatureCalculator:
                         for ts in series_list]
 
         elapsed = time.perf_counter() - start_time
-        print(f"Feature extraction completed in {elapsed:.3f} seconds.")
+        if verbose:
+            print(f"Feature extraction completed in {elapsed:.3f} seconds.")
         df = pd.json_normalize(rows)
         # assign row names
         df.index = pd.Index(labels_list, name="instance")
