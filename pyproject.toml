@@ -60,5 +60,7 @@ pyhctsa = [
   "configurations/*.yaml",
   "data/*.csv",
   "data/*.txt",
-  "toolboxes/**/*",
+  "toolboxes/**/*.py",
+  "toolboxes/Tisean_3_0_1/COPYING",
+  "toolboxes/Tisean_3_0_1/README",
 ]

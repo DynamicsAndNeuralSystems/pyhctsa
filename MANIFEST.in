@@ -1,4 +1,5 @@
 recursive-include pyhctsa/configurations *.yaml
 recursive-include pyhctsa/data *.csv *.txt
 recursive-include pyhctsa/operations *.py
-recursive-include pyhctsa/toolboxes *
+recursive-include pyhctsa/toolboxes *.py *.c *.h
+include pyhctsa/toolboxes/Tisean_3_0_1/COPYING pyhctsa/toolboxes/Tisean_3_0_1/README
