@@ -44,6 +44,18 @@ def _validate_data(ts: np.ndarray) -> bool:
 
     return True
 
+def _ml_rng(seed: int) -> np.random.RandomState:
+    """
+    ``rng(seed, 'twister')``, as a numpy ``RandomState``.
+    """
+    return np.random.RandomState(5489 if seed == 0 else seed)
+
+def _ml_randperm(n: int, rng: np.random.RandomState) -> np.ndarray:
+    """
+    MATLAB's ``randperm(n)``: the 1-based ordering that sorts ``rand(1, n)``.
+    """
+    return np.argsort(rng.random_sample(n), kind='stable') + 1
+
 def _load_csv(path: str) -> list:
     """Helper function to load CSV formatted datasets."""
     dataset = [] # list of np.ndarray
@@ -720,13 +732,17 @@ def make_function_name_mappings(
     """
     Map pyhctsa function names to their legacy counterparts in the MATLAB HCTSA.
     """
-    yaml.SafeLoader.add_constructor("!range", lambda loader, node: None)
+    # only the names are needed, so parse with a private loader that ignores
+    # !range rather than overriding the constructor on the shared SafeLoader
+    class _MappingLoader(yaml.SafeLoader):
+        pass
+    _MappingLoader.add_constructor("!range", lambda loader, node: None)
 
     if yaml_file is None:
         yaml_file = resources.files("pyhctsa.configurations").joinpath("hctsa.yaml")
 
     with open(yaml_file, "r", encoding="utf-8") as f:
-        yam = yaml.safe_load(f)
+        yam = yaml.load(f, Loader=_MappingLoader)
     module_dfs = []
     for module in yam:
         corr_mod = yam[module]

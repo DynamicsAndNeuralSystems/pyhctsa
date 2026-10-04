@@ -191,3 +191,29 @@ class TestPeripheryFuncs:
         out1, out2 = pyhctsa.utils.x_corr(d1, d2, max_lags=None)
         d1_len = len(d1)
         assert abs(out1[0]) == (d1_len - 1), "expected max lag to be nx - 1 where nx is length of data"
+
+# 6. Regression tests
+class TestRegressions:
+    def test_seeded_delay_time(self):
+        # delay_time relied on a seeded RNG helper that was not imported
+        from pyhctsa.operations.nonlinearity import delay_time
+        y = np.random.default_rng(0).standard_normal(500)
+        out1 = delay_time(y, random_seed=0)
+        out2 = delay_time(y, random_seed=0)
+        assert isinstance(out1, dict)
+        assert out1 == out2, "same seed should give identical outputs"
+
+    def test_std_nth_deriv_too_short(self):
+        # too-short input should return NaN, not raise
+        from pyhctsa.operations.stationarity import std_nth_deriv
+        assert np.isnan(std_nth_deriv(np.arange(2.0), ndr=3))
+
+    def test_name_mappings_do_not_clobber_range(self, tmp_path):
+        # building the mappings must not change how !range is parsed elsewhere
+        from pyhctsa.calculator import FeatureCalculator
+        config_path = Path(__file__).resolve().parents[1] / "pyhctsa" / "configurations" / "module_configs" / "correlation.yaml"
+        before = FeatureCalculator(config_path).feature_funcs
+        pyhctsa.utils.make_function_name_mappings(csv_out_fpath=str(tmp_path / "mappings.csv"))
+        after = FeatureCalculator(config_path).feature_funcs
+        assert list(before) == list(after)
+        assert "ac_1" in after and "ac_None" not in after

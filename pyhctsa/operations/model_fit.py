@@ -16,7 +16,7 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..toolboxes.matlab.optimizers import minimize
-from ..utils import z_score, ljung_box_pvalue
+from ..utils import _ml_randperm, _ml_rng, z_score, ljung_box_pvalue
 
 def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed: int = 0) -> dict:
     """
@@ -1105,20 +1105,6 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     out['stdmlik'] = np.std(mlikelihoods, ddof=1)
 
     return out
-
-
-def _ml_rng(seed: int) -> np.random.RandomState:
-    """
-    ``rng(seed, 'twister')``, as a numpy ``RandomState``.
-    """
-    return np.random.RandomState(5489 if seed == 0 else seed)
-
-
-def _ml_randperm(n: int, rng: np.random.RandomState) -> np.ndarray:
-    """
-    MATLAB's ``randperm(n)``: the 1-based ordering that sorts ``rand(1, n)``.
-    """
-    return np.argsort(rng.random_sample(n), kind='stable') + 1
 
 
 def _linspace(d1: float, d2: float, n: int) -> np.ndarray:
