@@ -1482,7 +1482,6 @@ wavelet:
   wfbm:
     base_name: wfbm
     dependencies:
-      - pywt
       - PyWavelets
     configs:
       - {zscore: True}

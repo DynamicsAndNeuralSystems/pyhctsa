@@ -213,6 +213,12 @@ class TestConfigFiles:
                     unknown.append(f"{module}.{name}.{key}")
         assert not unknown, f"Unknown config keys: {unknown}"
 
+    def test_no_functions_skipped(self):
+        # with all dependencies installed, every configured function should load;
+        # a dependency named by its import name rather than its distribution name never resolves
+        calc = FeatureCalculator()
+        assert calc._skipped_functions == [], f"Skipped: {calc._skipped_functions}"
+
     def test_module_config_matches_hctsa_yaml(self, module_config):
         # each single-module config cut from hctsa.yaml must parse to exactly that module
         with open(HCTSA_YAML, encoding="utf-8") as f:
