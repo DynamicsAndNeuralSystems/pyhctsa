@@ -7,14 +7,14 @@ import numpy as np
 from numpy.typing import ArrayLike
 from numba import njit
 from antropy.entropy import _xlogx
-from scipy.stats import gaussian_kde, rankdata
+from scipy.stats import gaussian_kde, norm, rankdata
 from sklearn.neighbors import KDTree
 
-from ..operations.correlation import first_crossing
 from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
 from ..toolboxes.physionet import sampen as _sampen_c
-from ..utils import bin_picker, histc, make_buffer, time_delay_embed, z_score
+from ..utils import (_zscore_matlab, bin_picker, get_tau, make_buffer, pre_process,
+                     time_delay_embed, z_score)
 
 
 def _entropy_summary(ents: np.ndarray) -> dict:
@@ -95,10 +95,25 @@ def shannon_entropy(
 
     return out
 
+def _ksdensity_bandwidth(y: np.ndarray) -> float:
+    """
+    The default bandwidth of MATLAB's ``ksdensity`` for a Gaussian kernel (the 'normal-approx'
+    rule): ``sigma * (4 / (3 N)) ** (1/5)`` with the robust spread estimate
+    ``sigma = median(|y - median(y)|) / 0.6745`` (the range of the data if that is zero).
+    """
+    y = np.asarray(y, dtype=float)
+    sigma = np.median(np.abs(y - np.median(y))) / 0.6745
+    if sigma <= 0:
+        sigma = np.max(y) - np.min(y)
+    if sigma > 0:
+        return float(sigma * (4.0 / (3.0 * y.size)) ** 0.2)
+    return 1.0
+
+
 def distribution_entropy(
     y: ArrayLike,
     hist_or_ks: str = 'hist',
-    num_bins: Union[str, int] = 10,
+    num_bins: Union[str, int, float, None] = 10,
     olremp: float = 0
 ) -> float:
     """
@@ -117,10 +132,17 @@ def distribution_entropy(
         The input time series.
     hist_or_ks : str
         Whether to use a histogram ('hist') or kernel-smoothed ('ks') distribution. Default is ``'hist'``.
-    num_bins : int or list of int, optional
+    num_bins : int or str or float or None, optional
 
-        - (for 'hist'): an integer, uses a histogram with that many bins
-        - (for 'ks'): a positive real number, for the bandwidth parameter for the kernel density estimate.
+        - (for 'hist'): an integer, uses a histogram with that many bins; or a binning rule
+          (NumPy's 'sturges', 'fd', 'sqrt', 'auto'; the bin edges differ from MATLAB's
+          ``histcounts`` rules of the same names, which round the bin width to a 'nice' value);
+        - (for 'ks'): a positive real number, the bandwidth (standard deviation of the Gaussian
+          kernel) of the kernel density estimate; or empty (``''`` / ``None``) to select it as
+          MATLAB's ``ksdensity`` does: the normal-reference rule
+          ``sigma * (4 / (3 N)) ** (1/5)`` with ``sigma = median(|y - median(y)|) / 0.6745``.
+          The density itself is scipy's Gaussian KDE (MATLAB's ``ksdensity`` truncates the
+          kernel at 4 bandwidths and evaluates approximately, which differs at about 1e-5).
 
         Default is 10.
 
@@ -133,9 +155,16 @@ def distribution_entropy(
     -------
     float
         Estimate of entropy from the distribution.
+
+    Notes
+    -----
+    The 'ks' density is evaluated on a 200-point grid spanning the 0.1% to 99.9% quantiles
+    of ``y`` plus a 10% margin, converted to probability mass per grid cell and renormalized
+    (NaN if those quantiles coincide). A fixed absolute bandwidth makes the estimate drift with
+    the length of the series, so the automatic selection is preferable.
     """
     # (1) Remove outliers?
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float)
     if olremp != 0:
         y_hat = y[
             (y >= np.quantile(y, olremp, method='hazen')) &
@@ -151,39 +180,51 @@ def distribution_entropy(
     # (2) Form the histogram
     if hist_or_ks == 'hist':
         # use histogram to calculate pdf
-        if isinstance(num_bins, int):
-            bin_edges = bin_picker(x_min=y.min(), x_max=y.max(), n_bins=num_bins)
-            px = histc(y, bin_edges)
-            px = np.divide(px, np.sum(px))[:-1]
-        elif num_bins in ['sturges', 'fd', 'sqrt', 'auto']:
-            bin_edges = np.histogram_bin_edges(y, bins=num_bins)
-            px = histc(y, bin_edges)[:-1]
-            px = np.divide(px, np.sum(px))
+        if isinstance(num_bins, (int, np.integer)) and not isinstance(num_bins, bool):
+            bin_edges = bin_picker(x_min=y.min(), x_max=y.max(), n_bins=int(num_bins))
+        elif isinstance(num_bins, str) and num_bins in ['sturges', 'fd', 'sqrt', 'auto']:
+            bin_edges = np.histogram_bin_edges(y, bins=num_bins)  # NumPy's rules
         else:
             raise ValueError(
                 f"Unknown binning method: {num_bins}. Choose either a valid rule or manually specify numBins."
             )
+        # (the last bin includes its right edge, as MATLAB's histcounts)
+        px = np.histogram(y, bins=bin_edges)[0].astype(float)
+        px = px / np.sum(px)
         bin_widths = np.diff(bin_edges)
 
     elif hist_or_ks == 'ks':
-        # use kernel density estimate to calculate pdf
-        if isinstance(num_bins, float):
-            # uses specified width
-            bw = num_bins
-            kde = gaussian_kde(y, bw_method=bw)
-            xr = np.linspace(min(y) - 3 * bw, max(y) + 3 * bw, 100)  # 3 x bandwidth padding
-            px = kde(xr)
-        elif num_bins in ['', ' ', '[]', 'none']:
-            # determine the optimal width
-            kde = gaussian_kde(y, bw_method='silverman')  # normal-approx equivalent as per docs
-            actual_bw = kde.factor * np.std(y)  # Convert factor to actual bandwidth
-            xr = np.linspace(min(y) - 3 * actual_bw, max(y) + 3 * actual_bw, 100)
-            px = kde(xr)
+        # Evaluate the kernel density estimate on an explicit, length-stable grid. The range
+        # of a sample grows with N (as ~sqrt(2 log N) for Gaussian data), and with it the
+        # log(bin width) term in the entropy sum, so the grid is anchored to extreme quantiles
+        # instead (consistent estimators, so the interval converges as N grows).
+        num_grid_pts = 200
+        lo, hi = np.quantile(y, [0.001, 0.999], method='hazen')
+        if not hi > lo:  # degenerate (near-constant) input
+            return np.nan
+        pad = 0.1 * (hi - lo)  # a little headroom beyond the quantile range
+        xr = np.linspace(lo - pad, hi + pad, num_grid_pts)
+        if num_bins is None or (isinstance(num_bins, str) and num_bins in ['', ' ', '[]', 'none']) \
+                or (isinstance(num_bins, (list, tuple, np.ndarray)) and len(num_bins) == 0):
+            bw = _ksdensity_bandwidth(y)  # selects the width as MATLAB's ksdensity does
+        elif isinstance(num_bins, (int, float, np.integer, np.floating)) and not isinstance(num_bins, bool):
+            # uses the specified width (the standard deviation of the Gaussian kernel). NB: a
+            # fixed absolute bandwidth makes the density estimate inconsistent (for consistency
+            # the bandwidth must shrink with the sample size), so the smoothness of the
+            # estimated density, and hence its entropy, drifts with N: hctsa no longer registers
+            # the fixed-bandwidth settings, but the option remains for a specific smoothing scale.
+            bw = float(num_bins)
         else:
             raise ValueError(
                 f"Unknown type for {num_bins}. Either set to a float (which specifies the width, or leave empty.)"
             )
+        # (the kernel standard deviation is bw: scipy's factor is relative to the data's std)
+        px = gaussian_kde(y, bw_method=bw / np.std(y, ddof=1))(xr)
         bin_widths = np.ones(len(px)) * (xr[1] - xr[0])
+        # The density must be converted to probability mass per cell for the entropy sum
+        # below (shared with 'hist'), and renormalized (the grid truncates some tail mass)
+        px = px * bin_widths
+        px = px / np.sum(px)
 
     else:
         raise ValueError(f"Unknown distribution estimator: {hist_or_ks}. Use 'hist' or 'ks'.")
@@ -201,100 +242,264 @@ def distribution_entropy(
 
     return out
 
+_MAD_TO_SIGMA = 0.6745
+
+
+def _bisquare_weights(r: np.ndarray) -> np.ndarray:
+    return (np.abs(r) < 1) * (1 - r ** 2) ** 2
+
+
+def _robustfit(x: np.ndarray, y: np.ndarray, tune: float = 4.685) -> tuple:
+    """
+    Robust straight-line fit by iteratively reweighted least squares with Tukey's bisquare
+    weights: a port of MATLAB's ``[b, stats] = robustfit(x, y)`` (default options).
+
+    Follows ``statrobustfit``: leverage-adjusted residuals, residual scale from the MAD
+    (``median(|r|) / 0.6745`` over the largest residuals, excluding the smallest ``p - 1``),
+    the same convergence rule, and the same standard errors (a robust estimate of the error
+    scale combined with the OLS one, from ``statrobustsigma``).
+
+    Returns
+    -------
+    (b, se) : tuple of ndarray
+        The intercept and slope, and their standard errors. NaN arrays if the design is rank
+        deficient or there are fewer than 3 points.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    y = np.asarray(y, dtype=float).ravel()
+    n = x.size
+    X = np.column_stack([np.ones(n), x])
+    p = 2
+    nan2 = np.full(2, np.nan)
+    if n <= p:
+        return nan2, nan2
+
+    Q, R = np.linalg.qr(X)
+    tol = abs(R[0, 0]) * max(n, p) * np.finfo(float).eps
+    if np.sum(np.abs(np.diag(R)) > tol) < p:
+        return nan2, nan2
+    b = np.linalg.solve(R, Q.T @ y)
+
+    E = np.linalg.solve(R.T, X.T).T  # X / R
+    h = np.minimum(0.9999, np.sum(E * E, axis=1))
+    adjfactor = 1.0 / np.sqrt(1.0 - h)
+
+    dfe = n - p
+    ols_s = np.linalg.norm(y - X @ b) / np.sqrt(dfe)
+    tiny_s = 1e-6 * np.std(y, ddof=1)
+    if tiny_s == 0:
+        tiny_s = 1.0
+
+    def madsigma(r, rank):
+        rs = np.sort(np.abs(r))
+        return np.median(rs[max(1, rank) - 1:]) / _MAD_TO_SIGMA
+
+    D = np.sqrt(np.finfo(float).eps)
+    b0 = np.zeros(2)
+    wxrank = p
+    w = np.ones(n)
+    it = 0
+    while it == 0 or np.any(np.abs(b - b0) > D * np.maximum(np.abs(b), np.abs(b0))):
+        it += 1
+        if it > 50:
+            logger.warning("Iteration limit reached in robust fit")
+            break
+        r = y - X @ b
+        radj = r * adjfactor
+        s = madsigma(radj, wxrank)
+        w = _bisquare_weights(radj / (max(s, tiny_s) * tune))
+        b0 = b
+        sw = np.sqrt(w)
+        Xw = X * sw[:, None]
+        b = np.linalg.lstsq(Xw, y * sw, rcond=None)[0]
+        wxrank = int(np.linalg.matrix_rank(Xw))
+
+    # Standard errors
+    r = y - X @ b
+    radj = r * adjfactor
+    mad_s = madsigma(radj, p)
+    if np.all((w < D) | (w > 1 - D)):
+        included = w > 1 - D
+        robust_s = np.linalg.norm(r[included]) / np.sqrt(np.sum(included) - p)
+    else:
+        # statrobustsigma
+        st = max(mad_s, tiny_s) * tune
+        u = radj / st
+        phi = u * _bisquare_weights(u)
+        delta = 0.0001
+        u1 = u - delta
+        phi0 = u1 * _bisquare_weights(u1)
+        u1 = u + delta
+        phi1 = u1 * _bisquare_weights(u1)
+        dphi = (phi1 - phi0) / (2 * delta)
+        m1 = np.mean(dphi)
+        m2 = np.sum((1 - h) * phi ** 2) / (n - p)
+        K = 1 + (p / n) * (1 - m1) / m1
+        robust_s = K * np.sqrt(m2) * st / m1
+    sigma = max(robust_s, np.sqrt((ols_s ** 2 * p ** 2 + robust_s ** 2 * n) / (p ** 2 + n)))
+    RI = np.linalg.solve(R, np.eye(p))
+    C = (RI @ RI.T) * sigma ** 2
+    se = np.sqrt(np.maximum(np.finfo(float).eps, np.diag(C)))
+    return b, se
+
+
 def multi_scale_entropy(
     y: ArrayLike,
     scale_range: Optional[Union[list, range]] = None,
     m: int = 2,
     r: float = 0.15,
-    pre_process_how: Optional[str] = None
-) -> dict:
+    pre_process_how: Optional[str] = None,
+    what_entropy: str = 'sampen',
+    num_classes: int = 6
+) -> Union[dict, float]:
     """
-    Compute multiscale entropy (MSE) of a time series using sample entropy across multiple scales.
+    Multiscale entropy (MSE) of a time series.
+
+    At each scale ``s`` the time series is coarse-grained by averaging over non-overlapping
+    windows of ``s`` samples (scale 1 is the original series), and the entropy of the
+    coarse-grained series is computed: by default the sample entropy, SampEn(m, r)
+    (:func:`sample_entropy`), as in the multiscale entropy of Costa et al. [1]. Scales are
+    handled as Composite Multiscale Entropy [2]: the value at scale ``s`` is the mean over all
+    ``s`` possible starting offsets of the windows, instead of just offset 0 (single-offset
+    estimates can swing several-fold depending on the arbitrary start). Offsets for which the
+    coarse-grained series has fewer than 20 samples are omitted from the mean, and a scale
+    for which all are is NaN. The entropy is also summarized across scales (extremes and where
+    they occur, mean, spread, trend).
+
+    References
+    ----------
+    .. [1] M. Costa, A. L. Goldberger and C.-K. Peng, "Multiscale entropy analysis of
+        biological signals", Phys. Rev. E 71, 021906 (2005).
+    .. [2] S.-D. Wu, C.-W. Wu, S.-G. Lin, C.-C. Wang and K.-Y. Lee, "Time series analysis using
+        composite multiscale entropy", Entropy 15(3), 1069 (2013).
+    .. [3] H. Azami, M. Rostaghi, D. Abasolo and J. Escudero, "Refined Composite Multiscale
+        Dispersion Entropy and its Application to Biomedical Signals", IEEE Trans. Biomed. Eng.
+        64(12), 2872 (2017).
 
     Parameters
     ----------
     y : array-like
         Input time series.
     scale_range : list or range, optional
-        List or range of scales (window sizes) to use for coarse-graining. Default is range(1, 11).
+        Scales (window sizes) for coarse-graining. Default is ``range(1, 11)``.
     m : int, optional
-        Embedding dimension for sample entropy. Default is 2.
+        Embedding dimension (length of the sequences to match). Default is 2.
     r : float, optional
-        Similarity threshold for sample entropy. Default is 0.15.
+        Similarity threshold for sample entropy, an absolute value (it is not rescaled with
+        the scale). It is a fraction of the standard deviation of the input if ``y`` is
+        z-scored. Unused for the dispersion settings. Default is 0.15.
     pre_process_how : str, optional
-        Preprocessing method. Supported:
+        Pre-processing applied (and the result z-scored) before coarse-graining:
 
-        - 'diff1': Use z-scored first differences.
-        - 'rescale_tau': Rescale using autocorrelation time.
-        - `None`: No pre-processing.
+        - 'diff1': incremental differences;
+        - 'rescale_tau': first coarse-grain at the first zero-crossing of the autocorrelation function;
+        - `None`: none.
 
         Default is `None`.
+    what_entropy : {'sampen', 'dispen', 'fdispen'}, optional
+        The entropy evaluated at each scale: sample entropy (``'sampen'``, the classical
+        multiscale entropy), normalized dispersion entropy (``'dispen'``, i.e. multiscale
+        dispersion entropy [3]; :func:`dispersion_entropy` with ``tau = 1``) or its
+        fluctuation-based variant (``'fdispen'``). Output names carry the corresponding
+        suffix (``dispen_s1``, ``meanDispEn``, ...). Default is ``'sampen'``.
+    num_classes : int, optional
+        The number of amplitude classes for the dispersion settings. Default is 6.
 
     Returns
     -------
-    dict
-        Dictionary containing sample entropy at each scale and summary statistics.
+    dict or float
+        A dictionary with (names for ``what_entropy = 'sampen'``; ``'dispen'``/``'fdispen'``
+        replace ``SampEn`` by ``DispEn``/``FDispEn`` and ``sampen`` by ``dispen``/``fdispen``):
+
+        - 'sampen_s{k}': the entropy at each scale ``k`` in ``scale_range``;
+        - 'maxSampEn', 'minSampEn': the maximum and minimum across scales, with
+          'maxScale' and 'minScale' the scales at which they occur;
+        - 'meanSampEn', 'stdSampEn', 'cvSampEn': the mean, standard deviation and
+          coefficient of variation across scales;
+        - 'meanch': the mean change from one scale to the next;
+        - 'slope', 'slopeSE': the slope, and its standard error, of a robust (bisquare,
+          as MATLAB's ``robustfit``) linear fit of the entropy against scale; NaN unless at
+          least 4 scales have valid values.
+
+        NaN (scalar) if no scale has enough samples.
     """
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float)
     m = int(m)
     if scale_range is None:
-        scale_range = range(1, 10)
+        scale_range = range(1, 11)
+    scale_range = list(scale_range)
     min_ts_length = 20
     num_scales = len(scale_range)
 
-    if pre_process_how is not None:
-        if pre_process_how == 'diff1':
-            y = z_score(np.diff(y))
-        elif pre_process_how == 'rescale_tau':
-            tau = first_crossing(y, 'ac', 0, 'discrete')
-            if np.isnan(tau):  # undefined ACF (e.g., constant series)
-                logger.warning("Could not determine the autocorrelation time for 'rescale_tau' pre-processing")
-                return np.nan
-            y_buffer = make_buffer(y, tau)
-            y = np.mean(y_buffer, 1)
-            y = z_score(y)
-        else:
-            raise ValueError(f"Unknown preprocessing setting: {pre_process_how}")    
-    
-    # Coarse-graining across scales
-    y_cg = [np.mean(make_buffer(y, buffer_size), 1) for buffer_size in scale_range]
+    if what_entropy not in ('sampen', 'dispen', 'fdispen'):
+        raise ValueError(
+            f"Unknown entropy '{what_entropy}' (expected 'sampen', 'dispen' or 'fdispen')")
+    en_name, en_prefix = {'sampen': ('SampEn', 'sampen'), 'dispen': ('DispEn', 'dispen'),
+                          'fdispen': ('FDispEn', 'fdispen')}[what_entropy]
 
-    # Run sample entropy at each scale
+    # Pre-processing happens BEFORE the coarse-graining, and the result is z-scored
+    if pre_process_how:
+        y = pre_process(y, pre_process_how)
+        if np.isscalar(y) or np.ndim(y) == 0:  # e.g., an undefined autocorrelation time
+            logger.warning(f"Could not apply '{pre_process_how}' pre-processing")
+            return np.nan
+        y = _zscore_matlab(y)
+
+    # Composite coarse-graining and entropy across scales: at each scale, the mean over all
+    # `scale` possible non-overlapping starting offsets (Eq. (16) of Costa et al. is the
+    # offset-0 coarse-graining)
     samp_ens = np.zeros(num_scales)
-    for si in range(num_scales):
-        if len(y_cg[si]) >= min_ts_length:
-            samp_ens[si] = sample_entropy(y_cg[si], m, r)[f'sampen{m}']
-        else:
-            samp_ens[si] = np.nan
+    for si, scale in enumerate(scale_range):
+        scale = int(scale)
+        offset_vals = np.full(scale, np.nan)
+        for off in range(scale):
+            y_cg = np.mean(make_buffer(y[off:], scale), axis=1) if y.size - off >= scale else np.empty(0)
+            if len(y_cg) < min_ts_length:
+                continue
+            if what_entropy == 'sampen':
+                offset_vals[off] = sample_entropy(y_cg, m, r)[f'sampen{m}']
+            else:
+                disp = dispersion_entropy(y_cg, m, num_classes, 1)
+                if isinstance(disp, dict):
+                    offset_vals[off] = disp['normDispEn' if what_entropy == 'dispen' else 'normFDispEn']
+        samp_ens[si] = np.mean(offset_vals[~np.isnan(offset_vals)]) if not np.all(np.isnan(offset_vals)) else np.nan
 
     # Outputs: multiscale entropy
     if np.all(np.isnan(samp_ens)):
-        if pre_process_how:
-            pp_text = f"after {pre_process_how} pre-processing"
-        else:
-            pp_text = ""
-        logger.warning(f"Not enough samples ({len(y)} {pp_text}) to compute sample entropy at multiple scales")
-        return {'out': np.nan}
+        pp_text = f"after {pre_process_how} pre-processing" if pre_process_how else ""
+        logger.warning(f"Not enough samples ({len(y)} {pp_text}) to compute {en_name} at multiple scales")
+        return np.nan
 
     # Output raw values
-    out = {f'sampen_s{scale_range[i]}': samp_ens[i] for i in range(num_scales)}
+    out = {f'{en_prefix}_s{scale_range[i]}': samp_ens[i] for i in range(num_scales)}
 
-    # Summary statistics of the variation
-    max_samp_en = np.nanmax(samp_ens)
-    max_ind = np.nanargmax(samp_ens)
-    min_samp_en = np.nanmin(samp_ens)
-    min_ind = np.nanargmin(samp_ens)
+    # Summary statistics of the variation (max, min, mean, std, diff all ignore NaN, as hctsa)
+    valid = samp_ens[~np.isnan(samp_ens)]
+    max_ind = int(np.nanargmax(samp_ens))
+    min_ind = int(np.nanargmin(samp_ens))
+    mean_val = np.mean(valid)
+    std_val = np.std(valid, ddof=1) if valid.size > 1 else 0.0
+    out[f'max{en_name}'] = samp_ens[max_ind]
+    out['maxScale'] = scale_range[max_ind]
+    out[f'min{en_name}'] = samp_ens[min_ind]
+    out['minScale'] = scale_range[min_ind]
+    out[f'mean{en_name}'] = mean_val
+    out[f'std{en_name}'] = std_val
+    with np.errstate(divide='ignore', invalid='ignore'):
+        out[f'cv{en_name}'] = std_val / mean_val
+    d = np.diff(samp_ens)
+    d = d[~np.isnan(d)]
+    out['meanch'] = np.mean(d) if d.size else np.nan
 
-    out.update({
-        'maxSampEn': max_samp_en,
-        'maxScale': scale_range[max_ind],
-        'minSampEn': min_samp_en,
-        'minScale': scale_range[min_ind],
-        'meanSampEn': np.nanmean(samp_ens),
-        'stdSampEn': np.nanstd(samp_ens, ddof=1),
-        'cvSampEn': np.nanstd(samp_ens, ddof=1) / np.nanmean(samp_ens),
-        'meanch': np.nanmean(np.diff(samp_ens))
-    })
+    # Trend across scales: a robust linear fit of the entropy against scale
+    good = ~np.isnan(samp_ens)
+    if good.sum() >= 4:
+        b, se = _robustfit(np.asarray(scale_range, dtype=float)[good], samp_ens[good])
+        out['slope'] = b[1]
+        out['slopeSE'] = se[1]
+    else:
+        out['slope'] = np.nan
+        out['slopeSE'] = np.nan
 
     return out
 
@@ -338,6 +543,11 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
             - 'sampen{m}': Sample entropy for each m from 0 to M
             - 'quadSampEn{m}': Quadratic sample entropy for each m
             - 'meanchsampen': Mean change in sample entropy values
+
+        As in hctsa's ``sampen_mex``, ``sampen{k}`` (and ``quadSampEn{k}``) is NaN for
+        ``k >= 1`` when no template of length ``k`` matched (there are no matches to
+        form the ratio of), and 0 when templates of length ``k`` matched but none of
+        length ``k + 1`` did.
     """
     m = int(m)
     y = np.asarray(y, dtype=np.float64)
@@ -398,9 +608,12 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
     m : int, optional
         Embedding dimension (order of the permutation entropy). Default is 2.
     tau : int or str, optional
-        Time-delay for the embedding: an integer, or ``'ac'`` for the first
-        zero-crossing of the autocorrelation function. NaN is returned if the delay
-        cannot be determined (e.g., a constant series). Default is 1.
+        Time-delay for the embedding: an integer, or a rule understood by
+        :func:`~pyhctsa.utils.get_tau`: ``'ac'`` (first zero-crossing of the
+        autocorrelation function), ``'ac1e'`` (floor of its first 1/e crossing) or ``'mi'``
+        (the smaller of the first minimum of the Kraskov automutual information and the
+        ``'ac1e'`` delay). NaN is returned if the delay cannot be determined (e.g., a
+        constant series). Default is 1.
 
     Returns
     -------
@@ -420,10 +633,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
     """
     m = int(m)
     y = np.asarray(y)
-    if isinstance(tau, str):
-        if tau != 'ac':
-            raise ValueError(f"Unknown tau '{tau}'")
-        tau = first_crossing(y, 'ac', 0, 'discrete')
+    tau = get_tau(y, tau)
     if np.isnan(tau):  # the delay could not be determined (e.g., constant series)
         return np.nan
     tau = int(tau)
@@ -468,7 +678,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
     return {"permEn": pe, "normPermEn": pe_norm, "permEnLE": pe_le,
             "normWPE": norm_wpe, "ordAsym": ord_asym}
 
-def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: int = -1) -> dict:
+def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.12, t_max: int = -1) -> dict:
     """
     Recurrence period density entropy (RPDE).
 
@@ -488,9 +698,9 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: i
     m : int, optional
         Embedding dimension. Default is 2.
     tau : int or str, optional
-        Embedding time delay: an integer, or ``'ac'`` for the first zero-crossing of the
-        autocorrelation function (NaN is returned if it is undefined, e.g. for a constant
-        series). Default is 1.
+        Embedding time delay: an integer, or a rule understood by
+        :func:`~pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``). NaN is returned if
+        it cannot be determined (e.g. for a constant series). Default is 1.
     epsilon : float, optional
         Recurrence neighbourhood radius. Default is 0.12.
     t_max : int, optional
@@ -509,9 +719,7 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: i
             - 'maxRPD': Maximum value of rpd (rescaled by N).
 
     """
-    if tau == 'ac':
-        # use the first zero crossing of the ACF
-        tau = first_crossing(y, 'ac', 0, 'discrete')
+    tau = get_tau(y, tau)
     if np.isnan(tau):
         # the delay could not be determined (e.g., constant series)
         logger.warning('Could not determine embedding parameters for this time series')
@@ -564,9 +772,11 @@ def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2,
     rth : float, optional
         Similarity threshold :math:`r`. Default is 0.2.
     tau : int or str, optional
-        The time delay between the elements of a pattern: an integer, or ``'ac'`` for
-        the first zero-crossing of the autocorrelation function. The default of 1
-        uses consecutive samples.
+        The time delay between the elements of a pattern: an integer, or a rule
+        understood by :func:`~pyhctsa.utils.get_tau` (``'ac'``: first zero-crossing of the
+        autocorrelation function; ``'ac1e'``: floor of its first 1/e crossing; ``'mi'``: the
+        smaller of the first Kraskov automutual-information minimum and the ``'ac1e'``
+        delay). The default of 1 uses consecutive samples.
 
     Returns
     -------
@@ -576,10 +786,7 @@ def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2,
         vectors).
     """
     x = np.asarray(x)
-    if isinstance(tau, str):
-        if tau != 'ac':
-            raise ValueError(f"Unknown tau '{tau}'")
-        tau = first_crossing(x, 'ac', 0, 'discrete')
+    tau = get_tau(x, tau)
     if np.isnan(tau):  # the delay could not be determined (e.g., constant series)
         return np.nan
     tau = int(tau)
@@ -619,6 +826,141 @@ def _app_samp_entropy(
         phi[1] = np.mean((count2 - 1) / (emb_data2.shape[0] - 1))
 
     return phi
+
+def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str] = 1,
+                       mapping_how: str = 'ncdf') -> Union[dict, float]:
+    """
+    Dispersion entropy of a time series.
+
+    Maps the time series onto ``c`` amplitude classes, replaces each run of ``m`` values
+    (spaced ``tau`` samples apart) by the sequence of classes it visits (a 'dispersion
+    pattern'), and returns the Shannon entropy of the resulting pattern distribution.
+    Port of hctsa's ``EN_DispEn``.
+
+    Unlike permutation entropy (:func:`permutation_entropy`), which records only the rank
+    ordering within each embedding vector and so discards amplitude information entirely
+    ([1, 2, 3] and [1, 2, 300] are the same pattern), dispersion entropy assigns each point
+    to an amplitude class first, so the size of an excursion, not just its direction, shapes
+    the symbol sequence. It is also markedly cheaper than sample entropy and degrades more
+    gracefully on short, noisy series.
+
+    The fluctuation-based variant is also returned. It symbolizes the differences between
+    successive classes rather than the classes themselves, and so responds to the size of
+    class-to-class changes rather than to absolute amplitude level.
+
+    References
+    ----------
+    .. [1] M. Rostaghi and H. Azami, "Dispersion Entropy: A Measure for Time-Series
+        Analysis", IEEE Signal Processing Letters 23(5) 610 (2016).
+    .. [2] H. Azami and J. Escudero, "Amplitude- and Fluctuation-Based Dispersion
+        Entropy", Entropy 20(3) 210 (2018).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    m : int, optional
+        The embedding dimension. The number of possible patterns grows as ``c**m``, so ``m``
+        must stay small for the pattern frequencies to be estimable. Default is 2.
+    c : int, optional
+        The number of amplitude classes (must be at least 2). Default is 6.
+    tau : int or str, optional
+        The time delay: an integer, or a rule understood by :func:`~pyhctsa.utils.get_tau`
+        (``'ac'``, ``'ac1e'``, ``'mi'``). Default is 1.
+    mapping_how : {'ncdf', 'linear'}, optional
+        How to map the time series onto (0, 1) before classifying:
+
+        - ``'ncdf'``: the normal cumulative distribution function with the series' own mean
+          and standard deviation (the mapping the method was introduced with; a linear
+          mapping assigns most points to a few classes whenever the maximum or minimum is far
+          from the median, so a single outlier can collapse the symbolization).
+        - ``'linear'``: a min-max rescaling onto [0, 1] (outlier-sensitive).
+
+        Default is ``'ncdf'``.
+
+    Returns
+    -------
+    dict or float
+        A dictionary with:
+
+        - 'dispEn': the dispersion entropy (nats),
+        - 'normDispEn': 'dispEn' normalized by its maximum possible value, ``log(c**m)``,
+        - 'fDispEn': the fluctuation-based dispersion entropy (nats; NaN for ``m = 1``),
+        - 'normFDispEn': 'fDispEn' normalized by ``log((2c-1)**(m-1))`` (NaN for ``m = 1``).
+
+        NaN (scalar) if the delay cannot be determined, the series is constant, or it is
+        too short for the embedding (fewer than 5 embedding vectors).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    m = int(m)
+    c = int(c)
+    if c < 2:
+        raise ValueError(f"Need at least two amplitude classes (c = {c} given)")
+    if m < 1:
+        raise ValueError(f"Embedding dimension must be at least 1 (m = {m} given)")
+
+    tau = get_tau(y, tau)
+    if np.isnan(tau):  # data-dependent: no correlation length could be estimated
+        return np.nan
+    tau = int(tau)
+
+    num_vectors = n - (m - 1) * tau
+    if num_vectors < 5:
+        logger.warning(f"Time series (N = {n}) too short for dispersion entropy at m = {m}, tau = {tau}")
+        return np.nan
+
+    # Map the series onto (0, 1), then onto the c amplitude classes
+    if mapping_how == 'ncdf':
+        sigma = np.std(y, ddof=1)
+        if not sigma > 0:
+            logger.warning("Constant time series has no dispersion structure")
+            return np.nan
+        y_mapped = norm.cdf(y, loc=np.mean(y), scale=sigma)
+    elif mapping_how == 'linear':
+        y_range = np.max(y) - np.min(y)
+        if not y_range > 0:
+            logger.warning("Constant time series has no dispersion structure")
+            return np.nan
+        y_mapped = (y - np.min(y)) / y_range
+    else:
+        raise ValueError(f"Unknown mapping '{mapping_how}' (expected 'ncdf' or 'linear')")
+
+    # Classes 1..c as z = round(c*y + 0.5) (Rostaghi & Azami); round half away from zero as
+    # MATLAB (the argument is positive), then clamp into 1..c (the top of the range rounds to c+1)
+    v = c * y_mapped + 0.5
+    z = np.floor(v)
+    z = z + ((v - z) >= 0.5)
+    z = np.clip(z, 1, c).astype(np.int64)
+
+    # Z[i, k] = z[i + k*tau], one row per embedding vector
+    emb = z[np.arange(num_vectors)[:, None] + np.arange(m) * tau]
+
+    # Dispersion entropy: the patterns are the class sequences themselves (c^m of them),
+    # encoded as base-c integers
+    place_values = c ** np.arange(m - 1, -1, -1, dtype=np.int64)
+    pattern_idx = (emb - 1) @ place_values
+    p = np.bincount(pattern_idx, minlength=c ** m) / num_vectors
+    p = p[p > 0]
+    disp_en = -np.sum(p * np.log(p))
+    out = {'dispEn': disp_en, 'normDispEn': disp_en / np.log(float(c) ** m)}
+
+    # Fluctuation-based: the patterns are the successive class differences, each in
+    # -(c-1)..(c-1), giving (2c-1)^(m-1) patterns
+    if m < 2:
+        out['fDispEn'] = np.nan
+        out['normFDispEn'] = np.nan
+        return out
+    d_z = np.diff(emb, axis=1) + (c - 1)  # shift -(c-1)..(c-1) onto 0..2c-2
+    num_fluct = (2 * c - 1) ** (m - 1)
+    f_place_values = (2 * c - 1) ** np.arange(m - 2, -1, -1, dtype=np.int64)
+    f_idx = d_z @ f_place_values
+    p_f = np.bincount(f_idx, minlength=num_fluct) / num_vectors
+    p_f = p_f[p_f > 0]
+    f_disp_en = -np.sum(p_f * np.log(p_f))
+    out['fDispEn'] = f_disp_en
+    out['normFDispEn'] = f_disp_en / np.log(float(num_fluct))
+    return out
 
 def complexity_invariant_distance(y: ArrayLike) -> dict:
     """
