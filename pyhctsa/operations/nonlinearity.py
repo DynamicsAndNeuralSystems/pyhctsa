@@ -594,9 +594,11 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
     y : array-like
         Input time series.
     tau: str or int
-        The time-delay, can be an integer or 'ac', or 'mi' for first
-        zero-crossing of the autocorrelation function or first minimum
-        of the automutual information, respectively. Default is ``'ac'``.
+        The time-delay: an integer, or a rule understood by :func:`pyhctsa.utils.get_tau`.
+        ``'ac'`` is the first zero-crossing of the autocorrelation function,
+        ``'ac1e'`` the (floored) first 1/e crossing of the autocorrelation
+        function, and ``'mi'`` the smaller of the first minimum of the (Kraskov)
+        automutual information and the 1/e time. Default is ``'ac'``.
     m : int
         The embedding dimension. Default is 3.
     
@@ -606,11 +608,10 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
         Various statistics summarizing the obtained eigenvalue distribution.
 
     """
-    if isinstance(tau, str):
-        tau = _resolve_time_delay(y, tau)
-        if np.isnan(tau):
-            logger.warning('Could not get time delay (time series too short?)')
-            return np.nan
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        logger.warning('Could not get time delay (time series too short?)')
+        return np.nan
     try:
         y_embed = time_delay_embed(y, m, int(tau))
     except ValueError as e:  # embedding failed (time series too short)
@@ -1057,7 +1058,7 @@ def _summarise_d2_scaling(dat_v: np.ndarray, dat_M: np.ndarray, p: str,
 
 
 def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
-              theiler_win: Union[int, float] = 0.01) -> Union[dict, float]:
+              theiler_win: Union[int, float, list, tuple] = ('ac', 1)) -> Union[dict, float]:
     """
     Correlation dimension and entropy from the TISEAN package's ``d2`` routine.
 
@@ -1092,14 +1093,20 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     y : array-like
         Input time series.
     tau : int or str, optional
-        The time-delay. Can be an integer, or ``'ac'`` for the first
-        zero-crossing of the autocorrelation function, or ``'mi'`` for the first
-        minimum of the automutual information. Default is 1.
+        The time-delay: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
+        autocorrelation function, ``'ac1e'`` the (floored) first 1/e crossing of
+        the autocorrelation function, and ``'mi'`` the smaller of the first
+        minimum of the (Kraskov) automutual information and the 1/e time.
+        Default is 1.
     maxm : int, optional
         The maximum embedding dimension. Default is 10.
-    theiler_win : int or float, optional
-        The Theiler window. A value in ``(0, 1)`` is taken as a proportion of the
-        time-series length. Default is 0.01, i.e. 1% of the data length.
+    theiler_win : int, float, or ``['ac', k]``, optional
+        The Theiler window (see :func:`pyhctsa.utils.theiler_window`): a number of
+        samples, ``['ac', k]`` for ``k`` times the first zero-crossing of the
+        autocorrelation function (``['ac1e', k]`` is also accepted), or a value in
+        ``(0, 1)`` taken as a proportion of the time-series length (legacy).
+        Default is ``['ac', 1]``.
 
     Returns
     -------
@@ -1118,15 +1125,17 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         return np.nan
 
     # Time delay, tau
-    tau = _resolve_time_delay(y, tau)
+    tau = get_tau(y, tau)
     if np.isnan(tau):
         logger.warning('Time series cannot be embedded (could not get the time delay)')
         return np.nan
     tau = int(tau)
 
     # Theiler window
-    if 0 < theiler_win < 1:  # specify proportion of time-series length
-        theiler_win = round(theiler_win * n)
+    theiler_win = theiler_window(y, theiler_win, n)
+    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
     theiler_win = int(theiler_win)
 
     # Data-dependent failures (no usable TISEAN output, no scaling range, ...) return
@@ -1164,8 +1173,11 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
     out['takens05_max'] = np.nanmax(takens05)
     out['takens05_min'] = np.nanmin(takens05)
     out['takens05_std'] = np.std(takens05, ddof=1)
-    q75, q25 = np.percentile(takens05[~np.isnan(takens05)], [75, 25], method='hazen')
-    out['takens05_iqr'] = q75 - q25
+    if np.all(np.isnan(takens05)):
+        out['takens05_iqr'] = np.nan
+    else:
+        q75, q25 = np.percentile(takens05[~np.isnan(takens05)], [75, 25], method='hazen')
+        out['takens05_iqr'] = q75 - q25
 
     # Find outliers as a means of inferring m_min: look for the estimate
     # approaching a constant for m > m_min
@@ -1271,9 +1283,12 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         point -- a construction TISEAN has no equivalent for -- and ``ref`` was
         repurposed to pick the crossing direction when it moved to TISEAN.
     tau : int or str, optional
-        The time-delay of the embedding. Can be an integer, or ``'ac'`` for the
-        first zero-crossing of the autocorrelation function, or ``'mi'`` for the
-        first minimum of the automutual information. Default is ``'mi'``.
+        The time-delay of the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
+        autocorrelation function, ``'ac1e'`` the (floored) first 1/e crossing of
+        the autocorrelation function, and ``'mi'`` the smaller of the first
+        minimum of the (Kraskov) automutual information and the 1/e time.
+        Default is ``'mi'``.
 
     Returns
     -------
@@ -1295,7 +1310,7 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     y = np.asarray(y, dtype=float).ravel()
     n = y.size  # length of the time series
 
-    tau = _resolve_time_delay(y, tau)
+    tau = get_tau(y, tau)
     if np.isnan(tau):
         logger.warning('Could not get time delay (time series too short?)')
         return np.nan
@@ -1304,8 +1319,12 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     # Embed in three dimensions, and cut on the last coordinate at TISEAN's own
     # default threshold (that coordinate's mean). hctsa reads the .poin file
     # back, so the section points are the ones TISEAN printed.
-    v = _tisean.poincare(y, dim=3, delay=tau, comp=3, direction=direction,
-                         as_written=True)
+    try:
+        v = _tisean.poincare(y, dim=3, delay=tau, comp=3, direction=direction,
+                             as_written=True)
+    except ValueError as exc:  # e.g. a constant series: no section can be cut
+        logger.warning(f'TISEAN poincare failed: {exc}')
+        return np.nan
 
     # Columns are the two uncut embedding coordinates, followed by the
     # (interpolated) crossing time -- only the first two are point coordinates:
