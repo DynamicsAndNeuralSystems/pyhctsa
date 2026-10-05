@@ -46,7 +46,8 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=6.0", "pytest-cov", "pytest-mock"]
+tda = ["ripser"]  # persistent_homology (NL_PersistentHomology); skipped by the calculator without it
+test = ["pytest>=6.0", "pytest-cov", "pytest-mock", "ripser"]
 
 [project.urls]
 Homepage = "https://dynamicsandneuralsystems.github.io/pyhctsa/"
