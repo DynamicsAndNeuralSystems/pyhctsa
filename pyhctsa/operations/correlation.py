@@ -1445,6 +1445,13 @@ def stick_angles(y: ArrayLike) -> dict:
         the angles, stationarity, autocorrelation, and measures of the distribution of
         these stick angles.
 
+        ``pnsumabsdiff`` is the summed absolute difference between the histograms (the proportion
+        of angles in each of 20 bins spanning -pi/2 to pi/2) of the positive and negative angles
+        (0 if identical, 2 if they share no bin); ``symks_p`` and ``symks_n`` are half the summed
+        absolute difference between the histogram of the positive or negative set's angles and
+        its mirror image about zero (0 if symmetric, 1 if all angles are in bins whose mirror
+        image is empty).
+
         As in hctsa, redundant statistics are not returned: ``std_p``, ``std_n``,
         ``statav2_all_s``, ``statav3_all_s``, ``statav4_all_s``, ``ac2_p``, ``ac2_n``,
         ``ac2_all``, ``tau_all`` and ``ac1_all``.
@@ -1475,66 +1482,42 @@ def stick_angles(y: ArrayLike) -> dict:
     out['mean'] = np.nanmean(all_angles)
     out['median'] = np.nanmedian(all_angles)
 
-    # difference between positive and negative angles
-    # return difference in densities
-    
-    ksx = np.linspace(np.min(all_angles), np.max(all_angles), 200)
-    out['pnsumabsdiff'] = np.nan
-    if (len(angles[0]) > 0 and len(angles[1]) > 0 and
-        np.var(angles[0]) > 1e-10 and np.var(angles[1]) > 1e-10):
-        try:
-            ksx = np.linspace(np.min(all_angles), np.max(all_angles), 200)
-            # Calculate the Kernel Density Estimate (KDE) for the first angle distribution.
-            kde1 = gaussian_kde(angles[0], bw_method='scott')
-            ksy1 = kde1(ksx)
+    # Difference between positive and negative angles. Angles lie in (-pi/2, pi/2), so histograms
+    # with fixed bins over that support need no smoothing parameter and are bounded (a kernel
+    # density would depend on the bandwidth, which collapses when the angles are tied)
+    bin_edges = _fixed_edges(20, -np.pi / 2, np.pi / 2)
+    if len(angles[0]) > 0 and len(angles[1]) > 0:
+        px1 = np.histogram(angles[0], bins=bin_edges)[0] / len(angles[0])
+        px2 = np.histogram(angles[1], bins=bin_edges)[0] / len(angles[1])
+        out['pnsumabsdiff'] = np.sum(np.abs(px1 - px2))
+    else:
+        out['pnsumabsdiff'] = np.nan
 
-            # Calculate the KDE for the second angle distribution.
-            kde2 = gaussian_kde(angles[1], bw_method='scott')
-            ksy2 = kde2(ksx)
-
-            # If the KDEs are calculated successfully, compute the sum of the absolute
-            out['pnsumabsdiff'] = np.sum(np.abs(ksy1 - ksy2))
-        except LinAlgError:
-            pass
-    
-    # # how symmetric is the distribution of angles?
+    # How symmetric is the distribution of angles? The difference between the histogram of the
+    # positive (negative) set and its mirror image about zero (the bins are symmetric about zero)
     out['symks_p'] = np.nan
     out['ratmean_p'] = np.nan
+    if len(angles[0]) > 0:
+        px1 = np.histogram(angles[0], bins=bin_edges)[0] / len(angles[0])
+        out['symks_p'] = 0.5 * np.sum(np.abs(px1 - px1[::-1]))
+        out['ratmean_p'] = np.mean(angles[0][angles[0] > 0]) / np.mean(angles[0][angles[0] < 0])
 
-    if len(angles[0]) > 0 and np.var(angles[0]) > 1e-10:
-        try:
-            maxdev = np.max(np.abs(angles[0]))
-            kde = gaussian_kde(angles[0], bw_method='scott')
-            ksy1 = kde(np.linspace(-maxdev, maxdev, 201))
-            out['symks_p'] = np.sum(np.abs(ksy1[:100] - ksy1[101:][::-1]))
-            out['ratmean_p'] = np.mean(angles[0][angles[0] > 0])/np.mean(angles[0][angles[0] < 0])
-        except LinAlgError:
-            pass
-    
     out['symks_n'] = np.nan
     out['ratmean_n'] = np.nan
-    if len(angles[1]) > 0 and np.var(angles[1]) > 1e-10:
-        try:
-            maxdev = np.max(np.abs(angles[1]))
-            kde = gaussian_kde(angles[1], bw_method='scott')
-            ksy2 = kde(np.linspace(-maxdev, maxdev, 201))
-            out['symks_n'] = np.sum(np.abs(ksy2[:100] - ksy2[101:][::-1]))
-            out['ratmean_n'] = np.mean(angles[1][angles[1] > 0])/np.mean(angles[1][angles[1] < 0])
-        except LinAlgError:
-            pass
-    
+    if len(angles[1]) > 0:
+        px2 = np.histogram(angles[1], bins=bin_edges)[0] / len(angles[1])
+        out['symks_n'] = 0.5 * np.sum(np.abs(px2 - px2[::-1]))
+        out['ratmean_n'] = np.mean(angles[1][angles[1] > 0]) / np.mean(angles[1][angles[1] < 0])
+
     # z-score
-    zangles = []
-    # handle the case where angles is a constant
-    if np.var(angles[0], ddof=1) > 1e-10:
-        zangles.append(z_score(angles[0]))
-    else:
-        zangles.append([])
-    if np.var(angles[1], ddof=1) > 1e-10:
-        zangles.append(z_score(angles[1]))
-    else:
-        zangles.append([])
-    zallAngles = z_score(all_angles)
+    # (a constant set of angles is z-scored to zeros, as MATLAB's zscore)
+    def _z(a):
+        a = np.asarray(a, dtype=float)
+        if a.size == 0:
+            return []
+        return z_score(a) if np.var(a, ddof=1) > 1e-10 else _zscore_matlab(a)
+    zangles = [_z(angles[0]), _z(angles[1])]
+    zallAngles = _z(all_angles)
 
     # how stationary are the angle sets?
 
