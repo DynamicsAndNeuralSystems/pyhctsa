@@ -613,7 +613,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
         :func:`~pyhctsa.utils.get_tau`: ``'ac'`` (first zero-crossing of the
         autocorrelation function), ``'ac1e'`` (floor of its first 1/e crossing) or ``'mi'``
         (the smaller of the first minimum of the Kraskov automutual information and the
-        ``'ac1e'`` delay). NaN is returned if the delay cannot be determined (e.g., a
+        ``'ac1e'`` delay). All outputs are NaN if the delay cannot be determined (e.g., a
         constant series). Default is 1.
 
     Returns
@@ -634,14 +634,14 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
     """
     m = int(m)
     y = np.asarray(y)
+    nan_out = {"permEn": np.nan, "normPermEn": np.nan, "permEnLE": np.nan,
+               "normWPE": np.nan, "ordAsym": np.nan}
     tau = get_tau(y, tau)
     if np.isnan(tau):  # the delay could not be determined (e.g., constant series)
-        return np.nan
+        return nan_out
     tau = int(tau)
     assert tau > 0, "delay must be greater than zero."
 
-    nan_out = {"permEn": np.nan, "normPermEn": np.nan, "permEnLE": np.nan,
-               "normWPE": np.nan, "ordAsym": np.nan}
     try:
         embedded = time_delay_embed(y, m, tau)
     except ValueError:
