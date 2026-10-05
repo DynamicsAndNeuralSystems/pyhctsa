@@ -14,6 +14,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 from ..operations.correlation import autocorr, first_crossing
+from ..operations.physics import _ksdensity
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..toolboxes.matlab.optimizers import minimize
@@ -302,6 +303,25 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
 
     return out
 
+def _gauss1_r2(x: np.ndarray) -> float:
+    """
+    R-squared of a Gaussian fit to the kernel-density estimate of x.
+
+    Equivalent to hctsa's ``DN_SimpleFit(x, 'gauss1', 0).r2``: the curve
+    a * exp(-((t - b) / c) ** 2) is fitted by nonlinear least squares to MATLAB's
+    default ``ksdensity`` estimate of x (100 points). NaN if the fit fails.
+    """
+    try:
+        dny, dnx = _ksdensity(np.asarray(x, dtype=float))
+        gauss1 = lambda t, a, b, c: a * np.exp(-((t - b) / c) ** 2)
+        i0 = int(np.argmax(dny))
+        popt, _ = curve_fit(gauss1, dnx, dny,
+                            p0=[dny[i0], dnx[i0], (dnx[-1] - dnx[0]) / 4], maxfev=10000)
+        sse = np.sum((dny - gauss1(dnx, *popt)) ** 2)
+        return float(1 - sse / np.sum((dny - np.mean(dny)) ** 2))
+    except (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
+        return np.nan
+
 def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
                  train_length: Union[int, str] = 3) -> dict:
     """
@@ -332,7 +352,9 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     Returns
     -------
     dict
-        Dictionary containing output statistics on the residuals of the simple forecasting method. 
+        Dictionary containing output statistics on the residuals of the simple forecasting
+        method, including ``normr2``, the R-squared of a Gaussian fit to their
+        distribution (hctsa's former ``gofr2``).
 
     """
     y = np.asarray(y)
@@ -378,7 +400,8 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     #% Stationarity of residuals:
     out['sws'] = sliding_window(res, 'std', 'std', 5, 1) # across five non-overlapping segments
     out['swm'] = sliding_window(res, 'mean', 'std', 5, 1) # across five non-overlapping segments
-    #% TODO Normality of residuals
+    #% Normality of residuals: r-squared of a Gaussian fit to their kernel-density estimate
+    out['normr2'] = _gauss1_r2(res)
     #% Autocorrelation structure of the residuals:
     out['ac1'] = autocorr(res, 1, 'Fourier')[0]
     out['ac2'] = autocorr(res, 2, 'Fourier')[0]
