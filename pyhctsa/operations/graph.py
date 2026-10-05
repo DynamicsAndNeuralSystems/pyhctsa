@@ -8,10 +8,13 @@ from scipy.special import gammaln
 from scipy.stats import expon, gumbel_l, norm
 from ts2vg import NaturalVG
 import logging
+from math import factorial
+
 logger = logging.getLogger('pyhctsa')
 
 from pyhctsa.operations.correlation import autocorr, first_crossing
-from pyhctsa.utils import bin_picker
+from pyhctsa.utils import bin_picker, get_tau, time_delay_embed
+from pyhctsa.operations.entropy import _ordinal_pattern_rank
 from pyhctsa.toolboxes.distribution_fits.distfits import evfit
 
 
@@ -405,5 +408,122 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
     out['kac2'] = autocorr(k, 2, 'Fourier')[0]
     out['kac3'] = autocorr(k, 3, 'Fourier')[0]
     out['ktau'] = first_crossing(k, 'ac', 0, 'continuous')
+
+    return out
+
+
+def ordinal_partition_network(y: ArrayLike, d: int = 3, tau: Union[int, str] = 1) -> dict:
+    """
+    Ordinal partition transition network measures.
+
+    Symbolizes the time series into ordinal patterns (Bandt-Pompe) and builds a
+    directed transition network in which nodes are the ordinal patterns actually
+    observed and edges connect a pattern to whichever pattern immediately follows it
+    in time. Network-topological measures of this ordinal partition transition
+    network are then computed. The network is unweighted: an edge exists if the
+    transition occurs at least once (self-transitions included).
+
+    Entropy is not recomputed here, to avoid duplicating
+    :func:`pyhctsa.operations.entropy.permutation_entropy`, which computes
+    entropy-based measures on the same symbolization; Kulp et al. found entropy to
+    be a weaker discriminator than the network measures computed below.
+
+    References
+    ----------
+    .. [1] C.W. Kulp, J.M. Chobot, H.R. Freitas and G.D. Sprechini, "Using ordinal
+        partition transition networks to analyze ECG data", Chaos 26(7), 073114 (2016).
+    .. [2] M. McCullough, M. Small, T. Stemler and H.H.-C. Iu, "Time lagged ordinal
+        partition networks for capturing dynamics of continuous dynamical systems",
+        Chaos 25(5), 053101 (2015). The original (weighted) ordinal partition
+        transition network, of which the unweighted version of Kulp et al. (used
+        here) is a variant.
+    .. [3] C. Bandt and B. Pompe, "Permutation entropy: a natural complexity measure
+        for time series", Phys. Rev. Lett. 88(17), 174102 (2002). The underlying
+        ordinal-pattern symbolization.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    d : int, optional
+        The ordinal pattern (embedding) dimension: windows of ``d`` consecutive
+        (delay-``tau``-spaced) points are each mapped to their rank permutation, one
+        of ``d!`` possible ordinal patterns. Default is 3.
+    tau : int or str, optional
+        The time delay: an integer number of samples, or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, the first zero-crossing of the
+        autocorrelation function; ``'ac1e'``, the floor of its first 1/e crossing;
+        or ``'mi'``, the smaller of the first minimum of the Kraskov automutual
+        information and the ``'ac1e'`` delay), as in the time-lagged networks of
+        McCullough et al. Default is 1, as used throughout Kulp et al.
+
+    Returns
+    -------
+    dict or float
+        NaN if the embedding fails (e.g. the delay cannot be set) or there are fewer
+        than 30 embedded points. Otherwise a dictionary with:
+
+        - ``meanDegree``: the mean degree (average number of unique out-edges per
+          visited node, ``m / n`` for ``m`` unique edges and ``n`` nodes; equal to the
+          mean in-degree), the paper's central discriminating measure
+        - ``NFP``: the number of forbidden (non-occurring) ordinal patterns, ``d!``
+          minus the number of nodes
+        - ``maxOutDegree``, ``maxInDegree``: the largest out-degree and in-degree
+        - ``stdOutDegree``, ``stdInDegree``: the standard deviation of the out- and
+          in-degrees
+        - ``reciprocity``: the fraction of unique edges whose reverse edge also exists
+        - ``maxEdgeWeight``: the proportion of all observed transitions taken up by the
+          most frequent single transition
+
+        (The maximum and spread of the degrees, reciprocity and edge-weight measures
+        are not reported in the paper but are cheaply available from the same
+        transition-pair computation.)
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    d = int(d)
+
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        logger.warning('Embedding failed (could not set the time delay)')
+        return np.nan
+    try:
+        X = time_delay_embed(y, d, int(tau))
+    except ValueError:
+        logger.warning('Embedding failed')
+        return np.nan
+    nx = X.shape[0]
+    if nx < 30:
+        logger.warning(f'Time series too short for a meaningful ordinal partition network (Nx = {nx})')
+        return np.nan
+
+    # Ordinal-pattern ID of each window, compacted to the patterns actually observed
+    # (node labels carry no meaning beyond identity)
+    _, s = np.unique(_ordinal_pattern_rank(X), return_inverse=True)
+    s = s.ravel()
+    n = int(s.max()) + 1  # number of nodes
+
+    # Directed transition network from consecutive symbols: unique directed edges
+    # and how many times each repeats
+    pair_code, weights = np.unique(s[:-1] * n + s[1:], return_counts=True)
+    from_nodes, to_nodes = pair_code // n, pair_code % n
+    m = pair_code.size  # number of unique directed edges
+
+    out = {}
+    out['meanDegree'] = m / n  # mean in-degree = mean out-degree = m/n
+    out['NFP'] = float(factorial(d) - n)
+
+    out_deg = np.bincount(from_nodes, minlength=n)
+    in_deg = np.bincount(to_nodes, minlength=n)
+    out['maxOutDegree'] = float(out_deg.max())
+    out['maxInDegree'] = float(in_deg.max())
+    out['stdOutDegree'] = float(np.std(out_deg, ddof=1)) if n > 1 else 0.0
+    out['stdInDegree'] = float(np.std(in_deg, ddof=1)) if n > 1 else 0.0
+
+    # Reciprocity: fraction of edges (i,j) for which the reverse edge (j,i) also occurs
+    reverse_code = to_nodes * n + from_nodes
+    out['reciprocity'] = np.isin(reverse_code, pair_code).sum() / m
+
+    # Probability of the most frequent single transition
+    out['maxEdgeWeight'] = weights.max() / weights.sum()
 
     return out
