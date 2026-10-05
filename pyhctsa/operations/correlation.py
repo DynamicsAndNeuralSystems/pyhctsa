@@ -2,11 +2,12 @@ import logging
 logger = logging.getLogger('pyhctsa')
 from typing import Union
 
+import numba
 import numpy as np
 from numpy.typing import ArrayLike
-from scipy.linalg import LinAlgError
+from scipy.linalg import LinAlgError, solve_triangular
 from scipy.optimize import curve_fit
-from scipy.stats import expon, gaussian_kde, kurtosis, skew
+from scipy.stats import chi2, expon, gaussian_kde, kstest, kurtosis, skew
 from scipy.stats import mode as smode
 from scipy.spatial import cKDTree
 from statsmodels.tsa.stattools import pacf
@@ -3030,4 +3031,420 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
         out['ac2diff'] = np.abs(acf_y_transform[1] - acf_y[1])
         out['ac3diff'] = np.abs(acf_y_transform[2] - acf_y[2])
         out['sumabsacfdiff'] = np.sum(np.abs(acf_y_transform - acf_y))
+    return out
+
+
+_QUANTILOGRAM_ALPHAS = (0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95)
+_QUANTILOGRAM_FIELDS = ('q05', 'q10', 'q25', 'q50', 'q75', 'q90', 'q95')
+
+
+def quantilogram(y: ArrayLike, lag: Union[int, str] = 1) -> dict:
+    """
+    Serial dependence of the series being below its own quantiles (the quantilogram).
+
+    Port of hctsa's ``CO_Quantilogram``. Computes the quantilogram of Linton and Whang [1]_:
+    the autocorrelation, at a given lag, of the 'hit' process that marks when the series is
+    below its alpha-quantile, for a range of quantile levels alpha from the lower tail through
+    the center to the upper tail. At level alpha, the hit process is ``h_t = 1(y_t <= q_alpha)``,
+    where ``q_alpha`` is the sample alpha-quantile, and the quantilogram is the sample
+    autocorrelation of ``h_t`` at the lag: ``sum_t (h_t - hbar)(h_{t+lag} - hbar) / sum_t (h_t - hbar)^2``.
+    It is positive when excursions below the alpha-quantile cluster in time and negative when
+    they alternate with excursions above it. For an independent series it is zero at every
+    level, with a standard error of about ``1/sqrt(N)``. Looking at the lower and upper quantile
+    levels separately captures dependence in the tails (volatility clustering, or bursts of
+    extreme values that follow one another), at the center (directional persistence), and any
+    asymmetry between them. Because the series enters only through whether each value lies below
+    a quantile, the result at a fixed lag is unchanged by any increasing monotonic rescaling of
+    the series, and is not affected by outliers (a lag set by the timescale of the series is found
+    from the series itself, so it can change with the rescaling).
+
+    References
+    ----------
+    .. [1] O. Linton and Y.-J. Whang, "The quantilogram: With an application to evaluating
+       directional predictability", J. Econometrics 141, 250 (2007).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (non-finite values are dropped).
+    lag : int or {'ac', 'ac1e', 'mi'}, optional
+        The time lag (default 1). A positive integer, or a lag set by the timescale of the
+        series (see :func:`~pyhctsa.utils.get_tau`): ``'ac'`` (the first zero-crossing of the
+        autocorrelation function of the series), ``'ac1e'`` (the floor of its first 1/e
+        crossing), or ``'mi'`` (the smaller of the first minimum of the Kraskov automutual
+        information and the ``'ac1e'`` delay).
+
+    Returns
+    -------
+    dict
+        The quantilogram at the lag for each quantile level, in the fields ``q05``, ``q10``,
+        ``q25``, ``q50``, ``q75``, ``q90`` and ``q95``, for alpha = 0.05, 0.10, 0.25, 0.50,
+        0.75, 0.90 and 0.95, respectively. A level for which the hit process is constant (a
+        constant series), or for which the lag is not smaller than N/2 (or cannot be set), is NaN.
+
+    Notes
+    -----
+    The sample quantile is the ``round(alpha*N)``-th smallest value, and the hit process is
+    centered at its sample mean rather than at alpha, which is the same for a continuous-valued
+    series (they differ by at most ``1/N``) and stays well-defined for series with tied values.
+
+    The central quantile levels measure the same persistence as the quantile-state transition
+    probabilities and the up-down motif frequencies (``transition_matrix``, ``motif_two``), so
+    hctsa registers only the tail levels (q05, q10, q90, q95 at the ``'mi'`` lag; q05 and q95
+    at lag 1). All seven levels are computed.
+    """
+    out = {f: np.nan for f in _QUANTILOGRAM_FIELDS}
+
+    y = np.asarray(y, dtype=float).ravel()
+    y = y[np.isfinite(y)]
+    n = y.size
+
+    if isinstance(lag, str):
+        if lag not in ('ac', 'ac1e', 'mi'):
+            raise ValueError(f"Unknown lag option '{lag}': use a positive integer, 'ac', 'ac1e', or 'mi'")
+        lag = get_tau(y, lag) if n > 1 else np.nan
+    if lag is None or np.isnan(lag) or lag < 1 or lag >= n / 2:
+        return out  # no lag defined, or too few pairs of observations
+    lag = int(lag)
+
+    y_sorted = np.sort(y)
+    for alpha, name in zip(_QUANTILOGRAM_ALPHAS, _QUANTILOGRAM_FIELDS):
+        # the round(alpha*N)-th smallest value (MATLAB rounding: halves away from zero)
+        q = y_sorted[max(1, int(np.floor(alpha * n + 0.5))) - 1]
+        h = (y <= q).astype(float)
+        h -= h.mean()
+        denom = np.sum(h ** 2)
+        if denom > 0:
+            out[name] = float(np.sum(h[:n - lag] * h[lag:]) / denom)
+    return out
+
+
+def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
+                          theiler_win: Union[int, float, list, tuple] = ('ac', 1),
+                          max_n: Union[int, str] = 10000) -> Union[dict, float]:
+    """
+    Tests for non-Gaussianity of the joint, time-lagged embedding distribution.
+
+    Port of hctsa's ``CO_JointNonGaussianity``. Embeds the time series in ``m`` dimensions at
+    time delay ``tau`` (e.g., the pair ``(x_t, x_{t+tau})`` for m=2, or the triple
+    ``(x_t, x_{t+tau}, x_{t+2tau})`` for m=3) and tests whether the resulting point cloud is
+    consistent with a multivariate Gaussian.
+
+    A linear (e.g., AR(1)) Gaussian process has a Gaussian marginal *and* a Gaussian joint
+    embedding distribution; a nonlinear or non-reversible process can look Gaussian marginally
+    while its lagged joint distribution is visibly non-elliptical (curved, multimodal, or
+    heavy/light-tailed along directions the marginal alone cannot see). This tests the whole
+    joint shape rather than one moment combination (cf. :func:`trev` and :func:`tc3`).
+
+    Two complementary statistics are based on Mardia's classical multivariate normality
+    measures [1]_, chosen because they generalize to any embedding dimension via the same
+    formula and reduce, at m=1, to ordinary skewness/kurtosis:
+
+    - Mardia's multivariate skewness, b1: detects asymmetry/curvature of the joint distribution
+      (e.g., a banana-shaped point cloud). Its population value is 0 for any joint Gaussian.
+    - Mardia's multivariate kurtosis, b2: detects joint tail weight/peakedness relative to a
+      Gaussian ellipsoid. Its population value is ``m(m+2)`` for any joint Gaussian (8 at m=2,
+      15 at m=3).
+
+    As a complementary check, the squared Mahalanobis distances of each embedded point to the
+    sample mean (the per-point terms underlying Mardia's kurtosis) are compared with their
+    theoretical distribution under joint Gaussianity, chi^2_m, via a Kolmogorov-Smirnov
+    D-statistic. This can catch departures (e.g., a bimodal or ring-shaped cloud) that the two
+    summary moments can miss.
+
+    The skewness statistic excludes near-diagonal pairs (``|i-j| <= theiler_win``) from its double
+    sum: for correlated jointly-Gaussian points, the third moment of their Mahalanobis inner
+    product is not zero, so nearby, strongly autocorrelated pairs bias the raw statistic away
+    from zero even under true joint Gaussianity. This removes most, but not all, of the bias
+    (the residual is the classical small-sample bias of whitening with the sample covariance of
+    the points being tested).
+
+    References
+    ----------
+    .. [1] K. V. Mardia, "Measures of multivariate skewness and kurtosis with applications",
+       Biometrika 57(3), 519 (1970).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tau : int or {'ac', 'ac1e', 'mi'}, optional
+        The time delay for the embedding (see :func:`~pyhctsa.utils.get_tau`). Default ``'ac'``.
+    m : int, optional
+        The embedding dimension (default 2, the pairwise joint distribution
+        ``(x_t, x_{t+tau})``; set to 3 for the triple-wise joint distribution). hctsa's
+        false-nearest-neighbors choice of ``m`` (``{'fnn', th}``) is not available.
+    theiler_win : (str, float) or int or float, optional
+        The number of temporally adjacent embedded points excluded from the skewness double sum
+        (``|i-j| <= theiler_win``): ``('ac', k)`` for k times the first zero-crossing of the
+        autocorrelation function, ``('ac1e', k)`` for k times its 1/e delay, or a number of samples
+        (see :func:`~pyhctsa.utils.theiler_window`). Default ``('ac', 1)``.
+    max_n : int or 'full', optional
+        The maximum number of embedded points used for the skewness statistic (default 10000;
+        ``'full'`` to disable). A legacy cap, from when the skewness double sum was evaluated
+        through an N x N Gram matrix (O(N^2)); it is now evaluated exactly through the
+        third-moment tensor in O(N d^3), so the cap is kept only so that values are unchanged
+        from earlier computations. The mean, covariance, kurtosis and KS statistic always use the
+        full embedded series.
+
+    Returns
+    -------
+    dict or float
+        - ``mardiaSkew``: Mardia's raw multivariate skewness (Theiler-windowed);
+        - ``mardiaKurt``: Mardia's raw multivariate kurtosis;
+        - ``mahalKSstat``: the Kolmogorov-Smirnov D-statistic of the squared Mahalanobis
+          distances against chi^2_m.
+
+        All are unitless departure-from-joint-Gaussianity magnitudes with no attached
+        significance level (see Notes). The output is a single NaN if the embedding fails, has
+        too few points, or has a near-singular covariance (``mardiaSkew`` alone is NaN if the
+        Theiler window leaves no pairs).
+
+    Notes
+    -----
+    Only raw statistics are returned, not p-values. Mardia's classical asymptotic null
+    distributions assume the N embedded points are iid draws, but consecutive embedded vectors
+    overlap in m-1 coordinates and are strongly autocorrelated, which inflates the naive test
+    statistics (empirically up to about 30% false positives at a nominal 5% level on a
+    linear-Gaussian AR(1) process, worse at higher m). For significance testing, compare to the
+    distribution over surrogates.
+
+    The KS statistic is computed against the exact chi^2_m CDF; hctsa evaluates it on a table of
+    the CDF at values rounded to 1e-6, so the two agree to about 1e-6.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+
+    theiler_win = theiler_window(y, theiler_win, n)
+    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    theiler_win = int(theiler_win)
+
+    # Embed the signal
+    if isinstance(m, str):
+        raise ValueError("An embedding dimension chosen by false nearest neighbors is not supported; "
+                         "give m as an integer.")
+    tau = _resolve_delay(y, tau, default='ac')
+    if np.isnan(tau):
+        logger.warning('Embedding failed')
+        return np.nan
+    m = int(m)
+    if n - (m - 1) * int(tau) <= 0:
+        logger.warning('Embedding failed')
+        return np.nan
+    Y = time_delay_embed(y, m, int(tau))
+    n_emb, d = Y.shape
+
+    # Need enough points to reliably estimate a d x d covariance matrix and for the
+    # higher-moment statistics below to be reasonably stable
+    if n_emb < max(30, 10 * d * (d + 2)):
+        logger.warning(f'Too few embedded points ({n_emb}) for a meaningful joint-Gaussianity '
+                       f'test at m = {d}')
+        return np.nan
+
+    # Center and whiten
+    Yc = Y - Y.mean(axis=0)
+    S = (Yc.T @ Yc) / n_emb  # Mardia's convention: divide by N, not N-1
+    try:
+        L = np.linalg.cholesky(S)
+    except np.linalg.LinAlgError:
+        L = None
+    if L is None or 1.0 / np.linalg.cond(S, 1) < 1e-10:
+        # near-singular covariance: tau too small relative to the series' correlation length,
+        # so consecutive embedded coordinates are nearly collinear
+        logger.warning('Embedded covariance matrix is near-singular (tau too small?)')
+        return np.nan
+
+    X = solve_triangular(L, Yc.T, lower=True)  # d x n_emb: whitened points L^{-1}(Y_i - mu)
+    D2 = np.sum(X ** 2, axis=0)  # squared Mahalanobis distances
+
+    out = {}
+    # Mardia's multivariate kurtosis (population value d(d+2) under joint Gaussianity)
+    mardia_kurt = float(np.mean(D2 ** 2))
+
+    # Mahalanobis-distance-vs-chi^2_d Kolmogorov-Smirnov statistic
+    ks_stat = float(kstest(D2, chi2(d).cdf).statistic)
+
+    # Mardia's multivariate skewness: b_{1,d} = mean over pairs (i,j) outside the Theiler band
+    # of (x_i' x_j)^3 for whitened x. The full double sum is evaluated through the d x d x d
+    # third-moment tensor, sum_{i,j} (x_i' x_j)^3 = sum_{a,b,c} (sum_i x_ia x_ib x_ic)^2, in
+    # O(N d^3), and the pairs inside the band |i - j| <= w (which the mean excludes) are
+    # subtracted in O(N w).
+    if max_n != 'full' and n_emb > max_n:
+        X_skew = X[:, :int(max_n)]  # legacy cap, kept so values are unchanged
+    else:
+        X_skew = X
+    n_skew = X_skew.shape[1]
+    w = theiler_win
+    num_off_band = n_skew ** 2 - ((2 * w + 1) * n_skew - w * (w + 1))
+    if w >= n_skew or num_off_band <= 0:
+        logger.warning('theiler_win too large relative to the (possibly subsampled) skewness '
+                       'sample size')
+        mardia_skew = np.nan
+    else:
+        Xt = X_skew.T  # n_skew x d
+        full_sum = 0.0
+        for a in range(d):
+            for b in range(d):
+                full_sum += np.sum(((Xt[:, a] * Xt[:, b]) @ Xt) ** 2)
+        # pairs inside the Theiler band (including i == j), to exclude
+        band_sum = np.sum(np.sum(X_skew ** 2, axis=0) ** 3)
+        for k in range(1, min(w, n_skew - 1) + 1):
+            ip = np.sum(X_skew[:, :n_skew - k] * X_skew[:, k:], axis=0)  # x_i' x_{i+k}
+            band_sum += 2 * np.sum(ip ** 3)
+        mardia_skew = float((full_sum - band_sum) / num_off_band)
+
+    out['mardiaKurt'] = mardia_kurt
+    out['mahalKSstat'] = ks_stat
+    out['mardiaSkew'] = mardia_skew
+    return out
+
+
+@numba.njit(cache=True)
+def _stomp_nn(y, m, mu, sig, qt, qt1, ex_zone):
+    # STOMP: for every window, the best (highest) correlation with a non-trivial match, and
+    # the index of that match
+    n = y.size
+    num_win = n - m + 1
+    best_r = np.full(num_win, -np.inf)
+    best_idx = np.zeros(num_win, dtype=np.int64)
+    for i in range(num_win):
+        if i > 0:
+            for j in range(num_win - 1, 0, -1):
+                qt[j] = qt[j - 1] - y[i - 1] * y[j - 1] + y[i + m - 1] * y[j + m - 1]
+            qt[0] = qt1[i]
+        lo = max(0, i - ex_zone + 1)
+        hi = min(num_win - 1, i + ex_zone - 1)
+        b = -np.inf
+        bi = 0
+        for j in range(num_win):
+            if lo <= j <= hi:
+                continue
+            r = (qt[j] - m * mu[i] * mu[j]) / (m * sig[i] * sig[j])
+            if r > b:
+                b = r
+                bi = j
+        best_r[i] = b
+        best_idx[i] = bi
+    return best_r, best_idx
+
+
+def matrix_profile(y: ArrayLike, m: Union[int, list, tuple] = ('ac', 8),
+                   max_n: Union[int, str] = 5000) -> Union[dict, float]:
+    """
+    How well each subsequence shape recurs elsewhere in a time series (the matrix profile).
+
+    Port of hctsa's ``CO_MatrixProfile``. Computes the matrix profile: for every length-``m``
+    window (subsequence) of the time series, the distance to its nearest neighbor among all
+    other windows, after z-normalizing each window (so only its shape matters, not its local
+    level or amplitude). Trivial matches (overlapping windows, ``|i-j| < m/2``) are excluded.
+    Distances are expressed as the equivalent nearest-neighbor Pearson correlation,
+    ``r = 1 - d^2/(2m)``, which is bounded and interpretable.
+
+    Features summarize the distribution of r across windows: high values mean shapes recur
+    ('motifs'); a window with unusually low r is a 'discord' (anomaly). The corrected arc curve
+    (Gharghabi et al., 2017; the FLUSS algorithm [1]_) counts how many nearest-neighbor links
+    cross each time point, relative to what a stationary process would give; its minimum is low
+    when the series has a regime change, because windows then match within their own regime.
+
+    A one-off anomaly lasting longer than about ``m/2`` is not a discord: its own overlapping
+    windows match each other (the 'twin freak' problem).
+
+    Uses the STOMP recursion (O(N^2) time, O(N) memory), compiled with numba.
+
+    References
+    ----------
+    .. [1] S. Gharghabi, Y. Ding, C.-C. M. Yeh, K. Kamgar, L. Ulanova and E. Keogh, "Matrix
+       Profile VIII: Domain Agnostic Online Semantic Segmentation at Superhuman Performance
+       Levels", 2017 IEEE International Conference on Data Mining (ICDM), pp. 117-126 (2017).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (z-scored in hctsa).
+    m : int or ('ac', k), optional
+        The window length in samples; or ``('ac', k)`` for k times the first zero-crossing of the
+        autocorrelation function (at least 10 samples). Default ``('ac', 8)``. Longer windows give
+        more reliable estimates of the nearest-neighbor statistics (test-retest across processes:
+        0.93-0.96 at k = 8 vs 0.73-0.84 at k = 4), at the cost of needing longer series.
+    max_n : int or 'full', optional
+        Crops time series longer than this to their first ``max_n`` samples (or ``'full'`` to use
+        every sample). Default 5000.
+
+    Returns
+    -------
+    dict or float
+        - ``meanR``, ``medianR``: the mean and median nearest-neighbor correlation
+          ('matchiness');
+        - ``motifR``: the highest nearest-neighbor correlation (the best-repeated shape);
+        - ``discordR``: the lowest nearest-neighbor correlation (the most anomalous shape);
+        - ``discordGap``: ``medianR - discordR``, how anomalous the discord is relative to a
+          typical window;
+        - ``propMatch90``: the proportion of windows with a nearest neighbor at r > 0.9;
+        - ``minCAC``: the minimum of the corrected arc curve (low = regime change). A specialist
+          statistic: it separates regime-switching from stationary series well, but across
+          stationary series it mostly reflects estimation noise.
+
+        The output is a single NaN if the series is too short (fewer than 5m windows), no
+        correlation length can be estimated, or most windows are flat.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    if max_n != 'full' and n > max_n:
+        y = y[:int(max_n)]
+        n = y.size
+
+    if isinstance(m, (list, tuple)):
+        tau = get_tau(y, 'ac')
+        if np.isnan(tau):
+            return np.nan  # data-dependent: no correlation length could be estimated
+        m = max(10, int(np.floor(m[1] * tau + 0.5)))
+    m = int(m)
+    num_win = n - m + 1
+    ex_zone = int(np.ceil(m / 2))
+    if num_win < 5 * m:
+        return np.nan  # data-dependent: too few windows relative to the window length
+
+    # Window means and standard deviations (from cumulative sums, as hctsa)
+    cs = np.concatenate(([0.0], np.cumsum(y)))
+    cs2 = np.concatenate(([0.0], np.cumsum(y ** 2)))
+    mu = (cs[m:] - cs[:num_win]) / m
+    sig = np.sqrt(np.maximum((cs2[m:] - cs2[:num_win]) / m - mu ** 2, 0.0))
+    flat = sig < 1e-8 * np.std(y, ddof=1)
+    sig[flat] = np.inf  # flat windows have no shape: they match nothing (r = 0)
+
+    # Sliding dot products of the first window against all windows (by FFT)
+    n_fft = int(2 ** np.ceil(np.log2(n + m)))
+    qt1 = np.fft.irfft(np.fft.rfft(y, n_fft) * np.fft.rfft(y[:m][::-1], n_fft), n_fft)[m - 1:n]
+    best_r, best_idx = _stomp_nn(y, m, mu, sig, qt1.copy(), qt1, ex_zone)
+    best_r = np.minimum(best_r, 1.0)
+    best_r[flat] = np.nan
+    if np.mean(np.isnan(best_r)) > 0.5:
+        return np.nan  # data-dependent: mostly flat windows
+
+    # Summaries
+    ok = ~np.isnan(best_r)
+    r_ok = best_r[ok]
+    out = {}
+    out['meanR'] = float(np.mean(r_ok))
+    out['medianR'] = float(np.median(r_ok))
+    out['motifR'] = float(np.max(r_ok))
+    out['discordR'] = float(np.min(r_ok))
+    out['discordGap'] = out['medianR'] - out['discordR']
+    out['propMatch90'] = float(np.mean(r_ok > 0.9))
+
+    # Corrected arc curve: nearest-neighbor links crossing each position, relative to the
+    # parabola 2k(n-k)/n expected when links point to uniformly random places
+    idx = np.arange(num_win)
+    lo = np.minimum(idx, best_idx)[ok]
+    hi = np.maximum(idx, best_idx)[ok]
+    nc = np.bincount(lo, minlength=num_win + 1) - np.bincount(hi, minlength=num_win + 1)
+    arcs = np.cumsum(nc[:num_win])
+    k = np.arange(1, num_win + 1)
+    ideal = 2.0 * k * (num_win - k) / num_win
+    with np.errstate(all='ignore'):
+        cac = np.minimum(arcs / ideal, 1.0)
+    edge_zone = 5 * m  # the arc curve is unreliable near the edges
+    out['minCAC'] = float(np.min(cac[edge_zone:num_win - edge_zone])) if num_win > 2 * edge_zone else np.nan
     return out

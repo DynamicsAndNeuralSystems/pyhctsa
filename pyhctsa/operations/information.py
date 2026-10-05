@@ -6,7 +6,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from scipy import stats
 
-from ..utils import sign_change
+from ..utils import get_tau, sign_change, time_delay_embed
 from ..toolboxes.infotheory.mutual_info import KraskovMI, GaussianMI
 
 def _tie_break_noise(y: np.ndarray, seed: int = 0) -> np.ndarray:
@@ -769,3 +769,113 @@ def _rm_histogram_2(x: ArrayLike, y: ArrayLike):
 
     return result, descriptor
 
+
+
+def multivariate_ami(y: ArrayLike, tau_method: Union[int, str] = 'ac',
+                     est_method: str = 'gaussian',
+                     extra_param: Optional[Union[int, str]] = None) -> Union[dict, float]:
+    """
+    Multivariate automutual information, I(x_t; x_{t-tau}, x_{t-2tau}).
+
+    Port of hctsa's ``IN_MultivariateAMI``. Measures how much information the past two points
+    (spaced ``tau`` apart, with ``tau`` estimated from the series' own autocorrelation
+    structure) jointly carry about the present, and, via the ``synergy`` output, whether that
+    joint information exceeds or falls short of the sum of the pairwise automutual informations
+    at tau and 2*tau individually. Positive synergy means the two lagged points are jointly more
+    informative than either alone would suggest (interaction structure); negative synergy means
+    ``x_{t-2tau}`` is mostly redundant with ``x_{t-tau}`` once you already know it.
+
+    References
+    ----------
+    .. [1] A. Kraskov, H. Stoegbauer, P. Grassberger, "Estimating mutual information",
+       Phys. Rev. E 69, 066138 (2004).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (expected z-scored).
+    tau_method : int or {'ac', 'ac1e', 'mi'}, optional
+        How to select the time delay, tau (see :func:`~pyhctsa.utils.get_tau`):
+
+        - ``'ac'`` (default): the first zero-crossing of the autocorrelation function;
+        - ``'ac1e'``: the floor of the first 1/e crossing of the autocorrelation function;
+        - ``'mi'``: the smaller of the first minimum of the Kraskov automutual information and
+          the ``'ac1e'`` delay;
+        - a fixed positive integer.
+    est_method : {'gaussian', 'kraskov1', 'kraskov2'}, optional
+        The estimator of the mutual information: ``'gaussian'`` (default), the closed form via the
+        multiple correlation coefficient, ``-0.5*log(1 - R^2)`` (fast, but blind to
+        nonlinear/non-Gaussian structure), or the nonparametric Kraskov-Stoegbauer-Grassberger
+        estimators ``'kraskov1'`` and ``'kraskov2'``.
+    extra_param : int or str, optional
+        The number of nearest neighbors for the Kraskov estimators (default 4).
+
+    Returns
+    -------
+    dict or float
+        - ``tau``: the time delay used (in samples);
+        - ``multiAMI``: the information that ``x_{t-tau}`` and ``x_{t-2tau}`` jointly carry about
+          ``x_t`` (in nats);
+        - ``ami_2tau``: the automutual information between ``x_{t-2tau}`` and ``x_t`` (in nats);
+        - ``ami_tau``: the automutual information between ``x_{t-tau}`` and ``x_t`` (in nats);
+        - ``synergy``: ``multiAMI - ami_tau - ami_2tau``.
+
+        NaN (instead of a dict) is returned if tau cannot be determined or fewer than 20 embedded
+        points remain.
+
+    Notes
+    -----
+    For the Kraskov estimators, a series with many repeated values gets tiny, reproducible
+    tie-breaking jitter first (see :func:`automutual_info`).
+    """
+    if isinstance(tau_method, str) and tau_method not in ('ac', 'ac1e', 'mi'):
+        raise ValueError(f"Unknown time-delay method '{tau_method}': use an integer, 'ac', 'ac1e' or 'mi'")
+    if est_method not in ('gaussian', 'kraskov1', 'kraskov2'):
+        raise ValueError(f"Unknown estimation method '{est_method}'")
+    min_samples = 20  # need reasonably many samples for a stable MI estimate
+
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    tau = get_tau(y, tau_method)
+    if np.isnan(tau) or n - 2 * int(tau) < min_samples:
+        return np.nan
+    tau = int(tau)
+
+    # The joint [x_{t-2tau}, x_{t-tau}, x_t] embedding, and the pairwise AMIs, all on the
+    # identical aligned set of samples (for a fair synergy comparison)
+    out = {'tau': tau}
+    if est_method == 'gaussian':
+        emb = time_delay_embed(y, 3, tau)
+        x_2tau, x_tau, x_now = emb[:, 0], emb[:, 1], emb[:, 2]
+        # I(Y;X) = -0.5*log(1 - R^2), where R^2 is the squared multiple correlation coefficient
+        # of Y on X (exact generalization of the univariate -0.5*log(1 - r^2))
+        R = np.corrcoef(np.column_stack([x_now, x_2tau, x_tau]), rowvar=False)
+        corr_xy = R[0, 1:3]
+        try:
+            r_sq = float(corr_xy @ np.linalg.solve(R[1:, 1:], corr_xy))
+        except np.linalg.LinAlgError:
+            r_sq = np.nan
+        if np.isnan(r_sq):
+            r_sq = 0.0  # as MATLAB's min(max(NaN, 0), ...)
+        r_sq = min(max(r_sq, 0.0), 1.0 - np.finfo(float).eps)  # guard numerical over/undershoot
+        with np.errstate(divide='ignore', invalid='ignore'):
+            out['multiAMI'] = float(-0.5 * np.log(1.0 - r_sq))
+            out['ami_2tau'] = float(-0.5 * np.log(1.0 - R[0, 1] ** 2))
+            out['ami_tau'] = float(-0.5 * np.log(1.0 - R[0, 2] ** 2))
+    else:
+        k = 4 if extra_param is None else int(extra_param)
+        mi_calc = KraskovMI(k=k, algorithm=1 if est_method == 'kraskov1' else 2,
+                            add_noise=False)  # no added noise
+        # (tiny, reproducible tie-breaking jitter if y has many repeats; applied to the series so
+        # every lagged copy of a sample carries the same jitter)
+        emb = time_delay_embed(_tie_break_noise(y), 3, tau)
+        x_2tau, x_tau, x_now = emb[:, 0], emb[:, 1], emb[:, 2]
+        out['multiAMI'] = float(mi_calc.compute(np.column_stack([x_2tau, x_tau]), x_now))
+        out['ami_2tau'] = float(mi_calc.compute(x_2tau, x_now))
+        out['ami_tau'] = float(mi_calc.compute(x_tau, x_now))
+
+    # The part of the joint information NOT explained by the two pairwise AMIs individually:
+    # positive means synergistic (jointly more informative than the sum of parts), negative means
+    # redundant (x_{t-2tau} mostly duplicates what x_{t-tau} already tells you about x_t)
+    out['synergy'] = out['multiAMI'] - out['ami_tau'] - out['ami_2tau']
+    return out
