@@ -173,7 +173,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     _, runs_pval = runstest_1samp(res, cutoff='mean')
     out['res_runstest'] = runs_pval
     out['res_swss5_1'] = sliding_window(res, 'std', 'std', 5, 1)
-    out['res_ac1'] = autocorr(res, 1)
+    out['res_ac1'] = autocorr(res, 1)[0]
 
     return out
 
