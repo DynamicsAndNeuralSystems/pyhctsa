@@ -1182,8 +1182,8 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     dict or float
         Statistics on the x- and y-components of the vectors on the Poincare
         surface, on distances between adjacent points and from the mean
-        position, and on the entropy of the boxed vector cloud. Returns NaN if
-        fewer than two section points were found.
+        position, and on the (Miller-Madow-corrected) entropy of the boxed vector
+        cloud. Returns NaN if fewer than two section points were found.
     """
     if ref == 'max':
         direction = 0  # crossing from below (heading toward a local maximum)
@@ -1284,8 +1284,11 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         out[f'zerospbox{num_partitions}'] = np.sum(pbox == 0)
         out[f'meanpbox{num_partitions}'] = np.mean(pbox)
         out[f'rangepbox{num_partitions}'] = np.ptp(pbox)
-        # This probably needs to be normalized:
-        out[f'hboxcounts{num_partitions}'] = -np.sum(pos * np.log(pos))
+        # Box-occupancy entropy, Miller-Madow corrected: the plug-in estimator
+        # -sum(p log p) is biased low by (M-1)/(2n) for M occupied boxes and n
+        # points on the section, so the raw value tracks the series length.
+        out[f'hboxcounts{num_partitions}'] = (
+            -np.sum(pos * np.log(pos)) + (pos.size - 1) / (2 * nn))
         out[f'tracepbox{num_partitions}'] = np.sum(np.diag(pbox))  # trace
 
     return out
