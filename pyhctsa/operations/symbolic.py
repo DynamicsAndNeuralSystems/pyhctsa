@@ -629,8 +629,14 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     -------
     dict 
         A dictionary including the transition probabilities themselves, as well as the trace
-        of the transition matrix, measures of asymmetry, and eigenvalues of the
-        transition matrix.
+        of the transition matrix, measures of asymmetry (``symdiff``, ``symsumdiff`` and the
+        Kullback-Leibler divergence ``transKLdiv`` between the matrix and its transpose),
+        eigenvalues of the transition matrix (including ``secondeig``, ``specgap`` and
+        ``lam2mod``, the modulus of the second-largest-modulus eigenvalue of the
+        row-normalized matrix), and the Miller-Madow-corrected conditional entropy of the
+        next state ``transEntropy``. NaN is returned if tau cannot be determined.
+        Note that the matrix is normalized by the number of transitions, so it holds joint
+        (not row-normalized) probabilities.
     """
     # check inputs
     y = np.asarray(y, dtype=float)
@@ -641,10 +647,12 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
             raise ValueError(f"Unknown tau '{tau}'")
         # determine tau from the first zero-crossing of the ACF
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g., constant series)
+            return np.nan
         if tau > len(y) / 50:  # cap at 2% of the series length so it stays long enough
             tau = int(np.floor(len(y) / 50))
     if np.isnan(tau):
-        raise ValueError('Time series too short to estimate tau')
+        return np.nan
     tau = int(tau)
 
     if tau > 1:  # calculate the transition matrix at a non-unit lag
@@ -679,6 +687,14 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     # difference in sums of upper and lower triangular parts of T
     out['symsumdiff'] = _seq_sum2(np.tril(T, -1)) - _seq_sum2(np.triu(T, 1))
 
+    # Kullback-Leibler divergence between T and its transpose, over the pairs where both
+    # T(i,j) and T(j,i) are nonzero (a reversal-asymmetry measure, 0 iff T is symmetric)
+    # (MATLAB's column-major order of summation)
+    t_f = T.flatten(order='F')
+    tt_f = T.T.flatten(order='F')
+    kl_mask = (t_f > 0) & (tt_f > 0)
+    out['transKLdiv'] = _seq_sum(t_f[kl_mask] * np.log(t_f[kl_mask] / tt_f[kl_mask]))
+
     # (iv) Measures from eigenvalues of T
     eig_t = np.linalg.eigvals(T)
     out['stdeig'] = _seq_std(eig_t)  # std of eigenvalues
@@ -686,6 +702,32 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     out['mineig'] = np.min(np.real(eig_t))  # minimum eigenvalue
     # mean eigenvalue is equivalent to the trace
     out['maximeig'] = np.max(np.imag(eig_t))  # maximum imaginary part of eigenvalues
+
+    # Second-largest (real) eigenvalue and the spectral gap (num_groups >= 2, so a second
+    # eigenvalue always exists)
+    real_eig = np.sort(np.real(eig_t))[::-1]
+    out['secondeig'] = real_eig[1]
+    out['specgap'] = out['maxeig'] - out['secondeig']
+
+    # Modulus of the second-largest-modulus eigenvalue of the row-normalized transition
+    # matrix P(i,j) = T(i,j)/sum_j T(i,j); NaN if some state never occurs as a source
+    src_prob = T.sum(axis=1)
+    if np.any(src_prob == 0):
+        out['lam2mod'] = np.nan
+    else:
+        abs_eig_p = np.sort(np.abs(np.linalg.eigvals(T / src_prob[:, None])))[::-1]
+        out['lam2mod'] = abs_eig_p[1]
+
+    # Transition (conditional) entropy, H(X_{t+1}|X_t) = H(joint) - H(marginal), with a
+    # Miller-Madow correction (M_joint - M_marginal)/(2 (N - 1)) for the number of
+    # occupied bins
+    row_sums = src_prob
+    p_joint = t_f[t_f > 0]
+    p_marg = row_sums[row_sums > 0]
+    h_joint = -np.sum(p_joint * np.log(p_joint))
+    h_marginal = -np.sum(p_marg * np.log(p_marg))
+    out['transEntropy'] = (h_joint - h_marginal
+                           + (p_joint.size - p_marg.size) / (2 * (len(yth) - 1)))
 
     # (v) Measures from the covariance matrix:
     cov_t = _ml_cov(T)
