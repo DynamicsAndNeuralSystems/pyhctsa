@@ -48,48 +48,6 @@ def cumulants(x: ArrayLike, cum_what_may: str = 'skew1') -> float:
     else:
         return ValueError('Unknown cumulant. Choose either skew1, skew2, kurt1, or kurt2.')
 
-def _ksdensity(x: np.ndarray, xi: Union[None, np.ndarray] = None, npoints: int = 100) -> tuple:
-    """
-    Gaussian kernel density estimate of x, in the manner of MATLAB's ``ksdensity``.
-
-    The bandwidth is MATLAB's default, ``sig * (4 / (3 n)) ** (1 / 5)`` with the
-    robust spread ``sig = median(|x - median(x)|) / 0.6745`` (the range of x if that
-    is zero, and 1 if the bandwidth is still not positive), applied through
-    ``scipy.stats.gaussian_kde``. With no evaluation points given, ``npoints`` equally
-    spaced points from ``min(x) - 3 bw`` to ``max(x) + 3 bw`` are used, as in MATLAB.
-
-    A constant series has a singular covariance, for which ``gaussian_kde`` raises
-    ``LinAlgError``; there the kernels are summed directly (bandwidth 1, as MATLAB).
-
-    Note that MATLAB's ``ksdensity`` truncates the kernel at four bandwidths when
-    there are many data points; ``gaussian_kde`` does not, so values differ slightly
-    (about 1e-4 relative to the peak) for series of more than a few hundred points.
-
-    Returns
-    -------
-    f, xi : numpy.ndarray
-        The density estimate and the points at which it is evaluated.
-    """
-    x = np.asarray(x, dtype=float)
-    n = len(x)
-    sig = np.median(np.abs(x - np.median(x))) / 0.6745
-    if sig <= 0:
-        sig = np.ptp(x)
-    bw = sig * (4 / (3 * n)) ** (1 / 5)
-    if not bw > 0:
-        bw = 1.0
-    if xi is None:
-        xi = np.linspace(np.min(x) - 3 * bw, np.max(x) + 3 * bw, npoints)
-    xi = np.asarray(xi, dtype=float)
-    std_x = np.std(x, ddof=1) if n > 1 else 0.0
-    if std_x > 0:
-        # (scipy multiplies the bw_method factor by std(x, ddof=1))
-        f = gaussian_kde(x, bw_method=bw / std_x)(xi)
-    else:
-        u = (xi[:, None] - x[None, :]) / bw
-        f = np.exp(-0.5 * u * u).sum(axis=1) / (n * bw * np.sqrt(2 * np.pi))
-    return f, xi
-
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """
     Compares a fitted distribution with the smoothed distribution of the data.
@@ -1655,28 +1613,6 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
     return out
 
 
-def _matlab_hist_edges(x: np.ndarray, num_bins: Union[int, str]) -> np.ndarray:
-    """Bin edges of MATLAB's ``histcounts(x, num_bins)`` / ``histcounts(x, 'BinMethod', rule)``.
-
-    MATLAB places the edges at "nice" values: for a given number of bins, or for the
-    ``'sqrt'`` and ``'sturges'`` rules (raw bin width: the range over the number of bins the
-    rule gives), the width and the limits are rounded as by its ``binpicker``
-    (:func:`pyhctsa.utils.bin_picker`). Other rules fall back to NumPy's edges.
-    """
-    x = np.asarray(x, dtype=float)
-    x = x[~np.isnan(x)]
-    xmin, xmax = np.float64(np.min(x)), np.float64(np.max(x))
-    if isinstance(num_bins, str):
-        if num_bins == 'sqrt':
-            nb = max(int(np.ceil(np.sqrt(len(x)))), 1)
-        elif num_bins == 'sturges':
-            nb = max(int(np.ceil(np.log2(len(x)) + 1)), 1)
-        else:
-            return np.histogram_bin_edges(x, bins=num_bins)
-        return bin_picker(xmin, xmax, None, (xmax - xmin) / nb)
-    return bin_picker(xmin, xmax, int(num_bins))
-
-
 _SIMPLE_FIT_MODELS = {'gauss1': ('gauss', 3), 'gauss2': ('gauss2', 6), 'exp1': ('exp', 2), 'power1': ('power', 2)}
 
 
@@ -1704,9 +1640,8 @@ def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') ->
         Fourier series, are fitted by ``sinusoid_fit`` in the spectral module; the
         names 'sin1', 'sin2', 'sin3' are passed on to it, as hctsa does.)
     num_bins : int or str, optional
-        How to estimate the distribution: a binning rule understood by
-        :func:`numpy.histogram_bin_edges` (default ``'sqrt'``), the number of
-        histogram bins, or 0 for a kernel-smoothed density.
+        How to estimate the distribution: the name of a rule for the number of histogram bins
+        (default ``'sqrt'``), the number of histogram bins, or 0 for a kernel-smoothed density.
 
     Returns
     -------
@@ -1718,15 +1653,15 @@ def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') ->
         value, at lags 1 and 2; resrunsz: the signed z-statistic of a runs test on the
         residuals (:func:`pyhctsa.robust.bf_runs_z`; negative when the residuals have
         fewer runs about their median than expected for a random order). NaN (not a
-        dict) if the model cannot be fitted.
+        dict) if the model cannot be fitted, or for a constant series with ``num_bins = 0``.
 
     Notes
     -----
-    The histogram bin edges are those of MATLAB's ``histcounts`` (limits and width rounded to
-    'nice' values) for a number of bins and for the ``'sqrt'`` and ``'sturges'`` rules. The
-    kernel-smoothed density (``num_bins = 0``) is the exact Gaussian-kernel sum with MATLAB's
-    default bandwidth, which does not truncate the kernel as ``ksdensity`` does for large
-    samples (a difference of about 1e-4 relative to the peak).
+    The histogram has equal-width bins spanning the data with explicit edges
+    (:func:`pyhctsa.robust.bf_hist_edges`; a number of bins or a rule: ``'auto'``, ``'fd'``,
+    ``'sqrt'``, ``'sturges'``), and the kernel-smoothed density is
+    :func:`pyhctsa.robust.bf_ks_density`, so neither depends on the rounding of a histogram or
+    kernel-density routine's defaults.
     """
     x = np.asarray(x, dtype=float).ravel()
     if dmodel in ('sin1', 'sin2', 'sin3', 'fourier1', 'fourier2', 'fourier3'):
@@ -1736,12 +1671,15 @@ def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') ->
         raise ValueError(f"Invalid distribution model '{dmodel}' specified")
 
     if isinstance(num_bins, str) or num_bins != 0:
-        edges = _matlab_hist_edges(x, num_bins)
+        # histogram with an explicit number of equal-width bins (a number, or a rule)
+        edges = bf_hist_edges(x, num_bins)
         counts, _ = np.histogram(x, bins=edges)
         dnx = (edges[:-1] + edges[1:]) / 2
         dny = counts / (np.sum(counts) * np.mean(np.diff(edges)))  # counts -> probability density
-    else:  # kernel-smoothed distribution instead of a histogram
-        dny, dnx = _ksdensity(x)
+    else:  # kernel-smoothed density instead of a histogram
+        dny, dnx, _ = bf_ks_density(x)
+        if np.any(np.isnan(dny)):  # constant series: no distribution to fit
+            return np.nan
 
     if dmodel == 'power1' and np.any(dnx <= 0):
         logger.warning(f"The model '{dmodel}' can not be applied to non-positive data")
