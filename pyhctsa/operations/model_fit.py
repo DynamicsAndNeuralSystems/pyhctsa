@@ -234,7 +234,7 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     out['stderr_chn'] = std_err_chnn
     out['stderr_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:, 0])))
     # (ii) Is there a peak?
-    if std_err_chnn < 1: # on the whole decreasing, as expected
+    if std_err_chnn < 0: # on the whole decreasing, as expected: look for a maximum
         wigv = np.max(stats_st[:, 0])
         wig = np.where(stats_st[:, 0] == wigv)[0][0]  # find first occurrence
         if wig != 0 and stats_st[wig - 1, 0] > wigv:
