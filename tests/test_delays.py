@@ -34,7 +34,7 @@ SERIES = {
 }
 # (ac, ac1e, mi, mi-gaussian, W['ac',1], W['ac',2.5], W['ac1e',3], decimated length)
 EXPECTED = {
-    'sine200': (52, 38, 2, 51, 52, 130, 114, 27),
+    'sine200': (52, 38, 8, 51, 52, 130, 114, 27),  # mi: tied series, so set by the BF_Random tie-break jitter (hctsa robust/all)
     'twosine': (15, 6, 5, 14, 15, 38, 18, 167),
     'am': (21, 12, 12, 20, 21, 53, 36, 84),
     'logistic': (1, 1, 1, 3, 1, 3, 3, 1000),
