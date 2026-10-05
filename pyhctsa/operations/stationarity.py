@@ -16,7 +16,7 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import fit_kernel_smooth, moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
 from ..robust import bf_quantile_edges, bf_random, bf_random_seed
-from ..utils import get_tau, make_mat_buffer, matlab_quantile, sign_change, z_score
+from ..utils import _round_half_away, get_tau, make_mat_buffer, matlab_quantile, sign_change, z_score
 from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit, polyfit, robustfit
 from ..toolboxes.matlab._pptest_tables import _pp_pvalue, _pp_regression
 
@@ -810,10 +810,6 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
 
     return out
 
-def _matlab_round(v: float) -> int:
-    """MATLAB's round(): halves round away from zero (Python's round() rounds halves to even)."""
-    return int(np.sign(v) * np.floor(np.abs(v) + 0.5))
-
 def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None] = None,
                  random_seed: Union[int, None] = None) -> dict:
     """
@@ -868,7 +864,7 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
         r = np.arange(min(n, N))
     elif subset_how == 'p':
         # take initial proportion n of time series
-        r = np.arange(_matlab_round(N*n))
+        r = np.arange(int(_round_half_away(N * n)))
     elif subset_how == 'unicg':
         r = np.floor(np.linspace(1, N, n) + 0.5).astype(int) - 1  # MATLAB round: halves away from zero
     elif subset_how == 'randcg':

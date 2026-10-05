@@ -9,7 +9,7 @@ from scipy.signal import resample_poly
 
 from ..operations.correlation import autocorr
 from ..robust import bf_exp_fit
-from ..utils import binarize, matlab_quantile, sign_change, get_tau
+from ..utils import _ml_std, binarize, matlab_quantile, sign_change, get_tau
 
 def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_groups: int = 3,
              coarse_grain_method: str = 'quantile', num_iters: int = 500,
@@ -629,11 +629,6 @@ def binary_stretch(x: ArrayLike, stretch_what: str = 'gaps1') -> float:
         out = None
 
     return out if out is not None else 0
-
-def _ml_std(x: ArrayLike) -> float:
-    """Sample standard deviation (normalized by n - 1), which is 0 (not NaN) for one value, as MATLAB's `std`."""
-    x = np.asarray(x, dtype=float)
-    return 0.0 if x.size == 1 else np.std(x, ddof=1)
 
 def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     """

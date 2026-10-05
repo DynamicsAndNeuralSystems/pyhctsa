@@ -19,7 +19,7 @@ from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..robust import bf_exp_fit, bf_random, bf_random_seed
 from ..toolboxes.matlab.optimizers import minimize
-from ..utils import _linspace, _zscore_matlab, get_tau, matlab_quantile, z_score
+from ..utils import _linspace, _ml_std, _zscore_matlab, get_tau, matlab_quantile, z_score
 
 @numba.njit(cache=True, error_model='numpy')
 def _zg_hmm_em(x, mu, cov, P, pi, n_cycles, tol, cov_floor):
@@ -1902,12 +1902,6 @@ def _fit_exp_smooth(x: np.ndarray, a: float) -> np.ndarray:
         
     return xf
 
-def _zscore(x: np.ndarray) -> np.ndarray:
-    # MATLAB's zscore: no guard against (near-)constant input, which gives NaN
-    # for exactly constant data (the guarded utils.z_score raises instead)
-    with np.errstate(all='ignore'):
-        return (x - np.mean(x)) / np.std(x, ddof=1)
-
 def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
                       level: str = 'full') -> dict:
     """
@@ -1984,7 +1978,7 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
     out['maxonstd'] = 0.0 if std_e == 0 else np.max(np.abs(e)) / std_e
 
     # z-score the residuals for everything that follows (all of it is scale-free)
-    e_z = np.zeros(N) if std_e == 0 else _zscore(e)
+    e_z = np.zeros(N) if std_e == 0 else _zscore_matlab(e)
 
     # Serial correlation
     max_lag = 25
@@ -2001,7 +1995,7 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
         out['taurat'] = np.nan
     else:
         y = np.asarray(y, dtype=float).ravel()
-        tau_y = first_crossing(_zscore(y), 'ac', 0, 'continuous')
+        tau_y = first_crossing(_zscore_matlab(y), 'ac', 0, 'continuous')
         tau_e = first_crossing(e_z, 'ac', 0, 'continuous')
         if tau_y == 0 or not np.isfinite(tau_y):
             out['taurat'] = np.nan
@@ -2480,11 +2474,6 @@ def is_seasonal(y: ArrayLike) -> int:
         out = 1 # test thinks the time series has strong periodicities
     
     return out
-
-def _ml_std(a: np.ndarray) -> float:
-    """MATLAB's ``std``: the sample standard deviation, 0 for a single element."""
-    return float(np.std(a, ddof=1)) if np.size(a) > 1 else 0.0
-
 
 def _ml_max(a, axis=None):
     """MATLAB ``max``: NaNs are omitted (NaN only if every element is NaN)."""

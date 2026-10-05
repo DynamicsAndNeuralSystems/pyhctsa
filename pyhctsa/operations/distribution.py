@@ -13,7 +13,7 @@ from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, rayleigh, 
 from ..operations.correlation import autocorr, first_crossing
 from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
 from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_random, bf_random_seed, bf_remove_points, bf_residual_stats, bf_runs_z
-from ..utils import bin_picker, histc, matlab_quantile, sign_change, simple_binner, x_corr
+from ..utils import _ml_std, _round_half_away, bin_picker, histc, matlab_quantile, sign_change, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')
 
@@ -862,12 +862,6 @@ def moments(y: ArrayLike, the_mom: int = 0, do_normalize: bool = True) -> float:
         return stats.moment(y, the_mom)
     return stats.moment(y, the_mom) / np.std(y, ddof=1) ** the_mom
 
-def _matlab_std(a) -> float:
-    """Sample standard deviation as MATLAB's std: 0 (not NaN) for a single value."""
-    a = np.asarray(a, dtype=float)
-    return float(np.std(a, ddof=1)) if a.size > 1 else 0.0
-
-
 def _fit_lin_gof(x: np.ndarray, y: np.ndarray) -> tuple:
     """Ordinary least-squares line ``a*x + b``, with R^2 and root-mean-square error (n - 2
     degrees of freedom). Returns (a, b, R^2, RMSE), all NaN for fewer than 3 points or a
@@ -1007,11 +1001,11 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
         r1 = r + 1  # MATLAB's 1-based event times
         return {
             'meanDt': mean_dt,
-            'seDt': _matlab_std(time_diffs) / np.sqrt(len(time_diffs)),
+            'seDt': _ml_std(time_diffs) / np.sqrt(len(time_diffs)),
             'propIncluded': prop_included,
             'medianRelTime': np.median(r1) / (N / 2) - 1,
             'meanRelTime': np.mean(r1) / (N / 2) - 1,
-            'stdRelTime': _matlab_std(r) / np.sqrt(len(r)),
+            'stdRelTime': _ml_std(r) / np.sqrt(len(r)),
         }
 
     # Initialize thresholds based on method
@@ -1045,11 +1039,11 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
         r1 = r + 1  # event times use 1-based indices, as in MATLAB
         rows.append([
             np.mean(time_diffs),  # mean time between events
-            _matlab_std(time_diffs) / np.sqrt(len(time_diffs)),  # standard error
+            _ml_std(time_diffs) / np.sqrt(len(time_diffs)),  # standard error
             prop_included,
             np.median(r1) / (N / 2) - 1,  # median position (-1 to 1)
             np.mean(r1) / (N / 2) - 1,  # mean position (-1 to 1)
-            _matlab_std(r) / np.sqrt(len(r)),  # position std error
+            _ml_std(r) / np.sqrt(len(r)),  # position std error
         ])
     statistics = np.array(rows).reshape(-1, 6)
     thresholds = thresholds[:len(statistics)]
@@ -1070,21 +1064,21 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
     results.update({
         'mdtm': np.mean(statistics[:, 0]),
         'mdtmd': np.median(statistics[:, 0]),
-        'mdtstd': _matlab_std(statistics[:, 0])
+        'mdtstd': _ml_std(statistics[:, 0])
     })
 
     # Statistics on median position deviations
     results.update({
         'mdrm': np.mean(statistics[:, 3]),
         'mdrmd': np.median(statistics[:, 3]),
-        'mdrstd': _matlab_std(statistics[:, 3])
+        'mdrstd': _ml_std(statistics[:, 3])
     })
 
     # Statistics on mean position deviations
     results.update({
         'mrm': np.mean(statistics[:, 4]),
         'mrmd': np.median(statistics[:, 4]),
-        'mrstd': _matlab_std(statistics[:, 4])
+        'mrstd': _ml_std(statistics[:, 4])
     })
 
     # Cross-correlation between mean and error
@@ -1373,11 +1367,6 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     return out
 
 
-def _matlab_round(v: float) -> int:
-    """MATLAB's ``round`` (halves away from zero)."""
-    return int(np.sign(v) * np.floor(abs(v) + 0.5))
-
-
 def _hill_estimate(s: np.ndarray, k: int) -> float:
     """Hill estimator from the k largest of the descending-sorted positive values ``s``."""
     if len(s) <= k or s[k] <= 0 or s[k - 1] == s[k]:
@@ -1453,7 +1442,7 @@ def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
     y = np.asarray(y, dtype=float).ravel()
     y = y[np.isfinite(y)]
     n = len(y)
-    k = _matlab_round(tail_frac * n)  # number of values in each tail
+    k = int(_round_half_away(tail_frac * n))  # number of values in each tail
     if k < 10 or k >= n // 2:
         return out  # too few tail values to estimate a tail index
 

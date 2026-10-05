@@ -638,6 +638,12 @@ def _round_half_away(x: float) -> float:
     return float(np.sign(x) * np.floor(np.abs(x) + 0.5))
 
 
+def _ml_std(x: ArrayLike) -> float:
+    """MATLAB's ``std``: the sample standard deviation (N - 1), which is 0 (not NaN) for a single value."""
+    x = np.asarray(x, dtype=float)
+    return float(np.std(x, ddof=1)) if x.size > 1 else 0.0
+
+
 def _acf_fourier(y: np.ndarray) -> np.ndarray:
     """ACF at lags 0..N-1 (CO_AutoCorr(y, [], 'Fourier')); all-NaN for a constant series."""
     from .operations.correlation import autocorr
