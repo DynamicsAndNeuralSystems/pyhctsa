@@ -11,7 +11,8 @@ from scipy.stats import gamma as gamma_dist
 from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, rayleigh, uniform, weibull_min, skew, kurtosis
 
 from ..operations.correlation import autocorr, first_crossing
-from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, gpfit, wblfit
+from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
+from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_residual_stats, bf_runs_z
 from ..utils import bin_picker, histc, matlab_quantile, sign_change, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')
@@ -726,7 +727,10 @@ def cv(x: ArrayLike, k: int = 1) -> float:
         \\left( \\frac{\\sigma}{\\mu} \\right)^{k},
 
     where :math:`\\sigma` is the standard deviation and :math:`\\mu` is the
-    mean of the input data.
+    mean of the input data. It is negative (for odd :math:`k`) when the mean is
+    negative, and undefined when the mean is zero, so NaN is returned when the mean
+    is at the level of rounding error relative to the spread
+    (:math:`|\\mu| < 10^{-10}\\sigma`, as for a centered or z-scored series).
 
     Parameters
     ----------
@@ -739,14 +743,21 @@ def cv(x: ArrayLike, k: int = 1) -> float:
     Returns
     -------
     float
-        The coefficient of variation of order :math:`k`.
+        The coefficient of variation of order :math:`k`, or NaN if the mean is zero
+        up to rounding error.
     """
     if not isinstance(k, int) or k < 0:
         logger.warning('k should probably be a positive integer')
         # carry on with just this warning, though
-    
+
     # Compute the coefficient of variation (of order k) of the data
-    return (np.std(x, ddof=1) ** k) / (np.mean(x) ** k)
+    mu = np.mean(x)
+    sigma = np.std(x, ddof=1)
+    if abs(mu) < 1e-10 * sigma:
+        # the mean is zero up to rounding error (e.g., a centered or z-scored series), so
+        # the ratio is rounding noise of order 1e17
+        return np.nan
+    return float((sigma / mu) ** k)
 
 def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     """
