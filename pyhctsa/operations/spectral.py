@@ -4,12 +4,15 @@ from numpy.typing import ArrayLike
 from typing import Union
 import scipy.fft
 import scipy.signal
+import scipy.optimize
+import scipy.stats
+import scipy.special
 
 from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit, robustfit, polyfit
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
-from ..utils import make_mat_buffer, sign_change
+from ..utils import make_mat_buffer, sign_change, matlab_quantile
 
 def specparam(y: ArrayLike, aperiodic_mode: str = 'fixed', max_n_peaks: int = 4,
               peak_threshold: float = 1.0,
@@ -208,6 +211,20 @@ def specparam(y: ArrayLike, aperiodic_mode: str = 'fixed', max_n_peaks: int = 4,
 
     return out
 
+def _bounded_lsq(fun, p0, x, y, lower, upper) -> np.ndarray:
+    # Bounded nonlinear least squares, min sum((fun(p, x) - y)^2): the
+    # trust-region-reflective algorithm, as MATLAB's fit with 'Lower'/'Upper'
+    # (tolerances 1e-6, at most 400 iterations). The start point is clipped
+    # into the bounds.
+    lower = np.asarray(lower, dtype=float)
+    upper = np.asarray(upper, dtype=float)
+    p0 = np.clip(np.asarray(p0, dtype=float), lower, upper)
+    sol = scipy.optimize.least_squares(lambda p: fun(p, x) - y, p0, bounds=(lower, upper),
+                                       method='trf', xtol=1e-6, ftol=1e-6, gtol=1e-6,
+                                       max_nfev=400)
+    return sol.x
+
+
 def _eval_aperiodic(ap: dict, fq: float) -> float:
     # Value of the fitted aperiodic curve at frequency fq.
     if 'knee' in ap and ap['knee'] > 0:
@@ -239,20 +256,20 @@ def _fit_aperiodic(fv: ArrayLike, log_f: ArrayLike, log_s: ArrayLike,
     # fails outright), in which case the model degenerates to the 'fixed'
     # form and we keep the robust linear fit rather than a bogus knee.
     try:
-        # fittype('a - log10(k + x^c)') names its coefficients in alphabetical
-        # order, so the fitted vector is [a, c, k]:
-        knee_model = lambda p, x: p[0] - np.log10(p[2] + x ** p[1])
-        p = lsqcurvefit_trr(knee_model,
-                            [ap['offset'], 1e-3, max(ap['exponent'], 0.1)],
-                            fv, log_s,
-                            lower=[-np.inf, 0, 0], upper=[np.inf, np.inf, 10],
-                            max_iter=400)
-        knee_val = p[2]
-        pred_knee = p[0] - np.log10(knee_val + fv ** p[1])
+        # Coefficients ordered [a, k, c] (hctsa names the order explicitly, since
+        # fittype('a - log10(k + x^c)') would order them alphabetically as
+        # [a, c, k]); the start point and bounds below are in this order:
+        knee_model = lambda p, x: p[0] - np.log10(p[1] + x ** p[2])
+        p = _bounded_lsq(knee_model,
+                         [ap['offset'], 1e-3, max(ap['exponent'], 0.1)],
+                         fv, log_s,
+                         lower=[-np.inf, 0, 0], upper=[np.inf, np.inf, 10])
+        knee_val = p[1]
+        pred_knee = p[0] - np.log10(knee_val + fv ** p[2])
         if np.isfinite(knee_val) and knee_val > 1e-10 and np.all(np.isfinite(pred_knee)):
             ap['offset'] = p[0]
             ap['knee'] = knee_val
-            ap['exponent'] = p[1]
+            ap['exponent'] = p[2]
             ap['pred'] = pred_knee
         else:
             ap['knee'] = 0  # degenerate: no detectable knee, keep the linear fit
@@ -275,10 +292,9 @@ def _fit_gaussian(log_f: ArrayLike, resid: ArrayLike, i_pk: int,
 
     try:
         gauss_model = lambda p, x: p[0] * np.exp(-(x - p[1]) ** 2 / (2 * p[2] ** 2))
-        p = lsqcurvefit_trr(gauss_model, [h0, x0, w0], log_f, resid,
-                            lower=[0, np.min(log_f), peak_width_limits[0]],
-                            upper=[np.inf, np.max(log_f), peak_width_limits[1]],
-                            max_iter=400)
+        p = _bounded_lsq(gauss_model, [h0, x0, w0], log_f, resid,
+                         lower=[0, np.min(log_f), peak_width_limits[0]],
+                         upper=[np.inf, np.max(log_f), peak_width_limits[1]])
     except Exception:
         return None
 
@@ -1182,3 +1198,773 @@ def cepstrum(y: ArrayLike, max_period: int = 100, min_period: int = 4) -> dict:
 
     return out
 
+
+
+def _sin_start_point(t: np.ndarray, y: np.ndarray, n: int) -> np.ndarray:
+    # FFT-based start point for a sum of n sinusoids a*sin(b*t + c), built up one
+    # component at a time from the FFT peak of the residuals (the heuristic of
+    # MATLAB's Curve Fitting Toolbox 'sinN' library model).
+    N = len(y)
+    freqs = []
+    old_peaks = []
+    res = y
+    ab = None
+    for j in range(n):
+        fy = np.fft.fft(res)
+        fy[old_peaks] = 0  # omit frequencies already used
+        max_loc = int(np.argmax(np.abs(fy[:N // 2])))  # 0-based
+        old_peaks.append(max_loc)
+        freqs.append(2 * np.pi * max(0.5, max_loc) / (t[-1] - t[0]))
+        X = np.empty((N, 2 * (j + 1)))
+        for k, w in enumerate(freqs):
+            X[:, 2 * k] = np.sin(w * t)
+            X[:, 2 * k + 1] = np.cos(w * t)
+        ab = np.linalg.lstsq(X, y, rcond=None)[0]
+        if j < n - 1:
+            res = y - X @ ab
+    p0 = np.empty(3 * n)
+    for k in range(n):
+        p0[3 * k] = np.hypot(ab[2 * k], ab[2 * k + 1])
+        p0[3 * k + 1] = freqs[k]
+        p0[3 * k + 2] = np.arctan2(ab[2 * k + 1], ab[2 * k])
+    return p0
+
+
+def _fourier_terms(t: np.ndarray, w: float, n: int) -> np.ndarray:
+    X = np.empty((len(t), 2 * n + 1))
+    X[:, 0] = 1.0
+    for i in range(1, n + 1):
+        X[:, 2 * i - 1] = np.cos(i * w * t)
+        X[:, 2 * i] = np.sin(i * w * t)
+    return X
+
+
+def _fourier_start_point(t: np.ndarray, y: np.ndarray, n: int) -> float:
+    # Fundamental frequency start for an n-term Fourier series: the FFT peak
+    # frequency, or a subharmonic of it chosen to minimize the (linear) misfit.
+    N = len(y)
+    fy = np.fft.fft(y - np.mean(y))
+    max_loc = int(np.argmax(np.abs(fy[:N // 2])))
+    w_peak = 2 * np.pi * max(0.5, max_loc) / (t[-1] - t[0])
+    best, w_best = np.inf, w_peak
+    for k in range(1, n + 1):
+        X = _fourier_terms(t, w_peak / k, n)
+        coef = np.linalg.lstsq(X, y, rcond=None)[0]
+        nrm = np.linalg.norm(y - X @ coef)
+        if nrm < best:
+            best, w_best = nrm, w_peak / k
+    return w_best
+
+
+def sinusoid_fit(y: ArrayLike, model: str = 'sin1') -> Union[dict, float]:
+    """
+    Fit sinusoids or a Fourier series to the time series.
+
+    Fits a sum of 1-3 sinusoids, or a Fourier series with 1-3 terms, to the time
+    series as a function of its time index ``t = 1..N``. The values are fitted in
+    the order in which they occur, so the result depends on the temporal ordering
+    of the data. (This is the time-series-model branch of the former
+    ``DN_SimpleFit``, split off in hctsa as ``SP_SinusoidFit`` because the
+    distribution of values is unaffected by temporal ordering, whereas these fits
+    are.)
+
+    The fitted models are:
+
+    - ``'sinK'``: a sum of K sinusoids, ``sum_i a_i*sin(b_i*t + c_i)``, with free
+      amplitudes, frequencies (constrained to ``b_i >= 0``) and phases.
+    - ``'fourierK'``: a K-term Fourier series,
+      ``a0 + sum_i (a_i*cos(i*w*t) + b_i*sin(i*w*t))``, with a single fitted
+      fundamental frequency ``w``, so that the terms are harmonically related.
+
+    Goodness of fit is summarized by the root mean square error (and R^2), and the
+    residuals are characterized by their autocorrelation at lags 1 and 2 and by a
+    runs test, which together reveal remaining temporal structure that the model
+    has not captured (e.g., whether a periodic component has been fully explained).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    model : {'sin1', 'sin2', 'sin3', 'fourier1', 'fourier2', 'fourier3'}, optional
+        The model to fit. Default is ``'sin1'``.
+
+    Returns
+    -------
+    dict or float
+        - ``r2``: the R^2 of the fit.
+        - ``adjr2``: the degrees-of-freedom-adjusted R^2.
+        - ``rmse``: the root mean square error of the fit.
+        - ``resAC1``, ``resAC2``: the autocorrelation of the residuals at lags 1
+          and 2 (``'Fourier'`` method).
+        - ``resruns``: the p-value of a runs test on the residuals.
+
+        NaN is returned instead of a dict if the model cannot be fitted.
+
+    Notes
+    -----
+    The fit is a nonlinear least-squares problem that can end in a local minimum
+    (a sum of sinusoids has many). It starts from the heuristic of MATLAB's Curve
+    Fitting Toolbox (the FFT peak of the data/residuals for each frequency, with
+    amplitudes and phases from a linear fit at those frequencies) and is
+    optimized with SciPy's trust-region-reflective ``least_squares``, so results
+    can differ from MATLAB's ``fit`` when the problem is multimodal.
+    """
+    from .graph import _runstest_pvalue  # local import: graph imports correlation
+
+    models = ('sin1', 'sin2', 'sin3', 'fourier1', 'fourier2', 'fourier3')
+    if model not in models:
+        raise ValueError(f"Invalid time-series model '{model}' specified")
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    t = np.arange(1, N + 1, dtype=float)
+    kind, n = model[:-1], int(model[-1])
+
+    try:
+        if N < 3:
+            return np.nan
+        if kind == 'sin':
+            def fun(p):
+                return sum(p[3 * k] * np.sin(p[3 * k + 1] * t + p[3 * k + 2])
+                           for k in range(n)) - y
+
+            def jac(p):
+                J = np.empty((N, 3 * n))
+                for k in range(n):
+                    arg = p[3 * k + 1] * t + p[3 * k + 2]
+                    J[:, 3 * k] = np.sin(arg)
+                    J[:, 3 * k + 1] = p[3 * k] * t * np.cos(arg)
+                    J[:, 3 * k + 2] = p[3 * k] * np.cos(arg)
+                return J
+
+            p0 = _sin_start_point(t, y, n)
+            lower = np.tile([-np.inf, 0.0, -np.inf], n)
+            p0 = np.maximum(p0, lower)
+            sol = scipy.optimize.least_squares(fun, p0, jac=jac, bounds=(lower, np.inf),
+                                               method='trf', xtol=1e-6, ftol=1e-6, gtol=1e-6,
+                                               max_nfev=400)
+            fitted = fun(sol.x) + y
+            n_coeff = 3 * n
+        else:
+            def fun(p):
+                return _fourier_terms(t, p[-1], n) @ p[:-1] - y
+
+            def jac(p):
+                w = p[-1]
+                X = _fourier_terms(t, w, n)
+                J = np.empty((N, 2 * n + 2))
+                J[:, :-1] = X
+                dw = np.zeros(N)
+                for i in range(1, n + 1):
+                    dw += (-p[2 * i - 1] * np.sin(i * w * t) + p[2 * i] * np.cos(i * w * t)) * i * t
+                J[:, -1] = dw
+                return J
+
+            w0 = _fourier_start_point(t, y, n)
+            coef = np.linalg.lstsq(_fourier_terms(t, w0, n), y, rcond=None)[0]
+            p0 = np.append(coef, w0)
+            sol = scipy.optimize.least_squares(fun, p0, jac=jac, method='trf',
+                                               xtol=1e-6, ftol=1e-6, gtol=1e-6, max_nfev=400)
+            fitted = fun(sol.x) + y
+            n_coeff = 2 * n + 2
+    except (FloatingPointError, ValueError, np.linalg.LinAlgError):
+        return np.nan  # the model could not be fitted
+    if not np.all(np.isfinite(fitted)):
+        return np.nan
+
+    res = y - fitted
+    sse = float(np.sum(res ** 2))
+    sst = float(np.sum((y - np.mean(y)) ** 2))
+    dfe = N - n_coeff
+    r2 = 1 - sse / sst if sst > 0 else np.nan
+    out = {}
+    out['r2'] = r2
+    out['adjr2'] = 1 - (1 - r2) * (N - 1) / dfe if dfe > 0 else np.nan
+    out['rmse'] = np.sqrt(sse / dfe) if dfe > 0 else np.nan
+    out['resAC1'] = float(autocorr(res, 1, 'Fourier')[0])
+    out['resAC2'] = float(autocorr(res, 2, 'Fourier')[0])
+    out['resruns'] = _runstest_pvalue(res)
+    return out
+
+
+def _envelope_summary(env: np.ndarray):
+    # Distributional and autocorrelation summaries of an amplitude envelope:
+    # (cv, skewness, kurtosis, 1/e autocorrelation timescale), NaN where undefined.
+    cv = sk = ku = tau = np.nan
+    n = len(env)
+    m = np.mean(env)
+    if not m > 0:
+        return cv, sk, ku, tau
+    e = env - m
+    s2 = np.mean(e ** 2)
+    cv = np.sqrt(s2) / m  # population standard deviation over the mean
+
+    # Weight of the measured skewness, kurtosis and timescale: these are a 0/0 for
+    # a constant envelope, so they are shrunk continuously toward conventional
+    # values (see the function help); w -> 1 for any envelope that varies.
+    cv_scale = 1e-10  # well above the round-off CV of a noiseless sinusoid (~1e-15)
+    w = cv ** 2 / (cv ** 2 + cv_scale ** 2)
+    tau_max = n // 2  # the largest lag searched below (the envelope never decorrelates)
+
+    sk_meas = ku_meas = tau_meas = np.nan
+    if s2 > 0:
+        sk_meas = np.mean(e ** 3) / s2 ** 1.5
+        ku_meas = np.mean(e ** 4) / s2 ** 2
+
+        # Autocorrelation of the envelope via the FFT (zero-padded, biased estimator)
+        nfft = 2 ** int(np.ceil(np.log2(2 * n)))
+        F = np.fft.fft(e, nfft)
+        acf = np.real(np.fft.ifft(np.abs(F) ** 2))
+        acf = acf[:n // 2 + 1] / acf[0]  # lags 0..n/2
+        below = np.flatnonzero(acf < np.exp(-1))
+        if below.size > 0 and below[0] > 0:
+            ic = below[0]
+            # linear interpolation between lags ic-1 and ic
+            a0, a1 = acf[ic - 1], acf[ic]
+            tau_meas = (ic - 1) + (a0 - np.exp(-1)) / (a0 - a1)
+
+    def shrink(measured, limit):
+        # limit + w*(measured - limit); an undefined measured value takes the
+        # conventional value only when w is negligible (an essentially constant envelope)
+        if np.isnan(measured):
+            return limit if w < 1e-6 else np.nan
+        return limit + w * (measured - limit)
+
+    return cv, shrink(sk_meas, 0), shrink(ku_meas, 3), shrink(tau_meas, tau_max)
+
+
+def envelope_stats(y: ArrayLike, power_frac: float = 0.5, trim_frac: float = 0.05) -> dict:
+    """
+    Statistics of the amplitude envelope of the full series and of its dominant oscillation.
+
+    Computes the instantaneous amplitude envelope ``|z(t)|`` of the analytic signal
+    ``z(t) = y(t) + i H[y](t)`` (``H`` the Hilbert transform) for (a) the full
+    series and (b) the dominant band: the narrowest frequency band centered on the
+    largest periodogram peak (DC and Nyquist bins excluded) that holds a fraction
+    ``power_frac`` of the total power, and at least 2 bins either side of the peak.
+    Its width therefore adapts to the series: it is the width of the dominant peak
+    for a narrowband oscillation, and a large part of the spectrum for broadband
+    noise. Each analytic signal comes from the FFT, zeroing the bins outside the
+    band.
+
+    The envelope summaries describe amplitude modulation: how variable the envelope
+    is (coefficient of variation), how asymmetric and heavy-tailed its distribution
+    is (kurtosis for the full series; skewness and kurtosis for the dominant band),
+    and how long it takes to decorrelate (the 1/e timescale of its autocorrelation
+    function). An unmodulated sinusoid has a constant envelope (CV near 0);
+    bursting or amplitude-modulated signals have a large CV, and a high kurtosis
+    for intermittent bursts.
+
+    Baseline for Gaussian noise: the analytic signal of a stationary Gaussian
+    process is complex Gaussian, so its envelope is Rayleigh distributed: CV =
+    ``sqrt(4/pi - 1)`` = 0.5227, skewness 0.6311, kurtosis 3.2451. Values of the CV
+    below this indicate an envelope steadier than noise (e.g., a sinusoid in noise
+    follows a Rice distribution), and above it an envelope more modulated than noise.
+
+    To limit edge effects (the FFT filter is circular, so the series ends wrap
+    around), ``trim_frac`` of the samples are dropped from each end of the envelope
+    and phase before any summary is computed. Timescales are in samples.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    power_frac : float, optional
+        The fraction of the total (one-sided, DC and Nyquist excluded) spectral
+        power that the dominant band, centered on the largest periodogram peak,
+        must contain. Default is 0.5.
+    trim_frac : float, optional
+        The fraction of samples dropped from each end of the analytic signal before
+        computing summaries. Default is 0.05.
+
+    Returns
+    -------
+    dict
+        - ``full_cv``: the envelope's coefficient of variation (standard deviation
+          over mean), full series.
+        - ``full_kurt``: the envelope's kurtosis, full series.
+        - ``full_tau``: the 1/e decay time (in samples) of the envelope's
+          autocorrelation function, full series.
+        - ``dom_cv``, ``dom_skew`` (the envelope's skewness), ``dom_kurt``,
+          ``dom_tau``: as above for the dominant band.
+        - ``dom_ifspread``: a robust spread of the dominant band's instantaneous
+          frequency (1.4826 times the median absolute deviation of the phase
+          increments, in cycles per sample).
+
+        All fields are NaN for constant, non-finite, or very short (N < 50) series.
+        A 1/e timescale is NaN when the autocorrelation never falls below 1/e
+        within N/2 lags. For an essentially constant envelope (as for a sinusoid
+        without noise) the skewness, kurtosis and timescale are an undefined 0/0;
+        they are set by convention to skewness 0, kurtosis 3 (the Gaussian values)
+        and a timescale of the largest lag searched, ``n // 2`` for the ``n``
+        samples left after trimming, each shrunk toward that value with weight
+        ``w = c^2 / (c^2 + 1e-20)`` where ``c`` is the envelope's CV, so the
+        reported values vary continuously with ``c``.
+
+    References
+    ----------
+    B. Boashash, "Estimating and interpreting the instantaneous frequency of a
+    signal. I. Fundamentals", Proc. IEEE 80(4), 520-538 (1992).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    out = {f: np.nan for f in ('full_cv', 'full_kurt', 'full_tau', 'dom_cv', 'dom_skew',
+                               'dom_kurt', 'dom_tau', 'dom_ifspread')}
+    N = len(y)
+    if N < 50 or not np.all(np.isfinite(y)) or np.std(y, ddof=1) == 0:
+        return out
+    y = y - np.mean(y)
+
+    # Frequency bins (DC and Nyquist excluded, as in phase_amp_coupling):
+    half_n = N // 2 + 1
+    usable = np.arange(1, half_n - 1 if N % 2 == 0 else half_n)
+    Y = np.fft.fft(y)
+
+    # Samples dropped from each end of the (circularly computed) analytic signal:
+    n_trim = max(1, int(np.floor(trim_frac * N + 0.5)))
+    keep = slice(n_trim, N - n_trim)
+
+    # (a) Full band
+    Yfull = np.zeros(N, dtype=complex)
+    Yfull[usable] = 2 * Y[usable]
+    env_full = np.abs(np.fft.ifft(Yfull)[keep])
+    out['full_cv'], _, out['full_kurt'], out['full_tau'] = _envelope_summary(env_full)
+
+    # (b) Dominant band: the largest periodogram peak +/- the smallest half-width
+    # (at least 2 bins) holding power_frac of the power
+    pw = np.abs(Y[usable]) ** 2
+    n_bins = len(usable)
+    i_peak = int(np.argmax(pw))
+    cum_pow = np.concatenate(([0.0], np.cumsum(pw)))
+    hws = np.arange(2, n_bins + 1)
+    band_pow = (cum_pow[np.minimum(n_bins - 1, i_peak + hws) + 1]
+                - cum_pow[np.maximum(0, i_peak - hws)])
+    ok = np.flatnonzero(band_pow >= power_frac * cum_pow[-1])
+    half_width = int(hws[ok[0]]) if ok.size else n_bins
+    peak_bin = usable[i_peak]
+    band = np.arange(max(usable[0], peak_bin - half_width),
+                     min(usable[-1], peak_bin + half_width) + 1)
+
+    Ydom = np.zeros(N, dtype=complex)
+    Ydom[band] = 2 * Y[band]
+    z_dom = np.fft.ifft(Ydom)
+    env_dom = np.abs(z_dom[keep])
+    out['dom_cv'], out['dom_skew'], out['dom_kurt'], out['dom_tau'] = _envelope_summary(env_dom)
+
+    # Instantaneous frequency (cycles per sample): the unwrapped phase increments
+    # over the trimmed segment, summarized robustly (scaled MAD, which equals the
+    # standard deviation for a Gaussian)
+    phi = np.unwrap(np.angle(z_dom[keep]))
+    inst_freq = np.diff(phi) / (2 * np.pi)
+    out['dom_ifspread'] = 1.4826 * np.median(np.abs(inst_freq - np.median(inst_freq)))
+    return out
+
+
+def phase_fluctuation_scaling(y: ArrayLike, half_width_frac: float = 0.01,
+                              num_windows: int = 16, max_n: int = 10000) -> Union[dict, float]:
+    """
+    Multi-scale fluctuation analysis of the instantaneous phase of the dominant oscillation.
+
+    Isolates the dominant oscillatory component of ``y`` (the frequency band
+    carrying the most spectral power, excluding DC and Nyquist), takes its
+    instantaneous phase via the analytic signal, and asks how the fluctuation of
+    that phase about its mean rotation rate grows with window size ``w``:
+    ``mean(|dphi(t+w) - dphi(t)|)`` against ``w``, in log-log space (the same logic
+    as detrended fluctuation analysis, as in ``fluctuation_analysis``, applied to
+    instantaneous phase instead of raw values).
+
+    The method is inspired by the analytic-signal analysis of strange nonchaotic
+    dynamics (SNA): for nonchaotic dynamics the curve rises at short windows but
+    flattens at longer windows (the largest Lyapunov exponent is negative and the
+    phase dynamics are globally stable), whereas for chaotic dynamics it keeps
+    rising at long windows. The original method uses empirical mode decomposition
+    to isolate the dominant intrinsic mode; this implementation instead bandpasses
+    around the single dominant non-edge FFT peak (the band-limited analytic-signal
+    trick of ``phase_amp_coupling``), which is simpler and avoids EMD's mode-mixing
+    and boundary sensitivities, at the cost of not being a literal reimplementation.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    half_width_frac : float, optional
+        Half-width of the frequency band around the dominant peak, as a fraction of
+        the usable (DC- and Nyquist-excluded) one-sided spectrum, and at least 2
+        bins. Default is 0.01.
+    num_windows : int, optional
+        The number of log-spaced window sizes (from 2 samples to N/4) to evaluate,
+        split into a short-window half and a long-window half for two separate
+        linear fits in log-log space. Default is 16.
+    max_n : int, optional
+        The maximum number of samples to consider; longer series are cropped to
+        their first ``max_n`` points. Default is 10000.
+
+    Returns
+    -------
+    dict or float
+        - ``meanFreq``: the mean rotation frequency of the isolated dominant
+          component, in cycles per sample.
+        - ``slope_short``, ``slope_long``: log-log slopes of the phase fluctuation
+          against window size, over the shorter and the longer half of the window
+          sizes (the two fits share one point).
+        - ``slope_diff``: ``slope_short - slope_long``.
+
+        NaN is returned if the series is too short for a well-defined dominant band
+        (or the phase is non-finite); the slopes are NaN if it is too short for the
+        multi-scale analysis.
+
+    Notes
+    -----
+    The short-window slope does not behave as the SNA reasoning suggests: the phase
+    comes from a narrow band, so it is smooth at short lags for any input, and
+    ``mean(|dphi(t+w) - dphi(t)|)`` grows linearly with ``w`` there (the trivial
+    derivative regime): ``slope_short`` is about 1 regardless of dynamics, and
+    ``slope_diff`` is just ``1 - slope_long``. The informative quantity is
+    ``slope_long`` alone: near 0 where the phase fluctuation saturates (periodic,
+    SNA-like), and positive where it keeps growing (chaotic, noisy).
+
+    References
+    ----------
+    K. Gupta, A. Prasad, H.P. Singh, R. Ramaswamy, "Analytical signal analysis of
+    strange nonchaotic dynamics", Phys. Rev. E 77, 046220 (2008).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    if N > max_n:
+        warnings.warn(f"Time series ({N} samples) exceeds max_n = {max_n}; "
+                      f"analyzing the first {max_n} samples")
+        y = y[:max_n]
+        N = max_n
+
+    # Dominant non-edge spectral peak (DC and Nyquist bins excluded):
+    half_n = N // 2 + 1
+    usable = np.arange(1, half_n - 1 if N % 2 == 0 else half_n)
+    half_width_bins = max(2, int(np.floor(half_width_frac * len(usable) + 0.5)))
+    if len(usable) < 4 * half_width_bins:
+        warnings.warn(f"Time series too short (N = {N}) for a well-defined dominant frequency band")
+        return np.nan
+
+    Y = np.fft.fft(y)
+    power = np.abs(Y[usable]) ** 2
+    peak_bin = usable[int(np.argmax(power))]
+    band = np.arange(max(usable[0], peak_bin - half_width_bins),
+                     min(usable[-1], peak_bin + half_width_bins) + 1)
+
+    # Band-limited analytic signal and its instantaneous phase:
+    Yband = np.zeros(N, dtype=complex)
+    Yband[band] = 2 * Y[band]
+    phi = np.unwrap(np.angle(np.fft.ifft(Yband)))
+    if not np.all(np.isfinite(phi)):
+        warnings.warn("Non-finite instantaneous phase (degenerate band-limited signal?)")
+        return np.nan
+
+    # Detrend: remove the mean rotation rate to leave the phase fluctuation
+    A = np.column_stack((np.arange(1, N + 1, dtype=float), np.ones(N)))
+    coef = np.linalg.lstsq(A, phi, rcond=None)[0]
+    out = {'meanFreq': coef[0] / (2 * np.pi)}  # cycles per sample
+    dphi = phi - A @ coef
+    out.update(slope_short=np.nan, slope_long=np.nan, slope_diff=np.nan)
+
+    # Multi-scale fluctuation analysis: mean(|dphi(t+w) - dphi(t)|) vs w
+    w_min = 2
+    w_max = N // 4
+    if w_max <= w_min * 4:
+        warnings.warn(f"Time series too short (N = {N}) for a meaningful multi-scale "
+                      f"phase-fluctuation analysis")
+        return out
+    windows = np.unique(np.floor(np.logspace(np.log10(w_min), np.log10(w_max), num_windows) + 0.5)
+                        ).astype(int)
+    if len(windows) < 6:
+        return out
+
+    mean_abs_diff = np.array([np.mean(np.abs(dphi[w:] - dphi[:-w])) for w in windows])
+    with np.errstate(divide='ignore'):
+        log_d = np.log10(mean_abs_diff)
+    valid = np.isfinite(log_d) & (mean_abs_diff > 0)
+    if np.sum(valid) < 6:
+        return out
+    log_w = np.log10(windows[valid].astype(float))
+    log_d = log_d[valid]
+
+    split = int(np.ceil(len(log_w) / 2))
+    short_idx = slice(0, split)
+    long_idx = slice(split - 1, None)  # one point of overlap anchors the two fits together
+
+    def fit_slope(x, yv):
+        if len(x) < 2:
+            return np.nan
+        return np.linalg.lstsq(np.column_stack((x, np.ones(len(x)))), yv, rcond=None)[0][0]
+
+    out['slope_short'] = fit_slope(log_w[short_idx], log_d[short_idx])
+    out['slope_long'] = fit_slope(log_w[long_idx], log_d[long_idx])
+    out['slope_diff'] = out['slope_short'] - out['slope_long']
+    return out
+
+
+def _bicoherence_grid(y: np.ndarray, step: int, num_seg: int, seg_length: int, half_n: int,
+                      win: np.ndarray, pi: np.ndarray, pj: np.ndarray) -> np.ndarray:
+    # Segment-averaged squared bicoherence of y at the frequency pairs (pi, pj)
+    # (0-based bins of the one-sided spectrum, with pi + pj <= half_n - 1).
+    psum = pi + pj
+    b_num = np.zeros(len(pi), dtype=complex)  # triple-product sum
+    p12 = np.zeros(len(pi))  # sum |X(f1) X(f2)|^2
+    p3 = np.zeros(len(pi))  # sum |X(f1+f2)|^2
+    for k in range(num_seg):
+        seg = y[k * step:k * step + seg_length]
+        seg = seg - np.mean(seg)  # demean each segment before windowing
+        xh = np.fft.fft(seg * win, seg_length)[:half_n]  # one-sided spectrum, DC to Nyquist
+        outer = xh[pi] * xh[pj]
+        b_num += outer * np.conj(xh[psum])
+        p12 += np.abs(outer) ** 2
+        p3 += np.abs(xh[psum]) ** 2
+    return np.abs(b_num) ** 2 / (p12 * p3 + np.finfo(float).eps)  # bounded in [0, 1]
+
+
+def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'full',
+                num_surr: int = 25) -> Union[dict, float]:
+    """
+    Quadratic phase coupling between frequencies, from the squared bicoherence.
+
+    Estimates the bicoherence, a normalized bispectrum, by segment averaging: the
+    series is split into overlapping segments (50% overlap, as many as fit), each
+    segment is demeaned, Hamming-windowed and Fourier transformed, and the
+    per-segment Fourier coefficients are combined into the bispectrum estimate
+    ``B(f1,f2) = <X(f1) X(f2) X*(f1+f2)>``, averaged over segments. The squared
+    bicoherence is ``bic2(f1,f2) = |B(f1,f2)|^2 / (<|X(f1)X(f2)|^2> <|X(f1+f2)|^2>)``,
+    bounded in [0, 1] by the Cauchy-Schwarz inequality.
+
+    Time-domain nonlinearity statistics (e.g., ``tc3``, the ramping-window asymmetry
+    of ``ramping_windows``) collapse all frequency structure into a single number
+    per lag, so nonlinear coupling localized to a specific pair of frequency bands
+    can average out to near zero. The bicoherence resolves quadratic phase coupling
+    per frequency pair, directly detecting whether energy at f1 and f2 is
+    phase-coupled to energy at f1+f2 (the frequency-domain signature of a quadratic
+    nonlinearity).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    seg_length : int, optional
+        The length (in samples) of each FFT segment (at least 16). Segments overlap
+        by 50% and as many as fit are averaged; the number of segments K sets the
+        variance of the bicoherence estimate. Fewer than 8 segments gives NaN.
+        Default is 64.
+    max_n : int or 'full', optional
+        The maximum number of samples to consider: longer series are cropped to
+        their first ``max_n`` points. ``'full'`` disables cropping. Default is
+        ``'full'``.
+    num_surr : int, optional
+        The number of random-phase surrogates (which preserve the power spectrum but
+        destroy phase coupling) used to calibrate the significance threshold
+        empirically, in place of its asymptotic approximation. The threshold is the
+        95% quantile of squared bicoherence values pooled across all frequency pairs
+        and all surrogates. Default is 25.
+
+    Returns
+    -------
+    dict or float
+        - ``meanBic``, ``maxBic``, ``stdBic``, ``skewBic``: mean, maximum, standard
+          deviation and skewness of the squared bicoherence over the non-redundant
+          principal domain of frequency pairs (``0 < f1 <= f2``, ``f1 + f2 <=
+          Nyquist``).
+        - ``entropy``: the Shannon entropy of the bicoherence surface, normalized
+          to [0, 1] by the uniform-distribution entropy: whether coupling is
+          concentrated in a few frequency pairs or diffuse across many.
+        - ``meanBicDiag``: the mean squared bicoherence on the self-coupling
+          diagonal ``f1 = f2`` (quadratic harmonic distortion).
+        - ``propSig``: the proportion of frequency pairs exceeding the
+          surrogate-calibrated 95% significance threshold.
+        - ``threshRatio``: the ratio of that empirical threshold to the standard
+          analytic large-K approximation (``K * bic2 ~ Exp(1)`` under the null of a
+          linear, ~Gaussian process, giving threshold ``-log(0.05)/K``). A ratio far
+          from 1 flags that the asymptotic approximation is untrustworthy for this
+          series (e.g., because of non-stationarity).
+
+        NaN is returned if the series is too short for 8 segments.
+
+    Notes
+    -----
+    The surrogates are generated from MATLAB's default random seed (the Mersenne
+    Twister with seed 0), so the output is reproducible and, because the surrogate
+    construction is the same as hctsa's ``SD_MakeSurrogates`` (``'RP'``), identical
+    to hctsa's.
+    """
+    from .surrogates import _make_surrogates  # local import: surrogates imports other operations
+
+    y = np.asarray(y, dtype=float).ravel()
+    min_seg_length = 16
+    if seg_length < min_seg_length:
+        raise ValueError(f"seg_length = {seg_length} is too short for a meaningful FFT "
+                         f"segment (need >= {min_seg_length})")
+    N = len(y)
+    if not (isinstance(max_n, str) and max_n == 'full') and N > max_n:
+        warnings.warn(f"Time series ({N} samples) exceeds max_n = {max_n}; "
+                      f"analyzing the first {max_n} samples")
+        y = y[:max_n]
+        N = int(max_n)
+
+    # Segment geometry (50% overlap, as many segments as fit), shared by the real
+    # series and every surrogate:
+    step = seg_length // 2
+    min_num_seg = 8  # need enough segments for a meaningful bicoherence estimate
+    num_seg = (N - seg_length) // step + 1
+    if num_seg < min_num_seg:
+        warnings.warn(f"Time series (N = {N}) too short for seg_length = {seg_length} to "
+                      f"form >= {min_num_seg} 50%-overlapping segments")
+        return np.nan
+
+    half_n = seg_length // 2 + 1  # bin i <-> frequency i/seg_length, up to Nyquist
+    win = scipy.signal.windows.hamming(seg_length, sym=True)
+
+    # Non-redundant principal domain (excluding DC): 1 <= i <= j, i + j <= Nyquist bin
+    ii, jj = np.meshgrid(np.arange(half_n), np.arange(half_n), indexing='ij')
+    mask = (ii + jj <= half_n - 1) & (jj >= ii) & (ii >= 1)
+    pi, pj = ii[mask], jj[mask]
+    diag = pi == pj  # self-coupling diagonal (f1 = f2)
+
+    # Bicoherence of the real series
+    bic = _bicoherence_grid(y, step, num_seg, seg_length, half_n, win, pi, pj)
+    if bic.size == 0 or not np.any(np.isfinite(bic)):
+        return np.nan
+
+    out = {}
+    out['meanBic'] = np.mean(bic)
+    out['maxBic'] = np.max(bic)
+    out['stdBic'] = np.std(bic, ddof=1)
+    out['skewBic'] = scipy.stats.skew(bic)
+
+    # Normalized Shannon entropy of the bicoherence surface (0 = all coupling
+    # concentrated in one frequency pair, 1 = uniformly diffuse):
+    p = bic[bic > 0]
+    p = p / np.sum(p)
+    out['entropy'] = -np.sum(p * np.log(p)) / np.log(len(bic))
+
+    out['meanBicDiag'] = np.mean(bic[diag])
+
+    # Surrogate-calibrated significance threshold. Random-phase surrogates preserve
+    # the power spectrum (linear structure) but destroy quadratic phase coupling,
+    # exactly the null hypothesis a bicoherence significance test needs; the 95%
+    # quantile of their pooled bic2 values is the empirical threshold.
+    alpha = 0.05
+    surrogates = _make_surrogates(y, 'RP', num_surr, random_seed=5489)  # = rng(0, 'twister')
+    null_vals = np.concatenate([
+        _bicoherence_grid(surrogates[:, s], step, num_seg, seg_length, half_n, win, pi, pj)
+        for s in range(num_surr)])
+    null_vals = null_vals[np.isfinite(null_vals)]
+    surr_thresh = float(np.ravel(matlab_quantile(null_vals, 1 - alpha))[0])
+    out['propSig'] = np.mean(bic > surr_thresh)
+
+    # How far the standard asymptotic threshold is from the empirical one:
+    analytic_thresh = -np.log(alpha) / num_seg
+    out['threshRatio'] = surr_thresh / analytic_thresh
+    return out
+
+
+def spectral_time_freq(y: ArrayLike, num_windows: int = 20) -> Union[dict, float]:
+    """
+    Time-varying spectral statistics from a spectrogram.
+
+    ``spectral_summaries`` computes statistics from a single, static spectral
+    estimate of the whole time series. This function instead divides the series into
+    overlapping windows and tracks how the spectral content changes across them:
+
+    - The spectral kurtosis (Antoni 2006) is the kurtosis, across windows, of the
+      power in each frequency bin. High values flag a frequency band whose energy is
+      concentrated in occasional bursts rather than spread evenly over time (e.g., a
+      transient, impulsive fault).
+    - The spectral entropy of the power spectrum is computed separately in each
+      window, giving one entropy value per window. Variation in this sequence flags
+      a time series whose spectral character is not stationary.
+
+    Each window is a Hamming window of ``max(8, round(N/num_windows))`` samples with
+    50% overlap, so about ``2*num_windows - 1`` windows result.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    num_windows : int, optional
+        Sets the window length to ``N/num_windows`` samples (at least 8), with 50%
+        overlap. If fewer than 4 windows fit, the output is NaN. Default is 20.
+
+    Returns
+    -------
+    dict or float
+        - ``sk_max``, ``sk_mean``, ``sk_std``, ``sk_range``: maximum, mean, standard
+          deviation and range, over frequencies, of the spectral kurtosis.
+        - ``sk_fracAboveThresh``: the fraction of frequencies whose spectral kurtosis
+          exceeds the 95% Gaussian-null threshold (non-Gaussian, bursty behavior).
+        - ``sk_freqAtMax``: the angular frequency, in radians per sample (``2*pi``
+          times the frequency in cycles per sample, from 0 to pi, matching
+          ``spectral_summaries``), at which the spectral kurtosis is largest.
+        - ``sk_relSpread``: the relative spread of power across windows: the mean over
+          frequencies of the standard deviation across windows of the power in each
+          frequency bin, divided by the mean over frequencies of the mean power across
+          windows. A dimensionless coefficient of variation of the power, independent
+          of the variance of the series and of the window length (about 1 for white
+          noise).
+        - ``se_mean``, ``se_std``, ``se_max``, ``se_min``, ``se_range``: mean,
+          standard deviation, maximum, minimum and range, over windows, of the spectral
+          entropy of each window's power spectrum: the Shannon entropy (base 2) of the
+          one-sided relative power across frequency bins, divided by its maximum,
+          log2 of the number of bins, so each window's value lies in [0, 1]: 1 for a
+          flat (white) spectrum, near 0 for a spectrum concentrated in a single
+          frequency bin.
+
+    Notes
+    -----
+    Everything is computed directly from the spectrogram (the same quantities as
+    MATLAB's ``spectralKurtosis`` and ``spectralEntropy``), with power in each
+    frequency bin and window normalized as ``|FFT|^2/(0.5*sum(window)^2)`` and halved
+    at zero frequency (and at the Nyquist frequency for an even window length).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    Ny = len(y)
+
+    # Windows sized as a fraction of the series length, so behavior scales across
+    # very different input lengths:
+    win_length = max(8, int(np.floor(Ny / num_windows + 0.5)))
+    noverlap = int(np.floor(win_length / 2 + 0.5))
+    window = scipy.signal.windows.hamming(win_length, sym=True)
+
+    hop = win_length - noverlap
+    num_frames = (Ny - win_length) // hop + 1
+    if num_frames < 4:
+        return np.nan  # too short for across-window statistics to mean anything
+
+    # Spectrogram: power in each (frequency bin, window), one-sided
+    idx = np.arange(win_length)[:, None] + hop * np.arange(num_frames)[None, :]
+    n_bins = win_length // 2 + 1
+    S = np.fft.fft(y[idx] * window[:, None], axis=0)[:n_bins, :]
+    P = np.abs(S) ** 2 / (0.5 * np.sum(window)) ** 2
+    P[0, :] *= 0.5  # zero frequency
+    if win_length % 2 == 0:
+        P[-1, :] *= 0.5  # Nyquist frequency
+    fout = np.arange(n_bins) / win_length  # cycles per sample
+
+    # Spectral kurtosis: kurtosis across windows, per frequency bin (Antoni 2006)
+    K = P.shape[1]
+    kurt = ((K + 1) / (K - 1)) * np.mean(P ** 2, axis=1) / np.mean(P, axis=1) ** 2 - 2
+    thresh = 2 * np.sqrt(2) * scipy.special.erfcinv(1 - 0.95) / np.sqrt(K)  # 95% Gaussian null
+    spread = np.std(P, axis=1, ddof=1)
+    centroid = np.mean(P, axis=1)
+
+    out = {}
+    out['sk_max'] = np.max(kurt)
+    out['sk_mean'] = np.mean(kurt)
+    out['sk_std'] = np.std(kurt, ddof=1)
+    out['sk_range'] = np.max(kurt) - np.min(kurt)
+    out['sk_fracAboveThresh'] = np.mean(kurt > thresh)
+    out['sk_freqAtMax'] = 2 * np.pi * fout[int(np.argmax(kurt))]
+    out['sk_relSpread'] = np.mean(spread) / np.mean(centroid)
+
+    # Instantaneous spectral entropy: one value per window
+    p = P / np.sum(P, axis=0, keepdims=True)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        plogp = np.where(p > 0, p * np.log2(p), 0.0)
+    se = -np.sum(plogp, axis=0) / np.log2(n_bins)
+    out['se_mean'] = np.mean(se)
+    out['se_std'] = np.std(se, ddof=1)
+    out['se_max'] = np.max(se)
+    out['se_min'] = np.min(se)
+    out['se_range'] = np.max(se) - np.min(se)
+    return out
