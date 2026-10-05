@@ -829,7 +829,7 @@ def _transition_measures(yth: np.ndarray, num_groups: int) -> np.ndarray:
     """A set of metrics on the one-time transition matrix of a symbolized time series."""
     T = _transition_matrix(yth, num_groups)
 
-    out = np.zeros(8)
+    out = np.zeros(6)
     #   (i) diagonal elements
     diag_t = np.diag(T)
     out[0] = _seq_sum(diag_t) / num_groups  # mean
@@ -845,8 +845,6 @@ def _transition_measures(yth: np.ndarray, num_groups: int) -> np.ndarray:
     # (iv) measures from eigenvalues of T
     eig_t = np.linalg.eigvals(T)
     out[5] = _seq_std(eig_t)
-    out[6] = np.max(np.real(eig_t))
-    out[7] = np.min(np.real(eig_t))
 
     return out
 
@@ -870,7 +868,8 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
     tau : int or str, optional
         The time-delay. The time series is downsampled at this lag before being
         discretized. Can also be set to ``'ac'`` to use the first zero-crossing of
-        the autocorrelation function. Default is 1.
+        the autocorrelation function (capped at floor(N/50); NaN is returned if it is
+        undefined). Default is 1.
 
     Returns
     -------
@@ -890,8 +889,8 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
             raise ValueError(f"Unknown tau '{tau}'")
         # determine tau from first zero of autocorrelation
         tau = first_crossing(y, 'ac', 0, 'discrete')
-        if np.isnan(tau):
-            raise ValueError('Time series too short to estimate tau')
+        if np.isnan(tau):  # undefined ACF (e.g., constant series)
+            return np.nan
         if tau > N / 50:  # for highly-correlated signals
             tau = np.floor(N / 50)
 
@@ -907,7 +906,7 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
     if tau > 1:
         y = resample_poly(y, 1, tau)  # resample
 
-    nfeat = 8  # the number of features calculated at each point
+    nfeat = 6  # the number of features calculated at each point
     store = np.zeros((len(num_groups_range), nfeat))
     for i, ng in enumerate(num_groups_range):
         yth = coarse_grain(y, 'quantile', int(ng))  # thresholded data: yth
@@ -994,22 +993,6 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
     out['stdeigfexp_r2'] = fit['r2']
     out['stdeigfexp_adjr2'] = fit['adjr2']
     out['stdeigfexp_rmse'] = fit['rmse']
-
-    # 7) maximum (real) eigenvalue of T -- fit an exponential decay
-    fit = _exp_fit_gof(x, store[:, 6], [1, -0.2])
-    out['maxeig_fexpa'] = fit['a']
-    out['maxeig_fexpb'] = fit['b']
-    out['maxeig_fexpr2'] = fit['r2']
-    out['maxeig_fexpadjr2'] = fit['adjr2']
-    out['maxeig_fexprmse'] = fit['rmse']
-
-    # 8) minimum (real) eigenvalue of T -- fit an exponential decay
-    fit = _exp_fit_gof(x, store[:, 7], [1, -0.2])
-    out['mineigfexp_a'] = fit['a']
-    out['mineigfexp_b'] = fit['b']
-    out['mineigfexp_r2'] = fit['r2']
-    out['mineigfexp_adjr2'] = fit['adjr2']
-    out['mineigfexp_rmse'] = fit['rmse']
 
     return out
 
