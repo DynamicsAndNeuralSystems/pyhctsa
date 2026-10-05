@@ -102,7 +102,9 @@ def moving_threshold(y: ArrayLike, a: float = 1.0, b: float = 0.1) -> dict:
     Returns
     -------
     dict
-        Dictionary containing barrier and kick statistics.
+        Dictionary containing barrier and kick statistics, including `pkick` (the probability of a
+        kick, number of kicks / (N-1)) and `meankicksize` (the mean size of the barrier jump when a
+        kick occurs; NaN if there are none).
     """
     if b < 0 or b > 1:
         raise ValueError('The decay proportion, b, should be between 0 and 1')
@@ -138,11 +140,12 @@ def moving_threshold(y: ArrayLike, a: float = 1.0, b: float = 0.1) -> dict:
     }
 
     # Kicks (when the barrier is changed due to extreme event)
-    f_kicks = np.flatnonzero(kicks > 0)
+    f_kicks = np.flatnonzero(kicks)  # indices of kicks (steps where an extreme event increased the barrier)
+    out['meankicksize'] = np.mean(kicks[f_kicks]) if f_kicks.size else np.nan  # mean size of the barrier jump
     i_kicks = np.diff(f_kicks)  # time intervals between successive kicks
     if i_kicks.size > 0:
         out.update({
-            'stdkickf': np.std(i_kicks, ddof=1) if i_kicks.size > 1 else np.nan,
+            'stdkickf': np.std(i_kicks, ddof=1) if i_kicks.size > 1 else 0.0,  # MATLAB's std of a scalar is 0
             'meankickf': np.mean(i_kicks),
             'mediankickf': np.median(i_kicks),
         })
