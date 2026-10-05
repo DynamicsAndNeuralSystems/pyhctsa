@@ -1634,3 +1634,230 @@ def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
                               / np.sqrt(np.sum(w*c_lead**2)*np.sum(w*resid**2)))
 
     return out
+
+# ------------------------------------------------------------------------------
+# Recurrence- and embedding-based operations (NL_RecurrenceTimes, NL_RQA, ...)
+# ------------------------------------------------------------------------------
+# (the imports for this block sit here, rather than at the top of the module, only to
+# keep the block self-contained)
+from numba import njit
+from scipy.spatial.distance import pdist
+from sklearn.neighbors import KDTree
+
+from ..utils import _ml_randperm
+
+
+@njit(cache=True)
+def _fnn_nearest(s, delay, max_emb, theiler):
+    """
+    For each query point and each embedding dimension 1..max_emb, the nearest neighbor
+    (max-norm, non-zero distance, outside the Theiler window) among the candidate points,
+    as TISEAN's ``false_nearest`` finds it, and whether the minimum distance is shared by
+    several candidates (a tie).
+    """
+    n_len = s.size
+    n_query = n_len - max_emb * delay
+    n_cand = n_len - (max_emb + 1) * delay
+    best = np.full((n_query, max_emb), 1.1)
+    which = np.full((n_query, max_emb), -1, dtype=np.int64)
+    tied = np.zeros((n_query, max_emb), dtype=np.bool_)
+    for n in range(n_query):
+        for e in range(n_cand):
+            if abs(e - n) <= theiler:
+                continue
+            mx = 0.0
+            for d in range(max_emb):
+                dx = abs(s[n + d] - s[e + d])
+                if dx > mx:
+                    mx = dx
+                if mx > 0.0:
+                    if mx < best[n, d]:
+                        best[n, d] = mx
+                        which[n, d] = e
+                        tied[n, d] = False
+                    elif mx == best[n, d]:
+                        tied[n, d] = True
+    return best, which, tied
+
+
+def _fnn_break_ties(s, best, which, tied, delay, max_emb, theiler, eps_grid):
+    """
+    Among tied nearest neighbors, pick the one TISEAN's box search meets first: it scans the
+    3x3 boxes (of side epsilon, in the first and the last coordinate) around the point in
+    order, and each box's points from the latest to the earliest, keeping the first minimum.
+    """
+    n_cand = s.size - (max_emb + 1) * delay
+    cand = np.arange(n_cand)
+    for n, d in zip(*np.nonzero(tied)):
+        mx = np.zeros(n_cand)
+        for k in range(d + 1):
+            mx = np.maximum(mx, np.abs(s[n + k] - s[cand + k]))
+        ties = cand[(mx == best[n, d]) & (np.abs(cand - n) > theiler)]
+        eps = eps_grid[min(np.searchsorted(eps_grid, best[n, d]), len(eps_grid) - 1)]
+        cx, cy = (s[ties] / eps).astype(np.int64) & 1023, (s[ties + d] / eps).astype(np.int64) & 1023
+        x, y = int(s[n] / eps) & 1023, int(s[n + d] / eps) & 1023
+        da, db = (cx - x + 1) & 1023, (cy - y + 1) & 1023  # offset + 1, if within the 3x3 boxes
+        visible = (da <= 2) & (db <= 2)
+        if visible.any():
+            ties, da, db = ties[visible], da[visible], db[visible]
+            which[n, d] = ties[np.lexsort((-ties, db, da))[0]]
+
+
+def _false_nearest(y: ArrayLike, delay: int = 1, max_dim: int = 10, theiler: int = 0,
+                   escape_factor: float = 2.0) -> Union[dict, None]:
+    """
+    Fraction of false nearest neighbors by embedding dimension (TISEAN's ``false_nearest``,
+    as called by hctsa's NL_FNN with ``-m1 -M1,max_dim``).
+
+    A nearest neighbor (max-norm, outside the Theiler window) of an embedded point is false
+    when, after adding the next coordinate, the distance to it grows by more than a factor
+    ``escape_factor``. The series is rescaled to [0, 1] and, as in hctsa, written to TISEAN
+    to 7 significant digits.
+
+    Returns a dictionary of arrays over the embedding dimensions TISEAN reports (``dim``,
+    ``pfnn``, ``nhood`` (mean size of the neighborhoods) and ``nhood_std``), or ``None`` when
+    TISEAN gives no output (constant or too-short series, or no neighbor within range at
+    the first dimension). TISEAN stops at the first dimension for which no neighbor is
+    found, keeping the dimensions before it.
+    """
+    y = _tisean._round_significant(np.asarray(y, dtype=float).ravel(), 7)
+    n_len = y.size
+    delay, max_dim, theiler = int(delay), int(max_dim), int(theiler)
+    if (max_dim + 1) * delay >= n_len:
+        return None
+    lo, hi = y.min(), y.max()
+    interval = hi - lo
+    if interval == 0:
+        return None
+    s = (y - lo) / interval
+    varianz = np.sqrt(np.abs(np.mean(s * s) - np.mean(s) ** 2))
+
+    best, which, tied = _fnn_nearest(s, delay, max_dim, theiler)
+    # TISEAN's grid of neighborhood sizes: 1e-5, increased by sqrt(2) up to 2*varianz/escape_factor
+    eps_grid = [1e-5]
+    while eps_grid[-1] < 2 * varianz / escape_factor:
+        eps_grid.append(eps_grid[-1] * np.sqrt(2.0))
+    _fnn_break_ties(s, best, which, tied, delay, max_dim, theiler, np.array(eps_grid))
+    rows = {'dim': [], 'pfnn': [], 'nhood': [], 'nhood_std': []}
+    for emb in range(1, max_dim + 1):
+        mindx, nbr = best[:, emb - 1], which[:, emb - 1]
+        found = (nbr >= 0) & (mindx <= varianz / escape_factor)
+        n_found = int(found.sum())
+        if n_found == 0:
+            break  # TISEAN: "Not enough points found!"
+        q = np.flatnonzero(found)
+        factor = np.abs(s[q + emb] - s[nbr[q] + emb]) / mindx[q]
+        rows['dim'].append(emb)
+        rows['pfnn'].append(_tisean._e(np.count_nonzero(factor > escape_factor) / n_found))
+        rows['nhood'].append(_tisean._e(np.mean(mindx[q]) * interval))
+        rows['nhood_std'].append(_tisean._e(np.sqrt(np.mean(mindx[q] ** 2)) * interval))
+    if not rows['dim']:
+        return None
+    return {k: np.array(v) for k, v in rows.items()}
+
+
+def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.4) -> Union[int, float]:
+    """
+    Embedding dimension by false nearest neighbors, as hctsa's ``BF_Embed(y, tau, 'fnn')``:
+    the first dimension (of 1 to 10) at which the fraction of false nearest neighbors falls
+    below `threshold` (TISEAN's ``false_nearest`` with a Theiler window of one
+    autocorrelation time and an escape factor of 5), or one more than the largest
+    dimension TISEAN reports if it never does. NaN when it cannot be determined.
+    """
+    if y.size < 10:
+        logger.warning(f'Time series (N={y.size}) too short for fnn')
+        return np.nan
+    theiler = theiler_window(y, ('ac', 1), y.size)
+    if np.isnan(theiler):
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    res = _false_nearest(y, tau, 10, int(theiler), 5.0)
+    if res is None:
+        logger.warning('TISEAN false_nearest produced no usable output for this data')
+        return np.nan
+    below = np.flatnonzero(res['pfnn'] < threshold)
+    return int(res['dim'][below[0]]) if below.size else int(res['dim'][-1]) + 1
+
+
+def _embedding_params(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
+                      ) -> Union[tuple, None]:
+    """
+    The time delay and embedding dimension, as hctsa's ``BF_Embed(y, tau, m, true)``.
+
+    `tau` is an integer or a rule understood by :func:`pyhctsa.utils.get_tau`. `m` is an
+    integer, ``'fnn'`` (false nearest neighbors, threshold 0.4), or ``('fnn', threshold)``.
+    Returns ``(tau, m)``, or None if either cannot be determined.
+    """
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        logger.warning('Could not determine the time delay for the embedding')
+        return None
+    tau = int(tau)
+    if isinstance(m, (list, tuple)):
+        m = m[0] if len(m) == 1 else m
+    if isinstance(m, (list, tuple)) or isinstance(m, str):
+        if (m if isinstance(m, str) else m[0]) != 'fnn':
+            raise ValueError(f"Embedding dimension, m, incorrectly specified: {m!r}")
+        m = _fnn_embedding_dim(y, tau, 0.4 if isinstance(m, str) else m[1])
+        if np.isnan(m):
+            return None
+    return tau, int(m)
+
+
+def _bf_embed(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
+              ) -> Union[np.ndarray, None]:
+    """
+    Time-delay embedding with hctsa's ``BF_Embed(y, tau, m, false)``: the embedded points as
+    rows (see :func:`_embedding_params` for `tau` and `m`), or None when it fails
+    (undetermined parameters, or a time series too short).
+    """
+    params = _embedding_params(y, tau, m)
+    if params is None:
+        return None
+    try:
+        return time_delay_embed(y, params[1], params[0])
+    except ValueError as e:
+        logger.warning(str(e))
+        return None
+
+
+def _random_subset(n: int, k: int, random_seed: Union[int, str, None]) -> np.ndarray:
+    """
+    ``k`` of ``n`` indices (from zero) in random order, from the Mersenne Twister seeded as
+    hctsa's ``BF_ResetSeed`` (an integer seed, ``'default'`` for seed 0, or ``None``/``'none'``
+    for an unseeded stream).
+    """
+    if random_seed is None or random_seed == 'none':
+        rng = np.random.RandomState()
+    else:
+        rng = _ml_rng(0 if random_seed == 'default' else int(random_seed))
+    return _ml_randperm(n, rng)[:k] - 1
+
+
+def _recurrence_radius(Y: np.ndarray, rr: float, random_seed: Union[int, str, None]) -> float:
+    """
+    Neighborhood radius giving the target recurrence rate `rr`: its quantile of the pairwise
+    distances between (at most) 500 randomly chosen embedded points.
+    """
+    n_emb = Y.shape[0]
+    sub = _random_subset(n_emb, min(500, n_emb), random_seed)
+    return float(matlab_quantile(pdist(Y[sub]), rr)[0])
+
+
+def _recurrent_pairs(Y: np.ndarray, radius: float) -> tuple:
+    """All ordered pairs (src, dst) of embedded points within `radius` (Euclidean) of each other."""
+    nbrs = KDTree(Y).query_radius(Y, radius)
+    src = np.repeat(np.arange(Y.shape[0]), [nb.size for nb in nbrs])
+    return src, np.concatenate(nbrs)
+
+
+def _check_max_n(y: np.ndarray, max_n: Union[int, str], what: str) -> np.ndarray:
+    """Crop the series to its first `max_n` samples (``'full'`` for no cropping)."""
+    if isinstance(max_n, str):
+        if max_n != 'full':
+            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
+    elif y.size > max_n:
+        logger.warning(f'Time series ({y.size} > {max_n}) is too long for {what}. '
+                       f'Analyzing the first {int(max_n)} samples')
+        y = y[:int(max_n)]
+    return y
