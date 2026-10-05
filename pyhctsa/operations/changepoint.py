@@ -209,3 +209,144 @@ def l1pwc_sweep_lambda(y: np.ndarray, lambdar: np.ndarray) -> dict:
     out['bestlambda'] = lambdar[indbest]
  
     return out
+
+def _wvarchg(y: np.ndarray, K: int, d: int) -> int:
+    """
+    Number of variance change points, as the Wavelet Toolbox's `wvarchg`.
+
+    Dynamic programming over a Gaussian variance-change contrast (Lavielle's method) for up
+    to `K` change points at least `d` samples apart, then an automatic choice of how many to
+    keep from the slope of the contrast across the number of segments. Only the number of
+    change points (`kopt`) is returned.
+    """
+    y = np.asarray(y, dtype=np.float64).ravel()
+    y = y - np.mean(y)
+    K = K + 1  # number of segments (up to)
+    N = y.size
+    y2 = y ** 2
+
+    # Contrast matrix: matD[i, j] = n log(mean of y^2 over i..j) for segments [i, j] of length >= d
+    mat_d = np.full((N, N), np.inf)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        for i in range(N - d):
+            vi = np.arange(1, N - i + 1)
+            dummy = vi * np.log(np.cumsum(y2[i:]) / vi)
+            mat_d[i, i + d - 1:] = dummy[d - 1:]
+    mat_d[~np.isfinite(mat_d)] = np.inf  # (-Inf from log(0), NaN) -> Inf: such segments are disallowed
+
+    # Dynamic programming: I[k, L] = best contrast of the first L+1 points split into k+1 segments
+    I = np.zeros((K, N))
+    t = np.zeros((K, N), dtype=np.int64)  # 1-based position of the last change point
+    I[0, :] = mat_d[0, :]
+    for k in range(1, K - 1):
+        cand = I[k - 1, :N - 1][:, None] + mat_d[1:, :]  # cand[j, L]: change after point j+1, segment j+2..L+1
+        arg = np.argmin(cand, axis=0)
+        val = cand[arg, np.arange(N)]
+        I[k, k:] = val[k:]
+        t[k - 1, k:] = arg[k:] + 1
+    cand = I[K - 2, :N - 1] + mat_d[1:, N - 1]
+    arg = int(np.argmin(cand))
+    I[K - 1, N - 1] = cand[arg]
+    t[K - 2, N - 1] = arg + 1
+
+    # Change-point locations are not needed for the number of change points (only kopt is returned)
+    V = I[:, N - 1]
+
+    def _nanmin(a):
+        a = a[~np.isnan(a)]
+        return a.min() if a.size else np.nan
+
+    def _nanmax(a):
+        a = a[~np.isnan(a)]
+        return a.max() if a.size else np.nan
+
+    # Slope of the contrast between numbers of segments (1-based j as in the Wavelet Toolbox)
+    g2 = np.zeros(K + 1)  # g2[j], j = 1..K
+    with np.errstate(invalid='ignore'):
+        for j in range(2, K + 1):
+            g2[j] = _nanmin((V[:j - 1] - V[j - 1]) / np.arange(j - 1, 0, -1))
+    G2, M = [], []
+    for j in range(2, K + 1):
+        if j < K and g2[j] > _nanmax(g2[j + 1:K + 1]):  # (j = K: comparison with an empty max is false)
+            G2.append(g2[j])
+            M.append(j)
+    k = len(M)
+    M.append(K)
+    G2.append(g2[K])
+
+    G1 = np.array(G2[:k + 1] + [0.0])
+    G2 = np.array([np.inf] + G2)
+    M = np.array([1] + M) - 1
+    if G1.size == 2:
+        return 0
+    diffs = G2[1:-1] - G1[1:-1]
+    lmax = _nanmax(diffs)
+    indopt = int(np.argmax(np.where(np.isnan(diffs), -np.inf, diffs))) + 1  # 1-based index into diffs
+    return int(M[indopt]) * int(lmax > G2[-1])
+
+
+def wavelet_var_chg(y: np.ndarray, w_name: str = 'db3', level: int | str = 3,
+                    max_n_chpts: int = 5, min_delay: float | int = 0.01) -> float:
+    """
+    Number of variance change points found from a wavelet detail signal.
+
+    The series is decomposed with a mother wavelet to a given level, and the detail signal at
+    that level is reconstructed. The 2% of its values with the largest magnitude are replaced
+    by the mean of the detail signal, so that single large events do not dominate. A variance
+    change-point estimator (as the Wavelet Toolbox's `wvarchg`: dynamic programming on a
+    Gaussian variance contrast) then finds up to `max_n_chpts` points at least `min_delay`
+    samples apart, and chooses how many to keep. The output is that number.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    w_name : str, optional
+        The name of the mother wavelet to analyze the data with, e.g., 'db3', 'sym2'.
+        Default is 'db3'.
+    level : int or 'max', optional
+        The level of wavelet decomposition; 'max' uses the maximum level for the series
+        length. Default is 3.
+    max_n_chpts : int, optional
+        The maximum number of change points. Default is 5.
+    min_delay : float or int, optional
+        The minimum delay between consecutive change points, in samples; a value between 0
+        and 1 is taken as a proportion of the time-series length, e.g., 0.02 ensures that
+        change points are separated by at least 2% of the length. Default is 0.01.
+
+    Returns
+    -------
+    float
+        The optimal number of change points, from 0 to `max_n_chpts`, or NaN if `level` is
+        too large for the wavelet on this series.
+    """
+    import pywt
+    from .wavelet import _wavedec, _wrcoef
+
+    y = np.asarray(y, dtype=np.float64).ravel()
+    N = y.size
+    max_level = pywt.dwt_max_level(N, w_name)
+    if level == 'max':
+        level = max_level
+    if min_delay is None:
+        min_delay = 0.01
+    if 0 < min_delay < 1:
+        min_delay = int(np.ceil(min_delay * N))
+    min_delay = int(min_delay)
+    if max_level < level or level < 1:
+        return np.nan
+
+    # Detail signal at the chosen level
+    c, l = _wavedec(y, w_name, level=level)
+    det = _wrcoef(c, l, w_name, level)
+
+    # Replace the 2% of the greatest (absolute) values by the mean
+    x = np.sort(np.abs(det))
+    idx = int(np.fix(x.size * 0.98))
+    if idx < 1:
+        return np.nan
+    v2p100 = x[idx - 1]
+    det = det.copy()
+    det[np.abs(det) > v2p100] = np.mean(det)
+
+    return float(_wvarchg(det, max_n_chpts, min_delay))

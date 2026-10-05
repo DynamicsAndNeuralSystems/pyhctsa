@@ -829,3 +829,104 @@ def modwt_var(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 5) -> 
         out['decaySlope'] = np.nan
 
     return out
+
+
+def _shannon_entropy(c: np.ndarray) -> float:
+    """Shannon entropy of wavelet coefficients, as the Wavelet Toolbox's wentropy(x, 'shannon')."""
+    x = c[c != 0] ** 2
+    return float(-np.sum(x * np.log(np.finfo(float).eps + x)))
+
+
+def wpd_best_tree(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] = 5) -> Union[dict, float]:
+    """
+    Adaptive best-basis wavelet packet decomposition.
+
+    Decomposes the time series with a full wavelet packet tree and then prunes it to the
+    entropy-optimal ("best basis") subtree using the Coifman-Wickerhauser algorithm: working
+    up from the deepest level, a node's two children are kept only if their (best-subtree)
+    Shannon entropies sum to strictly less than the node's own. Unlike a standard DWT, which
+    always splits the frequency axis into the same octave bands, the best basis is a
+    non-uniform partition tailored to the signal. The statistics summarize the shape of that
+    adaptively chosen partition and how energy is spread across it.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    w_name : str, optional
+        The mother wavelet, e.g., 'db3', 'sym2'. Default is 'db3'.
+    max_level : int or 'max', optional
+        The maximum depth of the initial (pre-pruning) wavelet packet tree; 'max' uses the
+        maximum level allowed for the series length and wavelet. Default is 5 (reduced to the
+        maximum allowed level for short series).
+
+    Returns
+    -------
+    dict or float
+        Dictionary containing:
+
+        - `numLeaves`: the number of terminal nodes in the best-basis tree.
+        - `meanDepth`: the mean depth of terminal nodes.
+        - `stdDepth`: the spread of terminal-node depths (zero if the best basis is uniform
+          in depth).
+        - `entropy`: the Shannon entropy of the energy distribution across terminal nodes.
+
+        NaN if the series is too short for a wavelet packet decomposition.
+    """
+    y = np.asarray(y, dtype=np.float64).ravel()
+    N = y.size
+    w = pywt.Wavelet(w_name)
+    max_level_allowed = pywt.dwt_max_level(N, w)
+    if max_level == 'max':
+        max_level = max_level_allowed
+    if max_level_allowed < max_level:
+        logger.info(f'Chosen level ({max_level}) is too large for the {w_name} wavelet on this signal (N = {N}); '
+                    f'using {max_level_allowed} instead.')
+        max_level = max_level_allowed
+    if max_level < 1:
+        return np.nan  # time series too short for a wavelet packet decomposition
+
+    # Full wavelet packet tree (symmetric extension), keyed by path ('' = root; 'a'/'d' = low/high-pass child)
+    data = {'': y}
+    for depth in range(max_level):
+        for path in [p for p in data if len(p) == depth]:
+            a, d = pywt.dwt(data[path], w, mode='symmetric')
+            data[path + 'a'], data[path + 'd'] = a, d
+    ent = {p: _shannon_entropy(c) for p, c in data.items()}
+
+    # Best basis, bottom-up: split a node only if its children's best entropies sum to less than its own
+    best_ent = {}
+    is_split = {}
+    for path in sorted(data, key=len, reverse=True):
+        if len(path) == max_level:
+            best_ent[path] = ent[path]
+            is_split[path] = False
+            continue
+        echild = best_ent[path + 'a'] + best_ent[path + 'd']
+        if echild < ent[path]:
+            best_ent[path] = echild
+            is_split[path] = True
+        else:
+            best_ent[path] = ent[path]
+            is_split[path] = False
+
+    leaves = []
+    stack = ['']
+    while stack:
+        p = stack.pop()
+        if is_split[p]:
+            stack.extend([p + 'a', p + 'd'])
+        else:
+            leaves.append(p)
+    depths = np.array([len(p) for p in leaves], dtype=float)
+    E = np.array([np.sum(data[p] ** 2) for p in leaves])
+    E = E / np.sum(E)  # proportion of the energy in the terminal nodes
+
+    out = {
+        'numLeaves': len(leaves),
+        'meanDepth': np.mean(depths),
+        'stdDepth': np.std(depths, ddof=1) if depths.size > 1 else 0.0,
+    }
+    p = E[E > 0]
+    out['entropy'] = -np.sum(p * np.log(p))
+    return out

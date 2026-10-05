@@ -7,6 +7,7 @@ from scipy.stats import ansari
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
+from ..utils import get_tau, matlab_quantile
 
 def _ksdensity(x: np.ndarray, xi: Union[None, np.ndarray] = None):
     """
@@ -409,4 +410,123 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
         out['pcrossup'] = np.sum((x[:-1] - alpha) * (x[1:] - alpha) < 0) / (N - 1)
         out['pcrossdown'] = np.sum((x[:-1] + alpha) * (x[1:] + alpha) < 0) / (N - 1)
 
+    return out
+
+
+def kramers_moyal(y: ArrayLike, tau: Union[int, str] = 1, num_bins: int = 15) -> Union[dict, float]:
+    """
+    How the series' average drift and noise intensity depend on its current level, from its increments.
+
+    Treats the time series as a sampled Langevin process,
+    ``dx = D1(x) dt + sqrt(2 D2(x)) dW``, and estimates the conditional-moment
+    (Kramers-Moyal) coefficients as a function of the current level x, from increments
+    over `tau` samples::
+
+        D1(x) = E[dx | x] / tau            (drift: the deterministic restoring force)
+        D2(x) = E[dx^2 | x] / (2 tau)      (diffusion: the local noise intensity)
+        D4(x) = E[dx^4 | x] / (24 tau)
+
+    with conditioning on x done in equiprobable (quantile) bins.
+
+    The features summarize the shape of D1 and D2 across levels: a linear D1 with a constant
+    D2 is an Ornstein-Uhlenbeck (AR(1)-like) process; a cubic D1 indicates a nonlinear
+    potential (e.g., bistability); a D2 that varies with x indicates state-dependent noise
+    (note that a monotone transformation of an Ornstein-Uhlenbeck process also has
+    state-dependent D2, so this is partly a property of the marginal distribution); the
+    Pawula ratio D4/D2^2 is small for continuous diffusion and large when increments are
+    dominated by jumps.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (z-scored in hctsa).
+    tau : int or str, optional
+        The increment lag, in samples (default: 1); or a rule that sets it from the series:
+        'ac' (first zero-crossing of the autocorrelation function), 'ac1e' (floor of its
+        first 1/e crossing), or 'mi' (the smaller of the first minimum of the Kraskov
+        automutual information and the 'ac1e' delay); see `pyhctsa.utils.get_tau`.
+    num_bins : int, optional
+        The number of equiprobable bins used to condition on x (default: 15).
+
+    Returns
+    -------
+    dict or float
+        Dictionary containing:
+
+        - `driftLin`, `driftQuad`, `driftCubic`: coefficients of a count-weighted cubic fit of
+          D1(x) (`driftCubic` < 0 for a stiffening restoring force).
+        - `driftNonlinGain`: fraction of the residual variance of a linear drift fit that is
+          removed by the cubic fit (0 = linear drift).
+        - `diffSlope`, `diffCurv`: linear and quadratic coefficients of a quadratic fit of
+          D2(x), each relative to the mean of D2 across bins (0 = additive noise).
+        - `diffTailRatio`: mean D2 in the outer bins (the lowest and highest fifth of the
+          bins) / mean D2 in the central bins.
+        - `pawula`: mean over bins of D4/D2^2 (tau/2 for Gaussian increments; larger for
+          jumps). Unlike the shape of D2, not changed by a monotone transformation of the data.
+
+        NaN (a single float) if there are fewer than 20 * `num_bins` increments, if no delay
+        can be estimated for a `tau` rule, or if tied values make the quantile bins coincide.
+    """
+    y = np.asarray(y, dtype=np.float64).ravel()
+    if isinstance(tau, str):
+        tau = get_tau(y, tau)  # adaptive delay
+        if np.isnan(tau):
+            return np.nan  # data-dependent: no correlation length could be estimated
+    tau = int(tau)
+
+    x = y[:-tau]
+    dx = y[tau:] - x
+    if x.size < 20 * num_bins:
+        return np.nan  # data-dependent: too few samples per bin
+
+    # Conditional moments in equiprobable bins of x
+    edges = matlab_quantile(x, np.linspace(0, 1, num_bins + 1))
+    edges[0], edges[-1] = -np.inf, np.inf
+    bin_ = np.digitize(x, edges[1:-1])  # 0..num_bins-1; bin i is [edges[i], edges[i+1])
+    n = np.bincount(bin_, minlength=num_bins).astype(np.float64)
+    if np.any(n == 0):
+        return np.nan  # data-dependent: heavily tied values (quantile edges coincide)
+    xc = np.empty(num_bins)
+    D1 = np.empty(num_bins)
+    D2 = np.empty(num_bins)
+    D4 = np.empty(num_bins)
+    for b in range(num_bins):
+        m = bin_ == b
+        xc[b] = np.median(x[m])
+        D1[b] = np.mean(dx[m]) / tau
+        D2[b] = np.mean(dx[m] ** 2) / (2 * tau)
+        D4[b] = np.mean(dx[m] ** 4) / (24 * tau)
+
+    # Drift: linear vs cubic fit (weighted by bin counts, which are ~equal)
+    w = np.sqrt(n)
+    V3 = np.column_stack([np.ones(num_bins), xc, xc ** 2, xc ** 3])
+    c3 = np.linalg.lstsq(V3 * w[:, None], D1 * w, rcond=None)[0]
+    V1 = V3[:, :2]
+    c1 = np.linalg.lstsq(V1 * w[:, None], D1 * w, rcond=None)[0]
+    res1 = np.sum(n * (D1 - V1 @ c1) ** 2)
+    res3 = np.sum(n * (D1 - V3 @ c3) ** 2)
+    out = {
+        'driftLin': c3[1],
+        'driftQuad': c3[2],
+        'driftCubic': c3[3],
+        'driftNonlinGain': 1 - res3 / res1,
+    }
+
+    # Diffusion: quadratic fit, relative to the mean of D2 across bins (always positive), not
+    # to the fitted D2 at x = 0, which can be near zero or negative for an unconstrained fit
+    V2 = V3[:, :3]
+    b2 = np.linalg.lstsq(V2 * w[:, None], D2 * w, rcond=None)[0]
+    out['diffSlope'] = b2[1] / np.mean(D2)
+    out['diffCurv'] = b2[2] / np.mean(D2)
+    num_outer = max(1, num_bins // 5)
+    is_outer = np.zeros(num_bins, dtype=bool)
+    is_outer[:num_outer] = True
+    is_outer[num_bins - num_outer:] = True
+    is_central = np.zeros(num_bins, dtype=bool)
+    half = num_outer // 2
+    is_central[int(np.ceil(num_bins / 2)) - 1 + np.arange(-half, half + 1)] = True
+    out['diffTailRatio'] = np.mean(D2[is_outer]) / np.mean(D2[is_central])
+
+    # Pawula ratio (jumps vs continuous diffusion); the mean over bins is more reliable than the median
+    out['pawula'] = np.mean(D4 / D2 ** 2)
     return out

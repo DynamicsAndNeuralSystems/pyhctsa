@@ -1,6 +1,8 @@
 import numpy as np
 from numpy.typing import ArrayLike
 
+from ..utils import matlab_quantile
+
 try:
     from numba import njit
     _HAVE_NUMBA = True
@@ -151,4 +153,119 @@ def moving_threshold(y: ArrayLike, a: float = 1.0, b: float = 0.1) -> dict:
         })
     else:
         out.update({'stdkickf': np.nan, 'meankickf': np.nan, 'mediankickf': np.nan})
+    return out
+
+def _lz_complexity_bs(symbols: np.ndarray) -> float:
+    """
+    Normalized Lempel-Ziv complexity of a symbol sequence, as Michael Small's
+    MS_complexitybs (mex): symbols are floor(x)+1, the alphabet size is the
+    largest symbol present, and the phrase count c is normalized as
+    c*log(N)/(N*log(bins)). Uses the same (self-referential, Kaspar-Schuster)
+    phrase counter as `lempel_ziv_complexity`.
+    """
+    from pyhctsa.operations.entropy import _lz_complexity
+    s = (np.floor(np.asarray(symbols, dtype=np.float64)) + 1).astype(np.int64)
+    n = s.size
+    bins = max(1, int(s.max()))
+    c = _lz_complexity(s)
+    return (c * np.log(n)) / (n * np.log(bins))
+
+
+def _interval_stats(idx: np.ndarray) -> tuple:
+    """Mean and coefficient of variation of the gaps between consecutive (sorted) indices."""
+    if idx.size >= 2:
+        intervals = np.diff(idx).astype(np.float64)
+        mean_i = np.mean(intervals)
+        if mean_i > 0:
+            sd = np.std(intervals, ddof=1) if intervals.size > 1 else 0.0  # MATLAB's std of a scalar is 0
+            return mean_i, sd / mean_i
+        return mean_i, np.nan
+    return np.nan, np.nan
+
+
+def extreme_event_order(y: ArrayLike, extreme_thresh: float = 0.05) -> dict:
+    """
+    Temporal patterning of positive vs. negative extreme events.
+
+    Labels each point in the top/bottom `extreme_thresh` fraction of the distribution as a
+    positive- or negative-direction 'extreme event' (raw threshold exceedances, not
+    declustered peaks), then asks not just how often each type occurs but how the two types
+    are *ordered* in time relative to each other: does a positive extreme tend to be followed
+    by another positive one (clustering by sign), or does the sequence alternate?
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (assumed z-scored).
+    extreme_thresh : float, optional
+        The proportion of points (in each direction) to count as 'extreme'; must be in (0, 0.5)
+        so that the two tails cannot overlap. Default is 0.05.
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+
+        - `propPosEvents`: proportion of extreme events that are positive-direction.
+        - `meanInterval`, `cvInterval`: mean (in samples) and coefficient of variation of the
+          inter-event intervals of the combined (both-direction) event sequence.
+        - `meanIntervalPos`, `cvIntervalPos`, `meanIntervalNeg`, `cvIntervalNeg`: the same,
+          computed within each direction's own event sub-sequence.
+        - `alternationRate`: proportion of consecutive event pairs whose direction differs.
+        - `propPN`, `propNP`: proportion of consecutive event pairs that switch
+          positive-to-negative and negative-to-positive (they sum to `alternationRate`).
+        - `meanIntervalPN`, `cvIntervalPN`, `meanIntervalNP`, `cvIntervalNP`: mean and
+          coefficient of variation of the gaps between successive PN (NP) switches,
+          timestamped at the later (post-switch) event.
+        - `lzComplexity`: normalized Lempel-Ziv complexity (Michael Small's MS_complexitybs) of
+          the 0/1 event-direction sequence. NaN with fewer than 10 events, or if all events
+          have the same direction.
+
+        Outputs that need at least two events (the intervals and alternation measures) are NaN
+        otherwise.
+    """
+    if extreme_thresh is None:
+        extreme_thresh = 0.05
+    if extreme_thresh <= 0 or extreme_thresh >= 0.5:
+        raise ValueError('extreme_thresh must be in (0,0.5) so the two tails cannot overlap.')
+
+    y = np.asarray(y, dtype=np.float64).ravel()
+    yq = y[~np.isnan(y)]
+    upper_thresh, lower_thresh = matlab_quantile(yq, [1 - extreme_thresh, extreme_thresh])
+
+    pos_idx = np.flatnonzero(y > upper_thresh) + 1  # 1-based, as in hctsa (only differences matter)
+    neg_idx = np.flatnonzero(y < lower_thresh) + 1
+
+    event_idx = np.concatenate([pos_idx, neg_idx])
+    event_type = np.concatenate([np.ones(pos_idx.size), np.zeros(neg_idx.size)])
+    order = np.argsort(event_idx, kind='stable')
+    event_idx = event_idx[order]
+    event_type = event_type[order]
+    n_events = event_idx.size
+
+    out = {'propPosEvents': np.mean(event_type) if n_events else np.nan}
+
+    out['meanInterval'], out['cvInterval'] = _interval_stats(event_idx)
+    out['meanIntervalPos'], out['cvIntervalPos'] = _interval_stats(pos_idx)
+    out['meanIntervalNeg'], out['cvIntervalNeg'] = _interval_stats(neg_idx)
+
+    if n_events >= 2:
+        type_change = np.diff(event_type)  # +1 = N-to-P switch, -1 = P-to-N switch
+        out['alternationRate'] = np.mean(type_change != 0)
+        out['propPN'] = np.mean(type_change == -1)
+        out['propNP'] = np.mean(type_change == 1)
+        pn_switch_idx = event_idx[np.flatnonzero(type_change == -1) + 1]  # timestamp at post-switch event
+        np_switch_idx = event_idx[np.flatnonzero(type_change == 1) + 1]
+    else:
+        out['alternationRate'] = out['propPN'] = out['propNP'] = np.nan
+        pn_switch_idx = np_switch_idx = np.array([], dtype=int)
+    out['meanIntervalPN'], out['cvIntervalPN'] = _interval_stats(pn_switch_idx)
+    out['meanIntervalNP'], out['cvIntervalNP'] = _interval_stats(np_switch_idx)
+
+    # Normalized LZ complexity of the direction sequence (unstable below ~10 symbols; undefined
+    # when every event has the same direction, as then log(#symbols) = 0)
+    if n_events >= 10 and 0 < out['propPosEvents'] < 1:
+        out['lzComplexity'] = _lz_complexity_bs(event_type)
+    else:
+        out['lzComplexity'] = np.nan
     return out
