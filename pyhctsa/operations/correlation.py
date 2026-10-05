@@ -1889,13 +1889,17 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     return out
 
 def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
-                  shape: str = 'circle', r: float = 1.0) -> dict:
+                  shape: str = 'circle', r: float = 1.0,
+                  theiler_win: Union[int, float, list, tuple, None] = ('ac', 1)) -> dict:
     """
     Shape-based statistics in a 2-d embedding space.
 
     Takes a shape and places it on each point in the two-dimensional time-delay
-    embedding space sequentially. This function counts the points inside this shape
-    as a function of time, and returns statistics on this extracted time series.
+    embedding space sequentially. For each point it records the *fraction* of the other
+    points (outside a Theiler window) that are inside the shape, giving a time series of
+    the local density along the trajectory (the pointwise correlation sum, which is
+    intensive and bounded in [0, 1]; raw counts would grow in direct proportion to N),
+    and returns statistics on this extracted time series.
 
     Parameters
     -----------
@@ -1912,6 +1916,12 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
         The shape to use. Currently only 'circle' is supported. Default is ``circle``.
     r : float, optional
         The radius of the circle. Default is 1.0.
+    theiler_win : list, tuple, int or float, optional
+        The Theiler window: points closer in time than this are not counted as neighbors, since
+        they are close in the embedding only because successive values are correlated.
+        ``['ac', k]`` for k times the first zero-crossing of the autocorrelation function, or a
+        number of samples (see :func:`~pyhctsa.utils.theiler_window`; 0 counts every other
+        point). Default is ``('ac', 1)``. NaN output if the window cannot be set.
 
     Returns
     --------
@@ -1919,35 +1929,64 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
         A dictionary containing various statistics of the constructed time series
         (``ac1``, ``ac2``, ``ac3``, ``tau``, ``std``, ``median``, ``mean``, ``iqr``,
         ``iqronrange``, ``mode_val``, ``mode``, ``hist_ent``, ``statav5_m``, ``statav5_s``).
-        As in hctsa, the maximum count (``max``) is no longer returned.
+        As in hctsa, the maximum (``max``) is no longer returned. If no point has any neighbor
+        within ``r``, a fixed set of values is returned (``std``, ``median``, ``mean``, ``iqr``,
+        ``hist_ent`` = 0; ``mode_val`` = 1; ``mode`` = 0; the rest NaN).
     """
     y = np.asarray(y, dtype=float).ravel()
+    if theiler_win is None:
+        theiler_win = ('ac', 1)
+    theiler_win = theiler_window(y, theiler_win)
+    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
+        return np.nan
+
     # Set tau from the series if it is a rule ('tau'/'ac', 'ac1e' or 'mi'), capped at N/10
     tau = _resolve_delay(y, tau, cap=True, default='tau')
     if np.isnan(tau):  # undefined ACF (e.g. constant series), or no delay by the rule
         return np.nan
     tau = int(tau)
+
     # Create the recurrence space, populated by points m
     m = np.column_stack((y[:len(y) - tau], y[tau:]))
     N = len(m)
 
     # Start the analysis
     if shape == 'circle':
-        # Puts a circle around each point in the embedding space in turn
-        # counts how many pts are inside this shape, looks at the time series thus formed.
-        # Vectorised: one pairwise squared-distance matrix (sqeuclidean == the loop's
-        # sum of squared diffs exactly), then count <= r**2 per row. Diagonal is 0, so
-        # the self-count subtraction below is preserved. O(N^2) memory.
+        # Puts a circle around each point in the embedding space in turn and finds the
+        # fraction of the points outside i's Theiler window (which includes i itself)
+        # that are enclosed, giving the time series of the local density.
+        # Vectorised in blocks of rows: squared distances (sqeuclidean == the loop's sum of
+        # squared diffs), compared with r**2, restricted to |i - j| > theiler_win.
         from scipy.spatial.distance import cdist
-        m_c_d = cdist(m, m, metric='sqeuclidean')
-        counts = np.sum(m_c_d <= r**2, axis=1).astype(float)
+        counts = np.empty(N)
+        r2 = r ** 2
+        block = max(1, min(N, 4_000_000 // max(N, 1)))
+        cols = np.arange(N)
+        for i0 in range(0, N, block):
+            i1 = min(N, i0 + block)
+            m_c_d = cdist(m[i0:i1], m, metric='sqeuclidean')
+            is_other = np.abs(cols[None, :] - np.arange(i0, i1)[:, None]) > theiler_win
+            num = np.sum((m_c_d <= r2) & is_other, axis=1)
+            den = np.sum(is_other, axis=1)
+            with np.errstate(invalid='ignore', divide='ignore'):
+                counts[i0:i1] = num / den
     else:
         raise ValueError(f"Unknown shape '{shape}'")
-    counts -= 1 # ignore self counts
 
-    if np.all(counts == 0):
-        logger.warning("embed2_shapes: no counts detected!")
+    if np.any(np.isnan(counts)):
+        # The Theiler window leaves some point with no other point to compare with (a window of
+        # about half the series or more). The density is undefined there: give NaN.
+        logger.warning('embed2_shapes: the Theiler window excludes every other point.')
         return np.nan
+
+    # No point has any (non-Theiler-excluded) neighbor within r: a zero density everywhere is a
+    # valid (if extreme) outcome. The location/spread statistics are zero, and statistics of
+    # the shape of the (constant) counts are undefined (NaN)
+    if np.all(counts == 0):
+        return {'ac1': np.nan, 'ac2': np.nan, 'ac3': np.nan, 'tau': np.nan, 'std': 0.0,
+                'median': 0.0, 'mean': 0.0, 'iqr': 0.0, 'iqronrange': np.nan,
+                'mode_val': 1.0, 'mode': 0.0, 'hist_ent': 0.0, 'statav5_m': np.nan,
+                'statav5_s': np.nan}
 
     # Return basic statistics on the counts
     out = {}
@@ -1962,11 +2001,12 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
                                                                            25, method='hazen')
     out['iqronrange'] = out['iqr']/np.ptp(counts)
 
-    # distribution - using sqrt binning method
-    num_bins_to_use = int(np.ceil(np.sqrt(len(counts))))
-    bin_counts_norm, bin_edges = np.histogram(counts, density=True, bins=num_bins_to_use)
+    # distribution - using sqrt binning method (as MATLAB's histcounts: the bin width is
+    # (range / ceil(sqrt(N))), rounded to a "nice" value by the bin picker)
+    num_bins_to_use = max(int(np.ceil(np.sqrt(len(counts)))), 1)
     min_x, max_x = np.min(counts), np.max(counts)
-    bin_edges = bin_picker(min_x, max_x, n_bins=num_bins_to_use)
+    bin_edges = bin_picker(min_x, max_x, n_bins=None,
+                           bin_width_est=(max_x - min_x) / num_bins_to_use)
     bin_counts = histc(counts, bin_edges)
     # normalise bin counts
     bin_counts_norm = np.divide(bin_counts, np.sum(bin_counts))
