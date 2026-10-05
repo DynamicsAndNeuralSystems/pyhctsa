@@ -1762,6 +1762,9 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     if tau == 'tau':
         # Make tau the first zero crossing of the autocorrelation function
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        # Cannot set the time delay greater than 10% the length of the time series
+        if tau > len(y) / 10:
+            tau = len(y) // 10
     tau = int(tau)
     xt = y[:-tau]  # part of the time series
     xtp = y[tau:]  # time-lagged time series
