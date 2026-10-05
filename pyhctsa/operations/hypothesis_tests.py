@@ -4,9 +4,9 @@ logger = logging.getLogger('pyhctsa')
 
 import numpy as np
 from numpy.typing import ArrayLike
-from arch.unitroot import VarianceRatio
 from scipy.stats import beta as beta_dist
 from scipy.stats import gamma as gamma_dist
+from scipy.special import log_ndtr
 from scipy.stats import jarque_bera, norm, wilcoxon, rayleigh, expon, gumbel_l, lognorm, uniform, weibull_min
 from statsmodels.sandbox.stats.runs import runstest_1samp
 from statsmodels.stats.descriptivestats import sign_test
@@ -227,12 +227,56 @@ def distribution_test(x: ArrayLike, the_test: str = 'chi2gof', the_distn: str = 
         return _kstest_effect(x, cdf_func)
     raise ValueError(f"Unknown test '{the_test}'.")
 
+def _vratiotest(y: np.ndarray, period: int, iid: bool) -> tuple:
+    """Lo-MacKinlay variance ratio test, a port of MATLAB's vratiotest for one
+    period: returns (pValue, stat, ratio).
+
+    The test uses the first N = floor((len(y) - 1) / period) * period increments
+    (so that the series divides into whole periods) and the sample drift
+    c = (y[N] - y[0]) / N.
+    """
+    num_obs = len(y)
+    if period >= num_obs / 2:
+        raise ValueError("Too few observations for the requested period.")
+    r = np.diff(y)
+    N = ((num_obs - 1) // period) * period  # number of increments used
+
+    c = (y[N] - y[0]) / N
+    e1 = r[:N] - c
+    sse1 = e1 @ e1
+    var1 = sse1 / (N - 1)
+
+    e2 = y[period:N + 1] - y[:N - period + 1] - period * c
+    sse2 = e2 @ e2
+    var2 = sse2 / (period * (N - period + 1) * (1 - period / N))
+
+    ratio = var2 / var1
+
+    if iid:
+        ratio_var = 2 * (2 * period - 1) * (period - 1) / (3 * period)
+    else:  # heteroskedasticity-consistent estimator
+        summands = np.zeros(period - 1)
+        for k in range(1, period):
+            delta = N * (e1[k:] ** 2 @ e1[:N - k] ** 2) / sse1 ** 2
+            summands[k - 1] = (1 - k / period) ** 2 * delta
+        ratio_var = 4 * np.sum(summands)
+
+    stat = np.sqrt(N) * (ratio - 1) / np.sqrt(ratio_var)
+    pvalue = 2 * norm.cdf(-abs(stat))  # two-tailed
+    if pvalue < 1e-290:
+        # scipy's cdf underflows to 0 for |stat| above ~37.5, whereas MATLAB's
+        # normcdf continues into the denormal range (to ~38.5); follow it, since
+        # which test has the smallest p-value is an output in the multi-test case
+        pvalue = 2 * np.exp(log_ndtr(-abs(stat)))
+    return pvalue, stat, ratio
+
+
 def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
                         iids: Union[int, list[int]] = 0) -> dict:
     """
     Variance ratio test for random walk.
 
-    Implements the variance ratio test using the VarianceRatio function from arch.unitroot.
+    Implements the Lo-MacKinlay variance ratio test, as in MATLAB's vratiotest.
 
     The test assesses the null hypothesis of a random walk in the time series,
     which is rejected for some critical p-value.
@@ -259,12 +303,15 @@ def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
         max and min test statistic (``meanstat``, ``maxstat``, ``minstat``), and the
         mean, max and min variance ratio (``meanratio``, ``maxratio``, ``minratio``).
     """
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float)
+    y = y[~np.isnan(y)]  # remove missing values
+    if not np.all(np.isfinite(y)):
+        raise ValueError("The data must be finite.")
 
     # Single period: return the raw test statistics.
     if isinstance(periods, (int, float, np.number)):
-        vr = VarianceRatio(y, lags=int(periods), robust=(iids == 0))
-        return {'pValue': vr.pvalue, 'stat': vr.stat, 'ratio': vr.vr}
+        pvalue, stat, ratio = _vratiotest(y, int(periods), bool(iids))
+        return {'pValue': pvalue, 'stat': stat, 'ratio': ratio}
 
     if not isinstance(periods, list):
         raise ValueError(f"Unknown data type for periods: {type(periods)}, "
@@ -280,11 +327,10 @@ def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
     if not all(i in (0, 1) for i in iids):
         raise ValueError("List of IIDs must only be logicals (0 or 1).")
 
-    vrs = [VarianceRatio(y, lags=p, robust=(iid == 0))
-           for p, iid in zip(periods, iids)]
-    pvals = np.array([vr.pvalue for vr in vrs])
-    stats = np.array([vr.stat for vr in vrs])
-    ratios = np.array([vr.vr for vr in vrs])
+    res = np.array([_vratiotest(y, int(p), bool(iid)) for p, iid in zip(periods, iids)])
+    pvals, stats, ratios = res[:, 0], res[:, 1], res[:, 2]
+    if len(periods) == 1:  # a single test: summarize it directly, as in hctsa
+        return {'pValue': pvals[0], 'stat': stats[0], 'ratio': ratios[0]}
     imax, imin = np.argmax(pvals), np.argmin(pvals)
 
     return {
