@@ -7,39 +7,12 @@ from numpy.typing import ArrayLike
 from scipy import stats
 
 from ..utils import get_tau, sign_change, time_delay_embed
+from ..robust import bf_tie_break_noise
 from ..toolboxes.infotheory.mutual_info import KraskovMI, GaussianMI
 
-def _tie_break_noise(y: np.ndarray, seed: int = 0) -> np.ndarray:
-    """Add tiny, reproducible jitter to break exact ties in ``y`` (hctsa ``BF_TieBreakNoise``).
-
-    ``y`` is returned unchanged unless it has a high proportion of repeated values
-    (fewer than 90% of its values unique), in which case Gaussian noise with standard
-    deviation ``1e-10 * std(y)`` is added. That is small enough to leave a well-behaved
-    continuous series untouched, but enough to break the exact ties that make
-    nearest-neighbour (Kraskov/KSG) mutual-information estimators degenerate on
-    quantized or periodic-orbit data.
-
-    The noise comes from a private, fixed-seed generator (not NumPy's global state), so
-    the same input always gives the same output and the caller's random state is left
-    alone. (hctsa uses a private MATLAB ``mt19937ar`` stream; the draws are not
-    bit-identical to MATLAB's, but the trigger rule and the noise scale are.)
-
-    Parameters
-    ----------
-    y : array-like
-        The input vector.
-    seed : int, optional
-        Seed of the private generator (default 0).
-    """
-    y = np.asarray(y, dtype=float)
-    if y.size < 2:
-        return y
-    unique_frac = np.unique(y).size / y.size
-    sigma = np.std(y, ddof=1)
-    if unique_frac < 0.9 and sigma > 0:
-        rng = np.random.default_rng(seed)
-        y = y + 1e-10 * sigma * rng.standard_normal(y.shape)
-    return y
+# hctsa BF_TieBreakNoise: tiny jitter from the portable BF_Random stream (pyhctsa.robust), so the
+# draws match MATLAB's. Kept under its old private name for the callers in this module.
+_tie_break_noise = bf_tie_break_noise
 
 
 def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, None]) -> Callable:
