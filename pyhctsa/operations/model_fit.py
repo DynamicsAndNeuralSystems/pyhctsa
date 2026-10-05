@@ -5,12 +5,10 @@ import numba
 import numpy as np
 from numpy.typing import ArrayLike
 from numpy.lib.stride_tricks import sliding_window_view
-from hmmlearn.hmm import GaussianHMM
 from scipy.optimize import curve_fit
 from scipy.signal import lfilter
 from scipy.special import gammaincc
 from scipy.stats import ks_1samp, norm, t
-from statsmodels.tsa.ar_model import AutoReg
 from lmfit.models import SineModel
 import logging
 logger = logging.getLogger('pyhctsa')
@@ -19,58 +17,232 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.physics import _ksdensity
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
+from ..robust import bf_exp_fit
 from ..toolboxes.matlab.optimizers import minimize
 from ..utils import _linspace, _ml_randperm, _ml_rng, _zscore_matlab, get_tau, matlab_quantile, z_score
 
-def _zg_hmm_fit(y_train: np.ndarray, num_states: int, rng: np.random.RandomState,
-                n_cycles: int = 30, tol: float = 1e-4) -> tuple:
+@numba.njit(cache=True, error_model='numpy')
+def _zg_hmm_em(x, mu, cov, P, pi, n_cycles, tol, cov_floor):
     """
-    Gaussian HMM fit as Zoubin Ghahramani's ``ZG_hmm`` (used by hctsa), with hmmlearn's EM.
-
-    The initial state means are random around the data mean (scaled by the data standard
-    deviation), the start probabilities and transition matrix random, and the tied variance
-    the data variance, all drawn from ``rng``. At most ``n_cycles`` cycles of EM, stopping when
-    the proportional change in the log-likelihood falls below ``tol`` (shared by :func:`hmm_fit` and
-    :func:`hmm_compare_n_states`).
-
-    Returns the fitted ``GaussianHMM`` and the log-likelihood of the training data at each
-    cycle.
+    Baum-Welch EM for a Gaussian-emission HMM with a variance shared by all states, as
+    Zoubin Ghahramani's ``ZG_hmm`` (hctsa's ``ZG_hmm``, with its covariance floor and
+    log-domain emission scaling). Returns the fitted parameters and the log-likelihood
+    at the start of each cycle (before that cycle's M step).
     """
-    y_col = y_train.reshape(-1, 1)
-    cov0 = np.var(y_train, ddof=1)
-    mu0 = rng.randn(num_states, 1) * np.sqrt(cov0) + np.mean(y_train)
-    pi0 = rng.random_sample(num_states)
-    pi0 = pi0 / pi0.sum()
-    p0 = rng.random_sample((num_states, num_states))
-    p0 = p0 / p0.sum(axis=1, keepdims=True)
-
-    model = GaussianHMM(n_components=num_states, covariance_type='tied',
-                        n_iter=1,  # one EM cycle per fit() call, so that we control the stopping rule
-                        tol=0, params='stmc', init_params='')
-    model.startprob_ = pi0
-    model.transmat_ = p0
-    model.means_ = mu0
-    model.covars_ = np.array([[cov0]])
-
-    LL = []  # log-likelihood of the training data at the start of each cycle
-    lik_base = 0.0
+    T = len(x)
+    K = len(mu)
+    mu = mu.copy()
+    P = P.copy()
+    pi = pi.copy()
+    LL = np.zeros(n_cycles)
+    n_done = 0
+    lik = 0.0
+    likbase = 0.0
+    alpha = np.zeros((T, K))
+    beta = np.zeros((T, K))
+    B = np.zeros((T, K))
+    gamma = np.zeros((T, K))
+    scale = np.zeros(T)
+    shift = np.zeros(T)
     for cycle in range(1, n_cycles + 1):
-        model.fit(y_col)  # one E step and M step
-        lik = model.monitor_.history[-1]
-        old_lik = LL[-1] if LL else 0.0
-        LL.append(lik)
+        # --- E step (forward-backward with scaling)
+        logk2 = np.log((2 * np.pi) ** (-0.5)) - 0.5 * np.log(cov)
+        for t in range(T):
+            m = -np.inf
+            for l in range(K):
+                d = x[t] - mu[l]
+                lb = logk2 - 0.5 * d * d / cov
+                B[t, l] = lb
+                if lb > m:
+                    m = lb
+            shift[t] = m
+            for l in range(K):
+                B[t, l] = np.exp(B[t, l] - m)
+        s = 0.0
+        for l in range(K):
+            alpha[0, l] = pi[l] * B[0, l]
+            s += alpha[0, l]
+        scale[0] = s
+        for l in range(K):
+            alpha[0, l] /= s
+        for t in range(1, T):
+            s = 0.0
+            for l in range(K):
+                a = 0.0
+                for j in range(K):
+                    a += alpha[t - 1, j] * P[j, l]
+                alpha[t, l] = a * B[t, l]
+                s += alpha[t, l]
+            scale[t] = s
+            for l in range(K):
+                alpha[t, l] /= s
+        for l in range(K):
+            beta[T - 1, l] = 1.0 / scale[T - 1]
+        for t in range(T - 2, -1, -1):
+            for j in range(K):
+                a = 0.0
+                for l in range(K):
+                    a += beta[t + 1, l] * B[t + 1, l] * P[j, l]
+                beta[t, j] = a / scale[t]
+        for t in range(T):
+            s = 0.0
+            for l in range(K):
+                gamma[t, l] = alpha[t, l] * beta[t, l]
+                s += gamma[t, l]
+            for l in range(K):
+                gamma[t, l] /= s
+        sxi = np.zeros((K, K))
+        for t in range(T - 1):
+            s = 0.0
+            for j in range(K):
+                for l in range(K):
+                    s += P[j, l] * alpha[t, j] * beta[t + 1, l] * B[t + 1, l]
+            for j in range(K):
+                for l in range(K):
+                    sxi[j, l] += P[j, l] * alpha[t, j] * beta[t + 1, l] * B[t + 1, l] / s
+        loglik = 0.0
+        for t in range(T):
+            loglik += np.log(scale[t]) + shift[t]
+        # --- M step
+        gsum = np.zeros(K)
+        for l in range(K):
+            num = 0.0
+            for t in range(T):
+                gsum[l] += gamma[t, l]
+                num += gamma[t, l] * x[t]
+            mu[l] = num / gsum[l]
+        for j in range(K):
+            rs = 0.0
+            for l in range(K):
+                rs += sxi[j, l]
+            for l in range(K):
+                P[j, l] = sxi[j, l] / rs
+        for l in range(K):
+            pi[l] = gamma[0, l]
+        c = 0.0
+        for l in range(K):
+            for t in range(T):
+                d = x[t] - mu[l]
+                c += gamma[t, l] * d * d
+        gtot = 0.0
+        for l in range(K):
+            gtot += gsum[l]
+        cov = max(c / gtot, cov_floor)
+        # --- convergence
+        oldlik = lik
+        lik = loglik
+        LL[cycle - 1] = lik
+        n_done = cycle
         if cycle <= 2:
-            lik_base = lik
-        elif lik < old_lik:
+            likbase = lik
+        elif lik < oldlik:
             pass  # a decrease (numerical violation): keep going, as ZG_hmm does
-        elif (lik - lik_base) < (1 + tol) * (old_lik - lik_base) or not np.isfinite(lik):
+        elif (lik - likbase) < (1 + tol) * (oldlik - likbase) or not np.isfinite(lik):
             break
-    return model, np.array(LL)
+    return mu, cov, P, pi, LL[:n_done]
 
 
-def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed: int = 0) -> dict:
+def _zg_hmm_fit(y_train: np.ndarray, num_states: int, n_cycles: int = 30,
+                rhos: tuple = (0.9, 0.5, 0.99), floor_frac: float = 0.01,
+                tol: float = 1e-4) -> tuple:
     """
-    Fits a Hidden Markov Model to sequential data.
+    Deterministic Gaussian HMM fit (hctsa's ``ZG_hmm_fit``, used by ``MF_hmm_Fit`` and
+    ``MF_hmm_CompareNStates``; shared by :func:`hmm_fit` and :func:`hmm_compare_n_states`).
+
+    Baum-Welch EM (Zoubin Ghahramani's ``ZG_hmm``) is run from six fixed starting points and
+    the fit with the highest final training log-likelihood is kept. The starts have a shared
+    variance equal to the variance of the data, equal initial-state probabilities, and a
+    transition matrix with probability ``rho`` of staying in a state (and ``(1-rho)/(K-1)`` of
+    moving to each other one) for each ``rho`` in ``rhos``, and two placements of the K state
+    means: at the ``(k-1/2)/K`` quantiles of the data (sorted, element ``ceil(N(k-1/2)/K)``)
+    and evenly spaced from ``mean - std`` to ``mean + std``. The shared variance is not
+    allowed to fall below ``floor_frac`` times the data variance. At most ``n_cycles`` cycles,
+    stopping when the proportional change in log-likelihood falls below ``tol``.
+
+    Returns ``(mu, cov, P, pi, LL)``: state means, shared variance, transition matrix,
+    initial-state probabilities and the log-likelihood at each cycle (NaN-filled parameters
+    and ``LL = [nan]`` if no start gives a finite fit).
+    """
+    x = np.ascontiguousarray(y_train, dtype=float).ravel()
+    K = int(num_states)
+    N = len(x)
+    v = np.var(x, ddof=1)
+    xs = np.sort(x)
+    idx = np.ceil(N * (np.arange(1, K + 1) - 0.5) / K).astype(int) - 1
+    mean_sets = [xs[idx], np.mean(x) + np.std(x, ddof=1) * _linspace(-1, 1, K)]
+    pi0 = np.ones(K) / K
+    best_ll = -np.inf
+    best = (np.full(K, np.nan), np.nan, np.full((K, K), np.nan), np.full(K, np.nan), np.array([np.nan]))
+    for r in range(2 * len(rhos)):
+        mu0 = mean_sets[0 if r < len(rhos) else 1]
+        rho = rhos[r % len(rhos)]
+        if K > 1:
+            P0 = (1 - rho) / (K - 1) * np.ones((K, K)) + (rho - (1 - rho) / (K - 1)) * np.eye(K)
+        else:
+            P0 = np.ones((1, 1))
+        mu, cov, P, pi, LL = _zg_hmm_em(x, mu0, v, P0, pi0, n_cycles, tol, floor_frac * v)
+        ok = np.all(np.isfinite(mu)) and np.isfinite(cov) and np.all(np.isfinite(P)) \
+            and np.all(np.isfinite(pi)) and np.isfinite(LL[-1])
+        if ok and LL[-1] > best_ll:
+            best_ll = LL[-1]
+            best = (mu, cov, P, pi, LL)
+    return best
+
+
+@numba.njit(cache=True, error_model='numpy')
+def _zg_hmm_loglik(x, mu, cov, P, pi):
+    """Log-likelihood of ``x`` under a fitted Gaussian HMM (hctsa's ``ZG_hmm_cl``)."""
+    T = len(x)
+    K = len(mu)
+    tiny = np.exp(-700.0)
+    logk2 = np.log((2 * np.pi) ** (-0.5)) - 0.5 * np.log(cov)
+    alpha = np.zeros(K)
+    new = np.zeros(K)
+    B = np.zeros(K)
+    lik = 0.0
+    for t in range(T):
+        m = -np.inf
+        for l in range(K):
+            d = x[t] - mu[l]
+            B[l] = logk2 - 0.5 * d * d / cov
+            if B[l] > m:
+                m = B[l]
+        for l in range(K):
+            B[l] = np.exp(B[l] - m)
+        s = 0.0
+        for l in range(K):
+            if t == 0:
+                new[l] = pi[l] * B[l]
+            else:
+                a = 0.0
+                for j in range(K):
+                    a += alpha[j] * P[j, l]
+                new[l] = a * B[l]
+            s += new[l]
+        for l in range(K):
+            alpha[l] = new[l] / (s + tiny)
+        if s == 0:
+            s = tiny
+        lik += np.log(s) + m
+    return lik
+
+
+def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3) -> dict:
+    """
+    A hidden Markov model fitted to the first part of the series, and how well it describes the rest.
+
+    Fits a hidden Markov model (HMM) with Gaussian emissions to the first ``train_p``
+    proportion of the time series (hctsa's ``MF_hmm_Fit``, using Zoubin Ghahramani's ``ZG_hmm``
+    EM). The emissions of all states share one variance (a tied covariance). The model is
+    trained with at most 30 cycles of EM (Baum-Welch), or until convergence.
+
+    The fit is deterministic. EM is run from six fixed starting points (state means at the
+    quantiles ``(k-1/2)/num_states`` of the training data, or evenly spaced within one standard
+    deviation of its mean; a variance equal to that of the training data; and probabilities
+    0.5, 0.9 and 0.99 of staying in a state); the fit with the highest training log-likelihood is
+    kept (see :func:`_zg_hmm_fit`). The shared variance cannot fall below 1% of the variance of
+    the training data, so that states placed on a few repeated values do not give unbounded
+    likelihoods.
 
     Parameters
     ----------
@@ -80,8 +252,6 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
         The proportion of data to train on, 0 < train_p < 1. Default is 0.8.
     num_states : int
         The number of states in the HMM. Default is 3.
-    random_seed : int
-        Random seed for the initial parameters of the fit. Default is 0.
 
     Returns
     -------
@@ -89,65 +259,58 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
         Dictionary of statistics based on the fitted HMM: the sorted state means
         (``Mu_1``, ...) and their ``meanMu``, ``rangeMu``, ``maxMu``, ``minMu``;
         the tied covariance ``Cov``; the transition matrix summaries
-        ``Pmeandiag``, ``stdmeanP``, ``maxP``, ``meanP``, ``stdP``; the training
-        log-likelihood per sample ``LLtrainpersample`` and the number of EM
-        iterations ``nit``; and the test log-likelihood per sample
-        ``LLtestpersample`` and ``LLdifference``.
+        ``Pmeandiag``, ``stdmeanP`` (standard deviation across states of the mean probability
+        of moving into each state), ``maxP`` and ``stdP``; the training
+        log-likelihood per sample ``LLtrainpersample`` (the highest reached);
+        and the test log-likelihood per sample ``LLtestpersample`` and
+        ``LLdifference`` (test minus training).
 
     """
-    #Actually highly stochastic, so for reproducible results helps to set the
-    #random seed.
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float).ravel()
     n_samples = len(y)
     out = {}
 
     # 1. Split data into training and test sets
     n_train = int(np.floor(train_p * n_samples))
-    n_test = n_samples-n_train
+    n_test = n_samples - n_train
     if n_train <= 0 or n_train > n_samples:
         raise ValueError("Invalid training proportion 'train_p' results in an invalid training set size.")
-    
+    if n_test == 0:
+        raise ValueError('No data for test set for HMM fitting')
+
     y_train = y[:n_train]
     y_test = y[n_train:]
-    y_test_reshaped = y_test.reshape(-1, 1)
     num_states = int(num_states)
 
-    # Initialize and iterate Baum-Welch as in Zoubin Ghahramani's ZG_hmm (used by hctsa): see
-    # _zg_hmm_fit. (hmmlearn's k-means initialization and absolute tolerance find different,
-    # generally poorer, local optima: the fitted-model statistics then do not follow the
-    # distribution of hctsa's.)
-    rng = _ml_rng(0 if random_seed is None else int(random_seed))
-    model, LL = _zg_hmm_fit(y_train, num_states, rng)
+    # 2. Train the HMM (deterministic EM from fixed starts, see _zg_hmm_fit)
+    mu, cov, p_matrix, pi, LL = _zg_hmm_fit(y_train, num_states)
 
-    means_sorted = np.sort(model.means_.flatten())
-    for i, mu in enumerate(means_sorted):
-        out[f'Mu_{i+1}'] = mu
+    means_sorted = np.sort(mu)
+    for i, m in enumerate(means_sorted):
+        out[f'Mu_{i+1}'] = m
     out['meanMu'] = np.mean(means_sorted)
     out['rangeMu'] = np.ptp(means_sorted)
     out['maxMu'] = np.max(means_sorted)
     out['minMu'] = np.min(means_sorted)
 
     # Covariance Cov
-    out['Cov'] = model.covars_.flatten()[0]
+    out['Cov'] = cov
 
-    #% Transition matrix
-    p_matrix = model.transmat_
-
+    # Transition matrix
     out['Pmeandiag'] = np.mean(np.diag(p_matrix))
     out['stdmeanP'] = np.std(np.mean(p_matrix, axis=0), ddof=1)
     out['maxP'] = np.max(p_matrix)
-    out['meanP'] = np.mean(p_matrix)
     out['stdP'] = np.std(p_matrix, ddof=1)
 
-    #% Within-sample log-likelihood
+    # Within-sample log-likelihood
     out['LLtrainpersample'] = np.max(LL) / n_train
-    out['nit'] = len(LL)
 
-    #Calculate log likelihood for the test data
-    out['LLtestpersample'] = model.score(y_test_reshaped)/n_test
+    # Log-likelihood of the test data
+    out['LLtestpersample'] = _zg_hmm_loglik(y_test, mu, cov, p_matrix, pi) / n_test
     out['LLdifference'] = out['LLtestpersample'] - out['LLtrainpersample']
 
     return out
+
 
 def _armax_fit(y: np.ndarray, p: int, q: int) -> tuple:
     """
@@ -564,10 +727,11 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     out['offset'] = 0.0
     for i in range(1, P + 1):
         out[f'GARCH_{i}'] = garch_c[i - 1]
-        out[f'GARCHerr_{i}'] = errors[i]
+        # (a coefficient estimated at exactly zero has no error: NaN, as hctsa)
+        out[f'GARCHerr_{i}'] = np.nan if garch_c[i - 1] == 0 else errors[i]
     for i in range(1, Q + 1):
         out[f'ARCH_{i}'] = arch_c[i - 1]
-        out[f'ARCHerr_{i}'] = errors[P + i]
+        out[f'ARCHerr_{i}'] = np.nan if arch_c[i - 1] == 0 else errors[P + i]
     if lev_c.size > 0:
         out['leverage'] = lev_c[0]
         out['leverageerr'] = errors[1 + P + Q]
@@ -1395,31 +1559,6 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         raise ValueError(f"Unknown model: {model}")
     return out
 
-def _fit_exp_curve(x: np.ndarray, y: np.ndarray, prefix: str) -> dict:
-    """
-    Fit y = a * exp(b * x) + c by nonlinear least squares.
-
-    The starting point is [range(y), -0.5, min(y)], as in hctsa's
-    FC_LoopLocalSimple. Returns the parameters (``a``, ``b``, ``c``) and the
-    goodness of fit (``r2``, ``adjr2``, ``rmse``, with ``rmse`` using the
-    degrees-of-freedom-adjusted residual variance), all NaN if the fit fails.
-    """
-    keys = [f'{prefix}_{k}' for k in ('a', 'b', 'c', 'r2', 'adjr2', 'rmse')]
-    try:
-        if not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))):
-            raise ValueError("non-finite data")
-        popt, _ = curve_fit(lambda t, a, b, c: a * np.exp(b * t) + c, x, y,
-                            p0=[np.ptp(y), -0.5, np.min(y)], maxfev=10000)
-        res = y - (popt[0] * np.exp(popt[1] * x) + popt[2])
-        sse = np.sum(res ** 2)
-        sst = np.sum((y - np.mean(y)) ** 2)
-        n, dfe = len(y), len(y) - 3
-        r2 = 1 - sse / sst
-        vals = [popt[0], popt[1], popt[2], r2, 1 - (1 - r2) * (n - 1) / dfe, np.sqrt(sse / dfe)]
-    except (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
-        vals = [np.nan] * 6
-    return dict(zip(keys, vals))
-
 def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     """
     How simple local forecasting depends on window length.
@@ -1446,9 +1585,14 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         with window length: for each of the residual standard deviation
         (``stde``), ``sws``, ``swm``, ``ac1`` and ``ac2``, the normalized mean
         change (``_chn``), the mean sign of the changes (``_meansgndiff``) and, for
-        the last four, ``_stdn``; ``sws_fexp_a``, ``_b``, ``_c``, ``_r2``,
-        ``_adjr2`` and ``_rmse`` (an exponential fit a*exp(b*l) + c to the
-        ``sws`` curve; NaN if the fit fails); ``stde_peakpos`` (1-based position in the list
+        the last four, ``_stdn``; ``sws_fexp_b`` (the rate of an exponential fit
+        a*exp(b*l) + c to the ``sws`` curve: negative for a decay with training length),
+        ``sws_fexp_r2`` (between 0 and 1), ``sws_fexp_adjr2`` and ``sws_fexp_rmse`` of that
+        fit. The fit is the global least-squares optimum over b, with a and c found by
+        linear least squares (:func:`pyhctsa.robust.bf_exp_fit`); a and c are not output
+        because they are poorly determined when the curve is close to a straight line.
+        The four ``sws_fexp_*`` outputs are NaN if the ``sws`` curve is constant.
+        ``stde_peakpos`` (1-based position in the list
         of window lengths of the extreme value of the ``stde`` curve) and
         ``stde_peaksize``.
     """
@@ -1503,8 +1647,12 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         out[f'{name}_meansgndiff'] = np.mean(np.sign(np.diff(curve)))
         out[f'{name}_stdn'] = np.std(curve, ddof=1) / np.ptp(curve)
         if name == 'sws':
-            # exponential fit f(l) = a exp(b l) + c to the sws curve
-            out.update(_fit_exp_curve(train_length_range.astype(float), curve, 'sws_fexp'))
+            # global least-squares exponential fit f(l) = a exp(b l) + c to the sws curve
+            f_exp = bf_exp_fit(train_length_range.astype(float), curve, True)
+            out['sws_fexp_b'] = f_exp['b']
+            out['sws_fexp_r2'] = f_exp['r2']
+            out['sws_fexp_adjr2'] = f_exp['adjr2']
+            out['sws_fexp_rmse'] = f_exp['rmse']
 
     return out
 
@@ -1932,14 +2080,26 @@ def ar_cov(y: ArrayLike, p: int = 2) -> dict:
         (``a1``, ..., ``a{p+1}``, with ``a1 = 1``), and the 11 ``'core'`` statistics of
         the residuals of the reconstructed time series (see :func:`residual_analysis`).
         The residuals are prediction minus data.
+
+        NaN for a (nearly) exactly predictable series: when the fitted noise variance is
+        below 1e-12 of the variance of the series, the design is singular and the fitted
+        coefficients and residuals are not meaningful (e.g., an exact sinusoid with p > 2).
     """
-    y = np.asarray(y)
-    model = AutoReg(y, lags=p, trend='n')
-    results = model.fit()
-    phi = results.params
+    y = np.asarray(y, dtype=float).ravel()
+    p = int(p)
+    n = len(y)
+    # covariance method: least squares fit of y(t) on its p past values, over t = p+1, ..., N
+    # (a minimum-norm least-squares solve, so that a singular design is fitted exactly rather
+    # than regularized)
+    x_design = np.column_stack([y[p - k:n - k] for k in range(1, p + 1)])
+    phi = np.linalg.lstsq(x_design, y[p:], rcond=None)[0]
+    noise_var = np.sum((y[p:] - x_design @ phi) ** 2) / (n - p)
+    var_y = np.var(y, ddof=1)
+    if noise_var < 1e-12 * var_y or not var_y > 0:
+        return np.nan
     a = np.concatenate(([1], -phi))
     out = {}
-    out['noisevar'] = results.sigma2
+    out['noisevar'] = noise_var
     for i in range(len(a)):
         out[f'a{i+1}'] = a[i]
     # Residual analysis
@@ -2198,7 +2358,10 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
           ``minexctn``, ``meanexctn``, ``stdexctn``: periods, damping times (with
           confidence intervals) and excitations of the eigenmodes
 
-        NaN if the series is too short for ARFIT.
+        NaN if the series is too short for ARFIT, and for a (nearly) exactly predictable
+        series (estimated noise variance below 1e-12 of the variance of the series, e.g. an
+        exact sinusoid): the coefficients are not determined and the residuals are
+        rounding noise.
     """
     y = np.asarray(y, dtype=float).ravel()
     p_min = int(p_min)
@@ -2215,6 +2378,11 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
         _, Aest, Cest, sbc, fpe, th = _arfit(y, p_min, p_max, selector, zero=True)
     except ValueError as err:
         logger.warning(f'Could not fit an AR model with the ARFIT algorithm: {err}')
+        return np.nan
+    # An exactly predictable series has a singular design and a noise variance at the level
+    # of rounding error: nothing to report
+    var_y = np.var(y, ddof=1)
+    if Cest < 1e-12 * var_y or not var_y > 0:
         return np.nan
     ps = np.arange(p_min, p_max + 1)
     popt = len(Aest)
@@ -2341,6 +2509,11 @@ def is_seasonal(y: ArrayLike) -> int:
     
     return out
 
+def _ml_std(a: np.ndarray) -> float:
+    """MATLAB's ``std``: the sample standard deviation, 0 for a single element."""
+    return float(np.std(a, ddof=1)) if np.size(a) > 1 else 0.0
+
+
 def _ml_max(a, axis=None):
     """MATLAB ``max``: NaNs are omitted (NaN only if every element is NaN)."""
     import warnings
@@ -2358,7 +2531,8 @@ def _ml_min(a, axis=None):
 
 
 def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
-                     hyp0: Union[np.ndarray, None] = None) -> np.ndarray:
+                     hyp0: Union[np.ndarray, None] = None,
+                     noise_pos: Union[tuple, list, None] = None) -> np.ndarray:
     """
     learn GP hyperparameters for the time series ``(tt, yt)``.
 
@@ -2381,8 +2555,22 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
     ``hyp0`` is the initial hyperparameter vector ``[cov..., lik]``; the default is
     the initialization for ``covSum{covSEiso, covNoise}`` (``cov`` must then be
     :class:`CovSEisoNoise`), see :func:`_gp_init_hyp` for the other covariances.
+
+    Noise floor (as hctsa's ``MF_GP_LearnHyperp``): the noise standard deviations (the Gaussian
+    likelihood's, and those of the ``covNoise`` terms, at the 0-based positions ``noise_pos``
+    among the covariance hyperparameters; ``(2,)`` for :class:`CovSEisoNoise`) are bounded
+    below by 1% of the standard deviation of the data. Without a bound the marginal
+    likelihood of a smooth series is nearly flat along a valley in which the noise runs to
+    e^-12 or less, so the fitted noise depends on where the optimizer stops. The bound is a
+    clamp of those hyperparameters inside the objective, with a zero gradient for a clamped
+    coordinate.
     """
     nhps = cov.n_hyp
+    if noise_pos is None:
+        if cov is not CovSEisoNoise:
+            raise ValueError('noise_pos is required for this covariance function')
+        noise_pos = (2,)
+    noise_pos = np.asarray(noise_pos, dtype=int)
     # Initial values, set component by component as in MF_GP_LearnHyperp for
     # covSum{covSEiso, covNoise}: the SE length scale is in the ballpark of the
     # difference between time elements, its log-magnitude starts at zero, the noise
@@ -2391,29 +2579,76 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
         hyp0 = np.array([np.log(np.mean(np.diff(tt))), 0.0, np.log(0.1), np.log(0.1)])
         assert nhps == 3
 
+    with np.errstate(divide='ignore'):
+        noise_floor = np.log(0.01 * np.std(yt, ddof=1))  # lower bound on the log noise standard deviations
+
+    def _clamp(theta):
+        theta = np.array(theta, dtype=float)
+        theta[nhps] = max(theta[nhps], noise_floor)
+        theta[noise_pos] = np.maximum(theta[noise_pos], noise_floor)
+        return theta
+
     def _nlz(theta):
+        # gpml's negative log marginal likelihood with the noise hyperparameters clamped at
+        # the floor (and zero gradient wherever they are clamped)
+        clamp_lik = theta[nhps] < noise_floor
+        clamp_cov = noise_pos[theta[noise_pos] < noise_floor]
+        theta = _clamp(theta)
         hyp = {'cov': theta[:nhps], 'lik': theta[nhps], 'mean': np.zeros(0)}
         nlZ, dnlZ = gp_train(hyp, cov, tt, yt)   # NaN if the inference fails (as gp.m)
-        return nlZ, np.concatenate([dnlZ['cov'], dnlZ['lik'], dnlZ['mean']])
+        d_cov = np.array(dnlZ['cov'], dtype=float)
+        d_lik = np.array(dnlZ['lik'], dtype=float)
+        d_cov[clamp_cov] = 0
+        if clamp_lik:
+            d_lik[:] = 0
+        return nlZ, np.concatenate([d_cov, d_lik, dnlZ['mean']])
 
-    theta, _, _ = minimize(hyp0, _nlz, nfevals)
+    theta, _, _ = minimize(_clamp(hyp0), _nlz, nfevals)
+    theta = _clamp(theta)  # (clamped coordinates can drift: same objective value)
     if not np.all(np.isfinite(theta)):
         raise np.linalg.LinAlgError('GP hyperparameters are not finite')
     return theta
 
 
+def _gp_noise_pos(components: list) -> list:
+    """
+    0-based positions of the ``covNoise`` standard deviations among the covariance
+    hyperparameters, found as ``MF_GP_LearnHyperp`` does (while it sets the initial values):
+    a degree-parameterized component (``covMaterniso``) advances the position by one only, so
+    for ``covMaterniso3_covNoise`` the position found for the noise is the Matern's second
+    hyperparameter (hctsa's convention, as in :func:`_gp_init_hyp`).
+    """
+    pos = 0
+    noise = []
+    for name, degree in components:
+        if degree is not None:
+            pos += 1
+        elif name == 'covSEiso':
+            pos += 2
+        elif name in ('covPeriodic', 'covRQiso'):
+            pos += 3
+        elif name == 'covNoise':
+            noise.append(pos)
+            pos += 1
+        else:
+            pos += 1
+    return noise
+
+
 def _gp_cov(cov_func) -> tuple:
     """
-    The covariance function for ``cov_func`` and a function giving the initial
-    hyperparameters for a set of times. The default ``'covSEiso_covNoise'`` is the
-    closed-form :class:`CovSEisoNoise` (initialized by :func:`_gp_learn_hyperp`); others are
-    built by ``parse_cov``, initialized by :func:`_gp_init_hyp`.
+    The covariance function for ``cov_func``, a function giving the initial
+    hyperparameters for a set of times, the 0-based positions of its noise standard deviations
+    (:func:`_gp_noise_pos`) and its components (a list of ``(name, degree)``). The default
+    ``'covSEiso_covNoise'`` is the closed-form :class:`CovSEisoNoise` (initialized by
+    :func:`_gp_learn_hyperp`); others are built by ``parse_cov``, initialized by
+    :func:`_gp_init_hyp`.
     """
-    if isinstance(cov_func, str) and cov_func == 'covSEiso_covNoise':
-        return CovSEisoNoise, (lambda tt: None)
     from ..toolboxes.matlab.gpml.cov import parse_cov
+    if isinstance(cov_func, str) and cov_func == 'covSEiso_covNoise':
+        return CovSEisoNoise, (lambda tt: None), [2], [('covSEiso', None), ('covNoise', None)]
     cov, components = parse_cov(cov_func)
-    return cov, (lambda tt: _gp_init_hyp(components, tt))
+    return cov, (lambda tt: _gp_init_hyp(components, tt)), _gp_noise_pos(components), components
 
 
 def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
@@ -2422,7 +2657,9 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     Gaussian Process time-series modeling for local prediction.
 
     Trains a Gaussian Process model on equally-spaced points throughout the time
-    series and uses the model to predict its intermediate values.
+    series and uses the model to predict its intermediate values. The hyperparameters
+    are learned by maximizing the marginal likelihood; the noise standard deviation is
+    bounded below by 1% of that of the data (see :func:`_gp_learn_hyperp`).
 
     Parameters
     ----------
@@ -2465,18 +2702,20 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     N = len(y)
     npoints = int(npoints)
 
-    cov, init_hyp = _gp_cov(cov_func)
+    cov, init_hyp, noise_pos, components = _gp_cov(cov_func)
     nhps = cov.n_hyp
+    is_se_noise = [c[0] for c in components] == ['covSEiso', 'covNoise'] and \
+        all(c[1] is None for c in components)
     nan_out = {k: np.nan for k in
                ('stde', 'meanabs_std', 'stdmu', 'meanS', 'stdS', 'nlml',
                 *(f'logh{i + 1}' for i in range(nhps)),
-                *(('h_lonN',) if cov is CovSEisoNoise else ()))}
+                *(('h_lonN',) if is_se_noise else ()))}
 
     tt = np.floor(_linspace(1, N, npoints))
     yt = y[tt.astype(int) - 1]
 
     try:
-        theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt))
+        theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt), noise_pos=noise_pos)
     except np.linalg.LinAlgError:
         logger.warning('Lack of positive definite matrix for this time series')
         return nan_out
@@ -2520,7 +2759,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
     # Give extra output based on length parameter on length of time series
     # (only for the squared exponential plus noise covariance)
-    if cov is CovSEisoNoise:
+    if is_se_noise:
         out['h_lonN'] = np.exp(loghyper[0]) / N
 
     return out
@@ -2535,7 +2774,10 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
     Fits a Gaussian Process model to a section of the time series and uses it to
     predict the subsequent datapoints, repeated at equally-spaced positions
-    through the time series.
+    through the time series. The noise standard deviation of each fit is bounded below by
+    1% of that of its training data (see :func:`_gp_learn_hyperp`). Windows whose training
+    data are constant (standard deviation below 1e-8 of that of the series) cannot be
+    standardized and are left out of every statistic.
 
     Parameters
     ----------
@@ -2595,13 +2837,14 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
           deviation across windows of the negative log marginal likelihood on
           the window's training data, divided by the number of training points.
 
-        All values are NaN if hyperparameters cannot be learned.
+        All values are NaN if hyperparameters cannot be learned, or if the training data
+        of every window are constant.
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
     num_train, num_test, num_preds = int(num_train), int(num_test), int(num_preds)
 
-    cov, init_hyp = _gp_cov(cov_func)
+    cov, init_hyp, noise_pos, _ = _gp_cov(cov_func)
     nhps = cov.n_hyp
 
     if pmode in ('frombefore', 'randomgap'):
@@ -2624,7 +2867,7 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     mus = np.zeros((num_test, num_preds))        # predicted values
     stderrs = np.zeros((num_test, num_preds))    # standard errors on predictions
     yss = np.zeros((num_test, num_preds))        # test values
-    nlmls = np.zeros(num_preds)                  # per-point negative log marginal likelihoods
+    nlmls = np.full(num_preds, np.nan)           # per-point negative log marginal likelihoods (NaN: skipped window)
     loghypers = np.zeros((nhps, num_preds))      # log-hyperparameters
 
     rng = np.random.RandomState() if random_seed is None else None
@@ -2666,14 +2909,19 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
             rs = np.arange(num_train + 1, num_train + num_test + 1)
             ts, ys = t[rs - 1], yy[rs - 1]
 
-        # Process to normalize scales (the same transformation for both sets)
+        # A window whose training data are constant (to rounding error, relative to the
+        # series) cannot be standardized and carries no information about a GP: skip it
         yt_mean, yt_std = np.mean(yt), np.std(yt, ddof=1)
+        if not yt_std > 1e-8 * np.std(y, ddof=1):
+            continue
+
+        # Process to normalize scales (the same transformation for both sets)
         ys = (ys - yt_mean) / yt_std
         yt = (yt - yt_mean) / yt_std
 
         # (1) Learn hyperparameters from the training set
         try:
-            theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt))
+            theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt), noise_pos=noise_pos)
         except np.linalg.LinAlgError:
             logger.warning('Unable to learn hyperparameters for this time series')
             return {k: np.nan for k in out_keys}
@@ -2693,6 +2941,13 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         mus[:, i] = mu                     # ~predicted values for time-series points
         stderrs[:, i] = 2 * np.sqrt(S2)    # ~errors on those predictions
         yss[:, i] = ys
+
+    # Drop the skipped windows (those with constant training data)
+    keep = ~np.isnan(nlmls)
+    if not np.any(keep):
+        return {k: np.nan for k in out_keys}
+    mus, stderrs, yss = mus[:, keep], stderrs[:, keep], yss[:, keep]
+    loghypers, nlmls = loghypers[:, keep], nlmls[keep]
 
     # (1) Prediction error measures
     allabserrs = np.abs(mus - yss)                 # absolute errors
@@ -2726,12 +2981,12 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     # (2) Hyperparameter measures: mean and std for each hyperparameter
     for i in range(nhps):
         out[f'meanlogh{i + 1}'] = np.mean(loghypers[i, :])
-        out[f'stdlogh{i + 1}'] = np.std(loghypers[i, :], ddof=1)
+        out[f'stdlogh{i + 1}'] = _ml_std(loghypers[i, :])
 
     # (3) Negative log marginal likelihood measures
     out['maxnlml'] = _ml_max(nlmls)
     out['minnlml'] = _ml_min(nlmls)
-    out['stdnlml'] = np.std(nlmls, ddof=1)
+    out['stdnlml'] = _ml_std(nlmls)
 
     return out
 
@@ -2759,6 +3014,7 @@ def _arx_losses(y_train: np.ndarray, y_test: np.ndarray, orders) -> tuple:
         a = np.linalg.lstsq(X, y_train[m:], rcond=None)[0]
         Xe = np.column_stack([y_test[m - k:n_te - k] for k in range(1, p + 1)])
         loss[i] = np.sum((y_test[m:] - Xe @ a) ** 2) / n_te
+    loss = np.maximum(loss, np.finfo(float).eps)  # (arxstruc cannot report a loss below eps)
     return loss, n_te
 
 
@@ -2817,7 +3073,10 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
           ``log(loss * (1 + 2 * order / test length))``,
         - ``bestaic``: the minimum value of that criterion over orders.
 
-        NaN if the series is too short for the largest order.
+        NaN if the series is too short for the largest order: the training segment must
+        have more than ``2 * max(orders) + 1`` points and the test segment more than
+        ``max(orders) + 1``. Otherwise the highest-order models interpolate the training data
+        and the loss is at machine precision, an artifact.
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
@@ -2830,6 +3089,15 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
     else:
         co = int(np.floor(N * test_how))  # cutoff
         y_train, y_test = y[:co], y[co:]
+
+    # The loss is only meaningful if the highest-order model is identifiable from the training
+    # segment (more points fitted than parameters) and the test segment has points to score
+    max_order = int(np.max(orders))
+    n_scored_train = len(y_train) - max_order - 1  # points fitted (the first max_order + 1 are excluded)
+    n_scored_test = len(y_test) - max_order - 1
+    if n_scored_train <= max_order or n_scored_test < 1:
+        logger.warning('Time series too short to compare AR models of these orders')
+        return np.nan
 
     try:
         v, n_test = _arx_losses(y_train, y_test, orders)
@@ -3262,8 +3530,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
 
 
 def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
-                         n_states: ArrayLike = (2, 3, 4),
-                         random_seed: Union[int, str, None] = 0) -> dict:
+                         n_states: ArrayLike = (2, 3, 4)) -> dict:
     """
     How the fit of hidden Markov models to the series changes with the number of hidden
     states.
@@ -3271,9 +3538,9 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
     Fits Gaussian hidden Markov models (HMMs) with different numbers of states to the first
     ``train_p`` proportion of the time series (each with at most 30 cycles of EM), and
     compares the resulting log-likelihoods per sample on the training part and on the
-    held-out remainder. Each fit is initialized and stopped as in :func:`hmm_fit`
-    (``ZG_hmm``'s random initialization and proportional tolerance), the random draws
-    continuing through the successive fits.
+    held-out remainder (hctsa's ``MF_hmm_CompareNStates``). Each model is fitted
+    deterministically, by the best of six fixed starting points with a floor on the shared
+    variance (:func:`_zg_hmm_fit`, as in :func:`hmm_fit`).
 
     Parameters
     ----------
@@ -3283,10 +3550,6 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
         The initial proportion of the time series to train the model on. Default is 0.6.
     n_states : array-like of int, optional
         The numbers of states to compare. Default is 2 to 4.
-    random_seed : int, 'default', 'none' or None, optional
-        Seed for the random initial parameters, reset once before the first fit as
-        ``BF_ResetSeed`` does (0, or ``'default'``, is MATLAB's default); ``'none'`` or
-        ``None`` leaves the stream alone. Default is 0.
 
     Returns
     -------
@@ -3308,14 +3571,6 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
     n_states = np.atleast_1d(np.asarray(n_states)).astype(int)
     n_train = int(np.floor(train_p * N))  # number of initial samples to train the model on
 
-    # reset the random seed if specified (BF_ResetSeed), once before the first fit
-    if isinstance(random_seed, str) and random_seed == 'default':
-        random_seed = 0
-    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
-        rng = np.random.RandomState()
-    else:
-        rng = _ml_rng(int(random_seed))
-
     if n_train >= N:
         raise ValueError(f'train_p = {train_p:g} leaves no test data for a series of length {N}')
     if n_train < 2:
@@ -3329,10 +3584,10 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
     ll_tests = np.zeros(len(n_states))
     for j, k in enumerate(n_states):
         # train an HMM with k states for 30 cycles of EM (or until convergence)
-        model, LL = _zg_hmm_fit(y_train, k, rng)
+        mu, cov, p_matrix, pi, LL = _zg_hmm_fit(y_train, k)
         ll_trains[j] = LL[-1] / n_train
         # log likelihood of the test data
-        ll_tests[j] = model.score(y_test.reshape(-1, 1)) / n_test
+        ll_tests[j] = _zg_hmm_loglik(y_test, mu, cov, p_matrix, pi) / n_test
 
     out = {}
     out['meanLLtrain'] = np.mean(ll_trains)
@@ -3552,7 +3807,8 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
 
     # Learn the hyperparameters (mean-zero process, Gaussian likelihood, exact inference)
     try:
-        theta = _gp_learn_hyperp(t, y, cov, hyp0=_gp_init_hyp(components, t))
+        theta = _gp_learn_hyperp(t, y, cov, hyp0=_gp_init_hyp(components, t),
+                                 noise_pos=_gp_noise_pos(components))
     except np.linalg.LinAlgError:
         logger.warning('Lack of positive definite matrix for this time series')
         return np.nan
