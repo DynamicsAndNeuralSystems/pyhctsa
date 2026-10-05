@@ -15,6 +15,7 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
 from ..utils import get_tau, make_mat_buffer, sign_change, z_score
+from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit
 from ..toolboxes.matlab._pptest_tables import _pp_pvalue, _pp_regression
 
 def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
@@ -975,6 +976,93 @@ def std_nth_deriv(y: ArrayLike, ndr: int = 2) -> float:
     out = np.std(yd, ddof=1)
 
     return float(out)
+
+def std_nth_deriv_change(y: ArrayLike, maxd: int = 10) -> dict:
+    """
+    How the output of :func:`std_nth_deriv` changes with the order of the derivative.
+
+    Computes ``std_nth_deriv(y, n)`` (the standard deviation of the nth difference of the
+    time series) for orders n = 1, ..., ``maxd``, and characterizes how it varies with n in
+    two ways: by an exponential fit, and directly through the order at which it is smallest.
+
+    An exponential function, ``f(x) = a*exp(b*x)``, is fitted to the variation across
+    successive derivatives: regular signals decrease, irregular signals increase. This
+    exponential-decay/growth picture only holds when ``std(diff(y, n))`` is monotonic across
+    n. Many real (especially oversampled/smooth) series instead show successive differencing
+    reduce the standard deviation up to some order (removing trend or nonstationary drift)
+    before over-differencing increases it again: a classic Box-Jenkins ARIMA-order-selection
+    U-shape that a monotonic exponential cannot represent. ``minOrder``, ``minOrderInterp``,
+    ``minRatio``, ``overDiffRatio`` and ``isInterior`` characterize this directly, alongside
+    the exponential fit. If the exponential fit fails, the ``fexp_*`` outputs are NaN and the
+    others are still returned.
+
+    Operation inspired by a comment in a comp.soft-sys.matlab (MATLAB newsgroup) posting:
+    "You can measure the standard deviation of the n-th derivative, if you like." (Vladimir
+    Vassilevsky, DSP and Mixed Signal Design Consultant).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    maxd : int, optional
+        The maximum derivative (difference) order to take. Default is 10.
+
+    Returns
+    -------
+    dict
+        - 'fexp_a', 'fexp_b', 'fexp_r2', 'fexp_rmse': the parameters a and b, the R^2, and
+          the root-mean-square error of the exponential fit f(n) = a*exp(b*n),
+        - 'minOrder': the order (1 to ``maxd``) at which the standard deviation is smallest,
+        - 'minOrderInterp': that order refined between integers by a parabola through the
+          three points around the minimum (equal to ``minOrder`` if the minimum is at either end),
+        - 'minRatio': the smallest standard deviation divided by that at order 1,
+        - 'overDiffRatio': the standard deviation at order ``maxd`` divided by the smallest,
+        - 'isInterior': 1 if the minimum is strictly between order 1 and ``maxd`` (a U shape),
+          else 0.
+
+        NaN if the time series is too short to take ``maxd`` differences.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    maxd = 10 if maxd is None else int(maxd)
+
+    if len(y) <= maxd:
+        return np.nan  # too short to take maxd differences (hctsa's SY_StdNthDer errors)
+    ms = np.array([std_nth_deriv(y, i) for i in range(1, maxd + 1)])
+    if len(y) - maxd == 1:
+        ms[-1] = 0.0  # a single difference: MATLAB's std of one value is 0
+
+    out = {}
+    # Exponential fit f(x) = a*exp(b*x), starting from a = 1, b = +/- 0.5 (the sign of the trend)
+    x = np.arange(1, maxd + 1, dtype=float)
+    try:
+        if not np.all(np.isfinite(ms)):
+            raise ValueError('non-finite values')
+        a, b = fit_exp1(x, ms, start_point=(1.0, 0.5 * np.sign(ms[-1] - ms[0])))
+        gof = goodness_of_fit(ms, a * np.exp(b * x), num_coeffs=2)
+        out['fexp_a'] = a
+        out['fexp_b'] = b  # this is important
+        out['fexp_r2'] = gof['rsquare']  # this is more important!
+        out['fexp_rmse'] = gof['rmse']
+    except Exception:
+        # The fit failed (e.g., non-finite values): NaN for the fit fields, but still
+        # report the directly computed minimum-order statistics below
+        out['fexp_a'] = out['fexp_b'] = out['fexp_r2'] = out['fexp_rmse'] = np.nan
+
+    # The order at which the standard deviation is smallest (MATLAB's min ignores NaN)
+    min_ind = int(np.nanargmin(ms)) + 1 if not np.all(np.isnan(ms)) else 1
+    min_std = ms[min_ind - 1]
+    out['minOrder'] = min_ind
+    out['minRatio'] = min_std / ms[0]  # how much differencing helped, relative to order 1
+    out['overDiffRatio'] = ms[-1] / min_std  # how much std rises again past the optimum
+    out['isInterior'] = float(min_ind > 1 and min_ind < maxd)  # genuine U-shape vs. monotonic
+    if out['isInterior']:
+        y0, y1, y2 = ms[min_ind - 2], ms[min_ind - 1], ms[min_ind]
+        denom = y0 - 2 * y1 + y2
+        out['minOrderInterp'] = min_ind + 0.5 * (y0 - y2) / denom if denom != 0 else float(min_ind)
+    else:
+        out['minOrderInterp'] = float(min_ind)
+
+    return out
 
 def trend(y: ArrayLike) -> dict:
     """
