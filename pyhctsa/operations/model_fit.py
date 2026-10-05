@@ -1682,3 +1682,140 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     out['stdnlml'] = np.std(nlmls, ddof=1)
 
     return out
+
+
+def _arx_losses(y_train: np.ndarray, y_test: np.ndarray, orders) -> tuple:
+    """
+    Out-of-sample loss of AR models of a range of orders (MATLAB's ``arxstruc``).
+
+    For each order ``p`` an AR(p) model (no mean, no windowing) is fitted by least
+    squares to ``y_train`` and applied to ``y_test``. As in ``arxstruc``, the same
+    points are scored for every order: the first ``max(orders) + 1`` samples of the
+    training and test segments are excluded from the fit and from the sum of squared
+    one-step prediction errors, which is nonetheless divided by the full test length.
+
+    Returns the losses (one per order) and the test length.
+    """
+    m = int(np.max(orders)) + 1
+    n_tr, n_te = len(y_train), len(y_test)
+    if n_tr <= m or n_te <= m:
+        raise ValueError('time series too short for the model orders')
+    loss = np.zeros(len(orders))
+    for i, p in enumerate(orders):
+        p = int(p)
+        X = np.column_stack([y_train[m - k:n_tr - k] for k in range(1, p + 1)])
+        a = np.linalg.lstsq(X, y_train[m:], rcond=None)[0]
+        Xe = np.column_stack([y_test[m - k:n_te - k] for k in range(1, p + 1)])
+        loss[i] = np.sum((y_test[m:] - Xe @ a) ** 2) / n_te
+    return loss, n_te
+
+
+def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
+               test_how: Union[float, str] = 'all') -> dict:
+    """
+    How the out-of-sample error of an AR model changes with its order.
+
+    Fits autoregressive (AR) models of a range of orders and compares the loss of
+    each (the sum of squared one-step prediction errors on the test segment divided
+    by the test length) when the model fitted to a training segment is applied to a
+    test segment (the counterpart of MATLAB's ``arxstruc`` and ``selstruc``).
+    Statistics are taken over the loss as a function of model order, ``v``.
+
+    The first ``max(orders) + 1`` points of the training and test segments are
+    excluded from the fit and from the sum, so that every order is scored on the same
+    points, but the sum is still divided by the full test length. The loss is
+    therefore the mean squared error scaled by about
+    ``1 - (max(orders) + 1) / (test length)``, the same for every order.
+
+    With ``test_how = 'all'`` the models are tested on the data they were trained on,
+    so the loss measures in-sample fit: it cannot rise with the model order, and
+    features such as ``minv``, ``firstonmin`` and ``where01max`` mostly describe how
+    fast the fit improves with order. Use a training fraction (e.g. 0.5) for a
+    genuine out-of-sample comparison.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    orders : array-like, optional
+        The model orders to compare. Default is 1 to 10.
+    test_how : float or str, optional
+        A fraction of the time series to train on (the model is tested on the
+        remaining portion), or ``'all'`` to train and test on all the data. Default
+        is ``'all'``.
+
+    Returns
+    -------
+    dict
+        - ``maxv``, ``minv``, ``meanv``, ``medianv``: the maximum, minimum, mean and
+          median of the loss over orders,
+        - ``firstonmin``: the loss of the first order divided by the minimum loss,
+        - ``maxonmed``: the maximum loss divided by the median loss,
+        - ``meandiff``, ``stddiff``, ``maxdiff``, ``meddiff``: the mean, standard
+          deviation, maximum absolute value and median of the change in loss from
+          one order to the next,
+        - ``minstdfromi``: the minimum (over starting orders ``i``) of the standard
+          error of the loss over orders ``i`` onward,
+          ``std(v[i:]) / sqrt(len(v) - i)``, ignoring zeros,
+        - ``where01max``: the first position in the list of orders (from 1) from
+          which that standard error is below 10% of its maximum (NaN if none),
+        - ``whereen4``: the first position from which it is below 1e-4 (NaN if none),
+        - ``best_n``: the order with the smallest loss,
+        - ``aic_n``: the order that minimizes Akaike's Information Criterion,
+          ``log(loss * (1 + 2 * order / test length))``,
+        - ``bestaic``: the minimum value of that criterion over orders.
+
+        NaN if the series is too short for the largest order.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    orders = np.atleast_1d(np.asarray(orders)).ravel().astype(int)
+
+    if isinstance(test_how, str):
+        if test_how != 'all':
+            raise ValueError(f"Unknown testing set specifier '{test_how}'")
+        y_train, y_test = y, y
+    else:
+        co = int(np.floor(N * test_how))  # cutoff
+        y_train, y_test = y[:co], y[co:]
+
+    try:
+        v, n_test = _arx_losses(y_train, y_test, orders)
+    except (ValueError, np.linalg.LinAlgError):
+        logger.warning('Time series too short to compare AR models of these orders')
+        return np.nan
+
+    out = {}
+    out['maxv'] = np.max(v)
+    out['minv'] = np.min(v)
+    out['meanv'] = np.mean(v)
+    out['medianv'] = np.median(v)
+    out['firstonmin'] = v[0] / np.min(v)
+    out['maxonmed'] = np.max(v) / np.median(v)
+    dv = np.diff(v)
+    if len(dv) > 0:
+        out['meandiff'] = np.mean(dv)
+        out['stddiff'] = np.std(dv, ddof=1) if len(dv) > 1 else 0.0
+        out['maxdiff'] = np.max(np.abs(dv))
+        out['meddiff'] = np.median(dv)
+    else:
+        out['meandiff'] = out['stddiff'] = out['maxdiff'] = out['meddiff'] = np.nan
+
+    # where does it steady off?
+    nv = len(v)
+    stdfromi = np.array([(np.std(v[i:], ddof=1) if nv - i > 1 else 0.0) / np.sqrt(nv - i)
+                         for i in range(nv)])
+    pos = stdfromi[stdfromi > 0]
+    out['minstdfromi'] = np.min(pos) if len(pos) > 0 else np.nan
+    w01 = np.flatnonzero(stdfromi < np.max(stdfromi) * 0.1)
+    out['where01max'] = w01[0] + 1 if len(w01) > 0 else np.nan
+    wen4 = np.flatnonzero(stdfromi < 1e-4)
+    out['whereen4'] = wen4[0] + 1 if len(wen4) > 0 else np.nan
+
+    # 'best' order measures (selstruc): by loss, and by AIC = log(loss (1 + 2 p / Nc))
+    out['best_n'] = orders[np.argmin(v)]
+    aic = np.log(v * (1 + 2 * orders / n_test))
+    out['aic_n'] = orders[np.argmin(aic)]
+    out['bestaic'] = np.min(aic)
+
+    return out
