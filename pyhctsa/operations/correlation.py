@@ -1624,7 +1624,7 @@ def _sub_statav(x: ArrayLike, n: int) -> tuple:
             # remove final pt
             x_buff = x_buff[:, :n]
         statavmean = np.std(np.mean(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
-        statavstd = np.std(np.std(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
+        statavstd = np.std(np.std(x_buff, axis=0, ddof=1), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
 
     return statavmean, statavstd
 
