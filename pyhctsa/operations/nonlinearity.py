@@ -4325,30 +4325,23 @@ def _slatec_rand(state):
 
 
 @njit(cache=True)
-def _c1_shuffle(nmax, m, delay, state, slots, ju):
+def _c1_shuffle(nmax, m, delay, state, ju):
     """
-    The permutation of the reference points in TISEAN's d1.f. Its swap partner is
-    ``int(rand * nmax - (m-1) * delay) + 1`` (rather than ``rand * (nmax - (m-1) * delay)``),
-    which for ``m >= 3`` is sometimes zero or negative, i.e. outside the array. Those writes and
-    reads are kept, on a persistent ``slots`` array that starts at zero, so that the points
-    chosen are the same as in the TISEAN binary. The list ``ju`` is also kept between calls: it is
-    refilled only up to ``nmax - (m-1) * delay``, so if more reference points are requested than
-    that (``-n``) the rest are what earlier calls left there (zeros, at first).
+    The permutation of the reference points in TISEAN's d1.f: ``ju`` starts as the embedded points
+    ``(m-1) * delay + 1 .. nmax`` and each entry is swapped with a partner drawn uniformly from
+    them, ``int(rand * (nmax - (m-1) * delay)) + 1`` (as patched in hctsa's copy of TISEAN; stock
+    TISEAN 3.0.1 subtracts ``(m-1) * delay`` from the random number instead, which reaches outside
+    the array).
     """
     n = nmax - (m - 1) * delay
     for i in range(n):
         ju[i] = i + (m - 1) * delay + 1
     for i in range(1, n + 1):
         r = _slatec_rand(state)
-        x = np.float32(r * np.float32(nmax)) - np.float32((m - 1) * delay)
-        iperm = min(int(x) + 1, n)
+        iperm = min(int(np.float32(r * np.float32(n))) + 1, n)
         ih = ju[i - 1]
-        if iperm >= 1:
-            ju[i - 1] = ju[iperm - 1]
-            ju[iperm - 1] = ih
-        else:
-            ju[i - 1] = slots[-iperm]
-            slots[-iperm] = ih
+        ju[i - 1] = ju[iperm - 1]
+        ju[iperm - 1] = ih
 
 
 @njit(cache=True)
@@ -4393,29 +4386,26 @@ def _f32_cumsum_last(v):
 
 
 def _c1_curves(y: np.ndarray, delay: int, m_from: int, m_to: int, nmin: int, n_ref: int,
-               kmax: int = 100, res: float = 2.0) -> Union[list, None]:
+               kmax: int = 100, res: float = 2.0) -> list:
     """
-    TISEAN's ``c1 -d<delay> -m<m_from> -M<m_to> -t<nmin> -n<n_ref>``: for each embedding
-    dimension, the table of [mean log distance to the k-th neighbor -> exp, mass] pairs (as
-    float32, as TISEAN writes them) for masses doubling every ``1/res`` octaves. Everything
-    that is single precision in the Fortran is single precision here. None if TISEAN could not
-    finish (it would search for neighbors for ever).
+    TISEAN's ``c1 -d<delay> -m<m_from> -M<m_to> -t<nmin> -n<n_ref>`` (as patched in hctsa): for
+    each embedding dimension, the table of [mean log distance to the k-th neighbor -> exp, mass]
+    pairs (as float32, as TISEAN writes them) for masses doubling every ``1/res`` octaves.
+    Everything that is single precision in the Fortran is single precision here. A mass for which
+    no point has a neighbor outside the Theiler window is skipped, the number of neighbors asked
+    for never exceeds the number that exist, and at most as many reference points are used as there
+    are embedded points.
     """
     y32 = np.array([float('%.7g' % v) for v in y], dtype=np.float32)  # BF_WriteTempFile
     nmax = y32.size
-    # the data sit at 1..nmax of `ye`; what lies before them is not data: zero, except that the
-    # variable `res` happens to sit at index -1 in the compiled c1 (read when a reference point
-    # of the permutation above falls outside the array)
-    off = (m_to - 1) * delay + 1
-    ye = np.zeros(off + nmax + 1, dtype=np.float32)
-    ye[off + 1:off + 1 + nmax] = y32
-    ye[off - 1] = res
+    ye = np.zeros(nmax + 1, dtype=np.float32)  # the data at 1..nmax, as in the Fortran
+    ye[1:] = y32
+    off = 0
     sd = F32(math.sqrt(float(F32(_f32_cumsum_last(((y32 - F32(_f32_cumsum_last(y32) / F32(nmax)))
                                                    ** 2).astype(np.float32)) / F32(nmax)))))
     state = np.zeros(2, np.int64)
     _slatec_rand(state)  # the program draws once when it seeds the generator
-    slots = np.zeros(max((m_to - 1) * delay, 1) + 2, np.int64)
-    ju = np.zeros(max(nmax, n_ref) + 1, np.int64)
+    ju = np.zeros(nmax + 1, np.int64)
     resl = F32(_logf(F32(2.0)) / F32(res))
     sqrt2 = F32(math.sqrt(2.0))
     curves = []
@@ -4423,27 +4413,31 @@ def _c1_curves(y: np.ndarray, delay: int, m_from: int, m_to: int, nmin: int, n_r
     for m in range(m_from, m_to + 1):
         rows = []
         pr = F32(0.0)
-        if nmax - (m - 1) * delay < 1:  # the delay vectors are longer than the series
-            return None
-        pl = _logf(F32(F32(1.0) / F32(nmax - (m - 1) * delay)))
-        # (a Fortran DO loop over a real: the trip count is fixed first, the variable then accumulates)
-        for _ in range(int(F32(F32(F32(0.0) - pl) + resl) / resl)):
-            ncomp = nmax - (m - 1) * delay
-            n_eff = ncomp - 2 * nmin - 1
-            if n_eff < 1:  # every point lies in every other's Theiler window: TISEAN never finds neighbors
-                return None
+        nvalid = nmax - (m - 1) * delay
+        if nvalid < 1:  # the delay vectors are longer than the series: nothing for this m
+            curves.append(np.empty((0, 2), dtype=np.float32))
+            continue
+        pl = _logf(F32(F32(1.0) / F32(nvalid)))
+        # (a Fortran DO loop over a real: the trip count int((0 - pl) / resl) + 1 is fixed first, the
+        # variable then accumulates; the last mass can be 1 or a hair above, for instance when
+        # nvalid is a power of two)
+        for _ in range(int(F32(F32(0.0) - pl) / resl) + 1):
+            ncomp = nvalid
+            n_eff = ncomp - 2 * nmin - 1  # neighbors a point can have outside its Theiler window
+            if n_eff < 1:  # every point lies in every other's Theiler window: no mass to compute
+                pl = F32(pl + resl)
+                continue
             kpr = int(F32(_expf(pr) * F32(n_eff))) + 1
-            k = int(F32(_expf(pl) * F32(n_eff))) + 1
+            k = min(int(F32(_expf(pl) * F32(n_eff))) + 1, n_eff)
             if k > kmax:  # fixed mass: use fewer points rather than more neighbors
                 ncomp = int(F32(F32(F32(n_eff) * F32(kmax)) / F32(k)) + F32(2 * nmin + 1))
                 k = kmax
             psi = _C1_PSI[k] if k <= 20 else F32(_logf(F32(k)) - F32(F32(1.0) / F32(2.0 * k)))
             pln = F32(psi - _logf(F32(ncomp - 2 * nmin - 1)))
             if k != kpr:
-                _c1_shuffle(nmax, m, delay, state, slots, ju)
-                e = _c1_kth_distance(ye, off, ju[:n_ref], delay, m, ncomp, nmin, k)
-                if np.isnan(e).any():
-                    return None
+                _c1_shuffle(nmax, m, delay, state, ju)
+                refs = ju[:min(n_ref, nvalid)].copy()  # at most as many centers as embedded points
+                e = _c1_kth_distance(ye, off, refs, delay, m, ncomp, nmin, k)
                 # TISEAN sweeps the reference points with a neighborhood size that grows by
                 # sqrt(2) until each has k neighbors; the sum of logs is in that order
                 eps = F32(_expf(F32(pln / F32(m))) * sd)
@@ -4452,13 +4446,10 @@ def _c1_curves(y: np.ndarray, delay: int, m_from: int, m_to: int, nmin: int, n_r
                     eps = F32(eps * sqrt2)
                     eps_seq.append(eps)
                 sweep = np.searchsorted(np.array(eps_seq, dtype=np.float32), e, side='right')
+                if int(sweep.max()) + 1 > 201:  # the search is abandoned after 200 sweeps
+                    pl = F32(pl + resl)
+                    continue
                 order = np.argsort(sweep, kind='stable')
-                # (each sweep moves the points still waiting to the front of ``ju``)
-                waiting, wait_sweep = ju[:n_ref].copy(), sweep
-                for s_i in range(int(sweep.max()) + 1):
-                    keep = wait_sweep > s_i
-                    waiting, wait_sweep = waiting[keep], wait_sweep[keep]
-                    ju[:waiting.size] = waiting
                 log_e = np.log(np.maximum(e[order].astype(np.float64), 1e-20)).astype(np.float32)
                 rln = F32(_f32_cumsum_last(log_e) / F32(n_ref - (m - 1) * delay))
             if pln != pr:
@@ -4528,9 +4519,12 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
     scaling range in each dimension and summarizes the dimension estimates across them.
 
     The routine is a port of TISEAN 3.0.1's Fortran (``c1.f``, ``d1.f``, ``c2d.f``) in single
-    precision, and reproduces the binary's output, including the permutation of the reference
-    points (its random numbers are SLATEC's ``RAND``) and the out-of-range indices it contains for
-    ``m >= 3``.
+    precision, with the corrections of hctsa's copy of TISEAN, and reproduces that binary's output,
+    including the permutation of the reference points (its random numbers are SLATEC's ``RAND``).
+    The stock TISEAN code picks the partner for each swap of that permutation from outside the
+    valid range, uses stale memory when more reference points are requested than there are
+    embedded points, and never finishes when it asks for more neighbors than exist (for example
+    when the number of embedded points is a power of two); those cases are fixed here.
 
     Parameters
     ----------
@@ -4558,20 +4552,14 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
         ``ranged`` (across embedding dimensions), ``maxmd`` (at the largest embedding dimension),
         ``meanstd`` (the mean of the standard deviations), ``bestscrd`` and ``longestscr`` (the
         dimension at, and log-length of, the longest scaling range). NaN if the series has fewer
-        than 100 points or is constant, the delay cannot be set, or no scaling range is found.
-        (Series whose length leaves a remainder of at most 6 on division by 128 lose their last
-        samples, as in hctsa, because TISEAN's ``c1`` stalls on them.)
+        than 100 points or is constant, the delay cannot be set, or no scaling range is found
+        (for instance when the Theiler window leaves no neighbors).
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size
     if n < 100:
         logger.warning('Time series too short for c1')
         return np.nan
-    freaky = n % 128
-    if freaky <= 6:
-        logger.warning(f"TISEAN's c1 stalls on a series of this length: ignoring the last {freaky + 1} points")
-        y = y[:n - (freaky + 1)]
-        n = y.size
     if np.unique(y).size == 1:
         return np.nan
 
@@ -4593,9 +4581,6 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
         nref = 100
 
     curves = _c1_curves(y, tau, int(mmm[0]), int(mmm[1]), int(tsep), nref)
-    if curves is None:
-        logger.warning("TISEAN's c1 could not find enough neighbors")
-        return np.nan
     slopes = _c2d_slopes(curves)
 
     sc = np.full((len(slopes), 6), np.nan)
