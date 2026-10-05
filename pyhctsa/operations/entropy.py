@@ -827,6 +827,90 @@ def _app_samp_entropy(
 
     return phi
 
+def bubble_entropy(y: ArrayLike, m: int = 10, tau: Union[int, str] = 1) -> Union[dict, float]:
+    """
+    Bubble entropy of a time series.
+
+    Manis et al.'s bubble entropy [1], an ordinal entropy that depends very little on its
+    embedding dimension. The series is cut into overlapping runs of ``m`` values spaced
+    ``tau`` samples apart. For each run, the number of swaps a bubble sort needs to put it
+    in order (equivalently, the number of pairs in which an earlier value exceeds a later
+    one, from 0 to ``m(m-1)/2``) is counted. The Renyi entropy of order 2 of the
+    distribution of this swap count, ``H_m = -log(sum_k p_k**2)``, is computed for runs of
+    ``m`` and of ``m + 1`` values. The bubble entropy is the increase in entropy on going
+    from ``m`` to ``m + 1`` values, ``H_(m+1) - H_m``, divided by ``log((m+1)/(m-1))`` to
+    normalize for the dimension. Low values indicate series whose runs have predictable
+    orderings. For white noise the long-series value is about 0.64 for ``m = 5`` and 0.69
+    for ``m = 10`` (rising slowly toward 0.75 as ``m`` grows). Port of hctsa's
+    ``EN_BubbleEn``.
+
+    A swap is counted only when an earlier value is strictly greater than a later one, so
+    tied values are never swapped (as in a standard bubble sort). The estimate is a small
+    difference between two entropies, so it is noisy when the series is short relative to
+    the number of possible swap counts: for series of about 1000 samples, embedding
+    dimensions much above 10 give poorly reproducible values.
+
+    With a delay set by the timescale of the series, the runs of ``m`` values span
+    ``(m-1)*tau`` samples, so for a slowly decorrelating series (a large delay) there are
+    few runs and the value is noisy. hctsa uses ``'mi'``, which is rarely NaN: it falls
+    back on the first automutual-information minimum when the autocorrelation function
+    never decays to 1/e. The ``'ac1e'`` delay is NaN when the autocorrelation function
+    never decays to 1/e (as for many random walks) or the runs are too few, and the first
+    zero crossing (``'ac'``) is less stable still.
+
+    References
+    ----------
+    .. [1] G. Manis, M. D. Aktaruzzaman and R. Sassi, "Bubble Entropy: An Entropy Almost
+        Free of Parameters", IEEE Trans. Biomed. Eng. 64(11), 2711 (2017).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    m : int, optional
+        The embedding dimension, at least 2. Default is 10.
+    tau : int or str, optional
+        The time delay for the embedding: an integer, or a rule understood by
+        :func:`~pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``). Default is 1.
+
+    Returns
+    -------
+    dict
+        A dictionary with a single field, 'bubbleEn', the bubble entropy
+        ``(H_(m+1) - H_m) / log((m+1)/(m-1))``. NaN if the series is constant, the delay
+        cannot be determined, or the series is too short for runs of ``m + 1`` values
+        (fewer than 10 runs).
+    """
+    m = int(m)
+    if m < 2:
+        raise ValueError(f"The embedding dimension must be at least 2 (m = {m} given)")
+    out = {'bubbleEn': np.nan}
+    y = np.asarray(y, dtype=float).ravel()
+    if not np.std(y, ddof=1) > 0:  # constant (or non-finite) series
+        return out
+    tau = get_tau(y, tau)  # resolve a rule once, so both dimensions share one delay
+    if np.isnan(tau):
+        return out
+    tau = int(tau)
+
+    # Renyi-2 entropy of the swap-count distribution at m and m + 1
+    H = np.zeros(2)
+    for j in range(2):
+        mm = m + j
+        n_vec = y.size - (mm - 1) * tau
+        if n_vec < 10:
+            return out
+        x = time_delay_embed(y, mm, tau)
+        num_swaps = np.zeros(n_vec, dtype=np.int64)
+        for a in range(mm - 1):
+            for b in range(a + 1, mm):
+                num_swaps += x[:, a] > x[:, b]  # one swap per inversion
+        p = np.bincount(num_swaps) / n_vec
+        H[j] = -np.log(np.sum(p ** 2))
+
+    out['bubbleEn'] = (H[1] - H[0]) / np.log((m + 1) / (m - 1))
+    return out
+
 def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str] = 1,
                        mapping_how: str = 'ncdf') -> Union[dict, float]:
     """
