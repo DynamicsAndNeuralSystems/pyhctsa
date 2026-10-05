@@ -632,8 +632,12 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
         Default is ``10``.
 
     random_seed : int or None, optional
-        Seed controlling noise realisations. If ``None``, defaults internally
-        to ``0``.
+        Seed controlling noise realisations (an independent noise vector is drawn
+        at each noise level). If ``None``, defaults internally to ``0``.
+
+    noise : array-like, optional
+        Test hook: noise to use instead of drawing it. Either a 1-D vector, reused at
+        every noise level, or a ``(50, len(y))`` array with one row per noise level.
 
     Returns
     -------
@@ -645,12 +649,17 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     # Set tau to minimum of autocorrelation function if 'ac' or 'tau'
     if tau in ['ac', 'tau']:
         tau = first_crossing(y, 'ac', 0, 'discrete')
-    # Generate noise
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
+    # Fresh uncorrelated Gaussian noise is drawn at each noise level (seed set once);
+    # a user-supplied ``noise`` (test hook) is either one vector reused at every level
+    # or an array with one row per level.
     if noise is not None:
-        noise = np.asarray(noise)
+        noise = np.asarray(noise, dtype=float)
+        noise_at = (lambda i: noise) if noise.ndim == 1 else (lambda i: noise[i])
     else:
         np.random.seed(0 if random_seed is None else random_seed)
-        noise = np.random.randn(len(y))  # generate uncorrelated additive noise
+        noise_at = lambda i: np.random.randn(len(y))
 
     # Set up noise range
     noise_range = np.linspace(0, 3, 50) # compare properties across this noise range
@@ -661,13 +670,13 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     if ami_method in ['std1', 'std2', 'quantiles', 'even']:
         # histogram-based methods using my naive implementation in CO_Histogram
         for i in range(num_repeats):
-            amis[i] = histogram_ami(y + noise_range[i]*noise, tau, ami_method, extra_param)
+            amis[i] = histogram_ami(y + noise_range[i]*noise_at(i), tau, ami_method, extra_param)
             if np.isnan(amis[i]):
                 logger.warning('Error computing AMI: Time series too short (?)')
                 return np.nan
     if ami_method in ['gaussian','kraskov1','kraskov2']:
         for i in range(num_repeats):
-            amis[i] = automutual_info(y + noise_range[i]*noise, tau, ami_method, extra_param)
+            amis[i] = automutual_info(y + noise_range[i]*noise_at(i), tau, ami_method, extra_param)
             if np.isnan(amis[i]):
                 logger.warning('Error computing AMI: Time series too short (?)')
                 return np.nan
@@ -916,6 +925,8 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     # Set tau to the first zero-crossing of the autocorrelation function with the 'tau' input
     if tau == 'tau':
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
         if tau > len(y) / 10:
             tau = len(y) // 10
     # Ensure that y is a column vector
@@ -955,7 +966,7 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     n = n / afifth
     
     for i in range(4):
-        out[f'stdb{i+1}'] = np.std(n[:, i], ddof=1)
+        out[f'stdb{i+1}'] = np.std(n[i, :], ddof=1)  # across the five fifths
 
     # STATIONARITY of points in the space (do they move around in the space)
     # (1) in terms of distance from origin
@@ -1191,6 +1202,7 @@ def _ami_from_binning(idx: np.ndarray, valid: np.ndarray, num_bins: int, t: int)
 
     Bit-identical to histogram_ami's per-lag value: the joint histogram of the binned
     delay pair is one ``bincount`` of paired indices instead of re-running histogram2d.
+    Includes the Miller-Madow bias correction.
     """
     if t == 0:
         # for tau = 0, y1 and y2 are identical to y
@@ -1211,7 +1223,17 @@ def _ami_from_binning(idx: np.ndarray, valid: np.ndarray, num_bins: int, t: int)
     pjj = np.tile(pj, (num_bins, 1))
 
     r = pij > 0  # Defining the range in this way, we set log(0) = 0
-    return np.sum(pij[r] * np.log(pij[r] / pii[r] / pjj[r]))
+    ami = np.sum(pij[r] * np.log(pij[r] / pii[r] / pjj[r]))
+
+    # Miller-Madow (Panzeri-Treves) bias correction: the plug-in estimate is biased
+    # upwards by ~(Mxy - Mx - My + 1)/(2n) nats, with M the numbers of occupied joint
+    # and marginal bins and n the number of delay pairs (numel(y1) in MATLAB, i.e.
+    # before discarding points outside the bin range). Deliberately not clamped at 0.
+    n = len(idx) - t
+    mxy = np.count_nonzero(r)
+    mx = np.count_nonzero(pi > 0)
+    my = np.count_nonzero(pj > 0)
+    return ami - (mxy - mx - my + 1) / (2 * n)
 
 
 def histogram_ami(
@@ -1224,7 +1246,11 @@ def histogram_ami(
     The automutual information of the distribution using histograms.
 
     Computes the automutual information between a time series and its time-delayed version
-    using different methods for binning the data.
+    using different methods for binning the data. The plug-in estimate is corrected for
+    finite-sample bias with the Miller-Madow (Panzeri-Treves) term
+    (Mxy - Mx - My + 1) / (2n), where Mxy, Mx and My are the numbers of occupied joint and
+    marginal bins and n is the number of delay pairs; the result is not clamped at zero
+    and can be slightly negative.
 
     Parameters
     ----------
@@ -1256,6 +1282,8 @@ def histogram_ami(
     y = np.asarray(y)
     if isinstance(tau, str) and tau in ['ac', 'tau']:
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
 
     # Bin the data once (the binning is the same for both delay vectors and does not
     # depend on the lag), then evaluate each lag from the precomputed bin indices.
@@ -1662,6 +1690,8 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     
     if tau == 'tau':
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
         if tau > N / 10:
             tau = N//10
 
@@ -1695,7 +1725,7 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     # Empirical distances distribution often fits Exponential distribution quite well
     # Fit to all values (often some extreme outliers, but oh well)
     l = 1 / np.mean(d)
-    n_log_l = -np.sum(expon.logpdf(d, scale=1/l))
+    n_log_l = -np.mean(expon.logpdf(d, scale=1/l))  # negative log-likelihood per observation
     out['d_expfit_nlogL'] = n_log_l
 
     # Calculate histogram
@@ -1740,6 +1770,13 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     if tau == 'tau':
         # Make tau the first zero crossing of the autocorrelation function
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
+        # Cannot set the time delay greater than 10% the length of the time series
+        if tau > len(y) / 10:
+            tau = len(y) // 10
+    if np.isnan(tau):
+        return np.nan
     tau = int(tau)
     xt = y[:-tau]  # part of the time series
     xtp = y[tau:]  # time-lagged time series
@@ -1832,6 +1869,8 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     y = np.asarray(y)
     if tau == 'tau':
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
         # cannot set time delay > 10% of the length of the time series...
         if tau > len(y)/10:
             tau = int(np.floor(len(y)/10))
@@ -1945,7 +1984,7 @@ def fzcglscf(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int],
         glscfs[i-1] = glscf(y, alpha, beta, tau)
         if (i > 1) and (glscfs[i-1]*glscfs[i-2] < 0):
             # Draw a straight line between these two and look at where it hits zero
-            out = i - 1 + glscfs[i-1]/(glscfs[i-1]-glscfs[i-2])
+            out = i - 1 + glscfs[i-2]/(glscfs[i-2]-glscfs[i-1])
             return out
     
     return max_tau
@@ -2018,6 +2057,8 @@ def glscf(y: ArrayLike, alpha: float, beta: float, tau: Union[int, str] = 'tau')
     # Set tau to first zero-crossing of the autocorrelation function with the input 'tau'
     if tau == 'tau':
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
     
     # Take magnitudes of time-delayed versions of the time series
     y1 = np.abs(y[:-tau])
@@ -2547,7 +2588,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
                 acf_val = acf_full[i-1]
                 if np.isnan(acf_val):
                     logger.warning("Weird time series (constant?)")
-                    out = np.nan
+                    return np.nan
                 if acf_val < th:
                     # Ensure ACF is all positive
                     if acf_val > 0:
@@ -2566,22 +2607,27 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
             # Stop when ACF is very close to 0 (within threshold, th = 2/sqrt(N))
             for i in range(1, N+1):
                 acf_val = acf_full[i-1] # acf vector indicies are not lags
-                # if positive and less than thresh
-                if i > 0 and abs(acf_val) < th:
-                    n_drown = i
+                if i > 1 and abs(acf_val) < th:
+                    n_drown = i - 1 # convert from index to the corresponding lag
                     acf.append(acf_val)
                     break
                 acf.append(acf_val)
+            if n_drown == 0:
+                # ACF never entered the significance band across available lags
+                n_drown = N - 1
         elif stop_when == 'double_drown':
             # Stop at 2*tau, where tau is the lag where ACF ~ 0 (within 1/sqrt(N) threshold)
             for i in range(1, N+1):
                 acf_val = acf_full[i-1]
-                if n_drown > 0 and i == n_drown * 2:
+                if n_drown > 0 and i == 2 * n_drown + 1:
                     acf.append(acf_val)
                     break
                 elif i > 1 and abs(acf_val) < th:
-                    n_drown = i
+                    n_drown = i - 1 # convert from index to the corresponding lag
                 acf.append(acf_val)
+            if n_drown == 0:
+                # ACF never entered the significance band across available lags
+                n_drown = N - 1
     else:
         raise ValueError(f"Unknown ACF decay criterion: '{stop_when}'")
 
@@ -2591,8 +2637,8 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
     # Check for good behavior
     if np.any(np.isnan(acf)):
         # This is an anomalous time series (e.g., all constant, or containing NaNs)
-        out = np.nan
-    
+        return np.nan
+
     out = {}
     out['Nac'] = n_drown
 
@@ -2655,9 +2701,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
         exp_fit = exp_func(np.arange(nac), b_fit)
         residuals = acf - exp_fit
         out['fexpacf_r2'] = 1 - (np.sum(residuals**2) / np.sum((acf - np.mean(acf))**2))
-        exp_fit2 = exp_func(np.arange(nac), -b_fit)
-        residuals2 = acf - exp_fit2
-        out['fexpacf_stdres'] = np.std(residuals2, ddof=1)
+        out['fexpacf_stdres'] = np.std(residuals, ddof=1)
 
     else:
         # Fit inappropriate (or failed): return nans for the relevant stats
