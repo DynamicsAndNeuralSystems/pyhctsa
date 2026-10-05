@@ -16,7 +16,7 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import fit_kernel_smooth, moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
 from ..robust import bf_quantile_edges, bf_random, bf_random_seed
-from ..utils import _round_half_away, get_tau, make_mat_buffer, matlab_quantile, sign_change, z_score
+from ..utils import dict_output, _round_half_away, get_tau, make_mat_buffer, matlab_quantile, sign_change, z_score
 from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit, polyfit, robustfit
 from ..toolboxes.matlab._pptest_tables import _pp_pvalue, _pp_regression
 
@@ -294,6 +294,7 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
 
     return out
 
+@dict_output
 def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
                 w_overlap: Union[None, float] = None, mom_1: str = 'mean',
                 mom_2: str = 'std', what_transform: str = 'none') -> dict:
@@ -482,6 +483,7 @@ def _std_matlab(v: np.ndarray) -> float:
     """Sample standard deviation (N-1) with MATLAB's convention that a single value has std 0 (numpy: NaN)."""
     return float(np.std(v, ddof=1)) if np.size(v) > 1 else 0.0
 
+@dict_output
 def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = None) -> dict:
     """
     How local maximums and minimums vary across the time series.
@@ -810,6 +812,7 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
 
     return out
 
+@dict_output
 def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None] = None,
                  random_seed: Union[int, None] = None) -> dict:
     """
@@ -987,6 +990,7 @@ def std_nth_deriv(y: ArrayLike, ndr: int = 2) -> float:
 
     return float(out)
 
+@dict_output
 def std_nth_deriv_change(y: ArrayLike, maxd: int = 10) -> dict:
     """
     How the output of :func:`std_nth_deriv` changes with the order of the derivative.
@@ -1266,6 +1270,7 @@ def peak_intervals(y: ArrayLike, min_prom: float = 1) -> dict:
 
     return out
 
+@dict_output
 def drifting_auto_corr(y: ArrayLike, tau: int = 1, what_product: str = 'ac') -> dict:
     """
     Drift in a lag-tau (auto)correlation via a cumulative-sum test.
@@ -1347,6 +1352,7 @@ def drifting_auto_corr(y: ArrayLike, tau: int = 1, what_product: str = 'ac') -> 
 
     return _cumsum_bridge_stats(p)
 
+@dict_output
 def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 100,
                         random_seed: Union[int, str, None] = 'default') -> dict:
     """
@@ -1503,6 +1509,7 @@ def _nstat_z_error(ser, base1, base2, clength, m, tau, minn, step, causal, cente
         err += (casted - ser[base2 + i + step]) ** 2
     return err
 
+@dict_output
 def nstat_z(y: ArrayLike, num_seg: int = 5, embed_params: tuple = (1, 3)) -> dict:
     """
     Cross-forecast errors of zeroth-order time-series models.
@@ -2071,6 +2078,7 @@ def _pearson(x: np.ndarray, y: np.ndarray) -> tuple:
 
     return r, pval
 
+@dict_output
 def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] = 1) -> dict:
     """
     Monotonic trend ('ramping') in windowed statistics.
@@ -2182,6 +2190,7 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] =
 
     return out
 
+@dict_output
 def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     """
     Slow feature analysis of windowed statistics.

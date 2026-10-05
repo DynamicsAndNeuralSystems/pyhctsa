@@ -11,7 +11,7 @@ from ..operations.correlation import tc3, trev
 from ..operations.information import automutual_info, first_min
 from ..operations.nonlinearity import _ms_nlpe, fnn, nlpe
 from ..robust import bf_ks_density, bf_random, bf_random_seed
-from ..utils import get_tau, theiler_window
+from ..utils import dict_output, get_tau, theiler_window
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -211,6 +211,7 @@ def _first_min_per_surrogate(z: np.ndarray, min_what: str) -> np.ndarray:
             out[i] = np.nan
     return out
 
+@dict_output
 def surrogate_test(
     x: ArrayLike,
     surr_meth: str = 'RP',
@@ -441,6 +442,7 @@ def surrogate_test(
     return out
 
 
+@dict_output
 def surrogates(
     y: ArrayLike,
     tau: Union[int, str] = 1,

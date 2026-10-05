@@ -7,7 +7,7 @@ from scipy.stats import ansari
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
 from ..robust import bf_ks_density, bf_runs_z
-from ..utils import get_tau, matlab_quantile
+from ..utils import dict_output, get_tau, matlab_quantile
 
 def walker(y: ArrayLike, walker_rule: str = 'prop',
            walker_params: Union[None, float, int, list] = None) -> dict:
@@ -204,6 +204,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
 
     return out
 
+@dict_output
 def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
                     params: Union[list, None] = None) -> dict:
     """
@@ -330,6 +331,7 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
     return out
 
 
+@dict_output
 def kramers_moyal(y: ArrayLike, tau: Union[int, str] = 1, num_bins: int = 15) -> Union[dict, float]:
     """
     How the series' average drift and noise intensity depend on its current level, from its increments.

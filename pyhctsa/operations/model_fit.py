@@ -19,7 +19,7 @@ from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..robust import bf_exp_fit, bf_random, bf_random_seed
 from ..toolboxes.matlab.optimizers import minimize
-from ..utils import _linspace, _ml_std, _zscore_matlab, get_tau, matlab_quantile, z_score
+from ..utils import dict_output, _linspace, _ml_std, _zscore_matlab, get_tau, matlab_quantile, z_score
 
 @numba.njit(cache=True, error_model='numpy')
 def _zg_hmm_em(x, mu, cov, P, pi, n_cycles, tol, cov_floor):
@@ -801,6 +801,7 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     return out
 
 
+@dict_output
 def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3),
                   qr: ArrayLike = (1, 2, 3), random_seed: Union[int, str, None] = None) -> dict:
     """
@@ -1203,6 +1204,7 @@ def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.
     return out
 
 
+@dict_output
 def state_space_comp_order(y: ArrayLike, max_order: int = 10) -> Union[dict, float]:
     """
     How the fit of a state-space model improves as its order increases.
@@ -1305,6 +1307,7 @@ def _fpe_stats(fpes: np.ndarray) -> dict:
             'fpe_min': np.min(fpes), 'fpe_range': np.ptp(fpes)}
 
 
+@dict_output
 def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, None] = 2,
                     subset_how: str = 'rand', sample_p: Union[list, tuple, int] = (20, 0.1),
                     random_seed: Union[int, str, None] = 'default') -> dict:
@@ -1646,6 +1649,7 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
 
     return out
 
+@dict_output
 def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
                  train_length: Union[int, str] = 3) -> dict:
     """
@@ -1739,6 +1743,7 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
 
     return out
 
+@dict_output
 def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
                   alpha: Union[str, float] = 'best') -> dict:
     """
@@ -2025,6 +2030,7 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
         out['minsbc'] = np.nan
     return out
 
+@dict_output
 def ar_cov(y: ArrayLike, p: int = 2) -> dict:
     """
     Fits an autoregressive (AR) model of a given order p.
@@ -2271,6 +2277,7 @@ def _t_quantile(dof: int, p: float) -> float:
     """Student-t quantile (ARFIT_tquant)."""
     return float(t.ppf(p, df=dof))
 
+@dict_output
 def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc') -> dict:
     """
     Statistics of a fitted AR model to a time series.
@@ -2978,6 +2985,7 @@ def _arx_losses(y_train: np.ndarray, y_test: np.ndarray, orders) -> tuple:
     return loss, n_te
 
 
+@dict_output
 def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
                test_how: Union[float, str] = 'all') -> dict:
     """
@@ -3201,6 +3209,7 @@ def _fit_predictor_model(y: np.ndarray, model: str, order):
     return lambda y_seg, steps: _kstep_residuals(a, c, y_seg, steps)
 
 
+@dict_output
 def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 2,
                 max_steps: int = 6) -> dict:
     """
@@ -3319,6 +3328,7 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
     return out
 
 
+@dict_output
 def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, list] = 2,
                       subset_how: str = 'rand', sample_p: Union[list, tuple] = (20, 0.1),
                       steps: int = 2, random_seed: Union[int, str, None] = 0) -> dict:
@@ -3489,6 +3499,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     return out
 
 
+@dict_output
 def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
                          n_states: ArrayLike = (2, 3, 4)) -> dict:
     """
@@ -3602,6 +3613,7 @@ def _gp_init_hyp(components: list, tt: np.ndarray) -> np.ndarray:
     return np.r_[hyp, np.log(0.1)]
 
 
+@dict_output
 def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covNoise',
                        squish_or_squash: int = 1, max_n: Union[int, float, str] = 500,
                        resample_how: str = 'resample',

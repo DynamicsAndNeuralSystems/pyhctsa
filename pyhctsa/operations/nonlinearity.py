@@ -23,7 +23,7 @@ from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robu
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
 from ..toolboxes.Tisean_3_0_1.tisean import _e, _round_significant
 from ..robust import bf_hist_edges, bf_random, bf_random_seed
-from ..utils import (_linspace, _ml_randperm, _ml_rng, _round_half_away, bin_picker, get_tau,
+from ..utils import (dict_output, _linspace, _ml_randperm, _ml_rng, _round_half_away, bin_picker, get_tau,
                      matlab_quantile, theiler_window, time_delay_embed)
 
 logger = logging.getLogger('pyhctsa')
@@ -33,6 +33,7 @@ logger = logging.getLogger('pyhctsa')
 # Embedding parameters (hctsa's NL_FNN and BF_Embed), shared by the operations below
 # ------------------------------------------------------------------------------
 
+@dict_output
 def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         theiler_win: Union[int, float, list, tuple] = ('ac', 1), just_best: bool = True,
         bestp: float = 0.4, escape_factor: Union[float, None] = None) -> Union[dict, float]:
@@ -520,6 +521,7 @@ def _ms_nlpe(y: ArrayLike, de: int, tau: int, theiler_win: int = 0) -> float:
 
     return e
 
+@dict_output
 def nsamdf(x: ArrayLike, tau_mult: Union[int, float] = 2, win_len_rel: Union[int, float] = 10,
            shift_len_rel: Union[float, int] = 0.5, degree: int = 7) -> dict:
     """
@@ -589,6 +591,7 @@ def nsamdf(x: ArrayLike, tau_mult: Union[int, float] = 2, win_len_rel: Union[int
 
     return {'L': np.sqrt(np.mean((s2n - sdn)**2))}
 
+@dict_output
 def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
          max_n: Union[int, str] = 5000,
          theiler_win: Union[int, float, list, tuple] = ('ac', 1)) -> dict:
@@ -695,6 +698,7 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
 
     return out
 
+@dict_output
 def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 10),
                past: Union[int, float, list, tuple] = ('ac', 1),
                random_seed: Union[int, None] = 0) -> dict:
@@ -817,6 +821,7 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
 
     return out
 
+@dict_output
 def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
     """
     Reconstructs the time series as a time-delay embedding, and performs Principal
@@ -889,6 +894,7 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
 
     return out
 
+@dict_output
 def local_density(y: ArrayLike, nnr: int = 3,
                   past: Union[int, float, list, tuple] = ('ac', 1),
                   tau: Union[str, int] = 'ac', m: Union[str, int] = 2) -> dict:
@@ -1292,6 +1298,7 @@ def _summarise_d2_scaling(dat_v: np.ndarray, dat_M: np.ndarray, p: str,
     out[f'{p}_dimstd'] = sc['dimstd']
 
 
+@dict_output
 def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
               theiler_win: Union[int, float, list, tuple] = ('ac', 1)) -> Union[dict, float]:
     """
@@ -1473,6 +1480,7 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
 
 
 
+@dict_output
 def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
                 thwin: Union[int, float, list, tuple] = ('ac', 1), nbins: int = 20,
                 embed_params: Union[list, tuple] = ('ac', 'fnn'), do_two: int = 1) -> Union[dict, float]:
@@ -1756,6 +1764,7 @@ def _fractal_dim_error(d: float, g: float, kmin: int, kmax: int, mom: np.ndarray
     return scale_err(a)
 
 
+@dict_output
 def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
                        nref: Union[int, float] = 0.2, gstart: float = 1, gend: float = 10,
                        past: Union[int, float, list, tuple] = ('ac', 1), steps: int = 32,
@@ -2032,6 +2041,7 @@ def _dimensions_best_m(logr: np.ndarray, log_nn: np.ndarray, prefix: str, out: d
     out[f'{prefix}_mbestfit'] = int(np.argmin(msq)) + 1
 
 
+@dict_output
 def dimensions(y: ArrayLike, num_bins: int = 50,
                embed_params: Union[list, tuple] = ('ac', 'fnn')) -> Union[dict, float]:
     """
@@ -2203,6 +2213,7 @@ def _tisean_lyap_r(y: np.ndarray, delay: int, dim: int, mindist: int, steps: int
     return np.column_stack([steps_idx[have], np.vectorize(_e)(lyap[have] / found[have] / 2.0)])
 
 
+@dict_output
 def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
                  maxtstep: Union[int, float, list, tuple] = ('ac1e', 30),
                  past: Union[int, float, list, tuple] = ('ac1e', 1), nnr: int = 3,
@@ -2506,6 +2517,7 @@ def _dvv_iaaft(x: np.ndarray, perm: np.ndarray, max_it: int = 100, tol: float = 
     return best_r
 
 
+@dict_output
 def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
         ntv: Union[int, None] = None, num_surr: int = 10, random_seed: Union[int, None] = 0,
         tau: Union[int, str] = 1) -> Union[dict, float]:
@@ -2662,6 +2674,7 @@ def _period_normalized_tau(y: np.ndarray) -> Union[int, str]:
     return max(1, int(_round_half_away(1 / f[locs[best]] / 5)))
 
 
+@dict_output
 def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, max_dim: int = 1,
                         max_n: Union[int, str] = 1000) -> Union[dict, float]:
     """
@@ -2796,6 +2809,7 @@ def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
     return boxcounts
 
 
+@dict_output
 def poincare_section(y: ArrayLike, ref: str = 'max',
                      tau: Union[int, str] = 'mi') -> Union[dict, float]:
     """
@@ -2949,6 +2963,7 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
 
     return out
 
+@dict_output
 def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
     """
     Singular Spectrum Analysis of a time series.
@@ -3180,6 +3195,7 @@ def _recurrence_time_stats(Y: np.ndarray, radius: float, theiler: int) -> tuple:
     return float(np.mean(w)), float(np.bincount(w).max() / w.size)
 
 
+@dict_output
 def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] = 3,
                      theiler_win: Union[int, float, list, tuple] = ('ac', 1), rr: float = 0.1,
                      num_segments: int = 4, max_n: Union[int, str] = 10000,
@@ -3299,6 +3315,7 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
     return out
 
 
+@dict_output
 def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] = 3,
         theiler_win: Union[int, float, list, tuple] = ('ac', 1), rr: float = 0.1,
         lmin: int = 2, vmin: int = 2, max_n: Union[int, str] = 10000,
@@ -3450,6 +3467,7 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
     return out
 
 
+@dict_output
 def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100,
                 past: Union[int, float, list, tuple] = ('ac', 1), nref: int = -1,
                 embed_params: Union[list, tuple] = ('ac', 'fnn')) -> dict:
@@ -3644,6 +3662,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     return out
 
 
+@dict_output
 def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: int = 4,
                   max_n: Union[int, str] = 'full') -> dict:
     """
@@ -3824,6 +3843,7 @@ def _spectrum_stats(perc: np.ndarray, m: int) -> dict:
     return stats
 
 
+@dict_output
 def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
                      max_n: Union[int, str] = 2000) -> dict:
     """
@@ -3975,6 +3995,7 @@ def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
     return out
 
 
+@dict_output
 def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
                            embed_params: Union[list, tuple] = ('ac', 'fnn')) -> dict:
     """
@@ -4079,6 +4100,7 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
     return out
 
 
+@dict_output
 def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: float = 0.98,
                   theiler_win: Union[int, float, list, tuple] = ('ac', 1), n_poles: int = 200,
                   m_order: int = 5, max_n: Union[int, str] = 'full',
@@ -4492,6 +4514,7 @@ def _c1_scaling_range(slopes: np.ndarray) -> Union[tuple, None]:
     return stptr[a], endptr[b], best, np.mean(rng), np.std(rng, ddof=1)
 
 
+@dict_output
 def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = (2, 10),
               tsep: Union[int, float] = 0.02, nref: Union[int, float] = 0.5) -> Union[dict, float]:
     """
@@ -4850,6 +4873,7 @@ def _lyap_spec_sums(S, k_nn, theiler, seed):
     return 0, factor, count
 
 
+@dict_output
 def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: int = 30,
               max_n: Union[int, str] = 10000, theiler_win: Union[int, float, list, tuple] = ('ac', 1),
               random_seed: int = 42) -> Union[dict, float]:

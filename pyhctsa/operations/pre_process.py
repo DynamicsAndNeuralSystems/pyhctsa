@@ -14,7 +14,7 @@ from ..operations.distribution import compare_ks_fit, outlier_test, simple_fit
 from ..operations.nonlinearity import zero_one_test
 from ..operations.stationarity import sliding_window, stat_av
 from ..robust import bf_fit_sinusoids, bf_random, bf_random_seed
-from ..utils import _round_half_away, _zscore_matlab, z_score
+from ..utils import dict_output, _round_half_away, _zscore_matlab, z_score
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
     """Apply a length-k median filter to a 1D array x, as MATLAB's ``medfilt1``.
@@ -91,6 +91,7 @@ def _spline_detrend(y: np.ndarray, npieces: int, order: int) -> np.ndarray:
     return y - spl(x)
 
 
+@dict_output
 def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
     """
     How time-series properties change after a preprocessing step.

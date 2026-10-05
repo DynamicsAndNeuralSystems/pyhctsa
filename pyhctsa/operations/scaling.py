@@ -8,7 +8,7 @@ logger = logging.getLogger('pyhctsa')
 from ..toolboxes.Max_Little import fastdfa
 from ..robust import bf_theil_sen
 from ..toolboxes.matlab.matlab_fit import robustfit
-from ..utils import _linspace, make_mat_buffer
+from ..utils import dict_output, _linspace, make_mat_buffer
 from ..operations.correlation import autocorr
 
 def fast_dfa(y: ArrayLike) -> float:
@@ -45,6 +45,7 @@ def fast_dfa(y: ArrayLike) -> float:
     
     return alpha
 
+@dict_output
 def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
                          wtf: str = 'rsrange', tau_step: int = 1, k: int = 1,
                          lag: int | None = None, log_inc: bool = True) -> dict:
@@ -376,6 +377,7 @@ def _std(x, axis=None):
         )
     return np.std(x, axis=axis, ddof=1)
 
+@dict_output
 def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None, 
         q_range: None | list = None) -> dict:
     """Scale-dependent estimates of multifractal scaling in a time series.
@@ -574,6 +576,7 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
 
     return out
 
+@dict_output
 def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
     """
     Higuchi's fractal dimension of a time series.
@@ -651,6 +654,7 @@ def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
 
     return out
 
+@dict_output
 def mfdfa(y: ArrayLike, scale_range: list | None = None, q_range: list | None = None,
           order: int = 1) -> dict | float:
     """

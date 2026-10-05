@@ -15,7 +15,7 @@ from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
 from ..toolboxes.physionet import sampen as _sampen_c
 from ..robust import bf_hist_edges, bf_ks_density, bf_random, bf_random_seed
-from ..utils import (_ml_rng, _zscore_matlab, get_tau, make_buffer, pre_process,
+from ..utils import (dict_output, _ml_rng, _zscore_matlab, get_tau, make_buffer, pre_process,
                      time_delay_embed, z_score)
 
 
@@ -335,6 +335,7 @@ def _robustfit(x: np.ndarray, y: np.ndarray, tune: float = 4.685) -> tuple:
     return b, se
 
 
+@dict_output
 def multi_scale_entropy(
     y: ArrayLike,
     scale_range: Optional[Union[list, range]] = None,
@@ -670,6 +671,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
     return {"permEn": pe, "normPermEn": pe_norm, "permEnLE": pe_le,
             "normWPE": norm_wpe, "ordAsym": ord_asym}
 
+@dict_output
 def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.12, t_max: int = -1) -> dict:
     """
     Recurrence period density entropy (RPDE).
@@ -1287,6 +1289,7 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
 
     return _randomize_fit(_randomize_run(y, randomize_how, draws))
 
+@dict_output
 def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str] = 1,
                        mapping_how: str = 'ncdf') -> Union[dict, float]:
     """

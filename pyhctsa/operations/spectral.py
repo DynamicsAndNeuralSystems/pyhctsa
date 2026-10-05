@@ -13,8 +13,9 @@ from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit, robu
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
 from ..robust import bf_fit_sinusoids, bf_residual_stats
-from ..utils import make_mat_buffer, sign_change, matlab_quantile
+from ..utils import dict_output, make_mat_buffer, sign_change, matlab_quantile
 
+@dict_output
 def specparam(y: ArrayLike, aperiodic_mode: str = 'fixed', max_n_peaks: int = 4,
               peak_threshold: float = 1.0,
               peak_width_limits: ArrayLike = (0.02, 0.5),
@@ -309,6 +310,7 @@ def _fit_gaussian(log_f: ArrayLike, resid: ArrayLike, i_pk: int,
         'pred': h * np.exp(-(log_f - m) ** 2 / (2 * w ** 2)),
     }
 
+@dict_output
 def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = 'hamming') -> dict:
     """
     Statistics of the power spectrum of a time series.
@@ -865,6 +867,7 @@ def _give_me_robust_stats(x_data: ArrayLike, y_data: ArrayLike, field_name: str,
             out[f'{field_name}_{key}'] = np.nan
     return out
 
+@dict_output
 def phase_amp_coupling(y: ArrayLike, n_bands: int = 5, max_n: Union[int, str] = 'full',
                        n_phase_bins: int = 18) -> dict:
     """
@@ -986,6 +989,7 @@ def phase_amp_coupling(y: ArrayLike, n_bands: int = 5, max_n: Union[int, str] = 
 
     return out
 
+@dict_output
 def spectral_summaries_phase(y: ArrayLike) -> dict:
     """
     Statistics of the Fourier phase spectrum of a time series.
@@ -1088,6 +1092,7 @@ def spectral_summaries_phase(y: ArrayLike) -> dict:
 
     return out
 
+@dict_output
 def cepstrum(y: ArrayLike, max_period: int = 100, min_period: int = 4) -> dict:
     """
     Cepstral statistics: harmonic (comb) structure of the power spectrum.
@@ -1236,6 +1241,7 @@ def _fourier_start_point(t: np.ndarray, y: np.ndarray, n: int) -> float:
     return w_best
 
 
+@dict_output
 def sinusoid_fit(y: ArrayLike, model: str = 'sin1') -> Union[dict, float]:
     """
     Fit sinusoids or a Fourier series to the time series.
@@ -1531,6 +1537,7 @@ def envelope_stats(y: ArrayLike, power_frac: float = 0.5, trim_frac: float = 0.0
     return out
 
 
+@dict_output
 def phase_fluctuation_scaling(y: ArrayLike, half_width_frac: float = 0.01,
                               num_windows: int = 16, max_n: int = 10000) -> Union[dict, float]:
     """
@@ -1691,6 +1698,7 @@ def _bicoherence_grid(y: np.ndarray, step: int, num_seg: int, seg_length: int, h
     return np.abs(b_num) ** 2 / (p12 * p3 + np.finfo(float).eps)  # bounded in [0, 1]
 
 
+@dict_output
 def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'full',
                 num_surr: int = 25) -> Union[dict, float]:
     """
@@ -1832,6 +1840,7 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
     return out
 
 
+@dict_output
 def spectral_time_freq(y: ArrayLike, num_windows: int = 20) -> Union[dict, float]:
     """
     Time-varying spectral statistics from a spectrogram.

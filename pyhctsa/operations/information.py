@@ -6,7 +6,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from scipy import stats
 
-from ..utils import _linspace, get_tau, matlab_quantile, sign_change, time_delay_embed
+from ..utils import dict_output, _linspace, get_tau, matlab_quantile, sign_change, time_delay_embed
 from ..robust import bf_hist_edges, bf_tie_break_noise
 from ..toolboxes.infotheory.mutual_info import KraskovMI, GaussianMI
 
@@ -791,6 +791,7 @@ def _rcond_1norm(a: np.ndarray) -> float:
         return 0.0
 
 
+@dict_output
 def multivariate_ami(y: ArrayLike, tau_method: Union[int, str] = 'ac',
                      est_method: str = 'gaussian',
                      extra_param: Optional[Union[int, str]] = None) -> Union[dict, float]:

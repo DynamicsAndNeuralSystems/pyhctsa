@@ -9,7 +9,7 @@ from scipy.signal import resample_poly
 
 from ..operations.correlation import autocorr
 from ..robust import bf_exp_fit
-from ..utils import _ml_std, binarize, matlab_quantile, sign_change, get_tau
+from ..utils import dict_output, _ml_std, binarize, matlab_quantile, sign_change, get_tau
 
 def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_groups: int = 3,
              coarse_grain_method: str = 'quantile', num_iters: int = 500,
@@ -254,6 +254,7 @@ def _downsample_by_tau(y: np.ndarray, tau: Union[int, str]) -> Optional[np.ndarr
     return y
 
 
+@dict_output
 def motif_two(y: ArrayLike, binarize_how: str = 'diff', tau: Union[int, str] = 1) -> dict:
     """
     Compute local motifs in a binary symbolization of the input time series.
@@ -438,6 +439,7 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff', tau: Union[int, str] = 1
 
     return out
 
+@dict_output
 def motif_three(y: ArrayLike, cg_how: str = 'quantile', tau: Union[int, str] = 1) -> dict:
     """
     Motifs in a coarse-graining of a time series to a 3-letter alphabet.
@@ -819,6 +821,7 @@ def binary_stats_ar1(y: ArrayLike, binary_method: str = 'mean') -> dict:
     return out
 
 
+@dict_output
 def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
                       num_groups: int = 2, tau: Union[int, str] = 1) -> dict:
     """
@@ -1070,6 +1073,7 @@ def _transition_measures(yth: np.ndarray, num_groups: int) -> np.ndarray:
     return out
 
 
+@dict_output
 def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
                           tau: Union[int, str] = 1) -> dict:
     """

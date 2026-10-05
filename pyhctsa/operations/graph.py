@@ -12,7 +12,7 @@ logger = logging.getLogger('pyhctsa')
 
 from pyhctsa.operations.correlation import autocorr, first_crossing
 from pyhctsa.robust import bf_fit_density_curve, bf_residual_stats
-from pyhctsa.utils import get_tau, time_delay_embed
+from pyhctsa.utils import dict_output, get_tau, time_delay_embed
 from pyhctsa.operations.entropy import _ordinal_pattern_rank, distribution_entropy
 from pyhctsa.toolboxes.distribution_fits.distfits import evfit
 
@@ -326,6 +326,7 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
     return out
 
 
+@dict_output
 def ordinal_partition_network(y: ArrayLike, d: int = 3, tau: Union[int, str] = 1) -> dict:
     """
     Ordinal partition transition network measures.

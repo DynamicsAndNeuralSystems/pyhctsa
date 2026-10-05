@@ -15,7 +15,7 @@ from statsmodels.tsa.stattools import pacf
 from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..robust import bf_hist_edges, bf_quantile_edges, bf_random, bf_remove_points
-from ..utils import (_zscore_matlab, bin_picker, get_tau, histc, make_mat_buffer,
+from ..utils import (dict_output, _zscore_matlab, bin_picker, get_tau, histc, make_mat_buffer,
                      matlab_quantile, point_of_crossing, sign_change, theiler_window,
                      time_delay_embed, z_score)
 
@@ -98,6 +98,7 @@ def _knn_kld(A: np.ndarray, B: np.ndarray, k: int, theiler_win: int) -> float:
     return float((d / n_good) * np.sum(np.log(sk[good] / rk[good]))
                  + np.log(n / (n - 1)))
 
+@dict_output
 def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int = 3,
                  theiler_win: Union[int, float, list, tuple] = ('ac', 1),
                  max_n: Union[int, str] = 'full') -> dict:
@@ -214,6 +215,7 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
 
     return out
 
+@dict_output
 def pos_neg_asymmetry(y: ArrayLike) -> dict:
     """
     Asymmetry of local dynamics between positive and negative regimes.
@@ -620,6 +622,7 @@ def _fall_branch(ix: ArrayLike, y: ArrayLike) -> tuple:
 
     return angles, colour_counts, case_counts
 
+@dict_output
 def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
               extra_param: Union[int, None] = None, random_seed = None) -> dict:
     """
@@ -905,6 +908,7 @@ def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
 
     return float(res)
 
+@dict_output
 def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
     """
     Angle autocorrelation in a 2-dimensional embedding space.
@@ -974,6 +978,7 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
 
     return out
 
+@dict_output
 def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     """
     Statistics of the time series in a 2-dimensional embedding space.
@@ -1325,6 +1330,7 @@ def _ami_from_binning(idx: np.ndarray, valid: np.ndarray, num_bins: int, t: int)
     return ami - (mxy - mx - my + 1) / (2 * n)
 
 
+@dict_output
 def histogram_ami(
     y: ArrayLike,
     tau: Union[str, int, ArrayLike] = 1,
@@ -1651,7 +1657,7 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
     Returns
     -------
     float
-        The computed nonlinear autocorrelation.
+        The computed nonlinear autocorrelation 
     """
     y = np.asarray(y)
     taus = np.asarray(taus)
@@ -1663,7 +1669,6 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
 
     n = len(y)
     tmax = np.max(taus)
-
     nlac = y[tmax:n]
 
     for i in taus:
@@ -1763,6 +1768,7 @@ def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'burg')
 
     return out
 
+@dict_output
 def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     """
     Analyzes distances in a 2-dimensional embedding space of a time series.
@@ -1853,6 +1859,7 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
 
     return out
 
+@dict_output
 def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     """
     Point-density statistics in a two-dimensional delay embedding.
@@ -1954,6 +1961,7 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     
     return out
 
+@dict_output
 def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
                   shape: str = 'circle', r: float = 1.0,
                   theiler_win: Union[int, float, list, tuple, None] = ('ac', 1)) -> dict:
@@ -2706,6 +2714,7 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
 
     return out
 
+@dict_output
 def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> dict:
     """
     How the autocorrelation function changes with the time lag.
@@ -2876,6 +2885,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
         out['fexpacf_stdres'] = np.nan
     return out
 
+@dict_output
 def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
     """
     Normalized nonlinear autocorrelation (trev) function of a time series.
@@ -2946,6 +2956,7 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
 
     return out
 
+@dict_output
 def tc3(y: list, tau: Union[int, str, None] = 'ac1e') -> dict:
     """
     Normalized nonlinear autocorrelation function, tc3.
@@ -3184,6 +3195,7 @@ def quantilogram(y: ArrayLike, lag: Union[int, str] = 1) -> dict:
     return out
 
 
+@dict_output
 def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
                           theiler_win: Union[int, float, list, tuple] = ('ac', 1),
                           max_n: Union[int, str] = 10000) -> Union[dict, float]:
@@ -3395,6 +3407,7 @@ def _stomp_nn(y, m, mu, sig, qt, qt1, ex_zone):
     return best_r, best_idx
 
 
+@dict_output
 def matrix_profile(y: ArrayLike, m: Union[int, list, tuple] = ('ac', 8),
                    max_n: Union[int, str] = 5000) -> Union[dict, float]:
     """

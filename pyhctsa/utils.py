@@ -25,6 +25,58 @@ def _check_optional_deps(dep: str) -> bool:
     except PackageNotFoundError:
         return False
 
+def _reference_series() -> list:
+    """Well-behaved test series (a Gaussian AR(1), a positive series, a noisy sine, a random walk) from
+    which :func:`nan_outputs` learns the field names of a function's output."""
+    rng = np.random.RandomState(0)
+    e = rng.randn(1000)
+    ar = np.zeros(1000)
+    for i in range(1, 1000):
+        ar[i] = 0.7 * ar[i - 1] + e[i]
+    z = lambda v: (v - v.mean()) / v.std(ddof=1)
+    return [z(ar), np.exp(0.5 * z(ar)), z(np.sin(0.2 * np.arange(1000)) + 0.3 * rng.randn(1000)), z(np.cumsum(e))]
+
+_FIELD_CACHE: dict = {}
+
+def nan_outputs(func: Callable, *args, **kwargs) -> Union[dict, float]:
+    """The output of ``func(y, *args, **kwargs)`` when every one of its outputs is undefined: a dict
+    with all of its fields NaN (``nan`` if the function does not return a dict).
+
+    The field names are those of the function's own output, with the same arguments, on a
+    well-behaved reference series (found the first time they are needed, then remembered).
+    """
+    key = (func, repr(args), repr(sorted(kwargs.items())))
+    if key not in _FIELD_CACHE:
+        fields = None
+        for ref in _reference_series():
+            try:
+                with np.errstate(all='ignore'):
+                    out = func(ref, *args, **kwargs)
+            except Exception:
+                continue
+            if isinstance(out, dict):
+                fields = list(out)
+                break
+        _FIELD_CACHE[key] = fields
+    fields = _FIELD_CACHE[key]
+    return np.nan if fields is None else dict.fromkeys(fields, np.nan)
+
+def dict_output(func: Callable) -> Callable:
+    """Decorator for a feature function that returns a dict of outputs (one feature per field).
+
+    When the function cannot compute anything (hctsa: ``out = NaN``, every output undefined) and
+    would return a bare ``nan``, the decorated function returns the dict with every field NaN
+    instead (see :func:`nan_outputs`), so that the feature names stay ``<label>.<field>``
+    whatever the data.
+    """
+    @wraps(func)
+    def wrapper(y, *args, **kwargs):
+        out = func(y, *args, **kwargs)
+        if isinstance(out, (float, np.floating)) and np.isnan(out):
+            return nan_outputs(func, *args, **kwargs)
+        return out
+    return wrapper
+
 def _validate_data(ts: np.ndarray) -> bool:
     """validate a time series before computing features"""
     if len(ts) < 100:

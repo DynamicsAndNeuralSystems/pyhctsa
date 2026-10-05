@@ -13,7 +13,7 @@ from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, rayleigh, 
 from ..operations.correlation import autocorr, first_crossing
 from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
 from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_random, bf_random_seed, bf_remove_points, bf_residual_stats, bf_runs_z
-from ..utils import _ml_std, _round_half_away, bin_picker, histc, matlab_quantile, sign_change, simple_binner, x_corr
+from ..utils import dict_output, _ml_std, _round_half_away, bin_picker, histc, matlab_quantile, sign_change, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')
 
@@ -48,6 +48,7 @@ def cumulants(x: ArrayLike, cum_what_may: str = 'skew1') -> float:
     else:
         return ValueError('Unknown cumulant. Choose either skew1, skew2, kurt1, or kurt2.')
 
+@dict_output
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """
     Compares a fitted distribution with the smoothed distribution of the data.
@@ -885,6 +886,7 @@ def _exp_fit_outputs(x: np.ndarray, y: np.ndarray) -> tuple:
     return f['b'], f['r2'], f['rmse']
 
 
+@dict_output
 def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
                     fixed_thresh: Union[float, None] = None) -> dict:
     """
@@ -1469,6 +1471,7 @@ def _fmt_threshold(prefix: str, thr: float) -> str:
     return f"{prefix}_{thr:.2f}".replace('.', '')
 
 
+@dict_output
 def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
                       numcross: Union[None, float, list] = None,
                       arclength: Union[None, float, list] = None) -> dict:
@@ -1551,6 +1554,7 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
 _SIMPLE_FIT_MODELS = {'gauss1': ('gauss', 3), 'gauss2': ('gauss2', 6), 'exp1': ('exp', 2), 'power1': ('power', 2)}
 
 
+@dict_output
 def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') -> Union[dict, float]:
     """
     Fits a simple curve to the distribution of the values.

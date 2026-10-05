@@ -14,7 +14,7 @@ import yaml
 from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
-from .utils import _check_optional_deps, _validate_data, _zscore_matlab, decimate_ac1e, z_score
+from .utils import _check_optional_deps, _validate_data, _zscore_matlab, decimate_ac1e, nan_outputs, z_score
 from .distribute import _compute_features_for_chunk, _extract_features_single_series
 
 class RangeList(list):
@@ -102,7 +102,7 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False,
 
     - ``'decimate_ac1e'``: one sample per floored 1/e autocorrelation time, then z-scored again
       if ``zscore`` (see :func:`pyhctsa.utils.decimate_ac1e`); if the delay cannot be
-      determined the function is not called and ``nan`` is returned;
+      determined the function is not called and its outputs are all NaN (:func:`~pyhctsa.utils.nan_outputs`);
     - ``'diff1'``: incremental differences, ``diff(x_z)`` (not re-z-scored);
     - ``'zscore_abs'`` / ``'zscore_sign'``: ``zscore(abs(x_z))`` / ``zscore(sign(x_z))``.
     """
@@ -114,8 +114,8 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False,
         @wraps(func)
         def wrapper(x, *args, **kwargs):
             x = _transform_input(x, zscore, absval, preprocess)
-            if np.ndim(x) == 0:
-                return np.nan  # no 1/e time: undefined, like hctsa's NaN
+            if np.ndim(x) == 0:  # no 1/e time: every output undefined, like hctsa's NaN
+                return nan_outputs(func, *args, **kwargs)
             return func(x, *args, **kwargs)
         return wrapper
     return decorator
