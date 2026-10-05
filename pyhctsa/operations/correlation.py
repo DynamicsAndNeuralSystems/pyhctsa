@@ -2682,9 +2682,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
         exp_fit = exp_func(np.arange(nac), b_fit)
         residuals = acf - exp_fit
         out['fexpacf_r2'] = 1 - (np.sum(residuals**2) / np.sum((acf - np.mean(acf))**2))
-        exp_fit2 = exp_func(np.arange(nac), -b_fit)
-        residuals2 = acf - exp_fit2
-        out['fexpacf_stdres'] = np.std(residuals2, ddof=1)
+        out['fexpacf_stdres'] = np.std(residuals, ddof=1)
 
     else:
         # Fit inappropriate (or failed): return nans for the relevant stats
