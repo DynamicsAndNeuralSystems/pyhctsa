@@ -7,7 +7,7 @@ logger = logging.getLogger('pyhctsa')
 from scipy.stats import mstats
 from scipy.signal import resample_poly
 
-from ..operations.correlation import first_crossing
+from ..operations.correlation import autocorr
 from ..toolboxes.matlab.matlab_fit import fit_exp1, fit_poly1, goodness_of_fit
 from ..utils import binarize, matlab_quantile, sign_change, get_tau
 
@@ -710,6 +710,106 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     out['diff21stretch0'] = np.mean(stretch0 == 2) - np.mean(stretch0 == 1)
 
     return out
+
+def binary_stats_ar1(y: ArrayLike, binary_method: str = 'mean') -> dict:
+    """
+    Binary run-length statistics normalized against an AR(1) null.
+
+    Binarizes the time series (as :func:`binary_stats`) and compares the resulting
+    run-length statistics to their analytic expectation under a Gaussian AR(1) null
+    process with the same lag-1 autocorrelation as the series. Ratios near 1 indicate that
+    the binary run structure is what linear autocorrelation alone would give.
+
+    For a stationary Gaussian process u (``u = y`` for 'mean'; ``u = diff(y)`` for 'diff',
+    i.e., whichever series is actually thresholded at zero), the probability that
+    consecutive samples lie on the same side of the mean follows the arcsine law,
+    ``p = 1/2 + arcsin(rho)/pi``, with ``rho`` the lag-1 autocorrelation of u. Treating the
+    binary sign sequence as a two-state Markov chain with persistence probability p gives
+    geometrically distributed run lengths, so the expected mean run length is ``1/(1-p)`` and
+    the expected proportion of runs of 1s (per sample) is ``(1-p)/2``. Only the statistics
+    whose theory holds up empirically (the mean run lengths and the number of runs) get an
+    AR(1)-normalized counterpart; for the fuller set of empirical run-length statistics see
+    :func:`binary_stats`.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    binary_method : {'mean', 'diff'}, optional
+        The binary symbolization rule: 'mean' (1 above the mean, 0 below) or 'diff' (1 for an
+        increase, 0 otherwise). Unlike :func:`binary_stats`, 'median' and 'iqr' are not
+        supported: the theory is specific to a sign threshold at the mean of a (possibly
+        transformed) Gaussian series. Default is ``'mean'``.
+
+    Returns
+    -------
+    dict
+        - 'pstretch1': the number of runs of 1s divided by the length of the binary string,
+        - 'meanstretch0', 'meanstretch1': the mean run length of 0s, and of 1s (NaN if there
+          are no such runs),
+        - 'ar1_p': the AR(1)-implied persistence probability p,
+        - 'meanstretch_ar1exp': the expected mean run length, ``1/(1-p)``,
+        - 'pstretch1_ar1exp': the expected value of 'pstretch1', ``(1-p)/2``,
+        - 'meanstretch0_ar1rat', 'meanstretch1_ar1rat': 'meanstretch0' and 'meanstretch1'
+          divided by 'meanstretch_ar1exp',
+        - 'pstretch1_ar1rat': 'pstretch1' divided by 'pstretch1_ar1exp'.
+
+        In the degenerate limit of a lag-1 autocorrelation of 1 the ratios are NaN,
+        'meanstretch_ar1exp' is Inf and 'pstretch1_ar1exp' is 0.
+    """
+    if binary_method not in ('mean', 'diff'):
+        raise ValueError(f"binary_stats_ar1 supports binary_method 'mean' or 'diff' only "
+                         f"(not '{binary_method}')")
+    y = np.asarray(y, dtype=float)
+
+    # The series that is actually sign-thresholded at its mean
+    u = y if binary_method == 'mean' else np.diff(y)
+
+    # Binarize (the case for which the arcsine law below is exact)
+    y_bin = binarize(y, binarize_how=binary_method)
+    N = len(y_bin)  # note: N = len(y) - 1 for 'diff'
+
+    # Empirical run-length statistics (cf. binary_stats)
+    diff_y = np.diff(np.where(np.concatenate(([1], y_bin, [1])))[0])
+    stretch0 = diff_y[diff_y != 1] - 1
+    diff_y = np.diff(np.where(np.concatenate(([0], y_bin, [0])) == 0)[0])
+    stretch1 = diff_y[diff_y != 1] - 1
+
+    out = {}
+    out['pstretch1'] = len(stretch1) / N
+    out['meanstretch0'] = np.mean(stretch0) if len(stretch0) else np.nan  # all 1s: no runs of 0s
+    out['meanstretch1'] = np.mean(stretch1) if len(stretch1) else np.nan  # all 0s: no runs of 1s
+
+    # AR(1)-null persistence probability, via the arcsine law
+    with np.errstate(all='ignore'):
+        rho = float(np.ravel(autocorr(u, 1, 'Fourier'))[0])
+    # guard against tiny numerical overshoot outside [-1, 1]; as MATLAB's max(min(rho,1),-1),
+    # a NaN (constant series) ends up as 1
+    rho = 1.0 if np.isnan(rho) else max(min(rho, 1.0), -1.0)
+    p = 0.5 + np.arcsin(rho) / np.pi
+    out['ar1_p'] = p
+
+    if p >= 1 - 1e-8:  # degenerate limit (rho -> 1): the expected run length diverges
+        out['meanstretch_ar1exp'] = np.inf
+        out['meanstretch0_ar1rat'] = np.nan
+        out['meanstretch1_ar1rat'] = np.nan
+        out['pstretch1_ar1exp'] = 0.0
+        out['pstretch1_ar1rat'] = np.nan
+        return out
+
+    exp_mean_stretch = 1 / (1 - p)
+    exp_pstretch1 = (1 - p) / 2
+
+    # The null expectation for meanstretch0 and meanstretch1 is the same value (symmetric
+    # about the mean by construction)
+    out['meanstretch_ar1exp'] = exp_mean_stretch
+    out['meanstretch0_ar1rat'] = out['meanstretch0'] / exp_mean_stretch
+    out['meanstretch1_ar1rat'] = out['meanstretch1'] / exp_mean_stretch
+    out['pstretch1_ar1exp'] = exp_pstretch1
+    out['pstretch1_ar1rat'] = out['pstretch1'] / exp_pstretch1
+
+    return out
+
 
 def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
                       num_groups: int = 2, tau: Union[int, str] = 1) -> dict:
