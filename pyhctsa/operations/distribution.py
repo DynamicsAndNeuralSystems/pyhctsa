@@ -1205,6 +1205,19 @@ def trimmed_mean(x: ArrayLike, p_exclude: float = 0.0) -> float:
 
     return float(out)
 
+def _explicit_histogram(y: np.ndarray, num_bins: int) -> tuple:
+    """Counts in ``num_bins`` equal-width bins spanning ``y``, with explicit edges (``bf_hist_edges``).
+
+    An empty ``y`` (nothing on this side of the mean) has no histogram: zero counts and NaN edges.
+    """
+    num_bins = int(num_bins)
+    if len(y) == 0:
+        return np.zeros(num_bins), np.full(num_bins + 1, np.nan)
+    edges = bf_hist_edges(y, num_bins)
+    counts, _ = np.histogram(y, bins=edges)
+    return counts, edges
+
+
 def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> dict:
     """
     Calculate measures of histogram asymmetry for a time series.
@@ -1219,12 +1232,14 @@ def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True
     num_bins : int, optional
         Number of bins to use in histogram calculation. Default is 10.
     do_simple : bool, optional
-        If True, uses linearly spaced bins. If False, uses optimized bin edges. Default is `True`.
+        If True, uses linearly spaced bins. If False, uses equal-width bins spanning the
+        values on each side, with explicit edges (:func:`pyhctsa.robust.bf_hist_edges`).
+        Default is `True`.
 
     Returns
     -------
     dict
-        Dictionary containing asymmetry measures.
+        Dictionary containing asymmetry measures (NaN modes for a side with no values).
     """
     y = np.asarray(y)
     # compute the histogram seperately from positive and negative values in the data
@@ -1235,10 +1250,8 @@ def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True
         counts_pos, bin_edges_pos = simple_binner(y_pos, num_bins)
         counts_neg, bin_edges_neg = simple_binner(y_neg, num_bins)
     else:
-        bin_edges_pos = bin_picker(y_pos.min(), y_pos.max(), num_bins)
-        counts_pos = histc(y_pos, bin_edges_pos)[:-1]
-        bin_edges_neg = bin_picker(y_neg.min(), y_neg.max(), num_bins)
-        counts_neg = histc(y_neg, bin_edges_neg)[:-1]
+        counts_pos, bin_edges_pos = _explicit_histogram(y_pos, num_bins)
+        counts_neg, bin_edges_neg = _explicit_histogram(y_neg, num_bins)
     # normalise by the total counts
     n_non_zero = np.sum(y != 0)
     p_pos = np.divide(counts_pos, n_non_zero)
