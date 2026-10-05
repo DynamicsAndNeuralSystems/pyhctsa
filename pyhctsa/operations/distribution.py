@@ -106,14 +106,14 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         loc, scale = gumbel_l.fit(x)
         pdf_func = lambda z: gumbel_l.pdf(z, loc=loc, scale=scale)
         peaky = pdf_func(loc)
-        left_start = right_start = 0.0
+        left_start = right_start = loc
 
     elif what_distn == 'uni':
         # Uniform distribution (peak of PDF = 1 / (b - a))
         loc, scale = uniform.fit(x)
         pdf_func = lambda z: uniform.pdf(z, loc=loc, scale=scale)
         peaky = pdf_func(np.mean(x))
-        left_start = right_start = 0.0
+        left_start = right_start = np.mean(x)
 
     elif what_distn == 'exp':
         if np.any(x < 0):
@@ -186,7 +186,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     # OLAPINT: overlap integral between the two curves; normalized by variance
     out['olapint'] = np.sum(f * ffit * dx) * np.std(x, ddof=1)
     # RELENT: relative entropy of the two distributions
-    r = ffit > 0
+    r = (ffit > 0) & (f > 0)  # skip points where either density is zero (0*log(0) := 0)
     out['relent'] = np.sum(f[r] * np.log(f[r] / ffit[r]) * dx)
 
     return out
@@ -239,7 +239,7 @@ def withinp(x: ArrayLike, p: float = 1.0, mean_or_median: str = 'mean') -> float
     elif mean_or_median == 'median':
         mu = np.median(x)
         iqr_val = np.percentile(x, 75, method='hazen') - np.percentile(x, 25, method='hazen')
-        sig = 1.35 * iqr_val
+        sig = iqr_val / 1.35
     else:
         raise ValueError(f"Unknown setting: '{mean_or_median}'")
 
@@ -634,7 +634,7 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     y = np.asarray(y)
     out = 0.0
     if what_skew == 'pearson':
-        out = ((3 * np.mean(y) - np.median(y)) / np.std(y, ddof=1))
+        out = (3 * (np.mean(y) - np.median(y)) / np.std(y, ddof=1))
     elif what_skew == 'bowley':
         qs = np.quantile(y, [0.25, 0.5, 0.75], method='hazen')
         out = (qs[2]+qs[0] - 2 * qs[1]) / (qs[2] - qs[0]) 
@@ -687,7 +687,8 @@ def burstiness(y: ArrayLike) -> dict:
 def moments(y: ArrayLike, the_mom: int = 0) -> float:
     """
     A moment of the distribution of the input time series.
-    Normalizes by the standard deviation.
+    Returns the standardized central moment: the ``the_mom``-th central moment
+    divided by the standard deviation raised to the power ``the_mom``.
 
     Parameters
     ----------
@@ -703,7 +704,7 @@ def moments(y: ArrayLike, the_mom: int = 0) -> float:
     """
     y = np.asarray(y)
 
-    return stats.moment(y, the_mom) / np.std(y, ddof=1)
+    return stats.moment(y, the_mom) / np.std(y, ddof=1) ** the_mom
 
 def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01) -> dict:
     """
@@ -781,10 +782,11 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01)
         
         # Store statistics
         statistics[i, 0] = np.mean(time_diffs)  # Mean time between events
-        statistics[i, 1] = np.std(time_diffs, ddof=1) / np.sqrt(len(over_threshold_idx))  # Standard error
+        statistics[i, 1] = np.std(time_diffs, ddof=1) / np.sqrt(len(time_diffs))  # Standard error
         statistics[i, 2] = len(time_diffs) / total_points * 100  # Percentage of events
-        statistics[i, 3] = (np.median(over_threshold_idx) / (N / 2)) - 1  # Median position deviation
-        statistics[i, 4] = np.mean(over_threshold_idx) / (N / 2) - 1  # Mean position deviation
+        # event times use 1-based indices, as in MATLAB
+        statistics[i, 3] = (np.median(over_threshold_idx + 1) / (N / 2)) - 1  # Median position deviation
+        statistics[i, 4] = np.mean(over_threshold_idx + 1) / (N / 2) - 1  # Mean position deviation
         statistics[i, 5] = np.std(over_threshold_idx, ddof=1) / np.sqrt(len(over_threshold_idx))  # Position std error
     
     # Trim data where statistics become invalid
@@ -979,7 +981,7 @@ def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True
 
     # Histogram counts and overall density differences
     out = {}
-    out['densityDiff'] = np.sum(y > 0) - np.sum(y < 0)  # measure of asymmetry about the mean
+    out['densityDiff'] = (np.sum(y > 0) - np.sum(y < 0)) / n_non_zero  # measure of asymmetry about the mean
     out['modeProbPos'] = np.max(p_pos)
     out['modeProbNeg'] = np.max(p_neg)
     out['modeDiff'] = out['modeProbPos'] - out['modeProbNeg']
