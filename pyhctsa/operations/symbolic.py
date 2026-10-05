@@ -59,7 +59,21 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     Returns
     -------
     dict
-        Summaries of the series of information gains.
+        Summaries of the series of information gains, with keys:
+
+        - 'min', 'max', 'median', 'mean', 'sum', 'std', 'lq', 'uq': the minimum (of the
+          nonzero values), maximum, median, mean, sum, standard deviation, and lower and
+          upper quartiles of the information gain over the test points,
+        - 'propUnseen': the proportion of test points whose antecedent pattern (the
+          current symbol itself for 'dist'; the preceding 1 or 2 symbols for 'T1'/'T2')
+          was never observed in the memory window (always 0 for 'dist'),
+        - 'effectSize': ``|mean - 1| / std``, the standardized distance of the mean
+          information gain from 1 nat,
+        - 'tstat': ``effectSize * sqrt(number of test points)``.
+
+        All NaN if the coarse-graining is undefined (the embedding delay for
+        'embed2quadrants' cannot be determined). ``effectSize`` and ``tstat`` are NaN if
+        the information gain has no variation.
     """
 
     if (memory > 0) and (memory < 1): #specify memory as a proportion of the time series length
@@ -70,6 +84,10 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     if isinstance(num_groups, (int, float)):
         num_groups = int(num_groups)
     yth = coarse_grain(y, coarse_grain_method, num_groups)
+    if np.isscalar(yth) and np.isnan(yth):
+        # No coarse-graining exists (the embedding delay is undefined): every output is NaN
+        return {k: np.nan for k in ('min', 'max', 'median', 'mean', 'sum', 'std', 'lq', 'uq',
+                                    'propUnseen', 'effectSize', 'tstat')}
     N = int(len(yth))
     num_iters = int(num_iters)
     memory = int(memory)
@@ -95,6 +113,7 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     # Sized to the number of test points actually available, min(num_iters, N-memory)
     num_test = rs.size
     store = np.zeros(num_test)
+    n_antecedent_all = np.zeros(num_test)  # how many times the antecedent pattern was seen in memory
     for i in range(0, num_test):
         if what_prior == 'dist':
             # uses the distribution up to memory to inform the next point
@@ -130,9 +149,14 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
         # Krichevsky-Trofimov-style smoothed probability estimate: always in (0, 1),
         # the uniform prior 1/num_symbols when the antecedent was never observed
         store[i] = (num_matches + 0.5) / (n_antecedent + 0.5 * num_symbols)
+        n_antecedent_all[i] = n_antecedent
 
     # INFORMATION GAINED FROM NEXT OBSERVATION IS log(1/p) = -log(p)
     out = {} # dictionary for outputs
+
+    # proportion of test points whose antecedent pattern was never observed in memory
+    # (always 0 for 'dist')
+    prop_unseen = np.mean(n_antecedent_all == 0)
 
     store = -(np.log(store))
     #minimum amount of information you can gain in this way
@@ -151,6 +175,16 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     uq = mstats.mquantiles(store, 0.75, alphap=0.5, betap=0.5)
     out['uq'] = uq[0]
     out['std'] = np.std(store, ddof=1)
+    out['propUnseen'] = prop_unseen
+
+    # Standardized distance of the mean information gain from 1 (the length-stable form),
+    # and the corresponding t-statistic, which grows with the number of test points
+    if out['std'] == 0 or np.isnan(out['std']):
+        out['effectSize'] = np.nan  # can't compute this if there is no variation
+        out['tstat'] = np.nan
+    else:
+        out['effectSize'] = np.abs((out['mean'] - 1) / out['std'])
+        out['tstat'] = out['effectSize'] * np.sqrt(num_test)
 
     return out
 
@@ -1021,7 +1055,8 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: int) -> np.ndarray:
     Returns
     --------
     yth : array-like
-        The coarse-grained time series.
+        The coarse-grained time series. NaN (a scalar) if the embedding delay for
+        'embed2quadrants'/'embed2octants' (``num_groups='tau'``) cannot be determined.
     """
     y = np.asarray(y)
     N = len(y)
@@ -1040,6 +1075,8 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: int) -> np.ndarray:
         if num_groups == 'tau':
             # First zero-crossing of the ACF
             tau = first_crossing(y, 'ac', 0, 'discrete')
+            if np.isnan(tau):  # undefined ACF (e.g., constant series): no coarse-graining
+                return np.nan
         else:
             tau = num_groups
         
