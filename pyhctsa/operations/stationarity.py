@@ -543,25 +543,30 @@ def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = 
     loc_ext[exti] = loc_min[exti] # local extrema (furthest from mean; either maxs or mins)
     abs_loc_ext = np.abs(loc_ext) # the magnitude of the most extreme events in each window
 
+    # Scale of a local extreme under a Gaussian null: the expected maximum of
+    # window_length iid standard normals (Blom's approximation). Location
+    # statistics are divided by this so that they do not grow with window length.
+    exp_max = norm.ppf((window_length - 0.375) / (window_length + 0.25))
+
     # Return Outputs
     out = {
         'meanrat': np.mean(loc_max) / np.mean(abs_loc_min),
         'medianrat': np.median(loc_max) / np.median(abs_loc_min),
-        'minmax': np.min(loc_max),
-        'minabsmin': np.min(abs_loc_min),
+        'minmax': np.min(loc_max) / exp_max,
+        'minabsmin': np.min(abs_loc_min) / exp_max,
         'minmaxonminabsmin': np.min(loc_max) / np.min(abs_loc_min),
-        'meanmax': np.mean(loc_max),
-        'meanabsmin': np.mean(abs_loc_min),
-        'meanext': np.mean(loc_ext),
-        'medianmax': np.median(loc_max),
-        'medianabsmin': np.median(abs_loc_min),
-        'medianext': np.median(loc_ext),
+        'meanmax': np.mean(loc_max) / exp_max,
+        'meanabsmin': np.mean(abs_loc_min) / exp_max,
+        'meanext': np.mean(loc_ext) / exp_max,
+        'medianmax': np.median(loc_max) / exp_max,
+        'medianabsmin': np.median(abs_loc_min) / exp_max,
+        'medianext': np.median(loc_ext) / exp_max,
         'stdmax': np.std(loc_max, ddof=1),
         'stdmin': np.std(loc_min, ddof=1),
         'stdext': np.std(loc_ext, ddof=1),
         'zcext': np.sum((loc_ext[:-1] * loc_ext[1:]) < 0) / num_windows,
-        'meanabsext': np.mean(abs_loc_ext),
-        'medianabsext': np.median(abs_loc_ext),
+        'meanabsext': np.mean(abs_loc_ext) / exp_max,
+        'medianabsext': np.median(abs_loc_ext) / exp_max,
         'diffmaxabsmin': np.sum(np.abs(loc_max - abs_loc_min)) / num_windows,
         'uord': np.sum(np.sign(loc_ext)) / num_windows,
         'maxmaxmed': np.max(loc_max) / np.median(loc_max),
