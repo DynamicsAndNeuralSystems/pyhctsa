@@ -1644,7 +1644,7 @@ from numba import njit
 from scipy.spatial.distance import pdist
 from sklearn.neighbors import KDTree
 
-from ..utils import _ml_randperm
+from ..utils import _linspace, _ml_randperm, _round_half_away, bin_picker
 
 
 @njit(cache=True)
@@ -2182,5 +2182,200 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
         out['LAM'] = vert_lengths.sum() / src.size
         out['TT'] = vert_lengths.mean()
         out['V_max'] = vert_lengths.max()
+
+    return out
+
+
+def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100,
+                past: Union[int, float, list, tuple] = ('ac', 1), nref: int = -1,
+                embed_params: Union[list, tuple] = ('ac', 'fnn')) -> dict:
+    """
+    Analysis of the histogram of return times.
+
+    Return times are the times taken for the time series to return to a similar location in
+    phase space from a given reference point. Strong peaks in the histogram indicate
+    periodicities in the data.
+
+    For each reference point in the embedding space, its ``nnr`` nearest neighbors are found
+    (excluding a Theiler window of ``past`` samples either side), and the time offset ``T`` of
+    each neighbor from the reference point is recorded. The histogram of these offsets over
+    the ``num_lags`` lags beyond the Theiler window, ``T = past + 1, ..., past + num_lags``
+    (the "return-time profile"), is analyzed. This follows TSTOOL's ``return_time``
+    (which hctsa previously called), with one change: each lag's count is divided by its
+    expected count if neighbors were placed at random among the valid (Theiler-excluded)
+    candidates, rather than by TSTOOL's ``2 * nnr * (N - T)``, so that the profile is about 1
+    at every lag for an uncorrelated process at any series length (TSTOOL's normalization
+    scaled as 1/N). Values above 1 mark lags at which the trajectory preferentially returns
+    to its neighborhood. The profile is closely related to the tau-recurrence rate of
+    recurrence quantification analysis, with neighborhoods holding a fixed proportion of
+    points rather than having a fixed radius. (For the distribution of *first* return times to
+    a neighborhood, see :func:`recurrence_times`.)
+
+    References
+    ----------
+    .. [1] N. Marwan, M. C. Romano, M. Thiel and J. Kurths, "Recurrence plots for the analysis
+        of complex systems", Phys. Rep. 438, 237 (2007) (recurrence quantification analysis).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    nnr : int or float, optional
+        The number of nearest neighbors, or, if in (0, 1), a proportion of the number of
+        embedded points (keeping neighborhoods the same size in probability as the series
+        length changes). Default is 0.01.
+    num_lags : int, optional
+        The number of lags beyond the Theiler window to analyze, in samples (at least 2).
+        Default is 100.
+    past : int, float or ``['ac', k]``, optional
+        The Theiler window, excluding neighbors that are close only because they are close in
+        time (see :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k`` times the first
+        zero-crossing of the autocorrelation function, or a number of samples.
+        Default is ``['ac', 1]``.
+    nref : int, optional
+        The number of reference points, spaced evenly through the series (-1 uses all
+        points). A fixed number keeps the number of neighbors counted at each lag, and so the
+        sampling noise of the histogram, independent of the series length (neighbors are still
+        sought among all points). Default is -1.
+    embed_params : list or tuple, optional
+        The embedding, as ``(tau, m)``: the time delay (an integer or a rule understood by
+        :func:`pyhctsa.utils.get_tau`) and the embedding dimension (an integer, or ``'fnn'``
+        for false nearest neighbors). Default is ``('ac', 'fnn')``.
+
+    Returns
+    -------
+    dict or float
+        NaN if the Theiler window or embedding cannot be determined, or the series is too short
+        (fewer embedded points than twice the largest lag, or than ``nnr`` plus two Theiler
+        windows). Otherwise measures of the return-time profile (the neighbor count at each lag
+        relative to chance), and of the histogram of its values:
+
+        - ``max``, ``std``, ``iqr``: the maximum, standard deviation and interquartile range of
+          the profile
+        - ``pzeros``: the proportion of lags with no neighbors
+        - ``pg05``: the proportion of lags at which the profile exceeds half its maximum
+        - ``meanpeaksep``, ``maxpeaksep``, ``minpeaksep``, ``rangepeaksep``, ``stdpeaksep``:
+          statistics of the spacings between successive crossings of half the maximum, as a
+          proportion of the number of lags (``stdpeaksep`` is divided by the square root of the
+          number of lags instead); all are NaN with fewer than 3 crossings
+        - ``statrtys``, ``statrtym``: the ratio of the standard deviation (``statrtys``) or mean
+          (``statrtym``) of the profile over the first half of the lags to that over the second
+        - ``hhist``: the entropy of the profile as a distribution over lags
+        - ``hcgdist``, ``rangecgdist``, ``pzeroscgdist``: the entropy, range and proportion of
+          zeros of the profile after summing it into 20 equal bins of lags (as a distribution
+          over bins)
+        - ``maxhisthist``, ``phisthistmin``, ``hhisthist``: the maximum, the first (lowest-value)
+          bin probability, and the entropy of the histogram of profile values (square-root bins)
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if num_lags < 2:
+        raise ValueError(f'num_lags ({num_lags}) must be at least 2')
+
+    past = theiler_window(y, past)
+    if np.isnan(past):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    past = int(past)
+    max_t = past + int(num_lags)  # the maximum return time (lag) to consider
+
+    Y = _bf_embed(y, embed_params[0], embed_params[1])
+    if Y is None:
+        logger.warning('Embedding failed')
+        return np.nan
+    n_emb = Y.shape[0]
+    if 0 < nnr < 1:  # a proportion of the number of embedded points
+        nnr = max(1, int(_round_half_away(nnr * n_emb)))
+    nnr = int(nnr)
+    if n_emb < 2 * max_t or n_emb <= nnr + 2 * past + 1:
+        # every lag in the histogram needs to be sampled by at least half the points
+        logger.warning('Time series too short to do a return-time analysis with these parameters')
+        return np.nan
+
+    # The neighborhood radius of each reference point: the distance to its nnr-th nearest
+    # neighbor outside the Theiler window (as a squared radius; NaN for non-reference points)
+    if nref == -1 or nref >= n_emb:
+        refs = np.arange(n_emb)
+    else:
+        refs = np.unique(np.floor(_linspace(1, n_emb, int(nref)) + 0.5).astype(int)) - 1  # (MATLAB's round)
+    # at most 2*past + 1 points (the reference point itself included) fall within the Theiler
+    # window, so nnr + 2*past + 1 neighbors always hold nnr valid ones
+    k = min(n_emb, nnr + 2 * past + 1)
+    tree = KDTree(Y)
+    r2 = np.full(n_emb, np.nan)
+    chunk = max(1, int(2e6 // k))
+    for c in range(0, refs.size, chunk):
+        the_refs = refs[c:c + chunk]
+        dist, idx = tree.query(Y[the_refs], k=k)
+        is_valid = np.abs(idx - the_refs[:, None]) > past
+        which_col = np.argmax(np.cumsum(is_valid, axis=1) >= nnr, axis=1)
+        r2[the_refs] = dist[np.arange(the_refs.size), which_col] ** 2 * (1 + 1e-9)
+
+    # Count the neighbors at each lag, relative to the count expected by chance
+    lags = np.arange(past + 1, max_t + 1)
+    counts = np.zeros(lags.size)
+    for i, lag in enumerate(lags):
+        fwd = refs[refs + lag <= n_emb - 1]  # references with a partner `lag` ahead
+        bwd = refs[refs - lag >= 0]  # references with a partner `lag` behind
+        counts[i] = (np.sum(np.sum((Y[fwd + lag] - Y[fwd]) ** 2, axis=1) <= r2[fwd])
+                     + np.sum(np.sum((Y[bwd - lag] - Y[bwd]) ** 2, axis=1) <= r2[bwd]))
+    # By chance, a given valid candidate is one of reference i's nnr neighbors with probability
+    # nnr/V_i, where V_i is the number of points outside i's Theiler window
+    i = np.arange(n_emb)
+    v = n_emb - (np.minimum(i, past) + np.minimum(n_emb - 1 - i, past) + 1)
+    w = np.zeros(n_emb)
+    w[refs] = nnr / v[refs]
+    cw = np.cumsum(w)
+    expected = cw[n_emb - lags - 1] + (cw[-1] - cw[lags - 1])  # forward + backward partners
+    trett = counts / expected
+
+    out = {}
+    nn = lags.size
+    max_trett = np.max(trett)
+    out['max'] = max_trett
+    out['std'] = np.std(trett, ddof=1)
+    out['pzeros'] = np.sum(trett == 0) / nn
+    out['pg05'] = np.sum(trett > max_trett * 0.5) / nn
+    q25, q75 = matlab_quantile(trett, [0.25, 0.75])
+    out['iqr'] = q75 - q25
+
+    # Recurrent peaks
+    icross05 = np.flatnonzero((trett[:-1] - 0.5 * max_trett) * (trett[1:] - 0.5 * max_trett) < 0)
+    if icross05.size > 2:
+        d = np.diff(icross05)
+        d = d[d > 0.4 * d.max()]  # remove small entries, crossing peaks
+        out['meanpeaksep'] = np.mean(d) / nn
+        out['maxpeaksep'] = np.max(d) / nn
+        out['minpeaksep'] = np.min(d) / nn
+        out['rangepeaksep'] = np.ptp(d) / nn
+        out['stdpeaksep'] = (np.std(d, ddof=1) if d.size > 1 else 0.0) / np.sqrt(nn)
+    else:
+        for name in ('meanpeaksep', 'maxpeaksep', 'minpeaksep', 'rangepeaksep', 'stdpeaksep'):
+            out[name] = np.nan
+
+    # Short lags compared to long lags
+    half = nn // 2
+    out['statrtys'] = np.std(trett[:half], ddof=1) / np.std(trett[half:], ddof=1)
+    out['statrtym'] = np.mean(trett[:half]) / np.mean(trett[half:])
+
+    # Entropy of the histogram, as a distribution over lags
+    p_trett = trett / np.sum(trett)
+    out['hhist'] = -np.sum(p_trett[p_trett > 0] * np.log(p_trett[p_trett > 0]))
+
+    # Coarse-grain to 20 bins of lags
+    num_bins = 20
+    inds = np.floor(_linspace(0, nn, num_bins + 1) + 0.5).astype(int)  # (MATLAB's round)
+    cglav = np.array([np.sum(p_trett[inds[b]:inds[b + 1]]) for b in range(num_bins)])
+    out['hcgdist'] = -np.sum(cglav[cglav > 0] * np.log(cglav[cglav > 0]))
+    out['rangecgdist'] = np.ptp(cglav)
+    out['pzeroscgdist'] = np.sum(cglav == 0) / num_bins
+
+    # Distribution of the profile values (MATLAB's 'sqrt' bin rule, as histcounts)
+    n_bins = max(int(np.ceil(np.sqrt(nn))), 1)
+    lo, hi = np.min(trett), np.max(trett)
+    edges = bin_picker(np.float64(lo), np.float64(hi), None, (hi - lo) / n_bins)
+    nhist = np.histogram(trett, bins=edges)[0] / nn
+    out['maxhisthist'] = np.max(nhist)
+    out['phisthistmin'] = nhist[0]  # probability in the first (lowest-value) bin
+    out['hhisthist'] = -np.sum(nhist[nhist > 0] * np.log(nhist[nhist > 0]))
 
     return out
