@@ -539,11 +539,13 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: i
         'maxRPD': np.max(rpd) * N,         # maximum value of rpd (rescaled by N)
     }
 
-def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2) -> float:
+def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2,
+                        tau: Union[int, str] = 1) -> float:
     """
     Approximate entropy (ApEn) of a time series.
 
-    Computes :math:`\\mathrm{ApEn}(m, r)`.
+    Computes :math:`\\mathrm{ApEn}(m, r)`, with delay vectors
+    :math:`(x_i, x_{i+\\tau}, \\ldots, x_{i+(m-1)\\tau})`.
 
     For details, see the PhysioNet documentation:
     https://physionet.org/physiotools/apen/
@@ -561,15 +563,32 @@ def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2) -> float:
         Embedding dimension :math:`m`. Default is 1.0
     rth : float, optional
         Similarity threshold :math:`r`. Default is 0.2.
+    tau : int or str, optional
+        The time delay between the elements of a pattern: an integer, or ``'ac'`` for
+        the first zero-crossing of the autocorrelation function. The default of 1
+        uses consecutive samples.
 
     Returns
     -------
     float
-        Approximate entropy value.
+        Approximate entropy value. NaN if the delay cannot be determined, or if the
+        series is too short for the pattern length and delay (fewer than two delay
+        vectors).
     """
     x = np.asarray(x)
+    if isinstance(tau, str):
+        if tau != 'ac':
+            raise ValueError(f"Unknown tau '{tau}'")
+        tau = first_crossing(x, 'ac', 0, 'discrete')
+    if np.isnan(tau):  # the delay could not be determined (e.g., constant series)
+        return np.nan
+    tau = int(tau)
+    mnom = int(mnom)
+    # number of delay vectors of length m and m + 1
+    if len(x) - (mnom - 1) * tau < 2 or len(x) - mnom * tau < 2:
+        return np.nan
     r = rth * np.std(x, ddof=1) # threshold of similarity
-    phi = _app_samp_entropy(x, order=mnom, r=r, metric="chebyshev", approximate=True)
+    phi = _app_samp_entropy(x, order=mnom, r=r, metric="chebyshev", approximate=True, tau=tau)
 
     return np.subtract(phi[0], phi[1])
 
@@ -578,17 +597,18 @@ def _app_samp_entropy(
         order: int,
         r: float,
         metric: str = "chebyshev", 
-        approximate: bool = True) -> ArrayLike:
-    """Modified version of `_app_samp_entropy` that supports order=1."""
+        approximate: bool = True,
+        tau: int = 1) -> ArrayLike:
+    """Modified version of `_app_samp_entropy` that supports order=1 and a time delay `tau`."""
     order = int(order)
     phi = np.zeros(2)
-    emb_data1 = time_delay_embed(x, order, 1)
+    emb_data1 = time_delay_embed(x, order, tau)
     if not approximate:
         emb_data1 = emb_data1[:-1]
 
     count1 = KDTree(emb_data1, metric=metric).query_radius(emb_data1, r,
                                                            count_only=True).astype(np.float64)
-    emb_data2 = time_delay_embed(x, order + 1, 1)
+    emb_data2 = time_delay_embed(x, order + 1, tau)
     count2 = KDTree(emb_data2, metric=metric).query_radius(emb_data2, r,
                                                            count_only=True).astype(np.float64)
     if approximate:
