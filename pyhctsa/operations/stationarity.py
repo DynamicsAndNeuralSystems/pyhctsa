@@ -823,7 +823,9 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     --------
     dict
         A dictionary containing various statistical measures comparing
-        the subset to the full time series.
+        the subset to the full time series: `absmean`, `std`, `median`, `iqr`, `skewness`, `kurtosis`, `ac1`
+        (the last four are the absolute relative deviation of the subset statistic from the full-series
+        one, NaN when the full-series statistic is zero).
     """
     # check input time series is z-scored
     y = np.asarray(y)
@@ -868,10 +870,6 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/global_kurt)) if global_kurt != 0 else np.nan
     global_ac1 = autocorr(y, 1, 'Fourier')[0]
     out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')[0]/global_ac1)) if global_ac1 != 0 else np.nan
-
-    sampen_full = sample_entropy(y, 1, 0.1)['sampen1']
-    sampen_r = sample_entropy(y[r], 1, 0.1)['sampen1']
-    out['sampen101'] = sampen_r / sampen_full if sampen_full > 0 else np.nan
 
     return out
 
