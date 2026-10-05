@@ -5,16 +5,18 @@ from typing import Union
 
 import numpy as np
 from numpy.typing import ArrayLike
-from scipy.signal import detrend
-from scipy.stats import gaussian_kde, kurtosis, kstest, skew, pearsonr, norm, rankdata
+from scipy.signal import detrend, peak_prominences
+from scipy.stats import gaussian_kde, kendalltau, kurtosis, kstest, skew, pearsonr, norm, rankdata
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 from statsmodels.tsa.stattools import kpss
 from itertools import permutations
+from numba import njit
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
-from ..utils import get_tau, make_mat_buffer, sign_change, z_score
+from ..utils import _ml_rng, get_tau, make_mat_buffer, matlab_quantile, sign_change, z_score
+from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit, polyfit, robustfit
 from ..toolboxes.matlab._pptest_tables import _pp_pvalue, _pp_regression
 
 def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
@@ -976,6 +978,695 @@ def std_nth_deriv(y: ArrayLike, ndr: int = 2) -> float:
 
     return float(out)
 
+def std_nth_deriv_change(y: ArrayLike, maxd: int = 10) -> dict:
+    """
+    How the output of :func:`std_nth_deriv` changes with the order of the derivative.
+
+    Computes ``std_nth_deriv(y, n)`` (the standard deviation of the nth difference of the
+    time series) for orders n = 1, ..., ``maxd``, and characterizes how it varies with n in
+    two ways: by an exponential fit, and directly through the order at which it is smallest.
+
+    An exponential function, ``f(x) = a*exp(b*x)``, is fitted to the variation across
+    successive derivatives: regular signals decrease, irregular signals increase. This
+    exponential-decay/growth picture only holds when ``std(diff(y, n))`` is monotonic across
+    n. Many real (especially oversampled/smooth) series instead show successive differencing
+    reduce the standard deviation up to some order (removing trend or nonstationary drift)
+    before over-differencing increases it again: a classic Box-Jenkins ARIMA-order-selection
+    U-shape that a monotonic exponential cannot represent. ``minOrder``, ``minOrderInterp``,
+    ``minRatio``, ``overDiffRatio`` and ``isInterior`` characterize this directly, alongside
+    the exponential fit. If the exponential fit fails, the ``fexp_*`` outputs are NaN and the
+    others are still returned.
+
+    Operation inspired by a comment in a comp.soft-sys.matlab (MATLAB newsgroup) posting:
+    "You can measure the standard deviation of the n-th derivative, if you like." (Vladimir
+    Vassilevsky, DSP and Mixed Signal Design Consultant).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    maxd : int, optional
+        The maximum derivative (difference) order to take. Default is 10.
+
+    Returns
+    -------
+    dict
+        - 'fexp_a', 'fexp_b', 'fexp_r2', 'fexp_rmse': the parameters a and b, the R^2, and
+          the root-mean-square error of the exponential fit f(n) = a*exp(b*n),
+        - 'minOrder': the order (1 to ``maxd``) at which the standard deviation is smallest,
+        - 'minOrderInterp': that order refined between integers by a parabola through the
+          three points around the minimum (equal to ``minOrder`` if the minimum is at either end),
+        - 'minRatio': the smallest standard deviation divided by that at order 1,
+        - 'overDiffRatio': the standard deviation at order ``maxd`` divided by the smallest,
+        - 'isInterior': 1 if the minimum is strictly between order 1 and ``maxd`` (a U shape),
+          else 0.
+
+        NaN if the time series is too short to take ``maxd`` differences.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    maxd = 10 if maxd is None else int(maxd)
+
+    if len(y) <= maxd:
+        return np.nan  # too short to take maxd differences (hctsa's SY_StdNthDer errors)
+    ms = np.array([std_nth_deriv(y, i) for i in range(1, maxd + 1)])
+    if len(y) - maxd == 1:
+        ms[-1] = 0.0  # a single difference: MATLAB's std of one value is 0
+
+    out = {}
+    # Exponential fit f(x) = a*exp(b*x), starting from a = 1, b = +/- 0.5 (the sign of the trend)
+    x = np.arange(1, maxd + 1, dtype=float)
+    try:
+        if not np.all(np.isfinite(ms)):
+            raise ValueError('non-finite values')
+        a, b = fit_exp1(x, ms, start_point=(1.0, 0.5 * np.sign(ms[-1] - ms[0])))
+        gof = goodness_of_fit(ms, a * np.exp(b * x), num_coeffs=2)
+        out['fexp_a'] = a
+        out['fexp_b'] = b  # this is important
+        out['fexp_r2'] = gof['rsquare']  # this is more important!
+        out['fexp_rmse'] = gof['rmse']
+    except Exception:
+        # The fit failed (e.g., non-finite values): NaN for the fit fields, but still
+        # report the directly computed minimum-order statistics below
+        out['fexp_a'] = out['fexp_b'] = out['fexp_r2'] = out['fexp_rmse'] = np.nan
+
+    # The order at which the standard deviation is smallest (MATLAB's min ignores NaN)
+    min_ind = int(np.nanargmin(ms)) + 1 if not np.all(np.isnan(ms)) else 1
+    min_std = ms[min_ind - 1]
+    out['minOrder'] = min_ind
+    out['minRatio'] = min_std / ms[0]  # how much differencing helped, relative to order 1
+    out['overDiffRatio'] = ms[-1] / min_std  # how much std rises again past the optimum
+    out['isInterior'] = float(min_ind > 1 and min_ind < maxd)  # genuine U-shape vs. monotonic
+    if out['isInterior']:
+        y0, y1, y2 = ms[min_ind - 2], ms[min_ind - 1], ms[min_ind]
+        denom = y0 - 2 * y1 + y2
+        out['minOrderInterp'] = min_ind + 0.5 * (y0 - y2) / denom if denom != 0 else float(min_ind)
+    else:
+        out['minOrderInterp'] = float(min_ind)
+
+    return out
+
+def _is_zscored(x: np.ndarray) -> bool:
+    # hctsa's BF_iszscored
+    tol = 100 * np.finfo(float).eps
+    return bool(abs(np.mean(x)) < tol and abs(np.std(x, ddof=1) - 1) < tol)
+
+def _cumsum_bridge_stats(p: ArrayLike) -> Union[dict, float]:
+    """
+    CUSUM/bridge stationarity statistics on a cumulative sum (hctsa's BF_CumSumBridgeStats).
+
+    Given a series ``p`` whose mean is being tested for stationarity, forms ``cumsum(p)`` and
+    computes: linear-fit statistics on the cumsum (cf. :func:`trend`), a CUSUM 'bridge'
+    relative to the endpoint-to-endpoint line (cf. Inclan-Tiao's test for a change point in
+    variance), and a comparison between an ordinary least-squares and a robust (bisquare)
+    linear fit to the cumsum -- large disagreement between the two indicates the OLS trend is
+    either outlier-driven or genuinely curved (accelerating/decelerating drift) rather than a
+    clean linear trend.
+
+    Returns a dict of statistics (meanYC, gradient, intercept, meanYC12, meanYC22, maxBridge,
+    posMaxBridge, stdBridge, gradientDiffSE, residStdRatio, varRatioTrend), or NaN if ``p`` is
+    shorter than 20 samples.
+    """
+    p = np.asarray(p, dtype=float).ravel()
+    Np = len(p)
+    if Np < 20:
+        return np.nan
+
+    t = np.arange(1, Np + 1, dtype=float)
+    yC = np.cumsum(p)
+
+    # Ordinary least-squares linear fit to the cumsum
+    out = {}
+    out['meanYC'] = np.mean(yC)
+    coeffs_ols = polyfit(t, yC, 1)
+    out['gradient'] = coeffs_ols[0] # ~ std(yC) too (r > 0.99 empirically); kept as the interpretable one
+    out['intercept'] = coeffs_ols[1]
+    resid_ols = yC - (coeffs_ols[0] * t + coeffs_ols[1])
+
+    # Mean cumsum in first and second half of the time series (cf. trend)
+    out['meanYC12'] = np.mean(yC[:Np // 2])
+    out['meanYC22'] = np.mean(yC[Np // 2:])
+
+    # CUSUM bridge relative to the endpoint-to-endpoint line (Inclan-Tiao-style)
+    bridge = yC - (t / Np) * yC[-1]
+    scale_factor = np.std(p, ddof=1) * np.sqrt(Np)
+    out['maxBridge'] = np.max(np.abs(bridge)) / scale_factor if scale_factor > 0 else np.nan
+    out['posMaxBridge'] = (np.argmax(np.abs(bridge)) + 1) / Np # where the largest deviation from stationarity occurs
+    out['stdBridge'] = np.std(bridge, ddof=1)
+
+    # Robust vs. OLS regression: is the OLS trend outlier-driven or genuine drift?
+    rob_coeffs, rob_stats = robustfit(t, yC)
+    robust_gradient = rob_coeffs[1] # not output directly: r > 0.98 with out['gradient']
+    rob_resid = yC - (rob_coeffs[0] + rob_coeffs[1] * t)
+    se_grad = rob_stats['se'][1]
+    out['gradientDiffSE'] = (out['gradient'] - robust_gradient) / se_grad if se_grad > 0 else np.nan
+    std_rob_resid = np.std(rob_resid, ddof=1)
+    out['residStdRatio'] = np.std(resid_ols, ddof=1) / std_rob_resid if std_rob_resid > 0 else np.nan
+
+    # Variance-standardized residual trend: the bridge is not white even under a stationary
+    # null -- it has the Brownian-bridge variance envelope Var(bridge(t)) = var(p).t.(Np-t)/Np
+    # (an arch shape) -- so standardize by that, then ask whether the standardized squared
+    # bridge trends with time (Kendall rank correlation)
+    var_p = np.var(p, ddof=1)
+    if var_p > 0 and Np > 21:
+        t_int = t[:-1]
+        null_var = var_p * t_int * (Np - t_int) / Np
+        std_resid = bridge[:-1] ** 2 / null_var # ~chi-square(1), mean 1, under the null
+        log_std_resid = np.log(std_resid + np.finfo(float).eps) # chi-square(1) is heavy-tailed; log stabilizes the trend estimate
+        out['varRatioTrend'] = kendalltau(t_int, log_std_resid).statistic
+    else:
+        out['varRatioTrend'] = np.nan
+
+    return out
+
+def drifting_mean_cusum(y: ArrayLike) -> dict:
+    """
+    Drift in the mean, via a cumulative-sum (CUSUM) test.
+
+    Tests whether the mean of the (z-scored) time series is stationary using CUSUM/bridge
+    statistics on its cumulative sum, ``cumsum(y)``. Under a stationary mean the cumulative sum
+    grows ~linearly; systematic curvature, or a localized departure from that line, indicates
+    drift (cf. Inclan-Tiao's test for a change point in variance, and :func:`trend`, which
+    fits a line to ``y`` itself). The statistics that merely re-express the linear trend of
+    ``y`` (meanYC, gradient, intercept, meanYC12, meanYC22, stdBridge) are not output.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (assumed z-scored).
+
+    Returns
+    -------
+    dict
+        Statistics on ``yC = cumsum(y)``, or NaN if ``y`` has fewer than 20 samples:
+
+        - 'maxBridge': the largest absolute deviation of ``yC`` from the straight line joining
+          0 to its final value (the 'bridge'), divided by ``std(y)*sqrt(N)``,
+        - 'posMaxBridge': the position (from 0 to 1) of that largest deviation,
+        - 'gradientDiffSE': the difference between the OLS and a robust (bisquare) slope fit to
+          ``yC``, in standard errors of the robust slope,
+        - 'residStdRatio': the standard deviation of the OLS residuals over that of the
+          robust-fit residuals,
+        - 'varRatioTrend': the Kendall rank correlation between time and the log of the
+          squared bridge divided by its Brownian-bridge null variance: whether the bridge
+          wanders more (or less) later in the series than expected under stationarity.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if not _is_zscored(y):
+        logger.warning('The input time series should be z-scored')
+    out = _cumsum_bridge_stats(y)
+    if isinstance(out, dict):
+        for k in ('meanYC', 'gradient', 'intercept', 'meanYC12', 'meanYC22', 'stdBridge'):
+            del out[k]
+
+    return out
+
+def _matlab_local_maxima(y: np.ndarray) -> np.ndarray:
+    """
+    Indices of the local maxima of ``y``, as MATLAB's ``findpeaks``: a plateau of equal values
+    that is higher than both neighbors is one peak, located at its *first* sample (SciPy's
+    ``find_peaks`` takes the middle); the end points are never peaks.
+    """
+    # keep only the first of each run of equal values
+    keep = np.r_[True, y[1:] != y[:-1]]
+    idx = np.flatnonzero(keep)
+    v = y[idx]
+    is_max = np.zeros(len(v), dtype=bool)
+    is_max[1:-1] = (v[1:-1] > v[:-2]) & (v[1:-1] > v[2:])
+    return idx[is_max]
+
+def peak_intervals(y: ArrayLike, min_prom: float = 1) -> dict:
+    """
+    Statistics on the prominences of, and intervals between, the peaks of a time series.
+
+    The series is z-scored (so that prominence is in units of its standard deviation) and its
+    peaks (local maxima) with prominence of at least ``min_prom`` are found, as with MATLAB's
+    ``findpeaks(y, 'MinPeakProminence', min_prom)``. Summaries are then taken of the peaks'
+    prominences and of the inter-peak intervals (in samples): a periodic series has regularly
+    spaced, equally prominent peaks (low ``cvInt``), while a noisy or aperiodic one does not.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    min_prom : float, optional
+        The minimum prominence of a peak to count it, in standard deviations of the series
+        (a peak's prominence is its height above the higher of the two lowest points between
+        it and the nearest higher peak on each side). Default is 1.
+
+    Returns
+    -------
+    dict
+        - 'meanProm': the mean prominence of the peaks (NaN if there are none),
+        - 'cvInt': the coefficient of variation (std / mean) of the inter-peak intervals (NaN
+          unless there are at least 3 intervals),
+        - 'acInt1': the lag-1 autocorrelation (Pearson correlation of successive intervals) of the
+          inter-peak intervals (NaN unless there are at least 5 intervals; 0 if the intervals
+          are all equal).
+
+        All NaN for a time series shorter than 20 samples, containing non-finite values, or
+        constant.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    out = {'meanProm': np.nan, 'cvInt': np.nan, 'acInt1': np.nan}
+
+    N = len(y)
+    if N < 20 or not np.all(np.isfinite(y)) or np.std(y, ddof=1) == 0:
+        return out
+
+    y = (y - np.mean(y)) / np.std(y, ddof=1) # prominence is in units of the series' standard deviation
+
+    locs = _matlab_local_maxima(y)
+    if len(locs) > 0:
+        proms = peak_prominences(y, locs)[0]
+        keep = proms >= min_prom
+        locs, proms = locs[keep], proms[keep]
+    else:
+        proms = np.array([])
+
+    if len(locs) >= 1:
+        out['meanProm'] = np.mean(proms)
+
+    ipi = np.diff(locs).astype(float) # inter-peak intervals (samples)
+    if len(ipi) >= 3:
+        out['cvInt'] = np.std(ipi, ddof=1) / np.mean(ipi)
+    if len(ipi) >= 5:
+        if np.all(ipi == ipi[0]):
+            out['acInt1'] = 0.0 # equal intervals (e.g., a periodic series): no serial correlation
+        else:
+            out['acInt1'] = np.corrcoef(ipi[:-1], ipi[1:])[0, 1]
+
+    return out
+
+def drifting_auto_corr(y: ArrayLike, tau: int = 1, what_product: str = 'ac') -> dict:
+    """
+    Drift in a lag-tau (auto)correlation via a cumulative-sum test.
+
+    Forms a lag-tau cross-term product series ``p_t`` and tests whether its mean (i.e., the
+    corresponding linear or nonlinear correlation statistic) is stationary, via CUSUM/bridge
+    statistics on ``cumsum(p)`` (see :func:`drifting_mean_cusum`). Under stationarity
+    ``cumsum(p)`` grows ~linearly; systematic curvature or a localized departure from that line
+    indicates that the correlation structure, not just the mean or variance of ``y`` itself, is
+    drifting over the course of the time series. This is a CUSUM-style stationarity test (cf.
+    Inclan-Tiao's test for a change point in variance) applied to a lag-product series rather
+    than to ``y`` itself, mirroring what :func:`trend` does for ``y``'s own cumsum.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (assumed z-scored).
+    tau : int, optional
+        The lag defining the cross term. Default is 1.
+    what_product : {'ac', 'forward', 'backward', 'asymmetry'}, optional
+        Which cross term ``p_t`` to test for drift:
+
+        - 'ac': ``y(t) * y(t+tau)``, the linear autocorrelation,
+        - 'forward': ``y(t) * y(t+tau)^2``, nonlinear/asymmetric (does the signed value now
+          predict the squared, energy-like value later? cf. :func:`autocorr_x2`),
+        - 'backward': ``y(t)^2 * y(t+tau)``, the other direction (does the squared value now
+          predict the signed value later?),
+        - 'asymmetry': ``y(t) * y(t+tau) * (y(t+tau) - y(t))`` = forward - backward, the
+          leverage/time-irreversibility signature itself (it vanishes in expectation for
+          time-reversible linear processes); tests whether that asymmetry, not just its forward
+          or backward half, is drifting over the time series.
+
+        Default is ``'ac'``.
+
+    Returns
+    -------
+    dict
+        Statistics on the cumulative sum ``yC = cumsum(p)`` (``p`` has N - tau values), or NaN
+        if there are fewer than 20 products, or ``tau >= N - 1``:
+
+        - 'meanYC': the mean of ``yC``,
+        - 'gradient', 'intercept': slope and intercept of an ordinary least-squares line fit to
+          ``yC`` against time,
+        - 'meanYC12', 'meanYC22': the mean of ``yC`` in the first and second half of the series,
+        - 'maxBridge': the largest absolute deviation of ``yC`` from the straight line joining 0
+          to its final value (the 'bridge'), divided by ``std(p)*sqrt(N-tau)``,
+        - 'posMaxBridge': the position (from 0 to 1) of that largest deviation,
+        - 'stdBridge': the standard deviation of the bridge,
+        - 'gradientDiffSE': the difference between the OLS and a robust (bisquare) slope fit to
+          ``yC``, in standard errors of the robust slope,
+        - 'residStdRatio': the standard deviation of the OLS residuals over that of the
+          robust-fit residuals,
+        - 'varRatioTrend': the Kendall rank correlation between time and the log of the squared
+          bridge divided by its Brownian-bridge null variance: whether the bridge wanders more
+          (or less) later in the series than expected under stationarity.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    tau = 1 if tau is None else int(tau)
+    if not _is_zscored(y):
+        logger.warning('The input time series should be z-scored')
+    N = len(y)
+
+    # Lag-tau product series
+    if tau >= N - 1:
+        return np.nan
+    y_earlier = y[:N - tau] # y(t)
+    y_later = y[tau:]       # y(t+tau)
+    if what_product == 'ac':
+        p = y_earlier * y_later
+    elif what_product == 'forward':
+        p = y_earlier * y_later ** 2
+    elif what_product == 'backward':
+        p = y_earlier ** 2 * y_later
+    elif what_product == 'asymmetry':
+        p = y_earlier * y_later * (y_later - y_earlier)
+    else:
+        raise ValueError(f"Unknown what_product '{what_product}' (should be 'ac', 'forward', "
+                         "'backward', or 'asymmetry')")
+
+    return _cumsum_bridge_stats(p)
+
+def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 100,
+                        random_seed: Union[int, str, None] = 'default') -> dict:
+    """
+    Bootstrap-based stationarity measure.
+
+    ``num_segs`` time-series segments of length ``l`` are selected at random from the time
+    series (at random start points; segments can overlap) and in each segment some statistic
+    is calculated: mean, standard deviation, skewness, kurtosis, PermEn(3,1), AC(1), AC(2), and
+    the first zero-crossing of the autocorrelation function. Outputs summarize how these
+    quantities vary in different local segments of the time series, as the standard deviation
+    of each across the segments. (The mean of each set is not output, since it just
+    re-estimates the corresponding global statistic, already covered elsewhere, rather than
+    measuring stationarity.) Returns NaN if ``l`` is longer than 90% of the time series.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    l : int or str, optional
+        The length of local time-series segments to analyze, as a positive integer, or:
+
+        - 'ac2': twice the first zero-crossing of the autocorrelation function,
+        - 'ac5': five times the first zero-crossing of the autocorrelation function.
+
+        Default is 100.
+    num_segs : int, optional
+        The number of randomly-selected local segments to analyze. Default is 100.
+    random_seed : int, str or None, optional
+        Seed of the random number generator, for reproducibility: an integer, or ``'default'``
+        (or ``None``) for seed 0 (hctsa's default), or ``'none'`` for an unseeded generator.
+        The start points are drawn from a Mersenne Twister seeded as MATLAB's ``rng(seed,
+        'twister')`` and mapped as ``randi``, so they reproduce hctsa's draws. Default is
+        ``'default'``.
+
+    Returns
+    -------
+    dict
+        - 'stdmean', 'stdstd', 'stdskew', 'stdkurt': the standard deviation, across segments,
+          of the segment mean, standard deviation, skewness, and kurtosis,
+        - 'stdpermen': the standard deviation of the normalized permutation entropy PermEn(3,1),
+        - 'stdac1', 'stdac2': the standard deviation of the autocorrelation at lags 1 and 2,
+        - 'stdtaul': the standard deviation of the first zero-crossing of the autocorrelation
+          function (interpolated, in samples).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+
+    if l is None:
+        l = 100 # by default use 100 samples
+    if isinstance(l, str):
+        taug = first_crossing(y, 'ac', 0, 'discrete') # tau (global)
+        if l == 'ac2':
+            l = 2 * taug
+        elif l == 'ac5':
+            l = 5 * taug
+        else:
+            raise ValueError(f"Unknown specifier '{l}'")
+        # Very short l for this sort of time series:
+        if not np.isnan(l) and l < 5:
+            logger.warning(f"This time series has a very short correlation length; setting l={l} "
+                           "means that changes estimates will be difficult to compare...")
+    num_segs = 100 if num_segs is None else int(num_segs)
+
+    # Check the parameters are appropriate for the length of the input time series:
+    if np.isnan(l) or l > 0.9 * N: # operation is not suitable -- time series is too short
+        logger.warning(f"This time series (N = {N}) is too short to use l = {l:.1f}")
+        return np.nan
+    l = int(l)
+
+    # numSegs segments, each of length l data points
+    if isinstance(random_seed, str) and random_seed == 'none':
+        rng = np.random.RandomState()
+    elif random_seed is None or (isinstance(random_seed, str) and random_seed == 'default'):
+        rng = _ml_rng(0)
+    else:
+        rng = _ml_rng(int(random_seed))
+
+    qs = np.full((num_segs, 8), np.nan)
+    for j in range(num_segs):
+        # pick a range; in this implementation, ranges CAN overlap
+        ist = int(np.floor((N - l + 1) * rng.random_sample())) # random start point (0-based; MATLAB's randi(N - l + 1) - 1)
+        y_sub = y[ist:ist + l] # contiguous subsegment of the time series
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            qs[j, 0] = np.mean(y_sub)
+            qs[j, 1] = np.std(y_sub, ddof=1)
+            qs[j, 2] = skew(y_sub)
+            qs[j, 3] = kurtosis(y_sub, fisher=False)
+            pe = permutation_entropy(y_sub, 3, 1) # normalized PermEn(3,1) -- cheaper and more
+            qs[j, 4] = pe['normPermEn'] if isinstance(pe, dict) else np.nan # stable than SampEn on these short random segments
+            qs[j, 5] = np.asarray(autocorr(y_sub, 1, 'Fourier')).item() # AC1
+            qs[j, 6] = np.asarray(autocorr(y_sub, 2, 'Fourier')).item() # AC2
+            qs[j, 7] = first_crossing(y_sub, 'ac', 0, 'continuous') # first zero crossing
+
+    # The spread of each feature across subsegments of the time series: a big bootstrapped
+    # distribution of the time series at a scale given by the length l. (The mean of each is
+    # not output: it re-estimates a global statistic.)
+    def _nanstd(v):
+        v = v[~np.isnan(v)]
+        return _std_matlab(v) if v.size > 0 else np.nan
+
+    names = ['stdmean', 'stdstd', 'stdskew', 'stdkurt', 'stdpermen', 'stdac1', 'stdac2', 'stdtaul']
+    return {name: _nanstd(qs[:, k]) for k, name in enumerate(names)}
+
+@njit(cache=True)
+def _nstat_z_std(seg):
+    # TISEAN's variance(): sqrt(|<x^2> - <x>^2|), accumulated sequentially (as in C)
+    av = 0.0
+    var = 0.0
+    for h in seg:
+        av += h
+        var += h * h
+    av /= len(seg)
+    return np.sqrt(abs(var / len(seg) - av * av))
+
+@njit(cache=True)
+def _nstat_z_error(ser, base1, base2, clength, m, tau, minn, step, causal, center, eps0, epsf):
+    """
+    The summed squared one-step forecast error of the zeroth-order model of TISEAN's nstat_z:
+    each point (an embedding vector) of the segment starting at ``base2`` is forecast by the mean of
+    what followed its neighbors (embedding vectors within the maximum-norm distance eps, with
+    eps grown from ``eps0`` by the factor ``epsf`` until there are at least ``minn``) in the
+    segment starting at ``base1``, excluding neighbors within the causality window of the point.
+    Returns NaN if some point can never find ``minn`` neighbors.
+    """
+    pstart = (m - 1) * tau
+    dists = np.empty(clength)
+    idxs = np.empty(clength, dtype=np.int64)
+    err = 0.0
+    for i in range(pstart, pstart + center):
+        cnt = 0
+        for j in range(pstart, clength - step):
+            if j >= i - causal + 1 and j <= i + causal + pstart - 1:
+                continue # exclude_interval
+            d = 0.0
+            for k in range(m):
+                dd = abs(ser[base2 + i - k * tau] - ser[base1 + j - k * tau])
+                if dd > d:
+                    d = dd
+            dists[cnt] = d
+            idxs[cnt] = j
+            cnt += 1
+        if cnt < minn:
+            return np.nan
+        # the first eps in the sequence eps0, eps0*epsf, ... with at least minn neighbors
+        dmin = np.sort(dists[:cnt])[minn - 1]
+        eps = eps0 / epsf
+        while True:
+            eps *= epsf
+            if eps >= dmin:
+                break
+        casted = 0.0
+        nf = 0
+        for q in range(cnt):
+            if dists[q] <= eps:
+                casted += ser[base1 + step + idxs[q]]
+                nf += 1
+        casted /= nf
+        err += (casted - ser[base2 + i + step]) ** 2
+    return err
+
+def nstat_z(y: ArrayLike, num_seg: int = 5, embed_params: tuple = (1, 3)) -> dict:
+    """
+    Cross-forecast errors of zeroth-order time-series models.
+
+    A Python port of the ``nstat_z`` routine from the TISEAN package for nonlinear time-series
+    analysis [1]_, which looks for nonstationarity in a time series by dividing it into a number
+    of segments and calculating the cross-forecast errors between the different segments. The
+    model is the zeroth-order model proposed by Schreiber: each point of the segment being
+    forecast is predicted one step ahead by averaging what followed its nearest neighbors in the
+    time-delay embedding of the predicting segment. The error between segment i (predicting) and
+    segment j (forecast) is the root-mean-square forecast error divided by the standard
+    deviation of segment j, collected in a ``num_seg`` x ``num_seg`` matrix. As in TISEAN, the
+    series is first rescaled to [0, 1], neighbors are within a maximum-norm distance eps that
+    grows (from 1e-3, by a factor 1.2) until there are at least 30 of them, and neighbors within
+    the causality window of the forecast point are excluded.
+
+    References
+    ----------
+    .. [1] R. Hegger, H. Kantz, and T. Schreiber, "Practical implementation of nonlinear time
+        series methods: The TISEAN package", Chaos 9(2), 413 (1999).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    num_seg : int, optional
+        The number of equally-spaced segments to divide the time series into, each used to
+        predict the other segments. Default is 5.
+    embed_params : tuple, optional
+        The embedding parameters ``(tau, m)``: a time delay, tau (an integer, or a rule for
+        :func:`pyhctsa.utils.get_tau`, e.g. ``'ac'`` or ``'ac1e'``), and an embedding dimension,
+        m (an integer). Default is ``(1, 3)``.
+
+    Returns
+    -------
+    dict
+        Statistics on the cross-prediction error matrix (below, 'rows' of the matrix are
+        predicting segments, 'columns' are the segments forecast); NaN if the time series is
+        too short for this many segments:
+
+        - 'trace': the trace of the matrix (segments predicting themselves),
+        - 'mean', 'median', 'min', 'max', 'iqr', 'std', 'range': of all entries of the matrix,
+        - 'minlower', 'minupper': the minimum nonzero error below and above the diagonal,
+        - 'minoffdiag', 'iqroffdiag', 'stdoffdiag', 'rangeoffdiag': the minimum, interquartile
+          range, standard deviation, and range of the nonzero off-diagonal entries,
+        - 'stdmean', 'rangemean', 'stdmedian', 'rangemedian': the standard deviation and range,
+          across columns, of the column means and of the column medians,
+        - 'rangerange', 'stdrange': the range and standard deviation, across columns, of the
+          column ranges,
+        - 'rangestd', 'stdstd': the range and standard deviation, across columns, of the column
+          standard deviations,
+        - 'maximageig', 'minimageig': the largest and smallest imaginary parts of the
+          eigenvalues of the matrix,
+        - 'rangeeig', 'stdeig', 'mineig', 'maxeig': the range, standard deviation, minimum, and
+          maximum of the real parts of the eigenvalues.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    num_seg = 5 if num_seg is None else int(num_seg)
+    tau, m = embed_params
+    if isinstance(m, str) or not float(m).is_integer():
+        raise ValueError("The embedding dimension, m, must be an integer")
+    m = int(m)
+    tau = get_tau(y, tau) # NaN if it cannot be determined
+    if np.isnan(tau):
+        logger.warning('Could not determine embedding parameters for this time series')
+        return np.nan
+    tau = int(tau)
+
+    # Preliminary checks
+    step = 1 # step increment (TISEAN's -s; also its causal-window default (-C) when unset)
+    min_neighbors = 30 # minimum number of neighbors for the fit (TISEAN's -k default)
+    pstart = (m - 1) * tau
+    clength = (N - pstart) / num_seg
+    # nstat_z's neighbor search grows its radius without bound until every point has enough
+    # neighbors after excluding a window of width (2*causal + pstart - 1) around it; this is the
+    # exact bound for that always to succeed
+    if clength < min_neighbors + 3 * step + 2 * pstart - 1:
+        logger.warning('Not enough neighbors to reliably estimate prediction errors with these settings')
+        return np.nan
+    clength = (N - pstart) // num_seg # (integer division, as in TISEAN)
+
+    # Rescale the series to [0, 1] (TISEAN's rescale_data)
+    lo, hi = np.min(y), np.max(y)
+    if hi - lo == 0:
+        return np.nan # TISEAN exits: the data have no range
+    ser = (y - lo) / (hi - lo)
+
+    # The standard deviation (population) of each segment
+    rms = np.array([_nstat_z_std(ser[i * clength:(i + 1) * clength]) for i in range(num_seg)])
+    if np.any(rms == 0):
+        return np.nan # TISEAN exits: zero variance in a segment
+
+    center = clength - step
+    xperr = np.zeros((num_seg, num_seg)) # cross prediction error from using segment i to forecast segment j
+    for first in range(num_seg):
+        for second in range(num_seg):
+            err = _nstat_z_error(ser, first * clength, second * clength, clength, m, tau,
+                                 min_neighbors, step, step, center, 1e-3, 1.2)
+            xperr[first, second] = np.sqrt(err / center) / rms[second]
+    if np.any(np.isnan(xperr)):
+        return np.nan
+
+    return _cross_prediction_stats(xperr)
+
+def _cross_prediction_stats(xperr: np.ndarray) -> dict:
+    # Output statistics on the matrix of cross-prediction errors
+    def _range(v):
+        return np.max(v) - np.min(v)
+    def _iqr(v):
+        q = matlab_quantile(v, [0.25, 0.75])
+        return q[1] - q[0]
+
+    out = {}
+    # diagonal elements are using a segment to predict itself -- ought to be pretty good
+    out['trace'] = np.trace(xperr)
+    flat = xperr.ravel()
+    out['mean'] = np.mean(flat)
+    out['median'] = np.median(flat)
+    out['min'] = np.min(flat) # the best you can do
+    out['max'] = np.max(flat) # the worst you can do
+    # measures of spread of prediction error: stationarity
+    out['iqr'] = _iqr(flat)
+    out['std'] = _std_matlab(flat)
+    out['range'] = _range(flat)
+
+    # minimum prediction error not on diagonal
+    lowertri = np.tril(xperr, -1)
+    lowertri = lowertri[lowertri > 0]
+    uppertri = np.triu(xperr, 1)
+    uppertri = uppertri[uppertri > 0]
+    offdiag = np.concatenate((lowertri, uppertri))
+    out['minlower'] = np.min(lowertri) if lowertri.size else np.nan
+    out['minupper'] = np.min(uppertri) if uppertri.size else np.nan
+    if offdiag.size == 0:
+        out['minoffdiag'] = out['iqroffdiag'] = out['stdoffdiag'] = out['rangeoffdiag'] = np.nan
+    else:
+        out['minoffdiag'] = np.min(offdiag)
+        # measures of spread: non-stationarity
+        out['iqroffdiag'] = _iqr(offdiag)
+        out['stdoffdiag'] = _std_matlab(offdiag)
+        out['rangeoffdiag'] = _range(offdiag)
+
+    # Comparing columns
+    col_mean, col_median = np.mean(xperr, axis=0), np.median(xperr, axis=0)
+    col_range = np.max(xperr, axis=0) - np.min(xperr, axis=0)
+    col_std = np.array([_std_matlab(xperr[:, j]) for j in range(xperr.shape[1])])
+    out['stdmean'] = _std_matlab(col_mean)
+    out['rangemean'] = _range(col_mean)
+    out['stdmedian'] = _std_matlab(col_median)
+    out['rangemedian'] = _range(col_median)
+    out['rangerange'] = _range(col_range)
+    out['stdrange'] = _std_matlab(col_range)
+    out['rangestd'] = _range(col_std)
+    out['stdstd'] = _std_matlab(col_std)
+
+    # Eigenvalues
+    eigs = np.linalg.eigvals(xperr)
+    imag_eigs, real_eigs = eigs.imag, eigs.real
+    out['maximageig'] = np.max(imag_eigs)
+    out['minimageig'] = np.min(imag_eigs) # for a real matrix, eigenvalues come in conjugate pairs, so maximageig = -minimageig exactly
+    out['rangeeig'] = _range(real_eigs) # range of real parts of eigenvalues
+    out['stdeig'] = _std_matlab(real_eigs)
+    out['mineig'] = np.min(real_eigs)
+    out['maxeig'] = np.max(real_eigs)
+
+    return out
+
 def trend(y: ArrayLike) -> dict:
     """
     Quantifies various measures of trend in a time series.
@@ -1303,6 +1994,8 @@ def _kendall(x: np.ndarray, y: np.ndarray) -> tuple:
     # Kendall's tau-b and its two-tailed p-value, following MATLAB's corr(...,'type','Kendall'):
     # the p-value is exact (permutation distribution of K) for small samples and a
     # continuity-corrected normal approximation otherwise
+    if np.any(np.isnan(x)) or np.any(np.isnan(y)):
+        return np.nan, np.nan
     n = len(x)
     xrank, yrank = rankdata(x), rankdata(y)
     xadj, yadj = _kendall_tie_adj(xrank), _kendall_tie_adj(yrank)
@@ -1362,6 +2055,8 @@ def _kendall(x: np.ndarray, y: np.ndarray) -> tuple:
 def _pearson(x: np.ndarray, y: np.ndarray) -> tuple:
     # Pearson's linear correlation and its two-tailed p-value (NaN for constant input,
     # matching MATLAB's corr)
+    if np.any(np.isnan(x)) or np.any(np.isnan(y)):
+        return np.nan, np.nan
     if np.std(x, ddof=1) == 0 or np.std(y, ddof=1) == 0:
         return np.nan, np.nan
     with warnings.catch_warnings():
@@ -1370,7 +2065,7 @@ def _pearson(x: np.ndarray, y: np.ndarray) -> tuple:
 
     return r, pval
 
-def ramping_windows(y: ArrayLike, num_seg: int = 10) -> dict:
+def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] = 1) -> dict:
     """
     Monotonic trend ('ramping') in windowed statistics.
 
@@ -1379,6 +2074,13 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10) -> dict:
     segment, and quantifies whether each of these quantities trends monotonically
     across the segments (e.g., a variance that ramps up steadily across the series,
     rather than merely fluctuating).
+
+    The asymmetric autocorrelation 'asymAC1' is ``mean(x_t * x_{t+tau} * (x_{t+tau} - x_t))``
+    with x z-scored within each segment. It is antisymmetric under time reversal, so it is zero
+    in expectation for any time-reversible process, and a trend in it flags a trend in the
+    series' local time-asymmetry/nonlinearity. The lag ``tau`` can be set from the series' own
+    correlation time (``asym_tau='ac1e'``) so that the statistic is not dominated by smoothness
+    when the series is oversampled.
 
     Parameters
     ----------
@@ -1391,6 +2093,12 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10) -> dict:
         induce artificial serial correlation between adjacent window-statistics,
         which would inflate the apparent monotonic trend independent of any real
         ramping in the data. Default is 10.
+    asym_tau : int or str, optional
+        The lag, tau, of asymAC1: an integer number of samples, or a rule for
+        :func:`pyhctsa.utils.get_tau` (e.g., ``'ac1e'``, the floor of the first 1/e crossing of
+        the autocorrelation function of the whole series; at least 1). The asymac1_* outputs are
+        NaN if tau cannot be set from the series, or if tau >= segment length - 1 (too few
+        pairs). Default is 1.
 
     Returns
     -------
@@ -1415,6 +2123,11 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10) -> dict:
         logger.warning(f"Time series (N = {N}) too short for {num_seg} segments of a meaningful length")
         return np.nan
 
+    # Lag of asymAC1 (an adaptive lag is set from the whole series, not per segment):
+    tau = get_tau(y, asym_tau) # NaN if it cannot be set
+    if not np.isnan(tau) and tau < 1:
+        raise ValueError("asym_tau must be a positive integer or a get_tau rule (e.g., 'ac1e')")
+
     # ------------------------------------------------------------------------------
     # Segment the time series (non-overlapping, discarding any remainder)
     # ------------------------------------------------------------------------------
@@ -1432,11 +2145,14 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10) -> dict:
     seg_skew = skew(z, axis=1)
     seg_kurt = kurtosis(z, axis=1, fisher=False)
     seg_ac1 = np.zeros(num_seg)
-    seg_asym_ac1 = np.zeros(num_seg)
+    seg_asym_ac1 = np.full(num_seg, np.nan)
     for i in range(num_seg):
         seg_ac1[i] = autocorr(z[i, :], 1, 'Fourier')[0]
-        zseg = (z[i, :] - np.mean(z[i, :])) / np.std(z[i, :], ddof=1) # z-scored *within* this segment
-        seg_asym_ac1[i] = np.mean(zseg[:-1] * zseg[1:] * (zseg[1:] - zseg[:-1]))
+        if not np.isnan(tau) and tau < seg_length - 1: # need pairs to average over
+            t = int(tau)
+            sd = np.std(z[i, :], ddof=1)
+            zseg = (z[i, :] - np.mean(z[i, :])) / (sd if sd > 0 else 1.0) # z-scored *within* this segment (MATLAB zscore: constant gives zeros)
+            seg_asym_ac1[i] = np.mean(zseg[:-t] * zseg[t:] * (zseg[t:] - zseg[:-t]))
 
     # ------------------------------------------------------------------------------
     # Kendall's tau and Pearson's r (each with p-value) against segment index
@@ -1475,10 +2191,18 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     variance. The lag-1 autocorrelation is symmetric under time reversal, so trev is
     included to let SFA pick up a slow drift in the *irreversibility* of the dynamics.
 
+    This operation is a compact variant of feature-based SFA (f-SFA) [2]_, which applies SFA
+    to sliding-window catch22/catch24 features; here five fixed window statistics are used,
+    to give a single hctsa feature.
+
     References
     ----------
     .. [1] Wiskott, L. & Sejnowski, T.J. "Slow feature analysis: unsupervised learning of
     invariances." Neural Computation 14(4), 715-770 (2002).
+    .. [2] Owens, K.S., Tamaki, M. & Fulcher, B.D. "Parameter inference from a non-stationary
+    unknown process using statistical feature-based slow feature analysis", arXiv:2609.01651
+    (2026). The full feature-based method (f-SFA: sliding-window catch22/catch24 features +
+    SFA) is implemented in the Python package fsfa: https://github.com/KieranOwens/fsfa
 
     Parameters
     ----------
