@@ -288,8 +288,9 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
 
     train_length : int or str, optional
         The number of time-series values to use to forecast the next value.
-        If 'ac', uses first zero-crossing of autocorrelation function.
-        Default is 1.
+        If 'ac', uses first zero-crossing of autocorrelation function (at least 2
+        for the 'lfit' method, since a straight line needs two points).
+        Default is 3.
         
     Returns
     -------
@@ -302,6 +303,11 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     # % Do the local prediction
     if train_length == 'ac':
         lp = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(lp):
+            logger.warning("Could not set the training length from the autocorrelation function")
+            return np.nan
+        if forecast_meth == 'lfit':
+            lp = max(lp, 2)  # a straight line needs at least two points
     else:
         #the e length of the subsegment preceding to use to predict the subsequent value
         train_length = int(train_length)
