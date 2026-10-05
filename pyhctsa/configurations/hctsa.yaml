@@ -269,7 +269,7 @@ correlation:
     dependencies:
       - statsmodels
     configs:
-      - {max_tau: 20, what_method: 'ols', zscore: True}
+      - {max_tau: 20, what_method: 'burg', zscore: True}   # CO_PartialAutoCorr(x_z,20,'burg')
     legacy_name: CO_PartialAutoCorr
     ordered_args: ['max_tau', 'what_method']
 
@@ -440,8 +440,8 @@ correlation:
     dependencies:
     configs:
       - {bin_method: 'std1', num_bins: [!range [2, 80]], zscore: True, exclude: ['max', 'median', 'mode']}
-      - {bin_method: 'std2', num_bins: [!range [2, 80]], zscore: True, select: ['mean', 'min', 'modef', 'nlocmax', 'std']}
-      - {bin_method: 'quantiles', num_bins: [!range [2, 80]], zscore: True, select: ['mean', 'min', 'modef', 'nlocmax', 'std']}
+      - {bin_method: 'std2', num_bins: [!range [2, 80]], zscore: True, select: ['mean', 'min', 'modef', 'nlocmax', 'nprompeaks', 'std']}
+      - {bin_method: 'quantiles', num_bins: [!range [2, 80]], zscore: True, select: ['mean', 'min', 'modef', 'nlocmax', 'nprompeaks', 'std']}
       - {bin_method: 'even', num_bins: [!range [2, 80]], zscore: True, exclude: ['conv4', 'max', 'median', 'range']}
     legacy_name: CO_CompareMinAMI
     ordered_args: ['bin_method', 'num_bins']
@@ -621,9 +621,6 @@ entropy:
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 20, olremp: 0, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 50, olremp: 0, zscore: True}
-      - {hist_or_ks: 'hist', num_bins: 'sqrt', olremp: 0, zscore: True}
-      - {hist_or_ks: 'hist', num_bins: 'fd', olremp: 0, zscore: True}
-      - {hist_or_ks: 'hist', num_bins: 'sturges', olremp: 0, zscore: True}
       
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.01, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.02, zscore: True}
@@ -631,13 +628,8 @@ entropy:
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.1, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.2, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.3, zscore: True}
-      - {hist_or_ks: 'hist', num_bins: 'auto', olremp: 0, zscore: True}   # EN_DistributionEntropy(x_z,'hist','auto',0)
       - {hist_or_ks: 'hist', num_bins: 'auto', olremp: 0.01, zscore: True}   # EN_DistributionEntropy(x_z,'hist','auto',0.01)
-      - {hist_or_ks: 'hist', num_bins: 'auto', olremp: 0.1, zscore: True}   # EN_DistributionEntropy(x_z,'hist','auto',0.1)
       - {hist_or_ks: 'hist', num_bins: 'auto', olremp: 0.02, zscore: True}   # EN_DistributionEntropy(x_z,'hist','auto',0.02)
-      - {hist_or_ks: 'hist', num_bins: 'auto', olremp: 0.2, zscore: True}   # EN_DistributionEntropy(x_z,'hist','auto',0.2)
-      - {hist_or_ks: 'hist', num_bins: 'auto', olremp: 0.3, zscore: True}   # EN_DistributionEntropy(x_z,'hist','auto',0.3)
-      - {hist_or_ks: 'hist', num_bins: 'auto', olremp: 0.05, zscore: True}   # EN_DistributionEntropy(x_z,'hist','auto',0.05)
       - {hist_or_ks: 'ks', olremp: 0.01, zscore: True}   # EN_DistributionEntropy(x_z,'ks',[],0.01)
       - {hist_or_ks: 'ks', olremp: 0.1, zscore: True}   # EN_DistributionEntropy(x_z,'ks',[],0.1)
       - {hist_or_ks: 'ks', olremp: 0.02, zscore: True}   # EN_DistributionEntropy(x_z,'ks',[],0.02)
@@ -903,11 +895,8 @@ stationarity:
 
 
 
-      - {window_stat: 'mean', across_win_stat: 'ent', num_seg: 2, inc_move: 1, zscore: True}
-      - {window_stat: 'AC1', across_win_stat: 'ent', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'AC1','ent',2,1)
       - {window_stat: 'AC1', across_win_stat: 'ent', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'AC1','ent',10,1)
       - {window_stat: 'AC1', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'AC1','permen',10,2)
-      - {window_stat: 'asymAC1', across_win_stat: 'ent', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'asymAC1','ent',2,1)
       - {window_stat: 'asymAC1', across_win_stat: 'ent', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'asymAC1','ent',10,1)
       - {window_stat: 'asymAC1', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'asymAC1','std',2,1)
       - {window_stat: 'asymAC1', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'asymAC1','std',10,1)
@@ -918,16 +907,13 @@ stationarity:
       - {window_stat: 'lillie', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'lillie','std',10,1)
       - {window_stat: 'mean', across_win_stat: 'ent', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'mean','ent',10,1)
       - {window_stat: 'mean', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'mean','permen',10,2)
-      - {window_stat: 'mom3', across_win_stat: 'ent', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'mom3','ent',2,1)
       - {window_stat: 'mom3', across_win_stat: 'ent', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'mom3','ent',10,1)
       - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'mom3','std',10,1)
       - {window_stat: 'mom3', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'mom3','permen',10,2)
-      - {window_stat: 'std', across_win_stat: 'ent', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'std','ent',2,1)
       - {window_stat: 'std', across_win_stat: 'ent', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'std','ent',10,1)
       - {window_stat: 'std', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'std','permen',10,2)
       - {window_stat: 'permen', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'permen','std',2,1)
       - {window_stat: 'permen', across_win_stat: 'std', num_seg: 5, inc_move: 10, zscore: True}   # SY_SlidingWindow(x_z,'permen','std',5,10)
-      - {window_stat: 'specen', across_win_stat: 'ent', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'specen','ent',2,1)
       - {window_stat: 'specen', across_win_stat: 'ent', num_seg: 5, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'specen','ent',5,1)
       - {window_stat: 'specen', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'specen','std',2,1)
       - {window_stat: 'specen', across_win_stat: 'std', num_seg: 5, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'specen','std',5,1)
@@ -961,8 +947,8 @@ stationarity:
     base_name: drifting_mean
     dependencies:
     configs:
-      - {segment_how: 'fix', l: 50, zscore: True}
-      - {segment_how: 'fix', l: 100, zscore: True}
+      - {segment_how: 'fix', l: 50, zscore: True, exclude: ['mean']}
+      - {segment_how: 'fix', l: 100, zscore: True, exclude: ['mean']}
     legacy_name: SY_DriftingMean
     ordered_args: ['segment_how', 'l']
   
@@ -1417,22 +1403,22 @@ scaling:
     base_name: fluctuation_analysis
     dependencies:
     configs:
-      - {q: 2.0, wtf: 'endptdiff', tau_step: 50,  log_inc: True, zscore: True}
-      - {q: 2.0, wtf: 'range', tau_step: 50,  log_inc: True, zscore: True}
+      - {q: 2.0, wtf: 'endptdiff', tau_step: 50,  log_inc: True, zscore: True, exclude: ['se1', 'se2']}
+      - {q: 2.0, wtf: 'range', tau_step: 50,  log_inc: True, zscore: True, exclude: ['se1', 'se2']}
 
-      - {q: 2.0, wtf: 'rsrange', tau_step: 50,  log_inc: True, zscore: True}
-      - {q: 2.0, wtf: 'rsrangefit', tau_step: 50,  log_inc: True, zscore: True}
+      - {q: 2.0, wtf: 'rsrange', tau_step: 50,  log_inc: True, zscore: True, exclude: ['se1', 'se2']}
+      - {q: 2.0, wtf: 'rsrangefit', tau_step: 50,  log_inc: True, zscore: True, exclude: ['se1', 'se2']}
 
-      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 0, log_inc: True, zscore: True}
-      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 1, log_inc: True, zscore: True}
-      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 2, log_inc: True, zscore: True}
-      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 3, log_inc: True, zscore: True}
-      - {wtf: 'dfa', tau_step: 50, k: 1, lag: 2, zscore: True}   # SC_FluctAnal(x_z,2,'dfa',50,1,2,true)
-      - {wtf: 'dfa', tau_step: 50, k: 1, lag: 3, zscore: True}   # SC_FluctAnal(x_z,2,'dfa',50,1,3,true)
-      - {wtf: 'iqr', tau_step: 50, zscore: True}   # SC_FluctAnal(x_z,2,'iqr',50,[],[],true)
-      - {wtf: 'std', tau_step: 50, zscore: True}   # SC_FluctAnal(x_z,2,'std',50,[],[],true)
-      - {wtf: 'dfa', tau_step: 50, k: 2, zscore: True, preprocess: zscore_abs}   # SC_FluctAnal(zscore(abs(x_z)),2,'dfa',50,2,[],true)
-      - {wtf: 'dfa', tau_step: 50, k: 2, zscore: True, preprocess: zscore_sign}   # SC_FluctAnal(zscore(sign(x_z)),2,'dfa',50,2,[],true)
+      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 0, log_inc: True, zscore: True, exclude: ['se1', 'se2']}
+      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 1, log_inc: True, zscore: True, exclude: ['se1', 'se2']}
+      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 2, log_inc: True, zscore: True, exclude: ['se1', 'se2']}
+      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 3, log_inc: True, zscore: True, exclude: ['se1', 'se2']}
+      - {wtf: 'dfa', tau_step: 50, k: 1, lag: 2, zscore: True, exclude: ['se1', 'se2']}   # SC_FluctAnal(x_z,2,'dfa',50,1,2,true)
+      - {wtf: 'dfa', tau_step: 50, k: 1, lag: 3, zscore: True, exclude: ['se1', 'se2']}   # SC_FluctAnal(x_z,2,'dfa',50,1,3,true)
+      - {wtf: 'iqr', tau_step: 50, zscore: True, exclude: ['se1', 'se2']}   # SC_FluctAnal(x_z,2,'iqr',50,[],[],true)
+      - {wtf: 'std', tau_step: 50, zscore: True, exclude: ['se1', 'se2']}   # SC_FluctAnal(x_z,2,'std',50,[],[],true)
+      - {wtf: 'dfa', tau_step: 50, k: 2, zscore: True, exclude: ['se1', 'se2'], preprocess: zscore_abs}   # SC_FluctAnal(zscore(abs(x_z)),2,'dfa',50,2,[],true)
+      - {wtf: 'dfa', tau_step: 50, k: 2, zscore: True, exclude: ['se1', 'se2'], preprocess: zscore_sign}   # SC_FluctAnal(zscore(sign(x_z)),2,'dfa',50,2,[],true)
     legacy_name: SC_FluctAnal
     ordered_args: ['q', 'wtf', 'tau_step', 'k', 'lag', 'log_inc']
 
@@ -1711,7 +1697,7 @@ hypothesis_tests:
     dependencies:
     configs:
       - {the_test: 'lbq', zscore: True}   # HT_IndependenceTests(x_z,'lbq')
-      - {the_test: 'runstest', zscore: False}   # HT_IndependenceTests(x,'runstest')
+      - {the_test: 'runsz', zscore: False}   # HT_IndependenceTests(x,'runsz')
     legacy_name: HT_IndependenceTests
     ordered_args: ['the_test']
 
@@ -2037,9 +2023,9 @@ physics:
       - {what_potential: 'dblwell', params: [[2, 0.05, 0.2]], zscore: True}
       - {what_potential: 'dblwell', params: [[3, 0.01, 0.1]], zscore: True}
 
-      - {what_potential: 'sine', params: [[0.5, 5, 0.1]], zscore: True}   # PH_ForcePotential(x_z,'sine',[0.5,5,0.1])
-      - {what_potential: 'sine', params: [[1, 2, 0.1]], zscore: True}   # PH_ForcePotential(x_z,'sine',[1,2,0.1])
-      - {what_potential: 'sine', params: [[1, 5, 0.1]], zscore: True}   # PH_ForcePotential(x_z,'sine',[1,5,0.1])
+      - {what_potential: 'sine', params: [[0.5, 5, 0.1]], zscore: True, exclude: ['meanabs']}   # PH_ForcePotential(x_z,'sine',[0.5,5,0.1])
+      - {what_potential: 'sine', params: [[1, 2, 0.1]], zscore: True, exclude: ['meanabs']}   # PH_ForcePotential(x_z,'sine',[1,2,0.1])
+      - {what_potential: 'sine', params: [[1, 5, 0.1]], zscore: True, exclude: ['meanabs']}   # PH_ForcePotential(x_z,'sine',[1,5,0.1])
     legacy_name: PH_ForcePotential
     ordered_args: ['what_potential', 'params']
   
@@ -2073,16 +2059,16 @@ pre_process:
     base_name: preproc_compare
     dependencies:
     configs:
-      - {detrend_meth: 'poly1', zscore: False, exclude: ['gauss1_kd_resruns']}
+      - {detrend_meth: 'poly1', zscore: False, exclude: ['gauss1_kd_resrunsz']}
 
-      - {detrend_meth: 'diff1', zscore: False, exclude: ['gauss1_kd_resruns']}
+      - {detrend_meth: 'diff1', zscore: False, exclude: ['gauss1_kd_resrunsz']}
 
 
-      - {detrend_meth: 'resample_1_2', zscore: False, exclude: ['gauss1_kd_resruns']}
-      - {detrend_meth: 'resample_2_1', zscore: False, exclude: ['gauss1_kd_resruns']}
-      - {detrend_meth: 'medianf3', zscore: False, exclude: ['gauss1_kd_resruns']}   # PP_Compare(x,'medianf3')
-      - {detrend_meth: 'sin1', zscore: False, exclude: ['gauss1_kd_resruns']}   # PP_Compare(x,'sin1')
-      - {detrend_meth: 'spline24', zscore: False, exclude: ['gauss1_kd_resruns']}   # PP_Compare(x,'spline24')
+      - {detrend_meth: 'resample_1_2', zscore: False, exclude: ['gauss1_kd_resrunsz']}
+      - {detrend_meth: 'resample_2_1', zscore: False, exclude: ['gauss1_kd_resrunsz']}
+      - {detrend_meth: 'medianf3', zscore: False, exclude: ['gauss1_kd_resrunsz']}   # PP_Compare(x,'medianf3')
+      - {detrend_meth: 'sin1', zscore: False, exclude: ['gauss1_kd_resrunsz']}   # PP_Compare(x,'sin1')
+      - {detrend_meth: 'spline24', zscore: False, exclude: ['gauss1_kd_resrunsz']}   # PP_Compare(x,'spline24')
     legacy_name: PP_Compare
     ordered_args: ['detrend_meth']
 
@@ -2122,18 +2108,18 @@ surrogates:
     base_name: surrogates
     dependencies:
     configs:
-      - {tau: 1, nsurr: 100, surr_method: 1, surrfn: 'tc3', zscore: True, exclude: ['stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,1,100,1,'tc3','default')
-      - {tau: 1, nsurr: 100, surr_method: 1, surrfn: 'trev', zscore: True, exclude: ['stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,1,100,1,'trev','default')
-      - {tau: 1, nsurr: 100, surr_method: 2, surrfn: 'tc3', zscore: True, exclude: ['stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,1,100,2,'tc3','default')
-      - {tau: 1, nsurr: 100, surr_method: 2, surrfn: 'trev', zscore: True, exclude: ['stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,1,100,2,'trev','default')
-      - {tau: 1, nsurr: 100, surr_method: 3, surrfn: 'tc3', zscore: True, exclude: ['stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,1,100,3,'tc3','default')
-      - {tau: 1, nsurr: 100, surr_method: 3, surrfn: 'trev', zscore: True, exclude: ['stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,1,100,3,'trev','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 1, surrfn: 'tc3', zscore: True, exclude: ['stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,'mi',100,1,'tc3','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 1, surrfn: 'trev', zscore: True, exclude: ['stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,'mi',100,1,'trev','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 2, surrfn: 'tc3', zscore: True, exclude: ['stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,'mi',100,2,'tc3','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 2, surrfn: 'trev', zscore: True, exclude: ['stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,'mi',100,2,'trev','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 3, surrfn: 'tc3', zscore: True, exclude: ['stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,'mi',100,3,'tc3','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 3, surrfn: 'trev', zscore: True, exclude: ['stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,'mi',100,3,'trev','default')
+      - {tau: 1, nsurr: 100, surr_method: 1, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,1,100,1,'tc3','default')
+      - {tau: 1, nsurr: 100, surr_method: 1, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,1,100,1,'trev','default')
+      - {tau: 1, nsurr: 100, surr_method: 2, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,1,100,2,'tc3','default')
+      - {tau: 1, nsurr: 100, surr_method: 2, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,1,100,2,'trev','default')
+      - {tau: 1, nsurr: 100, surr_method: 3, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,1,100,3,'tc3','default')
+      - {tau: 1, nsurr: 100, surr_method: 3, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,1,100,3,'trev','default')
+      - {tau: 'mi', nsurr: 100, surr_method: 1, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,'mi',100,1,'tc3','default')
+      - {tau: 'mi', nsurr: 100, surr_method: 1, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,'mi',100,1,'trev','default')
+      - {tau: 'mi', nsurr: 100, surr_method: 2, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,'mi',100,2,'tc3','default')
+      - {tau: 'mi', nsurr: 100, surr_method: 2, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,'mi',100,2,'trev','default')
+      - {tau: 'mi', nsurr: 100, surr_method: 3, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,'mi',100,3,'tc3','default')
+      - {tau: 'mi', nsurr: 100, surr_method: 3, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp']}   # SD_Surrogates(x_z,'mi',100,3,'trev','default')
     legacy_name: SD_Surrogates
     ordered_args: ['tau', 'surr_method', 'surrfn']
 
