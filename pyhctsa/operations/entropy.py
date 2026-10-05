@@ -623,6 +623,141 @@ def _app_samp_entropy(
 
     return phi
 
+def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str] = 1,
+                       mapping_how: str = 'ncdf') -> Union[dict, float]:
+    """
+    Dispersion entropy of a time series.
+
+    Maps the time series onto ``c`` amplitude classes, replaces each run of ``m`` values
+    (spaced ``tau`` samples apart) by the sequence of classes it visits (a 'dispersion
+    pattern'), and returns the Shannon entropy of the resulting pattern distribution.
+    Port of hctsa's ``EN_DispEn``.
+
+    Unlike permutation entropy (:func:`permutation_entropy`), which records only the rank
+    ordering within each embedding vector and so discards amplitude information entirely
+    ([1, 2, 3] and [1, 2, 300] are the same pattern), dispersion entropy assigns each point
+    to an amplitude class first, so the size of an excursion, not just its direction, shapes
+    the symbol sequence. It is also markedly cheaper than sample entropy and degrades more
+    gracefully on short, noisy series.
+
+    The fluctuation-based variant is also returned. It symbolizes the differences between
+    successive classes rather than the classes themselves, and so responds to the size of
+    class-to-class changes rather than to absolute amplitude level.
+
+    References
+    ----------
+    .. [1] M. Rostaghi and H. Azami, "Dispersion Entropy: A Measure for Time-Series
+        Analysis", IEEE Signal Processing Letters 23(5) 610 (2016).
+    .. [2] H. Azami and J. Escudero, "Amplitude- and Fluctuation-Based Dispersion
+        Entropy", Entropy 20(3) 210 (2018).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    m : int, optional
+        The embedding dimension. The number of possible patterns grows as ``c**m``, so ``m``
+        must stay small for the pattern frequencies to be estimable. Default is 2.
+    c : int, optional
+        The number of amplitude classes (must be at least 2). Default is 6.
+    tau : int or str, optional
+        The time delay: an integer, or a rule understood by :func:`~pyhctsa.utils.get_tau`
+        (``'ac'``, ``'ac1e'``, ``'mi'``). Default is 1.
+    mapping_how : {'ncdf', 'linear'}, optional
+        How to map the time series onto (0, 1) before classifying:
+
+        - ``'ncdf'``: the normal cumulative distribution function with the series' own mean
+          and standard deviation (the mapping the method was introduced with; a linear
+          mapping assigns most points to a few classes whenever the maximum or minimum is far
+          from the median, so a single outlier can collapse the symbolization).
+        - ``'linear'``: a min-max rescaling onto [0, 1] (outlier-sensitive).
+
+        Default is ``'ncdf'``.
+
+    Returns
+    -------
+    dict or float
+        A dictionary with:
+
+        - 'dispEn': the dispersion entropy (nats),
+        - 'normDispEn': 'dispEn' normalized by its maximum possible value, ``log(c**m)``,
+        - 'fDispEn': the fluctuation-based dispersion entropy (nats; NaN for ``m = 1``),
+        - 'normFDispEn': 'fDispEn' normalized by ``log((2c-1)**(m-1))`` (NaN for ``m = 1``).
+
+        NaN (scalar) if the delay cannot be determined, the series is constant, or it is
+        too short for the embedding (fewer than 5 embedding vectors).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    m = int(m)
+    c = int(c)
+    if c < 2:
+        raise ValueError(f"Need at least two amplitude classes (c = {c} given)")
+    if m < 1:
+        raise ValueError(f"Embedding dimension must be at least 1 (m = {m} given)")
+
+    tau = get_tau(y, tau)
+    if np.isnan(tau):  # data-dependent: no correlation length could be estimated
+        return np.nan
+    tau = int(tau)
+
+    num_vectors = n - (m - 1) * tau
+    if num_vectors < 5:
+        logger.warning(f"Time series (N = {n}) too short for dispersion entropy at m = {m}, tau = {tau}")
+        return np.nan
+
+    # Map the series onto (0, 1), then onto the c amplitude classes
+    if mapping_how == 'ncdf':
+        sigma = np.std(y, ddof=1)
+        if not sigma > 0:
+            logger.warning("Constant time series has no dispersion structure")
+            return np.nan
+        y_mapped = norm.cdf(y, loc=np.mean(y), scale=sigma)
+    elif mapping_how == 'linear':
+        y_range = np.max(y) - np.min(y)
+        if not y_range > 0:
+            logger.warning("Constant time series has no dispersion structure")
+            return np.nan
+        y_mapped = (y - np.min(y)) / y_range
+    else:
+        raise ValueError(f"Unknown mapping '{mapping_how}' (expected 'ncdf' or 'linear')")
+
+    # Classes 1..c as z = round(c*y + 0.5) (Rostaghi & Azami); round half away from zero as
+    # MATLAB (the argument is positive), then clamp into 1..c (the top of the range rounds to c+1)
+    v = c * y_mapped + 0.5
+    z = np.floor(v)
+    z = z + ((v - z) >= 0.5)
+    z = np.clip(z, 1, c).astype(np.int64)
+
+    # Z[i, k] = z[i + k*tau], one row per embedding vector
+    emb = z[np.arange(num_vectors)[:, None] + np.arange(m) * tau]
+
+    # Dispersion entropy: the patterns are the class sequences themselves (c^m of them),
+    # encoded as base-c integers
+    place_values = c ** np.arange(m - 1, -1, -1, dtype=np.int64)
+    pattern_idx = (emb - 1) @ place_values
+    p = np.bincount(pattern_idx, minlength=c ** m) / num_vectors
+    p = p[p > 0]
+    disp_en = -np.sum(p * np.log(p))
+    out = {'dispEn': disp_en, 'normDispEn': disp_en / np.log(float(c) ** m)}
+
+    # Fluctuation-based: the patterns are the successive class differences, each in
+    # -(c-1)..(c-1), giving (2c-1)^(m-1) patterns
+    if m < 2:
+        out['fDispEn'] = np.nan
+        out['normFDispEn'] = np.nan
+        return out
+    d_z = np.diff(emb, axis=1) + (c - 1)  # shift -(c-1)..(c-1) onto 0..2c-2
+    num_fluct = (2 * c - 1) ** (m - 1)
+    f_place_values = (2 * c - 1) ** np.arange(m - 2, -1, -1, dtype=np.int64)
+    f_idx = d_z @ f_place_values
+    p_f = np.bincount(f_idx, minlength=num_fluct) / num_vectors
+    p_f = p_f[p_f > 0]
+    f_disp_en = -np.sum(p_f * np.log(p_f))
+    out['fDispEn'] = f_disp_en
+    out['normFDispEn'] = f_disp_en / np.log(float(num_fluct))
+    return out
+
 def complexity_invariant_distance(y: ArrayLike) -> dict:
     """
     Complexity-invariant distance.
