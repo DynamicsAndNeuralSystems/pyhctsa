@@ -26,7 +26,7 @@ from numpy.typing import ArrayLike
 from .utils import _linspace, matlab_quantile
 
 __all__ = [
-    'bf_random', 'bf_tie_break_noise', 'bf_runs_z', 'bf_residual_stats', 'bf_theil_sen',
+    'bf_random', 'bf_random_seed', 'bf_tie_break_noise', 'bf_runs_z', 'bf_residual_stats', 'bf_theil_sen',
     'bf_exp_fit', 'bf_fit_density_curve', 'bf_gauss_mix2', 'bf_fit_sinusoids',
     'bf_ks_density', 'bf_hist_edges', 'bf_quantile_edges', 'bf_half_sample_mode',
 ]
@@ -64,17 +64,6 @@ def _mrg32k3a(k, state, num_skip):
     return u
 
 
-@njit(cache=True)
-def _fisher_yates(n, u):
-    x = np.arange(1, n + 1)
-    for i in range(n, 1, -1):
-        j = int(np.floor(u[n - i] * i))  # 0-based index of element floor(u*i)+1
-        t = x[i - 1]
-        x[i - 1] = x[j]
-        x[j] = t
-    return x
-
-
 def bf_random(n: int, seed: Union[int, float, ArrayLike] = 0, kind: str = 'uniform') -> np.ndarray:
     """Portable pseudo-random numbers: the same stream in MATLAB and Python (hctsa ``BF_Random``).
 
@@ -98,9 +87,8 @@ def bf_random(n: int, seed: Union[int, float, ArrayLike] = 0, kind: str = 'unifo
         ``'normal'``: n standard normal numbers by Box-Muller: the uniforms (u1, u2) =
         (2k-1, 2k) give ``sqrt(-2 log u1) cos(2 pi u2)`` and ``sqrt(-2 log u1) sin(2 pi u2)``
         as values 2k-1 and 2k.
-        ``'perm'``: a random permutation of 1..n (**1-based**, as in MATLAB) by a
-        Fisher-Yates shuffle: for i = n down to 2, element i is swapped with element
-        floor(u*i)+1.
+        ``'perm'``: a random permutation of 1..n (**1-based**, as in MATLAB): the ranks of n
+        uniform numbers, i.e. the stable argsort of the n uniforms (plus 1).
 
     Returns
     -------
@@ -129,8 +117,30 @@ def bf_random(n: int, seed: Union[int, float, ArrayLike] = 0, kind: str = 'unifo
         x[1::2] = r * np.sin(theta)
         return x[:n]
     if kind == 'perm':
-        return _fisher_yates(n, _mrg32k3a(max(n - 1, 0), state, num_skip))
+        return np.argsort(_mrg32k3a(n, state, num_skip), kind='stable') + 1
     raise ValueError(f"Unknown kind '{kind}'")
+
+
+def bf_random_seed(random_seed=None) -> int:
+    """The integer seed (for :func:`bf_random`) that a ``random_seed`` input stands for (hctsa ``BF_RandomSeed``).
+
+    ``'default'`` or ``None`` give the fixed seed 0; a number gives that seed (rounded and made
+    non-negative: ``mod(round(abs(s)), 4e9)``); ``'none'`` gives a seed drawn from NumPy's global
+    random stream (so repeated calls differ).
+    """
+    if random_seed is None:
+        return 0
+    if isinstance(random_seed, str):
+        if random_seed == 'default':
+            return 0
+        if random_seed == 'none':
+            return int(np.floor(4e9 * np.random.random_sample()))
+        raise ValueError(f"Not sure how to interpret the random seed '{random_seed}'")
+    s = float(np.asarray(random_seed).ravel()[0]) if np.size(random_seed) else None
+    if s is None:
+        return 0
+    # MATLAB round: half away from zero
+    return int(np.mod(np.floor(abs(s) + 0.5), 4e9))
 
 
 # ------------------------------------------------------------------------------

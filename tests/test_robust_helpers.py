@@ -3,7 +3,7 @@
 Expected values were generated with current hctsa (branch robust/all) in MATLAB R2026a on
 inputs stored in ``tests/data/robust_helpers.json`` (regenerate with the scripts in
 ``tests/data/robust_helpers/``). ``bf_random`` uniforms and permutations are bit-identical to
-MATLAB's ``BF_Random``; deterministic closed forms agree to rounding; the searches
+MATLAB's ``BF_Random`` (a permutation is the stable argsort of n uniforms); deterministic closed forms agree to rounding; the searches
 (``bf_exp_fit`` golden section, ``bf_fit_sinusoids`` zooming grids) agree to the resolution
 at which their criterion stops changing (about 1e-7 in the parameters, 1e-12 in the fit).
 """
@@ -15,7 +15,7 @@ import pytest
 
 from pyhctsa.robust import (bf_exp_fit, bf_fit_density_curve, bf_fit_sinusoids, bf_gauss_mix2,
                             bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_quantile_edges,
-                            bf_random, bf_residual_stats, bf_runs_z, bf_theil_sen,
+                            bf_random, bf_random_seed, bf_residual_stats, bf_runs_z, bf_theil_sen,
                             bf_tie_break_noise)
 
 with open(os.path.join(os.path.dirname(__file__), 'data', 'robust_helpers.json')) as fh:
@@ -61,6 +61,18 @@ class TestBFRandom:
         _eq(p, 'rand_perm3')
         assert sorted(p) == list(range(1, 51))
         _eq(bf_random(1, 0, 'perm'), 'rand_perm0_1')
+        _eq(bf_random(4000, 7, 'perm'), 'rand_perm7_4000')
+        _eq(bf_random(12, [1, 2, 3, 4, 5, 6], 'perm'), 'rand_perm_vec')
+        u = bf_random(50, 3)
+        np.testing.assert_array_equal(bf_random(50, 3, 'perm'), np.argsort(u, kind='stable') + 1)
+
+    def test_seed(self):
+        py = [bf_random_seed('default'), bf_random_seed(None), bf_random_seed(7.6), bf_random_seed(2.5),
+              bf_random_seed(-3), bf_random_seed(5e9 + 0.4), bf_random_seed(0.5), bf_random_seed(42)]
+        _eq(py, 'seed_vals')
+        assert 0 <= bf_random_seed('none') < 4e9
+        with pytest.raises(ValueError):
+            bf_random_seed('bogus')
 
     def test_properties(self):
         assert bf_random(0, 0).size == 0
