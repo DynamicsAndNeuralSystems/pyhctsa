@@ -1857,7 +1857,10 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     Returns
     --------
     dict
-        A dictionary containing various statistics of the constructed time series.
+        A dictionary containing various statistics of the constructed time series
+        (``ac1``, ``ac2``, ``ac3``, ``tau``, ``std``, ``median``, ``mean``, ``iqr``,
+        ``iqronrange``, ``mode_val``, ``mode``, ``hist_ent``, ``statav5_m``, ``statav5_s``).
+        As in hctsa, the maximum count (``max``) is no longer returned.
     """
     y = np.asarray(y)
     if tau == 'tau':
@@ -1895,7 +1898,6 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     out['ac2'] = autocorr(counts, 2, 'Fourier')[0]
     out['ac3'] = autocorr(counts, 3, 'Fourier')[0]
     out['tau'] = first_crossing(counts, 'ac', 0, 'continuous')
-    out['max'] = np.max(counts)
     out['std'] = np.std(counts, ddof=1)
     out['median'] = np.median(counts)
     out['mean'] = np.mean(counts)
