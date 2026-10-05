@@ -2540,3 +2540,177 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
         s[np.bincount(clust)[clust] == 1] = 1.0  # (MATLAB gives a singleton cluster 1)
         out['sep_silh'] = np.mean(s)
     return out
+
+
+def _spectrum_stats(perc: np.ndarray, m: int) -> dict:
+    """
+    Statistics of a normalized (summing to 1), descending eigenvalue spectrum, as
+    :func:`embed_pca` (hctsa's ``SUB_spectrumstats`` in NL_EmbedKernelPCA).
+    """
+    stats = {f'perc_{i + 1}': perc[i] for i in range(m)}
+    # The spread statistics are taken over the leading m components only: the linear spectrum
+    # has exactly m entries, but the kernel spectrum has one per embedded point, and taken over
+    # all of them its spread falls with the number of points
+    top = perc[:m]
+    stats['std'] = np.std(top, ddof=1)
+    stats['range'] = np.ptp(top)
+    stats['min'] = np.min(top)
+    stats['max'] = np.max(top)
+    stats['top2'] = np.sum(perc[:2])
+    csperc = np.cumsum(perc)
+    for pct in (50, 60, 70, 80, 90):
+        stats[f'nto{pct}'] = _first_fn(csperc, pct / 100, 'over')
+    for name, thresh in (('fb05', 0.5), ('fb02', 0.2), ('fb01', 0.1), ('fb001', 0.01)):
+        stats[name] = _first_fn(perc, thresh, 'under')
+    return stats
+
+
+def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
+                     max_n: Union[int, str] = 2000) -> dict:
+    """
+    Kernel PCA of a time-delay embedding of the series, compared with linear PCA.
+
+    Reconstructs the time series as a time-delay embedding (as in :func:`embed_pca`) and
+    performs kernel principal components analysis on the result using an RBF kernel
+    ``exp(-d^2 / median(d^2))``, with ``d`` the distance between embedded points, then
+    compares the resulting eigenvalue spectrum to that of ordinary (linear) PCA on the same
+    embedded points [1, 2].
+
+    At any finite kernel bandwidth, kernel PCA's spectrum is less compact than linear PCA's in
+    absolute terms (its RBF feature space is far higher-dimensional than the embedding
+    itself), so the kernel-to-linear ratios (``top2_ratio``, ``nto80_ratio``,
+    ``nto50_ratio``) are below 1 (``top2_ratio``) or at least 1 (``nto*_ratio``) for every
+    series. In simulations (N = 1000), the ratios are nearer 1 for series on a curved
+    low-dimensional manifold than for the linear (Gaussian) process with the same power
+    spectrum: for the logistic and Henon maps, ``top2_ratio`` is 0.77 and 0.73 against 0.52
+    and 0.50 for their phase-randomized surrogates (``tau = 'ac'``, ``m = 3``). The signal is
+    weaker for the Lorenz system and absent for a Roessler oscillator, which is close to
+    linear at this sampling. The ratios are not a stand-alone nonlinearity test, however: they
+    also rise with linear autocorrelation (``top2_ratio`` is about 0.52 for white noise and AR(1)
+    with phi = 0.5, but 0.61-0.71 for AR(1) with phi = 0.99), so a smooth linear process can look
+    more 'nonlinear' than a chaotic map. Compare against surrogates to isolate nonlinearity.
+    ``std_ratio`` did not separate nonlinear from linear series consistently.
+
+    References
+    ----------
+    .. [1] B. Scholkopf, A. Smola and K.-R. Muller, "Nonlinear Component Analysis as a
+        Kernel Eigenvalue Problem", Neural Comput. 10(5), 1299 (1998).
+    .. [2] D. S. Broomhead and G. P. King, "Extracting qualitative dynamics from
+        experimental data", Physica D 20(2-3), 217 (1986).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tau : int or str, optional
+        The time delay of the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
+        autocorrelation function, ``'ac1e'`` the (floored) first 1/e crossing of the
+        autocorrelation function, and ``'mi'`` the smaller of the first minimum of the
+        (Kraskov) automutual information and the 1/e time. Default is ``'ac'``.
+    m : int, optional
+        The embedding dimension (at least 2). Default is 3.
+    max_n : int or 'full', optional
+        The maximum number of embedded points used to form the N x N kernel matrix, whose
+        eigendecomposition costs O(N^3). Longer embeddings are reduced to their first ``max_n``
+        points (a memory/time cap, not a convergence point: the spectrum estimate keeps
+        sharpening with more points); ``'full'`` disables this, with a warning above 5000
+        points, where the eigendecomposition takes several seconds. Default is 2000.
+
+    Returns
+    -------
+    dict or float
+        NaN if the embedding fails, there are too few embedded points for a rank-``m``
+        decomposition, the embedded points coincide, or the kernel spectrum is degenerate.
+        Otherwise statistics of the normalized kernel PCA spectrum (the proportion of
+        variance in feature space explained by each kernel principal component, ordered from
+        largest, one per embedded point), with the linear PCA spectrum of the same points
+        (``m`` entries) for comparison:
+
+        - ``perc_1``, ..., ``perc_m``: the proportion of variance explained by each of the top
+          ``m`` kernel components
+        - ``std``, ``range``, ``min``, ``max``: standard deviation, range, minimum and maximum
+          of the top ``m`` proportions only (so they are comparable with linear PCA)
+        - ``top2``: the proportion of variance explained by the top two kernel components
+        - ``nto50``, ``nto60``, ``nto70``, ``nto80``, ``nto90``: the number of kernel
+          components needed to explain more than 50%, 60%, 70%, 80% or 90% of the variance
+        - ``fb05``, ``fb02``, ``fb01``, ``fb001``: the position of the first kernel component
+          whose proportion of variance is below 0.5, 0.2, 0.1 or 0.01
+        - ``top2_ratio``, ``top2_diff``: ``top2`` of the kernel PCA over (and minus) that of
+          linear PCA
+        - ``nto80_ratio``, ``nto80_diff``: ``nto80`` of the kernel PCA over (and minus) that of
+          linear PCA
+        - ``nto50_ratio``: ``nto50`` of the kernel PCA over that of linear PCA
+        - ``std_ratio``: ``std`` of the kernel PCA over that of linear PCA
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    y_embed = _bf_embed(y, tau, m)
+    if y_embed is None:
+        logger.warning('Embedding parameters are not suitable for this time series')
+        return np.nan
+
+    # pca needs m components (and at least 2, for top2)
+    if y_embed.shape[0] - 1 < m or m < 2:
+        logger.warning(f'Not enough embedding vectors ({y_embed.shape[0]}) for a rank-{m} PCA')
+        return np.nan
+
+    # Crop to max_n embedded points for the kernel matrix (memory/time cap)
+    n_emb = y_embed.shape[0]
+    if isinstance(max_n, str):
+        if max_n != 'full':
+            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
+        if n_emb > 5000:
+            logger.warning(f"{n_emb} embedded points exceeds 5000 with max_n='full'; the kernel "
+                           'eigendecomposition may take several seconds')
+    elif n_emb > max_n:
+        logger.warning(f'Cropping to the first {int(max_n)} of {n_emb} embedded points for kernel PCA '
+                       '(memory/time cap, not a convergence point)')
+        y_embed = y_embed[:int(max_n)]
+    n = y_embed.shape[0]
+    if n - 1 < m:
+        logger.warning(f'Not enough embedded points ({n}) after cropping for a rank-{m} kernel PCA')
+        return np.nan
+
+    # Linear PCA on the (possibly cropped) embedded points, for comparison
+    latent_lin = PCA().fit(y_embed).explained_variance_
+    stats_lin = _spectrum_stats(latent_lin / np.sum(latent_lin), m)
+
+    # Kernel PCA with an RBF kernel, whose bandwidth is the median heuristic: the median of
+    # the pairwise squared distances sets the kernel's length scale to the data's own typical
+    # point-to-point spacing
+    sq_dist = squareform(pdist(y_embed, 'sqeuclidean'))
+    med_sq_dist = np.median(sq_dist[~np.eye(n, dtype=bool)])
+    if med_sq_dist == 0:  # all embedded points coincide
+        return np.nan
+    kmat = np.exp(-sq_dist / med_sq_dist)
+
+    # Center the kernel matrix in feature space
+    one_n = np.full((n, n), 1 / n)
+    kc = kmat - one_n @ kmat - kmat @ one_n + one_n @ kmat @ one_n
+    kc = (kc + kc.T) / 2  # symmetrize away numerical asymmetry
+
+    # The eigenvalues of the centered kernel matrix are N times those of the empirical
+    # covariance operator in feature space, but the constant factor cancels in the normalized
+    # spectrum. Small negative values are numerical noise (the matrix is positive
+    # semi-definite in theory)
+    eig_k = np.sort(np.linalg.eigvalsh(kc))[::-1]
+    eig_k[eig_k < 0] = 0
+    if np.sum(eig_k) == 0 or eig_k[m - 1] == 0:
+        logger.warning('Kernel PCA produced a degenerate (near-zero-rank) spectrum')
+        return np.nan
+    stats_kern = _spectrum_stats(eig_k / np.sum(eig_k), m)
+
+    out = dict(stats_kern)
+    # Ratios and differences of matched linear and kernel spectrum statistics, the
+    # nonlinearity signal. The kernel spectrum is *always* less compact than the linear one in
+    # absolute terms (not itself the signal); what differs by system is *how much* less
+    # compact: on a genuinely low-dimensional nonlinear manifold, kernel PCA still finds much
+    # more compact structure than it does for a linear/stochastic process, so the ratios sit
+    # closer to 1.
+    out['top2_ratio'] = stats_kern['top2'] / stats_lin['top2']
+    out['top2_diff'] = stats_kern['top2'] - stats_lin['top2']
+    out['nto80_ratio'] = stats_kern['nto80'] / stats_lin['nto80']
+    out['nto80_diff'] = stats_kern['nto80'] - stats_lin['nto80']
+    out['nto50_ratio'] = stats_kern['nto50'] / stats_lin['nto50']
+    out['std_ratio'] = stats_kern['std'] / stats_lin['std']
+    return out
