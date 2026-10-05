@@ -1,7 +1,8 @@
+import re
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.signal import lfilter, resample_poly
-from statsmodels.tsa.tsatools import detrend
+from scipy.stats import boxcox
 import logging
 logger = logging.getLogger('pyhctsa')
 
@@ -10,145 +11,154 @@ from ..operations.stationarity import sliding_window, stat_av
 from ..utils import z_score
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
-    """Apply a length-k median filter to a 1D array x.
-    
+    """Apply a length-k median filter to a 1D array x, as MATLAB's ``medfilt1``.
+
+    The ends are padded with zeros (``medfilt1``'s default ``'zeropad'``), so the
+    first and last samples are medians that include zeros, not the edge values.
     For odd k, y(i) is the median of x[i-(k-1)//2 : i+(k-1)//2+1]
     For even k, y(i) is the median of x[i-k//2 : i+k//2]
-    
+
     Based on: https://gist.github.com/bhawkins/3535131.
     """
     assert k > 0, "Median filter length must be positive."
     assert x.ndim == 1, "Input must be one-dimensional."
-    
+
     if k % 2 == 1:
-        # Odd case: symmetric window
-        k2 = (k - 1) // 2
-        left_pad = k2
-        right_pad = k2
+        left_pad = right_pad = (k - 1) // 2
     else:
-        # Even case: asymmetric window (more on the left)
         left_pad = k // 2
         right_pad = k // 2 - 1
-    
-    y = np.zeros((len(x), k), dtype=x.dtype)
-    y[:, left_pad] = x
-    
-    # Fill left side of the window
-    for i in range(left_pad):
-        j = left_pad - i
-        y[j:, i] = x[:-j]
-        y[:j, i] = x[0]
-    
-    # Fill right side of the window
-    for i in range(right_pad):
-        j = i + 1
-        y[:-j, left_pad + j] = x[j:]
-        y[-j:, left_pad + j] = x[-1]
-    
+
+    n = len(x)
+    xp = np.concatenate([np.zeros(left_pad, dtype=float), np.asarray(x, dtype=float),
+                         np.zeros(right_pad, dtype=float)])
+    y = np.empty((n, k))
+    for i in range(k):
+        y[:, i] = xp[i:i + n]
     return np.median(y, axis=1)
 
-def _safe_divide(num, denom):
-    """Return num/denom, or np.nan if denom is zero."""
-    return num / denom if denom != 0 else np.nan
+def _norm_diff(proc: float, orig: float) -> float:
+    """Normalized difference (proc - orig) / (proc + orig) of two positive numbers.
 
-def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf') -> dict:
+    Lies in [-1, 1], is 0 when nothing changes (and, by convention, when both are 0),
+    and equals tanh(log(proc / orig) / 2): a bounded version of the log-ratio that
+    stays finite when the original value is near 0, where a plain ratio is unstable.
     """
-    Compare time-series properties before and after pre-processing.
+    if proc + orig == 0:
+        return 0.0
+    return (proc - orig) / (proc + orig)
 
-    Applies a specified pre-processing transformation to the input time series
-    and evaluates how selected statistical properties change relative to the
-    original series.
+
+def _diff(proc: float, orig: float) -> float:
+    """Difference, processed minus original (for statistics that can be negative or zero)."""
+    return proc - orig
+
+
+def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
+    """
+    How time-series properties change after a preprocessing step.
+
+    Applies a given preprocessing transformation (detrending, differencing,
+    filtering or resampling) to the time series, z-scores the original and the
+    processed series, and returns the change in each of a set of statistics from its
+    value for the original to its value for the processed series. The statistics compare
+    stationarity measures (StatAv, and the variation of the local mean and of the
+    local standard deviation across windows), distributional fits (a Gaussian fit
+    to the kernel-smoothed distribution, and the discrepancy from a fitted normal
+    distribution) and the effect of trimming outliers.
+
+    The change is the difference (processed minus original) for statistics that can be
+    negative or zero, and the normalized difference (processed - original) /
+    (processed + original) for positive statistics. The latter is between -1 and 1, is 0
+    when nothing changes, and equals tanh(log(processed / original) / 2), a bounded
+    version of the log-ratio that stays finite when the original value is near 0, where
+    a plain ratio is unstable.
 
     Parameters
     ----------
     y : array-like
         Input time series.
     detrend_meth : str, optional
-        Pre-processing method to apply.
+        The preprocessing to apply:
 
-        - ``"poly<n>"``  : polynomial detrend of order n (1 <= n <= 9)
-        - ``"diff<n>"``  : n successive differences
-        - ``"medianf<n>"``: median filter, window length n (odd)
-        - ``"rav<n>"``   : moving average, window size n
-        - ``"resample_<P>_<Q>"`` : resample by factor P/Q
+        - ``"poly<n>"``  : remove a polynomial of order n = 1-9, e.g., ``"poly1"``
+          is a linear detrending
+        - ``"diff<n>"``  : n successive differences, e.g., ``"diff1"``
+        - ``"medianf<n>"``: running median filter of length n (zero-padded at the
+          ends, like MATLAB's ``medfilt1``), e.g., ``"medianf3"``
+        - ``"rav<n>"``   : running mean filter of length n, e.g., ``"rav5"``
+        - ``"resample_<p>_<q>"`` : resample by the ratio p/q; e.g., ``"resample_1_2"``
+          halves the length and ``"resample_10_1"`` multiplies it by 10
+        - ``"logr"``     : log returns (positive data only; otherwise NaN)
+        - ``"boxcox"``   : a Box-Cox transformation (positive data only; otherwise NaN)
 
-        Default is ``"medianf"``.
+        Default is ``"medianf3"``.
 
     Returns
     -------
     dict
-        Comparison of stationarity and distributional measures between the
-        original and transformed time series.
+        The change, from the original to the processed series, of each of these
+        statistics (all of the series are z-scored first).
+
+        Normalized differences (positive statistics):
+
+        - ``statav2``: StatAv with 2 segments (``stat_av``)
+        - ``swms2_2``, ``swms5_1``, ``swms10_1``: the standard deviation of the window
+          means across windows (``sliding_window`` 'mean'), with 2 windows overlapping
+          by half, and 5 and 10 non-overlapping windows
+        - ``swss2_1``, ``swss5_1``, ``swss10_1``: the same for the window standard
+          deviations (``sliding_window`` 'std')
+        - ``olbt_s5``: the standard deviation after trimming the 5% most extreme values
+          at each end, relative to that of the full series (``outlier_test``)
+
+        Differences (statistics that can be negative or zero):
+
+        - ``olbt_m2``, ``olbt_m5``: the mean after trimming the 2% and 5% most extreme
+          values at each end (``outlier_test``)
+
+        A scalar NaN is returned if the processed series is identically zero (or, for
+        ``'logr'`` and ``'boxcox'``, if the data are not all positive).
     """
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float)
+    N = len(y)
 
     # ------------------------------------------------------------------
     # Apply preprocessing: y (raw) -> y_d (detrended/transformed)
     # ------------------------------------------------------------------
-    y_d = None
+    if (m := re.fullmatch(r'poly([1-9])', detrend_meth)):
+        # 1) Polynomial detrend
+        order = int(m.group(1))
+        r = np.arange(1, N + 1, dtype=float)
+        y_d = y - np.polynomial.Polynomial.fit(r, y, order)(r)
 
-    # 1) Polynomial detrend
-    if 'poly' in detrend_meth:
-        order = detrend_meth.removeprefix("poly")
-        if not order:
-            raise ValueError(f"Could not detect an order for polynomial: {detrend_meth}. "
-                             "Choose poly<o> where o is an integer between 1 and 9, e.g., poly1.")
-        try:
-            order = int(order)
-        except ValueError:
-            logger.warning(f"Could not convert order: `{order}' to integer.")
-        y_d = detrend(y, order=order, axis=0)
+    elif (m := re.fullmatch(r'diff(\d)', detrend_meth)):
+        # 4) Differencing
+        y_d = np.diff(y, n=int(m.group(1)))
 
-    # 2) Differencing
-    elif 'diff' in detrend_meth:
-        ndiff = detrend_meth.removeprefix("diff")
-        if not ndiff:
-            raise ValueError(f"Could not detect num diffs for diff: {detrend_meth}. "
-                             "Choose diff<n> where n is an integer > 0, e.g., diff1.")
-        try:
-            ndiff = int(ndiff)
-        except ValueError:
-            logger.warning(f"Could not convert ndiff: `{ndiff}' to integer.")
-        y_d = np.diff(y, n=ndiff, axis=0)
+    elif (m := re.fullmatch(r'medianf(\d+)', detrend_meth)):
+        # 5) Median filter
+        y_d = _med_filt_1d(y, int(m.group(1)))
 
-    # 3) Median filter
-    elif 'medianf' in detrend_meth:
-        med_ord = detrend_meth.removeprefix("medianf")
-        if not med_ord:
-            raise ValueError(f"Could not detect median filter order for median filter: {detrend_meth}. "
-                             "Choose medianf<n> where n is an integer >= 3, e.g., medianf3.")
-        try:
-            med_ord = int(med_ord)
-        except ValueError:
-            logger.warning(f"Could not convert median order: `{med_ord}' to integer.")
-        y_d = _med_filt_1d(y, med_ord)
+    elif (m := re.fullmatch(r'rav(\d+)', detrend_meth)):
+        # 6) Running average
+        n = int(m.group(1))
+        y_d = lfilter(np.ones(n) / n, [1], y)
 
-    # 4) Running average
-    elif 'rav' in detrend_meth:
-        rav_wsize = detrend_meth.removeprefix("rav")
-        if not rav_wsize:
-            raise ValueError(f"Could not detect running average window size for wsize: {detrend_meth}. "
-                             "Choose rav<n> where n is an integer > 1, e.g., rav4.")
-        try:
-            rav_wsize = int(rav_wsize)
-        except ValueError:
-            logger.warning(f"Could not convert running average window size: `{rav_wsize}' to integer.")
-        y_d = lfilter(np.ones(rav_wsize) / rav_wsize, [1], y)
+    elif (m := re.fullmatch(r'resample_(\d+)_(\d+)', detrend_meth)):
+        # 7) Resample
+        y_d = resample_poly(y, int(m.group(1)), int(m.group(2)))
 
-    # 5) Resample
-    elif 'resample' in detrend_meth:
-        rs_params = detrend_meth.removeprefix("resample_")
-        if not rs_params:
-            raise ValueError(f"Could not detect resample parameters P_Q: {detrend_meth}. "
-                             "Choose resample_<P>_<Q> where P is the upsampling factor and Q "
-                             "is the downsampling factor.")
-        P, Q = rs_params.split("_")
-        try:
-            P = int(P)
-            Q = int(Q)
-        except ValueError as e:
-            raise e
-        y_d = resample_poly(y, P, Q)
+    elif detrend_meth == 'logr':
+        # 8) Log returns
+        if not np.all(y > 0):
+            return np.nan
+        y_d = np.diff(np.log(y))
+
+    elif detrend_meth == 'boxcox':
+        # 9) Box-Cox transformation
+        if not np.all(y > 0):
+            return np.nan
+        y_d = boxcox(y)[0]
 
     else:
         raise ValueError(f"Invalid detrending method '{detrend_meth}'")
@@ -168,28 +178,22 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf') -> dict:
     out = {}
 
     # 1) Stationarity
-    for seg in [2, 4, 6, 8, 10]:
-        num = stat_av(y_d, 'seg', seg)
-        denom = stat_av(y, 'seg', seg)
-        out[f'statav{seg}'] = _safe_divide(num, denom)
+    # (a) StatAv
+    out['statav2'] = _norm_diff(stat_av(y_d, 'seg', 2), stat_av(y, 'seg', 2))
 
-    # which reproduces the overwrite and omits swms10_2.
-    for win, step in [(2, 2), (5, 1), (5, 2), (10, 1), (10, 2)]:
-        num = sliding_window(y_d, 'mean', 'std', win, step)
-        denom = sliding_window(y, 'mean', 'std', win, step)
-        out[f'swms{win}_{step}'] = _safe_divide(num, denom)
+    # (b) Sliding window mean
+    for win, step in [(2, 2), (5, 1), (10, 1)]:
+        out[f'swms{win}_{step}'] = _norm_diff(sliding_window(y_d, 'mean', 'std', win, step),
+                                              sliding_window(y, 'mean', 'std', win, step))
 
-    # Sliding window std
-    for win, step in [(2, 1), (2, 2), (5, 1), (5, 2), (10, 1), (10, 2)]:
-        num = sliding_window(y_d, 'std', 'std', win, step)
-        denom = sliding_window(y, 'std', 'std', win, step)
-        out[f'swss{win}_{step}'] = _safe_divide(num, denom)
+    # (c) Sliding window std
+    for win, step in [(2, 1), (5, 1), (10, 1)]:
+        out[f'swss{win}_{step}'] = _norm_diff(sliding_window(y_d, 'std', 'std', win, step),
+                                              sliding_window(y, 'std', 'std', win, step))
 
     # 3) Outliers
-    for thresh, method in [(2, 'mean'), (5, 'mean'), (5, 'std')]:
-        num = outlier_test(y_d, thresh, method)
-        denom = outlier_test(y, thresh, method)
-        key = f'olbt_{"m" if method == "mean" else "s"}{thresh}'
-        out[key] = _safe_divide(num, denom)
+    out['olbt_m2'] = _diff(outlier_test(y_d, 2, 'mean'), outlier_test(y, 2, 'mean'))
+    out['olbt_m5'] = _diff(outlier_test(y_d, 5, 'mean'), outlier_test(y, 5, 'mean'))
+    out['olbt_s5'] = _norm_diff(outlier_test(y_d, 5, 'std'), outlier_test(y, 5, 'std'))
 
     return out
