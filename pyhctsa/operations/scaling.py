@@ -478,7 +478,7 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
     for si, s_val in enumerate(s_list):
         for qi, q_val in enumerate(q_list):
             mask = (
-                (fqs_ll[:, 0] == q_val)
+                (np.abs(fqs_ll[:, 0] - q_val) < 1e-8)
                 & (fqs_ll[:, 1] >= s_val)
                 & (fqs_ll[:, 1] <= 5 * s_val)
             )
