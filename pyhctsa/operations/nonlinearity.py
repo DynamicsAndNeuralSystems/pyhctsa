@@ -4675,3 +4675,357 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
     out['bestscrd'] = sc[longest, 3]
     out['longestscr'] = np.max(sc[:, 5])
     return out
+
+
+@njit(cache=True)
+def _tisean_rnd_deltas(n, seed):
+    """TISEAN's ``rnd_init(seed)``, 10000 warm-up calls of ``rnd_long``, then ``n * n`` values
+    ``rnd_long() / ULONG_MAX`` (the random starting vectors of ``lyap_spec``)."""
+    factor = np.uint64(13) ** np.uint64(13)
+    arr = np.empty(9689, dtype=np.uint64)
+    arr[0] = np.uint64(seed)
+    for i in range(1, 9689):
+        arr[i] = factor * arr[i - 1] + np.uint64(1)
+    t, t1, t2, t3 = 9688, 9688 - 157, 9688 - 314, 9688 - 471
+    out = np.empty((n, n))
+    for c in range(10000 + n * n):
+        t = (t + 1) % 9689
+        t1 = (t1 + 1) % 9689
+        t2 = (t2 + 1) % 9689
+        t3 = (t3 + 1) % 9689
+        arr[t] = arr[t] ^ arr[t1] ^ arr[t2] ^ arr[t3]
+        if c >= 10000:
+            out[(c - 10000) // n, (c - 10000) % n] = np.float64(arr[t]) / 18446744073709551615.0
+    return out
+
+
+@njit(cache=True)
+def _gram_schmidt(delta):
+    """Orthonormalize the rows of ``delta`` in place (classical Gram-Schmidt, as TISEAN); returns
+    their lengths before normalization."""
+    n = delta.shape[0]
+    dnew = np.zeros((n, n))
+    stretch = np.zeros(n)
+    for i in range(n):
+        diff = np.zeros(n)
+        for j in range(i):
+            nrm = 0.0
+            for k in range(n):
+                nrm += delta[i, k] * dnew[j, k]
+            for k in range(n):
+                diff[k] -= nrm * dnew[j, k]
+        nrm = 0.0
+        for j in range(n):
+            nrm += (delta[i, j] + diff[j]) ** 2
+        nrm = np.sqrt(nrm)
+        stretch[i] = nrm
+        for j in range(n):
+            dnew[i, j] = (delta[i, j] + diff[j]) / nrm
+    delta[:, :] = dnew
+    return stretch
+
+
+@njit(cache=True)
+def _solve_in_place(mat, vec):
+    """TISEAN's ``solvele`` (Gaussian elimination with row pivoting, in place); False if singular."""
+    n = vec.size
+    for i in range(n - 1):
+        mx = abs(mat[i, i])
+        maxi = i
+        for j in range(i + 1, n):
+            if abs(mat[j, i]) > mx:
+                mx = abs(mat[j, i])
+                maxi = j
+        if maxi != i:
+            for c in range(n):
+                tmp = mat[i, c]
+                mat[i, c] = mat[maxi, c]
+                mat[maxi, c] = tmp
+            tmp = vec[i]
+            vec[i] = vec[maxi]
+            vec[maxi] = tmp
+        pivot = mat[i, i]
+        if pivot == 0.0:
+            return False
+        for j in range(i + 1, n):
+            q = -mat[j, i] / pivot
+            mat[j, i] = 0.0
+            for k in range(i + 1, n):
+                mat[j, k] += q * mat[i, k]
+            vec[j] += q * vec[i]
+    vec[n - 1] /= mat[n - 1, n - 1]
+    for i in range(n - 2, -1, -1):
+        for j in range(n - 1, i, -1):
+            vec[i] -= mat[i, j] * vec[j]
+        vec[i] /= mat[i, i]
+    return True
+
+
+_LYAP_BOX = 512  # cells per axis of the neighbor search grid, as in lyap_spec.c
+
+
+@njit(cache=True)
+def _lyap_neighbors(S, act, theiler, k_nn, epsmin, box, link, found, dist):
+    """
+    The neighbors of point ``act`` as TISEAN's ``lyap_spec`` finds them, in its order: a grid of cells
+    (on the first and last coordinates) of side epsilon, grown by 1.2 until more than ``k_nn`` points
+    lie within epsilon in every coordinate (the point itself, and the points inside the Theiler
+    window dropped); the ``k_nn`` nearest of them, by the selection sort in ``sort()`` (so ties are
+    resolved as there). Returns (number found, average distance of the last neighbor).
+    """
+    L, m = S.shape
+    nl = L - 1  # points that have a successor
+    ib = _LYAP_BOX - 1
+    epsilon = epsmin / 1.2
+    nfound = 0
+    foundeps = 0.0
+    while True:
+        epsilon *= 1.2
+        if epsilon > 1.0:
+            epsilon = 1.0
+        for x in range(_LYAP_BOX):
+            for y in range(_LYAP_BOX):
+                box[x, y] = -1
+        for i in range(nl):
+            x = int(S[i, 0] / epsilon) & ib
+            y = int(S[i, m - 1] / epsilon) & ib
+            link[i] = box[x, y]
+            box[x, y] = i
+        nfound = 0
+        i0 = int(S[act, 0] / epsilon) & ib
+        j0 = int(S[act, m - 1] / epsilon) & ib
+        for i1 in range(i0 - 1, i0 + 2):
+            for j1 in range(j0 - 1, j0 + 2):
+                element = box[i1 & ib, j1 & ib]
+                while element != -1:
+                    inside = True
+                    for c in range(m):
+                        if abs(S[act, c] - S[element, c]) > epsilon:
+                            inside = False
+                            break
+                    if inside:
+                        found[nfound] = element
+                        nfound += 1
+                    element = link[element]
+        if theiler > 0:  # drop neighbors within the Theiler window (the point itself is kept)
+            kept = 0
+            for q in range(nfound):
+                if found[q] == act or abs(found[q] - act) > theiler:
+                    found[kept] = found[q]
+                    kept += 1
+            nfound = kept
+        if nfound > k_nn:
+            # sort(): distances to all but the point itself, which is swapped to the end
+            self_at = 0
+            for q in range(nfound):
+                if found[q] != act:
+                    d = 0.0
+                    for c in range(m):
+                        dx = abs(S[act, c] - S[found[q], c])
+                        if dx > d:
+                            d = dx
+                    dist[q] = d
+                else:
+                    self_at = q
+            if self_at != nfound - 1:
+                dist[self_at] = dist[nfound - 1]
+                found[self_at] = found[nfound - 1]
+            for i in range(k_nn):
+                for j in range(i + 1, nfound - 1):
+                    if dist[j] < dist[i]:
+                        tmp = dist[i]
+                        dist[i] = dist[j]
+                        dist[j] = tmp
+                        tmpi = found[i]
+                        found[i] = found[j]
+                        found[j] = tmpi
+            return k_nn, dist[k_nn - 1]
+        if epsilon >= 1.0:
+            break
+    return nfound, foundeps
+
+
+@njit(cache=True)
+def _lyap_spec_sums(S, k_nn, theiler, seed):
+    """
+    Sano and Sawada's method as in TISEAN's ``lyap_spec`` for the m columns of ``S`` (each
+    rescaled to [0, 1]) as the state, mapped forward one sample: at each point a local affine
+    map is fitted to the next values of its ``k_nn`` nearest neighbors (max norm, outside the
+    Theiler window), and a set of m tangent vectors is carried along it and re-orthonormalized.
+    Returns the status (0 ok, 50 too few neighbors, 1 singular fit), the sums of the log
+    stretching rates and the number of steps.
+    """
+    L, m = S.shape
+    delta = _tisean_rnd_deltas(m, seed)
+    _gram_schmidt(delta)
+    factor = np.zeros(m)
+    nl = L - 1
+    dyn = np.zeros((m, m))
+    mat = np.zeros((m + 1, m + 1))
+    hmat = np.zeros((m + 1, m + 1))
+    imat = np.zeros((m + 1, m + 1))
+    vec = np.zeros(m + 1)
+    dist = np.empty(nl)
+    found = np.empty(nl, dtype=np.int64)
+    link = np.empty(nl, dtype=np.int64)
+    box = np.empty((_LYAP_BOX, _LYAP_BOX), dtype=np.int64)
+    epsmin = 1e-3
+    aveps = 0.0
+    count = 0
+    for act in range(nl):
+        count += 1
+        nf, foundeps = _lyap_neighbors(S, act, theiler, k_nn, epsmin, box, link, found, dist)
+        aveps += foundeps
+        epsmin = aveps / count  # the neighborhood size to start the next search with
+        if nf < k_nn:
+            return 50, factor, count
+        # normal equations of the local affine fit
+        mat[:, :] = 0.0
+        for a in range(nf):
+            p = found[a]
+            mat[0, 0] += 1.0
+            for j in range(m):
+                mat[0, j + 1] += S[p, j]
+            for j in range(m):
+                for k in range(j, m):
+                    mat[j + 1, k + 1] += S[p, k] * S[p, j]
+        for i in range(m + 1):
+            for j in range(i, m + 1):
+                mat[i, j] = mat[i, j] / nf
+                mat[j, i] = mat[i, j]
+        for i in range(m + 1):  # invert column by column
+            for j in range(m + 1):
+                vec[j] = 1.0 if i == j else 0.0
+                hmat[j, :] = mat[j, :]
+            if not _solve_in_place(hmat, vec):
+                return 1, factor, count
+            imat[:, i] = vec
+        for d in range(m):
+            vec[:] = 0.0
+            for a in range(nf):
+                p = found[a]
+                hv = S[p + 1, d]
+                vec[0] += hv
+                for j in range(m):
+                    vec[j + 1] += hv * S[p, j]
+            vec /= nf
+            for i in range(1, m + 1):
+                dyn[d, i - 1] = 0.0
+                for j in range(m + 1):
+                    dyn[d, i - 1] += imat[i, j] * vec[j]
+        dnew = np.zeros((m, m))  # carry the tangent vectors along the local map
+        for i in range(m):
+            for j in range(m):
+                dnew[i, j] = dyn[j, 0] * delta[i, 0]
+                for k in range(1, m):
+                    dnew[i, j] += dyn[j, k] * delta[i, k]
+        delta[:, :] = dnew
+        stretch = _gram_schmidt(delta)
+        for j in range(m):
+            factor[j] += np.log(stretch[j])
+    return 0, factor, count
+
+
+def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: int = 30,
+              max_n: Union[int, str] = 10000, theiler_win: Union[int, float, list, tuple] = ('ac', 1),
+              random_seed: int = 42) -> Union[dict, float]:
+    """
+    The spectrum of Lyapunov exponents of the delay-embedded trajectory.
+
+    Estimates all ``m`` exponents (not just the largest, cf. :func:`largest_lyap`) with TISEAN's
+    ``lyap_spec``, an implementation of the method of Sano and Sawada: local affine maps of the
+    embedded trajectory are fitted to the neighbors of each point, and tangent vectors propagated
+    along them with periodic orthonormalization. From the spectrum come the rate of
+    volume contraction (the sum of the exponents) and the Kaplan-Yorke estimate of the
+    attractor's dimension. The routine is run in process (a port of ``lyap_spec.c``, which
+    reproduces the TISEAN binary, including its random initial vectors).
+
+    A little noise (0.001 of the standard deviation) is added to the series first, so that the
+    local fits are well posed for quantized series; ``random_seed`` seeds it (NumPy's generator,
+    not MATLAB's ``rng(42)`` stream).
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    tau_method : int or str, optional
+        The time delay of the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``). Default is 1.
+    m : int, optional
+        The embedding dimension, and the number of exponents estimated (at least 3). Default is 3.
+    k_nn : int, optional
+        The number of neighbors used for each local fit. Default is 30.
+    max_n : int or 'full', optional
+        The maximum number of samples (the series is cropped to its first ``max_n`` samples), or
+        ``'full'``. Default is 10000.
+    theiler_win : int, float, or ``['ac', k]``, optional
+        The Theiler window (see :func:`pyhctsa.utils.theiler_window`): neighbors closer in time
+        than this are not used. Default is ``['ac', 1]``.
+    random_seed : int, optional
+        Seed of the added noise. Default is 42.
+
+    Returns
+    -------
+    dict
+        ``LE1``, ``LE2``, ``LE3`` (the three largest exponents, per sample), ``sumPos`` and
+        ``numPos`` (the sum and number of positive exponents), ``sumAll`` (their sum) and ``KYdim``
+        (the Kaplan-Yorke dimension). NaN if the delay or Theiler window cannot be set, the
+        series is too short for the fits (fewer than ``10 * k_nn + 2 * theiler_win`` embedded
+        points), TISEAN finds too few neighbors, or an exponent is not finite.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    if isinstance(max_n, str):
+        if max_n != 'full':
+            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
+        if n > 50000:
+            logger.warning(f"Time series ({n} samples) is long for max_n='full'; the computation may be slow")
+    elif n > max_n:
+        logger.warning(f'Time series ({n} samples) exceeds max_n = {max_n}; analyzing the first {int(max_n)} samples')
+        y = y[:int(max_n)]
+        n = y.size
+    if m < 3:
+        raise ValueError('The embedding dimension, m, must be at least 3 (the outputs include LE3)')
+
+    y = y + 0.001 * np.std(y, ddof=1) * np.random.RandomState(random_seed).randn(n)
+
+    params = _embedding_params(y, tau_method, m)
+    if params is None:
+        logger.warning('Could not determine a suitable time delay for this time series')
+        return np.nan
+    tau, m = params
+    theiler = theiler_window(y, theiler_win, n)
+    if np.isnan(theiler):
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    theiler = int(theiler)
+
+    n_emb = n - (m - 1) * tau
+    if n_emb < 10 * k_nn + 2 * theiler:
+        logger.warning(f'Time series too short to estimate the Lyapunov spectrum (N = {n}, tau = {tau}, m = {m})')
+        return np.nan
+    # the embedding as TISEAN reads it (BF writes seven significant digits), each column rescaled
+    emb = np.array([[float('%.7g' % v) for v in y[j * tau:j * tau + n_emb]] for j in range(m)]).T
+    span = emb.max(axis=0) - emb.min(axis=0)
+    if np.any(span == 0):
+        return np.nan
+    status, factor, count = _lyap_spec_sums((emb - emb.min(axis=0)) / span, int(k_nn), theiler, 0x098342)
+    if status != 0:
+        return np.nan
+    # (TISEAN prints the averages with %e)
+    le = np.array([float('%e' % (f / count)) for f in factor])
+    if not np.all(np.isfinite(le)):
+        return np.nan
+
+    out = {'LE1': le[0], 'LE2': le[1], 'LE3': le[2]}
+    out['sumPos'] = np.sum(le[le > 0])
+    out['numPos'] = int(np.sum(le > 0))
+    out['sumAll'] = np.sum(le)
+    cum = np.cumsum(le)
+    below = np.flatnonzero(cum < 0)
+    if below.size == 0:
+        out['KYdim'] = float(m)
+    else:
+        pos_k = int(below[0])  # the number of leading exponents whose cumulative sum is not negative
+        out['KYdim'] = 0.0 if pos_k == 0 else pos_k + cum[pos_k - 1] / abs(le[pos_k])
+    return out

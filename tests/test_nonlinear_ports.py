@@ -82,3 +82,29 @@ def test_tisean_c1():
     assert np.isnan(nl.tisean_c1(x[:520], 2, [3, 6], 0.05, 0.3))
     with pytest.raises(ValueError):
         nl.tisean_c1(x, 'nonsense')
+
+
+def _henon(n):
+    a, b, x = 1.4, 0.3, [0.1, 0.1]
+    for _ in range(n + 100):
+        x.append(1 - a * x[-1] ** 2 + b * x[-2])
+    x = np.array(x[102:])
+    return (x - x.mean()) / x.std(ddof=1)
+
+
+def test_lyap_spec():
+    # the TISEAN lyap_spec binary, run on the same noisy embedding (the noise is NumPy's, seed 42)
+    d = nl.lyap_spec(_henon(800), 1, 3, 30, 'full', ('ac', 1))
+    assert abs(d['LE1'] - 0.4855535) < 1e-9 and abs(d['LE2'] - 0.2755861) < 1e-9
+    assert abs(d['LE3'] + 1.741517) < 1e-9
+    assert d['numPos'] == 2 and abs(d['sumPos'] - 0.7611396) < 1e-9
+    assert abs(d['sumAll'] + 0.9803774) < 1e-9 and abs(d['KYdim'] - 2.437056) < 1e-6
+    d = nl.lyap_spec(_x(600), 1, 3, 30, 'full', ('ac', 1))
+    assert abs(d['LE1'] + 0.03207696) < 1e-9 and abs(d['LE3'] + 0.3943573) < 1e-9
+    assert d['numPos'] == 0 and d['KYdim'] == 0
+    d = nl.lyap_spec(_x(600), 2, 4, 20, 'full', ('ac', 1))
+    assert abs(d['LE2'] + 0.1008012) < 1e-9
+    assert np.isnan(nl.lyap_spec(_x(600)[:200], 1, 3, 30))  # too short for the local fits
+    assert np.isnan(nl.lyap_spec(np.ones(500)))
+    with pytest.raises(ValueError):
+        nl.lyap_spec(_x(600), 1, 2)
