@@ -4878,8 +4878,8 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
     reproduces the TISEAN binary, including its random initial vectors).
 
     A little noise (0.001 of the standard deviation) is added to the series first, so that the
-    local fits are well posed for quantized series; ``random_seed`` seeds it (NumPy's generator,
-    not MATLAB's ``rng(42)`` stream).
+    local fits are well posed for quantized series; ``random_seed`` seeds it (the portable
+    generator :func:`~pyhctsa.robust.bf_random`, so the dither is the same as hctsa's).
 
     Parameters
     ----------
@@ -4898,8 +4898,8 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
     theiler_win : int, float, or ``['ac', k]``, optional
         The Theiler window (see :func:`pyhctsa.utils.theiler_window`): neighbors closer in time
         than this are not used. Default is ``['ac', 1]``.
-    random_seed : int, optional
-        Seed of the added noise. Default is 42.
+    random_seed : int or str, optional
+        Seed of the added noise (see :func:`_bf_random_seed`). Default is 42.
 
     Returns
     -------
@@ -4915,7 +4915,7 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
     if m < 3:
         raise ValueError('The embedding dimension, m, must be at least 3 (the outputs include LE3)')
 
-    y = y + 0.001 * np.std(y, ddof=1) * np.random.RandomState(random_seed).randn(n)
+    y = y + 0.001 * np.std(y, ddof=1) * bf_random(n, _bf_random_seed(random_seed), 'normal')
 
     params = _embedding_params(y, tau_method, m)
     if params is None:
