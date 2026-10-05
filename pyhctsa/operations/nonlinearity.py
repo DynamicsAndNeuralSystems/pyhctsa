@@ -291,8 +291,8 @@ def _ms_embed(z, v, w):
 
     return x, y
 
-def _ms_nlpe(y: ArrayLike, de: int, tau: int) -> float:
-    # helper function for nlpe
+def _ms_nlpe(y: ArrayLike, de: int, tau: int, theiler_win: int = 0) -> float:
+    # helper function for nlpe (hctsa's MS_nlpe, with its Theiler-window argument)
     y = np.asarray(y, dtype=float)
 
     # Case 1: y is already a matrix (pre-embedded)
@@ -333,7 +333,16 @@ def _ms_nlpe(y: ArrayLike, de: int, tau: int) -> float:
         for i in range(de_dim):
             diff = x[i, np.newaxis, :] - x[i, start:stop, np.newaxis]
             rows += diff ** 2
+        # MS_nlpe adds 1 to every off-diagonal squared distance (its way of excluding the
+        # point itself): it only matters for near-ties, which it rounds to exact ties,
+        # so the nearest neighbor (first index) of quantized series matches the original.
+        rows += 1.0
         rows[np.arange(stop - start), np.arange(start, stop)] = np.inf # exclude self
+        if theiler_win > 0:  # also exclude neighbors within a Theiler window in time
+            lo = np.maximum(np.arange(start, stop) - theiler_win, 0)
+            hi = np.minimum(np.arange(start, stop) + theiler_win + 1, n)
+            cols = np.arange(n)[np.newaxis, :]
+            rows[(cols >= lo[:, np.newaxis]) & (cols < hi[:, np.newaxis])] = np.inf
         near[start:stop] = np.argmin(rows, axis=1)
 
     e = y[near] - y  # now y is (m,) so y[near] works correctly
@@ -394,12 +403,15 @@ def nsamdf(x: ArrayLike, fs: Union[float, int] = 1.0, win_len_rel: Union[int, fl
 
     return out
 
-def nlpe(y: ArrayLike, de: int = 3, tau: Union[int, str] = 1, max_n: int = 5000) -> dict:
+def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
+         max_n: Union[int, str] = 5000,
+         theiler_win: Union[int, float, list, tuple] = ('ac', 1)) -> dict:
     """
     Normalized drop-one-out constant interpolation nonlinear prediction error.
 
     Computes the nlpe for a time-delay embedded time series using Michael Small's
-    code, nlpe [1].
+    code, nlpe [1]. Neighbors within a Theiler window in time are excluded from
+    the search for the nearest neighbor of each embedded point.
 
     Modifications by Joshua B. Moore for incorporating into pyhctsa.
 
@@ -412,46 +424,73 @@ def nlpe(y: ArrayLike, de: int = 3, tau: Union[int, str] = 1, max_n: int = 5000)
     Parameters
     ----------
     y : array-like
-        Input time series.
-    de : int
-        The embedding dimension. Default is 3.
+        Input time series (should be z-scored).
+    de : int, optional
+        The embedding dimension. Default is 3. (hctsa's ``'fnn'`` option, which
+        sets it by TISEAN's false nearest neighbors, is not yet available.)
     tau : int or str, optional
-        The time-delay. Can be either an integer or ``'ac'`` to use the first
-        zero-crossing of the ACF, or ``'mi'`` to use the first minimum of the
-        automutual information function. Default is 1.
-    max_n : int, optional
-        The maximum length of the time series on which to compute the nlpe.
-        Default is 5000.
+        The time-delay: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
+        autocorrelation function, ``'ac1e'`` the (floored) first 1/e crossing of
+        the autocorrelation function, and ``'mi'`` the smaller of the first
+        minimum of the (Kraskov) automutual information and the 1/e time.
+        Default is 1.
+    max_n : int or 'full', optional
+        The maximum length of the time series on which to compute the nlpe (the
+        first ``max_n`` samples are used), or ``'full'`` to use the whole series
+        (memory use grows quadratically with length). Default is 5000.
+    theiler_win : int, float, or ``['ac', k]``, optional
+        The Theiler window (see :func:`pyhctsa.utils.theiler_window`), computed
+        on the (cropped) series: a number of samples, or ``['ac', k]`` for ``k``
+        times the first zero-crossing of the autocorrelation function. Default
+        is ``['ac', 1]``.
     
     Returns
     -------
     dict
         Measures of the mean error of the nonlinear predictor, and a
         set of measures on the correlation, Gaussianity, etc. of the residuals.
+        Returns NaN if the delay or Theiler window cannot be set, or the series
+        is too short.
     """
-
+    y = np.asarray(y, dtype=float).ravel()
     n = len(y)
 
-    if isinstance(tau, str):
-        tau = _resolve_time_delay(y, tau)
-        # check the tau
-        if np.isnan(tau):
-            logger.warning('Time series cannot be embedded (too short?)')
-            return np.nan
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        logger.warning('Time series cannot be embedded (could not get the time delay)')
+        return np.nan
+    tau = int(tau)
+
     #% nlpe can cause memory pains for long time series
     #% Let's do this dirty cheat
-    if n > max_n:
+    if isinstance(max_n, str):
+        if max_n != 'full':
+            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
+    elif n > max_n:
         # crop the time series to the first max_n samples
-        y = y[:max_n]
+        y = y[:int(max_n)]
         logger.info(f"Michael Small's nlpe code is only being evaluated on the first {max_n} (/{n}) samples.")
-        n = max_n
-    
+        n = int(max_n)
+
     if n < 20: # short time series cause problems
         logger.warning(f'Time series (N = {len(y)}) is too short.')
         return np.nan
 
+    if isinstance(de, str):
+        if de == 'fnn':
+            raise NotImplementedError(
+                "nlpe(de='fnn') needs a port of TISEAN's false_nearest (hctsa's NL_FNN), "
+                "which is not yet available in pyhctsa; pass an integer embedding dimension.")
+        raise ValueError(f"Invalid embedding dimension '{de}'")
+
+    theiler_win = theiler_window(y, theiler_win, n)
+    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+
     # run the nonlinear prediction error code
-    res = _ms_nlpe(y, de, tau)
+    res = _ms_nlpe(y, de, tau, int(theiler_win))
     if np.isscalar(res) and np.isnan(res):
         # a scalar nan has been returned instead of expected array
         return np.nan
