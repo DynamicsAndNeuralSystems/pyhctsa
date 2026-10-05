@@ -2509,6 +2509,11 @@ def is_seasonal(y: ArrayLike) -> int:
     
     return out
 
+def _ml_std(a: np.ndarray) -> float:
+    """MATLAB's ``std``: the sample standard deviation, 0 for a single element."""
+    return float(np.std(a, ddof=1)) if np.size(a) > 1 else 0.0
+
+
 def _ml_max(a, axis=None):
     """MATLAB ``max``: NaNs are omitted (NaN only if every element is NaN)."""
     import warnings
@@ -2526,7 +2531,8 @@ def _ml_min(a, axis=None):
 
 
 def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
-                     hyp0: Union[np.ndarray, None] = None) -> np.ndarray:
+                     hyp0: Union[np.ndarray, None] = None,
+                     noise_pos: Union[tuple, list, None] = None) -> np.ndarray:
     """
     learn GP hyperparameters for the time series ``(tt, yt)``.
 
@@ -2549,8 +2555,22 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
     ``hyp0`` is the initial hyperparameter vector ``[cov..., lik]``; the default is
     the initialization for ``covSum{covSEiso, covNoise}`` (``cov`` must then be
     :class:`CovSEisoNoise`), see :func:`_gp_init_hyp` for the other covariances.
+
+    Noise floor (as hctsa's ``MF_GP_LearnHyperp``): the noise standard deviations (the Gaussian
+    likelihood's, and those of the ``covNoise`` terms, at the 0-based positions ``noise_pos``
+    among the covariance hyperparameters; ``(2,)`` for :class:`CovSEisoNoise`) are bounded
+    below by 1% of the standard deviation of the data. Without a bound the marginal
+    likelihood of a smooth series is nearly flat along a valley in which the noise runs to
+    e^-12 or less, so the fitted noise depends on where the optimizer stops. The bound is a
+    clamp of those hyperparameters inside the objective, with a zero gradient for a clamped
+    coordinate.
     """
     nhps = cov.n_hyp
+    if noise_pos is None:
+        if cov is not CovSEisoNoise:
+            raise ValueError('noise_pos is required for this covariance function')
+        noise_pos = (2,)
+    noise_pos = np.asarray(noise_pos, dtype=int)
     # Initial values, set component by component as in MF_GP_LearnHyperp for
     # covSum{covSEiso, covNoise}: the SE length scale is in the ballpark of the
     # difference between time elements, its log-magnitude starts at zero, the noise
@@ -2559,29 +2579,76 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
         hyp0 = np.array([np.log(np.mean(np.diff(tt))), 0.0, np.log(0.1), np.log(0.1)])
         assert nhps == 3
 
+    with np.errstate(divide='ignore'):
+        noise_floor = np.log(0.01 * np.std(yt, ddof=1))  # lower bound on the log noise standard deviations
+
+    def _clamp(theta):
+        theta = np.array(theta, dtype=float)
+        theta[nhps] = max(theta[nhps], noise_floor)
+        theta[noise_pos] = np.maximum(theta[noise_pos], noise_floor)
+        return theta
+
     def _nlz(theta):
+        # gpml's negative log marginal likelihood with the noise hyperparameters clamped at
+        # the floor (and zero gradient wherever they are clamped)
+        clamp_lik = theta[nhps] < noise_floor
+        clamp_cov = noise_pos[theta[noise_pos] < noise_floor]
+        theta = _clamp(theta)
         hyp = {'cov': theta[:nhps], 'lik': theta[nhps], 'mean': np.zeros(0)}
         nlZ, dnlZ = gp_train(hyp, cov, tt, yt)   # NaN if the inference fails (as gp.m)
-        return nlZ, np.concatenate([dnlZ['cov'], dnlZ['lik'], dnlZ['mean']])
+        d_cov = np.array(dnlZ['cov'], dtype=float)
+        d_lik = np.array(dnlZ['lik'], dtype=float)
+        d_cov[clamp_cov] = 0
+        if clamp_lik:
+            d_lik[:] = 0
+        return nlZ, np.concatenate([d_cov, d_lik, dnlZ['mean']])
 
-    theta, _, _ = minimize(hyp0, _nlz, nfevals)
+    theta, _, _ = minimize(_clamp(hyp0), _nlz, nfevals)
+    theta = _clamp(theta)  # (clamped coordinates can drift: same objective value)
     if not np.all(np.isfinite(theta)):
         raise np.linalg.LinAlgError('GP hyperparameters are not finite')
     return theta
 
 
+def _gp_noise_pos(components: list) -> list:
+    """
+    0-based positions of the ``covNoise`` standard deviations among the covariance
+    hyperparameters, found as ``MF_GP_LearnHyperp`` does (while it sets the initial values):
+    a degree-parameterized component (``covMaterniso``) advances the position by one only, so
+    for ``covMaterniso3_covNoise`` the position found for the noise is the Matern's second
+    hyperparameter (hctsa's convention, as in :func:`_gp_init_hyp`).
+    """
+    pos = 0
+    noise = []
+    for name, degree in components:
+        if degree is not None:
+            pos += 1
+        elif name == 'covSEiso':
+            pos += 2
+        elif name in ('covPeriodic', 'covRQiso'):
+            pos += 3
+        elif name == 'covNoise':
+            noise.append(pos)
+            pos += 1
+        else:
+            pos += 1
+    return noise
+
+
 def _gp_cov(cov_func) -> tuple:
     """
-    The covariance function for ``cov_func`` and a function giving the initial
-    hyperparameters for a set of times. The default ``'covSEiso_covNoise'`` is the
-    closed-form :class:`CovSEisoNoise` (initialized by :func:`_gp_learn_hyperp`); others are
-    built by ``parse_cov``, initialized by :func:`_gp_init_hyp`.
+    The covariance function for ``cov_func``, a function giving the initial
+    hyperparameters for a set of times, the 0-based positions of its noise standard deviations
+    (:func:`_gp_noise_pos`) and its components (a list of ``(name, degree)``). The default
+    ``'covSEiso_covNoise'`` is the closed-form :class:`CovSEisoNoise` (initialized by
+    :func:`_gp_learn_hyperp`); others are built by ``parse_cov``, initialized by
+    :func:`_gp_init_hyp`.
     """
-    if isinstance(cov_func, str) and cov_func == 'covSEiso_covNoise':
-        return CovSEisoNoise, (lambda tt: None)
     from ..toolboxes.matlab.gpml.cov import parse_cov
+    if isinstance(cov_func, str) and cov_func == 'covSEiso_covNoise':
+        return CovSEisoNoise, (lambda tt: None), [2], [('covSEiso', None), ('covNoise', None)]
     cov, components = parse_cov(cov_func)
-    return cov, (lambda tt: _gp_init_hyp(components, tt))
+    return cov, (lambda tt: _gp_init_hyp(components, tt)), _gp_noise_pos(components), components
 
 
 def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
@@ -2590,7 +2657,9 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     Gaussian Process time-series modeling for local prediction.
 
     Trains a Gaussian Process model on equally-spaced points throughout the time
-    series and uses the model to predict its intermediate values.
+    series and uses the model to predict its intermediate values. The hyperparameters
+    are learned by maximizing the marginal likelihood; the noise standard deviation is
+    bounded below by 1% of that of the data (see :func:`_gp_learn_hyperp`).
 
     Parameters
     ----------
@@ -2633,18 +2702,20 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     N = len(y)
     npoints = int(npoints)
 
-    cov, init_hyp = _gp_cov(cov_func)
+    cov, init_hyp, noise_pos, components = _gp_cov(cov_func)
     nhps = cov.n_hyp
+    is_se_noise = [c[0] for c in components] == ['covSEiso', 'covNoise'] and \
+        all(c[1] is None for c in components)
     nan_out = {k: np.nan for k in
                ('stde', 'meanabs_std', 'stdmu', 'meanS', 'stdS', 'nlml',
                 *(f'logh{i + 1}' for i in range(nhps)),
-                *(('h_lonN',) if cov is CovSEisoNoise else ()))}
+                *(('h_lonN',) if is_se_noise else ()))}
 
     tt = np.floor(_linspace(1, N, npoints))
     yt = y[tt.astype(int) - 1]
 
     try:
-        theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt))
+        theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt), noise_pos=noise_pos)
     except np.linalg.LinAlgError:
         logger.warning('Lack of positive definite matrix for this time series')
         return nan_out
@@ -2688,7 +2759,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
     # Give extra output based on length parameter on length of time series
     # (only for the squared exponential plus noise covariance)
-    if cov is CovSEisoNoise:
+    if is_se_noise:
         out['h_lonN'] = np.exp(loghyper[0]) / N
 
     return out
@@ -2703,7 +2774,10 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
     Fits a Gaussian Process model to a section of the time series and uses it to
     predict the subsequent datapoints, repeated at equally-spaced positions
-    through the time series.
+    through the time series. The noise standard deviation of each fit is bounded below by
+    1% of that of its training data (see :func:`_gp_learn_hyperp`). Windows whose training
+    data are constant (standard deviation below 1e-8 of that of the series) cannot be
+    standardized and are left out of every statistic.
 
     Parameters
     ----------
@@ -2763,13 +2837,14 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
           deviation across windows of the negative log marginal likelihood on
           the window's training data, divided by the number of training points.
 
-        All values are NaN if hyperparameters cannot be learned.
+        All values are NaN if hyperparameters cannot be learned, or if the training data
+        of every window are constant.
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
     num_train, num_test, num_preds = int(num_train), int(num_test), int(num_preds)
 
-    cov, init_hyp = _gp_cov(cov_func)
+    cov, init_hyp, noise_pos, _ = _gp_cov(cov_func)
     nhps = cov.n_hyp
 
     if pmode in ('frombefore', 'randomgap'):
@@ -2792,7 +2867,7 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     mus = np.zeros((num_test, num_preds))        # predicted values
     stderrs = np.zeros((num_test, num_preds))    # standard errors on predictions
     yss = np.zeros((num_test, num_preds))        # test values
-    nlmls = np.zeros(num_preds)                  # per-point negative log marginal likelihoods
+    nlmls = np.full(num_preds, np.nan)           # per-point negative log marginal likelihoods (NaN: skipped window)
     loghypers = np.zeros((nhps, num_preds))      # log-hyperparameters
 
     rng = np.random.RandomState() if random_seed is None else None
@@ -2834,14 +2909,19 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
             rs = np.arange(num_train + 1, num_train + num_test + 1)
             ts, ys = t[rs - 1], yy[rs - 1]
 
-        # Process to normalize scales (the same transformation for both sets)
+        # A window whose training data are constant (to rounding error, relative to the
+        # series) cannot be standardized and carries no information about a GP: skip it
         yt_mean, yt_std = np.mean(yt), np.std(yt, ddof=1)
+        if not yt_std > 1e-8 * np.std(y, ddof=1):
+            continue
+
+        # Process to normalize scales (the same transformation for both sets)
         ys = (ys - yt_mean) / yt_std
         yt = (yt - yt_mean) / yt_std
 
         # (1) Learn hyperparameters from the training set
         try:
-            theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt))
+            theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt), noise_pos=noise_pos)
         except np.linalg.LinAlgError:
             logger.warning('Unable to learn hyperparameters for this time series')
             return {k: np.nan for k in out_keys}
@@ -2861,6 +2941,13 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         mus[:, i] = mu                     # ~predicted values for time-series points
         stderrs[:, i] = 2 * np.sqrt(S2)    # ~errors on those predictions
         yss[:, i] = ys
+
+    # Drop the skipped windows (those with constant training data)
+    keep = ~np.isnan(nlmls)
+    if not np.any(keep):
+        return {k: np.nan for k in out_keys}
+    mus, stderrs, yss = mus[:, keep], stderrs[:, keep], yss[:, keep]
+    loghypers, nlmls = loghypers[:, keep], nlmls[keep]
 
     # (1) Prediction error measures
     allabserrs = np.abs(mus - yss)                 # absolute errors
@@ -2894,12 +2981,12 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     # (2) Hyperparameter measures: mean and std for each hyperparameter
     for i in range(nhps):
         out[f'meanlogh{i + 1}'] = np.mean(loghypers[i, :])
-        out[f'stdlogh{i + 1}'] = np.std(loghypers[i, :], ddof=1)
+        out[f'stdlogh{i + 1}'] = _ml_std(loghypers[i, :])
 
     # (3) Negative log marginal likelihood measures
     out['maxnlml'] = _ml_max(nlmls)
     out['minnlml'] = _ml_min(nlmls)
-    out['stdnlml'] = np.std(nlmls, ddof=1)
+    out['stdnlml'] = _ml_std(nlmls)
 
     return out
 
@@ -3707,7 +3794,8 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
 
     # Learn the hyperparameters (mean-zero process, Gaussian likelihood, exact inference)
     try:
-        theta = _gp_learn_hyperp(t, y, cov, hyp0=_gp_init_hyp(components, t))
+        theta = _gp_learn_hyperp(t, y, cov, hyp0=_gp_init_hyp(components, t),
+                                 noise_pos=_gp_noise_pos(components))
     except np.linalg.LinAlgError:
         logger.warning('Lack of positive definite matrix for this time series')
         return np.nan
