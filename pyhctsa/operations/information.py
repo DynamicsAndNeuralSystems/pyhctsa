@@ -365,7 +365,10 @@ def automutual_info_stats(
     dami = np.diff(ami)
     extrema_i = np.where((dami[:-1] * dami[1:]) < 0)[0]
     out['pextrema'] = len(extrema_i) / (lami - 1)
-    out['fmmi'] = min(extrema_i) + 1 if len(extrema_i) > 0 else lami
+    # fmmi: lag of the first true local minimum (extrema_i is 0-based into dami, so the
+    # extremum sits at ami[j+1], i.e. lag j+2); lami if there is none
+    minima = extrema_i[dami[extrema_i] < 0]
+    out['fmmi'] = int(minima.min()) + 2 if minima.size > 0 else lami
 
     # Look for periodicities in local maxima
     maxima_i = np.where((dami[:-1] > 0) & (dami[1:] < 0))[0] + 1
