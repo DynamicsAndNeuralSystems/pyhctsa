@@ -203,9 +203,8 @@ def hrv_classic(y: ArrayLike) -> dict:
     out['hf'] = hf_p / total * 100
 
     # Triangular histogram index
-    edges_10 = bin_picker(y.min(), y.max(), 10)
-    hist = histc(y, edges_10)
-    out['tri'] = len(y) / np.max(hist)
+    # (equal-width bins spanning the data, with explicit edges)
+    out['tri'] = len(y) / np.max(np.histogram(y, bins=bf_hist_edges(y, 10))[0])
 
     # Poincare plot measures:
     # cf. "Do Existing Measures ... ", Brennan et. al. (2001), IEEE Trans Biomed Eng 48(11)
