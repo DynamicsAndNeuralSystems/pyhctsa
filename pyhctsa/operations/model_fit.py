@@ -33,7 +33,7 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     num_states : int
         The number of states in the HMM. Default is 3.
     random_seed : int
-        Random seed. Default is 0.
+        Random seed for the initial parameters of the fit. Default is 0.
 
     Returns
     -------
@@ -65,15 +65,48 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     y_test_reshaped = y_test.reshape(-1, 1)
     num_states = int(num_states)
 
+    # Initialize and iterate Baum-Welch as in Zoubin Ghahramani's ZG_hmm (used by hctsa):
+    # random state means around the data mean (scaled by the data standard
+    # deviation), random start probabilities and transition matrix, a tied
+    # variance equal to the data variance; at most 30 cycles, stopping when the
+    # proportional change in the log-likelihood falls below tol. (hmmlearn's
+    # k-means initialization and absolute tolerance find different, generally
+    # poorer, local optima: the fitted-model statistics then do not follow the
+    # distribution of hctsa's.)
+    rng = _ml_rng(0 if random_seed is None else int(random_seed))
+    tol = 1e-4
+    cov0 = np.var(y_train, ddof=1)
+    mu0 = rng.randn(num_states, 1) * np.sqrt(cov0) + np.mean(y_train)
+    pi0 = rng.random_sample(num_states)
+    pi0 = pi0 / pi0.sum()
+    p0 = rng.random_sample((num_states, num_states))
+    p0 = p0 / p0.sum(axis=1, keepdims=True)
+
     model = GaussianHMM(n_components=num_states,
-                    covariance_type='tied',
-                    n_iter=30,
-                    tol=0.0001,
-                    params='stmc',
-                    init_params='stmc',
-                    random_state=random_seed)
-    
-    model.fit(y_train_reshaped)
+                        covariance_type='tied',
+                        n_iter=1,  # one EM cycle per fit() call, so that we control the stopping rule
+                        tol=0,
+                        params='stmc',
+                        init_params='')
+    model.startprob_ = pi0
+    model.transmat_ = p0
+    model.means_ = mu0
+    model.covars_ = np.array([[cov0]])
+
+    LL = []  # log-likelihood of the training data at the start of each cycle
+    lik_base = 0.0
+    for cycle in range(1, 31):
+        model.fit(y_train_reshaped)  # one E step and M step
+        lik = model.monitor_.history[-1]
+        old_lik = LL[-1] if LL else 0.0
+        LL.append(lik)
+        if cycle <= 2:
+            lik_base = lik
+        elif lik < old_lik:
+            pass  # a decrease (numerical violation): keep going, as ZG_hmm does
+        elif (lik - lik_base) < (1 + tol) * (old_lik - lik_base) or not np.isfinite(lik):
+            break
+
     means_sorted = np.sort(model.means_.flatten())
     for i, mu in enumerate(means_sorted):
         out[f'Mu_{i+1}'] = mu
@@ -95,8 +128,8 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     out['stdP'] = np.std(p_matrix, ddof=1)
 
     #% Within-sample log-likelihood
-    out['LLtrainpersample'] = model.monitor_.history[-1] / n_train
-    out['nit'] = model.monitor_.iter
+    out['LLtrainpersample'] = np.max(LL) / n_train
+    out['nit'] = len(LL)
 
     #Calculate log likelihood for the test data
     out['LLtestpersample'] = model.score(y_test_reshaped)/n_test
