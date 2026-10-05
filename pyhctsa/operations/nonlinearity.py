@@ -2714,3 +2714,149 @@ def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
     out['nto50_ratio'] = stats_kern['nto50'] / stats_lin['nto50']
     out['std_ratio'] = stats_kern['std'] / stats_lin['std']
     return out
+
+
+def _boxcount_increments(y: np.ndarray, tau: int, m_max: int, num_bins: int) -> Union[np.ndarray, None]:
+    """
+    TISEAN's ``boxcount -M1,m_max -d tau -Q2.0 -#num_bins`` (hctsa's NL_BoxCountEntropyRate): the
+    order-2 Renyi entropy of the partition of the delay-embedded series into boxes, and its
+    increments with the embedding dimension.
+
+    The series is rescaled to [0, 1] (written to TISEAN to 7 significant digits) and
+    partitioned into boxes of side 1/n_boxes, for ``num_bins`` box sizes spaced geometrically
+    from 1 down to 1/1000 (each a distinct integer number of boxes per axis). With ``p_i`` the
+    fraction of embedded points in box ``i``, ``H(eps, d) = -log(sum_i p_i^2)``. Returns an array
+    (``num_bins`` x ``m_max``) whose column ``d`` is ``H(eps, d) - H(eps, d - 1)`` (``H`` itself
+    for ``d = 1``), each value as TISEAN prints it (``%e``), or None for a constant series.
+    """
+    y = _tisean._round_significant(y, 7)
+    lo, hi = y.min(), y.max()
+    if hi - lo == 0:
+        return None
+    s = (y - lo) / (hi - lo)
+    eps_min, eps_max = 1e-3, 1.0
+    s = np.where(s >= 1.0, s - eps_min / 2.0, s)
+    length = s.size - (m_max - 1) * tau
+    if length < 1:
+        return None
+    eps_factor = (eps_max / eps_min) ** (1.0 / (num_bins - 1))
+
+    rs = np.zeros((num_bins, m_max))
+    heps, epsi_old = eps_max * eps_factor, 0
+    for k in range(num_bins):
+        while True:  # (an integer number of boxes per axis, increasing with every length scale)
+            heps /= eps_factor
+            epsi = int(1.0 / heps)
+            if epsi > epsi_old:
+                break
+        epsi_old = epsi
+        # The box (per coordinate) of each embedded point, refined one coordinate at a time
+        label = np.zeros(length, dtype=np.int64)
+        h = np.zeros(m_max)
+        for d in range(m_max):
+            box = (s[d * tau:d * tau + length] * epsi).astype(np.int64)
+            _, label, counts = np.unique(label * epsi + box, return_inverse=True, return_counts=True)
+            h[d] = -np.log(np.sum((counts / length) ** 2))
+        rs[k] = np.diff(h, prepend=0.0)
+    return np.vectorize(_tisean._e)(rs)
+
+
+def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
+                           embed_params: Union[list, tuple] = ('ac', 'fnn')) -> dict:
+    """
+    How the box-counting (order-2 Renyi) entropy of a delay embedding grows with embedding
+    dimension.
+
+    Time-delay embeds the series in ``d = 1, ..., m`` dimensions and partitions the space into
+    boxes of side ``epsilon``, using TISEAN's ``boxcount`` (this operation previously used
+    TSTOOL's ``corrdim``). With ``p_i`` the fraction of embedded points in box ``i``,
+    ``boxcount`` gives the order-2 Renyi (collision) entropy
+    ``H(epsilon, d) = -log(sum_i p_i^2)`` for a sweep of ``num_bins`` box sizes, from the full
+    range of the series downward, and the increment over the ``(d-1)``-dimensional embedding,
+    ``I(epsilon, d) = H(epsilon, d) - H(epsilon, d-1)`` (defined for ``d = 2, ..., m``; at
+    ``d = 1``, ``boxcount`` reports ``H`` itself, which is not an increment, so ``d = 1`` is
+    excluded from all summaries). The matrix ``I`` (length scales by embedding dimensions
+    ``2, ..., m``) is summarized across length scales for each dimension, across dimensions for
+    each length scale, and overall.
+
+    The increment ``I`` approaches the entropy rate of the process (the K2 entropy, per delay
+    step) rather than a slope against ``log(epsilon)``, so these features are entropy-rate-like,
+    not correlation dimensions. (This function was previously named NL_BoxCorrDim in hctsa,
+    after the TSTOOL correlation-dimension code it replaced.) hctsa registers ``meanr``,
+    ``medianr``, ``minr`` and ``meanchr`` at ``r`` = 2, 3, 4, 6, 8, 11, 14, 17, 20, 24, 28, 32,
+    36 of ``num_bins = 50`` (2 to 429 boxes per axis): coarse scales change quickly with ``r``
+    and are sampled densely; neighboring finer scales are nearly redundant; for flows (long
+    delays) the informative scales lie beyond ``r = 18``; and beyond ``r = 36`` the
+    5-dimensional embedding saturates (``I = 0``) for series of a few thousand points.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    num_bins : int, optional
+        The number of length-scale (``epsilon``) values in the box-counting sweep (at least 2).
+        TSTOOL's "maximum number of partitions per axis" has no exact TISEAN equivalent; this is
+        the closest analogue. Default is 100.
+    embed_params : list or tuple, optional
+        The embedding parameters as ``(tau, m)``: the time delay (an integer, or a rule
+        understood by :func:`pyhctsa.utils.get_tau`: ``'ac'``, ``'ac1e'`` or ``'mi'``) and the
+        embedding dimension (an integer, or ``'fnn'`` for false nearest neighbors). hctsa uses
+        ``('ac1e', 5)``. Default is ``('ac', 'fnn')``.
+
+    Returns
+    -------
+    dict or float
+        NaN if the embedding parameters cannot be determined, the series is constant, or the
+        embedding dimension is below 2. Otherwise summaries of ``I(epsilon, d)``, with ``d`` the
+        embedding dimension and ``r`` the index (from 1) of the length scale (``r = 1`` is the
+        full range of the series, larger ``r`` are finer scales):
+
+        - ``meand<d>``, ``mediand<d>``: mean and median of ``I`` over length scales, at embedding
+          dimension ``d = 2, ..., m``
+        - ``meanr<r>``, ``medianr<r>``, ``minr<r>``: mean, median and minimum of ``I`` over
+          embedding dimensions ``2, ..., m``, at length scale ``r = 2, ..., num_bins``
+        - ``meanchr<r>``: mean change of ``I`` from one embedding dimension to the next
+          (``d = 2, ..., m``), at length scale ``r = 2, ..., num_bins`` (NaN for ``m = 2``)
+        - ``stdmean``, ``stdmedian``: standard deviation, across embedding dimensions
+          ``2, ..., m``, of the mean (or median) of ``I`` over length scales
+        - ``medianstretch``, ``iqrstretch``: median and interquartile range of ``I`` over all
+          length scales and embedding dimensions ``2, ..., m``
+
+        (The minima over all length scales, formerly ``mind<d>`` and ``minstretch``, were removed:
+        the coarsest scale is a single box, where ``I = 0``, so they were always 0.)
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if num_bins < 2:
+        raise ValueError('num_bins must be at least 2')
+    params = _embedding_params(y, embed_params[0], embed_params[1])
+    if params is None:
+        logger.warning('Could not determine embedding parameters for this time series')
+        return np.nan
+    tau, m_max = params
+
+    rs = _boxcount_increments(y, tau, m_max, int(num_bins))
+    if rs is None:
+        logger.warning('boxcount failed (constant series, or too short for these embedding parameters)')
+        return np.nan
+    if m_max < 2:
+        # the increment I is only defined from d = 2 (d = 1 holds H itself)
+        logger.warning(f'Embedding dimension m = {m_max} is too low for a box-counting entropy increment')
+        return np.nan
+
+    out = {}
+    for d in range(2, m_max + 1):
+        out[f'meand{d}'] = np.mean(rs[:, d - 1])
+        out[f'mediand{d}'] = np.median(rs[:, d - 1])
+    for r in range(2, rs.shape[0] + 1):
+        row = rs[r - 1, 1:]
+        out[f'meanr{r}'] = np.mean(row)
+        out[f'medianr{r}'] = np.median(row)
+        out[f'minr{r}'] = np.min(row)
+        out[f'meanchr{r}'] = np.mean(np.diff(row)) if row.size > 1 else np.nan
+    out['stdmean'] = np.std(np.mean(rs[:, 1:], axis=0), ddof=1) if m_max > 2 else 0.0
+    out['stdmedian'] = np.std(np.median(rs[:, 1:], axis=0), ddof=1) if m_max > 2 else 0.0
+    stretch = rs[:, 1:].ravel()
+    out['medianstretch'] = np.median(stretch)
+    q25, q75 = matlab_quantile(stretch, [0.25, 0.75])
+    out['iqrstretch'] = q75 - q25
+    return out
