@@ -875,18 +875,21 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
         stats_store[0, i] = autocorr(theta, 1, 'Fourier')[0]
         stats_store[1, i] = autocorr(theta, 2, 'Fourier')[0]
         stats_store[2, i] = autocorr(theta, 3, 'Fourier')[0]
-    # Compute output statistics
+    # Compute output statistics (max and min ignore NaNs, as in MATLAB: a NaN occurs when a
+    # run of equal values gives 0/0 angles)
     out = {
         'ac1_thetaac1': autocorr(stats_store[0, :], 1, 'Fourier')[0],
         'ac1_thetaac2': autocorr(stats_store[1, :], 1, 'Fourier')[0],
         'ac1_thetaac3': autocorr(stats_store[2, :], 1, 'Fourier')[0],
         'mean_thetaac1': np.mean(stats_store[0, :]),
-        'max_thetaac1': np.max(stats_store[0, :]),
-        'min_thetaac1': np.min(stats_store[0, :]),
+        'max_thetaac1': np.nanmax(stats_store[0, :]),
+        'min_thetaac1': np.nanmin(stats_store[0, :]),
         'mean_thetaac2': np.mean(stats_store[1, :]),
-        'max_thetaac2': np.max(stats_store[1, :]),
-        'min_thetaac2': np.min(stats_store[1, :]),
+        'max_thetaac2': np.nanmax(stats_store[1, :]),
+        'min_thetaac2': np.nanmin(stats_store[1, :]),
         'mean_thetaac3': np.mean(stats_store[2, :]),
+        'max_thetaac3': np.nanmax(stats_store[2, :]),
+        'min_thetaac3': np.nanmin(stats_store[2, :]),
     }
 
     out['meanrat_thetaac12'] = out['mean_thetaac1'] / out['mean_thetaac2']
@@ -1324,6 +1327,10 @@ def stick_angles(y: ArrayLike) -> dict:
         the different between positive and negative angles, measures of symmetry of
         the angles, stationarity, autocorrelation, and measures of the distribution of
         these stick angles.
+
+        As in hctsa, redundant statistics are not returned: ``std_p``, ``std_n``,
+        ``statav2_all_s``, ``statav3_all_s``, ``statav4_all_s``, ``ac2_p``, ``ac2_n``,
+        ``ac2_all``, ``tau_all`` and ``ac1_all``.
     """
     y = np.asarray(y)
     # Split the time series into positive and negative parts
@@ -1341,11 +1348,9 @@ def stick_angles(y: ArrayLike) -> dict:
 
     # Initialise output dictionary
     out = {}
-    out['std_p'] = np.nanstd(angles[0], ddof=1) 
     out['mean_p'] = np.nanmean(angles[0]) 
     out['median_p'] = np.nanmedian(angles[0])
 
-    out['std_n'] = np.nanstd(angles[1], ddof=1)
     out['mean_n'] = np.nanmean(angles[1])
     out['median_n'] = np.nanmedian(angles[1])
 
@@ -1450,12 +1455,10 @@ def stick_angles(y: ArrayLike) -> dict:
     
     # All angles
     
-    # StatAv2
-    out['statav2_all_m'], out['statav2_all_s'] = _sub_statav(zallAngles, 2)
-    # StatAv3
-    out['statav3_all_m'], out['statav3_all_s'] = _sub_statav(zallAngles, 3)
-    # StatAv4
-    out['statav4_all_m'], out['statav4_all_s'] = _sub_statav(zallAngles, 4)
+    # StatAv2, 3, 4 (the spread statav2/3/4_all_s is not returned: redundant with statav5_all_s)
+    out['statav2_all_m'], _ = _sub_statav(zallAngles, 2)
+    out['statav3_all_m'], _ = _sub_statav(zallAngles, 3)
+    out['statav4_all_m'], _ = _sub_statav(zallAngles, 4)
     # StatAv5
     out['statav5_all_m'], out['statav5_all_s'] = _sub_statav(zallAngles, 5)
     
@@ -1463,24 +1466,17 @@ def stick_angles(y: ArrayLike) -> dict:
     if len(zangles[0]) > 0:
         out['tau_p'] = first_crossing(zangles[0], 'ac', 0, 'continuous')
         out['ac1_p'] = autocorr(zangles[0], 1, 'Fourier')[0]
-        out['ac2_p'] = autocorr(zangles[0], 2, 'Fourier')[0]
     else:
         out['tau_p'] = np.nan
         out['ac1_p'] = np.nan
-        out['ac2_p'] = np.nan
     
     if len(zangles[1]) > 0:
         out['tau_n'] = first_crossing(zangles[1], 'ac', 0, 'continuous')
         out['ac1_n'] = autocorr(zangles[1], 1, 'Fourier')[0]
-        out['ac2_n'] = autocorr(zangles[1], 2, 'Fourier')[0]
     else:
         out['tau_n'] = np.nan
         out['ac1_n'] = np.nan
-        out['ac2_n'] = np.nan
     
-    out['tau_all'] = first_crossing(zallAngles, 'ac', 0, 'continuous')
-    out['ac1_all'] = autocorr(zallAngles, 1, 'Fourier')[0]
-    out['ac2_all'] = autocorr(zallAngles, 2, 'Fourier')[0]
 
     # What does the distribution look like?
     # Some quantiles and moments
@@ -1864,7 +1860,10 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     Returns
     --------
     dict
-        A dictionary containing various statistics of the constructed time series.
+        A dictionary containing various statistics of the constructed time series
+        (``ac1``, ``ac2``, ``ac3``, ``tau``, ``std``, ``median``, ``mean``, ``iqr``,
+        ``iqronrange``, ``mode_val``, ``mode``, ``hist_ent``, ``statav5_m``, ``statav5_s``).
+        As in hctsa, the maximum count (``max``) is no longer returned.
     """
     y = np.asarray(y)
     if tau == 'tau':
@@ -1902,7 +1901,6 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     out['ac2'] = autocorr(counts, 2, 'Fourier')[0]
     out['ac3'] = autocorr(counts, 3, 'Fourier')[0]
     out['tau'] = first_crossing(counts, 'ac', 0, 'continuous')
-    out['max'] = np.max(counts)
     out['std'] = np.std(counts, ddof=1)
     out['median'] = np.median(counts)
     out['mean'] = np.mean(counts)
@@ -2086,6 +2084,8 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
 
         - If an ``int``, returns the autocorrelation of ``y`` at that lag.
         - If a ``list`` of integers, returns autocorrelations at those lags.
+        - A NaN lag (e.g. a delay that could not be set) gives NaN for that entry
+          (``"Fourier"`` method).
         - If an empty list, returns the full autocorrelation function when 
         using the ``"Fourier"`` estimation method.
         Default is 1.
@@ -2109,11 +2109,12 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
     y = np.array(y)
     N = len(y)  # time-series length
 
-    if tau:
+    if np.size(tau) > 0:
         # if list is not empty
-        if np.max(tau) > N - 1:  # -1 because acf(1) is lag 0
-            logger.warning(f"Time lag {np.max(tau)} is too long for time-series length {N}.")
-        if np.any(np.array(tau) < 0):
+        tau_arr = np.atleast_1d(np.asarray(tau, dtype=float))
+        if not np.all(np.isnan(tau_arr)) and np.nanmax(tau_arr) > N - 1:  # -1 because acf(1) is lag 0
+            logger.warning(f"Time lag {np.nanmax(tau_arr)} is too long for time-series length {N}.")
+        if np.any(tau_arr < 0):
             logger.warning('Negative time lags not applicable.')
     if method == 'Fourier':
         n_fft = 2 ** (int(np.ceil(np.log2(N))) + 1)
@@ -2124,16 +2125,17 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
         acf = np.real(acf)
         acf = acf[:N]
         
-        if not tau:  # list empty, return the full function
+        if np.size(tau) == 0:  # list empty, return the full function
             out = acf
         else:  # return a specific set of values
             tau = np.atleast_1d(tau)
             out = np.zeros(len(tau))
             for i, t in enumerate(tau):
-                if (t > len(acf) - 1) or (t < 0):
+                # a NaN lag (e.g. from a delay rule that could not be set) gives NaN
+                if np.isnan(t) or (t > len(acf) - 1) or (t < 0):
                     out[i] = np.nan
                 else:
-                    out[i] = acf[t]
+                    out[i] = acf[int(t)]
     elif method == 'TimeDomainStat':
         sigma2 = np.std(y, ddof=1)**2  # time-series variance
         mu = np.mean(y)  # time-series mean

@@ -9,6 +9,39 @@ from scipy import stats
 from ..utils import sign_change
 from ..toolboxes.infotheory.mutual_info import KraskovMI, GaussianMI
 
+def _tie_break_noise(y: np.ndarray, seed: int = 0) -> np.ndarray:
+    """Add tiny, reproducible jitter to break exact ties in ``y`` (hctsa ``BF_TieBreakNoise``).
+
+    ``y`` is returned unchanged unless it has a high proportion of repeated values
+    (fewer than 90% of its values unique), in which case Gaussian noise with standard
+    deviation ``1e-10 * std(y)`` is added. That is small enough to leave a well-behaved
+    continuous series untouched, but enough to break the exact ties that make
+    nearest-neighbour (Kraskov/KSG) mutual-information estimators degenerate on
+    quantized or periodic-orbit data.
+
+    The noise comes from a private, fixed-seed generator (not NumPy's global state), so
+    the same input always gives the same output and the caller's random state is left
+    alone. (hctsa uses a private MATLAB ``mt19937ar`` stream; the draws are not
+    bit-identical to MATLAB's, but the trigger rule and the noise scale are.)
+
+    Parameters
+    ----------
+    y : array-like
+        The input vector.
+    seed : int, optional
+        Seed of the private generator (default 0).
+    """
+    y = np.asarray(y, dtype=float)
+    if y.size < 2:
+        return y
+    unique_frac = np.unique(y).size / y.size
+    sigma = np.std(y, ddof=1)
+    if unique_frac < 0.9 and sigma > 0:
+        rng = np.random.default_rng(seed)
+        y = y + 1e-10 * sigma * rng.standard_normal(y.shape)
+    return y
+
+
 def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, None]) -> Callable:
     """Helper to return the correct correlation function based on method type."""
     from ..operations.correlation import autocorr, automutual_info
@@ -76,11 +109,19 @@ def _self_corr_curve(y: np.ndarray, what: str):
         from ..operations.correlation import autocorr
         c = np.asarray(autocorr(y, [], 'Fourier'), dtype=float).ravel()
         return c[1:n]                                  # drop lag 0 -> lags 1..n-1
-    return _ami_gaussian_curve(y)                       # 'mi' / 'mi-gaussian'
+    c = _ami_gaussian_curve(y)                          # 'mi' / 'mi-gaussian'
+    # as in IN_AutoMutualInfo: no AMI is computed from fewer than 5 samples, so lags
+    # longer than n - 5 are NaN
+    c[max(n - 5, 0):] = np.nan
+    return c
 
 
-def _first_min_from_curve(c: np.ndarray):
-    """First strict local minimum of a precomputed lag-curve (lags 1..len(c))."""
+def _first_min_from_curve(c: np.ndarray, n: int):
+    """First strict local minimum of a precomputed lag-curve (lags 1..len(c)).
+
+    NaN if the curve hits a NaN first; ``n`` (the series length) if the curve keeps
+    decreasing, as in hctsa's ``CO_FirstMin``.
+    """
     for i in range(1, len(c) + 1):
         if np.isnan(c[i - 1]):
             logger.warning("No minimum: encountered NaN.")
@@ -89,18 +130,22 @@ def _first_min_from_curve(c: np.ndarray):
             return 1
         elif (i > 2) and c[i - 3] > c[i - 2] < c[i - 1]:
             return i - 1
-    return np.nan
+    return n
 
 
-def _first_max_from_curve(c: np.ndarray):
-    """First strict local maximum of a precomputed lag-curve (lags 1..len(c))."""
+def _first_max_from_curve(c: np.ndarray, n: int):
+    """First strict local maximum of a precomputed lag-curve (lags 1..len(c)).
+
+    NaN if the curve hits a NaN first; ``n`` (the series length) if no maximum is found,
+    as in hctsa's ``CO_FirstMin`` with ``minNotMax = false``.
+    """
     for i in range(1, len(c) + 1):
         if np.isnan(c[i - 1]):
             logger.warning("No maximum: encountered NaN.")
             return np.nan
         if (i > 2) and c[i - 3] < c[i - 2] > c[i - 1]:
             return i - 1
-    return np.nan
+    return n
 
 def first_min(
     y: list,
@@ -138,13 +183,14 @@ def first_min(
     Returns
     -------
     int
-        The time of the first minimum.
+        The time of the first minimum. If the function keeps decreasing and no minimum
+        is found, the length of the time series is returned (as in hctsa); NaN if a NaN
+        is reached first (e.g. an AMI that cannot be computed because the series is too short).
     """
     y = np.asarray(y)
     n = len(y)
-    if min_what in _VECTORISED_CORR:               # vectorised drop-in, identical lag
-        c = _self_corr_curve(y, min_what)
-        return np.nan if c is None else _first_min_from_curve(c)
+    if min_what in _VECTORISED_CORR and n >= 3:     # vectorised drop-in, identical lag
+        return _first_min_from_curve(_self_corr_curve(y, min_what), n)
     corrfn = _get_corr_fn(y, min_what, extra_param)
     
     auto_corr = np.zeros(n - 1)
@@ -160,8 +206,9 @@ def first_min(
             return 1
         elif (i > 2) and auto_corr[i - 3] > auto_corr[i - 2] < auto_corr[i - 1]:
             return i - 1
-            
-    return np.nan
+
+    # still decreasing: no minimum found anywhere in the series
+    return n
 
 def first_max(
     y: list,
@@ -197,13 +244,13 @@ def first_max(
     Returns
     -------
     int
-        The time of the first maximum.
+        The time of the first maximum. If no maximum is found, the length of the time
+        series is returned (as in hctsa); NaN if a NaN is reached first.
     """
     y = np.asarray(y)
     n = len(y)
-    if max_what in _VECTORISED_CORR:               # vectorised drop-in, identical lag
-        c = _self_corr_curve(y, max_what)
-        return np.nan if c is None else _first_max_from_curve(c)
+    if max_what in _VECTORISED_CORR and n >= 3:     # vectorised drop-in, identical lag
+        return _first_max_from_curve(_self_corr_curve(y, max_what), n)
     corrfn = _get_corr_fn(y, max_what, extra_param)
     
     auto_corr = np.zeros(n - 1)
@@ -217,8 +264,9 @@ def first_max(
         # Check for maximum
         if i > 2 and auto_corr[i - 3] < auto_corr[i - 2] > auto_corr[i - 1]:
             return i - 1
-            
-    return np.nan
+
+    # no maximum found anywhere in the series
+    return n
 
 def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
             r2: Union[str, list] = 'range', num_bins: int = 10) -> float:
@@ -320,7 +368,12 @@ def automutual_info_stats(
     Returns
     -------
     dict
-        Dictionary containing AMI statistics.
+        Dictionary of AMI statistics: the AMI at each lag (``ami1`` ... ``ami<max_tau>``),
+        ``mami``, ``stdami``, ``pextrema``, ``fmmi`` (lag of the first local minimum of
+        the AMI function; the number of lags if there is none), ``sumami_fmmi`` (the sum
+        of the AMI from lag 1 to ``fmmi``), ``pmaxima``, ``modeperiodmax``,
+        ``pmodeperiodmax``, ``pminima``, ``modeperiodmin``, ``pmodeperiodmin``,
+        ``pcrossmean``, ``pcrossmedian``, ``pcrossq10``, ``pcrossq90`` and ``amiac1``.
     """
     from ..operations.correlation import autocorr
 
@@ -369,6 +422,8 @@ def automutual_info_stats(
     # extremum sits at ami[j+1], i.e. lag j+2); lami if there is none
     minima = extrema_i[dami[extrema_i] < 0]
     out['fmmi'] = int(minima.min()) + 2 if minima.size > 0 else lami
+    # integrated AMI up to the first minimum (fmmi is a 1-based lag, so ami[:fmmi] is ami(1:fmmi))
+    out['sumami_fmmi'] = np.sum(ami[:out['fmmi']])
 
     # Look for periodicities in local maxima
     maxima_i = np.where((dami[:-1] > 0) & (dami[1:] < 0))[0] + 1
@@ -444,6 +499,10 @@ def automutual_info(
         - 'kraskov1': Kraskov estimator 1 (KSG1)
         - 'kraskov2': Kraskov estimator 2 (KSG2)
 
+        For the Kraskov estimators, a series with many repeated values (fewer than 90%
+        unique) first gets tiny, reproducible Gaussian jitter (standard deviation
+        ``1e-10 * std(y)``, fixed seed) to break the exact ties, as in hctsa.
+
         Default is `kernel`.
 
     extra_param : int or str, optional
@@ -489,11 +548,17 @@ def automutual_info(
         mi_calc = GaussianMI()
     else:
         raise ValueError(f'Unknown estimator: {est_method}')
+    if est_method in ('kraskov1', 'kraskov2'):
+        # Series with many repeated values make the nearest-neighbour estimators blow up:
+        # add tiny, reproducible tie-breaking jitter, once to the whole series (hctsa BF_TieBreakNoise)
+        y = _tie_break_noise(y)
     
     for k, delay in enumerate(time_delay):
-        if delay > n - min_samples:
-            # time series too short - keep the remaining values as NaNs
+        if np.isnan(delay) or delay > n - min_samples:
+            # time series too short, or an unresolvable 'ac'/'tau' delay from a degenerate
+            # (e.g. constant) series - keep the remaining values as NaNs
             break
+        delay = int(delay)
 
         # form the time-delay vectors y1 and y2
         y1 = y[:-delay]
