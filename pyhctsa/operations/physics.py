@@ -303,7 +303,9 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
     dict
         Summary statistics of the simulated trajectory, including mean,
         range, proportion of positive values, zero-crossing rate,
-        autocorrelation, final position, and standard deviation.
+        autocorrelation, ``meanabs`` (the mean magnitude of the position, a robust
+        summary of how far the particle is from the center; it is not sensitive to the
+        exact end of the run) and standard deviation.
     """
     y = np.asarray(y, dtype=np.float64)
 
@@ -351,7 +353,7 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
     out['ac10'] = np.abs(autocorr(x, 10, 'Fourier')[0])
     out['ac50'] = np.abs(autocorr(x, 50, 'Fourier')[0])
     out['tau'] = first_crossing(x, 'ac', 0, 'continuous')
-    out['finaldev'] = np.abs(x[-1]) # final position
+    out['meanabs'] = np.mean(np.abs(x)) # mean magnitude of the position
 
     # additional outputs for dbl well
     if what_potential == 'dblwell':
