@@ -632,8 +632,12 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
         Default is ``10``.
 
     random_seed : int or None, optional
-        Seed controlling noise realisations. If ``None``, defaults internally
-        to ``0``.
+        Seed controlling noise realisations (an independent noise vector is drawn
+        at each noise level). If ``None``, defaults internally to ``0``.
+
+    noise : array-like, optional
+        Test hook: noise to use instead of drawing it. Either a 1-D vector, reused at
+        every noise level, or a ``(50, len(y))`` array with one row per noise level.
 
     Returns
     -------
@@ -645,12 +649,15 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     # Set tau to minimum of autocorrelation function if 'ac' or 'tau'
     if tau in ['ac', 'tau']:
         tau = first_crossing(y, 'ac', 0, 'discrete')
-    # Generate noise
+    # Fresh uncorrelated Gaussian noise is drawn at each noise level (seed set once);
+    # a user-supplied ``noise`` (test hook) is either one vector reused at every level
+    # or an array with one row per level.
     if noise is not None:
-        noise = np.asarray(noise)
+        noise = np.asarray(noise, dtype=float)
+        noise_at = (lambda i: noise) if noise.ndim == 1 else (lambda i: noise[i])
     else:
         np.random.seed(0 if random_seed is None else random_seed)
-        noise = np.random.randn(len(y))  # generate uncorrelated additive noise
+        noise_at = lambda i: np.random.randn(len(y))
 
     # Set up noise range
     noise_range = np.linspace(0, 3, 50) # compare properties across this noise range
@@ -661,13 +668,13 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     if ami_method in ['std1', 'std2', 'quantiles', 'even']:
         # histogram-based methods using my naive implementation in CO_Histogram
         for i in range(num_repeats):
-            amis[i] = histogram_ami(y + noise_range[i]*noise, tau, ami_method, extra_param)
+            amis[i] = histogram_ami(y + noise_range[i]*noise_at(i), tau, ami_method, extra_param)
             if np.isnan(amis[i]):
                 logger.warning('Error computing AMI: Time series too short (?)')
                 return np.nan
     if ami_method in ['gaussian','kraskov1','kraskov2']:
         for i in range(num_repeats):
-            amis[i] = automutual_info(y + noise_range[i]*noise, tau, ami_method, extra_param)
+            amis[i] = automutual_info(y + noise_range[i]*noise_at(i), tau, ami_method, extra_param)
             if np.isnan(amis[i]):
                 logger.warning('Error computing AMI: Time series too short (?)')
                 return np.nan
