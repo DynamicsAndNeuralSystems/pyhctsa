@@ -265,6 +265,11 @@ def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
     mask = (p_ixp_j > 0) & (p_ij > 0)
     if np.any(mask):
         mi = np.sum(p_ij[mask] * np.log(p_ij[mask] / p_ixp_j[mask]))
+        # Miller-Madow (Panzeri-Treves) bias correction: the plug-in estimate is biased
+        # upwards by ~(Mxy - Mx - My + 1)/(2N) nats, with M the numbers of occupied
+        # joint and marginal bins.
+        mi -= (np.count_nonzero(mask) - np.count_nonzero(p_i > 0)
+               - np.count_nonzero(p_j > 0) + 1) / (2 * N)
     else:
         logger.warning("The histograms aren't catching any points. Perhaps due to an inappropriate custom range for binning the data.")
         mi = np.nan
