@@ -7,14 +7,15 @@ import numpy as np
 from numpy.typing import ArrayLike
 from numba import njit
 from antropy.entropy import _xlogx
-from scipy.stats import gaussian_kde, rankdata
+from scipy.stats import gaussian_kde, norm, rankdata
 from sklearn.neighbors import KDTree
 
 from ..operations.correlation import first_crossing
 from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
 from ..toolboxes.physionet import sampen as _sampen_c
-from ..utils import bin_picker, histc, make_buffer, time_delay_embed, z_score
+from ..utils import (_zscore_matlab, bin_picker, get_tau, histc, make_buffer, pre_process,
+                     time_delay_embed, z_score)
 
 
 def _entropy_summary(ents: np.ndarray) -> dict:
@@ -398,9 +399,12 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
     m : int, optional
         Embedding dimension (order of the permutation entropy). Default is 2.
     tau : int or str, optional
-        Time-delay for the embedding: an integer, or ``'ac'`` for the first
-        zero-crossing of the autocorrelation function. NaN is returned if the delay
-        cannot be determined (e.g., a constant series). Default is 1.
+        Time-delay for the embedding: an integer, or a rule understood by
+        :func:`~pyhctsa.utils.get_tau`: ``'ac'`` (first zero-crossing of the
+        autocorrelation function), ``'ac1e'`` (floor of its first 1/e crossing) or ``'mi'``
+        (the smaller of the first minimum of the Kraskov automutual information and the
+        ``'ac1e'`` delay). NaN is returned if the delay cannot be determined (e.g., a
+        constant series). Default is 1.
 
     Returns
     -------
@@ -420,10 +424,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
     """
     m = int(m)
     y = np.asarray(y)
-    if isinstance(tau, str):
-        if tau != 'ac':
-            raise ValueError(f"Unknown tau '{tau}'")
-        tau = first_crossing(y, 'ac', 0, 'discrete')
+    tau = get_tau(y, tau)
     if np.isnan(tau):  # the delay could not be determined (e.g., constant series)
         return np.nan
     tau = int(tau)
@@ -468,7 +469,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
     return {"permEn": pe, "normPermEn": pe_norm, "permEnLE": pe_le,
             "normWPE": norm_wpe, "ordAsym": ord_asym}
 
-def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: int = -1) -> dict:
+def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.12, t_max: int = -1) -> dict:
     """
     Recurrence period density entropy (RPDE).
 
@@ -488,9 +489,9 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: i
     m : int, optional
         Embedding dimension. Default is 2.
     tau : int or str, optional
-        Embedding time delay: an integer, or ``'ac'`` for the first zero-crossing of the
-        autocorrelation function (NaN is returned if it is undefined, e.g. for a constant
-        series). Default is 1.
+        Embedding time delay: an integer, or a rule understood by
+        :func:`~pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``). NaN is returned if
+        it cannot be determined (e.g. for a constant series). Default is 1.
     epsilon : float, optional
         Recurrence neighbourhood radius. Default is 0.12.
     t_max : int, optional
@@ -509,9 +510,7 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: i
             - 'maxRPD': Maximum value of rpd (rescaled by N).
 
     """
-    if tau == 'ac':
-        # use the first zero crossing of the ACF
-        tau = first_crossing(y, 'ac', 0, 'discrete')
+    tau = get_tau(y, tau)
     if np.isnan(tau):
         # the delay could not be determined (e.g., constant series)
         logger.warning('Could not determine embedding parameters for this time series')
@@ -564,9 +563,11 @@ def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2,
     rth : float, optional
         Similarity threshold :math:`r`. Default is 0.2.
     tau : int or str, optional
-        The time delay between the elements of a pattern: an integer, or ``'ac'`` for
-        the first zero-crossing of the autocorrelation function. The default of 1
-        uses consecutive samples.
+        The time delay between the elements of a pattern: an integer, or a rule
+        understood by :func:`~pyhctsa.utils.get_tau` (``'ac'``: first zero-crossing of the
+        autocorrelation function; ``'ac1e'``: floor of its first 1/e crossing; ``'mi'``: the
+        smaller of the first Kraskov automutual-information minimum and the ``'ac1e'``
+        delay). The default of 1 uses consecutive samples.
 
     Returns
     -------
@@ -576,10 +577,7 @@ def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2,
         vectors).
     """
     x = np.asarray(x)
-    if isinstance(tau, str):
-        if tau != 'ac':
-            raise ValueError(f"Unknown tau '{tau}'")
-        tau = first_crossing(x, 'ac', 0, 'discrete')
+    tau = get_tau(x, tau)
     if np.isnan(tau):  # the delay could not be determined (e.g., constant series)
         return np.nan
     tau = int(tau)
