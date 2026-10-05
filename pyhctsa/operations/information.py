@@ -315,7 +315,9 @@ def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
     -----------
         v1 (array-like): The first input vector
         v2 (array-like): The second input vector
-        r1 (str or list): The bin-partitioning method for v1 ('range', 'quantile', or [min, max])
+        r1 (str or list): The bin-partitioning method for v1: 'range' (equal-width bins spanning
+            the data, with explicit edges; NaN is returned for a constant vector), 'quantile'
+            (equal numbers of values) or [min, max] (equal-width bins spanning that range)
         r2 (str or list): The bin-partitioning method for v2 ('range', 'quantile', or [min, max])
         num_bins (int): The number of bins to partition each vector into (default : 10)
 
@@ -330,6 +332,9 @@ def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
         raise ValueError("Input vectors must be the same length")
 
     N = len(v1)
+    if (isinstance(r1, str) and r1 == 'range' and np.ptp(v1) == 0) or \
+            (isinstance(r2, str) and r2 == 'range' and np.ptp(v2) == 0):
+        return np.nan  # a constant vector has no distribution to bin
 
     # Create histograms
     edges_i = _give_me_edges(r1, v1, num_bins)
@@ -363,17 +368,17 @@ def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
     return mi
 
 def _give_me_edges(r, v, n_bins):
-    EE = 1E-6 # this small addition gets lost in the last bin
     if n_bins <= 0:
         raise ValueError(f"nbins must be > 0, got {n_bins}")
-    if r == 'range':
-        return np.linspace(np.min(v), np.max(v) + EE, n_bins + 1)
-    elif r == 'quantile': # bin edges based on quantiles
-        edges = np.quantile(v, np.linspace(0, 1, n_bins + 1))
-        edges[-1] += EE
+    if isinstance(r, str) and r == 'range':
+        return bf_hist_edges(v, n_bins)  # equal-width bins spanning the data (explicit edges)
+    elif isinstance(r, str) and r == 'quantile':  # bin edges based on quantiles
+        ee = 1E-6 * np.ptp(v)  # this small addition (relative to the data) gets lost in the last bin
+        edges = np.asarray(matlab_quantile(v, _linspace(0, 1, n_bins + 1)), dtype=float)
+        edges[-1] += ee
         return edges
-    elif isinstance(r, (list, np.ndarray)) and len(r) == 2: # a two-component vector
-        return np.linspace(r[0], r[1] + EE, n_bins + 1)
+    elif not isinstance(r, str) and len(r) == 2:  # a two-component vector
+        return bf_hist_edges(v, n_bins, r)  # equal-width bins spanning the given range
     else:
         raise ValueError(f"Unknown partitioning method '{r}'")
 
