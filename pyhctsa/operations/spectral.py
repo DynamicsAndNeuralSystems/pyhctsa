@@ -3,6 +3,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from typing import Union
 import scipy.fft
+import scipy.signal
 
 from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit, robustfit, polyfit
 
@@ -337,20 +338,27 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
         warnings.warn("Constant time series has no spectral structure")
         return np.nan
 
-    window = None
     # Set window (for periodogram and welch):
+    if psd_meth == 'welch':
+        # Welch's method needs a window shorter than the series, so that segments are averaged.
+        # The segment length is fixed in samples (not a fraction of N), so that the frequency
+        # resolution stays fixed and more segments are averaged as N grows. 50% overlap.
+        win_length = max(min(256, int(np.floor(ny / 4 + 0.5))), 16)  # MATLAB round: half away from zero
+    else:
+        win_length = ny
+    window = None
     if window_type == 'none':
-        window = []
+        window = None
     elif window_type == 'hamming':
-        window = np.hamming(ny)
+        window = np.hamming(win_length)
     elif window_type == 'hann':
-        window = np.hanning(ny)
+        window = np.hanning(win_length)
     elif window_type == 'bartlett':
-        window = np.bartlett(ny)
+        window = np.bartlett(win_length)
     elif window_type == 'boxcar':
-        window = scipy.signal.windows.boxcar(ny)
+        window = scipy.signal.windows.boxcar(win_length)
     elif window_type == 'rect':
-        window = np.ones(ny)
+        window = np.ones(win_length)
     else:
         raise ValueError(f"Unknown window: {window_type}")
 
@@ -371,14 +379,22 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
         s = s[1:]
 
     elif psd_meth == 'welch':
-        # welch power spectral density estimate
+        # Welch power spectral density estimate, as MATLAB's pwelch(y, window, [], [], 1):
+        # 50% overlap, no detrending, and pwelch's own default nfft = max(256, 2^nextpow2(win_length))
         fs = 1
-        n = 2 ** (int(np.ceil(np.log2(ny))))
-        f, s = scipy.signal.welch(y, window=window, noverlap=0, nfft=n, fs=fs)
+        if window is None:
+            # pwelch's default window for an empty window argument: Hamming, with the segment
+            # length chosen to give 8 segments at 50% overlap
+            win_length = int(np.floor(ny / 4.5))
+            window = np.hamming(win_length)
+        n_overlap = win_length // 2
+        nfft = max(256, 2 ** int(np.ceil(np.log2(win_length))))
+        f, s = scipy.signal.welch(y, fs=fs, window=window, nperseg=win_length, noverlap=n_overlap,
+                                  nfft=nfft, detrend=False, return_onesided=True, scaling='density')
         w = 2 * np.pi * f  # angular frequency
         s = s / (2 * np.pi)  # adjust so that area remains normalized in angular frequency space
     elif psd_meth == 'periodogram':
-        win = np.ones(ny) if (window is None or len(window) == 0) else np.asarray(window)
+        win = np.ones(ny) if window is None else np.asarray(window)
         nfft = max(256, 2 ** int(np.ceil(np.log2(ny))))
         f, s = scipy.signal.periodogram(
             y, fs=1, window=win, nfft=nfft, detrend=False,
