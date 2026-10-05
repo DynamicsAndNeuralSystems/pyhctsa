@@ -105,6 +105,12 @@ def wfbm(x: ArrayLike) -> dict:
     """
     Parameters of fractional Gaussian noise/Brownian motion in a time series.
 
+    The wavelet-toolbox estimator (``wfbmesti``) assumes its input is a path of fractional
+    Brownian motion (fBm). The series is treated as the increments of that path (fractional
+    Gaussian noise, fGn), so its cumulative sum is what is passed to the estimator, and H is
+    the Hurst exponent of the fGn: 0.5 for white noise, above 0.5 for persistent series,
+    below 0.5 for anti-persistent ones.
+
     Parameters
     ----------
     x : array-like
@@ -120,6 +126,7 @@ def wfbm(x: ArrayLike) -> dict:
         - (iii) using wavelet variance versus wavelet level.
     """
     x = np.asarray(x)
+    x = np.cumsum(x)  # the series is the increments (fGn); wfbmesti expects the fBm path
     y = np.cumsum(np.diff(x))
     b1 = np.array([1.0, -2.0, 1.0])
     b2 = np.array([1.0, 0.0, -2.0, 0.0, 1.0])
