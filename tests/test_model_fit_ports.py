@@ -1,7 +1,8 @@
 """Model-fit ports (wave 6c): the 'ss'/'arma' paths of steps_ahead / compare_test_sets,
 fit_subsegments ('ss', 'arma', 'rand'), and the shared whitening / HMM helpers.
 
-Expected values were generated with MATLAB hctsa (R2026a) on the deterministic series below."""
+Expected values were generated with MATLAB hctsa (R2026a; random starts from BF_Random, robust/all)
+on the deterministic series below."""
 import numpy as np
 import pytest
 
@@ -32,8 +33,8 @@ def test_steps_ahead_ss():
 
 def test_compare_test_sets_ss():
     out = mf.compare_test_sets(_x(), 'ss', 2, 'rand', [15, 0.1], 2, 'default')
-    _check(out, {'stde_mean': 0.791842451482, 'stde_iqr': 0.160026270653, 'ac1_mean': 0.112570982982,
-                 'meane_mean': 0.139714942505, 'stdrat_median': 0.983921846276})
+    _check(out, {'stde_mean': 0.8129013147578973, 'stde_iqr': 0.1447475672170616, 'ac1_mean': 0.1581924917842691,
+                 'meane_mean': 0.1387703290409182, 'stdrat_median': 0.9788364311434616})
 
 
 def test_predictor_models_run():
@@ -50,16 +51,16 @@ def test_predictor_models_run():
 def test_fit_subsegments_rand_matches_matlab_draws():
     y = _x()
     _check(mf.fit_subsegments(y, 'ar', 2, 'rand', [10, 0.1], 'default'),
-           {'fpe_mean': 0.379634519252, 'fpe_range': 0.102596762019, 'a_1_mean': -0.864566529011,
-            'a_2_std': 0.048453762369})
+           {'fpe_mean': 0.39482533738942843, 'fpe_range': 0.16510385440096348, 'a_1_mean': -0.88754626825997,
+            'a_2_std': 0.038102305197980246})
     _check(mf.fit_subsegments(y, 'arsbc', None, 'rand', [10, 0.1], 'default'),
-           {'orders_mean': 8.2, 'sbcs_std': 0.291284688166, 'sbcs_min': -2.181912461189})
+           {'orders_mean': 8.7, 'sbcs_std': 0.2789350693032891, 'sbcs_min': -2.12873710590734})
 
 
 def test_fit_subsegments_ss():
     y = _x()
     _check(mf.fit_subsegments(y, 'ss', 2, 'rand', [10, 0.15], 'default'),
-           {'fpe_mean': 0.504523045973, 'fpe_std': 0.038456149331, 'fpe_max': 0.554694513916})
+           {'fpe_mean': 0.49057558822547265, 'fpe_std': 0.062172401975952835, 'fpe_max': 0.5888360036601256})
     _check(mf.fit_subsegments(y, 'ss', 'best', 'uniform', [8, 0.2]),
            {'fpe_mean': 0.113022755098, 'fpe_range': 0.070104747615, 'fpe_min': 0.08019030167})
 

@@ -90,5 +90,9 @@ R.qe_lattice_4 = BF_QuantileEdges(S.lattice, 4);
 hm = {'white','quant','lattice','skew','bimodal','binary','const','two','small','mostmax','nan_series','hsm_even','hsm_tie','hsm_tie2','hsm_5'};
 R.hsm = zeros(numel(hm), 1);
 for i = 1:numel(hm), R.hsm(i) = BF_HalfSampleMode(S.(hm{i})); end
+% --- BF_Random 'perm' (argsort of uniforms) and BF_RandomSeed (added with robust/finish)
+R.rand_perm7_4000 = BF_Random(4000, 7, 'perm');
+R.rand_perm_vec = BF_Random(12, [1 2 3 4 5 6], 'perm');
+R.seed_vals = [BF_RandomSeed('default'), BF_RandomSeed([]), BF_RandomSeed(7.6), BF_RandomSeed(2.5), BF_RandomSeed(-3), BF_RandomSeed(5e9+0.4), BF_RandomSeed(0.5), BF_RandomSeed(42)];
 save(fullfile(D, 'results.mat'), '-struct', 'R', '-v7');
 disp('done');

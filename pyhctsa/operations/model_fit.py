@@ -17,9 +17,9 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.physics import _ksdensity
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
-from ..robust import bf_exp_fit
+from ..robust import bf_exp_fit, bf_random, bf_random_seed
 from ..toolboxes.matlab.optimizers import minimize
-from ..utils import _linspace, _ml_randperm, _ml_rng, _zscore_matlab, get_tau, matlab_quantile, z_score
+from ..utils import _linspace, _zscore_matlab, get_tau, matlab_quantile, z_score
 
 @numba.njit(cache=True, error_model='numpy')
 def _zg_hmm_em(x, mu, cov, P, pi, n_cycles, tol, cov_floor):
@@ -488,9 +488,10 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     preprocessing, from differencing (``d1`` to ``d3``), piecewise polynomial detrending
     (``p1_5`` ... ``p2_40``) and rank-mapping onto a Gaussian (``rmgd``), after which the
     z-scored series is the hardest for an AR(2) model to predict. It has to beat doing
-    nothing by 5% for a preprocessing to be applied. The random draws of ``rmgd`` are
-    NumPy's, seeded as ``BF_ResetSeed`` (``None``/``'default'``: seed 0, ``'none'``: NumPy's
-    global state, or an integer seed).
+    nothing by 5% for a preprocessing to be applied. The Gaussian draws of ``rmgd`` come
+    from the portable generator (:func:`pyhctsa.robust.bf_random`, the same numbers as in hctsa),
+    seeded as ``BF_RandomSeed`` (``None``/``'default'``: seed 0, ``'none'``: a seed from NumPy's
+    global state, or a number).
     """
     from scipy.signal import detrend
     # (imported here: pre_process imports nonlinearity, which imports this module)
@@ -509,7 +510,9 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
         for num_bits in (5, 10, 20, 40):
             # (as MATLAB's zscore: a constant series becomes zeros)
             candidates[f'p{order}_{num_bits}'] = _zscore_matlab(_piecewise_poly_residual(y, order, num_bits))
-    candidates['rmgd'] = _rank_map_gaussian(y, random_seed)  # rank-map onto a Gaussian (stochastic)
+    # rank-map onto a Gaussian (stochastic, from the portable generator)
+    candidates['rmgd'] = _rank_map_gaussian(
+        y, draws=bf_random(len(y), bf_random_seed(random_seed), 'normal'))
     # (hctsa's log, log returns, Box-Cox and square-root versions need a positive series,
     # which a detrended series never is)
 
@@ -643,8 +646,9 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     Q : int, optional
         The ARCH degree: the number of lagged squared innovations. Default is 1.
     random_seed : int, 'default', 'none' or None, optional
-        How to seed the random draws used by the whitening (``rmgd``), as ``BF_ResetSeed``.
-        Default is ``None`` (seed 0). The draws are NumPy's, not MATLAB's ``randn`` stream.
+        The seed of the random Gaussian draws used by the whitening (``rmgd``), as hctsa's
+        ``BF_RandomSeed``. Default is ``None`` (seed 0). The draws come from the portable
+        generator (:func:`pyhctsa.robust.bf_random`), so they are hctsa's.
     model_type : {'garch', 'gjr', 'egarch'}, optional
         The conditional variance model: ``'garch'`` (default, symmetric response to shocks),
         ``'gjr'`` (GJR-GARCH, adds a leverage term so negative and positive shocks can have
@@ -915,19 +919,6 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
     out['Ks_vary_p'] = np.nanmean(_std_omitnan(ks))
     out['Ks_vary_q'] = np.nanmean(_std_omitnan(ks.T))
     return out
-
-def _seeded_rng(random_seed) -> np.random.RandomState:
-    """
-    The random generator after hctsa's ``BF_ResetSeed(random_seed)``: an integer seed, or
-    ``'default'`` (seed 0), seeds MATLAB's Mersenne Twister (so ``rand`` draws are MATLAB's);
-    ``'none'`` or ``None`` gives a generator that is not reset (fresh entropy).
-    """
-    if isinstance(random_seed, str) and random_seed == 'default':
-        return _ml_rng(0)
-    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
-        return np.random.RandomState()
-    return _ml_rng(int(random_seed))
-
 
 def _n4_fpe(loss: float, n_order: int, n_obs: int) -> float:
     """Akaike's final prediction error of an ``n4sid`` fit of order ``n_order`` to ``n_obs`` samples
@@ -1378,10 +1369,10 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         non-overlapping segments to partition the series into.
         Default is [20, 0.1].
     random_seed : int, 'default', 'none' or None, optional
-        How to reset the random seed that picks the segment starts when ``subset_how`` is
-        ``'rand'``, as hctsa's ``BF_ResetSeed``: an integer seed, or ``'default'`` for seed
-        0, seeding a Mersenne Twister so that the draws are MATLAB's; ``'none'`` or
-        ``None`` for a generator that is not reset. Default is ``'default'``.
+        The seed of the random segment starts (``subset_how='rand'``), as hctsa's
+        ``BF_RandomSeed``: a number, ``'default'`` or ``None`` for seed 0, or ``'none'`` for
+        a seed drawn from NumPy's global state. The draws come from the portable generator
+        (:func:`pyhctsa.robust.bf_random`), so they are hctsa's. Default is ``'default'``.
 
     Returns
     -------
@@ -1428,9 +1419,8 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
             l = int(np.floor(N * sample_p[1]))
         else:  # specified an absolute interval
             l = int(sample_p[1])
-        # reset the random seed (BF_ResetSeed), then numPred random starting points (randi)
-        rng = _seeded_rng(random_seed)
-        spts = 1 + np.floor((N - l + 1) * rng.random_sample(num_pred)).astype(int)
+        # numPred random starting points (uniform on 1..N-l+1), reproducible from the seed
+        spts = 1 + np.floor((N - l + 1) * bf_random(num_pred, bf_random_seed(random_seed))).astype(int)
         r = np.column_stack([spts, spts + l - 1])
     else:
         raise ValueError(f"Unknown subset method: {subset_how}")
@@ -2803,11 +2793,12 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
           series by training on the other values in that segment.
 
         Default is ``'frombefore'``.
-    random_seed : int or None
-        Seed for the Mersenne Twister, reset once before the loop over windows
-        (as ``BF_ResetSeed`` does), used by the ``'randomgap'`` mode. ``None``
-        leaves the stream alone, matching ``BF_ResetSeed('none')``. Default
-        is 0.
+    random_seed : int, 'default', 'none' or None, optional
+        The seed of the random splits of the ``'randomgap'`` mode, as hctsa's
+        ``BF_RandomSeed``: a number, ``'default'`` or ``None`` for seed 0, or ``'none'`` for a
+        seed drawn from NumPy's global state. One block of uniforms from the portable generator
+        (:func:`pyhctsa.robust.bf_random`) gives each window its own split (the ranks of its
+        column), so the splits are hctsa's. Default is 0.
 
     Returns
     -------
@@ -2867,11 +2858,12 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     nlmls = np.full(num_preds, np.nan)           # per-point negative log marginal likelihoods (NaN: skipped window)
     loghypers = np.zeros((nhps, num_preds))      # log-hyperparameters
 
-    rng = np.random.RandomState() if random_seed is None else None
-    if pmode == 'randomgap' and random_seed is not None:
-        # reset the seed once, before the loop over windows: successive windows
-        # then draw different random splits (a reproducible sequence)
-        rng = _ml_rng(random_seed)
+    if pmode == 'randomgap':
+        # the random train/test splits, one column per window (so that the windows get different
+        # splits), reproducible from the seed: the ranks of one block of uniforms
+        random_splits = 1 + np.argsort(
+            bf_random((num_train + num_test) * num_preds, bf_random_seed(random_seed)).reshape(
+                (num_train + num_test, num_preds), order='F'), axis=0, kind='stable')
 
     for i in range(num_preds):
         # (0) Set up test and training sets
@@ -2885,7 +2877,7 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         elif pmode == 'randomgap':
             n = num_train + num_test
             t = np.arange(1, n + 1, dtype=float)
-            r = _ml_randperm(n, rng)
+            r = random_splits[:, i]
             yy = y[sp - 1:sp - 1 + n]
 
             rt = np.sort(r[:num_train])
@@ -3399,9 +3391,10 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     steps : int, optional
         The number of steps ahead to predict in each segment. Default is 2.
     random_seed : int, 'default', 'none' or None, optional
-        Seed for the Mersenne Twister that picks the random segments, reset first as
-        ``BF_ResetSeed`` does (0, or ``'default'``, is MATLAB's default); ``'none'`` or
-        ``None`` leaves the stream alone. Default is 0.
+        The seed of the random segment starts, as hctsa's ``BF_RandomSeed``: a number,
+        ``'default'`` or ``None`` for seed 0, or ``'none'`` for a seed drawn from NumPy's
+        global state. The draws come from the portable generator
+        (:func:`pyhctsa.robust.bf_random`), so they are hctsa's. Default is 0.
 
     Returns
     -------
@@ -3444,9 +3437,8 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
         else:  # an absolute interval
             seg_len = int(sample_p[1])
     if subset_how == 'rand':
-        # reset the random seed (BF_ResetSeed), then numPred starting points
-        rng = _seeded_rng(random_seed)
-        spts = 1 + np.floor((N - seg_len + 1) * rng.random_sample(num_pred)).astype(int)  # randi
+        # numPred random starting points (uniform on 1..N-seg_len+1), reproducible from the seed
+        spts = 1 + np.floor((N - seg_len + 1) * bf_random(num_pred, bf_random_seed(random_seed))).astype(int)
         r[:, 0] = spts
         r[:, 1] = spts + seg_len - 1
     elif subset_how == 'uniform':
@@ -3639,27 +3631,6 @@ def _gp_init_hyp(components: list, tt: np.ndarray) -> np.ndarray:
     return np.r_[hyp, np.log(0.1)]
 
 
-def _ml_randi(imax: int, rng: np.random.RandomState) -> int:
-    """MATLAB's scalar ``randi(imax)``: ``1 + floor(imax * rand)``."""
-    return 1 + int(np.floor(imax * rng.random_sample()))
-
-
-def _ml_randsample(n: int, k: int, rng: np.random.RandomState) -> np.ndarray:
-    """MATLAB's ``randsample(n, k)`` (without replacement): 1-based indices."""
-    if 4 * k > n:
-        return _ml_randperm(n, rng)[:k]
-    selected = np.zeros(n, dtype=bool)
-    out = np.zeros(k, dtype=int)
-    nsel = 0
-    while nsel < k:
-        r = _ml_randi(n, rng)
-        if not selected[r - 1]:
-            selected[r - 1] = True
-            out[nsel] = r
-            nsel += 1
-    return out
-
-
 def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covNoise',
                        squish_or_squash: int = 1, max_n: Union[int, float, str] = 500,
                        resample_how: str = 'resample',
@@ -3711,9 +3682,10 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         - ``'random_both'``: take ``max_n`` consecutive samples from a random position, then
           a random fifth of them.
     random_seed : int, 'default', 'none' or None, optional
-        Seed for the Mersenne Twister, reset first (as ``BF_ResetSeed``) for the settings of
-        ``resample_how`` that use random numbers; ``'none'`` or ``None`` leaves the stream
-        alone. Default is 0.
+        The seed of the random numbers, for the settings of ``resample_how`` that use them, as
+        hctsa's ``BF_RandomSeed``: a number, ``'default'`` or ``None`` for seed 0, or ``'none'``
+        for a seed drawn from NumPy's global state. The draws come from the portable generator
+        (:func:`pyhctsa.robust.bf_random`), so they are hctsa's. Default is 0.
 
     Returns
     -------
@@ -3755,9 +3727,6 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     def set_time_index(n):
         return np.arange(1, n + 1, dtype=float) if squish_or_squash else _linspace(0, 1, n)
 
-    def reset_seed():  # BF_ResetSeed
-        return _seeded_rng(random_seed)
-
     # Downsample long time series
     if max_n == 0:
         t = set_time_index(N)  # no resampling requested
@@ -3771,26 +3740,27 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
             t = set_time_index(N)
         elif resample_how == 'random_i':  # max_n random indices (unevenly spaced)
             t = set_time_index(N)
-            rng = reset_seed()
-            ii = np.sort(_ml_randsample(N, max_n, rng))
+            # max_n distinct indices, chosen reproducibly from the seed (the first max_n of a permutation)
+            ii = np.sort(bf_random(N, bf_random_seed(random_seed), 'perm')[:max_n])
             t = t[ii - 1]
             t = (t - np.min(t)) / np.ptp(t) * (max_n - 1) + 1  # respace from 1:max_n
             y = y[ii - 1]
         elif resample_how == 'random_consec':  # max_n consecutive samples from a random position
-            rng = reset_seed()
-            sind = _ml_randi(N - max_n + 1, rng)  # start index
+            # start index, uniform on 1..N-max_n+1
+            sind = 1 + int(np.floor((N - max_n + 1) * bf_random(1, bf_random_seed(random_seed))[0]))
             y = y[sind - 1:sind - 1 + max_n]
             t = set_time_index(max_n)
         elif resample_how == 'first':  # the first max_n samples
             y = y[:max_n]
             t = set_time_index(max_n)
         elif resample_how == 'random_both':  # random start, then a random fifth of those samples
-            rng = reset_seed()
-            sind = _ml_randi(N - max_n + 1, rng)
+            seed = bf_random_seed(random_seed)
+            sind = 1 + int(np.floor((N - max_n + 1) * bf_random(1, seed)[0]))  # start index
             y = y[sind - 1:sind - 1 + max_n]
             N = len(y)
             t = set_time_index(N)
-            ii = np.sort(_ml_randsample(N, int(np.ceil(max_n / 5)), rng))
+            # (a second stream, independent of the start index)
+            ii = np.sort(bf_random(N, seed + 1, 'perm')[:int(np.ceil(max_n / 5))])
             t = t[ii - 1]
             y = y[ii - 1]
         else:
