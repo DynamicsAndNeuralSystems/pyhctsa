@@ -382,7 +382,9 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
     out = {}
     rmat = np.corrcoef(M1, M2)
     out['absR'] = np.abs(rmat[0, 1])
-    out['density'] = np.ptp(M1) * np.ptp(M2) / N
+    # density of points in M1--M2 space: (number of windows) / (bounding-box area)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        out['density'] = len(M1) / (np.ptp(M1) * np.ptp(M2))
 
     return out
 
