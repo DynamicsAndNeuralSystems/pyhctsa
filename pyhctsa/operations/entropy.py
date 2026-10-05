@@ -911,6 +911,97 @@ def bubble_entropy(y: ArrayLike, m: int = 10, tau: Union[int, str] = 1) -> Union
     out['bubbleEn'] = (H[1] - H[0]) / np.log((m + 1) / (m - 1))
     return out
 
+def permutation_entropy_complexity(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> dict:
+    """
+    Jensen-Shannon statistical complexity of ordinal patterns.
+
+    Computes the Bandt-Pompe ordinal-pattern distribution (as in
+    :func:`permutation_entropy`) and pairs its normalized Shannon entropy with the
+    Jensen-Shannon statistical complexity of Rosso et al. [1]: the entropy-complexity
+    plane used to separate chaotic, stochastic and periodic dynamics that can look alike
+    under entropy alone.
+
+    Entropy is near its extremes (0 or ``log(m!)``) for both fully ordered *and* fully
+    random sequences. The statistical complexity ``C = Q_J[P, P_uniform] * H[P]`` is
+    instead close to zero at both those extremes and peaks for structured-but-disordered
+    ('chaotic') ordinal-pattern distributions, a distinct axis of information from
+    entropy alone. 'hNorm' reproduces the 'normPermEn' of :func:`permutation_entropy`.
+    Port of hctsa's ``EN_PermEnComplexity``.
+
+    At ``m = 2`` there are only two ordinal states, so H and C are both unimodal,
+    symmetric functions of a single probability: they are then forced to be near-perfect
+    reparameterizations of one another regardless of the input data, making
+    'jsComplexity' redundant with plain permutation entropy at that order. ``m = 3`` was
+    also found redundant on real-world data; only ``m = 4`` and ``m = 5`` are registered
+    in the default hctsa feature set.
+
+    References
+    ----------
+    .. [1] O.A. Rosso, H.A. Larrondo, M.T. Martin, A. Plastino and M.A. Fuentes,
+        "Distinguishing noise from chaos", Phys. Rev. Lett. 99, 154102 (2007).
+    .. [2] M.T. Martin, A. Plastino and O.A. Rosso, "Generalized statistical complexity
+        measures: Geometrical and analytical properties", Physica A 369(2), 439 (2006),
+        for the Q_0 normalization.
+    .. [3] P.W. Lamberti, M.T. Martin, A. Plastino and O.A. Rosso, "Intensive entropic
+        non-triviality measure", Physica A 334(1-2), 119 (2004).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    m : int, optional
+        The embedding dimension (order of the ordinal patterns). Default is 2.
+    tau : int or str, optional
+        The time delay for the embedding: an integer, or a rule understood by
+        :func:`~pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``). Default is 1.
+
+    Returns
+    -------
+    dict
+        A dictionary containing:
+
+        - 'hNorm': the normalized Shannon entropy of the ordinal-pattern distribution,
+          ``H[P] = S[P] / log2(m!)``, in [0, 1],
+        - 'jsComplexity': the Jensen-Shannon statistical complexity,
+          ``C[P] = Q_J[P, P_uniform] * H[P]``, in [0, 1].
+
+        Both are NaN if the delay cannot be determined or the series is too short to
+        embed (fewer than 5 embedding vectors).
+    """
+    m = int(m)
+    nan_out = {'hNorm': np.nan, 'jsComplexity': np.nan}
+    y = np.asarray(y, dtype=float).ravel()
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        return nan_out
+    tau = int(tau)
+    if y.size - (m - 1) * tau < 5:  # need at least 5 embedding vectors
+        logger.warning("Time series too short to embed")
+        return nan_out
+    x = time_delay_embed(y, m, tau)
+    nx = x.shape[0]
+
+    num_perms = factorial(m)
+    p = np.bincount(_ordinal_pattern_rank(x), minlength=num_perms) / nx
+
+    # Normalized Shannon entropy of P
+    p_0 = p[p > 0]
+    s_p = -np.sum(p_0 * np.log2(p_0))
+    s_max = np.log2(num_perms)
+    h_norm = s_p / s_max
+
+    # Jensen-Shannon statistical complexity of P relative to the uniform distribution Pe
+    pe = 1 / num_perms
+    p_mix = (p + pe) / 2  # every entry > 0, since pe > 0
+    s_mix = -np.sum(p_mix * np.log2(p_mix))
+    js_div = s_mix - s_p / 2 - s_max / 2  # the entropy of Pe is log2(m!)
+
+    # Normalizing constant so that Q_J is in [0, 1], attained for P a point mass
+    n = float(num_perms)
+    q0 = -2 / (((n + 1) / n) * np.log2(n + 1) - 2 * np.log2(2 * n) + np.log2(n))
+
+    return {'hNorm': h_norm, 'jsComplexity': q0 * js_div * h_norm}
+
 def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str] = 1,
                        mapping_how: str = 'ncdf') -> Union[dict, float]:
     """
