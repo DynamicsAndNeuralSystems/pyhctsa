@@ -1325,7 +1325,7 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
 
     return out
 
-from ..toolboxes.matlab.matlab_fit import robustfit
+from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robustfit
 from ..utils import _round_half_away
 
 
@@ -1999,6 +1999,294 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
     except (_D2DataError, ValueError) as exc:  # data-dependent failures give NaN
         logger.warning(str(exc))
         return np.nan
+    return out
+
+
+def _tisean_lyap_r(y: np.ndarray, delay: int, dim: int, mindist: int, steps: int) -> Union[tuple, None]:
+    # TISEAN's ``lyap_r -d<delay> -m<dim> -t<mindist> -s<steps>`` (Rosenstein et al.; source_c/lyap_r.c
+    # as modified in hctsa), in process. For every reference vector, the nearest neighbor (outside
+    # the Theiler window ``mindist``) is found at the first length scale of the geometric sequence
+    # 1e-3 * 1.1^k (of the data interval) at which any neighbor lies within it, and the logarithm
+    # of the distance between the two trajectories is averaged over all references at each of
+    # ``steps`` + 1 times. Returns the (time, mean ln distance) rows as in the .ros file, or None
+    # where TISEAN gives no output (a reference point has no neighbor within the search radius:
+    # exit status 54).
+    y = _round_significant(np.asarray(y, dtype=float).ravel(), 7)  # BF_WriteTempFile
+    length = y.size
+    ymin = np.min(y)
+    interval = np.max(y) - ymin
+    if interval == 0:
+        raise _D2DataError('lyap_r: the data are constant')
+    x = (y - ymin) / interval  # rescaled to [0, 1]
+    delay_span = delay * (dim - 1)
+    maxlength = length - delay_span - steps - 1 - mindist
+    if maxlength < 0:
+        raise _D2DataError('lyap_r: time series too short')
+    n_cand = length - delay_span - steps  # reference vectors that can be neighbors
+    emb = x[np.arange(length - delay_span)[:, None] + delay * np.arange(dim)[None, :]]
+    refs = np.arange(maxlength + 1)
+
+    # Length-scale sequence over which neighbors are looked for
+    eps_seq = []
+    eps = 1e-3
+    while eps <= 2.0:
+        eps_seq.append(eps)
+        eps *= 1.1
+    eps_sq = np.square(eps_seq)
+
+    # Nearest neighbors, in chunks of reference points
+    neighbor = np.full(refs.size, -1)
+    cand = np.arange(n_cand)
+    chunk = max(1, int(2e6 // (n_cand * dim)))
+    for c in range(0, refs.size, chunk):
+        r = refs[c:c + chunk]
+        d2 = np.zeros((r.size, n_cand))
+        for k in range(dim):
+            d2 += np.square(emb[r, k][:, None] - emb[:n_cand, k][None, :])
+        d2[np.abs(r[:, None] - cand[None, :]) <= mindist] = np.inf
+        d2[d2 >= 1.0] = np.inf  # only neighbors within squared distance 1 are accepted
+        dmin = d2.min(axis=1)
+        if np.any(dmin > eps_sq[-1]):
+            return None  # some reference point never gets a neighbor
+        # the neighbor is the nearest one with a positive distance, if within the first scale
+        # at which anything (even an exact duplicate) was found
+        k_found = np.searchsorted(eps_sq, dmin, side='left')
+        d2[d2 == 0] = np.inf
+        jmin = d2.argmin(axis=1)
+        dnear = d2[np.arange(r.size), jmin]
+        ok = dnear <= eps_sq[k_found]
+        # Exactly tied neighbors (quantized data): lyap_r takes the first met scanning its
+        # 256 x 256 grid of boxes (cells of side eps in the first and last coordinates, rows
+        # then columns, newest point first within a cell)
+        for ri in np.flatnonzero(ok & (np.sum(d2 == dnear[:, None], axis=1) > 1)):
+            tied = np.flatnonzero(d2[ri] == dnear[ri])
+            epsinv = 1.0 / eps_seq[k_found[ri]]
+            cell = [(emb[:, k] * epsinv).astype(int) & 255 for k in (0, dim - 1)]
+            rank = [(cell[k][tied] - cell[k][r[ri]] + 128) % 256 - 128 for k in (0, 1)]
+            jmin[ri] = tied[np.lexsort((-tied, rank[1], rank[0]))[0]]
+        neighbor[c:c + chunk] = np.where(ok, jmin, -1)
+
+    # Divergence of the neighbor pairs over time
+    found = np.zeros(steps + 1)
+    lyap = np.zeros(steps + 1)
+    use = refs[neighbor >= 0]
+    nb = neighbor[neighbor >= 0]
+    chunk = max(1, int(2e6 // ((steps + 1) * dim)))
+    steps_idx = np.arange(steps + 1)
+    for c in range(0, use.size, chunk):
+        a = use[c:c + chunk, None] + steps_idx[None, :]
+        b = nb[c:c + chunk, None] + steps_idx[None, :]
+        dx = np.sum(np.square(emb[a] - emb[b]), axis=2)
+        pos = dx > 0
+        found += pos.sum(axis=0)
+        lyap += np.sum(np.log(np.where(pos, dx, 1.0)), axis=0)
+    have = found > 0
+    if not have.any():
+        return np.empty((0, 2))
+    return np.column_stack([steps_idx[have], np.vectorize(_e)(lyap[have] / found[have] / 2.0)])
+
+
+def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
+                 maxtstep: Union[int, float, list, tuple] = ('ac1e', 30),
+                 past: Union[int, float, list, tuple] = ('ac1e', 1), nnr: int = 3,
+                 embed_params: Union[list, tuple] = ('ac', 'fnn')) -> Union[dict, float]:
+    """
+    Largest Lyapunov exponent: how nearest-neighbor trajectories diverge, and the scaling
+    of that divergence.
+
+    Estimates the divergence of nearby trajectories of the delay embedding as a function of
+    time by the algorithm of Rosenstein et al. [1]_ (TISEAN's ``lyap_r``): the logarithm of
+    the distance between each reference point's trajectory and that of its nearest neighbor
+    (outside a Theiler window) averaged over the reference points, :math:`p(t)`, for ``t`` up
+    to ``maxtstep``. For a chaotic system, :math:`p` rises linearly before saturating, with
+    slope the largest Lyapunov exponent. Outputs summarize :math:`p` (its first values,
+    maximum, crossings of fractions of the maximum, times to reach them), straight-line fits to
+    its scaling region (varying both start and end times, ``vse``, or just the end time,
+    ``ve``, chosen to minimize the mean absolute residual less 0.006 per point), those slopes
+    per autocorrelation time, and a saturating exponential fit
+    :math:`a (1 - e^{bt})`.
+
+    Unlike hctsa, which shells out to installed TISEAN binaries, this runs an in-process port
+    of ``lyap_r``.
+
+    References
+    ----------
+    .. [1] M. T. Rosenstein, J. J. Collins, and C. J. De Luca, "A practical method for
+        calculating largest Lyapunov exponents from small data sets", Physica D 65(1-2),
+        117-134 (1993).
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    nref : int or float, optional
+        Unused (kept for compatibility with hctsa's signature). Default is -1.
+    maxtstep : int, float, or ``['ac1e', k]``, optional
+        The maximum number of time steps to follow neighbors for: a number of steps, a
+        value in (0, 1) as a proportion of the time-series length, or ``['ac1e', k]`` (or
+        ``['ac', k]``) for ``k`` times the autocorrelation time (see
+        :func:`pyhctsa.utils.theiler_window`). At least 10 and at most half the series length;
+        an ``'ac1e'`` horizon too long for the series is shortened to fit (NaN if this leaves fewer
+        than ``max(10, 3 * ac1e time)`` steps). Default is ``['ac1e', 30]``.
+    past : int, float, or ``['ac1e', k]``, optional
+        The Theiler window of time-correlated points to exclude as neighbors (see
+        :func:`pyhctsa.utils.theiler_window`). Default is ``['ac1e', 1]``.
+    nnr : int, optional
+        Unused (kept for compatibility with hctsa's signature). Default is 3.
+    embed_params : [tau, m], optional
+        Embedding parameters: ``tau`` is an integer or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer, or
+        ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in pyhctsa and raises
+        ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+
+    Returns
+    -------
+    dict or float
+        ``p1`` to ``p5``, ``maxp``: the first five values and the maximum of :math:`p(t)`
+        (relative to :math:`p(0)`); ``ncross08max``, ``pcross08max``, ``ncross09max``,
+        ``pcross09max``: the number (and proportion) of times :math:`p` crosses 80% and 90% of its
+        maximum; ``to095max`` ... ``to05max``: the time to first exceed 95%, 90%, 80%, 70%, 50%
+        of the maximum; ``vse_*`` and ``ve_*`` (``meanabsres``, ``rmsres``, ``gradient``,
+        ``intercept``, ``minbad``, and ``gradient_pertau``, the gradient per autocorrelation
+        time): the straight-line fits (NaN if the rise to 95% of the maximum takes at most three
+        steps); ``expfit_a``, ``expfit_b``, ``expfit_r2``, ``expfit_adjr2``, ``expfit_rmse``: the
+        saturating exponential fit. Returns NaN if the delay, horizon, or Theiler window cannot be
+        set, the series is too short for the horizon, TISEAN finds no neighbor for some reference
+        point (data too sparse or quantized) or too little output, or the curve is flat.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+
+    # Maximum time step
+    cap_horizon = (isinstance(maxtstep, (list, tuple)) and len(maxtstep) == 2
+                   and maxtstep[0] == 'ac1e')  # cap (rather than NaN) a horizon too long for the series
+    if isinstance(maxtstep, (list, tuple)):  # a multiple of the autocorrelation time
+        maxtstep = theiler_window(y, maxtstep)
+        if np.isnan(maxtstep):
+            logger.warning('No autocorrelation time to set the prediction length')
+            return np.nan
+    if 0 < maxtstep < 1:
+        maxtstep = int(_round_half_away(n * maxtstep))  # a proportion of the time-series length
+    maxtstep = int(max(maxtstep, 10))  # minimum prediction length
+    maxtstep = min(maxtstep, n // 2)  # can't look further than half the time series length
+
+    # Theiler window
+    past = theiler_window(y, past, n)
+    if np.isnan(past):  # no autocorrelation time (e.g. the ACF never decays to 1/e)
+        logger.warning('No autocorrelation time to set the Theiler window')
+        return np.nan
+    past = int(past)
+    if cap_horizon and maxtstep + 2 * past > n // 2:
+        # cap an 'ac1e' horizon to fit, keeping at least a few correlation times
+        maxtstep = n // 2 - 2 * past
+        if maxtstep < max(10, 3 * get_tau(y, 'ac1e')):
+            logger.warning(f'Time series too short (N = {n}) for a prediction horizon with '
+                           f'Theiler window {past}')
+            return np.nan
+    if maxtstep + 2 * past > n / 2:
+        # too few correlation times in the series to follow neighbor divergence
+        logger.warning(f'Time series too short (N = {n}) for maxtstep = {maxtstep} with '
+                       f'Theiler window {past}')
+        return np.nan
+
+    tau, m = _embed_tau_m(y, embed_params)
+    if np.isnan(tau):
+        logger.warning('Could not determine embedding parameters for this time series')
+        return np.nan
+
+    try:
+        rows = _tisean_lyap_r(y, tau, m, past, maxtstep)
+    except _D2DataError as exc:
+        logger.warning(str(exc))
+        return np.nan
+    if rows is None or rows.shape[0] == 0:
+        logger.warning('No output obtained from lyap_r')
+        return np.nan
+    t, p = rows[:, 0], rows[:, 1]
+    if p.size < 6:
+        logger.warning('Not enough output from lyap_r to compute statistics')
+        return np.nan
+    p = p - p[0]
+    if np.all(p == 0):
+        return np.nan
+
+    out = {}
+    for i in range(5):
+        out[f'p{i + 1}'] = p[i]
+    pmax = np.max(p)
+    out['maxp'] = pmax
+
+    def ncross(x):  # number of crossings of the fraction x of the maximum
+        return np.sum((p[:-1] - x * pmax) * (p[1:] - x * pmax) < 0)
+
+    out['ncross08max'] = ncross(0.8)
+    out['pcross08max'] = ncross(0.8) / (p.size - 1)
+    out['ncross09max'] = ncross(0.9)
+    out['pcross09max'] = ncross(0.9) / (p.size - 1)
+
+    def time_to(x):  # (1-based) index of the first value above the fraction x of the maximum
+        idx = np.flatnonzero(p > x * pmax)
+        return idx[0] + 1 if idx.size else None
+
+    for lab, x in (('095', 0.95), ('09', 0.9), ('08', 0.8), ('07', 0.7), ('05', 0.5)):
+        i = time_to(x)
+        out[f'to{lab}max'] = np.nan if i is None else i - 1
+
+    imax = time_to(0.95)
+    if imax is None:
+        return np.nan  # cannot be (a flat curve at its maximum of zero)
+    if imax <= 3:
+        # not a suitable range for finding scaling
+        for pre in ('vse', 've'):
+            for lab in ('meanabsres', 'rmsres', 'gradient', 'intercept', 'minbad'):
+                out[f'{pre}_{lab}'] = np.nan
+    else:
+        t_scal, p_scal = t[:imax], p[:imax]
+
+        # Vary both the start and end times for the best scaling
+        s, e, mybad, pp, res = _dimensions_scaling_range(t_scal, p_scal, gamma=0.006)
+        out['vse_meanabsres'] = np.mean(np.abs(res))
+        out['vse_rmsres'] = np.sqrt(np.mean(res ** 2))
+        out['vse_gradient'] = pp[0]
+        out['vse_intercept'] = pp[1]
+        out['vse_minbad'] = np.min(mybad)
+
+        # Vary just the end time, which is at least at the 50% mark of the maximum
+        imin = time_to(0.5)
+        endptr = np.arange(imin, imax + 1)
+        bad = np.empty(endptr.size)
+        for i, e in enumerate(endptr):
+            pf = np.polyfit(t_scal[:e], p_scal[:e], 1)
+            bad[i] = np.mean(np.abs(pf[0] * t_scal[:e] + pf[1] - p_scal[:e])) - 0.006 * e
+        e = int(endptr[int(np.argmin(bad))])
+        pp = np.polyfit(t_scal[:e], p_scal[:e], 1)
+        res = pp[0] * t_scal[:e] + pp[1] - p_scal[:e]
+        out['ve_meanabsres'] = np.mean(np.abs(res))
+        out['ve_rmsres'] = np.sqrt(np.mean(res ** 2))
+        out['ve_gradient'] = pp[0]
+        out['ve_intercept'] = pp[1]
+        out['ve_minbad'] = np.min(bad)
+
+    # The gradients per autocorrelation time
+    tau1e = first_crossing(y, 'ac', 1 / np.e, 'continuous')
+    if np.isnan(get_tau(y, 'ac1e')):
+        tau1e = np.nan  # the ACF never falls to 1/e
+    out['vse_gradient_pertau'] = out['vse_gradient'] * tau1e
+    out['ve_gradient_pertau'] = out['ve_gradient'] * tau1e
+
+    # Saturating exponential fit
+    try:
+        a, b = lsqcurvefit_trr(lambda c, x: c[0] * (1 - np.exp(c[1] * x)), [pmax, -0.5], t, p)
+        gof = goodness_of_fit(p, a * (1 - np.exp(b * t)), 2)
+        out['expfit_a'] = a
+        out['expfit_b'] = b
+        out['expfit_r2'] = gof['rsquare']
+        out['expfit_adjr2'] = gof['adjrsquare']
+        out['expfit_rmse'] = gof['rmse']
+    except (ValueError, np.linalg.LinAlgError, FloatingPointError):
+        for lab in ('a', 'b', 'r2', 'adjr2', 'rmse'):
+            out[f'expfit_{lab}'] = np.nan
+
     return out
 
 
