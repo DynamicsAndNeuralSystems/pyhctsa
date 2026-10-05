@@ -99,7 +99,8 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     except ValueError as exc:  # no output, e.g. delay times dimension too large for the series
         logger.warning(f'No output from TISEAN routine false_nearest on the data: {exc}')
         return np.nan
-    m_dim, p_nn, n_hood2 = res['dim'], res['pfnn'], res['sdeps']
+    # (TISEAN prints these with %e, and hctsa reads that text)
+    m_dim, p_nn, n_hood2 = res['dim'], np.vectorize(_tisean._e)(res['pfnn']), np.vectorize(_tisean._e)(res['sdeps'])
 
     if just_best:
         return float(_tisean.fnn_first_under(m_dim, p_nn, bestp))
