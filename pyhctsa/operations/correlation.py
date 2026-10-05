@@ -1970,7 +1970,7 @@ def fzcglscf(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int],
         glscfs[i-1] = glscf(y, alpha, beta, tau)
         if (i > 1) and (glscfs[i-1]*glscfs[i-2] < 0):
             # Draw a straight line between these two and look at where it hits zero
-            out = i - 1 + glscfs[i-1]/(glscfs[i-1]-glscfs[i-2])
+            out = i - 1 + glscfs[i-2]/(glscfs[i-2]-glscfs[i-1])
             return out
     
     return max_tau
