@@ -325,7 +325,9 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
     Returns
     --------
     out
-        Dictionary of statistics related to the correlation between simple statistics in local windows of the input time series. 
+        Dictionary of statistics related to the correlation between simple statistics in local windows of the input
+        time series: the correlation coefficient `R`, its absolute value `absR`, and `density`, the number of
+        windows divided by the bounding-box area in the M1--M2 plane.
     """
     x = np.asarray(x)
     N = len(x) # length of the time series
@@ -374,7 +376,8 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
 
     out = {}
     rmat = np.corrcoef(M1, M2)
-    out['absR'] = np.abs(rmat[0, 1])
+    out['R'] = rmat[0, 1]  # correlation coefficient
+    out['absR'] = np.abs(rmat[0, 1])  # absolute value of the correlation coefficient
     # density of points in M1--M2 space: (number of windows) / (bounding-box area)
     with np.errstate(divide='ignore', invalid='ignore'):
         out['density'] = len(M1) / (np.ptp(M1) * np.ptp(M2))
