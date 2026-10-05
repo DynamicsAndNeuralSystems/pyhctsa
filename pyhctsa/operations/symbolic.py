@@ -81,25 +81,37 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     rs = np.sort(rs[0:min(num_iters, len(rs))])
     rs = np.array([rs])
 
+    # The alphabet size for the Krichevsky-Trofimov smoothing below. For
+    # 'embed2quadrants'/'embed2octants', num_groups is the embedding delay, not an
+    # alphabet size, so the alphabet size is fixed by the number of quadrants/octants.
+    if coarse_grain_method == 'embed2quadrants':
+        num_symbols = 4
+    elif coarse_grain_method == 'embed2octants':
+        num_symbols = 8
+    else:
+        num_symbols = num_groups
+
     # COMPUTE EMPIRICAL PROBABILITIES FROM TIME SERIES
-    store = np.zeros([num_iters, 1])
-    for i in range(0, rs.size): # rs.size
+    # Sized to the number of test points actually available, min(num_iters, N-memory)
+    num_test = rs.size
+    store = np.zeros(num_test)
+    for i in range(0, num_test):
         if what_prior == 'dist':
             # uses the distribution up to memory to inform the next point
             # had to be careful with indexing, arange() works like matlab's : operator
-            p = np.sum(yth[rs[0, i]-memory:rs[0, i]] == yth[rs[0, i]])/memory
-            store[i] = p
+            num_matches = np.sum(yth[rs[0, i]-memory:rs[0, i]] == yth[rs[0, i]])
+            n_antecedent = memory
         elif what_prior == 'T1':
             # uses one-point correlations in memory to inform the next point
             # estimate transition probabilities from data in memory
             # find where in memory this has been observbed before, and preceded it
             memory_data = yth[rs[0, i] - memory:rs[0, i]]
             inmem = np.where(memory_data[:-1] == yth[rs[0, i] - 1])[0]
-            if len(inmem) == 0:
-                p = 0
+            n_antecedent = len(inmem)
+            if n_antecedent == 0:
+                num_matches = 0
             else:
-                p = np.mean(memory_data[inmem + 1] == yth[rs[0, i]])
-            store[i] = p
+                num_matches = np.sum(memory_data[inmem + 1] == yth[rs[0, i]])
 
         elif what_prior == 'T2':
             # Uses two-point correlations in memory to inform the next point
@@ -107,20 +119,20 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
             # Previous value observed in memory here
             inmem1 = np.where(memory_data[1:-1] == yth[rs[0, i] - 1])[0]
             inmem2 = np.where(memory_data[inmem1] == yth[rs[0, i] - 2])[0]
-            if len(inmem2) == 0:
-                p = 0
+            n_antecedent = len(inmem2)
+            if n_antecedent == 0:
+                num_matches = 0
             else:
-                p = np.sum(memory_data[inmem2 + 2] == yth[rs[0, i]]) / len(inmem2)
-            store[i] = p
+                # inmem2 indexes into inmem1, not directly into memory_data
+                num_matches = np.sum(memory_data[inmem1[inmem2] + 2] == yth[rs[0, i]])
         else:
             raise ValueError(f"Unknown method: {what_prior}")
-    # INFORMATION GAINED FROM NEXT OBSERVATION IS log(1/p) = -log(p)
-    store[store == 0] = 1 # so that we set log[0] == 0
+        # Krichevsky-Trofimov-style smoothed probability estimate: always in (0, 1),
+        # the uniform prior 1/num_symbols when the antecedent was never observed
+        store[i] = (num_matches + 0.5) / (n_antecedent + 0.5 * num_symbols)
 
+    # INFORMATION GAINED FROM NEXT OBSERVATION IS log(1/p) = -log(p)
     out = {} # dictionary for outputs
-    for i in range(0, len(store)):
-        if store[i] == 0:
-            store[i] = 1
 
     store = -(np.log(store))
     #minimum amount of information you can gain in this way
