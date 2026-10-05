@@ -8,6 +8,9 @@ file, runs ``d2``, and then pipes the resulting ``.c2`` file through ``c2g`` and
 * :func:`d2` calls the C kernel in ``TS_d2.c`` (a re-entrant transcription of
   TISEAN's ``d2.c``) and assembles the ``.c2``/``.d2``/``.h2`` tables from the
   raw pair counts, using the expressions ``d2.c`` prints.
+* :func:`false_nearest` calls the C kernel in ``TS_false_nearest.c`` (a re-entrant
+  transcription of TISEAN's ``false_nearest.c``), and :func:`fnn_embedding_dimension`
+  turns its output into hctsa's choice of embedding dimension.
 * :func:`c2g` and :func:`c2t` are ports of ``source_f/c2g.f`` and
   ``source_f/c2t.f``.  Those are Fortran, so they are reimplemented rather than
   wrapped -- both are short, and this keeps the package free of a Fortran
@@ -26,9 +29,11 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from . import d2 as _d2_c
+from . import false_nearest as _fnn_c
 from . import poincare as _poincare_c
 
-__all__ = ["d2", "c2g", "c2t", "poincare"]
+__all__ = ["d2", "c2g", "c2t", "poincare", "false_nearest", "fnn_first_under",
+           "fnn_embedding_dimension"]
 
 
 # 15-point Gauss-Kronrod rule, as tabulated in SLATEC's dqk15.f (which is what
@@ -240,6 +245,144 @@ def poincare(
     return cuts
 
 
+_FNN_FAILURES = {
+    1: "the data are constant",
+    2: "the maximal embedding dimension times the delay is too large for the data length",
+    3: "not enough points found (no neighbour within the search radius)",
+}
+
+
+def false_nearest(
+    y: ArrayLike,
+    delay: int = 1,
+    minemb: int = 1,
+    maxemb: int = 10,
+    theiler: int = 0,
+    escape_factor: float = 2.0,
+    write_precision: Optional[int] = 7,
+) -> dict:
+    """
+    Fraction of false nearest neighbors as a function of embedding dimension
+    (TISEAN's ``false_nearest``).
+
+    For each embedding dimension ``m`` the nearest neighbor of every point is
+    found in ``m`` dimensions; it is *false* if the extra coordinate of the
+    ``m + 1``-dimensional embedding separates the two points by more than
+    ``escape_factor`` times their distance. Neighbors closer in time than
+    ``theiler`` samples are not considered, and only points whose neighbor is
+    within a fraction ``1/escape_factor`` of the standard deviation of the
+    (range-scaled) series count.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    delay : int, optional
+        Time delay (``false_nearest -d``). Default is 1. NOTE: as in TISEAN
+        3.0.1's ``false_nearest`` for a scalar series, the delay only limits
+        the number of embedded points used; the embedding coordinates are
+        consecutive samples.
+    minemb, maxemb : int, optional
+        Smallest and largest embedding dimension tested (``-m``, ``-M1,<maxemb>``).
+        Defaults are 1 and 10.
+    theiler : int, optional
+        Theiler window in samples (``-t``). Default is 0.
+    escape_factor : float, optional
+        Ratio of the extra-coordinate separation to the distance above which a
+        neighbor is false (``-f``). TISEAN's own default, 2.0, is the default here;
+        hctsa's embedding-dimension choice uses 5.
+    write_precision : int or None, optional
+        Round the series to this many significant digits first, as hctsa's
+        ``BF_WriteTempFile`` does on its way through a text file. Pass ``None`` to use the
+        series as given. Default is 7.
+
+    Returns
+    -------
+    dict
+        ``'dim'``, ``'pfnn'``, ``'aveps'`` and ``'sdeps'``: arrays with one entry per
+        embedding dimension completed, which are the four columns TISEAN prints:
+        the dimension, the fraction of false nearest neighbors, and the mean and the
+        standard deviation of the distance to the nearest neighbor (in the units of
+        ``y``). If no neighbor can be found at some dimension, TISEAN stops there and
+        the arrays hold the dimensions before it.
+
+    Raises
+    ------
+    ValueError
+        If not even the first dimension can be computed (constant series, delay times
+        dimension too large for the series, no neighbors found), where TISEAN exits
+        without output.
+    """
+    y = np.ascontiguousarray(np.asarray(y, dtype=float).ravel())
+    if write_precision is not None:
+        y = _round_significant(y, write_precision)
+    rows, status = _fnn_c.run(y, int(delay), int(minemb), int(maxemb), int(theiler),
+                              float(escape_factor))
+    if rows.shape[0] == 0:
+        raise ValueError("false_nearest: " + _FNN_FAILURES.get(status, "failed"))
+    return {"dim": rows[:, 0].astype(int), "pfnn": rows[:, 1],
+            "aveps": rows[:, 2], "sdeps": rows[:, 3]}
+
+
+def fnn_first_under(dim: ArrayLike, pfnn: ArrayLike, threshold: float) -> int:
+    """
+    First embedding dimension at which the fraction of false nearest neighbors
+    drops below ``threshold`` (``firstunderf`` in hctsa's ``NL_FNN``); one more
+    than the largest dimension if it never does.
+    """
+    dim = np.asarray(dim)
+    below = np.flatnonzero(np.asarray(pfnn) < threshold)
+    return int(dim[below[0]]) if below.size else int(dim[-1]) + 1
+
+
+def fnn_embedding_dimension(
+    y: ArrayLike,
+    delay: int = 1,
+    theiler: int = 0,
+    threshold: float = 0.4,
+    maxemb: int = 10,
+    escape_factor: float = 5.0,
+    write_precision: Optional[int] = 7,
+) -> float:
+    """
+    Embedding dimension chosen by false nearest neighbors, as hctsa's
+    ``BF_Embed(y, tau, {'fnn', threshold})`` does.
+
+    This is the first dimension (1 to ``maxemb``) at which the fraction of false
+    nearest neighbors, :func:`false_nearest` with the given ``theiler`` window and
+    ``escape_factor``, falls below ``threshold``; ``maxemb + 1`` if it never does.
+    hctsa's defaults are reproduced: threshold 0.4, 10 dimensions, escape factor 5
+    (NL_nlpe uses a threshold of 0.05). NaN where TISEAN produces no output.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    delay : int, optional
+        Time delay of the embedding, passed to :func:`false_nearest`. Default is 1.
+    theiler : int, optional
+        Theiler window in samples; hctsa uses one autocorrelation time. Default is 0.
+    threshold : float, optional
+        Fraction of false nearest neighbors to get under. Default is 0.4.
+    maxemb : int, optional
+        Largest dimension tested. Default is 10.
+    escape_factor : float, optional
+        See :func:`false_nearest`. Default is 5.
+    write_precision : int or None, optional
+        See :func:`false_nearest`. Default is 7.
+
+    Returns
+    -------
+    float
+        The embedding dimension (an integer value), or NaN.
+    """
+    try:
+        t = false_nearest(y, delay, 1, maxemb, theiler, escape_factor, write_precision)
+    except ValueError:
+        return float("nan")
+    return float(fnn_first_under(t["dim"], t["pfnn"], threshold))
+
+
 def _tisean_argsort(x: np.ndarray) -> np.ndarray:
     """
     Ascending sort order with TISEAN's tie-breaking.
@@ -280,36 +423,66 @@ def c2t(c2: List[np.ndarray]) -> List[np.ndarray]:
     list of ndarray
         One ``(n_i - 1, 2)`` array per embedding dimension: the upper length
         scale, and Takens' estimator at that scale.
+
+    Notes
+    -----
+    As in :func:`c2g`, ``c2t.f`` relies on implicit typing: the logarithms, the
+    sums ``cint`` and the printed outputs are single precision (only the slope
+    ``a`` and offset ``b`` of the power-law pieces and the exponentials in the
+    integral are double, computed from single-precision differences). That is
+    reproduced, with the output rounded to the 9 significant digits ``c2t``
+    prints.
     """
     out: List[np.ndarray] = []
     for block in c2:
         e_vals, c_vals = [], []
         for ee, cc in block:
+            ee, cc = _f32(ee), _f32(cc)  # read into REAL
             if cc <= 0.0:  # c2t.f stops the block at the first non-positive C
                 break
-            e_vals.append(math.log(ee))
-            c_vals.append(math.log(cc))
+            e_vals.append(_f32(math.log(ee)))
+            c_vals.append(_f32(math.log(cc)))
 
         me = len(e_vals)
-        e_vals = np.asarray(e_vals, dtype=float)
-        c_vals = np.asarray(c_vals, dtype=float)
+        e_vals = np.asarray(e_vals, dtype=np.float32)
+        c_vals = np.asarray(c_vals, dtype=np.float32)
         order = _tisean_argsort(e_vals)
         e = e_vals[order]
         c = c_vals[order]
 
-        cint = 0.0
+        # b and a are evaluated in single precision, then held as doubles
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            de = e[1:] - e[:-1]
+            b_all = ((e[1:] * c[:-1] - e[:-1] * c[1:]) / de).astype(np.float64)
+            a_all = ((c[1:] - c[:-1]) / de).astype(np.float64)
+            de = de.astype(np.float64)
+
+        cint = np.float32(0.0)  # REAL
         rows = []
-        for i in range(1, me):
-            de = e[i] - e[i - 1]
-            b = (e[i] * c[i - 1] - e[i - 1] * c[i]) / de
-            a = (c[i] - c[i - 1]) / de
-            if a != 0:
-                cint += (math.exp(b) / a) * (math.exp(a * e[i]) - math.exp(a * e[i - 1]))
-            else:
-                cint += math.exp(b) * de
-            rows.append((math.exp(e[i]), math.exp(c[i]) / cint))
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            for i in range(1, me):
+                a, b = a_all[i - 1], b_all[i - 1]
+                if a != 0:
+                    inc = (math.exp(b) / a) * (math.exp(a * float(e[i]))
+                                               - math.exp(a * float(e[i - 1])))
+                else:
+                    inc = math.exp(b) * de[i - 1]
+                cint = _f32(float(cint) + inc)
+                x = _f32(math.exp(float(e[i])))
+                y = _f32(math.exp(float(c[i]))) / cint
+                rows.append((_f32_9(x), _f32_9(y)))
         out.append(np.array(rows, dtype=float).reshape(-1, 2))
     return out
+
+
+def _f32(x) -> np.ndarray:
+    """Round to single precision (the REAL of ``c2g.f``'s implicit typing)."""
+    return np.asarray(x, dtype=np.float64).astype(np.float32)
+
+
+def _f32_9(x: float) -> float:
+    """A single-precision value as ``write(*,*)`` prints it (9 significant digits)."""
+    return float("%.9g" % x)
 
 
 def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
@@ -327,11 +500,23 @@ def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
     list of ndarray
         One ``(n_i, 3)`` array per embedding dimension: the kernel bandwidth
         ``r``, the Gaussian kernel correlation integral, and its logarithmic
-        derivative with respect to ``r``.
+        derivative with respect to ``r``. Entries are NaN or infinite where
+        ``c2g`` itself would print ``NaN`` or ``Infinity`` (see Notes).
 
     Notes
     -----
-    ``c2g.f`` increments its point counter *before* testing whether the
+    ``c2g.f`` relies on Fortran's implicit typing, so the length scales and
+    correlation sums it reads, their logarithms, the interpolation prefactor and
+    exponent of the power-law pieces, and the two output quantities are all
+    *single* precision; only the Gauss-Kronrod integration and the bandwidth
+    ``h`` are double. This is reproduced, because it changes the results
+    visibly: the prefactor ``exp((e_{k+1} c_k - e_k c_{k+1}) / (e_{k+1} - e_k))``
+    overflows to infinity for exponents above 88.7, which makes ``c2g`` print
+    ``Infinity``/``NaN`` for some series, and the printed values carry about
+    1e-7 relative error. Values are rounded to the 9 significant digits
+    ``c2g`` prints.
+
+    ``c2g.f`` also increments its point counter *before* testing whether the
     correlation sum is positive, so a block that is cut short by a zero keeps
     one trailing slot holding whatever the previous block left in the (static,
     zero-initialised) arrays. That off-by-one is reproduced here, since hctsa's
@@ -339,17 +524,18 @@ def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
     """
     out: List[np.ndarray] = []
     # Stand-ins for c2g.f's static REAL arrays, which persist between blocks.
-    e_buf = np.zeros(_MEPS)
-    c_buf = np.zeros(_MEPS)
+    e_buf = np.zeros(_MEPS, dtype=np.float32)
+    c_buf = np.zeros(_MEPS, dtype=np.float32)
 
     for block in c2:
         me = 0
         for ee, cc in block:
             me += 1
+            ee, cc = _f32(ee), _f32(cc)  # read into REAL
             if cc <= 0.0:
                 break
-            e_buf[me - 1] = math.log(ee)
-            c_buf[me - 1] = math.log(cc)
+            e_buf[me - 1] = _f32(math.log(ee))
+            c_buf[me - 1] = _f32(math.log(cc))
 
         if me == 0:
             out.append(np.empty((0, 3)))
@@ -365,19 +551,20 @@ def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
 
         # Piecewise power-law interpolation between successive points: on
         # [e_k, e_k+1] the correlation sum is f * exp(d * u).
-        de = e[1:] - e[:-1]
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-            f = np.exp((e[1:] * c[:-1] - e[:-1] * c[1:]) / de)
+            de = e[1:] - e[:-1]  # single precision throughout
+            f = _f32(np.exp((e[1:] * c[:-1] - e[:-1] * c[1:]) / de).astype(np.float64))
             d = (c[1:] - c[:-1]) / de
+        f, d = f.astype(np.float64), d.astype(np.float64)
         # c2g.f only integrates over intervals of non-zero width.
         keep = e[1:] != e[:-1]
-        a, b = e[:-1][keep], e[1:][keep]
+        a, b = e[:-1][keep].astype(np.float64), e[1:][keep].astype(np.float64)
         f, d = f[keep], d[keep]
 
-        e_last, rows = e[me - 1], []
+        e_last, rows = float(e[me - 1]), []
         with np.errstate(divide="ignore", invalid="ignore", over="ignore", under="ignore"):
             for j in range(me):
-                h = math.exp(e[j])
+                h = float(_f32(math.exp(float(e[j]))))
                 g = _gk15(lambda u: f[:, None] * np.exp((2 + d[:, None]) * u
                                                         - np.exp(2 * u) / (2 * h ** 2)),
                           a, b).sum()
@@ -385,8 +572,9 @@ def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
                                                          - np.exp(2 * u) / (2 * h ** 2)),
                            a, b).sum()
                 tail = math.exp(-math.exp(2 * e_last) / (2 * h ** 2))
-                cgauss = g / h ** 2 + tail
-                cgd = gd / h ** 4 + (2 + math.exp(2 * e_last) / h ** 2) * tail
-                rows.append((h, cgauss, -2 + cgd / cgauss))
+                cgauss = _f32(g / h ** 2 + tail)  # REAL
+                cgd = _f32(gd / h ** 4 + (2 + math.exp(2 * e_last) / h ** 2) * tail)  # REAL
+                slope = np.float32(-2) + cgd / cgauss  # single precision
+                rows.append((h, _f32_9(cgauss), _f32_9(slope)))
         out.append(np.array(rows, dtype=float).reshape(-1, 3))
     return out
