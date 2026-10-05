@@ -61,8 +61,7 @@ def zero_one_test(y, num_c=20, max_n=10000):
         if n > 50_000:
             logger.warning(
                 f"Time series ({n} samples) exceeds 50000 with "
-                "maxN='full'; computation may be slow.",
-                RuntimeWarning,
+                "maxN='full'; computation may be slow."
             )
 
     else:
@@ -71,8 +70,7 @@ def zero_one_test(y, num_c=20, max_n=10000):
         if n > max_n:
             logger.warning(
                 f"Time series ({n} samples) exceeds maxN={max_n}; "
-                f"analyzing the first {max_n} samples.",
-                RuntimeWarning,
+                f"analyzing the first {max_n} samples."
             )
             y = y[:max_n]
             n = max_n
@@ -80,8 +78,7 @@ def zero_one_test(y, num_c=20, max_n=10000):
     if n < 200:
         logger.warning(
             f"Time series (N={n}) too short for a meaningful "
-            "0-1 test (need >= 200).",
-            RuntimeWarning,
+            "0-1 test (need >= 200)."
         )
 
         return {
