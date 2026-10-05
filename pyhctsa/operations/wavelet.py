@@ -257,7 +257,7 @@ def dwt_coeff(y: ArrayLike, w_name: str = 'db3', level: int = 3) -> dict:
             # std coefficients at this level:
             out[f'stdd_l{k}'] = np.std(d, ddof=1)
             #% 1-D noise coefficient estimate (estimate of the noise std):
-            out[f'noisestd_l{k}'] = np.median(np.abs(d)) / 0.67448975
+            out[f'noisestd_l{k}'] = np.median(np.abs(d)) / 0.6745  # as MATLAB's wnoisest
         else:
             # exceeds max level, return nans
             out[f'maxd_l{k}'] = np.nan 
