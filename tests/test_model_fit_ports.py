@@ -90,10 +90,11 @@ def test_whiten_rounds_piece_boundaries_as_matlab():
 
 
 def test_hmm_fit_uses_shared_em_loop():
+    # hmm_fit is the shared deterministic multi-start EM (_zg_hmm_fit) on the training part
     y = _x()
-    out = mf.hmm_fit(y, 0.7, 3, 0)
-    rng = np.random.RandomState(5489)
-    model, LL = mf._zg_hmm_fit(y[:int(np.floor(0.7 * len(y)))], 3, rng)
-    assert out['nit'] == len(LL)
-    assert abs(out['LLtrainpersample'] - np.max(LL) / int(np.floor(0.7 * len(y)))) < 1e-12
-    assert abs(out['Cov'] - model.covars_.flatten()[0]) < 1e-12
+    n_train = int(np.floor(0.7 * len(y)))
+    mu, cov, P, pi, LL = mf._zg_hmm_fit(y[:n_train], 3)
+    out = mf.hmm_fit(y, 0.7, 3)
+    assert abs(out['LLtrainpersample'] - np.max(LL) / n_train) < 1e-12
+    assert abs(out['Cov'] - np.ravel(cov)[0]) < 1e-12
+    assert mf.hmm_fit(y, 0.7, 3) == out  # deterministic

@@ -1884,7 +1884,6 @@ model_fit:
   hmm_fit:
     base_name: hmm_fit
     dependencies:
-      - hmmlearn
     configs:
       - {train_p: 0.7, num_states: 3, zscore: True, exclude: ['maxMu', 'meanP', 'minMu']}
       - {train_p: 0.8, num_states: 2, zscore: True, exclude: ['maxMu', 'meanP', 'minMu']}

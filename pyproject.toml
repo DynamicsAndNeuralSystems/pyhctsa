@@ -27,7 +27,6 @@ dependencies = [
   "antropy",
   "ts2vg",
   "arch",
-  "hmmlearn",
   "PyWavelets",
   "rich",
   "pathos",
