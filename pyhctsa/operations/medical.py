@@ -366,7 +366,7 @@ def porta(x: ArrayLike, num_levels: int = 6) -> dict:
         return {'pV0': np.nan, 'pV1': np.nan, 'pV2LV': np.nan, 'pV2UV': np.nan}
 
     # quantize into 1:num_levels
-    edges = bin_picker(float(x.min()), float(x.max()), int(num_levels))
+    edges = bf_hist_edges(x, int(num_levels))  # equal-width levels spanning the data, explicit edges
     sym = np.searchsorted(edges, x, side='right')
     np.clip(sym, 1, len(edges) - 1, out=sym)
 
