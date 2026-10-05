@@ -1,5 +1,6 @@
 from typing import Union
 import re
+import numba
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.interpolate import make_lsq_spline
@@ -12,6 +13,7 @@ logger = logging.getLogger('pyhctsa')
 
 from ..operations.correlation import autocorr
 from ..operations.distribution import compare_ks_fit, outlier_test
+from ..operations.nonlinearity import zero_one_test
 from ..operations.stationarity import sliding_window, stat_av
 from ..utils import _ml_rng, _round_half_away, _zscore_matlab, z_score
 
@@ -743,3 +745,180 @@ def preproc_model_fit(y: ArrayLike, model: str = 'ar', order: int = 2,
     }
     rms = {k: _ar_rms_error(z_score(v), order) for k, v in versions.items()}
     return {f'stderat_{k}': rms[k] / rms['nothing'] for k in ('d1', 'd2', 'p1_20', 'p2_5', 'rmgd')}
+
+
+_NRLAZY_BOX = 512  # side of the hash grid used by TISEAN's nrlazy to find neighbors
+
+
+@numba.njit(cache=True)
+def _nrlazy_numba(x, m, d, num_iter, eps):
+    """Schreiber's simple nonlinear noise reduction, a port of TISEAN's ``nrlazy`` (one component).
+
+    ``x`` is the series rescaled to [0, 1] and ``eps`` the neighborhood radius in these units
+    (maximum norm). Each iteration corrects every embedding vector to the mean of its neighbors
+    (all vectors within ``eps`` in every coordinate, including itself), found as in the C code by
+    hashing the first and last coordinates into a ``_NRLAZY_BOX``-squared grid. Each sample
+    becomes the average of its corrections from the (up to m) vectors that contain it.
+    Returns the new series and, for the last iteration, the number of neighbors of each vector
+    (1 for the first (m-1)*d samples, which start no vector).
+    """
+    n = len(x)
+    back = (m - 1) * d
+    ibox = _NRLAZY_BOX - 1
+    epsinv = 1.0 / eps
+    nmf = np.ones(n, dtype=np.int64)
+    for _ in range(num_iter):
+        box = -np.ones((_NRLAZY_BOX, _NRLAZY_BOX), dtype=np.int64)
+        nxt = np.zeros(n, dtype=np.int64)
+        for i in range(back, n):
+            bx = int(x[i] / eps) & ibox
+            by = int(x[i - back] / eps) & ibox
+            nxt[i] = box[bx, by]
+            box[bx, by] = i
+        corr = np.zeros(n)
+        nf = np.zeros(n, dtype=np.int64)
+        nmf[:] = 1
+        hcor = np.zeros(m)
+        for k in range(back, n):
+            for q in range(m):
+                hcor[q] = 0.0
+            i = int(x[k] * epsinv) & ibox
+            j = int(x[k - back] * epsinv) & ibox
+            nfound = 0
+            for i1 in range(i - 1, i + 2):
+                i2 = i1 & ibox
+                for j1 in range(j - 1, j + 2):
+                    element = box[i2, j1 & ibox]
+                    while element != -1:
+                        q = 0
+                        while q < m:
+                            if abs(x[k - q * d] - x[element - q * d]) > eps:
+                                break
+                            q += 1
+                        if q == m:
+                            nfound += 1
+                            for q in range(m):
+                                hcor[q] += x[element - q * d]
+                        element = nxt[element]
+            for q in range(m):
+                corr[k - q * d] += hcor[q] / nfound
+                nf[k - q * d] += 1
+            nmf[k] = nfound
+        for k in range(n):
+            if nf[k] > 0:
+                x[k] = corr[k] / nf[k]
+    return x, nmf
+
+
+def _nrlazy(y: np.ndarray, m: int, d: int, num_iter: int, neighborhood_std: float):
+    """Run ``_nrlazy_numba`` as TISEAN's ``nrlazy -m1,m -d -i -v`` does on the series ``y``.
+
+    Returns ``(y_denoised, num_neighbors)``, or ``None`` where TISEAN would exit with an error
+    (a constant series).
+    """
+    y = np.asarray(y, dtype=float)
+    lo = y.min()
+    interval = y.max() - lo
+    if not interval > 0:
+        return None
+    x = (y - lo) / interval
+    dvar = np.sqrt(abs(np.mean(x ** 2) - np.mean(x) ** 2))  # TISEAN 'variance': the standard deviation
+    if not dvar > 0:
+        return None
+    x, nmf = _nrlazy_numba(x.copy(), int(m), int(d), int(num_iter), neighborhood_std * dvar)
+    return x * interval + lo, nmf
+
+
+def preproc_schreiber_denoise(y: ArrayLike, m: int = 5, d: int = 1, num_iter: int = 1,
+                              neighborhood_std: float = 0.5) -> dict:
+    """
+    Nonlinear noise reduction, and how it changes the series.
+
+    Applies Schreiber's simple nonlinear noise-reduction method, replacing each embedded point by
+    the average of its state-space neighbors, as TISEAN's ``nrlazy`` (a C reimplementation that
+    corrects the whole embedding vector, of the original single-component-correcting Fortran
+    ``lazy``; it tends to do better than ``lazy`` on flow-like data). This is a Python (numba)
+    port of ``nrlazy``, for a scalar time series. The method is that of
+
+    Schreiber, T. "Extremely simple nonlinear noise reduction method", Phys. Rev. E 47, 2401
+    (1993).
+
+    It is the first stage of the pipeline of Toker et al., used for diagnosing oversampling and
+    for classifying chaos with the 0-1 test.
+
+    Denoising is not itself a scalar feature, so this function reports how several properties
+    of the series change as a result of applying it.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    m : int, optional
+        The embedding dimension (nrlazy ``-m``). Default is 5.
+    d : int, optional
+        The embedding delay (nrlazy ``-d``). Default is 1.
+    num_iter : int, optional
+        The number of correction passes (nrlazy ``-i``). More iterations denoise more
+        aggressively but risk distorting real dynamics; TISEAN's own default, and most published
+        use, is 1.
+    neighborhood_std : float, optional
+        The neighborhood radius in units of the standard deviation of the data (nrlazy ``-v``;
+        scale-invariant, unlike the raw ``-r`` option, which is a fixed fraction of the data
+        interval). Default is 0.5.
+
+    Returns
+    -------
+    dict
+        - ``rmsCorrection``: the root-mean-square size of the correction made to the series
+        - ``fracVarRemoved``: 1 - var(denoised) / var(original), the fraction of the variance
+          attributed to noise and removed
+        - ``corrOrigDenoised``: the correlation coefficient between the original and denoised series
+        - ``ac1Change``: the lag-1 autocorrelation of the denoised series minus that of the
+          original (denoising should smooth the series, increasing it)
+        - ``meanNeighbors``: the mean number of neighbors per point found by nrlazy, counting
+          the point itself
+        - ``fracNoCorrection``: the fraction of points with a neighbor count of 1, that is, with no
+          neighbors besides themselves, so that no correction was possible there (diagnoses whether
+          ``neighborhood_std`` was too small for these data)
+        - ``KDenoised``: the statistic K of the 0-1 test for chaos (``zero_one_test``) computed on
+          the denoised series, since measurement noise inflates the apparent diffusion of the
+          test's (p, q) trajectory
+        - ``KChange``: ``KDenoised`` minus K of the original series: does removing noise change
+          the chaos verdict for this series?
+
+        All values are NaN if the series is too short for the embedding, or if nrlazy cannot
+        process it (a constant series). The 0-1 test needs at least 200 samples, so ``KDenoised``
+        and ``KChange`` are NaN for shorter series.
+    """
+    keys = ['rmsCorrection', 'fracVarRemoved', 'corrOrigDenoised', 'ac1Change', 'meanNeighbors',
+            'fracNoCorrection', 'KDenoised', 'KChange']
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    nan_out = {k: np.nan for k in keys}
+
+    # Need enough points for an embedding vector, with margin for the local statistics
+    if N < max(50, 10 * ((m - 1) * d + 1)):
+        logger.warning(f"Time series too short to denoise at m={m}, d={d}")
+        return nan_out
+
+    res = _nrlazy(y, m, d, num_iter, neighborhood_std)
+    if res is None or not np.all(np.isfinite(res[0])):
+        logger.warning("nrlazy cannot denoise this series")
+        return nan_out
+    y_den, num_neighbors = res
+
+    out = {}
+    out['rmsCorrection'] = float(np.sqrt(np.mean((y - y_den) ** 2)))
+    out['fracVarRemoved'] = float(1 - np.var(y_den, ddof=1) / np.var(y, ddof=1))
+    out['corrOrigDenoised'] = float(np.corrcoef(y, y_den)[0, 1])
+    out['ac1Change'] = float(np.ravel(autocorr(y_den, 1, 'Fourier'))[0]
+                             - np.ravel(autocorr(y, 1, 'Fourier'))[0])
+    out['meanNeighbors'] = float(np.mean(num_neighbors))
+    out['fracNoCorrection'] = float(np.mean(num_neighbors == 1))
+
+    # Does denoising change the 0-1-test chaos verdict?
+    k_orig = zero_one_test(y, 20)['K']
+    k_den = zero_one_test(y_den, 20)['K']
+    out['KDenoised'] = float(k_den)
+    out['KChange'] = float(k_den - k_orig)
+    return out
