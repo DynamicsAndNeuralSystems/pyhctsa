@@ -134,7 +134,7 @@ def moving_threshold(y: ArrayLike, a: float = 1.0, b: float = 0.1) -> dict:
         'minq': sq[0],
         'stdq': np.std(q, ddof=1),
         'meanqover': np.mean(q - y),
-        'pkick': np.sum(kicks) / (N - 1),  # probability of a kick
+        'pkick': np.count_nonzero(kicks) / (N - 1),  # probability of a kick: number of kicks / (N-1)
     }
 
     # Kicks (when the barrier is changed due to extreme event)
