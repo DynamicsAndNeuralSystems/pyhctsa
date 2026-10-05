@@ -532,9 +532,11 @@ def automutual_info(
         y = _tie_break_noise(y)
     
     for k, delay in enumerate(time_delay):
-        if delay > n - min_samples:
-            # time series too short - keep the remaining values as NaNs
+        if np.isnan(delay) or delay > n - min_samples:
+            # time series too short, or an unresolvable 'ac'/'tau' delay from a degenerate
+            # (e.g. constant) series - keep the remaining values as NaNs
             break
+        delay = int(delay)
 
         # form the time-delay vectors y1 and y2
         y1 = y[:-delay]
