@@ -632,8 +632,8 @@ def preproc_iterate(y: ArrayLike, dt_meth: str = 'diff') -> dict:
     return out
 
 
-def _piecewise_poly_detrend(y: np.ndarray, order: int, num_bits: int) -> np.ndarray:
-    """Remove a polynomial of the given order from each of ``num_bits`` equal pieces (z-scored result).
+def _piecewise_poly_residual(y: np.ndarray, order: int, num_bits: int) -> np.ndarray:
+    """Remove a polynomial of the given order from each of ``num_bits`` equal pieces.
 
     The pieces come from hctsa's ``PP_PreProcess`` (``SUB_rempt``): boundaries at
     ``round(linspace(0, N, num_bits + 1))``, with the fit made against 1, ..., length of piece.
@@ -645,7 +645,13 @@ def _piecewise_poly_detrend(y: np.ndarray, order: int, num_bits: int) -> np.ndar
         seg = y[bits[k]:bits[k + 1]]
         x = np.arange(1, len(seg) + 1, dtype=float)
         out[bits[k]:bits[k + 1]] = seg - np.polynomial.Polynomial.fit(x, seg, order)(x)
-    return z_score(out)
+    return out
+
+
+def _piecewise_poly_detrend(y: np.ndarray, order: int, num_bits: int) -> np.ndarray:
+    """Remove a polynomial of the given order from each of ``num_bits`` equal pieces (z-scored result);
+    see :func:`_piecewise_poly_residual`."""
+    return z_score(_piecewise_poly_residual(y, order, num_bits))
 
 
 def _rank_map_gaussian(y: np.ndarray, random_seed=None, draws: np.ndarray = None) -> np.ndarray:
