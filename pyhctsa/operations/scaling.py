@@ -114,8 +114,6 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
         combined fitting errors.
  
     """
-    N = len(x)
- 
     # Compute integrated sequence
     if (lag is None) | (lag == 1):
         # normal cumsum
@@ -123,6 +121,7 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
     else:
         # if a lag is specified, do a decimation...
         y = np.cumsum(x[::lag])
+    N = len(y)  # length of the integrated series (shorter than x if a lag is used)
  
     # perform scaling over a range of tau, up to a fifth of the time-series length
     if log_inc:
