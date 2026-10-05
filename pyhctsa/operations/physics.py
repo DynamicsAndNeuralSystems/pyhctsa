@@ -2,8 +2,8 @@ from typing import Union
 
 import numpy as np
 from numpy.typing import ArrayLike
+from scipy.special import gammaln
 from scipy.stats import ansari
-from statsmodels.sandbox.stats.runs import runstest_1samp
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
@@ -39,6 +39,59 @@ def _ksdensity(x: np.ndarray, xi: Union[None, np.ndarray] = None):
         u = (xi[j:j + 256, None] - x[None, :]) / bw
         f[j:j + 256] = np.exp(-0.5 * u * u).sum(axis=1) / (n * bw * np.sqrt(2 * np.pi))
     return f, xi
+
+
+def _log_n_choose_k(n, k):
+    """log of the binomial coefficient, -inf where it is zero (as in MATLAB's gammaln)."""
+    n = np.asarray(n, dtype=float)
+    k = np.asarray(k, dtype=float)
+    with np.errstate(invalid='ignore'):
+        out = gammaln(n + 1) - gammaln(k + 1) - gammaln(n - k + 1)
+    out = np.where((k < 0) | (n - k < 0), -np.inf, out)
+    return out
+
+
+def _runstest_pvalue(x: np.ndarray) -> float:
+    """
+    Two-sided p-value of MATLAB's ``runstest(x)``.
+
+    Runs above and below the mean of x (values equal to the mean are dropped),
+    with the exact distribution of the number of runs (MATLAB's default for
+    this test), and p = min(1, 2 * (P(R = r) + min(P(R < r), P(R > r)))).
+    """
+    x = np.asarray(x, dtype=float)
+    x = x[~np.isnan(x)]
+    if len(x) == 0:
+        return 1.0
+    v = np.mean(x)
+    x = x[x != v]
+    N = len(x)
+    if N == 0:
+        return 1.0
+    b = (x > v).astype(int)
+    n1 = int(b.sum())
+    n0 = N - n1
+    nruns = 1 + int(np.sum(b[:-1] != b[1:]))
+    if n1 == 0 or n0 == 0:
+        plist = np.array([1.0])  # exactly one run
+    else:
+        maxruns = 2 * min(n1, n0) + 1
+        R = np.arange(1, maxruns + 1)
+        plist = np.zeros(len(R))
+        logdenom = _log_n_choose_k(N, n0)
+        even = R % 2 == 0
+        k = R[even] // 2
+        plist[even] = 2 * np.exp(_log_n_choose_k(n1 - 1, k - 1)
+                                 + _log_n_choose_k(n0 - 1, k - 1) - logdenom)
+        k = R[~even] // 2
+        plist[~even] = (np.exp(_log_n_choose_k(n1 - 1, k - 1)
+                               + _log_n_choose_k(n0 - 1, k) - logdenom)
+                        + np.exp(_log_n_choose_k(n1 - 1, k)
+                                 + _log_n_choose_k(n0 - 1, k - 1) - logdenom))
+    pexact = plist[nruns - 1]
+    plo = np.sum(plist[:nruns - 1])
+    phi = np.sum(plist[nruns:])
+    return float(min(1.0, 2 * (pexact + min(plo, phi))))
 
 
 def walker(y: ArrayLike, walker_rule: str = 'prop',
@@ -229,8 +282,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
 
     # (iii) Residuals between time series and walker
     res = w - y
-    _, runs_pval = runstest_1samp(res, cutoff='mean')
-    out['res_runstest'] = runs_pval
+    out['res_runstest'] = _runstest_pvalue(res)
     out['res_swss5_1'] = sliding_window(res, 'std', 'std', 5, 1)
     out['res_ac1'] = autocorr(res, 1)[0]
 
