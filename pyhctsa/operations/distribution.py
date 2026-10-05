@@ -1,12 +1,17 @@
 import logging
+import warnings
 from typing import Dict, Union
 
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy import stats
-from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, uniform, skew, kurtosis
+from scipy.optimize import brentq, least_squares
+from scipy.stats import beta as beta_dist
+from scipy.stats import gamma as gamma_dist
+from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, rayleigh, uniform, weibull_min, skew, kurtosis
 
 from ..operations.correlation import autocorr, first_crossing
+from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
 from ..utils import bin_picker, histc, matlab_quantile, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')
@@ -44,11 +49,21 @@ def cumulants(x: ArrayLike, cum_what_may: str = 'skew1') -> float:
 
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """
-    Fits a distribution to data.
+    Compares a fitted distribution with the smoothed distribution of the data.
 
-    Returns simple statistics on the discrepancy between the kernel-smoothed distribution
-    of the time-series values and the distribution fitted to it by some model:
-    Gaussian, Extreme Value, Uniform, Exponential, and LogNormal.
+    Fits a standard distribution to the data (by maximum likelihood) and compares it
+    with a kernel-smoothed estimate of the distribution of the values. ("KS" here
+    means kernel-smoothed, not Kolmogorov-Smirnov.) Both curves are evaluated on a
+    common grid of 1000 points that covers the smoothed distribution and the body
+    of the fitted distribution (out to where it falls to 1/100 of its peak). They
+    are then compared by the area between them, the separation of their peaks,
+    their overlap, and the relative entropy.
+
+    The exponential, Rayleigh and gamma distributions require non-negative values,
+    and the log-normal and Weibull distributions require positive values; NaN is
+    returned if the data do not satisfy this (and for a constant series in the
+    Rayleigh and exponential cases). For the beta distribution, the data are first
+    rescaled to lie inside (0, 1), and all outputs are then in rescaled units.
 
     Parameters
     ----------
@@ -56,19 +71,40 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         The input data vector.
     what_distn : str
         The type of distribution to fit to the data:
-            - 'norm': normal
+            - 'norm': Gaussian
             - 'ev': extreme value
             - 'uni': uniform
+            - 'beta': beta
+            - 'rayleigh': Rayleigh
             - 'exp': exponential
-            - 'logn': Log-Normal
+            - 'gamma': gamma
+            - 'logn': log-normal
+            - 'wbl': Weibull
 
     Returns
     -------
     dict
-        Includes the absolute area between the two distributions, the peak separation,
-        overlap integral, and relative entropy.
+        adiff: the absolute area between the two distributions (0 for a perfect
+        match, at most 2); peaksepy: the maximum of the fitted distribution minus
+        that of the smoothed distribution; peaksepx: the position of the peak of
+        the fitted distribution minus that of the smoothed distribution; olapint:
+        the overlap integral of the two distributions, multiplied by the standard
+        deviation of the data so that it does not depend on their scale; relent:
+        the relative entropy (Kullback-Leibler divergence), in nats, of the fitted
+        distribution from the smoothed distribution.
+
+    Notes
+    -----
+    adiff, olapint and relent do not depend on the scale of the data, but peaksepy
+    and peaksepx do.
     """
-    x = np.asarray(x)
+    x = np.asarray(x, dtype=float)
+    if what_distn not in ('norm', 'ev', 'uni', 'beta', 'rayleigh', 'exp', 'gamma', 'logn', 'wbl'):
+        raise ValueError(f"Unknown distribution: {what_distn}.")
+    if what_distn == 'beta':
+        # clumsily scale to the range (0,1)
+        sd = np.std(x, ddof=1)
+        x = (x - np.min(x) + 0.01 * sd) / (np.max(x) - np.min(x) + 0.02 * sd)
     n = len(x)
     x_step = np.std(x, ddof=1) / 100  # set a step size
 
@@ -91,29 +127,51 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     # ----------------------------
     # Fit distribution & find the support bounds over which to compare
     # ----------------------------
-    # Each branch defines the fitted PDF `pdf_func`, its peak value `peaky`, and
-    # the starting points for the left/right bound search. A left start of None
-    # pins the left bound at 0 (used by the positive-only distributions).
+    # Each branch defines the fitted PDF `pdf_func` and the threshold `thresh` at
+    # which to stop searching for the edges of the fitted distribution (1/100 of
+    # its peak). The left/right edges are then found either by stepping outwards
+    # from a starting point (`left_start`, `right_start`), or, for the positive-only
+    # distributions, by pinning the left edge at 0 (`left_start = None`) and
+    # walking the right tail from `tail_start`.
+    tail_start = None
     if what_distn == 'norm':
-        # Normal distribution
-        loc, scale = norm.fit(x)
+        # Normal distribution (normfit uses the unbiased standard deviation)
+        loc, scale = np.mean(x), np.std(x, ddof=1)
         pdf_func = lambda z: norm.pdf(z, loc=loc, scale=scale)
-        peaky = pdf_func(loc)
+        thresh = pdf_func(loc) / 100.0
         left_start = right_start = np.mean(x)
 
     elif what_distn == 'ev':
         # Extreme value (left Gumbel) distribution
-        loc, scale = gumbel_l.fit(x)
+        loc, scale = evfit(x)
         pdf_func = lambda z: gumbel_l.pdf(z, loc=loc, scale=scale)
-        peaky = pdf_func(loc)
+        thresh = pdf_func(loc) / 100.0
         left_start = right_start = loc
 
     elif what_distn == 'uni':
         # Uniform distribution (peak of PDF = 1 / (b - a))
         loc, scale = uniform.fit(x)
         pdf_func = lambda z: uniform.pdf(z, loc=loc, scale=scale)
-        peaky = pdf_func(np.mean(x))
+        thresh = pdf_func(np.mean(x)) / 100.0
         left_start = right_start = np.mean(x)
+
+    elif what_distn == 'beta':
+        a, b = betafit(x)
+        pdf_func = lambda z: beta_dist.pdf(z, a, b)
+        thresh = 1e-5  # ok -- consistent since all scaled to the same range
+        left_start = right_start = np.mean(x)
+
+    elif what_distn == 'rayleigh':
+        if np.any(x < 0):
+            logger.warning("The data are not positive, but Rayleigh is a positive-only distribution.")
+            return np.nan
+        if np.all(x == x[0]):
+            logger.warning("Data are a constant.")
+            return np.nan
+        scale = np.sqrt(np.mean(x ** 2) / 2)  # raylfit
+        pdf_func = lambda z: rayleigh.pdf(z, scale=scale)
+        thresh = pdf_func(scale) / 100.0  # peak is at the scale parameter
+        left_start, tail_start = None, scale
 
     elif what_distn == 'exp':
         if np.any(x < 0):
@@ -123,30 +181,57 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
             logger.warning("Data are a constant.")
             return np.nan
         # Exponential distribution (equivalent to MATLAB's expfit); peak is at 0
-        _, lam = expon.fit(x, floc=0)  # force support at 0
+        lam = np.mean(x)
         pdf_func = lambda z: expon.pdf(z, loc=0, scale=lam)
-        peaky = pdf_func(0)
-        left_start, right_start = None, 0.0
+        thresh = pdf_func(0) / 100.0
+        left_start, tail_start = None, 0.0
+
+    elif what_distn == 'gamma':
+        if np.any(x < 0):
+            logger.warning("The data contains negative values, but Gamma is a positive-only distribution.")
+            return np.nan
+        a, b = gamfit(x)
+        if not (np.isfinite(a) and np.isfinite(b)):
+            logger.warning("No finite gamma fit for this data.")
+            return np.nan
+        pdf_func = lambda z: gamma_dist.pdf(z, a, scale=b)
+        if a < 1:
+            thresh = pdf_func(0.0) / 100.0  # unbounded at 0
+        else:
+            thresh = pdf_func((a - 1) * b) / 100.0
+        left_start, tail_start = None, a * b
 
     elif what_distn == 'logn':
         if np.any(x <= 0):
             logger.warning("The data are not positive, but Log-Normal is a positive-only distribution.")
             return np.nan
-        # Log-normal distribution; peak is at the mode
-        sigma, _, scale = lognorm.fit(x, floc=0)  # sigma, 0, exp(mu)
-        mu = np.log(scale)
+        # Log-normal distribution (lognfit uses the unbiased std of log(x)); peak is at the mode
+        lx = np.log(x)
+        mu, sigma = np.mean(lx), np.std(lx, ddof=1)
         mode = np.exp(mu - sigma ** 2)
         pdf_func = lambda z: lognorm.pdf(z, s=sigma, loc=0, scale=np.exp(mu))
-        peaky = pdf_func(mode)
-        left_start, right_start = None, mode
+        thresh = pdf_func(mode) / 100.0
+        left_start, tail_start = None, mode
 
+    else:  # 'wbl'
+        if np.any(x <= 0):
+            logger.warning("The data are not positive, but Weibull is a positive-only distribution.")
+            return np.nan
+        a, c = wblfit(x)  # scale, shape
+        if not (np.isfinite(a) and np.isfinite(c)):
+            logger.warning("No finite Weibull fit for this data.")
+            return np.nan
+        pdf_func = lambda z: weibull_min.pdf(z, c, scale=a)
+        if c <= 1:
+            thresh = pdf_func(0.0)
+        else:
+            thresh = pdf_func(a * ((c - 1) / c) ** (1 / c)) / 100.0
+        left_start, tail_start = None, 0.0
+
+    if tail_start is None:
+        xf = _find_bounds(pdf_func, left_start, right_start, x_step, thresh)
     else:
-        raise ValueError(f"Unknown distribution: {what_distn}.")
-
-    thresh = peaky / 100.0  # stop expanding when the PDF drops to 1/100 of its peak
-    xf = _find_bounds(pdf_func, left_start, right_start, x_step, thresh)
-    if xf[0] is None:  # positive-only distributions pin the left bound at 0
-        xf[0] = 0.0
+        xf = [0.0, _walk_tail(pdf_func, tail_start, x_step, thresh)]
 
     # ----------------------------
     # Estimate smoothed empirical distribution
@@ -183,7 +268,8 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     i1 = np.argmax(f)
     i2 = np.argmax(ffit)
     out['peaksepx'] = xi[i2] - xi[i1]
-    # OLAPINT: overlap integral between the two curves; normalized by variance
+    # OLAPINT: overlap integral between the two curves; multiplying by std(x) makes
+    # this scale-invariant
     out['olapint'] = np.sum(f * ffit * dx) * np.std(x, ddof=1)
     # RELENT: relative entropy of the two distributions
     r = (ffit > 0) & (f > 0)  # skip points where either density is zero (0*log(0) := 0)
@@ -210,6 +296,46 @@ def _find_bounds(pdf_func, start_left, start_right, x_step, thresh):
         ange = pdf_func(xf[1])
 
     return xf
+
+
+def _walk_tail(pdf_func, x_start, x_step, thresh):
+    """First grid point x_start + k*x_step (k >= 1) at which a unimodal pdf has fallen to
+    <= thresh: what stepping outward from x_start would return, but found by
+    bracketing the tail crossing and root-finding, then snapping to the grid. The
+    stepping form needs ~100*(scale/std(x)) pdf evaluations, which is effectively
+    unbounded for near-constant positive-valued data."""
+    if not (10 > thresh):  # replicate the stepping loop's initial ange = 10 sentinel
+        return x_start  # (e.g., thresh = inf for a gamma with shape < 1)
+
+    # The pdf may still be rising over the first step (e.g., a Weibull/gamma with
+    # shape > 1 walked from 0), in which case the stepping loop stops immediately:
+    x_end = x_start + x_step
+    if not (pdf_func(x_end) > thresh):
+        return x_end
+
+    # Bracket the tail crossing by doubling the distance from x_start
+    lo = x_end
+    stride = max(x_step, abs(x_start) + x_step)
+    hi = lo + stride
+    num_doublings = 0
+    while pdf_func(hi) > thresh:
+        stride *= 2
+        hi = lo + stride
+        num_doublings += 1
+        if num_doublings > 200 or not np.isfinite(hi):
+            raise RuntimeError('Could not bracket the tail of the fitted distribution')
+    x_cross = brentq(lambda z: pdf_func(z) - thresh, lo, hi, xtol=1e-300, rtol=4 * np.finfo(float).eps)
+
+    # Snap to the stepping grid, then correct for any floating-point boundary
+    # ambiguity so the result satisfies the loop's own stopping condition
+    # (pdf > thresh at k-1, pdf <= thresh at k):
+    k = max(1, int(np.ceil((x_cross - x_start) / x_step)))
+    while k > 1 and not (pdf_func(x_start + (k - 1) * x_step) > thresh):
+        k -= 1
+    while pdf_func(x_start + k * x_step) > thresh:
+        k += 1
+    return x_start + k * x_step
+
 
 def withinp(x: ArrayLike, p: float = 1.0, mean_or_median: str = 'mean') -> float:
     """
@@ -324,7 +450,7 @@ def quantile(y: ArrayLike, p: float = 0.5) -> float:
     """
     y = np.asarray(y)    
     if not isinstance(p, (int, float)) or p < 0 or p > 1:
-        raise ValueError("p must specify a proportion, in (0,1)")
+        raise ValueError("p must specify a proportion, in [0,1]")
     
     return float(np.quantile(y, p, method = 'hazen'))
 
@@ -714,131 +840,260 @@ def moments(y: ArrayLike, the_mom: int = 0, do_normalize: bool = True) -> float:
         return stats.moment(y, the_mom)
     return stats.moment(y, the_mom) / np.std(y, ddof=1) ** the_mom
 
-def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01) -> dict:
+def _matlab_std(a) -> float:
+    """Sample standard deviation as MATLAB's std: 0 (not NaN) for a single value."""
+    a = np.asarray(a, dtype=float)
+    return float(np.std(a, ddof=1)) if a.size > 1 else 0.0
+
+
+def _fit_exp_gof(x: np.ndarray, y: np.ndarray, start: list) -> tuple:
+    """Nonlinear least-squares fit of a*exp(b*x) + c from the given start point, as hctsa's
+    fit(x, y, fittype('a*exp(b*x)+c')). Returns (a, b, c, R^2, RMSE), all NaN if the fit fails.
+
+    These fits are often ill-conditioned (a and c large and opposite in sign when b is
+    near 0). This solver (Levenberg-Marquardt, run to convergence) and MATLAB's
+    trust-region solver (TolFun = TolX = 1e-6, MaxIter = 400) can then stop at different
+    points along the same valley, so a, b, c (and the fit quality) can differ in those
+    cases; where they do, this one has the lower (or equal) error.
     """
-    How statistics depend on distributional outliers.
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            res = least_squares(lambda p: p[0] * np.exp(p[1] * x) + p[2] - y, start, method='lm',
+                                ftol=1e-10, xtol=1e-10, gtol=1e-10, max_nfev=5000)
+            sse = np.sum(res.fun ** 2)
+            sst = np.sum((y - np.mean(y)) ** 2)
+            return (*res.x, 1 - sse / sst, np.sqrt(sse / (len(y) - 3)))
+    except (RuntimeError, ValueError, TypeError, FloatingPointError, np.linalg.LinAlgError) as exc:
+        logger.warning("DN_OutlierInclude: error fitting an exponential: %s", exc)
+        return (np.nan,) * 5
 
-    Measures how various statistics of a time series change as more and more outliers 
-    are included in the calculation, according to a specified rule for defining outliers.
 
-    At each threshold, the mean, standard error, proportion of included points, median, 
-    and standard deviation are calculated. Outputs summarize how these statistics change 
-    as more extreme points are included.
+def _fit_lin_gof(x: np.ndarray, y: np.ndarray) -> tuple:
+    """Least-squares fit of a*x + b, as hctsa's fit(x, y, fittype('a*x+b')).
+    Returns (a, b, R^2, RMSE), all NaN if the fit fails."""
+    try:
+        if len(x) < 2:
+            raise ValueError("too few points")
+        design = np.column_stack((x, np.ones(len(x))))
+        (a, b), *_ = np.linalg.lstsq(design, y, rcond=None)
+        sse = np.sum((y - (a * x + b)) ** 2)
+        sst = np.sum((y - np.mean(y)) ** 2)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return a, b, 1 - sse / sst, np.sqrt(sse / (len(y) - 2))
+    except (ValueError, np.linalg.LinAlgError, FloatingPointError) as exc:
+        logger.warning("DN_OutlierInclude: error fitting a linear trend: %s", exc)
+        return (np.nan,) * 4
+
+
+def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
+                    fixed_thresh: Union[float, None] = None) -> dict:
+    """
+    How the timing and spacing of extreme values change as the threshold rises.
+
+    Raises a threshold th from 0 to the maximum value of the series, in increments of
+    ``inc``, and at each threshold takes the "events": the points at or beyond it (for
+    'abs', values with abs(y) >= th; for 'pos', y >= th; for 'neg', y <= -th). The
+    threshold is applied to y itself, so the series should be z-scored. At each
+    threshold it records:
+
+    1. the mean gap (in samples) between successive events, and its standard error
+       (std of the gaps / sqrt of their number),
+    2. the percentage of points that are events (the number of gaps over the number of
+       candidate points, times 100),
+    3. the median and mean time of the events, rescaled so that the start of the series
+       is -1, the middle is 0 and the end is 1, and std(times)/sqrt(their number)
+       (in samples).
+
+    The sweep stops when events are 2% or fewer of the points. The outputs measure how
+    these curves change with th, using exponential [f(x) = a*exp(b*x) + c] and linear
+    [f(x) = a*x + b] fits, and simple statistics across thresholds. If a fit fails, its
+    outputs are NaN.
+
+    If ``fixed_thresh`` is given, the sweep and fits are skipped, and the statistics in
+    (1)-(3) are returned for that one threshold.
 
     Parameters
     ----------
     y : array-like
-        The input time series.
+        The input time series (ideally z-scored).
     threshold_how : {'abs', 'pos', 'neg'}, optional
         The method for determining outliers:
 
-            - 'abs': Outliers are furthest from the mean (default).
-            - 'pos': Outliers are the greatest positive deviations from the mean.
-            - 'neg': Outliers are the greatest negative deviations from the mean.
+            - 'abs': values furthest from zero in either direction (default).
+            - 'pos': the greatest positive values.
+            - 'neg': the greatest negative values.
 
     inc : float, optional
-        The increment to move through thresholds (as a fraction of the standard deviation).
-        Default is 0.01.
+        The increment to move through (in units of the standard deviation if the
+        time series is z-scored). Default is 0.01. Unused when ``fixed_thresh`` is given.
+    fixed_thresh : float, optional
+        A single threshold (in the units of y, e.g., 2 for two standard deviations of a
+        z-scored series). If given, the sweep is skipped.
 
     Returns
     -------
     dict
-        Dictionary containing statistics describing how the statistics change as more outliers are included.
+        From the sweep (``fixed_thresh`` not given):
+
+        - ``mfexpa``, ``mfexpb``, ``mfexpc``, ``mfexpr2``, ``mfexprmse``: the parameters
+          a, b, c, R^2 and root-mean-square error of the exponential fit to the mean
+          gap vs. th;
+        - ``nfexpa``, ``nfexpb``, ``nfexpc``, ``nfexpr2``, ``nfexprmse``: the same for an
+          exponential fit to the percentage of points that are events vs. th;
+        - ``nfla``, ``nflb``, ``nflr2``, ``nflrmse``: slope a, intercept b, R^2 and
+          RMSE of a linear fit to the percentage of points that are events vs. th;
+        - ``mdtm``, ``mdtmd``, ``mdtstd``: mean, median and standard deviation of the
+          mean gap across thresholds;
+        - ``mdrm``, ``mdrmd``, ``mdrstd``: mean, median and standard deviation, across
+          thresholds, of the median time of the events (-1 to 1);
+        - ``mrm``, ``mrmd``, ``mrstd``: the same for the mean time of the events;
+        - ``xcmerr1``, ``xcmerrn1``: cross-correlation between the mean gap and its
+          standard error across thresholds, at lags +1 and -1;
+        - ``stdrfexpa``, ``stdrfexpb``, ``stdrfexpc``, ``stdrfexpr2``, ``stdrfexprmse``:
+          the parameters and fit quality of an exponential fit to
+          std(times)/sqrt(their number) vs. th;
+        - ``stdrfla``, ``stdrflb``, ``stdrflr2``, ``stdrflrmse``: the same for a linear fit.
+
+        From a single threshold (``fixed_thresh`` given; all NaN except ``propIncluded``
+        if events are 2% or fewer of the points): ``meanDt``, ``seDt`` (the mean gap
+        between events and its standard error), ``propIncluded`` (the percentage of
+        points that are events), ``medianRelTime``, ``meanRelTime`` (the median and mean
+        time of the events, -1 to 1) and ``stdRelTime`` (std(times)/sqrt(their number),
+        in samples).
+
+        A constant time series returns NaN.
     """
     y = np.asarray(y)
-    
+
     # Handle constant time series
     if np.all(y[0] == y):
+        logger.warning("The time series is a constant!")
         return np.nan
-    
+
     N = len(y)
-    results = {}
-    
+    if threshold_how not in ('abs', 'pos', 'neg'):
+        raise ValueError(f"Invalid thresholdHow: '{threshold_how}'. Must be 'abs', 'pos', or 'neg'.")
+
+    def _events(idx, th):
+        """Indices (of those in idx) of events at threshold th."""
+        if threshold_how == 'abs':
+            return idx[np.abs(y[idx]) >= th]
+        if threshold_how == 'pos':
+            return idx[y[idx] >= th]
+        return idx[y[idx] <= -th]
+
+    total_points = {'abs': N, 'pos': np.sum(y >= 0), 'neg': np.sum(y <= 0)}[threshold_how]
+    trim_threshold = 2  # percent
+
+    # ----------------------------
+    # Single threshold: skip the sweep and curve fits
+    # ----------------------------
+    if fixed_thresh is not None:
+        r = _events(np.arange(N), fixed_thresh)
+        time_diffs = np.diff(r)
+        mean_dt = np.mean(time_diffs) if len(time_diffs) > 0 else np.nan
+        prop_included = len(time_diffs) / total_points * 100
+        # Same "too few events to say anything meaningful" bar as the sweep
+        if np.isnan(mean_dt) or prop_included <= trim_threshold:
+            return {'meanDt': np.nan, 'seDt': np.nan, 'propIncluded': prop_included,
+                    'medianRelTime': np.nan, 'meanRelTime': np.nan, 'stdRelTime': np.nan}
+        r1 = r + 1  # MATLAB's 1-based event times
+        return {
+            'meanDt': mean_dt,
+            'seDt': _matlab_std(time_diffs) / np.sqrt(len(time_diffs)),
+            'propIncluded': prop_included,
+            'medianRelTime': np.median(r1) / (N / 2) - 1,
+            'meanRelTime': np.mean(r1) / (N / 2) - 1,
+            'stdRelTime': _matlab_std(r) / np.sqrt(len(r)),
+        }
+
     # Initialize thresholds based on method
     if threshold_how == 'abs':
         thresholds = np.arange(0, max(abs(y)), inc)
-        total_points = N
     elif threshold_how == 'pos':
         thresholds = np.arange(0, max(y), inc)
-        total_points = np.sum(y >= 0)
-    elif threshold_how == 'neg':
-        thresholds = np.arange(0, max(-y), inc)
-        total_points = np.sum(y <= 0)
     else:
-        raise ValueError(f"Invalid thresholdHow: '{threshold_how}'. Must be 'abs', 'pos', or 'neg'.")
-    
+        thresholds = np.arange(0, max(-y), inc)
+
     if len(thresholds) == 0:
         logger.warning("Error setting increments through the time-series values")
         return np.nan
-    
-    # Initialize statistics matrix
+
+    # Calculate statistics of over-threshold events, looping over thresholds. Stop as
+    # soon as too few events remain to be useful: raising the threshold can only shrink
+    # the set of events, so the criteria keep failing for all higher thresholds. This
+    # also lets each threshold search only the previous one's events (in time order).
     # Columns: [mean_diff, std_err, percentage, median_pos, mean_pos, std_pos]
-    statistics = np.zeros((len(thresholds), 6))
-    
-    # Calculate statistics for each threshold
-    for i, threshold in enumerate(thresholds):
-        # Find indices exceeding threshold
-        if threshold_how == 'abs':
-            over_threshold_idx = np.argwhere(abs(y) >= threshold).flatten()
-        elif threshold_how == 'pos':
-            over_threshold_idx = np.argwhere(y >= threshold).flatten()
-        elif threshold_how == 'neg':
-            over_threshold_idx = np.argwhere(y <= -threshold).flatten()
-            
-        # Calculate differences between consecutive over-threshold events
-        time_diffs = np.diff(over_threshold_idx)
-        
-        # Store statistics
-        statistics[i, 0] = np.mean(time_diffs)  # Mean time between events
-        statistics[i, 1] = np.std(time_diffs, ddof=1) / np.sqrt(len(time_diffs))  # Standard error
-        statistics[i, 2] = len(time_diffs) / total_points * 100  # Percentage of events
-        # event times use 1-based indices, as in MATLAB
-        statistics[i, 3] = (np.median(over_threshold_idx + 1) / (N / 2)) - 1  # Median position deviation
-        statistics[i, 4] = np.mean(over_threshold_idx + 1) / (N / 2) - 1  # Mean position deviation
-        statistics[i, 5] = np.std(over_threshold_idx, ddof=1) / np.sqrt(len(over_threshold_idx))  # Position std error
-    
-    # Trim data where statistics become invalid
-    first_nan_idx = np.argmax(np.isnan(statistics[:, 0])) if np.any(np.isnan(statistics[:, 0])) else None
-    if first_nan_idx and first_nan_idx > 0:
-        statistics = statistics[:first_nan_idx, :]
-        thresholds = thresholds[:first_nan_idx]
-    
-    # Further trim based on percentage threshold
-    trim_threshold = 2 # percent
-    valid_indices = np.argwhere(statistics[:, 2] > trim_threshold).flatten()
-    if len(valid_indices) > 0:
-        last_valid_idx = valid_indices[-1]
-        statistics = statistics[:last_valid_idx + 1, :]
-        thresholds = thresholds[:last_valid_idx + 1]
-    
+    rows = []
+    r = np.arange(N)
+    for threshold in thresholds:
+        r = _events(r, threshold)
+        # Intervals between consecutive over-threshold events
+        time_diffs = np.diff(r)
+        if len(time_diffs) == 0:
+            break
+        prop_included = len(time_diffs) / total_points * 100  # percentage of events
+        if prop_included <= trim_threshold:
+            break
+        r1 = r + 1  # event times use 1-based indices, as in MATLAB
+        rows.append([
+            np.mean(time_diffs),  # mean time between events
+            _matlab_std(time_diffs) / np.sqrt(len(time_diffs)),  # standard error
+            prop_included,
+            np.median(r1) / (N / 2) - 1,  # median position (-1 to 1)
+            np.mean(r1) / (N / 2) - 1,  # mean position (-1 to 1)
+            _matlab_std(r) / np.sqrt(len(r)),  # position std error
+        ])
+    statistics = np.array(rows).reshape(-1, 6)
+    thresholds = thresholds[:len(statistics)]
+
+    results = {}
+
+    # Fit an exponential to the mean inter-event interval as a function of the threshold
+    mfexp = _fit_exp_gof(thresholds, statistics[:, 0], [0.1, 2.5, 1])
+    results.update(dict(zip(['mfexpa', 'mfexpb', 'mfexpc', 'mfexpr2', 'mfexprmse'], mfexp)))
+
+    # Fit an exponential, then a linear trend, to the percentage of points included
+    nfexp = _fit_exp_gof(thresholds, statistics[:, 2], [120, -1, -16])
+    results.update(dict(zip(['nfexpa', 'nfexpb', 'nfexpc', 'nfexpr2', 'nfexprmse'], nfexp)))
+    nfl = _fit_lin_gof(thresholds, statistics[:, 2])
+    results.update(dict(zip(['nfla', 'nflb', 'nflr2', 'nflrmse'], nfl)))
+
     # Basic statistics on mean times
     results.update({
         'mdtm': np.mean(statistics[:, 0]),
         'mdtmd': np.median(statistics[:, 0]),
-        'mdtstd': np.std(statistics[:, 0], ddof=1)
+        'mdtstd': _matlab_std(statistics[:, 0])
     })
-    
+
     # Statistics on median position deviations
     results.update({
         'mdrm': np.mean(statistics[:, 3]),
         'mdrmd': np.median(statistics[:, 3]),
-        'mdrstd': np.std(statistics[:, 3], ddof=1)
+        'mdrstd': _matlab_std(statistics[:, 3])
     })
-    
+
     # Statistics on mean position deviations
     results.update({
         'mrm': np.mean(statistics[:, 4]),
         'mrmd': np.median(statistics[:, 4]),
-        'mrstd': np.std(statistics[:, 4], ddof=1)
+        'mrstd': _matlab_std(statistics[:, 4])
     })
-    
+
     # Cross-correlation between mean and error
     _, cross_corr = x_corr(statistics[:, 0], statistics[:, 1], max_lags=1)
     results.update({
         'xcmerr1': cross_corr[-1],
         'xcmerrn1': cross_corr[0]
     })
-    
+
+    # Fit an exponential, then a linear trend, to the std of event times
+    stdrfexp = _fit_exp_gof(thresholds, statistics[:, 5], [5, 1, 15])
+    results.update(dict(zip(['stdrfexpa', 'stdrfexpb', 'stdrfexpc', 'stdrfexpr2', 'stdrfexprmse'], stdrfexp)))
+    stdrfl = _fit_lin_gof(thresholds, statistics[:, 5])
+    results.update(dict(zip(['stdrfla', 'stdrflb', 'stdrflr2', 'stdrflrmse'], stdrfl)))
+
     return results
 
 def outlier_test(y: ArrayLike, p: float = 2,
@@ -1035,7 +1290,7 @@ def histogram_mode(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> 
     return float(out)
 
 def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
-                  remove_or_saturate: str = 'remove') -> dict:
+                  remove_or_saturate: str = 'remove', random_seed: Union[int, None] = None) -> dict:
     """
     How time-series properties change as points are removed.
 
@@ -1062,11 +1317,17 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     remove_or_saturate : {'remove', 'saturate'}, optional
         Whether to remove points ('remove') or saturate their values ('saturate').
         Default is ``'remove'``.
+    random_seed : int, optional
+        Seed for the random ordering used when ``remove_how='random'``, for
+        reproducibility. Default is ``None`` (unseeded).
 
     Returns
     -------
     dict
-        Statistics including the change in autocorrelation, time scales, mean.
+        Statistics including the change in autocorrelation, time scales, mean, median,
+        standard deviation, skewness (``skewnessdiff``, the difference
+        skew(y_transform) - skew(y)), and kurtosis (``kurtosisrat``, the ratio
+        kurtosis(y_transform) / kurtosis(y)).
     """
     y = np.asarray(y)
     N = len(y)
@@ -1081,12 +1342,15 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     elif remove_how == 'max':
         is_ = np.argsort(y, kind='stable')             # ascending y
     elif remove_how == 'random':
-        is_ = np.random.permutation(N)
+        is_ = np.random.default_rng(random_seed).permutation(N)
     else:
         raise ValueError(f"Unknown method '{remove_how}'")
     
     # Indices of points to *keep*:
-    r_keep = np.sort(is_[:round(N * (1 - p))])
+    # (MATLAB's round: halves go away from zero, unlike Python's round)
+    n_keep = N * (1 - p)
+    n_keep = int(np.floor(n_keep)) + int(n_keep - np.floor(n_keep) >= 0.5)
+    r_keep = np.sort(is_[:n_keep])
 
     # Indices of points to *transform*:
     r_transform = np.setdiff1d(np.arange(N), r_keep)
@@ -1139,7 +1403,8 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     out['median'] = np.median(y_transform)
     out['std'] = np.std(y_transform, ddof=1)
     
-    out['skewnessrat'] = stats.skew(y_transform) / stats.skew(y)
+    # difference rather than ratio: a ratio blows up (and changes sign) when skew(y) is near 0
+    out['skewnessdiff'] = stats.skew(y_transform) - stats.skew(y)
     # return kurtosis instead of excess kurtosis
     out['kurtosisrat'] = stats.kurtosis(y_transform, fisher=False) / stats.kurtosis(y, fisher=False)
 
