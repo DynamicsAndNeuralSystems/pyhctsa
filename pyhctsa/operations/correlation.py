@@ -649,6 +649,8 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     # Set tau to minimum of autocorrelation function if 'ac' or 'tau'
     if tau in ['ac', 'tau']:
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
     # Fresh uncorrelated Gaussian noise is drawn at each noise level (seed set once);
     # a user-supplied ``noise`` (test hook) is either one vector reused at every level
     # or an array with one row per level.
@@ -923,6 +925,8 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     # Set tau to the first zero-crossing of the autocorrelation function with the 'tau' input
     if tau == 'tau':
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
         if tau > len(y) / 10:
             tau = len(y) // 10
     # Ensure that y is a column vector
@@ -1278,6 +1282,8 @@ def histogram_ami(
     y = np.asarray(y)
     if isinstance(tau, str) and tau in ['ac', 'tau']:
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
 
     # Bin the data once (the binning is the same for both delay vectors and does not
     # depend on the lag), then evaluate each lag from the precomputed bin indices.
@@ -1684,6 +1690,8 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     
     if tau == 'tau':
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
         if tau > N / 10:
             tau = N//10
 
@@ -1762,9 +1770,13 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     if tau == 'tau':
         # Make tau the first zero crossing of the autocorrelation function
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
         # Cannot set the time delay greater than 10% the length of the time series
         if tau > len(y) / 10:
             tau = len(y) // 10
+    if np.isnan(tau):
+        return np.nan
     tau = int(tau)
     xt = y[:-tau]  # part of the time series
     xtp = y[tau:]  # time-lagged time series
@@ -1857,6 +1869,8 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     y = np.asarray(y)
     if tau == 'tau':
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
         # cannot set time delay > 10% of the length of the time series...
         if tau > len(y)/10:
             tau = int(np.floor(len(y)/10))
@@ -2043,6 +2057,8 @@ def glscf(y: ArrayLike, alpha: float, beta: float, tau: Union[int, str] = 'tau')
     # Set tau to first zero-crossing of the autocorrelation function with the input 'tau'
     if tau == 'tau':
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g. constant series)
+            return np.nan
     
     # Take magnitudes of time-delayed versions of the time series
     y1 = np.abs(y[:-tau])
@@ -2572,7 +2588,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
                 acf_val = acf_full[i-1]
                 if np.isnan(acf_val):
                     logger.warning("Weird time series (constant?)")
-                    out = np.nan
+                    return np.nan
                 if acf_val < th:
                     # Ensure ACF is all positive
                     if acf_val > 0:
@@ -2621,8 +2637,8 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
     # Check for good behavior
     if np.any(np.isnan(acf)):
         # This is an anomalous time series (e.g., all constant, or containing NaNs)
-        out = np.nan
-    
+        return np.nan
+
     out = {}
     out['Nac'] = n_drown
 
