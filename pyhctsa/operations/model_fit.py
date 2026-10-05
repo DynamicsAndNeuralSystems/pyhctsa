@@ -3009,7 +3009,7 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
 
     With ``test_how = 'all'`` the models are tested on the data they were trained on,
     so the loss measures in-sample fit: it cannot rise with the model order, and
-    features such as ``minv``, ``firstonmin`` and ``where01max`` mostly describe how
+    features such as ``minv``, ``propgain1min`` and ``where01max`` mostly describe how
     fast the fit improves with order. Use a training fraction (e.g. 0.5) for a
     genuine out-of-sample comparison.
 
@@ -3029,8 +3029,12 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
     dict
         - ``maxv``, ``minv``, ``meanv``, ``medianv``: the maximum, minimum, mean and
           median of the loss over orders,
-        - ``firstonmin``: the loss of the first order divided by the minimum loss,
-        - ``maxonmed``: the maximum loss divided by the median loss,
+        - ``propgain1min``: the proportion of the first order's loss removed by the best
+          order, ``1 - min(v) / v[0]`` (between 0 and 1; 1 for a perfectly predictable
+          series; NaN if the first loss is zero or not finite),
+        - ``medonmax``: the median loss divided by the maximum loss (in (0, 1], approaching
+          1 when the loss is insensitive to the order; NaN if the maximum is zero or not
+          finite),
         - ``meandiff``, ``stddiff``, ``maxdiff``, ``meddiff``: the mean, standard
           deviation, maximum absolute value and median of the change in loss from
           one order to the next,
@@ -3082,8 +3086,9 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
     out['minv'] = np.min(v)
     out['meanv'] = np.mean(v)
     out['medianv'] = np.median(v)
-    out['firstonmin'] = v[0] / np.min(v)
-    out['maxonmed'] = np.max(v) / np.median(v)
+    # bounded forms of the two loss ratios (a zero or non-finite denominator is NaN)
+    out['propgain1min'] = 1 - np.min(v) / v[0] if (v[0] > 0 and np.isfinite(v[0])) else np.nan
+    out['medonmax'] = np.median(v) / np.max(v) if (np.max(v) > 0 and np.isfinite(np.max(v))) else np.nan
     dv = np.diff(v)
     if len(dv) > 0:
         out['meandiff'] = np.mean(dv)
