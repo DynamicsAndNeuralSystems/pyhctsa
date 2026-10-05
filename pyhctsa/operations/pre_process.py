@@ -4,17 +4,16 @@ import numba
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.interpolate import make_lsq_spline
-from scipy.optimize import least_squares
 from scipy.signal import lfilter, resample_poly
-from scipy.special import gammaln
-from scipy.stats import boxcox, norm
+from scipy.stats import boxcox
 import logging
 logger = logging.getLogger('pyhctsa')
 
 from ..operations.correlation import autocorr
-from ..operations.distribution import compare_ks_fit, outlier_test
+from ..operations.distribution import compare_ks_fit, outlier_test, simple_fit
 from ..operations.nonlinearity import zero_one_test
 from ..operations.stationarity import sliding_window, stat_av
+from ..robust import bf_fit_sinusoids
 from ..utils import _ml_rng, _round_half_away, _zscore_matlab, z_score
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
@@ -92,203 +91,6 @@ def _spline_detrend(y: np.ndarray, npieces: int, order: int) -> np.ndarray:
     return y - spl(x)
 
 
-def _sin_start(y: np.ndarray, n: int) -> np.ndarray:
-    """Start frequencies of a sum of n sinusoids, as MATLAB's ``sinnstart``.
-
-    One frequency at a time: the peak of the FFT magnitude of the residuals of the fit so
-    far, ignoring the peaks already used.
-    """
-    N = len(y)
-    t = np.arange(1, N + 1, dtype=float)
-    freqs, used, res = [], [], y.copy()
-    for j in range(n):
-        fy = np.abs(np.fft.fft(res))
-        fy[used] = 0
-        m = int(np.argmax(fy[:N // 2]))  # 0-based; MATLAB's maxloc is m + 1
-        used.append(m)
-        freqs.append(2 * np.pi * max(0.5, m) / (N - 1))
-        X = np.column_stack([f(w * t) for w in freqs for f in (np.sin, np.cos)])
-        ab = np.linalg.lstsq(X, y, rcond=None)[0]
-        res = y - X @ ab
-    return np.array(freqs)
-
-
-def _sin_detrend(y: np.ndarray, n: int) -> np.ndarray:
-    """Remove a sum of n sinusoids a1*sin(b1*t + c1) + ... fitted to y against t = 1:N.
-
-    Mirrors MATLAB's ``fit(t, y, 'sin<n>')``: the amplitude and phase of each sinusoid
-    are linear coefficients (the sine and cosine weights), solved by least squares, and
-    only the frequencies are optimized, starting from the FFT peaks of the series
-    (``sinnstart``). The result is therefore the local least-squares fit nearest to that
-    start, like MATLAB's, not necessarily the global one. Returns NaN if the fit fails.
-    """
-    N = len(y)
-    t = np.arange(1, N + 1, dtype=float)
-
-    def design(b):
-        return np.column_stack([f(w * t) for w in b for f in (np.sin, np.cos)])
-
-    def resid(b):
-        X = design(b)
-        return y - X @ np.linalg.lstsq(X, y, rcond=None)[0]
-
-    try:
-        b0 = _sin_start(y, n)
-        sol = least_squares(resid, b0, method='lm', xtol=1e-14, ftol=1e-14, gtol=1e-14)
-        r = resid(sol.x)
-    except (np.linalg.LinAlgError, ValueError):
-        return np.nan
-    if not np.all(np.isfinite(r)):
-        return np.nan
-    return r
-
-
-def _runstest_p(x: np.ndarray) -> float:
-    """Two-sided p-value of MATLAB's ``runstest(x)`` (exact distribution, mean cutoff).
-
-    Counts runs of values above and below the mean; values equal to the mean are dropped.
-    """
-    x = np.asarray(x, dtype=float)
-    x = x[~np.isnan(x)]
-    v = np.mean(x) if x.size else np.nan
-    x = x[x != v]
-    N = x.size
-    b = x > v
-    n1 = int(b.sum())
-    n0 = N - n1
-    if N == 0:
-        return 1.0
-    nruns = 1 + int(np.sum(b[:-1] != b[1:]))
-    if n1 == 0 or n0 == 0:
-        plist = np.array([1.0])  # exactly one run is possible
-    else:
-        def lnck(a, k):
-            a = np.asarray(a, dtype=float)
-            k = np.asarray(k, dtype=float)
-            with np.errstate(invalid='ignore'):
-                out = gammaln(a + 1) - gammaln(k + 1) - gammaln(a - k + 1)
-            return np.where((k < 0) | (k > a), -np.inf, out)
-        maxruns = 2 * min(n1, n0) + 1
-        R = np.arange(1, maxruns + 1)
-        plist = np.zeros(maxruns)
-        ev = R % 2 == 0
-        k = R[ev] // 2
-        plist[ev] = 2 * np.exp(lnck(n1 - 1, k - 1) + lnck(n0 - 1, k - 1) - lnck(N, n0))
-        k = R[~ev] // 2
-        plist[~ev] = (np.exp(lnck(n1 - 1, k - 1) + lnck(n0 - 1, k) - lnck(N, n0))
-                      + np.exp(lnck(n1 - 1, k) + lnck(n0 - 1, k - 1) - lnck(N, n0)))
-    pexact = plist[nruns - 1]
-    plo = plist[:nruns - 1].sum()
-    phi = plist[nruns:].sum()
-    return float(min(1.0, 2 * (pexact + min(plo, phi))))
-
-
-def _ksdensity(x: np.ndarray, m: int = 100) -> tuple:
-    """Normal-kernel density estimate of x on m points, like MATLAB's ``[f, xi] = ksdensity(x)``.
-
-    The bandwidth comes from the median absolute deviation (Silverman's rule) and the grid
-    covers the data range extended by 3 bandwidths, as in ``ksdensity``. (MATLAB truncates
-    the kernel at 4 bandwidths for large samples; this sums the full kernel.)
-    """
-    n = len(x)
-    sig = np.median(np.abs(x - np.median(x))) / 0.6745
-    if sig <= 0:
-        sig = np.ptp(x)
-    bw = sig * (4 / (3 * n)) ** (1 / 5)
-    xi = np.linspace(np.min(x) - 3 * bw, np.max(x) + 3 * bw, m)
-    f = np.mean(norm.pdf((xi[:, None] - x[None, :]) / bw), axis=1) / bw
-    return xi, f
-
-
-def _gauss1_fit(x: np.ndarray, xi: np.ndarray, f: np.ndarray) -> dict:
-    """Fit a Gaussian to a distribution of x, as hctsa's ``DN_SimpleFit(x, 'gauss1', ...)``.
-
-    The distribution is given as points ``xi`` and heights ``f`` (a kernel density estimate
-    or a histogram density); the model is a1*exp(-((u - b1)/c1)^2), fitted by least squares
-    from the start point of MATLAB's ``gaussnstart``. Returns the R^2 (``r2``), the root-mean-square
-    error (``rmse``, as hctsa, in units of the standard deviation of x), the lag-1
-    autocorrelation of the residuals (``resAC1``) and the p-value of a runs test on the
-    residuals (``resruns``), or NaN if the fit fails.
-    """
-    # Start point (gaussnstart, one peak)
-    k = np.nonzero(f == f.max())[0][-1]
-    a0, b0 = f[k], xi[k]
-    ok = (f > 0) & (f < a0)
-    if not ok.any():
-        return np.nan
-    c0 = np.mean(np.abs(xi[ok] - b0) / np.sqrt(np.log(a0 / f[ok]))) / 2
-
-    def basis(p):
-        b, c = p
-        return np.ones_like(xi) if c == 0 else np.exp(-((xi - b) / c) ** 2)
-
-    def resid(p):  # separable least squares: the amplitude is linear
-        A = basis(p)
-        return f - A * (A @ f) / (A @ A)
-
-    try:
-        sol = least_squares(resid, [b0, c0], method='lm', xtol=1e-14, ftol=1e-14, gtol=1e-14)
-        res = resid(sol.x)
-    except (np.linalg.LinAlgError, ValueError, FloatingPointError):
-        return np.nan
-    if not np.all(np.isfinite(res)):
-        return np.nan
-    sst = np.sum((f - np.mean(f)) ** 2)
-    sse = np.sum(res ** 2)
-    dfe = len(f) - 3  # three fitted coefficients
-    return {'r2': 1 - sse / sst,
-            'rmse': float(np.sqrt(sse / dfe) * np.std(x, ddof=1)) if dfe > 0 else np.nan,
-            'resAC1': float(np.ravel(autocorr(res, 1, 'Fourier'))[0]),
-            'resruns': _runstest_p(res)}
-
-
-def _gauss1_kd_fit(x: np.ndarray) -> dict:
-    """Fit a Gaussian to the kernel-smoothed distribution of x: hctsa's ``DN_SimpleFit(x, 'gauss1', 0)``.
-
-    The distribution is a normal-kernel density estimate on 100 points (MATLAB's
-    ``ksdensity`` defaults, see ``_ksdensity``). See ``_gauss1_fit`` for the outputs.
-    """
-    xi, f = _ksdensity(x)
-    return _gauss1_fit(x, xi, f)
-
-
-def _sqrt_rule_edges(x: np.ndarray) -> np.ndarray:
-    """Histogram bin edges of MATLAB's ``histcounts(x, 'BinMethod', 'sqrt')``.
-
-    The raw bin width is range / ceil(sqrt(N)); it is rounded to a "nice" value (1, 2, 3, 5 or
-    10 times a power of ten) and the edges are placed at multiples of that width, covering the data.
-    """
-    xmin, xmax = float(np.min(x)), float(np.max(x))
-    raw = (xmax - xmin) / max(int(np.ceil(np.sqrt(len(x)))), 1)
-    xscale = max(abs(xmin), abs(xmax))
-    if not xmax - xmin > max(np.sqrt(np.finfo(float).eps) * xscale, np.finfo(float).tiny):
-        return np.array([np.floor(2 * (xmin - 0.25)) / 2, np.ceil(2 * (xmax + 0.25)) / 2])  # constant data: one bin
-    raw = max(raw, np.spacing(xscale))
-    pow10 = 10.0 ** np.floor(np.log10(raw))
-    rel = raw / pow10
-    width = pow10 * (1 if rel < 1.5 else 2 if rel < 2.5 else 3 if rel < 4 else 5 if rel < 7.5 else 10)
-    left = min(width * np.floor(xmin / width), xmin)
-    nb = max(1, int(np.ceil((xmax - left) / width)))
-    right = max(left + nb * width, xmax)
-    return np.concatenate([[left], left + np.arange(1, nb) * width, [right]])
-
-
-def _gauss1_hist_fit(x: np.ndarray, bin_method: str = 'sqrt') -> dict:
-    """Fit a Gaussian to a histogram of x: hctsa's ``DN_SimpleFit(x, 'gauss1', bin_method)``.
-
-    The histogram uses MATLAB's square-root rule for its bin edges (see ``_sqrt_rule_edges``) or the
-    given number of equal-width bins, and is normalized to a probability density.
-    See ``_gauss1_fit`` for the outputs.
-    """
-    if bin_method == 'sqrt':
-        counts, edges = np.histogram(x, bins=_sqrt_rule_edges(x))
-    else:
-        counts, edges = np.histogram(x, bins=int(bin_method))
-    xi = (edges[:-1] + edges[1:]) / 2
-    f = counts / (counts.sum() * np.mean(np.diff(edges)))
-    return _gauss1_fit(x, xi, f)
-
-
 def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
     """
     How time-series properties change after a preprocessing step.
@@ -318,8 +120,10 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
 
         - ``"poly<n>"``  : remove a polynomial of order n = 1-9, e.g., ``"poly1"``
           is a linear detrending
-        - ``"sin<n>"``   : remove a sum of n = 1-8 sinusoids a1*sin(b1*t + c1) + ...,
-          fitted against the time index, e.g., ``"sin1"``
+        - ``"sin<n>"``   : remove a sum of n = 1-8 sinusoids a1*sin(2*pi*f1*t + c1) + ... fitted
+          by least squares to the mean-subtracted series, with frequencies searched
+          deterministically between 1/(2N) and 1/2 - 1/(2N) cycles per sample
+          (:func:`pyhctsa.robust.bf_fit_sinusoids`), e.g., ``"sin1"``
         - ``"spline<npieces><order>"`` : remove a least-squares spline with the given
           number of polynomial pieces and spline order, e.g., ``"spline24"`` is a
           cubic spline with 2 pieces
@@ -355,8 +159,8 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
 
         Differences (statistics that can be negative or zero):
 
-        - ``gauss1_kd_r2``, ``gauss1_kd_resAC1``, ``gauss1_kd_resruns``: the R^2, the
-          lag-1 autocorrelation of the residuals, and the runs-test p-value of the
+        - ``gauss1_kd_r2``, ``gauss1_kd_resAC1``, ``gauss1_kd_resrunsz``: the R^2, the
+          lag-1 autocorrelation of the residuals, and the runs-test z-statistic of the
           residuals of a Gaussian fit to the kernel-smoothed distribution
         - ``kscn_peaksepy``, ``kscn_peaksepx``, ``kscn_relent``: the peak separation in
           height and in position, and the relative entropy, of the kernel-smoothed
@@ -381,9 +185,13 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
 
     elif (m := re.fullmatch(r'sin([1-8])', detrend_meth)):
         # 2) Seasonal detrend: sum of sinusoids
-        y_d = _sin_detrend(y, int(m.group(1)))
-        if np.ndim(y_d) == 0:  # the fit failed
-            return np.nan
+        # (the mean is removed first: the sinusoids have no offset, and the frequencies are
+        # bounded away from zero, so they could not otherwise absorb a non-zero mean)
+        num_sin = int(m.group(1))
+        if N <= 3 * num_sin:
+            return np.nan  # too short to fit this many sinusoids
+        y_c = y - np.mean(y)
+        y_d = y_c - bf_fit_sinusoids(y_c, num_sin)[0]
 
     elif (m := re.fullmatch(r'spline(\d)(\d)', detrend_meth)):
         # 3) Spline detrend
@@ -451,14 +259,14 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
 
     # 2) Gaussianity
     # (a) Gaussian fit to the kernel density estimate
-    me1 = _gauss1_kd_fit(y_d)
-    me2 = _gauss1_kd_fit(y)
+    me1 = simple_fit(y_d, 'gauss1', 0)
+    me2 = simple_fit(y, 'gauss1', 0)
     if not isinstance(me1, dict) or not isinstance(me2, dict):
         # fitting the Gaussian failed
-        for key in ['r2', 'resAC1', 'resruns']:
+        for key in ['r2', 'resAC1', 'resrunsz']:
             out[f'gauss1_kd_{key}'] = np.nan
     else:
-        for key in ['r2', 'resAC1', 'resruns']:
+        for key in ['r2', 'resAC1', 'resrunsz']:
             out[f'gauss1_kd_{key}'] = _diff(me1[key], me2[key])
 
     # (b) Compare the distribution to a fitted normal distribution
@@ -493,9 +301,9 @@ def _iterate_stats(y: np.ndarray, y_d: np.ndarray) -> np.ndarray:
     f[2] = sliding_window(y_d, 'std', 'std', 5, 2) / sliding_window(y, 'std', 'std', 5, 2)
 
     # 2) Gaussianity: Gaussian fits to the kernel density and to a histogram, and a normal fit
-    me = _gauss1_kd_fit(y_d)
+    me = simple_fit(y_d, 'gauss1', 0)
     f[3] = me['rmse'] if isinstance(me, dict) else np.nan
-    me = _gauss1_hist_fit(y_d, 'sqrt')
+    me = simple_fit(y_d, 'gauss1', 'sqrt')
     f[4] = me['rmse'] if isinstance(me, dict) else np.nan
     me = compare_ks_fit(y_d, 'norm')
     f[5] = me['adiff'] if isinstance(me, dict) else np.nan
