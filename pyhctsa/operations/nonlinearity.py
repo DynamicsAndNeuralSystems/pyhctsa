@@ -3541,7 +3541,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
           zeros of the profile after summing it into 20 equal bins of lags (as a distribution
           over bins)
         - ``maxhisthist``, ``phisthistmin``, ``hhisthist``: the maximum, the first (lowest-value)
-          bin probability, and the entropy of the histogram of profile values (square-root bins)
+          bin probability, and the entropy of the histogram of profile values (ceil(sqrt(n)) equal-width bins, explicit edges)
     """
     y = np.asarray(y, dtype=float).ravel()
     if num_lags < 2:
@@ -3645,10 +3645,9 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     out['rangecgdist'] = np.ptp(cglav)
     out['pzeroscgdist'] = np.sum(cglav == 0) / num_bins
 
-    # Distribution of the profile values (MATLAB's 'sqrt' bin rule, as histcounts)
-    n_bins = max(int(np.ceil(np.sqrt(nn))), 1)
-    lo, hi = np.min(trett), np.max(trett)
-    edges = bin_picker(np.float64(lo), np.float64(hi), None, (hi - lo) / n_bins)
+    # Distribution of the profile values: ceil(sqrt(n)) equal-width bins spanning the values,
+    # with explicit edges (bf_hist_edges)
+    edges = bf_hist_edges(trett, 'sqrt')
     nhist = np.histogram(trett, bins=edges)[0] / nn
     out['maxhisthist'] = np.max(nhist)
     out['phisthistmin'] = nhist[0]  # probability in the first (lowest-value) bin
