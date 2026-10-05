@@ -38,7 +38,13 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     Returns
     -------
     dict
-        Dictionary of statistics based on the fitted HMM. 
+        Dictionary of statistics based on the fitted HMM: the sorted state means
+        (``Mu_1``, ...) and their ``meanMu``, ``rangeMu``, ``maxMu``, ``minMu``;
+        the tied covariance ``Cov``; the transition matrix summaries
+        ``Pmeandiag``, ``stdmeanP``, ``maxP``, ``meanP``, ``stdP``; the training
+        log-likelihood per sample ``LLtrainpersample`` and the number of EM
+        iterations ``nit``; and the test log-likelihood per sample
+        ``LLtestpersample`` and ``LLdifference``.
 
     """
     #Actually highly stochastic, so for reproducible results helps to set the
@@ -83,10 +89,10 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     p_matrix = model.transmat_
 
     out['Pmeandiag'] = np.mean(np.diag(p_matrix))
-    out['std_mean_p'] = np.std(np.mean(p_matrix, axis=0), ddof=1)
-    out['max_p'] = np.max(p_matrix)
-    out['mean_p'] = np.mean(p_matrix)
-    out['std_p'] = np.std(p_matrix, ddof=1)
+    out['stdmeanP'] = np.std(np.mean(p_matrix, axis=0), ddof=1)
+    out['maxP'] = np.max(p_matrix)
+    out['meanP'] = np.mean(p_matrix)
+    out['stdP'] = np.std(p_matrix, ddof=1)
 
     #% Within-sample log-likelihood
     out['LLtrainpersample'] = model.monitor_.history[-1] / n_train
