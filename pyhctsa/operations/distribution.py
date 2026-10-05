@@ -1655,92 +1655,54 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
     return out
 
 
-def _gauss_sum(t, *p):
-    """Sum of Gaussians a*exp(-((t-b)/c)^2) with parameters (a1, b1, c1, a2, b2, c2, ...)."""
-    out = np.zeros_like(t, dtype=float)
-    for i in range(0, len(p), 3):
-        out += p[i] * np.exp(-((t - p[i + 1]) / p[i + 2]) ** 2)
-    return out
+def _matlab_hist_edges(x: np.ndarray, num_bins: Union[int, str]) -> np.ndarray:
+    """Bin edges of MATLAB's ``histcounts(x, num_bins)`` / ``histcounts(x, 'BinMethod', rule)``.
 
-
-def _fit_curve(dnx: np.ndarray, dny: np.ndarray, dmodel: str):
-    """Least-squares fit of a curve of the named type; returns (fitted values, number of coefficients)."""
-    from scipy.optimize import curve_fit
-
-    span = np.ptp(dnx) if len(dnx) > 1 else 1.0
-    i0 = int(np.argmax(dny))
-    best = None
-    if dmodel in ('gauss1', 'gauss2'):
-        npk = 1 if dmodel == 'gauss1' else 2
-        a0, b0, c0 = dny[i0], dnx[i0], span / 4
-        starts = []
-        if npk == 1:
-            starts.append([a0, b0, c0])
+    MATLAB places the edges at "nice" values: for a given number of bins, or for the
+    ``'sqrt'`` and ``'sturges'`` rules (raw bin width: the range over the number of bins the
+    rule gives), the width and the limits are rounded as by its ``binpicker``
+    (:func:`pyhctsa.utils.bin_picker`). Other rules fall back to NumPy's edges.
+    """
+    x = np.asarray(x, dtype=float)
+    x = x[~np.isnan(x)]
+    xmin, xmax = np.float64(np.min(x)), np.float64(np.max(x))
+    if isinstance(num_bins, str):
+        if num_bins == 'sqrt':
+            nb = max(int(np.ceil(np.sqrt(len(x)))), 1)
+        elif num_bins == 'sturges':
+            nb = max(int(np.ceil(np.log2(len(x)) + 1)), 1)
         else:
-            # a second peak at a number of positions across the range, and half-height peaks
-            for frac in (0.1, 0.25, 0.4, 0.6, 0.75, 0.9):
-                b2 = dnx[0] + frac * span
-                starts.append([a0, b0, c0, a0 / 2, b2, c0 / 2])
-        model = _gauss_sum
-        k = 3 * npk
-    elif dmodel == 'exp1':
-        pos = dny > 0
-        if np.sum(pos) >= 2 and np.ptp(dnx[pos]) > 0:
-            b1, a1 = np.polyfit(dnx[pos], np.log(dny[pos]), 1)
-            starts = [[np.exp(a1), b1]]
-        else:
-            starts = [[1.0, 0.0]]
-        starts.append([1.0, 0.0])
-        model = lambda t, a, b: a * np.exp(b * t)
-        k = 2
-    elif dmodel == 'power1':
-        pos = dny > 0
-        if np.sum(pos) >= 2 and np.ptp(np.log(dnx[pos])) > 0:
-            b1, a1 = np.polyfit(np.log(dnx[pos]), np.log(dny[pos]), 1)
-            starts = [[np.exp(a1), b1]]
-        else:
-            starts = [[1.0, 1.0]]
-        starts.append([1.0, 1.0])
-        model = lambda t, a, b: a * np.power(t, b)
-        k = 2
-    else:
-        raise ValueError(f"Invalid distribution model '{dmodel}' specified")
+            return np.histogram_bin_edges(x, bins=num_bins)
+        return bin_picker(xmin, xmax, None, (xmax - xmin) / nb)
+    return bin_picker(xmin, xmax, int(num_bins))
 
-    for p0 in starts:
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter('ignore')
-                popt, _ = curve_fit(model, dnx, dny, p0=p0, maxfev=20000)
-        except (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
-            continue
-        fit = model(dnx, *popt)
-        if not np.all(np.isfinite(fit)):
-            continue
-        sse = np.sum((dny - fit) ** 2)
-        if best is None or sse < best[0]:
-            best = (sse, fit)
-    if best is None:
-        return None, k
-    return best[1], k
+
+_SIMPLE_FIT_MODELS = {'gauss1': ('gauss', 3), 'gauss2': ('gauss2', 6), 'exp1': ('exp', 2), 'power1': ('power', 2)}
 
 
 def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') -> Union[dict, float]:
     """
     Fits a simple curve to the distribution of the values.
 
-    The distribution of the data, estimated either as a histogram or by kernel
-    smoothing, is fitted by nonlinear least squares with a simple curve, and the
-    goodness of fit and the structure of the residuals are returned.
+    Fits a simple parametric curve to an estimate of the distribution of values in the
+    time series, ignoring their temporal ordering. The distribution is estimated either
+    as a histogram, with a specified number of bins, or as a kernel-smoothed density.
+    The outputs measure the goodness of fit, and test the residuals (in order of
+    increasing value) for remaining structure. The curve is fitted by least squares to
+    the density in a deterministic way, with no random starts and no optimizer defaults
+    (:func:`pyhctsa.robust.bf_fit_density_curve`).
 
     Parameters
     ----------
     x : array-like
         The input data vector.
     dmodel : {'gauss1', 'gauss2', 'exp1', 'power1'}
-        The curve to fit: a Gaussian, the sum of two Gaussians, an exponential, or a
-        power law ``a * x ** b`` (positive data only). (hctsa's time-series models, the
-        sinusoids and Fourier series, are fitted by ``sinusoid_fit`` in the spectral
-        module.)
+        The curve to fit: a Gaussian, the sum of two Gaussians, an exponential
+        ``a*exp(b*x)``, or a power law ``a * x ** b`` (cannot be fit if any bin center is
+        not positive; NaN is returned). NaN is also returned if there are no more bins
+        than parameters of the model. (hctsa's time-series models, the sinusoids and
+        Fourier series, are fitted by ``sinusoid_fit`` in the spectral module; the
+        names 'sin1', 'sin2', 'sin3' are passed on to it, as hctsa does.)
     num_bins : int or str, optional
         How to estimate the distribution: a binning rule understood by
         :func:`numpy.histogram_bin_edges` (default ``'sqrt'``), the number of
@@ -1750,28 +1712,32 @@ def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') ->
     -------
     dict
         r2: R-squared of the fit; adjr2: R-squared adjusted for the number of
-        coefficients; rmse: root-mean-square error of the fit, scaled by the standard
-        deviation of the data; resAC1, resAC2: autocorrelations of the residuals at lags
-        1 and 2; resruns: p-value of a runs test on the residuals. NaN (not a dict)
-        if the model cannot be fitted.
+        coefficients; rmse: root-mean-square error of the fit, in units of probability
+        density of the standardized series (multiplied by the standard deviation of the
+        data); resAC1, resAC2: autocorrelations of the residuals, in order of increasing
+        value, at lags 1 and 2; resrunsz: the signed z-statistic of a runs test on the
+        residuals (:func:`pyhctsa.robust.bf_runs_z`; negative when the residuals have
+        fewer runs about their median than expected for a random order). NaN (not a
+        dict) if the model cannot be fitted.
 
     Notes
     -----
-    Fits use ``scipy.optimize.curve_fit`` (Levenberg-Marquardt, from heuristic starting
-    points; several for ``'gauss2'``, keeping the best), where hctsa uses the
-    trust-region fit of MATLAB's ``fit``, so values can differ where the fit is
-    ill-conditioned or has local minima. Histogram bin edges follow NumPy's rules, not
-    MATLAB's, which are rounded to 'nice' values.
+    The histogram bin edges are those of MATLAB's ``histcounts`` (limits and width rounded to
+    'nice' values) for a number of bins and for the ``'sqrt'`` and ``'sturges'`` rules. The
+    kernel-smoothed density (``num_bins = 0``) is the exact Gaussian-kernel sum with MATLAB's
+    default bandwidth, which does not truncate the kernel as ``ksdensity`` does for large
+    samples (a difference of about 1e-4 relative to the peak).
     """
-    from .hypothesis_tests import independence_tests
-    from ..toolboxes.matlab.matlab_fit import goodness_of_fit
-
     x = np.asarray(x, dtype=float).ravel()
-    if dmodel not in ('gauss1', 'gauss2', 'exp1', 'power1'):
+    if dmodel in ('sin1', 'sin2', 'sin3', 'fourier1', 'fourier2', 'fourier3'):
+        from .spectral import sinusoid_fit
+        return sinusoid_fit(x, dmodel)
+    if dmodel not in _SIMPLE_FIT_MODELS:
         raise ValueError(f"Invalid distribution model '{dmodel}' specified")
 
     if isinstance(num_bins, str) or num_bins != 0:
-        counts, edges = np.histogram(x, bins=num_bins)
+        edges = _matlab_hist_edges(x, num_bins)
+        counts, _ = np.histogram(x, bins=edges)
         dnx = (edges[:-1] + edges[1:]) / 2
         dny = counts / (np.sum(counts) * np.mean(np.diff(edges)))  # counts -> probability density
     else:  # kernel-smoothed distribution instead of a histogram
@@ -1781,18 +1747,32 @@ def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') ->
         logger.warning(f"The model '{dmodel}' can not be applied to non-positive data")
         return np.nan
 
-    fit, k = _fit_curve(dnx, dny, dmodel)
-    if fit is None:
-        logger.warning(f"Error fitting the model '{dmodel}' to this data")
+    curve, num_params = _SIMPLE_FIT_MODELS[dmodel]
+    dfe = len(dny) - num_params  # degrees of freedom of the error
+    if dfe < 1:  # no more bins than parameters: the fit is not meaningful
         return np.nan
 
-    gof = goodness_of_fit(dny, fit, k)
-    res = dny - fit
+    # Fit the model by least squares for the density
+    dny_fit = bf_fit_density_curve(dnx, dny, curve)
+
+    # Residuals (in order of increasing value) and goodness of fit as in the Curve Fitting
+    # Toolbox: R^2, R^2 adjusted for the number of fitted parameters, and the root-mean-square
+    # error from the residual sum of squares divided by the degrees of freedom of the error
+    res = dny - dny_fit
+    sse = np.sum(res ** 2)
+    sstot = np.sum((dny - np.mean(dny)) ** 2)
+    with np.errstate(all='ignore'):
+        r2 = 1 - sse / sstot
+        adjr2 = 1 - (1 - r2) * (len(dny) - 1) / dfe
+    rmse = np.sqrt(sse / dfe)
+
+    # Remaining structure in the residuals, in order of increasing value:
+    res_ac1, res_ac2, res_runsz = bf_residual_stats(res, sstot)
     return {
-        'r2': float(gof['rsquare']),
-        'adjr2': float(gof['adjrsquare']),
-        'rmse': float(gof['rmse'] * np.std(x, ddof=1)),
-        'resAC1': float(np.ravel(autocorr(res, 1, 'Fourier'))[0]),
-        'resAC2': float(np.ravel(autocorr(res, 2, 'Fourier'))[0]),
-        'resruns': independence_tests(res, 'runstest'),
+        'r2': float(r2),
+        'adjr2': float(adjr2),
+        'rmse': float(rmse * np.std(x, ddof=1)),
+        'resAC1': float(res_ac1),
+        'resAC2': float(res_ac2),
+        'resrunsz': float(res_runsz),
     }
