@@ -450,7 +450,7 @@ def quantile(y: ArrayLike, p: float = 0.5) -> float:
     """
     y = np.asarray(y)    
     if not isinstance(p, (int, float)) or p < 0 or p > 1:
-        raise ValueError("p must specify a proportion, in (0,1)")
+        raise ValueError("p must specify a proportion, in [0,1]")
     
     return float(np.quantile(y, p, method = 'hazen'))
 
@@ -1290,7 +1290,7 @@ def histogram_mode(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> 
     return float(out)
 
 def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
-                  remove_or_saturate: str = 'remove') -> dict:
+                  remove_or_saturate: str = 'remove', random_seed: Union[int, None] = None) -> dict:
     """
     How time-series properties change as points are removed.
 
@@ -1317,6 +1317,9 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     remove_or_saturate : {'remove', 'saturate'}, optional
         Whether to remove points ('remove') or saturate their values ('saturate').
         Default is ``'remove'``.
+    random_seed : int, optional
+        Seed for the random ordering used when ``remove_how='random'``, for
+        reproducibility. Default is ``None`` (unseeded).
 
     Returns
     -------
@@ -1339,7 +1342,7 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     elif remove_how == 'max':
         is_ = np.argsort(y, kind='stable')             # ascending y
     elif remove_how == 'random':
-        is_ = np.random.permutation(N)
+        is_ = np.random.default_rng(random_seed).permutation(N)
     else:
         raise ValueError(f"Unknown method '{remove_how}'")
     
