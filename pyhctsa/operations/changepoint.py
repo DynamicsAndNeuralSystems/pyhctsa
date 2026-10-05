@@ -75,7 +75,7 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
     num_change_points = len(chpts)
 
     # Intervals -- of change
-    chints = np.diff(np.concatenate([chpts, [N]]))
+    chints = np.diff(np.concatenate([chpts, [N + 1]]))  # chpts are 1-based starts of runs
 
     # Number of constant segments per sample
     out["nsegments"] = num_change_points / N  # will be 1 if there are no changes
