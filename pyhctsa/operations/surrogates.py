@@ -5,10 +5,11 @@ logger = logging.getLogger('pyhctsa')
 
 import numpy as np
 from numpy.typing import ArrayLike
-from scipy.stats import gaussian_kde, norm, zmap
+from scipy.stats import norm, zmap
 
 from ..operations.correlation import tc3
 from ..operations.information import automutual_info, first_min
+from ..operations.physics import _ksdensity
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -32,37 +33,24 @@ def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str)
     out['p'] = p
     out['zscore'] = z_stat
 
-    # fit a kenerel distribution to zscored distributions
+    # kernel density of the (z-scored) surrogates' values, evaluated where the series' value lies
+    # (MATLAB's ksdensity rule, as in hctsa)
     sigma = np.std(stat_surr, ddof=1)
     mu = np.mean(stat_surr)
     if sigma == 0 or not np.isfinite(sigma):
-        # all surrogates have same value of this statisitc
-        # cannot do a meaningful zscore
-        c = float(stat_surr[0])
-        bw = 1.0 # bandwidth scale
-        xi = np.linspace(c - 3 * bw, c + 3 * bw, 100)
-        # tiny gaussian around c
-        f = norm.pdf(xi, loc=c, scale=bw)
-        if (stat_x < xi.min()) or (stat_x > xi.max()):
-            out["f"] = 0.0
-        else:
-            idx = int(np.argmin(np.abs(stat_x - xi)))
-            out["f"] = float(f[idx])
-    
+        # all surrogates have the same value of this statistic: cannot do a
+        # meaningful z-score, so do it raw
+        zsc_surr = np.asarray(stat_surr, dtype=float)
+        xval = stat_x
     else:
-        # z-score branch
-        zscstatsurr = (stat_surr - mu) / sigma
-        zscstatx = (stat_x - mu) / sigma
-        kde = gaussian_kde(zscstatsurr)  # Scott's rule
-        xi = np.linspace(zscstatsurr.min(), zscstatsurr.max(), 100)
-        f = kde(xi)
-        xval = float(zscstatx)
-        if (xval < xi.min()) or (xval > xi.max()):
-            out["f"] = 0.0
-        else:
-            minhere = int(np.argmin(np.abs(xval - xi)))
-            out["f"] = float(f[minhere])
-        
+        zsc_surr = (stat_surr - mu) / sigma
+        xval = (stat_x - mu) / sigma
+    f, xi = _ksdensity(zsc_surr)
+    if (xval < xi.min()) or (xval > xi.max()):
+        out["f"] = 0.0  # out of range: assume p = 0 here
+    else:
+        out["f"] = float(f[int(np.argmin(np.abs(xval - xi)))])
+
     # what fraction of the range is the sample in? 
     medsurr = np.median(stat_surr)
     iqrsurr = np.quantile(stat_surr, q=.75, method='hazen') - np.quantile(stat_surr, q=.25, method='hazen')
@@ -173,11 +161,21 @@ def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
     
     return out
 
+def _first_min_per_surrogate(z: np.ndarray, min_what: str) -> np.ndarray:
+    """First minimum of the automutual information function of each surrogate (NaN on failure)."""
+    out = np.zeros(z.shape[1])
+    for i in range(z.shape[1]):
+        try:
+            out[i] = first_min(z[:, i], min_what)
+        except Exception:
+            out[i] = np.nan
+    return out
+
 def surrogate_test(
     x: ArrayLike,
     surr_meth: str = 'RP',
     num_surrs: int = 99,
-    the_test_stat: Union[str, ArrayLike] = 'ami1',
+    the_test_stat: Union[str, ArrayLike] = 'amikraskov1',
     random_seed: int = 42
 ) -> dict:
     """
@@ -221,27 +219,59 @@ def surrogate_test(
         level 1-sided test.
     the_test_stat : str or array-like, optional
         The test statistic(s) to evaluate on all surrogates and the original time series.
-        Can specify multiple options and will return output for each specified test statistic:
+        A single name or a list of names; output is returned for each statistic:
 
-        - 'ami': the automutual information at lag 1, cf. [2]
-        - 'fmmi': the first minimum of the automutual information function.
-        - 'o3': a third-order statistic used in [3].
-        - 'tc3': a time-reversal asymmetry measure.
-        
-        Default is ``'ami'``. Outputs of the function include a z-test between the two distributions, and
-        some comparative rank-based statistics.
-        
+        - 'amikraskov1': the automutual information at lag 1, estimated with the Kraskov
+            nearest-neighbor estimator (``automutual_info(y, 1, 'kraskov1', 4)``); tested
+            one-sided (surrogates should have lower values), cf. [2].
+        - 'fmmikraskov': the first minimum of the Kraskov automutual information function
+            (``first_min(y, 'mi-kraskov1')``); tested one-sided.
+        - 'o3': a third-order statistic used in [3] (the mean cubed increment at lag 1);
+            tested two-sided.
+        - 'tc3': a time-reversal asymmetry measure (``tc3`` at lag 1); tested two-sided.
+        - 'amigaussian1' and 'fmmigaussian': as 'amikraskov1' and 'fmmikraskov' but with
+            the Gaussian estimate of the automutual information. That is a function of
+            the autocorrelation only, which random-phase surrogates preserve, so
+            these tests cannot detect anything (their p-values are close to uniform for
+            every series); hctsa no longer registers them. The earlier names 'ami1' and
+            'fmmi' (which both meant the Gaussian estimate) are accepted as
+            'amigaussian1' and 'fmmigaussian' with a deprecation warning.
+
+        Default is ``'amikraskov1'``. The statistics 'nlpe' and 'fnn' of hctsa's
+        ``SD_SurrogateTest`` are not implemented. Outputs for each statistic ``s``
+        (``amikraskov``, ``fmmikraskov``, ``amigaussian``, ``fmmigaussian``, ``o3``, ``tc3``)
+        are ``s_p`` (p-value of a one- or two-sided z-test of the series' value against the
+        Gaussian fitted to the surrogates' values), ``s_zscore``, ``s_f`` (kernel-smoothed
+        density of the z-scored surrogates' values at the series' value; 0 outside the density
+        estimate), ``s_mediqr`` (distance from the surrogates' median in interquartile ranges;
+        NaN if the interquartile range is 0) and ``s_prank`` (rank-based p-value
+        ``(k + 1) / (num_surrs + 1)``, with ``k`` the number of surrogates at least as extreme
+        as the series in the tested direction; doubled and capped at 1 for two-sided tests).
+
     random_seed : int, optional
         Random seed for reproducibility. Default is 42.
 
     Returns
     -------
-    dict
-        Dictionary of statistics comparing the original time series to its 
-        surrogates for each test statistic.
+    dict or float
+        Dictionary of statistics comparing the original time series to its
+        surrogates for each test statistic. NaN if a statistic cannot be computed on
+        every surrogate (hctsa raises an error, which its operation wrapper turns into NaN).
     """
     x = np.asarray(x)
     n = len(x)
+
+    if isinstance(the_test_stat, str):
+        the_test_stat = [the_test_stat]  # a bare string would be searched for substrings
+    the_test_stat = list(the_test_stat)
+    # earlier names of the Gaussian-estimate statistics
+    for old, new in (('ami1', 'amigaussian1'), ('fmmi', 'fmmigaussian')):
+        if old in the_test_stat:
+            warnings.warn(
+                f"surrogate_test statistic '{old}' is deprecated: use '{new}' (the Gaussian "
+                f"estimate) or the Kraskov versions 'amikraskov1' and 'fmmikraskov'.",
+                DeprecationWarning, stacklevel=2)
+            the_test_stat = [new if t == old else t for t in the_test_stat]
 
     #Generate surrogate time series
     z = _make_surrogates(x, surr_method=surr_meth, num_surrs=num_surrs, random_seed=random_seed)
@@ -249,34 +279,55 @@ def surrogate_test(
     #% Evaluate test statistic on each surrogate
     out = {}
 
-    if 'ami1' in the_test_stat:
-        ami_fn = lambda time_series, time_delay: automutual_info(time_series, time_delay, 'gaussian')
-        ami_x = ami_fn(x, 1)
-        ami_surr = np.zeros(num_surrs)
-        for i in range(num_surrs):
-            ami_surr[i] = ami_fn(z[:, i], 1)
-        some_stats = _sd_give_me_stats(ami_x, ami_surr, 'right')
-        for (k, v) in zip(some_stats.keys(), some_stats.values()):
-            out[f'ami_{k}'] = v
+    def _compare(label, stat_x, stat_surr, side):
+        some_stats = _sd_give_me_stats(stat_x, stat_surr, side)
+        if not isinstance(some_stats, dict):
+            return False  # NaN in the surrogates' statistics: hctsa errors
+        for k, v in some_stats.items():
+            out[f'{label}_{k}'] = v
+        return True
 
-    if 'fmmi' in the_test_stat:
-        #% Investigate the first minimum of mutual information of surrogates compared to
-        #% that of signal itself
-        fmmi_x = first_min(x, 'mi')
-        fmmi_surr = np.zeros(num_surrs)
-        for i in range(num_surrs):
-            try:
-                fmmi_surr[i] = first_min(z[:, i], 'mi')
-            except Exception:
-                fmmi_surr[i] = np.nan
-
-        if np.isnan(fmmi_surr).any():
-            logger.warning("fmmi failed")
+    if 'amikraskov1' in the_test_stat:
+        # Kraskov AMI(1) of the surrogates compared to that of the signal itself. Unlike the
+        # Gaussian estimate (a function of the autocorrelation, which random-phase surrogates
+        # preserve) it responds to nonlinear dependence between x(t) and x(t+1).
+        ami_x = automutual_info(x, 1, 'kraskov1', 4)
+        ami_surr = np.array([automutual_info(z[:, i], 1, 'kraskov1', 4)
+                             for i in range(num_surrs)])
+        # surrogates should have lower AMI than the original signal
+        if not _compare('amikraskov', ami_x, ami_surr, 'right'):
             return np.nan
-        #% FMMI should be higher for signal than surrogates
-        some_stats = _sd_give_me_stats(fmmi_x, fmmi_surr, 'right')
-        for (k, v) in zip(some_stats.keys(), some_stats.values()):
-            out[f'fmmi_{k}'] = v
+
+    if 'fmmikraskov' in the_test_stat:
+        # first minimum of the Kraskov automutual information of the surrogates compared to
+        # that of the signal itself
+        fmmi_x = first_min(x, 'mi-kraskov1')
+        fmmi_surr = _first_min_per_surrogate(z, 'mi-kraskov1')
+        if np.isnan(fmmi_surr).any():
+            logger.warning("fmmikraskov failed")
+            return np.nan
+        # the first minimum should be at a higher lag for the signal than for the surrogates
+        if not _compare('fmmikraskov', fmmi_x, fmmi_surr, 'right'):
+            return np.nan
+
+    if 'amigaussian1' in the_test_stat:
+        # AMI(1) of the surrogates compared to that of the signal itself, with the Gaussian
+        # estimate (as in Nakamura et al. (2006))
+        ami_x = automutual_info(x, 1, 'gaussian')
+        ami_surr = np.array([automutual_info(z[:, i], 1, 'gaussian')
+                             for i in range(num_surrs)])
+        if not _compare('amigaussian', ami_x, ami_surr, 'right'):
+            return np.nan
+
+    if 'fmmigaussian' in the_test_stat:
+        fmmi_x = first_min(x, 'mi-gaussian')
+        fmmi_surr = _first_min_per_surrogate(z, 'mi-gaussian')
+        if np.isnan(fmmi_surr).any():
+            logger.warning("fmmigaussian failed")
+            return np.nan
+        # FMMI should be higher for the signal than for the surrogates
+        if not _compare('fmmigaussian', fmmi_x, fmmi_surr, 'right'):
+            return np.nan
 
     if 'o3' in the_test_stat:
         #% Third-order statistic in Schreiber, Schmitz (Physica D)
@@ -285,9 +336,8 @@ def surrogate_test(
         o3_surr = np.zeros(num_surrs, dtype=float)
         for i in range(num_surrs):
             o3_surr[i] = (1.0 / (n - tau)) * np.sum((z[tau:, i] - z[:n - tau, i]) ** 3)
-        some_stats = _sd_give_me_stats(o3_x, o3_surr, 'both')
-        for (k, v) in zip(some_stats.keys(), some_stats.values()):
-            out[f'o3_{k}'] = v
+        if not _compare('o3', o3_x, o3_surr, 'both'):
+            return np.nan
 
     if 'tc3' in the_test_stat:
         # tc3 statistic -- another time-reversal asymmetry measure
@@ -298,8 +348,7 @@ def surrogate_test(
         for i in range(num_surrs):
             tmp = tc3(z[:, i], tau)
             tc3_surr[i] = tmp['raw']
-        some_stats = _sd_give_me_stats(tc3_x, tc3_surr, 'both')
-        for (k, v) in zip(some_stats.keys(), some_stats.values()):
-            out[f'tc3_{k}'] = v
+        if not _compare('tc3', tc3_x, tc3_surr, 'both'):
+            return np.nan
 
     return out
