@@ -191,8 +191,14 @@ def distribution_entropy(
     mask = px > 0
     p = px[mask]
     log_p = np.log(p / bin_widths[mask])
+    out = -np.sum(p * log_p)
 
-    return -np.sum(p * log_p)
+    if hist_or_ks == 'hist':
+        # Miller-Madow correction for the downward bias of the plug-in estimate,
+        # using this call's own sample size (y is y_hat inside the olremp recursion)
+        out += (np.count_nonzero(px) - 1) / (2 * len(y))
+
+    return out
 
 def multi_scale_entropy(
     y: ArrayLike,
