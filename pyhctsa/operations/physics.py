@@ -6,7 +6,7 @@ from scipy.stats import ansari
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
-from ..robust import bf_runs_z
+from ..robust import bf_ks_density, bf_runs_z
 from ..utils import get_tau, matlab_quantile
 
 def _ksdensity(x: np.ndarray, xi: Union[None, np.ndarray] = None):
@@ -225,8 +225,8 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     # grid of 200 points (sum times grid spacing: at most 2, independent of the
     # range of the data)
     r = np.linspace(min(np.min(y), np.min(w)), max(np.max(y), np.max(w)), 200)
-    dy, _ = _ksdensity(y, r)
-    dw, _ = _ksdensity(w, r)
+    dy, _, _ = bf_ks_density(y, r)
+    dw, _, _ = bf_ks_density(w, r)
     out['sw_distdiff'] = np.sum(np.abs(dy - dw)) * (r[1] - r[0])
 
     # (iii) Residuals between time series and walker
