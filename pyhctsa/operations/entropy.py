@@ -10,7 +10,6 @@ from antropy.entropy import _xlogx
 from scipy.stats import gaussian_kde, norm, rankdata
 from sklearn.neighbors import KDTree
 
-from ..operations.correlation import first_crossing
 from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
 from ..toolboxes.physionet import sampen as _sampen_c
@@ -202,100 +201,264 @@ def distribution_entropy(
 
     return out
 
+_MAD_TO_SIGMA = 0.6745
+
+
+def _bisquare_weights(r: np.ndarray) -> np.ndarray:
+    return (np.abs(r) < 1) * (1 - r ** 2) ** 2
+
+
+def _robustfit(x: np.ndarray, y: np.ndarray, tune: float = 4.685) -> tuple:
+    """
+    Robust straight-line fit by iteratively reweighted least squares with Tukey's bisquare
+    weights: a port of MATLAB's ``[b, stats] = robustfit(x, y)`` (default options).
+
+    Follows ``statrobustfit``: leverage-adjusted residuals, residual scale from the MAD
+    (``median(|r|) / 0.6745`` over the largest residuals, excluding the smallest ``p - 1``),
+    the same convergence rule, and the same standard errors (a robust estimate of the error
+    scale combined with the OLS one, from ``statrobustsigma``).
+
+    Returns
+    -------
+    (b, se) : tuple of ndarray
+        The intercept and slope, and their standard errors. NaN arrays if the design is rank
+        deficient or there are fewer than 3 points.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    y = np.asarray(y, dtype=float).ravel()
+    n = x.size
+    X = np.column_stack([np.ones(n), x])
+    p = 2
+    nan2 = np.full(2, np.nan)
+    if n <= p:
+        return nan2, nan2
+
+    Q, R = np.linalg.qr(X)
+    tol = abs(R[0, 0]) * max(n, p) * np.finfo(float).eps
+    if np.sum(np.abs(np.diag(R)) > tol) < p:
+        return nan2, nan2
+    b = np.linalg.solve(R, Q.T @ y)
+
+    E = np.linalg.solve(R.T, X.T).T  # X / R
+    h = np.minimum(0.9999, np.sum(E * E, axis=1))
+    adjfactor = 1.0 / np.sqrt(1.0 - h)
+
+    dfe = n - p
+    ols_s = np.linalg.norm(y - X @ b) / np.sqrt(dfe)
+    tiny_s = 1e-6 * np.std(y, ddof=1)
+    if tiny_s == 0:
+        tiny_s = 1.0
+
+    def madsigma(r, rank):
+        rs = np.sort(np.abs(r))
+        return np.median(rs[max(1, rank) - 1:]) / _MAD_TO_SIGMA
+
+    D = np.sqrt(np.finfo(float).eps)
+    b0 = np.zeros(2)
+    wxrank = p
+    w = np.ones(n)
+    it = 0
+    while it == 0 or np.any(np.abs(b - b0) > D * np.maximum(np.abs(b), np.abs(b0))):
+        it += 1
+        if it > 50:
+            logger.warning("Iteration limit reached in robust fit")
+            break
+        r = y - X @ b
+        radj = r * adjfactor
+        s = madsigma(radj, wxrank)
+        w = _bisquare_weights(radj / (max(s, tiny_s) * tune))
+        b0 = b
+        sw = np.sqrt(w)
+        Xw = X * sw[:, None]
+        b = np.linalg.lstsq(Xw, y * sw, rcond=None)[0]
+        wxrank = int(np.linalg.matrix_rank(Xw))
+
+    # Standard errors
+    r = y - X @ b
+    radj = r * adjfactor
+    mad_s = madsigma(radj, p)
+    if np.all((w < D) | (w > 1 - D)):
+        included = w > 1 - D
+        robust_s = np.linalg.norm(r[included]) / np.sqrt(np.sum(included) - p)
+    else:
+        # statrobustsigma
+        st = max(mad_s, tiny_s) * tune
+        u = radj / st
+        phi = u * _bisquare_weights(u)
+        delta = 0.0001
+        u1 = u - delta
+        phi0 = u1 * _bisquare_weights(u1)
+        u1 = u + delta
+        phi1 = u1 * _bisquare_weights(u1)
+        dphi = (phi1 - phi0) / (2 * delta)
+        m1 = np.mean(dphi)
+        m2 = np.sum((1 - h) * phi ** 2) / (n - p)
+        K = 1 + (p / n) * (1 - m1) / m1
+        robust_s = K * np.sqrt(m2) * st / m1
+    sigma = max(robust_s, np.sqrt((ols_s ** 2 * p ** 2 + robust_s ** 2 * n) / (p ** 2 + n)))
+    RI = np.linalg.solve(R, np.eye(p))
+    C = (RI @ RI.T) * sigma ** 2
+    se = np.sqrt(np.maximum(np.finfo(float).eps, np.diag(C)))
+    return b, se
+
+
 def multi_scale_entropy(
     y: ArrayLike,
     scale_range: Optional[Union[list, range]] = None,
     m: int = 2,
     r: float = 0.15,
-    pre_process_how: Optional[str] = None
-) -> dict:
+    pre_process_how: Optional[str] = None,
+    what_entropy: str = 'sampen',
+    num_classes: int = 6
+) -> Union[dict, float]:
     """
-    Compute multiscale entropy (MSE) of a time series using sample entropy across multiple scales.
+    Multiscale entropy (MSE) of a time series.
+
+    At each scale ``s`` the time series is coarse-grained by averaging over non-overlapping
+    windows of ``s`` samples (scale 1 is the original series), and the entropy of the
+    coarse-grained series is computed: by default the sample entropy, SampEn(m, r)
+    (:func:`sample_entropy`), as in the multiscale entropy of Costa et al. [1]. Scales are
+    handled as Composite Multiscale Entropy [2]: the value at scale ``s`` is the mean over all
+    ``s`` possible starting offsets of the windows, instead of just offset 0 (single-offset
+    estimates can swing several-fold depending on the arbitrary start). Offsets for which the
+    coarse-grained series has fewer than 20 samples are omitted from the mean, and a scale
+    for which all are is NaN. The entropy is also summarized across scales (extremes and where
+    they occur, mean, spread, trend).
+
+    References
+    ----------
+    .. [1] M. Costa, A. L. Goldberger and C.-K. Peng, "Multiscale entropy analysis of
+        biological signals", Phys. Rev. E 71, 021906 (2005).
+    .. [2] S.-D. Wu, C.-W. Wu, S.-G. Lin, C.-C. Wang and K.-Y. Lee, "Time series analysis using
+        composite multiscale entropy", Entropy 15(3), 1069 (2013).
+    .. [3] H. Azami, M. Rostaghi, D. Abasolo and J. Escudero, "Refined Composite Multiscale
+        Dispersion Entropy and its Application to Biomedical Signals", IEEE Trans. Biomed. Eng.
+        64(12), 2872 (2017).
 
     Parameters
     ----------
     y : array-like
         Input time series.
     scale_range : list or range, optional
-        List or range of scales (window sizes) to use for coarse-graining. Default is range(1, 11).
+        Scales (window sizes) for coarse-graining. Default is ``range(1, 11)``.
     m : int, optional
-        Embedding dimension for sample entropy. Default is 2.
+        Embedding dimension (length of the sequences to match). Default is 2.
     r : float, optional
-        Similarity threshold for sample entropy. Default is 0.15.
+        Similarity threshold for sample entropy, an absolute value (it is not rescaled with
+        the scale). It is a fraction of the standard deviation of the input if ``y`` is
+        z-scored. Unused for the dispersion settings. Default is 0.15.
     pre_process_how : str, optional
-        Preprocessing method. Supported:
+        Pre-processing applied (and the result z-scored) before coarse-graining:
 
-        - 'diff1': Use z-scored first differences.
-        - 'rescale_tau': Rescale using autocorrelation time.
-        - `None`: No pre-processing.
+        - 'diff1': incremental differences;
+        - 'rescale_tau': first coarse-grain at the first zero-crossing of the autocorrelation function;
+        - `None`: none.
 
         Default is `None`.
+    what_entropy : {'sampen', 'dispen', 'fdispen'}, optional
+        The entropy evaluated at each scale: sample entropy (``'sampen'``, the classical
+        multiscale entropy), normalized dispersion entropy (``'dispen'``, i.e. multiscale
+        dispersion entropy [3]; :func:`dispersion_entropy` with ``tau = 1``) or its
+        fluctuation-based variant (``'fdispen'``). Output names carry the corresponding
+        suffix (``dispen_s1``, ``meanDispEn``, ...). Default is ``'sampen'``.
+    num_classes : int, optional
+        The number of amplitude classes for the dispersion settings. Default is 6.
 
     Returns
     -------
-    dict
-        Dictionary containing sample entropy at each scale and summary statistics.
+    dict or float
+        A dictionary with (names for ``what_entropy = 'sampen'``; ``'dispen'``/``'fdispen'``
+        replace ``SampEn`` by ``DispEn``/``FDispEn`` and ``sampen`` by ``dispen``/``fdispen``):
+
+        - 'sampen_s{k}': the entropy at each scale ``k`` in ``scale_range``;
+        - 'maxSampEn', 'minSampEn': the maximum and minimum across scales, with
+          'maxScale' and 'minScale' the scales at which they occur;
+        - 'meanSampEn', 'stdSampEn', 'cvSampEn': the mean, standard deviation and
+          coefficient of variation across scales;
+        - 'meanch': the mean change from one scale to the next;
+        - 'slope', 'slopeSE': the slope, and its standard error, of a robust (bisquare,
+          as MATLAB's ``robustfit``) linear fit of the entropy against scale; NaN unless at
+          least 4 scales have valid values.
+
+        NaN (scalar) if no scale has enough samples.
     """
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float)
     m = int(m)
     if scale_range is None:
-        scale_range = range(1, 10)
+        scale_range = range(1, 11)
+    scale_range = list(scale_range)
     min_ts_length = 20
     num_scales = len(scale_range)
 
-    if pre_process_how is not None:
-        if pre_process_how == 'diff1':
-            y = z_score(np.diff(y))
-        elif pre_process_how == 'rescale_tau':
-            tau = first_crossing(y, 'ac', 0, 'discrete')
-            if np.isnan(tau):  # undefined ACF (e.g., constant series)
-                logger.warning("Could not determine the autocorrelation time for 'rescale_tau' pre-processing")
-                return np.nan
-            y_buffer = make_buffer(y, tau)
-            y = np.mean(y_buffer, 1)
-            y = z_score(y)
-        else:
-            raise ValueError(f"Unknown preprocessing setting: {pre_process_how}")    
-    
-    # Coarse-graining across scales
-    y_cg = [np.mean(make_buffer(y, buffer_size), 1) for buffer_size in scale_range]
+    if what_entropy not in ('sampen', 'dispen', 'fdispen'):
+        raise ValueError(
+            f"Unknown entropy '{what_entropy}' (expected 'sampen', 'dispen' or 'fdispen')")
+    en_name, en_prefix = {'sampen': ('SampEn', 'sampen'), 'dispen': ('DispEn', 'dispen'),
+                          'fdispen': ('FDispEn', 'fdispen')}[what_entropy]
 
-    # Run sample entropy at each scale
+    # Pre-processing happens BEFORE the coarse-graining, and the result is z-scored
+    if pre_process_how:
+        y = pre_process(y, pre_process_how)
+        if np.isscalar(y) or np.ndim(y) == 0:  # e.g., an undefined autocorrelation time
+            logger.warning(f"Could not apply '{pre_process_how}' pre-processing")
+            return np.nan
+        y = _zscore_matlab(y)
+
+    # Composite coarse-graining and entropy across scales: at each scale, the mean over all
+    # `scale` possible non-overlapping starting offsets (Eq. (16) of Costa et al. is the
+    # offset-0 coarse-graining)
     samp_ens = np.zeros(num_scales)
-    for si in range(num_scales):
-        if len(y_cg[si]) >= min_ts_length:
-            samp_ens[si] = sample_entropy(y_cg[si], m, r)[f'sampen{m}']
-        else:
-            samp_ens[si] = np.nan
+    for si, scale in enumerate(scale_range):
+        scale = int(scale)
+        offset_vals = np.full(scale, np.nan)
+        for off in range(scale):
+            y_cg = np.mean(make_buffer(y[off:], scale), axis=1) if y.size - off >= scale else np.empty(0)
+            if len(y_cg) < min_ts_length:
+                continue
+            if what_entropy == 'sampen':
+                offset_vals[off] = sample_entropy(y_cg, m, r)[f'sampen{m}']
+            else:
+                disp = dispersion_entropy(y_cg, m, num_classes, 1)
+                if isinstance(disp, dict):
+                    offset_vals[off] = disp['normDispEn' if what_entropy == 'dispen' else 'normFDispEn']
+        samp_ens[si] = np.mean(offset_vals[~np.isnan(offset_vals)]) if not np.all(np.isnan(offset_vals)) else np.nan
 
     # Outputs: multiscale entropy
     if np.all(np.isnan(samp_ens)):
-        if pre_process_how:
-            pp_text = f"after {pre_process_how} pre-processing"
-        else:
-            pp_text = ""
-        logger.warning(f"Not enough samples ({len(y)} {pp_text}) to compute sample entropy at multiple scales")
-        return {'out': np.nan}
+        pp_text = f"after {pre_process_how} pre-processing" if pre_process_how else ""
+        logger.warning(f"Not enough samples ({len(y)} {pp_text}) to compute {en_name} at multiple scales")
+        return np.nan
 
     # Output raw values
-    out = {f'sampen_s{scale_range[i]}': samp_ens[i] for i in range(num_scales)}
+    out = {f'{en_prefix}_s{scale_range[i]}': samp_ens[i] for i in range(num_scales)}
 
-    # Summary statistics of the variation
-    max_samp_en = np.nanmax(samp_ens)
-    max_ind = np.nanargmax(samp_ens)
-    min_samp_en = np.nanmin(samp_ens)
-    min_ind = np.nanargmin(samp_ens)
+    # Summary statistics of the variation (max, min, mean, std, diff all ignore NaN, as hctsa)
+    valid = samp_ens[~np.isnan(samp_ens)]
+    max_ind = int(np.nanargmax(samp_ens))
+    min_ind = int(np.nanargmin(samp_ens))
+    mean_val = np.mean(valid)
+    std_val = np.std(valid, ddof=1) if valid.size > 1 else 0.0
+    out[f'max{en_name}'] = samp_ens[max_ind]
+    out['maxScale'] = scale_range[max_ind]
+    out[f'min{en_name}'] = samp_ens[min_ind]
+    out['minScale'] = scale_range[min_ind]
+    out[f'mean{en_name}'] = mean_val
+    out[f'std{en_name}'] = std_val
+    with np.errstate(divide='ignore', invalid='ignore'):
+        out[f'cv{en_name}'] = std_val / mean_val
+    d = np.diff(samp_ens)
+    d = d[~np.isnan(d)]
+    out['meanch'] = np.mean(d) if d.size else np.nan
 
-    out.update({
-        'maxSampEn': max_samp_en,
-        'maxScale': scale_range[max_ind],
-        'minSampEn': min_samp_en,
-        'minScale': scale_range[min_ind],
-        'meanSampEn': np.nanmean(samp_ens),
-        'stdSampEn': np.nanstd(samp_ens, ddof=1),
-        'cvSampEn': np.nanstd(samp_ens, ddof=1) / np.nanmean(samp_ens),
-        'meanch': np.nanmean(np.diff(samp_ens))
-    })
+    # Trend across scales: a robust linear fit of the entropy against scale
+    good = ~np.isnan(samp_ens)
+    if good.sum() >= 4:
+        b, se = _robustfit(np.asarray(scale_range, dtype=float)[good], samp_ens[good])
+        out['slope'] = b[1]
+        out['slopeSE'] = se[1]
+    else:
+        out['slope'] = np.nan
+        out['slopeSE'] = np.nan
 
     return out
 
