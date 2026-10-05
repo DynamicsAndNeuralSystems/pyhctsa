@@ -148,7 +148,8 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     Returns
     -------
     dict
-        Measures of the sum of absolute deviations between distributions across the different pairwise comparisons.
+        Mean (`meandiv`) and standard deviation (`stddiv`) of the L1 distances between distributions across the
+        different pairwise comparisons. (For 'each' with two segments, the single L1 distance is returned as a float.)
     """
     # preliminaries
     y = np.asarray(y)
@@ -194,7 +195,6 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     # segments of the time series
     out = {}
     out['meandiv'] = np.mean(divs)
-    out['maxdiv'] = np.max(divs)
     out['stddiv'] = np.std(divs, ddof=1)
 
     return out
