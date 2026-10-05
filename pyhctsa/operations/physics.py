@@ -160,7 +160,8 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     out['sw_taudiff'] = (first_crossing(y, 'ac', 0, 'continuous')
                          - first_crossing(w, 'ac', 0, 'continuous'))
     out['sw_stdrat'] = np.std(w, ddof=1) / np.std(y, ddof=1)
-    out['sw_ac1rat'] = out['w_ac1'] / autocorr(y, 1)[0]
+    # a difference, not a ratio, which blows up when y has ac1 near 0
+    out['sw_ac1diff'] = out['w_ac1'] - autocorr(y, 1, 'Fourier')[0]
     out['sw_minrat'] = np.min(w) / np.min(y)
     out['sw_maxrat'] = np.max(w) / np.max(y)
     out['sw_propcross'] = np.sum((w[:-1] - y[:-1]) * (w[1:] - y[1:]) < 0) / (N - 1)
