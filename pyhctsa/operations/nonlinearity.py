@@ -51,8 +51,8 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     Neighbors farther apart than the standard deviation of the data divided by the
     escape factor are skipped.
 
-    Note: as in TISEAN 3.0.1 for a scalar series, the delay only limits the number of
-    points used; the embedding coordinates are consecutive samples.
+    The series is embedded with delay ``tau``: the point at time ``t`` is
+    ``(y[t], y[t + tau], ..., y[t + (m - 1) * tau])``.
 
     Parameters
     ----------
