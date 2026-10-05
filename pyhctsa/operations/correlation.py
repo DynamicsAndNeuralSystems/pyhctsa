@@ -1191,6 +1191,7 @@ def _ami_from_binning(idx: np.ndarray, valid: np.ndarray, num_bins: int, t: int)
 
     Bit-identical to histogram_ami's per-lag value: the joint histogram of the binned
     delay pair is one ``bincount`` of paired indices instead of re-running histogram2d.
+    Includes the Miller-Madow bias correction.
     """
     if t == 0:
         # for tau = 0, y1 and y2 are identical to y
@@ -1211,7 +1212,17 @@ def _ami_from_binning(idx: np.ndarray, valid: np.ndarray, num_bins: int, t: int)
     pjj = np.tile(pj, (num_bins, 1))
 
     r = pij > 0  # Defining the range in this way, we set log(0) = 0
-    return np.sum(pij[r] * np.log(pij[r] / pii[r] / pjj[r]))
+    ami = np.sum(pij[r] * np.log(pij[r] / pii[r] / pjj[r]))
+
+    # Miller-Madow (Panzeri-Treves) bias correction: the plug-in estimate is biased
+    # upwards by ~(Mxy - Mx - My + 1)/(2n) nats, with M the numbers of occupied joint
+    # and marginal bins and n the number of delay pairs (numel(y1) in MATLAB, i.e.
+    # before discarding points outside the bin range). Deliberately not clamped at 0.
+    n = len(idx) - t
+    mxy = np.count_nonzero(r)
+    mx = np.count_nonzero(pi > 0)
+    my = np.count_nonzero(pj > 0)
+    return ami - (mxy - mx - my + 1) / (2 * n)
 
 
 def histogram_ami(
@@ -1224,7 +1235,11 @@ def histogram_ami(
     The automutual information of the distribution using histograms.
 
     Computes the automutual information between a time series and its time-delayed version
-    using different methods for binning the data.
+    using different methods for binning the data. The plug-in estimate is corrected for
+    finite-sample bias with the Miller-Madow (Panzeri-Treves) term
+    (Mxy - Mx - My + 1) / (2n), where Mxy, Mx and My are the numbers of occupied joint and
+    marginal bins and n is the number of delay pairs; the result is not clamped at zero
+    and can be slightly negative.
 
     Parameters
     ----------
