@@ -1256,6 +1256,87 @@ def peak_intervals(y: ArrayLike, min_prom: float = 1) -> dict:
 
     return out
 
+def drifting_auto_corr(y: ArrayLike, tau: int = 1, what_product: str = 'ac') -> dict:
+    """
+    Drift in a lag-tau (auto)correlation via a cumulative-sum test.
+
+    Forms a lag-tau cross-term product series ``p_t`` and tests whether its mean (i.e., the
+    corresponding linear or nonlinear correlation statistic) is stationary, via CUSUM/bridge
+    statistics on ``cumsum(p)`` (see :func:`drifting_mean_cusum`). Under stationarity
+    ``cumsum(p)`` grows ~linearly; systematic curvature or a localized departure from that line
+    indicates that the correlation structure, not just the mean or variance of ``y`` itself, is
+    drifting over the course of the time series. This is a CUSUM-style stationarity test (cf.
+    Inclan-Tiao's test for a change point in variance) applied to a lag-product series rather
+    than to ``y`` itself, mirroring what :func:`trend` does for ``y``'s own cumsum.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (assumed z-scored).
+    tau : int, optional
+        The lag defining the cross term. Default is 1.
+    what_product : {'ac', 'forward', 'backward', 'asymmetry'}, optional
+        Which cross term ``p_t`` to test for drift:
+
+        - 'ac': ``y(t) * y(t+tau)``, the linear autocorrelation,
+        - 'forward': ``y(t) * y(t+tau)^2``, nonlinear/asymmetric (does the signed value now
+          predict the squared, energy-like value later? cf. :func:`autocorr_x2`),
+        - 'backward': ``y(t)^2 * y(t+tau)``, the other direction (does the squared value now
+          predict the signed value later?),
+        - 'asymmetry': ``y(t) * y(t+tau) * (y(t+tau) - y(t))`` = forward - backward, the
+          leverage/time-irreversibility signature itself (it vanishes in expectation for
+          time-reversible linear processes); tests whether that asymmetry, not just its forward
+          or backward half, is drifting over the time series.
+
+        Default is ``'ac'``.
+
+    Returns
+    -------
+    dict
+        Statistics on the cumulative sum ``yC = cumsum(p)`` (``p`` has N - tau values), or NaN
+        if there are fewer than 20 products, or ``tau >= N - 1``:
+
+        - 'meanYC': the mean of ``yC``,
+        - 'gradient', 'intercept': slope and intercept of an ordinary least-squares line fit to
+          ``yC`` against time,
+        - 'meanYC12', 'meanYC22': the mean of ``yC`` in the first and second half of the series,
+        - 'maxBridge': the largest absolute deviation of ``yC`` from the straight line joining 0
+          to its final value (the 'bridge'), divided by ``std(p)*sqrt(N-tau)``,
+        - 'posMaxBridge': the position (from 0 to 1) of that largest deviation,
+        - 'stdBridge': the standard deviation of the bridge,
+        - 'gradientDiffSE': the difference between the OLS and a robust (bisquare) slope fit to
+          ``yC``, in standard errors of the robust slope,
+        - 'residStdRatio': the standard deviation of the OLS residuals over that of the
+          robust-fit residuals,
+        - 'varRatioTrend': the Kendall rank correlation between time and the log of the squared
+          bridge divided by its Brownian-bridge null variance: whether the bridge wanders more
+          (or less) later in the series than expected under stationarity.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    tau = 1 if tau is None else int(tau)
+    if not _is_zscored(y):
+        logger.warning('The input time series should be z-scored')
+    N = len(y)
+
+    # Lag-tau product series
+    if tau >= N - 1:
+        return np.nan
+    y_earlier = y[:N - tau] # y(t)
+    y_later = y[tau:]       # y(t+tau)
+    if what_product == 'ac':
+        p = y_earlier * y_later
+    elif what_product == 'forward':
+        p = y_earlier * y_later ** 2
+    elif what_product == 'backward':
+        p = y_earlier ** 2 * y_later
+    elif what_product == 'asymmetry':
+        p = y_earlier * y_later * (y_later - y_earlier)
+    else:
+        raise ValueError(f"Unknown what_product '{what_product}' (should be 'ac', 'forward', "
+                         "'backward', or 'asymmetry')")
+
+    return _cumsum_bridge_stats(p)
+
 def trend(y: ArrayLike) -> dict:
     """
     Quantifies various measures of trend in a time series.
