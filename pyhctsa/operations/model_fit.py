@@ -774,6 +774,282 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
     out['Ks_vary_q'] = np.nanmean(_std_omitnan(ks.T))
     return out
 
+def _n4_arx_order(y: np.ndarray, n_max: int) -> int:
+    """
+    The best order of an ARX model by AIC, which sets n4sid's automatic past horizon (the
+    ``localAIC`` step of MATLAB's ``n4sid``). All orders are compared on the same samples,
+    through the R factor of the QR decomposition of the matrix of ``n_max`` consecutive values.
+    """
+    n = len(y)
+    r_fac = np.linalg.qr(sliding_window_view(y, n_max), mode='r')
+    n_eff = n - n_max + 1
+    m = min(n_max - 1, n_eff - 2)
+    v = np.zeros(m + 2)  # (the final element, 0, is part of the search as in MATLAB)
+    for k in range(m + 1):
+        v[k] = np.log((r_fac[k, k] / n_eff) ** 2) + 2 * k / n_eff
+    return int(np.argmin(v))
+
+
+def _n4_horizons(y: np.ndarray, order: int) -> tuple:
+    """
+    n4sid's automatic horizons for a time series (no input): the future horizon
+    ``ceil(1.5 order)`` and a past horizon from the best ARX order, adjusted for the series
+    length and the order (as ``n4sid``).
+    """
+    n = len(y)
+    r = int(np.ceil(1.5 * order))
+    n_max = int(np.ceil(min(4 * order, (n - 1) / 2, max(n // 2 - 1 + order, 1))))
+    s = _n4_arx_order(y, n_max)
+    if n - 2 * r - 2 * s < 0:  # too few samples: shrink the horizons
+        s = min(s, 2 * order)
+        r0, s0 = r, s
+        count = 1
+        while n - 2 * r - 2 * s < 0 and count < r0 + 2 * s0:
+            r, s = max(r - 1, order + 1), min(max(s - 1, order), s0)
+            count += 1
+    r = max(r, order + 1)
+    if s + 1 <= order:  # the past must carry at least as many values as the order
+        s = order
+    return r, s
+
+
+def _stabilize_matrix(a: np.ndarray, thresh: float = 1 + np.sqrt(np.finfo(float).eps)) -> np.ndarray:
+    """
+    Reflect eigenvalues of ``a`` that lie outside the unit circle (beyond ``thresh``) to
+    ``thresh^2/lambda``, as MATLAB's ``fstab``.
+    """
+    from scipy.linalg import rsf2csf, schur
+    eigval, eigvec = np.linalg.eig(a)
+    if np.linalg.cond(eigvec) > 1e8:
+        t_mat, z_mat = schur(a.astype(complex), output='complex')
+        eigval, eigvec = np.diag(t_mat).copy(), z_mat
+        diag_mat = t_mat
+    else:
+        diag_mat = np.diag(eigval)
+    if np.max(np.abs(eigval)) < thresh:
+        return a
+    for k in range(len(eigval)):
+        if abs(diag_mat[k, k]) > thresh:
+            diag_mat[k, k] = thresh ** 2 / diag_mat[k, k]
+    return np.real(eigvec @ diag_mat @ np.linalg.inv(eigvec))
+
+
+def _ss_predict(a: np.ndarray, k: np.ndarray, c: np.ndarray, y: np.ndarray, x0: np.ndarray,
+                steps: int = 1) -> np.ndarray:
+    """
+    ``steps``-ahead predictions of ``y`` from the innovations-form model
+    ``x(t+1) = A x(t) + K e(t)``, ``y(t) = C x(t) + e(t)``, starting from state ``x0``: the
+    predictor state is ``x(t+1) = (A - K C) x(t) + K y(t)`` and the prediction of
+    ``y(t)`` from data up to ``t - steps`` is ``C A^(steps-1) x(t - steps + 1)``.
+    """
+    n_obs = len(y)
+    f = a - k @ c
+    states = np.zeros((n_obs, len(x0)))
+    x = np.asarray(x0, dtype=float)
+    for t in range(n_obs):
+        states[t] = x
+        x = f @ x + k[:, 0] * y[t]
+    pred = np.zeros(n_obs)
+    a_pow = np.linalg.matrix_power(a, steps - 1)
+    for t in range(n_obs):
+        if t >= steps - 1:
+            pred[t] = (c @ a_pow @ states[t - steps + 1])[0]
+        else:  # before the first prediction can be updated by data: run from the initial state
+            pred[t] = (c @ np.linalg.matrix_power(a, t) @ states[0])[0]
+    return pred
+
+
+def _ss_initial_state(a: np.ndarray, k: np.ndarray, c: np.ndarray, y: np.ndarray,
+                      steps: int = 1) -> tuple:
+    """
+    The initial state of a state-space model that minimizes the squared ``steps``-ahead
+    prediction error (``'init', 'e'`` in MATLAB), and the prediction errors ``y - yp`` it gives.
+    """
+    n = a.shape[0]
+    zero = _ss_predict(a, k, c, y, np.zeros(n), steps)
+    basis = np.column_stack([_ss_predict(a, k, c, np.zeros_like(y), e_j, steps) for e_j in np.eye(n)])
+    x0 = np.linalg.lstsq(basis, y - zero, rcond=None)[0]
+    return x0, y - zero - basis @ x0
+
+
+def _n4_state_space(y: np.ndarray, order: Union[int, str]) -> dict:
+    """
+    Subspace identification of a state-space model of a time series (no input),
+    ``x(t+1) = A x(t) + K e(t)``, ``y(t) = C x(t) + e(t)``: the N4SID algorithm with canonical
+    variate analysis (CVA) weighting, as MATLAB's ``n4sid`` with default options.
+
+    The past and future horizons are set automatically, the gain K comes from the Riccati
+    equation for the estimated state and noise covariances, and the initial state is the
+    least-squares estimate for the one-step prediction errors. ``order`` can be ``'best'``,
+    which takes the order from the singular values of the CVA decomposition (orders 1 to 10
+    are considered).
+
+    Returns a dict with ``A``, ``K``, ``C``, the initial state ``x0``, the loss function
+    ``loss`` (mean squared one-step prediction error) and the model ``order``.
+    """
+    from scipy.linalg import solve_discrete_are
+    y = np.asarray(y, dtype=float).ravel()
+    n_obs = len(y)
+    n_try = 10 if order == 'best' else int(order)
+    r, s = _n4_horizons(y, n_try)
+
+    # LQ decomposition of the block Hankel matrix of past (s rows) and future (r rows) outputs
+    j = n_obs - s - r + 1
+    if j < s + r:
+        raise ValueError('Too few samples for the state-space model')
+    hankel = sliding_window_view(y, j)[:s + r]
+    lfac = np.linalg.qr(hankel.T, mode='r').T
+    lfp = lfac[s:, :s]                  # the future rows' dependence on the past
+    u_w, s_w, _ = np.linalg.svd(lfac[s:, :])
+    s_w = s_w[:r]
+    u_c, _, _ = np.linalg.svd((u_w[:, :r].T @ lfp) / s_w[:, None])
+    u_n = (u_w[:, :r] * s_w) @ u_c      # CVA weighting
+    # The sign of each singular vector, and so of each state, is arbitrary (it depends on the
+    # linear algebra library, and MATLAB's cannot be reproduced): fix it so that the output
+    # matrix C has no negative entries
+    u_n = u_n * np.where(u_n[0, :] < 0, -1.0, 1.0)
+
+    if order == 'best':
+        sv = np.linalg.svd(lfp, compute_uv=False)
+        if sv.max() / sv.min() < 1 + np.sqrt(np.finfo(float).eps):
+            n = 1
+        else:
+            above = np.nonzero(np.log(sv) > (np.log(sv).max() + np.log(sv).min()) / 2)[0]
+            n = max(1, min(n_try, above[-1] + 1))
+    else:
+        n = n_try
+
+    # System matrices from the shift structure of the extended observability matrix
+    a_mat = np.linalg.lstsq(u_n[:r - 1, :n], u_n[1:r, :n], rcond=None)[0]
+    c_mat = u_n[:1, :n]
+    if not np.all(np.isfinite(a_mat)):
+        raise ValueError('n4sid failed: the data are not persistently exciting')
+    a_mat = _stabilize_matrix(a_mat)
+
+    # The gain: regress the next state and the output on the state, then solve the Riccati equation
+    r2 = lfac[s:, :s + 1]
+    vl = np.vstack([np.linalg.lstsq(u_n[:r - 1, :n], r2[1:r, :], rcond=None)[0], r2[:1, :]])
+    hl = np.linalg.lstsq(u_n[:, :n], np.hstack([r2[:, :s], np.zeros((r, 1))]), rcond=None)[0]
+    resid = vl - (np.linalg.lstsq(hl.T, vl.T, rcond=None)[0].T) @ hl
+    w_cov = resid @ resid.T
+    try:
+        p_are = solve_discrete_are(a_mat.T, c_mat.T, w_cov[:n, :n], w_cov[n:, n:], s=w_cov[:n, n:])
+        k_mat = np.linalg.solve(w_cov[n:, n:] + c_mat @ p_are @ c_mat.T,
+                                c_mat @ p_are @ a_mat.T + w_cov[:n, n:].T).T
+    except (np.linalg.LinAlgError, ValueError):
+        k_mat = np.zeros((n, 1))
+    if not np.all(np.isfinite(k_mat)):
+        k_mat = np.zeros((n, 1))
+
+    x0, err = _ss_initial_state(a_mat, k_mat, c_mat, y)
+    return {'A': a_mat, 'K': k_mat, 'C': c_mat, 'x0': x0, 'loss': float(np.mean(err ** 2)),
+            'order': n}
+
+
+def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.5,
+                      steps: int = 1) -> dict:
+    """
+    A fitted state-space model of the series, and how well it predicts the later part of the series.
+
+    First fits the model to the whole time series, then trains it on the first portion and
+    tries to predict the rest (hctsa's ``MF_StateSpace_n4sid``, which uses ``n4sid`` from MATLAB's
+    System Identification Toolbox; here the same subspace algorithm is implemented directly).
+    The state-space model has the form (discrete time, no input, sampling interval 1)
+    ``x(t+1) = A x(t) + K e(t)``, ``y(t) = C x(t) + e(t)``,
+    for state-transition matrix ``A`` and output matrix ``C``, noise-input vector ``K``,
+    vector of states ``x`` and disturbance (noise) ``e``. The model fitted to the first
+    ``ptrain`` proportion of the series is used to predict the remaining samples ``steps`` ahead,
+    and the prediction residuals (prediction minus data) are summarized with
+    :func:`residual_analysis`.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    ord : int or 'best', optional
+        The order of the state-space model (the number of states), or ``'best'`` to choose it from
+        the singular values of the subspace decomposition (orders 1 to 10 are considered).
+        Default is 2.
+    ptrain : float, optional
+        The proportion of the time series to use for training. Default is 0.5.
+    steps : int, optional
+        The number of steps ahead to predict. Default is 1.
+
+    Returns
+    -------
+    dict
+        From the model fitted to the entire time series:
+
+        - ``A_1``, ..., ``A_(ord^2)``: the entries of the state-transition matrix ``A``, counted
+          down each column in turn
+        - ``k_1``, ..., ``k_ord``: the entries of the noise-input vector ``K``
+        - ``c_1``, ..., ``c_ord``: the entries of the output vector ``C``
+        - ``x0mod``: the length of the initial state vector
+        - ``np``: the number of parameters fitted
+        - ``Ts``: the sampling interval of the model (always 1)
+        - ``noisevar``: the estimated noise variance
+        - ``lossfn``: the loss function (the estimated prediction-error variance)
+        - ``fpe``: Akaike's final prediction error
+        - ``bestorder``: the order chosen (only when ``ord`` is ``'best'``)
+
+        From the residuals of the predictions of the held-out portion (see
+        :func:`residual_analysis`, ``'full'``): ``meane``, ``meanabs``, ``stde``, ``maxonstd``,
+        ``ac1``, ``ac2``, ``ac3``, ``propbth``, ``ftbth``, ``taurat``, ``sws``, ``swm``,
+        ``normksstat``, ``popt``, ``minsbc``; and ``ac1diff``, the absolute lag-1
+        autocorrelation of the whole time series minus that of the prediction residuals.
+
+    Notes
+    -----
+    The individual entries of ``A``, ``K`` and ``C`` depend on the (arbitrary) coordinates of the
+    hidden state, so they are not directly comparable between time series. Here the sign of each
+    state is fixed so that ``C`` has no negative entries (the sign of a singular vector depends
+    on the linear algebra library); MATLAB's signs are not reproducible, so ``A``, ``K`` and ``C``
+    can differ from MATLAB's by a sign change of states. Everything else (``x0mod``, the loss
+    function, and the residual summaries) is the same as MATLAB's to numerical precision, as long
+    as the subspace decomposition is well-conditioned.
+
+    The residuals are prediction minus data. The held-out portion starts at sample
+    ``floor(ptrain*N)``, overlapping the training portion by one sample.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n_obs = len(y)
+    if ord != 'best':
+        ord = int(ord)
+
+    # The model of the whole time series
+    fit = _n4_state_space(y, ord)
+    n = fit['order']
+    out = {}
+    if ord == 'best':
+        out['bestorder'] = n
+    for i, v in enumerate(fit['A'].ravel(order='F'), start=1):
+        out[f'A_{i}'] = v
+    for i, v in enumerate(fit['K'].ravel(), start=1):
+        out[f'k_{i}'] = v
+    for i, v in enumerate(fit['C'].ravel(), start=1):
+        out[f'c_{i}'] = v
+    out['x0mod'] = np.sqrt(np.sum(fit['x0'] ** 2))
+    out['np'] = n * n + 3 * n   # A, K, C and the initial state
+    out['Ts'] = 1
+    # (3n: the parameters that remain after removing the freedom in the choice of coordinates)
+    n_eff = 3 * n
+    out['noisevar'] = fit['loss'] * n_obs / (n_obs - n_eff)
+    out['lossfn'] = fit['loss']
+    out['fpe'] = fit['loss'] * (1 + n_eff / n_obs) / (1 - n_eff / n_obs)
+
+    # Train on the first portion, predict the rest (overlapping by one sample)
+    n_cut = int(np.floor(ptrain * n_obs))
+    y_test = y[n_cut - 1:]
+    try:
+        train = _n4_state_space(y[:n_cut], ord)
+    except (ValueError, np.linalg.LinAlgError) as err:
+        raise ValueError(f"Couldn't fit the model to this time series: {err}") from err
+    m_residuals = -_ss_initial_state(train['A'], train['K'], train['C'], y_test, int(steps))[1]
+    out.update(residual_analysis(m_residuals, y_test, 'full'))
+    out['ac1diff'] = abs(autocorr(y, [1], 'Fourier')[0]) - abs(autocorr(m_residuals, [1], 'Fourier')[0])
+    return out
+
+
 def _ar_fb(seg: np.ndarray, order: int) -> tuple:
     """
     AR model by forward-backward least squares (MATLAB's default ``ar`` estimator).
