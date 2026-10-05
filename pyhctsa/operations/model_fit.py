@@ -1819,3 +1819,208 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
     out['bestaic'] = np.min(aic)
 
     return out
+
+
+def _kstep_residuals_ss(F: np.ndarray, K: np.ndarray, C: np.ndarray, y: np.ndarray,
+                        steps: int) -> np.ndarray:
+    """
+    Errors, prediction minus data, of the ``steps``-ahead predictor of the innovations-form
+    state-space model ``x(t+1) = F x(t) + K e(t)``, ``y(t) = C x(t) + e(t)`` (MATLAB's
+    ``predict(m, y, steps)``).
+
+    The one-step predictor state ``x(u)`` is updated from the data, ``x(u+1) = (F - K C) x(u) +
+    K y(u)``, and the prediction of ``y(t)`` is ``C F^(steps-1) x(t - steps + 1)``. As in
+    ``predict`` (``'InitialCondition'`` ``'e'``), the state at the first sample ``x(0)`` is the
+    one that minimizes the squared prediction error, and the first ``steps - 1`` predictions
+    are the free run ``C F^t x(0)`` from it (the predictor has no earlier information).
+    """
+    n = len(y)
+    r = F.shape[0]
+    K = np.reshape(K, (r, 1))
+    Cr = np.reshape(C, (1, r))
+    Phi = F - K @ Cr                       # state update of the one-step predictor
+    CFk = Cr @ np.linalg.matrix_power(F, steps - 1)
+    # states x(u) = xz(u) + Phi^u x(0), u = 0..n-1: zero initial state response and homogeneous part
+    xz = np.zeros((n, r))
+    Pw = np.zeros((n, r, r))               # Phi^u
+    x, P = np.zeros(r), np.eye(r)
+    for u in range(n):
+        xz[u], Pw[u] = x, P
+        x = Phi @ x + K[:, 0] * y[u]
+        P = Phi @ P
+    yz = np.zeros(n)
+    B = np.zeros((n, r))
+    for t in range(n):
+        u = t - steps + 1
+        if u >= 0:
+            yz[t] = (CFk @ xz[u])[0]
+            B[t] = (CFk @ Pw[u])[0]
+        else:                              # free run from the initial state
+            B[t] = (Cr @ np.linalg.matrix_power(F, t))[0]
+    x0 = np.linalg.lstsq(B, y - yz, rcond=None)[0]
+    return yz + B @ x0 - y
+
+
+def _kstep_residuals(a: np.ndarray, c: np.ndarray, y: np.ndarray, steps: int) -> np.ndarray:
+    """
+    Errors, prediction minus data, of the ``steps``-ahead predictor of the polynomial model
+    ``a(q) y(t) = c(q) e(t)`` (MATLAB's ``predict(m, y, steps)``).
+
+    ``a`` and ``c`` are the coefficient vectors including the leading 1. The model is put in
+    innovations form (observer canonical form, ``x(t+1) = F x(t) + K e(t)``, ``y(t) = x_1(t) +
+    e(t)``) and passed to :func:`_kstep_residuals_ss`.
+    """
+    r = max(len(a), len(c)) - 1
+    if r == 0:
+        return -np.asarray(y, dtype=float)
+    ap = np.r_[a, np.zeros(r + 1 - len(a))]
+    cp = np.r_[c, np.zeros(r + 1 - len(c))]
+    F = np.zeros((r, r))
+    F[:, 0] = -ap[1:]
+    F[:-1, 1:] = np.eye(r - 1)
+    C = np.zeros(r)
+    C[0] = 1.0
+    return _kstep_residuals_ss(F, cp[1:] - ap[1:], C, y, steps)
+
+
+def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 2,
+                max_steps: int = 6) -> dict:
+    """
+    How the accuracy of multi-step-ahead model predictions compares with trivial
+    predictors and changes with the horizon.
+
+    Given a model, characterizes the variation in goodness of model predictions across
+    a range of prediction lengths, ``l``, from 1-step-ahead to ``max_steps``-steps-ahead
+    predictions. The model is fitted on the full time series and then used to predict the
+    same data (so all predictions are within the sample).
+
+    At each horizon, the errors of the model are compared with those of three trivial
+    predictors: (i) the value ``l`` samples earlier (a sliding mean of length 1),
+    (ii) the average of the last two values, iterated forward ``l`` steps (a sliding mean
+    of length 2), and (iii) the mean of the full time series.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    model : {'ar', 'arma', 'ss'}, optional
+        The time-series model to fit: an AR model (forward-backward least squares, as
+        MATLAB's ``ar``), an ARMA model (``armax``, using ``_armax_fit``), or a state-space
+        model (``n4sid``; not yet implemented). Default is ``'ar'``. The predictions of the
+        fitted model are those of MATLAB's ``predict(m, y, l)``, with the initial state of
+        the predictor estimated.
+    order : int, 'best' or two-vector, optional
+        The order of the model to fit: an integer for ``'ar'`` and ``'ss'``, a two-vector
+        ``[p, q]`` for ``'arma'``, or ``'best'``. For ``'ar'``, ``'best'`` picks the order
+        (1 to 10) by Schwarz's Bayesian criterion using ARfit; for ``'ss'``, n4sid chooses
+        the order from 1 to 10 by a gap rule on its Hankel singular values. Default is 2.
+    max_steps : int, optional
+        The maximum number of steps ahead to predict. Default is 6.
+
+    Returns
+    -------
+    dict
+        - ``stde_h1``, ..., ``stde_h<max_steps>``: the root-mean-square error of the model
+          at horizon ``l``, divided by the lowest root-mean-square error of the three
+          trivial predictors at that horizon,
+        - ``meanabs_h1``, ...: the same for the mean absolute error,
+        - ``ac1_h1``, ...: the absolute lag-1 autocorrelation of the model's errors at each
+          horizon (not a ratio),
+        - ``stde_meanabs_diff``: the absolute value of the mean difference between the
+          model's root-mean-square and mean absolute errors across horizons,
+        - ``stde_meandiff``, ``stde_maxdiff``, ``stde_stddiff``: the mean, maximum, and
+          standard deviation of the change in the model's root-mean-square error from one
+          horizon to the next,
+        - ``stde_ndown``: the number of horizon steps at which the model's
+          root-mean-square error falls.
+
+        The last five outputs use the model's raw errors, not the ratios to the trivial
+        predictors. NaN if the model cannot be fitted.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    max_steps = int(max_steps)
+    if order is None:
+        order = 2
+
+    # Fit the model on the whole time series, and set up its multi-step residuals
+    if model == 'ar':
+        if isinstance(order, str) and order == 'best':
+            # the optimum order by Schwarz's Bayesian criterion, from ARfit
+            try:
+                order = len(_arfit(y, 1, 10, 'sbc', zero=True)[1])
+            except ValueError:
+                return np.nan
+        try:
+            a = np.r_[1.0, _ar_fb(y, int(order))[0]]
+        except np.linalg.LinAlgError:
+            return np.nan
+        c = np.ones(1)
+
+        def model_residuals(k):
+            return _kstep_residuals(a, c, y, k)
+    elif model == 'arma':
+        try:
+            a, c = _armax_fit(y, int(order[0]), int(order[1]))[:2]
+        except NameError:
+            raise NotImplementedError("model='arma' needs the ARMA fit (_armax_fit)")
+        except (np.linalg.LinAlgError, ValueError):
+            return np.nan
+
+        def model_residuals(k):
+            return _kstep_residuals(a, c, y, k)
+    elif model == 'ss':
+        # needs the n4sid fit; its innovations-form (A, K, C) then go to _kstep_residuals_ss
+        raise NotImplementedError("model='ss' needs the state-space (n4sid) fit")
+    else:
+        raise ValueError(f"Unknown model '{model}'")
+
+    # Statistics of the predictions at each horizon
+    mf_rms, mf_abs, mf_ac1 = (np.zeros(max_steps) for _ in range(3))
+    sm1_rms, sm1_abs = np.zeros(max_steps), np.zeros(max_steps)
+    sm2_rms, sm2_abs = np.zeros(max_steps), np.zeros(max_steps)
+    for j in range(max_steps):
+        i = j + 1
+
+        # (1) *** Model ***
+        mres = model_residuals(i)[i - 1:]
+        mf_rms[j] = np.sqrt(np.mean(mres ** 2))
+        mf_abs[j] = np.mean(np.abs(mres))
+        mf_ac1[j] = np.ravel(autocorr(mres, 1, 'Fourier'))[0]
+
+        # (2) *** Sliding mean 1 ***: predicts with the value i steps before it
+        mres = y[i:] - y[:N - i]
+        sm1_rms[j] = np.sqrt(np.mean(mres ** 2))
+        sm1_abs[j] = np.mean(np.abs(mres))
+
+        # (3) *** Sliding mean 2 ***: closed-form solution of the order-2 linear recurrence
+        # p(n) = (p(n-1) + p(n-2)) / 2 that iterating the average of the last two values
+        # i steps ahead converges to
+        weights = np.array([1 + (-1) ** (i + 1) / 2 ** i, 2 + (-1) ** i / 2 ** i]) / 3
+        sm2p = np.column_stack([y[:N - i - 1], y[1:N - i]]) @ weights
+        mres = y[i + 1:] - sm2p
+        sm2_rms[j] = np.sqrt(np.mean(mres ** 2))
+        sm2_abs[j] = np.mean(np.abs(mres))
+
+    # (global) sample mean predictor
+    sminf_res = y - np.mean(y)
+    sminf_rms = np.sqrt(np.mean(sminf_res ** 2))
+    sminf_abs = np.mean(np.abs(sminf_res))
+
+    out = {}
+    for j in range(max_steps):
+        # relative to the best null (dumb) predictor
+        out[f'stde_h{j + 1}'] = mf_rms[j] / min(sm1_rms[j], sm2_rms[j], sminf_rms)
+        out[f'meanabs_h{j + 1}'] = mf_abs[j] / min(sm1_abs[j], sm2_abs[j], sminf_abs)
+        # raw ac1 values -- ratios don't really make sense
+        out[f'ac1_h{j + 1}'] = abs(mf_ac1[j])
+
+    out['stde_meanabs_diff'] = abs(np.mean(mf_rms - mf_abs))
+
+    # Quantify shape, other than being a boring increasing curve
+    d = np.diff(mf_rms)
+    out['stde_meandiff'] = np.mean(d)
+    out['stde_maxdiff'] = np.max(d)
+    out['stde_stddiff'] = np.std(d, ddof=1)
+    out['stde_ndown'] = int(np.sum(d < 0))
+    return out
