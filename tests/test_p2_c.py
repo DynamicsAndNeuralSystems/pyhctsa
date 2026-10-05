@@ -123,17 +123,22 @@ def test_gp_local_prediction_skips_constant_windows():
 # ------------------------------------------------------------------------------
 # AR fits
 # ------------------------------------------------------------------------------
+def _all_nan(out):
+    """True for NaN, or for the dict of NaN fields a failed dict-valued function returns."""
+    return all(np.isnan(v) for v in out.values()) if isinstance(out, dict) else bool(np.isnan(out))
+
+
 def test_exactly_predictable_series_give_nan():
     t = np.arange(1000)
     y = np.sin(2 * np.pi * t / 40)
     y = (y - y.mean()) / y.std(ddof=1)
-    assert np.isnan(mf.ar_cov(y, 3)) and np.isnan(mf.ar_fit(y, 1, 8, 'sbc'))
-    assert np.isnan(mf.ar_cov(y, 2))  # a sinusoid is an exact AR(2) process
+    assert _all_nan(mf.ar_cov(y, 3)) and _all_nan(mf.ar_fit(y, 1, 8, 'sbc'))
+    assert _all_nan(mf.ar_cov(y, 2))  # a sinusoid is an exact AR(2) process
 
 
 def test_compare_ar_short_series_is_nan():
     rng = np.random.RandomState(1)
-    assert np.isnan(mf.compare_ar(rng.randn(30), np.arange(1, 11), 0.5))
+    assert _all_nan(mf.compare_ar(rng.randn(30), np.arange(1, 11), 0.5))
     assert isinstance(mf.compare_ar(rng.randn(300), np.arange(1, 11), 0.5), dict)
 
 

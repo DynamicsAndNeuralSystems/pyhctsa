@@ -30,6 +30,11 @@ ZS = ['s3', 's20', 'expn700', 'quant600', 'short60']  # z-scored series
 ALL = ZS + ['const300']
 
 
+def _all_nan(out):
+    """True for NaN, or for the dict of NaN fields a failed dict-valued function returns."""
+    return all(np.isnan(v) for v in out.values()) if isinstance(out, dict) else bool(np.isnan(out))
+
+
 def _num(v):
     return np.nan if v is None or isinstance(v, str) else float(v)
 
@@ -92,7 +97,7 @@ class TestDistribution:
                   arclength=[0.1, 0.5, 1, 2])
         for n, ml in _series('A_fks'):
             _check(D.fit_kernel_smooth(SERIES[n], **kw), ml, f'fks {n}', rtol=1e-9, atol=1e-12)
-        assert np.isnan(D.fit_kernel_smooth(SERIES['const300']))
+        assert _all_nan(D.fit_kernel_smooth(SERIES['const300']))
 
     @pytest.mark.parametrize('dist', ['norm', 'uni', 'beta'])
     def test_compare_ks_fit(self, dist):
@@ -296,7 +301,7 @@ class TestSpectralScalingMedical:
                 assert 'resrunsz' in py and 'resruns' not in py
 
     def test_sinusoid_fit_too_short(self):
-        assert np.isnan(SP.sinusoid_fit(SERIES['s3'][:9], 'sin3'))
+        assert _all_nan(SP.sinusoid_fit(SERIES['s3'][:9], 'sin3'))
         for n, ml in _series('C_sf_sin3_ten', ZS):
             _check(SP.sinusoid_fit(SERIES[n][:10], 'sin3'), ml, f'sin3 N=10 {n}', rtol=1e-4, atol=1e-5)
 
