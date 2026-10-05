@@ -733,7 +733,10 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     y : array-like
         Input time series.
     how_to_cg : str, optional
-        The method of discretization. Default is ``'quantile'``.
+        The method of discretization: ``'quantile'`` (equiprobable, the default) or
+        ``'updown'`` (a true binary up/down split by the sign of each increment: NOT
+        equiprobable, and requires ``num_groups=2``; see :func:`coarse_grain`).
+        ``'diff'`` (equiprobable by increment) is also accepted.
     num_groups : int, optional
         number of groups in the course-graining. Default is 2.
     tau : int or str, optional
