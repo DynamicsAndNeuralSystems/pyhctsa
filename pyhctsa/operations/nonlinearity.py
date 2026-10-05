@@ -333,12 +333,17 @@ def _ms_nlpe(y: ArrayLike, de: int, tau: int, theiler_win: int = 0) -> float:
 
     return e
 
-def nsamdf(x: ArrayLike, fs: Union[float, int] = 1.0, win_len_rel: Union[int, float] = 14,
-           shift_len_rel: Union[float, int] = 0.5, lag_rel: Union[int, float] = 1,
-           degree: int = 7) -> dict:
+def nsamdf(x: ArrayLike, tau_mult: Union[int, float] = 2, win_len_rel: Union[int, float] = 10,
+           shift_len_rel: Union[float, int] = 0.5, degree: int = 7) -> dict:
     """
     Computes the nonlinearity measure L through nsAMDF
     (nonlinear average magnitude difference function), developed by Ozkurt et al. [1].
+
+    The lag range and window of the nsAMDF are set from the time series' own
+    correlation time: with ``tau`` the first zero-crossing of the autocorrelation
+    function, the maximum lag is ``ceil(tau_mult*tau)`` and the window length
+    ``win_len_rel`` times that. The normalized curves of the nsAMDF for
+    ``p = 2`` and ``p = degree`` are compared by their root-mean-square difference.
 
     This function was authored by Tolga Esat Ozkurt, 2020. (tolgaozkurt@gmail.com).
     Edits by Ben Fulcher for incorporating into hctsa and Joshua Moore for incorporating into pyhctsa.
@@ -352,40 +357,50 @@ def nsamdf(x: ArrayLike, fs: Union[float, int] = 1.0, win_len_rel: Union[int, fl
     ----------
     x : array-like
         Input time series.
-    fs : float or int
-        Sampling frequency in Hz. Default is 1.0.
+    tau_mult : float or int
+        The maximum lag, as a multiple of the first zero-crossing of the
+        autocorrelation function. Default is 2.
     win_len_rel : float or int
-        Window length (a long enough segment is important to estimate the nonlinearity). Default is 14.
+        The window length, as a multiple of the maximum lag (a long enough segment is
+        important to estimate the nonlinearity). Default is 10.
     shift_len_rel : float or int
-        This amounts to window length - overlap length btw windows. Default is 0.5.
-    lag_rel : float or int
-        TMaximum lag for nsAMDF, we chose it as 1. Default is 1.
-    degree : The chosen degree p should ideally be large enough to capture the
-           highest order of nonlinearity within the data. Default is 7.
+        The shift between successive windows, as a proportion of the window length
+        (window length minus overlap). Default is 0.5.
+    degree : int
+        The chosen degree p should ideally be large enough to capture the
+        highest order of nonlinearity within the data. Default is 7.
     
     Returns
     -------
-    float
-        The nsAMDF nonlinearity measure L. 
+    dict
+        ``L``, the nsAMDF nonlinearity measure: the root-mean-square difference
+        between the nsAMDF curves for p = 2 and p = ``degree``, each normalized by
+        its maximum (so it is invariant to the scale of the series). Returns NaN if the
+        autocorrelation function has no zero-crossing, or the window is longer than
+        the time series.
     """
-    window_length = int(win_len_rel * fs)
-    shift_length = int(shift_len_rel * window_length)
-    lag = int(fs * lag_rel)
+    x = np.asarray(x, dtype=float).ravel()
+    tau = first_crossing(x, 'ac', 0, 'discrete')
+    if np.isnan(tau):
+        logger.warning('No autocorrelation zero-crossing to set the nsAMDF lag range')
+        return np.nan
+    max_lag = int(np.ceil(tau_mult * tau))
+    window_length = win_len_rel * max_lag
+    if window_length > len(x):
+        logger.warning('Time series too short relative to its correlation time')
+        return np.nan
+    window_length = int(window_length)
+    shift_length = max(1, int(np.floor(shift_len_rel * window_length)))
 
-    out = {}
-    # nsAMDF for p = 2
-    s2 = _normed_single_curve_length_windowed(x, win_len=window_length, shift_len=shift_length, lag=lag, nrmdegree=2)
-    #out['s2'] = s2 / np.max(s2) # normalized
+    s2 = _normed_single_curve_length_windowed(x, win_len=window_length, shift_len=shift_length,
+                                              lag=max_lag, nrmdegree=2)
+    sd = _normed_single_curve_length_windowed(x, win_len=window_length, shift_len=shift_length,
+                                              lag=max_lag, nrmdegree=degree)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        s2n = s2 / np.max(s2)
+        sdn = sd / np.max(sd)
 
-    # nsAMDF for p = degree:
-    sd = _normed_single_curve_length_windowed(x, win_len=window_length, shift_len=shift_length, lag=lag, nrmdegree=degree)
-    #out['sd'] = sd / np.max(sd) # normalized
-    
-    #% If you like, you can bandpass filter s2 and sd for the specific frequency band
-    #% of nonlinear effect both to compute L and plot them as such
-    out['L'] = np.linalg.norm(s2 - sd)
-
-    return out
+    return {'L': np.sqrt(np.mean((s2n - sdn)**2))}
 
 def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
          max_n: Union[int, str] = 5000,
