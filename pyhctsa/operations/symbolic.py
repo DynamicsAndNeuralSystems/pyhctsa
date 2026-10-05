@@ -555,6 +555,7 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
         out['meanstretch1'] = 0
         out['meanstretch1norm'] = 0
         out['stdstretch1'] = np.nan
+        out['stdstretch1norm'] = np.nan
     else:
         out['longstretch1'] = np.max(stretch1)
         out['longstretch1norm'] = np.max(stretch1) / N
