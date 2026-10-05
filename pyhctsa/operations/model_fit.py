@@ -815,11 +815,12 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50) ->
     definiteness, the counterpart of gpml's ``MATLAB:posdef`` error.
     """
     nhps = cov.n_hyp
-    # Initial values: the length parameter is in the ballpark of the difference
-    # between time elements; the remaining log-hyperparameters start at zero and
-    # the likelihood noise at log(0.1).
-    hyp0 = np.concatenate([[np.log(np.mean(np.diff(tt)))],
-                           np.zeros(nhps - 1), [np.log(0.1)]])
+    # Initial values, set component by component as in MF_GP_LearnHyperp for
+    # covSum{covSEiso, covNoise}: the SE length scale is in the ballpark of the
+    # difference between time elements, its log-magnitude starts at zero, the noise
+    # covariance at log(0.1), and so does the likelihood noise.
+    hyp0 = np.array([np.log(np.mean(np.diff(tt))), 0.0, np.log(0.1), np.log(0.1)])
+    assert nhps == 3
 
     def _nlz(theta):
         hyp = {'cov': theta[:nhps], 'lik': theta[nhps], 'mean': np.zeros(0)}
