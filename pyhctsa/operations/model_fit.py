@@ -5,7 +5,6 @@ import numba
 import numpy as np
 from numpy.typing import ArrayLike
 from numpy.lib.stride_tricks import sliding_window_view
-from hmmlearn.hmm import GaussianHMM
 from scipy.optimize import curve_fit
 from scipy.signal import lfilter
 from scipy.special import gammaincc
@@ -22,55 +21,228 @@ from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..toolboxes.matlab.optimizers import minimize
 from ..utils import _linspace, _ml_randperm, _ml_rng, _zscore_matlab, get_tau, matlab_quantile, z_score
 
-def _zg_hmm_fit(y_train: np.ndarray, num_states: int, rng: np.random.RandomState,
-                n_cycles: int = 30, tol: float = 1e-4) -> tuple:
+@numba.njit(cache=True, error_model='numpy')
+def _zg_hmm_em(x, mu, cov, P, pi, n_cycles, tol, cov_floor):
     """
-    Gaussian HMM fit as Zoubin Ghahramani's ``ZG_hmm`` (used by hctsa), with hmmlearn's EM.
-
-    The initial state means are random around the data mean (scaled by the data standard
-    deviation), the start probabilities and transition matrix random, and the tied variance
-    the data variance, all drawn from ``rng``. At most ``n_cycles`` cycles of EM, stopping when
-    the proportional change in the log-likelihood falls below ``tol`` (shared by :func:`hmm_fit` and
-    :func:`hmm_compare_n_states`).
-
-    Returns the fitted ``GaussianHMM`` and the log-likelihood of the training data at each
-    cycle.
+    Baum-Welch EM for a Gaussian-emission HMM with a variance shared by all states, as
+    Zoubin Ghahramani's ``ZG_hmm`` (hctsa's ``ZG_hmm``, with its covariance floor and
+    log-domain emission scaling). Returns the fitted parameters and the log-likelihood
+    at the start of each cycle (before that cycle's M step).
     """
-    y_col = y_train.reshape(-1, 1)
-    cov0 = np.var(y_train, ddof=1)
-    mu0 = rng.randn(num_states, 1) * np.sqrt(cov0) + np.mean(y_train)
-    pi0 = rng.random_sample(num_states)
-    pi0 = pi0 / pi0.sum()
-    p0 = rng.random_sample((num_states, num_states))
-    p0 = p0 / p0.sum(axis=1, keepdims=True)
-
-    model = GaussianHMM(n_components=num_states, covariance_type='tied',
-                        n_iter=1,  # one EM cycle per fit() call, so that we control the stopping rule
-                        tol=0, params='stmc', init_params='')
-    model.startprob_ = pi0
-    model.transmat_ = p0
-    model.means_ = mu0
-    model.covars_ = np.array([[cov0]])
-
-    LL = []  # log-likelihood of the training data at the start of each cycle
-    lik_base = 0.0
+    T = len(x)
+    K = len(mu)
+    mu = mu.copy()
+    P = P.copy()
+    pi = pi.copy()
+    LL = np.zeros(n_cycles)
+    n_done = 0
+    lik = 0.0
+    likbase = 0.0
+    alpha = np.zeros((T, K))
+    beta = np.zeros((T, K))
+    B = np.zeros((T, K))
+    gamma = np.zeros((T, K))
+    scale = np.zeros(T)
+    shift = np.zeros(T)
     for cycle in range(1, n_cycles + 1):
-        model.fit(y_col)  # one E step and M step
-        lik = model.monitor_.history[-1]
-        old_lik = LL[-1] if LL else 0.0
-        LL.append(lik)
+        # --- E step (forward-backward with scaling)
+        logk2 = np.log((2 * np.pi) ** (-0.5)) - 0.5 * np.log(cov)
+        for t in range(T):
+            m = -np.inf
+            for l in range(K):
+                d = x[t] - mu[l]
+                lb = logk2 - 0.5 * d * d / cov
+                B[t, l] = lb
+                if lb > m:
+                    m = lb
+            shift[t] = m
+            for l in range(K):
+                B[t, l] = np.exp(B[t, l] - m)
+        s = 0.0
+        for l in range(K):
+            alpha[0, l] = pi[l] * B[0, l]
+            s += alpha[0, l]
+        scale[0] = s
+        for l in range(K):
+            alpha[0, l] /= s
+        for t in range(1, T):
+            s = 0.0
+            for l in range(K):
+                a = 0.0
+                for j in range(K):
+                    a += alpha[t - 1, j] * P[j, l]
+                alpha[t, l] = a * B[t, l]
+                s += alpha[t, l]
+            scale[t] = s
+            for l in range(K):
+                alpha[t, l] /= s
+        for l in range(K):
+            beta[T - 1, l] = 1.0 / scale[T - 1]
+        for t in range(T - 2, -1, -1):
+            for j in range(K):
+                a = 0.0
+                for l in range(K):
+                    a += beta[t + 1, l] * B[t + 1, l] * P[j, l]
+                beta[t, j] = a / scale[t]
+        for t in range(T):
+            s = 0.0
+            for l in range(K):
+                gamma[t, l] = alpha[t, l] * beta[t, l]
+                s += gamma[t, l]
+            for l in range(K):
+                gamma[t, l] /= s
+        sxi = np.zeros((K, K))
+        for t in range(T - 1):
+            s = 0.0
+            for j in range(K):
+                for l in range(K):
+                    s += P[j, l] * alpha[t, j] * beta[t + 1, l] * B[t + 1, l]
+            for j in range(K):
+                for l in range(K):
+                    sxi[j, l] += P[j, l] * alpha[t, j] * beta[t + 1, l] * B[t + 1, l] / s
+        loglik = 0.0
+        for t in range(T):
+            loglik += np.log(scale[t]) + shift[t]
+        # --- M step
+        gsum = np.zeros(K)
+        for l in range(K):
+            num = 0.0
+            for t in range(T):
+                gsum[l] += gamma[t, l]
+                num += gamma[t, l] * x[t]
+            mu[l] = num / gsum[l]
+        for j in range(K):
+            rs = 0.0
+            for l in range(K):
+                rs += sxi[j, l]
+            for l in range(K):
+                P[j, l] = sxi[j, l] / rs
+        for l in range(K):
+            pi[l] = gamma[0, l]
+        c = 0.0
+        for l in range(K):
+            for t in range(T):
+                d = x[t] - mu[l]
+                c += gamma[t, l] * d * d
+        gtot = 0.0
+        for l in range(K):
+            gtot += gsum[l]
+        cov = max(c / gtot, cov_floor)
+        # --- convergence
+        oldlik = lik
+        lik = loglik
+        LL[cycle - 1] = lik
+        n_done = cycle
         if cycle <= 2:
-            lik_base = lik
-        elif lik < old_lik:
+            likbase = lik
+        elif lik < oldlik:
             pass  # a decrease (numerical violation): keep going, as ZG_hmm does
-        elif (lik - lik_base) < (1 + tol) * (old_lik - lik_base) or not np.isfinite(lik):
+        elif (lik - likbase) < (1 + tol) * (oldlik - likbase) or not np.isfinite(lik):
             break
-    return model, np.array(LL)
+    return mu, cov, P, pi, LL[:n_done]
 
 
-def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed: int = 0) -> dict:
+def _zg_hmm_fit(y_train: np.ndarray, num_states: int, n_cycles: int = 30,
+                rhos: tuple = (0.9, 0.5, 0.99), floor_frac: float = 0.01,
+                tol: float = 1e-4) -> tuple:
     """
-    Fits a Hidden Markov Model to sequential data.
+    Deterministic Gaussian HMM fit (hctsa's ``ZG_hmm_fit``, used by ``MF_hmm_Fit`` and
+    ``MF_hmm_CompareNStates``; shared by :func:`hmm_fit` and :func:`hmm_compare_n_states`).
+
+    Baum-Welch EM (Zoubin Ghahramani's ``ZG_hmm``) is run from six fixed starting points and
+    the fit with the highest final training log-likelihood is kept. The starts have a shared
+    variance equal to the variance of the data, equal initial-state probabilities, and a
+    transition matrix with probability ``rho`` of staying in a state (and ``(1-rho)/(K-1)`` of
+    moving to each other one) for each ``rho`` in ``rhos``, and two placements of the K state
+    means: at the ``(k-1/2)/K`` quantiles of the data (sorted, element ``ceil(N(k-1/2)/K)``)
+    and evenly spaced from ``mean - std`` to ``mean + std``. The shared variance is not
+    allowed to fall below ``floor_frac`` times the data variance. At most ``n_cycles`` cycles,
+    stopping when the proportional change in log-likelihood falls below ``tol``.
+
+    Returns ``(mu, cov, P, pi, LL)``: state means, shared variance, transition matrix,
+    initial-state probabilities and the log-likelihood at each cycle (NaN-filled parameters
+    and ``LL = [nan]`` if no start gives a finite fit).
+    """
+    x = np.ascontiguousarray(y_train, dtype=float).ravel()
+    K = int(num_states)
+    N = len(x)
+    v = np.var(x, ddof=1)
+    xs = np.sort(x)
+    idx = np.ceil(N * (np.arange(1, K + 1) - 0.5) / K).astype(int) - 1
+    mean_sets = [xs[idx], np.mean(x) + np.std(x, ddof=1) * _linspace(-1, 1, K)]
+    pi0 = np.ones(K) / K
+    best_ll = -np.inf
+    best = (np.full(K, np.nan), np.nan, np.full((K, K), np.nan), np.full(K, np.nan), np.array([np.nan]))
+    for r in range(2 * len(rhos)):
+        mu0 = mean_sets[0 if r < len(rhos) else 1]
+        rho = rhos[r % len(rhos)]
+        if K > 1:
+            P0 = (1 - rho) / (K - 1) * np.ones((K, K)) + (rho - (1 - rho) / (K - 1)) * np.eye(K)
+        else:
+            P0 = np.ones((1, 1))
+        mu, cov, P, pi, LL = _zg_hmm_em(x, mu0, v, P0, pi0, n_cycles, tol, floor_frac * v)
+        ok = np.all(np.isfinite(mu)) and np.isfinite(cov) and np.all(np.isfinite(P)) \
+            and np.all(np.isfinite(pi)) and np.isfinite(LL[-1])
+        if ok and LL[-1] > best_ll:
+            best_ll = LL[-1]
+            best = (mu, cov, P, pi, LL)
+    return best
+
+
+@numba.njit(cache=True, error_model='numpy')
+def _zg_hmm_loglik(x, mu, cov, P, pi):
+    """Log-likelihood of ``x`` under a fitted Gaussian HMM (hctsa's ``ZG_hmm_cl``)."""
+    T = len(x)
+    K = len(mu)
+    tiny = np.exp(-700.0)
+    logk2 = np.log((2 * np.pi) ** (-0.5)) - 0.5 * np.log(cov)
+    alpha = np.zeros(K)
+    new = np.zeros(K)
+    B = np.zeros(K)
+    lik = 0.0
+    for t in range(T):
+        m = -np.inf
+        for l in range(K):
+            d = x[t] - mu[l]
+            B[l] = logk2 - 0.5 * d * d / cov
+            if B[l] > m:
+                m = B[l]
+        for l in range(K):
+            B[l] = np.exp(B[l] - m)
+        s = 0.0
+        for l in range(K):
+            if t == 0:
+                new[l] = pi[l] * B[l]
+            else:
+                a = 0.0
+                for j in range(K):
+                    a += alpha[j] * P[j, l]
+                new[l] = a * B[l]
+            s += new[l]
+        for l in range(K):
+            alpha[l] = new[l] / (s + tiny)
+        if s == 0:
+            s = tiny
+        lik += np.log(s) + m
+    return lik
+
+
+def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3) -> dict:
+    """
+    A hidden Markov model fitted to the first part of the series, and how well it describes the rest.
+
+    Fits a hidden Markov model (HMM) with Gaussian emissions to the first ``train_p``
+    proportion of the time series (hctsa's ``MF_hmm_Fit``, using Zoubin Ghahramani's ``ZG_hmm``
+    EM). The emissions of all states share one variance (a tied covariance). The model is
+    trained with at most 30 cycles of EM (Baum-Welch), or until convergence.
+
+    The fit is deterministic. EM is run from six fixed starting points (state means at the
+    quantiles ``(k-1/2)/num_states`` of the training data, or evenly spaced within one standard
+    deviation of its mean; a variance equal to that of the training data; and probabilities
+    0.5, 0.9 and 0.99 of staying in a state); the fit with the highest training log-likelihood is
+    kept (see :func:`_zg_hmm_fit`). The shared variance cannot fall below 1% of the variance of
+    the training data, so that states placed on a few repeated values do not give unbounded
+    likelihoods.
 
     Parameters
     ----------
@@ -80,8 +252,6 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
         The proportion of data to train on, 0 < train_p < 1. Default is 0.8.
     num_states : int
         The number of states in the HMM. Default is 3.
-    random_seed : int
-        Random seed for the initial parameters of the fit. Default is 0.
 
     Returns
     -------
@@ -89,65 +259,58 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
         Dictionary of statistics based on the fitted HMM: the sorted state means
         (``Mu_1``, ...) and their ``meanMu``, ``rangeMu``, ``maxMu``, ``minMu``;
         the tied covariance ``Cov``; the transition matrix summaries
-        ``Pmeandiag``, ``stdmeanP``, ``maxP``, ``meanP``, ``stdP``; the training
-        log-likelihood per sample ``LLtrainpersample`` and the number of EM
-        iterations ``nit``; and the test log-likelihood per sample
-        ``LLtestpersample`` and ``LLdifference``.
+        ``Pmeandiag``, ``stdmeanP`` (standard deviation across states of the mean probability
+        of moving into each state), ``maxP`` and ``stdP``; the training
+        log-likelihood per sample ``LLtrainpersample`` (the highest reached);
+        and the test log-likelihood per sample ``LLtestpersample`` and
+        ``LLdifference`` (test minus training).
 
     """
-    #Actually highly stochastic, so for reproducible results helps to set the
-    #random seed.
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float).ravel()
     n_samples = len(y)
     out = {}
 
     # 1. Split data into training and test sets
     n_train = int(np.floor(train_p * n_samples))
-    n_test = n_samples-n_train
+    n_test = n_samples - n_train
     if n_train <= 0 or n_train > n_samples:
         raise ValueError("Invalid training proportion 'train_p' results in an invalid training set size.")
-    
+    if n_test == 0:
+        raise ValueError('No data for test set for HMM fitting')
+
     y_train = y[:n_train]
     y_test = y[n_train:]
-    y_test_reshaped = y_test.reshape(-1, 1)
     num_states = int(num_states)
 
-    # Initialize and iterate Baum-Welch as in Zoubin Ghahramani's ZG_hmm (used by hctsa): see
-    # _zg_hmm_fit. (hmmlearn's k-means initialization and absolute tolerance find different,
-    # generally poorer, local optima: the fitted-model statistics then do not follow the
-    # distribution of hctsa's.)
-    rng = _ml_rng(0 if random_seed is None else int(random_seed))
-    model, LL = _zg_hmm_fit(y_train, num_states, rng)
+    # 2. Train the HMM (deterministic EM from fixed starts, see _zg_hmm_fit)
+    mu, cov, p_matrix, pi, LL = _zg_hmm_fit(y_train, num_states)
 
-    means_sorted = np.sort(model.means_.flatten())
-    for i, mu in enumerate(means_sorted):
-        out[f'Mu_{i+1}'] = mu
+    means_sorted = np.sort(mu)
+    for i, m in enumerate(means_sorted):
+        out[f'Mu_{i+1}'] = m
     out['meanMu'] = np.mean(means_sorted)
     out['rangeMu'] = np.ptp(means_sorted)
     out['maxMu'] = np.max(means_sorted)
     out['minMu'] = np.min(means_sorted)
 
     # Covariance Cov
-    out['Cov'] = model.covars_.flatten()[0]
+    out['Cov'] = cov
 
-    #% Transition matrix
-    p_matrix = model.transmat_
-
+    # Transition matrix
     out['Pmeandiag'] = np.mean(np.diag(p_matrix))
     out['stdmeanP'] = np.std(np.mean(p_matrix, axis=0), ddof=1)
     out['maxP'] = np.max(p_matrix)
-    out['meanP'] = np.mean(p_matrix)
     out['stdP'] = np.std(p_matrix, ddof=1)
 
-    #% Within-sample log-likelihood
+    # Within-sample log-likelihood
     out['LLtrainpersample'] = np.max(LL) / n_train
-    out['nit'] = len(LL)
 
-    #Calculate log likelihood for the test data
-    out['LLtestpersample'] = model.score(y_test_reshaped)/n_test
+    # Log-likelihood of the test data
+    out['LLtestpersample'] = _zg_hmm_loglik(y_test, mu, cov, p_matrix, pi) / n_test
     out['LLdifference'] = out['LLtestpersample'] - out['LLtrainpersample']
 
     return out
+
 
 def _armax_fit(y: np.ndarray, p: int, q: int) -> tuple:
     """
@@ -3262,8 +3425,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
 
 
 def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
-                         n_states: ArrayLike = (2, 3, 4),
-                         random_seed: Union[int, str, None] = 0) -> dict:
+                         n_states: ArrayLike = (2, 3, 4)) -> dict:
     """
     How the fit of hidden Markov models to the series changes with the number of hidden
     states.
@@ -3271,9 +3433,9 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
     Fits Gaussian hidden Markov models (HMMs) with different numbers of states to the first
     ``train_p`` proportion of the time series (each with at most 30 cycles of EM), and
     compares the resulting log-likelihoods per sample on the training part and on the
-    held-out remainder. Each fit is initialized and stopped as in :func:`hmm_fit`
-    (``ZG_hmm``'s random initialization and proportional tolerance), the random draws
-    continuing through the successive fits.
+    held-out remainder (hctsa's ``MF_hmm_CompareNStates``). Each model is fitted
+    deterministically, by the best of six fixed starting points with a floor on the shared
+    variance (:func:`_zg_hmm_fit`, as in :func:`hmm_fit`).
 
     Parameters
     ----------
@@ -3283,10 +3445,6 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
         The initial proportion of the time series to train the model on. Default is 0.6.
     n_states : array-like of int, optional
         The numbers of states to compare. Default is 2 to 4.
-    random_seed : int, 'default', 'none' or None, optional
-        Seed for the random initial parameters, reset once before the first fit as
-        ``BF_ResetSeed`` does (0, or ``'default'``, is MATLAB's default); ``'none'`` or
-        ``None`` leaves the stream alone. Default is 0.
 
     Returns
     -------
@@ -3308,14 +3466,6 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
     n_states = np.atleast_1d(np.asarray(n_states)).astype(int)
     n_train = int(np.floor(train_p * N))  # number of initial samples to train the model on
 
-    # reset the random seed if specified (BF_ResetSeed), once before the first fit
-    if isinstance(random_seed, str) and random_seed == 'default':
-        random_seed = 0
-    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
-        rng = np.random.RandomState()
-    else:
-        rng = _ml_rng(int(random_seed))
-
     if n_train >= N:
         raise ValueError(f'train_p = {train_p:g} leaves no test data for a series of length {N}')
     if n_train < 2:
@@ -3329,10 +3479,10 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
     ll_tests = np.zeros(len(n_states))
     for j, k in enumerate(n_states):
         # train an HMM with k states for 30 cycles of EM (or until convergence)
-        model, LL = _zg_hmm_fit(y_train, k, rng)
+        mu, cov, p_matrix, pi, LL = _zg_hmm_fit(y_train, k)
         ll_trains[j] = LL[-1] / n_train
         # log likelihood of the test data
-        ll_tests[j] = model.score(y_test.reshape(-1, 1)) / n_test
+        ll_tests[j] = _zg_hmm_loglik(y_test, mu, cov, p_matrix, pi) / n_test
 
     out = {}
     out['meanLLtrain'] = np.mean(ll_trains)
