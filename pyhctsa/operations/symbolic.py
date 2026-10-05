@@ -7,9 +7,9 @@ logger = logging.getLogger('pyhctsa')
 from scipy.stats import mstats
 from scipy.signal import resample_poly
 
-from ..operations.correlation import first_crossing
+from ..operations.correlation import autocorr
 from ..toolboxes.matlab.matlab_fit import fit_exp1, fit_poly1, goodness_of_fit
-from ..utils import binarize, matlab_quantile, sign_change
+from ..utils import binarize, matlab_quantile, sign_change, get_tau
 
 def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_groups: int = 3,
              coarse_grain_method: str = 'quantile', num_iters: int = 500,
@@ -39,16 +39,26 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     memory : float, optional
         The memory length (either number of samples, or a proportion of the time-series length 
         if between 0 and 1). Default is 0.2.
-    num_groups : int, optional
-        The number of groups to coarse-grain the time series into. Default is 3.
-    coarse_grain_method : {'quantile', 'updown', 'embed2quadrants'}, optional
-        The coarse-graining or symbolization method:
+    num_groups : int or str, optional
+        The number of groups to coarse-grain the time series into (2 for 'updown'), or, for
+        'embed2quadrants'/'embed2octants', the time delay of the embedding: a number of
+        samples, ``'ac1e'`` (the floor of the first 1/e crossing of the autocorrelation
+        function), ``'mi'`` (the smaller of the first minimum of the Kraskov automutual
+        information and the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`), or ``'tau'``
+        (the first zero-crossing of the autocorrelation function, kept for backward
+        compatibility). Default is 3.
+    coarse_grain_method : {'quantile', 'diff', 'updown', 'embed2quadrants', 'embed2octants'}, optional
+        The coarse-graining or symbolization method (see :func:`coarse_grain`):
 
         - 'quantile': equiprobable alphabet by value of each time-series datapoint (default),
-        - 'updown': equiprobable alphabet by incremental changes in the time-series values,
-        - 'embed2quadrants': 4-letter alphabet of the quadrant each data point resides in a 
-            2D embedding space.
-        
+        - 'diff': equiprobable alphabet by the value of the incremental changes in the
+          time series (not a literal sign split; called 'updown' before it was renamed in hctsa),
+        - 'updown': a binary split by the sign of each increment (requires ``num_groups=2``;
+          not equiprobable),
+        - 'embed2quadrants': 4-letter alphabet of the quadrant each data point resides in a
+          2D embedding space,
+        - 'embed2octants': 8-letter alphabet of the octant each data point resides in.
+
         Default is ``'quantile'``.
 
     num_iters : int, optional
@@ -72,7 +82,8 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
         - 'tstat': ``effectSize * sqrt(number of test points)``.
 
         All NaN if the coarse-graining is undefined (the embedding delay for
-        'embed2quadrants' cannot be determined). ``effectSize`` and ``tstat`` are NaN if
+        'embed2quadrants'/'embed2octants' cannot be determined: a constant series, or
+        ``'ac1e'`` for a series whose autocorrelation function never falls to 1/e). ``effectSize`` and ``tstat`` are NaN if
         the information gain has no variation.
     """
 
@@ -188,27 +199,43 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
 
     return out
 
+def _resolve_tau(y: np.ndarray, tau: Union[int, float, str]) -> Union[int, float]:
+    """
+    Resolve a time delay as hctsa's SB_MotifTwo/Three, SB_TransitionMatrix and
+    SB_TransitionPAlphabet do.
+
+    `tau` is a number of samples, or a string that sets it from the series: ``'ac'`` (first
+    zero crossing of the autocorrelation function), ``'ac1e'`` (floor of its first 1/e
+    crossing) or ``'mi'`` (the smaller of the first minimum of the Kraskov automutual
+    information and the 'ac1e' delay), see :func:`pyhctsa.utils.get_tau`. A delay set from the
+    series is capped at floor(N/50), so that the downsampled series stays long enough to count
+    words/transitions. Returns NaN if the delay cannot be determined (e.g., an undefined ACF
+    of a constant series, or an ACF that never falls to 1/e for 'ac1e').
+    """
+    if isinstance(tau, str):
+        if tau not in ('ac', 'ac1e', 'mi'):
+            raise ValueError(f"Unknown tau '{tau}': use an integer, 'ac', 'ac1e' or 'mi'")
+        tau = get_tau(y, tau)
+        if np.isnan(tau):
+            return np.nan
+        if tau > len(y) / 50:  # cap at 2% of the series length
+            tau = int(np.floor(len(y) / 50))
+    if np.isnan(tau):
+        return np.nan
+    return int(tau)
+
+
 def _downsample_by_tau(y: np.ndarray, tau: Union[int, str]) -> Optional[np.ndarray]:
     """
     Downsample `y` by a time delay before symbolizing it (as hctsa's SB_MotifTwo/Three).
 
-    `tau` is an integer, or ``'ac'`` for the first zero-crossing of the autocorrelation
-    function, capped at floor(N/50) so that the downsampled series stays long enough to
-    count words. The series is downsampled at rate 1:tau (anti-alias filtered, as MATLAB's
-    `resample`) if tau > 1. Returns None if tau cannot be determined (e.g., an undefined
-    ACF of a constant series).
+    `tau` is an integer or a rule that sets it from the series ('ac', 'ac1e', 'mi'; see
+    :func:`_resolve_tau`). The series is downsampled at rate 1:tau (anti-alias filtered, as
+    MATLAB's `resample`) if tau > 1. Returns None if tau cannot be determined.
     """
-    if isinstance(tau, str):
-        if tau != 'ac':
-            raise NotImplementedError(f"tau = '{tau}' is not supported (only an integer or 'ac')")
-        tau = first_crossing(y, 'ac', 0, 'discrete')
-        if np.isnan(tau):
-            return None
-        if tau > len(y) / 50:  # cap at 2% of the series length
-            tau = int(np.floor(len(y) / 50))
+    tau = _resolve_tau(y, tau)
     if np.isnan(tau):
         return None
-    tau = int(tau)
     if tau > 1:  # symbolize words at this lag by downsampling first
         y = resample_poly(y, 1, tau)
     return y
@@ -238,9 +265,12 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff', tau: Union[int, str] = 1
 
     tau : int or str, optional
         The time series is first downsampled by this factor (anti-alias filtered, as
-        MATLAB's `resample`), so that the words are formed at this lag: an integer, or
-        ``'ac'`` for the first zero-crossing of the autocorrelation function (capped at
-        floor(N/50)). Default is 1 (no downsampling). NaN is returned if tau cannot be
+        MATLAB's `resample`), so that the words are formed at this lag: an integer, or a
+        rule that sets it from the series: ``'ac'`` (the first zero-crossing of the
+        autocorrelation function), ``'ac1e'`` (the floor of its first 1/e crossing) or
+        ``'mi'`` (the smaller of the first minimum of the Kraskov automutual information and
+        the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`). A delay set by a rule is capped
+        at floor(N/50). Default is 1 (no downsampling). NaN is returned if tau cannot be
         determined.
 
     Returns
@@ -413,9 +443,12 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile', tau: Union[int, str] = 1
 
     tau : int or str, optional
         The time series is first downsampled by this factor (anti-alias filtered, as
-        MATLAB's `resample`), so that the words are formed at this lag: an integer, or
-        ``'ac'`` for the first zero-crossing of the autocorrelation function (capped at
-        floor(N/50)). Default is 1 (no downsampling). NaN is returned if tau cannot be
+        MATLAB's `resample`), so that the words are formed at this lag: an integer, or a
+        rule that sets it from the series: ``'ac'`` (the first zero-crossing of the
+        autocorrelation function), ``'ac1e'`` (the floor of its first 1/e crossing) or
+        ``'mi'`` (the smaller of the first minimum of the Kraskov automutual information and
+        the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`). A delay set by a rule is capped
+        at floor(N/50). Default is 1 (no downsampling). NaN is returned if tau cannot be
         determined.
 
     Returns
@@ -678,6 +711,106 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
 
     return out
 
+def binary_stats_ar1(y: ArrayLike, binary_method: str = 'mean') -> dict:
+    """
+    Binary run-length statistics normalized against an AR(1) null.
+
+    Binarizes the time series (as :func:`binary_stats`) and compares the resulting
+    run-length statistics to their analytic expectation under a Gaussian AR(1) null
+    process with the same lag-1 autocorrelation as the series. Ratios near 1 indicate that
+    the binary run structure is what linear autocorrelation alone would give.
+
+    For a stationary Gaussian process u (``u = y`` for 'mean'; ``u = diff(y)`` for 'diff',
+    i.e., whichever series is actually thresholded at zero), the probability that
+    consecutive samples lie on the same side of the mean follows the arcsine law,
+    ``p = 1/2 + arcsin(rho)/pi``, with ``rho`` the lag-1 autocorrelation of u. Treating the
+    binary sign sequence as a two-state Markov chain with persistence probability p gives
+    geometrically distributed run lengths, so the expected mean run length is ``1/(1-p)`` and
+    the expected proportion of runs of 1s (per sample) is ``(1-p)/2``. Only the statistics
+    whose theory holds up empirically (the mean run lengths and the number of runs) get an
+    AR(1)-normalized counterpart; for the fuller set of empirical run-length statistics see
+    :func:`binary_stats`.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    binary_method : {'mean', 'diff'}, optional
+        The binary symbolization rule: 'mean' (1 above the mean, 0 below) or 'diff' (1 for an
+        increase, 0 otherwise). Unlike :func:`binary_stats`, 'median' and 'iqr' are not
+        supported: the theory is specific to a sign threshold at the mean of a (possibly
+        transformed) Gaussian series. Default is ``'mean'``.
+
+    Returns
+    -------
+    dict
+        - 'pstretch1': the number of runs of 1s divided by the length of the binary string,
+        - 'meanstretch0', 'meanstretch1': the mean run length of 0s, and of 1s (NaN if there
+          are no such runs),
+        - 'ar1_p': the AR(1)-implied persistence probability p,
+        - 'meanstretch_ar1exp': the expected mean run length, ``1/(1-p)``,
+        - 'pstretch1_ar1exp': the expected value of 'pstretch1', ``(1-p)/2``,
+        - 'meanstretch0_ar1rat', 'meanstretch1_ar1rat': 'meanstretch0' and 'meanstretch1'
+          divided by 'meanstretch_ar1exp',
+        - 'pstretch1_ar1rat': 'pstretch1' divided by 'pstretch1_ar1exp'.
+
+        In the degenerate limit of a lag-1 autocorrelation of 1 the ratios are NaN,
+        'meanstretch_ar1exp' is Inf and 'pstretch1_ar1exp' is 0.
+    """
+    if binary_method not in ('mean', 'diff'):
+        raise ValueError(f"binary_stats_ar1 supports binary_method 'mean' or 'diff' only "
+                         f"(not '{binary_method}')")
+    y = np.asarray(y, dtype=float)
+
+    # The series that is actually sign-thresholded at its mean
+    u = y if binary_method == 'mean' else np.diff(y)
+
+    # Binarize (the case for which the arcsine law below is exact)
+    y_bin = binarize(y, binarize_how=binary_method)
+    N = len(y_bin)  # note: N = len(y) - 1 for 'diff'
+
+    # Empirical run-length statistics (cf. binary_stats)
+    diff_y = np.diff(np.where(np.concatenate(([1], y_bin, [1])))[0])
+    stretch0 = diff_y[diff_y != 1] - 1
+    diff_y = np.diff(np.where(np.concatenate(([0], y_bin, [0])) == 0)[0])
+    stretch1 = diff_y[diff_y != 1] - 1
+
+    out = {}
+    out['pstretch1'] = len(stretch1) / N
+    out['meanstretch0'] = np.mean(stretch0) if len(stretch0) else np.nan  # all 1s: no runs of 0s
+    out['meanstretch1'] = np.mean(stretch1) if len(stretch1) else np.nan  # all 0s: no runs of 1s
+
+    # AR(1)-null persistence probability, via the arcsine law
+    with np.errstate(all='ignore'):
+        rho = float(np.ravel(autocorr(u, 1, 'Fourier'))[0])
+    # guard against tiny numerical overshoot outside [-1, 1]; as MATLAB's max(min(rho,1),-1),
+    # a NaN (constant series) ends up as 1
+    rho = 1.0 if np.isnan(rho) else max(min(rho, 1.0), -1.0)
+    p = 0.5 + np.arcsin(rho) / np.pi
+    out['ar1_p'] = p
+
+    if p >= 1 - 1e-8:  # degenerate limit (rho -> 1): the expected run length diverges
+        out['meanstretch_ar1exp'] = np.inf
+        out['meanstretch0_ar1rat'] = np.nan
+        out['meanstretch1_ar1rat'] = np.nan
+        out['pstretch1_ar1exp'] = 0.0
+        out['pstretch1_ar1rat'] = np.nan
+        return out
+
+    exp_mean_stretch = 1 / (1 - p)
+    exp_pstretch1 = (1 - p) / 2
+
+    # The null expectation for meanstretch0 and meanstretch1 is the same value (symmetric
+    # about the mean by construction)
+    out['meanstretch_ar1exp'] = exp_mean_stretch
+    out['meanstretch0_ar1rat'] = out['meanstretch0'] / exp_mean_stretch
+    out['meanstretch1_ar1rat'] = out['meanstretch1'] / exp_mean_stretch
+    out['pstretch1_ar1exp'] = exp_pstretch1
+    out['pstretch1_ar1rat'] = out['pstretch1'] / exp_pstretch1
+
+    return out
+
+
 def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
                       num_groups: int = 2, tau: Union[int, str] = 1) -> dict:
     """
@@ -700,16 +833,22 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     y : array-like
         Input time series.
     how_to_cg : str, optional
-        The method of discretization. Default is ``'quantile'``.
+        The method of discretization: ``'quantile'`` (equiprobable, the default) or
+        ``'updown'`` (a true binary up/down split by the sign of each increment: NOT
+        equiprobable, and requires ``num_groups=2``; see :func:`coarse_grain`).
+        ``'diff'`` (equiprobable by increment) is also accepted.
     num_groups : int, optional
         number of groups in the course-graining. Default is 2.
     tau : int or str, optional
         analyze transition matrices corresponding to this lag. We
         could either downsample the time series at this lag and then do the
         discretization as normal, or do the discretization and then just
-        look at this dicrete lag. Here we do the former. Can also set tau to 'ac'
-        to set tau to the first zero-crossing of the autocorrelation function.
-        Default is 1.
+        look at this dicrete lag. Here we do the former. Can also set tau to a string
+        that sets it from the series: ``'ac'`` (the first zero-crossing of the
+        autocorrelation function), ``'ac1e'`` (the floor of its first 1/e crossing) or
+        ``'mi'`` (the smaller of the first minimum of the Kraskov automutual information
+        and the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`). All three are capped at
+        floor(N/50). Default is 1.
 
     Returns
     -------
@@ -728,18 +867,9 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     y = np.asarray(y, dtype=float)
     if num_groups < 2:
         raise ValueError('Too few groups for coarse-graining')
-    if isinstance(tau, str):
-        if tau != 'ac':
-            raise ValueError(f"Unknown tau '{tau}'")
-        # determine tau from the first zero-crossing of the ACF
-        tau = first_crossing(y, 'ac', 0, 'discrete')
-        if np.isnan(tau):  # undefined ACF (e.g., constant series)
-            return np.nan
-        if tau > len(y) / 50:  # cap at 2% of the series length so it stays long enough
-            tau = int(np.floor(len(y) / 50))
-    if np.isnan(tau):
+    tau = _resolve_tau(y, tau)
+    if np.isnan(tau):  # undefined delay (e.g., constant series, or an ACF that never falls to 1/e)
         return np.nan
-    tau = int(tau)
 
     if tau > 1:  # calculate the transition matrix at a non-unit lag
         y = resample_poly(y, 1, tau)  # downsample at rate 1:tau
@@ -953,9 +1083,12 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
         value, each at least 2. Default is ``range(2, 11)``.
     tau : int or str, optional
         The time-delay. The time series is downsampled at this lag before being
-        discretized. Can also be set to ``'ac'`` to use the first zero-crossing of
-        the autocorrelation function (capped at floor(N/50); NaN is returned if it is
-        undefined). Default is 1.
+        discretized. Can also be set to a string that sets it from the series:
+        ``'ac'`` (the first zero-crossing of the autocorrelation function), ``'ac1e'``
+        (the floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first
+        minimum of the Kraskov automutual information and the 'ac1e' delay; see
+        :func:`pyhctsa.utils.get_tau`). All three are capped at floor(N/50); NaN is
+        returned if the delay is undefined. Default is 1.
 
     Returns
     -------
@@ -970,20 +1103,13 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
         num_groups = np.arange(2, 11)  # compare across alphabet sizes from 2 to 10
     num_groups = np.atleast_1d(np.asarray(num_groups, dtype=int))
 
-    if isinstance(tau, str):
-        if tau != 'ac':
-            raise ValueError(f"Unknown tau '{tau}'")
-        # determine tau from first zero of autocorrelation
-        tau = first_crossing(y, 'ac', 0, 'discrete')
-        if np.isnan(tau):  # undefined ACF (e.g., constant series)
-            return np.nan
-        if tau > N / 50:  # for highly-correlated signals
-            tau = np.floor(N / 50)
-
     if np.size(tau) > 1 or num_groups.size == 1:
+        # (hctsa does not support varying tau either: "This setting kind of doesn't work yet")
         raise NotImplementedError('Only a scalar tau with a range of alphabet sizes is '
                                   'supported.')
-    tau = int(tau)
+    tau = _resolve_tau(y, tau if isinstance(tau, str) else np.ravel(tau)[0])
+    if np.isnan(tau):  # undefined delay (e.g., constant series)
+        return np.nan
 
     if np.min(num_groups) < 2:
         raise ValueError('Need more than 2 groups')
@@ -1083,7 +1209,7 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
     return out
 
 
-def coarse_grain(y: list, how_to_cg: str, num_groups: int) -> np.ndarray:
+def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str]) -> np.ndarray:
     """
     Coarse-grains a continuous time series to a discrete alphabet.
 
@@ -1095,47 +1221,80 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: int) -> np.ndarray:
         The method of coarse-graining.
         Options: 
 
-        - 'updown'
-        - 'quantile'
-        - 'embed2quadrants'
-        - 'embed2octants'
-        
-    num_groups : int
-        Specifies the size of the alphabet for 'quantile' and 'updown',
-        or sets the time delay for the embedding subroutines.
+        - 'quantile': an equiprobable alphabet by the value of each point,
+        - 'diff': as 'quantile', but applied to the increments ``diff(y)``: an equiprobable
+          alphabet by the *value* of each increment (not a literal sign split; this was called
+          'updown' before hctsa renamed it),
+        - 'updown': a true binary up/down split by the raw sign of each increment
+          (``diff(y) > 0`` gives symbol 2, otherwise 1); ``num_groups`` must be 2. Unlike the
+          other methods this is NOT equiprobable: the two states can be arbitrarily
+          imbalanced for a drifting series,
+        - 'embed2quadrants', 'embed2octants': the alphabet is the quadrant (4 symbols) or
+          octant (8 symbols) of each point of a 2-D time-delay embedding.
+
+    num_groups : int or str
+        The size of the alphabet for 'quantile' and 'diff' (must be 2 for 'updown'), or the
+        time delay for the embedding methods: a number of samples, or a string that sets it
+        from the series: ``'ac1e'`` (the floor of the first 1/e crossing of the
+        autocorrelation function), ``'mi'`` (the smaller of the first minimum of the Kraskov
+        automutual information and the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`), or
+        ``'tau'`` (the first zero-crossing of the autocorrelation function, kept for
+        backward compatibility). A delay is capped at floor(N/25).
 
     Returns
     --------
     yth : array-like
         The coarse-grained time series. NaN (a scalar) if the embedding delay for
-        'embed2quadrants'/'embed2octants' (``num_groups='tau'``) cannot be determined.
+        'embed2quadrants'/'embed2octants' cannot be determined (``num_groups='tau'`` or
+        ``'ac1e'`` for a constant series, or ``'ac1e'`` for a series whose autocorrelation
+        function never falls to 1/e).
     """
     y = np.asarray(y)
     N = len(y)
 
-    if how_to_cg not in ['updown', 'quantile', 'embed2quadrants', 'embed2octants']:
+    if how_to_cg not in ['updown', 'diff', 'quantile', 'embed2quadrants', 'embed2octants']:
         raise ValueError(f"Unknown coarse-graining method '{how_to_cg}'")
 
+    if how_to_cg == 'updown' and num_groups != 2:
+        raise ValueError(f"'updown' is a true binary up/down split: num_groups must be 2 "
+                         f"(got {num_groups}). Use 'diff' for a multi-level equiprobable "
+                         "alphabet of the increments.")
+
     # Some coarse-graining/symbolization methods require initial processing:
-    if how_to_cg == 'updown':
+    yth = None  # Ensure yth is always defined
+    if how_to_cg == 'diff':
         y = np.diff(y)
         N = N - 1 # the time series is one value shorter than the input because of differencing
         how_to_cg = 'quantile' # successive differences and then quantiles
 
+    elif how_to_cg == 'updown':
+        # True binary up/down split: 2 if the increment is positive, 1 otherwise
+        y = np.diff(y)
+        N = N - 1
+        yth = 1 + (y > 0).astype(int)
+
     elif how_to_cg in ['embed2quadrants', 'embed2octants']:
         # Construct the embedding
-        if num_groups == 'tau':
-            # First zero-crossing of the ACF
-            tau = first_crossing(y, 'ac', 0, 'discrete')
-            if np.isnan(tau):  # undefined ACF (e.g., constant series): no coarse-graining
+        if isinstance(num_groups, str):
+            if num_groups in ('ac1e', 'mi'):
+                # adaptive delay (NaN if undefined, or if the ACF never crosses 1/e)
+                tau = get_tau(y, num_groups)
+            elif num_groups == 'tau':
+                # first zero-crossing of the ACF
+                tau = get_tau(y, 'ac')
+            else:
+                raise ValueError(f"Unknown embedding delay '{num_groups}': use a number of "
+                                 "samples, 'ac1e', 'mi' or 'tau'")
+            if np.isnan(tau):  # undefined delay: no coarse-graining
                 return np.nan
         else:
             tau = num_groups
-        
+
         if tau > N/25:
             tau = N // 25
+        tau = int(tau)
 
-        m1 = y[:-tau]
+        m1 = y[:N - tau]
         m2 = y[tau:]
 
         # Look at which points are in which angular 'quadrant'
@@ -1148,7 +1307,6 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: int) -> np.ndarray:
         q4r = np.logical_and(downr, m1 >= 0) # points in quadrant 4
     
     # Do the coarse graining
-    yth = None  # Ensure yth is always defined
     if how_to_cg == 'quantile':
         th = matlab_quantile(y, np.linspace(0, 1, num_groups + 1)) # thresholds for dividing the time-series values
         th[0] = th[0] - 1 # this ensures the first point is included
