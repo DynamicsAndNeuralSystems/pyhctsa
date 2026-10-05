@@ -2084,6 +2084,8 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
 
         - If an ``int``, returns the autocorrelation of ``y`` at that lag.
         - If a ``list`` of integers, returns autocorrelations at those lags.
+        - A NaN lag (e.g. a delay that could not be set) gives NaN for that entry
+          (``"Fourier"`` method).
         - If an empty list, returns the full autocorrelation function when 
         using the ``"Fourier"`` estimation method.
         Default is 1.
@@ -2107,11 +2109,12 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
     y = np.array(y)
     N = len(y)  # time-series length
 
-    if tau:
+    if np.size(tau) > 0:
         # if list is not empty
-        if np.max(tau) > N - 1:  # -1 because acf(1) is lag 0
-            logger.warning(f"Time lag {np.max(tau)} is too long for time-series length {N}.")
-        if np.any(np.array(tau) < 0):
+        tau_arr = np.atleast_1d(np.asarray(tau, dtype=float))
+        if not np.all(np.isnan(tau_arr)) and np.nanmax(tau_arr) > N - 1:  # -1 because acf(1) is lag 0
+            logger.warning(f"Time lag {np.nanmax(tau_arr)} is too long for time-series length {N}.")
+        if np.any(tau_arr < 0):
             logger.warning('Negative time lags not applicable.')
     if method == 'Fourier':
         n_fft = 2 ** (int(np.ceil(np.log2(N))) + 1)
@@ -2122,16 +2125,17 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
         acf = np.real(acf)
         acf = acf[:N]
         
-        if not tau:  # list empty, return the full function
+        if np.size(tau) == 0:  # list empty, return the full function
             out = acf
         else:  # return a specific set of values
             tau = np.atleast_1d(tau)
             out = np.zeros(len(tau))
             for i, t in enumerate(tau):
-                if (t > len(acf) - 1) or (t < 0):
+                # a NaN lag (e.g. from a delay rule that could not be set) gives NaN
+                if np.isnan(t) or (t > len(acf) - 1) or (t < 0):
                     out[i] = np.nan
                 else:
-                    out[i] = acf[t]
+                    out[i] = acf[int(t)]
     elif method == 'TimeDomainStat':
         sigma2 = np.std(y, ddof=1)**2  # time-series variance
         mu = np.mean(y)  # time-series mean
