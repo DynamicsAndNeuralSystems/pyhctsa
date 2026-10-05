@@ -979,7 +979,7 @@ def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True
 
     # Histogram counts and overall density differences
     out = {}
-    out['densityDiff'] = np.sum(y > 0) - np.sum(y < 0)  # measure of asymmetry about the mean
+    out['densityDiff'] = (np.sum(y > 0) - np.sum(y < 0)) / n_non_zero  # measure of asymmetry about the mean
     out['modeProbPos'] = np.max(p_pos)
     out['modeProbNeg'] = np.max(p_neg)
     out['modeDiff'] = out['modeProbPos'] - out['modeProbNeg']
