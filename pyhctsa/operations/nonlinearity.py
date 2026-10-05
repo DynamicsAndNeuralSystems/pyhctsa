@@ -1846,9 +1846,14 @@ def _recurrence_radius(Y: np.ndarray, rr: float, random_seed: Union[int, str, No
 
 def _recurrent_pairs(Y: np.ndarray, radius: float) -> tuple:
     """All ordered pairs (src, dst) of embedded points within `radius` (Euclidean) of each other."""
-    nbrs = KDTree(Y).query_radius(Y, radius)
+    # (the tree search is padded, then squared distances compared with the squared radius, as
+    # MATLAB's rangesearch does, so that pairs lying exactly at the radius -- common for
+    # quantized data -- are counted consistently)
+    nbrs = KDTree(Y).query_radius(Y, radius * (1 + 1e-9))
     src = np.repeat(np.arange(Y.shape[0]), [nb.size for nb in nbrs])
-    return src, np.concatenate(nbrs)
+    dst = np.concatenate(nbrs)
+    keep = np.sum((Y[src] - Y[dst]) ** 2, axis=1) <= radius ** 2
+    return src[keep], dst[keep]
 
 
 def _check_max_n(y: np.ndarray, max_n: Union[int, str], what: str) -> np.ndarray:
@@ -1861,3 +1866,156 @@ def _check_max_n(y: np.ndarray, max_n: Union[int, str], what: str) -> np.ndarray
                        f'Analyzing the first {int(max_n)} samples')
         y = y[:int(max_n)]
     return y
+
+
+def _recurrence_time_stats(Y: np.ndarray, radius: float, theiler: int) -> tuple:
+    """
+    Mean recurrence time and modal probability mass of the white vertical line lengths of
+    the recurrence plot of `Y` (hctsa's ``SUB_recurrenceTimeStats``).
+
+    For each point, the number of non-recurrent points between successive recurrent points
+    (neighbors within `radius`, outside the Theiler window; the edges of the Theiler band
+    count as recurrent, and the neighbors before and after the point are differenced
+    separately) are pooled over all points.
+    """
+    n = Y.shape[0]
+    src, dst = _recurrent_pairs(Y, radius)
+    keep = np.abs(dst - src) > theiler  # excludes the Theiler window (and the point itself)
+    src, dst = src[keep], dst[keep]
+    j = np.arange(n)
+    # the band edges act as recurrent points, so that lines start at the edge of the band
+    left, right = j[j - theiler >= 0], j[j + theiler <= n - 1]
+    before = np.concatenate([np.column_stack((src[dst < src], dst[dst < src])),
+                             np.column_stack((left, left - theiler))])
+    after = np.concatenate([np.column_stack((src[dst > src], dst[dst > src])),
+                            np.column_stack((right, right + theiler))])
+    w = []
+    for pairs in (before, after):
+        pairs = pairs[np.lexsort((pairs[:, 1], pairs[:, 0]))]
+        same = pairs[1:, 0] == pairs[:-1, 0]
+        w.append(np.diff(pairs[:, 1])[same] - 1)
+    w = np.concatenate(w)
+    w = w[w >= 1]  # (drops the zero-length "lines" between consecutive recurrent points)
+    if w.size == 0:
+        return np.nan, np.nan
+    return float(np.mean(w)), float(np.bincount(w).max() / w.size)
+
+
+def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] = 3,
+                     theiler_win: Union[int, float, list, tuple] = ('ac', 1), rr: float = 0.1,
+                     num_segments: int = 4, max_n: Union[int, str] = 10000,
+                     random_seed: Union[int, str, None] = 'default') -> dict:
+    """
+    Recurrence-time statistics from a recurrence plot.
+
+    Embeds the series in a time-delay space and finds, for each embedded point, the times
+    at which the trajectory returns to its neighborhood: the lengths of the white vertical
+    lines of the recurrence plot (the numbers of non-recurrent points between successive
+    recurrent points), cf. [1]. This is the distribution of the times between recurrences
+    to a given neighborhood, rather than the black line-length statistics of
+    :func:`rqa`. Quasi-periodic dynamics on a torus return at a few distinct times, so the
+    distribution of recurrence times has a few sharp peaks, whereas strange nonchaotic
+    attractors have a more broadly distributed (and segment-to-segment more variable)
+    set of recurrence times.
+
+    The neighborhood radius is set once, from the full embedded series, to the `rr`-quantile
+    of a random subsample of pairwise distances; the same radius is then reused for every
+    segment, so that segment-to-segment differences reflect the dynamics rather than a
+    re-calibrated threshold. The Theiler band around each point counts as recurrent, so
+    that no white line spans the excluded band.
+
+    References
+    ----------
+    .. [1] Ngamga, E.J., Nandi, A., Ramaswamy, R., Romano, M.C., Thiel, M. and Kurths, J.
+        "Recurrence-time distributions in strange nonchaotic systems", Phys. Rev. E
+        75, 036222 (2007).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tau : int or str, optional
+        The time delay for the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'`` or ``'mi'``). Default is 1.
+    m : int, str or tuple, optional
+        The embedding dimension: an integer, or ``'fnn'`` to choose it by false nearest
+        neighbors (TISEAN's ``false_nearest``, as hctsa's ``BF_Embed``). Default is 3.
+    theiler_win : int, float or ``['ac', k]``, optional
+        The Theiler window excluding temporally-correlated neighbors (see
+        :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k`` times the first
+        zero-crossing of the autocorrelation function, or a number of samples. Narrowed
+        to ``Nemb // 5`` for short series. Default is ``['ac', 1]``.
+    rr : float, optional
+        The target recurrence rate used to set the neighborhood radius. Default is 0.1.
+    num_segments : int, optional
+        The embedded trajectory is divided into this many contiguous, non-overlapping
+        segments, and the mean recurrence time and modal probability are recomputed
+        independently within each; their variance across segments is the paper's diagnostic
+        for the torus-to-SNA transition. Each segment needs at least 50 embedded points,
+        otherwise the variance outputs (but not the full-series ``T_MRT``/``N_MPRT``) are
+        NaN. Default is 4.
+    max_n : int or 'full', optional
+        The maximum number of samples to consider (the first ``max_n``); ``'full'`` to
+        disable cropping. Default is 10000.
+    random_seed : int, str or None, optional
+        The seed of the Mersenne Twister for the random subsample used to set the radius, as
+        hctsa's ``BF_ResetSeed``: an integer, ``'default'`` (seed 0), or ``None``/``'none'``
+        (unseeded). The radius is the same as hctsa's only when there are at most 500 embedded
+        points (the subsample is then the whole series): MATLAB's ``randperm(n, k)`` draws a
+        different random subset from the same seed. Default is ``'default'``.
+
+    Returns
+    -------
+    dict or float
+        NaN if the embedding or Theiler window cannot be determined, or the embedded series is
+        too short (under 50 points) or degenerate (zero radius). Otherwise:
+
+        - ``T_MRT``: the mean recurrence time of the full series (the mean white-line length)
+        - ``N_MPRT``: the modal recurrence-time probability mass of the full series: the
+          fraction of all recurrence-time samples taking the single most common value (the
+          paper's raw count, normalized so that it does not scale with series length)
+        - ``T_MRT_var``, ``N_MPRT_var``: the variance of ``T_MRT`` and of ``N_MPRT`` across
+          the ``num_segments`` segments
+    """
+    y = _check_max_n(np.asarray(y, dtype=float).ravel(), max_n, 'recurrence-time analysis')
+
+    Y = _bf_embed(y, tau, m)
+    if Y is None:
+        logger.warning('Embedding failed')
+        return np.nan
+    n_emb = Y.shape[0]
+
+    theiler = theiler_window(y, theiler_win, n_emb)
+    if np.isnan(theiler):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    theiler = min(int(theiler), n_emb // 5)  # narrowed for short series
+    if n_emb < 50:
+        logger.warning(f'Time series too short for meaningful recurrence-time statistics '
+                       f'(Nemb = {n_emb}, theilerWin = {theiler})')
+        return np.nan
+
+    radius = _recurrence_radius(Y, rr, random_seed)
+    if not radius > 0:
+        logger.warning('Degenerate neighborhood radius (data may be too degenerate/short)')
+        return np.nan
+
+    out = {}
+    out['T_MRT'], out['N_MPRT'] = _recurrence_time_stats(Y, radius, theiler)
+    out['T_MRT_var'] = out['N_MPRT_var'] = np.nan
+    if np.isnan(out['T_MRT']):
+        logger.warning('No recurrence-time samples found outside the Theiler window -- radius too small?')
+        out['N_MPRT'] = np.nan
+        return out
+
+    # Variance across independent, contiguous segments (with the same global radius)
+    seg_len = n_emb // num_segments
+    if seg_len < 50:  # too short for a meaningful within-segment estimate
+        return out
+    theiler_seg = min(theiler, seg_len // 5)
+    stats = np.array([_recurrence_time_stats(Y[s * seg_len:(s + 1) * seg_len], radius, theiler_seg)
+                      for s in range(num_segments)])
+    if not np.any(np.isnan(stats[:, 0])):
+        out['T_MRT_var'] = float(np.var(stats[:, 0], ddof=1))
+        out['N_MPRT_var'] = float(np.var(stats[:, 1], ddof=1))
+    return out
