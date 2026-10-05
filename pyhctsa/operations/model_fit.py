@@ -5,6 +5,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from numpy.lib.stride_tricks import sliding_window_view
 from hmmlearn.hmm import GaussianHMM
+from scipy.optimize import curve_fit
 from scipy.signal import lfilter
 from scipy.stats import ks_1samp, norm, t
 from statsmodels.tsa.ar_model import AutoReg, ar_select_order
@@ -187,6 +188,31 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
         raise ValueError(f"Unknown model: {model}")
     return out
 
+def _fit_exp_curve(x: np.ndarray, y: np.ndarray, prefix: str) -> dict:
+    """
+    Fit y = a * exp(b * x) + c by nonlinear least squares.
+
+    The starting point is [range(y), -0.5, min(y)], as in hctsa's
+    FC_LoopLocalSimple. Returns the parameters (``a``, ``b``, ``c``) and the
+    goodness of fit (``r2``, ``adjr2``, ``rmse``, with ``rmse`` using the
+    degrees-of-freedom-adjusted residual variance), all NaN if the fit fails.
+    """
+    keys = [f'{prefix}_{k}' for k in ('a', 'b', 'c', 'r2', 'adjr2', 'rmse')]
+    try:
+        if not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))):
+            raise ValueError("non-finite data")
+        popt, _ = curve_fit(lambda t, a, b, c: a * np.exp(b * t) + c, x, y,
+                            p0=[np.ptp(y), -0.5, np.min(y)], maxfev=10000)
+        res = y - (popt[0] * np.exp(popt[1] * x) + popt[2])
+        sse = np.sum(res ** 2)
+        sst = np.sum((y - np.mean(y)) ** 2)
+        n, dfe = len(y), len(y) - 3
+        r2 = 1 - sse / sst
+        vals = [popt[0], popt[1], popt[2], r2, 1 - (1 - r2) * (n - 1) / dfe, np.sqrt(sse / dfe)]
+    except (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
+        vals = [np.nan] * 6
+    return dict(zip(keys, vals))
+
 def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     """
     How simple local forecasting depends on window length.
@@ -213,7 +239,9 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         with window length: for each of the residual standard deviation
         (``stde``), ``sws``, ``swm``, ``ac1`` and ``ac2``, the normalized mean
         change (``_chn``), the mean sign of the changes (``_meansgndiff``) and, for
-        the last four, ``_stdn``; ``stde_peakpos`` (1-based position in the list
+        the last four, ``_stdn``; ``sws_fexp_a``, ``_b``, ``_c``, ``_r2``,
+        ``_adjr2`` and ``_rmse`` (an exponential fit a*exp(b*l) + c to the
+        ``sws`` curve; NaN if the fit fails); ``stde_peakpos`` (1-based position in the list
         of window lengths of the extreme value of the ``stde`` curve) and
         ``stde_peaksize``.
     """
@@ -268,6 +296,9 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         out[f'{name}_chn'] = np.mean(np.diff(curve)) / np.ptp(curve)
         out[f'{name}_meansgndiff'] = np.mean(np.sign(np.diff(curve)))
         out[f'{name}_stdn'] = np.std(curve, ddof=1) / np.ptp(curve)
+        if name == 'sws':
+            # exponential fit f(l) = a exp(b l) + c to the sws curve
+            out.update(_fit_exp_curve(train_length_range.astype(float), curve, 'sws_fexp'))
 
     return out
 
