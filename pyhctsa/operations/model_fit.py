@@ -1304,20 +1304,41 @@ def is_seasonal(y: ArrayLike) -> int:
     
     return out
 
+def _ml_max(a, axis=None):
+    """MATLAB ``max``: NaNs are omitted (NaN only if every element is NaN)."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)
+        return np.nanmax(a, axis=axis)
+
+
+def _ml_min(a, axis=None):
+    """MATLAB ``min``: NaNs are omitted (NaN only if every element is NaN)."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)
+        return np.nanmin(a, axis=axis)
+
+
 def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50) -> np.ndarray:
     """
     learn GP hyperparameters for the time series ``(tt, yt)``.
 
-    The GP is a mean-zero process with a Gaussian likelihood and Laplace
-    inference; ``nfevals`` is negative, so it caps the number of function
-    evaluations rather than the number of line searches.
+    The GP is a mean-zero process with a Gaussian likelihood and exact Gaussian
+    inference (gpml ``infGaussLik``, as hctsa's ``MF_GP_LearnHyperp`` uses);
+    ``nfevals`` is negative, so it caps the number of function evaluations rather
+    than the number of line searches.
 
     Returns the flattened hyperparameter vector ``[cov..., lik]`` -- gpml
     unwraps the hyperparameter struct with its fields alphabetised (cov, lik,
     mean), and the mean is empty for a mean-zero process.
 
-    Raises ``numpy.linalg.LinAlgError`` if the covariance loses positive
-    definiteness, the counterpart of gpml's ``MATLAB:posdef`` error.
+    As in gpml's ``gp``, a failed inference (e.g., a covariance that loses
+    positive definiteness) gives a NaN marginal likelihood with zero
+    derivatives, which ``minimize`` treats as a bad step and backs away from, so
+    it does not abort the fit. ``numpy.linalg.LinAlgError`` is only raised if
+    that leaves non-finite hyperparameters, the counterpart of hctsa returning
+    NaN.
     """
     nhps = cov.n_hyp
     # Initial values, set component by component as in MF_GP_LearnHyperp for
@@ -1329,10 +1350,12 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50) ->
 
     def _nlz(theta):
         hyp = {'cov': theta[:nhps], 'lik': theta[nhps], 'mean': np.zeros(0)}
-        nlZ, dnlZ = gp_train(hyp, cov, tt, yt)
+        nlZ, dnlZ = gp_train(hyp, cov, tt, yt)   # NaN if the inference fails (as gp.m)
         return nlZ, np.concatenate([dnlZ['cov'], dnlZ['lik'], dnlZ['mean']])
 
     theta, _, _ = minimize(hyp0, _nlz, nfevals)
+    if not np.all(np.isfinite(theta)):
+        raise np.linalg.LinAlgError('GP hyperparameters are not finite')
     return theta
 
 
@@ -1360,7 +1383,24 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     Returns
     -------
     dict
-        Dictionary summarising the error and the fitted hyperparameters.
+        Dictionary summarising the error and the fitted hyperparameters:
+
+        - ``stde``: the root-mean-square error of the predictive mean, compared
+          with the series,
+        - ``meanabs_std``: the mean absolute error of the predictive mean, in
+          units of the predictive standard deviation at each time,
+        - ``stdmu``: the standard deviation of the predictive mean,
+        - ``meanS``, ``stdS``: the mean and standard deviation of the predictive
+          standard deviation,
+        - ``nlml``: the negative log marginal likelihood (gpml's ``nlZ``) of the
+          whole series (or of the 2000 resampled points), divided by the number
+          of points so it does not grow with the series length,
+        - ``logh1``, ``logh2``, ``logh3``: the log hyperparameters of the
+          covariance function (length scale, signal amplitude, noise standard
+          deviation),
+        - ``h_lonN``: the fitted length scale divided by the series length.
+
+        All values are NaN if the fit fails.
     """
     if cov_func != 'covSEiso_covNoise':
         raise ValueError(
@@ -1382,7 +1422,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     except np.linalg.LinAlgError:
         logger.warning('Lack of positive definite matrix for this time series')
         return {k: np.nan for k in
-                ('rmserr', 'meanstderr', 'stdmu', 'meanS', 'stdS', 'mlikelihood',
+                ('stde', 'meanabs_std', 'stdmu', 'meanS', 'stdS', 'nlml',
                  'logh1', 'logh2', 'logh3', 'h_lonN')}
 
     loghyper = theta[:nhps]
@@ -1395,23 +1435,30 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         ts = np.floor(_linspace(1, N, 2000) + 0.5)  # MATLAB round()
     y_ts = y[ts.astype(int) - 1]
 
-    mu, S2, _, _ = gp_predict(hyp, cov, tt, yt, ts)
+    try:
+        mu, S2, _, _ = gp_predict(hyp, cov, tt, yt, ts)
+    except np.linalg.LinAlgError:
+        logger.warning('Gaussian process regression failed for this time series')
+        return {k: np.nan for k in
+                ('stde', 'meanabs_std', 'stdmu', 'meanS', 'stdS', 'nlml',
+                 'logh1', 'logh2', 'logh3', 'h_lonN')}
 
     # Output statistics
     S = np.sqrt(S2)  # standard deviation function, S
     out = {}
     # rms error from mean function, mu
-    out['rmserr'] = np.sqrt(np.mean((y_ts - mu) ** 2))
-    out['meanstderr'] = np.mean(np.abs(y_ts - mu) / S)
+    out['stde'] = np.sqrt(np.mean((y_ts - mu) ** 2))
+    out['meanabs_std'] = np.mean(np.abs(y_ts - mu) / S)
     out['stdmu'] = np.std(mu, ddof=1)
     out['meanS'] = np.mean(S)
     out['stdS'] = np.std(S, ddof=1)
 
-    # Marginal likelihood
+    # Negative log marginal likelihood per point (gpml's nlZ divided by the number of
+    # points, so that it does not grow with the number of points, up to 2000)
     try:
-        out['mlikelihood'] = gp_train(hyp, cov, ts, y_ts, want_dnlZ=False)[0]
+        out['nlml'] = gp_train(hyp, cov, ts, y_ts, want_dnlZ=False)[0] / len(ts)
     except Exception:
-        out['mlikelihood'] = np.nan
+        out['nlml'] = np.nan
 
     # Log-hyperparameters
     for i in range(nhps):
@@ -1424,8 +1471,8 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
 
 def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
-                        num_train: int = 10, num_test: int = 3,
-                        num_preds: int = 20, pmode: str = 'randomgap',
+                        num_train: int = 20, num_test: int = 5,
+                        num_preds: int = 10, pmode: str = 'frombefore',
                         random_seed: int = 0) -> dict:
     """
     Gaussian Process time-series model for local prediction.
@@ -1470,7 +1517,28 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     -------
     dict
         Summaries of the quality of the predictions made, the mean and spread of
-        the obtained hyperparameter values, and the marginal likelihoods.
+        the obtained hyperparameter values, and the marginal likelihoods. Each
+        window is first standardized using its training data. The error bars are
+        95% error bars (twice the predictive standard deviation), so the outputs
+        ending in ``_std`` are in units of these.
+
+        - ``meanabs``, ``maxabs``, ``minabs``: mean, maximum and minimum over
+          all predicted points of the absolute prediction error,
+        - ``meanabs_std``, ``maxabs_std``, ``minabs_std``: the same, in units of
+          the error bar,
+        - ``meanabs_run``, ``maxabs_run``, ``minabs_run``: mean, maximum and
+          minimum over windows of the mean absolute error in a window,
+        - ``meanabs_std_run``, ``maxabs_std_run``, ``minabs_std_run``: the same,
+          in units of the error bar,
+        - ``maxerrbar``, ``meanerrbar``, ``minerrbar``: maximum, mean and
+          minimum error-bar half-width over all predicted points,
+        - ``meanlogh1``, ..., ``stdlogh1``, ...: mean and standard deviation
+          across windows of each log hyperparameter,
+        - ``maxnlml``, ``minnlml``, ``stdnlml``: maximum, minimum and standard
+          deviation across windows of the negative log marginal likelihood on
+          the window's training data, divided by the number of training points.
+
+        All values are NaN if hyperparameters cannot be learned.
     """
     if cov_func != 'covSEiso_covNoise':
         raise ValueError(
@@ -1493,18 +1561,18 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     spns = spns.astype(int)
 
     out_keys = (
-        'maxstderr', 'maxabserr', 'minstderr', 'minabserr', 'meanstderr',
-        'meanabserr', 'meanstderr_run', 'meanabserr_run', 'maxstderr_run',
-        'maxabserr_run', 'minstderr_run', 'minabserr_run', 'maxerrbar',
+        'maxabs_std', 'maxabs', 'minabs_std', 'minabs', 'meanabs_std',
+        'meanabs', 'meanabs_std_run', 'meanabs_run', 'maxabs_std_run',
+        'maxabs_run', 'minabs_std_run', 'minabs_run', 'maxerrbar',
         'meanerrbar', 'minerrbar',
         *(f'{s}logh{i + 1}' for i in range(nhps) for s in ('mean', 'std')),
-        'maxmlik', 'minmlik', 'stdmlik',
+        'maxnlml', 'minnlml', 'stdnlml',
     )
 
     mus = np.zeros((num_test, num_preds))        # predicted values
     stderrs = np.zeros((num_test, num_preds))    # standard errors on predictions
     yss = np.zeros((num_test, num_preds))        # test values
-    mlikelihoods = np.zeros(num_preds)           # marginal likelihoods of model
+    nlmls = np.zeros(num_preds)                  # per-point negative log marginal likelihoods
     loghypers = np.zeros((nhps, num_preds))      # log-hyperparameters
 
     rng = np.random.RandomState() if random_seed is None else None
@@ -1562,9 +1630,10 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         loghypers[:, i] = loghyper
         hyp = {'cov': loghyper, 'lik': theta[nhps], 'mean': np.zeros(0)}
 
-        # Marginal likelihood for this model, with hyperparameters optimized
-        # over the training data
-        mlikelihoods[i] = -gp_train(hyp, cov, tt, yt, want_dnlZ=False)[0]
+        # Negative log marginal likelihood for this model (gpml's nlZ divided by the
+        # number of training points), with hyperparameters optimized over the
+        # training data
+        nlmls[i] = gp_train(hyp, cov, tt, yt, want_dnlZ=False)[0] / len(tt)
 
         # (2) Evaluate at the test points, based on the training time/data
         mu, S2, _, _ = gp_predict(hyp, cov, tt, yt, ts)
@@ -1579,37 +1648,37 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
     out = {}
     # Largest/smallest/mean error across all runs:
-    out['maxstderr'] = np.max(allstderrs)
-    out['maxabserr'] = np.max(allabserrs)
-    out['minstderr'] = np.min(allstderrs)
-    out['minabserr'] = np.min(allabserrs)
-    out['meanstderr'] = np.mean(allstderrs)
-    out['meanabserr'] = np.mean(allabserrs)
+    out['maxabs_std'] = _ml_max(allstderrs)
+    out['maxabs'] = _ml_max(allabserrs)
+    out['minabs_std'] = _ml_min(allstderrs)
+    out['minabs'] = _ml_min(allabserrs)
+    out['meanabs_std'] = np.mean(allstderrs)
+    out['meanabs'] = np.mean(allabserrs)
 
     # Summary of how it did on each run:
     stderr_run = np.mean(allstderrs, axis=0)
     abserr_run = np.mean(allabserrs, axis=0)
 
-    out['meanstderr_run'] = np.mean(stderr_run)
-    out['meanabserr_run'] = np.mean(abserr_run)
-    out['maxstderr_run'] = np.max(stderr_run)
-    out['maxabserr_run'] = np.max(abserr_run)
-    out['minstderr_run'] = np.min(stderr_run)
-    out['minabserr_run'] = np.min(abserr_run)
+    out['meanabs_std_run'] = np.mean(stderr_run)
+    out['meanabs_run'] = np.mean(abserr_run)
+    out['maxabs_std_run'] = _ml_max(stderr_run)
+    out['maxabs_run'] = _ml_max(abserr_run)
+    out['minabs_std_run'] = _ml_min(stderr_run)
+    out['minabs_run'] = _ml_min(abserr_run)
 
     # Error bar stats:
-    out['maxerrbar'] = np.max(stderrs)     # largest error bar
+    out['maxerrbar'] = _ml_max(stderrs)     # largest error bar
     out['meanerrbar'] = np.mean(stderrs)   # mean error bar length
-    out['minerrbar'] = np.min(stderrs)     # minimum error bar length
+    out['minerrbar'] = _ml_min(stderrs)     # minimum error bar length
 
     # (2) Hyperparameter measures: mean and std for each hyperparameter
     for i in range(nhps):
         out[f'meanlogh{i + 1}'] = np.mean(loghypers[i, :])
         out[f'stdlogh{i + 1}'] = np.std(loghypers[i, :], ddof=1)
 
-    # (3) Marginal likelihood measures
-    out['maxmlik'] = np.max(mlikelihoods)
-    out['minmlik'] = np.min(mlikelihoods)
-    out['stdmlik'] = np.std(mlikelihoods, ddof=1)
+    # (3) Negative log marginal likelihood measures
+    out['maxnlml'] = _ml_max(nlmls)
+    out['minnlml'] = _ml_min(nlmls)
+    out['stdnlml'] = np.std(nlmls, ddof=1)
 
     return out
