@@ -2614,16 +2614,13 @@ def _gp_noise_pos(components: list) -> list:
     """
     0-based positions of the ``covNoise`` standard deviations among the covariance
     hyperparameters, found as ``MF_GP_LearnHyperp`` does (while it sets the initial values):
-    a degree-parameterized component (``covMaterniso``) advances the position by one only, so
-    for ``covMaterniso3_covNoise`` the position found for the noise is the Matern's second
-    hyperparameter (hctsa's convention, as in :func:`_gp_init_hyp`).
+    every component advances the position by its own number of hyperparameters (2 for a
+    degree-parameterized ``covMaterniso``).
     """
     pos = 0
     noise = []
     for name, degree in components:
-        if degree is not None:
-            pos += 1
-        elif name == 'covSEiso':
+        if name in ('covSEiso', 'covMaterniso'):
             pos += 2
         elif name in ('covPeriodic', 'covRQiso'):
             pos += 3
@@ -3610,10 +3607,8 @@ def _gp_init_hyp(components: list, tt: np.ndarray) -> np.ndarray:
     the data), ``covRQiso``'s log-shape at zero, and ``covNoise`` and the likelihood noise at
     log(0.1).
 
-    As in hctsa, a component with a degree (``covMaterniso``) is not initialized and advances
-    the position by one only (not by its two hyperparameters), so the next component is
-    written over the Matern's second hyperparameter and the vector is zero elsewhere.
-    ``components`` is the list of ``(name, degree)`` from ``parse_cov``.
+    ``covMaterniso`` is initialized like ``covSEiso`` (length scale at the typical time step,
+    log-magnitude 0). ``components`` is the list of ``(name, degree)`` from ``parse_cov``.
     """
     n_cov = int(sum({'covSEiso': 2, 'covPeriodic': 3, 'covRQiso': 3, 'covNoise': 1,
                      'covMaterniso': 2}[name] for name, _ in components))
@@ -3622,9 +3617,7 @@ def _gp_init_hyp(components: list, tt: np.ndarray) -> np.ndarray:
     hyp = np.zeros(n_cov)
     pos = 0
     for name, degree in components:
-        if degree is not None:  # degree-parameterized component: left at zero
-            pos += 1
-        elif name == 'covSEiso':
+        if name in ('covSEiso', 'covMaterniso'):
             hyp[pos] = np.log(typical_dt)       # length-scale
             hyp[pos + 1] = 0.0                  # log-magnitude
             pos += 2
