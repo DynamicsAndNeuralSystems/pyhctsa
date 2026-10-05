@@ -71,22 +71,17 @@ def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str)
     else:
         out['mediqr'] = np.abs(stat_x-medsurr)/iqrsurr
 
-    # rank statistic 
-    ix = np.argsort(np.concatenate(([stat_x], stat_surr)))
-    # Where did the original index 0 (i.e., stat_x) end up?
-    xfitshere = np.where(ix == 0)[0][0]
-    if left_right_both == 'right':  # x smaller than distribution → flip distance from top
-        xfitshere = num_surrs + 1 - xfitshere
-    elif left_right_both == 'both':
-        xfitshere = min(xfitshere, num_surrs + 1 - xfitshere)
-
-    if xfitshere is None:  
-        prank = 1 / (num_surrs + 1)
-    else:
-        prank = (1 + xfitshere) / (num_surrs + 1)
-
+    # rank-based p-value
+    # number of surrogates strictly below the series' value (the series is ranked
+    # ahead of any tied surrogates):
+    num_below = int(np.sum(stat_surr < stat_x))
+    num_at_least = num_surrs - num_below  # number of surrogates at least as large
+    num_extreme = {'right': num_at_least,  # series should be larger than the surrogates
+                   'left': num_below,
+                   'both': min(num_below, num_at_least)}[left_right_both]  # the more extreme tail
+    prank = (num_extreme + 1) / (num_surrs + 1)
     if left_right_both == 'both':
-        prank *= 2
+        prank = min(2 * prank, 1)  # two-sided: double, capped at 1
 
     out['prank'] = prank
 
