@@ -110,3 +110,43 @@ def wblfit(x: np.ndarray) -> tuple:
     except (ValueError, RuntimeError, FloatingPointError):
         return np.nan, np.nan  # no solution (near-constant data)
     return np.exp(mu), 1 / sigma
+
+
+def gpfit(x: np.ndarray) -> tuple:
+    """Generalized Pareto fit (threshold 0) matching MATLAB's gpfit; returns (shape k, scale sigma).
+
+    MATLAB maximizes the likelihood with ``fminsearch`` (Nelder-Mead; tolerances 1e-6 on
+    parameters and likelihood, at most 400 evaluations) from a moment-based start, so the
+    result is a loosely converged optimum, which differs from an exact maximum-likelihood
+    fit when the likelihood is flat. The same simplex search is used here.
+    """
+    from scipy.optimize import minimize
+    x = np.sort(np.asarray(x, dtype=float).ravel())
+    n = len(x)
+    if np.any(x <= 0):
+        raise ValueError('gpfit: data must be positive.')
+    xmax = x[-1]
+    if n == 0 or not np.isfinite(np.ptp(x)):
+        return np.nan, np.nan
+    if np.ptp(x) < np.finfo(float).tiny:
+        return (np.nan, 0.0) if xmax <= np.sqrt(np.finfo(float).max) else (-np.inf, np.inf)
+    xbar = np.mean(x)
+    s2 = np.var(x, ddof=1)
+    k0 = -0.5 * (xbar ** 2 / s2 - 1)
+    sigma0 = 0.5 * xbar * (xbar ** 2 / s2 + 1)
+    if k0 < 0 and xmax >= -sigma0 / k0:
+        k0, sigma0 = 0.0, xbar
+
+    def negloglike(p):
+        k, lnsigma = p
+        z = x / np.exp(lnsigma)
+        if abs(k) > np.finfo(float).eps:
+            if k > 0 or np.max(z) < -1 / k:
+                return n * lnsigma + (1 + 1 / k) * np.sum(np.log1p(k * z))
+            return np.inf
+        return n * lnsigma + np.sum(z)  # limiting exponential distribution
+
+    with np.errstate(all='ignore'):
+        res = minimize(negloglike, [k0, np.log(sigma0)], method='Nelder-Mead',
+                       options={'xatol': 1e-6, 'fatol': 1e-6, 'maxfev': 400, 'maxiter': 200})
+    return float(res.x[0]), float(np.exp(res.x[1]))

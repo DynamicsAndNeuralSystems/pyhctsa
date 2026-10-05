@@ -11,8 +11,8 @@ from scipy.stats import gamma as gamma_dist
 from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, rayleigh, uniform, weibull_min, skew, kurtosis
 
 from ..operations.correlation import autocorr, first_crossing
-from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
-from ..utils import bin_picker, histc, matlab_quantile, simple_binner, x_corr
+from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, gpfit, wblfit
+from ..utils import bin_picker, histc, matlab_quantile, sign_change, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')
 
@@ -1467,4 +1467,103 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     # return kurtosis instead of excess kurtosis
     out['kurtosisrat'] = stats.kurtosis(y_transform, fisher=False) / stats.kurtosis(y, fisher=False)
 
+    return out
+
+
+def _matlab_round(v: float) -> int:
+    """MATLAB's ``round`` (halves away from zero)."""
+    return int(np.sign(v) * np.floor(abs(v) + 0.5))
+
+
+def _hill_estimate(s: np.ndarray, k: int) -> float:
+    """Hill estimator from the k largest of the descending-sorted positive values ``s``."""
+    if len(s) <= k or s[k] <= 0 or s[k - 1] == s[k]:
+        return np.nan  # too few values, or a tie at the threshold
+    return float(np.mean(np.log(s[:k])) - np.log(s[k]))
+
+
+def _moment_estimate(s: np.ndarray, k: int) -> float:
+    """Dekkers-Einmahl-de Haan moment estimator of the tail index (as ``_hill_estimate``)."""
+    if len(s) <= k or s[k] <= 0 or s[k - 1] == s[k]:
+        return np.nan
+    log_excess = np.log(s[:k]) - np.log(s[k])
+    m1 = np.mean(log_excess)
+    m2 = np.mean(log_excess ** 2)
+    if m2 <= 0:
+        return np.nan
+    with np.errstate(all='ignore'):
+        xi = m1 + 1 - 0.5 / (1 - m1 ** 2 / m2)
+    return float(xi) if np.isfinite(xi) else np.nan
+
+
+def _gpd_shape(exceed: np.ndarray) -> float:
+    """Shape parameter of a generalized Pareto distribution (threshold 0) fitted by maximum likelihood."""
+    if np.any(exceed <= 0):
+        return np.nan  # ties between the tail values and the threshold
+    try:
+        c, _ = gpfit(exceed)
+    except (ValueError, RuntimeError, FloatingPointError):
+        return np.nan
+    return float(c) if np.isfinite(c) else np.nan
+
+
+def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
+    """
+    Tail index of the distribution of values: how heavy its tails are.
+
+    The tail index is estimated in several ways from the ``k = round(tail_frac * N)``
+    most extreme values in each tail (taken relative to the median of the data):
+    Hill's estimator, a moment estimator, and the shape parameter of a generalized
+    Pareto distribution fitted to the exceedances over the (k+1)-th most extreme value.
+    A larger index means a heavier tail (a power-law tail of exponent alpha has index
+    1/alpha; a Gaussian has an index of about zero). NaN is returned for every
+    output if there are fewer than 10 tail values or if k is at least N/2.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tail_frac : float, optional
+        The fraction of the data in each tail used to estimate the index
+        (default 0.05).
+
+    Returns
+    -------
+    dict
+        hillUpper, hillLower: Hill estimator for the upper and lower tail (distances
+        above and below the median); hillAsym: their difference; momentAbs: the moment
+        estimator for the distances from the median; gpdUpper, gpdLower: the generalized
+        Pareto shape parameter for the upper and lower exceedances; gpdAsym: their
+        difference.
+
+    Notes
+    -----
+    The generalized Pareto fit repeats MATLAB's ``gpfit`` (a Nelder-Mead search with loose
+    tolerances), so the ``gpd*`` values are not exact maximum-likelihood estimates.
+    """
+    names = ['hillUpper', 'hillLower', 'hillAsym', 'momentAbs', 'gpdUpper', 'gpdLower', 'gpdAsym']
+    out = dict.fromkeys(names, np.nan)
+
+    y = np.asarray(y, dtype=float).ravel()
+    y = y[np.isfinite(y)]
+    n = len(y)
+    k = _matlab_round(tail_frac * n)  # number of values in each tail
+    if k < 10 or k >= n // 2:
+        return out  # too few tail values to estimate a tail index
+
+    dev = y - np.median(y)
+    tail_up = np.sort(dev[dev > 0])[::-1]  # distances above the median
+    tail_lo = np.sort(-dev[dev < 0])[::-1]  # distances below the median
+    tail_abs = np.sort(np.abs(dev))[::-1]  # distances from the median
+
+    out['hillUpper'] = _hill_estimate(tail_up, k)
+    out['hillLower'] = _hill_estimate(tail_lo, k)
+    out['hillAsym'] = out['hillUpper'] - out['hillLower']
+    out['momentAbs'] = _moment_estimate(tail_abs, k)
+
+    ys = np.sort(y)[::-1]
+    out['gpdUpper'] = _gpd_shape(ys[:k] - ys[k])  # upper exceedances
+    ys = np.sort(y)
+    out['gpdLower'] = _gpd_shape(ys[k] - ys[:k])  # lower exceedances
+    out['gpdAsym'] = out['gpdUpper'] - out['gpdLower']
     return out
