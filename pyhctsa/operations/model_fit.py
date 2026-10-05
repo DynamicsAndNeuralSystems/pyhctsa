@@ -3014,6 +3014,7 @@ def _arx_losses(y_train: np.ndarray, y_test: np.ndarray, orders) -> tuple:
         a = np.linalg.lstsq(X, y_train[m:], rcond=None)[0]
         Xe = np.column_stack([y_test[m - k:n_te - k] for k in range(1, p + 1)])
         loss[i] = np.sum((y_test[m:] - Xe @ a) ** 2) / n_te
+    loss = np.maximum(loss, np.finfo(float).eps)  # (arxstruc cannot report a loss below eps)
     return loss, n_te
 
 
@@ -3072,7 +3073,10 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
           ``log(loss * (1 + 2 * order / test length))``,
         - ``bestaic``: the minimum value of that criterion over orders.
 
-        NaN if the series is too short for the largest order.
+        NaN if the series is too short for the largest order: the training segment must
+        have more than ``2 * max(orders) + 1`` points and the test segment more than
+        ``max(orders) + 1``. Otherwise the highest-order models interpolate the training data
+        and the loss is at machine precision, an artifact.
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
@@ -3085,6 +3089,15 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
     else:
         co = int(np.floor(N * test_how))  # cutoff
         y_train, y_test = y[:co], y[co:]
+
+    # The loss is only meaningful if the highest-order model is identifiable from the training
+    # segment (more points fitted than parameters) and the test segment has points to score
+    max_order = int(np.max(orders))
+    n_scored_train = len(y_train) - max_order - 1  # points fitted (the first max_order + 1 are excluded)
+    n_scored_test = len(y_test) - max_order - 1
+    if n_scored_train <= max_order or n_scored_test < 1:
+        logger.warning('Time series too short to compare AR models of these orders')
+        return np.nan
 
     try:
         v, n_test = _arx_losses(y_train, y_test, orders)
