@@ -106,14 +106,14 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         loc, scale = gumbel_l.fit(x)
         pdf_func = lambda z: gumbel_l.pdf(z, loc=loc, scale=scale)
         peaky = pdf_func(loc)
-        left_start = right_start = 0.0
+        left_start = right_start = loc
 
     elif what_distn == 'uni':
         # Uniform distribution (peak of PDF = 1 / (b - a))
         loc, scale = uniform.fit(x)
         pdf_func = lambda z: uniform.pdf(z, loc=loc, scale=scale)
         peaky = pdf_func(np.mean(x))
-        left_start = right_start = 0.0
+        left_start = right_start = np.mean(x)
 
     elif what_distn == 'exp':
         if np.any(x < 0):
