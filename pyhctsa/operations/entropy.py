@@ -8,13 +8,14 @@ import pywt
 from numpy.typing import ArrayLike
 from numba import njit
 from antropy.entropy import _xlogx
-from scipy.stats import gaussian_kde, norm, rankdata
+from scipy.stats import norm, rankdata
 from sklearn.neighbors import KDTree
 
 from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
 from ..toolboxes.physionet import sampen as _sampen_c
-from ..utils import (_ml_rng, _zscore_matlab, bin_picker, get_tau, make_buffer, pre_process,
+from ..robust import bf_hist_edges, bf_ks_density, bf_random
+from ..utils import (_ml_rng, _zscore_matlab, get_tau, make_buffer, pre_process,
                      time_delay_embed, z_score)
 
 
@@ -96,21 +97,6 @@ def shannon_entropy(
 
     return out
 
-def _ksdensity_bandwidth(y: np.ndarray) -> float:
-    """
-    The default bandwidth of MATLAB's ``ksdensity`` for a Gaussian kernel (the 'normal-approx'
-    rule): ``sigma * (4 / (3 N)) ** (1/5)`` with the robust spread estimate
-    ``sigma = median(|y - median(y)|) / 0.6745`` (the range of the data if that is zero).
-    """
-    y = np.asarray(y, dtype=float)
-    sigma = np.median(np.abs(y - np.median(y))) / 0.6745
-    if sigma <= 0:
-        sigma = np.max(y) - np.min(y)
-    if sigma > 0:
-        return float(sigma * (4.0 / (3.0 * y.size)) ** 0.2)
-    return 1.0
-
-
 def distribution_entropy(
     y: ArrayLike,
     hist_or_ks: str = 'hist',
@@ -121,8 +107,10 @@ def distribution_entropy(
     Distributional entropy.
 
     Estimates entropy from the distribution of a data vector. The distribution is estimated
-    either using a histogram with numBins bins, or as a kernel-smoothed distribution using
-    a Gaussian kernel.
+    either using a histogram (equal-width bins spanning the data, see
+    :func:`~pyhctsa.robust.bf_hist_edges`) with numBins bins, or as a kernel-smoothed
+    distribution using a Gaussian kernel with a normal-reference bandwidth (see
+    :func:`~pyhctsa.robust.bf_ks_density`).
 
     An optional additional parameter can be used to remove a proportion of the most extreme
     positive and negative deviations from the mean as an initial pre-processing step.
@@ -135,15 +123,14 @@ def distribution_entropy(
         Whether to use a histogram ('hist') or kernel-smoothed ('ks') distribution. Default is ``'hist'``.
     num_bins : int or str or float or None, optional
 
-        - (for 'hist'): an integer, uses a histogram with that many bins; or a binning rule
-          (NumPy's 'sturges', 'fd', 'sqrt', 'auto'; the bin edges differ from MATLAB's
-          ``histcounts`` rules of the same names, which round the bin width to a 'nice' value);
+        - (for 'hist'): an integer, the number of equal-width bins; or the name of a rule for
+          the number of bins ('sturges', 'fd', 'sqrt', 'auto'; written out as formulae in
+          :func:`~pyhctsa.robust.bf_hist_edges`, so not NumPy's or MATLAB's ``histcounts``
+          rules of the same names, which round the bin width to a 'nice' value);
         - (for 'ks'): a positive real number, the bandwidth (standard deviation of the Gaussian
-          kernel) of the kernel density estimate; or empty (``''`` / ``None``) to select it as
-          MATLAB's ``ksdensity`` does: the normal-reference rule
-          ``sigma * (4 / (3 N)) ** (1/5)`` with ``sigma = median(|y - median(y)|) / 0.6745``.
-          The density itself is scipy's Gaussian KDE (MATLAB's ``ksdensity`` truncates the
-          kernel at 4 bandwidths and evaluates approximately, which differs at about 1e-5).
+          kernel) of the kernel density estimate; or empty (``''`` / ``None``) for the default
+          bandwidth, the normal-reference rule ``sigma * (4 / (3 N)) ** (1/5)`` with
+          ``sigma = median(|y - median(y)|) / 0.6745`` (see :func:`~pyhctsa.robust.bf_ks_density`).
 
         Default is 10.
 
@@ -155,7 +142,10 @@ def distribution_entropy(
     Returns
     -------
     float
-        Estimate of entropy from the distribution.
+        Estimate of entropy from the distribution (in nats), or, if ``olremp`` is nonzero, the
+        entropy of the full time series minus that of the trimmed time series. NaN if everything
+        is removed by the trimming, or if the data (after trimming) are constant, for which the
+        differential entropy is not defined.
 
     Notes
     -----
@@ -181,10 +171,12 @@ def distribution_entropy(
     # (2) Form the histogram
     if hist_or_ks == 'hist':
         # use histogram to calculate pdf
+        if np.ptp(y) == 0:  # constant: the differential entropy is not defined
+            return np.nan
         if isinstance(num_bins, (int, np.integer)) and not isinstance(num_bins, bool):
-            bin_edges = bin_picker(x_min=y.min(), x_max=y.max(), n_bins=int(num_bins))
+            bin_edges = bf_hist_edges(y, int(num_bins))
         elif isinstance(num_bins, str) and num_bins in ['sturges', 'fd', 'sqrt', 'auto']:
-            bin_edges = np.histogram_bin_edges(y, bins=num_bins)  # NumPy's rules
+            bin_edges = bf_hist_edges(y, num_bins)
         else:
             raise ValueError(
                 f"Unknown binning method: {num_bins}. Choose either a valid rule or manually specify numBins."
@@ -207,7 +199,7 @@ def distribution_entropy(
         xr = np.linspace(lo - pad, hi + pad, num_grid_pts)
         if num_bins is None or (isinstance(num_bins, str) and num_bins in ['', ' ', '[]', 'none']) \
                 or (isinstance(num_bins, (list, tuple, np.ndarray)) and len(num_bins) == 0):
-            bw = _ksdensity_bandwidth(y)  # selects the width as MATLAB's ksdensity does
+            bw = None  # the default (normal-reference) bandwidth
         elif isinstance(num_bins, (int, float, np.integer, np.floating)) and not isinstance(num_bins, bool):
             # uses the specified width (the standard deviation of the Gaussian kernel). NB: a
             # fixed absolute bandwidth makes the density estimate inconsistent (for consistency
@@ -219,8 +211,7 @@ def distribution_entropy(
             raise ValueError(
                 f"Unknown type for {num_bins}. Either set to a float (which specifies the width, or leave empty.)"
             )
-        # (the kernel standard deviation is bw: scipy's factor is relative to the data's std)
-        px = gaussian_kde(y, bw_method=bw / np.std(y, ddof=1))(xr)
+        px = bf_ks_density(y, xr, bw)[0]
         bin_widths = np.ones(len(px)) * (xr[1] - xr[0])
         # The density must be converted to probability mass per cell for the entropy sum
         # below (shared with 'hist'), and renormalized (the grid truncates some tail mass)
@@ -1123,8 +1114,8 @@ def _randomize_run(y: np.ndarray, randomize_how: str, draws: np.ndarray) -> np.n
     Randomize ``y`` one point at a time for ``2N`` steps, recording the statistics at the
     start and every ``N/10`` steps.
 
-    ``draws`` has shape ``(2N, 2)``: the (0-based) random indices consumed by each step,
-    in the order they are drawn.
+    ``draws`` has shape ``(2N, 2)``: the (0-based) random indices of each step, the element to
+    overwrite (or swap) first and the element it takes its value from second.
     """
     n = y.size
     num_calcs = 2.0 / 0.1  # randp_max / rand_inc
@@ -1144,12 +1135,11 @@ def _randomize_run(y: np.ndarray, randomize_how: str, draws: np.ndarray) -> np.n
         a, b = draws[i - 1]
         if randomize_how == 'statdist':
             # substitute a random element by a random element of the original series
-            # (MATLAB evaluates the right-hand index first: the first draw is the source)
-            y_rand[b] = y[a]
+            y_rand[a] = y[b]
         elif randomize_how == 'dyndist':
             # substitute a random element by a random element of the current,
             # already partially randomized, series
-            y_rand[b] = y_rand[a]
+            y_rand[a] = y_rand[b]
         elif randomize_how == 'permute':
             # swap two random elements, so that the distribution never changes
             y_rand[a], y_rand[b] = y_rand[b], y_rand[a]
@@ -1223,9 +1213,9 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
     compares statistics of the randomized copy with the original at 21 checkpoints: at the
     start and after every ``N/10`` steps. Port of hctsa's ``EN_Randomize``.
 
-    The random draws are those of MATLAB's Mersenne Twister (``rng(seed, 'twister')``,
-    ``randi``) when a seed is given, so the result is reproducible and, for the same seed,
-    follows the same randomization as hctsa.
+    The random indices come from the portable generator :func:`~pyhctsa.robust.bf_random`
+    (two uniform draws per step, as indices uniform on 1..N), so the result is reproducible
+    and, for the same seed, follows the same randomization as hctsa.
 
     Parameters
     ----------
@@ -1243,9 +1233,9 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
 
         Default is ``'statdist'``.
     random_seed : int or {'default', 'none'}, optional
-        How to set the random seed, as hctsa's ``BF_ResetSeed``: an integer seed;
-        ``'default'`` (or None) seeds with 0; ``'none'`` does not seed (the run is then not
-        reproducible). Default is None.
+        The seed of the random choices, as hctsa's ``BF_RandomSeed``: a number;
+        ``'default'`` (or None) is 0; ``'none'`` draws a seed from NumPy's global stream (the
+        run is then not reproducible). Default is None.
 
     Returns
     -------
@@ -1290,16 +1280,11 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
     if not np.isclose(np.mean(y), 0, atol=1e-6) or not np.isclose(np.std(y, ddof=1), 1, atol=1e-6):
         logger.warning('The input time series should be z-scored for randomize.')
 
-    # Random indices, in the order a MATLAB run draws them (randi(N) = floor(N*rand) + 1)
-    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'default'):
-        rng = _ml_rng(0)
-    elif isinstance(random_seed, str):
-        if random_seed != 'none':
-            raise ValueError(f"Not sure how to reset using '{random_seed}'")
-        rng = np.random.RandomState()
-    else:
-        rng = _ml_rng(int(random_seed))
-    draws = np.floor(n * rng.random_sample(4 * n)).astype(np.int64).reshape(2 * n, 2)
+    # The random choices for every step, reproducible from the seed: two uniform draws per
+    # step, as indices uniform on 0..N-1
+    from .nonlinearity import _bf_random_seed
+    seed = 'default' if random_seed is None else random_seed
+    draws = np.floor(n * bf_random(4 * n, _bf_random_seed(seed))).astype(np.int64).reshape(2 * n, 2)
 
     return _randomize_fit(_randomize_run(y, randomize_how, draws))
 

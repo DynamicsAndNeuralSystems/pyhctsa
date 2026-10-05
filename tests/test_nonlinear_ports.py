@@ -93,17 +93,17 @@ def _henon(n):
 
 
 def test_lyap_spec():
-    # the TISEAN lyap_spec binary, run on the same noisy embedding (the noise is NumPy's, seed 42)
+    # the TISEAN lyap_spec binary, run on the same noisy embedding (the noise is BF_Random's, seed 42)
     d = nl.lyap_spec(_henon(800), 1, 3, 30, 'full', ('ac', 1))
-    assert abs(d['LE1'] - 0.4855535) < 1e-9 and abs(d['LE2'] - 0.2755861) < 1e-9
-    assert abs(d['LE3'] + 1.741517) < 1e-9
-    assert d['numPos'] == 2 and abs(d['sumPos'] - 0.7611396) < 1e-9
-    assert abs(d['sumAll'] + 0.9803774) < 1e-9 and abs(d['KYdim'] - 2.437056) < 1e-6
+    assert abs(d['LE1'] - 0.4762983) < 1e-9 and abs(d['LE2'] - 0.2482943) < 1e-9
+    assert abs(d['LE3'] + 1.678287) < 1e-9
+    assert d['numPos'] == 2 and abs(d['sumPos'] - 0.7245926) < 1e-9
+    assert abs(d['sumAll'] + 0.9536944) < 1e-9 and abs(d['KYdim'] - 2.431745) < 1e-6
     d = nl.lyap_spec(_x(600), 1, 3, 30, 'full', ('ac', 1))
-    assert abs(d['LE1'] + 0.03207696) < 1e-9 and abs(d['LE3'] + 0.3943573) < 1e-9
+    assert abs(d['LE1'] + 0.03536173) < 1e-9 and abs(d['LE3'] + 0.3993465) < 1e-9
     assert d['numPos'] == 0 and d['KYdim'] == 0
     d = nl.lyap_spec(_x(600), 2, 4, 20, 'full', ('ac', 1))
-    assert abs(d['LE2'] + 0.1008012) < 1e-9
+    assert abs(d['LE2'] + 0.09210157) < 1e-9
     assert np.isnan(nl.lyap_spec(_x(600)[:200], 1, 3, 30))  # too short for the local fits
     assert np.isnan(nl.lyap_spec(np.ones(500)))
     with pytest.raises(ValueError):
@@ -118,16 +118,16 @@ def test_surrogate_test_nlpe_fnn(monkeypatch):
     monkeypatch.setattr(su, '_make_surrogates', lambda *a, **k: z)
     out = su.surrogate_test(x, 'RandPerm', 12, ['nlpe', 'fnn'])
     assert {k.split('_')[0] for k in out} == {'nlpe', 'fnn'}
-    assert {k.split('_', 1)[1] for k in out} == {'p', 'zscore', 'f', 'mediqr', 'prank'}
-    # the statistics, as hctsa takes them: the series' nlpe error is a mean, the surrogates' a sum
+    assert {k.split('_', 1)[1] for k in out} == {'zscore', 'mediqr', 'prank'}
+    # the statistics, as hctsa takes them: mean squared prediction errors for the series and each surrogate
     fnn_x = nl.fnn(x, 1, 2, ('ac', 1), False, escape_factor=5)['pfnn_2']
     fnn_s = np.array([nl.fnn(z[:, i], 1, 2, ('ac', 1), False, escape_factor=5)['pfnn_2'] for i in range(12)])
     assert out['fnn_zscore'] == pytest.approx((fnn_x - fnn_s.mean()) / fnn_s.std(ddof=1))
-    nlpe_s = np.array([np.sum(nl._ms_nlpe(z[:, i], 3, 1, int(nl.theiler_window(z[:, i], ('ac', 1), 300))) ** 2)
+    nlpe_s = np.array([np.mean(nl._ms_nlpe(z[:, i], 3, 1, int(nl.theiler_window(z[:, i], ('ac', 1), 300))) ** 2)
                        for i in range(12)])
     assert out['nlpe_zscore'] == pytest.approx(
         (nl.nlpe(x, 3, 1, 5000, ('ac', 1))['msqerr'] - nlpe_s.mean()) / nlpe_s.std(ddof=1))
-    assert out['nlpe_zscore'] < -10  # (mean against sum)
+    assert out['nlpe_zscore'] < 0  # the series is more predictable than its permutations
 
 
 def test_gp_corr_sum_m1():

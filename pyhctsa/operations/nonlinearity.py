@@ -22,10 +22,24 @@ from ..operations.correlation import first_crossing, first_min, autocorr
 from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robustfit
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
 from ..toolboxes.Tisean_3_0_1.tisean import _e, _round_significant
+from ..robust import bf_hist_edges, bf_random
 from ..utils import (_linspace, _ml_randperm, _ml_rng, _round_half_away, bin_picker, get_tau,
                      matlab_quantile, theiler_window, time_delay_embed)
 
 logger = logging.getLogger('pyhctsa')
+
+
+def _bf_random_seed(random_seed: Union[int, float, str, None]) -> int:
+    """The integer seed for :func:`~pyhctsa.robust.bf_random` that a ``randomSeed`` input stands
+    for (hctsa's ``BF_RandomSeed``): ``'default'`` is 0, a number is itself (rounded, made
+    non-negative, below 4e9), and ``None`` or ``'none'`` a seed drawn from NumPy's global stream."""
+    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
+        return int(np.random.randint(0, 4_000_000_000))
+    if isinstance(random_seed, str):
+        if random_seed != 'default':
+            raise ValueError(f"Not sure how to interpret the random seed '{random_seed}'")
+        return 0
+    return int(np.mod(_round_half_away(abs(float(random_seed))), 4e9))
 
 # ------------------------------------------------------------------------------
 # Embedding parameters (hctsa's NL_FNN and BF_Embed), shared by the operations below
@@ -720,8 +734,10 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
         for value-neighbors, i.e., the Theiler window: a number of samples, or
         ``['ac', k]`` for ``k`` times the autocorrelation time (``['ac1e', k]`` is
         also accepted). Default is ``['ac', 1]``.
-    random_seed : int or None, optional
-        Seed for the Mersenne Twister used to draw the reference points.
+    random_seed : int, str or None, optional
+        Seed of the random reference points (see :func:`_bf_random_seed`; ``'default'`` is 0).
+        They come from the portable generator :func:`~pyhctsa.robust.bf_random`, so the
+        results are the same as hctsa's for the same seed. Default is 0.
 
     Returns
     -------
@@ -765,7 +781,11 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
     # index[r] is the position in the time series of the (r+1)th smallest value
     index = np.argsort(y[:length], kind='stable')
 
-    rng = np.random.RandomState() if random_seed is None else _ml_rng(random_seed)
+    # Random numbers for the reference points: the next unused number of one reproducible stream
+    # (more of the same stream is generated if the numbers run out)
+    seed = _bf_random_seed(random_seed)
+    rand_stream = bf_random(512, seed)
+    num_used = 0
 
     err = np.zeros(max_delay + 1)
     for _ in range(iterations):
@@ -773,7 +793,10 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
         # that clears the Theiler window (as hctsa, give up with NaN after
         # max_attempts draws, which is data dependent).
         for _ in range(max_attempts):
-            ref = int(np.ceil(rng.random_sample()*length))  # a random value-rank (from one)
+            if num_used >= len(rand_stream):
+                rand_stream = bf_random(4 * len(rand_stream), seed)  # same stream, longer
+            ref = int(np.ceil(rand_stream[num_used]*length))  # a random value-rank (from one)
+            num_used += 1
             actual = index[ref-1]
             below, above = index[:ref-1], index[ref:]
             pre_candidates = below[np.abs(below - actual) > past]
@@ -1010,45 +1033,6 @@ def local_density(y: ArrayLike, nnr: int = 3,
 
 class _D2DataError(ValueError):
     """A data-dependent failure of :func:`tisean_d2`, for which hctsa returns NaN."""
-
-
-def _c2g_overflows(c2: list) -> bool:
-    """
-    Whether TISEAN's ``c2g`` binary would write ``Infinity``/``NaN`` for these correlation sums.
-
-    ``c2g.f`` keeps the log-lengths and log-correlation sums in single precision, and the
-    prefactor ``f = exp((e(k+1)c(k) - e(k)c(k+1))/(e(k+1) - e(k)))`` of its piecewise
-    power-law interpolation overflows (above about 88.7 in the exponent) for some series,
-    which contaminates the whole block with ``Infinity``/``NaN``. hctsa cannot read that
-    output and returns NaN (``NL_d2``: 'Inf/NaN-contaminated output'). The vendored
-    :func:`pyhctsa.toolboxes.Tisean_3_0_1.tisean.c2g` works in double precision and does
-    not overflow, so this reproduces the single-precision condition from the same
-    buffers (including the leftover slot of a block cut short by a zero).
-    """
-    meps = 1000
-    e_buf = np.zeros(meps, dtype=np.float32)
-    c_buf = np.zeros(meps, dtype=np.float32)
-    for block in c2:
-        me = 0
-        for ee, cc in block:
-            me += 1
-            if cc <= 0.0:
-                break
-            e_buf[me - 1] = np.log(np.float32(ee))
-            c_buf[me - 1] = np.log(np.float32(cc))
-        if me == 0:
-            continue
-        order = _tisean._tisean_argsort(e_buf[:me])
-        e_buf[:me] = e_buf[:me][order]
-        c_buf[:me] = c_buf[:me][order]
-        e, c = e_buf[:me], c_buf[:me]
-        with np.errstate(all='ignore'):
-            de = e[1:] - e[:-1]
-            f = np.exp((e[1:] * c[:-1] - e[:-1] * c[1:]) / de)
-        # intervals of zero width are skipped by c2g.f
-        if np.any(~np.isfinite(f[de != 0])):
-            return True
-    return False
 
 
 def _argmin_first_colmajor(m: np.ndarray):
@@ -1378,8 +1362,8 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         correlation sum (raw and Gaussian-kernel smoothed), and the correlation
         entropy. Returns NaN, as hctsa does, if the time series is too short, the time
         delay cannot be determined, or the TISEAN output is unusable for this series
-        (no valid output for a long delay, Inf/NaN-contaminated correlation sums, no
-        correlation-dimension data, or no scaling range).
+        (no valid output for a long delay, no correlation-dimension data, or no scaling
+        range).
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size  # data length (number of samples)
@@ -1417,8 +1401,6 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
     except ValueError as exc:  # e.g. a delay vector longer than the series
         raise _D2DataError(f'TISEAN d2 produced invalid output (perhaps due to long '
                            f'tau = {tau}, N = {y.size}): {exc}') from exc
-    if _c2g_overflows(tables['c2']):
-        raise _D2DataError('TISEAN d2 produced Inf/NaN-contaminated output for this data')
     c2gdat = _tisean.c2g(tables['c2'])
     c2tdat = _tisean.c2t(tables['c2'])
     d2dat, h2dat = tables['d2'], tables['h2']
@@ -1847,9 +1829,10 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer,
         or ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
         TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
-    random_seed : int, optional
+    random_seed : int, str or None, optional
         Seed for choosing the random subsample of reference points (relevant when
-        ``nref != -1``; the subsample differs from MATLAB's). Default is 0.
+        ``nref != -1``; see :func:`_bf_random_seed`). The numbers come from the portable generator
+        :func:`~pyhctsa.robust.bf_random`, so the subsample is the same as hctsa's. Default is 0.
 
     Returns
     -------
@@ -1894,7 +1877,7 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     if nref == -1 or nref >= n_emb:
         ref_idx = np.arange(n_emb)
     else:
-        ref_idx = _ml_randperm(n_emb, _ml_rng(0 if random_seed is None else int(random_seed)))[:int(nref)] - 1
+        ref_idx = bf_random(n_emb, _bf_random_seed(random_seed), 'perm')[:int(nref)] - 1  # random subsample
 
     # For each reference point, the distances to its 1st..kmax-th nearest neighbors outside
     # the Theiler window (a KD-tree, over-fetching neighbors to cover those excluded)
@@ -2438,13 +2421,27 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
 
 
 
+def _ml_randsample(n: int, k: int, rng: np.random.RandomState) -> np.ndarray:
+    # MATLAB's randsample(n, k) (k values out of 1:n without replacement), from a stream
+    # emulating MATLAB's Mersenne twister: the first k of randperm(n) if the sample is more than
+    # a quarter of the population, otherwise repeated draws with replacement (randi) until k
+    # unique values, in a random order.
+    if 4 * k > n:
+        return _ml_randperm(n, rng)[:k]
+    seen = np.zeros(n, dtype=bool)
+    while np.count_nonzero(seen) < k:
+        seen[np.floor(n * rng.random_sample(k - np.count_nonzero(seen))).astype(int)] = True
+    return np.flatnonzero(seen)[_ml_randperm(k, rng) - 1] + 1
+
+
 def _dvv_draws(rng: np.random.RandomState, n: int, n_dv: int, nsub: int, num_surr: int) -> tuple:
-    # The random draws of NL_DVV, in the order hctsa makes them: the reference delay vectors
-    # (randsample without replacement) for the data, one random permutation per surrogate, then
-    # the reference delay vectors for each surrogate. Returns 0-based (refs, perms).
-    refs = [_ml_randperm(n_dv, rng)[:nsub] - 1]
+    # The random draws of NL_DVV, in the order hctsa makes them (and from MATLAB's stream, for
+    # the same seed): the reference delay vectors (randsample without replacement) for the data,
+    # one random permutation per surrogate, then the reference delay vectors for each surrogate.
+    # Returns 0-based (refs, perms).
+    refs = [_ml_randsample(n_dv, nsub, rng) - 1]
     perms = [_ml_randperm(n, rng) - 1 for _ in range(num_surr)]
-    refs += [_ml_randperm(n_dv, rng)[:nsub] - 1 for _ in range(num_surr)]
+    refs += [_ml_randsample(n_dv, nsub, rng) - 1 for _ in range(num_surr)]
     return refs, perms
 
 
@@ -2547,13 +2544,13 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
     Notes
     -----
     The surrogates keep the best-matching of (at most) 100 IAAFT iterates, as hctsa's patched
-    DVV toolbox does. In MATLAB, the rank-ordering step of hctsa's ``DVV_surrogate.m`` sorts
-    the output of ``ifft``, which carries a negligible imaginary part (from the sign of the
-    zero-frequency and Nyquist components) in most iterations; MATLAB then ranks it by
-    magnitude rather than by value. Here the real part is always ranked by value, as the
-    IAAFT algorithm intends, so surrogate-based outputs differ from MATLAB's in distribution.
-    The reference vectors and surrogate permutations are drawn from a numpy random stream
-    (seeded by ``random_seed``) rather than MATLAB's.
+    DVV toolbox does, and the rank-ordering step ranks the real part of the spectrum-matched
+    series by value (hctsa's ``DVV_surrogate.m`` takes ``real(ifft(...))``: ``ifft`` of the
+    conjugate-symmetric spectrum has imaginary parts of about 1e-16, by which MATLAB's
+    ``sort`` of a complex vector, ranking by magnitude, used to order the surrogate by
+    ``|s|`` instead of ``s``). The reference vectors and surrogate permutations are drawn from
+    an emulation of MATLAB's random stream (``rng(random_seed, 'twister')`` with ``randsample``
+    and ``randperm``), so the outputs agree with hctsa's for the same seed.
 
     Parameters
     ----------
@@ -3107,15 +3104,12 @@ def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
 # ------------------------------------------------------------------------------
 def _random_subset(n: int, k: int, random_seed: Union[int, str, None]) -> np.ndarray:
     """
-    ``k`` of ``n`` indices (from zero) in random order, from the Mersenne Twister seeded as
-    hctsa's ``BF_ResetSeed`` (an integer seed, ``'default'`` for seed 0, or ``None``/``'none'``
-    for an unseeded stream).
+    The first ``k`` of a random permutation of ``n`` indices (from zero), from the portable
+    generator :func:`~pyhctsa.robust.bf_random` (as hctsa's
+    ``BF_Random(n, BF_RandomSeed(randomSeed), 'perm')``): an integer seed, ``'default'`` for
+    seed 0, or ``None``/``'none'`` for a seed from NumPy's global stream.
     """
-    if random_seed is None or random_seed == 'none':
-        rng = np.random.RandomState()
-    else:
-        rng = _ml_rng(0 if random_seed == 'default' else int(random_seed))
-    return _ml_randperm(n, rng)[:k] - 1
+    return bf_random(n, _bf_random_seed(random_seed), 'perm')[:k] - 1
 
 
 def _recurrence_radius(Y: np.ndarray, rr: float, random_seed: Union[int, str, None]) -> float:
@@ -3255,11 +3249,10 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
         The maximum number of samples to consider (the first ``max_n``); ``'full'`` to
         disable cropping. Default is 10000.
     random_seed : int, str or None, optional
-        The seed of the Mersenne Twister for the random subsample used to set the radius, as
-        hctsa's ``BF_ResetSeed``: an integer, ``'default'`` (seed 0), or ``None``/``'none'``
-        (unseeded). The radius is the same as hctsa's only when there are at most 500 embedded
-        points (the subsample is then the whole series): MATLAB's ``randperm(n, k)`` draws a
-        different random subset from the same seed. Default is ``'default'``.
+        The seed of the random subsample used to set the radius, as hctsa's ``BF_RandomSeed``:
+        an integer, ``'default'`` (seed 0), or ``None``/``'none'`` (a seed from NumPy's global
+        stream). The subsample is the first 500 of a :func:`~pyhctsa.robust.bf_random`
+        permutation, so the radius is the same as hctsa's. Default is ``'default'``.
 
     Returns
     -------
@@ -3373,11 +3366,10 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
         ``max_n`` points, since the number of recurrent pairs grows as ``rr * N**2``.
         ``'full'`` disables cropping (a warning is logged above N = 20000). Default is 10000.
     random_seed : int, str or None, optional
-        The seed of the Mersenne Twister for the random subsample used to set the radius, as
-        hctsa's ``BF_ResetSeed``: an integer, ``'default'`` (seed 0), or ``None``/``'none'``
-        (unseeded). The subsample is the whole series (so the radius is exactly hctsa's)
-        up to 500 embedded points; beyond that MATLAB's ``randperm(n, k)`` draws a different
-        random subset from the same seed. Default is ``'default'``.
+        The seed of the random subsample used to set the radius, as hctsa's ``BF_RandomSeed``:
+        an integer, ``'default'`` (seed 0), or ``None``/``'none'`` (a seed from NumPy's global
+        stream). The subsample is the first 500 of a :func:`~pyhctsa.robust.bf_random`
+        permutation, so the radius is the same as hctsa's. Default is ``'default'``.
 
     Returns
     -------
@@ -3549,7 +3541,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
           zeros of the profile after summing it into 20 equal bins of lags (as a distribution
           over bins)
         - ``maxhisthist``, ``phisthistmin``, ``hhisthist``: the maximum, the first (lowest-value)
-          bin probability, and the entropy of the histogram of profile values (square-root bins)
+          bin probability, and the entropy of the histogram of profile values (ceil(sqrt(n)) equal-width bins, explicit edges)
     """
     y = np.asarray(y, dtype=float).ravel()
     if num_lags < 2:
@@ -3653,10 +3645,9 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     out['rangecgdist'] = np.ptp(cglav)
     out['pzeroscgdist'] = np.sum(cglav == 0) / num_bins
 
-    # Distribution of the profile values (MATLAB's 'sqrt' bin rule, as histcounts)
-    n_bins = max(int(np.ceil(np.sqrt(nn))), 1)
-    lo, hi = np.min(trett), np.max(trett)
-    edges = bin_picker(np.float64(lo), np.float64(hi), None, (hi - lo) / n_bins)
+    # Distribution of the profile values: ceil(sqrt(n)) equal-width bins spanning the values,
+    # with explicit edges (bf_hist_edges)
+    edges = bf_hist_edges(trett, 'sqrt')
     nhist = np.histogram(trett, bins=edges)[0] / nn
     out['maxhisthist'] = np.max(nhist)
     out['phisthistmin'] = nhist[0]  # probability in the first (lowest-value) bin
@@ -4184,10 +4175,10 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
         The maximum number of samples to consider (the first ``max_n``); ``'full'`` for no
         cropping (a warning is logged above 50000 samples). Default is ``'full'``.
     random_seed : int, str or None, optional
-        The seed of the Mersenne Twister for sampling the poles, as hctsa's ``BF_ResetSeed``: an
-        integer, ``'default'`` (seed 0), or ``None``/``'none'`` (unseeded). MATLAB's
-        ``randperm(n, k)`` draws a different random set of poles from the same seed than the
-        Mersenne-Twister permutation used here. Default is ``'default'``.
+        The seed for sampling the poles, as hctsa's ``BF_RandomSeed``: an integer, ``'default'``
+        (seed 0), or ``None``/``'none'`` (a seed from NumPy's global stream). The poles are the
+        first of a :func:`~pyhctsa.robust.bf_random` permutation, so they are the same as
+        hctsa's. Default is ``'default'``.
 
     Returns
     -------
@@ -4886,8 +4877,8 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
     reproduces the TISEAN binary, including its random initial vectors).
 
     A little noise (0.001 of the standard deviation) is added to the series first, so that the
-    local fits are well posed for quantized series; ``random_seed`` seeds it (NumPy's generator,
-    not MATLAB's ``rng(42)`` stream).
+    local fits are well posed for quantized series; ``random_seed`` seeds it (the portable
+    generator :func:`~pyhctsa.robust.bf_random`, so the dither is the same as hctsa's).
 
     Parameters
     ----------
@@ -4906,8 +4897,8 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
     theiler_win : int, float, or ``['ac', k]``, optional
         The Theiler window (see :func:`pyhctsa.utils.theiler_window`): neighbors closer in time
         than this are not used. Default is ``['ac', 1]``.
-    random_seed : int, optional
-        Seed of the added noise. Default is 42.
+    random_seed : int or str, optional
+        Seed of the added noise (see :func:`_bf_random_seed`). Default is 42.
 
     Returns
     -------
@@ -4923,7 +4914,7 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
     if m < 3:
         raise ValueError('The embedding dimension, m, must be at least 3 (the outputs include LE3)')
 
-    y = y + 0.001 * np.std(y, ddof=1) * np.random.RandomState(random_seed).randn(n)
+    y = y + 0.001 * np.std(y, ddof=1) * bf_random(n, _bf_random_seed(random_seed), 'normal')
 
     params = _embedding_params(y, tau_method, m)
     if params is None:

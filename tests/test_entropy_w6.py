@@ -49,13 +49,14 @@ def test_wavelet_entropy():
 
 
 def test_randomize():
-    # the random draws replicate MATLAB's (rng(0), randi), so the values agree
+    # the random indices come from BF_Random (hctsa robust/finish), so the values are MATLAB's
+    # for the same seed (checked against MATLAB in test_p2_a.py)
     d = randomize(_x(), 'statdist', 'default')
-    assert abs(d['ac1diff'] - 0.707323602716) < 1e-9 and d['ac1hp'] == 4
-    assert abs(d['xc1diff'] - 0.613406312685) < 1e-9
-    assert abs(d['permen3_1diff'] - 0.0166988313631) < 1e-9 and d['statav5hp'] == 6
-    assert abs(d['d1fexpc'] - 0.069342454) < 1e-6
+    assert abs(d['ac1diff'] - 0.8230860027955) < 1e-9 and d['ac1hp'] == 5
+    assert abs(d['xc1diff'] - 0.7438524870197) < 1e-9
+    assert abs(d['permen3_1diff'] - 0.0168573921147) < 1e-9 and d['statav5hp'] == 9
+    assert abs(d['d1fexpc'] - 0.0735217644) < 1e-6
     d = randomize(_x(), 'permute')
-    assert abs(d['ac1diff'] - 0.831449012634) < 1e-9 and d['ac1hp'] == 3
-    assert abs(d['xc1diff'] - 0.764558845981) < 1e-9
+    assert abs(d['ac1diff'] - 0.8526825194131) < 1e-9 and d['ac1hp'] == 3
+    assert abs(d['xc1diff'] - 0.8730839638616) < 1e-9
     assert len(d) == 64

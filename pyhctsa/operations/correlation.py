@@ -14,8 +14,8 @@ from statsmodels.tsa.stattools import pacf
 
 from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
-from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit
-from ..utils import (bf_remove_points, bin_picker, get_tau, histc, make_mat_buffer,
+from ..robust import bf_hist_edges, bf_quantile_edges, bf_random
+from ..utils import (_zscore_matlab, bf_remove_points, bin_picker, get_tau, histc, make_mat_buffer,
                      matlab_quantile, point_of_crossing, sign_change, theiler_window,
                      time_delay_embed, z_score)
 
@@ -621,22 +621,35 @@ def _fall_branch(ix: ArrayLike, y: ArrayLike) -> tuple:
     return angles, colour_counts, case_counts
 
 def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
-              extra_param: Union[int, None] = None, random_seed = None,
-              noise = None) -> dict:
+              extra_param: Union[int, None] = None, random_seed = None) -> dict:
     """
     Changes in the automutual information with the addition of noise.
 
-    Adds Gaussian-distributed noise to the time series with increasing standard deviation, eta, 
-    across the range eta = 0, 0.1, ..., 2, and measures the mutual information at each point. 
-    Can be measured using histograms with extra_param bins, or Kraskov estimators with k = extra_param.
+    Adds independent Gaussian noise of standard deviation eta to the (z-scored) time series,
+    for 50 noise levels evenly spaced from eta = 0 to eta = 3, and measures the automutual
+    information (AMI) at lag ``tau`` at each level, averaged over 10 independent noise draws
+    per level (so that the curve reflects the series rather than one particular noise
+    realization). Can be measured using histograms with ``extra_param`` bins, or Kraskov
+    estimators with k = ``extra_param``.
     The output is a set of statistics on the resulting set of automutual information
-    estimates, including a fit to an exponential decay, since the automutual information 
-    decreases with the added white noise. This algorithm is quite different, but was based 
+    estimates, including a fit to an exponential decay, since the automutual information
+    decreases with the added white noise. This algorithm is quite different, but was based
     on the idea in [1].
+
+    The noise comes from :func:`~pyhctsa.robust.bf_random` (seed ``random_seed + i`` at noise
+    level ``i``), so it is the same as in hctsa's ``CO_AddNoise``, in every release and
+    platform, and leaves NumPy's global random state untouched.
+
+    The exponential ``a * exp(b * eta)`` is fitted in closed form: least squares of
+    ``log(AMI)`` on ``eta`` weighted by ``AMI**2``, which approximates a least-squares fit of
+    the AMI itself (errors in ``log(AMI)`` scale as ``1/AMI``). Levels with ``AMI <= 0``
+    (possible for the Kraskov estimator) have no logarithm and zero weight. If fewer than two
+    levels have a positive AMI (or the AMI curve is constant) there is nothing to fit, and the
+    fit outputs are NaN.
 
     References
     ----------
-    .. [1] "Titration of chaos with added noise", Chi-Sang Poon and Mauricio Barahona 
+    .. [1] "Titration of chaos with added noise", Chi-Sang Poon and Mauricio Barahona
         P. Natl. Acad. Sci. USA, 98(13) 7107 (2001)
 
     Parameters
@@ -677,63 +690,64 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     extra_param : int, optional
         Additional parameter for the AMI estimator.
 
-        - For histogram methods: number of bins.
-        - For alternative methods: estimator-specific parameter.
-
-        Default is ``10``.
+        - For histogram methods: number of bins (default 10).
+        - For the Kraskov methods: the number of nearest neighbors (default 4).
 
     random_seed : int or None, optional
-        Seed controlling noise realisations (an independent noise vector is drawn
-        at each noise level). If ``None``, defaults internally to ``0``.
-
-    noise : array-like, optional
-        Test hook: noise to use instead of drawing it. Either a 1-D vector, reused at
-        every noise level, or a ``(50, len(y))`` array with one row per noise level.
+        Seed of the noise (a number, passed to :func:`~pyhctsa.robust.bf_random`; at noise level
+        ``i`` the seed is ``random_seed + i``). ``None`` (or a string such as ``'default'``)
+        is ``0``.
 
     Returns
     -------
     dict
-        Summary statistics of the AMI–noise curve, including exponential
+        Summary statistics of the AMI-noise curve, including exponential
         decay fit parameters and descriptive measures.
     """
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float).ravel()
+    n = len(y)
     # Set tau from the series if it is a rule: 'ac'/'tau', 'ac1e' or 'mi'
     tau = _resolve_delay(y, tau, default=1)
     if np.isnan(tau):  # undefined ACF (e.g. constant series) or no delay by the rule
         return np.nan
-    # Fresh uncorrelated Gaussian noise is drawn at each noise level (seed set once);
-    # a user-supplied ``noise`` (test hook) is either one vector reused at every level
-    # or an array with one row per level.
-    if noise is not None:
-        noise = np.asarray(noise, dtype=float)
-        noise_at = (lambda i: noise) if noise.ndim == 1 else (lambda i: noise[i])
-    else:
-        np.random.seed(0 if random_seed is None else random_seed)
-        noise_at = lambda i: np.random.randn(len(y))
+    if random_seed is None or isinstance(random_seed, str):
+        random_seed = 0
 
     # Set up noise range
-    noise_range = np.linspace(0, 3, 50) # compare properties across this noise range
-    num_repeats = len(noise_range)
+    num_levels = 50
+    num_draws = 10  # independent noise vectors to average over at each level
+    noise_range = np.linspace(0, 3, num_levels)  # compare properties across this noise range
 
-    # Compute the automutual information across a range of noise levels
-    amis = np.zeros(num_repeats)
-    if ami_method in ['std1', 'std2', 'quantiles', 'even']:
+    if ami_method in ('std1', 'std2', 'quantiles', 'even'):
         # histogram-based methods using my naive implementation in CO_Histogram
-        for i in range(num_repeats):
-            amis[i] = histogram_ami(y + noise_range[i]*noise_at(i), tau, ami_method, extra_param)
-            if np.isnan(amis[i]):
-                logger.warning('Error computing AMI: Time series too short (?)')
-                return np.nan
-    if ami_method in ['gaussian','kraskov1','kraskov2']:
-        for i in range(num_repeats):
-            amis[i] = automutual_info(y + noise_range[i]*noise_at(i), tau, ami_method, extra_param)
-            if np.isnan(amis[i]):
-                logger.warning('Error computing AMI: Time series too short (?)')
-                return np.nan
+        ami_fn = lambda yy: histogram_ami(yy, tau, ami_method, extra_param)
+    elif ami_method in ('gaussian', 'kraskov1', 'kraskov2'):
+        ami_fn = lambda yy: automutual_info(yy, tau, ami_method, extra_param)
+    else:
+        raise ValueError(f"Unknown AMI method '{ami_method}'")
+
+    # Compute the automutual information across a range of noise levels. At each level the
+    # AMI is the mean over num_draws independent, uncorrelated Gaussian noise vectors (a
+    # different stream for every level), so that the curve is not dominated by the
+    # idiosyncrasies of a single noise draw
+    amis = np.zeros(num_levels)
+    for i in range(num_levels):
+        if noise_range[i] == 0:
+            amis[i] = ami_fn(y)  # no noise to average over
+        else:
+            # column j of the (n, num_draws) matrix (MATLAB's column-major reshape) is draw j
+            noise = bf_random(n * num_draws, random_seed + i + 1, 'normal').reshape(num_draws, n)
+            for j in range(num_draws):
+                amis[i] += ami_fn(y + noise_range[i] * noise[j])
+            amis[i] = amis[i] / num_draws
+        if np.isnan(amis[i]):
+            logger.warning('Error computing AMI: Time series too short (?)')
+            return np.nan
+
     # Output statistics
     out = {}
     # Proportion decreases
-    out['pdec'] = np.sum(np.diff(amis) < 0) / (num_repeats - 1)
+    out['pdec'] = np.sum(np.diff(amis) < 0) / (num_levels - 1)
 
     # Mean change in AMI
     out['meanch'] = np.mean(np.diff(amis))
@@ -754,16 +768,29 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
     # Count number of times the AMI function crosses its mean
     c = amis - np.mean(amis)
-    out['pcrossmean'] = np.sum(c[:-1] * c[1:] < 0) / (num_repeats - 1)
+    out['pcrossmean'] = np.sum(c[:-1] * c[1:] < 0) / (num_levels - 1)
 
-    # Fit exponential decay model
-    a, b = fit_exp1(noise_range, amis, start_point=(amis[0], -1))
-    gof = goodness_of_fit(amis, a * np.exp(b * noise_range), num_coeffs=2)
-    out['fitexpa'] = a
-    out['fitexpb'] = b
-    out['fitexpr2'] = gof['rsquare']
-    out['fitexpadjr2'] = gof['adjrsquare']
-    out['fitexprmse'] = gof['rmse']
+    # Fit exponential decay, a*exp(b*eta), in closed form: least squares of log(AMI) on eta,
+    # weighted by AMI^2 (zero weight where AMI <= 0, which has no logarithm)
+    x = noise_range
+    sst = np.sum((amis - np.mean(amis)) ** 2)
+    if np.sum(amis > 0) < 2 or sst == 0:
+        out['fitexpa'] = out['fitexpb'] = out['fitexpr2'] = np.nan
+        out['fitexpadjr2'] = out['fitexprmse'] = np.nan
+    else:
+        w = np.maximum(amis, 0) ** 2
+        log_amis = np.log(np.maximum(amis, np.finfo(float).tiny))
+        S = np.array([[np.sum(w), np.sum(w * x)], [np.sum(w * x), np.sum(w * x ** 2)]])
+        coeffs = np.linalg.solve(S, [np.sum(w * log_amis), np.sum(w * x * log_amis)])  # [log a; b]
+        exp_fit = np.exp(coeffs[0]) * np.exp(coeffs[1] * x)
+        sse = np.sum((amis - exp_fit) ** 2)
+
+        # Output statistics on fit to an exponential decay
+        out['fitexpa'] = np.exp(coeffs[0])
+        out['fitexpb'] = coeffs[1]
+        out['fitexpr2'] = max(0.0, 1 - sse / sst)  # between 0 and 1
+        out['fitexpadjr2'] = 1 - (1 - out['fitexpr2']) * (num_levels - 1) / (num_levels - 2)
+        out['fitexprmse'] = np.sqrt(sse / (num_levels - 2))
 
     # Fit linear function
     p = np.polyfit(noise_range, amis, 1)
@@ -1005,7 +1032,10 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     out['theta_mean'] = np.mean(theta)
     out['theta_std'] = np.std(theta, ddof=1)
     
-    bin_edges = np.linspace(-np.pi/2, np.pi/2, 11) # 10 bins in the histogram
+    # 10 equal bins on the support of the angles (-pi/2, pi/2) (explicit edges, so that angles
+    # of exactly zero from tied values or of exactly +/-pi/2 from a vertical step fall in the
+    # same bin whatever the rounding):
+    bin_edges = _fixed_edges(10, -np.pi/2, np.pi/2)
     px, _ = _histcounts(theta, bin_edges=bin_edges)
     bin_widths = np.diff(bin_edges)
     out['hist10std'] = np.std(px, ddof=1)
@@ -1013,11 +1043,11 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     
     # Stationarity in fifths of the time series
     # Use histograms with 4 bins
-    x = np.linspace(-np.pi/2, np.pi/2, 5) # 4 bins
+    bin_edges4 = _fixed_edges(4, -np.pi/2, np.pi/2)
     afifth = (N-1) // 5 # -1 because angles are correlations *between* points
-    n = np.zeros((len(x)-1, 5))
+    n = np.zeros((4, 5))
     for i in range(5):
-        n[:, i], _ = np.histogram(theta[afifth*i:afifth*(i+1)], bins=x)
+        n[:, i], _ = np.histogram(theta[afifth*i:afifth*(i+1)], bins=bin_edges4)
         
     n = n / afifth
     
@@ -1053,7 +1083,7 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     # Outliers in the embedding space
     # area of max span of all points; versus area of max span of 50% of points closest to origin
     d = np.sqrt(m[:, 0]**2 + m[:, 1]**2)
-    ix = np.argsort(d)
+    ix = np.argsort(d, kind='stable')  # (ties stay in time order, as MATLAB's sort)
     
     out['areas_all'] = np.ptp(m[:, 0]) * np.ptp(m[:, 1])
     r50 = ix[:int(np.ceil(len(ix)/2))] # ceil to match MATLAB's round fn output
@@ -1063,9 +1093,21 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
 
     return out 
 
+def _fixed_edges(num_bins: int, lo: float, hi: float) -> np.ndarray:
+    """``num_bins`` equal bins on [lo, hi] as :func:`~pyhctsa.robust.bf_hist_edges` places them
+    (explicit edges, with a tiny tolerance so a value on an edge falls in the upper bin). With a
+    given number of bins the data do not enter, so (as in hctsa) this also works when there
+    are none (e.g. all angles NaN)."""
+    return bf_hist_edges(np.zeros(1), num_bins, [lo, hi])
+
+
 def _histcounts(x: ArrayLike, bins: Union[int, None, str] = None, 
                 bin_edges: Union[ArrayLike, None] = None) -> tuple:
     x = np.asarray(x).flatten()
+    # (NaNs are not counted in any bin, but, as in histcounts' 'probability' normalization, they
+    # are in the number of elements the counts are divided by)
+    x_all = x
+    x = x[~np.isnan(x)]
 
     if bin_edges is not None:
         edges = np.asarray(bin_edges)
@@ -1080,7 +1122,7 @@ def _histcounts(x: ArrayLike, bins: Union[int, None, str] = None,
 
     n, _ = np.histogram(x, bins=edges)
 
-    n = n / len(x)
+    n = n / len(x_all)
 
     return n, edges
 
@@ -1150,8 +1192,13 @@ def compare_min_ami(y: ArrayLike, bin_method: str = 'std1',
     Returns
     -------
     dict
-        Dictionary containing statistics on the set of first minimums 
-        of the automutual information function.
+        Dictionary containing statistics on the set of first minimums
+        of the automutual information function. ``nprompeaks`` is the number of prominent
+        peaks (local maxima) of the first-minimum lag as a function of the number of bins: peaks
+        that rise at least 5% of the range of the lags above the higher of the valleys on
+        either side of them, so a small fluctuation does not add a peak (it replaces the earlier
+        ``nlocmax``, a count of every local maximum more than one standard deviation above the
+        mean).
     """
     y = np.asarray(y)
     n = len(y)
@@ -1193,55 +1240,65 @@ def compare_min_ami(y: ArrayLike, bin_method: str = 'std1',
     out['conv4'] = np.mean(ami_mins[-5:])
 
     # look for peaks (local maxima)
-    # % local maxima above 1*std from mean
     # inspired by curious result of periodic maxima for periodic signal with
     # bin size... ('quantiles', [2:80])
-    diff_ami_mins = np.diff(ami_mins[:-1])
-    positive_diff_indices = np.where(diff_ami_mins > 0)[0]
-    sign_change_indices = sign_change(diff_ami_mins, 1)
-
-    # Find the intersection of positive_diff_indices and sign_change_indices
-    loc_extr = np.intersect1d(positive_diff_indices, sign_change_indices) + 1
-    above_threshold_indices = np.where(ami_mins > out['mean'] + out['std'])[0]
-    big_loc_extr = np.intersect1d(above_threshold_indices, loc_extr)
-
-    # Count the number of elements in big_loc_extr
-    out['nlocmax'] = len(big_loc_extr)
+    # Only prominent peaks are counted: a count of every local maximum, or of those above a
+    # fixed height such as the mean plus one standard deviation, changes with each small
+    # fluctuation of the curve
+    out['nprompeaks'] = _num_prominent_peaks(ami_mins, 0.05 * out['range'])
 
     return out
+
+def _num_prominent_peaks(x: ArrayLike, min_prominence: float) -> int:
+    """The number of local maxima of ``x`` with prominence at least ``min_prominence``.
+
+    Interior points higher than both neighbors count (a flat top counts once). The prominence
+    is how far a peak rises above the higher of the lowest values reached on each side before
+    meeting a higher value (or the end of the series). (hctsa's ``SUB_NumProminentPeaks``.)
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    x = x[np.concatenate(([True], np.diff(x) != 0))]  # merge runs of equal values
+    num_peaks = 0
+    for i in range(1, len(x) - 1):
+        if x[i] > x[i - 1] and x[i] > x[i + 1]:
+            higher_left = np.flatnonzero(x[:i] > x[i])
+            higher_right = np.flatnonzero(x[i + 1:] > x[i])
+            i_left = higher_left[-1] if higher_left.size else 0
+            i_right = i + 1 + higher_right[0] if higher_right.size else len(x) - 1
+            valley = max(np.min(x[i_left:i + 1]), np.min(x[i:i_right + 1]))
+            if x[i] - valley >= min_prominence:
+                num_peaks += 1
+    return num_peaks
+
 
 def _ami_hist_binning(y: ArrayLike, meth: str, num_bins: int):
     """Per-sample bin index for the histogram-AMI estimators.
 
     The binning depends only on ``y``, ``meth`` and ``num_bins`` --- not on the time
     lag --- so callers that sweep lags (e.g. ``compare_min_ami``) can compute this once
-    and reuse it. Returns ``(idx, valid, num_bins)`` where ``idx[k]`` is the 0-based bin
+    and reuse it. The edges are explicit (:func:`~pyhctsa.robust.bf_hist_edges`,
+    :func:`~pyhctsa.robust.bf_quantile_edges`): they place a value exactly on an edge always
+    in the same bin. Returns ``(idx, valid, num_bins)`` where ``idx[k]`` is the 0-based bin
     of ``y[k]`` and ``valid[k]`` is False if the point falls outside the bin range. The
     assignment reproduces ``np.histogram2d``'s bins exactly (last bin right-inclusive).
     """
     y = np.asarray(y)
     if meth == 'even':
-        b = np.linspace(np.min(y), np.max(y), num_bins + 1)
-        # Add increment buffer to ensure all points are included
-        inc = 0.1
-        b[0] -= inc
-        b[-1] += inc
+        b = bf_hist_edges(y, num_bins)  # through the range of the time series
     elif meth == 'std1':  # bins out to +/- 1 std
-        b = np.linspace(-1, 1, num_bins + 1)
-        if np.min(y) < -1:
+        b = bf_hist_edges(y, num_bins, [-1, 1])
+        if np.min(y) < b[0]:
             b = np.concatenate(([np.min(y) - 0.1], b))
-        if np.max(y) > 1:
+        if np.max(y) > b[-1]:
             b = np.concatenate((b, [np.max(y) + 0.1]))
     elif meth == 'std2':  # bins out to +/- 2 std
-        b = np.linspace(-2, 2, num_bins + 1)
-        if np.min(y) < -2:
+        b = bf_hist_edges(y, num_bins, [-2, 2])
+        if np.min(y) < b[0]:
             b = np.concatenate(([np.min(y) - 0.1], b))
-        if np.max(y) > 2:
+        if np.max(y) > b[-1]:
             b = np.concatenate((b, [np.max(y) + 0.1]))
     elif meth == 'quantiles':  # use quantiles with ~equal number in each bin
-        b = np.quantile(y, np.linspace(0, 1, num_bins + 1), method='hazen')
-        b[0] -= 0.1
-        b[-1] += 0.1
+        b = bf_quantile_edges(y, num_bins)  # (fewer bins if values are tied at a quantile)
     else:
         raise ValueError(f"Unknown method '{meth}'")
 
@@ -1322,7 +1379,11 @@ def histogram_ami(
         - 'even': evenly-spaced bins through the range
         - 'std1': bins extending to ±1 standard deviation from mean
         - 'std2': bins extending to ±2 standard deviations from mean
-        - 'quantiles': equiprobable bins using quantiles
+        - 'quantiles': equiprobable bins using quantiles (fewer bins if values are tied at a
+          quantile)
+
+        The bin edges are explicit, so that a value exactly on an edge always falls in the same
+        bin (see :func:`~pyhctsa.robust.bf_hist_edges`).
 
         Default is ``'even'``.
         
@@ -1344,6 +1405,8 @@ def histogram_ami(
 
     # Bin the data once (the binning is the same for both delay vectors and does not
     # depend on the lag), then evaluate each lag from the precomputed bin indices.
+    if num_bins is None:
+        num_bins = 10
     idx, valid, num_bins = _ami_hist_binning(y, meth, num_bins)
 
     # Form the time-delay vectors y1 and y2
@@ -1382,6 +1445,13 @@ def stick_angles(y: ArrayLike) -> dict:
         the angles, stationarity, autocorrelation, and measures of the distribution of
         these stick angles.
 
+        ``pnsumabsdiff`` is the summed absolute difference between the histograms (the proportion
+        of angles in each of 20 bins spanning -pi/2 to pi/2) of the positive and negative angles
+        (0 if identical, 2 if they share no bin); ``symks_p`` and ``symks_n`` are half the summed
+        absolute difference between the histogram of the positive or negative set's angles and
+        its mirror image about zero (0 if symmetric, 1 if all angles are in bins whose mirror
+        image is empty).
+
         As in hctsa, redundant statistics are not returned: ``std_p``, ``std_n``,
         ``statav2_all_s``, ``statav3_all_s``, ``statav4_all_s``, ``ac2_p``, ``ac2_n``,
         ``ac2_all``, ``tau_all`` and ``ac1_all``.
@@ -1412,66 +1482,42 @@ def stick_angles(y: ArrayLike) -> dict:
     out['mean'] = np.nanmean(all_angles)
     out['median'] = np.nanmedian(all_angles)
 
-    # difference between positive and negative angles
-    # return difference in densities
-    
-    ksx = np.linspace(np.min(all_angles), np.max(all_angles), 200)
-    out['pnsumabsdiff'] = np.nan
-    if (len(angles[0]) > 0 and len(angles[1]) > 0 and
-        np.var(angles[0]) > 1e-10 and np.var(angles[1]) > 1e-10):
-        try:
-            ksx = np.linspace(np.min(all_angles), np.max(all_angles), 200)
-            # Calculate the Kernel Density Estimate (KDE) for the first angle distribution.
-            kde1 = gaussian_kde(angles[0], bw_method='scott')
-            ksy1 = kde1(ksx)
+    # Difference between positive and negative angles. Angles lie in (-pi/2, pi/2), so histograms
+    # with fixed bins over that support need no smoothing parameter and are bounded (a kernel
+    # density would depend on the bandwidth, which collapses when the angles are tied)
+    bin_edges = _fixed_edges(20, -np.pi / 2, np.pi / 2)
+    if len(angles[0]) > 0 and len(angles[1]) > 0:
+        px1 = np.histogram(angles[0], bins=bin_edges)[0] / len(angles[0])
+        px2 = np.histogram(angles[1], bins=bin_edges)[0] / len(angles[1])
+        out['pnsumabsdiff'] = np.sum(np.abs(px1 - px2))
+    else:
+        out['pnsumabsdiff'] = np.nan
 
-            # Calculate the KDE for the second angle distribution.
-            kde2 = gaussian_kde(angles[1], bw_method='scott')
-            ksy2 = kde2(ksx)
-
-            # If the KDEs are calculated successfully, compute the sum of the absolute
-            out['pnsumabsdiff'] = np.sum(np.abs(ksy1 - ksy2))
-        except LinAlgError:
-            pass
-    
-    # # how symmetric is the distribution of angles?
+    # How symmetric is the distribution of angles? The difference between the histogram of the
+    # positive (negative) set and its mirror image about zero (the bins are symmetric about zero)
     out['symks_p'] = np.nan
     out['ratmean_p'] = np.nan
+    if len(angles[0]) > 0:
+        px1 = np.histogram(angles[0], bins=bin_edges)[0] / len(angles[0])
+        out['symks_p'] = 0.5 * np.sum(np.abs(px1 - px1[::-1]))
+        out['ratmean_p'] = np.mean(angles[0][angles[0] > 0]) / np.mean(angles[0][angles[0] < 0])
 
-    if len(angles[0]) > 0 and np.var(angles[0]) > 1e-10:
-        try:
-            maxdev = np.max(np.abs(angles[0]))
-            kde = gaussian_kde(angles[0], bw_method='scott')
-            ksy1 = kde(np.linspace(-maxdev, maxdev, 201))
-            out['symks_p'] = np.sum(np.abs(ksy1[:100] - ksy1[101:][::-1]))
-            out['ratmean_p'] = np.mean(angles[0][angles[0] > 0])/np.mean(angles[0][angles[0] < 0])
-        except LinAlgError:
-            pass
-    
     out['symks_n'] = np.nan
     out['ratmean_n'] = np.nan
-    if len(angles[1]) > 0 and np.var(angles[1]) > 1e-10:
-        try:
-            maxdev = np.max(np.abs(angles[1]))
-            kde = gaussian_kde(angles[1], bw_method='scott')
-            ksy2 = kde(np.linspace(-maxdev, maxdev, 201))
-            out['symks_n'] = np.sum(np.abs(ksy2[:100] - ksy2[101:][::-1]))
-            out['ratmean_n'] = np.mean(angles[1][angles[1] > 0])/np.mean(angles[1][angles[1] < 0])
-        except LinAlgError:
-            pass
-    
+    if len(angles[1]) > 0:
+        px2 = np.histogram(angles[1], bins=bin_edges)[0] / len(angles[1])
+        out['symks_n'] = 0.5 * np.sum(np.abs(px2 - px2[::-1]))
+        out['ratmean_n'] = np.mean(angles[1][angles[1] > 0]) / np.mean(angles[1][angles[1] < 0])
+
     # z-score
-    zangles = []
-    # handle the case where angles is a constant
-    if np.var(angles[0], ddof=1) > 1e-10:
-        zangles.append(z_score(angles[0]))
-    else:
-        zangles.append([])
-    if np.var(angles[1], ddof=1) > 1e-10:
-        zangles.append(z_score(angles[1]))
-    else:
-        zangles.append([])
-    zallAngles = z_score(all_angles)
+    # (a constant set of angles is z-scored to zeros, as MATLAB's zscore)
+    def _z(a):
+        a = np.asarray(a, dtype=float)
+        if a.size == 0:
+            return []
+        return z_score(a) if np.var(a, ddof=1) > 1e-10 else _zscore_matlab(a)
+    zangles = [_z(angles[0]), _z(angles[1])]
+    zallAngles = _z(all_angles)
 
     # how stationary are the angle sets?
 
@@ -1578,7 +1624,7 @@ def _sub_statav(x: ArrayLike, n: int) -> tuple:
             # remove final pt
             x_buff = x_buff[:, :n]
         statavmean = np.std(np.mean(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
-        statavstd = np.std(np.std(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
+        statavstd = np.std(np.std(x_buff, axis=0, ddof=1), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
 
     return statavmean, statavstd
 
@@ -1655,12 +1701,29 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
 
     return float(out)
 
-def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'ols') -> dict:
+def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'burg') -> dict:
     """
     Compute the partial autocorrelation of an input time series.
-    
-    This function calculates the partial autocorrelation function (PACF) up to a specified 
-    lag using either ordinary least squares or Yule-Walker equations.
+
+    Computes the partial autocorrelation at lags 1 to ``max_tau``: the correlation between
+    y(t) and y(t-k) after removing the linear effect of the intermediate values (the last
+    coefficient of an order-k autoregressive fit).
+
+    The default (``'burg'``) is the sequence of reflection coefficients of Burg's recursion:
+    at each order, the coefficient minimizing the summed forward and backward prediction
+    errors, which has a closed form and is bounded in [-1, 1]. It needs no matrix solve, so it
+    is the same in any implementation (it is exact against hctsa's ``CO_PartialAutoCorr``), and
+    it agrees closely with the ordinary-least-squares partial autocorrelation. The latter
+    (``'ols'``) regresses y(t) on k lagged values; for smooth, nearly deterministic series its
+    design matrix is numerically singular and the coefficient depends on the linear solver.
+
+    For ``'burg'``, each order k uses the N-k forward errors f(t) and the matching backward
+    errors b(t-1) of the order k-1 fit: the reflection coefficient is
+    ``2*sum(f*b)/(sum(f^2) + sum(b^2))``, the partial autocorrelation at lag k is its value,
+    and both error series are then updated with it. A constant series gives zeros, and
+    prediction errors below 1e-8 of the energy of the series (rounding-level noise, as for an
+    exactly predictable sinusoid) are not allowed to produce coefficients of up to +-1. Lags of
+    N or more are NaN.
 
     Parameters
     ----------
@@ -1668,13 +1731,14 @@ def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'ols') 
         The input time series.
     max_tau : int, optional
         Maximum time-delay to compute PACF values for. Default is 10.
-    method : {'ols', 'yule-walker'}, optional
+    what_method : {'burg', 'ols', 'yule-walker'}, optional
         Method to compute partial autocorrelation:
 
+        - ``'burg'``: Burg recursion (the default, as in hctsa).
         - ``'ols'``: Ordinary least squares regression.
-        - ``'yule-walker'``: Yule-Walker equations method.
+        - ``'yule-walker'``: Yule-Walker equations method (not in hctsa).
 
-        Default is ``'ols'``.
+        Default is ``'burg'``.
 
     Returns
     -------
@@ -1687,16 +1751,34 @@ def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'ols') 
 
     """
     max_tau = int(max_tau)
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float).ravel()
     if max_tau <= 0:
         raise ValueError('Negative or zero time lags not applicable')
 
-    method_map = {'ols': 'ols-inefficient', 'yule-walker': 'ywm'} 
-    if what_method not in method_map:
-        raise ValueError(f"Invalid method: {what_method}. Use 'ols' or 'yule-walker'.")
-
-    # Compute partial autocorrelation
-    pacf_values = pacf(y, nlags=max_tau, method=method_map[what_method])
+    if what_method == 'burg':
+        n = len(y)
+        n_lags = min(max_tau, n - 1)
+        f = y - np.mean(y)  # forward prediction errors (order 0: the series itself)
+        b = f.copy()  # backward prediction errors
+        # Prediction errors below 1e-8 of the series' energy are rounding-level noise; they are
+        # not allowed to produce partial autocorrelations of up to +-1 (exactly predictable
+        # series, such as a sinusoid, give zeros beyond their order)
+        tiny = max(2e-8 * (f @ f), np.finfo(float).tiny)
+        pacf_values = np.zeros(max_tau + 1)
+        pacf_values[0] = 1
+        for k in range(1, n_lags + 1):
+            ff = f[k:].copy()
+            bb = b[k - 1:n - 1].copy()
+            refl = 2 * (ff @ bb) / (ff @ ff + bb @ bb + tiny)
+            f[k:] = ff - refl * bb
+            b[k:] = bb - refl * ff
+            pacf_values[k] = refl
+        pacf_values[n_lags + 1:] = np.nan  # lags beyond the series length are undefined
+    else:
+        method_map = {'ols': 'ols-inefficient', 'yule-walker': 'ywm'}
+        if what_method not in method_map:
+            raise ValueError(f"Invalid method: {what_method}. Use 'burg', 'ols' or 'yule-walker'.")
+        pacf_values = pacf(y, nlags=max_tau, method=method_map[what_method])
 
     # Create output dictionary
     out = {}
@@ -1735,6 +1817,10 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
         A dictionary containing various statistics of the embedding including the 
         autocorrelation of distances, the mean distance, the spread of distances, 
         and statistics from an exponential fit to the distribution of distances.
+        ``d_expfit_meandiff`` is the mean absolute difference between the histogram of distances
+        (equal-width bins, their number the larger of the Sturges and Freedman-Diaconis
+        rules, normalized as a probability density) and the fitted exponential density at the
+        bin centers; NaN if all the distances are equal.
     """
     y = np.asarray(y)
     N = len(y) # time-series length
@@ -1778,10 +1864,13 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     n_log_l = -np.mean(expon.logpdf(d, scale=1/l))  # negative log-likelihood per observation
     out['d_expfit_nlogL'] = n_log_l
 
-    # Calculate histogram
-    # % Sum of abs differences between exp fit and observed:
-    bin_edges = bin_picker(x_min=d.min(), x_max=d.max(), n_bins=np.floor(np.sqrt(len(d))))
-    N, bin_edges = np.histogram(d, bins=bin_edges, density=True)
+    # Sum of abs differences between exp fit and observed, using a histogram with automatic
+    # binning (bf_hist_edges 'auto': explicit edges)
+    if np.ptp(d) == 0:  # all distances equal: no distribution to compare with the fit
+        out['d_expfit_meandiff'] = np.nan
+        return out
+    bin_edges = bf_hist_edges(d, 'auto')
+    N = np.histogram(d, bins=bin_edges)[0] / (len(d) * np.diff(bin_edges))  # pdf normalization
     bin_centers = np.mean(np.vstack([bin_edges[:-1], bin_edges[1:]]), axis=0)
     exp_fit = expon.pdf(bin_centers, scale=1/l)
     out['d_expfit_meandiff'] = np.mean(np.abs(N - exp_fit))
@@ -2002,15 +2091,12 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
                                                                            25, method='hazen')
     out['iqronrange'] = out['iqr']/np.ptp(counts)
 
-    # distribution - using sqrt binning method (as MATLAB's histcounts: the bin width is
-    # (range / ceil(sqrt(N))), rounded to a "nice" value by the bin picker)
-    num_bins_to_use = max(int(np.ceil(np.sqrt(len(counts)))), 1)
-    min_x, max_x = np.min(counts), np.max(counts)
-    bin_edges = bin_picker(min_x, max_x, n_bins=None,
-                           bin_width_est=(max_x - min_x) / num_bins_to_use)
-    bin_counts = histc(counts, bin_edges)
+    # distribution - using the sqrt binning rule, with explicit edges (the local densities are
+    # fractions k/n, so many lie exactly on a bin edge)
+    bin_edges = bf_hist_edges(counts, 'sqrt')
+    bin_counts = np.histogram(counts, bins=bin_edges)[0]
     # normalise bin counts
-    bin_counts_norm = np.divide(bin_counts, np.sum(bin_counts))
+    bin_counts_norm = np.divide(bin_counts, len(counts))
     # get bin centres
     bin_centres = (bin_edges[:-1] + bin_edges[1:]) / 2
     out['mode_val'] = np.max(bin_counts_norm)

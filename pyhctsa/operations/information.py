@@ -6,8 +6,8 @@ import numpy as np
 from numpy.typing import ArrayLike
 from scipy import stats
 
-from ..utils import get_tau, sign_change, time_delay_embed
-from ..robust import bf_tie_break_noise
+from ..utils import _linspace, get_tau, matlab_quantile, sign_change, time_delay_embed
+from ..robust import bf_hist_edges, bf_tie_break_noise
 from ..toolboxes.infotheory.mutual_info import KraskovMI, GaussianMI
 
 # hctsa BF_TieBreakNoise: tiny jitter from the portable BF_Random stream (pyhctsa.robust), so the
@@ -40,17 +40,35 @@ def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, No
     else:
         raise ValueError(f"Unknown correlation type specified: {min_what}")
 
-def _gaussian_ami_exact(y: np.ndarray, lag: int) -> float:
-    """Gaussian AMI at one lag from the Pearson correlation of the two delayed windows,
-    as ``IN_AutoMutualInfo(y, lag, 'gaussian')`` does (NaN for a constant window)."""
-    y1, y2 = y[:-lag], y[lag:]
+# 1 - r^2 is floored at 1e-12 in the Gaussian AMI (hctsa IN_AutoMutualInfo): at |r| = 1 it is
+# rounding noise, and can be 0 or negative, so a deterministic relationship (a trend, a pure
+# oscillation) gives a finite value (at most -0.5*log(1e-12) = 13.8 nats)
+_GAUSSIAN_AMI_FLOOR = 1e-12
+
+
+def _gaussian_ami_from_r(r):
+    """Gaussian AMI ``-0.5*log(max(1 - r^2, 1e-12))`` from a Pearson correlation ``r`` (scalar or array).
+
+    As MATLAB's ``max``, which ignores NaN, a NaN correlation (a constant delay window) is the
+    floor, 13.8 nats, as in hctsa.
+    """
+    with np.errstate(invalid='ignore'):
+        return -0.5 * np.log(np.fmax(1.0 - np.asarray(r, dtype=float) ** 2, _GAUSSIAN_AMI_FLOOR))
+
+
+def _pearson_r(y1: np.ndarray, y2: np.ndarray) -> float:
+    """Pearson correlation of two vectors (NaN if either is constant, as MATLAB's ``corr``)."""
     d1, d2 = y1 - y1.mean(), y2 - y2.mean()
     den = np.sqrt(np.dot(d1, d1) * np.dot(d2, d2))
     if not den > 0:
         return np.nan
-    r = min(1.0, max(-1.0, np.dot(d1, d2) / den))
-    with np.errstate(divide='ignore'):
-        return float(-0.5 * np.log(1.0 - r * r))
+    return min(1.0, max(-1.0, np.dot(d1, d2) / den))
+
+
+def _gaussian_ami_exact(y: np.ndarray, lag: int) -> float:
+    """Gaussian AMI at one lag from the Pearson correlation of the two delayed windows,
+    as ``IN_AutoMutualInfo(y, lag, 'gaussian')`` does."""
+    return float(_gaussian_ami_from_r(_pearson_r(y[:-lag], y[lag:])))
 
 
 def _ami_gaussian_curve(y: np.ndarray):
@@ -61,14 +79,14 @@ def _ami_gaussian_curve(y: np.ndarray):
     precision at long lags of smooth series (r close to 1), where the AMI -0.5*log(1 - r^2)
     amplifies the error (up to ~1e-2, enough to create a spurious extremum). Every lag whose
     fast estimate has 1 - r^2 below 1e-2 (or is not finite) is therefore recomputed exactly,
-    lag by lag, from the Pearson correlation of the two windows, as hctsa does. A degenerate
-    (constant) delay window gives NaN at that lag. Assumes ``n >= 3`` (guarded by
-    ``_self_corr_curve``).
+    lag by lag, from the Pearson correlation of the two windows, as hctsa does. The value is
+    floored as in hctsa (``1 - r^2 >= 1e-12``, so at most 13.8 nats), and a degenerate (constant)
+    delay window has the floor value. Assumes ``n >= 3`` (guarded by ``_self_corr_curve``).
     """
     y = np.asarray(y, dtype=float)
     n = y.size
     if not np.ptp(y) > 0:                  # constant series: every window is degenerate
-        return np.full(n - 1, np.nan)
+        return np.full(n - 1, float(_gaussian_ami_from_r(np.nan)))
     yc = y - y.mean()
     # linear autocorrelation  C[tau] = sum_t yc[t]*yc[t+tau]  via zero-padded FFT
     nfft = 1 << (2 * n - 1).bit_length()
@@ -83,14 +101,20 @@ def _ami_gaussian_curve(y: np.ndarray):
     Q1 = Q[n - taus]; Q2 = Q[n] - Q[taus]
     C = C_all[taus]
     num = m * C - S1 * S2
-    den = (m * Q1 - S1 * S1) * (m * Q2 - S2 * S2)
+    v1 = m * Q1 - S1 * S1
+    v2 = m * Q2 - S2 * S2
+    den = v1 * v2
     with np.errstate(invalid='ignore', divide='ignore'):
         r = np.clip(num / np.sqrt(den), -1.0, 1.0)
         one_minus_r2 = 1.0 - r * r
-        auto_corr = -0.5 * np.log(one_minus_r2)        # AMI(tau), Gaussian estimator
-    auto_corr[~(den > 0.0)] = np.nan                   # degenerate window -> NaN
-    # Exact recomputation wherever the fast estimate is imprecise (r near 1 or not finite)
-    for j in np.flatnonzero(~(one_minus_r2 > 1e-2)):
+        auto_corr = -0.5 * np.log(np.fmax(one_minus_r2, _GAUSSIAN_AMI_FLOOR))  # AMI(tau), Gaussian
+    # Exact recomputation wherever the fast estimate is imprecise (r near 1 or not finite;
+    # this includes the degenerate windows, which are NaN here)
+    # A delay window that is constant up to rounding has a variance the cumulative sums cannot
+    # resolve (r is then meaningless): it is recomputed exactly too.
+    with np.errstate(invalid='ignore'):
+        flat = (v1 <= 1e-8 * m * Q1) | (v2 <= 1e-8 * m * Q2)
+    for j in np.flatnonzero(~(one_minus_r2 > 1e-2) | flat):
         auto_corr[j] = _gaussian_ami_exact(y, int(taus[j]))
     return auto_corr
 
@@ -291,7 +315,9 @@ def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
     -----------
         v1 (array-like): The first input vector
         v2 (array-like): The second input vector
-        r1 (str or list): The bin-partitioning method for v1 ('range', 'quantile', or [min, max])
+        r1 (str or list): The bin-partitioning method for v1: 'range' (equal-width bins spanning
+            the data, with explicit edges; NaN is returned for a constant vector), 'quantile'
+            (equal numbers of values) or [min, max] (equal-width bins spanning that range)
         r2 (str or list): The bin-partitioning method for v2 ('range', 'quantile', or [min, max])
         num_bins (int): The number of bins to partition each vector into (default : 10)
 
@@ -306,6 +332,9 @@ def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
         raise ValueError("Input vectors must be the same length")
 
     N = len(v1)
+    if (isinstance(r1, str) and r1 == 'range' and np.ptp(v1) == 0) or \
+            (isinstance(r2, str) and r2 == 'range' and np.ptp(v2) == 0):
+        return np.nan  # a constant vector has no distribution to bin
 
     # Create histograms
     edges_i = _give_me_edges(r1, v1, num_bins)
@@ -339,17 +368,17 @@ def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
     return mi
 
 def _give_me_edges(r, v, n_bins):
-    EE = 1E-6 # this small addition gets lost in the last bin
     if n_bins <= 0:
         raise ValueError(f"nbins must be > 0, got {n_bins}")
-    if r == 'range':
-        return np.linspace(np.min(v), np.max(v) + EE, n_bins + 1)
-    elif r == 'quantile': # bin edges based on quantiles
-        edges = np.quantile(v, np.linspace(0, 1, n_bins + 1))
-        edges[-1] += EE
+    if isinstance(r, str) and r == 'range':
+        return bf_hist_edges(v, n_bins)  # equal-width bins spanning the data (explicit edges)
+    elif isinstance(r, str) and r == 'quantile':  # bin edges based on quantiles
+        ee = 1E-6 * np.ptp(v)  # this small addition (relative to the data) gets lost in the last bin
+        edges = np.asarray(matlab_quantile(v, _linspace(0, 1, n_bins + 1)), dtype=float)
+        edges[-1] += ee
         return edges
-    elif isinstance(r, (list, np.ndarray)) and len(r) == 2: # a two-component vector
-        return np.linspace(r[0], r[1] + EE, n_bins + 1)
+    elif not isinstance(r, str) and len(r) == 2:  # a two-component vector
+        return bf_hist_edges(v, n_bins, r)  # equal-width bins spanning the given range
     else:
         raise ValueError(f"Unknown partitioning method '{r}'")
 
@@ -509,7 +538,11 @@ def automutual_info(
     est_method : {'gaussian', 'kraskov1', 'kraskov2'}, optional
         Method for estimating mutual information:
 
-        - 'gaussian': Assumes Gaussian variables
+        - 'gaussian': Assumes Gaussian variables: ``-0.5*log(1 - r**2)`` for the Pearson
+          correlation ``r`` between the series and its lagged copy. ``1 - r**2`` is floored at
+          1e-12 so that a deterministic relationship (``|r| = 1`` up to rounding, as for a trend
+          or a pure oscillation) gives a finite value (at most 13.8 nats) rather than an inf or a
+          rounding-noise value.
         - 'kraskov1': Kraskov estimator 1 (KSG1)
         - 'kraskov2': Kraskov estimator 2 (KSG2)
 
@@ -541,8 +574,8 @@ def automutual_info(
     n = len(y)
     min_samples = 5  # minimum 5 samples to compute mutual information (could make higher?)
     kval = 4 # default 
-    if extra_param is not None:
-        kval = extra_param
+    if extra_param is not None and extra_param != '':
+        kval = int(extra_param)  # (hctsa passes the number of neighbors as a string, '4')
 
     # Loop over time delays if a vector
     if not isinstance(time_delay, list):
@@ -559,7 +592,7 @@ def automutual_info(
     elif est_method == 'kraskov2':
         mi_calc = KraskovMI(k=kval, algorithm=2, add_noise=False)
     elif est_method == 'gaussian':
-        mi_calc = GaussianMI()
+        mi_calc = None  # closed form from the Pearson correlation, below
     else:
         raise ValueError(f'Unknown estimator: {est_method}')
     if est_method in ('kraskov1', 'kraskov2'):
@@ -578,7 +611,12 @@ def automutual_info(
         y1 = y[:-delay]
         y2 = y[delay:]
 
-        amis[k] = mi_calc.compute(y1, y2)
+        if est_method == 'gaussian':
+            # -0.5*log(1 - r^2), with 1 - r^2 floored at 1e-12 (so a deterministic relationship,
+            # |r| = 1 up to rounding, gives a finite value: at most 13.8 nats)
+            amis[k] = _gaussian_ami_from_r(_pearson_r(y1, y2))
+        else:
+            amis[k] = mi_calc.compute(y1, y2)
         
     if np.isnan(amis).any():
         logger.warning(
@@ -744,6 +782,15 @@ def _rm_histogram_2(x: ArrayLike, y: ArrayLike):
 
 
 
+def _rcond_1norm(a: np.ndarray) -> float:
+    """Reciprocal condition number in the 1-norm, ``1/(norm(A, 1) * norm(inv(A), 1))`` (MATLAB's
+    ``rcond``; 0 for a singular matrix)."""
+    try:
+        return float(1.0 / (np.linalg.norm(a, 1) * np.linalg.norm(np.linalg.inv(a), 1)))
+    except np.linalg.LinAlgError:
+        return 0.0
+
+
 def multivariate_ami(y: ArrayLike, tau_method: Union[int, str] = 'ac',
                      est_method: str = 'gaussian',
                      extra_param: Optional[Union[int, str]] = None) -> Union[dict, float]:
@@ -788,7 +835,8 @@ def multivariate_ami(y: ArrayLike, tau_method: Union[int, str] = 'ac',
     dict or float
         - ``tau``: the time delay used (in samples);
         - ``multiAMI``: the information that ``x_{t-tau}`` and ``x_{t-2tau}`` jointly carry about
-          ``x_t`` (in nats);
+          ``x_t`` (in nats; for the Gaussian estimator NaN if the two lagged copies are
+          numerically collinear, and ``1 - R^2`` is floored at 1e-12, so at most 13.8 nats);
         - ``ami_2tau``: the automutual information between ``x_{t-2tau}`` and ``x_t`` (in nats);
         - ``ami_tau``: the automutual information between ``x_{t-tau}`` and ``x_t`` (in nats);
         - ``synergy``: ``multiAMI - ami_tau - ami_2tau``.
@@ -822,19 +870,19 @@ def multivariate_ami(y: ArrayLike, tau_method: Union[int, str] = 'ac',
         x_2tau, x_tau, x_now = emb[:, 0], emb[:, 1], emb[:, 2]
         # I(Y;X) = -0.5*log(1 - R^2), where R^2 is the squared multiple correlation coefficient
         # of Y on X (exact generalization of the univariate -0.5*log(1 - r^2))
-        R = np.corrcoef(np.column_stack([x_now, x_2tau, x_tau]), rowvar=False)
+        with np.errstate(invalid='ignore', divide='ignore'):
+            R = np.corrcoef(np.column_stack([x_now, x_2tau, x_tau]), rowvar=False)
         corr_xy = R[0, 1:3]
-        try:
-            r_sq = float(corr_xy @ np.linalg.solve(R[1:, 1:], corr_xy))
-        except np.linalg.LinAlgError:
-            r_sq = np.nan
-        if np.isnan(r_sq):
-            r_sq = 0.0  # as MATLAB's min(max(NaN, 0), ...)
-        r_sq = min(max(r_sq, 0.0), 1.0 - np.finfo(float).eps)  # guard numerical over/undershoot
-        with np.errstate(divide='ignore', invalid='ignore'):
-            out['multiAMI'] = float(-0.5 * np.log(1.0 - r_sq))
-            out['ami_2tau'] = float(-0.5 * np.log(1.0 - R[0, 1] ** 2))
-            out['ami_tau'] = float(-0.5 * np.log(1.0 - R[0, 2] ** 2))
+        corr_xx = R[1:, 1:]
+        if np.any(np.isnan(R)) or _rcond_1norm(corr_xx) < 1e-12:
+            # the two lagged copies are (numerically) collinear: the joint estimate is undefined
+            out['multiAMI'] = np.nan
+        else:
+            r_sq = float(corr_xy @ np.linalg.solve(corr_xx, corr_xy))
+            r_sq = min(max(r_sq, 0.0), 1.0)  # guard numerical over/undershoot
+            out['multiAMI'] = float(-0.5 * np.log(max(1.0 - r_sq, _GAUSSIAN_AMI_FLOOR)))  # floored as in automutual_info
+        out['ami_2tau'] = float(_gaussian_ami_from_r(R[0, 1]))
+        out['ami_tau'] = float(_gaussian_ami_from_r(R[0, 2]))
     else:
         k = 4 if extra_param is None else int(extra_param)
         mi_calc = KraskovMI(k=k, algorithm=1 if est_method == 'kraskov1' else 2,
