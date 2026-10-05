@@ -1826,10 +1826,9 @@ nonlinearity:
     base_name: nsamdf
     dependencies:
     configs:
-      - {fs: 1, win_len_rel: 14, shift_len_rel: 0.5, lag_rel: 1, degree: 7, zscore: False}
-      - {fs: 1, win_len_rel: 14, shift_len_rel: 0.5, lag_rel: 1, degree: 7, zscore: True}
+      - {tau_mult: 2, win_len_rel: 10, shift_len_rel: 0.5, degree: 7, zscore: True}
     legacy_name: NL_NSAMDF
-    ordered_args: ['fs', 'win_len_rel', 'shift_len_rel', 'lag_rel', 'degree']
+    ordered_args: ['tau_mult', 'win_len_rel', 'shift_len_rel', 'degree']
 
   nlpe:
     base_name: nlpe

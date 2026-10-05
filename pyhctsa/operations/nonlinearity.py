@@ -7,14 +7,14 @@ logger = logging.getLogger('pyhctsa')
 
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
+from scipy.special import gammaln
 from scipy.stats import spearmanr
 from scipy.signal import correlate
 
 from ..operations.model_fit import residual_analysis
 from ..operations.correlation import first_crossing, first_min, autocorr
-from ..operations.scaling import _round
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
-from ..utils import _ml_rng, matlab_quantile, time_delay_embed
+from ..utils import _ml_rng, get_tau, matlab_quantile, theiler_window, time_delay_embed
 
 def zero_one_test(y, num_c=20, max_n=10000):
     """Modified 0-1 test for chaos.
@@ -205,23 +205,6 @@ def zero_one_test(y, num_c=20, max_n=10000):
         "Dstd": np.std(d_c, ddof=1),
     }
 
-def _resolve_time_delay(y: ArrayLike, tau: Union[int, str]) -> Union[int, float]:
-    """Resolve a string time-delay spec to a lag.
-
-    ``'ac'`` uses the first zero-crossing of the autocorrelation function and
-    ``'mi'`` the first minimum of the automutual information. An integer is
-    returned unchanged. The resolved value may be NaN (time series too short);
-    callers are responsible for handling that.
-    """
-    if not isinstance(tau, str):
-        return tau
-    if tau == 'ac':
-        return first_crossing(y, 'ac', 0, 'discrete')
-    if tau == 'mi':
-        return first_min(y, 'mi')
-    raise ValueError(f'Invalid time-delay method: {tau}. Choose either mi or ac.')
-
-
 def _first_fn(p, threshold, over_or_under='under'):
     """Position (counting from one) of the first element of ``p`` on the given
     side of ``threshold``, or ``len(p) + 1`` if there is none."""
@@ -292,8 +275,8 @@ def _ms_embed(z, v, w):
 
     return x, y
 
-def _ms_nlpe(y: ArrayLike, de: int, tau: int) -> float:
-    # helper function for nlpe
+def _ms_nlpe(y: ArrayLike, de: int, tau: int, theiler_win: int = 0) -> float:
+    # helper function for nlpe (hctsa's MS_nlpe, with its Theiler-window argument)
     y = np.asarray(y, dtype=float)
 
     # Case 1: y is already a matrix (pre-embedded)
@@ -334,19 +317,33 @@ def _ms_nlpe(y: ArrayLike, de: int, tau: int) -> float:
         for i in range(de_dim):
             diff = x[i, np.newaxis, :] - x[i, start:stop, np.newaxis]
             rows += diff ** 2
+        # MS_nlpe adds 1 to every off-diagonal squared distance (its way of excluding the
+        # point itself): it only matters for near-ties, which it rounds to exact ties,
+        # so the nearest neighbor (first index) of quantized series matches the original.
+        rows += 1.0
         rows[np.arange(stop - start), np.arange(start, stop)] = np.inf # exclude self
+        if theiler_win > 0:  # also exclude neighbors within a Theiler window in time
+            lo = np.maximum(np.arange(start, stop) - theiler_win, 0)
+            hi = np.minimum(np.arange(start, stop) + theiler_win + 1, n)
+            cols = np.arange(n)[np.newaxis, :]
+            rows[(cols >= lo[:, np.newaxis]) & (cols < hi[:, np.newaxis])] = np.inf
         near[start:stop] = np.argmin(rows, axis=1)
 
     e = y[near] - y  # now y is (m,) so y[near] works correctly
 
     return e
 
-def nsamdf(x: ArrayLike, fs: Union[float, int] = 1.0, win_len_rel: Union[int, float] = 14,
-           shift_len_rel: Union[float, int] = 0.5, lag_rel: Union[int, float] = 1,
-           degree: int = 7) -> dict:
+def nsamdf(x: ArrayLike, tau_mult: Union[int, float] = 2, win_len_rel: Union[int, float] = 10,
+           shift_len_rel: Union[float, int] = 0.5, degree: int = 7) -> dict:
     """
     Computes the nonlinearity measure L through nsAMDF
     (nonlinear average magnitude difference function), developed by Ozkurt et al. [1].
+
+    The lag range and window of the nsAMDF are set from the time series' own
+    correlation time: with ``tau`` the first zero-crossing of the autocorrelation
+    function, the maximum lag is ``ceil(tau_mult*tau)`` and the window length
+    ``win_len_rel`` times that. The normalized curves of the nsAMDF for
+    ``p = 2`` and ``p = degree`` are compared by their root-mean-square difference.
 
     This function was authored by Tolga Esat Ozkurt, 2020. (tolgaozkurt@gmail.com).
     Edits by Ben Fulcher for incorporating into hctsa and Joshua Moore for incorporating into pyhctsa.
@@ -360,47 +357,60 @@ def nsamdf(x: ArrayLike, fs: Union[float, int] = 1.0, win_len_rel: Union[int, fl
     ----------
     x : array-like
         Input time series.
-    fs : float or int
-        Sampling frequency in Hz. Default is 1.0.
+    tau_mult : float or int
+        The maximum lag, as a multiple of the first zero-crossing of the
+        autocorrelation function. Default is 2.
     win_len_rel : float or int
-        Window length (a long enough segment is important to estimate the nonlinearity). Default is 14.
+        The window length, as a multiple of the maximum lag (a long enough segment is
+        important to estimate the nonlinearity). Default is 10.
     shift_len_rel : float or int
-        This amounts to window length - overlap length btw windows. Default is 0.5.
-    lag_rel : float or int
-        TMaximum lag for nsAMDF, we chose it as 1. Default is 1.
-    degree : The chosen degree p should ideally be large enough to capture the
-           highest order of nonlinearity within the data. Default is 7.
+        The shift between successive windows, as a proportion of the window length
+        (window length minus overlap). Default is 0.5.
+    degree : int
+        The chosen degree p should ideally be large enough to capture the
+        highest order of nonlinearity within the data. Default is 7.
     
     Returns
     -------
-    float
-        The nsAMDF nonlinearity measure L. 
+    dict
+        ``L``, the nsAMDF nonlinearity measure: the root-mean-square difference
+        between the nsAMDF curves for p = 2 and p = ``degree``, each normalized by
+        its maximum (so it is invariant to the scale of the series). Returns NaN if the
+        autocorrelation function has no zero-crossing, or the window is longer than
+        the time series.
     """
-    window_length = int(win_len_rel * fs)
-    shift_length = int(shift_len_rel * window_length)
-    lag = int(fs * lag_rel)
+    x = np.asarray(x, dtype=float).ravel()
+    tau = first_crossing(x, 'ac', 0, 'discrete')
+    if np.isnan(tau):
+        logger.warning('No autocorrelation zero-crossing to set the nsAMDF lag range')
+        return np.nan
+    max_lag = int(np.ceil(tau_mult * tau))
+    window_length = win_len_rel * max_lag
+    if window_length > len(x):
+        logger.warning('Time series too short relative to its correlation time')
+        return np.nan
+    window_length = int(window_length)
+    shift_length = max(1, int(np.floor(shift_len_rel * window_length)))
 
-    out = {}
-    # nsAMDF for p = 2
-    s2 = _normed_single_curve_length_windowed(x, win_len=window_length, shift_len=shift_length, lag=lag, nrmdegree=2)
-    #out['s2'] = s2 / np.max(s2) # normalized
+    s2 = _normed_single_curve_length_windowed(x, win_len=window_length, shift_len=shift_length,
+                                              lag=max_lag, nrmdegree=2)
+    sd = _normed_single_curve_length_windowed(x, win_len=window_length, shift_len=shift_length,
+                                              lag=max_lag, nrmdegree=degree)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        s2n = s2 / np.max(s2)
+        sdn = sd / np.max(sd)
 
-    # nsAMDF for p = degree:
-    sd = _normed_single_curve_length_windowed(x, win_len=window_length, shift_len=shift_length, lag=lag, nrmdegree=degree)
-    #out['sd'] = sd / np.max(sd) # normalized
-    
-    #% If you like, you can bandpass filter s2 and sd for the specific frequency band
-    #% of nonlinear effect both to compute L and plot them as such
-    out['L'] = np.linalg.norm(s2 - sd)
+    return {'L': np.sqrt(np.mean((s2n - sdn)**2))}
 
-    return out
-
-def nlpe(y: ArrayLike, de: int = 3, tau: Union[int, str] = 1, max_n: int = 5000) -> dict:
+def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
+         max_n: Union[int, str] = 5000,
+         theiler_win: Union[int, float, list, tuple] = ('ac', 1)) -> dict:
     """
     Normalized drop-one-out constant interpolation nonlinear prediction error.
 
     Computes the nlpe for a time-delay embedded time series using Michael Small's
-    code, nlpe [1].
+    code, nlpe [1]. Neighbors within a Theiler window in time are excluded from
+    the search for the nearest neighbor of each embedded point.
 
     Modifications by Joshua B. Moore for incorporating into pyhctsa.
 
@@ -413,46 +423,75 @@ def nlpe(y: ArrayLike, de: int = 3, tau: Union[int, str] = 1, max_n: int = 5000)
     Parameters
     ----------
     y : array-like
-        Input time series.
-    de : int
-        The embedding dimension. Default is 3.
+        Input time series (should be z-scored).
+    de : int, optional
+        The embedding dimension. Default is 3. (hctsa's ``'fnn'`` option, which
+        sets it by TISEAN's false nearest neighbors, is not yet available.)
     tau : int or str, optional
-        The time-delay. Can be either an integer or ``'ac'`` to use the first
-        zero-crossing of the ACF, or ``'mi'`` to use the first minimum of the
-        automutual information function. Default is 1.
-    max_n : int, optional
-        The maximum length of the time series on which to compute the nlpe.
-        Default is 5000.
+        The time-delay: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
+        autocorrelation function, ``'ac1e'`` the (floored) first 1/e crossing of
+        the autocorrelation function, and ``'mi'`` the smaller of the first
+        minimum of the (Kraskov) automutual information and the 1/e time.
+        Default is 1.
+    max_n : int or 'full', optional
+        The maximum length of the time series on which to compute the nlpe (the
+        first ``max_n`` samples are used), or ``'full'`` to use the whole series
+        (memory use grows quadratically with length). Default is 5000.
+    theiler_win : int, float, or ``['ac', k]``, optional
+        The Theiler window (see :func:`pyhctsa.utils.theiler_window`), computed
+        on the (cropped) series: a number of samples, or ``['ac', k]`` for ``k``
+        times the first zero-crossing of the autocorrelation function. Default
+        is ``['ac', 1]``.
     
     Returns
     -------
     dict
-        Measures of the mean error of the nonlinear predictor, and a
-        set of measures on the correlation, Gaussianity, etc. of the residuals.
+        Measures of the mean error of the nonlinear predictor (``msqerr``), and the
+        ``'full'`` residual analysis (:func:`pyhctsa.operations.model_fit.residual_analysis`:
+        correlation, Gaussianity, etc. of the residuals, and ``taurat`` relative to the
+        series used, i.e. after any ``max_n`` crop).
+        Returns NaN if the delay or Theiler window cannot be set, or the series
+        is too short.
     """
-
+    y = np.asarray(y, dtype=float).ravel()
     n = len(y)
 
-    if isinstance(tau, str):
-        tau = _resolve_time_delay(y, tau)
-        # check the tau
-        if np.isnan(tau):
-            logger.warning('Time series cannot be embedded (too short?)')
-            return np.nan
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        logger.warning('Time series cannot be embedded (could not get the time delay)')
+        return np.nan
+    tau = int(tau)
+
     #% nlpe can cause memory pains for long time series
     #% Let's do this dirty cheat
-    if n > max_n:
+    if isinstance(max_n, str):
+        if max_n != 'full':
+            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
+    elif n > max_n:
         # crop the time series to the first max_n samples
-        y = y[:max_n]
+        y = y[:int(max_n)]
         logger.info(f"Michael Small's nlpe code is only being evaluated on the first {max_n} (/{n}) samples.")
-        n = max_n
-    
+        n = int(max_n)
+
     if n < 20: # short time series cause problems
         logger.warning(f'Time series (N = {len(y)}) is too short.')
         return np.nan
 
+    if isinstance(de, str):
+        if de == 'fnn':
+            raise NotImplementedError(
+                "nlpe(de='fnn') needs a port of TISEAN's false_nearest (hctsa's NL_FNN), "
+                "which is not yet available in pyhctsa; pass an integer embedding dimension.")
+        raise ValueError(f"Invalid embedding dimension '{de}'")
+
+    theiler_win = theiler_window(y, theiler_win, n)
+    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+
     # run the nonlinear prediction error code
-    res = _ms_nlpe(y, de, tau)
+    res = _ms_nlpe(y, de, tau, int(theiler_win))
     if np.isscalar(res) and np.isnan(res):
         # a scalar nan has been returned instead of expected array
         return np.nan
@@ -460,29 +499,39 @@ def nlpe(y: ArrayLike, de: int = 3, tau: Union[int, str] = 1, max_n: int = 5000)
     # compute outputs
     out = {}
     out['msqerr'] = np.mean(res**2)
-    res = residual_analysis(res)
+    res = residual_analysis(res, y, 'full')
     # combine with residual analysis results
     out = out | res
 
     return out
 
-def delay_time(y: ArrayLike, max_delay: Union[int, float] = 0.2, past: int = 1,
+def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 10),
+               past: Union[int, float, list, tuple] = ('ac', 1),
                random_seed: Union[int, None] = 0) -> dict:
     """
     Optimal delay time using the method of Parlitz and Wichard.
 
+    For a set of randomly chosen reference points, the nearest neighbors in value
+    (one just below and one just above the reference value) are found, and the
+    mean absolute difference between the following values of the neighbor and
+    reference is tracked as a function of the delay.
 
     Parameters
     ----------
     y : array-like
         Input time series.
-    max_delay : int or float, optional
-        Maximum value of the delay to consider. Values in (0, 1) are
-        interpreted as a proportion of the time-series length. Delays below 10
-        are raised to 10. Default is 0.2.
-    past : int, optional
+    max_delay : int, float, or ``['ac', k]``, optional
+        Maximum value of the delay to consider. ``['ac', k]`` sets it to ``k`` times
+        the first zero-crossing of the autocorrelation function (see
+        :func:`pyhctsa.utils.theiler_window`). Values in (0, 1) are interpreted as
+        a proportion of the time-series length (legacy). Delays below 10 are raised
+        to 10, and a delay too long for the series (at least ``N/2``) is shortened to
+        ``ceil(N/2) - 1`` (NaN only if that is below 10). Default is ``['ac', 10]``.
+    past : int, float, or ``['ac', k]``, optional
         Number of time-correlated points to discard (samples) when searching
-        for value-neighbours, i.e., the Theiler window. Default is 1.
+        for value-neighbors, i.e., the Theiler window: a number of samples, or
+        ``['ac', k]`` for ``k`` times the autocorrelation time (``['ac1e', k]`` is
+        also accepted). Default is ``['ac', 1]``.
     random_seed : int or None, optional
         Seed for the Mersenne Twister used to draw the reference points.
 
@@ -491,26 +540,39 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float] = 0.2, past: int = 1,
     dict
         The first three values of ``tau``, the differences between them, and
         the mean, standard deviation, minimum and maximum of ``tau``. Returns
-        NaN if ``max_delay`` is too long for the given time series, or if no
+        NaN if an autocorrelation-based ``max_delay`` or ``past`` cannot be set (the ACF
+        never crosses zero), if the series is too short for a delay of 10, or if no
         reference point clears the Theiler window.
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
 
-    if 0 < max_delay < 1:
-        max_delay = _round(N * max_delay)  # a proportion of the time-series length
+    if isinstance(max_delay, (list, tuple)):  # a multiple of the autocorrelation time
+        max_delay = theiler_window(y, max_delay, N)
+        if np.isnan(max_delay):
+            logger.warning('No autocorrelation zero-crossing to set the maximum delay')
+            return np.nan
+    elif 0 < max_delay < 1:
+        max_delay = int(theiler_window(None, max_delay, N))  # a proportion of the time-series length
     max_delay = int(max_delay)
 
     if max_delay < 10:
         max_delay = 10
         logger.warning('Max delay set to its minimum: delaytime = 10')
     if max_delay >= N/2:
-        # Heuristic for appropriate time delay
-        logger.warning(f'Max delay, {max_delay}, too long for time series of length {N}')
+        # Too long for the series: shorten to fit (keeping the minimum of 10)
+        max_delay = int(np.ceil(N/2)) - 1
+        if max_delay < 10:
+            logger.warning(f'Time series of length {N} too short for a maximum delay of 10')
+            return np.nan
+
+    past = theiler_window(y, past, N)
+    if np.isnan(past):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
         return np.nan
 
     iterations = 64
-    max_attempts = 10000
+    max_attempts = 1000
     length = N - max_delay
     # index[r] is the position in the time series of the (r+1)th smallest value
     index = np.argsort(y[:length], kind='stable')
@@ -519,10 +581,9 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float] = 0.2, past: int = 1,
 
     err = np.zeros(max_delay + 1)
     for _ in range(iterations):
-        # Redraw until the reference point has a value-neighbour on both sides
-        # that clears the Theiler window (MATLAB retries forever; the attempt
-        # cap here only bites when almost no rank qualifies, i.e. when the
-        # original would spin rather than terminate).
+        # Redraw until the reference point has a value-neighbor on both sides
+        # that clears the Theiler window (as hctsa, give up with NaN after
+        # max_attempts draws, which is data dependent).
         for _ in range(max_attempts):
             ref = int(np.ceil(rng.random_sample()*length))  # a random value-rank (from one)
             actual = index[ref-1]
@@ -534,7 +595,7 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float] = 0.2, past: int = 1,
                 post = post_candidates[0]  # nearest-in-value candidate above ref
                 break
         else:
-            logger.warning('No reference point with value-neighbours outside a '
+            logger.warning('No reference point with value-neighbors outside a '
                            f'Theiler window of {past} samples was found in '
                            f'{max_attempts} draws')
             return np.nan
@@ -573,9 +634,11 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
     y : array-like
         Input time series.
     tau: str or int
-        The time-delay, can be an integer or 'ac', or 'mi' for first
-        zero-crossing of the autocorrelation function or first minimum
-        of the automutual information, respectively. Default is ``'ac'``.
+        The time-delay: an integer, or a rule understood by :func:`pyhctsa.utils.get_tau`.
+        ``'ac'`` is the first zero-crossing of the autocorrelation function,
+        ``'ac1e'`` the (floored) first 1/e crossing of the autocorrelation
+        function, and ``'mi'`` the smaller of the first minimum of the (Kraskov)
+        automutual information and the 1/e time. Default is ``'ac'``.
     m : int
         The embedding dimension. Default is 3.
     
@@ -585,11 +648,10 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
         Various statistics summarizing the obtained eigenvalue distribution.
 
     """
-    if isinstance(tau, str):
-        tau = _resolve_time_delay(y, tau)
-        if np.isnan(tau):
-            logger.warning('Could not get time delay (time series too short?)')
-            return np.nan
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        logger.warning('Could not get time delay (time series too short?)')
+        return np.nan
     try:
         y_embed = time_delay_embed(y, m, int(tau))
     except ValueError as e:  # embedding failed (time series too short)
@@ -628,47 +690,88 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
 
     return out
 
-def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
-                  tau: Union[str, int] = 'ac', m: int = 2) -> dict:
+def local_density(y: ArrayLike, nnr: int = 3,
+                  past: Union[int, float, list, tuple] = ('ac', 1),
+                  tau: Union[str, int] = 'ac', m: Union[str, int] = 2) -> dict:
     """
-    Local density estimates in the time-delay embedding space.
-    
-    Computes a standard k-nearest-neighbor local density estimate at each
-    point of the time-delay embedding: density(i) is proportional to
-    1/r_NNR(i)^m, where r_NNR(i) is the distance from point i to its NNR-th
-    nearest neighbor (excluding temporally-close points within a Theiler
-    window of "past" samples) and m is the embedding dimension. 
+    How densely the delay-embedded trajectory is sampled around each of its
+    points, and how that density changes along the orbit.
+
+    Computes a k-nearest-neighbor estimate of the local probability density at
+    each point of the time-delay embedding: ``density(i) = (k/Neff) / (V_m *
+    r_k(i)^m)``, where ``r_k(i)`` is the distance from point i to its k-th
+    (``k = nnr``) nearest neighbor (excluding temporally-close points within a
+    Theiler window of ``past`` samples), ``m`` is the embedding dimension,
+    ``V_m = pi^(m/2) / Gamma(m/2 + 1)`` is the volume of the unit m-ball, and
+    ``Neff = N_embed - 2*past - 1`` is the number of points that can be
+    neighbors. The estimate is computed in units of the series' standard
+    deviation, and its logarithm is analyzed::
+
+        log density(i) = log(k/Neff) - log(V_m) - m*log(r_k(i)/std(y)),
+
+    which makes the outputs independent of the units of ``y`` and, for a
+    stationary process, of the number of points. Working with the log density
+    keeps the statistics well behaved (the density itself is heavy-tailed). To
+    avoid infinite densities when there are repeated values (zero neighbor
+    distance, as in quantized or held series), distances are smoothed as
+    ``sqrt(r^2 + (0.01*median(r[r > 0]))^2)``. (hctsa previously used TSTOOL's
+    ``localdensity`` and then ``1/r^m``; neither is used any more.)
 
     Parameters
     ----------
     y : array-like
         Input time series.
     nnr : int, optional
-        Number of nearest neighbours to compute. Default is 3.
-    past : int, optional
-        Number of time-correlated points to discard (samples), i.e., the
-        Theiler window. Default is 40.
+        Number of nearest neighbors to compute. Default is 3.
+    past : int, float, or ``['ac', k]``, optional
+        The Theiler window of time-correlated points to discard (see
+        :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k`` times
+        the first zero-crossing of the autocorrelation function (also
+        ``['ac1e', k]``), or a number of samples. Default is ``['ac', 1]``.
     tau : str or int, optional
-        The time-delay of the embedding, either an integer or ``'ac'`` for the
-        first zero-crossing of the autocorrelation function. Default is ``'ac'``.
+        The time-delay of the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of
+        the autocorrelation function, ``'ac1e'`` the (floored) first 1/e
+        crossing of the autocorrelation function, and ``'mi'`` the smaller of
+        the first minimum of the (Kraskov) automutual information and the 1/e
+        time. Default is ``'ac'``.
     m : int, optional
-        The embedding dimension. Default is 2.
+        The embedding dimension. Default is 2. (hctsa's ``'fnn'`` option, which
+        sets it by TISEAN's false nearest neighbors, is not yet available, and
+        raises ``NotImplementedError``.)
 
     Returns
     -------
     dict
-        Various statistics on the local density estimates at each point in the
-        time-delay embedding, including the minimum and maximum values, the
-        range, the standard deviation, mean, median, and autocorrelation.
-        The correlation lengths of the density sequence are ``tauacden`` (first
-        zero-crossing of the autocorrelation function) and ``taumigaussden``
-        (first minimum of the Gaussian automutual information function).
+        Statistics on the log local density series (output names retain 'den'),
+        in the time order of the embedded points: the minimum, maximum,
+        interquartile range, range, standard deviation, mean and median
+        (``minden`` ... ``medianden``), the autocorrelation at lags 1 to 5
+        (``ac1den`` ... ``ac5den``), and the correlation lengths of the density
+        sequence, ``tauacden`` (first zero-crossing of the autocorrelation
+        function) and ``taumigaussden`` (first minimum of the Gaussian automutual
+        information function, a monotonic function of the autocorrelation).
+        Returns NaN if the Theiler window or delay cannot be set, the series is
+        too short, or all neighbor distances are zero.
     """
-    if isinstance(tau, str) and tau != 'ac':
-        raise ValueError(f"Invalid time-delay method: '{tau}'. Only 'ac' (or an integer) is supported.")
-    tau = _resolve_time_delay(y, tau)
+    y = np.asarray(y, dtype=float).ravel()
+
+    past = theiler_window(y, past, len(y))
+    if np.isnan(past):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    past = int(past)
+
+    if isinstance(m, str):
+        if m == 'fnn':
+            raise NotImplementedError(
+                "local_density(m='fnn') needs a port of TISEAN's false_nearest (hctsa's "
+                "NL_FNN), which is not yet available in pyhctsa; pass an integer embedding "
+                "dimension.")
+        raise ValueError(f"Invalid embedding dimension '{m}'")
+    tau = get_tau(y, tau)
     if np.isnan(tau):
-        logger.warning('Could not get time delay by ACF (time series too short?)')
+        logger.warning('Could not get the time delay (time series too short?)')
         return np.nan
     try:
         y_embed = time_delay_embed(y, m, int(tau))
@@ -688,19 +791,24 @@ def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
     valid = np.abs(idx - np.arange(n_embed)[:, None]) > past
     # only the nnr-th smallest valid distance is needed, so partition rather than sort
     valid_dists = np.partition(np.where(valid, dist, np.inf), nnr-1, axis=1)
-    r_nnr = valid_dists[:, nnr-1]
+    dk = valid_dists[:, nnr-1]  # distance to the nnr-th neighbor outside the Theiler window
 
     # Fall back to a full pairwise search wherever the over-fetch wasn't enough:
     for i in np.flatnonzero(valid.sum(axis=1) < nnr):
         all_dists = np.linalg.norm(y_embed - y_embed[i], axis=1)
         all_dists[np.abs(np.arange(n_embed) - i) <= past] = np.inf
-        r_nnr[i] = np.sort(all_dists)[nnr-1]
+        dk[i] = np.sort(all_dists)[nnr-1]
 
-    with np.errstate(divide='ignore', over='ignore'):
-        locden = 1 / (r_nnr**m)
-
-    if np.all(locden == 0) or np.any(~np.isfinite(locden)):
+    if not np.any(dk > 0):  # all neighbor distances are zero (e.g., a constant series)
         return np.nan
+
+    # Smooth the distances so that repeated values (zero distances) give a finite density:
+    d = np.sqrt(dk**2 + (0.01*np.median(dk[dk > 0]))**2)
+
+    # Log of the k-NN density estimate, with distances in units of the series' SD:
+    neff = n_embed - 2*past - 1  # number of points that can be neighbors of a given point
+    locden = (np.log(nnr/neff) - ((m/2)*np.log(np.pi) - gammaln(m/2 + 1))
+              - m*np.log(d/np.std(y, ddof=1)))
 
     out = {}
     out['minden'] = np.min(locden)
@@ -722,6 +830,7 @@ def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
     out['taumigaussden'] = first_min(locden, 'mi-gaussian')
 
     return out
+
 
 class _D2DataError(ValueError):
     """A data-dependent failure of :func:`tisean_d2`, for which hctsa returns NaN."""
@@ -1036,7 +1145,7 @@ def _summarise_d2_scaling(dat_v: np.ndarray, dat_M: np.ndarray, p: str,
 
 
 def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
-              theiler_win: Union[int, float] = 0.01) -> Union[dict, float]:
+              theiler_win: Union[int, float, list, tuple] = ('ac', 1)) -> Union[dict, float]:
     """
     Correlation dimension and entropy from the TISEAN package's ``d2`` routine.
 
@@ -1071,14 +1180,20 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     y : array-like
         Input time series.
     tau : int or str, optional
-        The time-delay. Can be an integer, or ``'ac'`` for the first
-        zero-crossing of the autocorrelation function, or ``'mi'`` for the first
-        minimum of the automutual information. Default is 1.
+        The time-delay: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
+        autocorrelation function, ``'ac1e'`` the (floored) first 1/e crossing of
+        the autocorrelation function, and ``'mi'`` the smaller of the first
+        minimum of the (Kraskov) automutual information and the 1/e time.
+        Default is 1.
     maxm : int, optional
         The maximum embedding dimension. Default is 10.
-    theiler_win : int or float, optional
-        The Theiler window. A value in ``(0, 1)`` is taken as a proportion of the
-        time-series length. Default is 0.01, i.e. 1% of the data length.
+    theiler_win : int, float, or ``['ac', k]``, optional
+        The Theiler window (see :func:`pyhctsa.utils.theiler_window`): a number of
+        samples, ``['ac', k]`` for ``k`` times the first zero-crossing of the
+        autocorrelation function (``['ac1e', k]`` is also accepted), or a value in
+        ``(0, 1)`` taken as a proportion of the time-series length (legacy).
+        Default is ``['ac', 1]``.
 
     Returns
     -------
@@ -1097,15 +1212,17 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         return np.nan
 
     # Time delay, tau
-    tau = _resolve_time_delay(y, tau)
+    tau = get_tau(y, tau)
     if np.isnan(tau):
         logger.warning('Time series cannot be embedded (could not get the time delay)')
         return np.nan
     tau = int(tau)
 
     # Theiler window
-    if 0 < theiler_win < 1:  # specify proportion of time-series length
-        theiler_win = round(theiler_win * n)
+    theiler_win = theiler_window(y, theiler_win, n)
+    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
     theiler_win = int(theiler_win)
 
     # Data-dependent failures (no usable TISEAN output, no scaling range, ...) return
@@ -1143,8 +1260,11 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
     out['takens05_max'] = np.nanmax(takens05)
     out['takens05_min'] = np.nanmin(takens05)
     out['takens05_std'] = np.std(takens05, ddof=1)
-    q75, q25 = np.percentile(takens05[~np.isnan(takens05)], [75, 25], method='hazen')
-    out['takens05_iqr'] = q75 - q25
+    if np.all(np.isnan(takens05)):
+        out['takens05_iqr'] = np.nan
+    else:
+        q75, q25 = np.percentile(takens05[~np.isnan(takens05)], [75, 25], method='hazen')
+        out['takens05_iqr'] = q75 - q25
 
     # Find outliers as a means of inferring m_min: look for the estimate
     # approaching a constant for m > m_min
@@ -1250,9 +1370,12 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         point -- a construction TISEAN has no equivalent for -- and ``ref`` was
         repurposed to pick the crossing direction when it moved to TISEAN.
     tau : int or str, optional
-        The time-delay of the embedding. Can be an integer, or ``'ac'`` for the
-        first zero-crossing of the autocorrelation function, or ``'mi'`` for the
-        first minimum of the automutual information. Default is ``'mi'``.
+        The time-delay of the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
+        autocorrelation function, ``'ac1e'`` the (floored) first 1/e crossing of
+        the autocorrelation function, and ``'mi'`` the smaller of the first
+        minimum of the (Kraskov) automutual information and the 1/e time.
+        Default is ``'mi'``.
 
     Returns
     -------
@@ -1274,7 +1397,7 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     y = np.asarray(y, dtype=float).ravel()
     n = y.size  # length of the time series
 
-    tau = _resolve_time_delay(y, tau)
+    tau = get_tau(y, tau)
     if np.isnan(tau):
         logger.warning('Could not get time delay (time series too short?)')
         return np.nan
@@ -1283,8 +1406,12 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     # Embed in three dimensions, and cut on the last coordinate at TISEAN's own
     # default threshold (that coordinate's mean). hctsa reads the .poin file
     # back, so the section points are the ones TISEAN printed.
-    v = _tisean.poincare(y, dim=3, delay=tau, comp=3, direction=direction,
-                         as_written=True)
+    try:
+        v = _tisean.poincare(y, dim=3, delay=tau, comp=3, direction=direction,
+                             as_written=True)
+    except ValueError as exc:  # e.g. a constant series: no section can be cut
+        logger.warning(f'TISEAN poincare failed: {exc}')
+        return np.nan
 
     # Columns are the two uncut embedding coordinates, followed by the
     # (interpolated) crossing time -- only the first two are point coordinates:
