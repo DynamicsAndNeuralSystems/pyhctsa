@@ -103,6 +103,9 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         raise ValueError(f"Unknown distribution: {what_distn}.")
     if what_distn == 'beta':
         # clumsily scale to the range (0,1)
+        if np.all(x == x[0]):
+            logger.warning("Data are a constant; the beta distribution cannot be fitted.")
+            return np.nan  # (MATLAB's betafit errors here)
         sd = np.std(x, ddof=1)
         x = (x - np.min(x) + 0.01 * sd) / (np.max(x) - np.min(x) + 0.02 * sd)
     n = len(x)
@@ -118,11 +121,18 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     if sig <= 0:
         sig = np.ptp(x)
     matlab_bw = sig * (4 / (3 * n)) ** (1 / 5)
+    if not matlab_bw > 0:
+        matlab_bw = 1.0  # as ksdensity, for a constant series
     std_x = np.std(x, ddof=1)
-    bw_factor = matlab_bw / std_x if std_x > 0 else None
 
-    def _make_kde(data):
-        return gaussian_kde(data, bw_method=bw_factor)
+    def _kde(z):
+        """Gaussian kernel density at z with the bandwidth above."""
+        if std_x > 0:
+            return gaussian_kde(x, bw_method=matlab_bw / std_x)(z)
+        # a constant series has a singular covariance (scipy raises LinAlgError):
+        # sum the kernels directly, as ksdensity does
+        u = (np.asarray(z, dtype=float)[:, None] - x[None, :]) / matlab_bw
+        return np.exp(-0.5 * u * u).sum(axis=1) / (n * matlab_bw * np.sqrt(2 * np.pi))
 
     # ----------------------------
     # Fit distribution & find the support bounds over which to compare
@@ -238,9 +248,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     # ----------------------------
     # MATLAB's default ksdensity grid extends ~3 bandwidths beyond the data range.
     xi = np.linspace(np.min(x) - 3 * matlab_bw, np.max(x) + 3 * matlab_bw, 100)
-    # Calculate the Kernel Density Estimate (KDE) for the first angle distribution.
-    kde = _make_kde(x)
-    f = kde(xi)
+    f = _kde(xi)
     xi = xi[f > 1e-6]  # only keep values greater than 1E-6
     if xi.size == 0:
         return np.nan
@@ -252,30 +260,43 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
 
     # Rerun both over the same range
     xi = np.linspace(x1, x2, 1000)
-    f = kde(xi)
-    ffit = pdf_func(xi)
+    f = _kde(xi)
+    with np.errstate(all='ignore'):
+        ffit = pdf_func(xi)
 
     # ----------------------------
     # Statistics
     # ----------------------------
+    # (as in MATLAB, max/argmax skip NaN, which a degenerate fit, such as one to a
+    # constant series, produces)
     dx = xi[1] - xi[0]
     out = {}
-    # ADIFF: returns absolute area between the curves
-    out['adiff'] = np.sum(np.abs(f - ffit) * dx)
-    # PEAKSEPY: separation (in y) between the maxima of each distribution
-    out['peaksepy'] = np.max(ffit) - np.max(f)
-    # PEAKSEPX: separation (in x) between the maxima of each distribution
-    i1 = np.argmax(f)
-    i2 = np.argmax(ffit)
-    out['peaksepx'] = xi[i2] - xi[i1]
-    # OLAPINT: overlap integral between the two curves; multiplying by std(x) makes
-    # this scale-invariant
-    out['olapint'] = np.sum(f * ffit * dx) * np.std(x, ddof=1)
-    # RELENT: relative entropy of the two distributions
-    r = (ffit > 0) & (f > 0)  # skip points where either density is zero (0*log(0) := 0)
-    out['relent'] = np.sum(f[r] * np.log(f[r] / ffit[r]) * dx)
+    with np.errstate(all='ignore'):
+        # ADIFF: returns absolute area between the curves
+        out['adiff'] = np.sum(np.abs(f - ffit) * dx)
+        # PEAKSEPY: separation (in y) between the maxima of each distribution
+        out['peaksepy'] = _matlab_max(ffit) - _matlab_max(f)
+        # PEAKSEPX: separation (in x) between the maxima of each distribution
+        out['peaksepx'] = xi[_matlab_argmax(ffit)] - xi[_matlab_argmax(f)]
+        # OLAPINT: overlap integral between the two curves; multiplying by std(x) makes
+        # this scale-invariant
+        out['olapint'] = np.sum(f * ffit * dx) * np.std(x, ddof=1)
+        # RELENT: relative entropy of the two distributions (points where either
+        # density is exactly zero are skipped: 0*log(0) := 0)
+        r = (ffit != 0) & (f != 0)
+        out['relent'] = np.sum(f[r] * np.log(f[r] / ffit[r]) * dx)
 
     return out
+
+
+def _matlab_max(v: np.ndarray) -> float:
+    """MATLAB's ``max(v)``: ignores NaN (NaN only if all are NaN)."""
+    return np.nan if np.all(np.isnan(v)) else float(np.nanmax(v))
+
+
+def _matlab_argmax(v: np.ndarray) -> int:
+    """Index from MATLAB's ``[~, i] = max(v)``: the first maximum, skipping NaN (1st element if all NaN)."""
+    return 0 if np.all(np.isnan(v)) else int(np.nanargmax(v))
 
 
 def _find_bounds(pdf_func, start_left, start_right, x_step, thresh):

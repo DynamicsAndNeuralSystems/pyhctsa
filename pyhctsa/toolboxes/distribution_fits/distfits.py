@@ -56,6 +56,8 @@ def evfit(x: np.ndarray) -> tuple:
     matching MATLAB's evfit: the profile likelihood is solved for the scale
     parameter, then the location parameter follows in closed form."""
     xmax = np.max(x)
+    if np.all(x == x[0]):
+        return float(x[0]), 0.0  # constant data: as MATLAB, zero scale
     mean_x = np.mean(x)
 
     def profile(sigma):
