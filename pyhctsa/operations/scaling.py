@@ -250,9 +250,9 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
     out_final = out | out2 | out3
  
     if np.isnan(out_final['r1_alpha']) or np.isnan(out_final['r2_alpha']):
-        out_final['alpha_rat'] = np.nan
+        out_final['alpharat'] = np.nan
     else:
-        out_final['alpha_rat'] = out_final['r1_alpha'] / out_final['r2_alpha']
+        out_final['alpharat'] = out_final['r1_alpha'] / out_final['r2_alpha']
  
     return out_final
  
