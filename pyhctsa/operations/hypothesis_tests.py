@@ -251,7 +251,13 @@ def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
     Returns
     -------
     dict
-        Dictionary of test results.
+        For a single period: ``pValue``, ``stat`` (the test statistic) and ``ratio``
+        (the variance ratio). For several periods: the max, min and mean p-value
+        (``maxpValue``, ``minpValue``, ``meanpValue``), the period and IID flag at
+        which the max and min p-value occur (``periodmaxpValue``,
+        ``periodminpValue``, ``IIDperiodmaxpValue``, ``IIDperiodminpValue``), the mean,
+        max and min test statistic (``meanstat``, ``maxstat``, ``minstat``), and the
+        mean, max and min variance ratio (``meanratio``, ``maxratio``, ``minratio``).
     """
     y = np.asarray(y)
 
@@ -278,6 +284,7 @@ def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
            for p, iid in zip(periods, iids)]
     pvals = np.array([vr.pvalue for vr in vrs])
     stats = np.array([vr.stat for vr in vrs])
+    ratios = np.array([vr.vr for vr in vrs])
     imax, imin = np.argmax(pvals), np.argmin(pvals)
 
     return {
@@ -291,6 +298,12 @@ def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
         'meanstat': np.mean(stats),
         'maxstat': np.max(stats),
         'minstat': np.min(stats),
+        # The variance ratio itself, the effect size behind the test. pValue and
+        # stat both grow with the series length under any alternative, whereas the
+        # ratio converges to a fixed population value.
+        'meanratio': np.mean(ratios),
+        'maxratio': np.max(ratios),
+        'minratio': np.min(ratios),
     }
 
 def hypothesis_test(x: ArrayLike, the_test: str = 'signtest') -> float:
