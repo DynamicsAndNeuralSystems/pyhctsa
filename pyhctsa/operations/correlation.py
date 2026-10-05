@@ -875,18 +875,21 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
         stats_store[0, i] = autocorr(theta, 1, 'Fourier')[0]
         stats_store[1, i] = autocorr(theta, 2, 'Fourier')[0]
         stats_store[2, i] = autocorr(theta, 3, 'Fourier')[0]
-    # Compute output statistics
+    # Compute output statistics (max and min ignore NaNs, as in MATLAB: a NaN occurs when a
+    # run of equal values gives 0/0 angles)
     out = {
         'ac1_thetaac1': autocorr(stats_store[0, :], 1, 'Fourier')[0],
         'ac1_thetaac2': autocorr(stats_store[1, :], 1, 'Fourier')[0],
         'ac1_thetaac3': autocorr(stats_store[2, :], 1, 'Fourier')[0],
         'mean_thetaac1': np.mean(stats_store[0, :]),
-        'max_thetaac1': np.max(stats_store[0, :]),
-        'min_thetaac1': np.min(stats_store[0, :]),
+        'max_thetaac1': np.nanmax(stats_store[0, :]),
+        'min_thetaac1': np.nanmin(stats_store[0, :]),
         'mean_thetaac2': np.mean(stats_store[1, :]),
-        'max_thetaac2': np.max(stats_store[1, :]),
-        'min_thetaac2': np.min(stats_store[1, :]),
+        'max_thetaac2': np.nanmax(stats_store[1, :]),
+        'min_thetaac2': np.nanmin(stats_store[1, :]),
         'mean_thetaac3': np.mean(stats_store[2, :]),
+        'max_thetaac3': np.nanmax(stats_store[2, :]),
+        'min_thetaac3': np.nanmin(stats_store[2, :]),
     }
 
     out['meanrat_thetaac12'] = out['mean_thetaac1'] / out['mean_thetaac2']
