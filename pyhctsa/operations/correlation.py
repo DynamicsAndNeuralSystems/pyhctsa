@@ -1036,7 +1036,8 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     # of exactly zero from tied values or of exactly +/-pi/2 from a vertical step fall in the
     # same bin whatever the rounding):
     bin_edges = _fixed_edges(10, -np.pi/2, np.pi/2)
-    px, _ = _histcounts(theta, bin_edges=bin_edges)
+    # (NaN angles are in no bin but count in the number of elements the counts are divided by)
+    px = np.histogram(theta[~np.isnan(theta)], bins=bin_edges)[0] / len(theta)
     bin_widths = np.diff(bin_edges)
     out['hist10std'] = np.std(px, ddof=1)
     out['histent'] = -np.sum(px[px>0] * np.log(px[px>0] / bin_widths[px>0]))
@@ -1100,31 +1101,6 @@ def _fixed_edges(num_bins: int, lo: float, hi: float) -> np.ndarray:
     are none (e.g. all angles NaN)."""
     return bf_hist_edges(np.zeros(1), num_bins, [lo, hi])
 
-
-def _histcounts(x: ArrayLike, bins: Union[int, None, str] = None, 
-                bin_edges: Union[ArrayLike, None] = None) -> tuple:
-    x = np.asarray(x).flatten()
-    # (NaNs are not counted in any bin, but, as in histcounts' 'probability' normalization, they
-    # are in the number of elements the counts are divided by)
-    x_all = x
-    x = x[~np.isnan(x)]
-
-    if bin_edges is not None:
-        edges = np.asarray(bin_edges)
-    elif bins is None or bins == 'auto':
-        # Use Scott's rule for automatic binning
-        bin_width = 3.5 * np.std(x, ddof=1) / (len(x) ** (1 / 3))
-        edges = np.arange(np.min(x), np.max(x) + bin_width, bin_width)
-    elif isinstance(bins, int):
-        edges = np.linspace(np.min(x), np.max(x), bins + 1)
-    else:
-        raise ValueError("Invalid bins parameter")
-
-    n, _ = np.histogram(x, bins=edges)
-
-    n = n / len(x_all)
-
-    return n, edges
 
 def periodicity_wang(y: ArrayLike) -> dict:
     """
