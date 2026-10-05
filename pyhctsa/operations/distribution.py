@@ -1325,28 +1325,33 @@ def histogram_mode(y: ArrayLike, num_bins: Union[int, str] = 10, do_simple: bool
     Measures the mode of the data vector using histograms with a given number
     of bins.
 
+    The mode is the center of the fullest bin of an equal-width histogram (the mean of
+    the centers if several bins are equally full). The bin edges are given explicitly
+    (:func:`pyhctsa.robust.bf_hist_edges`), so that the result does not depend on how a
+    histogram routine rounds its bin limits and width.
+
     Parameters
     -----------
     y : array-like
         The input time series.
     num_bins : int or str, optional
-        The number of bins to use in the histogram, or a bin-selection rule
-        understood by :func:`numpy.histogram_bin_edges` (such as ``'auto'``; hctsa's
-        ``'auto'`` is MATLAB's rule, which NumPy's only approximates). Default is 10.
+        The number of bins to use in the histogram, or the name of a rule for the
+        number of bins (``'auto'``, ``'fd'``, ``'sqrt'`` or ``'sturges'``; see
+        :func:`pyhctsa.robust.bf_hist_edges`). Default is 10.
     do_simple : bool, optional
-        Whether to use a simple binning method (linearly spaced bins) when
-        ``num_bins`` is a number. Default is `True`.
+        Whether to use equal-width bins between the minimum and maximum with explicit
+        edges (`True`, the default), or bins with limits and width rounded to 'nice'
+        values (`False`). Ignored if ``num_bins`` is a rule name.
 
     Returns
     --------
     float
         The mode of the data vector using histograms with num_bins bins. 
     """
-    y = np.asarray(y)
-    if isinstance(num_bins, str):
-        N, bin_edges = np.histogram(y, bins=num_bins)
-    elif do_simple:
-        N, bin_edges = simple_binner(y, num_bins)
+    y = np.asarray(y, dtype=float)
+    if isinstance(num_bins, str) or do_simple:
+        bin_edges = bf_hist_edges(y, num_bins)
+        N, _ = np.histogram(y, bins=bin_edges)
     else:
         bin_edges = bin_picker(y.min(), y.max(), num_bins)
         N = histc(y, bin_edges)[:-1]
