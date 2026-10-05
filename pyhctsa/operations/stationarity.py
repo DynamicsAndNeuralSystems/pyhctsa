@@ -6,14 +6,14 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.signal import detrend, peak_prominences
-from scipy.stats import gaussian_kde, kendalltau, kurtosis, kstest, skew, pearsonr, norm, rankdata
+from scipy.stats import kendalltau, kurtosis, kstest, skew, pearsonr, norm, rankdata
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 from statsmodels.tsa.stattools import kpss
 from itertools import permutations
 from numba import njit
 
 from ..operations.correlation import autocorr, first_crossing
-from ..operations.distribution import moments
+from ..operations.distribution import fit_kernel_smooth, moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
 from ..robust import bf_quantile_edges
 from ..utils import _ml_rng, get_tau, make_mat_buffer, matlab_quantile, sign_change, z_score
@@ -1825,7 +1825,8 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         - 'ent': distribution entropy (kernel-smoothed)
         - 'permen': normalized permutation entropy, PermEn(3, 1)
         - 'specen': normalized Shannon spectral entropy of the window's power spectrum
-          (window mean removed before the FFT)
+          (window mean removed before the FFT; the DC bin is excluded and the entropy is
+          normalized by the log of the number of frequencies, ``floor(n/2)``)
         - 'mom3': skewness (standardized third moment)
         - 'mom4': kurtosis (standardized fourth moment)
         - 'mom5': standardized fifth moment
@@ -1845,7 +1846,9 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         Method to summarize the sequence of local estimates:
 
         - 'std': standard deviation, normalized by that of the full series
-        - 'ent': (kernel-smoothed) distributional entropy
+        - 'ent': (kernel-smoothed) distributional entropy of the sequence of local
+          estimates (:func:`pyhctsa.operations.distribution.fit_kernel_smooth`; NaN if the
+          local estimates are all the same)
         - 'permen': normalized permutation entropy, PermEn(3, 1), of the sequence of local
           estimates
         - 'apen', 'sampen': approximate entropy (m=1, r=0.2) and sample entropy (m=2, r=0.15)
@@ -1959,13 +1962,9 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         out = sampen_dict['quadSampEn1']
     elif across_win_stat == 'ent':
         #% get a load of statistics from kernel-smoothed distribution
-        q = qs[~np.isnan(qs)]
-        kde = gaussian_kde(q)
-        xi = np.linspace(q.min() - 3 * np.std(q, ddof=1), q.max() + 3 * np.std(q, ddof=1), 100)
-        f = kde(xi)
-        f_pos = f[f > 0]
-        dx = xi[1] - xi[0]
-        out = -np.sum(f_pos * np.log(f_pos) * dx)
+        ks_outs = fit_kernel_smooth(qs[~np.isnan(qs)])
+        # (NaN if the local estimates are all the same: no scale to smooth over)
+        out = ks_outs['entropy'] if isinstance(ks_outs, dict) else np.nan
     else:
         raise ValueError(f"Unknown statistic '{across_win_stat}'")
 
@@ -1977,14 +1976,17 @@ def _perm_en_norm(v: np.ndarray) -> float:
     return res['normPermEn'] if isinstance(res, dict) else np.nan
 
 def _spectral_entropy_norm(w: np.ndarray) -> float:
-    """Normalized Shannon entropy of the one-sided power spectrum of a window (mean removed)."""
+    """Normalized Shannon entropy of the one-sided power spectrum of a window (mean removed, DC bin excluded)."""
     Fy = np.fft.fft(w - np.mean(w))
-    Py = np.abs(Fy[:len(w)//2 + 1])**2
-    Py = Py[Py > 0] # avoid log(0)
+    # One-sided power spectrum without the DC bin (zero after removing the mean, up to
+    # rounding), so that the number of frequencies, floor(n/2), does not depend on the
+    # last bit of the mean:
+    Py = np.abs(Fy[1:len(w)//2 + 1])**2
     if len(Py) < 2 or np.sum(Py) == 0:
         return np.nan
     Py = Py / np.sum(Py)
-    return -np.sum(Py * np.log2(Py)) / np.log2(len(Py))
+    Py = Py[Py > 0] # 0*log(0) = 0
+    return -np.sum(Py * np.log2(Py)) / np.log2(len(w)//2)
 
 def _get_window(step_ind, inc, win_length):
     # helper function to convert a step index (stepInd) to a range of indices corresponding to that window
