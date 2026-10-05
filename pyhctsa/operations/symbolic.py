@@ -641,6 +641,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
             raise ValueError(f"Unknown tau '{tau}'")
         # determine tau from the first zero-crossing of the ACF
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if tau > len(y) / 50:  # cap at 2% of the series length so it stays long enough
+            tau = int(np.floor(len(y) / 50))
     if np.isnan(tau):
         raise ValueError('Time series too short to estimate tau')
     tau = int(tau)
