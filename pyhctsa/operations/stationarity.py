@@ -59,6 +59,8 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
         For a single lag: the p-value, statistic, first regression coefficient
         and regression fit statistics. For multiple lags: summary statistics on
         the p-values, statistics and regression fit statistics across lags.
+        The log-likelihood and information criteria (AIC, BIC, HQC) are reported
+        per observation.
     """
     y = np.asarray(y, dtype=float)
     y = y[~np.isnan(y)]  # remove missing values
@@ -76,6 +78,7 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
     lag_list = [int(lags)] if single else [int(l) for l in lags]
 
     T = len(y) - 1
+    n_obs = len(y)  # log-likelihood and information criteria are reported per observation
     p_values, stats, regs = [], [], []
     for l in lag_list:
         reg = _pp_regression(y, l, model)
@@ -98,10 +101,10 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
             'pvalue': p_values[0],
             'stat': stats[0],
             'coeff1': reg['coeff'][0],  # could be multiple, depending on the model
-            'loglikelihood': reg['LL'],
-            'AIC': reg['AIC'],
-            'BIC': reg['BIC'],
-            'HQC': reg['HQC'],
+            'loglikelihood': reg['LL'] / n_obs,
+            'AIC': reg['AIC'] / n_obs,
+            'BIC': reg['BIC'] / n_obs,
+            'HQC': reg['HQC'] / n_obs,
             'rmse': reg['RMSE'],
         }
 
@@ -120,10 +123,10 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
         'maxstat': np.max(stats),
         'minstat': np.min(stats),
 
-        'meanloglikelihood': np.mean([r['LL'] for r in regs]),
-        'minAIC': np.min([r['AIC'] for r in regs]),
-        'minBIC': np.min([r['BIC'] for r in regs]),
-        'minHQC': np.min([r['HQC'] for r in regs]),
+        'meanloglikelihood': np.mean([r['LL'] for r in regs]) / n_obs,
+        'minAIC': np.min([r['AIC'] for r in regs]) / n_obs,
+        'minBIC': np.min([r['BIC'] for r in regs]) / n_obs,
+        'minHQC': np.min([r['HQC'] for r in regs]) / n_obs,
 
         'minrmse': np.min([r['RMSE'] for r in regs]),
         'maxrmse': np.max([r['RMSE'] for r in regs]),
