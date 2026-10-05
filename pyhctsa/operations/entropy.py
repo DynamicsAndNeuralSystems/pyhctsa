@@ -4,6 +4,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 import numpy as np
+import pywt
 from numpy.typing import ArrayLike
 from numba import njit
 from antropy.entropy import _xlogx
@@ -1001,6 +1002,83 @@ def permutation_entropy_complexity(y: ArrayLike, m: int = 2, tau: Union[int, str
     q0 = -2 / (((n + 1) / n) * np.log2(n + 1) - 2 * np.log2(2 * n) + np.log2(n))
 
     return {'hNorm': h_norm, 'jsComplexity': q0 * js_div * h_norm}
+
+def wavelet_entropy(y: ArrayLike, wavelet_name: str = 'sym4', level: int = 5) -> float:
+    """
+    Wavelet entropy of a time series.
+
+    Decomposes ``y`` via the maximal-overlap discrete wavelet transform (MODWT) into
+    ``level`` detail scales plus the remaining smooth (scaling) band, i.e., ``level + 1``
+    bands, computes each band's share of the signal's total energy,
+    ``p_j = E_j / sum(E)``, and returns the Shannon entropy of this relative-energy
+    distribution across bands, normalized to [0, 1] by its maximum possible value,
+    ``log2(level + 1)`` [1]. Low values mean the energy is concentrated in few bands;
+    high values that it is spread evenly across bands. Port of hctsa's ``EN_wentropy``
+    (MATLAB's ``wentropy`` with a global energy distribution of the MODWT); the MODWT is
+    computed here by the pyramid algorithm with circular boundary handling, using the
+    filters of PyWavelets.
+
+    The output is invariant to rescaling ``y``, and is bounded in [0, 1] (the value 1 is
+    reached when the energy is equal in all ``level + 1`` bands). ``level`` is fixed by
+    default (rather than left to depend on the series length) because the number of
+    levels sets the normalizing denominator, so letting it grow with the length of ``y``
+    introduces a strong length dependence. With ``level`` fixed, the value for white noise
+    is independent of length (about 0.75). ``level = 5`` needs about 64 samples or more
+    for a non-degenerate decomposition.
+
+    References
+    ----------
+    .. [1] O. A. Rosso, S. Blanco, J. Yordanova, V. Kolev, A. Figliola, M. Schuermann,
+        E. Basar, "Wavelet entropy: a new tool for analysis of short duration brain
+        electrical signals", J. Neurosci. Methods 105(1), 65 (2001).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    wavelet_name : str, optional
+        The wavelet used for the MODWT decomposition, a PyWavelets name for an orthogonal
+        wavelet (e.g., ``'sym4'``, ``'db2'``, ``'haar'``). Default is ``'sym4'``.
+    level : int, optional
+        The number of decomposition levels. Default is 5.
+
+    Returns
+    -------
+    float
+        The normalized wavelet entropy. NaN if the decomposition fails (e.g., for a series
+        too short for the requested number of levels: ``level`` may not exceed
+        ``floor(log2(N))``) or the series has no energy.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    level = int(level)
+    n = y.size
+    if level < 1 or n < 2 or level > int(np.floor(np.log2(n))) or not np.all(np.isfinite(y)):
+        return np.nan
+    try:
+        wav = pywt.Wavelet(wavelet_name)
+    except ValueError:
+        return np.nan
+    g = np.asarray(wav.dec_lo) / np.sqrt(2)  # MODWT scaling and wavelet filters
+    h = np.asarray(wav.dec_hi) / np.sqrt(2)
+    idx = np.arange(n)
+
+    # MODWT pyramid algorithm with circular boundary: the band energies do not depend on
+    # the (circular) time alignment of the coefficients
+    v = y
+    energy = np.zeros(level + 1)
+    for j in range(1, level + 1):
+        shifts = 2 ** (j - 1) * np.arange(g.size)
+        gather = v[(idx[:, None] - shifts[None, :]) % n]
+        energy[j - 1] = np.sum((gather @ h) ** 2)
+        v = gather @ g
+    energy[level] = np.sum(v ** 2)
+
+    total = energy.sum()
+    if not total > 0:
+        return np.nan
+    p = energy / total
+    p = p[p > 0]
+    return float(-np.sum(p * np.log2(p)) / np.log2(level + 1))
 
 def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str] = 1,
                        mapping_how: str = 'ncdf') -> Union[dict, float]:
