@@ -1718,12 +1718,29 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
 
     return float(out)
 
-def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'ols') -> dict:
+def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'burg') -> dict:
     """
     Compute the partial autocorrelation of an input time series.
-    
-    This function calculates the partial autocorrelation function (PACF) up to a specified 
-    lag using either ordinary least squares or Yule-Walker equations.
+
+    Computes the partial autocorrelation at lags 1 to ``max_tau``: the correlation between
+    y(t) and y(t-k) after removing the linear effect of the intermediate values (the last
+    coefficient of an order-k autoregressive fit).
+
+    The default (``'burg'``) is the sequence of reflection coefficients of Burg's recursion:
+    at each order, the coefficient minimizing the summed forward and backward prediction
+    errors, which has a closed form and is bounded in [-1, 1]. It needs no matrix solve, so it
+    is the same in any implementation (it is exact against hctsa's ``CO_PartialAutoCorr``), and
+    it agrees closely with the ordinary-least-squares partial autocorrelation. The latter
+    (``'ols'``) regresses y(t) on k lagged values; for smooth, nearly deterministic series its
+    design matrix is numerically singular and the coefficient depends on the linear solver.
+
+    For ``'burg'``, each order k uses the N-k forward errors f(t) and the matching backward
+    errors b(t-1) of the order k-1 fit: the reflection coefficient is
+    ``2*sum(f*b)/(sum(f^2) + sum(b^2))``, the partial autocorrelation at lag k is its value,
+    and both error series are then updated with it. A constant series gives zeros, and
+    prediction errors below 1e-8 of the energy of the series (rounding-level noise, as for an
+    exactly predictable sinusoid) are not allowed to produce coefficients of up to +-1. Lags of
+    N or more are NaN.
 
     Parameters
     ----------
@@ -1731,13 +1748,14 @@ def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'ols') 
         The input time series.
     max_tau : int, optional
         Maximum time-delay to compute PACF values for. Default is 10.
-    method : {'ols', 'yule-walker'}, optional
+    what_method : {'burg', 'ols', 'yule-walker'}, optional
         Method to compute partial autocorrelation:
 
+        - ``'burg'``: Burg recursion (the default, as in hctsa).
         - ``'ols'``: Ordinary least squares regression.
-        - ``'yule-walker'``: Yule-Walker equations method.
+        - ``'yule-walker'``: Yule-Walker equations method (not in hctsa).
 
-        Default is ``'ols'``.
+        Default is ``'burg'``.
 
     Returns
     -------
@@ -1750,16 +1768,34 @@ def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'ols') 
 
     """
     max_tau = int(max_tau)
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float).ravel()
     if max_tau <= 0:
         raise ValueError('Negative or zero time lags not applicable')
 
-    method_map = {'ols': 'ols-inefficient', 'yule-walker': 'ywm'} 
-    if what_method not in method_map:
-        raise ValueError(f"Invalid method: {what_method}. Use 'ols' or 'yule-walker'.")
-
-    # Compute partial autocorrelation
-    pacf_values = pacf(y, nlags=max_tau, method=method_map[what_method])
+    if what_method == 'burg':
+        n = len(y)
+        n_lags = min(max_tau, n - 1)
+        f = y - np.mean(y)  # forward prediction errors (order 0: the series itself)
+        b = f.copy()  # backward prediction errors
+        # Prediction errors below 1e-8 of the series' energy are rounding-level noise; they are
+        # not allowed to produce partial autocorrelations of up to +-1 (exactly predictable
+        # series, such as a sinusoid, give zeros beyond their order)
+        tiny = max(2e-8 * (f @ f), np.finfo(float).tiny)
+        pacf_values = np.zeros(max_tau + 1)
+        pacf_values[0] = 1
+        for k in range(1, n_lags + 1):
+            ff = f[k:].copy()
+            bb = b[k - 1:n - 1].copy()
+            refl = 2 * (ff @ bb) / (ff @ ff + bb @ bb + tiny)
+            f[k:] = ff - refl * bb
+            b[k:] = bb - refl * ff
+            pacf_values[k] = refl
+        pacf_values[n_lags + 1:] = np.nan  # lags beyond the series length are undefined
+    else:
+        method_map = {'ols': 'ols-inefficient', 'yule-walker': 'ywm'}
+        if what_method not in method_map:
+            raise ValueError(f"Invalid method: {what_method}. Use 'burg', 'ols' or 'yule-walker'.")
+        pacf_values = pacf(y, nlags=max_tau, method=method_map[what_method])
 
     # Create output dictionary
     out = {}
