@@ -440,8 +440,8 @@ correlation:
     dependencies:
     configs:
       - {bin_method: 'std1', num_bins: [!range [2, 80]], zscore: True, exclude: ['max', 'median', 'mode']}
-      - {bin_method: 'std2', num_bins: [!range [2, 80]], zscore: True, select: ['mean', 'min', 'modef', 'nlocmax', 'nprompeaks', 'std']}
-      - {bin_method: 'quantiles', num_bins: [!range [2, 80]], zscore: True, select: ['mean', 'min', 'modef', 'nlocmax', 'nprompeaks', 'std']}
+      - {bin_method: 'std2', num_bins: [!range [2, 80]], zscore: True, select: ['mean', 'min', 'modef', 'nprompeaks', 'std']}
+      - {bin_method: 'quantiles', num_bins: [!range [2, 80]], zscore: True, select: ['mean', 'min', 'modef', 'nprompeaks', 'std']}
       - {bin_method: 'even', num_bins: [!range [2, 80]], zscore: True, exclude: ['conv4', 'max', 'median', 'range']}
     legacy_name: CO_CompareMinAMI
     ordered_args: ['bin_method', 'num_bins']
@@ -1688,7 +1688,7 @@ hypothesis_tests:
     configs:
       - {periods: 2, iids: 0, zscore: True, select: ['ratio']}
       - {periods: 4, iids: 0, zscore: True, select: ['ratio']}
-      - {periods: [[2, 4, 6, 8, 2, 4, 6, 8]], iids: [[0, 0, 0, 0, 1, 1, 1, 1]], zscore: True, exclude: ['maxpValue', 'maxstat', 'meanpValue', 'meanstat', 'minpValue', 'minstat']}   # SY_VarRatioTest(x_z,[2,4,6,8,2,4,6,8],[0,0,0,0,1,1,1,1])
+      - {periods: [[2, 4, 6, 8, 2, 4, 6, 8]], iids: [[0, 0, 0, 0, 1, 1, 1, 1]], zscore: True, exclude: ['maxstat', 'meanstat', 'minstat']}   # SY_VarRatioTest(x_z,[2,4,6,8,2,4,6,8],[0,0,0,0,1,1,1,1])
     legacy_name: SY_VarRatioTest
     ordered_args: ['periods', 'iids']
 
@@ -1871,8 +1871,8 @@ model_fit:
     base_name: hmm_fit
     dependencies:
     configs:
-      - {train_p: 0.7, num_states: 3, zscore: True, exclude: ['maxMu', 'meanP', 'minMu']}
-      - {train_p: 0.8, num_states: 2, zscore: True, exclude: ['maxMu', 'meanP', 'minMu']}
+      - {train_p: 0.7, num_states: 3, zscore: True, exclude: ['maxMu', 'minMu']}
+      - {train_p: 0.8, num_states: 2, zscore: True, exclude: ['maxMu', 'minMu']}
     legacy_name: MF_hmm_Fit
     ordered_args: ['train_p', 'num_states']
   
