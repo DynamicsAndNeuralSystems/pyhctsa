@@ -1868,6 +1868,19 @@ def _check_max_n(y: np.ndarray, max_n: Union[int, str], what: str) -> np.ndarray
     return y
 
 
+def _line_lengths(group: np.ndarray, pos: np.ndarray, min_len: int) -> np.ndarray:
+    """
+    Lengths (at least `min_len`) of the runs of consecutive `pos` values within each `group`
+    (e.g. diagonal offset or column of a recurrence plot).
+    """
+    order = np.lexsort((pos, group))
+    group, pos = group[order], pos[order]
+    new_run = np.ones(group.size, dtype=bool)
+    new_run[1:] = (group[1:] != group[:-1]) | (pos[1:] - pos[:-1] != 1)
+    run_len = np.diff(np.append(np.flatnonzero(new_run), group.size))
+    return run_len[run_len >= min_len]
+
+
 def _recurrence_time_stats(Y: np.ndarray, radius: float, theiler: int) -> tuple:
     """
     Mean recurrence time and modal probability mass of the white vertical line lengths of
@@ -2018,4 +2031,156 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
     if not np.any(np.isnan(stats[:, 0])):
         out['T_MRT_var'] = float(np.var(stats[:, 0], ddof=1))
         out['N_MPRT_var'] = float(np.var(stats[:, 1], ddof=1))
+    return out
+
+
+def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] = 3,
+        theiler_win: Union[int, float, list, tuple] = ('ac', 1), rr: float = 0.1,
+        lmin: int = 2, vmin: int = 2, max_n: Union[int, str] = 10000,
+        random_seed: Union[int, str, None] = 'default') -> dict:
+    """
+    Recurrence quantification analysis (RQA) of the delay-embedded series.
+
+    Embeds the time series in an `m`-dimensional delay space and computes standard recurrence
+    quantification measures from the resulting recurrence plot [1]: recurrence rate,
+    determinism, laminarity, trapping time, and related diagonal and vertical line-length
+    statistics. Two embedded states are recurrent if they lie within a radius of each other;
+    the radius is set to give a target recurrence rate ``rr``. Pairs closer in time than the
+    Theiler window are excluded.
+
+    Neighbors are found with a KD-tree rather than by forming the full N x N distance
+    matrix, and the line-length statistics are computed directly from the list of recurrent
+    pairs. The number of recurrent pairs is itself about ``rr * N**2``, so run time grows
+    roughly quadratically with N at fixed ``rr`` (hence the ``max_n`` cap).
+
+    References
+    ----------
+    .. [1] N. Marwan, M. C. Romano, M. Thiel and J. Kurths, "Recurrence plots for the analysis
+        of complex systems", Phys. Rep. 438, 237 (2007).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tau : int or str, optional
+        The time delay for the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'`` or ``'mi'``). Default is 1.
+    m : int, str or tuple, optional
+        The embedding dimension: an integer, or ``'fnn'`` to choose it by false nearest
+        neighbors (TISEAN's ``false_nearest``, as hctsa's ``BF_Embed``). Default is 3.
+    theiler_win : int, float or ``['ac', k]``, optional
+        The Theiler window excluding temporally-correlated neighbors from the main diagonal
+        (see :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k`` times the first
+        zero-crossing of the autocorrelation function, or a number of samples. Default is
+        ``['ac', 1]``.
+    rr : float, optional
+        The target recurrence rate used to set the neighborhood radius: the radius is the
+        ``rr``-quantile of a random subsample of pairwise distances in the embedded space
+        (standard RQA practice, to fix the recurrence rate for comparability across
+        series). Default is 0.1.
+    lmin : int, optional
+        The minimum diagonal line length counted toward determinism and the line-length
+        entropy. Default is 2.
+    vmin : int, optional
+        The minimum vertical line length counted toward laminarity and trapping time.
+        Default is 2.
+    max_n : int or 'full', optional
+        The maximum number of samples to consider: longer series are reduced to their first
+        ``max_n`` points, since the number of recurrent pairs grows as ``rr * N**2``.
+        ``'full'`` disables cropping (a warning is logged above N = 20000). Default is 10000.
+    random_seed : int, str or None, optional
+        The seed of the Mersenne Twister for the random subsample used to set the radius, as
+        hctsa's ``BF_ResetSeed``: an integer, ``'default'`` (seed 0), or ``None``/``'none'``
+        (unseeded). The subsample is the whole series (so the radius is exactly hctsa's)
+        up to 500 embedded points; beyond that MATLAB's ``randperm(n, k)`` draws a different
+        random subset from the same seed. Default is ``'default'``.
+
+    Returns
+    -------
+    dict or float
+        NaN if the embedding or Theiler window cannot be determined, the series is too short
+        (fewer than 50 embedded points, or no more than four Theiler windows), the radius is
+        degenerate, or no points recur outside the Theiler window. Otherwise:
+
+        - ``RR``: recurrence rate, the proportion of pairs outside the Theiler window that
+          are recurrent
+        - ``DET``: determinism, the proportion of recurrent points on diagonal lines of
+          length at least ``lmin``
+        - ``L_mean``, ``L_max``: mean and maximum diagonal line length (lines of length at
+          least ``lmin``)
+        - ``L_entr``: Shannon entropy (nats) of the distribution of diagonal line lengths
+        - ``DIV``: divergence, ``1 / L_max``
+        - ``LAM``: laminarity, the proportion of recurrent points on vertical lines of length
+          at least ``vmin``
+        - ``TT``: trapping time, the mean vertical line length (lines of length at least
+          ``vmin``)
+        - ``V_max``: the maximum vertical line length
+
+        If there are no diagonal lines, ``DET = 0``, ``L_mean = NaN``, ``L_max = 0``,
+        ``L_entr = 0`` and ``DIV = inf``; if there are no vertical lines, ``LAM = 0``,
+        ``TT = NaN`` and ``V_max = 0``.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if isinstance(max_n, str) and max_n == 'full' and y.size > 20000:
+        logger.warning(f"Time series ({y.size} samples) exceeds 20000 with max_n='full'; RQA "
+                       "computation may be slow (recurrent pairs grow as rr*N^2)")
+    y = _check_max_n(y, max_n, 'RQA at this recurrence rate')
+
+    Y = _bf_embed(y, tau, m)
+    if Y is None:
+        logger.warning('Embedding failed')
+        return np.nan
+    n_emb = Y.shape[0]
+
+    theiler = theiler_window(y, theiler_win, n_emb)
+    if np.isnan(theiler):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    theiler = int(theiler)
+    if n_emb < 50 or n_emb <= 4 * theiler:
+        logger.warning(f'Time series too short for a meaningful RQA (Nemb = {n_emb}, theilerWin = {theiler})')
+        return np.nan
+
+    radius = _recurrence_radius(Y, rr, random_seed)
+    if not radius > 0:
+        logger.warning('Degenerate neighborhood radius (data may be too degenerate/short)')
+        return np.nan
+
+    # All recurrent pairs outside the Theiler window (which includes the trivial diagonal)
+    src, dst = _recurrent_pairs(Y, radius)
+    keep = np.abs(src - dst) > theiler
+    src, dst = src[keep], dst[keep]
+    if src.size == 0:
+        logger.warning('No recurrent points found outside the Theiler window -- radius too small?')
+        return np.nan
+
+    out = {}
+    # Recurrence rate: the fraction of the recurrence matrix outside the Theiler band
+    # that is recurrent
+    excluded_band = (2 * theiler + 1) * n_emb - theiler * (theiler + 1)
+    out['RR'] = src.size / (n_emb ** 2 - excluded_band)
+
+    # Diagonal line lengths, from the upper triangle only (the matrix is symmetric)
+    upper = dst > src
+    diag_lengths = _line_lengths(dst[upper] - src[upper], src[upper], lmin)
+    if diag_lengths.size == 0:
+        out['DET'], out['L_mean'], out['L_max'], out['L_entr'], out['DIV'] = 0.0, np.nan, 0, 0.0, np.inf
+    else:
+        out['DET'] = diag_lengths.sum() / upper.sum()
+        out['L_mean'] = diag_lengths.mean()
+        out['L_max'] = diag_lengths.max()
+        out['DIV'] = 1 / out['L_max']
+        counts = np.bincount(diag_lengths)
+        p = counts[counts > 0] / diag_lengths.size
+        out['L_entr'] = -np.sum(p * np.log(p))
+
+    # Vertical line lengths, from the full band-excluded matrix, grouping recurrent points by column
+    vert_lengths = _line_lengths(dst, src, vmin)
+    if vert_lengths.size == 0:
+        out['LAM'], out['TT'], out['V_max'] = 0.0, np.nan, 0
+    else:
+        out['LAM'] = vert_lengths.sum() / src.size
+        out['TT'] = vert_lengths.mean()
+        out['V_max'] = vert_lengths.max()
+
     return out
