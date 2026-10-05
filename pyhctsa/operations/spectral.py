@@ -359,6 +359,12 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
         s = scipy.fft.fft(y, nfft)  # do the fourier transform
         s = 2 * np.abs(s[:int(nfft / 2) + 1]) ** 2 / ny  # single-sided power spectral density
         s = s / (2 * np.pi)  # convert to angular freq space
+        # Drop the DC bin (w = 0). A z-scored series has a zero sum up to rounding, so s[0] is
+        # not a spectral estimate but the square of a ~1e-14 residual, and log(s[0]) is a
+        # random outlier near -70 that would dominate every log-domain statistic. (The
+        # windowed/Welch estimates have a genuine non-zero DC bin from leakage.)
+        w = w[1:]
+        s = s[1:]
 
     elif psd_meth == 'welch':
         # welch power spectral density estimate
