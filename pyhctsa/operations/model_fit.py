@@ -700,7 +700,7 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
         if popt >= i:
             out[f'A{i}'] = Aest[i-1]
         else:
-            out[f'A{i}'] = 0 # % set all the higher order coefficients are all zero
+            out[f'A{i}'] = np.nan  # not estimated at the selected order (NaN, not 0)
     # (ii) Summary statistics on the coefficients
     out['maxA'] = np.max(Aest)
     out['minA'] = np.min(Aest)
