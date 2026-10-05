@@ -358,7 +358,9 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
 
     Fits an exponential smoothing model to the time series using a training set to
     fit the optimal smoothing parameter, alpha, and then applies the result to
-    predict the rest of the time series.
+    predict the rest of the time series. The residual statistics are computed on
+    the held-out samples only (those after the first ``n_train``), and ``nan`` is
+    returned if fewer than 50 samples remain after the training set.
 
     References
     ----------
@@ -403,7 +405,7 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
         logger.info(f"Training set size increased from {n_train} to {min_train}.")
         n_train = min_train
         
-    if N < n_train:
+    if N < n_train + 50:  # too few samples held out after the training set
         logger.warning("Time series is too short for the specified training size.")
         return np.nan
         
@@ -471,7 +473,8 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
 
     # --- Final Fit and Residual Analysis ---
     y_fit = _fit_exp_smooth(x, alpha)
-    yp, xp = y_fit[2:], x[2:]
+    # residuals on the held-out part only (after the n_train samples used to fit alpha)
+    yp, xp = y_fit[n_train:], x[n_train:]
     
     if len(yp) < 2:
         logger.warning("Not enough points to calculate residual statistics.")
