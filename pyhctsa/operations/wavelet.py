@@ -364,12 +364,16 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
 
     return out
 
-def _slosr(xx: ArrayLike) -> int:
+def _slosr(xx: ArrayLike) -> float:
     """
     Helper for :func:`detail_coeffs`: the level at which the sum of values to
     the left most nearly equals the sum of values to the right.
     """
     the_max_level = len(xx)
+    if the_max_level < 3:
+        # Too few wavelet levels (short series relative to the wavelet) to define a
+        # meaningful split point between "left" and "right":
+        return np.nan
     slosr = np.zeros(the_max_level-2)
     for i in range(2, the_max_level):
         slosr[i-2] = np.sum(xx[:i-1])/np.sum(xx[i:])
