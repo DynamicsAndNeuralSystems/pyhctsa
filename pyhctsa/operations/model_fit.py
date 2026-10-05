@@ -20,7 +20,53 @@ from ..operations.physics import _ksdensity
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..toolboxes.matlab.optimizers import minimize
-from ..utils import _linspace, _ml_randperm, _ml_rng, get_tau, matlab_quantile, z_score
+from ..utils import _linspace, _ml_randperm, _ml_rng, _zscore_matlab, get_tau, matlab_quantile, z_score
+
+def _zg_hmm_fit(y_train: np.ndarray, num_states: int, rng: np.random.RandomState,
+                n_cycles: int = 30, tol: float = 1e-4) -> tuple:
+    """
+    Gaussian HMM fit as Zoubin Ghahramani's ``ZG_hmm`` (used by hctsa), with hmmlearn's EM.
+
+    The initial state means are random around the data mean (scaled by the data standard
+    deviation), the start probabilities and transition matrix random, and the tied variance
+    the data variance, all drawn from ``rng``. At most ``n_cycles`` cycles of EM, stopping when
+    the proportional change in the log-likelihood falls below ``tol`` (shared by :func:`hmm_fit` and
+    :func:`hmm_compare_n_states`).
+
+    Returns the fitted ``GaussianHMM`` and the log-likelihood of the training data at each
+    cycle.
+    """
+    y_col = y_train.reshape(-1, 1)
+    cov0 = np.var(y_train, ddof=1)
+    mu0 = rng.randn(num_states, 1) * np.sqrt(cov0) + np.mean(y_train)
+    pi0 = rng.random_sample(num_states)
+    pi0 = pi0 / pi0.sum()
+    p0 = rng.random_sample((num_states, num_states))
+    p0 = p0 / p0.sum(axis=1, keepdims=True)
+
+    model = GaussianHMM(n_components=num_states, covariance_type='tied',
+                        n_iter=1,  # one EM cycle per fit() call, so that we control the stopping rule
+                        tol=0, params='stmc', init_params='')
+    model.startprob_ = pi0
+    model.transmat_ = p0
+    model.means_ = mu0
+    model.covars_ = np.array([[cov0]])
+
+    LL = []  # log-likelihood of the training data at the start of each cycle
+    lik_base = 0.0
+    for cycle in range(1, n_cycles + 1):
+        model.fit(y_col)  # one E step and M step
+        lik = model.monitor_.history[-1]
+        old_lik = LL[-1] if LL else 0.0
+        LL.append(lik)
+        if cycle <= 2:
+            lik_base = lik
+        elif lik < old_lik:
+            pass  # a decrease (numerical violation): keep going, as ZG_hmm does
+        elif (lik - lik_base) < (1 + tol) * (old_lik - lik_base) or not np.isfinite(lik):
+            break
+    return model, np.array(LL)
+
 
 def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed: int = 0) -> dict:
     """
@@ -63,51 +109,15 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     
     y_train = y[:n_train]
     y_test = y[n_train:]
-    y_train_reshaped = y_train.reshape(-1, 1)
     y_test_reshaped = y_test.reshape(-1, 1)
     num_states = int(num_states)
 
-    # Initialize and iterate Baum-Welch as in Zoubin Ghahramani's ZG_hmm (used by hctsa):
-    # random state means around the data mean (scaled by the data standard
-    # deviation), random start probabilities and transition matrix, a tied
-    # variance equal to the data variance; at most 30 cycles, stopping when the
-    # proportional change in the log-likelihood falls below tol. (hmmlearn's
-    # k-means initialization and absolute tolerance find different, generally
-    # poorer, local optima: the fitted-model statistics then do not follow the
+    # Initialize and iterate Baum-Welch as in Zoubin Ghahramani's ZG_hmm (used by hctsa): see
+    # _zg_hmm_fit. (hmmlearn's k-means initialization and absolute tolerance find different,
+    # generally poorer, local optima: the fitted-model statistics then do not follow the
     # distribution of hctsa's.)
     rng = _ml_rng(0 if random_seed is None else int(random_seed))
-    tol = 1e-4
-    cov0 = np.var(y_train, ddof=1)
-    mu0 = rng.randn(num_states, 1) * np.sqrt(cov0) + np.mean(y_train)
-    pi0 = rng.random_sample(num_states)
-    pi0 = pi0 / pi0.sum()
-    p0 = rng.random_sample((num_states, num_states))
-    p0 = p0 / p0.sum(axis=1, keepdims=True)
-
-    model = GaussianHMM(n_components=num_states,
-                        covariance_type='tied',
-                        n_iter=1,  # one EM cycle per fit() call, so that we control the stopping rule
-                        tol=0,
-                        params='stmc',
-                        init_params='')
-    model.startprob_ = pi0
-    model.transmat_ = p0
-    model.means_ = mu0
-    model.covars_ = np.array([[cov0]])
-
-    LL = []  # log-likelihood of the training data at the start of each cycle
-    lik_base = 0.0
-    for cycle in range(1, 31):
-        model.fit(y_train_reshaped)  # one E step and M step
-        lik = model.monitor_.history[-1]
-        old_lik = LL[-1] if LL else 0.0
-        LL.append(lik)
-        if cycle <= 2:
-            lik_base = lik
-        elif lik < old_lik:
-            pass  # a decrease (numerical violation): keep going, as ZG_hmm does
-        elif (lik - lik_base) < (1 + tol) * (old_lik - lik_base) or not np.isfinite(lik):
-            break
+    model, LL = _zg_hmm_fit(y_train, num_states, rng)
 
     means_sorted = np.sort(model.means_.flatten())
     for i, mu in enumerate(means_sorted):
@@ -306,22 +316,6 @@ def armax(y: ArrayLike, orders: Union[list, tuple] = (3, 3), p_train: float = 0.
     out.update(residual_analysis(m_residuals, y_test, 'full'))
     return out
 
-def _ar_pe_rmse(data: np.ndarray, order: int) -> float:
-    """
-    RMS in-sample prediction error of an AR model fitted by MATLAB's default ``ar`` method
-    (forward-backward least squares): ``sqrt(mean(pe(ar(data, order), data).^2))``. As in
-    ``pe``, the errors of the first ``order`` samples are zero.
-    """
-    n = len(data)
-    lagged = np.column_stack([data[order - j - 1:n - j - 1] for j in range(order)])
-    ahead = np.column_stack([data[j + 1:n - order + j + 1] for j in range(order)])
-    theta = np.linalg.lstsq(np.vstack([lagged, ahead]),
-                            np.concatenate([data[order:], data[:n - order]]), rcond=None)[0]
-    e = np.zeros(n)
-    e[order:] = data[order:] - lagged @ theta
-    return float(np.sqrt(np.mean(e ** 2)))
-
-
 def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     """
     Whiten a time series by comparing a range of preprocessings (hctsa's ``BF_Whiten``).
@@ -336,6 +330,8 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     global state, or an integer seed).
     """
     from scipy.signal import detrend
+    # (imported here: pre_process imports nonlinearity, which imports this module)
+    from .pre_process import _ar_rms_error, _piecewise_poly_residual, _rank_map_gaussian
     y = np.asarray(y, dtype=float).ravel()
     if pre_proc in ('nothing', 'none'):
         return y
@@ -345,35 +341,17 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     if pre_proc != 'ar':
         raise ValueError(f"Unknown preprocessing setting '{pre_proc}'")
 
-    def zscore(v):  # as MATLAB's zscore: a constant series becomes zeros
-        sd = np.std(v, ddof=1)
-        return v - np.mean(v) if sd == 0 else (v - np.mean(v)) / sd
-
-    n = len(y)
     candidates = {'nothing': y, 'd1': np.diff(y, 1), 'd2': np.diff(y, 2), 'd3': np.diff(y, 3)}
     for order in (1, 2):
         for num_bits in (5, 10, 20, 40):
-            bits = np.round(np.linspace(0, n, num_bits + 1)).astype(int)
-            ydt = np.zeros(n)
-            for k in range(num_bits):
-                seg = y[bits[k]:bits[k + 1]]
-                x = np.arange(1, len(seg) + 1, dtype=float)
-                ydt[bits[k]:bits[k + 1]] = seg - np.polynomial.Polynomial.fit(x, seg, order)(x)
-            candidates[f'p{order}_{num_bits}'] = zscore(ydt)
-    # rank-map onto a Gaussian distribution (stochastic)
-    if isinstance(random_seed, str) and random_seed == 'none':
-        draws = np.random.randn(n)
-    else:
-        seed = 0 if random_seed is None or random_seed == 'default' else int(random_seed)
-        draws = _ml_rng(seed).standard_normal(n)
-    rmgd = np.zeros(n)
-    rmgd[np.argsort(y, kind='stable')] = np.sort(draws)
-    candidates['rmgd'] = rmgd
+            # (as MATLAB's zscore: a constant series becomes zeros)
+            candidates[f'p{order}_{num_bits}'] = _zscore_matlab(_piecewise_poly_residual(y, order, num_bits))
+    candidates['rmgd'] = _rank_map_gaussian(y, random_seed)  # rank-map onto a Gaussian (stochastic)
     # (hctsa's log, log returns, Box-Cox and square-root versions need a positive series,
     # which a detrended series never is)
 
     names = list(candidates)
-    rmse = np.array([_ar_pe_rmse(zscore(candidates[k]), 2) for k in names])
+    rmse = np.array([_ar_rms_error(_zscore_matlab(candidates[k]), 2) for k in names])
     if np.any(rmse > rmse[0] * 1.05):
         return candidates[names[int(np.argmax(rmse))]]
     return candidates['nothing']
@@ -774,6 +752,26 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
     out['Ks_vary_q'] = np.nanmean(_std_omitnan(ks.T))
     return out
 
+def _seeded_rng(random_seed) -> np.random.RandomState:
+    """
+    The random generator after hctsa's ``BF_ResetSeed(random_seed)``: an integer seed, or
+    ``'default'`` (seed 0), seeds MATLAB's Mersenne Twister (so ``rand`` draws are MATLAB's);
+    ``'none'`` or ``None`` gives a generator that is not reset (fresh entropy).
+    """
+    if isinstance(random_seed, str) and random_seed == 'default':
+        return _ml_rng(0)
+    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
+        return np.random.RandomState()
+    return _ml_rng(int(random_seed))
+
+
+def _n4_fpe(loss: float, n_order: int, n_obs: int) -> float:
+    """Akaike's final prediction error of an ``n4sid`` fit of order ``n_order`` to ``n_obs`` samples
+    (3 * order free parameters, as MATLAB counts them in ``EstimationInfo.FPE``)."""
+    n_eff = 3 * n_order
+    return loss * (1 + n_eff / n_obs) / (1 - n_eff / n_obs)
+
+
 def _n4_arx_order(y: np.ndarray, n_max: int) -> int:
     """
     The best order of an ARX model by AIC, which sets n4sid's automatic past horizon (the
@@ -1035,7 +1033,7 @@ def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.
     n_eff = 3 * n
     out['noisevar'] = fit['loss'] * n_obs / (n_obs - n_eff)
     out['lossfn'] = fit['loss']
-    out['fpe'] = fit['loss'] * (1 + n_eff / n_obs) / (1 - n_eff / n_obs)
+    out['fpe'] = _n4_fpe(fit['loss'], n, n_obs)
 
     # Train on the first portion, predict the rest (overlapping by one sample)
     n_cut = int(np.floor(ptrain * n_obs))
@@ -1146,14 +1144,22 @@ def _ar_fb(seg: np.ndarray, order: int) -> tuple:
     fpe = sse_f / n * (1 + p / n) / (1 - p / n)
     return a, fpe
 
-def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how: str = 'uniform',
-                    sample_p: Union[list, tuple] = [20, 0.1]) -> dict:
+def _fpe_stats(fpes: np.ndarray) -> dict:
+    """Spread statistics of the final prediction errors across segments (``fpe_*`` outputs)."""
+    return {'fpe_std': np.std(fpes, ddof=1), 'fpe_mean': np.mean(fpes), 'fpe_max': np.max(fpes),
+            'fpe_min': np.min(fpes), 'fpe_range': np.ptp(fpes)}
+
+
+def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, None] = 2,
+                    subset_how: str = 'rand', sample_p: Union[list, tuple, int] = (20, 0.1),
+                    random_seed: Union[int, str, None] = 'default') -> dict:
     """
     Robustness of model parameters across different segments of a time series.
 
-    The spread of parameters obtained (including in-sample goodness of fit statistics) 
-    provides some indication of stationarity. Values of goodness of fit provide some 
-    indication of model suitability.
+    The spread of parameters obtained (including in-sample goodness of fit statistics)
+    provides some indication of stationarity. Values of goodness of fit provide some
+    indication of model suitability. Inherits strongly from :func:`compare_test_sets`
+    (hctsa's ``MF_FitSubsegments``).
 
     Parameters
     ----------
@@ -1179,21 +1185,27 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
             predicting model, column: predicted segment), of which the spread and
             off-diagonal statistics are returned. NaN if any segment is shorter than
             ``5 * (order + 1)`` or an AR fit fails.
-        - 'arma': Not implemented (deregistered in hctsa).
-        - 'ss': Not yet implemented.
+        - 'ss': fits a state-space model of the given order by subspace identification
+            (``n4sid``; the order can be ``'best'``). Outputs are how Akaike's final
+            prediction error (``fpe_*``) varies across segments.
+        - 'arma': fits an ARMA model by prediction-error minimization (``armax``; ``order``
+            is ``[p, q]``). Outputs are how the FPE (``fpe_*``) and the fitted AR (``p_k_*``)
+            and MA (``q_k_*``) coefficients vary across segments. (Deregistered in hctsa,
+            as it is much like 'ar' and slow.)
 
-        Default is ``'ar'``.
+        Default is ``'ss'``.
 
-    order : int, optional
-        The order of the model to fit (used for 'ar', 'ss', or 'arma' models). Default is 2.
+    order : int or two-vector, optional
+        The order of the model to fit (used for 'ar', 'ss', or 'arma' models; a two-element
+        vector ``[p, q]`` for 'arma'). Default is 2.
     subset_how : str, optional
         How to choose segments from the time series, either:
 
-        - 'uniform' (uniformly) 
-        - 'rand' (at random) [not implemented].
+        - 'uniform' (evenly spaced)
+        - 'rand' (at random).
 
-        Default is ``'uniform'``.
-         
+        Default is ``'rand'``.
+
     sample_p : list, tuple or int, optional
         A two-vector specifying how many segments to take and of what length.
         Of the form [n_samples, length], where length can be a proportion of the time-series length.
@@ -1201,12 +1213,20 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
         For ``model='arcrosspred'``, an integer (or length-1 list): the number of
         non-overlapping segments to partition the series into.
         Default is [20, 0.1].
+    random_seed : int, 'default', 'none' or None, optional
+        How to reset the random seed that picks the segment starts when ``subset_how`` is
+        ``'rand'``, as hctsa's ``BF_ResetSeed``: an integer seed, or ``'default'`` for seed
+        0, seeding a Mersenne Twister so that the draws are MATLAB's; ``'none'`` or
+        ``None`` for a generator that is not reset. Default is ``'default'``.
 
     Returns
     -------
     dict
         Dictionary of statistics on the spread and mean of fitted model parameters 
-        and goodness of fit across segments. For ``'arcrosspred'``: ``std``, ``range``,
+        and goodness of fit across segments. For ``'ar'``, ``'ss'`` and ``'arma'``,
+        ``fpe_std``, ``fpe_mean``, ``fpe_max``, ``fpe_min``, ``fpe_range`` (of the final
+        prediction error); for ``'ar'`` ``a_k_std``, ``a_k_mean``, ``a_k_max``, ``a_k_min`` for each
+        lag ``k``, and for ``'arma'`` the same for ``p_k_*`` and ``q_k_*``. For ``'arcrosspred'``: ``std``, ``range``,
         ``iqr`` (over all entries of the cross-prediction error matrix), ``stdoffdiag``,
         ``rangeoffdiag``, ``iqroffdiag`` (over the positive off-diagonal entries),
         ``stdmean``, ``rangemean``, ``stdmedian``, ``rangemedian`` (across predicted
@@ -1215,10 +1235,9 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
         deviation of the errors) and ``mineig`` (smallest real part of the eigenvalues
         of the matrix).
     """
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float).ravel()
     N = len(y)
-    if np.ndim(sample_p) == 0:
-        sample_p = [sample_p]
+    sample_p = np.atleast_1d(sample_p)
     num_pred = int(sample_p[0])
     if model == 'arcrosspred' and (subset_how != 'uniform' or len(sample_p) != 1):
         raise ValueError("'arcrosspred' requires subset_how = 'uniform' and a scalar sample_p "
@@ -1241,7 +1260,14 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
             r[:, 0] = spts
             r[:, 1] = spts + l - 1
     elif subset_how == 'rand':
-        raise NotImplementedError("Subset method not yet implemented.")
+        if sample_p[1] < 1:  # specified a fraction of time series
+            l = int(np.floor(N * sample_p[1]))
+        else:  # specified an absolute interval
+            l = int(sample_p[1])
+        # reset the random seed (BF_ResetSeed), then numPred random starting points (randi)
+        rng = _seeded_rng(random_seed)
+        spts = 1 + np.floor((N - l + 1) * rng.random_sample(num_pred)).astype(int)
+        r = np.column_stack([spts, spts + l - 1])
     else:
         raise ValueError(f"Unknown subset method: {subset_how}")
     # Fit the model to each training set (r is 1-based and inclusive, as in MATLAB)
@@ -1277,11 +1303,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
         for i in range(num_pred):
             avals[i, :], fpes[i] = _ar_fb(y[r[i, 0] - 1:r[i, 1]], order)
         # statistics on the FPE
-        out['fpe_std'] = np.std(fpes, ddof=1)
-        out['fpe_mean'] = np.mean(fpes)
-        out['fpe_max'] = np.max(fpes)
-        out['fpe_min'] = np.min(fpes)
-        out['fpe_range'] = np.ptp(fpes)
+        out.update(_fpe_stats(fpes))
         # statistics on the fitted AR parameters, as in the polynomial 1 + a_1 z^-1 + ...
         for i in range(order):
             out[f'a_{i+1}_std'] = np.std(avals[:, i], ddof=1)
@@ -1337,8 +1359,38 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
         out['rangestd'] = np.ptp(col_std)
         out['stdstd'] = np.std(col_std, ddof=1)
         out['mineig'] = np.min(np.linalg.eigvals(xperr).real)
-    elif model in ['ss', 'arma']:
-        raise NotImplementedError("Model not yet implemented.")
+    elif model == 'ss':
+        # state-space models of the specified order: statistics on goodness of fit
+        fpes = np.zeros(num_pred)
+        for i in range(num_pred):
+            seg = y[r[i, 0] - 1:r[i, 1]]
+            try:
+                fit = _n4_state_space(seg, order if isinstance(order, str) else int(order))
+            except (np.linalg.LinAlgError, ValueError) as err:
+                raise ValueError("Couldn't fit this state space model") from err
+            fpes[i] = _n4_fpe(fit['loss'], fit['order'], len(seg))
+        out.update(_fpe_stats(fpes))
+    elif model == 'arma':
+        # ARMA models of the specified orders: goodness of fit, and the AR (p) and MA (q) coefficients
+        p_ord, q_ord = int(order[0]), int(order[1])
+        fpes = np.zeros(num_pred)
+        ps = np.zeros((num_pred, p_ord + 1))
+        qs = np.zeros((num_pred, q_ord + 1))
+        for i in range(num_pred):
+            seg = y[r[i, 0] - 1:r[i, 1]]
+            try:
+                ps[i], qs[i], loss = _armax_fit(seg, p_ord, q_ord)[:3]
+            except (np.linalg.LinAlgError, ValueError) as err:
+                raise ValueError("Couldn't fit this ARMA model") from err
+            n_par = p_ord + q_ord
+            fpes[i] = loss * (1 + n_par / len(seg)) / (1 - n_par / len(seg))
+        out.update(_fpe_stats(fpes))
+        for letter, coefs in (('p', ps), ('q', qs)):
+            for i in range(1, coefs.shape[1]):  # (the first column is 1)
+                out[f'{letter}_{i}_std'] = np.std(coefs[:, i], ddof=1)
+                out[f'{letter}_{i}_mean'] = np.mean(coefs[:, i])
+                out[f'{letter}_{i}_max'] = np.max(coefs[:, i])
+                out[f'{letter}_{i}_min'] = np.min(coefs[:, i])
     else:
         raise ValueError(f"Unknown model: {model}")
     return out
@@ -2883,16 +2935,24 @@ def _kstep_residuals(a: np.ndarray, c: np.ndarray, y: np.ndarray, steps: int) ->
     return _kstep_residuals_ss(F, cp[1:] - ap[1:], C, y, steps)
 
 
-def _fit_polynomial_model(y: np.ndarray, model: str, order) -> Union[tuple, None]:
+def _fit_predictor_model(y: np.ndarray, model: str, order):
     """
     Fit the model of MF_steps_ahead / MF_CompareTestSets to the whole series ``y``.
 
     ``model`` is ``'ar'`` (forward-backward least squares as MATLAB's ``ar``; ``order`` an
     integer, or ``'best'`` for the order from 1 to 10 chosen by Schwarz's Bayesian criterion,
-    ARFIT), ``'arma'`` (``armax``; ``order`` is ``[p, q]``; needs ``_armax_fit``) or ``'ss'``
-    (``n4sid``; not yet implemented). Returns the polynomials ``(a, c)`` of ``a(q) y = c(q) e``
-    including the leading 1, or None if the fit fails.
+    ARFIT), ``'arma'`` (``armax``; ``order`` is ``[p, q]``) or ``'ss'`` (``n4sid``; ``order``
+    an integer or ``'best'``). Returns a function ``predict_errors(y_seg, steps)`` giving the
+    errors, prediction minus data, of the model's ``steps``-ahead predictions of a series
+    (MATLAB's ``predict(m, y_seg, steps)``, with the initial state estimated), or None if the
+    fit fails.
     """
+    if model == 'ss':
+        try:
+            fit = _n4_state_space(y, order if isinstance(order, str) else int(order))
+        except (np.linalg.LinAlgError, ValueError):
+            return None
+        return lambda y_seg, steps: _kstep_residuals_ss(fit['A'], fit['K'], fit['C'], y_seg, steps)
     if model == 'ar':
         if isinstance(order, str) and order == 'best':
             try:
@@ -2900,21 +2960,17 @@ def _fit_polynomial_model(y: np.ndarray, model: str, order) -> Union[tuple, None
             except ValueError:
                 return None
         try:
-            return np.r_[1.0, _ar_fb(y, int(order))[0]], np.ones(1)
+            a, c = np.r_[1.0, _ar_fb(y, int(order))[0]], np.ones(1)
         except np.linalg.LinAlgError:
             return None
-    if model == 'arma':
+    elif model == 'arma':
         try:
             a, c = _armax_fit(y, int(order[0]), int(order[1]))[:2]
-        except NameError:
-            raise NotImplementedError("model='arma' needs the ARMA fit (_armax_fit)")
         except (np.linalg.LinAlgError, ValueError):
             return None
-        return a, c
-    if model == 'ss':
-        # needs the n4sid fit; its innovations-form (A, K, C) then go to _kstep_residuals_ss
-        raise NotImplementedError("model='ss' needs the state-space (n4sid) fit")
-    raise ValueError(f"Unknown model '{model}'")
+    else:
+        raise ValueError(f"Unknown model '{model}'")
+    return lambda y_seg, steps: _kstep_residuals(a, c, y_seg, steps)
 
 
 def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 2,
@@ -2939,9 +2995,8 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
         The input time series.
     model : {'ar', 'arma', 'ss'}, optional
         The time-series model to fit: an AR model (forward-backward least squares, as
-        MATLAB's ``ar``), an ARMA model (``armax``, using ``_armax_fit``), or a state-space
-        model (``n4sid``; not yet implemented). Default is ``'ar'``. The predictions of the
-        fitted model are those of MATLAB's ``predict(m, y, l)``, with the initial state of
+        MATLAB's ``ar``), an ARMA model (``armax``), or a state-space model (``n4sid``). Default is ``'ar'``.
+        The predictions of the fitted model are those of MATLAB's ``predict(m, y, l)``, with the initial state of
         the predictor estimated.
     order : int, 'best' or two-vector, optional
         The order of the model to fit: an integer for ``'ar'`` and ``'ss'``, a two-vector
@@ -2978,13 +3033,12 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
         order = 2
 
     # Fit the model on the whole time series
-    fit = _fit_polynomial_model(y, model, order)
-    if fit is None:
+    predict_errors = _fit_predictor_model(y, model, order)
+    if predict_errors is None:
         return np.nan
-    a, c = fit
 
     def model_residuals(k):
-        return _kstep_residuals(a, c, y, k)
+        return predict_errors(y, k)
 
     # Statistics of the predictions at each horizon
     mf_rms, mf_abs, mf_ac1 = (np.zeros(max_steps) for _ in range(3))
@@ -3062,8 +3116,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     y : array-like
         The input time series.
     the_model : {'ss', 'ar', 'arma'}, optional
-        The type of time-series model to fit: a state-space model (``'ss'``; not yet
-        implemented), an AR model (``'ar'``) or an ARMA model (``'arma'``). Default is
+        The type of time-series model to fit: a state-space model (``'ss'``), an AR model (``'ar'``) or an ARMA model (``'arma'``). Default is
         ``'ss'``.
     ord : int, 'best' or two-vector, optional
         The order of the model to fit (a two-element vector for ``'arma'``), or ``'best'``
@@ -3114,10 +3167,9 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     num_pred = int(sample_p[0])
 
     # Fit the model on the whole time series (the test sets are smaller chunks of it)
-    fit = _fit_polynomial_model(y, the_model, ord)
-    if fit is None:
+    predict_errors = _fit_predictor_model(y, the_model, ord)
+    if predict_errors is None:
         return np.nan
-    a, c = fit
 
     # Set the ranges of the test segments (1-based, inclusive)
     r = np.zeros((num_pred, 2), dtype=int)
@@ -3128,12 +3180,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
             seg_len = int(sample_p[1])
     if subset_how == 'rand':
         # reset the random seed (BF_ResetSeed), then numPred starting points
-        if isinstance(random_seed, str) and random_seed == 'default':
-            random_seed = 0
-        if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
-            rng = np.random.RandomState()
-        else:
-            rng = _ml_rng(int(random_seed))
+        rng = _seeded_rng(random_seed)
         spts = 1 + np.floor((N - seg_len + 1) * rng.random_sample(num_pred)).astype(int)  # randi
         r[:, 0] = spts
         r[:, 1] = spts + seg_len - 1
@@ -3161,7 +3208,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     for i in range(num_pred):
         y_test = y[r[i, 0] - 1:r[i, 1]]
         # step-ahead predictions across the test set, using the model fitted to all the data
-        mres = _kstep_residuals(a, c, y_test, steps)  # prediction minus data
+        mres = predict_errors(y_test, steps)  # prediction minus data
         yp = y_test + mres
 
         # statistics on the residuals
@@ -3212,51 +3259,6 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     out['stdrat_iqr'] = iqr(valid)
 
     return out
-
-
-def _zg_hmm_fit(y_train: np.ndarray, num_states: int, rng: np.random.RandomState,
-                n_cycles: int = 30, tol: float = 1e-4) -> tuple:
-    """
-    Gaussian HMM fit as Zoubin Ghahramani's ``ZG_hmm`` (used by hctsa), with hmmlearn's EM.
-
-    The initial state means are random around the data mean (scaled by the data standard
-    deviation), the start probabilities and transition matrix random, and the tied variance
-    the data variance, all drawn from ``rng``. At most ``n_cycles`` cycles of EM, stopping when
-    the proportional change in the log-likelihood falls below ``tol`` (see :func:`hmm_fit`).
-
-    Returns the fitted ``GaussianHMM`` and the log-likelihood of the training data at each
-    cycle.
-    """
-    y_col = y_train.reshape(-1, 1)
-    cov0 = np.var(y_train, ddof=1)
-    mu0 = rng.randn(num_states, 1) * np.sqrt(cov0) + np.mean(y_train)
-    pi0 = rng.random_sample(num_states)
-    pi0 = pi0 / pi0.sum()
-    p0 = rng.random_sample((num_states, num_states))
-    p0 = p0 / p0.sum(axis=1, keepdims=True)
-
-    model = GaussianHMM(n_components=num_states, covariance_type='tied',
-                        n_iter=1,  # one EM cycle per fit() call, so that we control the stopping rule
-                        tol=0, params='stmc', init_params='')
-    model.startprob_ = pi0
-    model.transmat_ = p0
-    model.means_ = mu0
-    model.covars_ = np.array([[cov0]])
-
-    LL = []  # log-likelihood of the training data at the start of each cycle
-    lik_base = 0.0
-    for cycle in range(1, n_cycles + 1):
-        model.fit(y_col)  # one E step and M step
-        lik = model.monitor_.history[-1]
-        old_lik = LL[-1] if LL else 0.0
-        LL.append(lik)
-        if cycle <= 2:
-            lik_base = lik
-        elif lik < old_lik:
-            pass  # a decrease (numerical violation): keep going, as ZG_hmm does
-        elif (lik - lik_base) < (1 + tol) * (old_lik - lik_base) or not np.isfinite(lik):
-            break
-    return model, np.array(LL)
 
 
 def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
@@ -3506,11 +3508,7 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         return np.arange(1, n + 1, dtype=float) if squish_or_squash else _linspace(0, 1, n)
 
     def reset_seed():  # BF_ResetSeed
-        if isinstance(random_seed, str) and random_seed == 'default':
-            return _ml_rng(0)
-        if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
-            return np.random.RandomState()
-        return _ml_rng(int(random_seed))
+        return _seeded_rng(random_seed)
 
     # Downsample long time series
     if max_n == 0:
