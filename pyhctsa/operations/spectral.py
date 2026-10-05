@@ -494,8 +494,10 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['ac2'] = auto_corrs_s[1]
     out['tau'] = first_crossing(s, 'ac', 0, 'continuous') * dw  # first zero crossing, in units of w (not bins)
 
-    # Shape of cumulative sum curve
-    cs_s = np.cumsum(s)
+    # Shape of cumulative sum curve: the cumulative area under the spectrum (a running
+    # integral over w, not a bare running sum over bins), which rises to ~1 for a unit-variance
+    # series whatever the number of bins
+    cs_s = np.cumsum(s) * dw
     f_frac_w_max = lambda frac: w[np.where(cs_s >= cs_s[-1] * frac)[0][0]]
     # @ what frequency is csS a fraction p of its maximum?
     out['wmax_5'] = f_frac_w_max(0.05)
@@ -519,7 +521,7 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['fpoly2csS_p3'] = c
     quad = lambda x, a, b, c: a * x**2 + b * x + c
     gof = goodness_of_fit(cs_s, quad(w, a, b, c), 3)
-    out['fpoly2_sse'] = gof['sse']
+    out['fpoly2_sse'] = gof['sse'] * dw  # integrated (not summed) squared error
     out['fpoly2_r2'] = gof['rsquare']
     out['fpoly2_rmse'] = gof['rmse']
 
@@ -532,10 +534,14 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['fpolysat_r2'] = gof['rsquare']
     out['fpolysat_rmse'] = gof['rmse']
 
-    # Shannon spectral entropy
-    h_shann = -s * np.log(s)
-    out['spect_shann_ent'] = np.sum(h_shann)
-    out['spect_shann_ent_norm'] = np.mean(h_shann)
+    # Shannon spectral entropy, from the spectrum rescaled to exactly unit area, Sn = S/(sum(S)*dw):
+    # (i) spect_shann_ent: -integral of Sn log(Sn) dw, the differential Shannon entropy of the
+    #     power distribution over frequency
+    # (ii) spect_shann_ent_norm: exp(spect_shann_ent) as a fraction of the frequency range N*dw
+    #     (1 for a flat spectrum, towards 0 as the power concentrates in a narrow band)
+    sn = s / (np.sum(s) * dw)
+    out['spect_shann_ent'] = np.sum(-sn * np.log(sn)) * dw
+    out['spect_shann_ent_norm'] = np.exp(out['spect_shann_ent']) / (n * dw)
 
     #"Spectral Flatness Measure"
     #which is given in dB as 10 log_10(gm/am) where gm is the geometric mean and am
