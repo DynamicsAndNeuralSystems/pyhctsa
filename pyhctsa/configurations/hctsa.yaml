@@ -898,7 +898,8 @@ stationarity:
       - {window_stat: 'AC1', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'AC1','permen',10,2)
       - {window_stat: 'asymAC1', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'asymAC1','std',2,1)
       - {window_stat: 'asymAC1', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'asymAC1','std',10,1)
-      - {window_stat: 'asymAC1', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'asymAC1','permen',10,2)
+      - {window_stat: 'asymAC1', across_win_stat: 'std', num_seg: 5, inc_move: 1, asym_tau: 'ac1e', zscore: True}   # SY_SlidingWindow(x_z,'asymAC1','std',5,1,'ac1e')
+      - {window_stat: 'asymAC1', across_win_stat: 'std', num_seg: 10, inc_move: 1, asym_tau: 'ac1e', zscore: True}   # SY_SlidingWindow(x_z,'asymAC1','std',10,1,'ac1e')
       - {window_stat: 'ent', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'ent','std',2,1)
       - {window_stat: 'ent', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'ent','std',10,1)
       - {window_stat: 'lillie', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'lillie','std',2,1)
@@ -914,7 +915,7 @@ stationarity:
       - {window_stat: 'specen', across_win_stat: 'std', num_seg: 5, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'specen','std',5,1)
       - {window_stat: 'specen', across_win_stat: 'permen', num_seg: 5, inc_move: 10, zscore: True}   # SY_SlidingWindow(x_z,'specen','permen',5,10)
     legacy_name: SY_SlidingWindow
-    ordered_args: ['window_stat', 'across_win_stat', 'num_seg', 'inc_move']
+    ordered_args: ['window_stat', 'across_win_stat', 'num_seg', 'inc_move', 'asym_tau']
   
   local_global:
     base_name: local_global
