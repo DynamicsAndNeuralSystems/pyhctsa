@@ -502,7 +502,7 @@ def _log_choose(n, k):
     return np.where((k < 0) | (n - k < 0), -np.inf, out)
 
 
-def _runstest_pvalue(x: np.ndarray) -> float:
+def runstest_pvalue(x: np.ndarray) -> float:
     """
     p-value of MATLAB's ``[~, p] = runstest(x)`` (runs above and below the mean; two-sided).
 
@@ -617,7 +617,7 @@ def independence_tests(y: ArrayLike, the_test: str = 'runstest') -> float:
     """
     y = np.asarray(y, dtype=float).ravel()
     if the_test == 'runstest':
-        return _runstest_pvalue(y)
+        return runstest_pvalue(y)
     if the_test == 'lbq':
         return ljung_box_pvalue(y, n_lags=20)
     raise ValueError(f"Unknown hypothesis test '{the_test}'.")
