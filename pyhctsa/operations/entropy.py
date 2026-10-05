@@ -8,13 +8,14 @@ import pywt
 from numpy.typing import ArrayLike
 from numba import njit
 from antropy.entropy import _xlogx
-from scipy.stats import gaussian_kde, norm, rankdata
+from scipy.stats import norm, rankdata
 from sklearn.neighbors import KDTree
 
 from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
 from ..toolboxes.physionet import sampen as _sampen_c
-from ..utils import (_ml_rng, _zscore_matlab, bin_picker, get_tau, make_buffer, pre_process,
+from ..robust import bf_hist_edges, bf_ks_density, bf_random
+from ..utils import (_ml_rng, _zscore_matlab, get_tau, make_buffer, pre_process,
                      time_delay_embed, z_score)
 
 
@@ -96,21 +97,6 @@ def shannon_entropy(
 
     return out
 
-def _ksdensity_bandwidth(y: np.ndarray) -> float:
-    """
-    The default bandwidth of MATLAB's ``ksdensity`` for a Gaussian kernel (the 'normal-approx'
-    rule): ``sigma * (4 / (3 N)) ** (1/5)`` with the robust spread estimate
-    ``sigma = median(|y - median(y)|) / 0.6745`` (the range of the data if that is zero).
-    """
-    y = np.asarray(y, dtype=float)
-    sigma = np.median(np.abs(y - np.median(y))) / 0.6745
-    if sigma <= 0:
-        sigma = np.max(y) - np.min(y)
-    if sigma > 0:
-        return float(sigma * (4.0 / (3.0 * y.size)) ** 0.2)
-    return 1.0
-
-
 def distribution_entropy(
     y: ArrayLike,
     hist_or_ks: str = 'hist',
@@ -121,8 +107,10 @@ def distribution_entropy(
     Distributional entropy.
 
     Estimates entropy from the distribution of a data vector. The distribution is estimated
-    either using a histogram with numBins bins, or as a kernel-smoothed distribution using
-    a Gaussian kernel.
+    either using a histogram (equal-width bins spanning the data, see
+    :func:`~pyhctsa.robust.bf_hist_edges`) with numBins bins, or as a kernel-smoothed
+    distribution using a Gaussian kernel with a normal-reference bandwidth (see
+    :func:`~pyhctsa.robust.bf_ks_density`).
 
     An optional additional parameter can be used to remove a proportion of the most extreme
     positive and negative deviations from the mean as an initial pre-processing step.
@@ -135,15 +123,14 @@ def distribution_entropy(
         Whether to use a histogram ('hist') or kernel-smoothed ('ks') distribution. Default is ``'hist'``.
     num_bins : int or str or float or None, optional
 
-        - (for 'hist'): an integer, uses a histogram with that many bins; or a binning rule
-          (NumPy's 'sturges', 'fd', 'sqrt', 'auto'; the bin edges differ from MATLAB's
-          ``histcounts`` rules of the same names, which round the bin width to a 'nice' value);
+        - (for 'hist'): an integer, the number of equal-width bins; or the name of a rule for
+          the number of bins ('sturges', 'fd', 'sqrt', 'auto'; written out as formulae in
+          :func:`~pyhctsa.robust.bf_hist_edges`, so not NumPy's or MATLAB's ``histcounts``
+          rules of the same names, which round the bin width to a 'nice' value);
         - (for 'ks'): a positive real number, the bandwidth (standard deviation of the Gaussian
-          kernel) of the kernel density estimate; or empty (``''`` / ``None``) to select it as
-          MATLAB's ``ksdensity`` does: the normal-reference rule
-          ``sigma * (4 / (3 N)) ** (1/5)`` with ``sigma = median(|y - median(y)|) / 0.6745``.
-          The density itself is scipy's Gaussian KDE (MATLAB's ``ksdensity`` truncates the
-          kernel at 4 bandwidths and evaluates approximately, which differs at about 1e-5).
+          kernel) of the kernel density estimate; or empty (``''`` / ``None``) for the default
+          bandwidth, the normal-reference rule ``sigma * (4 / (3 N)) ** (1/5)`` with
+          ``sigma = median(|y - median(y)|) / 0.6745`` (see :func:`~pyhctsa.robust.bf_ks_density`).
 
         Default is 10.
 
@@ -155,7 +142,10 @@ def distribution_entropy(
     Returns
     -------
     float
-        Estimate of entropy from the distribution.
+        Estimate of entropy from the distribution (in nats), or, if ``olremp`` is nonzero, the
+        entropy of the full time series minus that of the trimmed time series. NaN if everything
+        is removed by the trimming, or if the data (after trimming) are constant, for which the
+        differential entropy is not defined.
 
     Notes
     -----
@@ -181,10 +171,12 @@ def distribution_entropy(
     # (2) Form the histogram
     if hist_or_ks == 'hist':
         # use histogram to calculate pdf
+        if np.ptp(y) == 0:  # constant: the differential entropy is not defined
+            return np.nan
         if isinstance(num_bins, (int, np.integer)) and not isinstance(num_bins, bool):
-            bin_edges = bin_picker(x_min=y.min(), x_max=y.max(), n_bins=int(num_bins))
+            bin_edges = bf_hist_edges(y, int(num_bins))
         elif isinstance(num_bins, str) and num_bins in ['sturges', 'fd', 'sqrt', 'auto']:
-            bin_edges = np.histogram_bin_edges(y, bins=num_bins)  # NumPy's rules
+            bin_edges = bf_hist_edges(y, num_bins)
         else:
             raise ValueError(
                 f"Unknown binning method: {num_bins}. Choose either a valid rule or manually specify numBins."
@@ -207,7 +199,7 @@ def distribution_entropy(
         xr = np.linspace(lo - pad, hi + pad, num_grid_pts)
         if num_bins is None or (isinstance(num_bins, str) and num_bins in ['', ' ', '[]', 'none']) \
                 or (isinstance(num_bins, (list, tuple, np.ndarray)) and len(num_bins) == 0):
-            bw = _ksdensity_bandwidth(y)  # selects the width as MATLAB's ksdensity does
+            bw = None  # the default (normal-reference) bandwidth
         elif isinstance(num_bins, (int, float, np.integer, np.floating)) and not isinstance(num_bins, bool):
             # uses the specified width (the standard deviation of the Gaussian kernel). NB: a
             # fixed absolute bandwidth makes the density estimate inconsistent (for consistency
@@ -219,8 +211,7 @@ def distribution_entropy(
             raise ValueError(
                 f"Unknown type for {num_bins}. Either set to a float (which specifies the width, or leave empty.)"
             )
-        # (the kernel standard deviation is bw: scipy's factor is relative to the data's std)
-        px = gaussian_kde(y, bw_method=bw / np.std(y, ddof=1))(xr)
+        px = bf_ks_density(y, xr, bw)[0]
         bin_widths = np.ones(len(px)) * (xr[1] - xr[0])
         # The density must be converted to probability mass per cell for the entropy sum
         # below (shared with 'hist'), and renormalized (the grid truncates some tail mass)
