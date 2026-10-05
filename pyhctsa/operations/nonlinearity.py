@@ -3104,15 +3104,12 @@ def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
 # ------------------------------------------------------------------------------
 def _random_subset(n: int, k: int, random_seed: Union[int, str, None]) -> np.ndarray:
     """
-    ``k`` of ``n`` indices (from zero) in random order, from the Mersenne Twister seeded as
-    hctsa's ``BF_ResetSeed`` (an integer seed, ``'default'`` for seed 0, or ``None``/``'none'``
-    for an unseeded stream).
+    The first ``k`` of a random permutation of ``n`` indices (from zero), from the portable
+    generator :func:`~pyhctsa.robust.bf_random` (as hctsa's
+    ``BF_Random(n, BF_RandomSeed(randomSeed), 'perm')``): an integer seed, ``'default'`` for
+    seed 0, or ``None``/``'none'`` for a seed from NumPy's global stream.
     """
-    if random_seed is None or random_seed == 'none':
-        rng = np.random.RandomState()
-    else:
-        rng = _ml_rng(0 if random_seed == 'default' else int(random_seed))
-    return _ml_randperm(n, rng)[:k] - 1
+    return bf_random(n, _bf_random_seed(random_seed), 'perm')[:k] - 1
 
 
 def _recurrence_radius(Y: np.ndarray, rr: float, random_seed: Union[int, str, None]) -> float:
@@ -3252,11 +3249,10 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
         The maximum number of samples to consider (the first ``max_n``); ``'full'`` to
         disable cropping. Default is 10000.
     random_seed : int, str or None, optional
-        The seed of the Mersenne Twister for the random subsample used to set the radius, as
-        hctsa's ``BF_ResetSeed``: an integer, ``'default'`` (seed 0), or ``None``/``'none'``
-        (unseeded). The radius is the same as hctsa's only when there are at most 500 embedded
-        points (the subsample is then the whole series): MATLAB's ``randperm(n, k)`` draws a
-        different random subset from the same seed. Default is ``'default'``.
+        The seed of the random subsample used to set the radius, as hctsa's ``BF_RandomSeed``:
+        an integer, ``'default'`` (seed 0), or ``None``/``'none'`` (a seed from NumPy's global
+        stream). The subsample is the first 500 of a :func:`~pyhctsa.robust.bf_random`
+        permutation, so the radius is the same as hctsa's. Default is ``'default'``.
 
     Returns
     -------
@@ -3370,11 +3366,10 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
         ``max_n`` points, since the number of recurrent pairs grows as ``rr * N**2``.
         ``'full'`` disables cropping (a warning is logged above N = 20000). Default is 10000.
     random_seed : int, str or None, optional
-        The seed of the Mersenne Twister for the random subsample used to set the radius, as
-        hctsa's ``BF_ResetSeed``: an integer, ``'default'`` (seed 0), or ``None``/``'none'``
-        (unseeded). The subsample is the whole series (so the radius is exactly hctsa's)
-        up to 500 embedded points; beyond that MATLAB's ``randperm(n, k)`` draws a different
-        random subset from the same seed. Default is ``'default'``.
+        The seed of the random subsample used to set the radius, as hctsa's ``BF_RandomSeed``:
+        an integer, ``'default'`` (seed 0), or ``None``/``'none'`` (a seed from NumPy's global
+        stream). The subsample is the first 500 of a :func:`~pyhctsa.robust.bf_random`
+        permutation, so the radius is the same as hctsa's. Default is ``'default'``.
 
     Returns
     -------
@@ -4181,10 +4176,10 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
         The maximum number of samples to consider (the first ``max_n``); ``'full'`` for no
         cropping (a warning is logged above 50000 samples). Default is ``'full'``.
     random_seed : int, str or None, optional
-        The seed of the Mersenne Twister for sampling the poles, as hctsa's ``BF_ResetSeed``: an
-        integer, ``'default'`` (seed 0), or ``None``/``'none'`` (unseeded). MATLAB's
-        ``randperm(n, k)`` draws a different random set of poles from the same seed than the
-        Mersenne-Twister permutation used here. Default is ``'default'``.
+        The seed for sampling the poles, as hctsa's ``BF_RandomSeed``: an integer, ``'default'``
+        (seed 0), or ``None``/``'none'`` (a seed from NumPy's global stream). The poles are the
+        first of a :func:`~pyhctsa.robust.bf_random` permutation, so they are the same as
+        hctsa's. Default is ``'default'``.
 
     Returns
     -------
