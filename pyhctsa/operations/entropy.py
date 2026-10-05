@@ -14,7 +14,7 @@ from sklearn.neighbors import KDTree
 from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
 from ..toolboxes.physionet import sampen as _sampen_c
-from ..utils import (_zscore_matlab, bin_picker, get_tau, make_buffer, pre_process,
+from ..utils import (_ml_rng, _zscore_matlab, bin_picker, get_tau, make_buffer, pre_process,
                      time_delay_embed, z_score)
 
 
@@ -1079,6 +1079,229 @@ def wavelet_entropy(y: ArrayLike, wavelet_name: str = 'sym4', level: int = 5) ->
     p = energy / total
     p = p[p > 0]
     return float(-np.sum(p * np.log2(p)) / np.log2(level + 1))
+
+_RANDOMIZE_STATS = ('xcn1', 'xc1', 'd1', 'ac1', 'ac2', 'ac3', 'ac4', 'permen3_1', 'statav5',
+                    'swss5_1')
+
+
+def _randomize_stats(y: np.ndarray, y_rand: np.ndarray) -> list:
+    """The ten statistics comparing a series, ``y``, with a randomized version, ``y_rand``."""
+    from .stationarity import sliding_window, stat_av
+    from .correlation import autocorr
+    n = y.size
+
+    # Cross-correlation with the original signal at lags -1 and +1 (xcorr 'coeff')
+    norm_xc = np.sqrt(np.sum(y ** 2) * np.sum(y_rand ** 2))
+    with np.errstate(all='ignore'):
+        xcn1 = np.sum(y[:-1] * y_rand[1:]) / norm_xc
+        xc1 = np.sum(y[1:] * y_rand[:-1]) / norm_xc
+
+    # Norm of the differences between the original and randomized signals
+    d1 = np.linalg.norm(y - y_rand) / n
+
+    def safe(f, *args):
+        try:
+            return float(f(*args))
+        except Exception:  # data-dependent failure (e.g., a series too short): NaN
+            return np.nan
+
+    with np.errstate(all='ignore'):
+        ac = np.asarray(autocorr(y_rand, [1, 2, 3, 4], 'Fourier'), dtype=float).ravel()
+    if ac.size != 4:
+        ac = np.full(4, np.nan)
+
+    # Normalized permutation entropy, PermEn(3, 1)
+    permen3_1 = safe(lambda v: permutation_entropy(v, 3, 1)['normPermEn'], y_rand)
+    # Stationarity
+    statav5 = safe(stat_av, y_rand, 'seg', 5)
+    swss5_1 = safe(sliding_window, y_rand, 'std', 'std', 5, 1)
+    return [xcn1, xc1, d1, ac[0], ac[1], ac[2], ac[3], permen3_1, statav5, swss5_1]
+
+
+def _randomize_run(y: np.ndarray, randomize_how: str, draws: np.ndarray) -> np.ndarray:
+    """
+    Randomize ``y`` one point at a time for ``2N`` steps, recording the statistics at the
+    start and every ``N/10`` steps.
+
+    ``draws`` has shape ``(2N, 2)``: the (0-based) random indices consumed by each step,
+    in the order they are drawn.
+    """
+    n = y.size
+    num_calcs = 2.0 / 0.1  # randp_max / rand_inc
+    calc_ints = int(np.floor(2 * n / num_calcs))
+    if calc_ints == 0:
+        calc_ints = 1  # round up for short time series
+    calc_pts = list(range(0, 2 * n + 1, calc_ints))
+    if calc_pts[-1] != 2 * n:
+        calc_pts.append(2 * n)
+    row_of = {pt: k for k, pt in enumerate(calc_pts)}
+
+    stats = np.zeros((len(calc_pts), len(_RANDOMIZE_STATS)))
+    y_rand = y.copy()
+    stats[0] = _randomize_stats(y, y_rand)  # initial condition: apply on itself
+
+    for i in range(1, 2 * n + 1):
+        a, b = draws[i - 1]
+        if randomize_how == 'statdist':
+            # substitute a random element by a random element of the original series
+            # (MATLAB evaluates the right-hand index first: the first draw is the source)
+            y_rand[b] = y[a]
+        elif randomize_how == 'dyndist':
+            # substitute a random element by a random element of the current,
+            # already partially randomized, series
+            y_rand[b] = y_rand[a]
+        elif randomize_how == 'permute':
+            # swap two random elements, so that the distribution never changes
+            y_rand[a], y_rand[b] = y_rand[b], y_rand[a]
+        else:
+            raise ValueError(f"Unknown randomization method '{randomize_how}'.")
+        k = row_of.get(i)
+        if k is not None:
+            stats[k] = _randomize_stats(y, y_rand)
+    return stats
+
+
+def _randomize_fit(stats: np.ndarray) -> dict:
+    """Exponential fits and summaries of the trajectory of each statistic."""
+    from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr
+
+    def model2(p, x):
+        return p[0] * np.exp(p[1] * x)
+
+    def model3(p, x):
+        return p[0] * np.exp(p[1] * x) + p[2]
+
+    r = np.arange(1, stats.shape[0] + 1, dtype=float)  # an 'x-axis' for the fits
+    out = {}
+    for i, name in enumerate(_RANDOMIZE_STATS):
+        v = stats[:, i]
+        if name in ('xcn1', 'xc1'):
+            model, start = model2, [v[0], -0.1]
+        elif name in ('ac1', 'ac2', 'ac3'):
+            model, start = model2, [v[0], -0.2]
+        elif name == 'ac4':
+            model, start = model2, [v[0], -0.4]
+        elif name in ('d1', 'permen3_1'):
+            model, start = model3, [-v[-1], -0.2, v[-1]]
+        else:  # statav5, swss5_1
+            model, start = model3, [-v[-1], -0.1, v[-1]]
+        num_coeffs = len(start)
+
+        # Exponential fit (a * exp(b * k), plus an offset c for some), as MATLAB's fit
+        try:
+            with np.errstate(all='ignore'):
+                p = np.asarray(lsqcurvefit_trr(model, start, r, v), dtype=float)
+                gof = goodness_of_fit(v, model(p, r), num_coeffs)
+            if not np.all(np.isfinite(p)):
+                raise ValueError('non-finite fit')
+        except Exception:
+            p = np.full(num_coeffs, np.nan)
+            gof = {'rsquare': np.nan, 'rmse': np.nan}
+        out[name + 'fexpa'] = p[0]
+        out[name + 'fexpb'] = p[1]
+        if num_coeffs == 3:
+            out[name + 'fexpc'] = p[2]
+        out[name + 'fexpr2'] = gof['rsquare']
+        out[name + 'fexprmse'] = gof['rmse']
+
+        # Extra statistics: the absolute change, and the first checkpoint at which the
+        # statistic passes halfway between its start and end values
+        out[name + 'diff'] = abs(v[-1] - v[0])
+        half = 0.5 * (v[-1] + v[0])
+        passed = np.flatnonzero(v > half) if v[-1] > v[0] else np.flatnonzero(v < half)
+        out[name + 'hp'] = float(passed[0] + 1) if passed.size else np.nan
+    return out
+
+
+def randomize(y: ArrayLike, randomize_how: str = 'statdist',
+              random_seed: Union[int, str, None] = None) -> dict:
+    """
+    How properties of the series change as it is progressively randomized.
+
+    Randomizes a copy of the input (z-scored) series one point at a time, according to a
+    randomization procedure, repeated ``2N`` times for a series of length ``N``, and
+    compares statistics of the randomized copy with the original at 21 checkpoints: at the
+    start and after every ``N/10`` steps. Port of hctsa's ``EN_Randomize``.
+
+    The random draws are those of MATLAB's Mersenne Twister (``rng(seed, 'twister')``,
+    ``randi``) when a seed is given, so the result is reproducible and, for the same seed,
+    follows the same randomization as hctsa.
+
+    Parameters
+    ----------
+    y : array-like
+        The input (z-scored) time series.
+    randomize_how : {'statdist', 'dyndist', 'permute'}, optional
+        What one step of randomization does:
+
+        - ``'statdist'``: overwrites a random element of the series with a randomly chosen
+          element of the original series,
+        - ``'dyndist'``: overwrites a random element of the series with another random
+          element of the current, partially randomized, series,
+        - ``'permute'``: swaps two randomly chosen elements of the series, so that the
+          distribution of values never changes and only the temporal properties do.
+
+        Default is ``'statdist'``.
+    random_seed : int or {'default', 'none'}, optional
+        How to set the random seed, as hctsa's ``BF_ResetSeed``: an integer seed;
+        ``'default'`` (or None) seeds with 0; ``'none'`` does not seed (the run is then not
+        reproducible). Default is None.
+
+    Returns
+    -------
+    dict
+        For each of ten statistics measured at each checkpoint, six or seven fields
+        describing its trajectory over the 21 checkpoints. The statistics are:
+
+        - 'xcn1', 'xc1': the cross-correlation of the original and randomized series at
+          lags -1 and +1,
+        - 'd1': the distance between the original and randomized series,
+          ``norm(y - y_rand) / N``,
+        - 'ac1', 'ac2', 'ac3', 'ac4': the autocorrelation of the randomized series at
+          lags 1 to 4,
+        - 'permen3_1': the normalized permutation entropy of the randomized series,
+          PermEn(3, 1),
+        - 'statav5': StatAv with 5 segments (the standard deviation of the segment means),
+        - 'swss5_1': the standard deviation across 5 non-overlapping windows of the local
+          standard deviation, relative to the full-series standard deviation.
+
+        The fields are named by joining a statistic's name to a suffix. Fits of
+        ``a * exp(b * k)`` (``k`` the checkpoint number 1..21) for 'xcn1', 'xc1', 'ac1',
+        'ac2', 'ac3' and 'ac4' have the suffixes 'fexpa', 'fexpb' (the parameters),
+        'fexpr2' (R^2), 'fexprmse' (the standard error of the fit), 'diff' and 'hp'. Fits
+        of ``a * exp(b * k) + c`` for 'd1', 'permen3_1', 'statav5' and 'swss5_1' have the
+        same suffixes plus 'fexpc' (the offset ``c``). In all cases 'diff' is the absolute
+        change ``|s_end - s_start|`` of the statistic between the first and last
+        checkpoints and 'hp' is the number of the first checkpoint at which the statistic
+        passes halfway between its start and end values (NaN if it never does).
+
+    Notes
+    -----
+    'diff' is an absolute change, not a change relative to the starting value, because the
+    starting value (e.g., the autocorrelation of the original series at lag 2) can be near
+    0, where a relative change is unstable. The exponential fits use a port of MATLAB's
+    trust-region nonlinear least squares and the same starting points as hctsa; a fit that
+    fails gives NaN.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    if randomize_how not in ('statdist', 'dyndist', 'permute'):
+        raise ValueError(f"Unknown randomization method '{randomize_how}'.")
+    if not np.isclose(np.mean(y), 0, atol=1e-6) or not np.isclose(np.std(y, ddof=1), 1, atol=1e-6):
+        logger.warning('The input time series should be z-scored for randomize.')
+
+    # Random indices, in the order a MATLAB run draws them (randi(N) = floor(N*rand) + 1)
+    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'default'):
+        rng = _ml_rng(0)
+    elif isinstance(random_seed, str):
+        if random_seed != 'none':
+            raise ValueError(f"Not sure how to reset using '{random_seed}'")
+        rng = np.random.RandomState()
+    else:
+        rng = _ml_rng(int(random_seed))
+    draws = np.floor(n * rng.random_sample(4 * n)).astype(np.int64).reshape(2 * n, 2)
+
+    return _randomize_fit(_randomize_run(y, randomize_how, draws))
 
 def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str] = 1,
                        mapping_how: str = 'ncdf') -> Union[dict, float]:
