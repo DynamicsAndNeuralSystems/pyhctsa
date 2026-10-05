@@ -1584,12 +1584,6 @@ def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
     return out
 
 
-def _ratio(a: float, b: float) -> float:
-    """``a / b`` with MATLAB's semantics for a zero denominator (Inf, -Inf or NaN)."""
-    with np.errstate(all='ignore'):
-        return float(np.float64(a) / np.float64(b))
-
-
 def _fmt_threshold(prefix: str, thr: float) -> str:
     """Output name hctsa gives a threshold: sprintf('%s_%.2f') with the dot removed."""
     return f"{prefix}_{thr:.2f}".replace('.', '')
@@ -1601,8 +1595,9 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
     """
     Statistics of a kernel-smoothed distribution of the data.
 
-    The data are smoothed with a Gaussian kernel (100 points, MATLAB's default
-    bandwidth) and the smoothed density, f, is summarized by its number of peaks,
+    The data are smoothed with a Gaussian kernel with a normal-reference bandwidth
+    (:func:`pyhctsa.robust.bf_ks_density`: 100 points from three bandwidths below the
+    minimum to three above the maximum) and the smoothed density, f, is summarized by its number of peaks,
     maximum, entropy, and asymmetry about the mean, plus optional threshold-based
     statistics.
 
@@ -1624,16 +1619,12 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
     dict
         npeaks: the number of 'large enough' maxima of f (those with second difference
         below -0.0002); max: the maximum of f; entropy: the entropy of f; asym: the
-        area of f above the mean divided by that below it; plsym: the ratio of the
-        total variation of f below the mean to that above it; and, for each threshold t,
+        area of f above the mean divided by that below it (NaN if there is essentially
+        none below); plsym: the ratio of the total variation of f below the mean to that
+        above it (NaN if there is none above); and, for each threshold t,
         ``numcross_t``, ``area_t``, ``arclength_t`` (t formatted to two decimals with the
-        dot removed, e.g. ``numcross_005`` for 0.05).
-
-    Notes
-    -----
-    Uses ``scipy.stats.gaussian_kde`` with MATLAB's default bandwidth. MATLAB's
-    ``ksdensity`` truncates the kernel at four bandwidths for large samples, so
-    values differ slightly (about 1e-4 relative to the peak) for N above a few hundred.
+        dot removed, e.g. ``numcross_005`` for 0.05). NaN (not a dict) for a constant
+        series, which has no scale to smooth over.
     """
     x = np.asarray(x, dtype=float).ravel()
     for name, v in (('area', area), ('numcross', numcross), ('arclength', arclength)):
@@ -1643,7 +1634,9 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
                                  for v in (area, numcross, arclength))
 
     m = np.mean(x)
-    f, xi = _ksdensity(x)
+    f, xi, _ = bf_ks_density(x)
+    if np.any(np.isnan(f)):  # constant data: no scale to smooth over
+        return np.nan
     dx = xi[1] - xi[0]
     out = {}
 
@@ -1654,9 +1647,13 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
     out['max'] = float(np.max(f))  # maximum of the distribution
     fp = f[f > 0]
     out['entropy'] = float(-np.sum(fp * np.log(fp) * dx))
-    out['asym'] = _ratio(np.sum(f[xi > m] * dx), np.sum(f[xi < m] * dx))
-    out['plsym'] = _ratio(np.sum(np.abs(np.diff(f[xi < m])) * dx),
-                          np.sum(np.abs(np.diff(f[xi > m])) * dx))
+    mass_above = np.sum(f[xi > m] * dx)
+    mass_below = np.sum(f[xi < m] * dx)
+    # (essentially) no mass below the mean: the ratio is not meaningful
+    out['asym'] = np.nan if mass_below < 1e-10 else float(mass_above / mass_below)
+    var_below = np.sum(np.abs(np.diff(f[xi < m])) * dx)
+    var_above = np.sum(np.abs(np.diff(f[xi > m])) * dx)
+    out['plsym'] = np.nan if var_above < 1e-10 else float(var_below / var_above)  # no variation above the mean
 
     if numcross is not None:  # crossing statistics
         for thr in numcross:
