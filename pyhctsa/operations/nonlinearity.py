@@ -7,6 +7,7 @@ logger = logging.getLogger('pyhctsa')
 
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
+from scipy.special import gammaln
 from scipy.stats import spearmanr
 from scipy.signal import correlate
 
@@ -203,23 +204,6 @@ def zero_one_test(y, num_c=20, max_n=10000):
         "D": np.median(d_c),
         "Dstd": np.std(d_c, ddof=1),
     }
-
-def _resolve_time_delay(y: ArrayLike, tau: Union[int, str]) -> Union[int, float]:
-    """Resolve a string time-delay spec to a lag.
-
-    ``'ac'`` uses the first zero-crossing of the autocorrelation function and
-    ``'mi'`` the first minimum of the automutual information. An integer is
-    returned unchanged. The resolved value may be NaN (time series too short);
-    callers are responsible for handling that.
-    """
-    if not isinstance(tau, str):
-        return tau
-    if tau == 'ac':
-        return first_crossing(y, 'ac', 0, 'discrete')
-    if tau == 'mi':
-        return first_min(y, 'mi')
-    raise ValueError(f'Invalid time-delay method: {tau}. Choose either mi or ac.')
-
 
 def _first_fn(p, threshold, over_or_under='under'):
     """Position (counting from one) of the first element of ``p`` on the given
@@ -689,47 +673,88 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
 
     return out
 
-def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
-                  tau: Union[str, int] = 'ac', m: int = 2) -> dict:
+def local_density(y: ArrayLike, nnr: int = 3,
+                  past: Union[int, float, list, tuple] = ('ac', 1),
+                  tau: Union[str, int] = 'ac', m: Union[str, int] = 2) -> dict:
     """
-    Local density estimates in the time-delay embedding space.
-    
-    Computes a standard k-nearest-neighbor local density estimate at each
-    point of the time-delay embedding: density(i) is proportional to
-    1/r_NNR(i)^m, where r_NNR(i) is the distance from point i to its NNR-th
-    nearest neighbor (excluding temporally-close points within a Theiler
-    window of "past" samples) and m is the embedding dimension. 
+    How densely the delay-embedded trajectory is sampled around each of its
+    points, and how that density changes along the orbit.
+
+    Computes a k-nearest-neighbor estimate of the local probability density at
+    each point of the time-delay embedding: ``density(i) = (k/Neff) / (V_m *
+    r_k(i)^m)``, where ``r_k(i)`` is the distance from point i to its k-th
+    (``k = nnr``) nearest neighbor (excluding temporally-close points within a
+    Theiler window of ``past`` samples), ``m`` is the embedding dimension,
+    ``V_m = pi^(m/2) / Gamma(m/2 + 1)`` is the volume of the unit m-ball, and
+    ``Neff = N_embed - 2*past - 1`` is the number of points that can be
+    neighbors. The estimate is computed in units of the series' standard
+    deviation, and its logarithm is analyzed::
+
+        log density(i) = log(k/Neff) - log(V_m) - m*log(r_k(i)/std(y)),
+
+    which makes the outputs independent of the units of ``y`` and, for a
+    stationary process, of the number of points. Working with the log density
+    keeps the statistics well behaved (the density itself is heavy-tailed). To
+    avoid infinite densities when there are repeated values (zero neighbor
+    distance, as in quantized or held series), distances are smoothed as
+    ``sqrt(r^2 + (0.01*median(r[r > 0]))^2)``. (hctsa previously used TSTOOL's
+    ``localdensity`` and then ``1/r^m``; neither is used any more.)
 
     Parameters
     ----------
     y : array-like
         Input time series.
     nnr : int, optional
-        Number of nearest neighbours to compute. Default is 3.
-    past : int, optional
-        Number of time-correlated points to discard (samples), i.e., the
-        Theiler window. Default is 40.
+        Number of nearest neighbors to compute. Default is 3.
+    past : int, float, or ``['ac', k]``, optional
+        The Theiler window of time-correlated points to discard (see
+        :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k`` times
+        the first zero-crossing of the autocorrelation function (also
+        ``['ac1e', k]``), or a number of samples. Default is ``['ac', 1]``.
     tau : str or int, optional
-        The time-delay of the embedding, either an integer or ``'ac'`` for the
-        first zero-crossing of the autocorrelation function. Default is ``'ac'``.
+        The time-delay of the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of
+        the autocorrelation function, ``'ac1e'`` the (floored) first 1/e
+        crossing of the autocorrelation function, and ``'mi'`` the smaller of
+        the first minimum of the (Kraskov) automutual information and the 1/e
+        time. Default is ``'ac'``.
     m : int, optional
-        The embedding dimension. Default is 2.
+        The embedding dimension. Default is 2. (hctsa's ``'fnn'`` option, which
+        sets it by TISEAN's false nearest neighbors, is not yet available, and
+        raises ``NotImplementedError``.)
 
     Returns
     -------
     dict
-        Various statistics on the local density estimates at each point in the
-        time-delay embedding, including the minimum and maximum values, the
-        range, the standard deviation, mean, median, and autocorrelation.
-        The correlation lengths of the density sequence are ``tauacden`` (first
-        zero-crossing of the autocorrelation function) and ``taumigaussden``
-        (first minimum of the Gaussian automutual information function).
+        Statistics on the log local density series (output names retain 'den'),
+        in the time order of the embedded points: the minimum, maximum,
+        interquartile range, range, standard deviation, mean and median
+        (``minden`` ... ``medianden``), the autocorrelation at lags 1 to 5
+        (``ac1den`` ... ``ac5den``), and the correlation lengths of the density
+        sequence, ``tauacden`` (first zero-crossing of the autocorrelation
+        function) and ``taumigaussden`` (first minimum of the Gaussian automutual
+        information function, a monotonic function of the autocorrelation).
+        Returns NaN if the Theiler window or delay cannot be set, the series is
+        too short, or all neighbor distances are zero.
     """
-    if isinstance(tau, str) and tau != 'ac':
-        raise ValueError(f"Invalid time-delay method: '{tau}'. Only 'ac' (or an integer) is supported.")
-    tau = _resolve_time_delay(y, tau)
+    y = np.asarray(y, dtype=float).ravel()
+
+    past = theiler_window(y, past, len(y))
+    if np.isnan(past):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    past = int(past)
+
+    if isinstance(m, str):
+        if m == 'fnn':
+            raise NotImplementedError(
+                "local_density(m='fnn') needs a port of TISEAN's false_nearest (hctsa's "
+                "NL_FNN), which is not yet available in pyhctsa; pass an integer embedding "
+                "dimension.")
+        raise ValueError(f"Invalid embedding dimension '{m}'")
+    tau = get_tau(y, tau)
     if np.isnan(tau):
-        logger.warning('Could not get time delay by ACF (time series too short?)')
+        logger.warning('Could not get the time delay (time series too short?)')
         return np.nan
     try:
         y_embed = time_delay_embed(y, m, int(tau))
@@ -749,19 +774,24 @@ def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
     valid = np.abs(idx - np.arange(n_embed)[:, None]) > past
     # only the nnr-th smallest valid distance is needed, so partition rather than sort
     valid_dists = np.partition(np.where(valid, dist, np.inf), nnr-1, axis=1)
-    r_nnr = valid_dists[:, nnr-1]
+    dk = valid_dists[:, nnr-1]  # distance to the nnr-th neighbor outside the Theiler window
 
     # Fall back to a full pairwise search wherever the over-fetch wasn't enough:
     for i in np.flatnonzero(valid.sum(axis=1) < nnr):
         all_dists = np.linalg.norm(y_embed - y_embed[i], axis=1)
         all_dists[np.abs(np.arange(n_embed) - i) <= past] = np.inf
-        r_nnr[i] = np.sort(all_dists)[nnr-1]
+        dk[i] = np.sort(all_dists)[nnr-1]
 
-    with np.errstate(divide='ignore', over='ignore'):
-        locden = 1 / (r_nnr**m)
-
-    if np.all(locden == 0) or np.any(~np.isfinite(locden)):
+    if not np.any(dk > 0):  # all neighbor distances are zero (e.g., a constant series)
         return np.nan
+
+    # Smooth the distances so that repeated values (zero distances) give a finite density:
+    d = np.sqrt(dk**2 + (0.01*np.median(dk[dk > 0]))**2)
+
+    # Log of the k-NN density estimate, with distances in units of the series' SD:
+    neff = n_embed - 2*past - 1  # number of points that can be neighbors of a given point
+    locden = (np.log(nnr/neff) - ((m/2)*np.log(np.pi) - gammaln(m/2 + 1))
+              - m*np.log(d/np.std(y, ddof=1)))
 
     out = {}
     out['minden'] = np.min(locden)
@@ -783,6 +813,7 @@ def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
     out['taumigaussden'] = first_min(locden, 'mi-gaussian')
 
     return out
+
 
 class _D2DataError(ValueError):
     """A data-dependent failure of :func:`tisean_d2`, for which hctsa returns NaN."""
