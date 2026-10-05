@@ -12,7 +12,7 @@ logger = logging.getLogger('pyhctsa')
 from ..operations.correlation import autocorr
 from ..operations.distribution import compare_ks_fit, outlier_test
 from ..operations.stationarity import sliding_window, stat_av
-from ..utils import _round_half_away, z_score
+from ..utils import _round_half_away, _zscore_matlab, z_score
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
     """Apply a length-k median filter to a 1D array x, as MATLAB's ``medfilt1``.
@@ -197,17 +197,16 @@ def _ksdensity(x: np.ndarray, m: int = 100) -> tuple:
     return xi, f
 
 
-def _gauss1_kd_fit(x: np.ndarray) -> dict:
-    """Fit a Gaussian to the kernel-smoothed distribution of x: hctsa's ``DN_SimpleFit(x, 'gauss1', 0)``.
+def _gauss1_fit(x: np.ndarray, xi: np.ndarray, f: np.ndarray) -> dict:
+    """Fit a Gaussian to a distribution of x, as hctsa's ``DN_SimpleFit(x, 'gauss1', ...)``.
 
-    The distribution is a normal-kernel density estimate on 100 points (MATLAB's
-    ``ksdensity`` defaults, see ``_ksdensity``); the model is a1*exp(-((u - b1)/c1)^2),
-    fitted by least squares from the start point of MATLAB's ``gaussnstart``. Returns the R^2 (``r2``), the lag-1
+    The distribution is given as points ``xi`` and heights ``f`` (a kernel density estimate
+    or a histogram density); the model is a1*exp(-((u - b1)/c1)^2), fitted by least squares
+    from the start point of MATLAB's ``gaussnstart``. Returns the R^2 (``r2``), the root-mean-square
+    error (``rmse``, as hctsa, in units of the standard deviation of x), the lag-1
     autocorrelation of the residuals (``resAC1``) and the p-value of a runs test on the
     residuals (``resruns``), or NaN if the fit fails.
     """
-    xi, f = _ksdensity(x)
-
     # Start point (gaussnstart, one peak)
     k = np.nonzero(f == f.max())[0][-1]
     a0, b0 = f[k], xi[k]
@@ -232,9 +231,59 @@ def _gauss1_kd_fit(x: np.ndarray) -> dict:
     if not np.all(np.isfinite(res)):
         return np.nan
     sst = np.sum((f - np.mean(f)) ** 2)
-    return {'r2': 1 - np.sum(res ** 2) / sst,
+    sse = np.sum(res ** 2)
+    dfe = len(f) - 3  # three fitted coefficients
+    return {'r2': 1 - sse / sst,
+            'rmse': float(np.sqrt(sse / dfe) * np.std(x, ddof=1)) if dfe > 0 else np.nan,
             'resAC1': float(np.ravel(autocorr(res, 1, 'Fourier'))[0]),
             'resruns': _runstest_p(res)}
+
+
+def _gauss1_kd_fit(x: np.ndarray) -> dict:
+    """Fit a Gaussian to the kernel-smoothed distribution of x: hctsa's ``DN_SimpleFit(x, 'gauss1', 0)``.
+
+    The distribution is a normal-kernel density estimate on 100 points (MATLAB's
+    ``ksdensity`` defaults, see ``_ksdensity``). See ``_gauss1_fit`` for the outputs.
+    """
+    xi, f = _ksdensity(x)
+    return _gauss1_fit(x, xi, f)
+
+
+def _sqrt_rule_edges(x: np.ndarray) -> np.ndarray:
+    """Histogram bin edges of MATLAB's ``histcounts(x, 'BinMethod', 'sqrt')``.
+
+    The raw bin width is range / ceil(sqrt(N)); it is rounded to a "nice" value (1, 2, 3, 5 or
+    10 times a power of ten) and the edges are placed at multiples of that width, covering the data.
+    """
+    xmin, xmax = float(np.min(x)), float(np.max(x))
+    raw = (xmax - xmin) / max(int(np.ceil(np.sqrt(len(x)))), 1)
+    xscale = max(abs(xmin), abs(xmax))
+    if not xmax - xmin > max(np.sqrt(np.finfo(float).eps) * xscale, np.finfo(float).tiny):
+        return np.array([np.floor(2 * (xmin - 0.25)) / 2, np.ceil(2 * (xmax + 0.25)) / 2])  # constant data: one bin
+    raw = max(raw, np.spacing(xscale))
+    pow10 = 10.0 ** np.floor(np.log10(raw))
+    rel = raw / pow10
+    width = pow10 * (1 if rel < 1.5 else 2 if rel < 2.5 else 3 if rel < 4 else 5 if rel < 7.5 else 10)
+    left = min(width * np.floor(xmin / width), xmin)
+    nb = max(1, int(np.ceil((xmax - left) / width)))
+    right = max(left + nb * width, xmax)
+    return np.concatenate([[left], left + np.arange(1, nb) * width, [right]])
+
+
+def _gauss1_hist_fit(x: np.ndarray, bin_method: str = 'sqrt') -> dict:
+    """Fit a Gaussian to a histogram of x: hctsa's ``DN_SimpleFit(x, 'gauss1', bin_method)``.
+
+    The histogram uses MATLAB's square-root rule for its bin edges (see ``_sqrt_rule_edges``) or the
+    given number of equal-width bins, and is normalized to a probability density.
+    See ``_gauss1_fit`` for the outputs.
+    """
+    if bin_method == 'sqrt':
+        counts, edges = np.histogram(x, bins=_sqrt_rule_edges(x))
+    else:
+        counts, edges = np.histogram(x, bins=int(bin_method))
+    xi = (edges[:-1] + edges[1:]) / 2
+    f = counts / (counts.sum() * np.mean(np.diff(edges)))
+    return _gauss1_fit(x, xi, f)
 
 
 def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
@@ -426,4 +475,155 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
     out['olbt_m5'] = _diff(outlier_test(y_d, 5, 'mean'), outlier_test(y, 5, 'mean'))
     out['olbt_s5'] = _norm_diff(outlier_test(y_d, 5, 'std'), outlier_test(y, 5, 'std'))
 
+    return out
+
+
+def _iterate_stats(y: np.ndarray, y_d: np.ndarray) -> np.ndarray:
+    """The ten statistics of ``preproc_iterate`` for one processed series ``y_d`` (and original ``y``)."""
+    y = z_score(y)
+    y_d = z_score(y_d)
+    f = np.full(10, np.nan)
+
+    # 1) Stationarity: StatAv, sliding-window mean and standard deviation
+    f[0] = stat_av(y_d, 'seg', 5)
+    f[1] = sliding_window(y_d, 'mean', 'std', 5, 2)
+    f[2] = sliding_window(y_d, 'std', 'std', 5, 2) / sliding_window(y, 'std', 'std', 5, 2)
+
+    # 2) Gaussianity: Gaussian fits to the kernel density and to a histogram, and a normal fit
+    me = _gauss1_kd_fit(y_d)
+    f[3] = me['rmse'] if isinstance(me, dict) else np.nan
+    me = _gauss1_hist_fit(y_d, 'sqrt')
+    f[4] = me['rmse'] if isinstance(me, dict) else np.nan
+    me = compare_ks_fit(y_d, 'norm')
+    f[5] = me['adiff'] if isinstance(me, dict) else np.nan
+
+    # 3) Outliers
+    f[6] = outlier_test(y_d, 5, 'mean')
+
+    # Cross-correlation with, and distance to, the original signal
+    if len(y) == len(y_d):
+        norm = np.sqrt(np.sum(y ** 2) * np.sum(y_d ** 2))
+        f[7] = np.dot(y[:-1], y_d[1:]) / norm  # lag -1 of xcorr(y, y_d, 1, 'coeff')
+        f[8] = np.dot(y[1:], y_d[:-1]) / norm  # lag +1
+        f[9] = np.linalg.norm(y - y_d) / len(y)
+    return f
+
+
+def _profile_trend_jump(f: np.ndarray) -> tuple:
+    """Trend and jump of a profile of a statistic across processing strengths.
+
+    The profile is z-scored. The trend is the sum of its successive differences (last minus first).
+    The jump is the largest t-statistic for a step change in the mean, over all split points: the
+    split with the greatest absolute difference between the means before and after is chosen,
+    and its difference is divided by the combined standard error of the two means.
+    (NaN, NaN if any value is not finite.)
+    """
+    if not np.all(np.isfinite(f)):
+        return np.nan, np.nan
+    f = _zscore_matlab(f)
+    n = len(f)
+    trend = float(np.sum(np.diff(f)))
+
+    def sd(v):  # MATLAB std: the standard deviation of a single value is 0
+        return np.std(v, ddof=1) if len(v) > 1 else 0.0
+
+    m1 = np.array([np.mean(f[:j + 1]) for j in range(n)])
+    m2 = np.array([np.mean(f[j:]) for j in range(n)])
+    se1 = np.array([sd(f[:j + 1]) / np.sqrt(j + 1) for j in range(n)])
+    se2 = np.array([sd(f[j:]) / np.sqrt(n - j) for j in range(n)])
+    i = int(np.argmax(np.abs(m1 - m2)))
+    with np.errstate(divide='ignore', invalid='ignore'):
+        jump = float(np.abs((m1[i] - m2[i]) / np.sqrt(se1[i] ** 2 + se2[i] ** 2)))
+    return trend, jump
+
+
+def preproc_iterate(y: ArrayLike, dt_meth: str = 'diff') -> dict:
+    """
+    How time-series properties change as a preprocessing step is applied more and more strongly.
+
+    A preprocessing transformation is applied to the time series with increasing strength
+    (for the number of times, or the window size, given by the method), and a set of
+    statistics is computed on the (z-scored) processed series at each strength. Each
+    statistic's profile across the strengths is then z-scored and summarized by a trend
+    (the sum of its successive differences, i.e., the last minus the first value) and a jump
+    (the largest t-statistic for a step change in the mean, over all split points).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    dt_meth : str, optional
+        The preprocessing to apply:
+
+        - ``"spline"``: remove a least-squares cubic spline with 1, ..., 20 pieces
+        - ``"diff"``: take incremental differences, 1, ..., 5 times (the method hctsa uses)
+        - ``"medianf"``: a median filter with 25 window lengths from 1 to N/25
+        - ``"rav"``: a running mean filter with 25 window lengths from 1 to N/25
+        - ``"resampleup"``: progressively upsample the series, by factors 1, ..., 20
+        - ``"resampledown"``: progressively downsample the series, by factors 1, ..., 20
+
+        Default is ``"diff"``.
+
+    Returns
+    -------
+    dict
+        For each of the following statistics, measured on the processed series at each
+        strength, a trend (key ending ``_trend``) and a jump (ending ``_jump``) of its profile
+        across the strengths:
+
+        - ``statav5``: StatAv with 5 segments (``stat_av``)
+        - ``swms5_2``: the standard deviation of the window means in 5 windows overlapping by half
+        - ``swss5_2``: the standard deviation of the window standard deviations in 5 windows
+          overlapping by half, relative to that of the original series
+        - ``gauss1_kd``: the root-mean-square error of a Gaussian fit to the kernel-smoothed
+          distribution of values
+        - ``gauss1_hsqrt``: the root-mean-square error of a Gaussian fit to a histogram of the
+          values (square-root rule for the number of bins)
+        - ``norm_kscomp``: the area between the kernel-smoothed distribution of the values and the
+          best-fitting normal distribution (``compare_ks_fit``)
+        - ``ol``: the mean after trimming the 5% highest and 5% lowest values (``outlier_test``)
+        - ``xcn1``, ``xc1``: the cross-correlation between the original and processed series
+          at lags -1 and +1
+        - ``normdiff``: the distance between the original and processed series,
+          norm(y - y_processed) / N
+
+        The last three statistics need the processed series to be as long as the original, so
+        they are NaN for ``'diff'`` and the resampling methods.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+
+    # The number of times (or the strength with which) the processing is performed
+    if dt_meth in ('spline', 'resampleup', 'resampledown'):
+        n_range = np.arange(1, 21)
+    elif dt_meth == 'diff':
+        n_range = np.arange(1, 6)
+    elif dt_meth in ('medianf', 'rav'):
+        n_range = np.array([_round_half_away(v) for v in np.linspace(1, N / 25, 25)], dtype=int)
+    else:
+        raise ValueError(f"Unknown detrending method '{dt_meth}'")
+
+    # Progressive processing with a running statistical evaluation
+    outmat = np.full((len(n_range), 10), np.nan)
+    for q, n in enumerate(n_range):
+        n = int(n)
+        if dt_meth == 'spline':
+            y_d = _spline_detrend(y, n, 4)  # n pieces, cubic
+        elif dt_meth == 'diff':
+            y_d = np.diff(y, n=n)
+        elif dt_meth == 'medianf':
+            y_d = _med_filt_1d(y, n)
+        elif dt_meth == 'rav':
+            y_d = lfilter(np.ones(n) / n, [1], y)
+        elif dt_meth == 'resampleup':
+            y_d = resample_poly(y, n, 1)
+        else:  # resampledown
+            y_d = resample_poly(y, 1, n)
+        outmat[q] = _iterate_stats(y, y_d)
+
+    names = ['statav5', 'swms5_2', 'swss5_2', 'gauss1_kd', 'gauss1_hsqrt', 'norm_kscomp',
+             'ol', 'xcn1', 'xc1', 'normdiff']
+    out = {}
+    for t, name in enumerate(names):
+        out[f'{name}_trend'], out[f'{name}_jump'] = _profile_trend_jump(outmat[:, t])
     return out
