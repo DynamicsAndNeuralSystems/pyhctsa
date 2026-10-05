@@ -1320,7 +1320,8 @@ def _ml_min(a, axis=None):
         return np.nanmin(a, axis=axis)
 
 
-def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50) -> np.ndarray:
+def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
+                     hyp0: Union[np.ndarray, None] = None) -> np.ndarray:
     """
     learn GP hyperparameters for the time series ``(tt, yt)``.
 
@@ -1339,14 +1340,19 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50) ->
     it does not abort the fit. ``numpy.linalg.LinAlgError`` is only raised if
     that leaves non-finite hyperparameters, the counterpart of hctsa returning
     NaN.
+
+    ``hyp0`` is the initial hyperparameter vector ``[cov..., lik]``; the default is
+    the initialization for ``covSum{covSEiso, covNoise}`` (``cov`` must then be
+    :class:`CovSEisoNoise`), see :func:`_gp_init_hyp` for the other covariances.
     """
     nhps = cov.n_hyp
     # Initial values, set component by component as in MF_GP_LearnHyperp for
     # covSum{covSEiso, covNoise}: the SE length scale is in the ballpark of the
     # difference between time elements, its log-magnitude starts at zero, the noise
     # covariance at log(0.1), and so does the likelihood noise.
-    hyp0 = np.array([np.log(np.mean(np.diff(tt))), 0.0, np.log(0.1), np.log(0.1)])
-    assert nhps == 3
+    if hyp0 is None:
+        hyp0 = np.array([np.log(np.mean(np.diff(tt))), 0.0, np.log(0.1), np.log(0.1)])
+        assert nhps == 3
 
     def _nlz(theta):
         hyp = {'cov': theta[:nhps], 'lik': theta[nhps], 'mean': np.zeros(0)}
@@ -1357,6 +1363,20 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50) ->
     if not np.all(np.isfinite(theta)):
         raise np.linalg.LinAlgError('GP hyperparameters are not finite')
     return theta
+
+
+def _gp_cov(cov_func) -> tuple:
+    """
+    The covariance function for ``cov_func`` and a function giving the initial
+    hyperparameters for a set of times. The default ``'covSEiso_covNoise'`` is the
+    closed-form :class:`CovSEisoNoise` (initialized by :func:`_gp_learn_hyperp`); others are
+    built by ``parse_cov``, initialized by :func:`_gp_init_hyp`.
+    """
+    if isinstance(cov_func, str) and cov_func == 'covSEiso_covNoise':
+        return CovSEisoNoise, (lambda tt: None)
+    from ..toolboxes.matlab.gpml.cov import parse_cov
+    cov, components = parse_cov(cov_func)
+    return cov, (lambda tt: _gp_init_hyp(components, tt))
 
 
 def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
@@ -1371,11 +1391,12 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     ----------
     y : array-like
         The input time series.
-    cov_func : str
-        The covariance function. Only ``'covSEiso_covNoise'``, the gpml
-        ``covSum`` of a squared exponential and a noise term, is supported -- it
-        is the only configuration hctsa instantiates. Default is
-        ``'covSEiso_covNoise'``.
+    cov_func : str or list
+        The covariance function, a gpml ``covSum``: the names of its components joined
+        with underscores (``'covSEiso_covNoise'``, ``'covSEiso_covPeriodic_covNoise'``,
+        ``'covMaterniso3_covNoise'``, ``'covRQiso_covNoise'``) or in the gpml form
+        ``['covSum', ['covSEiso', 'covNoise']]``. The only configuration hctsa
+        instantiates is the default, ``'covSEiso_covNoise'`` (squared exponential plus noise).
     npoints : int
         The number of points through the time series to fit the GP model to.
         Default is 20.
@@ -1395,35 +1416,33 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         - ``nlml``: the negative log marginal likelihood (gpml's ``nlZ``) of the
           whole series (or of the 2000 resampled points), divided by the number
           of points so it does not grow with the series length,
-        - ``logh1``, ``logh2``, ``logh3``: the log hyperparameters of the
-          covariance function (length scale, signal amplitude, noise standard
-          deviation),
-        - ``h_lonN``: the fitted length scale divided by the series length.
+        - ``logh1``, ``logh2``, ...: the log hyperparameters of the covariance
+          function (for ``'covSEiso_covNoise'``: length scale, signal amplitude,
+          noise standard deviation),
+        - ``h_lonN``: the fitted length scale divided by the series length (only for
+          ``'covSEiso_covNoise'``).
 
         All values are NaN if the fit fails.
     """
-    if cov_func != 'covSEiso_covNoise':
-        raise ValueError(
-            "Only cov_func='covSEiso_covNoise' is supported "
-            f"(got {cov_func!r}); it is the only variant used by hctsa.")
-
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
     npoints = int(npoints)
 
-    cov = CovSEisoNoise
+    cov, init_hyp = _gp_cov(cov_func)
     nhps = cov.n_hyp
+    nan_out = {k: np.nan for k in
+               ('stde', 'meanabs_std', 'stdmu', 'meanS', 'stdS', 'nlml',
+                *(f'logh{i + 1}' for i in range(nhps)),
+                *(('h_lonN',) if cov is CovSEisoNoise else ()))}
 
     tt = np.floor(_linspace(1, N, npoints))
     yt = y[tt.astype(int) - 1]
 
     try:
-        theta = _gp_learn_hyperp(tt, yt, cov)
+        theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt))
     except np.linalg.LinAlgError:
         logger.warning('Lack of positive definite matrix for this time series')
-        return {k: np.nan for k in
-                ('stde', 'meanabs_std', 'stdmu', 'meanS', 'stdS', 'nlml',
-                 'logh1', 'logh2', 'logh3', 'h_lonN')}
+        return nan_out
 
     loghyper = theta[:nhps]
     hyp = {'cov': loghyper, 'lik': theta[nhps], 'mean': np.zeros(0)}
@@ -1439,9 +1458,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         mu, S2, _, _ = gp_predict(hyp, cov, tt, yt, ts)
     except np.linalg.LinAlgError:
         logger.warning('Gaussian process regression failed for this time series')
-        return {k: np.nan for k in
-                ('stde', 'meanabs_std', 'stdmu', 'meanS', 'stdS', 'nlml',
-                 'logh1', 'logh2', 'logh3', 'h_lonN')}
+        return nan_out
 
     # Output statistics
     S = np.sqrt(S2)  # standard deviation function, S
@@ -1465,7 +1482,9 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         out[f'logh{i + 1}'] = loghyper[i]
 
     # Give extra output based on length parameter on length of time series
-    out['h_lonN'] = np.exp(loghyper[0]) / N
+    # (only for the squared exponential plus noise covariance)
+    if cov is CovSEisoNoise:
+        out['h_lonN'] = np.exp(loghyper[0]) / N
 
     return out
 
@@ -1485,11 +1504,12 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     ----------
     y : array-like
         The input time series.
-    cov_func : str
-        The covariance function. Only ``'covSEiso_covNoise'``, the gpml
-        ``covSum`` of a squared exponential and a noise term, is supported -- it
-        is the only configuration hctsa instantiates. Default is
-        ``'covSEiso_covNoise'``.
+    cov_func : str or list
+        The covariance function, a gpml ``covSum``: the names of its components joined
+        with underscores (``'covSEiso_covNoise'``, ``'covSEiso_covPeriodic_covNoise'``,
+        ``'covMaterniso3_covNoise'``, ``'covRQiso_covNoise'``) or in the gpml form
+        ``['covSum', ['covSEiso', 'covNoise']]``. The only configuration hctsa
+        instantiates is the default, ``'covSEiso_covNoise'`` (squared exponential plus noise).
     num_train : int
         The number of training samples (for each iteration). Default is 20.
     num_test : int
@@ -1540,16 +1560,11 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
         All values are NaN if hyperparameters cannot be learned.
     """
-    if cov_func != 'covSEiso_covNoise':
-        raise ValueError(
-            "Only cov_func='covSEiso_covNoise' is supported "
-            f"(got {cov_func!r}); it is the only variant used by hctsa.")
-
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
     num_train, num_test, num_preds = int(num_train), int(num_test), int(num_preds)
 
-    cov = CovSEisoNoise
+    cov, init_hyp = _gp_cov(cov_func)
     nhps = cov.n_hyp
 
     if pmode in ('frombefore', 'randomgap'):
@@ -1621,7 +1636,7 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
         # (1) Learn hyperparameters from the training set
         try:
-            theta = _gp_learn_hyperp(tt, yt, cov)
+            theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt))
         except np.linalg.LinAlgError:
             logger.warning('Unable to learn hyperparameters for this time series')
             return {k: np.nan for k in out_keys}
@@ -2342,4 +2357,256 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
     out['meandiffLLtt'] = np.mean(np.abs(ll_tests - ll_trains))
     for i in range(len(n_states) - 1):
         out[f'LLtestdiff{i + 1}'] = ll_tests[i + 1] - ll_tests[i]
+    return out
+
+
+def _gp_init_hyp(components: list, tt: np.ndarray) -> np.ndarray:
+    """
+    Initial hyperparameters ``[cov..., lik]`` for ``MF_GP_LearnHyperp``, set component by
+    component of the ``covSum``: the length scale at the typical time step, log-magnitudes at
+    zero, the period of ``covPeriodic`` at a tenth of the time span (about ten cycles across
+    the data), ``covRQiso``'s log-shape at zero, and ``covNoise`` and the likelihood noise at
+    log(0.1).
+
+    As in hctsa, a component with a degree (``covMaterniso``) is not initialized and advances
+    the position by one only (not by its two hyperparameters), so the next component is
+    written over the Matern's second hyperparameter and the vector is zero elsewhere.
+    ``components`` is the list of ``(name, degree)`` from ``parse_cov``.
+    """
+    n_cov = int(sum({'covSEiso': 2, 'covPeriodic': 3, 'covRQiso': 3, 'covNoise': 1,
+                     'covMaterniso': 2}[name] for name, _ in components))
+    typical_dt = np.mean(np.diff(tt))  # typical time step: a length-scale prior
+    data_span = np.max(tt) - np.min(tt)
+    hyp = np.zeros(n_cov)
+    pos = 0
+    for name, degree in components:
+        if degree is not None:  # degree-parameterized component: left at zero
+            pos += 1
+        elif name == 'covSEiso':
+            hyp[pos] = np.log(typical_dt)       # length-scale
+            hyp[pos + 1] = 0.0                  # log-magnitude
+            pos += 2
+        elif name == 'covPeriodic':
+            hyp[pos] = np.log(typical_dt)       # length-scale
+            hyp[pos + 1] = np.log(data_span / 10)  # period (guess: ~10 cycles across the data)
+            hyp[pos + 2] = 0.0                  # log-magnitude
+            pos += 3
+        elif name == 'covRQiso':
+            hyp[pos] = np.log(typical_dt)       # length-scale
+            hyp[pos + 1] = 0.0                  # log-magnitude
+            hyp[pos + 2] = 0.0                  # log-alpha (shape)
+            pos += 3
+        elif name == 'covNoise':
+            hyp[pos] = np.log(0.1)              # noise magnitude
+            pos += 1
+        else:
+            pos += 1                            # unrecognized component: leave at zero
+    return np.r_[hyp, np.log(0.1)]
+
+
+def _ml_randi(imax: int, rng: np.random.RandomState) -> int:
+    """MATLAB's scalar ``randi(imax)``: ``1 + floor(imax * rand)``."""
+    return 1 + int(np.floor(imax * rng.random_sample()))
+
+
+def _ml_randsample(n: int, k: int, rng: np.random.RandomState) -> np.ndarray:
+    """MATLAB's ``randsample(n, k)`` (without replacement): 1-based indices."""
+    if 4 * k > n:
+        return _ml_randperm(n, rng)[:k]
+    selected = np.zeros(n, dtype=bool)
+    out = np.zeros(k, dtype=int)
+    nsel = 0
+    while nsel < k:
+        r = _ml_randi(n, rng)
+        if not selected[r - 1]:
+            selected[r - 1] = True
+            out[nsel] = r
+            nsel += 1
+    return out
+
+
+def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covNoise',
+                       squish_or_squash: int = 1, max_n: Union[int, float, str] = 500,
+                       resample_how: str = 'resample',
+                       random_seed: Union[int, str, None] = 0) -> dict:
+    """
+    Fits a Gaussian process to the series and reports its fitted kernel parameters and
+    goodness of fit.
+
+    Models the series as a smooth function of time using a Gaussian process (GP). A
+    zero-mean GP with a Gaussian likelihood is fitted using the covariance function
+    ``cov_func``, e.g., (i) a sum of squared exponential and noise terms, or (ii) a sum of
+    squared exponential, periodic, and noise terms. The log hyperparameters are found by
+    maximizing the marginal likelihood (at most 50 function evaluations), starting from a
+    data-informed initial guess (:func:`_gp_init_hyp`). Goodness of fit is summarized by the
+    per-point negative log marginal likelihood, the error of the fitted mean, and the GP's
+    predictive standard deviation.
+
+    Fitting is O(N^3), so the model is fitted to at most ``max_n`` samples from the time
+    series, chosen by (i) resampling the time series down to this many points, (ii) taking
+    the first ``max_n`` samples, or (iii) taking random samples. Times are the sample indices
+    (``squish_or_squash = 1``), so length scales and periods are in samples of the cut
+    series. The output is NaN if the fit fails or if the fitted mean is nearly constant
+    (standard deviation below 0.01).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (should be z-scored).
+    cov_func : str or list, optional
+        The covariance function: the names of the components of a gpml ``covSum``
+        joined with underscores (``'covSEiso_covNoise'``, ``'covSEiso_covPeriodic_covNoise'``,
+        ``'covMaterniso3_covNoise'``, ``'covRQiso_covNoise'``), or the gpml form
+        ``['covSum', ['covSEiso', 'covNoise']]`` (``['covMaterniso', 3]`` for a component
+        with a degree). Default is ``'covSEiso_covNoise'``.
+    squish_or_squash : int, optional
+        How to set the time index: if nonzero (default), t = 1, ..., N; if zero, t is
+        spread across the unit interval.
+    max_n : int, float or 'full', optional
+        The maximum length of time series to consider -- longer inputs are cut down to
+        ``max_n`` samples. A value below 1 is a proportion of the length. 0 or ``'full'``
+        disables the cut and uses the whole series. Default is 500.
+    resample_how : str, optional
+        How to cut time series longer than ``max_n`` down to ``max_n`` points:
+
+        - ``'resample'`` (default): resample the whole series down (``scipy.signal.resample_poly``),
+        - ``'first'``: take the first ``max_n`` samples,
+        - ``'random_i'``: take ``max_n`` random samples (unevenly spaced),
+        - ``'random_consec'``: take ``max_n`` consecutive samples from a random position,
+        - ``'random_both'``: take ``max_n`` consecutive samples from a random position, then
+          a random fifth of them.
+    random_seed : int, 'default', 'none' or None, optional
+        Seed for the Mersenne Twister, reset first (as ``BF_ResetSeed``) for the settings of
+        ``resample_how`` that use random numbers; ``'none'`` or ``None`` leaves the stream
+        alone. Default is 0.
+
+    Returns
+    -------
+    dict
+        - ``logh1``, ``logh2``, ...: the log hyperparameters of the fitted covariance
+          function, in the order of its components (the number depends on ``cov_func``):
+          covSEiso: [log length scale, log amplitude]; covPeriodic: [log length scale,
+          log period, log amplitude]; covMaterniso(3): [log length scale, log amplitude];
+          covRQiso: [log length scale, log amplitude, log shape parameter alpha]; covNoise:
+          [log noise standard deviation],
+        - ``nlml``: the negative log marginal likelihood of the fitted model, divided by the
+          number of points it was fitted to,
+        - ``stde``: root-mean-square error of the GP mean at the sampled times,
+        - ``meanabs_std``: mean absolute error of the GP mean, in units of the GP's
+          predictive standard deviation at each sampled time,
+        - ``std_mu_data``: standard deviation of the GP mean at the sampled times (if not
+          close to one, the GP has not followed the z-scored data),
+        - ``std_S_data``: standard deviation of the GP's predictive standard deviation at the
+          sampled times,
+        - ``maxS``, ``minS``, ``meanS``: maximum, minimum, and mean of the GP's predictive
+          standard deviation over 1000 equally spaced times spanning the sampled series.
+    """
+    from scipy.signal import resample_poly
+    from ..toolboxes.matlab.gpml.cov import parse_cov
+
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    cov, components = parse_cov(cov_func)
+    num_hps = cov.n_hyp
+
+    if isinstance(max_n, str):
+        if max_n.lower() != 'full':
+            raise ValueError(f"Invalid max_n '{max_n}'")
+        max_n = 0
+    if 0 < max_n < 1:  # a proportion of the time series length
+        max_n = int(np.ceil(N * max_n))
+    max_n = int(max_n)
+
+    def set_time_index(n):
+        return np.arange(1, n + 1, dtype=float) if squish_or_squash else _linspace(0, 1, n)
+
+    def reset_seed():  # BF_ResetSeed
+        if isinstance(random_seed, str) and random_seed == 'default':
+            return _ml_rng(0)
+        if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
+            return np.random.RandomState()
+        return _ml_rng(int(random_seed))
+
+    # Downsample long time series
+    if max_n == 0:
+        t = set_time_index(N)  # no resampling requested
+    elif N > max_n:
+        if resample_how == 'resample':  # resamples the whole time series down
+            f = max_n / N
+            y = resample_poly(y, int(np.ceil(f * 10000)), 10000)
+            if len(y) > max_n:
+                y = y[:max_n]
+            N = len(y)
+            t = set_time_index(N)
+        elif resample_how == 'random_i':  # max_n random indices (unevenly spaced)
+            t = set_time_index(N)
+            rng = reset_seed()
+            ii = np.sort(_ml_randsample(N, max_n, rng))
+            t = t[ii - 1]
+            t = (t - np.min(t)) / np.ptp(t) * (max_n - 1) + 1  # respace from 1:max_n
+            y = y[ii - 1]
+        elif resample_how == 'random_consec':  # max_n consecutive samples from a random position
+            rng = reset_seed()
+            sind = _ml_randi(N - max_n + 1, rng)  # start index
+            y = y[sind - 1:sind - 1 + max_n]
+            t = set_time_index(max_n)
+        elif resample_how == 'first':  # the first max_n samples
+            y = y[:max_n]
+            t = set_time_index(max_n)
+        elif resample_how == 'random_both':  # random start, then a random fifth of those samples
+            rng = reset_seed()
+            sind = _ml_randi(N - max_n + 1, rng)
+            y = y[sind - 1:sind - 1 + max_n]
+            N = len(y)
+            t = set_time_index(N)
+            ii = np.sort(_ml_randsample(N, int(np.ceil(max_n / 5)), rng))
+            t = t[ii - 1]
+            y = y[ii - 1]
+        else:
+            raise ValueError(f"Invalid sampling method '{resample_how}'.")
+    else:
+        t = set_time_index(N)
+
+    # Learn the hyperparameters (mean-zero process, Gaussian likelihood, exact inference)
+    try:
+        theta = _gp_learn_hyperp(t, y, cov, hyp0=_gp_init_hyp(components, t))
+    except np.linalg.LinAlgError:
+        logger.warning('Lack of positive definite matrix for this time series')
+        return np.nan
+    log_hyper = theta[:num_hps]
+    hyp = {'cov': log_hyper, 'lik': theta[num_hps], 'mean': np.zeros(0)}
+
+    out = {}
+    for i in range(num_hps):
+        out[f'logh{i + 1}'] = log_hyper[i]
+
+    # negative log marginal likelihood using the optimized hyperparameters, per point
+    out['nlml'] = gp_train(hyp, cov, t, y, want_dnlZ=False)[0] / len(t)
+
+    # mean error from the fit, evaluated at the data points
+    try:
+        mu, S2, _, _ = gp_predict(hyp, cov, t, y, t)
+    except np.linalg.LinAlgError:
+        return np.nan
+    if np.std(mu, ddof=1) < 0.01:  # hasn't fit the time series well at all -- too constant
+        logger.warning('This time series is not suited to Gaussian Process fitting')
+        return np.nan
+
+    # root-mean-square error of the mean function, mu
+    out['stde'] = np.sqrt(np.mean((y - mu) ** 2))
+    # better to look at the mean distance away in units of std
+    out['meanabs_std'] = np.mean(np.abs((y - mu) / np.sqrt(S2)))
+    out['std_mu_data'] = np.std(mu, ddof=1)  # std of the mean function at the datapoints
+    out['std_S_data'] = np.std(np.sqrt(S2), ddof=1)  # should vary a fair bit
+
+    # statistics on the predictive variance
+    xstar = _linspace(np.min(t), np.max(t), 1000)
+    try:
+        _, S2, _, _ = gp_predict(hyp, cov, t, y, xstar)
+    except np.linalg.LinAlgError:
+        return np.nan
+    S = np.sqrt(S2)  # standard deviation function (S2 is the variance)
+    out['maxS'] = np.max(S)
+    out['minS'] = np.min(S)
+    out['meanS'] = np.mean(S)
     return out
