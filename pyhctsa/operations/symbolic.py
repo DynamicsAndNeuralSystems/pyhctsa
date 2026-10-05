@@ -188,7 +188,33 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
 
     return out
 
-def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
+def _downsample_by_tau(y: np.ndarray, tau: Union[int, str]) -> Optional[np.ndarray]:
+    """
+    Downsample `y` by a time delay before symbolizing it (as hctsa's SB_MotifTwo/Three).
+
+    `tau` is an integer, or ``'ac'`` for the first zero-crossing of the autocorrelation
+    function, capped at floor(N/50) so that the downsampled series stays long enough to
+    count words. The series is downsampled at rate 1:tau (anti-alias filtered, as MATLAB's
+    `resample`) if tau > 1. Returns None if tau cannot be determined (e.g., an undefined
+    ACF of a constant series).
+    """
+    if isinstance(tau, str):
+        if tau != 'ac':
+            raise NotImplementedError(f"tau = '{tau}' is not supported (only an integer or 'ac')")
+        tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):
+            return None
+        if tau > len(y) / 50:  # cap at 2% of the series length
+            tau = int(np.floor(len(y) / 50))
+    if np.isnan(tau):
+        return None
+    tau = int(tau)
+    if tau > 1:  # symbolize words at this lag by downsampling first
+        y = resample_poly(y, 1, tau)
+    return y
+
+
+def motif_two(y: ArrayLike, binarize_how: str = 'diff', tau: Union[int, str] = 1) -> dict:
     """
     Compute local motifs in a binary symbolization of the input time series.
 
@@ -210,6 +236,13 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
 
         Default is ``'diff'``.
 
+    tau : int or str, optional
+        The time series is first downsampled by this factor (anti-alias filtered, as
+        MATLAB's `resample`), so that the words are formed at this lag: an integer, or
+        ``'ac'`` for the first zero-crossing of the autocorrelation function (capped at
+        floor(N/50)). Default is 1 (no downsampling). NaN is returned if tau cannot be
+        determined.
+
     Returns
     -------
     dict
@@ -221,8 +254,12 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
             Entropy values associated with the word distributions of lengths 1 to 4.
 
     """
+    # Downsample at lag tau, if requested
+    y = _downsample_by_tau(np.asarray(y), tau)
+    if y is None:
+        return np.nan
+
     # Generate a binarized version of the input time series
-    y = np.asarray(y)
     y_bin = binarize(y, binarize_how)
 
     # A median split fixes the marginal symbol frequencies (used for the
@@ -358,7 +395,7 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
 
     return out
 
-def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
+def motif_three(y: ArrayLike, cg_how: str = 'quantile', tau: Union[int, str] = 1) -> dict:
     """
     Motifs in a coarse-graining of a time series to a 3-letter alphabet.
 
@@ -374,14 +411,25 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
 
         Default is ``'quantile'``.
 
+    tau : int or str, optional
+        The time series is first downsampled by this factor (anti-alias filtered, as
+        MATLAB's `resample`), so that the words are formed at this lag: an integer, or
+        ``'ac'`` for the first zero-crossing of the autocorrelation function (capped at
+        floor(N/50)). Default is 1 (no downsampling). NaN is returned if tau cannot be
+        determined.
+
     Returns
     -------
     dict
         Statistics on words of length 1, 2, 3, and 4.
     """
 
+    # Downsample at lag tau, if requested
+    y = _downsample_by_tau(np.asarray(y), tau)
+    if y is None:
+        return np.nan
+
     # Coarse-grain the data y -> yt
-    y = np.asarray(y)
     num_letters = 3
     if cg_how == 'quantile':
         yt = coarse_grain(y, 'quantile', num_letters)
