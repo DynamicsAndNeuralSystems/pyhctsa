@@ -6,6 +6,7 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 import pywt
+from scipy import stats
 import logging
 logger = logging.getLogger('pyhctsa')
 
@@ -293,7 +294,10 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     Returns
     -------
     dict
-        Dictionary of statistics on the CWT coefficients.
+        Dictionary of statistics on the CWT coefficients, including ``gam1`` and
+        ``gam2`` (the shape and scale of a gamma distribution fitted to SC by maximum
+        likelihood) and ``dd_SC_h`` (the entropy of the maximum of SC in each of 10 time
+        boxes at each scale).
     """
     y = np.asarray(y)
     N = len(y)
@@ -331,9 +335,31 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     out['pover90'] = poverfn(90)
     out['pover80'] = poverfn(80)
 
+    # Gamma distribution fitted to the scaled power (maximum likelihood, as gamfit)
+    try:
+        gam_shape, _, gam_scale = stats.gamma.fit(SC.ravel(), floc=0)
+    except (stats.FitError, ValueError, RuntimeError):
+        # (e.g., exact zeros or NaNs in SC for degenerate series)
+        gam_shape = gam_scale = np.nan
+    out['gam1'] = gam_shape
+    out['gam2'] = gam_scale
+
     # 2D entropy (relative to its maximum)
     SC_a = SC/np.sum(SC)
     out['SC_h'] = -np.sum(SC_a * np.log(SC_a)) - np.log(num_entries)
+
+    # Entropy of the maximum of SC in each of 10 time boxes at each scale
+    num_boxes = 10
+    if N < num_boxes:
+        logger.warning('Time series too short')
+        return np.nan
+    cutoffs = np.floor(np.linspace(0, N, num_boxes + 1) + 0.5).astype(int)  # MATLAB round
+    dd_SC = np.zeros((max_scale, num_boxes))
+    for j in range(num_boxes):
+        dd_SC[:, j] = np.max(SC[:, cutoffs[j]:cutoffs[j + 1]], axis=1)
+    dd_SC = dd_SC / np.sum(dd_SC)
+    dd_SC_o = dd_SC.ravel()
+    out['dd_SC_h'] = -np.sum(dd_SC_o * np.log(dd_SC_o))
 
     # Sum across scales
     SSC = sum(SC)
