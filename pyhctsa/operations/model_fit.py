@@ -139,6 +139,173 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
 
     return out
 
+def _armax_fit(y: np.ndarray, p: int, q: int) -> tuple:
+    """
+    Prediction-error (least-squares) fit of an ARMA(p, q) model in the System Identification
+    Toolbox convention ``A(q) y(t) = C(q) e(t)`` with ``A = 1 + a_1 q^-1 + ... + a_p q^-p`` and
+    ``C = 1 + c_1 q^-1 + ... + c_q q^-q``, minimizing the sum of squared one-step prediction
+    errors with zero initial conditions (as ``armax``).
+
+    Returns ``(a, c, loss, cov)``: the coefficient vectors (including the leading 1), the loss
+    function (mean squared prediction error), and the covariance matrix of the parameter
+    estimates ``[a_1, ..., a_p, c_1, ..., c_q]``.
+    """
+    from scipy.optimize import least_squares
+    n = len(y)
+    n_par = p + q
+
+    def resid(th):
+        return lfilter(np.r_[1.0, th[:p]], np.r_[1.0, th[p:]], y)
+
+    if n_par > 0:
+        # Two starting points: an AR fit with no MA part, and a Hannan-Rissanen estimate (regress
+        # y on its lags and on the residuals of a long AR fit, standing in for the innovations)
+        m = max(p, q)
+        starts = []
+        if p > 0:
+            X = np.column_stack([-y[p - i - 1:n - i - 1] for i in range(p)])
+            starts.append(np.r_[np.linalg.lstsq(X, y[p:], rcond=None)[0], np.zeros(q)])
+        else:
+            starts.append(np.zeros(n_par))
+        L = min(max(10, 2 * n_par), n // 4)
+        X = np.column_stack([y[L - i - 1:n - i - 1] for i in range(L)])
+        e_hat = np.r_[np.zeros(L), y[L:] - X @ np.linalg.lstsq(X, y[L:], rcond=None)[0]]
+        cols = [-y[m - i - 1:n - i - 1] for i in range(p)] + [e_hat[m - i - 1:n - i - 1] for i in range(q)]
+        th_hr = np.linalg.lstsq(np.column_stack(cols), y[m:], rcond=None)[0]
+        if q > 0:  # an invertible start: reflect roots of C outside the unit circle
+            roots = np.roots(np.r_[1.0, th_hr[p:]])
+            roots = np.where(np.abs(roots) > 1, 1 / np.conj(roots), roots)
+            th_hr[p:] = np.real(np.poly(roots))[1:]
+        starts.append(th_hr)
+        sol = None
+        for th0 in starts:
+            try:
+                cand = least_squares(resid, th0, method='lm')
+            except (ValueError, np.linalg.LinAlgError):
+                continue
+            if np.isfinite(cand.cost) and (sol is None or cand.cost < sol.cost):
+                sol = cand
+        if sol is None:
+            raise ValueError('ARMA model could not be fitted')
+        th = sol.x
+        jac = sol.jac
+        loss = np.sum(sol.fun ** 2) / n
+        # covariance of the estimates: noise variance times the inverse of J'J
+        cov = loss * n / (n - n_par) * np.linalg.pinv(jac.T @ jac)
+    else:
+        th = np.zeros(0)
+        loss = np.mean(y ** 2)
+        cov = np.zeros((0, 0))
+    return np.r_[1.0, th[:p]], np.r_[1.0, th[p:]], loss, cov
+
+
+def _armax_residuals(a: np.ndarray, c: np.ndarray, y: np.ndarray, steps: int) -> np.ndarray:
+    """
+    Prediction errors of ``yp - y`` for a ``steps``-ahead predictor of the ARMA model
+    ``a(q) y = c(q) e`` (as ``predict(m, data, steps, 'init', 'e')``): the initial state of the
+    predictor is the one that minimizes the squared prediction error.
+    """
+    # y = H e with H = C/A; the k-step predictor error is e_k = (H_k A / C) y, where H_k is
+    # the first k terms of the impulse response of H
+    h = lfilter(c, a, np.r_[1.0, np.zeros(steps - 1)])
+    b = np.convolve(h, a)
+    state_len = max(len(b), len(c)) - 1
+    e0 = lfilter(b, c, y)
+    if state_len == 0:
+        return -e0
+    # the output is linear in the initial filter state: estimate it by least squares
+    basis = np.zeros((len(y), state_len))
+    for j in range(state_len):
+        zi = np.zeros(state_len)
+        zi[j] = 1.0
+        basis[:, j] = lfilter(b, c, y, zi=zi)[0] - e0
+    zi_hat = np.linalg.lstsq(basis, -e0, rcond=None)[0]
+    return -(e0 + basis @ zi_hat)
+
+
+def armax(y: ArrayLike, orders: Union[list, tuple] = (3, 3), p_train: float = 0.8,
+          num_steps: int = 1) -> dict:
+    """
+    The coefficients of a fitted ARMA model, and how well it predicts the later part of the series.
+
+    Fits an autoregressive moving-average (ARMA) model with orders ``[p, q]`` to the whole
+    time series by minimizing the one-step prediction error (hctsa's ``MF_armax``, which uses
+    ``armax`` from MATLAB's System Identification Toolbox). The coefficients, their
+    uncertainties, and the goodness of fit are from this fit. The model is then fitted again to
+    the first ``p_train`` proportion of the time series and used to predict the remainder
+    ``num_steps`` samples ahead; the prediction residuals (prediction minus data) are
+    summarized with :func:`residual_analysis`.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    orders : sequence of two ints, optional
+        ``[p, q]``, the AR and MA orders of the model. Default is ``(3, 3)``.
+    p_train : float, optional
+        The proportion of the data to train the model on (the remainder is used for testing).
+        Default is 0.8.
+    num_steps : int, optional
+        The number of steps ahead to predict when testing the model. Default is 1.
+
+    Returns
+    -------
+    dict
+        From the model fitted to the entire series, in the MATLAB convention
+        ``y(t) + a_1 y(t-1) + ... + a_p y(t-p) = e(t) + c_1 e(t-1) + ... + c_q e(t-q)``:
+
+        - ``AR_1``, ..., ``AR_p``: the AR coefficients ``a_1, ..., a_p`` (the negatives of the
+          usual AR coefficients)
+        - ``MA_1``, ..., ``MA_q``: the MA coefficients ``c_1, ..., c_q``
+        - ``maxda``, ``maxdc``: the largest estimated standard deviation of the AR and MA
+          coefficients (from the covariance of the parameter estimates)
+        - ``noisevar``, ``lossfn``, ``fpe``: the noise variance, the loss function (mean squared
+          prediction error), and Akaike's final prediction error of the fit
+
+        From the residuals of the predictions of the held-out portion (see
+        :func:`residual_analysis`, ``'full'``): ``meane``, ``meanabs``, ``stde``, ``maxonstd``,
+        ``ac1``, ``ac2``, ``ac3``, ``propbth``, ``ftbth``, ``taurat``, ``sws``, ``swm``,
+        ``normksstat``, ``popt``, ``minsbc``.
+
+    Notes
+    -----
+    The model is fitted by Levenberg-Marquardt least squares on the one-step prediction errors,
+    from the better of an AR start and a Hannan-Rissanen start, until convergence, with zero
+    initial conditions. MATLAB's ``armax`` instead stops at a loose tolerance (so its coefficients
+    are partly the starting values) and, with its default initial condition ``'auto'``, sometimes
+    estimates the initial conditions by backcasting (for highly predictable series). So the
+    coefficients and everything that depends on them agree with MATLAB's only roughly, and
+    poorly where an ARMA model is poorly identified (nearly cancelling AR and MA polynomials, as
+    for near-white series, where only the loss, ``noisevar`` and ``fpe`` are well-determined).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = len(y)
+    p, q = int(orders[0]), int(orders[1])
+
+    # Fit to the whole time series
+    a, c, loss, cov = _armax_fit(y, p, q)
+    n_par = p + q
+    out = {}
+    for i in range(1, p + 1):
+        out[f'AR_{i}'] = a[i]
+    for i in range(1, q + 1):
+        out[f'MA_{i}'] = c[i]
+    sd = np.sqrt(np.diag(cov))
+    out['maxda'] = np.max(sd[:p]) if p > 0 else 0.0
+    out['maxdc'] = np.max(sd[p:]) if q > 0 else 0.0
+    out['noisevar'] = loss * n / (n - n_par)
+    out['lossfn'] = loss
+    out['fpe'] = loss * (1 + n_par / n) / (1 - n_par / n)
+
+    # Fit to the training portion, predict the test portion (overlapping by one sample)
+    n_cut = int(np.floor(p_train * n))
+    y_train = y[:n_cut]
+    y_test = y[n_cut - 1:]
+    a_tr, c_tr, _, _ = _armax_fit(y_train, p, q)
+    m_residuals = _armax_residuals(a_tr, c_tr, y_test, int(num_steps))
+    out.update(residual_analysis(m_residuals, y_test, 'full'))
+    return out
+
 def _ar_fb(seg: np.ndarray, order: int) -> tuple:
     """
     AR model by forward-backward least squares (MATLAB's default ``ar`` estimator).
