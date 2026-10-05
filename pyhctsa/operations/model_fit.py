@@ -1883,6 +1883,40 @@ def _kstep_residuals(a: np.ndarray, c: np.ndarray, y: np.ndarray, steps: int) ->
     return _kstep_residuals_ss(F, cp[1:] - ap[1:], C, y, steps)
 
 
+def _fit_polynomial_model(y: np.ndarray, model: str, order) -> Union[tuple, None]:
+    """
+    Fit the model of MF_steps_ahead / MF_CompareTestSets to the whole series ``y``.
+
+    ``model`` is ``'ar'`` (forward-backward least squares as MATLAB's ``ar``; ``order`` an
+    integer, or ``'best'`` for the order from 1 to 10 chosen by Schwarz's Bayesian criterion,
+    ARFIT), ``'arma'`` (``armax``; ``order`` is ``[p, q]``; needs ``_armax_fit``) or ``'ss'``
+    (``n4sid``; not yet implemented). Returns the polynomials ``(a, c)`` of ``a(q) y = c(q) e``
+    including the leading 1, or None if the fit fails.
+    """
+    if model == 'ar':
+        if isinstance(order, str) and order == 'best':
+            try:
+                order = len(_arfit(y, 1, 10, 'sbc', zero=True)[1])
+            except ValueError:
+                return None
+        try:
+            return np.r_[1.0, _ar_fb(y, int(order))[0]], np.ones(1)
+        except np.linalg.LinAlgError:
+            return None
+    if model == 'arma':
+        try:
+            a, c = _armax_fit(y, int(order[0]), int(order[1]))[:2]
+        except NameError:
+            raise NotImplementedError("model='arma' needs the ARMA fit (_armax_fit)")
+        except (np.linalg.LinAlgError, ValueError):
+            return None
+        return a, c
+    if model == 'ss':
+        # needs the n4sid fit; its innovations-form (A, K, C) then go to _kstep_residuals_ss
+        raise NotImplementedError("model='ss' needs the state-space (n4sid) fit")
+    raise ValueError(f"Unknown model '{model}'")
+
+
 def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 2,
                 max_steps: int = 6) -> dict:
     """
@@ -1943,37 +1977,14 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
     if order is None:
         order = 2
 
-    # Fit the model on the whole time series, and set up its multi-step residuals
-    if model == 'ar':
-        if isinstance(order, str) and order == 'best':
-            # the optimum order by Schwarz's Bayesian criterion, from ARfit
-            try:
-                order = len(_arfit(y, 1, 10, 'sbc', zero=True)[1])
-            except ValueError:
-                return np.nan
-        try:
-            a = np.r_[1.0, _ar_fb(y, int(order))[0]]
-        except np.linalg.LinAlgError:
-            return np.nan
-        c = np.ones(1)
+    # Fit the model on the whole time series
+    fit = _fit_polynomial_model(y, model, order)
+    if fit is None:
+        return np.nan
+    a, c = fit
 
-        def model_residuals(k):
-            return _kstep_residuals(a, c, y, k)
-    elif model == 'arma':
-        try:
-            a, c = _armax_fit(y, int(order[0]), int(order[1]))[:2]
-        except NameError:
-            raise NotImplementedError("model='arma' needs the ARMA fit (_armax_fit)")
-        except (np.linalg.LinAlgError, ValueError):
-            return np.nan
-
-        def model_residuals(k):
-            return _kstep_residuals(a, c, y, k)
-    elif model == 'ss':
-        # needs the n4sid fit; its innovations-form (A, K, C) then go to _kstep_residuals_ss
-        raise NotImplementedError("model='ss' needs the state-space (n4sid) fit")
-    else:
-        raise ValueError(f"Unknown model '{model}'")
+    def model_residuals(k):
+        return _kstep_residuals(a, c, y, k)
 
     # Statistics of the predictions at each horizon
     mf_rms, mf_abs, mf_ac1 = (np.zeros(max_steps) for _ in range(3))
@@ -2023,4 +2034,181 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
     out['stde_maxdiff'] = np.max(d)
     out['stde_stddiff'] = np.std(d, ddof=1)
     out['stde_ndown'] = int(np.sum(d < 0))
+    return out
+
+
+def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, list] = 2,
+                      subset_how: str = 'rand', sample_p: Union[list, tuple] = (20, 0.1),
+                      steps: int = 2, random_seed: Union[int, str, None] = 0) -> dict:
+    """
+    How well a model fitted to the whole series predicts short stretches of it.
+
+    Fits a time-series model to the full series, then uses it to predict a set of short
+    test segments of the series (``steps`` samples ahead), and summarizes how the
+    prediction quality varies across the segments. For each segment it records the
+    root-mean-square prediction error, the lag-1 autocorrelation of the errors, the
+    absolute difference between the mean prediction and the mean of the data, and the
+    ratio of the standard deviations of the predictions and the data. It says something
+    about stationarity in the spread of values, and about the suitability of the model in
+    the level of values.
+
+    Similar to :func:`fit_subsegments`, except that the model is fitted on the full time
+    series and tested on different local segments. The predictions are those of MATLAB's
+    ``predict(m, segment, steps)``, with the initial state of the predictor estimated for
+    each segment.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    the_model : {'ss', 'ar', 'arma'}, optional
+        The type of time-series model to fit: a state-space model (``'ss'``; not yet
+        implemented), an AR model (``'ar'``) or an ARMA model (``'arma'``). Default is
+        ``'ss'``.
+    ord : int, 'best' or two-vector, optional
+        The order of the model to fit (a two-element vector for ``'arma'``), or ``'best'``
+        to select it automatically: for ``'ar'``, the order from 1 to 10 minimizing the
+        Schwarz Bayesian criterion (ARFIT); for ``'ss'``, as chosen by n4sid. Default is 2.
+    subset_how : {'rand', 'uniform'}, optional
+        How to select the test segments: at random, or evenly spaced throughout the time
+        series. Default is ``'rand'``.
+    sample_p : two-vector, optional
+        ``[number of segments, segment length]``. A segment length below 1 is a fraction of
+        the series length, capped to between 10 and 20 samples (so ``[25, 0.1]`` takes 25
+        segments of 10 to 20 samples); otherwise it is a number of samples. A single value
+        (with ``'uniform'``) partitions the series into that many segments. Default is
+        ``[20, 0.1]``.
+    steps : int, optional
+        The number of steps ahead to predict in each segment. Default is 2.
+    random_seed : int, 'default', 'none' or None, optional
+        Seed for the Mersenne Twister that picks the random segments, reset first as
+        ``BF_ResetSeed`` does (0, or ``'default'``, is MATLAB's default); ``'none'`` or
+        ``None`` leaves the stream alone. Default is 0.
+
+    Returns
+    -------
+    dict
+        - ``stde_mean``, ``stde_std``, ``stde_iqr``: the mean, standard deviation and
+          interquartile range over segments of the root-mean-square prediction error,
+        - ``ac1_mean``, ``ac1_median``: the absolute value of the mean, and of the median,
+          over segments of the lag-1 autocorrelation of the prediction errors,
+        - ``ac1_std``, ``ac1_iqr``: the standard deviation and interquartile range over
+          segments of that autocorrelation,
+        - ``meane_mean``, ``meane_std``, ``meane_iqr``: the mean, standard deviation and
+          interquartile range over segments of the absolute difference between the mean
+          prediction and the mean of the data,
+        - ``stdrat_mean``, ``stdrat_median``, ``stdrat_std``, ``stdrat_iqr``: the mean,
+          median, standard deviation and interquartile range over segments of the ratio of
+          the standard deviation of the predictions to that of the data (segments in which
+          the data are near-constant are excluded).
+
+        NaN if the model cannot be fitted.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    sigma_y = np.std(y, ddof=1)  # used to flag degenerate (near-constant) test segments
+    if ord is None:
+        ord = 2
+    sample_p = np.atleast_1d(np.asarray(sample_p, dtype=float))
+    steps = int(steps)
+    num_pred = int(sample_p[0])
+
+    # Fit the model on the whole time series (the test sets are smaller chunks of it)
+    fit = _fit_polynomial_model(y, the_model, ord)
+    if fit is None:
+        return np.nan
+    a, c = fit
+
+    # Set the ranges of the test segments (1-based, inclusive)
+    r = np.zeros((num_pred, 2), dtype=int)
+    if subset_how in ('rand', 'uniform') and len(sample_p) > 1:
+        if sample_p[1] < 1:  # a fraction of the time series, capped to between 10 and 20
+            seg_len = int(max(min(20, np.floor(N * sample_p[1])), 10))
+        else:  # an absolute interval
+            seg_len = int(sample_p[1])
+    if subset_how == 'rand':
+        # reset the random seed (BF_ResetSeed), then numPred starting points
+        if isinstance(random_seed, str) and random_seed == 'default':
+            random_seed = 0
+        if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
+            rng = np.random.RandomState()
+        else:
+            rng = _ml_rng(int(random_seed))
+        spts = 1 + np.floor((N - seg_len + 1) * rng.random_sample(num_pred)).astype(int)  # randi
+        r[:, 0] = spts
+        r[:, 1] = spts + seg_len - 1
+    elif subset_how == 'uniform':
+        if len(sample_p) == 1:  # size will depend on number of unique subsegments
+            spts = np.floor(_linspace(0, N, num_pred + 1) + 0.5).astype(int)  # MATLAB round()
+            r[:, 0] = spts[:num_pred] + 1
+            r[:, 1] = spts[1:]
+        else:
+            spts = np.floor(_linspace(1, N - seg_len + 1, num_pred) + 0.5).astype(int)
+            r[:, 0] = spts
+            r[:, 1] = spts + seg_len - 1
+    else:
+        raise ValueError(f"Unknown subset method '{subset_how}'")
+
+    # Quickly check that ranges are valid
+    if np.any(r[:, 0] >= r[:, 1]):
+        raise ValueError('Invalid settings')
+
+    # Do the series of predictions
+    rmserrs = np.zeros(num_pred)
+    ac1s = np.zeros(num_pred)
+    meandiffs = np.zeros(num_pred)
+    stdrats = np.zeros(num_pred)
+    for i in range(num_pred):
+        y_test = y[r[i, 0] - 1:r[i, 1]]
+        # step-ahead predictions across the test set, using the model fitted to all the data
+        mres = _kstep_residuals(a, c, y_test, steps)  # prediction minus data
+        yp = y_test + mres
+
+        # statistics on the residuals
+        rmserrs[i] = np.sqrt(np.mean(mres ** 2))
+        ac1s[i] = np.ravel(autocorr(mres, 1, 'Fourier'))[0]
+
+        # statistics on the output time series
+        meandiffs[i] = abs(np.mean(yp) - np.mean(y_test))
+        # near-constant test segments: the ratio of standard deviations is undefined, not just large
+        if np.std(y_test, ddof=1) < 1e-6 * sigma_y:
+            stdrats[i] = np.nan
+        else:
+            stdrats[i] = np.std(yp, ddof=1) / np.std(y_test, ddof=1)
+
+    def iqr(x):
+        return np.diff(matlab_quantile(x, [0.25, 0.75]))[0] if len(x) > 0 else np.nan
+
+    def std(x):
+        return np.std(x, ddof=1) if len(x) > 1 else (0.0 if len(x) == 1 else np.nan)
+
+    def mean(x):
+        return np.mean(x) if len(x) > 0 else np.nan
+
+    def median(x):
+        return np.median(x) if len(x) > 0 else np.nan
+
+    out = {}
+    out['stde_mean'] = mean(rmserrs)
+    out['stde_std'] = std(rmserrs)
+    out['stde_iqr'] = iqr(rmserrs)
+
+    # absolute values of operations on the raw ac1s (not the absolute values of ac1s)
+    out['ac1_mean'] = abs(mean(ac1s))
+    out['ac1_median'] = abs(median(ac1s))
+    out['ac1_std'] = std(ac1s)
+    out['ac1_iqr'] = iqr(ac1s)
+
+    # differences in mean between the predictions and the data
+    out['meane_mean'] = mean(meandiffs)
+    out['meane_std'] = std(meandiffs)
+    out['meane_iqr'] = iqr(meandiffs)
+
+    # ratio of standard deviations (omitting segments flagged as degenerate above)
+    valid = stdrats[~np.isnan(stdrats)]
+    out['stdrat_mean'] = mean(valid)
+    out['stdrat_median'] = median(valid)
+    out['stdrat_std'] = std(valid)
+    out['stdrat_iqr'] = iqr(valid)
+
     return out
