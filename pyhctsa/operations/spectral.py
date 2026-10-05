@@ -1009,7 +1009,10 @@ def cepstrum(y: ArrayLike, max_period: int = 100, min_period: int = 4) -> dict:
     nHalf = NFFT // 2 + 1
     halfLogMag = logMag[:nHalf]
     fIdx = np.arange(nHalf, dtype=float) / (nHalf - 1) # normalized frequency axis for conditioning
-    pEnv = polyfit(fIdx, halfLogMag, envOrder)
+    # The fit excludes the zero-frequency (DC) bin: a z-scored series has (almost) no
+    # power there, so log|X| at DC is a huge negative outlier (about -30) that would
+    # otherwise bend the fitted envelope. The detrending below still covers all bins.
+    pEnv = polyfit(fIdx[1:], halfLogMag[1:], envOrder)
     halfDetrended = halfLogMag - np.polyval(pEnv, fIdx)
 
     # Mirror back to a full Hermitian-symmetric spectrum so the cepstrum is real:
