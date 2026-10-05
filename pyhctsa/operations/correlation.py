@@ -541,7 +541,7 @@ def falling_sticks(y: ArrayLike) -> dict:
 
     # Persistence of the fall-angle sequence
     if len(angles_pos) >= 2 and np.std(angles_pos, ddof=1) > 0:
-        z_angles_pos = z_score(angles_pos)
+        z_angles_pos = _zscore_matlab(angles_pos)
         out['tau_p'] = first_crossing(z_angles_pos, 'ac', 0, 'continuous')
         out['ac1_p'] = autocorr(z_angles_pos, 1, 'Fourier')
     else:
@@ -549,7 +549,7 @@ def falling_sticks(y: ArrayLike) -> dict:
         out['ac1_p'] = np.nan
 
     if len(angles_neg) >= 2 and np.std(angles_neg, ddof=1) > 0:
-        z_angles_neg = z_score(angles_neg)
+        z_angles_neg = _zscore_matlab(angles_neg)
         out['tau_n'] = first_crossing(z_angles_neg, 'ac', 0, 'continuous')
         out['ac1_n'] = autocorr(z_angles_neg, 1, 'Fourier')
     else:
@@ -1657,7 +1657,7 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
     Returns
     -------
     float
-        The computed nonlinear autocorrelation 
+        The computed nonlinear autocorrelation (NaN if the series is not longer than the largest lag).
     """
     y = np.asarray(y)
     taus = np.asarray(taus)
@@ -1669,6 +1669,9 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
 
     n = len(y)
     tmax = np.max(taus)
+    if n <= tmax:  # no product to average
+        return np.nan
+
     nlac = y[tmax:n]
 
     for i in taus:

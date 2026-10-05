@@ -31,9 +31,12 @@ def fast_dfa(y: ArrayLike) -> float:
     Returns
     -------
     float
-        Estimated scaling exponent from log-log linear fit of fluctuation vs interval.
+        Estimated scaling exponent from log-log linear fit of fluctuation vs interval (NaN for fewer
+        than 10 samples).
     """
     y = np.asarray(y)
+    if y.size < 10:  # too short for the algorithm (e.g. a heavily decimated series)
+        return np.nan
     intervals, flucts = fastdfa.fastdfa(y)
     idx = np.argsort(intervals)
     intervals_sorted = intervals[idx]

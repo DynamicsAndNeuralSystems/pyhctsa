@@ -1100,6 +1100,7 @@ def _n4_state_space(y: np.ndarray, order: Union[int, str]) -> dict:
             'order': n}
 
 
+@dict_output
 def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.5,
                       steps: int = 1) -> dict:
     """
@@ -1132,7 +1133,8 @@ def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.
     Returns
     -------
     dict
-        From the model fitted to the entire time series:
+        All outputs NaN if the model cannot be fitted (e.g. a series too short for the order).
+        Otherwise, from the model fitted to the entire time series:
 
         - ``A_1``, ..., ``A_(ord^2)``: the entries of the state-transition matrix ``A``, counted
           down each column in turn
@@ -1171,7 +1173,10 @@ def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.
         ord = int(ord)
 
     # The model of the whole time series
-    fit = _n4_state_space(y, ord)
+    try:
+        fit = _n4_state_space(y, ord)
+    except (ValueError, np.linalg.LinAlgError):
+        return np.nan  # the model cannot be fitted (e.g. too few samples): every output is undefined
     n = fit['order']
     out = {}
     if ord == 'best':
@@ -1196,8 +1201,8 @@ def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.
     y_test = y[n_cut - 1:]
     try:
         train = _n4_state_space(y[:n_cut], ord)
-    except (ValueError, np.linalg.LinAlgError) as err:
-        raise ValueError(f"Couldn't fit the model to this time series: {err}") from err
+    except (ValueError, np.linalg.LinAlgError):
+        return np.nan
     m_residuals = -_ss_initial_state(train['A'], train['K'], train['C'], y_test, int(steps))[1]
     out.update(residual_analysis(m_residuals, y_test, 'full'))
     out['ac1diff'] = abs(autocorr(y, 1, 'Fourier')) - abs(autocorr(m_residuals, 1, 'Fourier'))
@@ -1523,8 +1528,8 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
             seg = y[r[i, 0] - 1:r[i, 1]]
             try:
                 fit = _n4_state_space(seg, order if isinstance(order, str) else int(order))
-            except (np.linalg.LinAlgError, ValueError) as err:
-                raise ValueError("Couldn't fit this state space model") from err
+            except (np.linalg.LinAlgError, ValueError):
+                return np.nan  # (hctsa: an error) a segment is too short for the model
             fpes[i] = _n4_fpe(fit['loss'], fit['order'], len(seg))
         out.update(_fpe_stats(fpes))
     elif model == 'arma':

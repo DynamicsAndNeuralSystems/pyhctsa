@@ -81,6 +81,21 @@ def test_calculator_decimation_failure_keeps_names(tmp_path):
 
 
 # ------------------------------------------------------------------------------
+# failures that are genuinely inappropriate inputs give NaN, not an exception
+# ------------------------------------------------------------------------------
+def test_short_series_give_nan_outputs():
+    for order, n in (('best', 25), (2, 10)):  # (too few samples for the model, or for training it on half)
+        out = model_fit.state_space_n4sid(Y[:n], order)
+        assert isinstance(out, dict) and all(np.isnan(v) for v in out.values())
+    assert np.isnan(correlation.nonlinear_autocorr(np.arange(5.0), [0, 3, 6]))
+    assert np.isnan(scaling.fast_dfa(np.arange(5.0)))
+
+
+def test_falling_sticks_near_constant_angles_do_not_raise():
+    assert isinstance(correlation.falling_sticks(np.exp(np.random.RandomState(1).randn(500))), dict)
+
+
+# ------------------------------------------------------------------------------
 # bf_remove_points (hctsa BF_RemovePoints): the random ordering is bf_random's permutation
 # ------------------------------------------------------------------------------
 def test_remove_points_random_uses_bf_random():
