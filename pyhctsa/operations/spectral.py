@@ -333,6 +333,10 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     y = np.asarray(y)
     ny = len(y)
 
+    if np.all(y == y[0]):  # constant series has an all-zero spectrum -> log(0)
+        warnings.warn("Constant time series has no spectral structure")
+        return np.nan
+
     window = None
     # Set window (for periodogram and welch):
     if window_type == 'none':
