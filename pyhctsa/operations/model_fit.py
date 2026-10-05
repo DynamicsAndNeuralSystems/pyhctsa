@@ -18,6 +18,7 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.physics import _ksdensity
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
+from ..robust import bf_exp_fit
 from ..toolboxes.matlab.optimizers import minimize
 from ..utils import _linspace, _ml_randperm, _ml_rng, _zscore_matlab, get_tau, matlab_quantile, z_score
 
@@ -1558,31 +1559,6 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         raise ValueError(f"Unknown model: {model}")
     return out
 
-def _fit_exp_curve(x: np.ndarray, y: np.ndarray, prefix: str) -> dict:
-    """
-    Fit y = a * exp(b * x) + c by nonlinear least squares.
-
-    The starting point is [range(y), -0.5, min(y)], as in hctsa's
-    FC_LoopLocalSimple. Returns the parameters (``a``, ``b``, ``c``) and the
-    goodness of fit (``r2``, ``adjr2``, ``rmse``, with ``rmse`` using the
-    degrees-of-freedom-adjusted residual variance), all NaN if the fit fails.
-    """
-    keys = [f'{prefix}_{k}' for k in ('a', 'b', 'c', 'r2', 'adjr2', 'rmse')]
-    try:
-        if not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))):
-            raise ValueError("non-finite data")
-        popt, _ = curve_fit(lambda t, a, b, c: a * np.exp(b * t) + c, x, y,
-                            p0=[np.ptp(y), -0.5, np.min(y)], maxfev=10000)
-        res = y - (popt[0] * np.exp(popt[1] * x) + popt[2])
-        sse = np.sum(res ** 2)
-        sst = np.sum((y - np.mean(y)) ** 2)
-        n, dfe = len(y), len(y) - 3
-        r2 = 1 - sse / sst
-        vals = [popt[0], popt[1], popt[2], r2, 1 - (1 - r2) * (n - 1) / dfe, np.sqrt(sse / dfe)]
-    except (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
-        vals = [np.nan] * 6
-    return dict(zip(keys, vals))
-
 def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     """
     How simple local forecasting depends on window length.
@@ -1609,9 +1585,14 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         with window length: for each of the residual standard deviation
         (``stde``), ``sws``, ``swm``, ``ac1`` and ``ac2``, the normalized mean
         change (``_chn``), the mean sign of the changes (``_meansgndiff``) and, for
-        the last four, ``_stdn``; ``sws_fexp_a``, ``_b``, ``_c``, ``_r2``,
-        ``_adjr2`` and ``_rmse`` (an exponential fit a*exp(b*l) + c to the
-        ``sws`` curve; NaN if the fit fails); ``stde_peakpos`` (1-based position in the list
+        the last four, ``_stdn``; ``sws_fexp_b`` (the rate of an exponential fit
+        a*exp(b*l) + c to the ``sws`` curve: negative for a decay with training length),
+        ``sws_fexp_r2`` (between 0 and 1), ``sws_fexp_adjr2`` and ``sws_fexp_rmse`` of that
+        fit. The fit is the global least-squares optimum over b, with a and c found by
+        linear least squares (:func:`pyhctsa.robust.bf_exp_fit`); a and c are not output
+        because they are poorly determined when the curve is close to a straight line.
+        The four ``sws_fexp_*`` outputs are NaN if the ``sws`` curve is constant.
+        ``stde_peakpos`` (1-based position in the list
         of window lengths of the extreme value of the ``stde`` curve) and
         ``stde_peaksize``.
     """
@@ -1666,8 +1647,12 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         out[f'{name}_meansgndiff'] = np.mean(np.sign(np.diff(curve)))
         out[f'{name}_stdn'] = np.std(curve, ddof=1) / np.ptp(curve)
         if name == 'sws':
-            # exponential fit f(l) = a exp(b l) + c to the sws curve
-            out.update(_fit_exp_curve(train_length_range.astype(float), curve, 'sws_fexp'))
+            # global least-squares exponential fit f(l) = a exp(b l) + c to the sws curve
+            f_exp = bf_exp_fit(train_length_range.astype(float), curve, True)
+            out['sws_fexp_b'] = f_exp['b']
+            out['sws_fexp_r2'] = f_exp['r2']
+            out['sws_fexp_adjr2'] = f_exp['adjr2']
+            out['sws_fexp_rmse'] = f_exp['rmse']
 
     return out
 
