@@ -1640,8 +1640,10 @@ def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
 # ------------------------------------------------------------------------------
 # (the imports for this block sit here, rather than at the top of the module, only to
 # keep the block self-contained)
+import warnings
+
 from numba import njit
-from scipy.spatial.distance import pdist
+from scipy.spatial.distance import pdist, squareform
 from sklearn.neighbors import KDTree
 
 from ..utils import _linspace, _ml_randperm, _round_half_away, bin_picker
@@ -2378,4 +2380,163 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     out['phisthistmin'] = nhist[0]  # probability in the first (lowest-value) bin
     out['hhisthist'] = -np.sum(nhist[nhist > 0] * np.log(nhist[nhist > 0]))
 
+    return out
+
+
+def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: int = 4,
+                  max_n: Union[int, str] = 'full') -> dict:
+    """
+    Whether the time-delay embedding of the series forms separate clusters of points.
+
+    Reconstructs the time series as a time-delay embedding (as in :func:`embed_pca`) and
+    fits Gaussian mixture models with a small grid of component counts (1, ..., ``k_max``) to
+    the resulting point cloud. A dynamical process whose trajectory visits distinct regions of
+    phase space (e.g., alternating between two attractor states, or a system with
+    intermittent bursts) leaves a multi-modal point cloud in the embedding; a process with a
+    single smooth (e.g., unimodal-stochastic or single-loop periodic) attractor does not. This
+    is a distinct signal from marginal-distribution multi-modality, since two states can
+    overlap entirely in amplitude yet still separate cleanly once lagged coordinates are
+    added, and from regime-switching detected by hidden Markov models, which cluster points
+    in raw-amplitude (not lagged/embedded) space.
+
+    Rather than reporting only the BIC-optimal number of components (a discrete,
+    model-selection-driven output that can be noisy across similar time series), the main
+    outputs are continuous separation statistics from a *fixed* 2-component fit, alongside the
+    (secondary) BIC-optimal number of components for reference.
+
+    The ``sep_*`` outputs are always computed from the fixed 2-component fit, so they are not
+    gated by whether that fit is favored by BIC over a single Gaussian: even a genuinely
+    unimodal-but-elongated point cloud (e.g., AR(1) noise) gets split into two "confident"
+    halves. Likewise, a curved-but-unimodal manifold (e.g., the ring traced out by a periodic
+    signal in a 2-d embedding) is poorly fit by any single elliptical Gaussian and so also
+    drives ``bestK`` and ``dBIC`` up, despite having no distinct dynamical states.
+    ``dBIC == 0`` (``bestK == 1``) is a clean "no mixture structure at all" signal, but
+    ``dBIC > 0`` does not by itself distinguish true multi-modality from curvature.
+
+    The mixtures are fitted with scikit-learn's ``GaussianMixture`` (full covariances,
+    k-means++ initialization, 3 initializations, at most 500 iterations, covariance
+    regularization of ``1e-6`` times the mean variance of the embedded coordinates), seeded
+    with 0. hctsa's ``fitgmdist`` runs the same fits, with its own initialization draws,
+    so a fit that does not have a clear optimum can differ.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tau : int or str, optional
+        The time delay of the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
+        autocorrelation function, ``'ac1e'`` the (floored) first 1/e crossing of the
+        autocorrelation function, and ``'mi'`` the smaller of the first minimum of the
+        (Kraskov) automutual information and the 1/e time. Default is ``'ac'``.
+    m : int, optional
+        The embedding dimension. Default is 2.
+    k_max : int, optional
+        The maximum number of Gaussian mixture components to consider when searching for the
+        BIC-optimal component count. Default is 4.
+    max_n : int or 'full', optional
+        The maximum number of embedded points used to fit the mixture models: longer
+        embeddings are reduced to their first ``max_n`` points (a memory/time cap; the
+        separation estimates keep sharpening with more points), or ``'full'`` for no cropping.
+        Default is ``'full'``.
+
+    Returns
+    -------
+    dict or float
+        NaN if the embedding fails, there are fewer than ``20 * m * k_max`` embedded points,
+        the embedded point cloud is constant, or the single-component fit fails. Otherwise:
+
+        - ``bestK``: the BIC-optimal number of mixture components over ``1:k_max``
+        - ``dBIC``: the relative BIC improvement of the best fit over a single (unimodal)
+          Gaussian fit, ``(BIC_1 - BIC_best) / |BIC_1|``; 0 when ``bestK == 1``
+        - ``sep_mahal``: ``log1p`` of the Mahalanobis separation between the two component
+          means of the 2-component fit, using their pooled covariance (log-compressed to tame
+          the heavy tail from near-singular covariance on near-deterministic embeddings)
+        - ``sep_conf``: mean posterior cluster-assignment confidence (mean of the larger of
+          each point's two posterior probabilities) under the 2-component fit; between 0.5 (fully
+          ambiguous assignment) and 1
+        - ``sep_silh``: mean silhouette value (squared Euclidean distance, as MATLAB's
+          ``silhouette``) of the hard (posterior-argmax) 2-cluster assignment
+        - ``sep_weightbalance``: ratio of the smaller to the larger mixture weight under the
+          2-component fit; 1 for balanced clusters, tending to 0 as one component comes to
+          dominate (degenerating toward a unimodal fit)
+
+        The ``sep_*`` outputs are NaN if ``k_max < 2`` or the 2-component fit fails.
+    """
+    from sklearn.metrics import silhouette_samples
+    from sklearn.mixture import GaussianMixture
+
+    y = np.asarray(y, dtype=float).ravel()
+    y_embed = _bf_embed(y, tau, m)
+    if y_embed is None:
+        logger.warning('Embedding parameters are not suitable for this time series')
+        return np.nan
+
+    # Enough points, relative to m and k_max, for a well-posed full-covariance fit at the
+    # largest component count considered
+    n_embed = y_embed.shape[0]
+    if n_embed < 20 * m * k_max:
+        logger.warning(f'Not enough embedded points ({n_embed}) for a stable {m}-dimensional, '
+                       f'up-to-{k_max}-component mixture fit')
+        return np.nan
+
+    # A constant (or near-constant) embedded point cloud cannot be usefully clustered
+    if np.all(np.ptp(y_embed, axis=0) < 1e-10):
+        return np.nan
+
+    if isinstance(max_n, str):
+        if max_n != 'full':
+            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
+    elif n_embed > max_n:
+        logger.warning(f'Cropping to the first {int(max_n)} of {n_embed} embedded points for mixture '
+                       'fitting (memory/time cap, not a convergence point)')
+        y_embed = y_embed[:int(max_n)]
+
+    # Regularize covariance estimates proportionally to the data's own scale
+    reg_val = 1e-6 * np.mean(np.var(y_embed, axis=0, ddof=1))
+
+    def fit(k):
+        gm = GaussianMixture(n_components=k, covariance_type='full', reg_covar=reg_val, n_init=3,
+                             init_params='k-means++', max_iter=500, tol=1e-6, random_state=0)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')  # (replicates that do not converge are expected)
+            return gm.fit(y_embed)
+
+    # Fit k = 1, ..., k_max, and record their BIC
+    bic = np.full(k_max, np.nan)
+    models = [None] * k_max
+    for k in range(1, k_max + 1):
+        try:
+            models[k - 1] = fit(k)
+            bic[k - 1] = models[k - 1].bic(y_embed)
+        except Exception:  # (e.g., an empty or near-singular component)
+            if k == 1:  # no useful mixture structure can be assessed either
+                return np.nan
+    best_k = int(np.nanargmin(bic)) + 1
+
+    out = {'bestK': best_k}
+    out['dBIC'] = 0 if best_k == 1 else (bic[0] - bic[best_k - 1]) / abs(bic[0])
+
+    # Continuous separation statistics from a fixed 2-component fit
+    if k_max < 2 or models[1] is None:
+        for name in ('sep_mahal', 'sep_conf', 'sep_silh', 'sep_weightbalance'):
+            out[name] = np.nan
+        return out
+
+    gm2 = models[1]
+    post = gm2.predict_proba(y_embed)
+    clust = np.argmax(post, axis=1)
+    out['sep_conf'] = np.mean(np.max(post, axis=1))
+    out['sep_weightbalance'] = np.min(gm2.weights_) / np.max(gm2.weights_)
+    pooled_cov = (gm2.covariances_[0] + gm2.covariances_[1]) / 2
+    d_mu = gm2.means_[0] - gm2.means_[1]
+    # (log1p-compressed: the raw value explodes for near-singular pooled covariance)
+    out['sep_mahal'] = np.log1p(np.sqrt(d_mu @ np.linalg.solve(pooled_cov, d_mu)))
+    if np.unique(clust).size < 2:
+        # all points collapsed onto one component under hard assignment
+        out['sep_silh'] = 0.0
+    else:
+        s = silhouette_samples(y_embed, clust, metric='sqeuclidean')
+        s[np.bincount(clust)[clust] == 1] = 1.0  # (MATLAB gives a singleton cluster 1)
+        out['sep_silh'] = np.mean(s)
     return out
