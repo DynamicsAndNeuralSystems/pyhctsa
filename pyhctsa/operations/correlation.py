@@ -14,7 +14,7 @@ from statsmodels.tsa.stattools import pacf
 from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit
-from ..utils import (bin_picker, histc, make_mat_buffer, matlab_quantile,
+from ..utils import (bf_remove_points, bin_picker, histc, make_mat_buffer, matlab_quantile,
                      point_of_crossing, sign_change, time_delay_embed, z_score)
 
 def _theiler_kth(idx: np.ndarray, dist: np.ndarray, k: int, theiler_win: int,
@@ -2851,4 +2851,78 @@ def tc3(y: list, tau: Union[int, str, None] = 'ac') -> dict:
     # The denominator
     out['denom'] = denominator
 
+    return out
+
+
+def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
+                  remove_or_saturate: str = 'remove', random_seed: Union[int, str, None] = None) -> dict:
+    """
+    How the autocorrelation of a time series changes when a set of points is removed or clipped.
+
+    A proportion, ``p``, of the points of the (z-scored) series are removed, or saturated,
+    according to a rule (see :func:`~pyhctsa.utils.bf_remove_points`), and the autocorrelation
+    structure is compared before and after the change. Removing deletes the chosen points and
+    closes up the rest into a shorter series, which splices together points that were not
+    neighbors. Saturating keeps them in place but clips their values to the most extreme value
+    among the points kept. The order-free statistics of the same transformation (mean, median,
+    standard deviation, skewness and kurtosis) are in :func:`~pyhctsa.operations.distribution.remove_points`.
+
+    Port of hctsa's ``CO_RemovePoints`` (split from a single function, ``DN_RemovePoints``,
+    that returned both sets of outputs).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (should be z-scored).
+    remove_how : {'absclose', 'absfar', 'min', 'max', 'random'}, optional
+        How to choose the points to remove:
+
+        - 'absclose': those closest to the mean,
+        - 'absfar': those furthest from the mean (default),
+        - 'min': the lowest values,
+        - 'max': the highest values,
+        - 'random': at random.
+    p : float, optional
+        The proportion of points to remove. Default 0.1.
+    remove_or_saturate : {'remove', 'saturate'}, optional
+        Whether to remove the points ('remove', the default) or to saturate their values
+        ('saturate'; not possible with 'absclose' or 'random').
+    random_seed : int, optional
+        Seed for ``remove_how='random'`` (as hctsa's ``BF_ResetSeed``; default 0).
+
+    Returns
+    -------
+    dict
+        Statistics of the changed series, relative to the original:
+
+        - ``fzcacrat``: the ratio of the first zero-crossing of the autocorrelation function
+          (changed to original);
+        - ``ac1diff``, ``ac2diff``, ``ac3diff``: the absolute differences in the
+          autocorrelation at lags 1, 2 and 3;
+        - ``sumabsacfdiff``: the sum over lags 1 to 8 of the absolute differences in the
+          autocorrelation.
+
+    Notes
+    -----
+    Only the first zero-crossing is a ratio: its original value is an interpolated lag of at
+    least 0.5, so the ratio is always well defined. The autocorrelation outputs are
+    differences, because the original autocorrelation can be near 0, where a ratio is unstable.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    y_transform = bf_remove_points(y, remove_how, p, remove_or_saturate, random_seed)
+
+    # Compute some autocorrelation properties
+    n = 8
+    lags = list(range(1, n + 1))
+    acf_y = autocorr(y, lags, 'Fourier')
+    acf_y_transform = autocorr(y_transform, lags, 'Fourier')
+
+    out = {}
+    with np.errstate(all='ignore'):
+        out['fzcacrat'] = np.divide(first_crossing(y_transform, 'ac', 0, 'continuous'),
+                                    first_crossing(y, 'ac', 0, 'continuous'))
+        out['ac1diff'] = np.abs(acf_y_transform[0] - acf_y[0])
+        out['ac2diff'] = np.abs(acf_y_transform[1] - acf_y[1])
+        out['ac3diff'] = np.abs(acf_y_transform[2] - acf_y[2])
+        out['sumabsacfdiff'] = np.sum(np.abs(acf_y_transform - acf_y))
     return out
