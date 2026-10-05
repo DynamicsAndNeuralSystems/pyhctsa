@@ -1325,6 +1325,1330 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
 
     return out
 
+from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robustfit
+from ..utils import _round_half_away
+
+
+def _embed_tau_m(y: np.ndarray, embed_params) -> tuple:
+    """
+    The delay and dimension of ``[tau, m]`` embedding parameters (hctsa's
+    ``BF_Embed(y, tau, m, true)``), without doing the embedding.
+
+    ``tau`` is an integer or a rule understood by :func:`pyhctsa.utils.get_tau`;
+    ``m`` is an integer, or ``'fnn'`` (or ``['fnn', threshold]``) for the
+    embedding dimension from TISEAN's false nearest neighbors. Returns
+    ``(nan, nan)`` if the delay cannot be set.
+    """
+    if not isinstance(embed_params, (list, tuple)) or len(embed_params) != 2:
+        raise ValueError('Embedding parameters are formatted incorrectly -- need [tau, m]')
+    tau = get_tau(y, embed_params[0])
+    if np.isnan(tau):
+        return np.nan, np.nan
+    m = embed_params[1]
+    if isinstance(m, (list, tuple)):
+        m = m[0] if len(m) == 1 and not isinstance(m[0], str) else m
+    if isinstance(m, str) or isinstance(m, (list, tuple)):
+        if (m if isinstance(m, str) else m[0]) == 'fnn':
+            raise NotImplementedError(
+                "m='fnn' needs a port of TISEAN's false_nearest (hctsa's NL_FNN), which is "
+                "not yet available in pyhctsa; pass an integer embedding dimension.")
+        raise ValueError('Embedding dimension, m, incorrectly specified.')
+    return int(tau), int(m)
+
+
+def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
+                thwin: Union[int, float, list, tuple] = ('ac', 1), nbins: int = 20,
+                embed_params: Union[list, tuple] = ('ac', 'fnn'), do_two: int = 1) -> Union[dict, float]:
+    """
+    How the number of close pairs of points in the delay embedding grows with
+    distance (the correlation sum and its scaling).
+
+    Computes the correlation sum, :math:`C(\\epsilon)`, the fraction of pairs of
+    time-delay-embedded points closer than :math:`\\epsilon`, by the
+    Grassberger-Procaccia algorithm [1]_, using TISEAN's ``d2`` (hctsa no longer
+    uses TSTOOL's ``corrsum``/``corrsum2``). For a low-dimensional attractor,
+    :math:`\\ln C` rises linearly with :math:`\\ln \\epsilon`, with a slope equal to the
+    correlation dimension. The outputs summarize the range of :math:`\\ln \\epsilon`
+    and :math:`\\ln C(\\epsilon)`, and an iteratively re-weighted least squares (robust)
+    linear fit to the log-log plot.
+
+    References
+    ----------
+    .. [1] P. Grassberger and I. Procaccia, "Characterization of Strange Attractors",
+        Phys. Rev. Lett. 50(5), 346 (1983).
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    nref : int or float, optional
+        Number of (randomly chosen) reference points: ``-1`` uses all points, a
+        value in (0, 1) is a fraction of the time-series length. Default is 500.
+    r : float, optional
+        Maximum search radius, in units of ``std(y) * sqrt(m)`` where ``m`` is the
+        embedding dimension. Default is 0.05.
+    thwin : int, float, or ``['ac', k]``, optional
+        The Theiler window of samples to exclude before and after each reference
+        index (see :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k``
+        times the first zero-crossing of the autocorrelation function, or a number
+        of samples. Default is ``['ac', 1]``.
+    nbins : int, optional
+        Number of (log-spaced) radii at which the correlation sum is found.
+        Default is 20.
+    embed_params : [tau, m], optional
+        Embedding parameters: ``tau`` is an integer or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an
+        integer, or ``'fnn'`` (TISEAN's false nearest neighbors, not yet available
+        in pyhctsa and raises ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+    do_two : int, optional
+        Only 1 (corrsum-style log-spaced radii, the default) is supported; 2 has no
+        TISEAN equivalent and raises ``ValueError``, as in hctsa.
+
+    Returns
+    -------
+    dict or float
+        Only radii with a finite :math:`\\ln C(\\epsilon)` are used. ``minlnr``,
+        ``maxlnr``: the smallest and largest :math:`\\ln \\epsilon`; ``minlnCr``,
+        ``maxlnCr``, ``rangelnCr``, ``meanlnCr``: the minimum, maximum, range and
+        mean of :math:`\\ln C`; ``robfit_a1``, ``robfit_a2``: intercept and slope of a
+        robust linear fit of :math:`\\ln C` against :math:`\\ln \\epsilon`;
+        ``robfit_sigrat``: ratio of the ordinary least-squares to the robust estimate
+        of the residual standard deviation; ``robfit_s``: the robust estimate of the
+        residual standard deviation; ``robfit_sea1``, ``robfit_sea2``: standard
+        errors of the intercept and slope; ``robfitresmeanabs``, ``robfitresmeansq``,
+        ``robfitresac1``: mean absolute and mean squared residual, and lag-1
+        autocorrelation of the residuals. The fit outputs are NaN when too few radii
+        have a finite :math:`\\ln C`. Returns NaN if the delay or Theiler window cannot
+        be set, the embedding is too short, or no correlation sum is obtained.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+
+    # Number of reference points
+    if 0 < nref < 1:
+        nref = int(_round_half_away(n * nref))  # a proportion of the series length
+    if nref >= n:
+        nref = -1  # capped at the time-series length
+
+    # Remove spurious correlations of adjacent points
+    thwin = theiler_window(y, thwin, n)
+    if np.isnan(thwin):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    thwin = int(thwin)
+
+    if do_two == 2:
+        raise ValueError("gp_corr_sum: do_two = 2 (corrsum2's fixed-pairs-per-bin binning) "
+                         "has no TISEAN equivalent and is not supported.")
+
+    tau, m = _embed_tau_m(y, embed_params)
+    if np.isnan(tau):
+        logger.warning('Could not determine embedding parameters for this time series')
+        return np.nan
+
+    if (n - (m - 1) * tau) < thwin:
+        logger.warning(f'Embedded time series (N = {n}, m = {m}, tau = {tau}) too short '
+                       'to do a correlation sum')
+        return np.nan
+
+    # TISEAN's d2: -N0 uses all pairs; the radius is in standard deviations of y, scaled by
+    # sqrt(m) since a pairwise distance in an m-dimensional embedding scales as std(y)*sqrt(m)
+    max_eps = float('%g' % (r * np.std(y, ddof=1) * np.sqrt(m)))  # -R%g: six significant digits
+    try:
+        tables = _tisean.d2(y, delay=tau, embed=m, theiler=thwin, howoften=nbins,
+                            maxfound=0 if nref == -1 else int(nref), epsmax=max_eps)
+    except ValueError as exc:  # e.g. a delay vector longer than the series
+        logger.warning(f'TISEAN d2 produced invalid output: {exc}')
+        return np.nan
+
+    # [r, C(r)] at the m-th embedding dimension (the radii are log-spaced)
+    rc = tables['c2'][m - 1]
+    if rc.shape[0] == 0:
+        logger.warning("No output obtained from d2's correlation sum.")
+        return np.nan
+    with np.errstate(divide='ignore'):
+        lnr = np.log(rc[:, 0])
+        lncr = np.log(rc[:, 1])
+
+    # Only keep finite values
+    good = np.isfinite(lncr)
+    if not good.any():
+        logger.warning('No good outputs obtained from the correlation sum.')
+        return np.nan
+    lnr, lncr = lnr[good], lncr[good]
+
+    out = {}
+    out['minlnr'] = np.min(lnr)
+    out['maxlnr'] = np.max(lnr)
+    out['minlnCr'] = np.min(lncr)
+    out['maxlnCr'] = np.max(lncr)
+    out['rangelnCr'] = np.ptp(lncr)
+    out['meanlnCr'] = np.mean(lncr)
+
+    # Robust linear fit to the log-log plot (full range)
+    try:
+        a, stats = robustfit(lnr, lncr)
+    except (ValueError, np.linalg.LinAlgError):  # too few finite points to fit
+        a = None
+    if a is not None:
+        res = lncr - (a[1] * lnr + a[0])
+        out['robfit_a1'] = a[0]
+        out['robfit_a2'] = a[1]
+        out['robfit_sigrat'] = stats['ols_s'] / stats['robust_s']
+        out['robfit_s'] = stats['s']
+        out['robfit_sea1'] = stats['se'][0]
+        out['robfit_sea2'] = stats['se'][1]
+        out['robfitresmeanabs'] = np.mean(np.abs(res))
+        out['robfitresmeansq'] = np.mean(res ** 2)
+        out['robfitresac1'] = autocorr(res, 1, 'Fourier')[0]
+    else:
+        for k in ('robfit_a1', 'robfit_a2', 'robfit_sigrat', 'robfit_s', 'robfit_sea1',
+                  'robfit_sea2', 'robfitresmeanabs', 'robfitresmeansq', 'robfitresac1'):
+            out[k] = np.nan
+
+    return out
+
+
+from scipy.spatial import cKDTree
+
+
+def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
+                     past: Union[int, float, list, tuple] = ('ac', 1),
+                     embed_params: Union[list, tuple] = ('ac', 'fnn')) -> float:
+    """
+    Takens' estimator for the correlation dimension.
+
+    Takens' maximum-likelihood estimator [1]_ of the correlation dimension at an
+    upper length scale ``eup = rad * std(y)``:
+
+    .. math::
+        D_T = 1 / \\langle \\ln(\\epsilon_{up} / r_{ij}) \\rangle,
+
+    the mean taken over all pairs ``(i, j)`` of delay vectors with max-norm distance
+    :math:`r_{ij} < \\epsilon_{up}`, excluding pairs closer in time than the Theiler
+    window and exact duplicate vectors. It is computed natively (a KD-tree range search
+    at the one radius needed), exactly at ``eup`` from the pair distances themselves,
+    rather than from the logarithmically binned correlation sum of TISEAN's ``d2``
+    followed by ``c2t`` as in earlier versions of hctsa. Kantz and Schreiber's
+    recommendation of half a standard deviation for the length scale is used the same
+    way in :func:`tisean_d2`.
+
+    References
+    ----------
+    .. [1] F. Takens, "On the numerical determination of the dimension of an attractor",
+        in B.L.J. Braaksma, H.W. Broer and F. Takens (eds.), Dynamical Systems and
+        Bifurcations (Groningen, 1984), Lecture Notes in Mathematics 1125, 99-106,
+        Springer, Berlin (1985). DOI: 10.1007/BFb0075637
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    nref : int, optional
+        The number of reference points (the first ``nref`` delay vectors); ``-1`` uses
+        all points. Default is -1.
+    rad : float, optional
+        The upper length scale at which to read off the dimension estimate, in standard
+        deviations of ``y``. Default is 0.05.
+    past : int, float, or ``['ac', k]``, optional
+        The Theiler window (see :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for
+        ``k`` times the first zero-crossing of the autocorrelation function, or a number
+        of samples. Default is ``['ac', 1]``.
+    embed_params : [tau, m], optional
+        Embedding parameters: ``tau`` is an integer or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an
+        integer, or ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in
+        pyhctsa and raises ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+
+    Returns
+    -------
+    float
+        Takens' estimator of the correlation dimension. NaN if the delay or Theiler
+        window cannot be set, the series cannot be embedded, it is constant, or no pair
+        of delay vectors lies within the length scale (or all such pairs are exact
+        duplicates, e.g. heavily quantized data). For high embedding dimensions of
+        noise-like series no pair may fall within the length scale at all.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+
+    past = theiler_window(y, past, n)
+    if np.isnan(past):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+
+    tau, m = _embed_tau_m(y, embed_params)
+    if np.isnan(tau):
+        logger.warning('Could not embed this time series with these embedding parameters')
+        return np.nan
+    try:
+        emb = time_delay_embed(y, m, tau)
+    except ValueError as exc:  # too short to embed
+        logger.warning(str(exc))
+        return np.nan
+    n_emb = emb.shape[0]
+
+    # Reference points: the first nref delay vectors, or all
+    n_ref = n_emb if (nref == -1 or nref >= n_emb) else int(nref)
+
+    eup = rad * np.std(y, ddof=1)  # upper length scale, in data units
+    if not eup > 0:
+        return np.nan  # constant series
+
+    # Sum ln(eup / r_ij) over pairs with r_ij <= eup (max norm) outside the Theiler window,
+    # over reference points in chunks (a low-dimensional attractor can have O(N^2) pairs
+    # within eup, so they are never all held at once)
+    tree = cKDTree(emb)
+    sum_log, num_pairs = 0.0, 0
+    chunk = 500
+    for c in range(0, n_ref, chunk):
+        refs = np.arange(c, min(c + chunk, n_ref))
+        pairs = cKDTree(emb[refs]).sparse_distance_matrix(
+            tree, eup, p=np.inf, output_type='ndarray')
+        keep = np.abs(pairs['j'] - refs[pairs['i']]) > past  # outside the Theiler window
+        d = pairs['v'][keep]
+        d = d[d > 0]  # exact duplicates carry no length-scale information (ln -> Inf)
+        sum_log += np.sum(np.log(eup / d))
+        num_pairs += d.size
+
+    if num_pairs == 0:
+        logger.warning(f'No pairs within {rad:g} standard deviations of each other to '
+                       'estimate a correlation dimension from')
+        return np.nan
+
+    return num_pairs / sum_log  # Takens' estimator: 1 / mean(ln(eup/r))
+
+
+from scipy.optimize import minimize_scalar
+from ..utils import _ml_randperm
+from scipy.special import digamma
+
+
+def _fractal_dim_error(d: float, g: float, kmin: int, kmax: int, mom: np.ndarray) -> float:
+    # Robust (log(1 + e^2/2)) error between the measured k-th-neighbor-distance moments,
+    # mom[kmin:kmax], and the curve expected for dimension d, after fitting the curve's free
+    # overall scale factor (gendimest.cpp's Error_Function, van de Water & Schram 1988).
+    ks = np.arange(kmin, kmax + 1)
+    if g == 0:
+        z = np.exp(digamma(ks) / d)
+    else:
+        z = np.ones(ks.size)  # anchored at k = kmin
+        running = np.cumprod((ks[:-1] + g / d) / ks[:-1])
+        with np.errstate(invalid='ignore'):
+            z[1:] = running ** (1 / g)
+    mk = mom[kmin - 1:kmax]
+    scale_err = lambda a: np.sum(np.log(1 + 0.5 * (mk - a * z) ** 2))
+    a = minimize_scalar(scale_err, bounds=(0, 1e6), method='bounded',
+                        options={'xatol': 1e-5}).x
+    return scale_err(a)
+
+
+def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
+                       nref: Union[int, float] = 0.2, gstart: float = 1, gend: float = 10,
+                       past: Union[int, float, list, tuple] = ('ac', 1), steps: int = 32,
+                       embed_params: Union[list, tuple] = ('ac', 'fnn'),
+                       random_seed: Union[int, None] = 0) -> Union[dict, float]:
+    """
+    The spectrum of generalized (fractal) dimensions of the delay embedding, estimated
+    from nearest-neighbor distances.
+
+    Estimates :math:`D(q)`, the generalized dimension of the time-delay embedding as a
+    function of the order of the moment, from the distances of reference points to their
+    nearest neighbors, by the method of van de Water and Schram [1]_ (that of TSTOOL's
+    ``fracdims``). For each of ``nref`` reference points, the distances to its 1st to
+    ``kmax``-th nearest neighbors are found (excluding a Theiler window of ``past``
+    samples). For each moment order :math:`\\gamma` swept linearly from ``gstart`` to
+    ``gend`` (``steps`` values), the :math:`\\gamma`-th moment of the k-th-neighbor
+    distance across all reference points is
+
+    .. math::
+        M(k) = \\langle r_k^\\gamma \\rangle^{1/\\gamma}
+
+    (or :math:`\\exp\\langle \\ln r_k \\rangle` as :math:`\\gamma \\to 0`), for
+    :math:`k = 1..k_{max}`. Under an assumed dimension :math:`D` the expected relation is
+    :math:`M(k) \\propto (\\Gamma(k + \\gamma/D)/\\Gamma(k))^{1/\\gamma}` (or
+    :math:`\\exp(\\psi(k)/D)` as :math:`\\gamma \\to 0`), up to an overall scale factor that is
+    fitted separately. :math:`D(\\gamma)` is the value that best matches the measured moments
+    :math:`M(k_{min}..k_{max})` under a robust :math:`\\log(1 + e^2/2)` error, found by nested
+    bounded one-dimensional minimizations. Finally :math:`q(\\gamma) = 1 - \\gamma / D(\\gamma)`.
+    The outputs summarize :math:`D` and :math:`q` across the moments, and a straight-line
+    fit of :math:`D` against :math:`q`.
+
+    References
+    ----------
+    .. [1] W. van de Water and P. Schram, "Generalized dimensions from near-neighbor
+        information", Phys. Rev. A 37(8), 3118-3125 (1988). DOI: 10.1103/PhysRevA.37.3118
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    kmin : int, optional
+        Minimum number of neighbors for each reference point. Default is 3.
+    kmax : int, optional
+        Maximum number of neighbors for each reference point. Default is 10.
+    nref : int or float, optional
+        Number of randomly chosen reference points: ``-1`` uses all points, a value in
+        (0, 1) is a proportion of the embedded points. Default is 0.2.
+    gstart, gend : float, optional
+        Starting and ending values of the moment order. Defaults are 1 and 10.
+    past : int, float, or ``['ac', k]``, optional
+        The Theiler window of samples to exclude before and after each reference index (see
+        :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k`` times the first
+        zero-crossing of the autocorrelation function, or a number of samples. Default is
+        ``['ac', 1]``.
+    steps : int, optional
+        Number of moments to calculate. Default is 32.
+    embed_params : [tau, m], optional
+        Embedding parameters: ``tau`` is an integer or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer,
+        or ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in pyhctsa and
+        raises ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+    random_seed : int, optional
+        Seed for choosing the random subsample of reference points (relevant when
+        ``nref != -1``; the subsample differs from MATLAB's). Default is 0.
+
+    Returns
+    -------
+    dict or float
+        ``rangeDq``, ``maxDq``, ``meanDq``: range, maximum and mean of :math:`D` across the
+        moments; ``maxq``, ``rangeq``, ``meanq``: maximum, range and mean of :math:`q`;
+        ``linfit_a``, ``linfit_b``: slope and intercept of a linear fit of :math:`D` against
+        :math:`q`; ``linfit_rmsqres``: root-mean-square residual of that fit. Returns NaN
+        if the Theiler window or delay cannot be set, the embedding fails, ``kmax`` is not
+        smaller than the number of embedded points, or too few neighbors lie outside the
+        Theiler window.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+
+    # Number of reference points
+    if 0 < nref < 1:
+        nref = int(_round_half_away(n * nref))  # a proportion of time-series length
+
+    past = theiler_window(y, past)
+    if np.isnan(past):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    past = int(past)
+
+    # Embed the signal
+    tau, m = _embed_tau_m(y, embed_params)
+    if np.isnan(tau):
+        logger.warning(f'Embedding of the {n}-sample time series failed')
+        return np.nan
+    try:
+        emb = time_delay_embed(y, m, tau)
+    except ValueError as exc:  # too short to embed
+        logger.warning(f'Embedding of the {n}-sample time series failed: {exc}')
+        return np.nan
+    n_emb = emb.shape[0]
+
+    if kmax >= n_emb:  # too many neighbors requested
+        return np.nan
+
+    # Reference points
+    if nref == -1 or nref >= n_emb:
+        ref_idx = np.arange(n_emb)
+    else:
+        ref_idx = _ml_randperm(n_emb, _ml_rng(0 if random_seed is None else int(random_seed)))[:int(nref)] - 1
+    n_ref = ref_idx.size
+
+    # For each reference point, the distances to its 1st..kmax-th nearest neighbors outside
+    # the Theiler window (a KD-tree, over-fetching neighbors to cover those excluded)
+    k_fetch = min(n_emb - 1, kmax + 2 * past + 5)
+    dist, idx = cKDTree(emb).query(emb[ref_idx], k=k_fetch + 1)
+    valid = np.abs(idx - ref_idx[:, None]) > past
+    dist = np.sort(np.where(valid, dist, np.inf), axis=1)[:, :kmax]
+    for ii in np.flatnonzero(valid.sum(axis=1) < kmax):  # fall back to a full search
+        all_dists = np.linalg.norm(emb - emb[ref_idx[ii]], axis=1)
+        all_dists[np.abs(np.arange(n_emb) - ref_idx[ii]) <= past] = np.inf
+        all_dists = np.sort(all_dists)
+        if np.sum(np.isfinite(all_dists)) < kmax:
+            return np.nan  # not enough valid neighbors exist at all
+        dist[ii] = all_dists[:kmax]
+    # dist[i, k]: the i-th reference point's distance to its (k+1)-th nearest neighbor
+
+    # Sweep the moment order and fit a dimension D(gamma) to each
+    gammas = np.linspace(gstart, gend, int(steps)) if (gend - gstart > 0 and steps > 1) \
+        else np.array([gstart], dtype=float)
+    dq = np.zeros(gammas.size)
+    q = np.zeros(gammas.size)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        for gi, g in enumerate(gammas):
+            # gamma-th moment of the k-th-neighbor distance, across reference points
+            if g == 0:
+                mom = np.exp(np.mean(np.log(dist), axis=0))
+            else:
+                mom = np.mean(dist ** g, axis=0) ** (1 / g)
+            dq[gi] = minimize_scalar(
+                lambda d: _fractal_dim_error(d, g, kmin, kmax, mom),
+                bounds=(max(0.05, -g / kmin), 128), method='bounded',
+                options={'xatol': 1e-4}).x
+            q[gi] = 1 - g / dq[gi]
+
+    out = {}
+    out['rangeDq'] = np.ptp(dq)
+    out['maxDq'] = np.max(dq)
+    out['meanDq'] = np.mean(dq)
+    out['maxq'] = np.max(q)
+    out['rangeq'] = np.ptp(q)
+    out['meanq'] = np.mean(q)
+
+    # Linear fit of D against q
+    p = np.polyfit(q, dq, 1)
+    res = np.polyval(p, q) - dq
+    out['linfit_a'] = p[0]
+    out['linfit_b'] = p[1]
+    out['linfit_rmsqres'] = np.sqrt(np.mean(res ** 2))
+    return out
+
+
+from ..toolboxes.Tisean_3_0_1.tisean import _e, _round_significant
+
+
+def _tisean_boxcount(y: np.ndarray, delay: int, maxembed: int, epscount: int) -> tuple:
+    # TISEAN's ``boxcount -M1,<maxembed> -d<delay> -Q0.0 -#<epscount>`` (source_c/boxcount.c),
+    # in process: ln N(eps), the log of the number of occupied cells of a partition of the
+    # delay embedding into cubes of side eps, for embedding dimensions 1..maxembed.
+    # Returns (eps, logN), with eps of shape (epscount,) and logN (epscount, maxembed), both
+    # rounded through C's %e as in the .box file hctsa reads back.
+    y = _round_significant(np.asarray(y, dtype=float).ravel(), 7)  # BF_WriteTempFile
+    ymin = np.min(y)
+    maxinterval = np.max(y) - ymin
+    if maxinterval == 0:
+        raise _D2DataError('boxcount: the data are constant')
+    epsmin, epsmax = 1e-3, 1.0  # relative to the data interval
+    x = (y - ymin) / maxinterval
+    x[x >= 1.0] -= epsmin / 2.0
+    length = y.size - (maxembed - 1) * delay
+    if length < 1 or epscount < 2:
+        raise _D2DataError('boxcount: time series too short for this embedding')
+    epsfaktor = (epsmax / epsmin) ** (1.0 / (epscount - 1))
+
+    eps = np.empty(epscount)
+    log_n = np.empty((epscount, maxembed))
+    heps = epsmax * epsfaktor
+    epsi_old = 0
+    for k in range(epscount):
+        while True:  # the number of boxes per axis is an integer that must increase
+            heps /= epsfaktor
+            epsi = int(1.0 / heps)
+            if epsi > epsi_old:
+                break
+        epsi_old = epsi
+        eps[k] = heps * maxinterval
+        labels = np.zeros(length, dtype=np.int64)
+        for d in range(maxembed):  # nested partition: cells are distinguished by coordinates 1..d+1
+            box = (x[d * delay:d * delay + length] * epsi).astype(np.int64)
+            labels = np.unique(labels * epsi + box, return_inverse=True)[1].ravel()
+            log_n[k, d] = np.log(labels.max() + 1)
+    return np.array([_e(v) for v in eps]), np.vectorize(_e)(log_n)
+
+
+def _dimensions_scaling_range(logr: np.ndarray, log_n: np.ndarray, gamma: float = 0.02) -> tuple:
+    # The scaling range of ln N(eps) against ln eps (start in the first half, end in the second
+    # half) that minimizes the mean absolute residual of a straight-line fit less gamma per point
+    # spanned. Returns (first index, last index, badness matrix, polyfit coefficients, residuals).
+    stptr, endptr = _scaling_range_endpoints(logr.size)
+    if stptr.size == 0 or endptr.size == 0:
+        raise _D2DataError('too few length scales to find a scaling range')
+    mybad = np.empty((stptr.size, endptr.size))
+    for i, s in enumerate(stptr):
+        for j, e in enumerate(endptr):
+            xs, ys = logr[s - 1:e], log_n[s - 1:e]
+            p = np.polyfit(xs, ys, 1)
+            mybad[i, j] = np.mean(np.abs(p[0] * xs + p[1] - ys)) - gamma * xs.size
+    a, b, _ = _argmin_first_colmajor(mybad)
+    s, e = int(stptr[a]), int(endptr[b])  # 1-based, inclusive
+    xs, ys = logr[s - 1:e], log_n[s - 1:e]
+    p = np.polyfit(xs, ys, 1)
+    return s, e, mybad, p, p[0] * xs + p[1] - ys
+
+
+def _dimensions_by_m(logr: np.ndarray, log_n: np.ndarray, prefix: str, out: dict) -> None:
+    # How ln N(eps) (or ln C(eps)) changes with m; at least m = 3 is always computed
+    cols = ((0, '1'), (1, '2'), (2, '3'), (-1, 'max'))
+    for j, lab in cols:
+        out[f'{prefix}_meanm{lab}' if j >= 0 else f'{prefix}_meanmmax'] = np.mean(log_n[:, j])
+    for j, lab in cols:
+        out[f'{prefix}_minm{lab}' if j >= 0 else f'{prefix}_minmmax'] = np.min(log_n[:, j])
+    for j, lab in cols:
+        out[f'{prefix}_range{lab}' if j >= 0 else f'{prefix}_rangemmax'] = np.ptp(log_n[:, j])
+    # increments with m
+    out[f'{prefix}_mindiff'] = np.mean([np.min(log_n[:, 1]) - np.min(log_n[:, 0]),
+                                        np.min(log_n[:, 2]) - np.min(log_n[:, 1])])
+    out[f'{prefix}_meandiff'] = np.mean([np.mean(log_n[:, 1]) - np.mean(log_n[:, 0]),
+                                         np.mean(log_n[:, 2]) - np.mean(log_n[:, 1])])
+    # slopes and goodness of a straight-line fit across the whole range of length scales
+    for j, lab in cols:
+        p = np.polyfit(logr, log_n[:, j], 1)
+        out[f'{prefix}_lfitm{lab}'] = p[0]
+        out[f'{prefix}_lfitb{lab}'] = p[1]
+        out[f'{prefix}_lfitmeansqdev{lab}'] = np.mean((log_n[:, j] - (p[0] * logr + p[1])) ** 2)
+
+
+def _dimensions_scaling(logr: np.ndarray, log_n: np.ndarray, prefix: str, out: dict) -> None:
+    # The scaling range for one embedding dimension, and the fit within it
+    s, e, mybad, p, res = _dimensions_scaling_range(logr, log_n)
+    out[f'{prefix}_logrmin'] = logr[s - 1]  # minimum of the scaling range
+    out[f'{prefix}_logrmax'] = logr[e - 1]  # maximum of the scaling range
+    out[f'{prefix}_logrrange'] = logr[e - 1] - logr[s - 1]
+    out[f'{prefix}_pgone'] = (s - 1 + logr.size - e) / logr.size  # proportion of points removed
+    out[f'{prefix}_meanabsres'] = np.mean(np.abs(res))
+    out[f'{prefix}_meansqres'] = np.mean(res ** 2)
+    out[f'{prefix}_scaling_exp'] = p[0]
+    out[f'{prefix}_scaling_int'] = p[1]
+    out[f'{prefix}_minbad'] = np.min(mybad)
+
+
+def _dimensions_best_m(logr: np.ndarray, log_nn: np.ndarray, prefix: str, out: dict) -> None:
+    # The scaling exponent in each embedding dimension, and which dimension is fitted best
+    exps = np.empty(log_nn.shape[1])
+    msq = np.empty(log_nn.shape[1])
+    for k in range(log_nn.shape[1]):
+        _, _, _, p, res = _dimensions_scaling_range(logr, log_nn[:, k])
+        exps[k], msq[k] = p[0], np.mean(res ** 2)
+    out[f'{prefix}_minscalingexp'] = np.min(exps)
+    out[f'{prefix}_meanscalingexp'] = np.mean(exps)
+    out[f'{prefix}_maxscalingexp'] = np.max(exps)
+    out[f'{prefix}_mbestfit'] = int(np.argmin(msq)) + 1
+
+
+def dimensions(y: ArrayLike, num_bins: int = 50,
+               embed_params: Union[list, tuple] = ('ac', 'fnn')) -> Union[dict, float]:
+    """
+    Box-counting and correlation-sum estimates of the dimension of the delay embedding, and
+    how they change with the embedding dimension.
+
+    Uses TISEAN's ``boxcount`` (the Renyi entropy of order 0, :math:`\\ln N(\\epsilon)`, the log of
+    the number of occupied boxes of a partition of the delay embedding) and ``d2`` (the
+    correlation sum :math:`\\ln C(\\epsilon)`) over ``num_bins`` geometrically spaced length scales
+    and embedding dimensions 1 to ``max(m, 3)`` (``m`` the embedding dimension of
+    ``embed_params``), to summarize the curves' means, minima, ranges and straight-line fits at
+    ``m`` = 1, 2, 3 and the largest ``m``, their changes with ``m``, the scaling range in
+    :math:`\\ln \\epsilon` (the range of scales, in the first and second halves of the scales,
+    minimizing the mean absolute error of a linear fit less 0.02 per point spanned) for
+    ``m`` = 1, 2, 3 and the embedding dimension ``m``, and the embedding dimension with the best
+    scaling fit. Unlike hctsa, which shells out to installed TISEAN binaries, this runs the
+    vendored ``d2`` and an in-process port of ``boxcount`` (hctsa's TSTOOL-based version of
+    this operation is no longer used).
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    num_bins : int, optional
+        Number of length scales (bins per axis) at which to evaluate the box counts and
+        correlation sums. Default is 50.
+    embed_params : [tau, m], optional
+        Embedding parameters: ``tau`` is an integer or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer, or
+        ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in pyhctsa and raises
+        ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+
+    Returns
+    -------
+    dict or float
+        With prefix ``bc`` (box counting, :math:`\\ln N`) and ``co`` (correlation sum,
+        :math:`\\ln C`): ``<p>_meanm1/2/3/max``, ``<p>_minm1/2/3/max``, ``<p>_range1/2/3/max``,
+        ``<p>_mindiff``, ``<p>_meandiff``, ``<p>_lfitm1/2/3/max`` (slope), ``<p>_lfitb...``
+        (intercept), ``<p>_lfitmeansqdev...``; ``scr_<p>_m1/m2/m3/mopt_*``: scaling range
+        (``logrmin``, ``logrmax``, ``logrrange``, ``pgone``) and fit (``meanabsres``,
+        ``meansqres``, ``scaling_exp``, ``scaling_int``, ``minbad``); ``<p>_minscalingexp``,
+        ``<p>_meanscalingexp``, ``<p>_maxscalingexp``, ``<p>_mbestfit``. Returns NaN if the delay
+        cannot be set, any ln N or ln C is not finite (e.g. some correlation sum is zero), or the
+        series is constant or too short.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+
+    tau, mopt = _embed_tau_m(y, embed_params)
+    if np.isnan(tau):
+        logger.warning('Could not determine embedding parameters for this time series')
+        return np.nan
+    big_m = max(mopt, 3)  # at least three dimensions, for the statistics below
+
+    try:
+        # Box counting
+        bc_r, bc_logn = _tisean_boxcount(y, tau, big_m, num_bins)
+        bc_logr = np.log(bc_r)
+
+        # Correlation sum, over the same number of scales: epsilon from max_eps/10 to max_eps
+        max_eps = float('%g' % (np.std(y, ddof=1) * np.sqrt(big_m)))
+        min_eps = float('%g' % (max_eps / 10))
+        tables = _tisean.d2(y, delay=tau, embed=big_m, theiler=0, howoften=num_bins,
+                            maxfound=0, epsmax=max_eps, epsmin=min_eps)
+        if any(b.shape[0] != num_bins for b in tables['c2']):
+            raise _D2DataError("TISEAN d2 returned an unexpected number of length scales")
+        co_logr = np.log(tables['c2'][0][:, 0])
+        with np.errstate(divide='ignore'):
+            co_logc = np.column_stack([np.log(b[:, 1]) for b in tables['c2']])
+
+        if not (np.all(np.isfinite(bc_logn)) and np.all(np.isfinite(co_logc))):
+            logger.warning('No good outputs obtained from the box-counting/correlation dimension curves.')
+            return np.nan
+
+        out = {}
+        _dimensions_by_m(bc_logr, bc_logn, 'bc', out)
+        _dimensions_by_m(co_logr, co_logc, 'co', out)
+        for prefix, logr, logn in (('bc', bc_logr, bc_logn), ('co', co_logr, co_logc)):
+            for col, lab in ((0, 'm1'), (1, 'm2'), (2, 'm3'), (mopt - 1, 'mopt')):
+                _dimensions_scaling(logr, logn[:, col], f'scr_{prefix}_{lab}', out)
+        _dimensions_best_m(bc_logr, bc_logn, 'bc', out)
+        _dimensions_best_m(co_logr, co_logc, 'co', out)
+    except (_D2DataError, ValueError) as exc:  # data-dependent failures give NaN
+        logger.warning(str(exc))
+        return np.nan
+    return out
+
+
+def _tisean_lyap_r(y: np.ndarray, delay: int, dim: int, mindist: int, steps: int) -> Union[tuple, None]:
+    # TISEAN's ``lyap_r -d<delay> -m<dim> -t<mindist> -s<steps>`` (Rosenstein et al.; source_c/lyap_r.c
+    # as modified in hctsa), in process. For every reference vector, the nearest neighbor (outside
+    # the Theiler window ``mindist``) is found at the first length scale of the geometric sequence
+    # 1e-3 * 1.1^k (of the data interval) at which any neighbor lies within it, and the logarithm
+    # of the distance between the two trajectories is averaged over all references at each of
+    # ``steps`` + 1 times. Returns the (time, mean ln distance) rows as in the .ros file, or None
+    # where TISEAN gives no output (a reference point has no neighbor within the search radius:
+    # exit status 54).
+    y = _round_significant(np.asarray(y, dtype=float).ravel(), 7)  # BF_WriteTempFile
+    length = y.size
+    ymin = np.min(y)
+    interval = np.max(y) - ymin
+    if interval == 0:
+        raise _D2DataError('lyap_r: the data are constant')
+    x = (y - ymin) / interval  # rescaled to [0, 1]
+    delay_span = delay * (dim - 1)
+    maxlength = length - delay_span - steps - 1 - mindist
+    if maxlength < 0:
+        raise _D2DataError('lyap_r: time series too short')
+    n_cand = length - delay_span - steps  # reference vectors that can be neighbors
+    emb = x[np.arange(length - delay_span)[:, None] + delay * np.arange(dim)[None, :]]
+    refs = np.arange(maxlength + 1)
+
+    # Length-scale sequence over which neighbors are looked for
+    eps_seq = []
+    eps = 1e-3
+    while eps <= 2.0:
+        eps_seq.append(eps)
+        eps *= 1.1
+    eps_sq = np.square(eps_seq)
+
+    # Nearest neighbors, in chunks of reference points
+    neighbor = np.full(refs.size, -1)
+    cand = np.arange(n_cand)
+    chunk = max(1, int(2e6 // (n_cand * dim)))
+    for c in range(0, refs.size, chunk):
+        r = refs[c:c + chunk]
+        d2 = np.zeros((r.size, n_cand))
+        for k in range(dim):
+            d2 += np.square(emb[r, k][:, None] - emb[:n_cand, k][None, :])
+        d2[np.abs(r[:, None] - cand[None, :]) <= mindist] = np.inf
+        d2[d2 >= 1.0] = np.inf  # only neighbors within squared distance 1 are accepted
+        dmin = d2.min(axis=1)
+        if np.any(dmin > eps_sq[-1]):
+            return None  # some reference point never gets a neighbor
+        # the neighbor is the nearest one with a positive distance, if within the first scale
+        # at which anything (even an exact duplicate) was found
+        k_found = np.searchsorted(eps_sq, dmin, side='left')
+        d2[d2 == 0] = np.inf
+        jmin = d2.argmin(axis=1)
+        dnear = d2[np.arange(r.size), jmin]
+        ok = dnear <= eps_sq[k_found]
+        # Exactly tied neighbors (quantized data): lyap_r takes the first met scanning its
+        # 256 x 256 grid of boxes (cells of side eps in the first and last coordinates, rows
+        # then columns, newest point first within a cell)
+        for ri in np.flatnonzero(ok & (np.sum(d2 == dnear[:, None], axis=1) > 1)):
+            tied = np.flatnonzero(d2[ri] == dnear[ri])
+            epsinv = 1.0 / eps_seq[k_found[ri]]
+            cell = [(emb[:, k] * epsinv).astype(int) & 255 for k in (0, dim - 1)]
+            rank = [(cell[k][tied] - cell[k][r[ri]] + 128) % 256 - 128 for k in (0, 1)]
+            jmin[ri] = tied[np.lexsort((-tied, rank[1], rank[0]))[0]]
+        neighbor[c:c + chunk] = np.where(ok, jmin, -1)
+
+    # Divergence of the neighbor pairs over time
+    found = np.zeros(steps + 1)
+    lyap = np.zeros(steps + 1)
+    use = refs[neighbor >= 0]
+    nb = neighbor[neighbor >= 0]
+    chunk = max(1, int(2e6 // ((steps + 1) * dim)))
+    steps_idx = np.arange(steps + 1)
+    for c in range(0, use.size, chunk):
+        a = use[c:c + chunk, None] + steps_idx[None, :]
+        b = nb[c:c + chunk, None] + steps_idx[None, :]
+        dx = np.sum(np.square(emb[a] - emb[b]), axis=2)
+        pos = dx > 0
+        found += pos.sum(axis=0)
+        lyap += np.sum(np.log(np.where(pos, dx, 1.0)), axis=0)
+    have = found > 0
+    if not have.any():
+        return np.empty((0, 2))
+    return np.column_stack([steps_idx[have], np.vectorize(_e)(lyap[have] / found[have] / 2.0)])
+
+
+def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
+                 maxtstep: Union[int, float, list, tuple] = ('ac1e', 30),
+                 past: Union[int, float, list, tuple] = ('ac1e', 1), nnr: int = 3,
+                 embed_params: Union[list, tuple] = ('ac', 'fnn')) -> Union[dict, float]:
+    """
+    Largest Lyapunov exponent: how nearest-neighbor trajectories diverge, and the scaling
+    of that divergence.
+
+    Estimates the divergence of nearby trajectories of the delay embedding as a function of
+    time by the algorithm of Rosenstein et al. [1]_ (TISEAN's ``lyap_r``): the logarithm of
+    the distance between each reference point's trajectory and that of its nearest neighbor
+    (outside a Theiler window) averaged over the reference points, :math:`p(t)`, for ``t`` up
+    to ``maxtstep``. For a chaotic system, :math:`p` rises linearly before saturating, with
+    slope the largest Lyapunov exponent. Outputs summarize :math:`p` (its first values,
+    maximum, crossings of fractions of the maximum, times to reach them), straight-line fits to
+    its scaling region (varying both start and end times, ``vse``, or just the end time,
+    ``ve``, chosen to minimize the mean absolute residual less 0.006 per point), those slopes
+    per autocorrelation time, and a saturating exponential fit
+    :math:`a (1 - e^{bt})`.
+
+    Unlike hctsa, which shells out to installed TISEAN binaries, this runs an in-process port
+    of ``lyap_r``.
+
+    References
+    ----------
+    .. [1] M. T. Rosenstein, J. J. Collins, and C. J. De Luca, "A practical method for
+        calculating largest Lyapunov exponents from small data sets", Physica D 65(1-2),
+        117-134 (1993).
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    nref : int or float, optional
+        Unused (kept for compatibility with hctsa's signature). Default is -1.
+    maxtstep : int, float, or ``['ac1e', k]``, optional
+        The maximum number of time steps to follow neighbors for: a number of steps, a
+        value in (0, 1) as a proportion of the time-series length, or ``['ac1e', k]`` (or
+        ``['ac', k]``) for ``k`` times the autocorrelation time (see
+        :func:`pyhctsa.utils.theiler_window`). At least 10 and at most half the series length;
+        an ``'ac1e'`` horizon too long for the series is shortened to fit (NaN if this leaves fewer
+        than ``max(10, 3 * ac1e time)`` steps). Default is ``['ac1e', 30]``.
+    past : int, float, or ``['ac1e', k]``, optional
+        The Theiler window of time-correlated points to exclude as neighbors (see
+        :func:`pyhctsa.utils.theiler_window`). Default is ``['ac1e', 1]``.
+    nnr : int, optional
+        Unused (kept for compatibility with hctsa's signature). Default is 3.
+    embed_params : [tau, m], optional
+        Embedding parameters: ``tau`` is an integer or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer, or
+        ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in pyhctsa and raises
+        ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+
+    Returns
+    -------
+    dict or float
+        ``p1`` to ``p5``, ``maxp``: the first five values and the maximum of :math:`p(t)`
+        (relative to :math:`p(0)`); ``ncross08max``, ``pcross08max``, ``ncross09max``,
+        ``pcross09max``: the number (and proportion) of times :math:`p` crosses 80% and 90% of its
+        maximum; ``to095max`` ... ``to05max``: the time to first exceed 95%, 90%, 80%, 70%, 50%
+        of the maximum; ``vse_*`` and ``ve_*`` (``meanabsres``, ``rmsres``, ``gradient``,
+        ``intercept``, ``minbad``, and ``gradient_pertau``, the gradient per autocorrelation
+        time): the straight-line fits (NaN if the rise to 95% of the maximum takes at most three
+        steps); ``expfit_a``, ``expfit_b``, ``expfit_r2``, ``expfit_adjr2``, ``expfit_rmse``: the
+        saturating exponential fit. Returns NaN if the delay, horizon, or Theiler window cannot be
+        set, the series is too short for the horizon, TISEAN finds no neighbor for some reference
+        point (data too sparse or quantized) or too little output, or the curve is flat.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+
+    # Maximum time step
+    cap_horizon = (isinstance(maxtstep, (list, tuple)) and len(maxtstep) == 2
+                   and maxtstep[0] == 'ac1e')  # cap (rather than NaN) a horizon too long for the series
+    if isinstance(maxtstep, (list, tuple)):  # a multiple of the autocorrelation time
+        maxtstep = theiler_window(y, maxtstep)
+        if np.isnan(maxtstep):
+            logger.warning('No autocorrelation time to set the prediction length')
+            return np.nan
+    if 0 < maxtstep < 1:
+        maxtstep = int(_round_half_away(n * maxtstep))  # a proportion of the time-series length
+    maxtstep = int(max(maxtstep, 10))  # minimum prediction length
+    maxtstep = min(maxtstep, n // 2)  # can't look further than half the time series length
+
+    # Theiler window
+    past = theiler_window(y, past, n)
+    if np.isnan(past):  # no autocorrelation time (e.g. the ACF never decays to 1/e)
+        logger.warning('No autocorrelation time to set the Theiler window')
+        return np.nan
+    past = int(past)
+    if cap_horizon and maxtstep + 2 * past > n // 2:
+        # cap an 'ac1e' horizon to fit, keeping at least a few correlation times
+        maxtstep = n // 2 - 2 * past
+        if maxtstep < max(10, 3 * get_tau(y, 'ac1e')):
+            logger.warning(f'Time series too short (N = {n}) for a prediction horizon with '
+                           f'Theiler window {past}')
+            return np.nan
+    if maxtstep + 2 * past > n / 2:
+        # too few correlation times in the series to follow neighbor divergence
+        logger.warning(f'Time series too short (N = {n}) for maxtstep = {maxtstep} with '
+                       f'Theiler window {past}')
+        return np.nan
+
+    tau, m = _embed_tau_m(y, embed_params)
+    if np.isnan(tau):
+        logger.warning('Could not determine embedding parameters for this time series')
+        return np.nan
+
+    try:
+        rows = _tisean_lyap_r(y, tau, m, past, maxtstep)
+    except _D2DataError as exc:
+        logger.warning(str(exc))
+        return np.nan
+    if rows is None or rows.shape[0] == 0:
+        logger.warning('No output obtained from lyap_r')
+        return np.nan
+    t, p = rows[:, 0], rows[:, 1]
+    if p.size < 6:
+        logger.warning('Not enough output from lyap_r to compute statistics')
+        return np.nan
+    p = p - p[0]
+    if np.all(p == 0):
+        return np.nan
+
+    out = {}
+    for i in range(5):
+        out[f'p{i + 1}'] = p[i]
+    pmax = np.max(p)
+    out['maxp'] = pmax
+
+    def ncross(x):  # number of crossings of the fraction x of the maximum
+        return np.sum((p[:-1] - x * pmax) * (p[1:] - x * pmax) < 0)
+
+    out['ncross08max'] = ncross(0.8)
+    out['pcross08max'] = ncross(0.8) / (p.size - 1)
+    out['ncross09max'] = ncross(0.9)
+    out['pcross09max'] = ncross(0.9) / (p.size - 1)
+
+    def time_to(x):  # (1-based) index of the first value above the fraction x of the maximum
+        idx = np.flatnonzero(p > x * pmax)
+        return idx[0] + 1 if idx.size else None
+
+    for lab, x in (('095', 0.95), ('09', 0.9), ('08', 0.8), ('07', 0.7), ('05', 0.5)):
+        i = time_to(x)
+        out[f'to{lab}max'] = np.nan if i is None else i - 1
+
+    imax = time_to(0.95)
+    if imax is None:
+        return np.nan  # cannot be (a flat curve at its maximum of zero)
+    if imax <= 3:
+        # not a suitable range for finding scaling
+        for pre in ('vse', 've'):
+            for lab in ('meanabsres', 'rmsres', 'gradient', 'intercept', 'minbad'):
+                out[f'{pre}_{lab}'] = np.nan
+    else:
+        t_scal, p_scal = t[:imax], p[:imax]
+
+        # Vary both the start and end times for the best scaling
+        s, e, mybad, pp, res = _dimensions_scaling_range(t_scal, p_scal, gamma=0.006)
+        out['vse_meanabsres'] = np.mean(np.abs(res))
+        out['vse_rmsres'] = np.sqrt(np.mean(res ** 2))
+        out['vse_gradient'] = pp[0]
+        out['vse_intercept'] = pp[1]
+        out['vse_minbad'] = np.min(mybad)
+
+        # Vary just the end time, which is at least at the 50% mark of the maximum
+        imin = time_to(0.5)
+        endptr = np.arange(imin, imax + 1)
+        bad = np.empty(endptr.size)
+        for i, e in enumerate(endptr):
+            pf = np.polyfit(t_scal[:e], p_scal[:e], 1)
+            bad[i] = np.mean(np.abs(pf[0] * t_scal[:e] + pf[1] - p_scal[:e])) - 0.006 * e
+        e = int(endptr[int(np.argmin(bad))])
+        pp = np.polyfit(t_scal[:e], p_scal[:e], 1)
+        res = pp[0] * t_scal[:e] + pp[1] - p_scal[:e]
+        out['ve_meanabsres'] = np.mean(np.abs(res))
+        out['ve_rmsres'] = np.sqrt(np.mean(res ** 2))
+        out['ve_gradient'] = pp[0]
+        out['ve_intercept'] = pp[1]
+        out['ve_minbad'] = np.min(bad)
+
+    # The gradients per autocorrelation time
+    tau1e = first_crossing(y, 'ac', 1 / np.e, 'continuous')
+    if np.isnan(get_tau(y, 'ac1e')):
+        tau1e = np.nan  # the ACF never falls to 1/e
+    out['vse_gradient_pertau'] = out['vse_gradient'] * tau1e
+    out['ve_gradient_pertau'] = out['ve_gradient'] * tau1e
+
+    # Saturating exponential fit
+    try:
+        a, b = lsqcurvefit_trr(lambda c, x: c[0] * (1 - np.exp(c[1] * x)), [pmax, -0.5], t, p)
+        gof = goodness_of_fit(p, a * (1 - np.exp(b * t)), 2)
+        out['expfit_a'] = a
+        out['expfit_b'] = b
+        out['expfit_r2'] = gof['rsquare']
+        out['expfit_adjr2'] = gof['adjrsquare']
+        out['expfit_rmse'] = gof['rmse']
+    except (ValueError, np.linalg.LinAlgError, FloatingPointError):
+        for lab in ('a', 'b', 'r2', 'adjr2', 'rmse'):
+            out[f'expfit_{lab}'] = np.nan
+
+    return out
+
+
+from scipy.stats import norm as _norm
+
+
+def _dvv_draws(rng: np.random.RandomState, n: int, n_dv: int, nsub: int, num_surr: int) -> tuple:
+    # The random draws of NL_DVV, in the order hctsa makes them: the reference delay vectors
+    # (randsample without replacement) for the data, one random permutation per surrogate, then
+    # the reference delay vectors for each surrogate. Returns 0-based (refs, perms).
+    refs = [_ml_randperm(n_dv, rng)[:nsub] - 1]
+    perms = [_ml_randperm(n, rng) - 1 for _ in range(num_surr)]
+    refs += [_ml_randperm(n_dv, rng)[:nsub] - 1 for _ in range(num_surr)]
+    return refs, perms
+
+
+def _dvv_curve(x: np.ndarray, m: int, nsub: int, nd: float, ntv: int, tau: int,
+               ref: np.ndarray) -> np.ndarray:
+    # Delay vector variance (Gautama, Mandic & Van Hulle 2004; the DVV toolbox's dvv.m as modified
+    # in hctsa): the target variance (of the value following each delay vector) of the sets of
+    # delay vectors within distance rd of each of the nsub reference vectors ``ref`` (indices of
+    # delay vectors), averaged over references and normalized by the variance of x, at ntv
+    # values of rd spanning the mean distance between delay vectors +/- nd standard deviations.
+    # Returns the ntv x 2 array of the standardized distance and the target variance.
+    n = x.size
+    n_dv = n - m * tau  # number of delay vectors (each with a target)
+    dvs = x[np.arange(n_dv)[:, None] + tau * np.arange(m)[None, :]]
+    d = np.sqrt(np.sum((dvs[:, None, :] - dvs[ref][None, :, :]) ** 2, axis=2))  # n_dv x nsub
+
+    # Mean and standard deviation of the distances over all (reference, vector) pairs except
+    # each reference with itself
+    count = nsub * n_dv - nsub
+    avg = np.sum(d) / count
+    sd = np.sqrt((np.sum((d - avg) ** 2) - nsub * avg ** 2) / (count - 1))
+    rd = avg - nd * sd + (2 * nd * sd * np.arange(ntv)) / (ntv - 1)
+
+    # For each reference, the variance of the targets of the delay vectors within each rd (from
+    # cumulative sums of the targets sorted by distance); only sets of at least 30 count
+    tot = np.zeros(ntv)
+    num = np.zeros(ntv)
+    for k in range(nsub):
+        order = np.argsort(d[:, k], kind='stable')
+        ds = d[order, k]
+        xs = x[order + m * tau]
+        s1 = np.cumsum(xs)
+        s2 = np.cumsum(xs ** 2)
+        c = np.searchsorted(ds, rd, side='right')  # number of vectors within each rd
+        t1 = np.where(c > 0, s1[np.maximum(c, 1) - 1], 0.0)
+        t2 = np.where(c > 0, s2[np.maximum(c, 1) - 1], 0.0)
+        # hctsa excludes from each set the target with (1-based) index k, the loop counter
+        # rather than the reference's own index (a quirk of the original toolbox, kept)
+        if k + 1 > m * tau:
+            inside = d[k - m * tau, k] <= rd
+            c = c - inside
+            t1 = t1 - inside * x[k]
+            t2 = t2 - inside * x[k] ** 2
+        ok = (c >= 30) & (rd > 0)
+        tot[ok] += (t2[ok] - t1[ok] ** 2 / c[ok]) / (c[ok] - 1)
+        num[ok] += 1
+    y = np.full(ntv, np.nan)
+    has = num > 0
+    y[has] = tot[has] / (num[has] * np.var(x, ddof=1))
+    return np.column_stack([(rd - avg) / sd, y])
+
+
+def _dvv_iaaft(x: np.ndarray, perm: np.ndarray, max_it: int = 100, tol: float = 1e-5) -> np.ndarray:
+    # Iterated amplitude-adjusted Fourier transform surrogate (the DVV toolbox's surrogate.m,
+    # real-valued branch as modified in hctsa): from the permutation ``perm`` of x, alternately
+    # impose the amplitude spectrum and rank-order back onto the sorted values of x, returning the
+    # iterate (of at most max_it) that matches the amplitude spectrum best.
+    x_amp = np.abs(np.fft.fft(x))
+    x_sorted = np.sort(x)
+    r_prev = x[perm]
+    mse, mse_prev = np.inf, 0.0
+    best_mse, best_r = np.inf, r_prev
+    it = 0
+    while abs(mse - mse_prev) > tol and it < max_it:
+        mse_prev = mse
+        s = np.fft.ifft(x_amp * np.exp(1j * np.angle(np.fft.fft(r_prev)))).real
+        r = np.empty_like(x)
+        r[np.argsort(s, kind='stable')] = x_sorted
+        mse = np.mean(np.abs(x_amp - np.abs(np.fft.fft(r))))
+        if mse < best_mse:
+            best_mse, best_r = mse, r
+        r_prev = r
+        it += 1
+    return best_r
+
+
+def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
+        ntv: Union[int, None] = None, num_surr: int = 10, random_seed: Union[int, None] = 0,
+        tau: Union[int, str] = 1) -> Union[dict, float]:
+    """
+    How well nearby delay vectors predict the next value, compared with surrogates.
+
+    The delay vector variance (DVV) method [1]_ for detecting determinism and nonlinearity. A
+    delay vector is a run of ``m`` values (spaced ``tau`` apart) and its target is the value
+    that follows. For each of ``num_dvs`` randomly chosen reference vectors, the variance of the
+    targets of all delay vectors within a distance ``rd`` of the reference is found (only if at
+    least 30 vectors lie within ``rd``). The mean of these variances over the references, divided
+    by the variance of the series, is the target variance; it is computed at ``ntv`` values of
+    ``rd`` that span the mean distance between delay vectors plus or minus ``nd`` standard
+    deviations. The same curve is found for ``num_surr`` iterated amplitude-adjusted Fourier
+    transform (IAAFT) surrogates, and the outputs summarize the data curve and its difference
+    from the mean surrogate curve.
+
+    References
+    ----------
+    .. [1] T. Gautama, D.P. Mandic and M.M. Van Hulle, "The delay vector variance method for
+        detecting determinism and nonlinearity in time series", Physica D 190(3-4), 167-176
+        (2004). DOI: 10.1016/j.physd.2003.11.001
+
+    Notes
+    -----
+    The surrogates keep the best-matching of (at most) 100 IAAFT iterates, as hctsa's patched
+    DVV toolbox does. In MATLAB, the rank-ordering step of hctsa's ``DVV_surrogate.m`` sorts
+    the output of ``ifft``, which carries a negligible imaginary part (from the sign of the
+    zero-frequency and Nyquist components) in most iterations; MATLAB then ranks it by
+    magnitude rather than by value. Here the real part is always ranked by value, as the
+    IAAFT algorithm intends, so surrogate-based outputs differ from MATLAB's in distribution.
+    The reference vectors and surrogate permutations are drawn from a numpy random stream
+    (seeded by ``random_seed``) rather than MATLAB's.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series (real-valued).
+    m : int, optional
+        The delay embedding dimension. Default is 3.
+    num_dvs : int, optional
+        Number of reference delay vectors to consider. Default is 100.
+    nd : float, optional
+        Span over which to perform DVV, in standard deviations of the distances between delay
+        vectors. Default is 2.
+    ntv : int, optional
+        Number of points on the horizontal (distance) axis. Default is ``25 * nd``.
+    num_surr : int, optional
+        Number of surrogates to compare to. Default is 10.
+    random_seed : int, optional
+        Seed for the random choices of reference vectors and surrogates. Default is 0.
+    tau : int or str, optional
+        The time delay between delay-vector elements: an integer number of samples, or a rule
+        understood by :func:`pyhctsa.utils.get_tau` (``'ac1e'``, ``'mi'``, ...). The same delay
+        is used for the data and the surrogates. An adaptive delay makes the statistics much less
+        dependent on the sampling rate. Default is 1.
+
+    Returns
+    -------
+    dict or float
+        Statistics of the curve of target variance against standardized distance (the data curve,
+        at the distances where it is defined): ``trend`` (slope of a linear fit), ``max``,
+        ``min``, ``mean``, ``meanDiff`` and ``stdDiff`` (mean and standard deviation of its
+        successive differences), ``trendDiff`` (slope of a linear fit to them); and against the
+        mean surrogate curve: ``rmsDiffSurr``, ``meanDiffSurr``, ``dataSurrCorr``,
+        ``trendDataSurr`` (slope of the surrogate curve against the data curve),
+        ``numZeroCrossings`` (sign changes of the difference), ``trendSurr``,
+        ``meanDiffTrendSurr`` (``trendSurr`` minus ``trend``) and ``meanNormCDF`` (the mean over
+        distances of the Gaussian cumulative probability of the data value given the mean and
+        standard deviation across surrogates). Returns NaN if no delay can be set, the series is
+        too short to draw ``num_dvs`` reference vectors, or the data curve is defined at fewer
+        than two distances.
+    """
+    x = np.asarray(y, dtype=float).ravel()
+    n = x.size
+    nd = float(nd)
+    ntv = int(25 * nd) if ntv is None else int(ntv)
+
+    tau = get_tau(x, tau)
+    if np.isnan(tau):
+        return np.nan  # no delay can be set (e.g. a constant series)
+    tau = int(tau)
+
+    if n - m * tau < num_dvs:
+        logger.warning(f'Time series (N = {n}) too short to draw {num_dvs} reference delay '
+                       f'vectors at m = {m}, tau = {tau}')
+        return np.nan
+    n_dv = n - m * tau
+
+    refs, perms = _dvv_draws(_ml_rng(0 if random_seed is None else int(random_seed)),
+                             n, n_dv, num_dvs, num_surr)
+    dvv_data = _dvv_curve(x, m, num_dvs, nd, ntv, tau, refs[0])
+    dvv_surr = np.stack([_dvv_curve(_dvv_iaaft(x, perms[i]), m, num_dvs, nd, ntv, tau, refs[i + 1])[:, 1]
+                         for i in range(num_surr)], axis=1)  # ntv x num_surr
+    mean_surr = np.mean(dvv_surr, axis=1)
+
+    # Data curve, using only the distances where it is defined
+    good = ~np.isnan(dvv_data[:, 1])
+    if good.sum() < 2:
+        logger.warning('The data curve is defined at fewer than two distances')
+        return np.nan
+    t_d, v_d = dvv_data[good, 0], dvv_data[good, 1]
+    d_v = np.diff(v_d)
+
+    out = {}
+    out['trend'] = np.polyfit(t_d, v_d, 1)[0]
+    out['max'] = np.max(v_d)
+    out['min'] = np.min(v_d)
+    out['mean'] = np.mean(v_d)
+    out['meanDiff'] = np.mean(d_v)
+    out['stdDiff'] = np.std(d_v, ddof=1)
+    out['trendDiff'] = np.polyfit(t_d[:-1], d_v, 1)[0]
+
+    # Comparison to the surrogates, where both are defined
+    both = good & ~np.isnan(mean_surr)
+    if both.sum() < 2:
+        logger.warning('Too few distances at which both the data and surrogate curves are defined')
+        return np.nan
+    t_b, v_b, s_b = dvv_data[both, 0], dvv_data[both, 1], mean_surr[both]
+    out['rmsDiffSurr'] = np.sqrt(np.mean((v_b - s_b) ** 2))
+    out['meanDiffSurr'] = np.mean(v_b - s_b)
+    out['dataSurrCorr'] = np.corrcoef(v_b, s_b)[0, 1]
+    out['trendDataSurr'] = np.polyfit(v_b, s_b, 1)[0]
+    out['numZeroCrossings'] = np.sum((v_b - s_b)[1:] * (v_b - s_b)[:-1] < 0)
+    out['trendSurr'] = np.polyfit(t_b, s_b, 1)[0]
+    out['meanDiffTrendSurr'] = out['trendSurr'] - out['trend']
+    with np.errstate(invalid='ignore', divide='ignore'):
+        probs = _norm.cdf(v_b, loc=np.mean(dvv_surr[both], axis=1),
+                          scale=np.std(dvv_surr[both], axis=1, ddof=1))
+    out['meanNormCDF'] = np.mean(probs)
+    return out
+
+
+from scipy.signal import find_peaks, welch as _welch
+from scipy.spatial.distance import pdist, squareform
+
+
+def _period_normalized_tau(y: np.ndarray) -> Union[int, str]:
+    # An embedding delay of one fifth of the series' dominant period (from the most prominent
+    # peak of the log Welch spectrum), so it scales with the sampling rate; 'mi' if the series is
+    # too short or has no sufficiently prominent peak. (hctsa: SUB_periodNormalizedTau.)
+    if y.size < 16:
+        return 'mi'
+    win_length = int(np.floor(y.size / 4.5))  # MATLAB's pwelch default: 8 segments, 50% overlap
+    f, pxx = _welch(y - np.mean(y), fs=1, window=np.hamming(win_length), nperseg=win_length,
+                    noverlap=win_length // 2, nfft=max(256, 2 ** int(np.ceil(np.log2(win_length)))),
+                    detrend=False, return_onesided=True, scaling='density')
+    f, pxx = f[1:], pxx[1:]  # exclude the DC bin
+    if pxx.size < 3:
+        return 'mi'
+    log_p = np.log(pxx + np.spacing(np.max(pxx)))
+    locs, props = find_peaks(log_p, prominence=2.0)
+    if locs.size == 0:
+        return 'mi'
+    best = int(np.argmax(props['prominences']))  # the most prominent peak, not necessarily the tallest
+    return max(1, int(_round_half_away(1 / f[locs[best]] / 5)))
+
+
+def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, max_dim: int = 1,
+                        max_n: Union[int, str] = 1000) -> Union[dict, float]:
+    """
+    Persistent homology of the delay embedding: the lifetimes of its loops and components.
+
+    Embeds the time series in ``m`` dimensions, builds the Vietoris-Rips filtration of the point
+    cloud, and summarizes the lifetimes (death minus birth, as a proportion of the filtration
+    threshold, the maximum distance between 300 evenly spaced embedded points) of its
+    one-dimensional holes (loops, H1; a periodic series gives a long-lived loop) and its
+    connected components (H0). Uses ripser [1]_ (the ``ripser`` Python package, an optional
+    dependency; hctsa runs the ripser executable).
+
+    References
+    ----------
+    .. [1] U. Bauer, "Ripser: efficient computation of Vietoris-Rips persistence barcodes",
+        J. Appl. Comput. Topol. 5, 391-423 (2021). DOI: 10.1007/s41468-021-00071-5
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    tau : int or str, optional
+        The embedding delay: an integer number of samples, a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), or ``'periodWelch'`` for
+        one fifth of the dominant period (the most prominent peak of the log Welch power
+        spectrum, falling back to ``'mi'`` if there is none). A fixed ``tau = 1`` embeds a
+        smooth periodic series nearly collinearly, which makes its loop short-lived. Default is
+        ``'mi'``.
+    m : int, optional
+        The embedding dimension. Default is 3.
+    max_dim : int, optional
+        The maximum homology dimension computed (at least 1 for the H1 outputs; with 0 they are
+        zero). Default is 1.
+    max_n : int or ``'full'``, optional
+        The maximum number of embedded points: a longer point cloud is subsampled at evenly spaced
+        points (the cost of ripser grows steeply with the size of the cloud), or ``'full'`` for no
+        subsampling. Default is 1000.
+
+    Returns
+    -------
+    dict or float
+        ``maxPersistenceH1``, ``totalPersistenceH1``, ``persistenceEntropyH1``: the maximum and
+        sum of the (normalized) lifetimes of the H1 classes and the entropy of their distribution
+        (all 0 if there are none); ``totalPersistenceH0``: the sum of the lifetimes of the H0
+        classes. Returns NaN if the delay cannot be set, the embedding fails, there are fewer than 20
+        embedded points, or the point cloud is degenerate (e.g. a constant series).
+
+    Raises
+    ------
+    ImportError
+        If the ``ripser`` package is not installed.
+    """
+    try:
+        from ripser import ripser
+    except ImportError as exc:
+        raise ImportError("persistent_homology needs the 'ripser' package "
+                          "(pip install ripser)") from exc
+
+    y = np.asarray(y, dtype=float).ravel()
+
+    if isinstance(tau, str) and tau.lower() == 'periodwelch':
+        tau = _period_normalized_tau(y)
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        return np.nan
+    try:
+        x = time_delay_embed(y, m, int(tau))
+    except ValueError as exc:  # embedding failed
+        logger.warning(str(exc))
+        return np.nan
+    n_emb = x.shape[0]
+    if n_emb < 20:  # too few embedded points for a meaningful Rips filtration
+        return np.nan
+
+    if isinstance(max_n, str):
+        if max_n.lower() != 'full':
+            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
+    elif n_emb > max_n:
+        # an evenly spaced subsample over the whole embedded point cloud
+        x = x[np.floor(np.linspace(1, n_emb, int(max_n)) + 0.5).astype(int) - 1]
+        n_emb = x.shape[0]
+
+    # The filtration threshold: the largest distance among (at most) 300 evenly spaced points
+    n_sub = min(300, n_emb)
+    sub = np.floor(np.linspace(1, n_emb, n_sub) + 0.5).astype(int) - 1
+    threshold = np.max(pdist(x[sub]))
+    if not threshold > 0:
+        return np.nan  # degenerate point cloud (e.g. a constant series)
+    threshold = float('%.8g' % threshold)  # as passed to ripser
+
+    # hctsa hands ripser the point cloud as a text file of 7 significant digits
+    dgms = ripser(squareform(pdist(_round_significant(x.ravel(), 7).reshape(x.shape))),
+                  maxdim=int(max_dim), thresh=threshold, distance_matrix=True)['dgms']
+
+    def lifetimes(d):  # finite lifetimes as a proportion of the threshold (essential classes dropped)
+        p = (d[:, 1] - d[:, 0]) if d.size else np.empty(0)
+        return p[np.isfinite(p)] / threshold
+
+    out = {}
+    pers1 = lifetimes(dgms[1]) if len(dgms) > 1 else np.empty(0)
+    if pers1.size == 0:
+        out['maxPersistenceH1'] = 0.0
+        out['totalPersistenceH1'] = 0.0
+        out['persistenceEntropyH1'] = 0.0
+    else:
+        out['maxPersistenceH1'] = np.max(pers1)
+        out['totalPersistenceH1'] = np.sum(pers1)
+        # zero-persistence pairs contribute nothing to the entropy (0 log 0 = 0)
+        pos = pers1[pers1 > 0]
+        p = pos / np.sum(pos)
+        out['persistenceEntropyH1'] = -np.sum(p * np.log(p)) if p.size else 0.0
+    out['totalPersistenceH0'] = np.sum(lifetimes(dgms[0]))
+    return out
+
+
 def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
     """Counts of points per box, where the boxes are quantiles along each axis."""
     props = np.arange(nbox + 1) / nbox
