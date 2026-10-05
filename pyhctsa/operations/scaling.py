@@ -625,3 +625,140 @@ def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
     out["resac1"] = autocorr(resid, 1, 'Fourier')[0]  # residual autocorrelation
 
     return out
+
+def mfdfa(y: ArrayLike, scale_range: list | None = None, q_range: list | None = None,
+          order: int = 1) -> dict | float:
+    """
+    Multifractal detrended fluctuation analysis (MFDFA): the multifractal spectrum of a time series.
+
+    Estimates the multifractal singularity spectrum f(alpha) of a time series by the classical
+    MFDFA algorithm of Kantelhardt et al. (2002) [1]. The mean-subtracted series is integrated
+    (cumulative sum) to a profile, which is divided into non-overlapping segments of length s
+    (taken from both the start and the end of the series, to use the whole series when N is
+    not a multiple of s). Each segment is detrended by a polynomial of a given order, and the
+    q-th order fluctuation function F_q(s) is formed by averaging the segment variances raised
+    to the power q/2 (with a log-averaging limit at q = 0). h(q), the slope of log F_q(s)
+    against log s, is Legendre-transformed via the mass exponent tau(q) = q h(q) - 1 into the
+    singularity spectrum f(alpha), where alpha = d tau / dq and f = q alpha - tau.
+
+    Unlike `fast_dfa` and `fluctuation_analysis` (monofractal, q = 2) and `mma` (which reports
+    how the raw h(q) surface varies with scale), this fixes the scaling range and focuses on
+    the q axis.
+
+    References
+    ----------
+    .. [1] J. W. Kantelhardt et al., "Multifractal detrended fluctuation analysis of
+        nonstationary time series", Physica A 316(1-4), 87-114 (2002).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    scale_range : list, optional
+        [min_scale, max_scale], the range of segment lengths s used for the fluctuation-function
+        fit, as 20 log-spaced values. Default is [16, floor(N/4)].
+    q_range : list, optional
+        [q_min, q_max], the range of the multifractal order q, sampled in steps of 0.5, with
+        q = 0 handled by its log-averaging limit. Default is [-5, 5].
+    order : int, optional
+        The order of the polynomial used to detrend each segment (1 = linear detrending, MFDFA1).
+        Default is 1.
+
+    Returns
+    -------
+    dict or float
+        Dictionary containing:
+
+        - `meanR2`: the mean (across q) of the R^2 of the log-log fits of F_q(s) against s.
+        - `h2`: the generalized Hurst exponent h(q) at q = 2 (NaN if q = 2 is not in `q_range`).
+        - `alphaMin`, `alphaMax`: the smallest and largest singularity exponents alpha.
+        - `alphaWidth`: alphaMax - alphaMin, the degree of multifractality.
+        - `fAlphaMax`: the maximum of f(alpha), the height of the spectrum's peak.
+        - `alpha0`: the alpha at the peak of the spectrum (the dominant exponent).
+        - `spectrumAsymmetry`: (alpha0 - alphaMin) / (alphaMax - alpha0).
+
+        A scalar NaN is returned if the series or scale range cannot support the analysis.
+    """
+    y = np.asarray(y, dtype=np.float64).ravel()
+    N = y.size
+    if scale_range is None or len(scale_range) == 0:
+        scale_range = [16, N // 4]
+    min_scale, max_scale = scale_range[0], scale_range[1]
+    if q_range is None or len(q_range) == 0:
+        q_range = [-5, 5]
+    q_min, q_max = q_range[0], q_range[1]
+
+    # At least order+3 points per segment, and at least 8 distinct scales spanning the range
+    if min_scale < order + 3:
+        min_scale = order + 3
+    num_scales = 20
+    if max_scale > N // 4 or (max_scale / min_scale) < 2 or N // (2 * min_scale) < 4:
+        return np.nan
+    scales = np.unique(_round(np.exp(_linspace(np.log(min_scale), np.log(max_scale), num_scales)))).astype(int)
+    if scales.size < 8:
+        return np.nan
+
+    q_true = _colon(q_min, 0.5, q_max)
+    q_list = q_true.copy()
+    q_zero = np.flatnonzero(q_true == 0)
+    q_list[q_list == 0] = 1e-4  # q = 0 handled separately via log-averaging below
+    q_zero_idx = q_zero[0] if q_zero.size else None
+
+    # Profile (integrated, mean-subtracted series)
+    profile = np.cumsum(y - np.mean(y))
+
+    n_q = q_list.size
+    log_fq = np.full((scales.size, n_q), np.nan)
+    eps = np.finfo(float).eps
+    for si, s in enumerate(scales):
+        Ns = N // s
+        # Detrending is a fixed linear projection for all segments of length s
+        tt = np.arange(1, s + 1, dtype=float)
+        V = np.vander(tt / s, order + 1)  # (scaled for conditioning; the projection is unchanged)
+        resid_op = np.eye(s) - V @ np.linalg.pinv(V)
+        starts = np.concatenate([np.arange(Ns) * s, N - (np.arange(Ns) + 1) * s])
+        segs = profile[starts[:, None] + np.arange(s)[None, :]]  # segments from the start, then from the end
+        F2 = np.mean((segs @ resid_op.T) ** 2, axis=1)
+        F2[F2 < eps] = eps  # floor to avoid log(0) / 0^(negative q)
+        for qi, q in enumerate(q_list):
+            log_fq[si, qi] = (1 / q) * np.log(np.mean(F2 ** (q / 2)))
+        if q_zero_idx is not None:
+            # q = 0 limit: F_0(s) = exp{ (1/(4Ns)) * sum( log F^2(s,v) ) }
+            log_fq[si, q_zero_idx] = np.mean(np.log(F2)) / 2
+
+    # h(q): slope of log(F_q(s)) vs log(s), for each q
+    log_s = np.log(scales.astype(float))
+    hq = np.full(n_q, np.nan)
+    r2q = np.full(n_q, np.nan)
+    for qi in range(n_q):
+        good = np.isfinite(log_fq[:, qi])
+        if good.sum() < 8:
+            continue
+        p = np.polyfit(log_s[good], log_fq[good, qi], 1)
+        hq[qi] = p[0]
+        fitted = np.polyval(p, log_s[good])
+        ss_res = np.sum((log_fq[good, qi] - fitted) ** 2)
+        ss_tot = np.sum((log_fq[good, qi] - np.mean(log_fq[good, qi])) ** 2)
+        if ss_tot > 0:
+            r2q[qi] = 1 - ss_res / ss_tot
+    if np.any(np.isnan(hq)):
+        return np.nan
+
+    # Legendre transform: mass exponent tau(q), singularity spectrum alpha/f(alpha)
+    tauq = q_true * hq - 1
+    alpha = np.gradient(tauq, q_true)  # d(tau)/dq
+    falpha = q_true * alpha - tauq
+
+    out = {'meanR2': np.nanmean(r2q) if not np.all(np.isnan(r2q)) else np.nan}
+    idx2 = np.flatnonzero(np.abs(q_true - 2) < 1e-8)
+    out['h2'] = hq[idx2[0]] if idx2.size else np.nan
+    out['alphaMin'] = np.min(alpha)
+    out['alphaMax'] = np.max(alpha)
+    out['alphaWidth'] = out['alphaMax'] - out['alphaMin']
+    i_peak = int(np.argmax(falpha))
+    out['fAlphaMax'] = falpha[i_peak]
+    out['alpha0'] = alpha[i_peak]
+    left_width = out['alpha0'] - out['alphaMin']
+    right_width = out['alphaMax'] - out['alpha0']
+    out['spectrumAsymmetry'] = left_width / right_width if right_width > 0 else np.nan
+    return out
