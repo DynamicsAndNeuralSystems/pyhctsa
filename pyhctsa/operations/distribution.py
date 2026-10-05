@@ -191,6 +191,9 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
             logger.warning("The data contains negative values, but Gamma is a positive-only distribution.")
             return np.nan
         a, b = gamfit(x)
+        if not (np.isfinite(a) and np.isfinite(b)):
+            logger.warning("No finite gamma fit for this data.")
+            return np.nan
         pdf_func = lambda z: gamma_dist.pdf(z, a, scale=b)
         if a < 1:
             thresh = pdf_func(0.0) / 100.0  # unbounded at 0
@@ -215,6 +218,9 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
             logger.warning("The data are not positive, but Weibull is a positive-only distribution.")
             return np.nan
         a, c = wblfit(x)  # scale, shape
+        if not (np.isfinite(a) and np.isfinite(c)):
+            logger.warning("No finite Weibull fit for this data.")
+            return np.nan
         pdf_func = lambda z: weibull_min.pdf(z, c, scale=a)
         if c <= 1:
             thresh = pdf_func(0.0)

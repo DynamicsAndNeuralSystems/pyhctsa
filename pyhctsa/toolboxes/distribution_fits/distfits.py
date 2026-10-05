@@ -80,14 +80,19 @@ def gamfit(x: np.ndarray) -> tuple:
 
     Maximum likelihood for strictly positive data. As in MATLAB, data
     containing exact zeros (for which the likelihood is degenerate) fall back
-    to matching the mean and variance.
+    to matching the mean and variance, and (Inf, 0) is returned when no finite
+    maximum exists (constant or near-constant data).
     """
     from scipy.stats import gamma as gamma_dist
     if np.any(x == 0):
         xbar = np.mean(x)
         s2 = np.var(x, ddof=1)
         return xbar ** 2 / s2, s2 / xbar
-    a, _, b = gamma_dist.fit(x, floc=0)
+    try:
+        a, _, b = gamma_dist.fit(x, floc=0)
+    except (ValueError, RuntimeError, FloatingPointError):
+        # no finite maximum (near-constant data): MATLAB's gamfit returns (Inf, 0)
+        return np.inf, 0.0
     return a, b
 
 
@@ -96,5 +101,10 @@ def wblfit(x: np.ndarray) -> tuple:
 
     The Weibull fit is the extreme-value fit to the log of the data.
     """
-    mu, sigma = evfit(np.log(x))
+    if np.all(x == x[0]):
+        return float(x[0]), np.inf  # a constant has infinite shape
+    try:
+        mu, sigma = evfit(np.log(x))
+    except (ValueError, RuntimeError, FloatingPointError):
+        return np.nan, np.nan  # no solution (near-constant data)
     return np.exp(mu), 1 / sigma
