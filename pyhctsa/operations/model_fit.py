@@ -655,6 +655,125 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     return out
 
 
+def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3),
+                  qr: ArrayLike = (1, 2, 3), random_seed: Union[int, str, None] = None) -> dict:
+    """
+    How well GARCH models of different orders describe the changing variance of the series.
+
+    Fits a set of zero-mean GARCH(p, q) models with Gaussian innovations to the (whitened and
+    z-scored) time series (hctsa's ``MF_GARCHcompare``) and returns statistics on the goodness
+    of fit across a range of p (the number of lagged variances) and q (the number of lagged
+    squared innovations): summaries across the grid of fitted models, and the orders that fit
+    best. See :func:`garch_fit` for how the models are fitted.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    pre_proc : {'none', 'ar'}, optional
+        A preprocessing to apply after detrending: ``'none'`` (default), or ``'ar'``, which
+        applies the preprocessing that maximizes AR(2) whiteness (see :func:`garch_fit`).
+    pr : array-like of int, optional
+        The model orders p to compare. Default is ``(1, 2, 3)``.
+    qr : array-like of int, optional
+        The model orders q to compare. Default is ``(1, 2, 3)``.
+    random_seed : int, 'default', 'none' or None, optional
+        How to seed the random draws used by the whitening, as in :func:`garch_fit`.
+
+    Returns
+    -------
+    dict or float
+        NaN if no model could be fitted. Otherwise, statistics across the (p, q) models that
+        fitted (the log-likelihood, AIC and BIC are per observation):
+
+        - ``minLLF``, ``maxLLF``, ``meanLLF``: the log-likelihood
+        - ``minBIC``, ``maxBIC``, ``meanBIC``: the Bayesian information criterion
+        - ``minAIC``, ``maxAIC``, ``meanAIC``: Akaike's information criterion
+        - ``minK``, ``maxK``, ``meanK``: the constant term of the variance equation
+        - ``min_meanarchps``, ``max_meanarchps``, ``mean_meanarchps``: across models, the mean
+          p-value (over lags 1 to 20) of Engle's ARCH test on the standardized residuals
+        - ``min_maxarchps``, ``max_maxarchps``, ``mean_maxarchps``: the same for the maximum
+          p-value over the 20 lags
+        - ``min_meanlbqps``, ``max_meanlbqps``, ``mean_meanlbqps``: across models, the mean
+          p-value of the Ljung-Box Q-test on the squared standardized residuals
+        - ``min_maxlbqps``, ``max_maxlbqps``, ``mean_maxlbqps``: the same for the maximum
+        - ``bestpLLF``, ``bestqLLF``: the orders p and q of the model with the maximum
+          log-likelihood
+        - ``bestpAIC``, ``bestqAIC``, ``bestpBIC``, ``bestqBIC``: the orders of the models with
+          the minimum AIC and BIC
+        - ``Ks_vary_p``, ``Ks_vary_q``: how much the constant term varies with p and with q: the
+          standard deviation of the constant across one order, averaged over the other
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    pr = [int(v) for v in np.atleast_1d(pr)]
+    qr = [int(v) for v in np.atleast_1d(qr)]
+
+    y = z_score(_whiten(y, pre_proc, random_seed))
+    n = len(y)
+
+    shape = (len(pr), len(qr))
+    llfs, aics, bics, ks, mean_arch, max_arch, mean_lbq, max_lbq = (np.full(shape, np.nan) for _ in range(8))
+    for i, p in enumerate(pr):
+        for j, q in enumerate(qr):
+            try:
+                fit = _garch_estimate(y, p, q)
+            except (ValueError, np.linalg.LinAlgError, FloatingPointError):
+                logger.warning(f'Bad fit at p = {p}, q = {q}')
+                continue  # didn't fit successfully; everything stays NaN
+            n_params = int(np.sum(np.any(fit['cov'] != 0, axis=0)))
+            if n_params < p + q + 1:
+                logger.warning(f'Bad fit at p = {p}, q = {q}')
+                continue
+            llfs[i, j] = fit['llf']
+            aics[i, j] = -2 * fit['llf'] + 2 * n_params
+            bics[i, j] = -2 * fit['llf'] + n_params * np.log(n)
+            ks[i, j] = fit['constant']
+            stde = (0.0 - y) / np.sqrt(fit['sigma2'])
+            engle = _arch_test_pvalues(stde)
+            lbq = _lbq_test_pvalues(stde ** 2)
+            mean_arch[i, j], max_arch[i, j] = np.mean(engle), np.max(engle)
+            mean_lbq[i, j], max_lbq[i, j] = np.mean(lbq), np.max(lbq)
+
+    if np.all(np.isnan(llfs)):
+        logger.warning('None of the ARCH or GARCH models could be fit.')
+        return np.nan
+
+    # Log-likelihoods and information criteria per observation
+    llfs, aics, bics = llfs / n, aics / n, bics / n
+
+    out = {}
+    for name, values in (('LLF', llfs), ('BIC', bics), ('AIC', aics), ('K', ks)):
+        out[f'min{name}'] = np.nanmin(values)
+        out[f'max{name}'] = np.nanmax(values)
+        out[f'mean{name}'] = np.nanmean(values)
+    for name, values in (('meanarchps', mean_arch), ('maxarchps', max_arch),
+                         ('meanlbqps', mean_lbq), ('maxlbqps', max_lbq)):
+        out[f'min_{name}'] = np.nanmin(values)
+        out[f'max_{name}'] = np.nanmax(values)
+        out[f'mean_{name}'] = np.nanmean(values)
+
+    # The orders of the best models (first in column-major order, as MATLAB's find)
+    for name, values, pick in (('LLF', llfs, np.nanargmax), ('AIC', aics, np.nanargmin),
+                               ('BIC', bics, np.nanargmin)):
+        a, b = np.unravel_index(pick(values.ravel(order='F')), shape, order='F')
+        out[f'bestp{name}'] = pr[a]
+        out[f'bestq{name}'] = qr[b]
+
+    # How much the constant varies with each order
+    def _std_omitnan(values):
+        std = np.full(values.shape[1], np.nan)
+        for k in range(values.shape[1]):
+            col = values[:, k][~np.isnan(values[:, k])]
+            if col.size == 1:
+                std[k] = 0.0
+            elif col.size > 1:
+                std[k] = np.std(col, ddof=1)
+        return std
+
+    out['Ks_vary_p'] = np.nanmean(_std_omitnan(ks))
+    out['Ks_vary_q'] = np.nanmean(_std_omitnan(ks.T))
+    return out
+
 def _ar_fb(seg: np.ndarray, order: int) -> tuple:
     """
     AR model by forward-backward least squares (MATLAB's default ``ar`` estimator).
