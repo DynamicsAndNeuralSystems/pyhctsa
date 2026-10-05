@@ -43,9 +43,16 @@ def _tie_break_noise(y: np.ndarray, seed: int = 0) -> np.ndarray:
 
 
 def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, None]) -> Callable:
-    """Helper to return the correct correlation function based on method type."""
+    """Helper to return the correct correlation function based on method type.
+
+    As in hctsa's ``CO_FirstMin``: a naked ``'mi'`` is the Kraskov AMI (``'mi-kraskov1'``),
+    and for ``'mi'``/``'mi-kraskov1'`` ``extra_param`` is not passed on (the estimator's
+    default of 4 nearest neighbors is used).
+    """
     from ..operations.correlation import autocorr, automutual_info
 
+    if min_what == 'mi':
+        min_what = 'mi-kraskov1'
     if min_what in ['ac', 'corr']:
         return lambda x: autocorr(y, tau=x, method='Fourier').item()
     elif min_what == 'mi-hist':
@@ -54,22 +61,42 @@ def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, No
     elif min_what == 'mi-kraskov2':
         return lambda x: automutual_info(y, x, 'kraskov2', extra_param)
     elif min_what == 'mi-kraskov1':
-        return lambda x: automutual_info(y, x, 'kraskov1', extra_param)
-    elif min_what in ['mi', 'mi-gaussian']:
+        return lambda x: automutual_info(y, x, 'kraskov1', None)
+    elif min_what == 'mi-gaussian':
         return lambda x: automutual_info(y, x, 'gaussian', extra_param)
     else:
         raise ValueError(f"Unknown correlation type specified: {min_what}")
 
-def _ami_gaussian_curve(y: np.ndarray):
-    """Gaussian automutual information at every lag 1..n-1 in one O(n log n) pass.
+def _gaussian_ami_exact(y: np.ndarray, lag: int) -> float:
+    """Gaussian AMI at one lag from the Pearson correlation of the two delayed windows,
+    as ``IN_AutoMutualInfo(y, lag, 'gaussian')`` does (NaN for a constant window)."""
+    y1, y2 = y[:-lag], y[lag:]
+    d1, d2 = y1 - y1.mean(), y2 - y2.mean()
+    den = np.sqrt(np.dot(d1, d1) * np.dot(d2, d2))
+    if not den > 0:
+        return np.nan
+    r = min(1.0, max(-1.0, np.dot(d1, d2) / den))
+    with np.errstate(divide='ignore'):
+        return float(-0.5 * np.log(1.0 - r * r))
 
-    Reproduces the windowed Pearson estimate (== ``GaussianMI`` on the 1-D delay
-    pair); a degenerate (constant) delay window gives NaN at that lag. Assumes
-    ``n >= 3`` (guarded by ``_self_corr_curve``).
+
+def _ami_gaussian_curve(y: np.ndarray):
+    """Gaussian automutual information at every lag 1..n-1.
+
+    A fast O(n log n) estimate of the windowed Pearson correlation (== ``GaussianMI`` on the
+    1-D delay pair) is used for all lags, but the cumulative sums and FFT it relies on lose
+    precision at long lags of smooth series (r close to 1), where the AMI -0.5*log(1 - r^2)
+    amplifies the error (up to ~1e-2, enough to create a spurious extremum). Every lag whose
+    fast estimate has 1 - r^2 below 1e-2 (or is not finite) is therefore recomputed exactly,
+    lag by lag, from the Pearson correlation of the two windows, as hctsa does. A degenerate
+    (constant) delay window gives NaN at that lag. Assumes ``n >= 3`` (guarded by
+    ``_self_corr_curve``).
     """
     y = np.asarray(y, dtype=float)
     n = y.size
-    yc = y - y.mean()                      
+    if not np.ptp(y) > 0:                  # constant series: every window is degenerate
+        return np.full(n - 1, np.nan)
+    yc = y - y.mean()
     # linear autocorrelation  C[tau] = sum_t yc[t]*yc[t+tau]  via zero-padded FFT
     nfft = 1 << (2 * n - 1).bit_length()
     fy = np.fft.rfft(yc, nfft)
@@ -86,19 +113,22 @@ def _ami_gaussian_curve(y: np.ndarray):
     den = (m * Q1 - S1 * S1) * (m * Q2 - S2 * S2)
     with np.errstate(invalid='ignore', divide='ignore'):
         r = np.clip(num / np.sqrt(den), -1.0, 1.0)
-        auto_corr = -0.5 * np.log(1.0 - r * r)         # AMI(tau), Gaussian estimator
+        one_minus_r2 = 1.0 - r * r
+        auto_corr = -0.5 * np.log(one_minus_r2)        # AMI(tau), Gaussian estimator
     auto_corr[~(den > 0.0)] = np.nan                   # degenerate window -> NaN
+    # Exact recomputation wherever the fast estimate is imprecise (r near 1 or not finite)
+    for j in np.flatnonzero(~(one_minus_r2 > 1e-2)):
+        auto_corr[j] = _gaussian_ami_exact(y, int(taus[j]))
     return auto_corr
 
 
-
-_VECTORISED_CORR = ('ac', 'mi', 'mi-gaussian')
+_VECTORISED_CORR = ('ac', 'mi-gaussian')
 
 def _self_corr_curve(y: np.ndarray, what: str):
     """Full self-correlation curve at lags 1..n-1 for a vectorisable estimator.
 
     ``'ac'`` -> the FFT autocorrelation, computed once (cf. ``first_crossing``);
-    ``'mi'`` / ``'mi-gaussian'`` -> the Gaussian AMI curve. Returns ``None`` when
+    ``'mi-gaussian'`` -> the Gaussian AMI curve. Returns ``None`` when
     the series is too short to have an interior extremum (``n < 3``).
     """
     y = np.asarray(y, dtype=float)
@@ -109,7 +139,7 @@ def _self_corr_curve(y: np.ndarray, what: str):
         from ..operations.correlation import autocorr
         c = np.asarray(autocorr(y, [], 'Fourier'), dtype=float).ravel()
         return c[1:n]                                  # drop lag 0 -> lags 1..n-1
-    c = _ami_gaussian_curve(y)                          # 'mi' / 'mi-gaussian'
+    c = _ami_gaussian_curve(y)                          # 'mi-gaussian'
     # as in IN_AutoMutualInfo: no AMI is computed from fewer than 5 samples, so lags
     # longer than n - 5 are NaN
     c[max(n - 5, 0):] = np.nan
@@ -169,16 +199,23 @@ def first_min(
 
         Automutual information (AMI):
 
-        - ``'mi'``: AMI using the Gaussian estimator (default for AMI).
-        - ``'mi-kraskov1'``: AMI using the Kraskov estimator (variant 1).
-        - ``'mi-kraskov2'``: AMI using the Kraskov estimator (variant 2).
-        - ``'mi-hist'``: AMI using a histogram-based estimator.
+        - ``'mi-gaussian'``: AMI using the Gaussian estimator (default; a monotonic function of
+          the absolute autocorrelation, so not a nonlinear timescale).
+        - ``'mi'``: AMI using the Kraskov estimator, the same as ``'mi-kraskov1'`` with the
+          estimator's default of 4 nearest neighbors (as in current hctsa; earlier versions of
+          hctsa, and of pyhctsa, used the name ``'mi'`` for the Gaussian estimator, which
+          must now be requested as ``'mi-gaussian'``).
+        - ``'mi-kraskov1'``: AMI using the Kraskov estimator (variant 1; 4 nearest neighbors,
+          ``extra_param`` is not passed on).
+        - ``'mi-kraskov2'``: AMI using the Kraskov estimator (variant 2); ``extra_param`` is
+          the number of nearest neighbors.
+        - ``'mi-hist'``: AMI using a histogram-based estimator; ``extra_param`` is the
+          number of bins.
 
         Default is ``'mi-gaussian'``.
 
     extra_param : any, optional
-        Additional parameter required by the chosen ``min_what`` method
-        (e.g., a k-nearest-neighbours parameter for Kraskov-based AMI).
+        Additional parameter required by the chosen ``min_what`` method (see above).
 
     Returns
     -------
@@ -231,15 +268,19 @@ def first_max(
 
         Automutual information (AMI):
 
-        - ``'mi'``: AMI using the Gaussian estimator (default for AMI).
-        - ``'mi-kraskov1'``: AMI using the Kraskov estimator (variant 1).
-        - ``'mi-kraskov2'``: AMI using the Kraskov estimator (variant 2).
-        - ``'mi-hist'``: AMI using a histogram-based estimator.
+        - ``'mi-gaussian'``: AMI using the Gaussian estimator (default).
+        - ``'mi'``: AMI using the Kraskov estimator, the same as ``'mi-kraskov1'`` (as in current
+          hctsa; the Gaussian estimator must now be requested as ``'mi-gaussian'``).
+        - ``'mi-kraskov1'``: AMI using the Kraskov estimator (variant 1; 4 nearest neighbors).
+        - ``'mi-kraskov2'``: AMI using the Kraskov estimator (variant 2); ``extra_param`` is
+          the number of nearest neighbors.
+        - ``'mi-hist'``: AMI using a histogram-based estimator; ``extra_param`` is the
+          number of bins.
 
-        Default is ``'mi'``.
+        Default is ``'mi-gaussian'``.
 
     extra_param : any, optional
-        An additional parameter required for the specified `max_what` method (e.g., for Kraskov).
+        An additional parameter required for the specified `max_what` method (see above).
 
     Returns
     -------
