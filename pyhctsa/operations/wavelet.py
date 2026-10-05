@@ -376,7 +376,7 @@ def _slosr(xx: ArrayLike) -> float:
     for i in range(2, the_max_level):
         slosr[i-2] = np.sum(xx[:i-1])/np.sum(xx[i:])
 
-    return np.argmin(np.abs(slosr - 1)) + 1
+    return np.argmin(np.abs(slosr - 1)) + 2  # the (1-based) level i in 2..L-1 at the split
 
 def detail_coeffs(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] = 20) -> dict:
     """
@@ -442,9 +442,9 @@ def detail_coeffs(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] 
     out['std_max'] = np.std(maxs, ddof=1)
 
     #% At what level is the maximum
-    out['wheremax_mean'] = np.argwhere(means == means_s[0]).flatten()[0]
-    out['wheremax_median'] = np.argwhere(medians == medians_s[0]).flatten()[0]
-    out['wheremax_max'] = np.argwhere(maxs == maxs_s[0]).flatten()[0]
+    out['wheremax_mean'] = np.argwhere(means == means_s[0]).flatten()[0] + 1  # 1-based level, as MATLAB
+    out['wheremax_median'] = np.argwhere(medians == medians_s[0]).flatten()[0] + 1  # 1-based level, as MATLAB
+    out['wheremax_max'] = np.argwhere(maxs == maxs_s[0]).flatten()[0] + 1  # 1-based level, as MATLAB
 
     #% Size of maximum (relative to next maximum)
     out['max1on2_mean'] = means_s[0]/means_s[1]
