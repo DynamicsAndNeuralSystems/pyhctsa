@@ -10,6 +10,7 @@ from scipy.stats import gaussian_kde, kendalltau, kurtosis, kstest, skew, pearso
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 from statsmodels.tsa.stattools import kpss
 from itertools import permutations
+from numba import njit
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
@@ -1440,6 +1441,231 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
 
     names = ['stdmean', 'stdstd', 'stdskew', 'stdkurt', 'stdpermen', 'stdac1', 'stdac2', 'stdtaul']
     return {name: _nanstd(qs[:, k]) for k, name in enumerate(names)}
+
+@njit(cache=True)
+def _nstat_z_std(seg):
+    # TISEAN's variance(): sqrt(|<x^2> - <x>^2|), accumulated sequentially (as in C)
+    av = 0.0
+    var = 0.0
+    for h in seg:
+        av += h
+        var += h * h
+    av /= len(seg)
+    return np.sqrt(abs(var / len(seg) - av * av))
+
+@njit(cache=True)
+def _nstat_z_error(ser, base1, base2, clength, m, tau, minn, step, causal, center, eps0, epsf):
+    """
+    The summed squared one-step forecast error of the zeroth-order model of TISEAN's nstat_z:
+    each point (an embedding vector) of the segment starting at ``base2`` is forecast by the mean of
+    what followed its neighbors (embedding vectors within the maximum-norm distance eps, with
+    eps grown from ``eps0`` by the factor ``epsf`` until there are at least ``minn``) in the
+    segment starting at ``base1``, excluding neighbors within the causality window of the point.
+    Returns NaN if some point can never find ``minn`` neighbors.
+    """
+    pstart = (m - 1) * tau
+    dists = np.empty(clength)
+    idxs = np.empty(clength, dtype=np.int64)
+    err = 0.0
+    for i in range(pstart, pstart + center):
+        cnt = 0
+        for j in range(pstart, clength - step):
+            if j >= i - causal + 1 and j <= i + causal + pstart - 1:
+                continue # exclude_interval
+            d = 0.0
+            for k in range(m):
+                dd = abs(ser[base2 + i - k * tau] - ser[base1 + j - k * tau])
+                if dd > d:
+                    d = dd
+            dists[cnt] = d
+            idxs[cnt] = j
+            cnt += 1
+        if cnt < minn:
+            return np.nan
+        # the first eps in the sequence eps0, eps0*epsf, ... with at least minn neighbors
+        dmin = np.sort(dists[:cnt])[minn - 1]
+        eps = eps0 / epsf
+        while True:
+            eps *= epsf
+            if eps >= dmin:
+                break
+        casted = 0.0
+        nf = 0
+        for q in range(cnt):
+            if dists[q] <= eps:
+                casted += ser[base1 + step + idxs[q]]
+                nf += 1
+        casted /= nf
+        err += (casted - ser[base2 + i + step]) ** 2
+    return err
+
+def nstat_z(y: ArrayLike, num_seg: int = 5, embed_params: tuple = (1, 3)) -> dict:
+    """
+    Cross-forecast errors of zeroth-order time-series models.
+
+    A Python port of the ``nstat_z`` routine from the TISEAN package for nonlinear time-series
+    analysis [1]_, which looks for nonstationarity in a time series by dividing it into a number
+    of segments and calculating the cross-forecast errors between the different segments. The
+    model is the zeroth-order model proposed by Schreiber: each point of the segment being
+    forecast is predicted one step ahead by averaging what followed its nearest neighbors in the
+    time-delay embedding of the predicting segment. The error between segment i (predicting) and
+    segment j (forecast) is the root-mean-square forecast error divided by the standard
+    deviation of segment j, collected in a ``num_seg`` x ``num_seg`` matrix. As in TISEAN, the
+    series is first rescaled to [0, 1], neighbors are within a maximum-norm distance eps that
+    grows (from 1e-3, by a factor 1.2) until there are at least 30 of them, and neighbors within
+    the causality window of the forecast point are excluded.
+
+    References
+    ----------
+    .. [1] R. Hegger, H. Kantz, and T. Schreiber, "Practical implementation of nonlinear time
+        series methods: The TISEAN package", Chaos 9(2), 413 (1999).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    num_seg : int, optional
+        The number of equally-spaced segments to divide the time series into, each used to
+        predict the other segments. Default is 5.
+    embed_params : tuple, optional
+        The embedding parameters ``(tau, m)``: a time delay, tau (an integer, or a rule for
+        :func:`pyhctsa.utils.get_tau`, e.g. ``'ac'`` or ``'ac1e'``), and an embedding dimension,
+        m (an integer). Default is ``(1, 3)``.
+
+    Returns
+    -------
+    dict
+        Statistics on the cross-prediction error matrix (below, 'rows' of the matrix are
+        predicting segments, 'columns' are the segments forecast); NaN if the time series is
+        too short for this many segments:
+
+        - 'trace': the trace of the matrix (segments predicting themselves),
+        - 'mean', 'median', 'min', 'max', 'iqr', 'std', 'range': of all entries of the matrix,
+        - 'minlower', 'minupper': the minimum nonzero error below and above the diagonal,
+        - 'minoffdiag', 'iqroffdiag', 'stdoffdiag', 'rangeoffdiag': the minimum, interquartile
+          range, standard deviation, and range of the nonzero off-diagonal entries,
+        - 'stdmean', 'rangemean', 'stdmedian', 'rangemedian': the standard deviation and range,
+          across columns, of the column means and of the column medians,
+        - 'rangerange', 'stdrange': the range and standard deviation, across columns, of the
+          column ranges,
+        - 'rangestd', 'stdstd': the range and standard deviation, across columns, of the column
+          standard deviations,
+        - 'maximageig', 'minimageig': the largest and smallest imaginary parts of the
+          eigenvalues of the matrix,
+        - 'rangeeig', 'stdeig', 'mineig', 'maxeig': the range, standard deviation, minimum, and
+          maximum of the real parts of the eigenvalues.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    num_seg = 5 if num_seg is None else int(num_seg)
+    tau, m = embed_params
+    if isinstance(m, str) or not float(m).is_integer():
+        raise ValueError("The embedding dimension, m, must be an integer")
+    m = int(m)
+    tau = get_tau(y, tau) # NaN if it cannot be determined
+    if np.isnan(tau):
+        logger.warning('Could not determine embedding parameters for this time series')
+        return np.nan
+    tau = int(tau)
+
+    # Preliminary checks
+    step = 1 # step increment (TISEAN's -s; also its causal-window default (-C) when unset)
+    min_neighbors = 30 # minimum number of neighbors for the fit (TISEAN's -k default)
+    pstart = (m - 1) * tau
+    clength = (N - pstart) / num_seg
+    # nstat_z's neighbor search grows its radius without bound until every point has enough
+    # neighbors after excluding a window of width (2*causal + pstart - 1) around it; this is the
+    # exact bound for that always to succeed
+    if clength < min_neighbors + 3 * step + 2 * pstart - 1:
+        logger.warning('Not enough neighbors to reliably estimate prediction errors with these settings')
+        return np.nan
+    clength = (N - pstart) // num_seg # (integer division, as in TISEAN)
+
+    # Rescale the series to [0, 1] (TISEAN's rescale_data)
+    lo, hi = np.min(y), np.max(y)
+    if hi - lo == 0:
+        return np.nan # TISEAN exits: the data have no range
+    ser = (y - lo) / (hi - lo)
+
+    # The standard deviation (population) of each segment
+    rms = np.array([_nstat_z_std(ser[i * clength:(i + 1) * clength]) for i in range(num_seg)])
+    if np.any(rms == 0):
+        return np.nan # TISEAN exits: zero variance in a segment
+
+    center = clength - step
+    xperr = np.zeros((num_seg, num_seg)) # cross prediction error from using segment i to forecast segment j
+    for first in range(num_seg):
+        for second in range(num_seg):
+            err = _nstat_z_error(ser, first * clength, second * clength, clength, m, tau,
+                                 min_neighbors, step, step, center, 1e-3, 1.2)
+            xperr[first, second] = np.sqrt(err / center) / rms[second]
+    if np.any(np.isnan(xperr)):
+        return np.nan
+
+    return _cross_prediction_stats(xperr)
+
+def _cross_prediction_stats(xperr: np.ndarray) -> dict:
+    # Output statistics on the matrix of cross-prediction errors
+    def _range(v):
+        return np.max(v) - np.min(v)
+    def _iqr(v):
+        q = matlab_quantile(v, [0.25, 0.75])
+        return q[1] - q[0]
+
+    out = {}
+    # diagonal elements are using a segment to predict itself -- ought to be pretty good
+    out['trace'] = np.trace(xperr)
+    flat = xperr.ravel()
+    out['mean'] = np.mean(flat)
+    out['median'] = np.median(flat)
+    out['min'] = np.min(flat) # the best you can do
+    out['max'] = np.max(flat) # the worst you can do
+    # measures of spread of prediction error: stationarity
+    out['iqr'] = _iqr(flat)
+    out['std'] = _std_matlab(flat)
+    out['range'] = _range(flat)
+
+    # minimum prediction error not on diagonal
+    lowertri = np.tril(xperr, -1)
+    lowertri = lowertri[lowertri > 0]
+    uppertri = np.triu(xperr, 1)
+    uppertri = uppertri[uppertri > 0]
+    offdiag = np.concatenate((lowertri, uppertri))
+    out['minlower'] = np.min(lowertri) if lowertri.size else np.nan
+    out['minupper'] = np.min(uppertri) if uppertri.size else np.nan
+    if offdiag.size == 0:
+        out['minoffdiag'] = out['iqroffdiag'] = out['stdoffdiag'] = out['rangeoffdiag'] = np.nan
+    else:
+        out['minoffdiag'] = np.min(offdiag)
+        # measures of spread: non-stationarity
+        out['iqroffdiag'] = _iqr(offdiag)
+        out['stdoffdiag'] = _std_matlab(offdiag)
+        out['rangeoffdiag'] = _range(offdiag)
+
+    # Comparing columns
+    col_mean, col_median = np.mean(xperr, axis=0), np.median(xperr, axis=0)
+    col_range = np.max(xperr, axis=0) - np.min(xperr, axis=0)
+    col_std = np.array([_std_matlab(xperr[:, j]) for j in range(xperr.shape[1])])
+    out['stdmean'] = _std_matlab(col_mean)
+    out['rangemean'] = _range(col_mean)
+    out['stdmedian'] = _std_matlab(col_median)
+    out['rangemedian'] = _range(col_median)
+    out['rangerange'] = _range(col_range)
+    out['stdrange'] = _std_matlab(col_range)
+    out['rangestd'] = _range(col_std)
+    out['stdstd'] = _std_matlab(col_std)
+
+    # Eigenvalues
+    eigs = np.linalg.eigvals(xperr)
+    imag_eigs, real_eigs = eigs.imag, eigs.real
+    out['maximageig'] = np.max(imag_eigs)
+    out['minimageig'] = np.min(imag_eigs) # for a real matrix, eigenvalues come in conjugate pairs, so maximageig = -minimageig exactly
+    out['rangeeig'] = _range(real_eigs) # range of real parts of eigenvalues
+    out['stdeig'] = _std_matlab(real_eigs)
+    out['mineig'] = np.min(real_eigs)
+    out['maxeig'] = np.max(real_eigs)
+
+    return out
 
 def trend(y: ArrayLike) -> dict:
     """
