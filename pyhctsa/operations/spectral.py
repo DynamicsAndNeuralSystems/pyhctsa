@@ -320,7 +320,9 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     the power lie, power-weighted moments of frequency, fits to the cumulative power, a spectral
     entropy and flatness, robust power-law fits to the log-log spectrum, the power in 2 and 5
     equal frequency bands, and the number of crossings of the log spectrum at various levels.
-    Many statistics have a log-domain version computed on log(S).
+    Many statistics have a log-domain version computed on log(S). The spectrum is floored at
+    1e-12 of its maximum before any statistic is computed, so that bins at the rounding level
+    of the estimator do not determine the log-domain statistics.
 
     Parameters
     ----------
@@ -495,6 +497,13 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
 
     if not np.any(np.isfinite(s)):
         return np.nan
+
+    # Floor the spectrum at 1e-12 of its maximum (120 dB below the peak) before taking logs: bins
+    # at the rounding level of the estimator (e.g., for a periodic signal that fits the transform
+    # length, or a ramp) are otherwise arbitrary values of order 1e-30 or exactly zero, and then
+    # set every log-domain statistic. The spectral dynamic range of real-world series is well
+    # above this floor.
+    s = np.maximum(s, 1e-12 * np.nanmax(s))
 
     n = len(s)
     log_s = np.log(s)
