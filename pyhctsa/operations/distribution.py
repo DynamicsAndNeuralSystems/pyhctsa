@@ -1567,3 +1567,90 @@ def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
     out['gpdLower'] = _gpd_shape(ys[k] - ys[:k])  # lower exceedances
     out['gpdAsym'] = out['gpdUpper'] - out['gpdLower']
     return out
+
+
+def _ratio(a: float, b: float) -> float:
+    """``a / b`` with MATLAB's semantics for a zero denominator (Inf, -Inf or NaN)."""
+    with np.errstate(all='ignore'):
+        return float(np.float64(a) / np.float64(b))
+
+
+def _fmt_threshold(prefix: str, thr: float) -> str:
+    """Output name hctsa gives a threshold: sprintf('%s_%.2f') with the dot removed."""
+    return f"{prefix}_{thr:.2f}".replace('.', '')
+
+
+def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
+                      numcross: Union[None, float, list] = None,
+                      arclength: Union[None, float, list] = None) -> dict:
+    """
+    Statistics of a kernel-smoothed distribution of the data.
+
+    The data are smoothed with a Gaussian kernel (100 points, MATLAB's default
+    bandwidth) and the smoothed density, f, is summarized by its number of peaks,
+    maximum, entropy, and asymmetry about the mean, plus optional threshold-based
+    statistics.
+
+    Parameters
+    ----------
+    x : array-like
+        The input data vector.
+    area : float or list of float, optional
+        Thresholds for which to compute the integral of f over the region where
+        f is below the threshold.
+    numcross : float or list of float, optional
+        Thresholds for which to count the crossings of f through the threshold.
+    arclength : float or list of float, optional
+        Half-widths of a window around the mean; the arc length (total absolute change
+        in f) within the window is computed.
+
+    Returns
+    -------
+    dict
+        npeaks: the number of 'large enough' maxima of f (those with second difference
+        below -0.0002); max: the maximum of f; entropy: the entropy of f; asym: the
+        area of f above the mean divided by that below it; plsym: the ratio of the
+        total variation of f below the mean to that above it; and, for each threshold t,
+        ``numcross_t``, ``area_t``, ``arclength_t`` (t formatted to two decimals with the
+        dot removed, e.g. ``numcross_005`` for 0.05).
+
+    Notes
+    -----
+    Uses ``scipy.stats.gaussian_kde`` with MATLAB's default bandwidth. MATLAB's
+    ``ksdensity`` truncates the kernel at four bandwidths for large samples, so
+    values differ slightly (about 1e-4 relative to the peak) for N above a few hundred.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    for name, v in (('area', area), ('numcross', numcross), ('arclength', arclength)):
+        if v is not None and np.any(np.asarray(v) <= 0):
+            raise ValueError(f"'{name}' thresholds must be positive.")
+    area, numcross, arclength = (None if v is None else np.atleast_1d(np.asarray(v, dtype=float))
+                                 for v in (area, numcross, arclength))
+
+    m = np.mean(x)
+    f, xi = _ksdensity(x)
+    dx = xi[1] - xi[0]
+    out = {}
+
+    df = np.diff(f)
+    ddf = np.diff(df)
+    sdsp = ddf[sign_change(df, 1)]
+    out['npeaks'] = int(np.sum(sdsp < -0.0002))  # 'large enough' maxima
+    out['max'] = float(np.max(f))  # maximum of the distribution
+    fp = f[f > 0]
+    out['entropy'] = float(-np.sum(fp * np.log(fp) * dx))
+    out['asym'] = _ratio(np.sum(f[xi > m] * dx), np.sum(f[xi < m] * dx))
+    out['plsym'] = _ratio(np.sum(np.abs(np.diff(f[xi < m])) * dx),
+                          np.sum(np.abs(np.diff(f[xi > m])) * dx))
+
+    if numcross is not None:  # crossing statistics
+        for thr in numcross:
+            out[_fmt_threshold('numcross', thr)] = int(np.sum(sign_change(f - thr)))
+    if area is not None:  # area statistics
+        for thr in area:
+            out[_fmt_threshold('area', thr)] = float(np.sum(f[f < thr] * dx))
+    if arclength is not None:  # arc length statistics
+        for thr in arclength:
+            fd = np.abs(np.diff(f[(xi > m - thr) & (xi < m + thr)]))
+            out[_fmt_threshold('arclength', thr)] = float(np.sum(fd * dx))
+    return out
