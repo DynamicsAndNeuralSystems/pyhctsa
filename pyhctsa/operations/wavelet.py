@@ -119,45 +119,43 @@ def wfbm(x: ArrayLike) -> dict:
     Returns
     -------
     dict
-        Dictionary containing the three estimates of the fractal index H of the signal x: 
+        Dictionary containing two estimates of the fractal index H of the signal x:
 
-        - (i) using a second order discrete derivative, 
-        - (ii) using a second order discrete derivative with wavelets, 
-        - (iii) using wavelet variance versus wavelet level.
+        - 'H_deriv2' : using a second order discrete derivative,
+        - 'H_deriv2Wavelet' : using a second order discrete derivative with wavelets (sym5).
+
+        (The third estimator of wfbmesti, from the wavelet variance versus level, is no
+        longer returned, as in hctsa; see :func:`modwt_var` and its ``decaySlope``.)
     """
     x = np.asarray(x)
     x = np.cumsum(x)  # the series is the increments (fGn); wfbmesti expects the fBm path
     y = np.cumsum(np.diff(x))
+
+    def conv_valid(sig, ker):
+        # MATLAB conv(sig, ker, 'valid'): empty when the kernel is longer than the signal
+        # (np.convolve would swap the arguments)
+        if len(ker) > len(sig):
+            return np.zeros(0)
+        return np.convolve(sig, ker, mode='valid')
+
+    def mean_sq(v):
+        return np.mean(v**2) if len(v) else np.nan
+
     b1 = np.array([1.0, -2.0, 1.0])
     b2 = np.array([1.0, 0.0, -2.0, 0.0, 1.0])
-    y1 = np.convolve(y, b1, mode='valid')
-    y2 = np.convolve(y, b2, mode='valid')
-    s1 = np.mean(y1**2)
-    s2 = np.mean(y2**2)
+    s1 = mean_sq(conv_valid(y, b1))
+    s2 = mean_sq(conv_valid(y, b2))
     H1 = 0.5 * np.log2(s2 / s1)
 
     w = pywt.Wavelet('sym5')
     c1 = np.array(w.dec_hi, dtype=float)
     c2 = np.zeros(2 * len(c1))
     c2[::2] = c1
-    cy1 = np.convolve(y, c1,  mode='valid')
-    cy2 = np.convolve(y, c2,  mode='valid')
-    cs1 = np.mean(cy1**2)
-    cs2 = np.mean(cy2**2)
+    cs1 = mean_sq(conv_valid(y, c1))
+    cs2 = mean_sq(conv_valid(y, c2))
     H2 = 0.5*np.log2(cs2 / cs1)
 
-    level_decomp = min(pywt.dwt_max_level(len(x), 'haar'), 6)
-    C, L = _wavedec(x, wavelet='haar', level=level_decomp)
-    all_levels = np.arange(1, level_decomp+1)
-    stdc = np.zeros(len(all_levels))
-    for i in range(len(all_levels)):
-        d = _detcoef(coefs=C, lengths=L, level=all_levels[i])
-        stdc_val = np.median(np.abs(d)) / 0.67448975
-        stdc[i] = stdc_val
-    po = np.polyfit(all_levels, np.log2(stdc**2), 1)
-    H3 = (po[0] - 1)/2
-
-    return {"p1": H1, "p2": H2, "p3": H3}
+    return {"H_deriv2": H1, "H_deriv2Wavelet": H2}
 
 def scal_2_freq(y: ArrayLike, w_name: str = 'db3', a_max: int = 5, delta: int = 1) -> dict:
     """
