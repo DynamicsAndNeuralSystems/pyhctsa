@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.linalg import cho_solve, cholesky
+from scipy.linalg import cho_solve, cholesky, solve_triangular
 
 from ..optimizers import brentmin
 
@@ -261,7 +261,51 @@ def inf_laplace(hyp, cov, x, y, want_dnlZ=True):
     dnlZ = {'cov': dnlZ_cov, 'lik': np.array([dnlZ_lik]), 'mean': np.zeros(0)}
     return post, nlZ, dnlZ
 
-def gp_train(hyp, cov, x, y, want_dnlZ=True):
+def inf_gauss_lik(hyp, cov, x, y, want_dnlZ=True):
+    """
+    gpml ``infGaussLik``: exact inference for a zero mean and a Gaussian
+    likelihood.
+
+    Unlike ``infLaplace`` (a Newton iteration, which in gpml warm-starts from a
+    persistent copy of the previous call's solution) this is a closed-form,
+    deterministic computation: ``alpha = (K + sn2 I) \\ y`` from one Cholesky
+    factorisation of ``B = I + sW K sW`` with ``sW = 1/sn``.
+
+    Returns ``(post, nlZ, dnlZ)``. ``post['L']`` is the upper-triangular
+    Cholesky factor of ``B`` (as in gpml's ``apx`` exact mode), which
+    ``gp_predict`` recognises, as ``gp.m`` does, and uses for the predictive
+    variances.
+    """
+    hyp_cov = np.asarray(hyp['cov'], dtype=float).ravel()
+    hyp_lik = float(np.ravel(hyp['lik'])[0])
+    x = np.asarray(x, dtype=float).ravel()
+    y = np.asarray(y, dtype=float).ravel()
+    n = x.size
+
+    m = np.zeros(n)                                                 # meanZero
+    sn2 = np.exp(2.0 * hyp_lik)
+    W = np.ones(n) / sn2                          # noise precision of likGauss
+    K = cov.K(hyp_cov, x)
+    ldB2, solveKiW, L, sW = _ldB2_exact(W, K)       # functionality depending on W
+
+    alpha = solveKiW(y - m)
+    post = {'alpha': alpha, 'sW': sW, 'L': L}
+    nlZ = (y - m).dot(alpha) / 2 + ldB2 + n * np.log(2 * np.pi * sn2) / 2
+    if not want_dnlZ:
+        return post, nlZ, None
+
+    Q = (1.0 / sW)[:, None] * _solve_chol(L, np.diag(sW))
+    dW = np.sum(Q * K, axis=1) / 2        # d log(det(B))/2 / dW = diag(inv(inv(K)+W))
+    dnlZ_cov = cov.dK(hyp_cov, x, (Q * W[:, None]) - np.outer(alpha, alpha)) / 2
+    dnlZ_lik = -sn2 * alpha.dot(alpha) - 2 * np.sum(dW) / sn2 + n
+    dnlZ = {'cov': dnlZ_cov, 'lik': np.array([dnlZ_lik]), 'mean': np.zeros(0)}
+    return post, nlZ, dnlZ
+
+
+_INF = {'gauss_lik': inf_gauss_lik, 'laplace': inf_laplace}
+
+
+def gp_train(hyp, cov, x, y, want_dnlZ=True, inf='gauss_lik'):
     """
     gpml ``gp(hyp, inf, mean, cov, lik, x, y)`` -- training mode.
 
@@ -270,12 +314,25 @@ def gp_train(hyp, cov, x, y, want_dnlZ=True):
     identically either way; pass ``want_dnlZ=False`` when only the marginal
     likelihood is needed to skip the (dominant) derivative computation, in
     which case ``dnlZ`` is ``None``.
+
+    ``inf`` selects the inference method: ``'gauss_lik'`` (exact, hctsa's
+    choice) or ``'laplace'``.
+
+    As in ``gp.m``, a failed inference (e.g., ``numpy.linalg.LinAlgError`` when
+    ``I + K/sn2`` loses positive definiteness) does not raise: ``nlZ`` is NaN
+    and ``dnlZ`` is zero ("Inference method failed .. attempting to continue").
     """
-    _, nlZ, dnlZ = inf_laplace(hyp, cov, x, y, want_dnlZ=want_dnlZ)
+    try:
+        _, nlZ, dnlZ = _INF[inf](hyp, cov, x, y, want_dnlZ=want_dnlZ)
+    except np.linalg.LinAlgError:
+        n_cov = np.size(hyp['cov'])
+        dnlZ = ({'cov': np.zeros(n_cov), 'lik': np.zeros(1), 'mean': np.zeros(0)}
+                if want_dnlZ else None)
+        return np.nan, dnlZ
     return nlZ, dnlZ
 
 
-def gp_predict(hyp, cov, x, y, xs, nperbatch=1000):
+def gp_predict(hyp, cov, x, y, xs, nperbatch=1000, inf='gauss_lik'):
     """
     gpml ``gp(hyp, inf, mean, cov, lik, x, y, xs)`` -- prediction mode.
 
@@ -293,9 +350,13 @@ def gp_predict(hyp, cov, x, y, xs, nperbatch=1000):
     y = np.asarray(y, dtype=float).ravel()
     xs = np.asarray(xs, dtype=float).ravel()
 
-    post, _, _ = inf_laplace(hyp, cov, x, y, want_dnlZ=False)
+    post, _, _ = _INF[inf](hyp, cov, x, y, want_dnlZ=False)
     alpha = post['alpha']
     L = post['L']
+    sW = post['sW']
+    # gp.m: a numeric, upper-triangular L with a positive diagonal is a Cholesky
+    # factor of I + sW*sW'.*K (use alpha, sW, L); otherwise L is a callback
+    L_is_chol = isinstance(L, np.ndarray)
 
     ns = xs.size
     fmu = np.zeros(ns)
@@ -309,10 +370,12 @@ def gp_predict(hyp, cov, x, y, xs, nperbatch=1000):
         ms = np.zeros(xs[idx].size)                                   # meanZero
 
         fmu[idx] = ms + Ks.T @ alpha                       # conditional mean fs|f
-        # post.L is a callback, not a Cholesky factor, so gpml takes the
-        # alternative parametrisation here.
-        LKs = L(Ks)
-        fs2[idx] = kss + np.sum(Ks * LKs, axis=0)
+        if L_is_chol:                    # Cholesky parametrisation (alpha, sW, L)
+            V = solve_triangular(L, sW[:, None] * Ks, trans='T', lower=False,
+                                 check_finite=False)
+            fs2[idx] = kss - np.sum(V * V, axis=0)
+        else:                              # alternative parametrisation, callback L
+            fs2[idx] = kss + np.sum(Ks * L(Ks), axis=0)
         fs2[idx] = np.maximum(fs2[idx], 0)     # remove numerical noise, i.e. < 0
         nact = min(nact + nperbatch, ns)
 

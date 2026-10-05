@@ -898,20 +898,41 @@ def is_seasonal(y: ArrayLike) -> int:
     
     return out
 
+def _ml_max(a, axis=None):
+    """MATLAB ``max``: NaNs are omitted (NaN only if every element is NaN)."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)
+        return np.nanmax(a, axis=axis)
+
+
+def _ml_min(a, axis=None):
+    """MATLAB ``min``: NaNs are omitted (NaN only if every element is NaN)."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)
+        return np.nanmin(a, axis=axis)
+
+
 def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50) -> np.ndarray:
     """
     learn GP hyperparameters for the time series ``(tt, yt)``.
 
-    The GP is a mean-zero process with a Gaussian likelihood and Laplace
-    inference; ``nfevals`` is negative, so it caps the number of function
-    evaluations rather than the number of line searches.
+    The GP is a mean-zero process with a Gaussian likelihood and exact Gaussian
+    inference (gpml ``infGaussLik``, as hctsa's ``MF_GP_LearnHyperp`` uses);
+    ``nfevals`` is negative, so it caps the number of function evaluations rather
+    than the number of line searches.
 
     Returns the flattened hyperparameter vector ``[cov..., lik]`` -- gpml
     unwraps the hyperparameter struct with its fields alphabetised (cov, lik,
     mean), and the mean is empty for a mean-zero process.
 
-    Raises ``numpy.linalg.LinAlgError`` if the covariance loses positive
-    definiteness, the counterpart of gpml's ``MATLAB:posdef`` error.
+    As in gpml's ``gp``, a failed inference (e.g., a covariance that loses
+    positive definiteness) gives a NaN marginal likelihood with zero
+    derivatives, which ``minimize`` treats as a bad step and backs away from, so
+    it does not abort the fit. ``numpy.linalg.LinAlgError`` is only raised if
+    that leaves non-finite hyperparameters, the counterpart of hctsa returning
+    NaN.
     """
     nhps = cov.n_hyp
     # Initial values, set component by component as in MF_GP_LearnHyperp for
@@ -923,10 +944,12 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50) ->
 
     def _nlz(theta):
         hyp = {'cov': theta[:nhps], 'lik': theta[nhps], 'mean': np.zeros(0)}
-        nlZ, dnlZ = gp_train(hyp, cov, tt, yt)
+        nlZ, dnlZ = gp_train(hyp, cov, tt, yt)   # NaN if the inference fails (as gp.m)
         return nlZ, np.concatenate([dnlZ['cov'], dnlZ['lik'], dnlZ['mean']])
 
     theta, _, _ = minimize(hyp0, _nlz, nfevals)
+    if not np.all(np.isfinite(theta)):
+        raise np.linalg.LinAlgError('GP hyperparameters are not finite')
     return theta
 
 
@@ -989,7 +1012,13 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         ts = np.floor(_linspace(1, N, 2000) + 0.5)  # MATLAB round()
     y_ts = y[ts.astype(int) - 1]
 
-    mu, S2, _, _ = gp_predict(hyp, cov, tt, yt, ts)
+    try:
+        mu, S2, _, _ = gp_predict(hyp, cov, tt, yt, ts)
+    except np.linalg.LinAlgError:
+        logger.warning('Gaussian process regression failed for this time series')
+        return {k: np.nan for k in
+                ('rmserr', 'meanstderr', 'stdmu', 'meanS', 'stdS', 'mlikelihood',
+                 'logh1', 'logh2', 'logh3', 'h_lonN')}
 
     # Output statistics
     S = np.sqrt(S2)  # standard deviation function, S
