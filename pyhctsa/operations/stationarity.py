@@ -800,7 +800,8 @@ def _matlab_round(v: float) -> int:
     """MATLAB's round(): halves round away from zero (Python's round() rounds halves to even)."""
     return int(np.sign(v) * np.floor(np.abs(v) + 0.5))
 
-def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None] = None) -> dict:
+def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None] = None,
+                 random_seed: Union[int, None] = None) -> dict:
     """
     Compare local statistics to global statistics of a time series.
 
@@ -822,6 +823,11 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
         The parameter for the method specified by subset_how.
         
         Default `None` is 100 samples or 0.1 (10% of time series length) if proportion. 
+
+    random_seed : int, optional
+        Seed for the random number generator, for the 'randcg' option (for reproducibility;
+        the stream is numpy's, not MATLAB's, so the chosen points differ from hctsa's for
+        the same seed). Default `None` is not seeded.
 
     Returns
     --------
@@ -850,6 +856,10 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
         r = np.arange(_matlab_round(N*n))
     elif subset_how == 'unicg':
         r = np.floor(np.linspace(1, N, n) + 0.5).astype(int) - 1  # MATLAB round: halves away from zero
+    elif subset_how == 'randcg':
+        # n random points (there could be repeats): a single stochastic sample, so not
+        # very statistically robust (as in hctsa)
+        r = np.random.default_rng(random_seed).integers(0, N, size=int(n))
     else:
         raise ValueError(f"Unknown specifier, {subset_how}. Can be either 'l', 'p', 'unicg', or 'randcg'.")
 
