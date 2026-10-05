@@ -528,6 +528,24 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['w10_90'] = out['wmax_90'] - out['wmax_10']  # % from 10% to 90%:
     out['w25_75'] = out['wmax_75'] - out['wmax_25']
 
+    # Power-weighted moments of the frequency distribution: the spectrum (non-negative) is treated as a
+    # weighting over frequency, giving the textbook spectral centroid (mean frequency), spread (standard
+    # deviation), skewness and kurtosis. Not to be confused with mom3, a moment of the distribution of
+    # power *values*, nor with 'centroid' above, which is the median frequency (the 50% point of the
+    # cumulative power).
+    s_pos = np.maximum(s, 0)  # guard against any tiny negative values from the estimator
+    sum_s = np.sum(s_pos)
+    out['specCentroid'] = out['specSpread'] = out['specSkew'] = out['specKurt'] = np.nan
+    if sum_s > 0:
+        pw = s_pos / sum_s  # normalized weighting over frequency
+        out['specCentroid'] = np.sum(pw * w)
+        w_dev = w - out['specCentroid']
+        spec_var = np.sum(pw * w_dev ** 2)
+        out['specSpread'] = np.sqrt(spec_var)
+        if spec_var > 0:  # otherwise all the power is in a single bin and the shape is undefined
+            out['specSkew'] = np.sum(pw * w_dev ** 3) / spec_var ** 1.5
+            out['specKurt'] = np.sum(pw * w_dev ** 4) / spec_var ** 2
+
     # Fit some functions to this cumulative sum:
     # Quadratic
     a, b, c = np.polyfit(w, cs_s, deg=2)
