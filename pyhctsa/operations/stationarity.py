@@ -470,6 +470,10 @@ def simple_stats(x: ArrayLike, what_stat: str = 'zcross') -> dict:
     
     return out
 
+def _std_matlab(v: np.ndarray) -> float:
+    """Sample standard deviation (N-1) with MATLAB's convention that a single value has std 0 (numpy: NaN)."""
+    return float(np.std(v, ddof=1)) if np.size(v) > 1 else 0.0
+
 def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = None) -> dict:
     """
     How local maximums and minimums vary across the time series.
@@ -521,8 +525,8 @@ def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = 
     else:
         raise ValueError(f"Unknown method {how_to_window}")
     
-    if (window_length > N) or (window_length <= 1):
-        # This feature is unsuitable if the window length exceeds ts
+    if np.isnan(window_length) or (window_length > N) or (window_length <= 1):
+        # This feature is unsuitable if the window length exceeds ts (or is undefined)
         return np.nan
     
     # Buffer the time series
@@ -559,9 +563,9 @@ def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = 
         'medianmax': np.median(loc_max) / exp_max,
         'medianabsmin': np.median(abs_loc_min) / exp_max,
         'medianext': np.median(loc_ext) / exp_max,
-        'stdmax': np.std(loc_max, ddof=1),
-        'stdmin': np.std(loc_min, ddof=1),
-        'stdext': np.std(loc_ext, ddof=1),
+        'stdmax': _std_matlab(loc_max),
+        'stdmin': _std_matlab(loc_min),
+        'stdext': _std_matlab(loc_ext),
         'zcext': np.sum((loc_ext[:-1] * loc_ext[1:]) < 0) / num_windows,
         'meanabsext': np.mean(abs_loc_ext) / exp_max,
         'medianabsext': np.median(abs_loc_ext) / exp_max,
