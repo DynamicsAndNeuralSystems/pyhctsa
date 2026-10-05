@@ -727,10 +727,11 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     out['offset'] = 0.0
     for i in range(1, P + 1):
         out[f'GARCH_{i}'] = garch_c[i - 1]
-        out[f'GARCHerr_{i}'] = errors[i]
+        # (a coefficient estimated at exactly zero has no error: NaN, as hctsa)
+        out[f'GARCHerr_{i}'] = np.nan if garch_c[i - 1] == 0 else errors[i]
     for i in range(1, Q + 1):
         out[f'ARCH_{i}'] = arch_c[i - 1]
-        out[f'ARCHerr_{i}'] = errors[P + i]
+        out[f'ARCHerr_{i}'] = np.nan if arch_c[i - 1] == 0 else errors[P + i]
     if lev_c.size > 0:
         out['leverage'] = lev_c[0]
         out['leverageerr'] = errors[1 + P + Q]
