@@ -55,7 +55,7 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
         # Round to remove numerical fluctuations of order less than 1e-4
         steppedy = np.round(steppedy * 1e4) / 1e4
         out = {
-            "E": E[0],
+            "E": E[0] / N,        # energy per sample (E sums over the series)
             "s": s[0],          # collapses to 1 for some parameter values
             "lambdamax": lambda_max,
         }
