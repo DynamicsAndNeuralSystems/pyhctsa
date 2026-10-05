@@ -115,7 +115,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
         w[1] = y[1]
         for i in range(2, N):
             w_inert = w[i-1] + (w[i-1] - w[i-2])
-            w[i] = w_inert + (y[i] - w_inert) / m  # dissipative term
+            w[i] = w_inert + (y[i-1] - w_inert) / m  # dissipative term
 
     elif walker_rule == 'runningvar':
         # inertial motion rescaled by local standard deviation
