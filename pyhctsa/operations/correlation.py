@@ -1324,6 +1324,10 @@ def stick_angles(y: ArrayLike) -> dict:
         the different between positive and negative angles, measures of symmetry of
         the angles, stationarity, autocorrelation, and measures of the distribution of
         these stick angles.
+
+        As in hctsa, redundant statistics are not returned: ``std_p``, ``std_n``,
+        ``statav2_all_s``, ``statav3_all_s``, ``statav4_all_s``, ``ac2_p``, ``ac2_n``,
+        ``ac2_all``, ``tau_all`` and ``ac1_all``.
     """
     y = np.asarray(y)
     # Split the time series into positive and negative parts
@@ -1341,11 +1345,9 @@ def stick_angles(y: ArrayLike) -> dict:
 
     # Initialise output dictionary
     out = {}
-    out['std_p'] = np.nanstd(angles[0], ddof=1) 
     out['mean_p'] = np.nanmean(angles[0]) 
     out['median_p'] = np.nanmedian(angles[0])
 
-    out['std_n'] = np.nanstd(angles[1], ddof=1)
     out['mean_n'] = np.nanmean(angles[1])
     out['median_n'] = np.nanmedian(angles[1])
 
@@ -1450,12 +1452,10 @@ def stick_angles(y: ArrayLike) -> dict:
     
     # All angles
     
-    # StatAv2
-    out['statav2_all_m'], out['statav2_all_s'] = _sub_statav(zallAngles, 2)
-    # StatAv3
-    out['statav3_all_m'], out['statav3_all_s'] = _sub_statav(zallAngles, 3)
-    # StatAv4
-    out['statav4_all_m'], out['statav4_all_s'] = _sub_statav(zallAngles, 4)
+    # StatAv2, 3, 4 (the spread statav2/3/4_all_s is not returned: redundant with statav5_all_s)
+    out['statav2_all_m'], _ = _sub_statav(zallAngles, 2)
+    out['statav3_all_m'], _ = _sub_statav(zallAngles, 3)
+    out['statav4_all_m'], _ = _sub_statav(zallAngles, 4)
     # StatAv5
     out['statav5_all_m'], out['statav5_all_s'] = _sub_statav(zallAngles, 5)
     
@@ -1463,24 +1463,17 @@ def stick_angles(y: ArrayLike) -> dict:
     if len(zangles[0]) > 0:
         out['tau_p'] = first_crossing(zangles[0], 'ac', 0, 'continuous')
         out['ac1_p'] = autocorr(zangles[0], 1, 'Fourier')[0]
-        out['ac2_p'] = autocorr(zangles[0], 2, 'Fourier')[0]
     else:
         out['tau_p'] = np.nan
         out['ac1_p'] = np.nan
-        out['ac2_p'] = np.nan
     
     if len(zangles[1]) > 0:
         out['tau_n'] = first_crossing(zangles[1], 'ac', 0, 'continuous')
         out['ac1_n'] = autocorr(zangles[1], 1, 'Fourier')[0]
-        out['ac2_n'] = autocorr(zangles[1], 2, 'Fourier')[0]
     else:
         out['tau_n'] = np.nan
         out['ac1_n'] = np.nan
-        out['ac2_n'] = np.nan
     
-    out['tau_all'] = first_crossing(zallAngles, 'ac', 0, 'continuous')
-    out['ac1_all'] = autocorr(zallAngles, 1, 'Fourier')[0]
-    out['ac2_all'] = autocorr(zallAngles, 2, 'Fourier')[0]
 
     # What does the distribution look like?
     # Some quantiles and moments
