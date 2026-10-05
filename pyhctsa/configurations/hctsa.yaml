@@ -2012,7 +2012,6 @@ graph:
   visibility_graph:
     base_name: visibility_graph
     dependencies:
-      - ts2vg
     configs:
       - {meth: 'norm', zscore: True, exclude: ['dexpk_adjr2', 'dgaussk_adjr2', 'dpowerk_adjr2', 'expnlogL', 'gaussnlogL']}
       - {max_l: 'full', zscore: True, exclude: ['dexpk_adjr2', 'dgaussk_adjr2', 'dpowerk_adjr2', 'expnlogL', 'gaussnlogL']}   # NW_VisibilityGraph(x_z,'horiz','full')
