@@ -349,17 +349,6 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     out['stat_2_s_m'] = np.std([mean2_1, mean2_2], ddof=1) / std_SC
     out['stat_2_s_s'] = np.std([std2_1, std2_2], ddof=1) / std_SC
 
-    means5, stds5 = [], []
-    for i, SC_i in enumerate(np.array_split(SC, 5, axis=1), start=1):
-        means5.append(np.mean(SC_i))
-        stds5.append(np.std(SC_i, ddof=1))
-        out[f'mean5_{i}'] = means5[-1]
-        out[f'std5_{i}'] = stds5[-1]
-
-    out['stat_5_m_s'] = np.mean(stds5)/mean_SC
-    out['stat_5_s_m'] = np.std(means5, ddof=1)/std_SC
-    out['stat_5_s_s'] = np.std(stds5, ddof=1)/std_SC
-
     return out
 
 def _slosr(xx: ArrayLike) -> float:
