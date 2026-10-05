@@ -9,7 +9,6 @@ from scipy.optimize import curve_fit
 from scipy.signal import lfilter
 from scipy.special import gammaincc
 from scipy.stats import ks_1samp, norm, t
-from statsmodels.tsa.ar_model import AutoReg
 from lmfit.models import SineModel
 import logging
 logger = logging.getLogger('pyhctsa')
@@ -2080,14 +2079,26 @@ def ar_cov(y: ArrayLike, p: int = 2) -> dict:
         (``a1``, ..., ``a{p+1}``, with ``a1 = 1``), and the 11 ``'core'`` statistics of
         the residuals of the reconstructed time series (see :func:`residual_analysis`).
         The residuals are prediction minus data.
+
+        NaN for a (nearly) exactly predictable series: when the fitted noise variance is
+        below 1e-12 of the variance of the series, the design is singular and the fitted
+        coefficients and residuals are not meaningful (e.g., an exact sinusoid with p > 2).
     """
-    y = np.asarray(y)
-    model = AutoReg(y, lags=p, trend='n')
-    results = model.fit()
-    phi = results.params
+    y = np.asarray(y, dtype=float).ravel()
+    p = int(p)
+    n = len(y)
+    # covariance method: least squares fit of y(t) on its p past values, over t = p+1, ..., N
+    # (a minimum-norm least-squares solve, so that a singular design is fitted exactly rather
+    # than regularized)
+    x_design = np.column_stack([y[p - k:n - k] for k in range(1, p + 1)])
+    phi = np.linalg.lstsq(x_design, y[p:], rcond=None)[0]
+    noise_var = np.sum((y[p:] - x_design @ phi) ** 2) / (n - p)
+    var_y = np.var(y, ddof=1)
+    if noise_var < 1e-12 * var_y or not var_y > 0:
+        return np.nan
     a = np.concatenate(([1], -phi))
     out = {}
-    out['noisevar'] = results.sigma2
+    out['noisevar'] = noise_var
     for i in range(len(a)):
         out[f'a{i+1}'] = a[i]
     # Residual analysis
