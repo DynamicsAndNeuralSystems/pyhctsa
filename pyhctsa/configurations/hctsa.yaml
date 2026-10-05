@@ -1371,8 +1371,8 @@ symbolic:
     base_name: binary_stretch
     dependencies:
     configs:
-      - {stretch_what: 'lseq1', zscore: True}
-      - {stretch_what: 'lseq0', zscore: True}
+      - {stretch_what: 'gaps1', zscore: True}
+      - {stretch_what: 'gaps0', zscore: True}
     legacy_name: SB_BinaryGapHomogeneity
     ordered_args: ['stretch_what']
   

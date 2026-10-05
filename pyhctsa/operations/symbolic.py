@@ -59,7 +59,21 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     Returns
     -------
     dict
-        Summaries of the series of information gains.
+        Summaries of the series of information gains, with keys:
+
+        - 'min', 'max', 'median', 'mean', 'sum', 'std', 'lq', 'uq': the minimum (of the
+          nonzero values), maximum, median, mean, sum, standard deviation, and lower and
+          upper quartiles of the information gain over the test points,
+        - 'propUnseen': the proportion of test points whose antecedent pattern (the
+          current symbol itself for 'dist'; the preceding 1 or 2 symbols for 'T1'/'T2')
+          was never observed in the memory window (always 0 for 'dist'),
+        - 'effectSize': ``|mean - 1| / std``, the standardized distance of the mean
+          information gain from 1 nat,
+        - 'tstat': ``effectSize * sqrt(number of test points)``.
+
+        All NaN if the coarse-graining is undefined (the embedding delay for
+        'embed2quadrants' cannot be determined). ``effectSize`` and ``tstat`` are NaN if
+        the information gain has no variation.
     """
 
     if (memory > 0) and (memory < 1): #specify memory as a proportion of the time series length
@@ -70,6 +84,10 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     if isinstance(num_groups, (int, float)):
         num_groups = int(num_groups)
     yth = coarse_grain(y, coarse_grain_method, num_groups)
+    if np.isscalar(yth) and np.isnan(yth):
+        # No coarse-graining exists (the embedding delay is undefined): every output is NaN
+        return {k: np.nan for k in ('min', 'max', 'median', 'mean', 'sum', 'std', 'lq', 'uq',
+                                    'propUnseen', 'effectSize', 'tstat')}
     N = int(len(yth))
     num_iters = int(num_iters)
     memory = int(memory)
@@ -95,6 +113,7 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     # Sized to the number of test points actually available, min(num_iters, N-memory)
     num_test = rs.size
     store = np.zeros(num_test)
+    n_antecedent_all = np.zeros(num_test)  # how many times the antecedent pattern was seen in memory
     for i in range(0, num_test):
         if what_prior == 'dist':
             # uses the distribution up to memory to inform the next point
@@ -130,9 +149,14 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
         # Krichevsky-Trofimov-style smoothed probability estimate: always in (0, 1),
         # the uniform prior 1/num_symbols when the antecedent was never observed
         store[i] = (num_matches + 0.5) / (n_antecedent + 0.5 * num_symbols)
+        n_antecedent_all[i] = n_antecedent
 
     # INFORMATION GAINED FROM NEXT OBSERVATION IS log(1/p) = -log(p)
     out = {} # dictionary for outputs
+
+    # proportion of test points whose antecedent pattern was never observed in memory
+    # (always 0 for 'dist')
+    prop_unseen = np.mean(n_antecedent_all == 0)
 
     store = -(np.log(store))
     #minimum amount of information you can gain in this way
@@ -151,10 +175,46 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     uq = mstats.mquantiles(store, 0.75, alphap=0.5, betap=0.5)
     out['uq'] = uq[0]
     out['std'] = np.std(store, ddof=1)
+    out['propUnseen'] = prop_unseen
+
+    # Standardized distance of the mean information gain from 1 (the length-stable form),
+    # and the corresponding t-statistic, which grows with the number of test points
+    if out['std'] == 0 or np.isnan(out['std']):
+        out['effectSize'] = np.nan  # can't compute this if there is no variation
+        out['tstat'] = np.nan
+    else:
+        out['effectSize'] = np.abs((out['mean'] - 1) / out['std'])
+        out['tstat'] = out['effectSize'] * np.sqrt(num_test)
 
     return out
 
-def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
+def _downsample_by_tau(y: np.ndarray, tau: Union[int, str]) -> Optional[np.ndarray]:
+    """
+    Downsample `y` by a time delay before symbolizing it (as hctsa's SB_MotifTwo/Three).
+
+    `tau` is an integer, or ``'ac'`` for the first zero-crossing of the autocorrelation
+    function, capped at floor(N/50) so that the downsampled series stays long enough to
+    count words. The series is downsampled at rate 1:tau (anti-alias filtered, as MATLAB's
+    `resample`) if tau > 1. Returns None if tau cannot be determined (e.g., an undefined
+    ACF of a constant series).
+    """
+    if isinstance(tau, str):
+        if tau != 'ac':
+            raise NotImplementedError(f"tau = '{tau}' is not supported (only an integer or 'ac')")
+        tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):
+            return None
+        if tau > len(y) / 50:  # cap at 2% of the series length
+            tau = int(np.floor(len(y) / 50))
+    if np.isnan(tau):
+        return None
+    tau = int(tau)
+    if tau > 1:  # symbolize words at this lag by downsampling first
+        y = resample_poly(y, 1, tau)
+    return y
+
+
+def motif_two(y: ArrayLike, binarize_how: str = 'diff', tau: Union[int, str] = 1) -> dict:
     """
     Compute local motifs in a binary symbolization of the input time series.
 
@@ -176,6 +236,13 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
 
         Default is ``'diff'``.
 
+    tau : int or str, optional
+        The time series is first downsampled by this factor (anti-alias filtered, as
+        MATLAB's `resample`), so that the words are formed at this lag: an integer, or
+        ``'ac'`` for the first zero-crossing of the autocorrelation function (capped at
+        floor(N/50)). Default is 1 (no downsampling). NaN is returned if tau cannot be
+        determined.
+
     Returns
     -------
     dict
@@ -187,8 +254,12 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
             Entropy values associated with the word distributions of lengths 1 to 4.
 
     """
+    # Downsample at lag tau, if requested
+    y = _downsample_by_tau(np.asarray(y), tau)
+    if y is None:
+        return np.nan
+
     # Generate a binarized version of the input time series
-    y = np.asarray(y)
     y_bin = binarize(y, binarize_how)
 
     # A median split fixes the marginal symbol frequencies (used for the
@@ -324,7 +395,7 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
 
     return out
 
-def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
+def motif_three(y: ArrayLike, cg_how: str = 'quantile', tau: Union[int, str] = 1) -> dict:
     """
     Motifs in a coarse-graining of a time series to a 3-letter alphabet.
 
@@ -340,14 +411,25 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
 
         Default is ``'quantile'``.
 
+    tau : int or str, optional
+        The time series is first downsampled by this factor (anti-alias filtered, as
+        MATLAB's `resample`), so that the words are formed at this lag: an integer, or
+        ``'ac'`` for the first zero-crossing of the autocorrelation function (capped at
+        floor(N/50)). Default is 1 (no downsampling). NaN is returned if tau cannot be
+        determined.
+
     Returns
     -------
     dict
         Statistics on words of length 1, 2, 3, and 4.
     """
 
+    # Downsample at lag tau, if requested
+    y = _downsample_by_tau(np.asarray(y), tau)
+    if y is None:
+        return np.nan
+
     # Coarse-grain the data y -> yt
-    y = np.asarray(y)
     num_letters = 3
     if cg_how == 'quantile':
         yt = coarse_grain(y, 'quantile', num_letters)
@@ -446,65 +528,66 @@ def _f_entropy(p, num_samples=None, word_length=1, alphabet_size=2, fixed_margin
     return h
 
 
-def binary_stretch(x: ArrayLike, stretch_what: str = 'lseq1') -> float:
+def binary_stretch(x: ArrayLike, stretch_what: str = 'gaps1') -> float:
     """
-    Characterize stretches of 0s or 1s in a binarized time series.
+    Homogeneity of the gaps between like symbols in a binarized time series.
 
-    This function binarizes the input time series based on its mean:
-    values above the mean are converted to 1, and values below to 0.
-    It then computes a statistic related to the lengths of consecutive
-    0s or 1s in the resulting binary sequence, depending on the `stretch_what`
-    argument.
+    This is hctsa's SB_BinaryGapHomogeneity (formerly SB_BinaryStretch). The input is
+    binarized at zero (values above zero become 1, the rest 0; the time series is
+    typically z-scored first, so this is a split about the mean). The gaps between
+    successive 1s (or 0s) are then characterized by the longest block of gaps of one type
+    (shorter or longer than one sample) between like symbols, as a proportion of the
+    time-series length.
 
-    **Note**: Due to an implementation error in the original version, this
-    function does not correctly compute the *longest* stretch of 0s or 1s,
-    but still produces a potentially interesting statistic.
+    **Note**: Despite its former name, this does not measure the *longest run* of 0s
+    or 1s (an implementation quirk of the original that is retained), but it is a
+    potentially interesting statistic.
 
     Parameters
     ----------
     x : array-like
         The input time series.
 
-    stretch_what : str, optional
-        Specifies which binary symbol's stretch length to analyze:
+    stretch_what : {'gaps1', 'gaps0'}, optional
+        Which binary symbol's gaps to analyze (formerly ``'lseq1'`` and ``'lseq0'``):
 
-        - 'lseq1': Analyze stretches related to consecutive 1s.
-        - 'lseq0': Analyze stretches related to consecutive 0s.
+        - 'gaps1': Analyze gaps between consecutive 1s.
+        - 'gaps0': Analyze gaps between consecutive 0s.
 
-        Default is ``'lseq1'``.
+        Default is ``'gaps1'``.
 
     Returns
     -------
     float
-        A statistic related to the stretch length of consecutive 0s or 1s,
-        normalized by the time-series length.
+        The statistic, normalized by the time-series length (0 if the symbol does not
+        occur often enough to define it).
     """
     x = np.asarray(x)
     N = len(x) # time series length
     x = np.where(x > 0, 1, 0)
 
-    if stretch_what == 'lseq1':
-        # longest stretch of 1s [this code doesn't actualy measure this!]
+    if stretch_what == 'gaps1':
+        # longest stretch of 1s [this code doesn't actually measure this!]
         indices = np.where(x == 1)[0]
-        diffs = np.diff(indices) - 1.5
-        sign_changes = sign_change(diffs, 1)
-        if sign_changes.size > 1:
-            out = np.max(np.diff(sign_changes)) / N
-        else:
-            out = None
-    elif stretch_what == 'lseq0':
-        # longest stretch of 0s [this code doesn't actualy measure this!]
+    elif stretch_what == 'gaps0':
+        # longest stretch of 0s [this code doesn't actually measure this!]
         indices = np.where(x == 0)[0]
-        diffs = np.diff(indices) - 1.5
-        sign_changes = sign_change(diffs, 1)
-        if sign_changes.size > 1:
-            out = np.max(np.diff(sign_changes)) / N
-        else:
-            out = None
     else:
-        raise ValueError(f"Unknown input {stretch_what}")
-    
+        raise ValueError(f"Unknown input '{stretch_what}' (expected 'gaps1' or 'gaps0')")
+
+    diffs = np.diff(indices) - 1.5
+    sign_changes = sign_change(diffs, 1)
+    if sign_changes.size > 1:
+        out = np.max(np.diff(sign_changes)) / N
+    else:
+        out = None
+
     return out if out is not None else 0
+
+def _ml_std(x: ArrayLike) -> float:
+    """Sample standard deviation (normalized by n - 1), which is 0 (not NaN) for one value, as MATLAB's `std`."""
+    x = np.asarray(x, dtype=float)
+    return 0.0 if x.size == 1 else np.std(x, ddof=1)
 
 def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     """
@@ -525,13 +608,16 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
 
         - 'diff': Encode as 1 if the time-series difference is positive, and 0 otherwise.
         - 'mean': Encode as 1 if the value is above the mean, 0 otherwise.
+        - 'median': Encode as 1 if the value is above the median, 0 otherwise.
 
         Default is ``'diff'``.
 
     Returns
     -------
     dict
-        Statistics computed on the binary symbolisation.
+        Statistics computed on the binary symbolisation. The standard deviations of the
+        stretch lengths are NaN if there are no stretches of that symbol, and 0 if there
+        is a single stretch.
     """
     
     # Binarize the time series
@@ -566,8 +652,8 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
         out['longstretch0norm'] = np.max(stretch0) / N
         out['meanstretch0'] = np.mean(stretch0)
         out['meanstretch0norm'] = np.mean(stretch0) / N
-        out['stdstretch0'] = np.std(stretch0, ddof=1)
-        out['stdstretch0norm'] = np.std(stretch0, ddof=1) / N
+        out['stdstretch0'] = _ml_std(stretch0)
+        out['stdstretch0norm'] = _ml_std(stretch0) / N
 
     if len(stretch1) == 0:
         out['longstretch1'] = 0
@@ -581,8 +667,8 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
         out['longstretch1norm'] = np.max(stretch1) / N
         out['meanstretch1'] = np.mean(stretch1)
         out['meanstretch1norm'] = np.mean(stretch1) / N
-        out['stdstretch1'] = np.std(stretch1, ddof=1)
-        out['stdstretch1norm'] = np.std(stretch1, ddof=1) / N
+        out['stdstretch1'] = _ml_std(stretch1)
+        out['stdstretch1norm'] = _ml_std(stretch1) / N
     
     out['meanstretchdiff'] = (out['meanstretch1'] - out['meanstretch0']) / N
     out['stdstretchdiff'] = (out['stdstretch1'] - out['stdstretch0']) / N
@@ -629,8 +715,14 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     -------
     dict 
         A dictionary including the transition probabilities themselves, as well as the trace
-        of the transition matrix, measures of asymmetry, and eigenvalues of the
-        transition matrix.
+        of the transition matrix, measures of asymmetry (``symdiff``, ``symsumdiff`` and the
+        Kullback-Leibler divergence ``transKLdiv`` between the matrix and its transpose),
+        eigenvalues of the transition matrix (including ``secondeig``, ``specgap`` and
+        ``lam2mod``, the modulus of the second-largest-modulus eigenvalue of the
+        row-normalized matrix), and the Miller-Madow-corrected conditional entropy of the
+        next state ``transEntropy``. NaN is returned if tau cannot be determined.
+        Note that the matrix is normalized by the number of transitions, so it holds joint
+        (not row-normalized) probabilities.
     """
     # check inputs
     y = np.asarray(y, dtype=float)
@@ -641,10 +733,12 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
             raise ValueError(f"Unknown tau '{tau}'")
         # determine tau from the first zero-crossing of the ACF
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):  # undefined ACF (e.g., constant series)
+            return np.nan
         if tau > len(y) / 50:  # cap at 2% of the series length so it stays long enough
             tau = int(np.floor(len(y) / 50))
     if np.isnan(tau):
-        raise ValueError('Time series too short to estimate tau')
+        return np.nan
     tau = int(tau)
 
     if tau > 1:  # calculate the transition matrix at a non-unit lag
@@ -679,6 +773,14 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     # difference in sums of upper and lower triangular parts of T
     out['symsumdiff'] = _seq_sum2(np.tril(T, -1)) - _seq_sum2(np.triu(T, 1))
 
+    # Kullback-Leibler divergence between T and its transpose, over the pairs where both
+    # T(i,j) and T(j,i) are nonzero (a reversal-asymmetry measure, 0 iff T is symmetric)
+    # (MATLAB's column-major order of summation)
+    t_f = T.flatten(order='F')
+    tt_f = T.T.flatten(order='F')
+    kl_mask = (t_f > 0) & (tt_f > 0)
+    out['transKLdiv'] = _seq_sum(t_f[kl_mask] * np.log(t_f[kl_mask] / tt_f[kl_mask]))
+
     # (iv) Measures from eigenvalues of T
     eig_t = np.linalg.eigvals(T)
     out['stdeig'] = _seq_std(eig_t)  # std of eigenvalues
@@ -686,6 +788,32 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     out['mineig'] = np.min(np.real(eig_t))  # minimum eigenvalue
     # mean eigenvalue is equivalent to the trace
     out['maximeig'] = np.max(np.imag(eig_t))  # maximum imaginary part of eigenvalues
+
+    # Second-largest (real) eigenvalue and the spectral gap (num_groups >= 2, so a second
+    # eigenvalue always exists)
+    real_eig = np.sort(np.real(eig_t))[::-1]
+    out['secondeig'] = real_eig[1]
+    out['specgap'] = out['maxeig'] - out['secondeig']
+
+    # Modulus of the second-largest-modulus eigenvalue of the row-normalized transition
+    # matrix P(i,j) = T(i,j)/sum_j T(i,j); NaN if some state never occurs as a source
+    src_prob = T.sum(axis=1)
+    if np.any(src_prob == 0):
+        out['lam2mod'] = np.nan
+    else:
+        abs_eig_p = np.sort(np.abs(np.linalg.eigvals(T / src_prob[:, None])))[::-1]
+        out['lam2mod'] = abs_eig_p[1]
+
+    # Transition (conditional) entropy, H(X_{t+1}|X_t) = H(joint) - H(marginal), with a
+    # Miller-Madow correction (M_joint - M_marginal)/(2 (N - 1)) for the number of
+    # occupied bins
+    row_sums = src_prob
+    p_joint = t_f[t_f > 0]
+    p_marg = row_sums[row_sums > 0]
+    h_joint = -np.sum(p_joint * np.log(p_joint))
+    h_marginal = -np.sum(p_marg * np.log(p_marg))
+    out['transEntropy'] = (h_joint - h_marginal
+                           + (p_joint.size - p_marg.size) / (2 * (len(yth) - 1)))
 
     # (v) Measures from the covariance matrix:
     cov_t = _ml_cov(T)
@@ -787,7 +915,7 @@ def _transition_measures(yth: np.ndarray, num_groups: int) -> np.ndarray:
     """A set of metrics on the one-time transition matrix of a symbolized time series."""
     T = _transition_matrix(yth, num_groups)
 
-    out = np.zeros(8)
+    out = np.zeros(6)
     #   (i) diagonal elements
     diag_t = np.diag(T)
     out[0] = _seq_sum(diag_t) / num_groups  # mean
@@ -803,8 +931,6 @@ def _transition_measures(yth: np.ndarray, num_groups: int) -> np.ndarray:
     # (iv) measures from eigenvalues of T
     eig_t = np.linalg.eigvals(T)
     out[5] = _seq_std(eig_t)
-    out[6] = np.max(np.real(eig_t))
-    out[7] = np.min(np.real(eig_t))
 
     return out
 
@@ -828,7 +954,8 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
     tau : int or str, optional
         The time-delay. The time series is downsampled at this lag before being
         discretized. Can also be set to ``'ac'`` to use the first zero-crossing of
-        the autocorrelation function. Default is 1.
+        the autocorrelation function (capped at floor(N/50); NaN is returned if it is
+        undefined). Default is 1.
 
     Returns
     -------
@@ -848,8 +975,8 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
             raise ValueError(f"Unknown tau '{tau}'")
         # determine tau from first zero of autocorrelation
         tau = first_crossing(y, 'ac', 0, 'discrete')
-        if np.isnan(tau):
-            raise ValueError('Time series too short to estimate tau')
+        if np.isnan(tau):  # undefined ACF (e.g., constant series)
+            return np.nan
         if tau > N / 50:  # for highly-correlated signals
             tau = np.floor(N / 50)
 
@@ -865,7 +992,7 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
     if tau > 1:
         y = resample_poly(y, 1, tau)  # resample
 
-    nfeat = 8  # the number of features calculated at each point
+    nfeat = 6  # the number of features calculated at each point
     store = np.zeros((len(num_groups_range), nfeat))
     for i, ng in enumerate(num_groups_range):
         yth = coarse_grain(y, 'quantile', int(ng))  # thresholded data: yth
@@ -953,22 +1080,6 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
     out['stdeigfexp_adjr2'] = fit['adjr2']
     out['stdeigfexp_rmse'] = fit['rmse']
 
-    # 7) maximum (real) eigenvalue of T -- fit an exponential decay
-    fit = _exp_fit_gof(x, store[:, 6], [1, -0.2])
-    out['maxeig_fexpa'] = fit['a']
-    out['maxeig_fexpb'] = fit['b']
-    out['maxeig_fexpr2'] = fit['r2']
-    out['maxeig_fexpadjr2'] = fit['adjr2']
-    out['maxeig_fexprmse'] = fit['rmse']
-
-    # 8) minimum (real) eigenvalue of T -- fit an exponential decay
-    fit = _exp_fit_gof(x, store[:, 7], [1, -0.2])
-    out['mineigfexp_a'] = fit['a']
-    out['mineigfexp_b'] = fit['b']
-    out['mineigfexp_r2'] = fit['r2']
-    out['mineigfexp_adjr2'] = fit['adjr2']
-    out['mineigfexp_rmse'] = fit['rmse']
-
     return out
 
 
@@ -996,7 +1107,8 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: int) -> np.ndarray:
     Returns
     --------
     yth : array-like
-        The coarse-grained time series.
+        The coarse-grained time series. NaN (a scalar) if the embedding delay for
+        'embed2quadrants'/'embed2octants' (``num_groups='tau'``) cannot be determined.
     """
     y = np.asarray(y)
     N = len(y)
@@ -1015,6 +1127,8 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: int) -> np.ndarray:
         if num_groups == 'tau':
             # First zero-crossing of the ACF
             tau = first_crossing(y, 'ac', 0, 'discrete')
+            if np.isnan(tau):  # undefined ACF (e.g., constant series): no coarse-graining
+                return np.nan
         else:
             tau = num_groups
         
