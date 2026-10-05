@@ -2397,13 +2397,27 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
 
 
 
+def _ml_randsample(n: int, k: int, rng: np.random.RandomState) -> np.ndarray:
+    # MATLAB's randsample(n, k) (k values out of 1:n without replacement), from a stream
+    # emulating MATLAB's Mersenne twister: the first k of randperm(n) if the sample is more than
+    # a quarter of the population, otherwise repeated draws with replacement (randi) until k
+    # unique values, in a random order.
+    if 4 * k > n:
+        return _ml_randperm(n, rng)[:k]
+    seen = np.zeros(n, dtype=bool)
+    while np.count_nonzero(seen) < k:
+        seen[np.floor(n * rng.random_sample(k - np.count_nonzero(seen))).astype(int)] = True
+    return np.flatnonzero(seen)[_ml_randperm(k, rng) - 1] + 1
+
+
 def _dvv_draws(rng: np.random.RandomState, n: int, n_dv: int, nsub: int, num_surr: int) -> tuple:
-    # The random draws of NL_DVV, in the order hctsa makes them: the reference delay vectors
-    # (randsample without replacement) for the data, one random permutation per surrogate, then
-    # the reference delay vectors for each surrogate. Returns 0-based (refs, perms).
-    refs = [_ml_randperm(n_dv, rng)[:nsub] - 1]
+    # The random draws of NL_DVV, in the order hctsa makes them (and from MATLAB's stream, for
+    # the same seed): the reference delay vectors (randsample without replacement) for the data,
+    # one random permutation per surrogate, then the reference delay vectors for each surrogate.
+    # Returns 0-based (refs, perms).
+    refs = [_ml_randsample(n_dv, nsub, rng) - 1]
     perms = [_ml_randperm(n, rng) - 1 for _ in range(num_surr)]
-    refs += [_ml_randperm(n_dv, rng)[:nsub] - 1 for _ in range(num_surr)]
+    refs += [_ml_randsample(n_dv, nsub, rng) - 1 for _ in range(num_surr)]
     return refs, perms
 
 
@@ -2506,13 +2520,13 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
     Notes
     -----
     The surrogates keep the best-matching of (at most) 100 IAAFT iterates, as hctsa's patched
-    DVV toolbox does. In MATLAB, the rank-ordering step of hctsa's ``DVV_surrogate.m`` sorts
-    the output of ``ifft``, which carries a negligible imaginary part (from the sign of the
-    zero-frequency and Nyquist components) in most iterations; MATLAB then ranks it by
-    magnitude rather than by value. Here the real part is always ranked by value, as the
-    IAAFT algorithm intends, so surrogate-based outputs differ from MATLAB's in distribution.
-    The reference vectors and surrogate permutations are drawn from a numpy random stream
-    (seeded by ``random_seed``) rather than MATLAB's.
+    DVV toolbox does, and the rank-ordering step ranks the real part of the spectrum-matched
+    series by value (hctsa's ``DVV_surrogate.m`` takes ``real(ifft(...))``: ``ifft`` of the
+    conjugate-symmetric spectrum has imaginary parts of about 1e-16, by which MATLAB's
+    ``sort`` of a complex vector, ranking by magnitude, used to order the surrogate by
+    ``|s|`` instead of ``s``). The reference vectors and surrogate permutations are drawn from
+    an emulation of MATLAB's random stream (``rng(random_seed, 'twister')`` with ``randsample``
+    and ``randperm``), so the outputs agree with hctsa's for the same seed.
 
     Parameters
     ----------
