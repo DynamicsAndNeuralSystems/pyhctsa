@@ -1512,14 +1512,21 @@ def _moment_estimate(s: np.ndarray, k: int) -> float:
 
 
 def _gpd_shape(exceed: np.ndarray) -> float:
-    """Shape parameter of a generalized Pareto distribution (threshold 0) fitted by maximum likelihood."""
+    """Shape parameter of a generalized Pareto distribution (threshold 0), by probability-weighted moments.
+
+    Hosking and Wallis (1987): with ``a0`` the mean of the exceedances and ``a1`` the
+    mean of ``(1 - p_i) z_i`` for the ascending exceedances ``z_i`` with plotting
+    positions ``p_i = (i - 0.35)/n``, the shape is ``2 - a0/(a0 - 2 a1)``.
+    """
     if np.any(exceed <= 0):
         return np.nan  # ties between the tail values and the threshold
-    try:
-        c, _ = gpfit(exceed)
-    except (ValueError, RuntimeError, FloatingPointError):
-        return np.nan
-    return float(c) if np.isfinite(c) else np.nan
+    n = len(exceed)
+    z = np.sort(exceed)
+    a0 = np.mean(z)
+    a1 = np.mean((1 - (np.arange(1, n + 1) - 0.35) / n) * z)
+    with np.errstate(all='ignore'):
+        xi = 2 - a0 / (a0 - 2 * a1)
+    return float(xi) if np.isfinite(xi) else np.nan
 
 
 def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
@@ -1529,7 +1536,8 @@ def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
     The tail index is estimated in several ways from the ``k = round(tail_frac * N)``
     most extreme values in each tail (taken relative to the median of the data):
     Hill's estimator, a moment estimator, and the shape parameter of a generalized
-    Pareto distribution fitted to the exceedances over the (k+1)-th most extreme value.
+    Pareto distribution fitted to the exceedances over the (k+1)-th most extreme value
+    (by probability-weighted moments, Hosking and Wallis 1987, which has a closed form).
     A larger index means a heavier tail (a power-law tail of exponent alpha has index
     1/alpha; a Gaussian has an index of about zero). NaN is returned for every
     output if there are fewer than 10 tail values or if k is at least N/2.
@@ -1550,11 +1558,6 @@ def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
         estimator for the distances from the median; gpdUpper, gpdLower: the generalized
         Pareto shape parameter for the upper and lower exceedances; gpdAsym: their
         difference.
-
-    Notes
-    -----
-    The generalized Pareto fit repeats MATLAB's ``gpfit`` (a Nelder-Mead search with loose
-    tolerances), so the ``gpd*`` values are not exact maximum-likelihood estimates.
     """
     names = ['hillUpper', 'hillLower', 'hillAsym', 'momentAbs', 'gpdUpper', 'gpdLower', 'gpdAsym']
     out = dict.fromkeys(names, np.nan)
