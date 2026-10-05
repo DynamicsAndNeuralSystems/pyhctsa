@@ -423,7 +423,7 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['numPromPeaks_5'] = np.sum(pk_prom > 5)  # number of peaks with prominence of at least 5
     # number of peaks with prominence greater than the mean (low for skewed distn)
     out['numPeaks_overmean'] = np.sum(pk_prom > np.mean(pk_prom))
-    out['maxProm'] = np.max(pk_prom)
+    out['maxProm'] = np.max(pk_prom) if pk_prom.size else np.nan
     # mean peak prominence of those with prominence of at least 2
     out['meanProm_2'] = np.mean(pk_prom[pk_prom > 2])
     out['meanPeakWidth_prom2'] = np.mean(pk_width[pk_prom > 2])
@@ -442,8 +442,12 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['w_weighted_peak_height'] = np.sum(pk_loc * pk_height) / np.sum(pk_height)
     # Number of peaks required to get to 50% of power in peaks
     peak_power = pk_height * pk_width
-    out['numPeaks_50power'] = np.where(np.cumsum(peak_power) > 0.5 * np.sum(peak_power))[0][0]
-    out['peakpower_1'] = peak_power[0] / sum(peak_power)
+    if peak_power.size == 0:  # no peaks found (e.g., a monotonic spectrum)
+        out['numPeaks_50power'] = np.nan
+        out['peakpower_1'] = np.nan
+    else:
+        out['numPeaks_50power'] = np.where(np.cumsum(peak_power) > 0.5 * np.sum(peak_power))[0][0]
+        out['peakpower_1'] = peak_power[0] / np.sum(peak_power)
 
     # Distribution
     # quantiles
@@ -643,7 +647,7 @@ def _findpeaks(s, min_pk_dist=0, sort_str='none'):
     all_peaks = np.sort(all_peaks)
 
     if len(all_peaks) == 0:
-        return np.array([]), np.array([]), np.array([]), np.array([])
+        return np.array([]), np.array([], dtype=int)
 
     # apply minimum peak distance constraint
     if min_pk_dist > 0:
@@ -678,7 +682,7 @@ def _findpeaks(s, min_pk_dist=0, sort_str='none'):
         final_peaks = all_peaks
 
     if len(final_peaks) == 0:
-        return np.array([]), np.array([]), np.array([]), np.array([])
+        return np.array([]), np.array([], dtype=int)
 
     pk_height = s[final_peaks]
     pk_loc = final_peaks.astype(int)
