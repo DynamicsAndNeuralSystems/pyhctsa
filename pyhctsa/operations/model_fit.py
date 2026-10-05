@@ -1,3 +1,4 @@
+import warnings
 from typing import Union
 
 import numba
@@ -7,8 +8,9 @@ from numpy.lib.stride_tricks import sliding_window_view
 from hmmlearn.hmm import GaussianHMM
 from scipy.optimize import curve_fit
 from scipy.signal import lfilter
+from scipy.special import gammaincc
 from scipy.stats import ks_1samp, norm, t
-from statsmodels.tsa.ar_model import AutoReg, ar_select_order
+from statsmodels.tsa.ar_model import AutoReg
 from lmfit.models import SineModel
 import logging
 logger = logging.getLogger('pyhctsa')
@@ -18,7 +20,7 @@ from ..operations.physics import _ksdensity
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..toolboxes.matlab.optimizers import minimize
-from ..utils import _linspace, _ml_randperm, _ml_rng, z_score, ljung_box_pvalue
+from ..utils import _linspace, _ml_randperm, _ml_rng, get_tau, z_score
 
 def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed: int = 0) -> dict:
     """
@@ -295,8 +297,7 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     stats_st = np.zeros((len(train_length_range), 5))
     for i in range(len(train_length_range)):
         outtmp = local_simple(y, forecast_meth, train_length_range[i])
-        # local_simple's standard-deviation key is 'stde' in hctsa (renamed from 'stderr')
-        stats_st[i, 0] = outtmp['stde'] if 'stde' in outtmp else outtmp['stderr']
+        stats_st[i, 0] = outtmp['stde']
         stats_st[i, 1] = outtmp['sws']
         stats_st[i, 2] = outtmp['swm']
         stats_st[i, 3] = outtmp['ac1']
@@ -366,9 +367,12 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     """
     Simple local time-series forecasting.
     
-    Simple predictors using the past trainLength values of the time series to
-    predict its next value.
-    
+    Simple predictors using the past ``train_length`` values of the time series to
+    predict its next value. The residuals (prediction minus data) are summarized with
+    the ``'core'`` level of :func:`residual_analysis`, plus the Gaussianity of their
+    distribution. The first ``train_length`` values are used for training only and are
+    not forecast.
+
     Parameters
     ----------
     y : array-like
@@ -376,30 +380,44 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     forecast_meth : str, optional
         The forecasting method:
 
-        - 'mean': local mean prediction using the past trainLength time-series values
-        - 'median': local median prediction using the past trainLength time-series values  
-        - 'lfit': local linear prediction using the past trainLength time-series values
+        - 'mean': local mean prediction using the past ``train_length`` time-series values
+        - 'median': local median prediction using the past ``train_length`` time-series values
+        - 'lfit': local linear prediction using the past ``train_length`` time-series values
 
         Default is ``'mean'``.
 
     train_length : int or str, optional
-        The number of time-series values to use to forecast the next value.
-        If 'ac', uses first zero-crossing of autocorrelation function (at least 2
-        for the 'lfit' method, since a straight line needs two points).
+        The number of time-series values to use to forecast the next value, or a
+        string that sets it from the series: 'ac' (the first zero crossing of the
+        autocorrelation function of ``y``, discrete), 'ac1e' (the floor of its first
+        1/e crossing) or 'mi' (the smaller of the first minimum of the Kraskov
+        automutual information and the 'ac1e' delay), as in
+        :func:`pyhctsa.utils.get_tau`. For 'lfit' with 'ac', 'ac1e' or 'mi', the
+        window is at least 2 (a straight line needs two points).
         Default is 3.
-        
+
     Returns
     -------
     dict
-        Dictionary containing output statistics on the residuals of the simple forecasting
-        method, including ``normr2``, the R-squared of a Gaussian fit to their
-        distribution (hctsa's former ``gofr2``).
+        The 11 ``'core'`` residual statistics (``meane``, ``meanabs``, ``stde``,
+        ``maxonstd``, ``ac1``, ``ac2``, ``ac3``, ``propbth``, ``taurat``, ``sws``,
+        ``swm``) and ``normr2``, the R-squared of a Gaussian fit to the
+        kernel-smoothed distribution of the residuals. NaN if the series is too short
+        to forecast or the window cannot be set.
 
     """
     y = np.asarray(y)
     N = len(y)
     # % Do the local prediction
-    if train_length == 'ac':
+    if isinstance(train_length, str) and train_length in ('ac1e', 'mi'):
+        # adaptive window (hctsa BF_GetTau): NaN if it cannot be set
+        train_length = get_tau(y, train_length)
+        if np.isnan(train_length):
+            logger.warning("Could not set the training length from the series")
+            return np.nan
+        if forecast_meth == 'lfit':
+            train_length = max(train_length, 2)  # a straight line needs at least two points
+    if isinstance(train_length, str) and train_length == 'ac':
         lp = first_crossing(y, 'ac', 0, 'discrete')
         if np.isnan(lp):
             logger.warning("Could not set the training length from the autocorrelation function")
@@ -407,9 +425,9 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
         if forecast_meth == 'lfit':
             lp = max(lp, 2)  # a straight line needs at least two points
     else:
-        #the e length of the subsegment preceding to use to predict the subsequent value
+        # the length of the subsegment preceding to use to predict the subsequent value
         train_length = int(train_length)
-        lp = train_length 
+        lp = train_length
     evalr = np.arange(lp, N) #range over which to evaluate the forecast
     if np.size(evalr) == 0:
         logger.warning("This time series is too short for forecasting")
@@ -428,25 +446,11 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
             res[i] = np.polyval(p, lp+1) - y[evalr[i]]  # prediction - value
     else:
         raise ValueError(f"Unknown forecasting method: {forecast_meth}")
-    
-    #Output statistics on the residuals, res
-    #% Mean residual (mean error/bias):
-    out = {}
-    out['meanerr'] = np.mean(res)
-    #% Spread of residuals:
-    out['stderr'] = np.std(res, ddof=1)
-    out['meanabserr'] = np.mean(np.abs(res))
-    #% Stationarity of residuals:
-    out['sws'] = sliding_window(res, 'std', 'std', 5, 1) # across five non-overlapping segments
-    out['swm'] = sliding_window(res, 'mean', 'std', 5, 1) # across five non-overlapping segments
+
+    # Output statistics on the residuals, res, through the shared contract ('core' level)
+    out = residual_analysis(res, y, 'core')
     #% Normality of residuals: r-squared of a Gaussian fit to their kernel-density estimate
     out['normr2'] = _gauss1_r2(res)
-    #% Autocorrelation structure of the residuals:
-    out['ac1'] = autocorr(res, 1, 'Fourier')[0]
-    out['ac2'] = autocorr(res, 2, 'Fourier')[0]
-    taures = first_crossing(res, 'ac', 0, 'continuous')
-    out['taures'] = taures
-    out['tauresrat'] = taures / first_crossing(y, 'ac', 0, 'continuous')
 
     return out
 
@@ -460,6 +464,9 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
     predict the rest of the time series. The residual statistics are computed on
     the held-out samples only (those after the first ``n_train``), and ``nan`` is
     returned if fewer than 50 samples remain after the training set.
+
+    The residuals (prediction minus data) are summarized with the ``'full'`` level of
+    :func:`residual_analysis`.
 
     References
     ----------
@@ -480,8 +487,11 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
     Returns
     -------
     dict
-        Dictionary including the fitted alpha and statistics on the 
-        residuals from the prediction phase.
+        Dictionary including the fitted alpha (``alphamin``, with the quadratic-fit
+        outputs ``alphamin_1``, ``p1_1`` and ``cup_1``) and the 15 ``'full'``
+        statistics on the residuals from the prediction phase: ``meane``, ``meanabs``,
+        ``stde``, ``maxonstd``, ``ac1``, ``ac2``, ``ac3``, ``propbth``, ``taurat``,
+        ``sws``, ``swm``, ``ftbth``, ``normksstat``, ``popt`` and ``minsbc``.
     """
     x = np.asarray(x, dtype=float)
     N = len(x)
@@ -540,8 +550,8 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
             out.update({'alphamin_1': -p[1] / (2 * p[0]), 'p1_1': abs(p[0]), 'cup_1': np.sign(p[0])})
             
             if p[0] < 0:  # Concave down (found a maximum), pick a boundary
-                y_boundary = np.polyval(p, [0.01, 1.0])
-                alphamin = [0.01, 1.0][np.argmin(y_boundary)]
+                # (hctsa compares the fitted curve at alpha = 0 and alpha = 1)
+                alphamin = 0.01 if np.polyval(p, 0.0) < np.polyval(p, 1.0) else 1.0
             else:  # Concave up (found a minimum)
                 alphamin = -p[1] / (2 * p[0])
 
@@ -577,10 +587,10 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
     
     if len(yp) < 2:
         logger.warning("Not enough points to calculate residual statistics.")
-        residout = {'mean': np.nan, 'std': np.nan, 'AC1': np.nan}
+        residout = {}
     else:
-        residuals = yp - xp
-        residout = residual_analysis(residuals)
+        residuals = yp - xp  # prediction minus data
+        residout = residual_analysis(residuals, xp, 'full')
     
     out.update(residout)
 
@@ -607,73 +617,133 @@ def _fit_exp_smooth(x: np.ndarray, a: float) -> np.ndarray:
         
     return xf
 
-def residual_analysis(e: ArrayLike) -> dict:
-    """
-    Analysis of residuals from a model fit.
+def _zscore(x: np.ndarray) -> np.ndarray:
+    # MATLAB's zscore: no guard against (near-)constant input, which gives NaN
+    # for exactly constant data (the guarded utils.z_score raises instead)
+    with np.errstate(all='ignore'):
+        return (x - np.mean(x)) / np.std(x, ddof=1)
 
-    Given an input residual time series `e`, this function returns a dictionary 
-    with fields corresponding to statistical tests on the residuals. These tests 
-    are motivated by the general expectation that model residuals should be uncorrelated.
+def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
+                      level: str = 'full') -> dict:
+    """
+    Canonical summary of the residuals from a model fit.
+
+    The shared residual-summary contract of the model-fitting and forecasting
+    operations (hctsa's ``MF_ResidualAnalysis``): every operation that produces a
+    residual series reports it through this function, so the same quantity carries
+    the same name everywhere. Two levels are available: ``'core'`` is cheap (no test
+    and no model fit), ``'full'`` adds diagnostics that need extra machinery.
 
     Parameters
     ----------
     e : array-like
-        Raw residuals as prediction minus data (e = yp - y), provided as a column vector.
+        The residuals, as prediction minus data (``e = yp - y``).
+    y : array-like, optional
+        The original time series the model was fitted to. It is only used for
+        ``taurat``, which compares the residual timescale to the data timescale;
+        ``taurat`` is NaN if ``y`` is not supplied. Default is ``None``.
+    level : {'full', 'core'}, optional
+        The summary level. Default is ``'full'``.
 
     Returns
     -------
     dict
-        Dictionary of statistics on the residuals.
+        ``'core'`` (11 fields):
+
+        - ``meane``: mean residual
+        - ``meanabs``: mean absolute residual
+        - ``stde``: standard deviation of the residuals
+        - ``maxonstd``: largest absolute residual, in units of the residual standard
+          deviation (0 if the residuals are constant)
+        - ``ac1``, ``ac2``, ``ac3``: residual autocorrelation at lags 1 to 3
+        - ``propbth``: proportion of the first 25 autocorrelations within the
+          significance band, ``2.6/sqrt(N)``
+        - ``taurat``: residual decorrelation time (first zero crossing of the ACF)
+          divided by that of the data (NaN without ``y``, or if the data timescale
+          is 0 or undefined)
+        - ``sws``, ``swm``: stationarity of the residual standard deviation and mean
+          across 5 windows
+
+        ``'full'`` adds 4 fields:
+
+        - ``ftbth``: first lag at which the autocorrelation drops below significance
+          (26 if it never does)
+        - ``normksstat``: Kolmogorov-Smirnov statistic against a standard normal
+        - ``popt``: order of the SBC-selected zero-mean AR model (orders 1 to 10, fitted
+          with the ARFIT algorithm) of the z-scored residuals (NaN if the fit fails)
+        - ``minsbc``: the corresponding Schwarz criterion (NaN if the fit fails)
+
+    Notes
+    -----
+    Callers: ``local_simple`` (``'core'``), ``ar_cov`` (``'core'``), ``ar_fit``
+    (``'core'``, on the negated ARFIT residuals), ``exp_smoothing`` (``'full'``) and
+    ``nonlinearity.nlpe`` (``'full'``, hctsa's ``NL_nlpe`` passes the series as ``y``:
+    ``residual_analysis(res, y, 'full')``; the one-argument call still works but
+    leaves ``taurat`` NaN).
     """
-    e = np.asarray(e)
+    if level not in ('core', 'full'):
+        raise ValueError(f"Unknown summary level '{level}' (expected 'core' or 'full')")
+    e = np.asarray(e, dtype=float).ravel()
     N = len(e)
-    # basic stats on resids
+    if np.all(e > 0):
+        logger.warning('Very weird that ALL model residuals are positive...')
+    elif np.all(e < 0):
+        logger.warning('Very weird that ALL model residuals are negative...')
+
+    # Location, scale and shape
     out = {}
     out['meane'] = np.mean(e)
     out['meanabs'] = np.mean(np.abs(e))
-    out['rmse'] = np.sqrt(np.mean(e**2))
     std_e = np.std(e, ddof=1)
     out['stde'] = std_e
-    out['mms'] = np.abs(out['meane']) + np.abs(std_e)
+    out['maxonstd'] = 0.0 if std_e == 0 else np.max(np.abs(e)) / std_e
 
-    if std_e == 0:
-        e = np.zeros(len(e))
-    else:
-        e = z_score(e)
-    
-    # Analyze autocorrelation in residuals
+    # z-score the residuals for everything that follows (all of it is scale-free)
+    e_z = np.zeros(N) if std_e == 0 else _zscore(e)
+
+    # Serial correlation
     max_lag = 25
-    autocorr_resid = autocorr(e, list(range(1, max_lag+1)), 'Fourier')
+    acf = np.asarray(autocorr(e_z, list(range(1, max_lag + 1)), 'Fourier'))
     sqrt_n = np.sqrt(N)
+    out['ac1'] = acf[0]
+    out['ac2'] = acf[1]
+    out['ac3'] = acf[2]
+    # proportion of the autocorrelation function within the significance band
+    out['propbth'] = np.sum(np.abs(acf) < 2.6 / sqrt_n) / max_lag
 
-    # Output first 3 ACs
-    out['ac1'] = autocorr_resid[0]
-    out['ac2'] = autocorr_resid[1]
-    out['ac3'] = autocorr_resid[2]
-    out['ac1n'] = np.abs(autocorr_resid[0]) * sqrt_n
-    out['ac2n'] = np.abs(autocorr_resid[1]) * sqrt_n
-    out['ac3n'] = np.abs(autocorr_resid[2]) * sqrt_n
-
-    #% Median normalized distance from zero
-    out['acmnd0'] = np.median(np.abs(autocorr_resid)) * sqrt_n
-    out['acsnd0'] = np.std(np.abs(autocorr_resid), ddof=1) * sqrt_n
-    out['propbth'] = np.sum(np.abs(autocorr_resid) < 2.6/sqrt_n)/max_lag
-
-    # % First time to get below the significance threshold
-    ftbth_indices = np.where(np.abs(autocorr_resid) < 2.6/sqrt_n)[0]
-    if ftbth_indices.size > 0:  # Alternative way to check if array is empty
-        out['ftbth'] = ftbth_indices[0] + 1
+    # Residual decorrelation time relative to that of the data
+    if y is None:
+        out['taurat'] = np.nan
     else:
-        out['ftbth'] = max_lag + 1
+        y = np.asarray(y, dtype=float).ravel()
+        tau_y = first_crossing(_zscore(y), 'ac', 0, 'continuous')
+        tau_e = first_crossing(e_z, 'ac', 0, 'continuous')
+        if tau_y == 0 or not np.isfinite(tau_y):
+            out['taurat'] = np.nan
+        else:
+            out['taurat'] = tau_e / tau_y
 
-    # Durbin-Watson test statistic (like AC1)
-    out['dwts'] = np.sum((e[1:] - e[:-1])**2) / np.sum(e**2)
+    # Stationarity of the residuals (on the raw, not z-scored, residuals)
+    out['sws'] = sliding_window(e, 'std', 'std', 5, 1)
+    out['swm'] = sliding_window(e, 'mean', 'std', 5, 1)
 
-    # Distribution tests
-    res = ks_1samp(e, norm.cdf)
-    out['normksstat'] = res.statistic
-    out['normp'] = res.pvalue
+    if level == 'core':
+        return out
 
+    # (full only) Whiteness, normality and an AR fit to the residuals
+    below = np.where(np.abs(acf) < 2.6 / sqrt_n)[0]
+    out['ftbth'] = below[0] + 1 if below.size > 0 else max_lag + 1
+    out['normksstat'] = ks_1samp(e_z, norm.cdf).statistic
+
+    # does an AR model still find structure in the residuals?
+    try:
+        _, A_est, _, sbc, _, _ = _arfit(e_z, 1, 10, 'sbc', zero=True)
+        out['popt'] = len(A_est)
+        out['minsbc'] = np.min(sbc)
+    except (ValueError, np.linalg.LinAlgError, FloatingPointError) as err:
+        logger.warning(f'Error fitting AR model to residuals using the ARFIT algorithm: {err}')
+        out['popt'] = np.nan
+        out['minsbc'] = np.nan
     return out
 
 def ar_cov(y: ArrayLike, p: int = 2) -> dict:
@@ -692,70 +762,233 @@ def ar_cov(y: ArrayLike, p: int = 2) -> dict:
     Returns
     -------
     dict
-        Dictionary containing the parameters of the fitted model, the variance estimate
-        of a white noise input to the AR model, the root-mean-square (RMS) error of a
-        reconstructed time series, and the autocorrelation of residuals.
+        Dictionary containing the variance estimate of the white noise input to
+        the AR model (``noisevar``), the parameters of the fitted model
+        (``a1``, ..., ``a{p+1}``, with ``a1 = 1``), and the 11 ``'core'`` statistics of
+        the residuals of the reconstructed time series (see :func:`residual_analysis`).
+        The residuals are prediction minus data.
     """
     y = np.asarray(y)
     model = AutoReg(y, lags=p, trend='n')
     results = model.fit()
     phi = results.params
     a = np.concatenate(([1], -phi))
-    e = results.sigma2
     out = {}
-    out['e'] = e
+    out['noisevar'] = results.sigma2
     for i in range(len(a)):
         out[f'a{i+1}'] = a[i]
     # Residual analysis
     b_coeffs = np.concatenate(([0], -a[1:]))
     # Predict y from its past values
     y_est = lfilter(b_coeffs, [1], y)
-    err = y - y_est
-    out['res_mu'] = np.mean(err)
-    out['res_std'] = np.std(err, ddof=1)
-    out['res_AC1'] = autocorr(err, 1, 'Fourier')[0]
-    out['res_AC2'] = autocorr(err, 2, 'Fourier')[0]
+    err = y_est - y  # prediction minus data (the residual_analysis convention)
+    out.update(residual_analysis(err, y, 'core'))
 
     return out
 
-def _arconf_from_arfit(fitted_ar, the_conf_interval: float = 0.95) -> dict:
-    has_intercept = fitted_ar.model.trend == 'c'
-    # degress of freedom
-    dof = fitted_ar.df_resid
-    t_crit = t.ppf(0.5 + the_conf_interval / 2, df=dof) # quantiles of the t distrib
-    Cest = fitted_ar.sigma2 # the noise covariance/variance
-    uinv = fitted_ar.cov_params() / Cest
-    all_errs = t_crit * np.sqrt(np.diag(uinv) * Cest)
-    if has_intercept:
-        w_err = all_errs[0]
-        A_err = all_errs[1:]
-        return {'w_err': w_err, 'A_err': A_err}
-    else:
-        A_err = all_errs
-        return {'A_err': A_err}
+def _arfit(v: ArrayLike, pmin: int, pmax: int, selector: str = 'sbc',
+           zero: bool = True) -> tuple:
+    """
+    Stepwise least-squares AR model for a univariate series (ARFIT algorithm).
 
-def _get_criteria(sel, N, crit="aic"):
-    if crit == "aic":
-        se = sel.aic
-    elif crit == "bic":
-        se = sel.bic
-    else:
-        raise ValueError(f"Unknown criteria: {crit}!")
+    Port of ``ARFIT_arfit`` [1]_ for a single variable and a single realization. All
+    orders ``pmin`` to ``pmax`` are compared on the same ``N - pmax`` equations (via one
+    QR factorization), and the order is chosen by Schwarz's criterion (``'sbc'``) or
+    the log of Akaike's final prediction error (``'fpe'``).
 
-    se.pop(0)  # drop the zero-lag (intercept-only) model
-    keys = list(se.keys())
-    # Order by AR order (the last element of each lag-tuple key); aic and bic
-    # are keyed identically, so this ordering is shared.
-    order = np.argsort([k[-1] for k in keys])
-    return np.array([se[keys[i]] / N for i in order])  # normalise by num observations
+    References
+    ----------
+    .. [1] T. Schneider and A. Neumaier, "Algorithm 808: ARFIT---a Matlab package for
+        the estimation of parameters and eigenmodes of multivariate autoregressive
+        models", ACM Trans. Math. Softw. 27, 58 (2001)
+
+    Parameters
+    ----------
+    v : array-like
+        The time series.
+    pmin, pmax : int
+        The range of orders.
+    selector : {'sbc', 'fpe'}
+        The order-selection criterion.
+    zero : bool
+        If True fit a zero-mean model, ``v[k] = A1 v[k-1] + ... + Ap v[k-p] + noise``;
+        otherwise also fit an intercept.
+
+    Returns
+    -------
+    w, A, C, sbc, fpe, th
+        The intercept (0 if ``zero``), the coefficients ``A1, ..., Ap`` at the selected
+        order, the noise variance, the criteria for orders ``pmin`` to ``pmax``, and
+        ``th = (dof, Uinv)`` for the confidence intervals and eigenmodes.
+
+    Raises
+    ------
+    ValueError
+        If the series is too short or the fit is degenerate (e.g. a constant series).
+    """
+    v = np.asarray(v, dtype=float).ravel()
+    n = len(v)
+    pmin, pmax = int(pmin), int(pmax)
+    if pmin != pmax and pmax < pmin:
+        raise ValueError('PMAX must be greater than or equal to PMIN.')
+    if selector not in ('sbc', 'fpe'):
+        raise ValueError(f"Unknown order selector '{selector}'.")
+    mcor = 0 if zero else 1
+    ne = n - pmax                # number of equations
+    npmax = pmax + mcor          # maximum number of parameters
+    if ne <= npmax:
+        raise ValueError(f'Time series (N = {n}) too short.')
+
+    # ARFIT_arqr: QR factorization of the data matrix for order pmax
+    K = np.zeros((ne, npmax + 1))
+    if mcor:
+        K[:, 0] = 1.0
+    for j in range(1, pmax + 1):
+        K[:, mcor + j - 1] = v[pmax - j:n - j]
+    K[:, npmax] = v[pmax:]
+    q = npmax + 1
+    delta = (q ** 2 + q + 1) * np.finfo(float).eps  # Higham's choice for a Cholesky factorization
+    scale = np.sqrt(delta) * np.sqrt(np.sum(K ** 2, axis=0))
+    R = np.triu(np.linalg.qr(np.vstack([K, np.diag(scale)]), mode='r'))
+
+    # ARFIT_arord: order selection criteria for orders pmin:pmax
+    imax = pmax - pmin + 1
+    sbc = np.zeros(imax)
+    fpe = np.zeros(imax)
+    logdp = np.zeros(imax)
+    with np.errstate(all='ignore'):
+        R22 = R[npmax, npmax]
+        Mp = (1.0 / R22) ** 2
+        logdp[imax - 1] = 2.0 * np.log(abs(R22))
+        i = imax - 1
+        for p in range(pmax, pmin - 1, -1):
+            np_i = p + mcor
+            if p < pmax:
+                Rp = R[np_i, npmax]
+                L = np.sqrt(1.0 + Rp * Mp * Rp)
+                Nn = Rp * Mp / L
+                Mp = Mp - Nn * Nn
+                logdp[i] = logdp[i + 1] + 2.0 * np.log(abs(L))
+            sbc[i] = logdp[i] - np.log(ne) * (ne - np_i) / ne
+            fpe[i] = logdp[i] - np.log(ne * (ne - np_i) / (ne + np_i))
+            i -= 1
+    if not (np.all(np.isfinite(sbc)) and np.all(np.isfinite(fpe))):
+        raise ValueError('Degenerate AR fit (non-finite order-selection criteria).')
+
+    # order of the model
+    iopt = int(np.argmin(sbc if selector == 'sbc' else fpe))
+    popt = pmin + iopt
+    np_opt = popt + mcor
+    R11 = R[:np_opt, :np_opt].copy()
+    R12 = R[:np_opt, npmax]
+    R22v = R[np_opt:npmax + 1, npmax]
+    con = 1.0
+    if mcor:
+        con = np.max(scale[1:npmax + 1]) / scale[0]  # improve condition of R11
+        R11[:, 0] *= con
+    Aaug = np.linalg.solve(R11, R12)
+    if mcor:
+        w = Aaug[0] * con
+        A = Aaug[1:]
+    else:
+        w = 0.0
+        A = Aaug
+    dof = ne - np_opt
+    C = float(R22v @ R22v) / dof
+    invR11 = np.linalg.inv(R11)
+    if mcor:
+        invR11[0, :] *= con
+    Uinv = invR11 @ invR11.T
+    return w, A, C, sbc, fpe, (dof, Uinv)
+
+def _arfit_residuals(w: float, A: np.ndarray, v: np.ndarray, k: Union[int, None] = None) -> tuple:
+    """
+    Residuals of a fitted AR model and the Li-McLeod portmanteau test (ARFIT_arres).
+
+    Returns ``(siglev, res)``: the significance level of the test for whiteness of the
+    residuals (autocorrelations up to lag ``k``, default ``min(20, N - p - 1)``) and the
+    residuals, *data minus fit*.
+    """
+    v = np.asarray(v, dtype=float).ravel()
+    n = len(v)
+    p = len(A)
+    nres = n - p
+    if k is None:
+        k = min(20, nres - 1)
+    if k <= p:
+        raise ValueError('Maximum lag of residual correlation matrices too small.')
+    if k >= nres:
+        raise ValueError('Maximum lag of residual correlation matrices too large.')
+    res = v[p:] - w
+    for j in range(1, p + 1):
+        res = res - A[j - 1] * v[p - j:n - j]
+    resc = res - np.mean(res)
+    c0 = np.sum(resc ** 2)
+    cl = np.array([np.sum(resc[:nres - l] * resc[l:]) / c0 for l in range(1, k + 1)])
+    lmp = nres * np.sum(cl ** 2) + k * (k + 1) / 2 / nres
+    dof_lmp = k - p
+    return float(gammaincc(dof_lmp / 2, lmp / 2)), res
+
+def _arfit_modes(A: np.ndarray, C: float, th: tuple, conf: float = 0.95) -> tuple:
+    """
+    Eigenmodes of a univariate AR model (the parts of ARFIT_armode that MF_arfit uses).
+
+    Returns ``(per, tau, exctn, lam)``: the period and its confidence interval
+    (``per`` has shape ``(2, p)``), the damping time and its confidence interval
+    (``tau``, ``(2, p)``), the relative excitations and the eigenvalues of the
+    companion matrix.
+    """
+    p = len(A)
+    dof, Uinv = th
+    t = _t_quantile(dof, 0.5 + conf / 2)
+    A1 = np.zeros((p, p))
+    A1[0, :] = A
+    if p > 1:
+        A1[1:, :-1] = np.eye(p - 1)
+    lam, BigS = np.linalg.eig(A1)
+    # the eigenvectors are only used in products invariant to their phase and norm
+    BigS_inv = np.linalg.inv(BigS)
+    Sigma_A = Uinv * C
+    cov_dcpld = BigS_inv[:, 0] * C * np.conj(BigS_inv[:, 0])
+    per = np.zeros((2, p))
+    tau = np.zeros((2, p))
+    exctn = np.zeros(p)
+    with np.errstate(all='ignore'):
+        for j in range(p):
+            a, b = lam[j].real, lam[j].imag
+            abs_lambda_sq = abs(lam[j]) ** 2
+            tau[0, j] = -2.0 / np.log(abs_lambda_sq)
+            exctn[j] = (cov_dcpld[j] / (1 - abs_lambda_sq)).real
+            dot_lam = BigS_inv[j, 0] * BigS[:, j]
+            dot_a, dot_b = dot_lam.real, dot_lam.imag
+            phi = tau[0, j] ** 2 / abs_lambda_sq * (a * dot_a + b * dot_b)
+            tau[1, j] = t * np.sqrt(phi @ Sigma_A @ phi)
+            if b == 0 and a >= 0:    # purely real, nonnegative eigenvalue
+                per[0, j] = np.inf
+                per[1, j] = 0.0
+            elif b == 0 and a < 0:   # purely real, negative eigenvalue
+                per[0, j] = 2.0
+                per[1, j] = 0.0
+            else:                    # complex eigenvalue
+                per[0, j] = 2 * np.pi / abs(np.arctan2(b, a))
+                phi = per[0, j] ** 2 / (2 * np.pi * abs_lambda_sq) * (b * dot_a - a * dot_b)
+                per[1, j] = t * np.sqrt(phi @ Sigma_A @ phi)
+        exctn = exctn / np.sum(exctn)
+    return per, tau, exctn, lam
+
+def _t_quantile(dof: int, p: float) -> float:
+    """Student-t quantile (ARFIT_tquant)."""
+    return float(t.ppf(p, df=dof))
 
 def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc') -> dict:
     """
     Statistics of a fitted AR model to a time series.
 
-    Fits autoregressive (AR) models of orders p = p_min, p_min + 1, ...,  to the input time series,
-    selects the optimal model order using Schwartz's Bayesian Criterion (SBC), and returns statistics
-    on the fitted model, residuals, and confidence intervals.
+    Fits zero-mean autoregressive (AR) models of orders p = p_min, ..., p_max to the
+    input time series with the ARFIT algorithm [1]_ [2]_, selects the optimal order
+    using Schwarz's Bayesian Criterion (SBC) or the final prediction error (FPE), and
+    returns statistics on the fitted model, its residuals, confidence intervals and
+    eigenmodes. As in ARFIT, all orders are fitted to the same ``N - p_max`` equations.
 
     References
     ---------
@@ -772,30 +1005,56 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
         The minimum AR model order to fit. Default is 1.
     p_max : int, optional
         The maximum AR model order to fit. Default is 10.
-    selector : str, optional
-        Criterion to select optimal model order (e.g., 'sbc', cf. ARFIT package documentation). Default is ``'sbc'``.
+    selector : {'sbc', 'fpe'}, optional
+        Criterion to select the optimal model order (cf. the ARFIT documentation;
+        ``'bic'`` and ``'aic'`` are accepted as aliases). Default is ``'sbc'``.
 
     Returns
     -------
     dict
-        Dictionary containing statistics of a fitted AR model to a time series.
+        - ``A1`` ... ``A6``: the first six AR coefficients (NaN beyond the selected order)
+        - ``maxA``, ``minA``, ``meanA``, ``stdA``, ``sumA``, ``rmsA``: summaries of the
+          coefficients
+        - ``C``: the noise variance
+        - ``sbc_k``, ``minsbc``, ``popt_sbc``, ``aroundmin_sbc``: Schwarz's criterion for
+          each order, its minimum, the position (1-based, within ``p_min..p_max``) of
+          the minimum, and its size relative to the neighboring values
+        - ``fpe_k``, ``minfpe``, ``popt_fpe``, ``aroundmin_fpe``: the same for the
+          logarithm of Akaike's final prediction error
+        - ``res_siglev``: significance level of the Li-McLeod test for autocorrelation
+          in the residuals (up to lag 20)
+        - the 11 ``'core'`` statistics of the residuals (see :func:`residual_analysis`)
+        - ``aerr_min``, ``aerr_max``, ``aerr_mean``: 95% confidence intervals on the
+          coefficients
+        - ``maxReLambda``, ``maxImLambda``, ``maxabsLambda``, ``stdabsLambda``: the eigenvalues
+          of the AR model's companion matrix
+        - ``hasInfper``, ``meanper``, ``stdper``, ``maxper``, ``minper``, ``meanpererr``,
+          ``meantau``, ``maxtau``, ``mintau``, ``stdtau``, ``meantauerr``, ``maxexctn``,
+          ``minexctn``, ``meanexctn``, ``stdexctn``: periods, damping times (with
+          confidence intervals) and excitations of the eigenmodes
+
+        NaN if the series is too short for ARFIT.
     """
-    y = np.asarray(y)
-    N = len(y)
+    y = np.asarray(y, dtype=float).ravel()
     p_min = int(p_min)
     p_max = int(p_max)
-    if selector in ['bic', 'sbc']: # bic and sbc are the same metrics
-        selector = 'bic'
-    #(I) Fit AR model)
-    sel = ar_select_order(y, maxlag=p_max, ic=selector, glob=False, trend='n') # bic is the same as sbc
-    p_optimal = max(p_min, np.max(sel.ar_lags)) if sel.ar_lags is not None else p_min
-    ps = np.arange(p_min, p_max+1)
-    # fit the AR model using the optimal number of lags from above
-    model = AutoReg(y, lags=p_optimal, trend='n')
-    res = model.fit()
-    popt = len(res.params)
-    Aest = res.params
-    #2) Coefficients Aest
+    if selector in ('bic', 'sbc'):  # bic and sbc are the same metrics
+        selector = 'sbc'
+    elif selector in ('aic', 'fpe'):
+        selector = 'fpe'
+    else:
+        raise ValueError(f"Unknown order selector '{selector}'.")
+
+    # (I) Fit the AR model
+    try:
+        _, Aest, Cest, sbc, fpe, th = _arfit(y, p_min, p_max, selector, zero=True)
+    except ValueError as err:
+        logger.warning(f'Could not fit an AR model with the ARFIT algorithm: {err}')
+        return np.nan
+    ps = np.arange(p_min, p_max + 1)
+    popt = len(Aest)
+
+    # (i) Coefficients
     out = {}
     out['A1'] = Aest[0]
     for i in range(2, 7):
@@ -807,55 +1066,74 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
     out['maxA'] = np.max(Aest)
     out['minA'] = np.min(Aest)
     out['meanA'] = np.mean(Aest)
-    out['stdA'] = np.std(Aest, ddof=1) if len(Aest) > 1 else 0
+    out['stdA'] = np.std(Aest, ddof=1) if len(Aest) > 1 else 0.0
     out['sumA'] = np.sum(Aest)
-    out['rmsA'] = np.sqrt(sum(Aest**2))
-    out['sumsqA'] = np.sum(Aest**2)
+    out['rmsA'] = np.sqrt(np.sum(Aest ** 2))
 
-    #(3) Noise covariance matrix, Cest
-    # In our case of a univariate time series, just a scalar for the noise magnitude.
-    Cest = res.sigma2
+    # (iii) Noise covariance matrix: for a univariate series, a scalar noise variance
     out['C'] = Cest
 
-    # #(4) Schwartz's Bayesian Criterion, SBC (BIC)
-    bics = _get_criteria(sel, N, "bic")
-    for i in range(len(bics)):
-        out[f'sbc_{ps[i]}'] = bics[i]
+    # (iv) Order-selection criteria: Schwarz's Bayesian Criterion and the log FPE
+    for crit, vals in (('sbc', sbc), ('fpe', fpe)):
+        for i in range(len(ps)):
+            out[f'{crit}_{ps[i]}'] = vals[i]
+        out[f'min{crit}'] = np.min(vals)
+        pos = int(np.argmin(vals))  # first minimum
+        out[f'popt_{crit}'] = pos + 1  # as hctsa: a position in p_min:p_max
+        if len(vals) == 1:
+            around = np.nan
+        elif pos == 0:
+            around = abs(vals[1])
+        elif pos == len(vals) - 1:
+            around = abs(vals[pos - 1])
+        else:
+            around = np.mean(np.abs([vals[pos - 1], vals[pos + 1]]))
+        out[f'aroundmin_{crit}'] = abs(np.min(vals)) / around
 
-    # return minimum 
-    out['minsbc'] = np.min(bics)
-    popt_sbc = ps[np.argmin(bics)]
-    out['popt_sbc'] = popt_sbc
-    
-    # Akiake Information Criteria (AIC) as a viable alternative to Akiake's FPE for final prediction error (FPE)
-    aics = _get_criteria(sel, N, "aic")
-    for i in range(len(aics)):
-        out[f'fpe_{ps[i]}'] = aics[i]
-    # return minimum 
-    out['minfpe'] = np.min(aics)
-    popt_fpe = ps[np.argmin(aics)]
-    out['popt_fpe'] = popt_fpe
+    # (II) Test the residuals
+    try:
+        siglev, res = _arfit_residuals(0.0, Aest, y)
+    except ValueError as err:
+        logger.warning(f'Could not test the AR residuals: {err}')
+        return np.nan
+    out['res_siglev'] = siglev
+    # ARFIT returns data minus fit; the contract is prediction minus data
+    out.update(residual_analysis(-res, y, 'core'))
 
-    #%% (II) Test Residuals
-    #test of auto correlation in the residuals (test up to lag 20)
-    out['res_siglev'] = ljung_box_pvalue(res.resid, n_lags=20, model_df=p_optimal)
-
-    # Correlation test of residuals.
-    # autocorr(...,'Fourier') computes the full FFT ACF internally, so compute
-    # lags 1..20 once and reuse lag 1 (acf[0]) rather than running two FFTs.
-    resids = res.resid
-    acf = autocorr(resids, list(range(1, 21)), 'Fourier')
-    out['res_ac1'] = acf[0]
-    out['res_ac1_norm'] = out['res_ac1']/np.sqrt(N)
-
-    #Calculate correlations up to 20, return how many exceed significance threshold
-    out['pcorr_res'] = np.sum(np.abs(acf) > 1.96/np.sqrt(N))/20
-
-    # Confidence Intervals
-    a_err = _arconf_from_arfit(res, 0.95)['A_err']
+    # (III) Confidence intervals on the coefficients
+    t_crit = _t_quantile(th[0], 0.5 + 0.95 / 2)
+    a_err = t_crit * np.sqrt(np.diag(th[1]) * Cest)
     out['aerr_min'] = np.min(a_err)
     out['aerr_max'] = np.max(a_err)
     out['aerr_mean'] = np.mean(a_err)
+
+    # (IV) Eigendecomposition
+    per, tau, exctn, lam = _arfit_modes(Aest, Cest, th)
+    out['maxReLambda'] = np.max(lam.real)
+    out['maxImLambda'] = np.max(lam.imag)
+    out['maxabsLambda'] = np.max(np.abs(lam))
+    out['stdabsLambda'] = np.std(np.abs(lam), ddof=1) if len(lam) > 1 else 0.0
+
+    per_special = ~np.isfinite(per[0])
+    per_filtered = np.where(per_special, np.nan, per[0])
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', category=RuntimeWarning)
+        out['hasInfper'] = int(np.sum(per_special))
+        out['meanper'] = np.nanmean(per_filtered)
+        out['stdper'] = np.nanstd(per_filtered, ddof=1) if np.sum(~np.isnan(per_filtered)) > 1 else (
+            0.0 if np.sum(~np.isnan(per_filtered)) == 1 else np.nan)
+        out['maxper'] = np.nanmax(per_filtered)
+        out['minper'] = np.nanmin(per_filtered)
+        out['meanpererr'] = np.nanmean(per[1])
+    out['meantau'] = np.mean(tau[0])
+    out['maxtau'] = np.max(tau[0])
+    out['mintau'] = np.min(tau[0])
+    out['stdtau'] = np.std(tau[0], ddof=1) if len(tau[0]) > 1 else 0.0
+    out['meantauerr'] = np.mean(tau[1])
+    out['maxexctn'] = np.max(exctn)
+    out['minexctn'] = np.min(exctn)
+    out['meanexctn'] = np.mean(exctn)
+    out['stdexctn'] = np.std(exctn, ddof=1) if len(exctn) > 1 else 0.0
 
     return out
 
