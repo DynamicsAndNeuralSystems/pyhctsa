@@ -1,6 +1,8 @@
 import numpy as np
 from numpy.typing import ArrayLike
 
+from ..utils import matlab_quantile
+
 try:
     from numba import njit
     _HAVE_NUMBA = True
@@ -228,9 +230,8 @@ def extreme_event_order(y: ArrayLike, extreme_thresh: float = 0.05) -> dict:
         raise ValueError('extreme_thresh must be in (0,0.5) so the two tails cannot overlap.')
 
     y = np.asarray(y, dtype=np.float64).ravel()
-    sy = np.sort(y[~np.isnan(y)])
-    upper_thresh = _hazen(sy, 1 - extreme_thresh)  # MATLAB's quantile (Hazen)
-    lower_thresh = _hazen(sy, extreme_thresh)
+    yq = y[~np.isnan(y)]
+    upper_thresh, lower_thresh = matlab_quantile(yq, [1 - extreme_thresh, extreme_thresh])
 
     pos_idx = np.flatnonzero(y > upper_thresh) + 1  # 1-based, as in hctsa (only differences matter)
     neg_idx = np.flatnonzero(y < lower_thresh) + 1
