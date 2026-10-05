@@ -95,22 +95,23 @@ def _x600():
 def test_tisean_c1():
     x = _x600()
     # the c1 + c2d -a2 output of hctsa's patched TISEAN binary (-d1 -m1 -M5 -t12 -n300): [length scale, slope]
+    # (the m = 1 block is unaffected by the normalization over the reference points; higher m rise)
     curves = nl._c2d_slopes(nl._c1_curves(x, 1, 1, 5, 12, 300))
     assert [c.shape[0] for c in curves] == [14] * 5
     for blk, first, last in [(0, (0.00588210579, 1.00610375), (0.876543283, 0.908076644)),
-                             (2, (0.200121105, 2.78322077), (1.60031796, 1.47137749)),
-                             (4, (0.335232317, 3.2817564), (1.94198883, 1.77112842))]:
+                             (2, (0.202279046, 2.80189896), (1.59530938, 1.48125291)),
+                             (4, (0.340153217, 3.32611132), (1.92487907, 1.79506338))]:
         np.testing.assert_allclose(curves[blk][0], first, rtol=1e-8)
         np.testing.assert_allclose(curves[blk][-1], last, rtol=1e-8)
     # hctsa's NL_c1 (MATLAB)
     d = nl.tisean_c1(x, 1, [1, 5], 0.02, 0.5)
     assert abs(d['bestestd'] - 0.990854776154) < 1e-8 and abs(d['bestestdstd'] - 0.0251984141023) < 1e-8
-    assert abs(d['bestgoodness'] + 0.0398015858977) < 1e-8 and abs(d['mediand'] - 2.7382611925) < 1e-8
-    assert abs(d['maxd'] - 3.4196553825) < 1e-8 and abs(d['meanstd'] - 0.0341219760806) < 1e-8
+    assert abs(d['bestgoodness'] + 0.0398015858977) < 1e-8 and abs(d['mediand'] - 2.75663849875) < 1e-8
+    assert abs(d['maxd'] - 3.46587086) < 1e-8 and abs(d['meanstd'] - 0.034373558084) < 1e-8
     assert abs(d['longestscr'] - 4.61435478461) < 1e-8
     d = nl.tisean_c1(x, 'ac', [2, 4], 10, 150)
-    assert abs(d['bestestd'] - 1.9128137525) < 1e-8 and abs(d['ranged'] - 1.1507857175) < 1e-8
-    assert abs(d['longestscr'] - 1.53589069592) < 1e-8
+    assert abs(d['bestestd'] - 1.9925182025) < 1e-8 and abs(d['ranged'] - 1.4888368675) < 1e-8
+    assert abs(d['longestscr'] - 1.47445509118) < 1e-8
     # no length is trimmed (TISEAN's c1 used to hang near multiples of 128): 512 differs from 511
     d = nl.tisean_c1(x[:512], 1, [1, 5], 0.02, 0.5)
     assert abs(d['bestestd'] - 0.979613147769) < 1e-8 and abs(d['longestscr'] - 4.69222625921) < 1e-8
@@ -118,9 +119,9 @@ def test_tisean_c1():
     assert _all_nan(nl.tisean_c1(x[:99])) and _all_nan(nl.tisean_c1(np.ones(300)))
     # 520 samples with delay 2 give 512 embedded points at m = 5: stock TISEAN's c1 never finishes
     d = nl.tisean_c1(x[:520], 2, [3, 6], 0.05, 0.3)
-    assert abs(d['bestestd'] - 3.143591688) < 1e-8 and abs(d['longestscr'] - 0.650273515665) < 1e-8
+    assert abs(d['bestestd'] - 3.269335416) < 1e-8 and abs(d['longestscr'] - 0.608589370967) < 1e-8
     d = nl.tisean_c1(x[:520], 2, [1, 7], 26, 156)
-    assert abs(d['bestestd'] - 1.00743966045) < 1e-8 and abs(d['meanstd'] - 0.119834906335) < 1e-8
+    assert abs(d['bestestd'] - 1.00743966045) < 1e-8 and abs(d['meanstd'] - 0.126210223428) < 1e-8
     # a Theiler window that leaves no neighbors, or delay vectors longer than the series
     assert _all_nan(nl.tisean_c1(x[:300], 1, [2, 4], 200, 0.5))
     assert _all_nan(nl.tisean_c1(x[:150], 40, [1, 5], 3, 100))
@@ -128,6 +129,14 @@ def test_tisean_c1():
     assert not _all_nan(nl.tisean_c1(x[:300], 2, [2, 6], 0.02, 1))
     with pytest.raises(ValueError):
         nl.tisean_c1(x, 'nonsense')
+
+
+def test_tisean_c1_mean_over_reference_points_used():
+    # the mean log radius is taken over the reference points used (stock TISEAN divided by
+    # nref - (m - 1) * tau, which biased the estimates low and made them drift with nref)
+    x = np.random.default_rng(7).standard_normal(2000)
+    est = [nl.tisean_c1(x, 10, [2, 4], 0.02, nref)['maxmd'] for nref in (100, 300, 2000)]
+    assert max(est) / min(est) < 1.12 and min(est) > 3.5
 
 
 def _henon(n):

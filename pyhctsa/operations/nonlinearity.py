@@ -4451,7 +4451,7 @@ def _c1_curves(y: np.ndarray, delay: int, m_from: int, m_to: int, nmin: int, n_r
                     continue
                 order = np.argsort(sweep, kind='stable')
                 log_e = np.log(np.maximum(e[order].astype(np.float64), 1e-20)).astype(np.float32)
-                rln = F32(_f32_cumsum_last(log_e) / F32(n_ref - (m - 1) * delay))
+                rln = F32(_f32_cumsum_last(log_e) / F32(refs.size))  # mean over the centers used
             if pln != pr:
                 pr = pln
                 rows.append((_expf(rln), _expf(pln)))
@@ -4524,7 +4524,10 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
     The stock TISEAN code picks the partner for each swap of that permutation from outside the
     valid range, uses stale memory when more reference points are requested than there are
     embedded points, and never finishes when it asks for more neighbors than exist (for example
-    when the number of embedded points is a power of two); those cases are fixed here.
+    when the number of embedded points is a power of two); those cases are fixed here. The stock
+    code also divides the sum of the log distances by ``nref - (m - 1) * tau`` instead of the
+    number of reference points used, which biases the dimension estimates low; the mean is taken
+    over the reference points used.
 
     Parameters
     ----------
