@@ -1208,7 +1208,10 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
         raise ValueError(f"Unknown method '{remove_how}'")
     
     # Indices of points to *keep*:
-    r_keep = np.sort(is_[:round(N * (1 - p))])
+    # (MATLAB's round: halves go away from zero, unlike Python's round)
+    n_keep = N * (1 - p)
+    n_keep = int(np.floor(n_keep)) + int(n_keep - np.floor(n_keep) >= 0.5)
+    r_keep = np.sort(is_[:n_keep])
 
     # Indices of points to *transform*:
     r_transform = np.setdiff1d(np.arange(N), r_keep)
