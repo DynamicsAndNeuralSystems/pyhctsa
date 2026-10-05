@@ -2509,6 +2509,146 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
     return out
 
 
+from scipy.signal import find_peaks, welch as _welch
+from scipy.spatial.distance import pdist, squareform
+
+
+def _period_normalized_tau(y: np.ndarray) -> Union[int, str]:
+    # An embedding delay of one fifth of the series' dominant period (from the most prominent
+    # peak of the log Welch spectrum), so it scales with the sampling rate; 'mi' if the series is
+    # too short or has no sufficiently prominent peak. (hctsa: SUB_periodNormalizedTau.)
+    if y.size < 16:
+        return 'mi'
+    win_length = int(np.floor(y.size / 4.5))  # MATLAB's pwelch default: 8 segments, 50% overlap
+    f, pxx = _welch(y - np.mean(y), fs=1, window=np.hamming(win_length), nperseg=win_length,
+                    noverlap=win_length // 2, nfft=max(256, 2 ** int(np.ceil(np.log2(win_length)))),
+                    detrend=False, return_onesided=True, scaling='density')
+    f, pxx = f[1:], pxx[1:]  # exclude the DC bin
+    if pxx.size < 3:
+        return 'mi'
+    log_p = np.log(pxx + np.spacing(np.max(pxx)))
+    locs, props = find_peaks(log_p, prominence=2.0)
+    if locs.size == 0:
+        return 'mi'
+    best = int(np.argmax(props['prominences']))  # the most prominent peak, not necessarily the tallest
+    return max(1, int(_round_half_away(1 / f[locs[best]] / 5)))
+
+
+def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, max_dim: int = 1,
+                        max_n: Union[int, str] = 1000) -> Union[dict, float]:
+    """
+    Persistent homology of the delay embedding: the lifetimes of its loops and components.
+
+    Embeds the time series in ``m`` dimensions, builds the Vietoris-Rips filtration of the point
+    cloud, and summarizes the lifetimes (death minus birth, as a proportion of the filtration
+    threshold, the maximum distance between 300 evenly spaced embedded points) of its
+    one-dimensional holes (loops, H1; a periodic series gives a long-lived loop) and its
+    connected components (H0). Uses ripser [1]_ (the ``ripser`` Python package, an optional
+    dependency; hctsa runs the ripser executable).
+
+    References
+    ----------
+    .. [1] U. Bauer, "Ripser: efficient computation of Vietoris-Rips persistence barcodes",
+        J. Appl. Comput. Topol. 5, 391-423 (2021). DOI: 10.1007/s41468-021-00071-5
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    tau : int or str, optional
+        The embedding delay: an integer number of samples, a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), or ``'periodWelch'`` for
+        one fifth of the dominant period (the most prominent peak of the log Welch power
+        spectrum, falling back to ``'mi'`` if there is none). A fixed ``tau = 1`` embeds a
+        smooth periodic series nearly collinearly, which makes its loop short-lived. Default is
+        ``'mi'``.
+    m : int, optional
+        The embedding dimension. Default is 3.
+    max_dim : int, optional
+        The maximum homology dimension computed (at least 1 for the H1 outputs; with 0 they are
+        zero). Default is 1.
+    max_n : int or ``'full'``, optional
+        The maximum number of embedded points: a longer point cloud is subsampled at evenly spaced
+        points (the cost of ripser grows steeply with the size of the cloud), or ``'full'`` for no
+        subsampling. Default is 1000.
+
+    Returns
+    -------
+    dict or float
+        ``maxPersistenceH1``, ``totalPersistenceH1``, ``persistenceEntropyH1``: the maximum and
+        sum of the (normalized) lifetimes of the H1 classes and the entropy of their distribution
+        (all 0 if there are none); ``totalPersistenceH0``: the sum of the lifetimes of the H0
+        classes. Returns NaN if the delay cannot be set, the embedding fails, there are fewer than 20
+        embedded points, or the point cloud is degenerate (e.g. a constant series).
+
+    Raises
+    ------
+    ImportError
+        If the ``ripser`` package is not installed.
+    """
+    try:
+        from ripser import ripser
+    except ImportError as exc:
+        raise ImportError("persistent_homology needs the 'ripser' package "
+                          "(pip install ripser)") from exc
+
+    y = np.asarray(y, dtype=float).ravel()
+
+    if isinstance(tau, str) and tau.lower() == 'periodwelch':
+        tau = _period_normalized_tau(y)
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        return np.nan
+    try:
+        x = time_delay_embed(y, m, int(tau))
+    except ValueError as exc:  # embedding failed
+        logger.warning(str(exc))
+        return np.nan
+    n_emb = x.shape[0]
+    if n_emb < 20:  # too few embedded points for a meaningful Rips filtration
+        return np.nan
+
+    if isinstance(max_n, str):
+        if max_n.lower() != 'full':
+            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
+    elif n_emb > max_n:
+        # an evenly spaced subsample over the whole embedded point cloud
+        x = x[np.floor(np.linspace(1, n_emb, int(max_n)) + 0.5).astype(int) - 1]
+        n_emb = x.shape[0]
+
+    # The filtration threshold: the largest distance among (at most) 300 evenly spaced points
+    n_sub = min(300, n_emb)
+    sub = np.floor(np.linspace(1, n_emb, n_sub) + 0.5).astype(int) - 1
+    threshold = np.max(pdist(x[sub]))
+    if not threshold > 0:
+        return np.nan  # degenerate point cloud (e.g. a constant series)
+    threshold = float('%.8g' % threshold)  # as passed to ripser
+
+    # hctsa hands ripser the point cloud as a text file of 7 significant digits
+    dgms = ripser(squareform(pdist(_round_significant(x.ravel(), 7).reshape(x.shape))),
+                  maxdim=int(max_dim), thresh=threshold, distance_matrix=True)['dgms']
+
+    def lifetimes(d):  # finite lifetimes as a proportion of the threshold (essential classes dropped)
+        p = (d[:, 1] - d[:, 0]) if d.size else np.empty(0)
+        return p[np.isfinite(p)] / threshold
+
+    out = {}
+    pers1 = lifetimes(dgms[1]) if len(dgms) > 1 else np.empty(0)
+    if pers1.size == 0:
+        out['maxPersistenceH1'] = 0.0
+        out['totalPersistenceH1'] = 0.0
+        out['persistenceEntropyH1'] = 0.0
+    else:
+        out['maxPersistenceH1'] = np.max(pers1)
+        out['totalPersistenceH1'] = np.sum(pers1)
+        # zero-persistence pairs contribute nothing to the entropy (0 log 0 = 0)
+        pos = pers1[pers1 > 0]
+        p = pos / np.sum(pos)
+        out['persistenceEntropyH1'] = -np.sum(p * np.log(p)) if p.size else 0.0
+    out['totalPersistenceH0'] = np.sum(lifetimes(dgms[0]))
+    return out
+
+
 def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
     """Counts of points per box, where the boxes are quantiles along each axis."""
     props = np.arange(nbox + 1) / nbox
