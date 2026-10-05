@@ -598,6 +598,9 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
     except ValueError as e:  # embedding failed (time series too short)
         logger.warning(str(e))
         return np.nan
+    if y_embed.shape[0] - 1 < m or m < 2:
+        logger.warning(f'Not enough embedding vectors ({y_embed.shape[0]}) for a rank-{m} PCA')
+        return np.nan
     # do the PCA
     pca = PCA().fit(y_embed)
     #proportion of variance explained
