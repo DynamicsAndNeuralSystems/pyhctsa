@@ -383,26 +383,27 @@ def fnn_embedding_dimension(
     return float(fnn_first_under(t["dim"], t["pfnn"], threshold))
 
 
-def _tisean_argsort(x: np.ndarray) -> np.ndarray:
-    """
-    Ascending sort order with TISEAN's tie-breaking.
-
-    ``indexx`` (source_f/rank.f) builds a per-bucket linked list and inserts a
-    new point *before* the first element it does not exceed, so equal keys come
-    out in reverse order of appearance -- the opposite of a stable sort. Ties do
-    occur: ``c2g``'s off-by-one can duplicate a length scale, and which of the
-    two correlation sums then leads changes the interpolation.
-    """
-    n = x.size
-    return (n - 1) - np.argsort(x[::-1], kind="stable")
-
-
 def _gk15(f, a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Vectorised 15-point Gauss-Kronrod estimate of int_a^b f, per interval."""
     centr = 0.5 * (a + b)
     hlgth = 0.5 * (b - a)
     u = centr[:, None] + hlgth[:, None] * _GK_X[None, :]
     return (f(u) * _GK_W[None, :]).sum(axis=1) * hlgth
+
+
+def _read_c2_block(block: np.ndarray) -> tuple:
+    """Log length scales and log correlation sums of one block of a ``.c2`` table, as
+    ``c2g.f`` and ``c2t.f`` read them: the block ends at the first non-positive correlation
+    sum, and the points are then sorted by increasing length scale (an insertion sort, so
+    equal length scales keep their order)."""
+    block = np.asarray(block, dtype=np.float64).reshape(-1, 2)
+    nonpos = np.flatnonzero(block[:, 1] <= 0.0)
+    if nonpos.size:
+        block = block[:nonpos[0]]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        e, c = np.log(block[:, 0]), np.log(block[:, 1])
+    order = np.argsort(e, kind="stable")
+    return e[order], c[order]
 
 
 def c2t(c2: List[np.ndarray]) -> List[np.ndarray]:
@@ -426,63 +427,30 @@ def c2t(c2: List[np.ndarray]) -> List[np.ndarray]:
 
     Notes
     -----
-    As in :func:`c2g`, ``c2t.f`` relies on implicit typing: the logarithms, the
-    sums ``cint`` and the printed outputs are single precision (only the slope
-    ``a`` and offset ``b`` of the power-law pieces and the exponentials in the
-    integral are double, computed from single-precision differences). That is
-    reproduced, with the output rounded to the 9 significant digits ``c2t``
-    prints.
+    As in hctsa's modified ``c2t.f``, all quantities are double precision (the original
+    keeps the logarithms and sums in single precision, and relies on a sort that
+    reverses equal keys).
     """
     out: List[np.ndarray] = []
     for block in c2:
-        e_vals, c_vals = [], []
-        for ee, cc in block:
-            ee, cc = _f32(ee), _f32(cc)  # read into REAL
-            if cc <= 0.0:  # c2t.f stops the block at the first non-positive C
-                break
-            e_vals.append(_f32(math.log(ee)))
-            c_vals.append(_f32(math.log(cc)))
-
-        me = len(e_vals)
-        e_vals = np.asarray(e_vals, dtype=np.float32)
-        c_vals = np.asarray(c_vals, dtype=np.float32)
-        order = _tisean_argsort(e_vals)
-        e = e_vals[order]
-        c = c_vals[order]
-
-        # b and a are evaluated in single precision, then held as doubles
+        e, c = _read_c2_block(block)
+        me = e.size
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             de = e[1:] - e[:-1]
-            b_all = ((e[1:] * c[:-1] - e[:-1] * c[1:]) / de).astype(np.float64)
-            a_all = ((c[1:] - c[:-1]) / de).astype(np.float64)
-            de = de.astype(np.float64)
+            b_all = (e[1:] * c[:-1] - e[:-1] * c[1:]) / de
+            a_all = (c[1:] - c[:-1]) / de
 
-        cint = np.float32(0.0)  # REAL
-        rows = []
-        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            cint = 0.0
+            rows = []
             for i in range(1, me):
                 a, b = a_all[i - 1], b_all[i - 1]
                 if a != 0:
-                    inc = (math.exp(b) / a) * (math.exp(a * float(e[i]))
-                                               - math.exp(a * float(e[i - 1])))
+                    cint = cint + (np.exp(b) / a) * (np.exp(a * e[i]) - np.exp(a * e[i - 1]))
                 else:
-                    inc = math.exp(b) * de[i - 1]
-                cint = _f32(float(cint) + inc)
-                x = _f32(math.exp(float(e[i])))
-                y = _f32(math.exp(float(c[i]))) / cint
-                rows.append((_f32_9(x), _f32_9(y)))
+                    cint = cint + np.exp(b) * de[i - 1]
+                rows.append((np.exp(e[i]), np.exp(c[i]) / cint))
         out.append(np.array(rows, dtype=float).reshape(-1, 2))
     return out
-
-
-def _f32(x) -> np.ndarray:
-    """Round to single precision (the REAL of ``c2g.f``'s implicit typing)."""
-    return np.asarray(x, dtype=np.float64).astype(np.float32)
-
-
-def _f32_9(x: float) -> float:
-    """A single-precision value as ``write(*,*)`` prints it (9 significant digits)."""
-    return float("%.9g" % x)
 
 
 def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
@@ -498,73 +466,43 @@ def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
     Returns
     -------
     list of ndarray
-        One ``(n_i, 3)`` array per embedding dimension: the kernel bandwidth
-        ``r``, the Gaussian kernel correlation integral, and its logarithmic
-        derivative with respect to ``r``. Entries are NaN or infinite where
-        ``c2g`` itself would print ``NaN`` or ``Infinity`` (see Notes).
+        One ``(m_i, 3)`` array per embedding dimension (``m_i`` the number of
+        points with a positive correlation sum): the kernel bandwidth ``r``, the
+        Gaussian kernel correlation integral, and its logarithmic derivative with
+        respect to ``r``.
 
     Notes
     -----
-    ``c2g.f`` relies on Fortran's implicit typing, so the length scales and
-    correlation sums it reads, their logarithms, the interpolation prefactor and
-    exponent of the power-law pieces, and the two output quantities are all
-    *single* precision; only the Gauss-Kronrod integration and the bandwidth
-    ``h`` are double. This is reproduced, because it changes the results
-    visibly: the prefactor ``exp((e_{k+1} c_k - e_k c_{k+1}) / (e_{k+1} - e_k))``
-    overflows to infinity for exponents above 88.7, which makes ``c2g`` print
-    ``Infinity``/``NaN`` for some series, and the printed values carry about
-    1e-7 relative error. Values are rounded to the 9 significant digits
-    ``c2g`` prints.
-
-    ``c2g.f`` also increments its point counter *before* testing whether the
-    correlation sum is positive, so a block that is cut short by a zero keeps
-    one trailing slot holding whatever the previous block left in the (static,
-    zero-initialised) arrays. That off-by-one is reproduced here, since hctsa's
-    feature values were computed with it.
+    As in hctsa's modified ``c2g.f``, all quantities are double precision (in the original
+    the single-precision logarithms overflowed in the interpolation prefactor
+    ``exp((e_{k+1} c_k - e_k c_{k+1}) / (e_{k+1} - e_k))`` for series with steep local slopes,
+    which gave Inf/NaN output), and the points of an embedding dimension are only those with
+    a positive correlation sum: the original counted the point that ended the list, so that
+    a stale point of the previous embedding dimension entered the integral.
     """
     out: List[np.ndarray] = []
-    # Stand-ins for c2g.f's static REAL arrays, which persist between blocks.
-    e_buf = np.zeros(_MEPS, dtype=np.float32)
-    c_buf = np.zeros(_MEPS, dtype=np.float32)
-
     for block in c2:
-        me = 0
-        for ee, cc in block:
-            me += 1
-            ee, cc = _f32(ee), _f32(cc)  # read into REAL
-            if cc <= 0.0:
-                break
-            e_buf[me - 1] = _f32(math.log(ee))
-            c_buf[me - 1] = _f32(math.log(cc))
-
+        e, c = _read_c2_block(block)
+        me = e.size
         if me == 0:
             out.append(np.empty((0, 3)))
             continue
 
-        # c2g.f sorts in place, so the leftover slot above picks up a value from
-        # the *sorted* previous block, not from it in file order.
-        order = _tisean_argsort(e_buf[:me])
-        e_buf[:me] = e_buf[:me][order]
-        c_buf[:me] = c_buf[:me][order]
-        e = e_buf[:me].copy()
-        c = c_buf[:me].copy()
-
         # Piecewise power-law interpolation between successive points: on
         # [e_k, e_k+1] the correlation sum is f * exp(d * u).
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-            de = e[1:] - e[:-1]  # single precision throughout
-            f = _f32(np.exp((e[1:] * c[:-1] - e[:-1] * c[1:]) / de).astype(np.float64))
+            de = e[1:] - e[:-1]
+            f = np.exp((e[1:] * c[:-1] - e[:-1] * c[1:]) / de)
             d = (c[1:] - c[:-1]) / de
-        f, d = f.astype(np.float64), d.astype(np.float64)
         # c2g.f only integrates over intervals of non-zero width.
         keep = e[1:] != e[:-1]
-        a, b = e[:-1][keep].astype(np.float64), e[1:][keep].astype(np.float64)
+        a, b = e[:-1][keep], e[1:][keep]
         f, d = f[keep], d[keep]
 
         e_last, rows = float(e[me - 1]), []
         with np.errstate(divide="ignore", invalid="ignore", over="ignore", under="ignore"):
             for j in range(me):
-                h = float(_f32(math.exp(float(e[j]))))
+                h = math.exp(float(e[j]))
                 g = _gk15(lambda u: f[:, None] * np.exp((2 + d[:, None]) * u
                                                         - np.exp(2 * u) / (2 * h ** 2)),
                           a, b).sum()
@@ -572,9 +510,8 @@ def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
                                                          - np.exp(2 * u) / (2 * h ** 2)),
                            a, b).sum()
                 tail = math.exp(-math.exp(2 * e_last) / (2 * h ** 2))
-                cgauss = _f32(g / h ** 2 + tail)  # REAL
-                cgd = _f32(gd / h ** 4 + (2 + math.exp(2 * e_last) / h ** 2) * tail)  # REAL
-                slope = np.float32(-2) + cgd / cgauss  # single precision
-                rows.append((h, _f32_9(cgauss), _f32_9(slope)))
+                cgauss = g / h ** 2 + tail
+                cgd = gd / h ** 4 + (2 + math.exp(2 * e_last) / h ** 2) * tail
+                rows.append((h, cgauss, -2 + cgd / cgauss))
         out.append(np.array(rows, dtype=float).reshape(-1, 3))
     return out

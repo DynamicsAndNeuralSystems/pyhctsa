@@ -1012,45 +1012,6 @@ class _D2DataError(ValueError):
     """A data-dependent failure of :func:`tisean_d2`, for which hctsa returns NaN."""
 
 
-def _c2g_overflows(c2: list) -> bool:
-    """
-    Whether TISEAN's ``c2g`` binary would write ``Infinity``/``NaN`` for these correlation sums.
-
-    ``c2g.f`` keeps the log-lengths and log-correlation sums in single precision, and the
-    prefactor ``f = exp((e(k+1)c(k) - e(k)c(k+1))/(e(k+1) - e(k)))`` of its piecewise
-    power-law interpolation overflows (above about 88.7 in the exponent) for some series,
-    which contaminates the whole block with ``Infinity``/``NaN``. hctsa cannot read that
-    output and returns NaN (``NL_d2``: 'Inf/NaN-contaminated output'). The vendored
-    :func:`pyhctsa.toolboxes.Tisean_3_0_1.tisean.c2g` works in double precision and does
-    not overflow, so this reproduces the single-precision condition from the same
-    buffers (including the leftover slot of a block cut short by a zero).
-    """
-    meps = 1000
-    e_buf = np.zeros(meps, dtype=np.float32)
-    c_buf = np.zeros(meps, dtype=np.float32)
-    for block in c2:
-        me = 0
-        for ee, cc in block:
-            me += 1
-            if cc <= 0.0:
-                break
-            e_buf[me - 1] = np.log(np.float32(ee))
-            c_buf[me - 1] = np.log(np.float32(cc))
-        if me == 0:
-            continue
-        order = _tisean._tisean_argsort(e_buf[:me])
-        e_buf[:me] = e_buf[:me][order]
-        c_buf[:me] = c_buf[:me][order]
-        e, c = e_buf[:me], c_buf[:me]
-        with np.errstate(all='ignore'):
-            de = e[1:] - e[:-1]
-            f = np.exp((e[1:] * c[:-1] - e[:-1] * c[1:]) / de)
-        # intervals of zero width are skipped by c2g.f
-        if np.any(~np.isfinite(f[de != 0])):
-            return True
-    return False
-
-
 def _argmin_first_colmajor(m: np.ndarray):
     """First index of the minimum in column-major order; NaNs ignored."""
     flat = m.ravel(order='F')
@@ -1378,8 +1339,8 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         correlation sum (raw and Gaussian-kernel smoothed), and the correlation
         entropy. Returns NaN, as hctsa does, if the time series is too short, the time
         delay cannot be determined, or the TISEAN output is unusable for this series
-        (no valid output for a long delay, Inf/NaN-contaminated correlation sums, no
-        correlation-dimension data, or no scaling range).
+        (no valid output for a long delay, no correlation-dimension data, or no scaling
+        range).
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size  # data length (number of samples)
@@ -1417,8 +1378,6 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
     except ValueError as exc:  # e.g. a delay vector longer than the series
         raise _D2DataError(f'TISEAN d2 produced invalid output (perhaps due to long '
                            f'tau = {tau}, N = {y.size}): {exc}') from exc
-    if _c2g_overflows(tables['c2']):
-        raise _D2DataError('TISEAN d2 produced Inf/NaN-contaminated output for this data')
     c2gdat = _tisean.c2g(tables['c2'])
     c2tdat = _tisean.c2t(tables['c2'])
     d2dat, h2dat = tables['d2'], tables['h2']
