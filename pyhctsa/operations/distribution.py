@@ -687,7 +687,8 @@ def burstiness(y: ArrayLike) -> dict:
 def moments(y: ArrayLike, the_mom: int = 0) -> float:
     """
     A moment of the distribution of the input time series.
-    Normalizes by the standard deviation.
+    Returns the standardized central moment: the ``the_mom``-th central moment
+    divided by the standard deviation raised to the power ``the_mom``.
 
     Parameters
     ----------
@@ -703,7 +704,7 @@ def moments(y: ArrayLike, the_mom: int = 0) -> float:
     """
     y = np.asarray(y)
 
-    return stats.moment(y, the_mom) / np.std(y, ddof=1)
+    return stats.moment(y, the_mom) / np.std(y, ddof=1) ** the_mom
 
 def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01) -> dict:
     """
