@@ -2,7 +2,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from scipy import signal
 
-from ..utils import bin_picker, histc
+from ..robust import bf_hist_edges
 
 def raw_hrv_meas(x: ArrayLike) -> dict:
     """
@@ -54,28 +54,15 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
     N = len(x)
     out = {}
 
-    # min/max are reused across all three binnings
-    x_min = x.min()
-    x_max = x.max()
-
     # triangular histogram index
     # 10 bins
-    edges_10 = bin_picker(x_min, x_max, 10)
-    hist_counts10 = histc(x, edges_10)
-    out['tri10'] = N/np.max(hist_counts10)
+    out['tri10'] = N/np.max(np.histogram(x, bins=bf_hist_edges(x, 10))[0])
 
     # 20 bins
-    edges_20 = bin_picker(x_min, x_max, 20)
-    hist_counts20 = histc(x, edges_20)
-    out['tri20'] = N/np.max(hist_counts20)
+    out['tri20'] = N/np.max(np.histogram(x, bins=bf_hist_edges(x, 20))[0])
 
     # (sqrt samples) bins
-    # (MATLAB's histcounts 'sqrt' rule: the bin *width* is range/ceil(sqrt(N)), rounded to a
-    # 'nice' value by binpicker, so the number of bins is not exactly ceil(sqrt(N)))
-    bin_width_sqrt = (x_max - x_min) / max(int(np.ceil(np.sqrt(N))), 1)
-    edges_sqrt = bin_picker(x_min, x_max, None, bin_width_sqrt)
-    hist_counts_sqrt = histc(x, edges_sqrt)
-    out['trisqrt'] = N/np.max(hist_counts_sqrt)
+    out['trisqrt'] = N/np.max(np.histogram(x, bins=bf_hist_edges(x, 'sqrt'))[0])
 
     # Poincare plot measures
     diff_x = np.diff(x)
