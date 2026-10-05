@@ -279,7 +279,9 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     y : array-like
         The input time series.
     w_name : str, optional
-        The wavelet name, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), etc. Default is ``'db3'``.
+        The wavelet name, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), or the continuous
+        Morlet wavelet 'morl' (the second wavelet registered in hctsa; its support is [-4, 4]
+        sampled at 2**10 points, as in MATLAB's legacy ``cwt``). Default is ``'db3'``.
     max_scale : int, optional
         The maximum scale of wavelet analysis. Default is 32.
 
@@ -302,7 +304,18 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     y = np.asarray(y)
     N = len(y)
     scales = np.arange(1, max_scale+1)
-    coeffs = _custom_cwt(data=y, scales=scales, wavelet=w_name)
+    if w_name in pywt.wavelist(kind='discrete'):
+        # discrete wavelets: MATLAB's legacy cwt gives the opposite sign for symmetric ones
+        flip_sign = pywt.Wavelet(w_name).symmetry != 'asymmetric'
+        coeffs = _custom_cwt(data=y, scales=scales, wavelet=w_name)
+    else:
+        # continuous wavelet (e.g., 'morl'): no sign flip. As in MATLAB's wavefun, 'morl' is
+        # supported on [-4, 4] sampled at 2**10 points
+        flip_sign = False
+        w = pywt.ContinuousWavelet(w_name)
+        if w_name == 'morl':
+            w.lower_bound, w.upper_bound = -4, 4
+        coeffs = _custom_cwt(data=y, scales=scales, wavelet=w, precision=10)
     S = np.abs(coeffs * coeffs)
     SC = S/np.mean(S)  # scaled power, relative to the mean power
 
@@ -313,7 +326,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     std_SC = np.std(SC, ddof=1)
 
     # 1) Coefficients, coeffs
-    all_coeffs = coeffs if pywt.Wavelet(w_name).symmetry == 'asymmetric' else -coeffs
+    all_coeffs = -coeffs if flip_sign else coeffs
     abs_coeffs = np.abs(all_coeffs)
     out = {}
     out['meanC'] = np.mean(all_coeffs)
