@@ -353,7 +353,12 @@ def automutual_info_stats(
     Returns
     -------
     dict
-        Dictionary containing AMI statistics.
+        Dictionary of AMI statistics: the AMI at each lag (``ami1`` ... ``ami<max_tau>``),
+        ``mami``, ``stdami``, ``pextrema``, ``fmmi`` (lag of the first local minimum of
+        the AMI function; the number of lags if there is none), ``sumami_fmmi`` (the sum
+        of the AMI from lag 1 to ``fmmi``), ``pmaxima``, ``modeperiodmax``,
+        ``pmodeperiodmax``, ``pminima``, ``modeperiodmin``, ``pmodeperiodmin``,
+        ``pcrossmean``, ``pcrossmedian``, ``pcrossq10``, ``pcrossq90`` and ``amiac1``.
     """
     from ..operations.correlation import autocorr
 
@@ -402,6 +407,8 @@ def automutual_info_stats(
     # extremum sits at ami[j+1], i.e. lag j+2); lami if there is none
     minima = extrema_i[dami[extrema_i] < 0]
     out['fmmi'] = int(minima.min()) + 2 if minima.size > 0 else lami
+    # integrated AMI up to the first minimum (fmmi is a 1-based lag, so ami[:fmmi] is ami(1:fmmi))
+    out['sumami_fmmi'] = np.sum(ami[:out['fmmi']])
 
     # Look for periodicities in local maxima
     maxima_i = np.where((dami[:-1] > 0) & (dami[1:] < 0))[0] + 1
