@@ -792,6 +792,10 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
 
     return out
 
+def _matlab_round(v: float) -> int:
+    """MATLAB's round(): halves round away from zero (Python's round() rounds halves to even)."""
+    return int(np.sign(v) * np.floor(np.abs(v) + 0.5))
+
 def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None] = None) -> dict:
     """
     Compare local statistics to global statistics of a time series.
@@ -804,7 +808,7 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
         The method to select the local subset of time series:
 
         - 'l': the first n points in a time series
-        - 'p': an initial proportion of the full time series
+        - 'p': an initial proportion of the full time series (round(N*n) points, as in MATLAB)
         - 'unicg': n evenly-spaced points throughout the time series
         - 'randcg': n randomly-chosen points from the time series (chosen with replacement)
 
@@ -837,9 +841,9 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
         r = np.arange(min(n, N))
     elif subset_how == 'p':
         # take initial proportion n of time series
-        r = np.arange(int(np.floor(N*n)))
+        r = np.arange(_matlab_round(N*n))
     elif subset_how == 'unicg':
-        r = np.round(np.linspace(1, N, n)).astype(int) - 1
+        r = np.floor(np.linspace(1, N, n) + 0.5).astype(int) - 1  # MATLAB round: halves away from zero
     else:
         raise ValueError(f"Unknown specifier, {subset_how}. Can be either 'l', 'p', 'unicg', or 'randcg'.")
 
