@@ -1541,3 +1541,144 @@ def envelope_stats(y: ArrayLike, power_frac: float = 0.5, trim_frac: float = 0.0
     inst_freq = np.diff(phi) / (2 * np.pi)
     out['dom_ifspread'] = 1.4826 * np.median(np.abs(inst_freq - np.median(inst_freq)))
     return out
+
+
+def phase_fluctuation_scaling(y: ArrayLike, half_width_frac: float = 0.01,
+                              num_windows: int = 16, max_n: int = 10000) -> Union[dict, float]:
+    """
+    Multi-scale fluctuation analysis of the instantaneous phase of the dominant oscillation.
+
+    Isolates the dominant oscillatory component of ``y`` (the frequency band
+    carrying the most spectral power, excluding DC and Nyquist), takes its
+    instantaneous phase via the analytic signal, and asks how the fluctuation of
+    that phase about its mean rotation rate grows with window size ``w``:
+    ``mean(|dphi(t+w) - dphi(t)|)`` against ``w``, in log-log space (the same logic
+    as detrended fluctuation analysis, as in ``fluctuation_analysis``, applied to
+    instantaneous phase instead of raw values).
+
+    The method is inspired by the analytic-signal analysis of strange nonchaotic
+    dynamics (SNA): for nonchaotic dynamics the curve rises at short windows but
+    flattens at longer windows (the largest Lyapunov exponent is negative and the
+    phase dynamics are globally stable), whereas for chaotic dynamics it keeps
+    rising at long windows. The original method uses empirical mode decomposition
+    to isolate the dominant intrinsic mode; this implementation instead bandpasses
+    around the single dominant non-edge FFT peak (the band-limited analytic-signal
+    trick of ``phase_amp_coupling``), which is simpler and avoids EMD's mode-mixing
+    and boundary sensitivities, at the cost of not being a literal reimplementation.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    half_width_frac : float, optional
+        Half-width of the frequency band around the dominant peak, as a fraction of
+        the usable (DC- and Nyquist-excluded) one-sided spectrum, and at least 2
+        bins. Default is 0.01.
+    num_windows : int, optional
+        The number of log-spaced window sizes (from 2 samples to N/4) to evaluate,
+        split into a short-window half and a long-window half for two separate
+        linear fits in log-log space. Default is 16.
+    max_n : int, optional
+        The maximum number of samples to consider; longer series are cropped to
+        their first ``max_n`` points. Default is 10000.
+
+    Returns
+    -------
+    dict or float
+        - ``meanFreq``: the mean rotation frequency of the isolated dominant
+          component, in cycles per sample.
+        - ``slope_short``, ``slope_long``: log-log slopes of the phase fluctuation
+          against window size, over the shorter and the longer half of the window
+          sizes (the two fits share one point).
+        - ``slope_diff``: ``slope_short - slope_long``.
+
+        NaN is returned if the series is too short for a well-defined dominant band
+        (or the phase is non-finite); the slopes are NaN if it is too short for the
+        multi-scale analysis.
+
+    Notes
+    -----
+    The short-window slope does not behave as the SNA reasoning suggests: the phase
+    comes from a narrow band, so it is smooth at short lags for any input, and
+    ``mean(|dphi(t+w) - dphi(t)|)`` grows linearly with ``w`` there (the trivial
+    derivative regime): ``slope_short`` is about 1 regardless of dynamics, and
+    ``slope_diff`` is just ``1 - slope_long``. The informative quantity is
+    ``slope_long`` alone: near 0 where the phase fluctuation saturates (periodic,
+    SNA-like), and positive where it keeps growing (chaotic, noisy).
+
+    References
+    ----------
+    K. Gupta, A. Prasad, H.P. Singh, R. Ramaswamy, "Analytical signal analysis of
+    strange nonchaotic dynamics", Phys. Rev. E 77, 046220 (2008).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    if N > max_n:
+        warnings.warn(f"Time series ({N} samples) exceeds max_n = {max_n}; "
+                      f"analyzing the first {max_n} samples")
+        y = y[:max_n]
+        N = max_n
+
+    # Dominant non-edge spectral peak (DC and Nyquist bins excluded):
+    half_n = N // 2 + 1
+    usable = np.arange(1, half_n - 1 if N % 2 == 0 else half_n)
+    half_width_bins = max(2, int(np.floor(half_width_frac * len(usable) + 0.5)))
+    if len(usable) < 4 * half_width_bins:
+        warnings.warn(f"Time series too short (N = {N}) for a well-defined dominant frequency band")
+        return np.nan
+
+    Y = np.fft.fft(y)
+    power = np.abs(Y[usable]) ** 2
+    peak_bin = usable[int(np.argmax(power))]
+    band = np.arange(max(usable[0], peak_bin - half_width_bins),
+                     min(usable[-1], peak_bin + half_width_bins) + 1)
+
+    # Band-limited analytic signal and its instantaneous phase:
+    Yband = np.zeros(N, dtype=complex)
+    Yband[band] = 2 * Y[band]
+    phi = np.unwrap(np.angle(np.fft.ifft(Yband)))
+    if not np.all(np.isfinite(phi)):
+        warnings.warn("Non-finite instantaneous phase (degenerate band-limited signal?)")
+        return np.nan
+
+    # Detrend: remove the mean rotation rate to leave the phase fluctuation
+    A = np.column_stack((np.arange(1, N + 1, dtype=float), np.ones(N)))
+    coef = np.linalg.lstsq(A, phi, rcond=None)[0]
+    out = {'meanFreq': coef[0] / (2 * np.pi)}  # cycles per sample
+    dphi = phi - A @ coef
+    out.update(slope_short=np.nan, slope_long=np.nan, slope_diff=np.nan)
+
+    # Multi-scale fluctuation analysis: mean(|dphi(t+w) - dphi(t)|) vs w
+    w_min = 2
+    w_max = N // 4
+    if w_max <= w_min * 4:
+        warnings.warn(f"Time series too short (N = {N}) for a meaningful multi-scale "
+                      f"phase-fluctuation analysis")
+        return out
+    windows = np.unique(np.floor(np.logspace(np.log10(w_min), np.log10(w_max), num_windows) + 0.5)
+                        ).astype(int)
+    if len(windows) < 6:
+        return out
+
+    mean_abs_diff = np.array([np.mean(np.abs(dphi[w:] - dphi[:-w])) for w in windows])
+    with np.errstate(divide='ignore'):
+        log_d = np.log10(mean_abs_diff)
+    valid = np.isfinite(log_d) & (mean_abs_diff > 0)
+    if np.sum(valid) < 6:
+        return out
+    log_w = np.log10(windows[valid].astype(float))
+    log_d = log_d[valid]
+
+    split = int(np.ceil(len(log_w) / 2))
+    short_idx = slice(0, split)
+    long_idx = slice(split - 1, None)  # one point of overlap anchors the two fits together
+
+    def fit_slope(x, yv):
+        if len(x) < 2:
+            return np.nan
+        return np.linalg.lstsq(np.column_stack((x, np.ones(len(x)))), yv, rcond=None)[0][0]
+
+    out['slope_short'] = fit_slope(log_w[short_idx], log_d[short_idx])
+    out['slope_long'] = fit_slope(log_w[long_idx], log_d[long_idx])
+    out['slope_diff'] = out['slope_short'] - out['slope_long']
+    return out
