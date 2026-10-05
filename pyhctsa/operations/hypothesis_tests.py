@@ -241,7 +241,7 @@ def distribution_test(x: ArrayLike, the_test: str = 'chi2gof', the_distn: str = 
     if the_distn == 'beta':
         # clumsily scale to the range (0,1), as in MATLAB
         sd = np.std(x, ddof=1)
-        x = (x - np.min(x) + 0.01 * sd) / (np.max(x) - np.min(x) + 0.01 * sd)
+        x = (x - np.min(x) + 0.01 * sd) / (np.max(x) - np.min(x) + 0.02 * sd)
     elif the_distn in ('rayleigh', 'exp', 'gamma'):
         if np.any(x < 0):
             return np.nan
