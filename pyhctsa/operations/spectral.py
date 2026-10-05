@@ -882,6 +882,10 @@ def spectral_summaries_phase(y: ArrayLike) -> dict:
 
     sc = scipy.fft.fft(y - np.mean(y), nfft)  # mean-subtracted, so the DC bin is (numerically) exactly zero
     sc = sc[:nfft // 2 + 1]  # single-sided
+    # Reference the phase to the centre of the series rather than the first sample. This
+    # removes a linear term of ~pi*N/NFFT per bin that would otherwise dominate the
+    # unwrapped phase (groupDelay ~ N/2 for any stationary series).
+    sc = sc * np.exp(1j * w * (ny - 1) / 2)
     mag = np.abs(sc)
     ph = np.angle(sc)
 
@@ -917,9 +921,9 @@ def spectral_summaries_phase(y: ArrayLike) -> dict:
     X = np.column_stack((np.ones(len(ww)), ww))
     XtW = X.T * wgt
     beta = np.linalg.solve(XtW @ X, XtW @ ph_unwrap)
-    out['groupDelay'] = -beta[1]
+    out['groupDelay'] = -beta[1] / ny  # relative to the series centre, as a fraction of its length
     resid = ph_unwrap - X @ beta
-    out['phaseLinearity'] = np.sqrt(np.sum(wgt * resid ** 2))
+    out['phaseLinearity'] = np.sqrt(np.sum(wgt * resid ** 2)) / np.sqrt(len(ww))
 
     # Magnitude-phase correlation
     out['magPhaseCorr'] = np.corrcoef(mag, ph)[0, 1]
