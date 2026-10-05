@@ -150,9 +150,13 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
         elif wtf == "range":
             y_dt = np.max(y_buff, axis=0) - np.min(y_buff, axis=0)
         elif wtf == 'std':
-            raise NotImplementedError(f"{wtf} not yet implemented.")
+            # standard deviation (N-1 normalization, as MATLAB's std) in each segment
+            y_dt = np.std(y_buff, axis=0, ddof=1)
         elif wtf == 'iqr':
-            raise NotImplementedError(f"{wtf} not yet implemented.")
+            # interquartile range in each segment, using MATLAB's quantile definition
+            # (piecewise-linear through the (i-0.5)/n points, i.e. Hazen's method)
+            q75, q25 = np.percentile(y_buff, [75, 25], axis=0, method='hazen')
+            y_dt = q75 - q25
         elif wtf == 'dfa':
             tt = np.arange(1, tau + 1).reshape(-1, 1)  # faux time range (column vector)
             for j in range(y_buff.shape[1]):
