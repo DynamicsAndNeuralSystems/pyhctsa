@@ -70,7 +70,10 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
     out['tri20'] = N/np.max(hist_counts20)
 
     # (sqrt samples) bins
-    edges_sqrt = bin_picker(x_min, x_max, int(np.ceil(np.sqrt(N))))
+    # (MATLAB's histcounts 'sqrt' rule: the bin *width* is range/ceil(sqrt(N)), rounded to a
+    # 'nice' value by binpicker, so the number of bins is not exactly ceil(sqrt(N)))
+    bin_width_sqrt = (x_max - x_min) / max(int(np.ceil(np.sqrt(N))), 1)
+    edges_sqrt = bin_picker(x_min, x_max, None, bin_width_sqrt)
     hist_counts_sqrt = histc(x, edges_sqrt)
     out['trisqrt'] = N/np.max(hist_counts_sqrt)
 
