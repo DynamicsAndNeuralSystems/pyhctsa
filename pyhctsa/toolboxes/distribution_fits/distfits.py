@@ -74,3 +74,27 @@ def evfit(x: np.ndarray) -> tuple:
     sigma = brentq(profile, lo, hi, xtol=1e-300, rtol=4 * np.finfo(float).eps)
     mu = xmax + sigma * np.log(np.mean(np.exp((x - xmax) / sigma)))
     return mu, sigma
+
+def gamfit(x: np.ndarray) -> tuple:
+    """Gamma-distribution fit matching MATLAB's gamfit; returns (shape, scale).
+
+    Maximum likelihood for strictly positive data. As in MATLAB, data
+    containing exact zeros (for which the likelihood is degenerate) fall back
+    to matching the mean and variance.
+    """
+    from scipy.stats import gamma as gamma_dist
+    if np.any(x == 0):
+        xbar = np.mean(x)
+        s2 = np.var(x, ddof=1)
+        return xbar ** 2 / s2, s2 / xbar
+    a, _, b = gamma_dist.fit(x, floc=0)
+    return a, b
+
+
+def wblfit(x: np.ndarray) -> tuple:
+    """Weibull-distribution MLE matching MATLAB's wblfit; returns (scale, shape).
+
+    The Weibull fit is the extreme-value fit to the log of the data.
+    """
+    mu, sigma = evfit(np.log(x))
+    return np.exp(mu), 1 / sigma

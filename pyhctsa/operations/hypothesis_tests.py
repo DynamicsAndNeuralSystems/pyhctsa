@@ -12,7 +12,7 @@ from statsmodels.sandbox.stats.runs import runstest_1samp
 from statsmodels.stats.descriptivestats import sign_test
 
 from ..utils import ljung_box_pvalue
-from ..toolboxes.distribution_fits.distfits import betafit, evfit
+from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
 
 def _fit_distribution_cdf(x: np.ndarray, the_distn: str) -> tuple:
     """Fit a distribution to data, MATLAB-style; return its CDF and parameter count."""
@@ -36,20 +36,14 @@ def _fit_distribution_cdf(x: np.ndarray, the_distn: str) -> tuple:
         mu = np.mean(x)
         return (lambda z: expon.cdf(z, scale=mu)), 1
     if the_distn == 'gamma':
-        if np.any(x == 0):
-            xbar = np.mean(x)
-            s2 = np.var(x, ddof=1)
-            a, b = xbar ** 2 / s2, s2 / xbar
-        else:
-            a, _, b = gamma_dist.fit(x, floc=0)
+        a, b = gamfit(x)
         return (lambda z: gamma_dist.cdf(z, a, scale=b)), 2
     if the_distn == 'logn':
         lx = np.log(x)
         mu, sigma = np.mean(lx), np.std(lx, ddof=1)
         return (lambda z: lognorm.cdf(z, s=sigma, scale=np.exp(mu))), 2
     if the_distn == 'wbl':
-        mu, sigma = evfit(np.log(x))
-        a, c = np.exp(mu), 1 / sigma
+        a, c = wblfit(x)
         return (lambda z: weibull_min.cdf(z, c, scale=a)), 2
     raise ValueError(f"Unknown distribution '{the_distn}'.")
 

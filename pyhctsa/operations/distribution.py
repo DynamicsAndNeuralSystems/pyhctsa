@@ -4,9 +4,13 @@ from typing import Dict, Union
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy import stats
-from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, uniform, skew, kurtosis
+from scipy.optimize import brentq
+from scipy.stats import beta as beta_dist
+from scipy.stats import gamma as gamma_dist
+from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, rayleigh, uniform, weibull_min, skew, kurtosis
 
 from ..operations.correlation import autocorr, first_crossing
+from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
 from ..utils import bin_picker, histc, matlab_quantile, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')
@@ -44,11 +48,21 @@ def cumulants(x: ArrayLike, cum_what_may: str = 'skew1') -> float:
 
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """
-    Fits a distribution to data.
+    Compares a fitted distribution with the smoothed distribution of the data.
 
-    Returns simple statistics on the discrepancy between the kernel-smoothed distribution
-    of the time-series values and the distribution fitted to it by some model:
-    Gaussian, Extreme Value, Uniform, Exponential, and LogNormal.
+    Fits a standard distribution to the data (by maximum likelihood) and compares it
+    with a kernel-smoothed estimate of the distribution of the values. ("KS" here
+    means kernel-smoothed, not Kolmogorov-Smirnov.) Both curves are evaluated on a
+    common grid of 1000 points that covers the smoothed distribution and the body
+    of the fitted distribution (out to where it falls to 1/100 of its peak). They
+    are then compared by the area between them, the separation of their peaks,
+    their overlap, and the relative entropy.
+
+    The exponential, Rayleigh and gamma distributions require non-negative values,
+    and the log-normal and Weibull distributions require positive values; NaN is
+    returned if the data do not satisfy this (and for a constant series in the
+    Rayleigh and exponential cases). For the beta distribution, the data are first
+    rescaled to lie inside (0, 1), and all outputs are then in rescaled units.
 
     Parameters
     ----------
@@ -56,19 +70,40 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         The input data vector.
     what_distn : str
         The type of distribution to fit to the data:
-            - 'norm': normal
+            - 'norm': Gaussian
             - 'ev': extreme value
             - 'uni': uniform
+            - 'beta': beta
+            - 'rayleigh': Rayleigh
             - 'exp': exponential
-            - 'logn': Log-Normal
+            - 'gamma': gamma
+            - 'logn': log-normal
+            - 'wbl': Weibull
 
     Returns
     -------
     dict
-        Includes the absolute area between the two distributions, the peak separation,
-        overlap integral, and relative entropy.
+        adiff: the absolute area between the two distributions (0 for a perfect
+        match, at most 2); peaksepy: the maximum of the fitted distribution minus
+        that of the smoothed distribution; peaksepx: the position of the peak of
+        the fitted distribution minus that of the smoothed distribution; olapint:
+        the overlap integral of the two distributions, multiplied by the standard
+        deviation of the data so that it does not depend on their scale; relent:
+        the relative entropy (Kullback-Leibler divergence), in nats, of the fitted
+        distribution from the smoothed distribution.
+
+    Notes
+    -----
+    adiff, olapint and relent do not depend on the scale of the data, but peaksepy
+    and peaksepx do.
     """
-    x = np.asarray(x)
+    x = np.asarray(x, dtype=float)
+    if what_distn not in ('norm', 'ev', 'uni', 'beta', 'rayleigh', 'exp', 'gamma', 'logn', 'wbl'):
+        raise ValueError(f"Unknown distribution: {what_distn}.")
+    if what_distn == 'beta':
+        # clumsily scale to the range (0,1)
+        sd = np.std(x, ddof=1)
+        x = (x - np.min(x) + 0.01 * sd) / (np.max(x) - np.min(x) + 0.02 * sd)
     n = len(x)
     x_step = np.std(x, ddof=1) / 100  # set a step size
 
@@ -91,29 +126,51 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     # ----------------------------
     # Fit distribution & find the support bounds over which to compare
     # ----------------------------
-    # Each branch defines the fitted PDF `pdf_func`, its peak value `peaky`, and
-    # the starting points for the left/right bound search. A left start of None
-    # pins the left bound at 0 (used by the positive-only distributions).
+    # Each branch defines the fitted PDF `pdf_func` and the threshold `thresh` at
+    # which to stop searching for the edges of the fitted distribution (1/100 of
+    # its peak). The left/right edges are then found either by stepping outwards
+    # from a starting point (`left_start`, `right_start`), or, for the positive-only
+    # distributions, by pinning the left edge at 0 (`left_start = None`) and
+    # walking the right tail from `tail_start`.
+    tail_start = None
     if what_distn == 'norm':
-        # Normal distribution
-        loc, scale = norm.fit(x)
+        # Normal distribution (normfit uses the unbiased standard deviation)
+        loc, scale = np.mean(x), np.std(x, ddof=1)
         pdf_func = lambda z: norm.pdf(z, loc=loc, scale=scale)
-        peaky = pdf_func(loc)
+        thresh = pdf_func(loc) / 100.0
         left_start = right_start = np.mean(x)
 
     elif what_distn == 'ev':
         # Extreme value (left Gumbel) distribution
-        loc, scale = gumbel_l.fit(x)
+        loc, scale = evfit(x)
         pdf_func = lambda z: gumbel_l.pdf(z, loc=loc, scale=scale)
-        peaky = pdf_func(loc)
+        thresh = pdf_func(loc) / 100.0
         left_start = right_start = loc
 
     elif what_distn == 'uni':
         # Uniform distribution (peak of PDF = 1 / (b - a))
         loc, scale = uniform.fit(x)
         pdf_func = lambda z: uniform.pdf(z, loc=loc, scale=scale)
-        peaky = pdf_func(np.mean(x))
+        thresh = pdf_func(np.mean(x)) / 100.0
         left_start = right_start = np.mean(x)
+
+    elif what_distn == 'beta':
+        a, b = betafit(x)
+        pdf_func = lambda z: beta_dist.pdf(z, a, b)
+        thresh = 1e-5  # ok -- consistent since all scaled to the same range
+        left_start = right_start = np.mean(x)
+
+    elif what_distn == 'rayleigh':
+        if np.any(x < 0):
+            logger.warning("The data are not positive, but Rayleigh is a positive-only distribution.")
+            return np.nan
+        if np.all(x == x[0]):
+            logger.warning("Data are a constant.")
+            return np.nan
+        scale = np.sqrt(np.mean(x ** 2) / 2)  # raylfit
+        pdf_func = lambda z: rayleigh.pdf(z, scale=scale)
+        thresh = pdf_func(scale) / 100.0  # peak is at the scale parameter
+        left_start, tail_start = None, scale
 
     elif what_distn == 'exp':
         if np.any(x < 0):
@@ -123,30 +180,51 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
             logger.warning("Data are a constant.")
             return np.nan
         # Exponential distribution (equivalent to MATLAB's expfit); peak is at 0
-        _, lam = expon.fit(x, floc=0)  # force support at 0
+        lam = np.mean(x)
         pdf_func = lambda z: expon.pdf(z, loc=0, scale=lam)
-        peaky = pdf_func(0)
-        left_start, right_start = None, 0.0
+        thresh = pdf_func(0) / 100.0
+        left_start, tail_start = None, 0.0
+
+    elif what_distn == 'gamma':
+        if np.any(x < 0):
+            logger.warning("The data contains negative values, but Gamma is a positive-only distribution.")
+            return np.nan
+        a, b = gamfit(x)
+        pdf_func = lambda z: gamma_dist.pdf(z, a, scale=b)
+        if a < 1:
+            thresh = pdf_func(0.0) / 100.0  # unbounded at 0
+        else:
+            thresh = pdf_func((a - 1) * b) / 100.0
+        left_start, tail_start = None, a * b
 
     elif what_distn == 'logn':
         if np.any(x <= 0):
             logger.warning("The data are not positive, but Log-Normal is a positive-only distribution.")
             return np.nan
-        # Log-normal distribution; peak is at the mode
-        sigma, _, scale = lognorm.fit(x, floc=0)  # sigma, 0, exp(mu)
-        mu = np.log(scale)
+        # Log-normal distribution (lognfit uses the unbiased std of log(x)); peak is at the mode
+        lx = np.log(x)
+        mu, sigma = np.mean(lx), np.std(lx, ddof=1)
         mode = np.exp(mu - sigma ** 2)
         pdf_func = lambda z: lognorm.pdf(z, s=sigma, loc=0, scale=np.exp(mu))
-        peaky = pdf_func(mode)
-        left_start, right_start = None, mode
+        thresh = pdf_func(mode) / 100.0
+        left_start, tail_start = None, mode
 
+    else:  # 'wbl'
+        if np.any(x <= 0):
+            logger.warning("The data are not positive, but Weibull is a positive-only distribution.")
+            return np.nan
+        a, c = wblfit(x)  # scale, shape
+        pdf_func = lambda z: weibull_min.pdf(z, c, scale=a)
+        if c <= 1:
+            thresh = pdf_func(0.0)
+        else:
+            thresh = pdf_func(a * ((c - 1) / c) ** (1 / c)) / 100.0
+        left_start, tail_start = None, 0.0
+
+    if tail_start is None:
+        xf = _find_bounds(pdf_func, left_start, right_start, x_step, thresh)
     else:
-        raise ValueError(f"Unknown distribution: {what_distn}.")
-
-    thresh = peaky / 100.0  # stop expanding when the PDF drops to 1/100 of its peak
-    xf = _find_bounds(pdf_func, left_start, right_start, x_step, thresh)
-    if xf[0] is None:  # positive-only distributions pin the left bound at 0
-        xf[0] = 0.0
+        xf = [0.0, _walk_tail(pdf_func, tail_start, x_step, thresh)]
 
     # ----------------------------
     # Estimate smoothed empirical distribution
@@ -183,7 +261,8 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     i1 = np.argmax(f)
     i2 = np.argmax(ffit)
     out['peaksepx'] = xi[i2] - xi[i1]
-    # OLAPINT: overlap integral between the two curves; normalized by variance
+    # OLAPINT: overlap integral between the two curves; multiplying by std(x) makes
+    # this scale-invariant
     out['olapint'] = np.sum(f * ffit * dx) * np.std(x, ddof=1)
     # RELENT: relative entropy of the two distributions
     r = (ffit > 0) & (f > 0)  # skip points where either density is zero (0*log(0) := 0)
@@ -210,6 +289,46 @@ def _find_bounds(pdf_func, start_left, start_right, x_step, thresh):
         ange = pdf_func(xf[1])
 
     return xf
+
+
+def _walk_tail(pdf_func, x_start, x_step, thresh):
+    """First grid point x_start + k*x_step (k >= 1) at which a unimodal pdf has fallen to
+    <= thresh: what stepping outward from x_start would return, but found by
+    bracketing the tail crossing and root-finding, then snapping to the grid. The
+    stepping form needs ~100*(scale/std(x)) pdf evaluations, which is effectively
+    unbounded for near-constant positive-valued data."""
+    if not (10 > thresh):  # replicate the stepping loop's initial ange = 10 sentinel
+        return x_start  # (e.g., thresh = inf for a gamma with shape < 1)
+
+    # The pdf may still be rising over the first step (e.g., a Weibull/gamma with
+    # shape > 1 walked from 0), in which case the stepping loop stops immediately:
+    x_end = x_start + x_step
+    if not (pdf_func(x_end) > thresh):
+        return x_end
+
+    # Bracket the tail crossing by doubling the distance from x_start
+    lo = x_end
+    stride = max(x_step, abs(x_start) + x_step)
+    hi = lo + stride
+    num_doublings = 0
+    while pdf_func(hi) > thresh:
+        stride *= 2
+        hi = lo + stride
+        num_doublings += 1
+        if num_doublings > 200 or not np.isfinite(hi):
+            raise RuntimeError('Could not bracket the tail of the fitted distribution')
+    x_cross = brentq(lambda z: pdf_func(z) - thresh, lo, hi, xtol=1e-300, rtol=4 * np.finfo(float).eps)
+
+    # Snap to the stepping grid, then correct for any floating-point boundary
+    # ambiguity so the result satisfies the loop's own stopping condition
+    # (pdf > thresh at k-1, pdf <= thresh at k):
+    k = max(1, int(np.ceil((x_cross - x_start) / x_step)))
+    while k > 1 and not (pdf_func(x_start + (k - 1) * x_step) > thresh):
+        k -= 1
+    while pdf_func(x_start + k * x_step) > thresh:
+        k += 1
+    return x_start + k * x_step
+
 
 def withinp(x: ArrayLike, p: float = 1.0, mean_or_median: str = 'mean') -> float:
     """
