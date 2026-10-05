@@ -1634,3 +1634,1415 @@ def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
                               / np.sqrt(np.sum(w*c_lead**2)*np.sum(w*resid**2)))
 
     return out
+
+# ------------------------------------------------------------------------------
+# Recurrence- and embedding-based operations (NL_RecurrenceTimes, NL_RQA, ...)
+# ------------------------------------------------------------------------------
+# (the imports for this block sit here, rather than at the top of the module, only to
+# keep the block self-contained)
+import warnings
+
+from numba import njit
+from scipy.spatial.distance import pdist, squareform
+from sklearn.neighbors import KDTree
+
+from ..utils import _linspace, _ml_randperm, _round_half_away, bin_picker
+
+
+@njit(cache=True)
+def _fnn_nearest(s, delay, max_emb, theiler):
+    """
+    For each query point and each embedding dimension 1..max_emb, the nearest neighbor
+    (max-norm, non-zero distance, outside the Theiler window) among the candidate points,
+    as TISEAN's ``false_nearest`` finds it, and whether the minimum distance is shared by
+    several candidates (a tie).
+    """
+    n_len = s.size
+    n_query = n_len - max_emb * delay
+    n_cand = n_len - (max_emb + 1) * delay
+    best = np.full((n_query, max_emb), 1.1)
+    which = np.full((n_query, max_emb), -1, dtype=np.int64)
+    tied = np.zeros((n_query, max_emb), dtype=np.bool_)
+    for n in range(n_query):
+        for e in range(n_cand):
+            if abs(e - n) <= theiler:
+                continue
+            mx = 0.0
+            for d in range(max_emb):
+                dx = abs(s[n + d] - s[e + d])
+                if dx > mx:
+                    mx = dx
+                if mx > 0.0:
+                    if mx < best[n, d]:
+                        best[n, d] = mx
+                        which[n, d] = e
+                        tied[n, d] = False
+                    elif mx == best[n, d]:
+                        tied[n, d] = True
+    return best, which, tied
+
+
+def _fnn_break_ties(s, best, which, tied, delay, max_emb, theiler, eps_grid):
+    """
+    Among tied nearest neighbors, pick the one TISEAN's box search meets first: it scans the
+    3x3 boxes (of side epsilon, in the first and the last coordinate) around the point in
+    order, and each box's points from the latest to the earliest, keeping the first minimum.
+    """
+    n_cand = s.size - (max_emb + 1) * delay
+    cand = np.arange(n_cand)
+    for n, d in zip(*np.nonzero(tied)):
+        mx = np.zeros(n_cand)
+        for k in range(d + 1):
+            mx = np.maximum(mx, np.abs(s[n + k] - s[cand + k]))
+        ties = cand[(mx == best[n, d]) & (np.abs(cand - n) > theiler)]
+        eps = eps_grid[min(np.searchsorted(eps_grid, best[n, d]), len(eps_grid) - 1)]
+        cx, cy = (s[ties] / eps).astype(np.int64) & 1023, (s[ties + d] / eps).astype(np.int64) & 1023
+        x, y = int(s[n] / eps) & 1023, int(s[n + d] / eps) & 1023
+        da, db = (cx - x + 1) & 1023, (cy - y + 1) & 1023  # offset + 1, if within the 3x3 boxes
+        visible = (da <= 2) & (db <= 2)
+        if visible.any():
+            ties, da, db = ties[visible], da[visible], db[visible]
+            which[n, d] = ties[np.lexsort((-ties, db, da))[0]]
+
+
+def _false_nearest(y: ArrayLike, delay: int = 1, max_dim: int = 10, theiler: int = 0,
+                   escape_factor: float = 2.0) -> Union[dict, None]:
+    """
+    Fraction of false nearest neighbors by embedding dimension (TISEAN's ``false_nearest``,
+    as called by hctsa's NL_FNN with ``-m1 -M1,max_dim``).
+
+    A nearest neighbor (max-norm, outside the Theiler window) of an embedded point is false
+    when, after adding the next coordinate, the distance to it grows by more than a factor
+    ``escape_factor``. The series is rescaled to [0, 1] and, as in hctsa, written to TISEAN
+    to 7 significant digits.
+
+    Returns a dictionary of arrays over the embedding dimensions TISEAN reports (``dim``,
+    ``pfnn``, ``nhood`` (mean size of the neighborhoods) and ``nhood_std``), or ``None`` when
+    TISEAN gives no output (constant or too-short series, or no neighbor within range at
+    the first dimension). TISEAN stops at the first dimension for which no neighbor is
+    found, keeping the dimensions before it.
+    """
+    y = _tisean._round_significant(np.asarray(y, dtype=float).ravel(), 7)
+    n_len = y.size
+    delay, max_dim, theiler = int(delay), int(max_dim), int(theiler)
+    if (max_dim + 1) * delay >= n_len:
+        return None
+    lo, hi = y.min(), y.max()
+    interval = hi - lo
+    if interval == 0:
+        return None
+    s = (y - lo) / interval
+    varianz = np.sqrt(np.abs(np.mean(s * s) - np.mean(s) ** 2))
+
+    best, which, tied = _fnn_nearest(s, delay, max_dim, theiler)
+    # TISEAN's grid of neighborhood sizes: 1e-5, increased by sqrt(2) up to 2*varianz/escape_factor
+    eps_grid = [1e-5]
+    while eps_grid[-1] < 2 * varianz / escape_factor:
+        eps_grid.append(eps_grid[-1] * np.sqrt(2.0))
+    _fnn_break_ties(s, best, which, tied, delay, max_dim, theiler, np.array(eps_grid))
+    rows = {'dim': [], 'pfnn': [], 'nhood': [], 'nhood_std': []}
+    for emb in range(1, max_dim + 1):
+        mindx, nbr = best[:, emb - 1], which[:, emb - 1]
+        found = (nbr >= 0) & (mindx <= varianz / escape_factor)
+        n_found = int(found.sum())
+        if n_found == 0:
+            break  # TISEAN: "Not enough points found!"
+        q = np.flatnonzero(found)
+        factor = np.abs(s[q + emb] - s[nbr[q] + emb]) / mindx[q]
+        rows['dim'].append(emb)
+        rows['pfnn'].append(_tisean._e(np.count_nonzero(factor > escape_factor) / n_found))
+        rows['nhood'].append(_tisean._e(np.mean(mindx[q]) * interval))
+        rows['nhood_std'].append(_tisean._e(np.sqrt(np.mean(mindx[q] ** 2)) * interval))
+    if not rows['dim']:
+        return None
+    return {k: np.array(v) for k, v in rows.items()}
+
+
+def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.4) -> Union[int, float]:
+    """
+    Embedding dimension by false nearest neighbors, as hctsa's ``BF_Embed(y, tau, 'fnn')``:
+    the first dimension (of 1 to 10) at which the fraction of false nearest neighbors falls
+    below `threshold` (TISEAN's ``false_nearest`` with a Theiler window of one
+    autocorrelation time and an escape factor of 5), or one more than the largest
+    dimension TISEAN reports if it never does. NaN when it cannot be determined.
+    """
+    if y.size < 10:
+        logger.warning(f'Time series (N={y.size}) too short for fnn')
+        return np.nan
+    theiler = theiler_window(y, ('ac', 1), y.size)
+    if np.isnan(theiler):
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    res = _false_nearest(y, tau, 10, int(theiler), 5.0)
+    if res is None:
+        logger.warning('TISEAN false_nearest produced no usable output for this data')
+        return np.nan
+    below = np.flatnonzero(res['pfnn'] < threshold)
+    return int(res['dim'][below[0]]) if below.size else int(res['dim'][-1]) + 1
+
+
+def _embedding_params(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
+                      ) -> Union[tuple, None]:
+    """
+    The time delay and embedding dimension, as hctsa's ``BF_Embed(y, tau, m, true)``.
+
+    `tau` is an integer or a rule understood by :func:`pyhctsa.utils.get_tau`. `m` is an
+    integer, ``'fnn'`` (false nearest neighbors, threshold 0.4), or ``('fnn', threshold)``.
+    Returns ``(tau, m)``, or None if either cannot be determined.
+    """
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        logger.warning('Could not determine the time delay for the embedding')
+        return None
+    tau = int(tau)
+    if isinstance(m, (list, tuple)):
+        m = m[0] if len(m) == 1 else m
+    if isinstance(m, (list, tuple)) or isinstance(m, str):
+        if (m if isinstance(m, str) else m[0]) != 'fnn':
+            raise ValueError(f"Embedding dimension, m, incorrectly specified: {m!r}")
+        m = _fnn_embedding_dim(y, tau, 0.4 if isinstance(m, str) else m[1])
+        if np.isnan(m):
+            return None
+    return tau, int(m)
+
+
+def _bf_embed(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
+              ) -> Union[np.ndarray, None]:
+    """
+    Time-delay embedding with hctsa's ``BF_Embed(y, tau, m, false)``: the embedded points as
+    rows (see :func:`_embedding_params` for `tau` and `m`), or None when it fails
+    (undetermined parameters, or a time series too short).
+    """
+    params = _embedding_params(y, tau, m)
+    if params is None:
+        return None
+    try:
+        return time_delay_embed(y, params[1], params[0])
+    except ValueError as e:
+        logger.warning(str(e))
+        return None
+
+
+def _random_subset(n: int, k: int, random_seed: Union[int, str, None]) -> np.ndarray:
+    """
+    ``k`` of ``n`` indices (from zero) in random order, from the Mersenne Twister seeded as
+    hctsa's ``BF_ResetSeed`` (an integer seed, ``'default'`` for seed 0, or ``None``/``'none'``
+    for an unseeded stream).
+    """
+    if random_seed is None or random_seed == 'none':
+        rng = np.random.RandomState()
+    else:
+        rng = _ml_rng(0 if random_seed == 'default' else int(random_seed))
+    return _ml_randperm(n, rng)[:k] - 1
+
+
+def _recurrence_radius(Y: np.ndarray, rr: float, random_seed: Union[int, str, None]) -> float:
+    """
+    Neighborhood radius giving the target recurrence rate `rr`: its quantile of the pairwise
+    distances between (at most) 500 randomly chosen embedded points.
+    """
+    n_emb = Y.shape[0]
+    sub = _random_subset(n_emb, min(500, n_emb), random_seed)
+    return float(matlab_quantile(pdist(Y[sub]), rr)[0])
+
+
+def _recurrent_pairs(Y: np.ndarray, radius: float) -> tuple:
+    """All ordered pairs (src, dst) of embedded points within `radius` (Euclidean) of each other."""
+    # (the tree search is padded, then squared distances compared with the squared radius, as
+    # MATLAB's rangesearch does, so that pairs lying exactly at the radius -- common for
+    # quantized data -- are counted consistently)
+    nbrs = KDTree(Y).query_radius(Y, radius * (1 + 1e-9))
+    src = np.repeat(np.arange(Y.shape[0]), [nb.size for nb in nbrs])
+    dst = np.concatenate(nbrs)
+    keep = np.sum((Y[src] - Y[dst]) ** 2, axis=1) <= radius ** 2
+    return src[keep], dst[keep]
+
+
+def _check_max_n(y: np.ndarray, max_n: Union[int, str], what: str) -> np.ndarray:
+    """Crop the series to its first `max_n` samples (``'full'`` for no cropping)."""
+    if isinstance(max_n, str):
+        if max_n != 'full':
+            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
+    elif y.size > max_n:
+        logger.warning(f'Time series ({y.size} > {max_n}) is too long for {what}. '
+                       f'Analyzing the first {int(max_n)} samples')
+        y = y[:int(max_n)]
+    return y
+
+
+def _line_lengths(group: np.ndarray, pos: np.ndarray, min_len: int) -> np.ndarray:
+    """
+    Lengths (at least `min_len`) of the runs of consecutive `pos` values within each `group`
+    (e.g. diagonal offset or column of a recurrence plot).
+    """
+    order = np.lexsort((pos, group))
+    group, pos = group[order], pos[order]
+    new_run = np.ones(group.size, dtype=bool)
+    new_run[1:] = (group[1:] != group[:-1]) | (pos[1:] - pos[:-1] != 1)
+    run_len = np.diff(np.append(np.flatnonzero(new_run), group.size))
+    return run_len[run_len >= min_len]
+
+
+def _recurrence_time_stats(Y: np.ndarray, radius: float, theiler: int) -> tuple:
+    """
+    Mean recurrence time and modal probability mass of the white vertical line lengths of
+    the recurrence plot of `Y` (hctsa's ``SUB_recurrenceTimeStats``).
+
+    For each point, the number of non-recurrent points between successive recurrent points
+    (neighbors within `radius`, outside the Theiler window; the edges of the Theiler band
+    count as recurrent, and the neighbors before and after the point are differenced
+    separately) are pooled over all points.
+    """
+    n = Y.shape[0]
+    src, dst = _recurrent_pairs(Y, radius)
+    keep = np.abs(dst - src) > theiler  # excludes the Theiler window (and the point itself)
+    src, dst = src[keep], dst[keep]
+    j = np.arange(n)
+    # the band edges act as recurrent points, so that lines start at the edge of the band
+    left, right = j[j - theiler >= 0], j[j + theiler <= n - 1]
+    before = np.concatenate([np.column_stack((src[dst < src], dst[dst < src])),
+                             np.column_stack((left, left - theiler))])
+    after = np.concatenate([np.column_stack((src[dst > src], dst[dst > src])),
+                            np.column_stack((right, right + theiler))])
+    w = []
+    for pairs in (before, after):
+        pairs = pairs[np.lexsort((pairs[:, 1], pairs[:, 0]))]
+        same = pairs[1:, 0] == pairs[:-1, 0]
+        w.append(np.diff(pairs[:, 1])[same] - 1)
+    w = np.concatenate(w)
+    w = w[w >= 1]  # (drops the zero-length "lines" between consecutive recurrent points)
+    if w.size == 0:
+        return np.nan, np.nan
+    return float(np.mean(w)), float(np.bincount(w).max() / w.size)
+
+
+def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] = 3,
+                     theiler_win: Union[int, float, list, tuple] = ('ac', 1), rr: float = 0.1,
+                     num_segments: int = 4, max_n: Union[int, str] = 10000,
+                     random_seed: Union[int, str, None] = 'default') -> dict:
+    """
+    Recurrence-time statistics from a recurrence plot.
+
+    Embeds the series in a time-delay space and finds, for each embedded point, the times
+    at which the trajectory returns to its neighborhood: the lengths of the white vertical
+    lines of the recurrence plot (the numbers of non-recurrent points between successive
+    recurrent points), cf. [1]. This is the distribution of the times between recurrences
+    to a given neighborhood, rather than the black line-length statistics of
+    :func:`rqa`. Quasi-periodic dynamics on a torus return at a few distinct times, so the
+    distribution of recurrence times has a few sharp peaks, whereas strange nonchaotic
+    attractors have a more broadly distributed (and segment-to-segment more variable)
+    set of recurrence times.
+
+    The neighborhood radius is set once, from the full embedded series, to the `rr`-quantile
+    of a random subsample of pairwise distances; the same radius is then reused for every
+    segment, so that segment-to-segment differences reflect the dynamics rather than a
+    re-calibrated threshold. The Theiler band around each point counts as recurrent, so
+    that no white line spans the excluded band.
+
+    References
+    ----------
+    .. [1] Ngamga, E.J., Nandi, A., Ramaswamy, R., Romano, M.C., Thiel, M. and Kurths, J.
+        "Recurrence-time distributions in strange nonchaotic systems", Phys. Rev. E
+        75, 036222 (2007).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tau : int or str, optional
+        The time delay for the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'`` or ``'mi'``). Default is 1.
+    m : int, str or tuple, optional
+        The embedding dimension: an integer, or ``'fnn'`` to choose it by false nearest
+        neighbors (TISEAN's ``false_nearest``, as hctsa's ``BF_Embed``). Default is 3.
+    theiler_win : int, float or ``['ac', k]``, optional
+        The Theiler window excluding temporally-correlated neighbors (see
+        :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k`` times the first
+        zero-crossing of the autocorrelation function, or a number of samples. Narrowed
+        to ``Nemb // 5`` for short series. Default is ``['ac', 1]``.
+    rr : float, optional
+        The target recurrence rate used to set the neighborhood radius. Default is 0.1.
+    num_segments : int, optional
+        The embedded trajectory is divided into this many contiguous, non-overlapping
+        segments, and the mean recurrence time and modal probability are recomputed
+        independently within each; their variance across segments is the paper's diagnostic
+        for the torus-to-SNA transition. Each segment needs at least 50 embedded points,
+        otherwise the variance outputs (but not the full-series ``T_MRT``/``N_MPRT``) are
+        NaN. Default is 4.
+    max_n : int or 'full', optional
+        The maximum number of samples to consider (the first ``max_n``); ``'full'`` to
+        disable cropping. Default is 10000.
+    random_seed : int, str or None, optional
+        The seed of the Mersenne Twister for the random subsample used to set the radius, as
+        hctsa's ``BF_ResetSeed``: an integer, ``'default'`` (seed 0), or ``None``/``'none'``
+        (unseeded). The radius is the same as hctsa's only when there are at most 500 embedded
+        points (the subsample is then the whole series): MATLAB's ``randperm(n, k)`` draws a
+        different random subset from the same seed. Default is ``'default'``.
+
+    Returns
+    -------
+    dict or float
+        NaN if the embedding or Theiler window cannot be determined, or the embedded series is
+        too short (under 50 points) or degenerate (zero radius). Otherwise:
+
+        - ``T_MRT``: the mean recurrence time of the full series (the mean white-line length)
+        - ``N_MPRT``: the modal recurrence-time probability mass of the full series: the
+          fraction of all recurrence-time samples taking the single most common value (the
+          paper's raw count, normalized so that it does not scale with series length)
+        - ``T_MRT_var``, ``N_MPRT_var``: the variance of ``T_MRT`` and of ``N_MPRT`` across
+          the ``num_segments`` segments
+    """
+    y = _check_max_n(np.asarray(y, dtype=float).ravel(), max_n, 'recurrence-time analysis')
+
+    Y = _bf_embed(y, tau, m)
+    if Y is None:
+        logger.warning('Embedding failed')
+        return np.nan
+    n_emb = Y.shape[0]
+
+    theiler = theiler_window(y, theiler_win, n_emb)
+    if np.isnan(theiler):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    theiler = min(int(theiler), n_emb // 5)  # narrowed for short series
+    if n_emb < 50:
+        logger.warning(f'Time series too short for meaningful recurrence-time statistics '
+                       f'(Nemb = {n_emb}, theilerWin = {theiler})')
+        return np.nan
+
+    radius = _recurrence_radius(Y, rr, random_seed)
+    if not radius > 0:
+        logger.warning('Degenerate neighborhood radius (data may be too degenerate/short)')
+        return np.nan
+
+    out = {}
+    out['T_MRT'], out['N_MPRT'] = _recurrence_time_stats(Y, radius, theiler)
+    out['T_MRT_var'] = out['N_MPRT_var'] = np.nan
+    if np.isnan(out['T_MRT']):
+        logger.warning('No recurrence-time samples found outside the Theiler window -- radius too small?')
+        out['N_MPRT'] = np.nan
+        return out
+
+    # Variance across independent, contiguous segments (with the same global radius)
+    seg_len = n_emb // num_segments
+    if seg_len < 50:  # too short for a meaningful within-segment estimate
+        return out
+    theiler_seg = min(theiler, seg_len // 5)
+    stats = np.array([_recurrence_time_stats(Y[s * seg_len:(s + 1) * seg_len], radius, theiler_seg)
+                      for s in range(num_segments)])
+    if not np.any(np.isnan(stats[:, 0])):
+        out['T_MRT_var'] = float(np.var(stats[:, 0], ddof=1))
+        out['N_MPRT_var'] = float(np.var(stats[:, 1], ddof=1))
+    return out
+
+
+def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] = 3,
+        theiler_win: Union[int, float, list, tuple] = ('ac', 1), rr: float = 0.1,
+        lmin: int = 2, vmin: int = 2, max_n: Union[int, str] = 10000,
+        random_seed: Union[int, str, None] = 'default') -> dict:
+    """
+    Recurrence quantification analysis (RQA) of the delay-embedded series.
+
+    Embeds the time series in an `m`-dimensional delay space and computes standard recurrence
+    quantification measures from the resulting recurrence plot [1]: recurrence rate,
+    determinism, laminarity, trapping time, and related diagonal and vertical line-length
+    statistics. Two embedded states are recurrent if they lie within a radius of each other;
+    the radius is set to give a target recurrence rate ``rr``. Pairs closer in time than the
+    Theiler window are excluded.
+
+    Neighbors are found with a KD-tree rather than by forming the full N x N distance
+    matrix, and the line-length statistics are computed directly from the list of recurrent
+    pairs. The number of recurrent pairs is itself about ``rr * N**2``, so run time grows
+    roughly quadratically with N at fixed ``rr`` (hence the ``max_n`` cap).
+
+    References
+    ----------
+    .. [1] N. Marwan, M. C. Romano, M. Thiel and J. Kurths, "Recurrence plots for the analysis
+        of complex systems", Phys. Rep. 438, 237 (2007).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tau : int or str, optional
+        The time delay for the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'`` or ``'mi'``). Default is 1.
+    m : int, str or tuple, optional
+        The embedding dimension: an integer, or ``'fnn'`` to choose it by false nearest
+        neighbors (TISEAN's ``false_nearest``, as hctsa's ``BF_Embed``). Default is 3.
+    theiler_win : int, float or ``['ac', k]``, optional
+        The Theiler window excluding temporally-correlated neighbors from the main diagonal
+        (see :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k`` times the first
+        zero-crossing of the autocorrelation function, or a number of samples. Default is
+        ``['ac', 1]``.
+    rr : float, optional
+        The target recurrence rate used to set the neighborhood radius: the radius is the
+        ``rr``-quantile of a random subsample of pairwise distances in the embedded space
+        (standard RQA practice, to fix the recurrence rate for comparability across
+        series). Default is 0.1.
+    lmin : int, optional
+        The minimum diagonal line length counted toward determinism and the line-length
+        entropy. Default is 2.
+    vmin : int, optional
+        The minimum vertical line length counted toward laminarity and trapping time.
+        Default is 2.
+    max_n : int or 'full', optional
+        The maximum number of samples to consider: longer series are reduced to their first
+        ``max_n`` points, since the number of recurrent pairs grows as ``rr * N**2``.
+        ``'full'`` disables cropping (a warning is logged above N = 20000). Default is 10000.
+    random_seed : int, str or None, optional
+        The seed of the Mersenne Twister for the random subsample used to set the radius, as
+        hctsa's ``BF_ResetSeed``: an integer, ``'default'`` (seed 0), or ``None``/``'none'``
+        (unseeded). The subsample is the whole series (so the radius is exactly hctsa's)
+        up to 500 embedded points; beyond that MATLAB's ``randperm(n, k)`` draws a different
+        random subset from the same seed. Default is ``'default'``.
+
+    Returns
+    -------
+    dict or float
+        NaN if the embedding or Theiler window cannot be determined, the series is too short
+        (fewer than 50 embedded points, or no more than four Theiler windows), the radius is
+        degenerate, or no points recur outside the Theiler window. Otherwise:
+
+        - ``RR``: recurrence rate, the proportion of pairs outside the Theiler window that
+          are recurrent
+        - ``DET``: determinism, the proportion of recurrent points on diagonal lines of
+          length at least ``lmin``
+        - ``L_mean``, ``L_max``: mean and maximum diagonal line length (lines of length at
+          least ``lmin``)
+        - ``L_entr``: Shannon entropy (nats) of the distribution of diagonal line lengths
+        - ``DIV``: divergence, ``1 / L_max``
+        - ``LAM``: laminarity, the proportion of recurrent points on vertical lines of length
+          at least ``vmin``
+        - ``TT``: trapping time, the mean vertical line length (lines of length at least
+          ``vmin``)
+        - ``V_max``: the maximum vertical line length
+
+        If there are no diagonal lines, ``DET = 0``, ``L_mean = NaN``, ``L_max = 0``,
+        ``L_entr = 0`` and ``DIV = inf``; if there are no vertical lines, ``LAM = 0``,
+        ``TT = NaN`` and ``V_max = 0``.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if isinstance(max_n, str) and max_n == 'full' and y.size > 20000:
+        logger.warning(f"Time series ({y.size} samples) exceeds 20000 with max_n='full'; RQA "
+                       "computation may be slow (recurrent pairs grow as rr*N^2)")
+    y = _check_max_n(y, max_n, 'RQA at this recurrence rate')
+
+    Y = _bf_embed(y, tau, m)
+    if Y is None:
+        logger.warning('Embedding failed')
+        return np.nan
+    n_emb = Y.shape[0]
+
+    theiler = theiler_window(y, theiler_win, n_emb)
+    if np.isnan(theiler):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    theiler = int(theiler)
+    if n_emb < 50 or n_emb <= 4 * theiler:
+        logger.warning(f'Time series too short for a meaningful RQA (Nemb = {n_emb}, theilerWin = {theiler})')
+        return np.nan
+
+    radius = _recurrence_radius(Y, rr, random_seed)
+    if not radius > 0:
+        logger.warning('Degenerate neighborhood radius (data may be too degenerate/short)')
+        return np.nan
+
+    # All recurrent pairs outside the Theiler window (which includes the trivial diagonal)
+    src, dst = _recurrent_pairs(Y, radius)
+    keep = np.abs(src - dst) > theiler
+    src, dst = src[keep], dst[keep]
+    if src.size == 0:
+        logger.warning('No recurrent points found outside the Theiler window -- radius too small?')
+        return np.nan
+
+    out = {}
+    # Recurrence rate: the fraction of the recurrence matrix outside the Theiler band
+    # that is recurrent
+    excluded_band = (2 * theiler + 1) * n_emb - theiler * (theiler + 1)
+    out['RR'] = src.size / (n_emb ** 2 - excluded_band)
+
+    # Diagonal line lengths, from the upper triangle only (the matrix is symmetric)
+    upper = dst > src
+    diag_lengths = _line_lengths(dst[upper] - src[upper], src[upper], lmin)
+    if diag_lengths.size == 0:
+        out['DET'], out['L_mean'], out['L_max'], out['L_entr'], out['DIV'] = 0.0, np.nan, 0, 0.0, np.inf
+    else:
+        out['DET'] = diag_lengths.sum() / upper.sum()
+        out['L_mean'] = diag_lengths.mean()
+        out['L_max'] = diag_lengths.max()
+        out['DIV'] = 1 / out['L_max']
+        counts = np.bincount(diag_lengths)
+        p = counts[counts > 0] / diag_lengths.size
+        out['L_entr'] = -np.sum(p * np.log(p))
+
+    # Vertical line lengths, from the full band-excluded matrix, grouping recurrent points by column
+    vert_lengths = _line_lengths(dst, src, vmin)
+    if vert_lengths.size == 0:
+        out['LAM'], out['TT'], out['V_max'] = 0.0, np.nan, 0
+    else:
+        out['LAM'] = vert_lengths.sum() / src.size
+        out['TT'] = vert_lengths.mean()
+        out['V_max'] = vert_lengths.max()
+
+    return out
+
+
+def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100,
+                past: Union[int, float, list, tuple] = ('ac', 1), nref: int = -1,
+                embed_params: Union[list, tuple] = ('ac', 'fnn')) -> dict:
+    """
+    Analysis of the histogram of return times.
+
+    Return times are the times taken for the time series to return to a similar location in
+    phase space from a given reference point. Strong peaks in the histogram indicate
+    periodicities in the data.
+
+    For each reference point in the embedding space, its ``nnr`` nearest neighbors are found
+    (excluding a Theiler window of ``past`` samples either side), and the time offset ``T`` of
+    each neighbor from the reference point is recorded. The histogram of these offsets over
+    the ``num_lags`` lags beyond the Theiler window, ``T = past + 1, ..., past + num_lags``
+    (the "return-time profile"), is analyzed. This follows TSTOOL's ``return_time``
+    (which hctsa previously called), with one change: each lag's count is divided by its
+    expected count if neighbors were placed at random among the valid (Theiler-excluded)
+    candidates, rather than by TSTOOL's ``2 * nnr * (N - T)``, so that the profile is about 1
+    at every lag for an uncorrelated process at any series length (TSTOOL's normalization
+    scaled as 1/N). Values above 1 mark lags at which the trajectory preferentially returns
+    to its neighborhood. The profile is closely related to the tau-recurrence rate of
+    recurrence quantification analysis, with neighborhoods holding a fixed proportion of
+    points rather than having a fixed radius. (For the distribution of *first* return times to
+    a neighborhood, see :func:`recurrence_times`.)
+
+    References
+    ----------
+    .. [1] N. Marwan, M. C. Romano, M. Thiel and J. Kurths, "Recurrence plots for the analysis
+        of complex systems", Phys. Rep. 438, 237 (2007) (recurrence quantification analysis).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    nnr : int or float, optional
+        The number of nearest neighbors, or, if in (0, 1), a proportion of the number of
+        embedded points (keeping neighborhoods the same size in probability as the series
+        length changes). Default is 0.01.
+    num_lags : int, optional
+        The number of lags beyond the Theiler window to analyze, in samples (at least 2).
+        Default is 100.
+    past : int, float or ``['ac', k]``, optional
+        The Theiler window, excluding neighbors that are close only because they are close in
+        time (see :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k`` times the first
+        zero-crossing of the autocorrelation function, or a number of samples.
+        Default is ``['ac', 1]``.
+    nref : int, optional
+        The number of reference points, spaced evenly through the series (-1 uses all
+        points). A fixed number keeps the number of neighbors counted at each lag, and so the
+        sampling noise of the histogram, independent of the series length (neighbors are still
+        sought among all points). Default is -1.
+    embed_params : list or tuple, optional
+        The embedding, as ``(tau, m)``: the time delay (an integer or a rule understood by
+        :func:`pyhctsa.utils.get_tau`) and the embedding dimension (an integer, or ``'fnn'``
+        for false nearest neighbors). Default is ``('ac', 'fnn')``.
+
+    Returns
+    -------
+    dict or float
+        NaN if the Theiler window or embedding cannot be determined, or the series is too short
+        (fewer embedded points than twice the largest lag, or than ``nnr`` plus two Theiler
+        windows). Otherwise measures of the return-time profile (the neighbor count at each lag
+        relative to chance), and of the histogram of its values:
+
+        - ``max``, ``std``, ``iqr``: the maximum, standard deviation and interquartile range of
+          the profile
+        - ``pzeros``: the proportion of lags with no neighbors
+        - ``pg05``: the proportion of lags at which the profile exceeds half its maximum
+        - ``meanpeaksep``, ``maxpeaksep``, ``minpeaksep``, ``rangepeaksep``, ``stdpeaksep``:
+          statistics of the spacings between successive crossings of half the maximum, as a
+          proportion of the number of lags (``stdpeaksep`` is divided by the square root of the
+          number of lags instead); all are NaN with fewer than 3 crossings
+        - ``statrtys``, ``statrtym``: the ratio of the standard deviation (``statrtys``) or mean
+          (``statrtym``) of the profile over the first half of the lags to that over the second
+        - ``hhist``: the entropy of the profile as a distribution over lags
+        - ``hcgdist``, ``rangecgdist``, ``pzeroscgdist``: the entropy, range and proportion of
+          zeros of the profile after summing it into 20 equal bins of lags (as a distribution
+          over bins)
+        - ``maxhisthist``, ``phisthistmin``, ``hhisthist``: the maximum, the first (lowest-value)
+          bin probability, and the entropy of the histogram of profile values (square-root bins)
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if num_lags < 2:
+        raise ValueError(f'num_lags ({num_lags}) must be at least 2')
+
+    past = theiler_window(y, past)
+    if np.isnan(past):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    past = int(past)
+    max_t = past + int(num_lags)  # the maximum return time (lag) to consider
+
+    Y = _bf_embed(y, embed_params[0], embed_params[1])
+    if Y is None:
+        logger.warning('Embedding failed')
+        return np.nan
+    n_emb = Y.shape[0]
+    if 0 < nnr < 1:  # a proportion of the number of embedded points
+        nnr = max(1, int(_round_half_away(nnr * n_emb)))
+    nnr = int(nnr)
+    if n_emb < 2 * max_t or n_emb <= nnr + 2 * past + 1:
+        # every lag in the histogram needs to be sampled by at least half the points
+        logger.warning('Time series too short to do a return-time analysis with these parameters')
+        return np.nan
+
+    # The neighborhood radius of each reference point: the distance to its nnr-th nearest
+    # neighbor outside the Theiler window (as a squared radius; NaN for non-reference points)
+    if nref == -1 or nref >= n_emb:
+        refs = np.arange(n_emb)
+    else:
+        refs = np.unique(np.floor(_linspace(1, n_emb, int(nref)) + 0.5).astype(int)) - 1  # (MATLAB's round)
+    # at most 2*past + 1 points (the reference point itself included) fall within the Theiler
+    # window, so nnr + 2*past + 1 neighbors always hold nnr valid ones
+    k = min(n_emb, nnr + 2 * past + 1)
+    tree = KDTree(Y)
+    r2 = np.full(n_emb, np.nan)
+    chunk = max(1, int(2e6 // k))
+    for c in range(0, refs.size, chunk):
+        the_refs = refs[c:c + chunk]
+        dist, idx = tree.query(Y[the_refs], k=k)
+        is_valid = np.abs(idx - the_refs[:, None]) > past
+        which_col = np.argmax(np.cumsum(is_valid, axis=1) >= nnr, axis=1)
+        r2[the_refs] = dist[np.arange(the_refs.size), which_col] ** 2 * (1 + 1e-9)
+
+    # Count the neighbors at each lag, relative to the count expected by chance
+    lags = np.arange(past + 1, max_t + 1)
+    counts = np.zeros(lags.size)
+    for i, lag in enumerate(lags):
+        fwd = refs[refs + lag <= n_emb - 1]  # references with a partner `lag` ahead
+        bwd = refs[refs - lag >= 0]  # references with a partner `lag` behind
+        counts[i] = (np.sum(np.sum((Y[fwd + lag] - Y[fwd]) ** 2, axis=1) <= r2[fwd])
+                     + np.sum(np.sum((Y[bwd - lag] - Y[bwd]) ** 2, axis=1) <= r2[bwd]))
+    # By chance, a given valid candidate is one of reference i's nnr neighbors with probability
+    # nnr/V_i, where V_i is the number of points outside i's Theiler window
+    i = np.arange(n_emb)
+    v = n_emb - (np.minimum(i, past) + np.minimum(n_emb - 1 - i, past) + 1)
+    w = np.zeros(n_emb)
+    w[refs] = nnr / v[refs]
+    cw = np.cumsum(w)
+    expected = cw[n_emb - lags - 1] + (cw[-1] - cw[lags - 1])  # forward + backward partners
+    trett = counts / expected
+
+    out = {}
+    nn = lags.size
+    max_trett = np.max(trett)
+    out['max'] = max_trett
+    out['std'] = np.std(trett, ddof=1)
+    out['pzeros'] = np.sum(trett == 0) / nn
+    out['pg05'] = np.sum(trett > max_trett * 0.5) / nn
+    q25, q75 = matlab_quantile(trett, [0.25, 0.75])
+    out['iqr'] = q75 - q25
+
+    # Recurrent peaks
+    icross05 = np.flatnonzero((trett[:-1] - 0.5 * max_trett) * (trett[1:] - 0.5 * max_trett) < 0)
+    if icross05.size > 2:
+        d = np.diff(icross05)
+        d = d[d > 0.4 * d.max()]  # remove small entries, crossing peaks
+        out['meanpeaksep'] = np.mean(d) / nn
+        out['maxpeaksep'] = np.max(d) / nn
+        out['minpeaksep'] = np.min(d) / nn
+        out['rangepeaksep'] = np.ptp(d) / nn
+        out['stdpeaksep'] = (np.std(d, ddof=1) if d.size > 1 else 0.0) / np.sqrt(nn)
+    else:
+        for name in ('meanpeaksep', 'maxpeaksep', 'minpeaksep', 'rangepeaksep', 'stdpeaksep'):
+            out[name] = np.nan
+
+    # Short lags compared to long lags
+    half = nn // 2
+    out['statrtys'] = np.std(trett[:half], ddof=1) / np.std(trett[half:], ddof=1)
+    out['statrtym'] = np.mean(trett[:half]) / np.mean(trett[half:])
+
+    # Entropy of the histogram, as a distribution over lags
+    p_trett = trett / np.sum(trett)
+    out['hhist'] = -np.sum(p_trett[p_trett > 0] * np.log(p_trett[p_trett > 0]))
+
+    # Coarse-grain to 20 bins of lags
+    num_bins = 20
+    inds = np.floor(_linspace(0, nn, num_bins + 1) + 0.5).astype(int)  # (MATLAB's round)
+    cglav = np.array([np.sum(p_trett[inds[b]:inds[b + 1]]) for b in range(num_bins)])
+    out['hcgdist'] = -np.sum(cglav[cglav > 0] * np.log(cglav[cglav > 0]))
+    out['rangecgdist'] = np.ptp(cglav)
+    out['pzeroscgdist'] = np.sum(cglav == 0) / num_bins
+
+    # Distribution of the profile values (MATLAB's 'sqrt' bin rule, as histcounts)
+    n_bins = max(int(np.ceil(np.sqrt(nn))), 1)
+    lo, hi = np.min(trett), np.max(trett)
+    edges = bin_picker(np.float64(lo), np.float64(hi), None, (hi - lo) / n_bins)
+    nhist = np.histogram(trett, bins=edges)[0] / nn
+    out['maxhisthist'] = np.max(nhist)
+    out['phisthistmin'] = nhist[0]  # probability in the first (lowest-value) bin
+    out['hhisthist'] = -np.sum(nhist[nhist > 0] * np.log(nhist[nhist > 0]))
+
+    return out
+
+
+def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: int = 4,
+                  max_n: Union[int, str] = 'full') -> dict:
+    """
+    Whether the time-delay embedding of the series forms separate clusters of points.
+
+    Reconstructs the time series as a time-delay embedding (as in :func:`embed_pca`) and
+    fits Gaussian mixture models with a small grid of component counts (1, ..., ``k_max``) to
+    the resulting point cloud. A dynamical process whose trajectory visits distinct regions of
+    phase space (e.g., alternating between two attractor states, or a system with
+    intermittent bursts) leaves a multi-modal point cloud in the embedding; a process with a
+    single smooth (e.g., unimodal-stochastic or single-loop periodic) attractor does not. This
+    is a distinct signal from marginal-distribution multi-modality, since two states can
+    overlap entirely in amplitude yet still separate cleanly once lagged coordinates are
+    added, and from regime-switching detected by hidden Markov models, which cluster points
+    in raw-amplitude (not lagged/embedded) space.
+
+    Rather than reporting only the BIC-optimal number of components (a discrete,
+    model-selection-driven output that can be noisy across similar time series), the main
+    outputs are continuous separation statistics from a *fixed* 2-component fit, alongside the
+    (secondary) BIC-optimal number of components for reference.
+
+    The ``sep_*`` outputs are always computed from the fixed 2-component fit, so they are not
+    gated by whether that fit is favored by BIC over a single Gaussian: even a genuinely
+    unimodal-but-elongated point cloud (e.g., AR(1) noise) gets split into two "confident"
+    halves. Likewise, a curved-but-unimodal manifold (e.g., the ring traced out by a periodic
+    signal in a 2-d embedding) is poorly fit by any single elliptical Gaussian and so also
+    drives ``bestK`` and ``dBIC`` up, despite having no distinct dynamical states.
+    ``dBIC == 0`` (``bestK == 1``) is a clean "no mixture structure at all" signal, but
+    ``dBIC > 0`` does not by itself distinguish true multi-modality from curvature.
+
+    The mixtures are fitted with scikit-learn's ``GaussianMixture`` (full covariances,
+    k-means++ initialization, 3 initializations, at most 500 iterations, covariance
+    regularization of ``1e-6`` times the mean variance of the embedded coordinates), seeded
+    with 0. hctsa's ``fitgmdist`` runs the same fits, with its own initialization draws,
+    so a fit that does not have a clear optimum can differ.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tau : int or str, optional
+        The time delay of the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
+        autocorrelation function, ``'ac1e'`` the (floored) first 1/e crossing of the
+        autocorrelation function, and ``'mi'`` the smaller of the first minimum of the
+        (Kraskov) automutual information and the 1/e time. Default is ``'ac'``.
+    m : int, optional
+        The embedding dimension. Default is 2.
+    k_max : int, optional
+        The maximum number of Gaussian mixture components to consider when searching for the
+        BIC-optimal component count. Default is 4.
+    max_n : int or 'full', optional
+        The maximum number of embedded points used to fit the mixture models: longer
+        embeddings are reduced to their first ``max_n`` points (a memory/time cap; the
+        separation estimates keep sharpening with more points), or ``'full'`` for no cropping.
+        Default is ``'full'``.
+
+    Returns
+    -------
+    dict or float
+        NaN if the embedding fails, there are fewer than ``20 * m * k_max`` embedded points,
+        the embedded point cloud is constant, or the single-component fit fails. Otherwise:
+
+        - ``bestK``: the BIC-optimal number of mixture components over ``1:k_max``
+        - ``dBIC``: the relative BIC improvement of the best fit over a single (unimodal)
+          Gaussian fit, ``(BIC_1 - BIC_best) / |BIC_1|``; 0 when ``bestK == 1``
+        - ``sep_mahal``: ``log1p`` of the Mahalanobis separation between the two component
+          means of the 2-component fit, using their pooled covariance (log-compressed to tame
+          the heavy tail from near-singular covariance on near-deterministic embeddings)
+        - ``sep_conf``: mean posterior cluster-assignment confidence (mean of the larger of
+          each point's two posterior probabilities) under the 2-component fit; between 0.5 (fully
+          ambiguous assignment) and 1
+        - ``sep_silh``: mean silhouette value (squared Euclidean distance, as MATLAB's
+          ``silhouette``) of the hard (posterior-argmax) 2-cluster assignment
+        - ``sep_weightbalance``: ratio of the smaller to the larger mixture weight under the
+          2-component fit; 1 for balanced clusters, tending to 0 as one component comes to
+          dominate (degenerating toward a unimodal fit)
+
+        The ``sep_*`` outputs are NaN if ``k_max < 2`` or the 2-component fit fails.
+    """
+    from sklearn.metrics import silhouette_samples
+    from sklearn.mixture import GaussianMixture
+
+    y = np.asarray(y, dtype=float).ravel()
+    y_embed = _bf_embed(y, tau, m)
+    if y_embed is None:
+        logger.warning('Embedding parameters are not suitable for this time series')
+        return np.nan
+
+    # Enough points, relative to m and k_max, for a well-posed full-covariance fit at the
+    # largest component count considered
+    n_embed = y_embed.shape[0]
+    if n_embed < 20 * m * k_max:
+        logger.warning(f'Not enough embedded points ({n_embed}) for a stable {m}-dimensional, '
+                       f'up-to-{k_max}-component mixture fit')
+        return np.nan
+
+    # A constant (or near-constant) embedded point cloud cannot be usefully clustered
+    if np.all(np.ptp(y_embed, axis=0) < 1e-10):
+        return np.nan
+
+    if isinstance(max_n, str):
+        if max_n != 'full':
+            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
+    elif n_embed > max_n:
+        logger.warning(f'Cropping to the first {int(max_n)} of {n_embed} embedded points for mixture '
+                       'fitting (memory/time cap, not a convergence point)')
+        y_embed = y_embed[:int(max_n)]
+
+    # Regularize covariance estimates proportionally to the data's own scale
+    reg_val = 1e-6 * np.mean(np.var(y_embed, axis=0, ddof=1))
+
+    def fit(k):
+        gm = GaussianMixture(n_components=k, covariance_type='full', reg_covar=reg_val, n_init=3,
+                             init_params='k-means++', max_iter=500, tol=1e-6, random_state=0)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')  # (replicates that do not converge are expected)
+            return gm.fit(y_embed)
+
+    # Fit k = 1, ..., k_max, and record their BIC
+    bic = np.full(k_max, np.nan)
+    models = [None] * k_max
+    for k in range(1, k_max + 1):
+        try:
+            models[k - 1] = fit(k)
+            bic[k - 1] = models[k - 1].bic(y_embed)
+        except Exception:  # (e.g., an empty or near-singular component)
+            if k == 1:  # no useful mixture structure can be assessed either
+                return np.nan
+    best_k = int(np.nanargmin(bic)) + 1
+
+    out = {'bestK': best_k}
+    out['dBIC'] = 0 if best_k == 1 else (bic[0] - bic[best_k - 1]) / abs(bic[0])
+
+    # Continuous separation statistics from a fixed 2-component fit
+    if k_max < 2 or models[1] is None:
+        for name in ('sep_mahal', 'sep_conf', 'sep_silh', 'sep_weightbalance'):
+            out[name] = np.nan
+        return out
+
+    gm2 = models[1]
+    post = gm2.predict_proba(y_embed)
+    clust = np.argmax(post, axis=1)
+    out['sep_conf'] = np.mean(np.max(post, axis=1))
+    out['sep_weightbalance'] = np.min(gm2.weights_) / np.max(gm2.weights_)
+    pooled_cov = (gm2.covariances_[0] + gm2.covariances_[1]) / 2
+    d_mu = gm2.means_[0] - gm2.means_[1]
+    # (log1p-compressed: the raw value explodes for near-singular pooled covariance)
+    out['sep_mahal'] = np.log1p(np.sqrt(d_mu @ np.linalg.solve(pooled_cov, d_mu)))
+    if np.unique(clust).size < 2:
+        # all points collapsed onto one component under hard assignment
+        out['sep_silh'] = 0.0
+    else:
+        s = silhouette_samples(y_embed, clust, metric='sqeuclidean')
+        s[np.bincount(clust)[clust] == 1] = 1.0  # (MATLAB gives a singleton cluster 1)
+        out['sep_silh'] = np.mean(s)
+    return out
+
+
+def _spectrum_stats(perc: np.ndarray, m: int) -> dict:
+    """
+    Statistics of a normalized (summing to 1), descending eigenvalue spectrum, as
+    :func:`embed_pca` (hctsa's ``SUB_spectrumstats`` in NL_EmbedKernelPCA).
+    """
+    stats = {f'perc_{i + 1}': perc[i] for i in range(m)}
+    # The spread statistics are taken over the leading m components only: the linear spectrum
+    # has exactly m entries, but the kernel spectrum has one per embedded point, and taken over
+    # all of them its spread falls with the number of points
+    top = perc[:m]
+    stats['std'] = np.std(top, ddof=1)
+    stats['range'] = np.ptp(top)
+    stats['min'] = np.min(top)
+    stats['max'] = np.max(top)
+    stats['top2'] = np.sum(perc[:2])
+    csperc = np.cumsum(perc)
+    for pct in (50, 60, 70, 80, 90):
+        stats[f'nto{pct}'] = _first_fn(csperc, pct / 100, 'over')
+    for name, thresh in (('fb05', 0.5), ('fb02', 0.2), ('fb01', 0.1), ('fb001', 0.01)):
+        stats[name] = _first_fn(perc, thresh, 'under')
+    return stats
+
+
+def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
+                     max_n: Union[int, str] = 2000) -> dict:
+    """
+    Kernel PCA of a time-delay embedding of the series, compared with linear PCA.
+
+    Reconstructs the time series as a time-delay embedding (as in :func:`embed_pca`) and
+    performs kernel principal components analysis on the result using an RBF kernel
+    ``exp(-d^2 / median(d^2))``, with ``d`` the distance between embedded points, then
+    compares the resulting eigenvalue spectrum to that of ordinary (linear) PCA on the same
+    embedded points [1, 2].
+
+    At any finite kernel bandwidth, kernel PCA's spectrum is less compact than linear PCA's in
+    absolute terms (its RBF feature space is far higher-dimensional than the embedding
+    itself), so the kernel-to-linear ratios (``top2_ratio``, ``nto80_ratio``,
+    ``nto50_ratio``) are below 1 (``top2_ratio``) or at least 1 (``nto*_ratio``) for every
+    series. In simulations (N = 1000), the ratios are nearer 1 for series on a curved
+    low-dimensional manifold than for the linear (Gaussian) process with the same power
+    spectrum: for the logistic and Henon maps, ``top2_ratio`` is 0.77 and 0.73 against 0.52
+    and 0.50 for their phase-randomized surrogates (``tau = 'ac'``, ``m = 3``). The signal is
+    weaker for the Lorenz system and absent for a Roessler oscillator, which is close to
+    linear at this sampling. The ratios are not a stand-alone nonlinearity test, however: they
+    also rise with linear autocorrelation (``top2_ratio`` is about 0.52 for white noise and AR(1)
+    with phi = 0.5, but 0.61-0.71 for AR(1) with phi = 0.99), so a smooth linear process can look
+    more 'nonlinear' than a chaotic map. Compare against surrogates to isolate nonlinearity.
+    ``std_ratio`` did not separate nonlinear from linear series consistently.
+
+    References
+    ----------
+    .. [1] B. Scholkopf, A. Smola and K.-R. Muller, "Nonlinear Component Analysis as a
+        Kernel Eigenvalue Problem", Neural Comput. 10(5), 1299 (1998).
+    .. [2] D. S. Broomhead and G. P. King, "Extracting qualitative dynamics from
+        experimental data", Physica D 20(2-3), 217 (1986).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tau : int or str, optional
+        The time delay of the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
+        autocorrelation function, ``'ac1e'`` the (floored) first 1/e crossing of the
+        autocorrelation function, and ``'mi'`` the smaller of the first minimum of the
+        (Kraskov) automutual information and the 1/e time. Default is ``'ac'``.
+    m : int, optional
+        The embedding dimension (at least 2). Default is 3.
+    max_n : int or 'full', optional
+        The maximum number of embedded points used to form the N x N kernel matrix, whose
+        eigendecomposition costs O(N^3). Longer embeddings are reduced to their first ``max_n``
+        points (a memory/time cap, not a convergence point: the spectrum estimate keeps
+        sharpening with more points); ``'full'`` disables this, with a warning above 5000
+        points, where the eigendecomposition takes several seconds. Default is 2000.
+
+    Returns
+    -------
+    dict or float
+        NaN if the embedding fails, there are too few embedded points for a rank-``m``
+        decomposition, the embedded points coincide, or the kernel spectrum is degenerate.
+        Otherwise statistics of the normalized kernel PCA spectrum (the proportion of
+        variance in feature space explained by each kernel principal component, ordered from
+        largest, one per embedded point), with the linear PCA spectrum of the same points
+        (``m`` entries) for comparison:
+
+        - ``perc_1``, ..., ``perc_m``: the proportion of variance explained by each of the top
+          ``m`` kernel components
+        - ``std``, ``range``, ``min``, ``max``: standard deviation, range, minimum and maximum
+          of the top ``m`` proportions only (so they are comparable with linear PCA)
+        - ``top2``: the proportion of variance explained by the top two kernel components
+        - ``nto50``, ``nto60``, ``nto70``, ``nto80``, ``nto90``: the number of kernel
+          components needed to explain more than 50%, 60%, 70%, 80% or 90% of the variance
+        - ``fb05``, ``fb02``, ``fb01``, ``fb001``: the position of the first kernel component
+          whose proportion of variance is below 0.5, 0.2, 0.1 or 0.01
+        - ``top2_ratio``, ``top2_diff``: ``top2`` of the kernel PCA over (and minus) that of
+          linear PCA
+        - ``nto80_ratio``, ``nto80_diff``: ``nto80`` of the kernel PCA over (and minus) that of
+          linear PCA
+        - ``nto50_ratio``: ``nto50`` of the kernel PCA over that of linear PCA
+        - ``std_ratio``: ``std`` of the kernel PCA over that of linear PCA
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    y_embed = _bf_embed(y, tau, m)
+    if y_embed is None:
+        logger.warning('Embedding parameters are not suitable for this time series')
+        return np.nan
+
+    # pca needs m components (and at least 2, for top2)
+    if y_embed.shape[0] - 1 < m or m < 2:
+        logger.warning(f'Not enough embedding vectors ({y_embed.shape[0]}) for a rank-{m} PCA')
+        return np.nan
+
+    # Crop to max_n embedded points for the kernel matrix (memory/time cap)
+    n_emb = y_embed.shape[0]
+    if isinstance(max_n, str):
+        if max_n != 'full':
+            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
+        if n_emb > 5000:
+            logger.warning(f"{n_emb} embedded points exceeds 5000 with max_n='full'; the kernel "
+                           'eigendecomposition may take several seconds')
+    elif n_emb > max_n:
+        logger.warning(f'Cropping to the first {int(max_n)} of {n_emb} embedded points for kernel PCA '
+                       '(memory/time cap, not a convergence point)')
+        y_embed = y_embed[:int(max_n)]
+    n = y_embed.shape[0]
+    if n - 1 < m:
+        logger.warning(f'Not enough embedded points ({n}) after cropping for a rank-{m} kernel PCA')
+        return np.nan
+
+    # Linear PCA on the (possibly cropped) embedded points, for comparison
+    latent_lin = PCA().fit(y_embed).explained_variance_
+    stats_lin = _spectrum_stats(latent_lin / np.sum(latent_lin), m)
+
+    # Kernel PCA with an RBF kernel, whose bandwidth is the median heuristic: the median of
+    # the pairwise squared distances sets the kernel's length scale to the data's own typical
+    # point-to-point spacing
+    sq_dist = squareform(pdist(y_embed, 'sqeuclidean'))
+    med_sq_dist = np.median(sq_dist[~np.eye(n, dtype=bool)])
+    if med_sq_dist == 0:  # all embedded points coincide
+        return np.nan
+    kmat = np.exp(-sq_dist / med_sq_dist)
+
+    # Center the kernel matrix in feature space
+    one_n = np.full((n, n), 1 / n)
+    kc = kmat - one_n @ kmat - kmat @ one_n + one_n @ kmat @ one_n
+    kc = (kc + kc.T) / 2  # symmetrize away numerical asymmetry
+
+    # The eigenvalues of the centered kernel matrix are N times those of the empirical
+    # covariance operator in feature space, but the constant factor cancels in the normalized
+    # spectrum. Small negative values are numerical noise (the matrix is positive
+    # semi-definite in theory)
+    eig_k = np.sort(np.linalg.eigvalsh(kc))[::-1]
+    eig_k[eig_k < 0] = 0
+    if np.sum(eig_k) == 0 or eig_k[m - 1] == 0:
+        logger.warning('Kernel PCA produced a degenerate (near-zero-rank) spectrum')
+        return np.nan
+    stats_kern = _spectrum_stats(eig_k / np.sum(eig_k), m)
+
+    out = dict(stats_kern)
+    # Ratios and differences of matched linear and kernel spectrum statistics, the
+    # nonlinearity signal. The kernel spectrum is *always* less compact than the linear one in
+    # absolute terms (not itself the signal); what differs by system is *how much* less
+    # compact: on a genuinely low-dimensional nonlinear manifold, kernel PCA still finds much
+    # more compact structure than it does for a linear/stochastic process, so the ratios sit
+    # closer to 1.
+    out['top2_ratio'] = stats_kern['top2'] / stats_lin['top2']
+    out['top2_diff'] = stats_kern['top2'] - stats_lin['top2']
+    out['nto80_ratio'] = stats_kern['nto80'] / stats_lin['nto80']
+    out['nto80_diff'] = stats_kern['nto80'] - stats_lin['nto80']
+    out['nto50_ratio'] = stats_kern['nto50'] / stats_lin['nto50']
+    out['std_ratio'] = stats_kern['std'] / stats_lin['std']
+    return out
+
+
+def _boxcount_increments(y: np.ndarray, tau: int, m_max: int, num_bins: int) -> Union[np.ndarray, None]:
+    """
+    TISEAN's ``boxcount -M1,m_max -d tau -Q2.0 -#num_bins`` (hctsa's NL_BoxCountEntropyRate): the
+    order-2 Renyi entropy of the partition of the delay-embedded series into boxes, and its
+    increments with the embedding dimension.
+
+    The series is rescaled to [0, 1] (written to TISEAN to 7 significant digits) and
+    partitioned into boxes of side 1/n_boxes, for ``num_bins`` box sizes spaced geometrically
+    from 1 down to 1/1000 (each a distinct integer number of boxes per axis). With ``p_i`` the
+    fraction of embedded points in box ``i``, ``H(eps, d) = -log(sum_i p_i^2)``. Returns an array
+    (``num_bins`` x ``m_max``) whose column ``d`` is ``H(eps, d) - H(eps, d - 1)`` (``H`` itself
+    for ``d = 1``), each value as TISEAN prints it (``%e``), or None for a constant series.
+    """
+    y = _tisean._round_significant(y, 7)
+    lo, hi = y.min(), y.max()
+    if hi - lo == 0:
+        return None
+    s = (y - lo) / (hi - lo)
+    eps_min, eps_max = 1e-3, 1.0
+    s = np.where(s >= 1.0, s - eps_min / 2.0, s)
+    length = s.size - (m_max - 1) * tau
+    if length < 1:
+        return None
+    eps_factor = (eps_max / eps_min) ** (1.0 / (num_bins - 1))
+
+    rs = np.zeros((num_bins, m_max))
+    heps, epsi_old = eps_max * eps_factor, 0
+    for k in range(num_bins):
+        while True:  # (an integer number of boxes per axis, increasing with every length scale)
+            heps /= eps_factor
+            epsi = int(1.0 / heps)
+            if epsi > epsi_old:
+                break
+        epsi_old = epsi
+        # The box (per coordinate) of each embedded point, refined one coordinate at a time
+        label = np.zeros(length, dtype=np.int64)
+        h = np.zeros(m_max)
+        for d in range(m_max):
+            box = (s[d * tau:d * tau + length] * epsi).astype(np.int64)
+            _, label, counts = np.unique(label * epsi + box, return_inverse=True, return_counts=True)
+            h[d] = -np.log(np.sum((counts / length) ** 2))
+        rs[k] = np.diff(h, prepend=0.0)
+    return np.vectorize(_tisean._e)(rs)
+
+
+def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
+                           embed_params: Union[list, tuple] = ('ac', 'fnn')) -> dict:
+    """
+    How the box-counting (order-2 Renyi) entropy of a delay embedding grows with embedding
+    dimension.
+
+    Time-delay embeds the series in ``d = 1, ..., m`` dimensions and partitions the space into
+    boxes of side ``epsilon``, using TISEAN's ``boxcount`` (this operation previously used
+    TSTOOL's ``corrdim``). With ``p_i`` the fraction of embedded points in box ``i``,
+    ``boxcount`` gives the order-2 Renyi (collision) entropy
+    ``H(epsilon, d) = -log(sum_i p_i^2)`` for a sweep of ``num_bins`` box sizes, from the full
+    range of the series downward, and the increment over the ``(d-1)``-dimensional embedding,
+    ``I(epsilon, d) = H(epsilon, d) - H(epsilon, d-1)`` (defined for ``d = 2, ..., m``; at
+    ``d = 1``, ``boxcount`` reports ``H`` itself, which is not an increment, so ``d = 1`` is
+    excluded from all summaries). The matrix ``I`` (length scales by embedding dimensions
+    ``2, ..., m``) is summarized across length scales for each dimension, across dimensions for
+    each length scale, and overall.
+
+    The increment ``I`` approaches the entropy rate of the process (the K2 entropy, per delay
+    step) rather than a slope against ``log(epsilon)``, so these features are entropy-rate-like,
+    not correlation dimensions. (This function was previously named NL_BoxCorrDim in hctsa,
+    after the TSTOOL correlation-dimension code it replaced.) hctsa registers ``meanr``,
+    ``medianr``, ``minr`` and ``meanchr`` at ``r`` = 2, 3, 4, 6, 8, 11, 14, 17, 20, 24, 28, 32,
+    36 of ``num_bins = 50`` (2 to 429 boxes per axis): coarse scales change quickly with ``r``
+    and are sampled densely; neighboring finer scales are nearly redundant; for flows (long
+    delays) the informative scales lie beyond ``r = 18``; and beyond ``r = 36`` the
+    5-dimensional embedding saturates (``I = 0``) for series of a few thousand points.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    num_bins : int, optional
+        The number of length-scale (``epsilon``) values in the box-counting sweep (at least 2).
+        TSTOOL's "maximum number of partitions per axis" has no exact TISEAN equivalent; this is
+        the closest analogue. Default is 100.
+    embed_params : list or tuple, optional
+        The embedding parameters as ``(tau, m)``: the time delay (an integer, or a rule
+        understood by :func:`pyhctsa.utils.get_tau`: ``'ac'``, ``'ac1e'`` or ``'mi'``) and the
+        embedding dimension (an integer, or ``'fnn'`` for false nearest neighbors). hctsa uses
+        ``('ac1e', 5)``. Default is ``('ac', 'fnn')``.
+
+    Returns
+    -------
+    dict or float
+        NaN if the embedding parameters cannot be determined, the series is constant, or the
+        embedding dimension is below 2. Otherwise summaries of ``I(epsilon, d)``, with ``d`` the
+        embedding dimension and ``r`` the index (from 1) of the length scale (``r = 1`` is the
+        full range of the series, larger ``r`` are finer scales):
+
+        - ``meand<d>``, ``mediand<d>``: mean and median of ``I`` over length scales, at embedding
+          dimension ``d = 2, ..., m``
+        - ``meanr<r>``, ``medianr<r>``, ``minr<r>``: mean, median and minimum of ``I`` over
+          embedding dimensions ``2, ..., m``, at length scale ``r = 2, ..., num_bins``
+        - ``meanchr<r>``: mean change of ``I`` from one embedding dimension to the next
+          (``d = 2, ..., m``), at length scale ``r = 2, ..., num_bins`` (NaN for ``m = 2``)
+        - ``stdmean``, ``stdmedian``: standard deviation, across embedding dimensions
+          ``2, ..., m``, of the mean (or median) of ``I`` over length scales
+        - ``medianstretch``, ``iqrstretch``: median and interquartile range of ``I`` over all
+          length scales and embedding dimensions ``2, ..., m``
+
+        (The minima over all length scales, formerly ``mind<d>`` and ``minstretch``, were removed:
+        the coarsest scale is a single box, where ``I = 0``, so they were always 0.)
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if num_bins < 2:
+        raise ValueError('num_bins must be at least 2')
+    params = _embedding_params(y, embed_params[0], embed_params[1])
+    if params is None:
+        logger.warning('Could not determine embedding parameters for this time series')
+        return np.nan
+    tau, m_max = params
+
+    rs = _boxcount_increments(y, tau, m_max, int(num_bins))
+    if rs is None:
+        logger.warning('boxcount failed (constant series, or too short for these embedding parameters)')
+        return np.nan
+    if m_max < 2:
+        # the increment I is only defined from d = 2 (d = 1 holds H itself)
+        logger.warning(f'Embedding dimension m = {m_max} is too low for a box-counting entropy increment')
+        return np.nan
+
+    out = {}
+    for d in range(2, m_max + 1):
+        out[f'meand{d}'] = np.mean(rs[:, d - 1])
+        out[f'mediand{d}'] = np.median(rs[:, d - 1])
+    for r in range(2, rs.shape[0] + 1):
+        row = rs[r - 1, 1:]
+        out[f'meanr{r}'] = np.mean(row)
+        out[f'medianr{r}'] = np.median(row)
+        out[f'minr{r}'] = np.min(row)
+        out[f'meanchr{r}'] = np.mean(np.diff(row)) if row.size > 1 else np.nan
+    out['stdmean'] = np.std(np.mean(rs[:, 1:], axis=0), ddof=1) if m_max > 2 else 0.0
+    out['stdmedian'] = np.std(np.median(rs[:, 1:], axis=0), ddof=1) if m_max > 2 else 0.0
+    stretch = rs[:, 1:].ravel()
+    out['medianstretch'] = np.median(stretch)
+    q25, q75 = matlab_quantile(stretch, [0.25, 0.75])
+    out['iqrstretch'] = q75 - q25
+    return out
+
+
+def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: float = 0.98,
+                  theiler_win: Union[int, float, list, tuple] = ('ac', 1), n_poles: int = 200,
+                  m_order: int = 5, max_n: Union[int, str] = 'full',
+                  random_seed: Union[int, str, None] = 'default') -> dict:
+    """
+    The local dimension and persistence of the reconstructed attractor, from extreme-value
+    statistics of close returns.
+
+    Time-delay embeds the series and, for a sample of reference points ("poles") on the
+    reconstructed orbit, treats close returns of the orbit to each pole as extreme events:
+    ``g_i = -log(||Y_i - pole||)`` is large exactly when the orbit passes close to the pole.
+    Extreme value theory applied to this observable gives two local quantities per pole:
+
+    - a local dimension ``d(pole)``: under the Freitas-Freitas-Todd theorem [1], the Gumbel-law
+      scale parameter of the extreme value law for ``g_i`` equals the local dimension of the
+      attractor at that pole exactly. In practice this is estimated by a peaks-over-threshold
+      fit [2, 3, 4]: take the exceedances of ``g_i`` above a high quantile ``q``, and set
+      ``d(pole) = 1 / mean(exceedances)`` (the reciprocal of the exponential maximum-likelihood
+      scale, i.e. the generalized Pareto fit with shape fixed at its ansatz-implied value of 0,
+      appropriate here because ``g_i = -log(distance)`` is unbounded above, putting it in the
+      Gumbel/exponential-tail domain).
+    - a persistence ``theta(pole)`` (the "extremal index" of ``g_i`` at that pole): whether
+      close returns to the pole arrive as isolated events (``theta`` near 1) or cluster into
+      runs where the orbit lingers nearby (``theta`` well below 1, i.e. long average residence
+      time near that point of phase space; ``1 / theta`` is the average cluster/sojourn size).
+      Estimated with the O'Brien order-``m_order`` estimator, which Caby et al. [5] found more
+      reliable for this observable than the Suveges likelihood estimator [6], particularly near
+      near-periodic (sticky) poles.
+
+    This differs from the attractor-dimension operations that pool all pairwise distances or
+    neighbor ranks into one global scaling exponent: it estimates a genuinely *local* dimension
+    and persistence separately at each of several poles and reports how they are distributed
+    (and covary) across the attractor, capturing multifractal-style local heterogeneity that a
+    single global exponent cannot.
+
+    References
+    ----------
+    .. [1] A.C.M. Freitas, J.M. Freitas and M. Todd, "Hitting time statistics and extreme value
+        theory", Probab. Theory Relat. Fields 147(3-4), 675-710 (2010).
+    .. [2] V. Lucarini, D. Faranda, A.C.G.M.M. de Freitas, J.M. de Freitas, M. Holland, T. Kuna,
+        M. Nicol, M. Todd and S. Vaienti, "Extremes and Recurrence in Dynamical Systems",
+        Wiley (2016).
+    .. [3] D. Faranda, G. Messori and P. Yiou, "Dynamical proxies of North Atlantic
+        predictability and extremes", Sci. Rep. 7, 41278 (2017).
+    .. [4] D. Faranda, J.M. Freitas, P. Guiraud and S. Vaienti, "Sampling local properties of
+        attractors via extreme value theory", Chaos Solitons Fractals 74, 55-66 (2015).
+    .. [5] Th. Caby, D. Faranda, S. Vaienti and P. Yiou, "On the computation of the extremal
+        index for time series", J. Stat. Phys. 179(5-6), 1666-1697 (2019) (Eqs 19/21).
+    .. [6] M. Suveges, "Likelihood estimation of the extremal index", Extremes 10(1-2),
+        41-55 (2007).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (assumed z-scored).
+    tau : int or str, optional
+        The embedding time delay: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``: the first zero-crossing of the autocorrelation
+        function, ``'ac1e'``: the floor of its first 1/e crossing, ``'mi'``: the smaller of the
+        first minimum of the Kraskov automutual information and the ``'ac1e'`` delay).
+        Default is ``'ac'``.
+    m : int or str, optional
+        The embedding dimension (an integer, or ``'fnn'`` for false nearest neighbors).
+        Default is 3.
+    q : float, optional
+        The quantile level defining "extreme" close returns: exceedances of ``g_i`` above its
+        ``q``-quantile are treated as events (default 0.98, i.e. the closest 2% of returns to
+        each pole).
+    theiler_win : int, float or ``['ac', k]``, optional
+        The Theiler window excluding temporally-correlated neighbors of each pole from being
+        treated as (trivially close) returns (see :func:`pyhctsa.utils.theiler_window`):
+        ``['ac', k]`` for ``k`` times the first zero-crossing of the autocorrelation function,
+        or a number of samples. Default is ``['ac', 1]``.
+    n_poles : int, optional
+        The number of reference points (poles) to sample from the embedded orbit (the cost is
+        ``O(n_poles * Nemb)``). Default is 200.
+    m_order : int, optional
+        The order of the O'Brien persistence estimator: how many steps ahead to check for a
+        further exceedance before counting a given exceedance as "isolated" (default 5,
+        following Caby et al.).
+    max_n : int or 'full', optional
+        The maximum number of samples to consider (the first ``max_n``); ``'full'`` for no
+        cropping (a warning is logged above 50000 samples). Default is ``'full'``.
+    random_seed : int, str or None, optional
+        The seed of the Mersenne Twister for sampling the poles, as hctsa's ``BF_ResetSeed``: an
+        integer, ``'default'`` (seed 0), or ``None``/``'none'`` (unseeded). MATLAB's
+        ``randperm(n, k)`` draws a different random set of poles from the same seed than the
+        Mersenne-Twister permutation used here. Default is ``'default'``.
+
+    Returns
+    -------
+    dict or float
+        NaN if the embedding or Theiler window cannot be determined, or the embedded series is
+        too short for the exceedances required. Otherwise:
+
+        - ``propValidPoles``: the proportion of poles that gave a valid local dimension (at least
+          15 exceedances; such a pole also has a valid persistence, as long as ``m_order`` is
+          smaller than the number of returns used): a diagnostic of whether ``q``, ``n_poles`` and
+          the series length were adequate, not a property of the dynamics
+        - ``meanLocalDim``, ``stdLocalDim``: mean and standard deviation of the local dimension
+          across poles
+        - ``meanTheta``, ``stdTheta``: mean and standard deviation of the persistence (extremal
+          index) across poles
+        - ``corrDimTheta``: correlation across poles between the local dimension and the
+          persistence (NaN if fewer than 10 poles are valid)
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if isinstance(max_n, str) and max_n == 'full' and y.size > 50000:
+        logger.warning(f"Time series ({y.size} samples) exceeds 50000 with max_n='full'; "
+                       'computation may be slow')
+    y = _check_max_n(y, max_n, 'extreme-value analysis')
+
+    Y = _bf_embed(y, tau, m)
+    if Y is None:
+        return np.nan
+    n_emb = Y.shape[0]
+
+    theiler = theiler_window(y, theiler_win, n_emb)
+    if np.isnan(theiler):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    theiler = int(theiler)
+
+    min_exceed = 15  # the minimum number of exceedances for a pole's estimate to be trusted
+    min_n_emb = int(np.ceil(min_exceed / (1 - q))) + 2 * theiler + m_order + 1
+    if n_emb < max(min_n_emb, 100):
+        return np.nan
+
+    # Sample poles (reference points) from the embedded orbit
+    n_poles = min(int(n_poles), n_emb)
+    pole_idx = _random_subset(n_emb, n_poles, random_seed)
+
+    local_dim = np.full(n_poles, np.nan)
+    theta = np.full(n_poles, np.nan)
+    idx = np.arange(n_emb)
+    for p, j in enumerate(pole_idx):
+        # Exclude the Theiler window around this pole, keeping the rest of the orbit in its
+        # original chronological order
+        keep = np.abs(idx - j) > theiler
+        dist_j = np.sqrt(np.sum((Y[keep] - Y[j]) ** 2, axis=1))
+        dist_j = dist_j[dist_j > 0]  # excludes exact duplicate embedded points
+        if dist_j.size < min_exceed / (1 - q):
+            continue
+        g = -np.log(dist_j)  # (chronological order preserved)
+
+        u = matlab_quantile(g, q)[0]
+        exceed = g > u  # exceedance indicator, in chronological order
+        n_u = int(exceed.sum())
+        if n_u < min_exceed:
+            continue
+
+        # Local dimension: the reciprocal of the mean exceedance (the exponential, or
+        # shape-0 generalized Pareto, scale maximum-likelihood estimate)
+        local_dim[p] = 1 / np.mean(g[exceed] - u)
+
+        # Persistence: the O'Brien order-m_order estimator (Caby et al. 2019, Eq 19),
+        # vectorized via a cumulative sum of the exceedance indicator
+        n_tot = exceed.size
+        if n_tot > m_order + 1:
+            cum_e = np.concatenate(([0], np.cumsum(exceed)))
+            i = np.arange(n_tot - m_order)
+            future_sum = cum_e[i + 1 + m_order] - cum_e[i + 1]  # exceedances in the next m_order steps
+            is_isolated = exceed[i] & (future_sum == 0)
+            theta[p] = min((is_isolated.sum() / (n_tot - m_order)) / (n_u / n_tot), 1)  # clip finite-sample overshoot
+
+    def nanmean(x):
+        return np.mean(x[~np.isnan(x)]) if np.any(~np.isnan(x)) else np.nan
+
+    def nanstd(x):
+        x = x[~np.isnan(x)]
+        return (np.std(x, ddof=1) if x.size > 1 else 0.0) if x.size else np.nan
+
+    valid = ~np.isnan(local_dim) & ~np.isnan(theta)
+    out = {}
+    out['propValidPoles'] = np.mean(~np.isnan(local_dim))
+    out['meanLocalDim'] = nanmean(local_dim)
+    out['stdLocalDim'] = nanstd(local_dim)
+    out['meanTheta'] = nanmean(theta)
+    out['stdTheta'] = nanstd(theta)
+    if valid.sum() >= 10 and np.std(local_dim[valid]) > 0 and np.std(theta[valid]) > 0:
+        out['corrDimTheta'] = np.corrcoef(local_dim[valid], theta[valid])[0, 1]
+    else:
+        out['corrDimTheta'] = np.nan
+    return out
