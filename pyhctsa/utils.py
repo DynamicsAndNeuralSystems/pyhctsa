@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import os
 from functools import wraps
 from importlib.metadata import PackageNotFoundError, version
@@ -142,15 +143,21 @@ def get_dataset(which: str = "e1000") -> list:
     logger.info(f"Loaded dataset of {len(dataset)} time series.")
     return dataset
     
-def _preprocess_decorator(zscore: bool = False, absval: bool = False) -> Callable:
+# config `preprocess:` values and the label suffix each adds
+_PREPROCESS_LABELS = {'decimate_ac1e': '_dec'}
+
+def _preprocess_decorator(zscore: bool = False, absval: bool = False,
+                          preprocess: Union[str, None] = None) -> Callable:
     """
     Decorator to preprocess time series data before feature computation.
     
-    Applies optional z-score normalization and/or absolute value transformation
-    to the input time series before passing it to the decorated function.
+    Applies optional z-score normalization, an optional hctsa ``BF_PreProcess`` step
+    and/or absolute value transformation to the input time series before passing it to
+    the decorated function.
 
-    Note that by default, the zscore operation will always be applied **before** the absolute 
-    value operation if both are enabled.
+    The order is: z-score, then ``preprocess``, then absolute value. A
+    ``preprocess`` step is followed by a second z-score if ``zscore`` is True, matching
+    hctsa's ``zscore(BF_PreProcess(x_z, ...))``.
 
     Parameters
     ----------
@@ -160,6 +167,11 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False) -> Callabl
     absval : bool, optional
         If True, take the absolute value of all data points in the input time series.
         Default is False.
+    preprocess : {None, 'decimate_ac1e'}, optional
+        A named pre-processing step applied to the (z-scored) series. Currently
+        ``'decimate_ac1e'``: keep one sample per floored 1/e autocorrelation time
+        (see :func:`decimate_ac1e`). If the delay cannot be determined the wrapped
+        function is not called and ``nan`` is returned. Default is None.
     
     Returns
     -------
@@ -168,11 +180,19 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False) -> Callabl
         the specified preprocessing operations to the input time series before
         passing it to the wrapped function.
     """
+    if preprocess is not None and preprocess not in _PREPROCESS_LABELS:
+        raise ValueError(f"Unknown preprocess setting '{preprocess}'; "
+                         f"supported: {sorted(_PREPROCESS_LABELS)}")
+
     def decorator(func):
         @wraps(func)
         def wrapper(x, *args, **kwargs):
             if zscore:
                 x = z_score(x)
+            if preprocess == 'decimate_ac1e':
+                x = decimate_ac1e(x, rezscore=zscore)
+                if not isinstance(x, np.ndarray):
+                    return np.nan  # no 1/e time: undefined, like hctsa's NaN
             if absval:
                 x = np.abs(x)
             return func(x, *args, **kwargs)
@@ -604,7 +624,333 @@ def make_mat_buffer(x: ArrayLike, n: int, p: int = 0,
 
     return result
 
-def time_delay_embed(y: ArrayLike, m: int, tau: int = 1,
+# ------------------------------------------------------------------------------
+# Adaptive time delays, Theiler windows and decimation (hctsa BF_GetTau,
+# BF_TheilerWindow, BF_PreProcess)
+# ------------------------------------------------------------------------------
+_TAU_RULES = ('ac', 'ac1e', 'mi', 'mi-gaussian')
+_TAU_CACHE: list = []  # (rule, N, digest, tau); small FIFO cache, like hctsa's persistent cache
+_TAU_CACHE_SIZE = 4
+
+
+def _round_half_away(x: float) -> float:
+    """MATLAB's ``round``: halves are rounded away from zero (NumPy rounds to even)."""
+    return float(np.sign(x) * np.floor(np.abs(x) + 0.5))
+
+
+def _acf_fourier(y: np.ndarray) -> np.ndarray:
+    """ACF at lags 0..N-1 (CO_AutoCorr(y, [], 'Fourier')); all-NaN for a constant series."""
+    from .operations.correlation import autocorr
+    with np.errstate(all='ignore'):
+        return np.asarray(autocorr(y, [], 'Fourier'), dtype=float).ravel()
+
+
+def _tau_ac(y: np.ndarray) -> float:
+    """First zero crossing of the ACF (CO_FirstCrossing(y,'ac',0,'discrete'))."""
+    if y.size < 2:
+        return np.nan
+    fc, _ = point_of_crossing(_acf_fourier(y), 0.0)
+    return np.nan if np.isnan(fc) else int(fc)
+
+
+def _tau_ac1e(y: np.ndarray) -> float:
+    """Floor of the first 1/e crossing of the ACF, at least 1 (BF_GetTau's TauAC1e)."""
+    if y.size < 2:
+        return np.nan
+    acf = _acf_fourier(y)
+    threshold = 1.0 / np.e
+    if np.any(np.isnan(acf)) or not np.any(acf < threshold):
+        # degenerate series, or the ACF never decays to 1/e
+        return np.nan
+    _, poc = point_of_crossing(acf, threshold)  # already in lag units
+    return int(max(1, np.floor(poc)))
+
+
+def _tau_mi_gaussian(y: np.ndarray) -> float:
+    """First local minimum of the Gaussian AMI (CO_FirstMin(y,'mi-gaussian')).
+
+    The AMI at each lag is computed from the Pearson correlation of the two delayed windows,
+    as IN_AutoMutualInfo does, stopping at the first minimum. (A vectorized FFT/cumulative-sum
+    curve is not used: it loses precision at long lags of smooth series, where r is close to 1.)
+    """
+    n = y.size
+    prev2 = prev1 = np.nan  # AMI at lags i-2, i-1
+    # IN_AutoMutualInfo gives NaN for lags > N - 5, and CO_FirstMin gives up on a NaN
+    for i in range(1, n - 4):
+        y1, y2 = y[:-i], y[i:]
+        d1, d2 = y1 - y1.mean(), y2 - y2.mean()
+        den = np.sqrt(np.dot(d1, d1) * np.dot(d2, d2))
+        if not den > 0:
+            return np.nan
+        r = min(1.0, max(-1.0, np.dot(d1, d2) / den))
+        with np.errstate(divide='ignore'):
+            cur = -0.5 * np.log(1.0 - r * r)
+        if np.isnan(cur):
+            return np.nan
+        if i == 2 and cur > prev1:
+            return 1  # already increases at lag 2 from lag 1
+        if i > 2 and prev2 > prev1 < cur:
+            return i - 1
+        prev2, prev1 = prev1, cur
+    return np.nan
+
+
+def _tau_mi(y: np.ndarray) -> float:
+    """min(first minimum of the Kraskov (k=4) AMI, 'ac1e' delay), at least 1 (BF_GetTau's TauMI)."""
+    from .operations.information import automutual_info
+    n = y.size
+    tau_ac = _tau_ac1e(y)
+    if np.isnan(tau_ac):
+        max_lag = n // 10
+    else:
+        # only lags up to tau_ac can matter; one extra lag to detect a minimum at tau_ac
+        max_lag = min(int(tau_ac) + 1, n // 10)
+    if tau_ac == 1:
+        return 1  # can't go below 1
+    if max_lag < 2:
+        return tau_ac  # series too short to locate an AMI minimum
+    lags = list(range(1, max_lag + 1))
+    ami = automutual_info(y, lags, 'kraskov1', 4)
+    amis = np.array([ami[f'ami{l}'] for l in lags], dtype=float)
+
+    # first local minimum (at lag 1 if the AMI already increases from lag 1 to 2)
+    tau_min = np.nan
+    for l in range(1, max_lag):  # 1-based lag l; amis[l-1] is AMI(l)
+        if np.isnan(amis[l]):
+            break
+        if amis[l] > amis[l - 1] and (l == 1 or amis[l - 2] > amis[l - 1]):
+            tau_min = l
+            break
+
+    if not np.isnan(tau_min):
+        return min(tau_min, tau_ac) if not np.isnan(tau_ac) else tau_min
+    if not np.isnan(tau_ac):
+        return tau_ac
+    # no 1/e crossing of the ACF and no AMI minimum: first drop of the AMI below the
+    # Gaussian AMI at a correlation of 1/e
+    mi_threshold = -0.5 * np.log(1.0 - np.exp(-2.0))
+    below = np.flatnonzero(amis < mi_threshold)
+    return int(below[0] + 1) if below.size else np.nan
+
+
+def get_tau(y: ArrayLike, rule: Union[int, str] = 'ac1e') -> Union[int, float]:
+    """
+    A time delay (in samples) set by the time series' own timescale.
+
+    Port of hctsa's ``BF_GetTau``. Adaptive delays let a feature measure structure
+    relative to the series' own correlation time rather than the sampling interval.
+    Both adaptive rules scale linearly with the sampling rate and sit on the low side
+    of the correlation time: iterated maps, which decorrelate within one step, keep
+    ``tau = 1``.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    rule : int or {'ac1e', 'mi', 'mi-gaussian', 'ac'}
+        How to set the delay:
+
+        - an integer: returned unchanged (so a fixed delay and a rule can share an argument);
+        - ``'ac1e'``: the largest integer lag at which the ACF is still at least 1/e (the
+          floor of the linearly interpolated first 1/e crossing), and at least 1;
+        - ``'mi'``: ``max(1, min(first local minimum of the Kraskov k=4 AMI, ac1e))``. If the
+          ACF never falls to 1/e, the AMI is searched up to ``N // 10`` lags for its first local
+          minimum, or else its first drop below ``-0.5 * log(1 - exp(-2))`` (the Gaussian AMI
+          at a correlation of 1/e);
+        - ``'mi-gaussian'``: the first local minimum of the Gaussian AMI (the rule 'mi' meant
+          in earlier versions of hctsa; a monotonic function of |ACF|, so not a nonlinear
+          timescale);
+        - ``'ac'``: the first zero crossing of the ACF (a series whose ACF is defined but
+          never crosses zero gives ``N - 1``, as in hctsa).
+
+    Returns
+    -------
+    int or float
+        The delay as an ``int``, or ``nan`` if it cannot be determined (constant series,
+        ACF that never falls to 1/e for 'ac1e', series too short, ...). Callers should
+        propagate a NaN delay to a NaN feature value.
+
+    Notes
+    -----
+    The last few results are cached (keyed on the rule and the series' values), since
+    many operations resolve the same delay for the same series and the Kraskov AMI behind
+    ``'mi'`` is the expensive part.
+
+    Raises
+    ------
+    ValueError
+        For an unknown rule, or a non-integral numeric ``rule``.
+    """
+    if not isinstance(rule, str):
+        if rule is None or not np.isfinite(rule) or float(rule) != int(rule):
+            raise ValueError(f"A numeric time delay must be an integer, got {rule!r}.")
+        return int(rule)
+    if rule not in _TAU_RULES:
+        raise ValueError(f"Unknown time-delay rule '{rule}'; expected an integer or one of {_TAU_RULES}.")
+
+    y = np.ascontiguousarray(np.asarray(y, dtype=float).ravel())
+    digest = hashlib.blake2b(y.tobytes(), digest_size=16).digest()
+    for c_rule, c_n, c_digest, c_tau in _TAU_CACHE:
+        if c_rule == rule and c_n == y.size and c_digest == digest:
+            return c_tau
+
+    if rule == 'ac1e':
+        tau = _tau_ac1e(y)
+    elif rule == 'mi':
+        tau = _tau_mi(y)
+    elif rule == 'mi-gaussian':
+        tau = _tau_mi_gaussian(y)
+    else:  # 'ac'
+        tau = _tau_ac(y)
+    if not isinstance(tau, (int, np.integer)):
+        tau = np.nan if np.isnan(tau) else int(tau)
+
+    _TAU_CACHE.append((rule, y.size, digest, tau))
+    del _TAU_CACHE[:-_TAU_CACHE_SIZE]
+    return tau
+
+
+def theiler_window(y: Union[ArrayLike, None], spec: Union[int, float, list, tuple],
+                   N: Union[int, None] = None) -> Union[int, float]:
+    """
+    Resolve a Theiler-window specification to a number of samples.
+
+    Port of hctsa's ``BF_TheilerWindow``. Neighbor-based methods exclude candidate
+    neighbors j of a reference point i with ``|i - j| <= W``, since those are close in
+    state space only because successive values are correlated (Theiler, Phys. Rev. A 34,
+    2427, 1986). The window should span the time over which values stay correlated, which
+    differs from series to series.
+
+    Parameters
+    ----------
+    y : array-like or None
+        The time series (used to compute its autocorrelation time). May be ``None`` for a
+        numeric ``spec``.
+    spec : [str, number] or number
+        The Theiler window:
+
+        - ``['ac', k]`` (or tuple): ``ceil(k * first zero crossing of the ACF)`` (recommended);
+        - ``['ac1e', k]``: ``ceil(k * get_tau(y, 'ac1e'))``; shorter and more stable than the
+          zero crossing, NaN if the ACF never falls to 1/e;
+        - an integer >= 0: a fixed number of samples;
+        - a number in (0, 1): a proportion of ``N`` (legacy; scales with series length),
+          rounded half away from zero as in MATLAB. (A value of 1 or more is a number of samples.)
+    N : int, optional
+        The length a proportional window refers to. Default ``len(y)``.
+
+    Returns
+    -------
+    int or float
+        The window in samples, or ``nan`` when the ACF-based delay cannot be set (constant
+        series, ...). Callers should propagate NaN to a NaN feature value.
+
+    Raises
+    ------
+    ValueError
+        For a malformed ``spec``.
+    """
+    if isinstance(spec, (list, tuple)):
+        ok = (len(spec) == 2 and isinstance(spec[0], str) and spec[0] in ('ac', 'ac1e')
+              and isinstance(spec[1], (int, float, np.integer, np.floating))
+              and not isinstance(spec[1], bool) and spec[1] >= 0)
+        if not ok:
+            raise ValueError("Theiler window must be specified as ['ac', k] or ['ac1e', k], with k >= 0")
+        tau = get_tau(y, spec[0])
+        if np.isnan(tau):
+            return np.nan
+        return int(np.ceil(spec[1] * tau))
+    if isinstance(spec, (int, float, np.integer, np.floating)) and not isinstance(spec, bool) and spec >= 0:
+        if 0 < spec < 1:  # a proportion of the series length
+            if N is None:
+                if y is None:
+                    raise ValueError("N is required for a proportional window when y is None.")
+                N = len(y)
+            return int(_round_half_away(spec * N))
+        return int(_round_half_away(spec))
+    raise ValueError("Unrecognized Theiler window specification")
+
+
+def pre_process(y: ArrayLike, how: Union[str, None]) -> Union[np.ndarray, float]:
+    """
+    Pre-process a time series (hctsa's ``BF_PreProcess``).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    how : {'diff1', 'rescale_tau', 'decimate_ac1e'} or None
+        - ``'diff1'``: incremental differences;
+        - ``'rescale_tau'``: coarse-grain by averaging non-overlapping windows whose length is the
+          first zero crossing of the ACF;
+        - ``'decimate_ac1e'``: keep one sample per (floored) 1/e autocorrelation time
+          (``y[::get_tau(y, 'ac1e')]``), so features of the result do not change trivially with
+          the sampling rate. Iterated maps (ACF below 1/e at lag 1) are unchanged. In hctsa it is
+          used as ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``, see :func:`decimate_ac1e`.
+        - ``None`` or ``''``: no change.
+
+    Returns
+    -------
+    numpy.ndarray or float
+        The processed series, or ``nan`` (scalar) when the required time delay cannot be set
+        (as hctsa, which returns the scalar NaN).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if how is None or how == '':
+        return y
+    if how == 'diff1':
+        return np.diff(y)
+    if how == 'rescale_tau':
+        tau = get_tau(y, 'ac')
+        if np.isnan(tau) or tau < 1 or tau > y.size:
+            return np.nan
+        return np.mean(make_buffer(y, int(tau)), axis=1)
+    if how == 'decimate_ac1e':
+        tau = get_tau(y, 'ac1e')
+        if np.isnan(tau):
+            return np.nan
+        return y[::int(tau)]
+    raise ValueError(f"Unknown preprocessing setting: '{how}'")
+
+
+def _zscore_matlab(x: np.ndarray) -> np.ndarray:
+    """MATLAB's ``zscore``: (x - mean)/std with the N-1 std, and a zero std treated as 1."""
+    x = np.asarray(x, dtype=float)
+    mu = np.mean(x)
+    sd = np.std(x, ddof=1) if x.size > 1 else 0.0
+    if not sd > 0:
+        sd = 1.0
+    return (x - mu) / sd
+
+
+def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, float]:
+    """
+    ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``: decimate by the 1/e autocorrelation time.
+
+    Keeps every ``tau``-th sample, ``tau = get_tau(x_z, 'ac1e')``, then z-scores the result
+    (MATLAB ``zscore``: N-1 std, a constant result becomes zeros). hctsa uses this for the
+    ``*_dec`` variants of rate-dependent features. A config requests it with
+    ``preprocess: decimate_ac1e`` (see :class:`~pyhctsa.calculator.FeatureCalculator`).
+
+    Parameters
+    ----------
+    x_z : array-like
+        The (already z-scored) time series.
+    rezscore : bool, optional
+        Z-score the decimated series (default True, as hctsa).
+
+    Returns
+    -------
+    numpy.ndarray or float
+        The decimated series, or scalar ``nan`` if the delay cannot be set (hctsa's behavior:
+        the operation then returns NaN).
+    """
+    y = pre_process(x_z, 'decimate_ac1e')
+    if not isinstance(y, np.ndarray):
+        return np.nan
+    return _zscore_matlab(y) if rezscore else y
+
+
+def time_delay_embed(y: ArrayLike, m: int, tau: Union[int, str] = 1,
                      reverse: bool = False) -> np.ndarray:
     """
     Time-delay embedding of a univariate time series into an `m`-dimensional space.
@@ -618,8 +964,9 @@ def time_delay_embed(y: ArrayLike, m: int, tau: int = 1,
         The input time series.
     m : int
         The embedding dimension. Must be at least 1.
-    tau : int, optional
-        The time delay between successive coordinates. Default is 1.
+    tau : int or str, optional
+        The time delay between successive coordinates, or a rule understood by
+        :func:`get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``, ``'mi-gaussian'``). Default is 1.
     reverse : bool, optional
         If True, order the columns from the most- to the least-delayed copy
         (i.e. reverse the column order). Default is False.
@@ -632,12 +979,16 @@ def time_delay_embed(y: ArrayLike, m: int, tau: int = 1,
     Raises
     ------
     ValueError
-        If `m` is less than 1, or the time series is too short to embed with the
-        given parameters.
+        If `m` is less than 1, the time series is too short to embed with the
+        given parameters, or a ``tau`` rule gives no delay for this series (NaN).
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size
     m = int(m)
+    if isinstance(tau, str):
+        tau = get_tau(y, tau)
+        if np.isnan(tau):
+            raise ValueError('Time delay could not be determined for this time series.')
     tau = int(tau)
 
     if m < 1:

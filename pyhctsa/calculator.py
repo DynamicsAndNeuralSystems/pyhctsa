@@ -14,7 +14,7 @@ import yaml
 from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
-from .utils import _check_optional_deps, _preprocess_decorator, _validate_data
+from .utils import _check_optional_deps, _preprocess_decorator, _validate_data, _PREPROCESS_LABELS
 from .distribute import _compute_features_for_chunk, _extract_features_single_series
 
 class RangeList(list):
@@ -194,7 +194,7 @@ def _format_param_value(val, key=None) -> str:
             return str(val).replace('.', 'p').rstrip('0').rstrip('p')
     return str(val)
 
-def _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval):
+def _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval, preprocess=None):
     """Constructs the feature string based on params and flags."""
     parts = []
     # Process parameters
@@ -215,6 +215,8 @@ def _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval):
         label += '_raw'
     if do_absval:
         label += '_abs'
+    if preprocess:
+        label += _PREPROCESS_LABELS[preprocess]
     return label
 
 class FeatureCalculator:
@@ -234,6 +236,20 @@ class FeatureCalculator:
         Path to the YAML configuration file. If None, uses the default 'hctsa.yaml'
         configuration file in the package configurations directory.
     
+    Notes
+    -----
+    Besides the operation's own arguments, each entry of a feature's ``configs`` list may
+    carry these meta keys (not passed to the function):
+
+    - ``zscore: True``: z-score the series first (label gets no suffix; without it, ``_raw``);
+    - ``abs: True``: take the absolute value last (suffix ``_abs``);
+    - ``preprocess: decimate_ac1e``: hctsa's ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``.
+      The z-scored series is decimated to one sample per floored 1/e autocorrelation time and
+      z-scored again (suffix ``_dec``, after ``_abs``). If that time cannot be determined
+      (e.g. the ACF never falls to 1/e) the feature is NaN. See
+      :func:`pyhctsa.utils.decimate_ac1e`;
+    - ``select`` / ``exclude``: keep or drop keys of a dict-valued output.
+
     Examples
     --------
     >>> fc = FeatureCalculator()  # Load default configuration
@@ -299,10 +315,11 @@ class FeatureCalculator:
                     # extract and clean meta params
                     do_zscore = config_item.pop('zscore', False)
                     do_absval = config_item.pop('abs', False)
+                    preprocess = config_item.pop('preprocess', None)
                     select_features = config_item.pop('select', None)
                     exclude_features = config_item.pop('exclude', None)
                     # setup base function
-                    master_func = _preprocess_decorator(do_zscore, do_absval)(op_func)
+                    master_func = _preprocess_decorator(do_zscore, do_absval, preprocess)(op_func)
                     
                     # standardise config_item into a list of combinations
                     # if config_item is empty, product(*) returns [()], allowing us to loop once
@@ -313,7 +330,7 @@ class FeatureCalculator:
                         combo_dict = dict(zip(keys, combo_values))
                         
                         # generate label and apply wrappers
-                        label = _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval)
+                        label = _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval, preprocess)
                         
                         final_func = partial(master_func, **combo_dict)
                         # filter out certain features if specified by the user with the select/include keys
