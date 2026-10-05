@@ -910,44 +910,27 @@ def _matlab_std(a) -> float:
     return float(np.std(a, ddof=1)) if a.size > 1 else 0.0
 
 
-def _fit_exp_gof(x: np.ndarray, y: np.ndarray, start: list) -> tuple:
-    """Nonlinear least-squares fit of a*exp(b*x) + c from the given start point, as hctsa's
-    fit(x, y, fittype('a*exp(b*x)+c')). Returns (a, b, c, R^2, RMSE), all NaN if the fit fails.
-
-    These fits are often ill-conditioned (a and c large and opposite in sign when b is
-    near 0). This solver (Levenberg-Marquardt, run to convergence) and MATLAB's
-    trust-region solver (TolFun = TolX = 1e-6, MaxIter = 400) can then stop at different
-    points along the same valley, so a, b, c (and the fit quality) can differ in those
-    cases; where they do, this one has the lower (or equal) error.
-    """
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            res = least_squares(lambda p: p[0] * np.exp(p[1] * x) + p[2] - y, start, method='lm',
-                                ftol=1e-10, xtol=1e-10, gtol=1e-10, max_nfev=5000)
-            sse = np.sum(res.fun ** 2)
-            sst = np.sum((y - np.mean(y)) ** 2)
-            return (*res.x, 1 - sse / sst, np.sqrt(sse / (len(y) - 3)))
-    except (RuntimeError, ValueError, TypeError, FloatingPointError, np.linalg.LinAlgError) as exc:
-        logger.warning("DN_OutlierInclude: error fitting an exponential: %s", exc)
-        return (np.nan,) * 5
-
-
 def _fit_lin_gof(x: np.ndarray, y: np.ndarray) -> tuple:
-    """Least-squares fit of a*x + b, as hctsa's fit(x, y, fittype('a*x+b')).
-    Returns (a, b, R^2, RMSE), all NaN if the fit fails."""
-    try:
-        if len(x) < 2:
-            raise ValueError("too few points")
-        design = np.column_stack((x, np.ones(len(x))))
-        (a, b), *_ = np.linalg.lstsq(design, y, rcond=None)
-        sse = np.sum((y - (a * x + b)) ** 2)
-        sst = np.sum((y - np.mean(y)) ** 2)
-        with np.errstate(divide='ignore', invalid='ignore'):
-            return a, b, 1 - sse / sst, np.sqrt(sse / (len(y) - 2))
-    except (ValueError, np.linalg.LinAlgError, FloatingPointError) as exc:
-        logger.warning("DN_OutlierInclude: error fitting a linear trend: %s", exc)
+    """Ordinary least-squares line ``a*x + b``, with R^2 and root-mean-square error (n - 2
+    degrees of freedom). Returns (a, b, R^2, RMSE), all NaN for fewer than 3 points or a
+    constant curve."""
+    n = len(y)
+    sst = np.sum((y - np.mean(y)) ** 2)
+    if n < 3 or not sst > 0:
         return (np.nan,) * 4
+    a, b = np.polyfit(x, y, 1)
+    sse = np.sum((y - (a * x + b)) ** 2)
+    return a, b, 1 - sse / sst, np.sqrt(sse / (n - 2))
+
+
+def _exp_fit_outputs(x: np.ndarray, y: np.ndarray) -> tuple:
+    """Rate b, R^2 and RMSE of the global exponential fit ``a*exp(b*x) + c`` (:func:`pyhctsa.robust.bf_exp_fit`).
+
+    The amplitude a and offset c are not output: they are poorly determined when the
+    curve is close to a straight line, as a and c then become large and opposite in sign.
+    """
+    f = bf_exp_fit(x, y, True)
+    return f['b'], f['r2'], f['rmse']
 
 
 def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
@@ -971,8 +954,10 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
 
     The sweep stops when events are 2% or fewer of the points. The outputs measure how
     these curves change with th, using exponential [f(x) = a*exp(b*x) + c] and linear
-    [f(x) = a*x + b] fits, and simple statistics across thresholds. If a fit fails, its
-    outputs are NaN.
+    [f(x) = a*x + b] fits, and simple statistics across thresholds. The exponential fits
+    are global least-squares fits (:func:`pyhctsa.robust.bf_exp_fit`), which need no
+    starting point; only the rate b and the fit quality are returned. If a fit is
+    degenerate (a constant curve, too few points), its outputs are NaN.
 
     If ``fixed_thresh`` is given, the sweep and fits are skipped, and the statistics in
     (1)-(3) are returned for that one threshold.
@@ -1000,11 +985,10 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
     dict
         From the sweep (``fixed_thresh`` not given):
 
-        - ``mfexpa``, ``mfexpb``, ``mfexpc``, ``mfexpr2``, ``mfexprmse``: the parameters
-          a, b, c, R^2 and root-mean-square error of the exponential fit to the mean
-          gap vs. th;
-        - ``nfexpa``, ``nfexpb``, ``nfexpc``, ``nfexpr2``, ``nfexprmse``: the same for an
-          exponential fit to the percentage of points that are events vs. th;
+        - ``mfexpb``, ``mfexpr2``, ``mfexprmse``: the rate b, R^2 and root-mean-square
+          error of the exponential fit to the mean gap vs. th;
+        - ``nfexpb``, ``nfexpr2``, ``nfexprmse``: the same for an exponential fit to the
+          percentage of points that are events vs. th;
         - ``nfla``, ``nflb``, ``nflr2``, ``nflrmse``: slope a, intercept b, R^2 and
           RMSE of a linear fit to the percentage of points that are events vs. th;
         - ``mdtm``, ``mdtmd``, ``mdtstd``: mean, median and standard deviation of the
@@ -1014,8 +998,8 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
         - ``mrm``, ``mrmd``, ``mrstd``: the same for the mean time of the events;
         - ``xcmerr1``, ``xcmerrn1``: cross-correlation between the mean gap and its
           standard error across thresholds, at lags +1 and -1;
-        - ``stdrfexpa``, ``stdrfexpb``, ``stdrfexpc``, ``stdrfexpr2``, ``stdrfexprmse``:
-          the parameters and fit quality of an exponential fit to
+        - ``stdrfexpb``, ``stdrfexpr2``, ``stdrfexprmse``:
+          the rate and fit quality of an exponential fit to
           std(times)/sqrt(their number) vs. th;
         - ``stdrfla``, ``stdrflb``, ``stdrflr2``, ``stdrflrmse``: the same for a linear fit.
 
@@ -1115,12 +1099,12 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
     results = {}
 
     # Fit an exponential to the mean inter-event interval as a function of the threshold
-    mfexp = _fit_exp_gof(thresholds, statistics[:, 0], [0.1, 2.5, 1])
-    results.update(dict(zip(['mfexpa', 'mfexpb', 'mfexpc', 'mfexpr2', 'mfexprmse'], mfexp)))
+    mfexp = _exp_fit_outputs(thresholds, statistics[:, 0])
+    results.update(dict(zip(['mfexpb', 'mfexpr2', 'mfexprmse'], mfexp)))
 
     # Fit an exponential, then a linear trend, to the percentage of points included
-    nfexp = _fit_exp_gof(thresholds, statistics[:, 2], [120, -1, -16])
-    results.update(dict(zip(['nfexpa', 'nfexpb', 'nfexpc', 'nfexpr2', 'nfexprmse'], nfexp)))
+    nfexp = _exp_fit_outputs(thresholds, statistics[:, 2])
+    results.update(dict(zip(['nfexpb', 'nfexpr2', 'nfexprmse'], nfexp)))
     nfl = _fit_lin_gof(thresholds, statistics[:, 2])
     results.update(dict(zip(['nfla', 'nflb', 'nflr2', 'nflrmse'], nfl)))
 
@@ -1153,8 +1137,8 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
     })
 
     # Fit an exponential, then a linear trend, to the std of event times
-    stdrfexp = _fit_exp_gof(thresholds, statistics[:, 5], [5, 1, 15])
-    results.update(dict(zip(['stdrfexpa', 'stdrfexpb', 'stdrfexpc', 'stdrfexpr2', 'stdrfexprmse'], stdrfexp)))
+    stdrfexp = _exp_fit_outputs(thresholds, statistics[:, 5])
+    results.update(dict(zip(['stdrfexpb', 'stdrfexpr2', 'stdrfexprmse'], stdrfexp)))
     stdrfl = _fit_lin_gof(thresholds, statistics[:, 5])
     results.update(dict(zip(['stdrfla', 'stdrflb', 'stdrflr2', 'stdrflrmse'], stdrfl)))
 
