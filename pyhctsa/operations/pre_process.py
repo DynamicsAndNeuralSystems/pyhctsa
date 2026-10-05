@@ -10,11 +10,11 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 from ..operations.correlation import autocorr
-from ..operations.distribution import compare_ks_fit, outlier_test, simple_fit
+from ..operations.distribution import _bf_random_seed, compare_ks_fit, outlier_test, simple_fit
 from ..operations.nonlinearity import zero_one_test
 from ..operations.stationarity import sliding_window, stat_av
-from ..robust import bf_fit_sinusoids
-from ..utils import _ml_rng, _round_half_away, _zscore_matlab, z_score
+from ..robust import bf_fit_sinusoids, bf_random
+from ..utils import _round_half_away, _zscore_matlab, z_score
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
     """Apply a length-k median filter to a 1D array x, as MATLAB's ``medfilt1``.
@@ -466,18 +466,14 @@ def _rank_map_gaussian(y: np.ndarray, random_seed=None, draws: np.ndarray = None
     """Replace the values of y by Gaussian values of the same rank (hctsa's ``rmgd``).
 
     N Gaussian values are drawn and sorted, and the k-th smallest is given to the k-th smallest
-    value of y. ``random_seed`` is as in ``bf_remove_points``: an integer, ``None``/``'default'``
-    for seed 0, or ``'none'`` for NumPy's global random state. (The draws come from NumPy's
-    generator, so they are not MATLAB's ``randn`` stream for the same seed.) The sorted draws
-    can instead be supplied as ``draws``.
+    value of y. ``random_seed`` is as in ``remove_points``: an integer, ``None``/``'default'``
+    for seed 0, or ``'none'`` for a seed drawn from NumPy's global random state. The draws come
+    from the portable generator :func:`pyhctsa.robust.bf_random` (normal), so they are hctsa's
+    for the same seed. The sorted draws can instead be supplied as ``draws``.
     """
     n = len(y)
     if draws is None:
-        if isinstance(random_seed, str) and random_seed == 'none':
-            draws = np.random.randn(n)
-        else:
-            seed = 0 if random_seed is None or random_seed == 'default' else int(random_seed)
-            draws = _ml_rng(seed).standard_normal(n)
+        draws = bf_random(n, _bf_random_seed(random_seed), 'normal')
     out = np.zeros(n)
     out[np.argsort(y, kind='stable')] = np.sort(draws)
     return out
@@ -533,9 +529,10 @@ def preproc_model_fit(y: ArrayLike, model: str = 'ar', order: int = 2,
     order : int, optional
         The order of the AR model to fit. Default is 2.
     random_seed : int, 'default', 'none' or None, optional
-        How to seed the random draws used by ``rmgd``, as hctsa's ``BF_ResetSeed``: an integer
-        seed, ``'default'`` or ``None`` for seed 0, or ``'none'`` to use NumPy's global random
-        state. The draws are NumPy's, not MATLAB's ``randn`` stream.
+        The seed of the random draws used by ``rmgd`` (hctsa's ``BF_RandomSeed``): an integer,
+        ``'default'`` or ``None`` for seed 0, or ``'none'`` for a seed drawn from NumPy's global
+        random state. The draws come from the portable generator
+        :func:`pyhctsa.robust.bf_random`, so they are hctsa's for the same seed.
 
     Returns
     -------
