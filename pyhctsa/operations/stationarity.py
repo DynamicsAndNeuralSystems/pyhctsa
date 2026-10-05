@@ -57,8 +57,9 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
     -------
     dict
         For a single lag: the p-value, statistic, first regression coefficient
-        and regression fit statistics. For multiple lags: summary statistics on
-        the p-values, statistics and regression fit statistics across lags.
+        and regression fit statistics (`pvalue`, `stat`, `coeff1`, `loglikelihood`,
+        `AIC`, `BIC`, `HQC`, `rmse`). For multiple lags: `minpValue`, `meanpValue`,
+        `lagmaxp`, `lagminp`, `meanstat` and `minBIC`.
         The log-likelihood and information criteria (AIC, BIC, HQC) are reported
         per observation.
     """
@@ -112,24 +113,12 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
     p_values = np.asarray(p_values)
     stats = np.asarray(stats)
     return {
-        'maxpValue': np.max(p_values),
         'minpValue': np.min(p_values),
         'meanpValue': np.mean(p_values),
-        'stdpValue': np.std(p_values, ddof=1),
         'lagmaxp': lag_list[int(np.argmax(p_values))],
         'lagminp': lag_list[int(np.argmin(p_values))],
-
         'meanstat': np.mean(stats),
-        'maxstat': np.max(stats),
-        'minstat': np.min(stats),
-
-        'meanloglikelihood': np.mean([r['LL'] for r in regs]) / n_obs,
-        'minAIC': np.min([r['AIC'] for r in regs]) / n_obs,
         'minBIC': np.min([r['BIC'] for r in regs]) / n_obs,
-        'minHQC': np.min([r['HQC'] for r in regs]) / n_obs,
-
-        'minrmse': np.min([r['RMSE'] for r in regs]),
-        'maxrmse': np.max([r['RMSE'] for r in regs]),
     }
 
 def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par',
@@ -159,7 +148,8 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     Returns
     -------
     dict
-        Measures of the sum of absolute deviations between distributions across the different pairwise comparisons.
+        Mean (`meandiv`) and standard deviation (`stddiv`) of the L1 distances between distributions across the
+        different pairwise comparisons. (For 'each' with two segments, the single L1 distance is returned as a float.)
     """
     # preliminaries
     y = np.asarray(y)
@@ -205,7 +195,6 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     # segments of the time series
     out = {}
     out['meandiv'] = np.mean(divs)
-    out['maxdiv'] = np.max(divs)
     out['stddiv'] = np.std(divs, ddof=1)
 
     return out
@@ -336,7 +325,9 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
     Returns
     --------
     out
-        Dictionary of statistics related to the correlation between simple statistics in local windows of the input time series. 
+        Dictionary of statistics related to the correlation between simple statistics in local windows of the input
+        time series: the correlation coefficient `R`, its absolute value `absR`, and `density`, the number of
+        windows divided by the bounding-box area in the M1--M2 plane.
     """
     x = np.asarray(x)
     N = len(x) # length of the time series
@@ -385,7 +376,8 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
 
     out = {}
     rmat = np.corrcoef(M1, M2)
-    out['absR'] = np.abs(rmat[0, 1])
+    out['R'] = rmat[0, 1]  # correlation coefficient
+    out['absR'] = np.abs(rmat[0, 1])  # absolute value of the correlation coefficient
     # density of points in M1--M2 space: (number of windows) / (bounding-box area)
     with np.errstate(divide='ignore', invalid='ignore'):
         out['density'] = len(M1) / (np.ptp(M1) * np.ptp(M2))
@@ -478,6 +470,10 @@ def simple_stats(x: ArrayLike, what_stat: str = 'zcross') -> dict:
     
     return out
 
+def _std_matlab(v: np.ndarray) -> float:
+    """Sample standard deviation (N-1) with MATLAB's convention that a single value has std 0 (numpy: NaN)."""
+    return float(np.std(v, ddof=1)) if np.size(v) > 1 else 0.0
+
 def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = None) -> dict:
     """
     How local maximums and minimums vary across the time series.
@@ -529,8 +525,8 @@ def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = 
     else:
         raise ValueError(f"Unknown method {how_to_window}")
     
-    if (window_length > N) or (window_length <= 1):
-        # This feature is unsuitable if the window length exceeds ts
+    if np.isnan(window_length) or (window_length > N) or (window_length <= 1):
+        # This feature is unsuitable if the window length exceeds ts (or is undefined)
         return np.nan
     
     # Buffer the time series
@@ -567,9 +563,9 @@ def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = 
         'medianmax': np.median(loc_max) / exp_max,
         'medianabsmin': np.median(abs_loc_min) / exp_max,
         'medianext': np.median(loc_ext) / exp_max,
-        'stdmax': np.std(loc_max, ddof=1),
-        'stdmin': np.std(loc_min, ddof=1),
-        'stdext': np.std(loc_ext, ddof=1),
+        'stdmax': _std_matlab(loc_max),
+        'stdmin': _std_matlab(loc_min),
+        'stdext': _std_matlab(loc_ext),
         'zcext': np.sum((loc_ext[:-1] * loc_ext[1:]) < 0) / num_windows,
         'meanabsext': np.mean(abs_loc_ext) / exp_max,
         'medianabsext': np.median(abs_loc_ext) / exp_max,
@@ -800,6 +796,10 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
 
     return out
 
+def _matlab_round(v: float) -> int:
+    """MATLAB's round(): halves round away from zero (Python's round() rounds halves to even)."""
+    return int(np.sign(v) * np.floor(np.abs(v) + 0.5))
+
 def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None] = None) -> dict:
     """
     Compare local statistics to global statistics of a time series.
@@ -812,7 +812,7 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
         The method to select the local subset of time series:
 
         - 'l': the first n points in a time series
-        - 'p': an initial proportion of the full time series
+        - 'p': an initial proportion of the full time series (round(N*n) points, as in MATLAB)
         - 'unicg': n evenly-spaced points throughout the time series
         - 'randcg': n randomly-chosen points from the time series (chosen with replacement)
 
@@ -827,7 +827,9 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     --------
     dict
         A dictionary containing various statistical measures comparing
-        the subset to the full time series.
+        the subset to the full time series: `absmean`, `std`, `median`, `iqr`, `skewness`, `kurtosis`, `ac1`
+        (the last four are the absolute relative deviation of the subset statistic from the full-series
+        one, NaN when the full-series statistic is zero).
     """
     # check input time series is z-scored
     y = np.asarray(y)
@@ -845,9 +847,9 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
         r = np.arange(min(n, N))
     elif subset_how == 'p':
         # take initial proportion n of time series
-        r = np.arange(int(np.floor(N*n)))
+        r = np.arange(_matlab_round(N*n))
     elif subset_how == 'unicg':
-        r = np.round(np.linspace(1, N, n)).astype(int) - 1
+        r = np.floor(np.linspace(1, N, n) + 0.5).astype(int) - 1  # MATLAB round: halves away from zero
     else:
         raise ValueError(f"Unknown specifier, {subset_how}. Can be either 'l', 'p', 'unicg', or 'randcg'.")
 
@@ -872,10 +874,6 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/global_kurt)) if global_kurt != 0 else np.nan
     global_ac1 = autocorr(y, 1, 'Fourier')[0]
     out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')[0]/global_ac1)) if global_ac1 != 0 else np.nan
-
-    sampen_full = sample_entropy(y, 1, 0.1)['sampen1']
-    sampen_r = sample_entropy(y[r], 1, 0.1)['sampen1']
-    out['sampen101'] = sampen_r / sampen_full if sampen_full > 0 else np.nan
 
     return out
 
