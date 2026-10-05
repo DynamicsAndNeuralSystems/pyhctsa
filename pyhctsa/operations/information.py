@@ -782,6 +782,15 @@ def _rm_histogram_2(x: ArrayLike, y: ArrayLike):
 
 
 
+def _rcond_1norm(a: np.ndarray) -> float:
+    """Reciprocal condition number in the 1-norm, ``1/(norm(A, 1) * norm(inv(A), 1))`` (MATLAB's
+    ``rcond``; 0 for a singular matrix)."""
+    try:
+        return float(1.0 / (np.linalg.norm(a, 1) * np.linalg.norm(np.linalg.inv(a), 1)))
+    except np.linalg.LinAlgError:
+        return 0.0
+
+
 def multivariate_ami(y: ArrayLike, tau_method: Union[int, str] = 'ac',
                      est_method: str = 'gaussian',
                      extra_param: Optional[Union[int, str]] = None) -> Union[dict, float]:
@@ -826,7 +835,8 @@ def multivariate_ami(y: ArrayLike, tau_method: Union[int, str] = 'ac',
     dict or float
         - ``tau``: the time delay used (in samples);
         - ``multiAMI``: the information that ``x_{t-tau}`` and ``x_{t-2tau}`` jointly carry about
-          ``x_t`` (in nats);
+          ``x_t`` (in nats; for the Gaussian estimator NaN if the two lagged copies are
+          numerically collinear, and ``1 - R^2`` is floored at 1e-12, so at most 13.8 nats);
         - ``ami_2tau``: the automutual information between ``x_{t-2tau}`` and ``x_t`` (in nats);
         - ``ami_tau``: the automutual information between ``x_{t-tau}`` and ``x_t`` (in nats);
         - ``synergy``: ``multiAMI - ami_tau - ami_2tau``.
@@ -860,19 +870,19 @@ def multivariate_ami(y: ArrayLike, tau_method: Union[int, str] = 'ac',
         x_2tau, x_tau, x_now = emb[:, 0], emb[:, 1], emb[:, 2]
         # I(Y;X) = -0.5*log(1 - R^2), where R^2 is the squared multiple correlation coefficient
         # of Y on X (exact generalization of the univariate -0.5*log(1 - r^2))
-        R = np.corrcoef(np.column_stack([x_now, x_2tau, x_tau]), rowvar=False)
+        with np.errstate(invalid='ignore', divide='ignore'):
+            R = np.corrcoef(np.column_stack([x_now, x_2tau, x_tau]), rowvar=False)
         corr_xy = R[0, 1:3]
-        try:
-            r_sq = float(corr_xy @ np.linalg.solve(R[1:, 1:], corr_xy))
-        except np.linalg.LinAlgError:
-            r_sq = np.nan
-        if np.isnan(r_sq):
-            r_sq = 0.0  # as MATLAB's min(max(NaN, 0), ...)
-        r_sq = min(max(r_sq, 0.0), 1.0 - np.finfo(float).eps)  # guard numerical over/undershoot
-        with np.errstate(divide='ignore', invalid='ignore'):
-            out['multiAMI'] = float(-0.5 * np.log(1.0 - r_sq))
-            out['ami_2tau'] = float(-0.5 * np.log(1.0 - R[0, 1] ** 2))
-            out['ami_tau'] = float(-0.5 * np.log(1.0 - R[0, 2] ** 2))
+        corr_xx = R[1:, 1:]
+        if np.any(np.isnan(R)) or _rcond_1norm(corr_xx) < 1e-12:
+            # the two lagged copies are (numerically) collinear: the joint estimate is undefined
+            out['multiAMI'] = np.nan
+        else:
+            r_sq = float(corr_xy @ np.linalg.solve(corr_xx, corr_xy))
+            r_sq = min(max(r_sq, 0.0), 1.0)  # guard numerical over/undershoot
+            out['multiAMI'] = float(-0.5 * np.log(max(1.0 - r_sq, _GAUSSIAN_AMI_FLOOR)))  # floored as in automutual_info
+        out['ami_2tau'] = float(_gaussian_ami_from_r(R[0, 1]))
+        out['ami_tau'] = float(_gaussian_ami_from_r(R[0, 2]))
     else:
         k = 4 if extra_param is None else int(extra_param)
         mi_calc = KraskovMI(k=k, algorithm=1 if est_method == 'kraskov1' else 2,
