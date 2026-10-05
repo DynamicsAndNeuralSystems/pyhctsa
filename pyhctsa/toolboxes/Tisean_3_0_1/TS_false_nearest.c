@@ -10,8 +10,9 @@
  *   as a numpy array, and the rows the program would have printed are handed
  *   back as an (n_rows, 4) array.
  *
- *   The numerics are a line-by-line transcription of false_nearest.c (single
- *   component case), including the box-assisted neighbour search with its
+ *   The numerics are a transcription of false_nearest.c (single
+ *   component case; the embedding coordinates are lagged by `delay` samples,
+ *   which the original, using lag 1 whatever -d, does not do), including the box-assisted neighbour search with its
  *   1024 x 1024 hashed grid, the growth of the search radius by sqrt(2) until
  *   every point has a neighbour, routines/rescale_data.c and the naive
  *   summation of routines/variance.c. A condition under which the program
@@ -69,15 +70,16 @@ static void mmb(fnn_ctx *c, int64_t maxemb, int64_t delay, int64_t hemb, double 
     }
 }
 
-/* component 0 only: vcomp[i] = 0, vemb[i] = i */
-static char find_nearest(fnn_ctx *c, int64_t n, int64_t dim, double eps)
+/* component 0 only: embedding coordinate i is the sample at lag vemb[i] = i * delay
+   (vcomp[i] = 0). */
+static char find_nearest(fnn_ctx *c, int64_t n, int64_t dim, int64_t delay, double eps)
 {
     int64_t x, y, x1, x2, y1, i, element, which = -1;
     double dx, maxdx, mindx = 1.1, hfactor, factor;
     const double *s = c->series;
 
     x = (int64_t)(s[n] / eps) & IBOX;
-    y = (int64_t)(s[n + dim] / eps) & IBOX;
+    y = (int64_t)(s[n + dim * delay] / eps) & IBOX;
 
     for (x1 = x - 1; x1 <= x + 1; x1++) {
         x2 = x1 & IBOX;
@@ -89,7 +91,7 @@ static char find_nearest(fnn_ctx *c, int64_t n, int64_t dim, double eps)
                 if (d > c->theiler) {
                     maxdx = fabs(s[n] - s[element]);
                     for (i = 1; i <= dim; i++) {
-                        dx = fabs(s[n + i] - s[element + i]);
+                        dx = fabs(s[n + i * delay] - s[element + i * delay]);
                         if (dx > maxdx)
                             maxdx = dx;
                     }
@@ -107,7 +109,7 @@ static char find_nearest(fnn_ctx *c, int64_t n, int64_t dim, double eps)
         c->aveps += mindx;
         c->vareps += mindx * mindx;
         /* comp == 1: the next component is the next delay coordinate */
-        hfactor = fabs(s[n + dim + 1] - s[which + dim + 1]) / mindx;
+        hfactor = fabs(s[n + (dim + 1) * delay] - s[which + (dim + 1) * delay]) / mindx;
         factor = 0.0;
         if (hfactor > factor)
             factor = hfactor;
@@ -225,10 +227,10 @@ static PyObject *py_run(PyObject *self, PyObject *args)
         memset(nearest, 0, (size_t)c.length);
         while (!alldone && (epsilon < 2. * c.varianz / c.rt)) {
             alldone = 1;
-            mmb(&c, maxemb, delay, dim, epsilon);
+            mmb(&c, maxemb, delay, dim * delay, epsilon);
             for (i = 0; i < c.length - maxemb * delay; i++)
                 if (!nearest[i]) {
-                    nearest[i] = find_nearest(&c, i, dim, epsilon);
+                    nearest[i] = find_nearest(&c, i, dim, delay, epsilon);
                     alldone &= nearest[i];
                     donesofar += (int64_t)nearest[i];
                 }

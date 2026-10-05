@@ -17,7 +17,7 @@ def _x(n=400):
 def test_fnn_embedding_dimension():
     # BF_Embed(x, tau, 'fnn', true)
     assert nl._embedding_params(_x(), 'mi', 'fnn') == (3, 3)
-    assert nl._embedding_params(_x(), 'ac1e', 'fnn') == (4, 3)
+    assert nl._embedding_params(_x(), 'ac1e', 'fnn') == (4, 2)
     assert nl._embedding_params(_x(), 'ac1e', ['fnn', 0.05]) == (4, 5)
     assert nl._embed_tau_m(_x(), ['mi', 'fnn']) == (3, 3)
     assert nl._embedding_params(_x(), 2, 6) == (2, 6)
@@ -28,9 +28,9 @@ def test_fnn_embedding_dimension():
 
 def test_fnn_users():
     x = _x()
-    assert abs(nl.nlpe(x, 'fnn', 'mi', 5000, ('ac', 1))['msqerr'] - 0.236829945826) < 1e-9
+    assert abs(nl.nlpe(x, 'fnn', 'mi', 5000, ('ac', 1))['msqerr'] - 0.207584162764) < 1e-9
     d = nl.local_density(x, 5, ('ac', 1), 'ac1e', 'fnn')
-    assert abs(d['meanden'] + 2.76300616221) < 1e-9 and abs(d['stdden'] - 0.902477556828) < 1e-9
+    assert abs(d['meanden'] + 2.37340122116) < 1e-9 and abs(d['stdden'] - 0.723311553717) < 1e-9
     d = nl.gp_corr_sum(x, -1, 0.1, ('ac', 1), 20, ('ac', 'fnn'))
     assert abs(d['robfit_a2'] - 3.66955087508) < 1e-9 and abs(d['meanlnCr'] + 8.32376735638) < 1e-9
     assert abs(nl.takens_estimator(x, -1, 0.05, ('ac', 1), ('mi', 'fnn')) - 2.14107670491) < 1e-9
@@ -46,8 +46,41 @@ def test_fnn():
     assert (d['firstunder09'], d['firstunder05'], d['firstunder02'], d['firstunder005']) == (2, 3, 4, 5)
     assert d['pdrop'] == pytest.approx(2 / 3)
     assert nl.fnn(_x(), 1, 10, ('ac', 1), True, 0.4, 5) == 3
-    assert nl.fnn(_x(), 'ac', escape_factor=5, just_best=True, bestp=0.05) == 5
+    assert nl.fnn(_x(), 'ac', escape_factor=5, just_best=True, bestp=0.05) == 6
     assert np.isnan(nl.fnn(_x()[:8])) and np.isnan(nl.fnn(np.ones(100)))
+
+
+def test_fnn_delay_is_the_lag_between_coordinates():
+    # TISEAN 3.0.1 ignores -d for a scalar series (lag 1 whatever the delay); here the delay is the lag.
+    # Reference values from hctsa's false_nearest binary (lag = delay) on a Lorenz x series.
+    x = _lorenz_x(3000)
+    f1 = _tisean.false_nearest(x, 1, 1, 5, 50, 5.0, 7)['pfnn']
+    f30 = _tisean.false_nearest(x, 30, 1, 5, 50, 5.0, 7)['pfnn']
+    # delay 1 is unchanged (the original program's values)
+    assert np.allclose(f1, [0.9489149, 0.01035058, 0.002003339, 0, 0], atol=1e-6)
+    # delay 30: the false-neighbor fraction stays high at m = 2 .. 5 (it was ~0 from m = 3 with lag 1)
+    assert np.allclose(f30, [0.9824561, 0.4029484, 0.2250270, 0.2035503, 0.2013487], atol=1e-6)
+    # a delay-d embedding of x with each value repeated d times is the lag-1 embedding of x
+    d, z = 4, x[:1500]
+    r = _tisean.false_nearest(np.repeat(z, d), d, 1, 4, 0, 5.0, None)['pfnn']
+    r1 = _tisean.false_nearest(z, 1, 1, 4, 0, 5.0, None)['pfnn']
+    assert np.allclose(r, r1, atol=0.01)
+
+
+def _lorenz_x(n):
+    def f(s):
+        return np.array([10 * (s[1] - s[0]), s[0] * (28 - s[2]) - s[1], s[0] * s[1] - 8 / 3 * s[2]])
+    s, h = np.array([1., 1., 1.]), 0.01
+    def rk4(s):
+        k1 = f(s); k2 = f(s + h / 2 * k1); k3 = f(s + h / 2 * k2); k4 = f(s + h * k3)
+        return s + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+    for _ in range(5000):
+        s = rk4(s)
+    x = np.empty(n)
+    for i in range(n):
+        s = rk4(rk4(s))
+        x[i] = s[0]
+    return x
 
 
 def _x600():

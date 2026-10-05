@@ -278,10 +278,11 @@ def false_nearest(
     y : array-like
         Input time series.
     delay : int, optional
-        Time delay (``false_nearest -d``). Default is 1. NOTE: as in TISEAN
-        3.0.1's ``false_nearest`` for a scalar series, the delay only limits
-        the number of embedded points used; the embedding coordinates are
-        consecutive samples.
+        Time delay (``false_nearest -d``): the lag in samples between successive
+        embedding coordinates. Default is 1. NOTE: TISEAN 3.0.1's ``false_nearest``
+        ignores it for a scalar series (the coordinates are consecutive samples, and
+        the delay only limits the number of embedded points used); hctsa's copy and
+        this port use it as the lag.
     minemb, maxemb : int, optional
         Smallest and largest embedding dimension tested (``-m``, ``-M1,<maxemb>``).
         Defaults are 1 and 10.
