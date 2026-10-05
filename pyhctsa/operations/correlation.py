@@ -476,6 +476,10 @@ def falling_sticks(y: ArrayLike) -> dict:
         -- falling flat, hitting the immediately next stick, or skipping over
         one or more sticks to hit a farther one -- and the two ways a hit can
         occur -- trunk-strike (case 1) vs. tip-strike/topple-over (case 2).
+        The persistence statistics (``tau_p``, ``ac1_p``, ``tau_n``, ``ac1_n``) are NaN
+        when a branch's fall angles are constant to rounding error (e.g. all sticks fall flat);
+        likewise ``skewness_all`` and ``kurtosis_all`` when all the angles are, and ``std_all``
+        is then 0.
     """
     y = np.asarray(y).flatten()
 
@@ -505,6 +509,8 @@ def falling_sticks(y: ArrayLike) -> dict:
     out['median_all'] = _fall_safe_stat(np.median, all_angles)
     out['std_all'] = _fall_safe_stat(
         lambda x: np.std(x, ddof=1) if len(x) > 1 else 0.0, all_angles)
+    if len(all_angles) > 0 and _fall_is_constant(all_angles):
+        out['std_all'] = 0.0  # constant to rounding error: the spread is zero
 
     # Asymmetry between the positive- and negative-branch fall angles:
     if not np.isnan(out['mean_p']) and not np.isnan(out['mean_n']):
@@ -530,17 +536,16 @@ def falling_sticks(y: ArrayLike) -> dict:
     # (The 90th percentile is omitted: across two independent redundancy-check
     # datasets it landed exactly on the pi/2 flat-fall spike every time, since
     # most series have >=10% flat falls -- it carries no information.)
-    if len(all_angles) >= 2:
+    if len(all_angles) >= 2 and not _fall_is_constant(all_angles):
         out['skewness_all'] = skew(all_angles)
         out['kurtosis_all'] = kurtosis(all_angles, fisher=False)
-        out['q10_all'] = np.quantile(all_angles, 0.1, method='hazen')
     else:
-        out['skewness_all'] = np.nan
+        out['skewness_all'] = np.nan  # undefined for constant angles
         out['kurtosis_all'] = np.nan
-        out['q10_all'] = np.nan
+    out['q10_all'] = np.quantile(all_angles, 0.1, method='hazen') if len(all_angles) >= 2 else np.nan
 
     # Persistence of the fall-angle sequence
-    if len(angles_pos) >= 2 and np.std(angles_pos, ddof=1) > 0:
+    if len(angles_pos) >= 2 and not _fall_is_constant(angles_pos):
         z_angles_pos = _zscore_matlab(angles_pos)
         out['tau_p'] = first_crossing(z_angles_pos, 'ac', 0, 'continuous')
         out['ac1_p'] = autocorr(z_angles_pos, 1, 'Fourier')
@@ -548,7 +553,7 @@ def falling_sticks(y: ArrayLike) -> dict:
         out['tau_p'] = np.nan
         out['ac1_p'] = np.nan
 
-    if len(angles_neg) >= 2 and np.std(angles_neg, ddof=1) > 0:
+    if len(angles_neg) >= 2 and not _fall_is_constant(angles_neg):
         z_angles_neg = _zscore_matlab(angles_neg)
         out['tau_n'] = first_crossing(z_angles_neg, 'ac', 0, 'continuous')
         out['ac1_n'] = autocorr(z_angles_neg, 1, 'Fourier')
@@ -557,6 +562,17 @@ def falling_sticks(y: ArrayLike) -> dict:
         out['ac1_n'] = np.nan
 
     return out
+
+
+def _fall_is_constant(x: np.ndarray) -> bool:
+    """A sequence of angles counts as constant when its spread is at rounding level.
+
+    E.g. when all sticks fall flat but some angles differ in the last bits: z-scoring would amplify
+    the rounding noise, so the persistence statistics are NaN instead.
+    """
+    if len(x) < 2:
+        return True
+    return bool(np.std(x, ddof=1) <= 1e-10 * max(1.0, float(np.max(np.abs(x)))))
 
 
 def _fall_branch(ix: ArrayLike, y: ArrayLike) -> tuple:
