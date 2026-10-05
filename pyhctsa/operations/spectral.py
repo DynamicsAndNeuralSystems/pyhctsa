@@ -3,6 +3,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from typing import Union
 import scipy.fft
+import scipy.signal
 
 from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit, robustfit, polyfit
 
@@ -291,13 +292,18 @@ def _fit_gaussian(log_f: ArrayLike, resid: ArrayLike, i_pk: int,
         'pred': h * np.exp(-(log_f - m) ** 2 / (2 * w ** 2)),
     }
 
-def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = 'none') -> dict:
+def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = 'hamming') -> dict:
     """
     Statistics of the power spectrum of a time series.
 
-    Computes a range of statistics summarizing the power spectrum of a time series.
-    The spectrum can be estimated using a periodogram, fast Fourier transform (FFT), 
-    or Welch's method.
+    Estimates the power spectrum (as a periodogram, a plain fast Fourier transform, or by
+    Welch's method) and returns many summary statistics: the location and width of its main
+    peak, the number and prominence of peaks, the distribution of power values, the
+    autocorrelation of power across frequency, the frequencies below which given fractions of
+    the power lie, power-weighted moments of frequency, fits to the cumulative power, a spectral
+    entropy and flatness, robust power-law fits to the log-log spectrum, the power in 2 and 5
+    equal frequency bands, and the number of crossings of the log spectrum at various levels.
+    Many statistics have a log-domain version computed on log(S).
 
     Parameters
     ----------
@@ -306,28 +312,94 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     psd_meth : {'periodogram', 'fft', 'welch'}, optional
         The method for obtaining the spectrum from the signal:
 
-        - 'periodogram': periodogram
-        - 'fft': fast Fourier transform
-        - 'welch': Welch's method
+        - 'periodogram': periodogram (window across the whole series)
+        - 'fft': fast Fourier transform, single-sided power spectral density; no window is
+          applied and the DC bin is dropped
+        - 'welch': Welch's method, with windows of ``max(min(256, round(N/4)), 16)`` samples,
+          50% overlap, no detrending and the MATLAB ``pwelch`` default ``nfft``
 
         Default is ``'fft'``.
 
     window_type : {'boxcar', 'rect', 'bartlett', 'hann', 'hamming', 'none'}, optional
-        The window to use for spectral estimation:
-            
-        - 'boxcar'
-        - 'rect'
-        - 'bartlett'
-        - 'hann'
-        - 'hamming'
-        - 'none'
-
-        Default is ``'none'``.
+        The window to use (for 'periodogram' and 'welch'; ignored by 'fft'). Default is
+        ``'hamming'``.
 
     Returns
     -------
     dict
-        Statistics summarizing various properties of the spectrum.
+        The spectrum S is a power spectral density in angular frequency w (radians per sample,
+        0 to pi), normalized for all three estimators so that its area (the sum of S times the
+        bin spacing dw) equals the variance of the series (~1 for a z-scored series).
+        Statistics that accumulate over bins (cumulative-area fits, entropy) are therefore
+        integrals over w, independent of the number of bins. Returns NaN for a constant series.
+        Output fields:
+
+        Peaks
+            - ``maxS``, ``maxw``: the maximum of S and the angular frequency at which it occurs.
+            - ``maxWidth``: half-power bandwidth of the dominant peak.
+            - ``numPromPeaks_3``, ``numPromPeaks_5``, ``numPromPeaks_8``: number of peaks of
+              log(S) with prominence above 3, 5, 8 (natural-log units).
+            - ``meanProm_5``, ``meanPeakWidth_prom5``: mean prominence and mean width of the
+              peaks with prominence above 5.
+            - ``width_weighted_prom``, ``w_weighted_peak_prom``: mean peak width and mean peak
+              location, weighted by prominence.
+            - ``peakPower_2``, ``peakPower_5``, ``peakPower_prom5``: power (height x width) in
+              the 2 and 5 tallest peaks and in the peaks with prominence above 5.
+            - ``numPeaks_50power``, ``peakpower_1``: number of tallest peaks needed to hold
+              half the peak power, and the fraction of peak power in the tallest peak.
+
+            Peaks are found on log(S), and the prominence thresholds are calibrated for (and
+            hctsa registers these fields only with) ``psd_meth='welch'``.
+
+        Distribution of power values (and of log power values, with prefix ``log``)
+            ``iqr``, ``logiqr``, ``q25``, ``median``, ``q75``, ``logq25``, ``logmedian``,
+            ``logq75``, ``std``, ``stdlog`` (log of the std), ``logstd`` (std of log(S)),
+            ``mom3`` and ``logmom3`` (skewness).
+
+        Autocorrelation of the spectrum across frequency
+            ``ac1``, ``ac2``, ``tau`` (first zero-crossing of the autocorrelation, in units of
+            w), and ``logac1``, ``logac2``, ``logtau`` for log(S).
+
+        Cumulative power
+            ``wmax_5``, ``wmax_10``, ``wmax_25``, ``centroid``, ``wmax_75``, ``wmax_90``,
+            ``wmax_95``, ``wmax_99``: the frequency below which 5%, 10%, ..., 99% of the power
+            lies (``centroid`` is the median frequency, 50%).
+
+        Power-weighted moments of frequency
+            ``specCentroid``, ``specSpread``, ``specSkew``, ``specKurt``: mean, standard
+            deviation, skewness and kurtosis of frequency weighted by power.
+
+        Fits to the cumulative area under S (a running integral over w)
+            ``fpoly2csS_p1``, ``fpoly2csS_p2``, ``fpoly2csS_p3``, ``fpoly2_sse``,
+            ``fpoly2_r2``, ``fpoly2_rmse``: coefficients and goodness of a quadratic fit
+            (``fpoly2_sse`` is the integrated squared error); ``fpolysat_a``, ``fpolysat_b``,
+            ``fpolysat_r2``, ``fpolysat_rmse``: parameters and goodness of ``a*w**2/(b+w**2)``.
+
+        Entropy, flatness and areas
+            ``spect_shann_ent`` (differential Shannon entropy of the power distribution over
+            frequency), ``spect_shann_ent_norm`` (``exp(spect_shann_ent)`` as a fraction of the
+            frequency range), ``sfm`` (spectral flatness measure, 10*log10(geometric mean /
+            arithmetic mean)), ``areatopeak`` and ``ylogareatopeak`` (area under S, and under
+            log(S), up to the peak).
+
+        Robust linear fits (``a1`` intercept, ``a2`` gradient, ``sigrat`` OLS/robust sigma ratio, ``sigma``, ``sea1`` standard error of the intercept)
+            ``linfitloglog_all_{a1,a2,sigrat,sigma,sea1}`` (log(S) against log(w), all
+            frequencies), ``linfitloglog_lf_a2`` and ``linfitloglog_mf_a2`` (lower half and
+            middle half), ``linfitloglog_hf_{a1,a2,sigrat,sigma,sea1}`` (upper half) and
+            ``linfitsemilog_all_{a1,sigrat,sigma,sea1}`` (log(S) against w).
+
+        Power in frequency bands (2 and 5 equal bands, from the lowest frequencies)
+            ``area_2_1``, ``area_2_2``, ``logarea_2_1``, ``logarea_2_2`` and ``area_5_1`` ...
+            ``area_5_5``, ``logarea_5_1`` ... ``logarea_5_5`` (area under S and log(S) in each
+            band); ``statav2_s``, ``statav5_s`` (std across bands of the within-band std of S,
+            relative to std(S)); ``logstatav2_m``, ``logstatav2_s``, ``logstatav5_m``,
+            ``logstatav5_s`` (the same for the band means and stds of log(S), relative to
+            std(log(S))). When the number of bins is not divisible by the number of bands the
+            last few bins are dropped.
+
+        Crossings of the log spectrum
+            ``ncross_log_f05``, ``ncross_log_f10``, ``ncross_log_f20``, ``ncross_log_f50``:
+            crossings of a level 5%, 10%, 20%, 50% of the way from min(log S) to max(log S).
     """
 
     y = np.asarray(y)
@@ -337,20 +409,27 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
         warnings.warn("Constant time series has no spectral structure")
         return np.nan
 
-    window = None
     # Set window (for periodogram and welch):
+    if psd_meth == 'welch':
+        # Welch's method needs a window shorter than the series, so that segments are averaged.
+        # The segment length is fixed in samples (not a fraction of N), so that the frequency
+        # resolution stays fixed and more segments are averaged as N grows. 50% overlap.
+        win_length = max(min(256, int(np.floor(ny / 4 + 0.5))), 16)  # MATLAB round: half away from zero
+    else:
+        win_length = ny
+    window = None
     if window_type == 'none':
-        window = []
+        window = None
     elif window_type == 'hamming':
-        window = np.hamming(ny)
+        window = np.hamming(win_length)
     elif window_type == 'hann':
-        window = np.hanning(ny)
+        window = np.hanning(win_length)
     elif window_type == 'bartlett':
-        window = np.bartlett(ny)
+        window = np.bartlett(win_length)
     elif window_type == 'boxcar':
-        window = scipy.signal.windows.boxcar(ny)
+        window = scipy.signal.windows.boxcar(win_length)
     elif window_type == 'rect':
-        window = np.ones(ny)
+        window = np.ones(win_length)
     else:
         raise ValueError(f"Unknown window: {window_type}")
 
@@ -371,14 +450,22 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
         s = s[1:]
 
     elif psd_meth == 'welch':
-        # welch power spectral density estimate
+        # Welch power spectral density estimate, as MATLAB's pwelch(y, window, [], [], 1):
+        # 50% overlap, no detrending, and pwelch's own default nfft = max(256, 2^nextpow2(win_length))
         fs = 1
-        n = 2 ** (int(np.ceil(np.log2(ny))))
-        f, s = scipy.signal.welch(y, window=window, noverlap=0, nfft=n, fs=fs)
+        if window is None:
+            # pwelch's default window for an empty window argument: Hamming, with the segment
+            # length chosen to give 8 segments at 50% overlap
+            win_length = int(np.floor(ny / 4.5))
+            window = np.hamming(win_length)
+        n_overlap = win_length // 2
+        nfft = max(256, 2 ** int(np.ceil(np.log2(win_length))))
+        f, s = scipy.signal.welch(y, fs=fs, window=window, nperseg=win_length, noverlap=n_overlap,
+                                  nfft=nfft, detrend=False, return_onesided=True, scaling='density')
         w = 2 * np.pi * f  # angular frequency
         s = s / (2 * np.pi)  # adjust so that area remains normalized in angular frequency space
     elif psd_meth == 'periodogram':
-        win = np.ones(ny) if (window is None or len(window) == 0) else np.asarray(window)
+        win = np.ones(ny) if window is None else np.asarray(window)
         nfft = max(256, 2 ** int(np.ceil(np.log2(ny))))
         f, s = scipy.signal.periodogram(
             y, fs=1, window=win, nfft=nfft, detrend=False,
@@ -411,75 +498,92 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     i_lower = l[-1] if l.size else 0  # never drops below half power below the peak
     out['maxWidth'] = w[i_upper] - w[i_lower]
 
+    # Characterize all peaks, run on log(S) rather than S: a linear-scale power spectrum is
+    # heavy-tailed (a single dominant peak can be >100x the mean level), so prominence-based
+    # peak detection on raw S buries smaller-but-genuine peaks under the dominant one, and the
+    # fixed prominence thresholds below are only meaningfully calibrated on the log scale.
+    # These thresholds are calibrated for a Welch-smoothed spectrum (psd_meth='welch'): for
+    # 'fft' and 'periodogram' the peak-derived fields are computed but not calibrated.
     min_dist_w = 0.02
     pts_per_w = len(s) / np.pi
     min_pk_dist = np.ceil(min_dist_w * pts_per_w)
-    pk_height, pk_loc = _findpeaks(s, min_pk_dist, 'descend')
-    pk_width = scipy.signal.peak_widths(s, pk_loc)[0]
-    pk_prom = (scipy.signal.peak_prominences(s, pk_loc)[0])
+    pk_height, pk_loc = _findpeaks(log_s, min_pk_dist, 'descend')
+    pk_width = scipy.signal.peak_widths(log_s, pk_loc)[0]
+    pk_prom = scipy.signal.peak_prominences(log_s, pk_loc)[0]
+    # Linear-domain height of each peak, for the 'power in peaks' fields: detection and
+    # prominence use log(S), but height x width only means power on the linear spectrum
+    pk_height_lin = s[pk_loc]
     pk_width = pk_width / pts_per_w
-    pk_loc = pk_loc / pts_per_w  # diff due to indexing difference
+    pk_loc = (pk_loc + 1) / pts_per_w  # +1: MATLAB's one-based sample index
 
-    # Characterize mean peak prominence
-    out['numPeaks'] = len(pk_height)
-    out['numPromPeaks_1'] = np.sum(pk_prom > 1)  # number of peaks with prominence of at least 1
-    out['numPromPeaks_2'] = np.sum(pk_prom > 2)  # number of peaks with prominence of at least 2
-    out['numPromPeaks_5'] = np.sum(pk_prom > 5)  # number of peaks with prominence of at least 5
-    # number of peaks with prominence greater than the mean (low for skewed distn)
-    out['numPeaks_overmean'] = np.sum(pk_prom > np.mean(pk_prom))
-    out['maxProm'] = np.max(pk_prom) if pk_prom.size else np.nan
-    # mean peak prominence of those with prominence of at least 2
-    out['meanProm_2'] = np.mean(pk_prom[pk_prom > 2])
-    out['meanPeakWidth_prom2'] = np.mean(pk_width[pk_prom > 2])
-    out['width_weighted_prom'] = np.sum(pk_width * pk_prom) / np.sum(pk_prom)
+    # Characterize peak prominence (thresholds in log-power units, calibrated on a Welch null)
+    num_peaks = len(pk_height)  # local only: needed for the peakPower_* fields below, not itself an output
+    with np.errstate(invalid='ignore', divide='ignore'):
+        out['numPromPeaks_3'] = np.sum(pk_prom > 3)  # number of peaks with log-prominence of at least 3
+        out['numPromPeaks_5'] = np.sum(pk_prom > 5)  # ... at least 5
+        out['numPromPeaks_8'] = np.sum(pk_prom > 8)  # ... at least 8
+        # mean peak prominence of those with log-prominence of at least 5
+        out['meanProm_5'] = _mean_or_nan(pk_prom[pk_prom > 5])
+        out['meanPeakWidth_prom5'] = _mean_or_nan(pk_width[pk_prom > 5])
+        out['width_weighted_prom'] = np.sum(pk_width * pk_prom) / np.sum(pk_prom)
 
-    # Power in top N peaks
-    nn = lambda x: np.arange(0, np.minimum(x, out['numPeaks'] - 1))
-    out['peakPower_2'] = np.sum(pk_height[nn(2)] * pk_width[nn(2)])
-    out['peakPower_5'] = np.sum(pk_height[nn(5)] * pk_width[nn(5)])
-    # power in peaks with prominence of at least 2
-    out['peakPower_prom2'] = np.sum(pk_height[pk_prom > 2] * pk_width[pk_prom > 2])
-    # note any features which depend on pKLoc will yield slightly diff answers due to one-indexing,
-    # but should be perfectly correlated
-    out['w_weighted_peak_prom'] = np.sum(pk_loc * pk_prom) / np.sum(pk_prom)
-    #where are prominent peaks located on average (weighted by height)
-    out['w_weighted_peak_height'] = np.sum(pk_loc * pk_height) / np.sum(pk_height)
+        # Power in top N peaks
+        nn = lambda x: np.arange(min(x, num_peaks))
+        out['peakPower_2'] = np.sum(pk_height_lin[nn(2)] * pk_width[nn(2)])
+        out['peakPower_5'] = np.sum(pk_height_lin[nn(5)] * pk_width[nn(5)])
+        # power in peaks with log-prominence of at least 5
+        out['peakPower_prom5'] = np.sum(pk_height_lin[pk_prom > 5] * pk_width[pk_prom > 5])
+        # where are prominent peaks located on average (weighted by prominence)
+        out['w_weighted_peak_prom'] = np.sum(pk_loc * pk_prom) / np.sum(pk_prom)
+
     # Number of peaks required to get to 50% of power in peaks
-    peak_power = pk_height * pk_width
+    peak_power = pk_height_lin * pk_width
     if peak_power.size == 0:  # no peaks found (e.g., a monotonic spectrum)
         out['numPeaks_50power'] = np.nan
         out['peakpower_1'] = np.nan
     else:
-        out['numPeaks_50power'] = np.where(np.cumsum(peak_power) > 0.5 * np.sum(peak_power))[0][0]
+        half_idx = np.flatnonzero(np.cumsum(peak_power) > 0.5 * np.sum(peak_power))
+        # a count (one-based); NaN if the peak powers are not finite
+        out['numPeaks_50power'] = half_idx[0] + 1 if half_idx.size else np.nan
         out['peakpower_1'] = peak_power[0] / np.sum(peak_power)
 
     # Distribution
     # quantiles
-    iqr75 = np.quantile(s, 0.75, method='hazen')
-    iqr25 = np.quantile(s, 0.25, method='hazen')
-    out['iqr'] = iqr75 - iqr25
-    out['logiqr'] = np.quantile(log_s, 0.75, method='hazen') - np.quantile(log_s, 0.25, method='hazen')
-    out['q25'] = iqr25
+    q25_s, q75_s = np.quantile(s, [0.25, 0.75], method='hazen')
+    q25_log, q75_log = np.quantile(log_s, [0.25, 0.75], method='hazen')
+    out['iqr'] = q75_s - q25_s
+    out['logiqr'] = q75_log - q25_log
+    out['q25'] = q25_s
     out['median'] = np.median(s)
-    out['q75'] = iqr75
+    out['q75'] = q75_s
+    # log-domain companions (the linear spectrum is heavy-tailed, so these capture different information)
+    out['logq25'] = q25_log
+    out['logmedian'] = np.median(log_s)
+    out['logq75'] = q75_log
 
-    # Moments
+    # Moments (the standardized third moment, i.e. the skewness, of the power values)
     out['std'] = np.std(s, ddof=1)
     out['stdlog'] = np.log(out['std'])
     out['logstd'] = np.std(log_s, ddof=1)
-    out['mean'] = np.mean(s)
-    out['logmean'] = np.mean(log_s)
-    for i in range(3, 6):
-        out[f'mom{i}'] = moments(s, i)
+    out['mom3'] = moments(s, 3, True)
+    out['logmom3'] = moments(log_s, 3, True)
 
     # Autocorrelation of amplitude spectrum:
     auto_corrs_s = autocorr(s, [1, 2, 3, 4], 'Fourier')
     out['ac1'] = auto_corrs_s[0]
     out['ac2'] = auto_corrs_s[1]
     out['tau'] = first_crossing(s, 'ac', 0, 'continuous') * dw  # first zero crossing, in units of w (not bins)
+    # The same for log(S): the autocorrelation of the heavy-tailed linear spectrum is dominated by the
+    # distance of its single largest value from the rest, which log(S) compresses
+    auto_corrs_log_s = autocorr(log_s, [1, 2, 3, 4], 'Fourier')
+    out['logac1'] = auto_corrs_log_s[0]
+    out['logac2'] = auto_corrs_log_s[1]
+    out['logtau'] = first_crossing(log_s, 'ac', 0, 'continuous') * dw
 
-    # Shape of cumulative sum curve
-    cs_s = np.cumsum(s)
+    # Shape of cumulative sum curve: the cumulative area under the spectrum (a running
+    # integral over w, not a bare running sum over bins), which rises to ~1 for a unit-variance
+    # series whatever the number of bins
+    cs_s = np.cumsum(s) * dw
     f_frac_w_max = lambda frac: w[np.where(cs_s >= cs_s[-1] * frac)[0][0]]
     # @ what frequency is csS a fraction p of its maximum?
     out['wmax_5'] = f_frac_w_max(0.05)
@@ -491,9 +595,23 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['wmax_95'] = f_frac_w_max(0.95)
     out['wmax_99'] = f_frac_w_max(0.99)
 
-    #Width of saturation measures
-    out['w10_90'] = out['wmax_90'] - out['wmax_10']  # % from 10% to 90%:
-    out['w25_75'] = out['wmax_75'] - out['wmax_25']
+    # Power-weighted moments of the frequency distribution: the spectrum (non-negative) is treated as a
+    # weighting over frequency, giving the textbook spectral centroid (mean frequency), spread (standard
+    # deviation), skewness and kurtosis. Not to be confused with mom3, a moment of the distribution of
+    # power *values*, nor with 'centroid' above, which is the median frequency (the 50% point of the
+    # cumulative power).
+    s_pos = np.maximum(s, 0)  # guard against any tiny negative values from the estimator
+    sum_s = np.sum(s_pos)
+    out['specCentroid'] = out['specSpread'] = out['specSkew'] = out['specKurt'] = np.nan
+    if sum_s > 0:
+        pw = s_pos / sum_s  # normalized weighting over frequency
+        out['specCentroid'] = np.sum(pw * w)
+        w_dev = w - out['specCentroid']
+        spec_var = np.sum(pw * w_dev ** 2)
+        out['specSpread'] = np.sqrt(spec_var)
+        if spec_var > 0:  # otherwise all the power is in a single bin and the shape is undefined
+            out['specSkew'] = np.sum(pw * w_dev ** 3) / spec_var ** 1.5
+            out['specKurt'] = np.sum(pw * w_dev ** 4) / spec_var ** 2
 
     # Fit some functions to this cumulative sum:
     # Quadratic
@@ -503,7 +621,7 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['fpoly2csS_p3'] = c
     quad = lambda x, a, b, c: a * x**2 + b * x + c
     gof = goodness_of_fit(cs_s, quad(w, a, b, c), 3)
-    out['fpoly2_sse'] = gof['sse']
+    out['fpoly2_sse'] = gof['sse'] * dw  # integrated (not summed) squared error
     out['fpoly2_r2'] = gof['rsquare']
     out['fpoly2_rmse'] = gof['rmse']
 
@@ -516,10 +634,14 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['fpolysat_r2'] = gof['rsquare']
     out['fpolysat_rmse'] = gof['rmse']
 
-    # Shannon spectral entropy
-    h_shann = -s * np.log(s)
-    out['spect_shann_ent'] = np.sum(h_shann)
-    out['spect_shann_ent_norm'] = np.mean(h_shann)
+    # Shannon spectral entropy, from the spectrum rescaled to exactly unit area, Sn = S/(sum(S)*dw):
+    # (i) spect_shann_ent: -integral of Sn log(Sn) dw, the differential Shannon entropy of the
+    #     power distribution over frequency
+    # (ii) spect_shann_ent_norm: exp(spect_shann_ent) as a fraction of the frequency range N*dw
+    #     (1 for a flat spectrum, towards 0 as the power concentrates in a narrow band)
+    sn = s / (np.sum(s) * dw)
+    out['spect_shann_ent'] = np.sum(-sn * np.log(sn)) * dw
+    out['spect_shann_ent_norm'] = np.exp(out['spect_shann_ent']) / (n * dw)
 
     #"Spectral Flatness Measure"
     #which is given in dB as 10 log_10(gm/am) where gm is the geometric mean and am
@@ -530,29 +652,26 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['areatopeak'] = np.sum(s[0:np.argmax(s) + 1]) * dw
     out['ylogareatopeak'] = np.sum(log_s[0:np.argmax(s) + 1]) * dw  # % (semilogy)
 
-    # Robust Fits
+    # Robust Fits (iteratively re-weighted least squares); only the statistics hctsa emits per range
     # across full range
     r_all = w > 0
-    across_full_range_res = _give_me_robust_stats(np.log(w[r_all]), np.log(s[r_all]), 'linfitloglog_all')
-    out = out | across_full_range_res
+    out |= _give_me_robust_stats(np.log(w[r_all]), np.log(s[r_all]), 'linfitloglog_all',
+                                 ('a1', 'a2', 'sigrat', 'sigma', 'sea1'))
     # across first half (low frequency)
     r_lf = (w > 0)
     r_lf[int(np.floor(n/2)):] = 0 #% remove second half of angular frequenciesf
-    first_half_res = _give_me_robust_stats(np.log(w[r_lf]), np.log(s[r_lf]), 'linfitloglog_lf')
-    out = out | first_half_res
+    out |= _give_me_robust_stats(np.log(w[r_lf]), np.log(s[r_lf]), 'linfitloglog_lf', ('a2',))
     # across second half (high frequency)
     r_hf = np.arange(n // 2, n)
-    second_half_res = _give_me_robust_stats(np.log(w[r_hf]), np.log(s[r_hf]), 'linfitloglog_hf')
-    out = out | second_half_res
-    #Middle half (mid-frequencies)
-    start = int(np.round(n / 4)) - 1
-    stop = int(np.round(n * 3 / 4))
+    out |= _give_me_robust_stats(np.log(w[r_hf]), np.log(s[r_hf]), 'linfitloglog_hf',
+                                 ('a1', 'a2', 'sigrat', 'sigma', 'sea1'))
+    # Middle half (mid-frequencies); MATLAB round (half away from zero)
+    start = int(np.floor(n / 4 + 0.5)) - 1
+    stop = int(np.floor(n * 3 / 4 + 0.5))
     r_mf = np.arange(start, stop)
-    middle_half_res = _give_me_robust_stats(np.log(w[r_mf]), np.log(s[r_mf]), 'linfitloglog_mf')
-    out = out | middle_half_res
-    #Fit linear to semilog plot (across full range)
-    res_semilog = _give_me_robust_stats(w, np.log(s), 'linfitsemilog_all')
-    out = out | res_semilog
+    out |= _give_me_robust_stats(np.log(w[r_mf]), np.log(s[r_mf]), 'linfitloglog_mf', ('a2',))
+    # Fit linear to semilog plot (across full range)
+    out |= _give_me_robust_stats(w, np.log(s), 'linfitsemilog_all', ('a1', 'sigrat', 'sigma', 'sea1'))
 
     # Power in specific frequency bands
     # % 2 bands
@@ -563,36 +682,13 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['logarea_2_1'] = np.sum(np.log(split[:, 0])) * dw
     out['area_2_2'] = np.sum(split[:, 1]) * dw
     out['logarea_2_2'] = np.sum(np.log(split[:, 1])) * dw
-    out['statav2_m'] = np.std(np.mean(split, axis=0), ddof=1) / np.std(s, ddof=1)
     out['statav2_s'] = np.std(np.std(split, ddof=1, axis=0), axis=0, ddof=1) / np.std(s, ddof=1)
-
-    # 3 bands
-    split = make_mat_buffer(s, int(np.floor(n / 3)))
-    if split.shape[1] > 3:
-        split = split[:, :3]
-    out['area_3_1'] = np.sum(split[:, 0]) * dw
-    out['logarea_3_1'] = np.sum(np.log(split[:, 0])) * dw
-    out['area_3_2'] = np.sum(split[:, 1]) * dw
-    out['logarea_3_2'] = np.sum(np.log(split[:, 1])) * dw
-    out['area_3_3'] = np.sum(split[:, 2]) * dw
-    out['logarea_3_3'] = np.sum(np.log(split[:, 2])) * dw
-    out['statav3_m'] = np.std(np.mean(split, axis=0), ddof=1) / np.std(s, ddof=1)
-    out['statav3_s'] = np.std(np.std(split, ddof=1, axis=0), axis=0, ddof=1) / np.std(s, ddof=1)
-
-    # 4 bands
-    split = make_mat_buffer(s, int(np.floor(n / 4)))
-    if split.shape[1] > 4:
-        split = split[:, :4]
-    out['area_4_1'] = np.sum(split[:, 0]) * dw
-    out['logarea_4_1'] = np.sum(np.log(split[:, 0])) * dw
-    out['area_4_2'] = np.sum(split[:, 1]) * dw
-    out['logarea_4_2'] = np.sum(np.log(split[:, 1])) * dw
-    out['area_4_3'] = np.sum(split[:, 2]) * dw
-    out['logarea_4_3'] = np.sum(np.log(split[:, 2])) * dw
-    out['area_4_4'] = np.sum(split[:, 3]) * dw
-    out['logarea_4_4'] = np.sum(np.log(split[:, 3])) * dw
-    out['statav4_m'] = np.std(np.mean(split, axis=0), ddof=1) / np.std(s, ddof=1)
-    out['statav4_s'] = np.std(np.std(split, ddof=1, axis=0), axis=0, ddof=1) / np.std(s, ddof=1)
+    # The same on log(S): on the linear spectrum, whichever band contains the dominant peak swamps these
+    split_log = make_mat_buffer(log_s, int(np.floor(n / 2)))
+    if split_log.shape[1] > 2:
+        split_log = split_log[:, :2]
+    out['logstatav2_m'] = np.std(np.mean(split_log, axis=0), ddof=1) / np.std(log_s, ddof=1)
+    out['logstatav2_s'] = np.std(np.std(split_log, ddof=1, axis=0), axis=0, ddof=1) / np.std(log_s, ddof=1)
 
     # 5 bands
     split = make_mat_buffer(s, int(np.floor(n / 5)))
@@ -608,18 +704,30 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['logarea_5_4'] = np.sum(np.log(split[:, 3])) * dw
     out['area_5_5'] = np.sum(split[:, 4]) * dw
     out['logarea_5_5'] = np.sum(np.log(split[:, 4])) * dw
-    out['statav5_m'] = np.std(np.mean(split, axis=0), ddof=1) / np.std(s, ddof=1)
     out['statav5_s'] = np.std(np.std(split, ddof=1, axis=0), axis=0, ddof=1) / np.std(s, ddof=1)
+    split_log = make_mat_buffer(log_s, int(np.floor(n / 5)))
+    if split_log.shape[1] > 5:
+        split_log = split_log[:, :5]
+    out['logstatav5_m'] = np.std(np.mean(split_log, axis=0), ddof=1) / np.std(log_s, ddof=1)
+    out['logstatav5_s'] = np.std(np.std(split_log, ddof=1, axis=0), axis=0, ddof=1) / np.std(log_s, ddof=1)
 
-    # Count crossings:
-    # Get a horizontal line and count the number of crossings with the power spectrum
-    ncrossfn_rel = lambda frac: np.sum(sign_change(s - frac * np.max(s)))
-    out['ncross_f05'] = ncrossfn_rel(0.05)
-    out['ncross_f01'] = ncrossfn_rel(0.1)
-    out['ncross_f02'] = ncrossfn_rel(0.2)
-    out['ncross_f05'] = ncrossfn_rel(0.5)
+    # Count crossings of the log spectrum with a horizontal line set a fraction of the way from
+    # min(log S) to max(log S). On the linear spectrum a threshold at a fixed fraction of max(S) sits far
+    # above the noise floor whenever there is one dominant peak (and the old ncross_f* fields were also
+    # mislabelled: ncross_f05 was assigned twice); differences in log S are power ratios (dB), so a
+    # fraction of the log range is a genuinely relative 'how far up from the noise floor' level.
+    log_range = np.max(log_s) - np.min(log_s)
+    ncrossfn_rel_log = lambda frac: np.sum(sign_change(log_s - (np.min(log_s) + frac * log_range)))
+    out['ncross_log_f05'] = ncrossfn_rel_log(0.05)
+    out['ncross_log_f10'] = ncrossfn_rel_log(0.1)
+    out['ncross_log_f20'] = ncrossfn_rel_log(0.2)
+    out['ncross_log_f50'] = ncrossfn_rel_log(0.5)
 
     return out
+
+def _mean_or_nan(x):
+    """Mean of an array, NaN (without a warning) when it is empty, as MATLAB's mean([])."""
+    return np.mean(x) if len(x) else np.nan
 
 def _findpeaks(s, min_pk_dist=0, sort_str='none'):
     """
@@ -659,7 +767,7 @@ def _findpeaks(s, min_pk_dist=0, sort_str='none'):
         peak_heights = s[all_peaks]
 
         # sort by height (descending)
-        sort_idx = np.argsort(peak_heights)[::-1]
+        sort_idx = np.argsort(-peak_heights, kind='stable')
         sorted_peaks = all_peaks[sort_idx]
 
         # keep track of which peaks to delete
@@ -692,33 +800,42 @@ def _findpeaks(s, min_pk_dist=0, sort_str='none'):
     pk_loc = final_peaks.astype(int)
 
     if sort_str == 'descend':
-        sort_idx = np.argsort(pk_height)[::-1]
+        sort_idx = np.argsort(-pk_height, kind='stable')
         pk_height = pk_height[sort_idx]
         pk_loc = pk_loc[sort_idx]
     elif sort_str == 'ascend':
-        sort_idx = np.argsort(pk_height)
+        sort_idx = np.argsort(pk_height, kind='stable')
         pk_height = pk_height[sort_idx]
         pk_loc = pk_loc[sort_idx]
 
     return pk_height, pk_loc
 
-def _give_me_robust_stats(x_data: ArrayLike, y_data: ArrayLike, field_name: str) -> dict:
+def _give_me_robust_stats(x_data: ArrayLike, y_data: ArrayLike, field_name: str,
+                          which_stats=('a1', 'a2', 'sigrat', 'sigma', 'sea1')) -> dict:
     """
-    Statistics based on a robust linear fit
+    Statistics based on a robust linear fit.
+
+    ``which_stats`` selects which of the available statistics to emit: ``a1`` (robust intercept),
+    ``a2`` (robust gradient), ``sigrat`` (ratio of the OLS to the robust sigma estimate), ``sigma``
+    (residual sigma estimate), ``sea1`` / ``sea2`` (standard error of the intercept / gradient).
     """
     out = {}
     try:
         a, stats = robustfit(x_data, y_data)
-        out[f'{field_name}_a1'] = a[0]  # robust intercept
-        out[f'{field_name}_a2'] = a[1]  # robust gradient
-        # ratio of sigma estimates between ordinary least squares and the robust fit:
-        out[f'{field_name}_sigrat'] = stats['ols_s'] / stats['robust_s']
-        # sigma as the larger of robust_s and a weighted average of ols_s and robust_s:
-        out[f'{field_name}_sigma'] = stats['s']
-        out[f'{field_name}_sea1'] = stats['se'][0]  # standard error in intercept
-        out[f'{field_name}_sea2'] = stats['se'][1]  # standard error in slope
+        available = {
+            'a1': lambda: a[0],  # robust intercept
+            'a2': lambda: a[1],  # robust gradient
+            # ratio of sigma estimates between ordinary least squares and the robust fit:
+            'sigrat': lambda: stats['ols_s'] / stats['robust_s'],
+            # sigma as the larger of robust_s and a weighted average of ols_s and robust_s:
+            'sigma': lambda: stats['s'],
+            'sea1': lambda: stats['se'][0],  # standard error in intercept
+            'sea2': lambda: stats['se'][1],  # standard error in slope
+        }
+        for key in which_stats:
+            out[f'{field_name}_{key}'] = available[key]()
     except Exception:
-        for key in ('a1', 'a2', 'sigrat', 'sigma', 'sea1', 'sea2'):
+        for key in which_stats:
             out[f'{field_name}_{key}'] = np.nan
     return out
 

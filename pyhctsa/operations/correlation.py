@@ -14,8 +14,40 @@ from statsmodels.tsa.stattools import pacf
 from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit
-from ..utils import (bin_picker, histc, make_mat_buffer, matlab_quantile,
-                     point_of_crossing, sign_change, time_delay_embed, z_score)
+from ..utils import (bf_remove_points, bin_picker, get_tau, histc, make_mat_buffer,
+                     matlab_quantile, point_of_crossing, sign_change, theiler_window,
+                     time_delay_embed, z_score)
+
+
+def _resolve_delay(y: ArrayLike, tau: Union[int, float, str, None], cap: bool = False,
+                   default: Union[int, str] = 'ac') -> Union[int, float]:
+    """Resolve a time-delay specification to a number of samples, as hctsa does.
+
+    A number is returned unchanged. A string is a rule for :func:`~pyhctsa.utils.get_tau`:
+    ``'ac'`` or ``'tau'`` (first zero crossing of the ACF), ``'ac1e'`` (floor of the first 1/e
+    crossing of the ACF), ``'mi'`` (the smaller of the first minimum of the Kraskov AMI and the
+    ``'ac1e'`` delay) or ``'mi-gaussian'``. ``None`` means ``default``.
+
+    Parameters
+    ----------
+    cap : bool
+        Cap a delay set by a rule at ``floor(N/10)`` (hctsa's ``CO_Embed2*`` do this).
+
+    Returns
+    -------
+    int or float
+        The delay, or NaN if it cannot be set from the series (callers then return NaN).
+    """
+    if tau is None:
+        tau = default
+    if isinstance(tau, str):
+        y = np.asarray(y, dtype=float).ravel()
+        tau = get_tau(y, 'ac' if tau == 'tau' else tau)
+        if np.isnan(tau):
+            return np.nan
+        if cap and tau > y.size / 10:
+            tau = y.size // 10
+    return tau
 
 def _theiler_kth(idx: np.ndarray, dist: np.ndarray, k: int, theiler_win: int,
                  ref_set: np.ndarray, query_set: np.ndarray) -> np.ndarray:
@@ -66,7 +98,8 @@ def _knn_kld(A: np.ndarray, B: np.ndarray, k: int, theiler_win: int) -> float:
                  + np.log(n / (n - 1)))
 
 def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int = 3,
-                 theiler_win: int = 1, max_n: Union[int, str] = 'full') -> dict:
+                 theiler_win: Union[int, float, list, tuple] = ('ac', 1),
+                 max_n: Union[int, str] = 'full') -> dict:
     """
     Kullback-Leibler divergence between forward and time-reversed embeddings.
 
@@ -93,8 +126,11 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
     y : array-like
         The input time series.
     tau : int or str, optional
-        The time delay for the embedding (can be 'ac' or 'mi', or an
-        integer). Default: 'ac'.
+        The time delay for the embedding: an integer number of samples, or a rule
+        (see :func:`~pyhctsa.utils.get_tau`): ``'ac'`` (first zero crossing of the
+        autocorrelation function), ``'ac1e'`` (floor of its first 1/e crossing) or ``'mi'``
+        (the smaller of the first minimum of the Kraskov automutual information and the
+        ``'ac1e'`` delay). Default: ``'ac'``.
     m : int, optional
         The embedding dimension. Default: 2, for the pairwise joint
         distribution (x_t,x_{t+tau}); set to 3 for the triple-wise joint
@@ -102,11 +138,14 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
     k : int, optional
         The number of nearest neighbors used by the k-NN divergence estimator.
         Default: 3 (matches local_density's default).
-    theiler_win : int, optional
-        The number of temporally-adjacent points excluded from both the
-        within-set and cross-set neighbor searches (|i-j| <= theiler_win),
-        applied at matching time indices in both the forward and reversed
-        embeddings. Default: 1.
+    theiler_win : int, float, list or tuple, optional
+        The Theiler window: the number of temporally-adjacent points excluded from both the
+        within-set and cross-set neighbor searches (|i-j| <= theiler_win), applied
+        at matching time indices in both the forward and reversed embeddings. Either
+        ``['ac', c]`` for ``c`` times the first zero crossing of the autocorrelation function
+        (or ``['ac1e', c]`` for its 1/e time), a number of samples, or a number in (0, 1) for a
+        proportion of the series length (see :func:`~pyhctsa.utils.theiler_window`).
+        Default: ``('ac', 1)``. Narrowed to fit short series.
     max_n : int or str, optional
         The maximum number of embedded points used. Default: 'full' (no cropping); set
         to an integer to cap runtime on unusually long series.
@@ -119,15 +158,20 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
         noise for a reversible process (the k-NN estimator can dip slightly
         negative near a true value of zero -- expected behavior of this
         nonparametric estimator, not a bug), with no attached significance
-        level (see note above).
+        level (see note above). NaN if the delay or the Theiler window cannot be
+        set, the embedding fails, or there are too few embedded points (fewer than
+        ``max(50, 10*k)``).
     """
     y = np.asarray(y, dtype=float).ravel()
 
+    # The Theiler window (NaN if the autocorrelation function never crosses zero)
+    theiler_win = theiler_window(y, theiler_win)
+    if np.isnan(theiler_win):
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+
     # Embed the signal
-    if tau == 'ac':
-        tau = first_crossing(y, 'ac', 0, 'discrete')
-    if tau == 'mi':
-        tau = first_min(y, 'mi')
+    tau = _resolve_delay(y, tau)
     if np.isnan(tau):
         logger.warning('Embedding failed')
         return np.nan
@@ -138,7 +182,10 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
         return np.nan
     n_emb, d = Y.shape
 
-    min_n = max(50, 10 * (k + theiler_win))
+    # Require ~10*(k + theiler_win) embedded points; for short series, narrow the
+    # Theiler window to fit rather than give up
+    theiler_win = int(min(theiler_win, max(0, n_emb // 10 - k)))
+    min_n = max(50, 10 * k)
     if n_emb < min_n:
         logger.warning(f'Too few embedded points ({n_emb}) for a meaningful '
                        f'time-reversal KLD estimate at m = {d}')
@@ -601,9 +648,12 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
         - If an ``int``, computes AMI at that lag.
         - If ``"ac"`` or ``"tau"``, uses the first zero-crossing of the
-        autocorrelation function.
+          autocorrelation function.
+        - If ``"ac1e"``, the floor of the first 1/e crossing of the autocorrelation function.
+        - If ``"mi"``, the smaller of the first minimum of the Kraskov automutual information
+          and the ``"ac1e"`` delay (see :func:`~pyhctsa.utils.get_tau`).
 
-        Default is ``1``.
+        Default is ``1``. A delay that cannot be set from the series gives NaN.
 
     ami_method : str, optional
         Estimation method for AMI.
@@ -646,11 +696,10 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
         decay fit parameters and descriptive measures.
     """
     y = np.asarray(y)
-    # Set tau to minimum of autocorrelation function if 'ac' or 'tau'
-    if tau in ['ac', 'tau']:
-        tau = first_crossing(y, 'ac', 0, 'discrete')
-        if np.isnan(tau):  # undefined ACF (e.g. constant series)
-            return np.nan
+    # Set tau from the series if it is a rule: 'ac'/'tau', 'ac1e' or 'mi'
+    tau = _resolve_delay(y, tau, default=1)
+    if np.isnan(tau):  # undefined ACF (e.g. constant series) or no delay by the rule
+        return np.nan
     # Fresh uncorrelated Gaussian noise is drawn at each noise level (seed set once);
     # a user-supplied ``noise`` (test hook) is either one vector reused at every level
     # or an array with one row per level.
@@ -912,8 +961,12 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     y : array-like
         The input time series.
     tau : int or str, optional
-        The time-delay. If 'tau', it will be set to the first zero-crossing of 
-        the autocorrelation function (ACF). Default is ``'tau'``.
+        The time delay: an integer number of samples, or a rule that sets it from the series:
+        ``'tau'`` (or ``'ac'``; the first zero crossing of the autocorrelation function),
+        ``'ac1e'`` (the floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first
+        minimum of the Kraskov automutual information and the ``'ac1e'`` delay); see
+        :func:`~pyhctsa.utils.get_tau`. A delay set by a rule is capped at N/10; if it cannot be
+        set the output is NaN. Default is ``'tau'``.
 
     Returns
     -------
@@ -925,18 +978,17 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
             - Statistics on outliers in the embedding space (e.g., area ratios).
     """
 
-    # Set tau to the first zero-crossing of the autocorrelation function with the 'tau' input
-    if tau == 'tau':
-        tau = first_crossing(y, 'ac', 0, 'discrete')
-        if np.isnan(tau):  # undefined ACF (e.g. constant series)
-            return np.nan
-        if tau > len(y) / 10:
-            tau = len(y) // 10
+    # Set tau from the series if it is a rule ('tau'/'ac', 'ac1e' or 'mi'), capped at N/10
+    y = np.asarray(y, dtype=float).ravel()
+    tau = _resolve_delay(y, tau, cap=True, default='tau')
+    if np.isnan(tau):  # undefined ACF (e.g. constant series), or no delay by the rule
+        return np.nan
+    tau = int(tau)
     # Ensure that y is a column vector
-    y = np.array(y).reshape(-1, 1)
+    y = y.reshape(-1, 1)
 
     # Construct the two-dimensional recurrence space
-    m = np.hstack((y[:-tau], y[tau:]))
+    m = np.hstack((y[:len(y) - tau], y[tau:]))
     N = m.shape[0] # number of points in the recurrence space
 
     # 1) Distribution of angles time series; angles between successive points in this space
@@ -1261,7 +1313,8 @@ def histogram_ami(
         The input time series.
     tau : int, list, or str, optional
         The time-lag(s). Can be an integer time lag, list of time lags, or 'ac'/'tau' to use
-        first zero-crossing of autocorrelation function. Default is 1.
+        first zero-crossing of autocorrelation function (also 'ac1e' or 'mi', see
+        :func:`~pyhctsa.utils.get_tau`). Default is 1.
     meth : str, optional
         The method for binning data:
 
@@ -1283,8 +1336,8 @@ def histogram_ami(
     """
     # Use first zero crossing of the ACF as the time lag
     y = np.asarray(y)
-    if isinstance(tau, str) and tau in ['ac', 'tau']:
-        tau = first_crossing(y, 'ac', 0, 'discrete')
+    if isinstance(tau, str):
+        tau = _resolve_delay(y, tau)
         if np.isnan(tau):  # undefined ACF (e.g. constant series)
             return np.nan
 
@@ -1667,9 +1720,13 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     ----------
     y : array-like
         The z-scored input time series.
-    tau : (int, optional)
-        The time delay. If None, it's set to the first minimum of the autocorrelation function.
-        Default is ``None``.
+    tau : int or str, optional
+        The time delay: an integer number of samples, or a rule that sets it from the series:
+        ``'tau'`` (or ``'ac'``; the first zero crossing of the autocorrelation function),
+        ``'ac1e'`` (the floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first
+        minimum of the Kraskov automutual information and the ``'ac1e'`` delay); see
+        :func:`~pyhctsa.utils.get_tau`. A delay set by a rule is capped at N/10; if it cannot be
+        set the output is NaN. If None, ``'tau'``. Default is ``None``.
 
     Returns
     -------
@@ -1681,21 +1738,17 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     y = np.asarray(y)
     N = len(y) # time-series length
 
-    if tau is None:
-        tau = 'tau' # set to the first minimum of autocorrelation function
-    
-    if tau == 'tau':
-        tau = first_crossing(y, 'ac', 0, 'discrete')
-        if np.isnan(tau):  # undefined ACF (e.g. constant series)
-            return np.nan
-        if tau > N / 10:
-            tau = N//10
+    # Set tau from the series if it is a rule ('tau'/'ac', 'ac1e' or 'mi'), capped at N/10
+    tau = _resolve_delay(y, tau, cap=True, default='tau')
+    if np.isnan(tau):  # undefined ACF (e.g. constant series), or no delay by the rule
+        return np.nan
+    tau = int(tau)
 
     # Make sure the time series is a column vector
     y = np.asarray(y).reshape(-1, 1)
 
     # Construct a 2-dimensional time-delay embedding (delay of tau)
-    m = np.hstack((y[:-tau], y[tau:]))
+    m = np.hstack((y[:N - tau], y[tau:]))
 
     # Calculate Euclidean distances between successive points in this space, d:
     out = {}
@@ -1751,9 +1804,14 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     y : array-like
         Input time series.
 
-    tau : int
+    tau : int or str, optional
         Time delay used to construct the embedding
-        :math:`(y_i, y_{i-\\tau})`.
+        :math:`(y_i, y_{i-\\tau})`: an integer number of samples, or a rule that sets it from
+        the series: ``'tau'`` (or ``'ac'``; the first zero crossing of the autocorrelation
+        function), ``'ac1e'`` (the floor of its first 1/e crossing) or ``'mi'`` (the smaller of
+        the first minimum of the Kraskov automutual information and the ``'ac1e'`` delay); see
+        :func:`~pyhctsa.utils.get_tau`. A delay set by a rule is capped at N/10; if it cannot be
+        set the output is NaN.
         Default is 1.
 
     Returns
@@ -1763,18 +1821,12 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
         geometric regions in the embedding space.
     """
     y = np.asarray(y)
-    if tau == 'tau':
-        # Make tau the first zero crossing of the autocorrelation function
-        tau = first_crossing(y, 'ac', 0, 'discrete')
-        if np.isnan(tau):  # undefined ACF (e.g. constant series)
-            return np.nan
-        # Cannot set the time delay greater than 10% the length of the time series
-        if tau > len(y) / 10:
-            tau = len(y) // 10
-    if np.isnan(tau):
+    # Set tau from the series if it is a rule ('tau'/'ac', 'ac1e' or 'mi'), capped at N/10
+    tau = _resolve_delay(y, tau, cap=True, default=1)
+    if np.isnan(tau):  # undefined ACF (e.g. constant series), or no delay by the rule
         return np.nan
     tau = int(tau)
-    xt = y[:-tau]  # part of the time series
+    xt = y[:len(y) - tau]  # part of the time series
     xtp = y[tau:]  # time-lagged time series
     N = len(y) - tau  # Length of each time series subsegment
 
@@ -1837,25 +1889,39 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     return out
 
 def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
-                  shape: str = 'circle', r: float = 1.0) -> dict:
+                  shape: str = 'circle', r: float = 1.0,
+                  theiler_win: Union[int, float, list, tuple, None] = ('ac', 1)) -> dict:
     """
     Shape-based statistics in a 2-d embedding space.
 
     Takes a shape and places it on each point in the two-dimensional time-delay
-    embedding space sequentially. This function counts the points inside this shape
-    as a function of time, and returns statistics on this extracted time series.
+    embedding space sequentially. For each point it records the *fraction* of the other
+    points (outside a Theiler window) that are inside the shape, giving a time series of
+    the local density along the trajectory (the pointwise correlation sum, which is
+    intensive and bounded in [0, 1]; raw counts would grow in direct proportion to N),
+    and returns statistics on this extracted time series.
 
     Parameters
     -----------
     y : array-like
         The input time-series (z-scored).
     tau : int or str, optional
-        The time-delay. If 'tau', it's set to the first zero crossing of the 
-        autocorrelation function. Default is ``'tau'``.
+        The time delay: an integer number of samples, or a rule that sets it from the series:
+        ``'tau'`` (or ``'ac'``; the first zero crossing of the autocorrelation function),
+        ``'ac1e'`` (the floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first
+        minimum of the Kraskov automutual information and the ``'ac1e'`` delay); see
+        :func:`~pyhctsa.utils.get_tau`. A delay set by a rule is capped at N/10; if it cannot be
+        set the output is NaN. Default is ``'tau'``.
     shape : str, optional
         The shape to use. Currently only 'circle' is supported. Default is ``circle``.
     r : float, optional
         The radius of the circle. Default is 1.0.
+    theiler_win : list, tuple, int or float, optional
+        The Theiler window: points closer in time than this are not counted as neighbors, since
+        they are close in the embedding only because successive values are correlated.
+        ``['ac', k]`` for k times the first zero-crossing of the autocorrelation function, or a
+        number of samples (see :func:`~pyhctsa.utils.theiler_window`; 0 counts every other
+        point). Default is ``('ac', 1)``. NaN output if the window cannot be set.
 
     Returns
     --------
@@ -1863,37 +1929,64 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
         A dictionary containing various statistics of the constructed time series
         (``ac1``, ``ac2``, ``ac3``, ``tau``, ``std``, ``median``, ``mean``, ``iqr``,
         ``iqronrange``, ``mode_val``, ``mode``, ``hist_ent``, ``statav5_m``, ``statav5_s``).
-        As in hctsa, the maximum count (``max``) is no longer returned.
+        As in hctsa, the maximum (``max``) is no longer returned. If no point has any neighbor
+        within ``r``, a fixed set of values is returned (``std``, ``median``, ``mean``, ``iqr``,
+        ``hist_ent`` = 0; ``mode_val`` = 1; ``mode`` = 0; the rest NaN).
     """
-    y = np.asarray(y)
-    if tau == 'tau':
-        tau = first_crossing(y, 'ac', 0, 'discrete')
-        if np.isnan(tau):  # undefined ACF (e.g. constant series)
-            return np.nan
-        # cannot set time delay > 10% of the length of the time series...
-        if tau > len(y)/10:
-            tau = int(np.floor(len(y)/10))
+    y = np.asarray(y, dtype=float).ravel()
+    if theiler_win is None:
+        theiler_win = ('ac', 1)
+    theiler_win = theiler_window(y, theiler_win)
+    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
+        return np.nan
+
+    # Set tau from the series if it is a rule ('tau'/'ac', 'ac1e' or 'mi'), capped at N/10
+    tau = _resolve_delay(y, tau, cap=True, default='tau')
+    if np.isnan(tau):  # undefined ACF (e.g. constant series), or no delay by the rule
+        return np.nan
+    tau = int(tau)
+
     # Create the recurrence space, populated by points m
-    m = np.column_stack((y[:-tau], y[tau:]))
+    m = np.column_stack((y[:len(y) - tau], y[tau:]))
     N = len(m)
 
     # Start the analysis
     if shape == 'circle':
-        # Puts a circle around each point in the embedding space in turn
-        # counts how many pts are inside this shape, looks at the time series thus formed.
-        # Vectorised: one pairwise squared-distance matrix (sqeuclidean == the loop's
-        # sum of squared diffs exactly), then count <= r**2 per row. Diagonal is 0, so
-        # the self-count subtraction below is preserved. O(N^2) memory.
+        # Puts a circle around each point in the embedding space in turn and finds the
+        # fraction of the points outside i's Theiler window (which includes i itself)
+        # that are enclosed, giving the time series of the local density.
+        # Vectorised in blocks of rows: squared distances (sqeuclidean == the loop's sum of
+        # squared diffs), compared with r**2, restricted to |i - j| > theiler_win.
         from scipy.spatial.distance import cdist
-        m_c_d = cdist(m, m, metric='sqeuclidean')
-        counts = np.sum(m_c_d <= r**2, axis=1).astype(float)
+        counts = np.empty(N)
+        r2 = r ** 2
+        block = max(1, min(N, 4_000_000 // max(N, 1)))
+        cols = np.arange(N)
+        for i0 in range(0, N, block):
+            i1 = min(N, i0 + block)
+            m_c_d = cdist(m[i0:i1], m, metric='sqeuclidean')
+            is_other = np.abs(cols[None, :] - np.arange(i0, i1)[:, None]) > theiler_win
+            num = np.sum((m_c_d <= r2) & is_other, axis=1)
+            den = np.sum(is_other, axis=1)
+            with np.errstate(invalid='ignore', divide='ignore'):
+                counts[i0:i1] = num / den
     else:
         raise ValueError(f"Unknown shape '{shape}'")
-    counts -= 1 # ignore self counts
 
-    if np.all(counts == 0):
-        logger.warning("embed2_shapes: no counts detected!")
+    if np.any(np.isnan(counts)):
+        # The Theiler window leaves some point with no other point to compare with (a window of
+        # about half the series or more). The density is undefined there: give NaN.
+        logger.warning('embed2_shapes: the Theiler window excludes every other point.')
         return np.nan
+
+    # No point has any (non-Theiler-excluded) neighbor within r: a zero density everywhere is a
+    # valid (if extreme) outcome. The location/spread statistics are zero, and statistics of
+    # the shape of the (constant) counts are undefined (NaN)
+    if np.all(counts == 0):
+        return {'ac1': np.nan, 'ac2': np.nan, 'ac3': np.nan, 'tau': np.nan, 'std': 0.0,
+                'median': 0.0, 'mean': 0.0, 'iqr': 0.0, 'iqronrange': np.nan,
+                'mode_val': 1.0, 'mode': 0.0, 'hist_ent': 0.0, 'statav5_m': np.nan,
+                'statav5_s': np.nan}
 
     # Return basic statistics on the counts
     out = {}
@@ -1908,11 +2001,12 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
                                                                            25, method='hazen')
     out['iqronrange'] = out['iqr']/np.ptp(counts)
 
-    # distribution - using sqrt binning method
-    num_bins_to_use = int(np.ceil(np.sqrt(len(counts))))
-    bin_counts_norm, bin_edges = np.histogram(counts, density=True, bins=num_bins_to_use)
+    # distribution - using sqrt binning method (as MATLAB's histcounts: the bin width is
+    # (range / ceil(sqrt(N))), rounded to a "nice" value by the bin picker)
+    num_bins_to_use = max(int(np.ceil(np.sqrt(len(counts)))), 1)
     min_x, max_x = np.min(counts), np.max(counts)
-    bin_edges = bin_picker(min_x, max_x, n_bins=num_bins_to_use)
+    bin_edges = bin_picker(min_x, max_x, n_bins=None,
+                           bin_width_est=(max_x - min_x) / num_bins_to_use)
     bin_counts = histc(counts, bin_edges)
     # normalise bin counts
     bin_counts_norm = np.divide(bin_counts, np.sum(bin_counts))
@@ -2038,28 +2132,33 @@ def glscf(y: ArrayLike, alpha: float, beta: float, tau: Union[int, str] = 'tau')
         Exponent applied to the later time point :math:`x(t+\\tau)`.
         Must be non-zero.
 
-    tau : int or {"tau"}, optional
+    tau : int or {"tau", "ac1e", "mi"}, optional
         Time delay (lag) between points.
 
         - If an ``int``, computes GLSCF at that lag.
-        - If ``"tau"``, uses the first zero-crossing of the
-        autocorrelation function.
+        - If ``"tau"`` (or ``"ac"``), uses the first zero-crossing of the
+          autocorrelation function.
+        - If ``"ac1e"``, the floor of the first 1/e crossing of the autocorrelation function.
+        - If ``"mi"``, the smaller of the first minimum of the Kraskov automutual information
+          and the ``"ac1e"`` delay (see :func:`~pyhctsa.utils.get_tau`).
 
-        Default is ``'tau'``.
+        Default is ``'tau'``. If the delay cannot be set from the series the output is NaN.
 
     Returns
     -------
     float
         The GLSCF value at the specified lag :math:`\\tau`.
     """
-    # Set tau to first zero-crossing of the autocorrelation function with the input 'tau'
-    if tau == 'tau':
-        tau = first_crossing(y, 'ac', 0, 'discrete')
-        if np.isnan(tau):  # undefined ACF (e.g. constant series)
-            return np.nan
-    
+    y = np.asarray(y, dtype=float).ravel()
+    # Set tau from the series if it is a rule: 'tau'/'ac' (first zero-crossing of the
+    # autocorrelation function), 'ac1e' or 'mi'
+    tau = _resolve_delay(y, tau, default='tau')
+    if np.isnan(tau):  # undefined ACF (e.g. constant series), or no delay by the rule
+        return np.nan
+    tau = int(tau)
+
     # Take magnitudes of time-delayed versions of the time series
-    y1 = np.abs(y[:-tau])
+    y1 = np.abs(y[:len(y) - tau])
     y2 = np.abs(y[tau:])
 
     p1 = np.mean(np.multiply((y1 ** alpha), (y2 ** beta)))
@@ -2734,9 +2833,11 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
 
             - int: Use the specified lag.
             - 'ac': Use the first zero-crossing of the autocorrelation function.
-            - 'mi': Use the first minimum of the automutual information function.
+            - 'ac1e': Use the floor of the first 1/e crossing of the autocorrelation function.
+            - 'mi': Use the smaller of the first minimum of the (Kraskov) automutual information
+              and the 'ac1e' delay (see :func:`~pyhctsa.utils.get_tau`).
 
-        Default is ``'ac'``.
+        Default is ``'ac'``. If the delay cannot be set from the series the output is NaN.
 
     Returns
     -------
@@ -2748,19 +2849,18 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
             - 'absnum': The magnitude of the numerator.
             - 'denom': The denominator.
     """
-    # Can set the time lag, tau, to be 'ac' or 'mi'
-    if tau == 'ac':
-        # tau is first zero crossing of the autocorrelation function
-        tau = first_crossing(y, 'ac', 0, 'discrete')
-    elif tau == 'mi':
-        # tau is the first minimum of the automutual information function
-        tau = first_min(y, 'mi')
+    y = np.asarray(y, dtype=float).ravel()
+    # Can set the time lag, tau, to be 'ac' (first zero crossing of the autocorrelation function),
+    # 'ac1e' (floor of its first 1/e crossing) or 'mi' (the smaller of the first minimum of the
+    # Kraskov automutual information and the 'ac1e' delay)
+    tau = _resolve_delay(y, tau, default='ac')
     if np.isnan(tau):
         logger.warning("No valid setting for time delay. (Is the time series too short?)")
         return np.nan
+    tau = int(tau)
 
     # Compute trev quantities
-    yn = y[:-tau]
+    yn = y[:len(y) - tau]
     yn1 = y[tau:] # yn, tau steps ahead
     out = {}
 
@@ -2781,7 +2881,7 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
 
     return out
 
-def tc3(y: list, tau: Union[int, str, None] = 'ac') -> dict:
+def tc3(y: list, tau: Union[int, str, None] = 'ac1e') -> dict:
     """
     Normalized nonlinear autocorrelation function, tc3.
 
@@ -2797,12 +2897,18 @@ def tc3(y: list, tau: Union[int, str, None] = 'ac') -> dict:
         Input time series.
     tau : int or str, optional
         Time lag. Can be:
-        
-            - int: Use the specified lag.
-            - 'ac': Use the first zero-crossing of the autocorrelation function.
-            - 'mi': Use the first minimum of the automutual information function.
 
-            Default is 'ac'.
+            - int: Use the specified lag.
+            - 'ac1e': Use the floor of the first 1/e crossing of the autocorrelation
+              function (the largest lag at which it is still at least 1/e).
+            - 'ac': Use the first zero-crossing of the autocorrelation function (kept for
+              backward compatibility; for a series whose autocorrelation never crosses zero,
+              or only at a very long lag, the lag is meaninglessly long, which is why 'ac1e'
+              is the default).
+            - 'mi': Use the smaller of the first minimum of the (Kraskov) automutual
+              information and the 'ac1e' delay (see :func:`~pyhctsa.utils.get_tau`).
+
+            Default is 'ac1e'. If the delay cannot be set from the series the output is NaN.
 
     Returns
     -------
@@ -2816,22 +2922,21 @@ def tc3(y: list, tau: Union[int, str, None] = 'ac') -> dict:
         - 'denom': The denominator
         
     """
-    # Set the time lag as a measure of the time-series correlation length
-    # Can set the time lag, tau, to be 'ac' or 'mi'
-    if tau == 'ac':
-        # tau is first zero crossing of the autocorrelation function
-        tau = first_crossing(y, 'ac', 0, 'discrete')
-    elif tau == 'mi':
-        # tau is the first minimum of the automutual information function
-        tau = first_min(y, 'mi')
-    
+    y = np.asarray(y, dtype=float).ravel()
+    # Set the time lag as a measure of the time-series correlation length. Can set the time lag,
+    # tau, to be 'ac1e' (floor of the first 1/e crossing of the autocorrelation function),
+    # 'ac' (its first zero crossing) or 'mi' (the smaller of the first minimum of the Kraskov
+    # automutual information and the 'ac1e' delay)
+    tau = _resolve_delay(y, tau, default='ac1e')
     if np.isnan(tau):
         logger.warning("No valid setting for time delay (time series too short?)")
         return np.nan
-    
+    tau = int(tau)
+
     # Compute tc3 statistic
-    yn = y[:-2*tau]
-    yn1 = y[tau:-tau] # yn1, tau steps ahead
+    n = len(y)
+    yn = y[:max(n - 2*tau, 0)]
+    yn1 = y[tau:max(n - tau, 0)] # yn1, tau steps ahead
     yn2 = y[2*tau:] # yn2, 2*tau steps ahead
 
     numerator = np.mean(yn * yn1 * yn2)
@@ -2851,4 +2956,78 @@ def tc3(y: list, tau: Union[int, str, None] = 'ac') -> dict:
     # The denominator
     out['denom'] = denominator
 
+    return out
+
+
+def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
+                  remove_or_saturate: str = 'remove', random_seed: Union[int, str, None] = None) -> dict:
+    """
+    How the autocorrelation of a time series changes when a set of points is removed or clipped.
+
+    A proportion, ``p``, of the points of the (z-scored) series are removed, or saturated,
+    according to a rule (see :func:`~pyhctsa.utils.bf_remove_points`), and the autocorrelation
+    structure is compared before and after the change. Removing deletes the chosen points and
+    closes up the rest into a shorter series, which splices together points that were not
+    neighbors. Saturating keeps them in place but clips their values to the most extreme value
+    among the points kept. The order-free statistics of the same transformation (mean, median,
+    standard deviation, skewness and kurtosis) are in :func:`~pyhctsa.operations.distribution.remove_points`.
+
+    Port of hctsa's ``CO_RemovePoints`` (split from a single function, ``DN_RemovePoints``,
+    that returned both sets of outputs).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (should be z-scored).
+    remove_how : {'absclose', 'absfar', 'min', 'max', 'random'}, optional
+        How to choose the points to remove:
+
+        - 'absclose': those closest to the mean,
+        - 'absfar': those furthest from the mean (default),
+        - 'min': the lowest values,
+        - 'max': the highest values,
+        - 'random': at random.
+    p : float, optional
+        The proportion of points to remove. Default 0.1.
+    remove_or_saturate : {'remove', 'saturate'}, optional
+        Whether to remove the points ('remove', the default) or to saturate their values
+        ('saturate'; not possible with 'absclose' or 'random').
+    random_seed : int, optional
+        Seed for ``remove_how='random'`` (as hctsa's ``BF_ResetSeed``; default 0).
+
+    Returns
+    -------
+    dict
+        Statistics of the changed series, relative to the original:
+
+        - ``fzcacrat``: the ratio of the first zero-crossing of the autocorrelation function
+          (changed to original);
+        - ``ac1diff``, ``ac2diff``, ``ac3diff``: the absolute differences in the
+          autocorrelation at lags 1, 2 and 3;
+        - ``sumabsacfdiff``: the sum over lags 1 to 8 of the absolute differences in the
+          autocorrelation.
+
+    Notes
+    -----
+    Only the first zero-crossing is a ratio: its original value is an interpolated lag of at
+    least 0.5, so the ratio is always well defined. The autocorrelation outputs are
+    differences, because the original autocorrelation can be near 0, where a ratio is unstable.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    y_transform = bf_remove_points(y, remove_how, p, remove_or_saturate, random_seed)
+
+    # Compute some autocorrelation properties
+    n = 8
+    lags = list(range(1, n + 1))
+    acf_y = autocorr(y, lags, 'Fourier')
+    acf_y_transform = autocorr(y_transform, lags, 'Fourier')
+
+    out = {}
+    with np.errstate(all='ignore'):
+        out['fzcacrat'] = np.divide(first_crossing(y_transform, 'ac', 0, 'continuous'),
+                                    first_crossing(y, 'ac', 0, 'continuous'))
+        out['ac1diff'] = np.abs(acf_y_transform[0] - acf_y[0])
+        out['ac2diff'] = np.abs(acf_y_transform[1] - acf_y[1])
+        out['ac3diff'] = np.abs(acf_y_transform[2] - acf_y[2])
+        out['sumabsacfdiff'] = np.sum(np.abs(acf_y_transform - acf_y))
     return out

@@ -1396,21 +1396,21 @@ symbolic:
       - {what_prior: 'T2', memory: 100, num_groups: 4, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
       - {what_prior: 'T2', memory: 100, num_groups: 5, coarse_grain_method: 'quantile', num_iters: 500, zscore: True}
 
-      - {what_prior: 'dist', memory: 5, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'dist', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'dist', memory: 50, num_groups: 3, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'dist', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'dist', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 5, num_groups: 2, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 20, num_groups: 2, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 50, num_groups: 3, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 4, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 5, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
 
-      - {what_prior: 'T1', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'T1', memory: 50, num_groups: 3, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'T1', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'T1', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 20, num_groups: 2, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 3, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 4, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 5, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
 
-      - {what_prior: 'T2', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'T2', memory: 50, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'T2', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'T2', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 20, num_groups: 2, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 50, num_groups: 2, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 4, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 5, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
 
       - {what_prior: 'dist', memory: 5, num_groups: 1, coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
       - {what_prior: 'dist', memory: 5, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
