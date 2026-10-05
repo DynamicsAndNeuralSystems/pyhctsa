@@ -47,6 +47,48 @@ def cumulants(x: ArrayLike, cum_what_may: str = 'skew1') -> float:
     else:
         return ValueError('Unknown cumulant. Choose either skew1, skew2, kurt1, or kurt2.')
 
+def _ksdensity(x: np.ndarray, xi: Union[None, np.ndarray] = None, npoints: int = 100) -> tuple:
+    """
+    Gaussian kernel density estimate of x, in the manner of MATLAB's ``ksdensity``.
+
+    The bandwidth is MATLAB's default, ``sig * (4 / (3 n)) ** (1 / 5)`` with the
+    robust spread ``sig = median(|x - median(x)|) / 0.6745`` (the range of x if that
+    is zero, and 1 if the bandwidth is still not positive), applied through
+    ``scipy.stats.gaussian_kde``. With no evaluation points given, ``npoints`` equally
+    spaced points from ``min(x) - 3 bw`` to ``max(x) + 3 bw`` are used, as in MATLAB.
+
+    A constant series has a singular covariance, for which ``gaussian_kde`` raises
+    ``LinAlgError``; there the kernels are summed directly (bandwidth 1, as MATLAB).
+
+    Note that MATLAB's ``ksdensity`` truncates the kernel at four bandwidths when
+    there are many data points; ``gaussian_kde`` does not, so values differ slightly
+    (about 1e-4 relative to the peak) for series of more than a few hundred points.
+
+    Returns
+    -------
+    f, xi : numpy.ndarray
+        The density estimate and the points at which it is evaluated.
+    """
+    x = np.asarray(x, dtype=float)
+    n = len(x)
+    sig = np.median(np.abs(x - np.median(x))) / 0.6745
+    if sig <= 0:
+        sig = np.ptp(x)
+    bw = sig * (4 / (3 * n)) ** (1 / 5)
+    if not bw > 0:
+        bw = 1.0
+    if xi is None:
+        xi = np.linspace(np.min(x) - 3 * bw, np.max(x) + 3 * bw, npoints)
+    xi = np.asarray(xi, dtype=float)
+    std_x = np.std(x, ddof=1) if n > 1 else 0.0
+    if std_x > 0:
+        # (scipy multiplies the bw_method factor by std(x, ddof=1))
+        f = gaussian_kde(x, bw_method=bw / std_x)(xi)
+    else:
+        u = (xi[:, None] - x[None, :]) / bw
+        f = np.exp(-0.5 * u * u).sum(axis=1) / (n * bw * np.sqrt(2 * np.pi))
+    return f, xi
+
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """
     Compares a fitted distribution with the smoothed distribution of the data.
@@ -110,29 +152,6 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         x = (x - np.min(x) + 0.01 * sd) / (np.max(x) - np.min(x) + 0.02 * sd)
     n = len(x)
     x_step = np.std(x, ddof=1) / 100  # set a step size
-
-    # ----------------------------
-    # KDE bandwidth matching MATLAB's ksdensity default
-    # (robust MAD-based sigma + Silverman's rule), expressed as a scipy
-    # bw_method factor (scipy multiplies the factor by std(x, ddof=1)).
-    # ----------------------------
-    med = np.median(x)
-    sig = np.median(np.abs(x - med)) / 0.6745
-    if sig <= 0:
-        sig = np.ptp(x)
-    matlab_bw = sig * (4 / (3 * n)) ** (1 / 5)
-    if not matlab_bw > 0:
-        matlab_bw = 1.0  # as ksdensity, for a constant series
-    std_x = np.std(x, ddof=1)
-
-    def _kde(z):
-        """Gaussian kernel density at z with the bandwidth above."""
-        if std_x > 0:
-            return gaussian_kde(x, bw_method=matlab_bw / std_x)(z)
-        # a constant series has a singular covariance (scipy raises LinAlgError):
-        # sum the kernels directly, as ksdensity does
-        u = (np.asarray(z, dtype=float)[:, None] - x[None, :]) / matlab_bw
-        return np.exp(-0.5 * u * u).sum(axis=1) / (n * matlab_bw * np.sqrt(2 * np.pi))
 
     # ----------------------------
     # Fit distribution & find the support bounds over which to compare
@@ -246,9 +265,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     # ----------------------------
     # Estimate smoothed empirical distribution
     # ----------------------------
-    # MATLAB's default ksdensity grid extends ~3 bandwidths beyond the data range.
-    xi = np.linspace(np.min(x) - 3 * matlab_bw, np.max(x) + 3 * matlab_bw, 100)
-    f = _kde(xi)
+    f, xi = _ksdensity(x)
     xi = xi[f > 1e-6]  # only keep values greater than 1E-6
     if xi.size == 0:
         return np.nan
@@ -260,7 +277,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
 
     # Rerun both over the same range
     xi = np.linspace(x1, x2, 1000)
-    f = _kde(xi)
+    f, _ = _ksdensity(x, xi)
     with np.errstate(all='ignore'):
         ffit = pdf_func(xi)
 
