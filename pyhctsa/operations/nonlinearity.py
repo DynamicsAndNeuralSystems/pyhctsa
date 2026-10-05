@@ -1,22 +1,31 @@
+import logging
 import math
+import warnings
 from typing import Union
 
 import numpy as np
-from numpy.typing import ArrayLike
-import logging
-logger = logging.getLogger('pyhctsa')
-
 from numba import njit
+from numpy.typing import ArrayLike
+from scipy.optimize import minimize_scalar
+from scipy.signal import correlate, find_peaks, welch as _welch
+from scipy.spatial import cKDTree
+from scipy.spatial.distance import pdist, squareform
+from scipy.special import digamma, gammaln
+from scipy.stats import norm as _norm, spearmanr
 from sklearn.decomposition import PCA
-from sklearn.neighbors import NearestNeighbors
-from scipy.special import gammaln
-from scipy.stats import spearmanr
-from scipy.signal import correlate
+from sklearn.metrics import silhouette_samples
+from sklearn.mixture import GaussianMixture
+from sklearn.neighbors import KDTree, NearestNeighbors
 
 from ..operations.model_fit import residual_analysis
 from ..operations.correlation import first_crossing, first_min, autocorr
+from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robustfit
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
-from ..utils import _ml_rng, _round_half_away, get_tau, matlab_quantile, theiler_window, time_delay_embed
+from ..toolboxes.Tisean_3_0_1.tisean import _e, _round_significant
+from ..utils import (_linspace, _ml_randperm, _ml_rng, _round_half_away, bin_picker, get_tau,
+                     matlab_quantile, theiler_window, time_delay_embed)
+
+logger = logging.getLogger('pyhctsa')
 
 # ------------------------------------------------------------------------------
 # Embedding parameters (hctsa's NL_FNN and BF_Embed), shared by the operations below
@@ -1060,16 +1069,16 @@ def _scaling_range_endpoints(l: int) -> tuple:
 
 
 def _best_flat_range(v: np.ndarray, gamma: float, stptr: np.ndarray,
-                     endptr: np.ndarray) -> tuple:
+                     endptr: np.ndarray, normalize: bool = True) -> tuple:
     """Scaling range over which ``v`` is most nearly constant.
 
-    Rescales ``v`` to [0,1] so the comparison is independent of its range, then
-    scores each candidate range by the spread of ``v`` across it, less a bonus
+    Rescales ``v`` to [0,1] (unless ``normalize`` is False) so the comparison is independent of
+    its range, then scores each candidate range by the spread of ``v`` across it, less a bonus
     (``gamma``) per additional point spanned. Returns the winning
     ``(start index, end index, score)`` into ``stptr``/``endptr``.
     """
     with np.errstate(invalid='ignore', divide='ignore'):
-        vnorm = (v - v.min()) / (v.max() - v.min())
+        vnorm = (v - v.min()) / (v.max() - v.min()) if normalize else v
     mybad = np.empty((stptr.size, endptr.size))
     for i, s in enumerate(stptr):
         for j, e in enumerate(endptr):
@@ -1492,8 +1501,6 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
 
     return out
 
-from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robustfit
-from ..utils import _round_half_away
 
 
 def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
@@ -1649,7 +1656,6 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
     return out
 
 
-from scipy.spatial import cKDTree
 
 
 def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
@@ -1759,9 +1765,6 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
     return num_pairs / sum_log  # Takens' estimator: 1 / mean(ln(eup/r))
 
 
-from scipy.optimize import minimize_scalar
-from ..utils import _ml_randperm
-from scipy.special import digamma
 
 
 def _fractal_dim_error(d: float, g: float, kmin: int, kmax: int, mom: np.ndarray) -> float:
@@ -1892,7 +1895,6 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
         ref_idx = np.arange(n_emb)
     else:
         ref_idx = _ml_randperm(n_emb, _ml_rng(0 if random_seed is None else int(random_seed)))[:int(nref)] - 1
-    n_ref = ref_idx.size
 
     # For each reference point, the distances to its 1st..kmax-th nearest neighbors outside
     # the Theiler window (a KD-tree, over-fetching neighbors to cover those excluded)
@@ -1944,14 +1946,16 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     return out
 
 
-from ..toolboxes.Tisean_3_0_1.tisean import _e, _round_significant
 
 
-def _tisean_boxcount(y: np.ndarray, delay: int, maxembed: int, epscount: int) -> tuple:
-    # TISEAN's ``boxcount -M1,<maxembed> -d<delay> -Q0.0 -#<epscount>`` (source_c/boxcount.c),
-    # in process: ln N(eps), the log of the number of occupied cells of a partition of the
-    # delay embedding into cubes of side eps, for embedding dimensions 1..maxembed.
-    # Returns (eps, logN), with eps of shape (epscount,) and logN (epscount, maxembed), both
+def _tisean_boxcount(y: np.ndarray, delay: int, maxembed: int, epscount: int, q: float = 0.0) -> tuple:
+    # TISEAN's ``boxcount -M1,<maxembed> -d<delay> -Q<q> -#<epscount>`` (source_c/boxcount.c), in
+    # process: the Renyi entropy of order q, H_q = log(sum_i p_i^q) / (1 - q) (Shannon, -sum p log p,
+    # for q = 1), of the partition of the delay embedding into cubes of side eps -- p_i being the
+    # fraction of embedded points in cube i -- for embedding dimensions 1..maxembed. For q = 0
+    # that is ln N(eps), the log of the number of occupied cubes.
+    # Returns (eps, H, dH): eps of shape (epscount,), and H and dH, of shape (epscount, maxembed),
+    # the entropy and its increment with the embedding dimension (H itself for dimension 1), all
     # rounded through C's %e as in the .box file hctsa reads back.
     y = _round_significant(np.asarray(y, dtype=float).ravel(), 7)  # BF_WriteTempFile
     ymin = np.min(y)
@@ -1967,7 +1971,7 @@ def _tisean_boxcount(y: np.ndarray, delay: int, maxembed: int, epscount: int) ->
     epsfaktor = (epsmax / epsmin) ** (1.0 / (epscount - 1))
 
     eps = np.empty(epscount)
-    log_n = np.empty((epscount, maxembed))
+    h = np.empty((epscount, maxembed))
     heps = epsmax * epsfaktor
     epsi_old = 0
     for k in range(epscount):
@@ -1981,9 +1985,11 @@ def _tisean_boxcount(y: np.ndarray, delay: int, maxembed: int, epscount: int) ->
         labels = np.zeros(length, dtype=np.int64)
         for d in range(maxembed):  # nested partition: cells are distinguished by coordinates 1..d+1
             box = (x[d * delay:d * delay + length] * epsi).astype(np.int64)
-            labels = np.unique(labels * epsi + box, return_inverse=True)[1].ravel()
-            log_n[k, d] = np.log(labels.max() + 1)
-    return np.array([_e(v) for v in eps]), np.vectorize(_e)(log_n)
+            _, labels, counts = np.unique(labels * epsi + box, return_inverse=True, return_counts=True)
+            p = counts / length
+            h[k, d] = -np.sum(p * np.log(p)) if q == 1.0 else np.log(np.sum(p ** q)) / (1.0 - q)
+    dh = np.diff(h, axis=1, prepend=0.0)
+    return np.array([_e(v) for v in eps]), np.vectorize(_e)(h), np.vectorize(_e)(dh)
 
 
 def _dimensions_scaling_range(logr: np.ndarray, log_n: np.ndarray, gamma: float = 0.02) -> tuple:
@@ -2110,7 +2116,7 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
 
     try:
         # Box counting
-        bc_r, bc_logn = _tisean_boxcount(y, tau, big_m, num_bins)
+        bc_r, bc_logn, _ = _tisean_boxcount(y, tau, big_m, num_bins)
         bc_logr = np.log(bc_r)
 
         # Correlation sum, over the same number of scales: epsilon from max_eps/10 to max_eps
@@ -2430,7 +2436,6 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
     return out
 
 
-from scipy.stats import norm as _norm
 
 
 def _dvv_draws(rng: np.random.RandomState, n: int, n_dv: int, nsub: int, num_surr: int) -> tuple:
@@ -2649,8 +2654,6 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
     return out
 
 
-from scipy.signal import find_peaks, welch as _welch
-from scipy.spatial.distance import pdist, squareform
 
 
 def _period_normalized_tau(y: np.ndarray) -> Union[int, str]:
@@ -3102,16 +3105,6 @@ def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
 # ------------------------------------------------------------------------------
 # Recurrence- and embedding-based operations (NL_RecurrenceTimes, NL_RQA, ...)
 # ------------------------------------------------------------------------------
-# (the imports for this block sit here, rather than at the top of the module, only to
-# keep the block self-contained)
-import warnings
-
-from scipy.spatial.distance import pdist, squareform
-from sklearn.neighbors import KDTree
-
-from ..utils import _linspace, _ml_randperm, _round_half_away, bin_picker
-
-
 def _random_subset(n: int, k: int, random_seed: Union[int, str, None]) -> np.ndarray:
     """
     ``k`` of ``n`` indices (from zero) in random order, from the Mersenne Twister seeded as
@@ -3752,8 +3745,6 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
 
         The ``sep_*`` outputs are NaN if ``k_max < 2`` or the 2-component fit fails.
     """
-    from sklearn.metrics import silhouette_samples
-    from sklearn.mixture import GaussianMixture
 
     y = np.asarray(y, dtype=float).ravel()
     y_embed = _bf_embed(y, tau, m)
@@ -4005,51 +3996,6 @@ def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
     return out
 
 
-def _boxcount_increments(y: np.ndarray, tau: int, m_max: int, num_bins: int) -> Union[np.ndarray, None]:
-    """
-    TISEAN's ``boxcount -M1,m_max -d tau -Q2.0 -#num_bins`` (hctsa's NL_BoxCountEntropyRate): the
-    order-2 Renyi entropy of the partition of the delay-embedded series into boxes, and its
-    increments with the embedding dimension.
-
-    The series is rescaled to [0, 1] (written to TISEAN to 7 significant digits) and
-    partitioned into boxes of side 1/n_boxes, for ``num_bins`` box sizes spaced geometrically
-    from 1 down to 1/1000 (each a distinct integer number of boxes per axis). With ``p_i`` the
-    fraction of embedded points in box ``i``, ``H(eps, d) = -log(sum_i p_i^2)``. Returns an array
-    (``num_bins`` x ``m_max``) whose column ``d`` is ``H(eps, d) - H(eps, d - 1)`` (``H`` itself
-    for ``d = 1``), each value as TISEAN prints it (``%e``), or None for a constant series.
-    """
-    y = _tisean._round_significant(y, 7)
-    lo, hi = y.min(), y.max()
-    if hi - lo == 0:
-        return None
-    s = (y - lo) / (hi - lo)
-    eps_min, eps_max = 1e-3, 1.0
-    s = np.where(s >= 1.0, s - eps_min / 2.0, s)
-    length = s.size - (m_max - 1) * tau
-    if length < 1:
-        return None
-    eps_factor = (eps_max / eps_min) ** (1.0 / (num_bins - 1))
-
-    rs = np.zeros((num_bins, m_max))
-    heps, epsi_old = eps_max * eps_factor, 0
-    for k in range(num_bins):
-        while True:  # (an integer number of boxes per axis, increasing with every length scale)
-            heps /= eps_factor
-            epsi = int(1.0 / heps)
-            if epsi > epsi_old:
-                break
-        epsi_old = epsi
-        # The box (per coordinate) of each embedded point, refined one coordinate at a time
-        label = np.zeros(length, dtype=np.int64)
-        h = np.zeros(m_max)
-        for d in range(m_max):
-            box = (s[d * tau:d * tau + length] * epsi).astype(np.int64)
-            _, label, counts = np.unique(label * epsi + box, return_inverse=True, return_counts=True)
-            h[d] = -np.log(np.sum((counts / length) ** 2))
-        rs[k] = np.diff(h, prepend=0.0)
-    return np.vectorize(_tisean._e)(rs)
-
-
 def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
                            embed_params: Union[list, tuple] = ('ac', 'fnn')) -> dict:
     """
@@ -4123,9 +4069,12 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
         return np.nan
     tau, m_max = params
 
-    rs = _boxcount_increments(y, tau, m_max, int(num_bins))
-    if rs is None:
-        logger.warning('boxcount failed (constant series, or too short for these embedding parameters)')
+    # (the order-2 Renyi entropy of the partition into boxes, as a function of the box size and the
+    # embedding dimension d, and its increment with d; the increments are analyzed)
+    try:
+        rs = _tisean_boxcount(y, tau, m_max, int(num_bins), 2.0)[2]
+    except _D2DataError as exc:
+        logger.warning(f'boxcount failed: {exc}')
         return np.nan
     if m_max < 2:
         # the increment I is only defined from d = 2 (d = 1 holds H itself)
@@ -4557,11 +4506,7 @@ def _c1_scaling_range(slopes: np.ndarray) -> Union[tuple, None]:
     endptr = np.arange(int(np.ceil(n / 4)) + 1, n + 1)
     if stptr.size == 0 or endptr.size == 0:
         return None
-    bad = np.empty((stptr.size, endptr.size))
-    for i, s in enumerate(stptr):
-        for j, e in enumerate(endptr):
-            bad[i, j] = np.std(slopes[s - 1:e], ddof=1) - 0.005 * (e - s + 1)
-    a, b, best = _argmin_first_colmajor(bad)
+    a, b, best = _best_flat_range(slopes, 0.005, stptr, endptr, normalize=False)
     if a is None:
         return None
     rng = slopes[stptr[a] - 1:endptr[b]]
@@ -4973,17 +4918,8 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
         series is too short for the fits (fewer than ``10 * k_nn + 2 * theiler_win`` embedded
         points), TISEAN finds too few neighbors, or an exponent is not finite.
     """
-    y = np.asarray(y, dtype=float).ravel()
+    y = _check_max_n(np.asarray(y, dtype=float).ravel(), max_n, 'lyap_spec')
     n = y.size
-    if isinstance(max_n, str):
-        if max_n != 'full':
-            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
-        if n > 50000:
-            logger.warning(f"Time series ({n} samples) is long for max_n='full'; the computation may be slow")
-    elif n > max_n:
-        logger.warning(f'Time series ({n} samples) exceeds max_n = {max_n}; analyzing the first {int(max_n)} samples')
-        y = y[:int(max_n)]
-        n = y.size
     if m < 3:
         raise ValueError('The embedding dimension, m, must be at least 3 (the outputs include LE3)')
 
