@@ -6,6 +6,7 @@ import scipy.fft
 import scipy.signal
 import scipy.optimize
 import scipy.stats
+import scipy.special
 
 from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit, robustfit, polyfit
 
@@ -1842,4 +1843,115 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
     # How far the standard asymptotic threshold is from the empirical one:
     analytic_thresh = -np.log(alpha) / num_seg
     out['threshRatio'] = surr_thresh / analytic_thresh
+    return out
+
+
+def spectral_time_freq(y: ArrayLike, num_windows: int = 20) -> Union[dict, float]:
+    """
+    Time-varying spectral statistics from a spectrogram.
+
+    ``spectral_summaries`` computes statistics from a single, static spectral
+    estimate of the whole time series. This function instead divides the series into
+    overlapping windows and tracks how the spectral content changes across them:
+
+    - The spectral kurtosis (Antoni 2006) is the kurtosis, across windows, of the
+      power in each frequency bin. High values flag a frequency band whose energy is
+      concentrated in occasional bursts rather than spread evenly over time (e.g., a
+      transient, impulsive fault).
+    - The spectral entropy of the power spectrum is computed separately in each
+      window, giving one entropy value per window. Variation in this sequence flags
+      a time series whose spectral character is not stationary.
+
+    Each window is a Hamming window of ``max(8, round(N/num_windows))`` samples with
+    50% overlap, so about ``2*num_windows - 1`` windows result.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    num_windows : int, optional
+        Sets the window length to ``N/num_windows`` samples (at least 8), with 50%
+        overlap. If fewer than 4 windows fit, the output is NaN. Default is 20.
+
+    Returns
+    -------
+    dict or float
+        - ``sk_max``, ``sk_mean``, ``sk_std``, ``sk_range``: maximum, mean, standard
+          deviation and range, over frequencies, of the spectral kurtosis.
+        - ``sk_fracAboveThresh``: the fraction of frequencies whose spectral kurtosis
+          exceeds the 95% Gaussian-null threshold (non-Gaussian, bursty behavior).
+        - ``sk_freqAtMax``: the angular frequency, in radians per sample (``2*pi``
+          times the frequency in cycles per sample, from 0 to pi, matching
+          ``spectral_summaries``), at which the spectral kurtosis is largest.
+        - ``sk_relSpread``: the relative spread of power across windows: the mean over
+          frequencies of the standard deviation across windows of the power in each
+          frequency bin, divided by the mean over frequencies of the mean power across
+          windows. A dimensionless coefficient of variation of the power, independent
+          of the variance of the series and of the window length (about 1 for white
+          noise).
+        - ``se_mean``, ``se_std``, ``se_max``, ``se_min``, ``se_range``: mean,
+          standard deviation, maximum, minimum and range, over windows, of the spectral
+          entropy of each window's power spectrum: the Shannon entropy (base 2) of the
+          one-sided relative power across frequency bins, divided by its maximum,
+          log2 of the number of bins, so each window's value lies in [0, 1]: 1 for a
+          flat (white) spectrum, near 0 for a spectrum concentrated in a single
+          frequency bin.
+
+    Notes
+    -----
+    Everything is computed directly from the spectrogram (the same quantities as
+    MATLAB's ``spectralKurtosis`` and ``spectralEntropy``), with power in each
+    frequency bin and window normalized as ``|FFT|^2/(0.5*sum(window)^2)`` and halved
+    at zero frequency (and at the Nyquist frequency for an even window length).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    Ny = len(y)
+
+    # Windows sized as a fraction of the series length, so behavior scales across
+    # very different input lengths:
+    win_length = max(8, int(np.floor(Ny / num_windows + 0.5)))
+    noverlap = int(np.floor(win_length / 2 + 0.5))
+    window = scipy.signal.windows.hamming(win_length, sym=True)
+
+    hop = win_length - noverlap
+    num_frames = (Ny - win_length) // hop + 1
+    if num_frames < 4:
+        return np.nan  # too short for across-window statistics to mean anything
+
+    # Spectrogram: power in each (frequency bin, window), one-sided
+    idx = np.arange(win_length)[:, None] + hop * np.arange(num_frames)[None, :]
+    n_bins = win_length // 2 + 1
+    S = np.fft.fft(y[idx] * window[:, None], axis=0)[:n_bins, :]
+    P = np.abs(S) ** 2 / (0.5 * np.sum(window)) ** 2
+    P[0, :] *= 0.5  # zero frequency
+    if win_length % 2 == 0:
+        P[-1, :] *= 0.5  # Nyquist frequency
+    fout = np.arange(n_bins) / win_length  # cycles per sample
+
+    # Spectral kurtosis: kurtosis across windows, per frequency bin (Antoni 2006)
+    K = P.shape[1]
+    kurt = ((K + 1) / (K - 1)) * np.mean(P ** 2, axis=1) / np.mean(P, axis=1) ** 2 - 2
+    thresh = 2 * np.sqrt(2) * scipy.special.erfcinv(1 - 0.95) / np.sqrt(K)  # 95% Gaussian null
+    spread = np.std(P, axis=1, ddof=1)
+    centroid = np.mean(P, axis=1)
+
+    out = {}
+    out['sk_max'] = np.max(kurt)
+    out['sk_mean'] = np.mean(kurt)
+    out['sk_std'] = np.std(kurt, ddof=1)
+    out['sk_range'] = np.max(kurt) - np.min(kurt)
+    out['sk_fracAboveThresh'] = np.mean(kurt > thresh)
+    out['sk_freqAtMax'] = 2 * np.pi * fout[int(np.argmax(kurt))]
+    out['sk_relSpread'] = np.mean(spread) / np.mean(centroid)
+
+    # Instantaneous spectral entropy: one value per window
+    p = P / np.sum(P, axis=0, keepdims=True)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        plogp = np.where(p > 0, p * np.log2(p), 0.0)
+    se = -np.sum(plogp, axis=0) / np.log2(n_bins)
+    out['se_mean'] = np.mean(se)
+    out['se_std'] = np.std(se, ddof=1)
+    out['se_max'] = np.max(se)
+    out['se_min'] = np.min(se)
+    out['se_range'] = np.max(se) - np.min(se)
     return out
