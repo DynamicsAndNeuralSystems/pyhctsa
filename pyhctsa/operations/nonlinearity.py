@@ -1509,6 +1509,116 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
     return out
 
 
+from scipy.spatial import cKDTree
+
+
+def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
+                     past: Union[int, float, list, tuple] = ('ac', 1),
+                     embed_params: Union[list, tuple] = ('ac', 'fnn')) -> float:
+    """
+    Takens' estimator for the correlation dimension.
+
+    Takens' maximum-likelihood estimator [1]_ of the correlation dimension at an
+    upper length scale ``eup = rad * std(y)``:
+
+    .. math::
+        D_T = 1 / \\langle \\ln(\\epsilon_{up} / r_{ij}) \\rangle,
+
+    the mean taken over all pairs ``(i, j)`` of delay vectors with max-norm distance
+    :math:`r_{ij} < \\epsilon_{up}`, excluding pairs closer in time than the Theiler
+    window and exact duplicate vectors. It is computed natively (a KD-tree range search
+    at the one radius needed), exactly at ``eup`` from the pair distances themselves,
+    rather than from the logarithmically binned correlation sum of TISEAN's ``d2``
+    followed by ``c2t`` as in earlier versions of hctsa. Kantz and Schreiber's
+    recommendation of half a standard deviation for the length scale is used the same
+    way in :func:`tisean_d2`.
+
+    References
+    ----------
+    .. [1] F. Takens, "On the numerical determination of the dimension of an attractor",
+        in B.L.J. Braaksma, H.W. Broer and F. Takens (eds.), Dynamical Systems and
+        Bifurcations (Groningen, 1984), Lecture Notes in Mathematics 1125, 99-106,
+        Springer, Berlin (1985). DOI: 10.1007/BFb0075637
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    nref : int, optional
+        The number of reference points (the first ``nref`` delay vectors); ``-1`` uses
+        all points. Default is -1.
+    rad : float, optional
+        The upper length scale at which to read off the dimension estimate, in standard
+        deviations of ``y``. Default is 0.05.
+    past : int, float, or ``['ac', k]``, optional
+        The Theiler window (see :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for
+        ``k`` times the first zero-crossing of the autocorrelation function, or a number
+        of samples. Default is ``['ac', 1]``.
+    embed_params : [tau, m], optional
+        Embedding parameters: ``tau`` is an integer or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an
+        integer, or ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in
+        pyhctsa and raises ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+
+    Returns
+    -------
+    float
+        Takens' estimator of the correlation dimension. NaN if the delay or Theiler
+        window cannot be set, the series cannot be embedded, it is constant, or no pair
+        of delay vectors lies within the length scale (or all such pairs are exact
+        duplicates, e.g. heavily quantized data). For high embedding dimensions of
+        noise-like series no pair may fall within the length scale at all.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+
+    past = theiler_window(y, past, n)
+    if np.isnan(past):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+
+    tau, m = _embed_tau_m(y, embed_params)
+    if np.isnan(tau):
+        logger.warning('Could not embed this time series with these embedding parameters')
+        return np.nan
+    try:
+        emb = time_delay_embed(y, m, tau)
+    except ValueError as exc:  # too short to embed
+        logger.warning(str(exc))
+        return np.nan
+    n_emb = emb.shape[0]
+
+    # Reference points: the first nref delay vectors, or all
+    n_ref = n_emb if (nref == -1 or nref >= n_emb) else int(nref)
+
+    eup = rad * np.std(y, ddof=1)  # upper length scale, in data units
+    if not eup > 0:
+        return np.nan  # constant series
+
+    # Sum ln(eup / r_ij) over pairs with r_ij <= eup (max norm) outside the Theiler window,
+    # over reference points in chunks (a low-dimensional attractor can have O(N^2) pairs
+    # within eup, so they are never all held at once)
+    tree = cKDTree(emb)
+    sum_log, num_pairs = 0.0, 0
+    chunk = 500
+    for c in range(0, n_ref, chunk):
+        refs = np.arange(c, min(c + chunk, n_ref))
+        pairs = cKDTree(emb[refs]).sparse_distance_matrix(
+            tree, eup, p=np.inf, output_type='ndarray')
+        keep = np.abs(pairs['j'] - refs[pairs['i']]) > past  # outside the Theiler window
+        d = pairs['v'][keep]
+        d = d[d > 0]  # exact duplicates carry no length-scale information (ln -> Inf)
+        sum_log += np.sum(np.log(eup / d))
+        num_pairs += d.size
+
+    if num_pairs == 0:
+        logger.warning(f'No pairs within {rad:g} standard deviations of each other to '
+                       'estimate a correlation dimension from')
+        return np.nan
+
+    return num_pairs / sum_log  # Takens' estimator: 1 / mean(ln(eup/r))
+
+
 def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
     """Counts of points per box, where the boxes are quantiles along each axis."""
     props = np.arange(nbox + 1) / nbox
