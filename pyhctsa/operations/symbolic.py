@@ -540,6 +540,11 @@ def binary_stretch(x: ArrayLike, stretch_what: str = 'lseq1') -> float:
     
     return out if out is not None else 0
 
+def _ml_std(x: ArrayLike) -> float:
+    """Sample standard deviation (normalized by n - 1), which is 0 (not NaN) for one value, as MATLAB's `std`."""
+    x = np.asarray(x, dtype=float)
+    return 0.0 if x.size == 1 else np.std(x, ddof=1)
+
 def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     """
     Compute statistics on a binary symbolisation of the input time series.
@@ -559,13 +564,16 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
 
         - 'diff': Encode as 1 if the time-series difference is positive, and 0 otherwise.
         - 'mean': Encode as 1 if the value is above the mean, 0 otherwise.
+        - 'median': Encode as 1 if the value is above the median, 0 otherwise.
 
         Default is ``'diff'``.
 
     Returns
     -------
     dict
-        Statistics computed on the binary symbolisation.
+        Statistics computed on the binary symbolisation. The standard deviations of the
+        stretch lengths are NaN if there are no stretches of that symbol, and 0 if there
+        is a single stretch.
     """
     
     # Binarize the time series
@@ -600,8 +608,8 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
         out['longstretch0norm'] = np.max(stretch0) / N
         out['meanstretch0'] = np.mean(stretch0)
         out['meanstretch0norm'] = np.mean(stretch0) / N
-        out['stdstretch0'] = np.std(stretch0, ddof=1)
-        out['stdstretch0norm'] = np.std(stretch0, ddof=1) / N
+        out['stdstretch0'] = _ml_std(stretch0)
+        out['stdstretch0norm'] = _ml_std(stretch0) / N
 
     if len(stretch1) == 0:
         out['longstretch1'] = 0
@@ -615,8 +623,8 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
         out['longstretch1norm'] = np.max(stretch1) / N
         out['meanstretch1'] = np.mean(stretch1)
         out['meanstretch1norm'] = np.mean(stretch1) / N
-        out['stdstretch1'] = np.std(stretch1, ddof=1)
-        out['stdstretch1norm'] = np.std(stretch1, ddof=1) / N
+        out['stdstretch1'] = _ml_std(stretch1)
+        out['stdstretch1norm'] = _ml_std(stretch1) / N
     
     out['meanstretchdiff'] = (out['meanstretch1'] - out['meanstretch0']) / N
     out['stdstretchdiff'] = (out['stdstretch1'] - out['stdstretch0']) / N
