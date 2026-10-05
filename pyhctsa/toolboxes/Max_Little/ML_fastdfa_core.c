@@ -77,7 +77,7 @@ static void dfa(
    unsigned long N_scales
 )
 {
-   unsigned long idx, i, start, end, iwidth, accum_idx;
+   unsigned long idx, i, start, end, iwidth, accum_idx, covered;
    long scale;
 
    REAL Sy, Sxy;                   /* y and x-y components of normal equations */
@@ -90,17 +90,22 @@ static void dfa(
 
    for (scale = N_scales - 1; scale >= 0; scale--)
    {
+      /* Number of leading samples covered by complete windows at this scale */
+      covered = elements;
+
       for (accum_idx = 0, idx = 0; idx < elements; idx += intervals[scale], accum_idx++)
       {
          start = idx;
          end = idx + intervals[scale] - 1;
 
+         /* A window shorter than the interval, at the end of the sequence, is
+            dropped (as in standard DFA): the fluctuation is measured only over the
+            samples covered by complete windows, and the mean is taken over those
+            samples (counting the dropped samples with zero residual biased F(s)
+            downwards at scales that do not divide the length). */
          if (end >= elements)
          {
-            for (i = start; i < elements; i++)
-            {
-               trend[i] = x[i];
-            }
+            covered = start;
             break;
          }
          iwidth = end - start + 1;
@@ -128,12 +133,12 @@ static void dfa(
       }
 
       accum = 0.0f;
-      for (i = 0; i < elements; i++)
+      for (i = 0; i < covered; i++)
       {
          diff = x[i] - trend[i];
          accum += diff * diff;
       }
-      flucts[scale] = sqrt(accum / (REAL)elements);
+      flucts[scale] = sqrt(accum / (REAL)covered);
    }
 
    free(trend);
