@@ -4,6 +4,7 @@ from typing import Union
 
 import numpy as np
 from numpy.typing import ArrayLike
+from numba import njit
 from scipy.linalg import LinAlgError
 from scipy.optimize import curve_fit
 from scipy.stats import expon, gaussian_kde, kurtosis, skew
@@ -2806,3 +2807,213 @@ def tc3(y: list, tau: Union[int, str, None] = 'ac') -> dict:
     out['denom'] = denominator
 
     return out
+
+def matrix_profile(y: ArrayLike, m: Union[int, list] = ['ac', 8],
+                   max_n: Union[int, str] = 5000) -> Union[dict, float]:
+    """
+    How well each subsequence shape recurs elsewhere in a time series.
+
+    Computes the matrix profile: for every length-m window (subsequence) of the time
+    series, the distance to its nearest neighbour among all other windows, after
+    z-normalizing each window (so only its shape matters, not its local level or
+    amplitude). Trivial matches (overlapping windows, |i-j| < m/2) are excluded.
+    Distances are expressed as the equivalent nearest-neighbour Pearson correlation,
+    r = 1 - d^2/(2m), which is bounded and interpretable.
+
+    Features summarize the distribution of r across windows: high values mean shapes
+    recur ('motifs'); a window with unusually low r is a 'discord' (anomaly). The
+    corrected arc curve (Gharghabi et al., 2017; the FLUSS algorithm) counts how many
+    nearest-neighbour links cross each time point, relative to what a stationary
+    process would give; its minimum is low when the series has a regime change,
+    because windows then match within their own regime.
+
+    A one-off anomaly lasting longer than about m/2 is not a discord: its own
+    overlapping windows match each other (the 'twin freak' problem).
+
+    Uses the STOMP recursion (O(N^2) time, O(N) memory).
+
+    References
+    ----------
+    .. [1] S. Gharghabi, Y. Ding, C.-C. M. Yeh, K. Kamgar, L. Ulanova and E. Keogh,
+           "Matrix Profile VIII: Domain Agnostic Online Semantic Segmentation at
+           Superhuman Performance Levels", 2017 IEEE International Conference on
+           Data Mining (ICDM), pp. 117-126 (2017). DOI: 10.1109/ICDM.2017.21 (the
+           FLUSS corrected arc curve).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (z-scored in hctsa).
+    m : int or list, optional
+        The window length in samples; or ['ac', k] for k times the first
+        zero-crossing of the autocorrelation function (at least 10 samples).
+        Default: ['ac', 8]. Longer windows give more reliable estimates of the
+        nearest-neighbour statistics (test-retest across processes: 0.93-0.96 at
+        k = 8 vs 0.73-0.84 at k = 4), at the cost of needing longer series.
+    max_n : int or str, optional
+        Crops time series longer than this to their first max_n samples (or 'full'
+        to use every sample). Default: 5000.
+
+    Returns
+    -------
+    dict or float
+        meanR, medianR : the mean and median nearest-neighbour correlation
+            ('matchiness').
+        motifR : the highest nearest-neighbour correlation (the best-repeated shape).
+        discordR : the lowest nearest-neighbour correlation (the most anomalous
+            shape).
+        discordGap : medianR - discordR, how anomalous the discord is relative to a
+            typical window.
+        propMatch90 : the proportion of windows with a nearest neighbour at r > 0.9.
+        minCAC : the minimum of the corrected arc curve (low = regime change). A
+            specialist statistic: it separates regime-switching from stationary
+            series well, but across stationary series it mostly reflects estimation
+            noise.
+        The output is a single NaN if the series is too short (fewer than 5m
+        windows), no correlation length can be estimated, or most windows are flat.
+    """
+    # Check inputs and set defaults:
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    if not (isinstance(max_n, str) and max_n == 'full') and N > max_n:
+        y = y[:max_n]
+        N = max_n
+
+    if isinstance(m, (list, tuple)):
+        tau = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(tau):
+            return np.nan # data-dependent: no correlation length could be estimated
+        m = int(max(10, np.floor(m[1]*tau + 0.5)))
+    m = int(m)
+    num_win = N - m + 1
+    ex_zone = int(np.ceil(m/2))
+    if num_win < 5*m:
+        return np.nan # data-dependent: too few windows relative to the window length
+
+    # Matrix profile by STOMP, in correlation units
+    cs = np.concatenate(([0.0], np.cumsum(y)))
+    cs2 = np.concatenate(([0.0], np.cumsum(y**2)))
+    mu = (cs[m:] - cs[:num_win])/m
+    sig = np.sqrt(np.maximum((cs2[m:] - cs2[:num_win])/m - mu**2, 0))
+    flat = sig < 1e-8*np.std(y, ddof=1)
+    sig[flat] = np.inf # flat windows have no shape: they match nothing (r = 0)
+
+    # Sliding dot products of the first window against all windows (by FFT):
+    QT = _sliding_dot(y[:m], y)
+    QT1 = QT.copy() # the first column, needed to restart each row of the recursion
+    best_r, best_idx = _stomp(y, QT, QT1, mu, sig, m, ex_zone)
+    best_r = np.fmin(best_r, 1)
+    best_r[flat] = np.nan
+    if np.mean(np.isnan(best_r)) > 0.5:
+        return np.nan # data-dependent: mostly flat windows
+
+    # Summaries
+    ok = ~np.isnan(best_r)
+    out = {}
+    out['meanR'] = np.mean(best_r[ok])
+    out['medianR'] = np.median(best_r[ok])
+    out['motifR'] = np.max(best_r[ok])
+    out['discordR'] = np.min(best_r[ok])
+    out['discordGap'] = out['medianR'] - out['discordR']
+    out['propMatch90'] = np.mean(best_r[ok] > 0.9)
+
+    # Corrected arc curve: nearest-neighbour links crossing each position, relative
+    # to the parabola 2k(n-k)/n expected when links point to uniformly random places
+    pos = np.arange(num_win)
+    lo = np.minimum(pos, best_idx)
+    hi = np.maximum(pos, best_idx)
+    nc = (np.bincount(lo[ok], minlength=num_win+1)
+          - np.bincount(hi[ok], minlength=num_win+1))
+    arcs = np.cumsum(nc[:num_win])
+    k = np.arange(1, num_win+1)
+    ideal = 2*k*(num_win - k)/num_win
+    with np.errstate(divide='ignore', invalid='ignore'):
+        cac = np.fmin(arcs/ideal, 1)
+    edge_zone = 5*m # the arc curve is unreliable near the edges
+    if num_win > 2*edge_zone:
+        out['minCAC'] = np.nanmin(cac[edge_zone:num_win-edge_zone])
+    else:
+        out['minCAC'] = np.nan
+
+    return out
+
+@njit(cache=True)
+def _stomp(y: np.ndarray, QT: np.ndarray, QT1: np.ndarray, mu: np.ndarray,
+           sig: np.ndarray, m: int, ex_zone: int) -> tuple:
+    num_win = len(QT)
+    best_r = np.full(num_win, -np.inf)
+    best_idx = np.zeros(num_win, dtype=np.int64)
+    QT_next = np.empty(num_win)
+    for i in range(num_win):
+        if i > 0:
+            a = y[i-1]
+            b = y[i+m-1]
+            for j in range(1, num_win):
+                QT_next[j] = QT[j-1] - a*y[j-1] + b*y[m+j-1]
+            QT_next[0] = QT1[i]
+            QT, QT_next = QT_next, QT
+        mmu = m*mu[i]
+        msig = m*sig[i]
+        lo = max(0, i-ex_zone+1)
+        hi = min(num_win, i+ex_zone)
+        best, best_j = _row_max(QT, mu, sig, mmu, msig, 0, lo)
+        best_hi, best_j_hi = _row_max(QT, mu, sig, mmu, msig, hi, num_win)
+        if best_j_hi >= 0 and (best_j < 0 or best_hi > best):
+            best = best_hi
+            best_j = best_j_hi
+        if best_j < 0 or best == -np.inf:
+            best = -np.inf
+            best_j = lo
+            for j in range(lo):
+                if (QT[j] - mmu*mu[j])/(msig*sig[j]) == -np.inf:
+                    best_j = j
+                    break
+        best_r[i] = best
+        best_idx[i] = best_j
+    return best_r, best_idx
+
+@njit(cache=True)
+def _row_max(QT: np.ndarray, mu: np.ndarray, sig: np.ndarray, mmu: float,
+             msig: float, start: int, stop: int) -> tuple:
+    b0 = b1 = b2 = b3 = -np.inf
+    j0 = j1 = j2 = j3 = -1
+    j = start
+    while j + 4 <= stop:
+        v0 = (QT[j] - mmu*mu[j])/(msig*sig[j])
+        v1 = (QT[j+1] - mmu*mu[j+1])/(msig*sig[j+1])
+        v2 = (QT[j+2] - mmu*mu[j+2])/(msig*sig[j+2])
+        v3 = (QT[j+3] - mmu*mu[j+3])/(msig*sig[j+3])
+        if v0 > b0:
+            b0 = v0
+            j0 = j
+        if v1 > b1:
+            b1 = v1
+            j1 = j+1
+        if v2 > b2:
+            b2 = v2
+            j2 = j+2
+        if v3 > b3:
+            b3 = v3
+            j3 = j+3
+        j += 4
+    while j < stop:
+        v0 = (QT[j] - mmu*mu[j])/(msig*sig[j])
+        if v0 > b0:
+            b0 = v0
+            j0 = j
+        j += 1
+    best = -np.inf
+    best_j = -1
+    for bv, bj in ((b0, j0), (b1, j1), (b2, j2), (b3, j3)):
+        if bj >= 0 and (best_j < 0 or bv > best or (bv == best and bj < best_j)):
+            best = bv
+            best_j = bj
+    return best, best_j
+
+def _sliding_dot(q: np.ndarray, t: np.ndarray) -> np.ndarray:
+    # Dot products of the query q with every length-m window of t
+    m = len(q)
+    n = len(t)
+    L = 1 << (n + m - 1).bit_length()
+    z = np.real(np.fft.ifft(np.fft.fft(t, L) * np.fft.fft(q[::-1], L)))
+    return z[m-1:n]

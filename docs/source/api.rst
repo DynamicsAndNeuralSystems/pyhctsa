@@ -45,6 +45,7 @@ Correlation
 
    pyhctsa.operations.correlation.oversampling
    pyhctsa.operations.correlation.time_rev_kld
+   pyhctsa.operations.correlation.matrix_profile
    pyhctsa.operations.correlation.autocorr
    pyhctsa.operations.correlation.autocorr_x2_shape
    pyhctsa.operations.correlation.add_noise
@@ -255,6 +256,7 @@ Spectral
    :toctree: generated/
 
    pyhctsa.operations.spectral.phase_amp_coupling
+   pyhctsa.operations.spectral.envelope_stats
    pyhctsa.operations.spectral.spectral_summaries
    pyhctsa.operations.spectral.spectral_summaries_phase
    pyhctsa.operations.spectral.specparam

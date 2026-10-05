@@ -92,6 +92,14 @@ correlation:
     legacy_name: CO_TimeRevKLD
     ordered_args: ['tau', 'm', 'k', 'theiler_win', 'max_n']
 
+  matrix_profile:
+    base_name: matrix_profile
+    dependencies:
+    configs:
+      - {m: [['ac', 8]], max_n: 5000, exclude: ['meanR'], zscore: True}
+    legacy_name: CO_MatrixProfile
+    ordered_args: ['m', 'max_n']
+
   autocorr:
     base_name: ac
     dependencies:
@@ -1599,6 +1607,14 @@ spectral:
       - {n_bands: 5, max_n: 'full', n_phase_bins: 18, zscore: True}
     legacy_name: SP_PhaseAmpCoupling
     ordered_args: ['n_bands', 'max_n', 'n_phase_bins']
+
+  envelope_stats:
+    base_name: envelope_stats
+    dependencies:
+    configs:
+      - {power_frac: 0.5, trim_frac: 0.05, zscore: True}
+    legacy_name: SP_EnvelopeStats
+    ordered_args: ['power_frac', 'trim_frac']
 
   spectral_summaries:
     base_name: spectral_summaries

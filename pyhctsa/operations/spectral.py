@@ -841,6 +841,234 @@ def phase_amp_coupling(y: ArrayLike, n_bands: int = 5, max_n: Union[int, str] = 
 
     return out
 
+def envelope_stats(y: ArrayLike, power_frac: float = 0.5, trim_frac: float = 0.05) -> dict:
+    """
+    Statistics of the amplitude envelope of the full series and of its dominant oscillation.
+
+    Computes the instantaneous amplitude envelope |z(t)| of the analytic signal
+    z(t) = y(t) + i H[y](t), where H is the Hilbert transform, for (a) the full
+    series and (b) the dominant band: the narrowest frequency band centered on the
+    largest periodogram peak (DC and Nyquist bins excluded) that holds a fraction
+    power_frac of the total power, and at least 2 bins either side of the peak. Its
+    width therefore adapts to the series: it is the width of the dominant peak
+    for a narrowband oscillation, and a large part of the spectrum for broadband noise.
+    Each analytic signal comes from the FFT: zeroing the bins outside the band
+    (negative frequencies included) and doubling the rest before an inverse FFT,
+    with no toolbox needed.
+
+    The envelope summaries describe amplitude modulation: how variable the
+    envelope is (coefficient of variation), how asymmetric and heavy-tailed its
+    distribution is (kurtosis for the full series; skewness and kurtosis for the
+    dominant band), and how long it takes to decorrelate (the 1/e timescale of its
+    autocorrelation function). An unmodulated sinusoid has a constant envelope (CV
+    near 0); bursting or amplitude-modulated signals have a large CV, and a high
+    kurtosis for intermittent bursts.
+
+    Baseline for Gaussian noise: the analytic signal of a stationary Gaussian
+    process is complex Gaussian, so its envelope is Rayleigh distributed:
+    CV = sqrt(4/pi - 1) = 0.5227, skewness 0.6311, kurtosis 3.2451 (checked
+    numerically on white noise for the full-band fields; the full-band skewness is
+    not returned, as it is redundant with the kurtosis). Values of the CV below
+    this indicate an envelope steadier than noise (e.g., a sinusoid in noise follows
+    a Rice distribution), and above it an envelope more modulated than noise.
+
+    To limit edge effects (the FFT filter is circular, so the series ends wrap
+    around), trim_frac of the samples are dropped from each end of the envelope and
+    phase before any summary is computed. Timescales are in samples (as elsewhere in
+    hctsa), so they scale with the sampling rate (for a narrowband oscillation, the
+    dominant-band timescale and frequency spread do too, because the band is set by
+    the width of the spectral peak). The dominant-band fields of a narrow band are
+    based on few effectively independent envelope values (about N times the band
+    width), so they are biased toward lower CV for short series.
+
+    The dominant band is the narrowest window around the largest periodogram peak
+    holding half the power (by default), so for a narrowband oscillation it follows the
+    width of the spectral peak and dom_tau and dom_ifspread scale with the
+    sampling rate like full_tau (decimating by 2 and 4 gave dom_tau ratios of
+    about 1/2 and 1/4 and dom_ifspread ratios of 2 and 4, in simulation). A peak
+    narrower than the frequency resolution (a sinusoid in noise, a random walk)
+    gives a band of the 2-bin minimum, so dom_tau then grows in proportion to N. For
+    broadband noise the band is a large part of the spectrum, so dom_tau is only a few
+    samples.
+
+    Also computed during development but not kept, as redundant: the lag-1
+    envelope autocorrelation (r = 0.95 with the 1/e timescale for the full band;
+    near 1 for every series for a narrow band), and the instantaneous-frequency
+    spread relative to its median (r = 0.92 with SP_PhaseFluctuationScaling's meanFreq).
+
+    References
+    ----------
+    .. [1] B. Boashash, "Estimating and interpreting the instantaneous frequency of a
+           signal. I. Fundamentals", Proc. IEEE 80(4), 520-538 (1992).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    power_frac : float, optional
+        The fraction of the total (one-sided, DC and Nyquist excluded) spectral power
+        that the dominant band, centered on the largest periodogram peak, must
+        contain (default: 0.5).
+    trim_frac : float, optional
+        The fraction of samples dropped from each end of the analytic signal
+        before computing summaries (default: 0.05).
+
+    Returns
+    -------
+    dict
+        - ``full_cv``: the envelope's coefficient of variation (standard deviation
+          over mean), full series.
+        - ``full_kurt``: the envelope's kurtosis, full series.
+        - ``full_tau``: the 1/e decay time (in samples) of the envelope's
+          autocorrelation function, full series.
+        - ``dom_cv``, ``dom_skew`` (the envelope's skewness), ``dom_kurt``,
+          ``dom_tau``: as above for the dominant band.
+        - ``dom_ifspread``: a robust spread of the dominant band's instantaneous
+          frequency (1.4826 times the median absolute deviation of the phase
+          increments, in cycles per sample).
+
+        All fields are NaN for constant, non-finite, or very short (N < 50) series.
+        A 1/e timescale is NaN when the autocorrelation never falls below 1/e within
+        N/2 lags. For an envelope that is essentially constant (as for a sinusoid
+        without noise) the skewness, kurtosis and timescale are an undefined 0/0
+        (they divide by the variance), and their limit depends on how the envelope
+        becomes constant (a sinusoid with vanishing added noise and one with
+        vanishing amplitude modulation tend to different values). They are set by
+        convention to skewness 0 and kurtosis 3 (the Gaussian values) and a 1/e
+        timescale equal to the largest lag searched, floor(n/2) for the n samples
+        left after trimming (a constant envelope never decorrelates). So that no
+        threshold is needed, each measured value is shrunk toward its conventional
+        value with the weight w = c^2/(c^2 + 1e-20), where c is the envelope's CV
+        (computed as usual, and reported unchanged):
+        reported = convention + w*(measured - convention). The reported values vary
+        continuously with c; the change happens over c of about 1e-11 to 1e-9, and
+        they are unchanged (to a relative 1e-12 or better) when c exceeds 1e-4. The
+        scale 1e-10 is four to five orders above the round-off of a noiseless
+        sinusoid (c of order 1e-15 to 1e-14) and far below any real variability. The
+        weights are applied to the full and dominant-band envelopes separately.
+    """
+    # ------------------------------------------------------------------------------
+    # Check inputs, set defaults
+    # ------------------------------------------------------------------------------
+    y = np.asarray(y, dtype=float).ravel()
+
+    # Fixed set of output fields (NaN whenever a value is undefined):
+    fld_full = ['full_cv', 'full_kurt', 'full_tau']
+    fld_dom = ['dom_cv', 'dom_skew', 'dom_kurt', 'dom_tau', 'dom_ifspread']
+    out = {f: np.nan for f in fld_full + fld_dom}
+
+    N = len(y)
+    if N < 50 or not np.all(np.isfinite(y)) or np.std(y) == 0:
+        return out
+    y = y - np.mean(y)
+
+    # ------------------------------------------------------------------------------
+    # Frequency bins (DC and Nyquist excluded, as in phase_amp_coupling)
+    # ------------------------------------------------------------------------------
+    half_n = N // 2 + 1
+    if N % 2 == 0:
+        usable_bins = np.arange(1, half_n - 1)
+    else:
+        usable_bins = np.arange(1, half_n)
+    Y = scipy.fft.fft(y)
+
+    # Samples dropped from each end of the (circularly computed) analytic signal:
+    n_trim = max(1, int(np.floor(trim_frac * N + 0.5)))
+    keep = slice(n_trim, N - n_trim)
+
+    # ------------------------------------------------------------------------------
+    # (a) Full band
+    # ------------------------------------------------------------------------------
+    Y_full = np.zeros(N, dtype=complex)
+    Y_full[usable_bins] = 2 * Y[usable_bins]
+    z_full = scipy.fft.ifft(Y_full)
+    env_full = np.abs(z_full[keep])
+    out['full_cv'], _, out['full_kurt'], out['full_tau'] = _envelope_summary(env_full)
+
+    # ------------------------------------------------------------------------------
+    # (b) Dominant band: the largest periodogram peak +/- the smallest half-width
+    # (at least 2 bins) for which the band holds a fraction power_frac of the total power
+    # ------------------------------------------------------------------------------
+    pow_ = np.abs(Y[usable_bins])**2
+    n_bins = len(usable_bins)
+    i_peak = int(np.argmax(pow_))
+    cum_pow = np.concatenate(([0.0], np.cumsum(pow_)))
+    hws = np.arange(2, n_bins + 1)
+    band_pow = (cum_pow[np.minimum(n_bins, i_peak + 1 + hws)]
+                - cum_pow[np.maximum(0, i_peak - hws)])
+    hit = np.flatnonzero(band_pow >= power_frac * cum_pow[-1])
+    half_width_bins = hws[hit[0]] if hit.size > 0 else n_bins
+    peak_bin = usable_bins[i_peak]
+    band_bins = np.arange(max(usable_bins[0], peak_bin - half_width_bins),
+                          min(usable_bins[-1], peak_bin + half_width_bins) + 1)
+
+    Y_dom = np.zeros(N, dtype=complex)
+    Y_dom[band_bins] = 2 * Y[band_bins]
+    z_dom = scipy.fft.ifft(Y_dom)
+    env_dom = np.abs(z_dom[keep])
+    (out['dom_cv'], out['dom_skew'], out['dom_kurt'],
+     out['dom_tau']) = _envelope_summary(env_dom)
+
+    # Instantaneous frequency (cycles per sample): the unwrapped phase increments
+    # over the trimmed segment, summarized robustly (scaled MAD, which equals the
+    # standard deviation for a Gaussian)
+    phi = np.unwrap(np.angle(z_dom[keep]))
+    inst_freq = np.diff(phi) / (2 * np.pi)
+    out['dom_ifspread'] = 1.4826 * np.median(np.abs(inst_freq - np.median(inst_freq)))
+
+    return out
+
+def _envelope_summary(env: np.ndarray) -> tuple:
+    # Distributional and autocorrelation summaries of an amplitude envelope
+    cv = sk = ku = tau = np.nan
+    n = len(env)
+    m = np.mean(env)
+    if not (m > 0):
+        return cv, sk, ku, tau
+    e = env - m
+    s2 = np.mean(e**2)
+    cv = np.sqrt(s2) / m # population standard deviation over the mean
+
+    # Weight of the measured skewness, kurtosis and timescale: these are a 0/0 for a
+    # constant envelope, shrunk continuously toward conventional values (see the
+    # function help); w -> 1 for any envelope that varies
+    cv_scale = 1e-10 # well above the round-off CV of a noiseless sinusoid (~1e-15)
+    w = cv**2 / (cv**2 + cv_scale**2)
+    tau_max = n // 2 # the largest lag searched below (the envelope never decorrelates)
+
+    sk_meas = ku_meas = tau_meas = np.nan
+    if s2 > 0:
+        sk_meas = np.mean(e**3) / s2**1.5
+        ku_meas = np.mean(e**4) / s2**2
+
+        # Autocorrelation of the envelope via the FFT (zero-padded, biased estimator)
+        nfft = 1 << (2 * n - 1).bit_length()
+        F = scipy.fft.fft(e, nfft)
+        acf = np.real(scipy.fft.ifft(np.abs(F)**2))
+        acf = acf[:n // 2 + 1] / acf[0] # lags 0..N/2
+        i_cross = np.flatnonzero(acf < np.exp(-1))
+        if i_cross.size > 0 and i_cross[0] > 0:
+            # linear interpolation between lags (i_cross-1) and i_cross
+            i_cross = i_cross[0]
+            a0 = acf[i_cross - 1]
+            a1 = acf[i_cross]
+            tau_meas = (i_cross - 1) + (a0 - np.exp(-1)) / (a0 - a1)
+
+    sk = _shrink_to_limit(sk_meas, 0, w)
+    ku = _shrink_to_limit(ku_meas, 3, w)
+    tau = _shrink_to_limit(tau_meas, tau_max, w)
+    return cv, sk, ku, tau
+
+def _shrink_to_limit(measured: float, limit: float, w: float) -> float:
+    # limit + w*(measured - limit), where limit is the conventional value; an
+    # undefined measured value takes it only when the weight w is negligible (an
+    # essentially constant envelope)
+    if np.isnan(measured):
+        if w < 1e-6:
+            return float(limit)
+        return np.nan
+    return limit + w * (measured - limit)
+
 def spectral_summaries_phase(y: ArrayLike) -> dict:
     """
     Statistics of the Fourier phase spectrum of a time series.
