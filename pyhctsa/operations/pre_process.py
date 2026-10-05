@@ -1,3 +1,4 @@
+from typing import Union
 import re
 import numpy as np
 from numpy.typing import ArrayLike
@@ -12,7 +13,7 @@ logger = logging.getLogger('pyhctsa')
 from ..operations.correlation import autocorr
 from ..operations.distribution import compare_ks_fit, outlier_test
 from ..operations.stationarity import sliding_window, stat_av
-from ..utils import _round_half_away, _zscore_matlab, z_score
+from ..utils import _ml_rng, _round_half_away, _zscore_matlab, z_score
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
     """Apply a length-k median filter to a 1D array x, as MATLAB's ``medfilt1``.
@@ -627,3 +628,118 @@ def preproc_iterate(y: ArrayLike, dt_meth: str = 'diff') -> dict:
     for t, name in enumerate(names):
         out[f'{name}_trend'], out[f'{name}_jump'] = _profile_trend_jump(outmat[:, t])
     return out
+
+
+def _piecewise_poly_detrend(y: np.ndarray, order: int, num_bits: int) -> np.ndarray:
+    """Remove a polynomial of the given order from each of ``num_bits`` equal pieces (z-scored result).
+
+    The pieces come from hctsa's ``PP_PreProcess`` (``SUB_rempt``): boundaries at
+    ``round(linspace(0, N, num_bits + 1))``, with the fit made against 1, ..., length of piece.
+    """
+    n = len(y)
+    bits = np.array([_round_half_away(v) for v in np.linspace(0, n, num_bits + 1)], dtype=int)
+    out = np.zeros(n)
+    for k in range(num_bits):
+        seg = y[bits[k]:bits[k + 1]]
+        x = np.arange(1, len(seg) + 1, dtype=float)
+        out[bits[k]:bits[k + 1]] = seg - np.polynomial.Polynomial.fit(x, seg, order)(x)
+    return z_score(out)
+
+
+def _rank_map_gaussian(y: np.ndarray, random_seed=None, draws: np.ndarray = None) -> np.ndarray:
+    """Replace the values of y by Gaussian values of the same rank (hctsa's ``rmgd``).
+
+    N Gaussian values are drawn and sorted, and the k-th smallest is given to the k-th smallest
+    value of y. ``random_seed`` is as in ``bf_remove_points``: an integer, ``None``/``'default'``
+    for seed 0, or ``'none'`` for NumPy's global random state. (The draws come from NumPy's
+    generator, so they are not MATLAB's ``randn`` stream for the same seed.) The sorted draws
+    can instead be supplied as ``draws``.
+    """
+    n = len(y)
+    if draws is None:
+        if isinstance(random_seed, str) and random_seed == 'none':
+            draws = np.random.randn(n)
+        else:
+            seed = 0 if random_seed is None or random_seed == 'default' else int(random_seed)
+            draws = _ml_rng(seed).standard_normal(n)
+    out = np.zeros(n)
+    out[np.argsort(y, kind='stable')] = np.sort(draws)
+    return out
+
+
+def _ar_rms_error(data: np.ndarray, order: int) -> float:
+    """In-sample RMS one-step prediction error of an AR model: ``sqrt(mean(pe(ar(data, order), data).^2))``.
+
+    The model is MATLAB's default ``ar`` fit, forward-backward least squares on the samples with a
+    full set of lagged values ('fb/now'). As ``pe`` does, the prediction errors of the first
+    ``order`` samples are 0 (they are counted in the mean).
+    """
+    n = len(data)
+    p = order
+    # Forward and backward prediction regressions, solved jointly
+    A = np.vstack([np.column_stack([data[p - j - 1:n - j - 1] for j in range(p)]),
+                   np.column_stack([data[j + 1:n - p + j + 1] for j in range(p)])])
+    b = np.concatenate([data[p:], data[:n - p]])
+    theta = np.linalg.lstsq(A, b, rcond=None)[0]
+    e = np.zeros(n)
+    e[p:] = data[p:] - np.column_stack([data[p - j - 1:n - j - 1] for j in range(p)]) @ theta
+    return float(np.sqrt(np.mean(e ** 2)))
+
+
+def preproc_model_fit(y: ArrayLike, model: str = 'ar', order: int = 2,
+                      random_seed: Union[int, str, None] = None) -> dict:
+    """
+    How the error of an AR model changes after preprocessing the series.
+
+    Fits an autoregressive (AR) model to the time series and to a set of preprocessed versions of
+    it, and returns the in-sample root-mean-square (RMS) one-step prediction error for each
+    preprocessed version as a ratio of the RMS prediction error for the original series. Every
+    version is z-scored before the model is fitted. The AR model is MATLAB's default
+    ``ar`` fit (forward-backward least squares).
+
+    Only one representative of each family of preprocessings (from hctsa's ``PP_PreProcess``)
+    is fitted, as the other candidates were found to correlate at r >= 0.95 with one of these:
+
+    - ``d1``: incremental differencing (first differences)
+    - ``d2``: second differences
+    - ``p1_20``: a straight line removed in each of 20 equal segments (piece-wise linear detrending)
+    - ``p2_5``: a quadratic removed in each of 5 equal segments (piece-wise quadratic detrending)
+    - ``rmgd``: the values replaced by Gaussian values of the same rank (rank mapping to a
+      Gaussian distribution)
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    model : str, optional
+        The time-series model to fit to the transformed series (currently ``'ar'`` is the only
+        option).
+    order : int, optional
+        The order of the AR model to fit. Default is 2.
+    random_seed : int, 'default', 'none' or None, optional
+        How to seed the random draws used by ``rmgd``, as hctsa's ``BF_ResetSeed``: an integer
+        seed, ``'default'`` or ``None`` for seed 0, or ``'none'`` to use NumPy's global random
+        state. The draws are NumPy's, not MATLAB's ``randn`` stream.
+
+    Returns
+    -------
+    dict
+        The ratios of the RMS prediction error of the AR model for the preprocessed series to
+        that for the original series: ``stderat_d1``, ``stderat_d2``, ``stderat_p1_20``,
+        ``stderat_p2_5``, ``stderat_rmgd``. A ratio above 1 means the preprocessing left the
+        series harder to predict, as when it removes a trend or slow dynamics that the model
+        had been exploiting.
+    """
+    if model != 'ar':
+        raise ValueError(f"Unknown model '{model}'")
+    y = np.asarray(y, dtype=float).ravel()
+    versions = {
+        'nothing': y,
+        'd1': np.diff(y, 1),
+        'd2': np.diff(y, 2),
+        'p1_20': _piecewise_poly_detrend(y, 1, 20),
+        'p2_5': _piecewise_poly_detrend(y, 2, 5),
+        'rmgd': _rank_map_gaussian(y, random_seed),
+    }
+    rms = {k: _ar_rms_error(z_score(v), order) for k, v in versions.items()}
+    return {f'stderat_{k}': rms[k] / rms['nothing'] for k in ('d1', 'd2', 'p1_20', 'p2_5', 'rmgd')}
