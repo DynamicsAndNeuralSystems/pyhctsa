@@ -1804,6 +1804,204 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     return out
 
 
+from ..toolboxes.Tisean_3_0_1.tisean import _e, _round_significant
+
+
+def _tisean_boxcount(y: np.ndarray, delay: int, maxembed: int, epscount: int) -> tuple:
+    # TISEAN's ``boxcount -M1,<maxembed> -d<delay> -Q0.0 -#<epscount>`` (source_c/boxcount.c),
+    # in process: ln N(eps), the log of the number of occupied cells of a partition of the
+    # delay embedding into cubes of side eps, for embedding dimensions 1..maxembed.
+    # Returns (eps, logN), with eps of shape (epscount,) and logN (epscount, maxembed), both
+    # rounded through C's %e as in the .box file hctsa reads back.
+    y = _round_significant(np.asarray(y, dtype=float).ravel(), 7)  # BF_WriteTempFile
+    ymin = np.min(y)
+    maxinterval = np.max(y) - ymin
+    if maxinterval == 0:
+        raise _D2DataError('boxcount: the data are constant')
+    epsmin, epsmax = 1e-3, 1.0  # relative to the data interval
+    x = (y - ymin) / maxinterval
+    x[x >= 1.0] -= epsmin / 2.0
+    length = y.size - (maxembed - 1) * delay
+    if length < 1 or epscount < 2:
+        raise _D2DataError('boxcount: time series too short for this embedding')
+    epsfaktor = (epsmax / epsmin) ** (1.0 / (epscount - 1))
+
+    eps = np.empty(epscount)
+    log_n = np.empty((epscount, maxembed))
+    heps = epsmax * epsfaktor
+    epsi_old = 0
+    for k in range(epscount):
+        while True:  # the number of boxes per axis is an integer that must increase
+            heps /= epsfaktor
+            epsi = int(1.0 / heps)
+            if epsi > epsi_old:
+                break
+        epsi_old = epsi
+        eps[k] = heps * maxinterval
+        labels = np.zeros(length, dtype=np.int64)
+        for d in range(maxembed):  # nested partition: cells are distinguished by coordinates 1..d+1
+            box = (x[d * delay:d * delay + length] * epsi).astype(np.int64)
+            labels = np.unique(labels * epsi + box, return_inverse=True)[1].ravel()
+            log_n[k, d] = np.log(labels.max() + 1)
+    return np.array([_e(v) for v in eps]), np.vectorize(_e)(log_n)
+
+
+def _dimensions_scaling_range(logr: np.ndarray, log_n: np.ndarray, gamma: float = 0.02) -> tuple:
+    # The scaling range of ln N(eps) against ln eps (start in the first half, end in the second
+    # half) that minimizes the mean absolute residual of a straight-line fit less gamma per point
+    # spanned. Returns (first index, last index, badness matrix, polyfit coefficients, residuals).
+    stptr, endptr = _scaling_range_endpoints(logr.size)
+    if stptr.size == 0 or endptr.size == 0:
+        raise _D2DataError('too few length scales to find a scaling range')
+    mybad = np.empty((stptr.size, endptr.size))
+    for i, s in enumerate(stptr):
+        for j, e in enumerate(endptr):
+            xs, ys = logr[s - 1:e], log_n[s - 1:e]
+            p = np.polyfit(xs, ys, 1)
+            mybad[i, j] = np.mean(np.abs(p[0] * xs + p[1] - ys)) - gamma * xs.size
+    a, b, _ = _argmin_first_colmajor(mybad)
+    s, e = int(stptr[a]), int(endptr[b])  # 1-based, inclusive
+    xs, ys = logr[s - 1:e], log_n[s - 1:e]
+    p = np.polyfit(xs, ys, 1)
+    return s, e, mybad, p, p[0] * xs + p[1] - ys
+
+
+def _dimensions_by_m(logr: np.ndarray, log_n: np.ndarray, prefix: str, out: dict) -> None:
+    # How ln N(eps) (or ln C(eps)) changes with m; at least m = 3 is always computed
+    cols = ((0, '1'), (1, '2'), (2, '3'), (-1, 'max'))
+    for j, lab in cols:
+        out[f'{prefix}_meanm{lab}' if j >= 0 else f'{prefix}_meanmmax'] = np.mean(log_n[:, j])
+    for j, lab in cols:
+        out[f'{prefix}_minm{lab}' if j >= 0 else f'{prefix}_minmmax'] = np.min(log_n[:, j])
+    for j, lab in cols:
+        out[f'{prefix}_range{lab}' if j >= 0 else f'{prefix}_rangemmax'] = np.ptp(log_n[:, j])
+    # increments with m
+    out[f'{prefix}_mindiff'] = np.mean([np.min(log_n[:, 1]) - np.min(log_n[:, 0]),
+                                        np.min(log_n[:, 2]) - np.min(log_n[:, 1])])
+    out[f'{prefix}_meandiff'] = np.mean([np.mean(log_n[:, 1]) - np.mean(log_n[:, 0]),
+                                         np.mean(log_n[:, 2]) - np.mean(log_n[:, 1])])
+    # slopes and goodness of a straight-line fit across the whole range of length scales
+    for j, lab in cols:
+        p = np.polyfit(logr, log_n[:, j], 1)
+        out[f'{prefix}_lfitm{lab}'] = p[0]
+        out[f'{prefix}_lfitb{lab}'] = p[1]
+        out[f'{prefix}_lfitmeansqdev{lab}'] = np.mean((log_n[:, j] - (p[0] * logr + p[1])) ** 2)
+
+
+def _dimensions_scaling(logr: np.ndarray, log_n: np.ndarray, prefix: str, out: dict) -> None:
+    # The scaling range for one embedding dimension, and the fit within it
+    s, e, mybad, p, res = _dimensions_scaling_range(logr, log_n)
+    out[f'{prefix}_logrmin'] = logr[s - 1]  # minimum of the scaling range
+    out[f'{prefix}_logrmax'] = logr[e - 1]  # maximum of the scaling range
+    out[f'{prefix}_logrrange'] = logr[e - 1] - logr[s - 1]
+    out[f'{prefix}_pgone'] = (s - 1 + logr.size - e) / logr.size  # proportion of points removed
+    out[f'{prefix}_meanabsres'] = np.mean(np.abs(res))
+    out[f'{prefix}_meansqres'] = np.mean(res ** 2)
+    out[f'{prefix}_scaling_exp'] = p[0]
+    out[f'{prefix}_scaling_int'] = p[1]
+    out[f'{prefix}_minbad'] = np.min(mybad)
+
+
+def _dimensions_best_m(logr: np.ndarray, log_nn: np.ndarray, prefix: str, out: dict) -> None:
+    # The scaling exponent in each embedding dimension, and which dimension is fitted best
+    exps = np.empty(log_nn.shape[1])
+    msq = np.empty(log_nn.shape[1])
+    for k in range(log_nn.shape[1]):
+        _, _, _, p, res = _dimensions_scaling_range(logr, log_nn[:, k])
+        exps[k], msq[k] = p[0], np.mean(res ** 2)
+    out[f'{prefix}_minscalingexp'] = np.min(exps)
+    out[f'{prefix}_meanscalingexp'] = np.mean(exps)
+    out[f'{prefix}_maxscalingexp'] = np.max(exps)
+    out[f'{prefix}_mbestfit'] = int(np.argmin(msq)) + 1
+
+
+def dimensions(y: ArrayLike, num_bins: int = 50,
+               embed_params: Union[list, tuple] = ('ac', 'fnn')) -> Union[dict, float]:
+    """
+    Box-counting and correlation-sum estimates of the dimension of the delay embedding, and
+    how they change with the embedding dimension.
+
+    Uses TISEAN's ``boxcount`` (the Renyi entropy of order 0, :math:`\\ln N(\\epsilon)`, the log of
+    the number of occupied boxes of a partition of the delay embedding) and ``d2`` (the
+    correlation sum :math:`\\ln C(\\epsilon)`) over ``num_bins`` geometrically spaced length scales
+    and embedding dimensions 1 to ``max(m, 3)`` (``m`` the embedding dimension of
+    ``embed_params``), to summarize the curves' means, minima, ranges and straight-line fits at
+    ``m`` = 1, 2, 3 and the largest ``m``, their changes with ``m``, the scaling range in
+    :math:`\\ln \\epsilon` (the range of scales, in the first and second halves of the scales,
+    minimizing the mean absolute error of a linear fit less 0.02 per point spanned) for
+    ``m`` = 1, 2, 3 and the embedding dimension ``m``, and the embedding dimension with the best
+    scaling fit. Unlike hctsa, which shells out to installed TISEAN binaries, this runs the
+    vendored ``d2`` and an in-process port of ``boxcount`` (hctsa's TSTOOL-based version of
+    this operation is no longer used).
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    num_bins : int, optional
+        Number of length scales (bins per axis) at which to evaluate the box counts and
+        correlation sums. Default is 50.
+    embed_params : [tau, m], optional
+        Embedding parameters: ``tau`` is an integer or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer, or
+        ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in pyhctsa and raises
+        ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+
+    Returns
+    -------
+    dict or float
+        With prefix ``bc`` (box counting, :math:`\\ln N`) and ``co`` (correlation sum,
+        :math:`\\ln C`): ``<p>_meanm1/2/3/max``, ``<p>_minm1/2/3/max``, ``<p>_range1/2/3/max``,
+        ``<p>_mindiff``, ``<p>_meandiff``, ``<p>_lfitm1/2/3/max`` (slope), ``<p>_lfitb...``
+        (intercept), ``<p>_lfitmeansqdev...``; ``scr_<p>_m1/m2/m3/mopt_*``: scaling range
+        (``logrmin``, ``logrmax``, ``logrrange``, ``pgone``) and fit (``meanabsres``,
+        ``meansqres``, ``scaling_exp``, ``scaling_int``, ``minbad``); ``<p>_minscalingexp``,
+        ``<p>_meanscalingexp``, ``<p>_maxscalingexp``, ``<p>_mbestfit``. Returns NaN if the delay
+        cannot be set, any ln N or ln C is not finite (e.g. some correlation sum is zero), or the
+        series is constant or too short.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+
+    tau, mopt = _embed_tau_m(y, embed_params)
+    if np.isnan(tau):
+        logger.warning('Could not determine embedding parameters for this time series')
+        return np.nan
+    big_m = max(mopt, 3)  # at least three dimensions, for the statistics below
+
+    try:
+        # Box counting
+        bc_r, bc_logn = _tisean_boxcount(y, tau, big_m, num_bins)
+        bc_logr = np.log(bc_r)
+
+        # Correlation sum, over the same number of scales: epsilon from max_eps/10 to max_eps
+        max_eps = float('%g' % (np.std(y, ddof=1) * np.sqrt(big_m)))
+        min_eps = float('%g' % (max_eps / 10))
+        tables = _tisean.d2(y, delay=tau, embed=big_m, theiler=0, howoften=num_bins,
+                            maxfound=0, epsmax=max_eps, epsmin=min_eps)
+        if any(b.shape[0] != num_bins for b in tables['c2']):
+            raise _D2DataError("TISEAN d2 returned an unexpected number of length scales")
+        co_logr = np.log(tables['c2'][0][:, 0])
+        with np.errstate(divide='ignore'):
+            co_logc = np.column_stack([np.log(b[:, 1]) for b in tables['c2']])
+
+        if not (np.all(np.isfinite(bc_logn)) and np.all(np.isfinite(co_logc))):
+            logger.warning('No good outputs obtained from the box-counting/correlation dimension curves.')
+            return np.nan
+
+        out = {}
+        _dimensions_by_m(bc_logr, bc_logn, 'bc', out)
+        _dimensions_by_m(co_logr, co_logc, 'co', out)
+        for prefix, logr, logn in (('bc', bc_logr, bc_logn), ('co', co_logr, co_logc)):
+            for col, lab in ((0, 'm1'), (1, 'm2'), (2, 'm3'), (mopt - 1, 'mopt')):
+                _dimensions_scaling(logr, logn[:, col], f'scr_{prefix}_{lab}', out)
+        _dimensions_best_m(bc_logr, bc_logn, 'bc', out)
+        _dimensions_best_m(co_logr, co_logc, 'co', out)
+    except (_D2DataError, ValueError) as exc:  # data-dependent failures give NaN
+        logger.warning(str(exc))
+        return np.nan
+    return out
+
+
 def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
     """Counts of points per box, where the boxes are quantiles along each axis."""
     props = np.arange(nbox + 1) / nbox
