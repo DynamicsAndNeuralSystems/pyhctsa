@@ -1114,8 +1114,8 @@ def _randomize_run(y: np.ndarray, randomize_how: str, draws: np.ndarray) -> np.n
     Randomize ``y`` one point at a time for ``2N`` steps, recording the statistics at the
     start and every ``N/10`` steps.
 
-    ``draws`` has shape ``(2N, 2)``: the (0-based) random indices consumed by each step,
-    in the order they are drawn.
+    ``draws`` has shape ``(2N, 2)``: the (0-based) random indices of each step, the element to
+    overwrite (or swap) first and the element it takes its value from second.
     """
     n = y.size
     num_calcs = 2.0 / 0.1  # randp_max / rand_inc
@@ -1135,12 +1135,11 @@ def _randomize_run(y: np.ndarray, randomize_how: str, draws: np.ndarray) -> np.n
         a, b = draws[i - 1]
         if randomize_how == 'statdist':
             # substitute a random element by a random element of the original series
-            # (MATLAB evaluates the right-hand index first: the first draw is the source)
-            y_rand[b] = y[a]
+            y_rand[a] = y[b]
         elif randomize_how == 'dyndist':
             # substitute a random element by a random element of the current,
             # already partially randomized, series
-            y_rand[b] = y_rand[a]
+            y_rand[a] = y_rand[b]
         elif randomize_how == 'permute':
             # swap two random elements, so that the distribution never changes
             y_rand[a], y_rand[b] = y_rand[b], y_rand[a]
@@ -1214,9 +1213,9 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
     compares statistics of the randomized copy with the original at 21 checkpoints: at the
     start and after every ``N/10`` steps. Port of hctsa's ``EN_Randomize``.
 
-    The random draws are those of MATLAB's Mersenne Twister (``rng(seed, 'twister')``,
-    ``randi``) when a seed is given, so the result is reproducible and, for the same seed,
-    follows the same randomization as hctsa.
+    The random indices come from the portable generator :func:`~pyhctsa.robust.bf_random`
+    (two uniform draws per step, as indices uniform on 1..N), so the result is reproducible
+    and, for the same seed, follows the same randomization as hctsa.
 
     Parameters
     ----------
@@ -1234,9 +1233,9 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
 
         Default is ``'statdist'``.
     random_seed : int or {'default', 'none'}, optional
-        How to set the random seed, as hctsa's ``BF_ResetSeed``: an integer seed;
-        ``'default'`` (or None) seeds with 0; ``'none'`` does not seed (the run is then not
-        reproducible). Default is None.
+        The seed of the random choices, as hctsa's ``BF_RandomSeed``: a number;
+        ``'default'`` (or None) is 0; ``'none'`` draws a seed from NumPy's global stream (the
+        run is then not reproducible). Default is None.
 
     Returns
     -------
@@ -1281,16 +1280,11 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
     if not np.isclose(np.mean(y), 0, atol=1e-6) or not np.isclose(np.std(y, ddof=1), 1, atol=1e-6):
         logger.warning('The input time series should be z-scored for randomize.')
 
-    # Random indices, in the order a MATLAB run draws them (randi(N) = floor(N*rand) + 1)
-    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'default'):
-        rng = _ml_rng(0)
-    elif isinstance(random_seed, str):
-        if random_seed != 'none':
-            raise ValueError(f"Not sure how to reset using '{random_seed}'")
-        rng = np.random.RandomState()
-    else:
-        rng = _ml_rng(int(random_seed))
-    draws = np.floor(n * rng.random_sample(4 * n)).astype(np.int64).reshape(2 * n, 2)
+    # The random choices for every step, reproducible from the seed: two uniform draws per
+    # step, as indices uniform on 0..N-1
+    from .nonlinearity import _bf_random_seed
+    seed = 'default' if random_seed is None else random_seed
+    draws = np.floor(n * bf_random(4 * n, _bf_random_seed(seed))).astype(np.int64).reshape(2 * n, 2)
 
     return _randomize_fit(_randomize_run(y, randomize_how, draws))
 
