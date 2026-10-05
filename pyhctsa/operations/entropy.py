@@ -962,6 +962,98 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
     out['normFDispEn'] = f_disp_en / np.log(float(num_fluct))
     return out
 
+def fuzzy_entropy(y: ArrayLike, M: int = 2, r: float = 0.2, n: float = 2) -> dict:
+    """
+    Fuzzy entropy of a time series.
+
+    Chen et al.'s fuzzy entropy [1, 2], a smooth relative of sample entropy
+    (:func:`sample_entropy`). The series is cut into overlapping runs of ``m``
+    consecutive values, and the mean of each run is subtracted from it, so runs are
+    compared by shape and not by level. Two runs are not simply 'matching' or 'not
+    matching', as in sample entropy: they are given a similarity ``exp(-(d/r)**n)``,
+    where ``d`` is the largest absolute difference between corresponding values of the
+    two (baseline-removed) runs. ``phi_m`` is the mean similarity over all pairs of
+    distinct runs of length ``m``, and the fuzzy entropy at dimension ``m`` is
+    ``log(phi_m) - log(phi_(m+1))``. Low values indicate regular, predictable series;
+    high values irregular ones. The smooth similarity makes the measure continuous in
+    ``r`` and defined for short series for which sample entropy would find no matches.
+
+    All runs of length 1, ..., M+1 are taken from the same ``N - M`` starting points, so
+    that successive dimensions are compared on the same footing. The distances are
+    computed in blocks, so memory use does not grow with the square of the series length
+    (the run time does: it is O(N^2 M)). Port of hctsa's ``EN_FuzzyEn``.
+
+    The similarity is written here as ``exp(-(d/r)**n)``, so that ``r`` is a distance (in
+    units of the standard deviation of ``y``). Chen et al. (2007) write it as
+    ``exp(-d**n/r)``, in which ``r`` is not a distance: for ``n = 2``, their ``r = 0.2``
+    on standardized data is a Gaussian width of ``sqrt(0.2) = 0.45`` standard deviations,
+    against 0.2 here. Values of ``r`` are therefore not directly comparable with those
+    quoted in that paper. To get the fuzzy entropy of the increments of a series, give
+    ``np.diff(y)`` as the input.
+
+    References
+    ----------
+    .. [1] W. Chen, Z. Wang, H. Xie and W. Yu, "Characterization of surface EMG signal
+        based on fuzzy entropy", IEEE Trans. Neural Syst. Rehabil. Eng. 15(2), 266
+        (2007).
+    .. [2] W. Chen, J. Zhuang, W. Yu and Z. Wang, "Measuring complexity using FuzzyEn,
+        ApEn, and SampEn", Med. Eng. Phys. 31(1), 61 (2009).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    M : int, optional
+        The largest embedding dimension: the fuzzy entropy is returned for
+        ``m = 1, ..., M``. Default is 2.
+    r : float, optional
+        The width of the similarity function, as a fraction of the standard deviation of
+        ``y`` (the width in the units of ``y`` is ``r * std(y)``, so the measure is
+        unchanged by any rescaling of ``y``). Default is 0.2.
+    n : float, optional
+        The exponent of the similarity function ``exp(-(d/r)**n)`` (larger values make
+        the similarity closer to a hard threshold). Default is 2.
+
+    Returns
+    -------
+    dict
+        Fields 'fuzzyEn1', 'fuzzyEn2', ..., 'fuzzyEnM': the fuzzy entropy at each
+        embedding dimension (nats). At ``m = 1`` the run mean removed is the value itself,
+        so ``phi_1 = 1`` and 'fuzzyEn1' is ``-log(phi_2)``. All fields are NaN if the
+        series is constant, has fewer than ``M + 3`` points, or has no pair of runs with
+        a nonzero similarity.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    M = int(M)
+    N = y.size
+    out = {f'fuzzyEn{m}': np.nan for m in range(1, M + 1)}
+
+    sd = np.std(y, ddof=1) if N > 1 else np.nan
+    Nv = N - M  # number of starting points shared by every embedding dimension
+    if not np.isfinite(sd) or sd == 0 or Nv < 3:
+        return out
+    width = r * sd
+
+    phi = np.zeros(M + 1)
+    block_size = max(1, int(2e6 // Nv))  # cap the size of the distance block
+    for m in range(1, M + 2):
+        Z = y[np.arange(Nv)[:, None] + np.arange(m)[None, :]]
+        Z = Z - Z.mean(axis=1, keepdims=True)  # remove each run's own mean (local baseline)
+        total = 0.0
+        for i0 in range(0, Nv, block_size):
+            Zi = Z[i0:i0 + block_size]
+            D = np.abs(Zi[:, 0][:, None] - Z[:, 0][None, :])
+            for k in range(1, m):
+                np.maximum(D, np.abs(Zi[:, k][:, None] - Z[:, k][None, :]), out=D)  # Chebyshev
+            total += np.exp(-(D / width) ** n).sum() - Zi.shape[0]  # drop self-similarity (=1)
+        phi[m - 1] = total / (Nv * (Nv - 1))
+
+    if np.any(phi <= 0):
+        return out
+    for m in range(1, M + 1):
+        out[f'fuzzyEn{m}'] = np.log(phi[m - 1]) - np.log(phi[m])
+    return out
+
 def complexity_invariant_distance(y: ArrayLike) -> dict:
     """
     Complexity-invariant distance.
