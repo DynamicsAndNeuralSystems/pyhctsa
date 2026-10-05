@@ -1303,17 +1303,16 @@ functions:
   nsamdf:
     python_func: nsamdf
     python_module: nonlinearity
-    matlab_func: NL_nsamdf
+    matlab_func: NL_NSAMDF
     arg_map:
-      fs: fs
+      tau_mult: tauMult
       win_len_rel: winLenRel
       shift_len_rel: shiftLenRel
-      lag_rel: lagRel
       degree: degree
-    matlab_signature: ['y', 'fs', 'winLenRel', 'shiftLenRel', 'lagRel', 'degree']
+    matlab_signature: ['y', 'tauMult', 'winLenRel', 'shiftLenRel', 'degree']
     test_cases:
-      - {fs: 1.0, win_len_rel: 14.0, shift_len_rel: 0.5, lag_rel: 1.0, degree: 7.0, zscore: False}
-      - {fs: 1.0, win_len_rel: 14.0, shift_len_rel: 0.5, lag_rel: 1.0, degree: 7.0, zscore: True}
+      - {tau_mult: 2, win_len_rel: 10, shift_len_rel: 0.5, degree: 7, zscore: False}
+      - {tau_mult: 2, win_len_rel: 10, shift_len_rel: 0.5, degree: 7, zscore: True}
   
   nlpe:
     python_func: nlpe
@@ -1816,19 +1815,19 @@ functions:
 
       - {what_prior: 'dist', memory: 5, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
       - {what_prior: 'dist', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'dist', memory: 50, num_groups: 3, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'dist', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'dist', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 50, num_groups: 3, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 4, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'dist', memory: 100, num_groups: 5, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
 
       - {what_prior: 'T1', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'T1', memory: 50, num_groups: 3, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'T1', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'T1', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 50, num_groups: 3, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 4, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'T1', memory: 100, num_groups: 5, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
 
       - {what_prior: 'T2', memory: 20, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
       - {what_prior: 'T2', memory: 50, num_groups: 2, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'T2', memory: 100, num_groups: 4, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
-      - {what_prior: 'T2', memory: 100, num_groups: 5, coarse_grain_method: 'updown', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 4, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
+      - {what_prior: 'T2', memory: 100, num_groups: 5, coarse_grain_method: 'diff', num_iters: 500, zscore: True}
 
       - {what_prior: 'dist', memory: 5, num_groups: 1, coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
       - {what_prior: 'dist', memory: 5, num_groups: 'tau', coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True}
@@ -1921,14 +1920,14 @@ functions:
   binary_stretch:
     python_func: binary_stretch
     python_module: symbolic
-    matlab_func: SB_BinaryStretch
+    matlab_func: SB_BinaryGapHomogeneity
     arg_map:
       stretch_what: stretchWhat
     matlab_signature: ['y', 'stretchWhat']
     output_type: array
     test_cases:
-      - {stretch_what: 'lseq1', zscore: True}
-      - {stretch_what: 'lseq0', zscore: True}
+      - {stretch_what: 'gaps1', zscore: True}
+      - {stretch_what: 'gaps0', zscore: True}
 
   wl_coeffs:
     python_func: wl_coeffs
@@ -1969,8 +1968,8 @@ functions:
     matlab_signature: ['y', 'wName', 'maxScale']
     output_type: array
     test_cases:
-    - {w_name: 'db3', max_scale: 32.0, zscore: True}
-    - {w_name: 'sym2', max_scale: 32.0, zscore: True}
+    - {w_name: 'db3', max_scale: 32, zscore: True}
+    - {w_name: 'sym2', max_scale: 32, zscore: True}
 
   dwt_coeff:
     python_func: dwt_coeff

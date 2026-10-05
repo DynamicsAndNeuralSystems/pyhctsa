@@ -1,6 +1,6 @@
 import importlib
 import time
-from functools import partial
+from functools import partial, wraps
 from itertools import product
 from pathlib import Path
 from typing import Union, Any, Callable
@@ -14,7 +14,7 @@ import yaml
 from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
-from .utils import _check_optional_deps, _preprocess_decorator, _validate_data, _PREPROCESS_LABELS
+from .utils import _check_optional_deps, _validate_data, _zscore_matlab, decimate_ac1e, z_score
 from .distribute import _compute_features_for_chunk, _extract_features_single_series
 
 class RangeList(list):
@@ -58,6 +58,67 @@ def range_constructor(loader, node) -> RangeList:
     values = [round(start + i * step, 10) for i in range(n)]
     return RangeList(values, start, stop, step)
 yaml.SafeLoader.add_constructor("!range", range_constructor)
+
+# The input transforms a config can request with ``preprocess:`` (besides ``zscore:`` and
+# ``abs:``), the hctsa input each one reproduces, and the suffix it adds to the feature label.
+# ``x_z`` is the z-scored series (``zscore: True``); the label suffix is hctsa's.
+_PREPROCESS_LABELS = {
+    'decimate_ac1e': '_dec',     # zscore(BF_PreProcess(x_z, 'decimate_ac1e'))
+    'diff1': '_diff1',           # diff(x_z)
+    'zscore_abs': '_mag',        # zscore(abs(x_z)): the magnitudes, re-z-scored
+    'zscore_sign': '_sign',      # zscore(sign(x_z)): the signs, re-z-scored
+}
+
+def _transform_input(x, zscore: bool = False, absval: bool = False,
+                     preprocess: Union[str, None] = None):
+    """The series a feature function is called on: z-score, then ``preprocess``, then abs.
+
+    Returns a scalar ``nan`` when ``decimate_ac1e`` cannot determine its delay (the feature is
+    then undefined, as in hctsa).
+    """
+    if zscore:
+        x = z_score(x)
+    if preprocess == 'decimate_ac1e':
+        x = decimate_ac1e(x, rezscore=zscore)
+        if not isinstance(x, np.ndarray):
+            return np.nan
+    elif preprocess == 'diff1':
+        x = np.diff(np.asarray(x, dtype=float))
+    elif preprocess == 'zscore_abs':
+        x = _zscore_matlab(np.abs(x))
+    elif preprocess == 'zscore_sign':
+        x = _zscore_matlab(np.sign(x))
+    if absval:
+        x = np.abs(x)
+    return x
+
+def _preprocess_decorator(zscore: bool = False, absval: bool = False,
+                          preprocess: Union[str, None] = None) -> Callable:
+    """
+    Decorator that gives a feature function the input its config asks for.
+
+    The order is: z-score (``zscore``), then the named ``preprocess`` step, then the absolute
+    value (``absval``). ``preprocess`` is one of the keys of ``_PREPROCESS_LABELS``:
+
+    - ``'decimate_ac1e'``: one sample per floored 1/e autocorrelation time, then z-scored again
+      if ``zscore`` (see :func:`pyhctsa.utils.decimate_ac1e`); if the delay cannot be
+      determined the function is not called and ``nan`` is returned;
+    - ``'diff1'``: incremental differences, ``diff(x_z)`` (not re-z-scored);
+    - ``'zscore_abs'`` / ``'zscore_sign'``: ``zscore(abs(x_z))`` / ``zscore(sign(x_z))``.
+    """
+    if preprocess is not None and preprocess not in _PREPROCESS_LABELS:
+        raise ValueError(f"Unknown preprocess setting '{preprocess}'; "
+                         f"supported: {sorted(_PREPROCESS_LABELS)}")
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(x, *args, **kwargs):
+            x = _transform_input(x, zscore, absval, preprocess)
+            if np.ndim(x) == 0:
+                return np.nan  # no 1/e time: undefined, like hctsa's NaN
+            return func(x, *args, **kwargs)
+        return wrapper
+    return decorator
 
 def classify_output(res) -> int:
     """classify the type of output"""
@@ -243,11 +304,16 @@ class FeatureCalculator:
 
     - ``zscore: True``: z-score the series first (label gets no suffix; without it, ``_raw``);
     - ``abs: True``: take the absolute value last (suffix ``_abs``);
-    - ``preprocess: decimate_ac1e``: hctsa's ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``.
-      The z-scored series is decimated to one sample per floored 1/e autocorrelation time and
-      z-scored again (suffix ``_dec``, after ``_abs``). If that time cannot be determined
-      (e.g. the ACF never falls to 1/e) the feature is NaN. See
-      :func:`pyhctsa.utils.decimate_ac1e`;
+    - ``preprocess``: one more input transform, applied to the (z-scored) series before ``abs``;
+      its label suffix follows ``_abs``. The values, with the hctsa input each reproduces:
+
+      * ``decimate_ac1e`` (suffix ``_dec``): ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``.
+        The z-scored series is decimated to one sample per floored 1/e autocorrelation time and
+        z-scored again. If that time cannot be determined (e.g. the ACF never falls to 1/e) the
+        feature is NaN. See :func:`pyhctsa.utils.decimate_ac1e`;
+      * ``diff1`` (``_diff1``): ``diff(x_z)``;
+      * ``zscore_abs`` (``_mag``): ``zscore(abs(x_z))``; ``zscore_sign`` (``_sign``):
+        ``zscore(sign(x_z))``. (``abs: True`` alone is ``abs(x_z)``.)
     - ``select`` / ``exclude``: keep or drop keys of a dict-valued output.
 
     Examples

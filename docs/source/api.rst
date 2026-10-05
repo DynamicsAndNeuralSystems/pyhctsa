@@ -34,6 +34,7 @@ Changepoint
 
    pyhctsa.operations.changepoint.stepdetect
    pyhctsa.operations.changepoint.l1pwc_sweep_lambda
+   pyhctsa.operations.changepoint.wavelet_var_chg
 
 .. _correlationmeths:
 
@@ -71,6 +72,10 @@ Correlation
    pyhctsa.operations.correlation.autocorr_shape
    pyhctsa.operations.correlation.trev
    pyhctsa.operations.correlation.tc3
+   pyhctsa.operations.correlation.joint_non_gaussianity
+   pyhctsa.operations.correlation.matrix_profile
+   pyhctsa.operations.correlation.quantilogram
+   pyhctsa.operations.correlation.remove_points
 
 .. _criticalitymeths:
 
@@ -110,6 +115,9 @@ Distribution
    pyhctsa.operations.distribution.histogram_asymmetry
    pyhctsa.operations.distribution.histogram_mode
    pyhctsa.operations.distribution.remove_points
+   pyhctsa.operations.distribution.fit_kernel_smooth
+   pyhctsa.operations.distribution.simple_fit
+   pyhctsa.operations.distribution.tail_index
 
 .. _entropymeths:
 
@@ -127,6 +135,12 @@ Entropy
    pyhctsa.operations.entropy.approximate_entropy
    pyhctsa.operations.entropy.complexity_invariant_distance
    pyhctsa.operations.entropy.lempel_ziv_complexity
+   pyhctsa.operations.entropy.bubble_entropy
+   pyhctsa.operations.entropy.dispersion_entropy
+   pyhctsa.operations.entropy.fuzzy_entropy
+   pyhctsa.operations.entropy.permutation_entropy_complexity
+   pyhctsa.operations.entropy.randomize
+   pyhctsa.operations.entropy.wavelet_entropy
 
 .. _extemeeventsmeths:
 
@@ -136,6 +150,7 @@ Extreme Events
    :toctree: generated/
 
    pyhctsa.operations.extreme_events.moving_threshold
+   pyhctsa.operations.extreme_events.extreme_event_order
 
 .. _graphmeths:
 
@@ -145,6 +160,7 @@ Graph
    :toctree: generated/
 
    pyhctsa.operations.graph.visibility_graph
+   pyhctsa.operations.graph.ordinal_partition_network
 
 .. _hypothesistestsmeths:
 
@@ -156,6 +172,8 @@ Hypothesis Tests
    pyhctsa.operations.hypothesis_tests.variance_ratio_test
    pyhctsa.operations.hypothesis_tests.hypothesis_test
    pyhctsa.operations.hypothesis_tests.distribution_test
+   pyhctsa.operations.hypothesis_tests.independence_tests
+   pyhctsa.operations.hypothesis_tests.marginal_tests
 
 .. _informationmeths:
 
@@ -169,6 +187,7 @@ Information
    pyhctsa.operations.information.automutual_info_stats
    pyhctsa.operations.information.automutual_info
    pyhctsa.operations.information.rm_automutual_information
+   pyhctsa.operations.information.multivariate_ami
 
 .. _medicalmeths:
 
@@ -198,6 +217,18 @@ Model Fit
    pyhctsa.operations.model_fit.ar_cov
    pyhctsa.operations.model_fit.ar_fit
    pyhctsa.operations.model_fit.is_seasonal
+   pyhctsa.operations.model_fit.gp_fit_across
+   pyhctsa.operations.model_fit.gp_local_prediction
+   pyhctsa.operations.model_fit.compare_ar
+   pyhctsa.operations.model_fit.compare_test_sets
+   pyhctsa.operations.model_fit.garch_compare
+   pyhctsa.operations.model_fit.garch_fit
+   pyhctsa.operations.model_fit.gp_hyperparameters
+   pyhctsa.operations.model_fit.state_space_comp_order
+   pyhctsa.operations.model_fit.state_space_n4sid
+   pyhctsa.operations.model_fit.armax
+   pyhctsa.operations.model_fit.hmm_compare_n_states
+   pyhctsa.operations.model_fit.steps_ahead
 
 .. _nonlinearitymeths:
 
@@ -215,6 +246,23 @@ Nonlinearity
    pyhctsa.operations.nonlinearity.tisean_d2
    pyhctsa.operations.nonlinearity.poincare_section
    pyhctsa.operations.nonlinearity.delay_time
+   pyhctsa.operations.nonlinearity.box_count_entropy_rate
+   pyhctsa.operations.nonlinearity.dvv
+   pyhctsa.operations.nonlinearity.dimensions
+   pyhctsa.operations.nonlinearity.evt_local_dim
+   pyhctsa.operations.nonlinearity.embed_cluster
+   pyhctsa.operations.nonlinearity.embed_kernel_pca
+   pyhctsa.operations.nonlinearity.fnn
+   pyhctsa.operations.nonlinearity.fractal_dimensions
+   pyhctsa.operations.nonlinearity.gp_corr_sum
+   pyhctsa.operations.nonlinearity.largest_lyap
+   pyhctsa.operations.nonlinearity.lyap_spec
+   pyhctsa.operations.nonlinearity.persistent_homology
+   pyhctsa.operations.nonlinearity.rqa
+   pyhctsa.operations.nonlinearity.recurrence_times
+   pyhctsa.operations.nonlinearity.return_time
+   pyhctsa.operations.nonlinearity.takens_estimator
+   pyhctsa.operations.nonlinearity.tisean_c1
 
 .. _physicsmeths:
 
@@ -225,6 +273,7 @@ Physics
 
    pyhctsa.operations.physics.walker
    pyhctsa.operations.physics.force_potential
+   pyhctsa.operations.physics.kramers_moyal
 
 .. _preprocessmeths:
 
@@ -234,6 +283,9 @@ Pre-Process
    :toctree: generated/
 
    pyhctsa.operations.pre_process.preproc_compare
+   pyhctsa.operations.pre_process.preproc_iterate
+   pyhctsa.operations.pre_process.preproc_model_fit
+   pyhctsa.operations.pre_process.preproc_schreiber_denoise
 
 .. _scalingmeths:
 
@@ -246,6 +298,7 @@ Scaling
    pyhctsa.operations.scaling.fluctuation_analysis
    pyhctsa.operations.scaling.mma
    pyhctsa.operations.scaling.higuchi_fd
+   pyhctsa.operations.scaling.mfdfa
 
 .. _spectralmeths:
 
@@ -259,6 +312,11 @@ Spectral
    pyhctsa.operations.spectral.spectral_summaries_phase
    pyhctsa.operations.spectral.specparam
    pyhctsa.operations.spectral.cepstrum
+   pyhctsa.operations.spectral.bicoherence
+   pyhctsa.operations.spectral.envelope_stats
+   pyhctsa.operations.spectral.phase_fluctuation_scaling
+   pyhctsa.operations.spectral.sinusoid_fit
+   pyhctsa.operations.spectral.spectral_time_freq
 
 .. _stationaritymeths:
 
@@ -285,6 +343,12 @@ Stationarity
    pyhctsa.operations.stationarity.ramping_windows
    pyhctsa.operations.stationarity.slow_feature_analysis
    pyhctsa.operations.stationarity.pp_test
+   pyhctsa.operations.stationarity.peak_intervals
+   pyhctsa.operations.stationarity.drifting_auto_corr
+   pyhctsa.operations.stationarity.drifting_mean_cusum
+   pyhctsa.operations.stationarity.spread_random_local
+   pyhctsa.operations.stationarity.std_nth_deriv_change
+   pyhctsa.operations.stationarity.nstat_z
 
 .. _surrogatesmeths:
 
@@ -294,6 +358,7 @@ Surrogates
    :toctree: generated/
 
    pyhctsa.operations.surrogates.surrogate_test
+   pyhctsa.operations.surrogates.surrogates
 
 .. _symbolicmeths:
 
@@ -310,6 +375,7 @@ Symbolic
    pyhctsa.operations.symbolic.transition_matrix
    pyhctsa.operations.symbolic.transition_p_alphabet
    pyhctsa.operations.symbolic.coarse_grain
+   pyhctsa.operations.symbolic.binary_stats_ar1
 
 .. _waveletmeths:
 
@@ -325,3 +391,4 @@ Wavelet
    pyhctsa.operations.wavelet.scal_2_freq
    pyhctsa.operations.wavelet.wfbm
    pyhctsa.operations.wavelet.modwt_var
+   pyhctsa.operations.wavelet.wpd_best_tree
