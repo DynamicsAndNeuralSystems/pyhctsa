@@ -15,6 +15,7 @@ from numba import njit
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
+from ..robust import bf_quantile_edges
 from ..utils import _ml_rng, get_tau, make_mat_buffer, matlab_quantile, sign_change, z_score
 from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit, polyfit, robustfit
 from ..toolboxes.matlab._pptest_tables import _pp_pvalue, _pp_regression
@@ -124,12 +125,19 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
     }
 
 def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par',
-                        num_points: int = 200) -> dict:
+                        num_bins: int = 10) -> dict:
     """
     Compares the distribution in consecutive time-series segments.
 
-    Returns the L1 distance (sum of absolute differences times the grid spacing) between each kernel-smoothed distribution, either comparing each segment to the parent (full time series)
-    distribution or to all other segments.
+    Breaks the time series into ``num_segs`` consecutive segments of equal length and
+    measures how different the distributions of values in two segments are as the total
+    variation distance between their histograms: half the sum of the absolute differences
+    between the proportions of values in each bin (0 for identical distributions, 1 for
+    distributions with no bin in common). The bins are common to all segments and
+    equiprobable for the full series (edges at its quantiles,
+    :func:`pyhctsa.robust.bf_quantile_edges`), so the measure has no smoothing parameter
+    and does not depend on the scale of the data. Either each segment is compared to the
+    parent (full time series) distribution, or each to all other segments.
 
     Parameters
     ----------
@@ -144,51 +152,49 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
 
         Default is ``'par'``.
 
-    num_points : int, optional
-        Number of points to compute the distribution across in each local segment. Default is 200.
+    num_bins : int, optional
+        The number of equiprobable bins (fewer if values are tied at a quantile).
+        Default is 10.
 
     Returns
     -------
     dict
-        Mean (`meandiv`) and standard deviation (`stddiv`) of the L1 distances between distributions across the
-        different pairwise comparisons. (For 'each' with two segments, the single L1 distance is returned as a float.)
+        Mean (`meandiv`) and standard deviation (`stddiv`) of the total variation distances
+        between distributions across the different pairwise comparisons. (For 'each' with
+        two segments, the single distance is returned as a float.)
     """
     # preliminaries
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float)
     N = len(y)
-    num_points = int(num_points)
     num_segs = int(num_segs)
     lseg = int(np.floor(N / num_segs))
-    dns = np.zeros((num_points, num_segs))
-    # Make range of ksdensity uniform across all subsegments
-    r = np.linspace(np.min(y), np.max(y), num_points)
-    dr = r[1] - r[0] # grid spacing, to turn sums over the grid into integrals
-    # Compute the kernel-smoothed distribution in all num_segs segments of the time series
+    bin_edges = bf_quantile_edges(y, int(num_bins))  # bins common to all segments, equiprobable for the full series
+
+    def proportions(v):
+        counts, _ = np.histogram(v, bins=bin_edges)
+        return counts / np.sum(counts)
+
+    # Compute the distribution (proportion in each bin) in all num_segs segments of the time series
+    dns = np.zeros((len(bin_edges) - 1, num_segs))
     for i in range(num_segs):
-        start_idx = i * lseg
-        end_idx = (i + 1) * lseg
-        segment_data = y[start_idx:end_idx]
-        kde = gaussian_kde(segment_data, bw_method='scott')
-        dns[:, i] = kde.evaluate(r)
+        dns[:, i] = proportions(y[i * lseg:(i + 1) * lseg])
     # Compare the local distributions
     if each_or_par in ['par', 'parent']:
         #Compares each subdistribtuion to the parent (full signal) distribution
-        kde = gaussian_kde(y, bw_method='scott')
-        pardn = kde.evaluate(r)
+        pardn = proportions(y)
         divs = np.zeros(num_segs)
         for i in range(num_segs):
-            divs[i] = np.sum(np.abs(dns[:, i] - pardn)) * dr
+            divs[i] = 0.5 * np.sum(np.abs(dns[:, i] - pardn)) # each is just divergence to parent
     elif each_or_par == 'each':
         # Compares each subdistribtuion to the parent (full signal) distribution
         if num_segs == 2:
-            out = np.sum(np.abs(dns[:, 0] - dns[:, 1])) * dr
-            return out
+            return float(0.5 * np.sum(np.abs(dns[:, 0] - dns[:, 1])))
         # num_segs > 2
         diffmat = np.nan * np.ones((num_segs, num_segs)) 
         for i in range(num_segs):
             for j in range(num_segs):
                 if j > i:
-                    diffmat[i, j] = np.sum(np.abs(dns[:, i] - dns[:, j])) * dr
+                    diffmat[i, j] = 0.5 * np.sum(np.abs(dns[:, i] - dns[:, j])) # total variation distance
         divs = diffmat[~np.isnan(diffmat)] # % (the upper triangle of diffmat)
     else:
         raise ValueError(f"Unknown method: {each_or_par}. Should be 'each' or 'par'. ")
