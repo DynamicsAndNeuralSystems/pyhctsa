@@ -28,6 +28,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from ..operations.correlation import first_crossing
+from ..utils import get_tau
 
 def rad(x: ArrayLike, tau: Union[int, str] = 1, centre: bool = True) -> float:
     """
@@ -49,10 +50,16 @@ def rad(x: ArrayLike, tau: Union[int, str] = 1, centre: bool = True) -> float:
     x : array-like
         The input time series (1D array).
     tau : int or str, optional
-        The embedding and differencing delay, in units of the time step.
-        If a string, must be "tau", in which case the delay is set to the first
-        crossing of the autocorrelation function (NaN is returned if that delay is
-        undefined). Default is 1.
+        The embedding and differencing delay, in units of the time step. A string sets it
+        from the series (after any `centre` transformation); NaN is returned if the delay
+        is undefined:
+
+        - ``'tau'``: the first zero crossing of the autocorrelation function;
+        - ``'ac1e'``: the floor of the first 1/e crossing of the autocorrelation function;
+        - ``'mi'``: the smaller of the first minimum of the Kraskov automutual information
+          and the ``'ac1e'`` delay (see :func:`pyhctsa.utils.get_tau`).
+
+        Default is 1.
     centre : bool, optional
         Whether to center the time series at zero and take absolute values before 
         analysis. Default is `True`.
@@ -79,6 +86,11 @@ def rad(x: ArrayLike, tau: Union[int, str] = 1, centre: bool = True) -> float:
                 # delay undefined (e.g., an all-NaN autocorrelation function)
                 return np.nan
             tau = int(tau)
+        elif tau in ("ac1e", "mi"):
+            # adaptive delay: see BF_GetTau
+            tau = get_tau(x, tau)
+            if np.isnan(tau):
+                return np.nan
         else:
             raise ValueError(f"Unknown operation {tau}")
 
