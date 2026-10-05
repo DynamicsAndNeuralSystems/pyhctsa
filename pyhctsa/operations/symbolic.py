@@ -920,7 +920,7 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
     else:
         mba = np.zeros((n, 2))  # means before and after
         sba = np.zeros((n, 2))  # standard deviation before and after
-        for i in range(2, n):
+        for i in range(2, n - 2):
             mba[i, 0] = _seq_mean(store[:i, 3])
             sba[i, 0] = _seq_std(store[:i, 3]) / np.sqrt(i)
             after = store[i + 1:, 3]
