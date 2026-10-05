@@ -280,34 +280,54 @@ def c2t(c2: List[np.ndarray]) -> List[np.ndarray]:
     list of ndarray
         One ``(n_i - 1, 2)`` array per embedding dimension: the upper length
         scale, and Takens' estimator at that scale.
+
+    Notes
+    -----
+    As in :func:`c2g`, ``c2t.f`` relies on implicit typing: the logarithms, the
+    sums ``cint`` and the printed outputs are single precision (only the slope
+    ``a`` and offset ``b`` of the power-law pieces and the exponentials in the
+    integral are double, computed from single-precision differences). That is
+    reproduced, with the output rounded to the 9 significant digits ``c2t``
+    prints.
     """
     out: List[np.ndarray] = []
     for block in c2:
         e_vals, c_vals = [], []
         for ee, cc in block:
+            ee, cc = _f32(ee), _f32(cc)  # read into REAL
             if cc <= 0.0:  # c2t.f stops the block at the first non-positive C
                 break
-            e_vals.append(math.log(ee))
-            c_vals.append(math.log(cc))
+            e_vals.append(_f32(math.log(ee)))
+            c_vals.append(_f32(math.log(cc)))
 
         me = len(e_vals)
-        e_vals = np.asarray(e_vals, dtype=float)
-        c_vals = np.asarray(c_vals, dtype=float)
+        e_vals = np.asarray(e_vals, dtype=np.float32)
+        c_vals = np.asarray(c_vals, dtype=np.float32)
         order = _tisean_argsort(e_vals)
         e = e_vals[order]
         c = c_vals[order]
 
-        cint = 0.0
+        # b and a are evaluated in single precision, then held as doubles
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            de = e[1:] - e[:-1]
+            b_all = ((e[1:] * c[:-1] - e[:-1] * c[1:]) / de).astype(np.float64)
+            a_all = ((c[1:] - c[:-1]) / de).astype(np.float64)
+            de = de.astype(np.float64)
+
+        cint = np.float32(0.0)  # REAL
         rows = []
-        for i in range(1, me):
-            de = e[i] - e[i - 1]
-            b = (e[i] * c[i - 1] - e[i - 1] * c[i]) / de
-            a = (c[i] - c[i - 1]) / de
-            if a != 0:
-                cint += (math.exp(b) / a) * (math.exp(a * e[i]) - math.exp(a * e[i - 1]))
-            else:
-                cint += math.exp(b) * de
-            rows.append((math.exp(e[i]), math.exp(c[i]) / cint))
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            for i in range(1, me):
+                a, b = a_all[i - 1], b_all[i - 1]
+                if a != 0:
+                    inc = (math.exp(b) / a) * (math.exp(a * float(e[i]))
+                                               - math.exp(a * float(e[i - 1])))
+                else:
+                    inc = math.exp(b) * de[i - 1]
+                cint = _f32(float(cint) + inc)
+                x = _f32(math.exp(float(e[i])))
+                y = _f32(math.exp(float(c[i]))) / cint
+                rows.append((_f32_9(x), _f32_9(y)))
         out.append(np.array(rows, dtype=float).reshape(-1, 2))
     return out
 
