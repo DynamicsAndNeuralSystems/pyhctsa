@@ -57,9 +57,10 @@ def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str)
 
     return out
 
-def _random_phase(x: np.ndarray, rng: np.random.RandomState, fc: float = 0) -> np.ndarray:
+def _random_phase(x: np.ndarray, u: np.ndarray, fc: float = 0) -> np.ndarray:
     """
-    Random-phase-Fourier-transform surrogate of x (hctsa's ``SUB_RandomPhase``).
+    Random-phase-Fourier-transform surrogate of x (hctsa's ``SUB_RandomPhase``), with the uniform
+    random numbers ``u`` (one per free frequency bin, in (0, 1)) setting the phases.
 
     The magnitude spectrum of x (at full length N) is kept, and every phase is randomized
     except the DC (and, for even N, Nyquist) phase, which is kept (necessarily 0 or pi for
@@ -68,12 +69,12 @@ def _random_phase(x: np.ndarray, rng: np.random.RandomState, fc: float = 0) -> n
     rather than randomized (truncated Fourier transform surrogates), 0 for none.
     """
     N = len(x)
-    n_free = max((N // 2 - 1) if (N % 2 == 0) else ((N - 1) // 2), 0)
+    n_free = max((N - 1) // 2, 0)
     z = np.fft.fft(x)
     z_mag = np.abs(z)
     z_phase = np.angle(z)
 
-    rand_phase = rng.uniform(0.0, 2.0 * np.pi, size=n_free)
+    rand_phase = 2.0 * np.pi * np.asarray(u, dtype=float)
     n_keep = int(np.floor(min(fc, n_free)))
     if n_keep > 0:
         rand_phase[:n_keep] = z_phase[1:1 + n_keep]  # preserve low-frequency phases (TFT)
@@ -89,12 +90,19 @@ def _random_phase(x: np.ndarray, rng: np.random.RandomState, fc: float = 0) -> n
 
 
 def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
-                    random_seed: int = 42, extra_params: Union[float, None] = None) -> ArrayLike:
+                    random_seed: Union[int, str, None] = 0,
+                    extra_params: Union[float, None] = None) -> ArrayLike:
     """
     Generates surrogate time series (hctsa's ``SD_MakeSurrogates``).
 
     Method described relatively clearly in Guarin Lopez et al. (arXiv, 2010)
     Used bits of aaft code that references (and presumably was obtained from) [1].
+
+    The random numbers come from the portable generator :func:`~pyhctsa.robust.bf_random`, so
+    the surrogates are the same as hctsa's for the same seed, and NumPy's global random state is
+    untouched. All the surrogates are drawn in one go: column k of the random numbers (a block
+    of consecutive draws) makes surrogate k. (AAFT draws its Gaussian noise from the seed and
+    its phases from the seed + 1.)
 
     References
     ----------
@@ -122,8 +130,9 @@ def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
 
     num_surrs : int, optional
         The number of surrogates to generate. Default is 1.
-    random_seed : int, optional
-        Random seed for reproducibility. Default is 42.
+    random_seed : int, str or None, optional
+        The seed of the random numbers, as hctsa's ``BF_RandomSeed``: a number, ``'default'`` (0),
+        or ``None``/``'none'`` (a seed from NumPy's global stream). Default is 0.
     extra_params : float, optional
         The cut-off frequency for 'TFT', in frequency bins (a value below 1 is taken as a
         proportion of N). Default is N/8.
@@ -138,28 +147,34 @@ def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
     .. [2] "A new surrogate data method for nonstationary time series", D. L. Guarin Lopez
         et al., arXiv 1008.1804 (2010).
     """
+    from .nonlinearity import _bf_random_seed
     x = np.asarray(x, dtype=float).ravel()
     N = len(x)
     out = np.zeros(shape=(N, num_surrs))
-    # Mersenne twister, as MATLAB's rng(seed, 'twister') (identical uniform draws for the
-    # same seed, except that MATLAB's seed 0 is the generator's default initialisation)
-    rng = np.random.RandomState(5489 if random_seed == 0 else random_seed)
+    seed = _bf_random_seed(random_seed)
+    n_free = (N - 1) // 2  # number of random phases per surrogate
+
+    def uniform_block(rows, s):  # (rows, num_surrs): column k is a block of consecutive draws
+        return bf_random(rows * num_surrs, s).reshape(rows, num_surrs, order='F')
 
     if surr_method == 'RP':
+        phases = uniform_block(n_free, seed)
         for s in range(num_surrs):
-            out[:, s] = _random_phase(x, rng)
+            out[:, s] = _random_phase(x, phases[:, s])
 
     elif surr_method == "AAFT":
         # sort and rank order the data
         ix = np.argsort(x, kind='stable')
         x_sorted = x[ix]
         x_ro = np.argsort(ix, kind='stable')  # rank-ordered permutation
+        noise = bf_random(N * num_surrs, seed, 'normal').reshape(N, num_surrs, order='F')
+        phases = uniform_block(n_free, seed + 1)
         for s in range(num_surrs):
             # random-order white Gaussian-distributed noise, ranked as x
-            n_sort = np.sort(rng.standard_normal(N))
+            n_sort = np.sort(noise[:, s])
             y = n_sort[x_ro]
             # random-phase surrogate of y (phase-randomized noise ranked as x)
-            y_rp = _random_phase(y, rng)
+            y_rp = _random_phase(y, phases[:, s])
             # rank order x with respect to y_rp
             ix_yrp = np.argsort(y_rp, kind='stable')
             y_ro = np.argsort(ix_yrp, kind='stable')
@@ -173,12 +188,14 @@ def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
             fc = extra_params
             if fc < 1:
                 fc = N * fc
+        phases = uniform_block(n_free, seed)
         for s in range(num_surrs):
-            out[:, s] = _random_phase(x, rng, fc)
+            out[:, s] = _random_phase(x, phases[:, s], fc)
 
     elif surr_method == "RandPerm":
+        perms = np.argsort(uniform_block(N, seed), axis=0, kind='stable')
         for s in range(num_surrs):
-            out[:, s] = x[rng.permutation(N)]
+            out[:, s] = x[perms[:, s]]
 
     else:
         raise ValueError(f"Unknown method: {surr_method}")
