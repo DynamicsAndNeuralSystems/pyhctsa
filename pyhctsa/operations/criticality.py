@@ -51,7 +51,8 @@ def rad(x: ArrayLike, tau: Union[int, str] = 1, centre: bool = True) -> float:
     tau : int or str, optional
         The embedding and differencing delay, in units of the time step.
         If a string, must be "tau", in which case the delay is set to the first
-        crossing of the autocorrelation function. Default is 1.
+        crossing of the autocorrelation function (NaN is returned if that delay is
+        undefined). Default is 1.
     centre : bool, optional
         Whether to center the time series at zero and take absolute values before 
         analysis. Default is `True`.
@@ -74,6 +75,10 @@ def rad(x: ArrayLike, tau: Union[int, str] = 1, centre: bool = True) -> float:
     if isinstance(tau, str):
         if tau == "tau":
             tau = first_crossing(x, 'ac', 0, 'discrete')
+            if tau is None or np.isnan(tau):
+                # delay undefined (e.g., an all-NaN autocorrelation function)
+                return np.nan
+            tau = int(tau)
         else:
             raise ValueError(f"Unknown operation {tau}")
 

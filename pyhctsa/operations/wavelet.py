@@ -6,6 +6,7 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 import pywt
+from scipy import stats
 import logging
 logger = logging.getLogger('pyhctsa')
 
@@ -119,45 +120,43 @@ def wfbm(x: ArrayLike) -> dict:
     Returns
     -------
     dict
-        Dictionary containing the three estimates of the fractal index H of the signal x: 
+        Dictionary containing two estimates of the fractal index H of the signal x:
 
-        - (i) using a second order discrete derivative, 
-        - (ii) using a second order discrete derivative with wavelets, 
-        - (iii) using wavelet variance versus wavelet level.
+        - 'H_deriv2' : using a second order discrete derivative,
+        - 'H_deriv2Wavelet' : using a second order discrete derivative with wavelets (sym5).
+
+        (The third estimator of wfbmesti, from the wavelet variance versus level, is no
+        longer returned, as in hctsa; see :func:`modwt_var` and its ``decaySlope``.)
     """
     x = np.asarray(x)
     x = np.cumsum(x)  # the series is the increments (fGn); wfbmesti expects the fBm path
     y = np.cumsum(np.diff(x))
+
+    def conv_valid(sig, ker):
+        # MATLAB conv(sig, ker, 'valid'): empty when the kernel is longer than the signal
+        # (np.convolve would swap the arguments)
+        if len(ker) > len(sig):
+            return np.zeros(0)
+        return np.convolve(sig, ker, mode='valid')
+
+    def mean_sq(v):
+        return np.mean(v**2) if len(v) else np.nan
+
     b1 = np.array([1.0, -2.0, 1.0])
     b2 = np.array([1.0, 0.0, -2.0, 0.0, 1.0])
-    y1 = np.convolve(y, b1, mode='valid')
-    y2 = np.convolve(y, b2, mode='valid')
-    s1 = np.mean(y1**2)
-    s2 = np.mean(y2**2)
+    s1 = mean_sq(conv_valid(y, b1))
+    s2 = mean_sq(conv_valid(y, b2))
     H1 = 0.5 * np.log2(s2 / s1)
 
     w = pywt.Wavelet('sym5')
     c1 = np.array(w.dec_hi, dtype=float)
     c2 = np.zeros(2 * len(c1))
     c2[::2] = c1
-    cy1 = np.convolve(y, c1,  mode='valid')
-    cy2 = np.convolve(y, c2,  mode='valid')
-    cs1 = np.mean(cy1**2)
-    cs2 = np.mean(cy2**2)
+    cs1 = mean_sq(conv_valid(y, c1))
+    cs2 = mean_sq(conv_valid(y, c2))
     H2 = 0.5*np.log2(cs2 / cs1)
 
-    level_decomp = min(pywt.dwt_max_level(len(x), 'haar'), 6)
-    C, L = _wavedec(x, wavelet='haar', level=level_decomp)
-    all_levels = np.arange(1, level_decomp+1)
-    stdc = np.zeros(len(all_levels))
-    for i in range(len(all_levels)):
-        d = _detcoef(coefs=C, lengths=L, level=all_levels[i])
-        stdc_val = np.median(np.abs(d)) / 0.67448975
-        stdc[i] = stdc_val
-    po = np.polyfit(all_levels, np.log2(stdc**2), 1)
-    H3 = (po[0] - 1)/2
-
-    return {"p1": H1, "p2": H2, "p3": H3}
+    return {"H_deriv2": H1, "H_deriv2Wavelet": H2}
 
 def scal_2_freq(y: ArrayLike, w_name: str = 'db3', a_max: int = 5, delta: int = 1) -> dict:
     """
@@ -258,7 +257,7 @@ def dwt_coeff(y: ArrayLike, w_name: str = 'db3', level: int = 3) -> dict:
             # std coefficients at this level:
             out[f'stdd_l{k}'] = np.std(d, ddof=1)
             #% 1-D noise coefficient estimate (estimate of the noise std):
-            out[f'noisestd_l{k}'] = np.median(np.abs(d)) / 0.67448975
+            out[f'noisestd_l{k}'] = np.median(np.abs(d)) / 0.6745  # as MATLAB's wnoisest
         else:
             # exceeds max level, return nans
             out[f'maxd_l{k}'] = np.nan 
@@ -280,21 +279,45 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     y : array-like
         The input time series.
     w_name : str, optional
-        The wavelet name, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), etc. Default is ``'db3'``.
+        The wavelet name, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), or the continuous
+        Morlet wavelet 'morl' (the second wavelet registered in hctsa; its support is [-4, 4]
+        sampled at 2**10 points, as in MATLAB's legacy ``cwt``). Default is ``'db3'``.
     max_scale : int, optional
         The maximum scale of wavelet analysis. Default is 32.
+
+    The scaled power is relative to the mean power, ``SC = S / mean(S)`` with
+    ``S = |coeffs|**2`` (so the mean of SC is 1, independent of the number of
+    coefficients). ``pover99``, ``pover98``, ``pover95``, ``pover90`` and ``pover80`` are the
+    energy shares of the strongest 1, 2, 5, 10 and 20% of coefficients (the sum of the
+    largest ``max(1, floor((100 - p)/100*numEntries))`` values of SC, divided by
+    ``numEntries``). ``SC_h`` is the entropy of SC relative to its maximum,
+    ``-sum(SC_a*log(SC_a)) - log(numEntries)`` with ``SC_a = SC/sum(SC)``.
 
     Returns
     -------
     dict
-        Dictionary of statistics on the CWT coefficients.
+        Dictionary of statistics on the CWT coefficients, including ``gam1`` and
+        ``gam2`` (the shape and scale of a gamma distribution fitted to SC by maximum
+        likelihood) and ``dd_SC_h`` (the entropy of the maximum of SC in each of 10 time
+        boxes at each scale).
     """
     y = np.asarray(y)
     N = len(y)
     scales = np.arange(1, max_scale+1)
-    coeffs = _custom_cwt(data=y, scales=scales, wavelet=w_name)
+    if w_name in pywt.wavelist(kind='discrete'):
+        # discrete wavelets: MATLAB's legacy cwt gives the opposite sign for symmetric ones
+        flip_sign = pywt.Wavelet(w_name).symmetry != 'asymmetric'
+        coeffs = _custom_cwt(data=y, scales=scales, wavelet=w_name)
+    else:
+        # continuous wavelet (e.g., 'morl'): no sign flip. As in MATLAB's wavefun, 'morl' is
+        # supported on [-4, 4] sampled at 2**10 points
+        flip_sign = False
+        w = pywt.ContinuousWavelet(w_name)
+        if w_name == 'morl':
+            w.lower_bound, w.upper_bound = -4, 4
+        coeffs = _custom_cwt(data=y, scales=scales, wavelet=w, precision=10)
     S = np.abs(coeffs * coeffs)
-    SC = 100*S/np.sum(S)
+    SC = S/np.mean(S)  # scaled power, relative to the mean power
 
     # Get statistics from CWT
     num_entries = SC.size
@@ -303,7 +326,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     std_SC = np.std(SC, ddof=1)
 
     # 1) Coefficients, coeffs
-    all_coeffs = coeffs if pywt.Wavelet(w_name).symmetry == 'asymmetric' else -coeffs
+    all_coeffs = -coeffs if flip_sign else coeffs
     abs_coeffs = np.abs(all_coeffs)
     out = {}
     out['meanC'] = np.mean(all_coeffs)
@@ -316,16 +339,40 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     out['maxonmeanSC'] = max_SC/mean_SC
 
     #% Proportion of coeffs matrix over ___ maximum (thresholded)
-    poverfn = lambda x : np.sum(SC[SC > x * max_SC])/num_entries
-    out['pover99'] = poverfn(0.99)
-    out['pover98'] = poverfn(0.88)  # threshold as in hctsa's WL_cwt
-    out['pover95'] = poverfn(0.95)
-    out['pover90'] = poverfn(0.90)
-    out['pover80'] = poverfn(0.80)
+    # Energy share of the strongest (100 - p)% of coefficients
+    sc_sorted = np.sort(SC.ravel())[::-1]
+    poverfn = lambda p: np.sum(sc_sorted[:max(1, int(np.floor((100 - p) / 100 * num_entries)))]) / num_entries
+    out['pover99'] = poverfn(99)
+    out['pover98'] = poverfn(98)
+    out['pover95'] = poverfn(95)
+    out['pover90'] = poverfn(90)
+    out['pover80'] = poverfn(80)
 
-    # 2D entropy
+    # Gamma distribution fitted to the scaled power (maximum likelihood, as gamfit)
+    try:
+        gam_shape, _, gam_scale = stats.gamma.fit(SC.ravel(), floc=0)
+    except (stats.FitError, ValueError, RuntimeError):
+        # (e.g., exact zeros or NaNs in SC for degenerate series)
+        gam_shape = gam_scale = np.nan
+    out['gam1'] = gam_shape
+    out['gam2'] = gam_scale
+
+    # 2D entropy (relative to its maximum)
     SC_a = SC/np.sum(SC)
-    out['SC_h'] = -np.sum(SC_a * np.log(SC_a))
+    out['SC_h'] = -np.sum(SC_a * np.log(SC_a)) - np.log(num_entries)
+
+    # Entropy of the maximum of SC in each of 10 time boxes at each scale
+    num_boxes = 10
+    if N < num_boxes:
+        logger.warning('Time series too short')
+        return np.nan
+    cutoffs = np.floor(np.linspace(0, N, num_boxes + 1) + 0.5).astype(int)  # MATLAB round
+    dd_SC = np.zeros((max_scale, num_boxes))
+    for j in range(num_boxes):
+        dd_SC[:, j] = np.max(SC[:, cutoffs[j]:cutoffs[j + 1]], axis=1)
+    dd_SC = dd_SC / np.sum(dd_SC)
+    dd_SC_o = dd_SC.ravel()
+    out['dd_SC_h'] = -np.sum(dd_SC_o * np.log(dd_SC_o))
 
     # Sum across scales
     SSC = sum(SC)
@@ -334,7 +381,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     out['min_ssc'] = np.min(SSC)
     out['maxonmed_ssc'] = max_SSC / np.median(SSC)
     out['pcross_maxssc50'] = np.sum(sign_change(SSC - 0.5 * max_SSC)) / (N - 1)
-    out['std_ssc'] = np.std(SSC)
+    out['std_ssc'] = np.std(SSC, ddof=1)
 
     #Stationarity
     midpoint = N // 2  # Integer division is equivalent to floor
@@ -350,17 +397,6 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     out['stat_2_m_s'] = np.mean([std2_1, std2_2]) / mean_SC
     out['stat_2_s_m'] = np.std([mean2_1, mean2_2], ddof=1) / std_SC
     out['stat_2_s_s'] = np.std([std2_1, std2_2], ddof=1) / std_SC
-
-    means5, stds5 = [], []
-    for i, SC_i in enumerate(np.array_split(SC, 5, axis=1), start=1):
-        means5.append(np.mean(SC_i))
-        stds5.append(np.std(SC_i, ddof=1))
-        out[f'mean5_{i}'] = means5[-1]
-        out[f'std5_{i}'] = stds5[-1]
-
-    out['stat_5_m_s'] = np.mean(stds5)/mean_SC
-    out['stat_5_s_m'] = np.std(means5, ddof=1)/std_SC
-    out['stat_5_s_s'] = np.std(stds5, ddof=1)/std_SC
 
     return out
 
@@ -378,7 +414,7 @@ def _slosr(xx: ArrayLike) -> float:
     for i in range(2, the_max_level):
         slosr[i-2] = np.sum(xx[:i-1])/np.sum(xx[i:])
 
-    return np.argmin(np.abs(slosr - 1)) + 1
+    return np.argmin(np.abs(slosr - 1)) + 2  # the (1-based) level i in 2..L-1 at the split
 
 def detail_coeffs(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] = 20) -> dict:
     """
@@ -444,9 +480,9 @@ def detail_coeffs(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] 
     out['std_max'] = np.std(maxs, ddof=1)
 
     #% At what level is the maximum
-    out['wheremax_mean'] = np.argwhere(means == means_s[0]).flatten()[0]
-    out['wheremax_median'] = np.argwhere(medians == medians_s[0]).flatten()[0]
-    out['wheremax_max'] = np.argwhere(maxs == maxs_s[0]).flatten()[0]
+    out['wheremax_mean'] = np.argwhere(means == means_s[0]).flatten()[0] + 1  # 1-based level, as MATLAB
+    out['wheremax_median'] = np.argwhere(medians == medians_s[0]).flatten()[0] + 1  # 1-based level, as MATLAB
+    out['wheremax_max'] = np.argwhere(maxs == maxs_s[0]).flatten()[0] + 1  # 1-based level, as MATLAB
 
     #% Size of maximum (relative to next maximum)
     out['max1on2_mean'] = means_s[0]/means_s[1]
@@ -488,10 +524,9 @@ def wl_coeffs(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 3) -> 
     dict
         Dictionary containing statistics of the wavelet coefficients, including:
 
-        - 'mean_coeff': Mean of sorted absolute detail coefficients.
-        - 'max_coeff': Maximum of sorted absolute detail coefficients.
-        - 'med_coeff': Median of sorted absolute detail coefficients.
-        - 'wb75m', 'wb50m', 'wb25m', 'wb10m', 'wb1m': Decay rate statistics (fraction of coefficients below a threshold of the maximum).
+        - 'wb99m', 'wb90m', 'wb75m', 'wb50m', 'wb25m', 'wb10m', 'wb1m': Decay rate statistics
+          (the position, as a proportion of the series length, at which the sorted
+          absolute detail coefficients first drop below the given proportion of the maximum).
     """
     y = np.asarray(y)
     N = len(y)
@@ -511,10 +546,6 @@ def wl_coeffs(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 3) -> 
 
     #%% Return statistics
     out = {}
-    out['mean_coeff'] = np.mean(det_s)
-    out['max_coeff'] = np.max(det_s)
-    out['med_coeff'] = np.median(det_s)
-
     #% Decay rate stats ('where below _ maximum' = 'wb_m')
     out['wb99m'] = _find_my_threshold(0.99, det_s, N)
     out['wb90m'] = _find_my_threshold(0.90, det_s, N)
@@ -603,13 +634,14 @@ def _wrcoef(coefs, lengths, wavelet, level):
 def _find_my_threshold(x: float, det_s: ArrayLike, N: int):
     """
     Fraction of the way into ``det_s`` (sorted descending) at which the
-    coefficients first drop below ``x`` times the maximum.
+    coefficients first drop below ``x`` times the maximum: the 1-based position of the
+    first such coefficient divided by ``N`` (as MATLAB's ``find(...,1,'first')/N``).
     """
     below = det_s < x * np.max(det_s)
     if not below.any():
         return np.nan
 
-    return np.argmax(below)/N
+    return (np.argmax(below) + 1)/N
 
 def _modwt(x: ArrayLike, w_name: str, level: int) -> np.ndarray:
     """
