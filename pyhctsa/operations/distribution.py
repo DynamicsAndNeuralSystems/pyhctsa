@@ -266,7 +266,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     # ----------------------------
     # Estimate smoothed empirical distribution
     # ----------------------------
-    f, xi = _ksdensity(x)
+    f, xi, _ = bf_ks_density(x)
     xi = xi[f > 1e-6]  # only keep values greater than 1E-6
     if xi.size == 0:
         return np.nan
@@ -278,7 +278,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
 
     # Rerun both over the same range
     xi = np.linspace(x1, x2, 1000)
-    f, _ = _ksdensity(x, xi)
+    f, _, _ = bf_ks_density(x, xi)
     with np.errstate(all='ignore'):
         ffit = pdf_func(xi)
 
