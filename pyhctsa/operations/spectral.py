@@ -4,6 +4,7 @@ from numpy.typing import ArrayLike
 from typing import Union
 import scipy.fft
 import scipy.signal
+import scipy.optimize
 
 from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit, robustfit, polyfit
 
@@ -1182,3 +1183,189 @@ def cepstrum(y: ArrayLike, max_period: int = 100, min_period: int = 4) -> dict:
 
     return out
 
+
+
+def _sin_start_point(t: np.ndarray, y: np.ndarray, n: int) -> np.ndarray:
+    # FFT-based start point for a sum of n sinusoids a*sin(b*t + c), built up one
+    # component at a time from the FFT peak of the residuals (the heuristic of
+    # MATLAB's Curve Fitting Toolbox 'sinN' library model).
+    N = len(y)
+    freqs = []
+    old_peaks = []
+    res = y
+    ab = None
+    for j in range(n):
+        fy = np.fft.fft(res)
+        fy[old_peaks] = 0  # omit frequencies already used
+        max_loc = int(np.argmax(np.abs(fy[:N // 2])))  # 0-based
+        old_peaks.append(max_loc)
+        freqs.append(2 * np.pi * max(0.5, max_loc) / (t[-1] - t[0]))
+        X = np.empty((N, 2 * (j + 1)))
+        for k, w in enumerate(freqs):
+            X[:, 2 * k] = np.sin(w * t)
+            X[:, 2 * k + 1] = np.cos(w * t)
+        ab = np.linalg.lstsq(X, y, rcond=None)[0]
+        if j < n - 1:
+            res = y - X @ ab
+    p0 = np.empty(3 * n)
+    for k in range(n):
+        p0[3 * k] = np.hypot(ab[2 * k], ab[2 * k + 1])
+        p0[3 * k + 1] = freqs[k]
+        p0[3 * k + 2] = np.arctan2(ab[2 * k + 1], ab[2 * k])
+    return p0
+
+
+def _fourier_terms(t: np.ndarray, w: float, n: int) -> np.ndarray:
+    X = np.empty((len(t), 2 * n + 1))
+    X[:, 0] = 1.0
+    for i in range(1, n + 1):
+        X[:, 2 * i - 1] = np.cos(i * w * t)
+        X[:, 2 * i] = np.sin(i * w * t)
+    return X
+
+
+def _fourier_start_point(t: np.ndarray, y: np.ndarray, n: int) -> float:
+    # Fundamental frequency start for an n-term Fourier series: the FFT peak
+    # frequency, or a subharmonic of it chosen to minimize the (linear) misfit.
+    N = len(y)
+    fy = np.fft.fft(y - np.mean(y))
+    max_loc = int(np.argmax(np.abs(fy[:N // 2])))
+    w_peak = 2 * np.pi * max(0.5, max_loc) / (t[-1] - t[0])
+    best, w_best = np.inf, w_peak
+    for k in range(1, n + 1):
+        X = _fourier_terms(t, w_peak / k, n)
+        coef = np.linalg.lstsq(X, y, rcond=None)[0]
+        nrm = np.linalg.norm(y - X @ coef)
+        if nrm < best:
+            best, w_best = nrm, w_peak / k
+    return w_best
+
+
+def sinusoid_fit(y: ArrayLike, model: str = 'sin1') -> Union[dict, float]:
+    """
+    Fit sinusoids or a Fourier series to the time series.
+
+    Fits a sum of 1-3 sinusoids, or a Fourier series with 1-3 terms, to the time
+    series as a function of its time index ``t = 1..N``. The values are fitted in
+    the order in which they occur, so the result depends on the temporal ordering
+    of the data. (This is the time-series-model branch of the former
+    ``DN_SimpleFit``, split off in hctsa as ``SP_SinusoidFit`` because the
+    distribution of values is unaffected by temporal ordering, whereas these fits
+    are.)
+
+    The fitted models are:
+
+    - ``'sinK'``: a sum of K sinusoids, ``sum_i a_i*sin(b_i*t + c_i)``, with free
+      amplitudes, frequencies (constrained to ``b_i >= 0``) and phases.
+    - ``'fourierK'``: a K-term Fourier series,
+      ``a0 + sum_i (a_i*cos(i*w*t) + b_i*sin(i*w*t))``, with a single fitted
+      fundamental frequency ``w``, so that the terms are harmonically related.
+
+    Goodness of fit is summarized by the root mean square error (and R^2), and the
+    residuals are characterized by their autocorrelation at lags 1 and 2 and by a
+    runs test, which together reveal remaining temporal structure that the model
+    has not captured (e.g., whether a periodic component has been fully explained).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    model : {'sin1', 'sin2', 'sin3', 'fourier1', 'fourier2', 'fourier3'}, optional
+        The model to fit. Default is ``'sin1'``.
+
+    Returns
+    -------
+    dict or float
+        - ``r2``: the R^2 of the fit.
+        - ``adjr2``: the degrees-of-freedom-adjusted R^2.
+        - ``rmse``: the root mean square error of the fit.
+        - ``resAC1``, ``resAC2``: the autocorrelation of the residuals at lags 1
+          and 2 (``'Fourier'`` method).
+        - ``resruns``: the p-value of a runs test on the residuals.
+
+        NaN is returned instead of a dict if the model cannot be fitted.
+
+    Notes
+    -----
+    The fit is a nonlinear least-squares problem that can end in a local minimum
+    (a sum of sinusoids has many). It starts from the heuristic of MATLAB's Curve
+    Fitting Toolbox (the FFT peak of the data/residuals for each frequency, with
+    amplitudes and phases from a linear fit at those frequencies) and is
+    optimized with SciPy's trust-region-reflective ``least_squares``, so results
+    can differ from MATLAB's ``fit`` when the problem is multimodal.
+    """
+    from .graph import _runstest_pvalue  # local import: graph imports correlation
+
+    models = ('sin1', 'sin2', 'sin3', 'fourier1', 'fourier2', 'fourier3')
+    if model not in models:
+        raise ValueError(f"Invalid time-series model '{model}' specified")
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    t = np.arange(1, N + 1, dtype=float)
+    kind, n = model[:-1], int(model[-1])
+
+    try:
+        if N < 3:
+            return np.nan
+        if kind == 'sin':
+            def fun(p):
+                return sum(p[3 * k] * np.sin(p[3 * k + 1] * t + p[3 * k + 2])
+                           for k in range(n)) - y
+
+            def jac(p):
+                J = np.empty((N, 3 * n))
+                for k in range(n):
+                    arg = p[3 * k + 1] * t + p[3 * k + 2]
+                    J[:, 3 * k] = np.sin(arg)
+                    J[:, 3 * k + 1] = p[3 * k] * t * np.cos(arg)
+                    J[:, 3 * k + 2] = p[3 * k] * np.cos(arg)
+                return J
+
+            p0 = _sin_start_point(t, y, n)
+            lower = np.tile([-np.inf, 0.0, -np.inf], n)
+            p0 = np.maximum(p0, lower)
+            sol = scipy.optimize.least_squares(fun, p0, jac=jac, bounds=(lower, np.inf),
+                                               method='trf', xtol=1e-6, ftol=1e-6, gtol=1e-6,
+                                               max_nfev=400)
+            fitted = fun(sol.x) + y
+            n_coeff = 3 * n
+        else:
+            def fun(p):
+                return _fourier_terms(t, p[-1], n) @ p[:-1] - y
+
+            def jac(p):
+                w = p[-1]
+                X = _fourier_terms(t, w, n)
+                J = np.empty((N, 2 * n + 2))
+                J[:, :-1] = X
+                dw = np.zeros(N)
+                for i in range(1, n + 1):
+                    dw += (-p[2 * i - 1] * np.sin(i * w * t) + p[2 * i] * np.cos(i * w * t)) * i * t
+                J[:, -1] = dw
+                return J
+
+            w0 = _fourier_start_point(t, y, n)
+            coef = np.linalg.lstsq(_fourier_terms(t, w0, n), y, rcond=None)[0]
+            p0 = np.append(coef, w0)
+            sol = scipy.optimize.least_squares(fun, p0, jac=jac, method='trf',
+                                               xtol=1e-6, ftol=1e-6, gtol=1e-6, max_nfev=400)
+            fitted = fun(sol.x) + y
+            n_coeff = 2 * n + 2
+    except (FloatingPointError, ValueError, np.linalg.LinAlgError):
+        return np.nan  # the model could not be fitted
+    if not np.all(np.isfinite(fitted)):
+        return np.nan
+
+    res = y - fitted
+    sse = float(np.sum(res ** 2))
+    sst = float(np.sum((y - np.mean(y)) ** 2))
+    dfe = N - n_coeff
+    r2 = 1 - sse / sst if sst > 0 else np.nan
+    out = {}
+    out['r2'] = r2
+    out['adjr2'] = 1 - (1 - r2) * (N - 1) / dfe if dfe > 0 else np.nan
+    out['rmse'] = np.sqrt(sse / dfe) if dfe > 0 else np.nan
+    out['resAC1'] = float(autocorr(res, 1, 'Fourier')[0])
+    out['resAC2'] = float(autocorr(res, 2, 'Fourier')[0])
+    out['resruns'] = _runstest_pvalue(res)
+    return out
