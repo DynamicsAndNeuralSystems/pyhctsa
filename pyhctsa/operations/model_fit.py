@@ -956,8 +956,8 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
         Default is ``'frombefore'``.
     random_seed : int or None
-        Seed for the Mersenne Twister, reset before each prediction (as
-        ``BF_ResetSeed`` does), used by the ``'randomgap'`` mode. ``None``
+        Seed for the Mersenne Twister, reset once before the loop over windows
+        (as ``BF_ResetSeed`` does), used by the ``'randomgap'`` mode. ``None``
         leaves the stream alone, matching ``BF_ResetSeed('none')``. Default
         is 0.
 
@@ -1003,6 +1003,10 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     loghypers = np.zeros((nhps, num_preds))      # log-hyperparameters
 
     rng = np.random.RandomState() if random_seed is None else None
+    if pmode == 'randomgap' and random_seed is not None:
+        # reset the seed once, before the loop over windows: successive windows
+        # then draw different random splits (a reproducible sequence)
+        rng = _ml_rng(random_seed)
 
     for i in range(num_preds):
         # (0) Set up test and training sets
@@ -1014,8 +1018,6 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
             ys = y[sp - 1 + num_train:sp - 1 + num_train + num_test]  # test data
 
         elif pmode == 'randomgap':
-            if random_seed is not None:
-                rng = _ml_rng(random_seed)
             n = num_train + num_test
             t = np.arange(1, n + 1, dtype=float)
             r = _ml_randperm(n, rng)
