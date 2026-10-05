@@ -5,12 +5,13 @@ from typing import Union
 import scipy.fft
 import scipy.signal
 import scipy.optimize
+import scipy.stats
 
 from ..toolboxes.matlab.matlab_fit import lsqcurvefit_trr, goodness_of_fit, robustfit, polyfit
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
-from ..utils import make_mat_buffer, sign_change
+from ..utils import make_mat_buffer, sign_change, matlab_quantile
 
 def specparam(y: ArrayLike, aperiodic_mode: str = 'fixed', max_n_peaks: int = 4,
               peak_threshold: float = 1.0,
@@ -1681,4 +1682,164 @@ def phase_fluctuation_scaling(y: ArrayLike, half_width_frac: float = 0.01,
     out['slope_short'] = fit_slope(log_w[short_idx], log_d[short_idx])
     out['slope_long'] = fit_slope(log_w[long_idx], log_d[long_idx])
     out['slope_diff'] = out['slope_short'] - out['slope_long']
+    return out
+
+
+def _bicoherence_grid(y: np.ndarray, step: int, num_seg: int, seg_length: int, half_n: int,
+                      win: np.ndarray, pi: np.ndarray, pj: np.ndarray) -> np.ndarray:
+    # Segment-averaged squared bicoherence of y at the frequency pairs (pi, pj)
+    # (0-based bins of the one-sided spectrum, with pi + pj <= half_n - 1).
+    psum = pi + pj
+    b_num = np.zeros(len(pi), dtype=complex)  # triple-product sum
+    p12 = np.zeros(len(pi))  # sum |X(f1) X(f2)|^2
+    p3 = np.zeros(len(pi))  # sum |X(f1+f2)|^2
+    for k in range(num_seg):
+        seg = y[k * step:k * step + seg_length]
+        seg = seg - np.mean(seg)  # demean each segment before windowing
+        xh = np.fft.fft(seg * win, seg_length)[:half_n]  # one-sided spectrum, DC to Nyquist
+        outer = xh[pi] * xh[pj]
+        b_num += outer * np.conj(xh[psum])
+        p12 += np.abs(outer) ** 2
+        p3 += np.abs(xh[psum]) ** 2
+    return np.abs(b_num) ** 2 / (p12 * p3 + np.finfo(float).eps)  # bounded in [0, 1]
+
+
+def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'full',
+                num_surr: int = 25) -> Union[dict, float]:
+    """
+    Quadratic phase coupling between frequencies, from the squared bicoherence.
+
+    Estimates the bicoherence, a normalized bispectrum, by segment averaging: the
+    series is split into overlapping segments (50% overlap, as many as fit), each
+    segment is demeaned, Hamming-windowed and Fourier transformed, and the
+    per-segment Fourier coefficients are combined into the bispectrum estimate
+    ``B(f1,f2) = <X(f1) X(f2) X*(f1+f2)>``, averaged over segments. The squared
+    bicoherence is ``bic2(f1,f2) = |B(f1,f2)|^2 / (<|X(f1)X(f2)|^2> <|X(f1+f2)|^2>)``,
+    bounded in [0, 1] by the Cauchy-Schwarz inequality.
+
+    Time-domain nonlinearity statistics (e.g., ``tc3``, the ramping-window asymmetry
+    of ``ramping_windows``) collapse all frequency structure into a single number
+    per lag, so nonlinear coupling localized to a specific pair of frequency bands
+    can average out to near zero. The bicoherence resolves quadratic phase coupling
+    per frequency pair, directly detecting whether energy at f1 and f2 is
+    phase-coupled to energy at f1+f2 (the frequency-domain signature of a quadratic
+    nonlinearity).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    seg_length : int, optional
+        The length (in samples) of each FFT segment (at least 16). Segments overlap
+        by 50% and as many as fit are averaged; the number of segments K sets the
+        variance of the bicoherence estimate. Fewer than 8 segments gives NaN.
+        Default is 64.
+    max_n : int or 'full', optional
+        The maximum number of samples to consider: longer series are cropped to
+        their first ``max_n`` points. ``'full'`` disables cropping. Default is
+        ``'full'``.
+    num_surr : int, optional
+        The number of random-phase surrogates (which preserve the power spectrum but
+        destroy phase coupling) used to calibrate the significance threshold
+        empirically, in place of its asymptotic approximation. The threshold is the
+        95% quantile of squared bicoherence values pooled across all frequency pairs
+        and all surrogates. Default is 25.
+
+    Returns
+    -------
+    dict or float
+        - ``meanBic``, ``maxBic``, ``stdBic``, ``skewBic``: mean, maximum, standard
+          deviation and skewness of the squared bicoherence over the non-redundant
+          principal domain of frequency pairs (``0 < f1 <= f2``, ``f1 + f2 <=
+          Nyquist``).
+        - ``entropy``: the Shannon entropy of the bicoherence surface, normalized
+          to [0, 1] by the uniform-distribution entropy: whether coupling is
+          concentrated in a few frequency pairs or diffuse across many.
+        - ``meanBicDiag``: the mean squared bicoherence on the self-coupling
+          diagonal ``f1 = f2`` (quadratic harmonic distortion).
+        - ``propSig``: the proportion of frequency pairs exceeding the
+          surrogate-calibrated 95% significance threshold.
+        - ``threshRatio``: the ratio of that empirical threshold to the standard
+          analytic large-K approximation (``K * bic2 ~ Exp(1)`` under the null of a
+          linear, ~Gaussian process, giving threshold ``-log(0.05)/K``). A ratio far
+          from 1 flags that the asymptotic approximation is untrustworthy for this
+          series (e.g., because of non-stationarity).
+
+        NaN is returned if the series is too short for 8 segments.
+
+    Notes
+    -----
+    The surrogates are generated from MATLAB's default random seed (the Mersenne
+    Twister with seed 0), so the output is reproducible and, because the surrogate
+    construction is the same as hctsa's ``SD_MakeSurrogates`` (``'RP'``), identical
+    to hctsa's.
+    """
+    from .surrogates import _make_surrogates  # local import: surrogates imports other operations
+
+    y = np.asarray(y, dtype=float).ravel()
+    min_seg_length = 16
+    if seg_length < min_seg_length:
+        raise ValueError(f"seg_length = {seg_length} is too short for a meaningful FFT "
+                         f"segment (need >= {min_seg_length})")
+    N = len(y)
+    if not (isinstance(max_n, str) and max_n == 'full') and N > max_n:
+        warnings.warn(f"Time series ({N} samples) exceeds max_n = {max_n}; "
+                      f"analyzing the first {max_n} samples")
+        y = y[:max_n]
+        N = int(max_n)
+
+    # Segment geometry (50% overlap, as many segments as fit), shared by the real
+    # series and every surrogate:
+    step = seg_length // 2
+    min_num_seg = 8  # need enough segments for a meaningful bicoherence estimate
+    num_seg = (N - seg_length) // step + 1
+    if num_seg < min_num_seg:
+        warnings.warn(f"Time series (N = {N}) too short for seg_length = {seg_length} to "
+                      f"form >= {min_num_seg} 50%-overlapping segments")
+        return np.nan
+
+    half_n = seg_length // 2 + 1  # bin i <-> frequency i/seg_length, up to Nyquist
+    win = scipy.signal.windows.hamming(seg_length, sym=True)
+
+    # Non-redundant principal domain (excluding DC): 1 <= i <= j, i + j <= Nyquist bin
+    ii, jj = np.meshgrid(np.arange(half_n), np.arange(half_n), indexing='ij')
+    mask = (ii + jj <= half_n - 1) & (jj >= ii) & (ii >= 1)
+    pi, pj = ii[mask], jj[mask]
+    diag = pi == pj  # self-coupling diagonal (f1 = f2)
+
+    # Bicoherence of the real series
+    bic = _bicoherence_grid(y, step, num_seg, seg_length, half_n, win, pi, pj)
+    if bic.size == 0 or not np.any(np.isfinite(bic)):
+        return np.nan
+
+    out = {}
+    out['meanBic'] = np.mean(bic)
+    out['maxBic'] = np.max(bic)
+    out['stdBic'] = np.std(bic, ddof=1)
+    out['skewBic'] = scipy.stats.skew(bic)
+
+    # Normalized Shannon entropy of the bicoherence surface (0 = all coupling
+    # concentrated in one frequency pair, 1 = uniformly diffuse):
+    p = bic[bic > 0]
+    p = p / np.sum(p)
+    out['entropy'] = -np.sum(p * np.log(p)) / np.log(len(bic))
+
+    out['meanBicDiag'] = np.mean(bic[diag])
+
+    # Surrogate-calibrated significance threshold. Random-phase surrogates preserve
+    # the power spectrum (linear structure) but destroy quadratic phase coupling,
+    # exactly the null hypothesis a bicoherence significance test needs; the 95%
+    # quantile of their pooled bic2 values is the empirical threshold.
+    alpha = 0.05
+    surrogates = _make_surrogates(y, 'RP', num_surr, random_seed=5489)  # = rng(0, 'twister')
+    null_vals = np.concatenate([
+        _bicoherence_grid(surrogates[:, s], step, num_seg, seg_length, half_n, win, pi, pj)
+        for s in range(num_surr)])
+    null_vals = null_vals[np.isfinite(null_vals)]
+    surr_thresh = float(np.ravel(matlab_quantile(null_vals, 1 - alpha))[0])
+    out['propSig'] = np.mean(bic > surr_thresh)
+
+    # How far the standard asymptotic threshold is from the empirical one:
+    analytic_thresh = -np.log(alpha) / num_seg
+    out['threshRatio'] = surr_thresh / analytic_thresh
     return out
