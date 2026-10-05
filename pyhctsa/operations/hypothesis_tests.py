@@ -6,13 +6,15 @@ import numpy as np
 from numpy.typing import ArrayLike
 from scipy.stats import beta as beta_dist
 from scipy.stats import gamma as gamma_dist
-from scipy.special import log_ndtr
-from scipy.stats import jarque_bera, norm, wilcoxon, rayleigh, expon, gumbel_l, lognorm, uniform, weibull_min
-from statsmodels.sandbox.stats.runs import runstest_1samp
-from statsmodels.stats.descriptivestats import sign_test
+from scipy.interpolate import PchipInterpolator
+from scipy.optimize import brentq
+from scipy.special import gammaln, log_ndtr
+from scipy.stats import binom, chi2, norm, rankdata, rayleigh, expon, gumbel_l, lognorm, uniform, weibull_min
 
 from ..utils import ljung_box_pvalue
 from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
+from ..toolboxes.distribution_fits.jbtest_tables import (ALPHAS as JB_ALPHAS, CRITICAL_VALUES as JB_CRITICAL_VALUES,
+                                                         SAMPLE_SIZES as JB_SAMPLE_SIZES)
 
 def _fit_distribution_cdf(x: np.ndarray, the_distn: str) -> tuple:
     """Fit a distribution to data, MATLAB-style; return its CDF and parameter count."""
@@ -356,8 +358,9 @@ def hypothesis_test(x: ArrayLike, the_test: str = 'signtest') -> float:
     """
     Perform statistical hypothesis testing on a time series.
 
-    Applies a specified statistical test and returns its p-value. Tests are chosen
-    to evaluate different null hypotheses about the time series properties.
+    Deprecated in hctsa in favor of :func:`marginal_tests` (tests about the
+    distribution of values) and :func:`independence_tests` (tests of serial
+    independence), to which this dispatches.
 
     Parameters
     ----------
@@ -366,13 +369,9 @@ def hypothesis_test(x: ArrayLike, the_test: str = 'signtest') -> float:
     the_test : str, optional
         Type of hypothesis test to perform:
 
-        - 'signtest': Tests if median equals zero
-        - 'runstest': Tests for randomness in sequence
-        - 'ztest': Tests if mean equals zero (assumes unit variance)
-        - 'signrank': Wilcoxon signed rank test for zero median
-        - 'jbtest': Jarque-Bera test for normality
-        - 'lbq': Ljung-Box Q-test for autocorrelation
-        
+        - 'signtest', 'vartest', 'ztest', 'signrank', 'jbtest': see :func:`marginal_tests`
+        - 'runstest', 'lbq': see :func:`independence_tests`
+
         Default is ``'signtest'``.
 
     Returns
@@ -381,27 +380,244 @@ def hypothesis_test(x: ArrayLike, the_test: str = 'signtest') -> float:
         P-value from the statistical test. A small p-value (< 0.05) typically
         indicates rejection of the null hypothesis.
     """
-    x = np.asarray(x)
-    p = np.nan
-    if the_test == 'signtest':
-        _, p = sign_test(x)
-    elif the_test == 'runstest':
-        _, p = runstest_1samp(x, cutoff='mean', correction=True)
-    elif the_test == 'jbtest':
-        s = jarque_bera(x)
-        p = s.pvalue
-    elif the_test == 'ztest':
-        x_mean = np.mean(x)
-        n = len(x)
-        sigma = 1
-        zval = (x_mean - 0) / (sigma / np.sqrt(n))
-        p = 2 * norm.cdf(-abs(zval))
-    elif the_test == 'signrank':
-        _, p = wilcoxon(x)
-    elif the_test == 'lbq':
-        # Ljung-Box Q-test for residual autocorrelation; O(N*n_lags), see
-        # utils.ljung_box_pvalue.
-        p = ljung_box_pvalue(x, n_lags=20)
+    if the_test in ('runstest', 'lbq'):
+        return independence_tests(x, the_test)
+    if the_test in ('signtest', 'vartest', 'ztest', 'signrank', 'jbtest'):
+        return marginal_tests(x, the_test)
+    raise ValueError(f"Unknown test: {the_test}.")
+
+
+def _signtest_pvalue(x: np.ndarray) -> float:
+    """
+    p-value of MATLAB's ``signtest(x)`` (median zero, two-sided).
+
+    Zeros are dropped; the exact binomial test is used for fewer than 100 remaining
+    values, the normal approximation (with a continuity correction) otherwise.
+    """
+    d = x[~np.isnan(x)]
+    d = d[d != 0]
+    n = len(d)
+    if n == 0:
+        return 1.0
+    npos = int(np.sum(d > 0))
+    nneg = n - npos
+    if n < 100:
+        return float(min(1.0, 2 * binom.cdf(min(nneg, npos), n, 0.5)))
+    z = (npos - nneg - np.sign(npos - nneg)) / np.sqrt(n)
+    return float(2 * norm.cdf(-abs(z)))
+
+
+def _signrank_pvalue(x: np.ndarray) -> float:
+    """
+    p-value of MATLAB's ``signrank(x)`` (Wilcoxon signed rank test of zero median, two-sided).
+
+    Exact (from the permutation distribution of the signed ranks, with ties given their
+    average rank) for 15 or fewer non-zero values, the tie-corrected normal
+    approximation otherwise.
+    """
+    d = x[~np.isnan(x)]
+    if len(d) == 0:
+        raise ValueError('signrank: not enough data.')
+    d = d[d != 0]
+    n = len(d)
+    if n == 0:
+        return 1.0
+    ranks = rankdata(np.abs(d))  # average ranks for ties
+    w = np.sum(ranks[d > 0])
+    if n > 15:
+        _, counts = np.unique(np.abs(d), return_counts=True)
+        tieadj = 0.5 * np.sum(counts ** 3 - counts)
+        z = (w - n * (n + 1) / 4) / np.sqrt((n * (n + 1) * (2 * n + 1) - tieadj) / 24)
+        return float(2 * norm.cdf(-abs(z)))
+    # exact: probability that the sum of a random subset of the ranks is at most the
+    # smaller of w and n(n+1)/2 - w
+    maxw = n * (n + 1) / 2
+    if w > maxw / 2:
+        w = maxw - w
+    v = np.sort(ranks)
+    if np.any(v != np.floor(v)):  # half-integer ranks: work in units of 1/2
+        v = np.round(2 * v).astype(int)
+        w = int(round(2 * w))
     else:
-        raise ValueError(f"Unknown test: {the_test}.")
-    return p
+        v = v.astype(int)
+        w = int(round(w))
+    counts = np.zeros(w + 1)
+    counts[0] = 1.0
+    for vj in v[v <= w]:
+        counts[vj:] = counts[vj:] + counts[:w + 1 - vj].copy()
+    return float(min(1.0, 2 * np.sum(counts) / 2.0 ** n))
+
+
+def _vartest_pvalue(x: np.ndarray, v: float = 1.0) -> float:
+    """p-value of MATLAB's ``[~, p] = vartest(x, v)``: chi-squared test that the variance is v (two-sided)."""
+    x = x[~np.isnan(x)]
+    df = max(len(x) - 1, 0)
+    sumsq = np.sum((x - np.mean(x)) ** 2)
+    p = chi2.cdf(sumsq / v, df)
+    return float(2 * min(p, 1 - p))
+
+
+def _jbtest_pvalue(x: np.ndarray) -> float:
+    """
+    p-value of MATLAB's ``[~, p] = jbtest(x)`` (Jarque-Bera test of normality).
+
+    MATLAB interpolates a table of simulated critical values (see
+    ``toolboxes/distribution_fits/jbtest_tables.py``), so the p-value is limited to
+    [0.001, 0.5].
+    """
+    x = x[~np.isnan(x)]
+    n = len(x)
+    if n < 2:
+        raise ValueError('jbtest: not enough data.')
+    if n == 2:
+        return 1.0
+    z = (x - np.mean(x)) / np.std(x)
+    skew_ = np.sum(z ** 3) / n
+    kurt_ = np.sum(z ** 4) / n - 3
+    jb = n * (skew_ ** 2 / 6 + kurt_ ** 2 / 24)
+
+    # critical values at this sample size: interpolate in 1/n, shape-preserving
+    inv_n = 1.0 / JB_SAMPLE_SIZES
+    order = np.argsort(inv_n)
+    cvs = np.array([PchipInterpolator(inv_n[order], JB_CRITICAL_VALUES[order, j])(1.0 / n)
+                    for j in range(len(JB_ALPHAS))])
+    if np.isnan(jb):
+        return 0.0
+    if jb < cvs[-1]:  # smallest critical value at the end
+        return float(JB_ALPHAS[-1])
+    if cvs[0] <= jb:  # largest critical value at the beginning
+        return float(JB_ALPHAS[0])
+    pp = PchipInterpolator(JB_ALPHAS, cvs)
+    i = int(np.argmax(jb > cvs))  # first index with jb > cvs
+    return float(brentq(lambda a: pp(a) - jb, JB_ALPHAS[i - 1], JB_ALPHAS[i],
+                        xtol=1e-16, rtol=4 * np.finfo(float).eps))
+
+
+def _log_choose(n, k):
+    """log of the binomial coefficient, -inf where it is zero."""
+    n = np.asarray(n, dtype=float)
+    k = np.asarray(k, dtype=float)
+    with np.errstate(invalid='ignore'):
+        out = gammaln(n + 1) - gammaln(k + 1) - gammaln(n - k + 1)
+    return np.where((k < 0) | (n - k < 0), -np.inf, out)
+
+
+def runstest_pvalue(x: np.ndarray) -> float:
+    """
+    p-value of MATLAB's ``[~, p] = runstest(x)`` (runs above and below the mean; two-sided).
+
+    Values equal to the mean are dropped. The p-value comes from the exact distribution
+    of the number of runs (as MATLAB's default for this test),
+    ``min(1, 2 (P(R = r) + min(P(R < r), P(R > r))))``.
+    """
+    x = x[~np.isnan(x)]
+    if len(x) == 0:
+        return 1.0
+    v = np.mean(x)
+    x = x[x != v]
+    n = len(x)
+    if n == 0:
+        return 1.0
+    b = (x > v).astype(int)
+    n1 = int(b.sum())
+    n0 = n - n1
+    nruns = 1 + int(np.sum(b[:-1] != b[1:]))
+    if n1 == 0 or n0 == 0:
+        plist = np.array([1.0])  # exactly one run
+    else:
+        r = np.arange(1, 2 * min(n1, n0) + 2)
+        plist = np.zeros(len(r))
+        logdenom = _log_choose(n, n0)
+        even = r % 2 == 0
+        k = r[even] // 2
+        plist[even] = 2 * np.exp(_log_choose(n1 - 1, k - 1) + _log_choose(n0 - 1, k - 1) - logdenom)
+        k = r[~even] // 2
+        plist[~even] = (np.exp(_log_choose(n1 - 1, k - 1) + _log_choose(n0 - 1, k) - logdenom)
+                        + np.exp(_log_choose(n1 - 1, k) + _log_choose(n0 - 1, k - 1) - logdenom))
+    pexact = plist[nruns - 1]
+    plo = np.sum(plist[:nruns - 1])
+    phi = np.sum(plist[nruns:])
+    return float(min(1.0, 2 * (pexact + min(plo, phi))))
+
+
+def marginal_tests(y: ArrayLike, the_test: str = 'signtest') -> float:
+    """
+    p-value of a hypothesis test about the distribution of values.
+
+    Tests the distribution of the values of the time series, ignoring their temporal
+    order (a shuffled series gives the same p-value); see :func:`independence_tests`
+    for tests of serial dependence. This is the part of hctsa's former
+    ``HT_HypothesisTest`` that tests marginal properties.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    the_test : {'signtest', 'vartest', 'ztest', 'signrank', 'jbtest'}, optional
+        The test:
+
+        - 'signtest': sign test of zero median (exact binomial test for fewer than
+          100 non-zero values, normal approximation otherwise);
+        - 'vartest': chi-squared test that the variance is 1 (assuming normality);
+        - 'ztest': z-test that the mean is zero (assuming unit variance);
+        - 'signrank': Wilcoxon signed rank test of zero median (exact for up to 15
+          non-zero values, normal approximation otherwise);
+        - 'jbtest': Jarque-Bera test of normality (p-values from MATLAB's table of
+          simulated critical values: limited to [0.001, 0.5]).
+
+        Default is ``'signtest'``.
+
+    Returns
+    -------
+    float
+        The p-value of the (two-sided) test. Small values reject the null hypothesis.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if the_test == 'signtest':
+        return _signtest_pvalue(y)
+    if the_test == 'vartest':
+        return _vartest_pvalue(y, 1.0)
+    if the_test == 'ztest':
+        y = y[~np.isnan(y)]
+        z = np.mean(y) / (1.0 / np.sqrt(len(y)))
+        return float(2 * norm.cdf(-abs(z)))
+    if the_test == 'signrank':
+        return _signrank_pvalue(y)
+    if the_test == 'jbtest':
+        return _jbtest_pvalue(y)
+    raise ValueError(f"Unknown hypothesis test '{the_test}'.")
+
+
+def independence_tests(y: ArrayLike, the_test: str = 'runstest') -> float:
+    """
+    p-value of a hypothesis test of serial independence.
+
+    Tests whether the values of the time series are independent of one another (a
+    small p-value indicates serial dependence). Unlike the tests in
+    :func:`marginal_tests`, the p-value depends on the temporal order of the values.
+    This is the part of hctsa's former ``HT_HypothesisTest`` that tests dependence.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    the_test : {'runstest', 'lbq'}, optional
+        The test:
+
+        - 'runstest': runs test for randomness of runs above and below the mean
+          (exact distribution of the number of runs);
+        - 'lbq': Ljung-Box Q-test for autocorrelation up to lag 20.
+
+        Default is ``'runstest'``.
+
+    Returns
+    -------
+    float
+        The p-value of the test.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if the_test == 'runstest':
+        return runstest_pvalue(y)
+    if the_test == 'lbq':
+        return ljung_box_pvalue(y, n_lags=20)
+    raise ValueError(f"Unknown hypothesis test '{the_test}'.")

@@ -11,8 +11,8 @@ from scipy.stats import gamma as gamma_dist
 from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, rayleigh, uniform, weibull_min, skew, kurtosis
 
 from ..operations.correlation import autocorr, first_crossing
-from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
-from ..utils import bin_picker, histc, matlab_quantile, simple_binner, x_corr
+from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, gpfit, wblfit
+from ..utils import bin_picker, histc, matlab_quantile, sign_change, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')
 
@@ -46,6 +46,48 @@ def cumulants(x: ArrayLike, cum_what_may: str = 'skew1') -> float:
         return kurtosis(x, bias=False, fisher=True)
     else:
         return ValueError('Unknown cumulant. Choose either skew1, skew2, kurt1, or kurt2.')
+
+def _ksdensity(x: np.ndarray, xi: Union[None, np.ndarray] = None, npoints: int = 100) -> tuple:
+    """
+    Gaussian kernel density estimate of x, in the manner of MATLAB's ``ksdensity``.
+
+    The bandwidth is MATLAB's default, ``sig * (4 / (3 n)) ** (1 / 5)`` with the
+    robust spread ``sig = median(|x - median(x)|) / 0.6745`` (the range of x if that
+    is zero, and 1 if the bandwidth is still not positive), applied through
+    ``scipy.stats.gaussian_kde``. With no evaluation points given, ``npoints`` equally
+    spaced points from ``min(x) - 3 bw`` to ``max(x) + 3 bw`` are used, as in MATLAB.
+
+    A constant series has a singular covariance, for which ``gaussian_kde`` raises
+    ``LinAlgError``; there the kernels are summed directly (bandwidth 1, as MATLAB).
+
+    Note that MATLAB's ``ksdensity`` truncates the kernel at four bandwidths when
+    there are many data points; ``gaussian_kde`` does not, so values differ slightly
+    (about 1e-4 relative to the peak) for series of more than a few hundred points.
+
+    Returns
+    -------
+    f, xi : numpy.ndarray
+        The density estimate and the points at which it is evaluated.
+    """
+    x = np.asarray(x, dtype=float)
+    n = len(x)
+    sig = np.median(np.abs(x - np.median(x))) / 0.6745
+    if sig <= 0:
+        sig = np.ptp(x)
+    bw = sig * (4 / (3 * n)) ** (1 / 5)
+    if not bw > 0:
+        bw = 1.0
+    if xi is None:
+        xi = np.linspace(np.min(x) - 3 * bw, np.max(x) + 3 * bw, npoints)
+    xi = np.asarray(xi, dtype=float)
+    std_x = np.std(x, ddof=1) if n > 1 else 0.0
+    if std_x > 0:
+        # (scipy multiplies the bw_method factor by std(x, ddof=1))
+        f = gaussian_kde(x, bw_method=bw / std_x)(xi)
+    else:
+        u = (xi[:, None] - x[None, :]) / bw
+        f = np.exp(-0.5 * u * u).sum(axis=1) / (n * bw * np.sqrt(2 * np.pi))
+    return f, xi
 
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """
@@ -103,26 +145,13 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         raise ValueError(f"Unknown distribution: {what_distn}.")
     if what_distn == 'beta':
         # clumsily scale to the range (0,1)
+        if np.all(x == x[0]):
+            logger.warning("Data are a constant; the beta distribution cannot be fitted.")
+            return np.nan  # (MATLAB's betafit errors here)
         sd = np.std(x, ddof=1)
         x = (x - np.min(x) + 0.01 * sd) / (np.max(x) - np.min(x) + 0.02 * sd)
     n = len(x)
     x_step = np.std(x, ddof=1) / 100  # set a step size
-
-    # ----------------------------
-    # KDE bandwidth matching MATLAB's ksdensity default
-    # (robust MAD-based sigma + Silverman's rule), expressed as a scipy
-    # bw_method factor (scipy multiplies the factor by std(x, ddof=1)).
-    # ----------------------------
-    med = np.median(x)
-    sig = np.median(np.abs(x - med)) / 0.6745
-    if sig <= 0:
-        sig = np.ptp(x)
-    matlab_bw = sig * (4 / (3 * n)) ** (1 / 5)
-    std_x = np.std(x, ddof=1)
-    bw_factor = matlab_bw / std_x if std_x > 0 else None
-
-    def _make_kde(data):
-        return gaussian_kde(data, bw_method=bw_factor)
 
     # ----------------------------
     # Fit distribution & find the support bounds over which to compare
@@ -236,11 +265,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     # ----------------------------
     # Estimate smoothed empirical distribution
     # ----------------------------
-    # MATLAB's default ksdensity grid extends ~3 bandwidths beyond the data range.
-    xi = np.linspace(np.min(x) - 3 * matlab_bw, np.max(x) + 3 * matlab_bw, 100)
-    # Calculate the Kernel Density Estimate (KDE) for the first angle distribution.
-    kde = _make_kde(x)
-    f = kde(xi)
+    f, xi = _ksdensity(x)
     xi = xi[f > 1e-6]  # only keep values greater than 1E-6
     if xi.size == 0:
         return np.nan
@@ -252,30 +277,43 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
 
     # Rerun both over the same range
     xi = np.linspace(x1, x2, 1000)
-    f = kde(xi)
-    ffit = pdf_func(xi)
+    f, _ = _ksdensity(x, xi)
+    with np.errstate(all='ignore'):
+        ffit = pdf_func(xi)
 
     # ----------------------------
     # Statistics
     # ----------------------------
+    # (as in MATLAB, max/argmax skip NaN, which a degenerate fit, such as one to a
+    # constant series, produces)
     dx = xi[1] - xi[0]
     out = {}
-    # ADIFF: returns absolute area between the curves
-    out['adiff'] = np.sum(np.abs(f - ffit) * dx)
-    # PEAKSEPY: separation (in y) between the maxima of each distribution
-    out['peaksepy'] = np.max(ffit) - np.max(f)
-    # PEAKSEPX: separation (in x) between the maxima of each distribution
-    i1 = np.argmax(f)
-    i2 = np.argmax(ffit)
-    out['peaksepx'] = xi[i2] - xi[i1]
-    # OLAPINT: overlap integral between the two curves; multiplying by std(x) makes
-    # this scale-invariant
-    out['olapint'] = np.sum(f * ffit * dx) * np.std(x, ddof=1)
-    # RELENT: relative entropy of the two distributions
-    r = (ffit > 0) & (f > 0)  # skip points where either density is zero (0*log(0) := 0)
-    out['relent'] = np.sum(f[r] * np.log(f[r] / ffit[r]) * dx)
+    with np.errstate(all='ignore'):
+        # ADIFF: returns absolute area between the curves
+        out['adiff'] = np.sum(np.abs(f - ffit) * dx)
+        # PEAKSEPY: separation (in y) between the maxima of each distribution
+        out['peaksepy'] = _matlab_max(ffit) - _matlab_max(f)
+        # PEAKSEPX: separation (in x) between the maxima of each distribution
+        out['peaksepx'] = xi[_matlab_argmax(ffit)] - xi[_matlab_argmax(f)]
+        # OLAPINT: overlap integral between the two curves; multiplying by std(x) makes
+        # this scale-invariant
+        out['olapint'] = np.sum(f * ffit * dx) * np.std(x, ddof=1)
+        # RELENT: relative entropy of the two distributions (points where either
+        # density is exactly zero are skipped: 0*log(0) := 0)
+        r = (ffit != 0) & (f != 0)
+        out['relent'] = np.sum(f[r] * np.log(f[r] / ffit[r]) * dx)
 
     return out
+
+
+def _matlab_max(v: np.ndarray) -> float:
+    """MATLAB's ``max(v)``: ignores NaN (NaN only if all are NaN)."""
+    return np.nan if np.all(np.isnan(v)) else float(np.nanmax(v))
+
+
+def _matlab_argmax(v: np.ndarray) -> int:
+    """Index from MATLAB's ``[~, i] = max(v)``: the first maximum, skipping NaN (1st element if all NaN)."""
+    return 0 if np.all(np.isnan(v)) else int(np.nanargmax(v))
 
 
 def _find_bounds(pdf_func, start_left, start_right, x_step, thresh):
@@ -714,17 +752,19 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     """
     Compute custom skewness measures of a time series.
 
-    Calculates either the Pearson skewness or the Bowley (quartile)
-    skewness coefficient.
+    Calculates the Pearson skewness (using the median or the mode) or the Bowley
+    (quartile) skewness coefficient.
 
-    The Pearson skewness is defined as
+    The Pearson skewness (with the median) is defined as
 
     .. math::
 
         \\frac{3(\\mu - \\tilde{x})}{\\sigma},
 
     where :math:`\\mu` is the mean, :math:`\\tilde{x}` is the median,
-    and :math:`\\sigma` is the standard deviation.
+    and :math:`\\sigma` is the standard deviation. The mode-based version is
+    :math:`(\\mu - \\text{mode})/\\sigma`, with the mode estimated from a histogram
+    with automatically chosen bins (see :func:`histogram_mode`).
 
     The Bowley skewness is defined as
 
@@ -743,10 +783,20 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     what_skew : str, optional
         Skewness measure to compute.
 
-        - ``"pearson"``: Pearson skewness coefficient.
+        - ``"pearson"`` (or ``"pearsonMedian"``): Pearson skewness coefficient
+          from the median.
+        - ``"pearsonMode"``: Pearson skewness coefficient from the mode of a
+          histogram (automatic bins).
         - ``"bowley"``: Bowley (quartile) skewness coefficient.
 
         Default is ``"pearson"``.
+
+    Notes
+    -----
+    hctsa picks the histogram bins for ``"pearsonMode"`` with MATLAB's ``'auto'``
+    bin rule (Scott's rule, or integer bins for integer data of small range);
+    here NumPy's ``'auto'`` rule (the larger of the Sturges and Freedman-Diaconis
+    bin counts) is used, so the mode, and hence this value, differs somewhat.
 
     Returns
     -------
@@ -759,11 +809,15 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     """
     y = np.asarray(y)
     out = 0.0
-    if what_skew == 'pearson':
+    if what_skew == 'pearsonMode':
+        out = (np.mean(y) - histogram_mode(y, 'auto')) / np.std(y, ddof=1)
+    elif what_skew in ('pearson', 'pearsonMedian'):
         out = (3 * (np.mean(y) - np.median(y)) / np.std(y, ddof=1))
     elif what_skew == 'bowley':
         qs = np.quantile(y, [0.25, 0.5, 0.75], method='hazen')
         out = (qs[2]+qs[0] - 2 * qs[1]) / (qs[2] - qs[0]) 
+    else:
+        raise ValueError(f"Unknown skewness type '{what_skew}'.")
     
     return float(out)
 
@@ -1256,7 +1310,7 @@ def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True
 
     return out
 
-def histogram_mode(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> float:
+def histogram_mode(y: ArrayLike, num_bins: Union[int, str] = 10, do_simple: bool = True) -> float:
     """
     Measures the mode of the data vector using histograms with a given number
     of bins.
@@ -1265,10 +1319,13 @@ def histogram_mode(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> 
     -----------
     y : array-like
         The input time series.
-    num_bins : int, optional
-        The number of bins to use in the histogram. Default is 10.
+    num_bins : int or str, optional
+        The number of bins to use in the histogram, or a bin-selection rule
+        understood by :func:`numpy.histogram_bin_edges` (such as ``'auto'``; hctsa's
+        ``'auto'`` is MATLAB's rule, which NumPy's only approximates). Default is 10.
     do_simple : bool, optional
-        Whether to use a simple binning method (linearly spaced bins). Default is `True`.
+        Whether to use a simple binning method (linearly spaced bins) when
+        ``num_bins`` is a number. Default is `True`.
 
     Returns
     --------
@@ -1276,7 +1333,9 @@ def histogram_mode(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> 
         The mode of the data vector using histograms with num_bins bins. 
     """
     y = np.asarray(y)
-    if do_simple:
+    if isinstance(num_bins, str):
+        N, bin_edges = np.histogram(y, bins=num_bins)
+    elif do_simple:
         N, bin_edges = simple_binner(y, num_bins)
     else:
         bin_edges = bin_picker(y.min(), y.max(), num_bins)
@@ -1409,3 +1468,332 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     out['kurtosisrat'] = stats.kurtosis(y_transform, fisher=False) / stats.kurtosis(y, fisher=False)
 
     return out
+
+
+def _matlab_round(v: float) -> int:
+    """MATLAB's ``round`` (halves away from zero)."""
+    return int(np.sign(v) * np.floor(abs(v) + 0.5))
+
+
+def _hill_estimate(s: np.ndarray, k: int) -> float:
+    """Hill estimator from the k largest of the descending-sorted positive values ``s``."""
+    if len(s) <= k or s[k] <= 0 or s[k - 1] == s[k]:
+        return np.nan  # too few values, or a tie at the threshold
+    return float(np.mean(np.log(s[:k])) - np.log(s[k]))
+
+
+def _moment_estimate(s: np.ndarray, k: int) -> float:
+    """Dekkers-Einmahl-de Haan moment estimator of the tail index (as ``_hill_estimate``)."""
+    if len(s) <= k or s[k] <= 0 or s[k - 1] == s[k]:
+        return np.nan
+    log_excess = np.log(s[:k]) - np.log(s[k])
+    m1 = np.mean(log_excess)
+    m2 = np.mean(log_excess ** 2)
+    if m2 <= 0:
+        return np.nan
+    with np.errstate(all='ignore'):
+        xi = m1 + 1 - 0.5 / (1 - m1 ** 2 / m2)
+    return float(xi) if np.isfinite(xi) else np.nan
+
+
+def _gpd_shape(exceed: np.ndarray) -> float:
+    """Shape parameter of a generalized Pareto distribution (threshold 0) fitted by maximum likelihood."""
+    if np.any(exceed <= 0):
+        return np.nan  # ties between the tail values and the threshold
+    try:
+        c, _ = gpfit(exceed)
+    except (ValueError, RuntimeError, FloatingPointError):
+        return np.nan
+    return float(c) if np.isfinite(c) else np.nan
+
+
+def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
+    """
+    Tail index of the distribution of values: how heavy its tails are.
+
+    The tail index is estimated in several ways from the ``k = round(tail_frac * N)``
+    most extreme values in each tail (taken relative to the median of the data):
+    Hill's estimator, a moment estimator, and the shape parameter of a generalized
+    Pareto distribution fitted to the exceedances over the (k+1)-th most extreme value.
+    A larger index means a heavier tail (a power-law tail of exponent alpha has index
+    1/alpha; a Gaussian has an index of about zero). NaN is returned for every
+    output if there are fewer than 10 tail values or if k is at least N/2.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tail_frac : float, optional
+        The fraction of the data in each tail used to estimate the index
+        (default 0.05).
+
+    Returns
+    -------
+    dict
+        hillUpper, hillLower: Hill estimator for the upper and lower tail (distances
+        above and below the median); hillAsym: their difference; momentAbs: the moment
+        estimator for the distances from the median; gpdUpper, gpdLower: the generalized
+        Pareto shape parameter for the upper and lower exceedances; gpdAsym: their
+        difference.
+
+    Notes
+    -----
+    The generalized Pareto fit repeats MATLAB's ``gpfit`` (a Nelder-Mead search with loose
+    tolerances), so the ``gpd*`` values are not exact maximum-likelihood estimates.
+    """
+    names = ['hillUpper', 'hillLower', 'hillAsym', 'momentAbs', 'gpdUpper', 'gpdLower', 'gpdAsym']
+    out = dict.fromkeys(names, np.nan)
+
+    y = np.asarray(y, dtype=float).ravel()
+    y = y[np.isfinite(y)]
+    n = len(y)
+    k = _matlab_round(tail_frac * n)  # number of values in each tail
+    if k < 10 or k >= n // 2:
+        return out  # too few tail values to estimate a tail index
+
+    dev = y - np.median(y)
+    tail_up = np.sort(dev[dev > 0])[::-1]  # distances above the median
+    tail_lo = np.sort(-dev[dev < 0])[::-1]  # distances below the median
+    tail_abs = np.sort(np.abs(dev))[::-1]  # distances from the median
+
+    out['hillUpper'] = _hill_estimate(tail_up, k)
+    out['hillLower'] = _hill_estimate(tail_lo, k)
+    out['hillAsym'] = out['hillUpper'] - out['hillLower']
+    out['momentAbs'] = _moment_estimate(tail_abs, k)
+
+    ys = np.sort(y)[::-1]
+    out['gpdUpper'] = _gpd_shape(ys[:k] - ys[k])  # upper exceedances
+    ys = np.sort(y)
+    out['gpdLower'] = _gpd_shape(ys[k] - ys[:k])  # lower exceedances
+    out['gpdAsym'] = out['gpdUpper'] - out['gpdLower']
+    return out
+
+
+def _ratio(a: float, b: float) -> float:
+    """``a / b`` with MATLAB's semantics for a zero denominator (Inf, -Inf or NaN)."""
+    with np.errstate(all='ignore'):
+        return float(np.float64(a) / np.float64(b))
+
+
+def _fmt_threshold(prefix: str, thr: float) -> str:
+    """Output name hctsa gives a threshold: sprintf('%s_%.2f') with the dot removed."""
+    return f"{prefix}_{thr:.2f}".replace('.', '')
+
+
+def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
+                      numcross: Union[None, float, list] = None,
+                      arclength: Union[None, float, list] = None) -> dict:
+    """
+    Statistics of a kernel-smoothed distribution of the data.
+
+    The data are smoothed with a Gaussian kernel (100 points, MATLAB's default
+    bandwidth) and the smoothed density, f, is summarized by its number of peaks,
+    maximum, entropy, and asymmetry about the mean, plus optional threshold-based
+    statistics.
+
+    Parameters
+    ----------
+    x : array-like
+        The input data vector.
+    area : float or list of float, optional
+        Thresholds for which to compute the integral of f over the region where
+        f is below the threshold.
+    numcross : float or list of float, optional
+        Thresholds for which to count the crossings of f through the threshold.
+    arclength : float or list of float, optional
+        Half-widths of a window around the mean; the arc length (total absolute change
+        in f) within the window is computed.
+
+    Returns
+    -------
+    dict
+        npeaks: the number of 'large enough' maxima of f (those with second difference
+        below -0.0002); max: the maximum of f; entropy: the entropy of f; asym: the
+        area of f above the mean divided by that below it; plsym: the ratio of the
+        total variation of f below the mean to that above it; and, for each threshold t,
+        ``numcross_t``, ``area_t``, ``arclength_t`` (t formatted to two decimals with the
+        dot removed, e.g. ``numcross_005`` for 0.05).
+
+    Notes
+    -----
+    Uses ``scipy.stats.gaussian_kde`` with MATLAB's default bandwidth. MATLAB's
+    ``ksdensity`` truncates the kernel at four bandwidths for large samples, so
+    values differ slightly (about 1e-4 relative to the peak) for N above a few hundred.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    for name, v in (('area', area), ('numcross', numcross), ('arclength', arclength)):
+        if v is not None and np.any(np.asarray(v) <= 0):
+            raise ValueError(f"'{name}' thresholds must be positive.")
+    area, numcross, arclength = (None if v is None else np.atleast_1d(np.asarray(v, dtype=float))
+                                 for v in (area, numcross, arclength))
+
+    m = np.mean(x)
+    f, xi = _ksdensity(x)
+    dx = xi[1] - xi[0]
+    out = {}
+
+    df = np.diff(f)
+    ddf = np.diff(df)
+    sdsp = ddf[sign_change(df, 1)]
+    out['npeaks'] = int(np.sum(sdsp < -0.0002))  # 'large enough' maxima
+    out['max'] = float(np.max(f))  # maximum of the distribution
+    fp = f[f > 0]
+    out['entropy'] = float(-np.sum(fp * np.log(fp) * dx))
+    out['asym'] = _ratio(np.sum(f[xi > m] * dx), np.sum(f[xi < m] * dx))
+    out['plsym'] = _ratio(np.sum(np.abs(np.diff(f[xi < m])) * dx),
+                          np.sum(np.abs(np.diff(f[xi > m])) * dx))
+
+    if numcross is not None:  # crossing statistics
+        for thr in numcross:
+            out[_fmt_threshold('numcross', thr)] = int(np.sum(sign_change(f - thr)))
+    if area is not None:  # area statistics
+        for thr in area:
+            out[_fmt_threshold('area', thr)] = float(np.sum(f[f < thr] * dx))
+    if arclength is not None:  # arc length statistics
+        for thr in arclength:
+            fd = np.abs(np.diff(f[(xi > m - thr) & (xi < m + thr)]))
+            out[_fmt_threshold('arclength', thr)] = float(np.sum(fd * dx))
+    return out
+
+
+def _gauss_sum(t, *p):
+    """Sum of Gaussians a*exp(-((t-b)/c)^2) with parameters (a1, b1, c1, a2, b2, c2, ...)."""
+    out = np.zeros_like(t, dtype=float)
+    for i in range(0, len(p), 3):
+        out += p[i] * np.exp(-((t - p[i + 1]) / p[i + 2]) ** 2)
+    return out
+
+
+def _fit_curve(dnx: np.ndarray, dny: np.ndarray, dmodel: str):
+    """Least-squares fit of a curve of the named type; returns (fitted values, number of coefficients)."""
+    from scipy.optimize import curve_fit
+
+    span = np.ptp(dnx) if len(dnx) > 1 else 1.0
+    i0 = int(np.argmax(dny))
+    best = None
+    if dmodel in ('gauss1', 'gauss2'):
+        npk = 1 if dmodel == 'gauss1' else 2
+        a0, b0, c0 = dny[i0], dnx[i0], span / 4
+        starts = []
+        if npk == 1:
+            starts.append([a0, b0, c0])
+        else:
+            # a second peak at a number of positions across the range, and half-height peaks
+            for frac in (0.1, 0.25, 0.4, 0.6, 0.75, 0.9):
+                b2 = dnx[0] + frac * span
+                starts.append([a0, b0, c0, a0 / 2, b2, c0 / 2])
+        model = _gauss_sum
+        k = 3 * npk
+    elif dmodel == 'exp1':
+        pos = dny > 0
+        if np.sum(pos) >= 2 and np.ptp(dnx[pos]) > 0:
+            b1, a1 = np.polyfit(dnx[pos], np.log(dny[pos]), 1)
+            starts = [[np.exp(a1), b1]]
+        else:
+            starts = [[1.0, 0.0]]
+        starts.append([1.0, 0.0])
+        model = lambda t, a, b: a * np.exp(b * t)
+        k = 2
+    elif dmodel == 'power1':
+        pos = dny > 0
+        if np.sum(pos) >= 2 and np.ptp(np.log(dnx[pos])) > 0:
+            b1, a1 = np.polyfit(np.log(dnx[pos]), np.log(dny[pos]), 1)
+            starts = [[np.exp(a1), b1]]
+        else:
+            starts = [[1.0, 1.0]]
+        starts.append([1.0, 1.0])
+        model = lambda t, a, b: a * np.power(t, b)
+        k = 2
+    else:
+        raise ValueError(f"Invalid distribution model '{dmodel}' specified")
+
+    for p0 in starts:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                popt, _ = curve_fit(model, dnx, dny, p0=p0, maxfev=20000)
+        except (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
+            continue
+        fit = model(dnx, *popt)
+        if not np.all(np.isfinite(fit)):
+            continue
+        sse = np.sum((dny - fit) ** 2)
+        if best is None or sse < best[0]:
+            best = (sse, fit)
+    if best is None:
+        return None, k
+    return best[1], k
+
+
+def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') -> Union[dict, float]:
+    """
+    Fits a simple curve to the distribution of the values.
+
+    The distribution of the data, estimated either as a histogram or by kernel
+    smoothing, is fitted by nonlinear least squares with a simple curve, and the
+    goodness of fit and the structure of the residuals are returned.
+
+    Parameters
+    ----------
+    x : array-like
+        The input data vector.
+    dmodel : {'gauss1', 'gauss2', 'exp1', 'power1'}
+        The curve to fit: a Gaussian, the sum of two Gaussians, an exponential, or a
+        power law ``a * x ** b`` (positive data only). (hctsa's time-series models, the
+        sinusoids and Fourier series, are fitted by ``sinusoid_fit`` in the spectral
+        module.)
+    num_bins : int or str, optional
+        How to estimate the distribution: a binning rule understood by
+        :func:`numpy.histogram_bin_edges` (default ``'sqrt'``), the number of
+        histogram bins, or 0 for a kernel-smoothed density.
+
+    Returns
+    -------
+    dict
+        r2: R-squared of the fit; adjr2: R-squared adjusted for the number of
+        coefficients; rmse: root-mean-square error of the fit, scaled by the standard
+        deviation of the data; resAC1, resAC2: autocorrelations of the residuals at lags
+        1 and 2; resruns: p-value of a runs test on the residuals. NaN (not a dict)
+        if the model cannot be fitted.
+
+    Notes
+    -----
+    Fits use ``scipy.optimize.curve_fit`` (Levenberg-Marquardt, from heuristic starting
+    points; several for ``'gauss2'``, keeping the best), where hctsa uses the
+    trust-region fit of MATLAB's ``fit``, so values can differ where the fit is
+    ill-conditioned or has local minima. Histogram bin edges follow NumPy's rules, not
+    MATLAB's, which are rounded to 'nice' values.
+    """
+    from .hypothesis_tests import independence_tests
+    from ..toolboxes.matlab.matlab_fit import goodness_of_fit
+
+    x = np.asarray(x, dtype=float).ravel()
+    if dmodel not in ('gauss1', 'gauss2', 'exp1', 'power1'):
+        raise ValueError(f"Invalid distribution model '{dmodel}' specified")
+
+    if isinstance(num_bins, str) or num_bins != 0:
+        counts, edges = np.histogram(x, bins=num_bins)
+        dnx = (edges[:-1] + edges[1:]) / 2
+        dny = counts / (np.sum(counts) * np.mean(np.diff(edges)))  # counts -> probability density
+    else:  # kernel-smoothed distribution instead of a histogram
+        dny, dnx = _ksdensity(x)
+
+    if dmodel == 'power1' and np.any(dnx <= 0):
+        logger.warning(f"The model '{dmodel}' can not be applied to non-positive data")
+        return np.nan
+
+    fit, k = _fit_curve(dnx, dny, dmodel)
+    if fit is None:
+        logger.warning(f"Error fitting the model '{dmodel}' to this data")
+        return np.nan
+
+    gof = goodness_of_fit(dny, fit, k)
+    res = dny - fit
+    return {
+        'r2': float(gof['rsquare']),
+        'adjr2': float(gof['adjrsquare']),
+        'rmse': float(gof['rmse'] * np.std(x, ddof=1)),
+        'resAC1': float(np.ravel(autocorr(res, 1, 'Fourier'))[0]),
+        'resAC2': float(np.ravel(autocorr(res, 2, 'Fourier'))[0]),
+        'resruns': independence_tests(res, 'runstest'),
+    }
