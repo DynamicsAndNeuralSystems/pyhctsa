@@ -2357,7 +2357,10 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
           ``minexctn``, ``meanexctn``, ``stdexctn``: periods, damping times (with
           confidence intervals) and excitations of the eigenmodes
 
-        NaN if the series is too short for ARFIT.
+        NaN if the series is too short for ARFIT, and for a (nearly) exactly predictable
+        series (estimated noise variance below 1e-12 of the variance of the series, e.g. an
+        exact sinusoid): the coefficients are not determined and the residuals are
+        rounding noise.
     """
     y = np.asarray(y, dtype=float).ravel()
     p_min = int(p_min)
@@ -2374,6 +2377,11 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
         _, Aest, Cest, sbc, fpe, th = _arfit(y, p_min, p_max, selector, zero=True)
     except ValueError as err:
         logger.warning(f'Could not fit an AR model with the ARFIT algorithm: {err}')
+        return np.nan
+    # An exactly predictable series has a singular design and a noise variance at the level
+    # of rounding error: nothing to report
+    var_y = np.var(y, ddof=1)
+    if Cest < 1e-12 * var_y or not var_y > 0:
         return np.nan
     ps = np.arange(p_min, p_max + 1)
     popt = len(Aest)
