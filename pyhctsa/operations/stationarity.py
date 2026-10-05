@@ -134,7 +134,7 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     """
     Compares the distribution in consecutive time-series segments.
 
-    Returns the sum of differences between each kernel-smoothed distribution, either comparing each segment to the parent (full time series)
+    Returns the L1 distance (sum of absolute differences times the grid spacing) between each kernel-smoothed distribution, either comparing each segment to the parent (full time series)
     distribution or to all other segments.
 
     Parameters
@@ -167,6 +167,7 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     dns = np.zeros((num_points, num_segs))
     # Make range of ksdensity uniform across all subsegments
     r = np.linspace(np.min(y), np.max(y), num_points)
+    dr = r[1] - r[0] # grid spacing, to turn sums over the grid into integrals
     # Compute the kernel-smoothed distribution in all num_segs segments of the time series
     for i in range(num_segs):
         start_idx = i * lseg
@@ -181,18 +182,18 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
         pardn = kde.evaluate(r)
         divs = np.zeros(num_segs)
         for i in range(num_segs):
-            divs[i] = np.sum(np.abs(dns[:, i] - pardn))
+            divs[i] = np.sum(np.abs(dns[:, i] - pardn)) * dr
     elif each_or_par == 'each':
         # Compares each subdistribtuion to the parent (full signal) distribution
         if num_segs == 2:
-            out = np.sum(np.abs(dns[:, 0] - dns[:, 1]))
+            out = np.sum(np.abs(dns[:, 0] - dns[:, 1])) * dr
             return out
         # num_segs > 2
         diffmat = np.nan * np.ones((num_segs, num_segs)) 
         for i in range(num_segs):
             for j in range(num_segs):
                 if j > i:
-                    diffmat[i, j] = np.sum(np.abs(dns[:, i] - dns[:, j]))
+                    diffmat[i, j] = np.sum(np.abs(dns[:, i] - dns[:, j])) * dr
         divs = diffmat[~np.isnan(diffmat)] # % (the upper triangle of diffmat)
     else:
         raise ValueError(f"Unknown method: {each_or_par}. Should be 'each' or 'par'. ")
