@@ -83,12 +83,12 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
     out['SD1'] = 1/np.sqrt(2) * sd_diff * 1000
     out['SD2'] = np.sqrt(2 * np.var(x, ddof=1) - (1/2) * sd_diff**2) * 1000
 
-    return out
-
-def hrv_classic(y: ArrayLike) -> dict:
     # CVI: cardiac vagal index (Toichi et al., 1997)
     out['CVI'] = np.log10(out['SD1'] * out['SD2'] * 16)
 
+    return out
+
+def hrv_classic(y: ArrayLike) -> dict:
     """
     Compute classic heart rate variability (HRV) statistics.
 
@@ -98,8 +98,15 @@ def hrv_classic(y: ArrayLike) -> dict:
 
     The following categories of HRV features are included:
 
-    1. **pNNx measures**
-    Measures the proportion of interval differences greater than a given threshold `x` [1].
+    1. **pNNx-style measures (pnnrel025, pnnrel05, pnnrel1, pnnrel2, pnnrel3)**
+    The proportion of successive differences whose magnitude exceeds 0.25, 0.5, 1, 2 and 3
+    times the robust standard deviation of the successive differences,
+    ``sigD = median(|d - median(d)|)/0.6745`` with ``d = diff(y)`` [1]. If ``sigD`` is
+    at rounding-error level (``<= 1e-10*std(y)``, i.e. more than half the increments are
+    equal) the mean absolute deviation about the median times ``sqrt(pi/2)`` is used
+    instead; if that is also negligible (all increments equal) all five are NaN. These
+    replace the earlier fixed-threshold pnn5, pnn10, pnn20, pnn30 and pnn40, which were
+    almost always ~1 for a z-scored series.
 
     2. **Frequency-domain measures**
     Power spectral density ratios computed over standard frequency bands (e.g., LF, HF) [2].
@@ -131,8 +138,10 @@ def hrv_classic(y: ArrayLike) -> dict:
     Returns
     -------
     out: dict
-        Dictionary containing various HRV features, including pNNx statistics,
-        frequency-domain power ratios, triangular index, and Poincaré measures.
+        Dictionary containing various HRV features: pnnrel025, pnnrel05, pnnrel1,
+        pnnrel2, pnnrel3 (pNNx-style statistics relative to a robust SD of the
+        increments), frequency-domain power ratios (lfhf, vlf, lf, hf), triangular
+        index (tri), and Poincaré measures (SD1, SD2).
     """
 
     # Standard defaults
@@ -141,20 +150,32 @@ def hrv_classic(y: ArrayLike) -> dict:
     n = len(y)
 
     # ------------------------------------------------------------------------------
-    # Calculate pNNx percentage
+    # Calculate pNNx: proportion of |successive differences| exceeding c robust SDs
     # ------------------------------------------------------------------------------
-    # pNNx: recommendation as per Mietus et. al. 2002, "The pNNx files: ...", Heart
-    # strange to do this for a z-scored time series...
+    # cf. Mietus et. al. 2002, "The pNNx files: ...", Heart. The fixed thresholds x/1000
+    # are replaced by multiples of the robust SD of the increments, so the measure
+    # does not depend on the units of the series.
     d_y = np.abs(diff_y)
-    pnn_x_fn = lambda x: np.mean(d_y > x / 1000)
+    med = np.median(diff_y)
+    sig_d = np.median(np.abs(diff_y - med)) / 0.6745  # robust (MAD-based) SD of increments
+    tol_d = 1e-10 * np.std(y, ddof=1)  # a spread below this (rounding error) is treated as zero
+    if sig_d <= tol_d:
+        # over half the increments are equal: fall back to the mean absolute deviation
+        # about the median (consistent with the SD for Gaussian increments)
+        sig_d = np.mean(np.abs(diff_y - med)) * np.sqrt(np.pi / 2)
+    if sig_d <= tol_d:
+        sig_d = np.nan  # all increments equal
+
+    def pnn_rel_fn(c):
+        # (a comparison with NaN would otherwise give 0)
+        return np.nan if np.isnan(sig_d) else float(np.mean(d_y > c * sig_d))
 
     out = {}
-
-    out['pnn5'] = pnn_x_fn(5)  # 0.0055*sigma
-    out['pnn10'] = pnn_x_fn(10)  # 0.01*sigma
-    out['pnn20'] = pnn_x_fn(20)  # 0.02*sigma
-    out['pnn30'] = pnn_x_fn(30)  # 0.03*sigma
-    out['pnn40'] = pnn_x_fn(40)  # 0.04*sigma
+    out['pnnrel025'] = pnn_rel_fn(0.25)
+    out['pnnrel05'] = pnn_rel_fn(0.5)
+    out['pnnrel1'] = pnn_rel_fn(1)
+    out['pnnrel2'] = pnn_rel_fn(2)
+    out['pnnrel3'] = pnn_rel_fn(3)
 
     # ------------------------------------------------------------------------------
     # Calculate PSD
