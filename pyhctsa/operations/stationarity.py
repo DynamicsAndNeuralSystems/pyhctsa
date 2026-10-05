@@ -14,7 +14,7 @@ from itertools import permutations
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
-from ..utils import get_tau, make_mat_buffer, sign_change, z_score
+from ..utils import _ml_rng, get_tau, make_mat_buffer, matlab_quantile, sign_change, z_score
 from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit, polyfit, robustfit
 from ..toolboxes.matlab._pptest_tables import _pp_pvalue, _pp_regression
 
@@ -1336,6 +1336,110 @@ def drifting_auto_corr(y: ArrayLike, tau: int = 1, what_product: str = 'ac') -> 
                          "'backward', or 'asymmetry')")
 
     return _cumsum_bridge_stats(p)
+
+def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 100,
+                        random_seed: Union[int, str, None] = 'default') -> dict:
+    """
+    Bootstrap-based stationarity measure.
+
+    ``num_segs`` time-series segments of length ``l`` are selected at random from the time
+    series (at random start points; segments can overlap) and in each segment some statistic
+    is calculated: mean, standard deviation, skewness, kurtosis, PermEn(3,1), AC(1), AC(2), and
+    the first zero-crossing of the autocorrelation function. Outputs summarize how these
+    quantities vary in different local segments of the time series, as the standard deviation
+    of each across the segments. (The mean of each set is not output, since it just
+    re-estimates the corresponding global statistic, already covered elsewhere, rather than
+    measuring stationarity.) Returns NaN if ``l`` is longer than 90% of the time series.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    l : int or str, optional
+        The length of local time-series segments to analyze, as a positive integer, or:
+
+        - 'ac2': twice the first zero-crossing of the autocorrelation function,
+        - 'ac5': five times the first zero-crossing of the autocorrelation function.
+
+        Default is 100.
+    num_segs : int, optional
+        The number of randomly-selected local segments to analyze. Default is 100.
+    random_seed : int, str or None, optional
+        Seed of the random number generator, for reproducibility: an integer, or ``'default'``
+        (or ``None``) for seed 0 (hctsa's default), or ``'none'`` for an unseeded generator.
+        The start points are drawn from a Mersenne Twister seeded as MATLAB's ``rng(seed,
+        'twister')`` and mapped as ``randi``, so they reproduce hctsa's draws. Default is
+        ``'default'``.
+
+    Returns
+    -------
+    dict
+        - 'stdmean', 'stdstd', 'stdskew', 'stdkurt': the standard deviation, across segments,
+          of the segment mean, standard deviation, skewness, and kurtosis,
+        - 'stdpermen': the standard deviation of the normalized permutation entropy PermEn(3,1),
+        - 'stdac1', 'stdac2': the standard deviation of the autocorrelation at lags 1 and 2,
+        - 'stdtaul': the standard deviation of the first zero-crossing of the autocorrelation
+          function (interpolated, in samples).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+
+    if l is None:
+        l = 100 # by default use 100 samples
+    if isinstance(l, str):
+        taug = first_crossing(y, 'ac', 0, 'discrete') # tau (global)
+        if l == 'ac2':
+            l = 2 * taug
+        elif l == 'ac5':
+            l = 5 * taug
+        else:
+            raise ValueError(f"Unknown specifier '{l}'")
+        # Very short l for this sort of time series:
+        if not np.isnan(l) and l < 5:
+            logger.warning(f"This time series has a very short correlation length; setting l={l} "
+                           "means that changes estimates will be difficult to compare...")
+    num_segs = 100 if num_segs is None else int(num_segs)
+
+    # Check the parameters are appropriate for the length of the input time series:
+    if np.isnan(l) or l > 0.9 * N: # operation is not suitable -- time series is too short
+        logger.warning(f"This time series (N = {N}) is too short to use l = {l:.1f}")
+        return np.nan
+    l = int(l)
+
+    # numSegs segments, each of length l data points
+    if isinstance(random_seed, str) and random_seed == 'none':
+        rng = np.random.RandomState()
+    elif random_seed is None or (isinstance(random_seed, str) and random_seed == 'default'):
+        rng = _ml_rng(0)
+    else:
+        rng = _ml_rng(int(random_seed))
+
+    qs = np.full((num_segs, 8), np.nan)
+    for j in range(num_segs):
+        # pick a range; in this implementation, ranges CAN overlap
+        ist = int(np.floor((N - l + 1) * rng.random_sample())) # random start point (0-based; MATLAB's randi(N - l + 1) - 1)
+        y_sub = y[ist:ist + l] # contiguous subsegment of the time series
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            qs[j, 0] = np.mean(y_sub)
+            qs[j, 1] = np.std(y_sub, ddof=1)
+            qs[j, 2] = skew(y_sub)
+            qs[j, 3] = kurtosis(y_sub, fisher=False)
+            pe = permutation_entropy(y_sub, 3, 1) # normalized PermEn(3,1) -- cheaper and more
+            qs[j, 4] = pe['normPermEn'] if isinstance(pe, dict) else np.nan # stable than SampEn on these short random segments
+            qs[j, 5] = np.asarray(autocorr(y_sub, 1, 'Fourier')).item() # AC1
+            qs[j, 6] = np.asarray(autocorr(y_sub, 2, 'Fourier')).item() # AC2
+            qs[j, 7] = first_crossing(y_sub, 'ac', 0, 'continuous') # first zero crossing
+
+    # The spread of each feature across subsegments of the time series: a big bootstrapped
+    # distribution of the time series at a scale given by the length l. (The mean of each is
+    # not output: it re-estimates a global statistic.)
+    def _nanstd(v):
+        v = v[~np.isnan(v)]
+        return _std_matlab(v) if v.size > 0 else np.nan
+
+    names = ['stdmean', 'stdstd', 'stdskew', 'stdkurt', 'stdpermen', 'stdac1', 'stdac2', 'stdtaul']
+    return {name: _nanstd(qs[:, k]) for k, name in enumerate(names)}
 
 def trend(y: ArrayLike) -> dict:
     """
