@@ -1261,33 +1261,29 @@ def _ami_hist_binning(y: ArrayLike, meth: str, num_bins: int):
 
     The binning depends only on ``y``, ``meth`` and ``num_bins`` --- not on the time
     lag --- so callers that sweep lags (e.g. ``compare_min_ami``) can compute this once
-    and reuse it. Returns ``(idx, valid, num_bins)`` where ``idx[k]`` is the 0-based bin
+    and reuse it. The edges are explicit (:func:`~pyhctsa.robust.bf_hist_edges`,
+    :func:`~pyhctsa.robust.bf_quantile_edges`): they place a value exactly on an edge always
+    in the same bin. Returns ``(idx, valid, num_bins)`` where ``idx[k]`` is the 0-based bin
     of ``y[k]`` and ``valid[k]`` is False if the point falls outside the bin range. The
     assignment reproduces ``np.histogram2d``'s bins exactly (last bin right-inclusive).
     """
     y = np.asarray(y)
     if meth == 'even':
-        b = np.linspace(np.min(y), np.max(y), num_bins + 1)
-        # Add increment buffer to ensure all points are included
-        inc = 0.1
-        b[0] -= inc
-        b[-1] += inc
+        b = bf_hist_edges(y, num_bins)  # through the range of the time series
     elif meth == 'std1':  # bins out to +/- 1 std
-        b = np.linspace(-1, 1, num_bins + 1)
-        if np.min(y) < -1:
+        b = bf_hist_edges(y, num_bins, [-1, 1])
+        if np.min(y) < b[0]:
             b = np.concatenate(([np.min(y) - 0.1], b))
-        if np.max(y) > 1:
+        if np.max(y) > b[-1]:
             b = np.concatenate((b, [np.max(y) + 0.1]))
     elif meth == 'std2':  # bins out to +/- 2 std
-        b = np.linspace(-2, 2, num_bins + 1)
-        if np.min(y) < -2:
+        b = bf_hist_edges(y, num_bins, [-2, 2])
+        if np.min(y) < b[0]:
             b = np.concatenate(([np.min(y) - 0.1], b))
-        if np.max(y) > 2:
+        if np.max(y) > b[-1]:
             b = np.concatenate((b, [np.max(y) + 0.1]))
     elif meth == 'quantiles':  # use quantiles with ~equal number in each bin
-        b = np.quantile(y, np.linspace(0, 1, num_bins + 1), method='hazen')
-        b[0] -= 0.1
-        b[-1] += 0.1
+        b = bf_quantile_edges(y, num_bins)  # (fewer bins if values are tied at a quantile)
     else:
         raise ValueError(f"Unknown method '{meth}'")
 
@@ -1368,7 +1364,11 @@ def histogram_ami(
         - 'even': evenly-spaced bins through the range
         - 'std1': bins extending to ±1 standard deviation from mean
         - 'std2': bins extending to ±2 standard deviations from mean
-        - 'quantiles': equiprobable bins using quantiles
+        - 'quantiles': equiprobable bins using quantiles (fewer bins if values are tied at a
+          quantile)
+
+        The bin edges are explicit, so that a value exactly on an edge always falls in the same
+        bin (see :func:`~pyhctsa.robust.bf_hist_edges`).
 
         Default is ``'even'``.
         
@@ -1390,6 +1390,8 @@ def histogram_ami(
 
     # Bin the data once (the binning is the same for both delay vectors and does not
     # depend on the lag), then evaluate each lag from the precomputed bin indices.
+    if num_bins is None:
+        num_bins = 10
     idx, valid, num_bins = _ami_hist_binning(y, meth, num_bins)
 
     # Form the time-delay vectors y1 and y2
