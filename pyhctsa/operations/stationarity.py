@@ -363,7 +363,7 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
         raise ValueError(f"Unknown transformation {what_transform}")
     
     # create the windows
-    x_buff = make_mat_buffer(x, window_length, w_overlap)
+    x_buff = make_mat_buffer(x, window_length, w_overlap, 'nodelay')
     num_windows = (N/(window_length - w_overlap)) # number of windows
 
     if np.size(x_buff, 1) > num_windows:
