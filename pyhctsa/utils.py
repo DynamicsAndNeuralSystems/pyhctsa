@@ -143,15 +143,21 @@ def get_dataset(which: str = "e1000") -> list:
     logger.info(f"Loaded dataset of {len(dataset)} time series.")
     return dataset
     
-def _preprocess_decorator(zscore: bool = False, absval: bool = False) -> Callable:
+# config `preprocess:` values and the label suffix each adds
+_PREPROCESS_LABELS = {'decimate_ac1e': '_dec'}
+
+def _preprocess_decorator(zscore: bool = False, absval: bool = False,
+                          preprocess: Union[str, None] = None) -> Callable:
     """
     Decorator to preprocess time series data before feature computation.
     
-    Applies optional z-score normalization and/or absolute value transformation
-    to the input time series before passing it to the decorated function.
+    Applies optional z-score normalization, an optional hctsa ``BF_PreProcess`` step
+    and/or absolute value transformation to the input time series before passing it to
+    the decorated function.
 
-    Note that by default, the zscore operation will always be applied **before** the absolute 
-    value operation if both are enabled.
+    The order is: z-score, then ``preprocess``, then absolute value. A
+    ``preprocess`` step is followed by a second z-score if ``zscore`` is True, matching
+    hctsa's ``zscore(BF_PreProcess(x_z, ...))``.
 
     Parameters
     ----------
@@ -161,6 +167,11 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False) -> Callabl
     absval : bool, optional
         If True, take the absolute value of all data points in the input time series.
         Default is False.
+    preprocess : {None, 'decimate_ac1e'}, optional
+        A named pre-processing step applied to the (z-scored) series. Currently
+        ``'decimate_ac1e'``: keep one sample per floored 1/e autocorrelation time
+        (see :func:`decimate_ac1e`). If the delay cannot be determined the wrapped
+        function is not called and ``nan`` is returned. Default is None.
     
     Returns
     -------
@@ -169,11 +180,19 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False) -> Callabl
         the specified preprocessing operations to the input time series before
         passing it to the wrapped function.
     """
+    if preprocess is not None and preprocess not in _PREPROCESS_LABELS:
+        raise ValueError(f"Unknown preprocess setting '{preprocess}'; "
+                         f"supported: {sorted(_PREPROCESS_LABELS)}")
+
     def decorator(func):
         @wraps(func)
         def wrapper(x, *args, **kwargs):
             if zscore:
                 x = z_score(x)
+            if preprocess == 'decimate_ac1e':
+                x = decimate_ac1e(x, rezscore=zscore)
+                if not isinstance(x, np.ndarray):
+                    return np.nan  # no 1/e time: undefined, like hctsa's NaN
             if absval:
                 x = np.abs(x)
             return func(x, *args, **kwargs)
@@ -849,6 +868,86 @@ def theiler_window(y: Union[ArrayLike, None], spec: Union[int, float, list, tupl
             return int(_round_half_away(spec * N))
         return int(_round_half_away(spec))
     raise ValueError("Unrecognized Theiler window specification")
+
+
+def pre_process(y: ArrayLike, how: Union[str, None]) -> Union[np.ndarray, float]:
+    """
+    Pre-process a time series (hctsa's ``BF_PreProcess``).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    how : {'diff1', 'rescale_tau', 'decimate_ac1e'} or None
+        - ``'diff1'``: incremental differences;
+        - ``'rescale_tau'``: coarse-grain by averaging non-overlapping windows whose length is the
+          first zero crossing of the ACF;
+        - ``'decimate_ac1e'``: keep one sample per (floored) 1/e autocorrelation time
+          (``y[::get_tau(y, 'ac1e')]``), so features of the result do not change trivially with
+          the sampling rate. Iterated maps (ACF below 1/e at lag 1) are unchanged. In hctsa it is
+          used as ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``, see :func:`decimate_ac1e`.
+        - ``None`` or ``''``: no change.
+
+    Returns
+    -------
+    numpy.ndarray or float
+        The processed series, or ``nan`` (scalar) when the required time delay cannot be set
+        (as hctsa, which returns the scalar NaN).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if how is None or how == '':
+        return y
+    if how == 'diff1':
+        return np.diff(y)
+    if how == 'rescale_tau':
+        tau = get_tau(y, 'ac')
+        if np.isnan(tau) or tau < 1 or tau > y.size:
+            return np.nan
+        return np.mean(make_buffer(y, int(tau)), axis=1)
+    if how == 'decimate_ac1e':
+        tau = get_tau(y, 'ac1e')
+        if np.isnan(tau):
+            return np.nan
+        return y[::int(tau)]
+    raise ValueError(f"Unknown preprocessing setting: '{how}'")
+
+
+def _zscore_matlab(x: np.ndarray) -> np.ndarray:
+    """MATLAB's ``zscore``: (x - mean)/std with the N-1 std, and a zero std treated as 1."""
+    x = np.asarray(x, dtype=float)
+    mu = np.mean(x)
+    sd = np.std(x, ddof=1) if x.size > 1 else 0.0
+    if not sd > 0:
+        sd = 1.0
+    return (x - mu) / sd
+
+
+def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, float]:
+    """
+    ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``: decimate by the 1/e autocorrelation time.
+
+    Keeps every ``tau``-th sample, ``tau = get_tau(x_z, 'ac1e')``, then z-scores the result
+    (MATLAB ``zscore``: N-1 std, a constant result becomes zeros). hctsa uses this for the
+    ``*_dec`` variants of rate-dependent features. A config requests it with
+    ``preprocess: decimate_ac1e`` (see :class:`~pyhctsa.calculator.FeatureCalculator`).
+
+    Parameters
+    ----------
+    x_z : array-like
+        The (already z-scored) time series.
+    rezscore : bool, optional
+        Z-score the decimated series (default True, as hctsa).
+
+    Returns
+    -------
+    numpy.ndarray or float
+        The decimated series, or scalar ``nan`` if the delay cannot be set (hctsa's behavior:
+        the operation then returns NaN).
+    """
+    y = pre_process(x_z, 'decimate_ac1e')
+    if not isinstance(y, np.ndarray):
+        return np.nan
+    return _zscore_matlab(y) if rezscore else y
 
 
 def time_delay_embed(y: ArrayLike, m: int, tau: Union[int, str] = 1,

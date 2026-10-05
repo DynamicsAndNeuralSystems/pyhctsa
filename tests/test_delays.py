@@ -5,8 +5,11 @@ Expected values were generated with current hctsa (MATLAB) on the same analytic 
 """
 import numpy as np
 import pytest
+import yaml
 
-from pyhctsa.utils import get_tau, theiler_window, time_delay_embed
+from pyhctsa.calculator import FeatureCalculator
+from pyhctsa.utils import (_preprocess_decorator, decimate_ac1e, get_tau, pre_process,
+                           theiler_window, time_delay_embed, z_score)
 
 T = np.arange(1000.0)
 
@@ -41,7 +44,7 @@ EXPECTED = {
 @pytest.mark.parametrize('name', list(SERIES))
 def test_matches_hctsa(name):
     y = SERIES[name]
-    ac, ac1e, mi, mig, w_ac1, w_ac25, w_ac1e3, _ = EXPECTED[name]
+    ac, ac1e, mi, mig, w_ac1, w_ac25, w_ac1e3, n_dec = EXPECTED[name]
     assert get_tau(y, 'ac') == ac
     assert get_tau(y, 'ac1e') == ac1e
     assert get_tau(y, 'mi') == mi
@@ -49,6 +52,7 @@ def test_matches_hctsa(name):
     assert theiler_window(y, ['ac', 1]) == w_ac1
     assert theiler_window(y, ('ac', 2.5)) == w_ac25
     assert theiler_window(y, ['ac1e', 3]) == w_ac1e3
+    assert len(decimate_ac1e(y)) == n_dec
 
 
 def test_integer_passthrough_and_errors():
@@ -66,6 +70,7 @@ def test_constant_series_gives_nan():
         assert np.isnan(get_tau(y, rule))
     assert np.isnan(theiler_window(y, ['ac', 1]))
     assert np.isnan(theiler_window(y, ['ac1e', 3]))
+    assert np.isnan(decimate_ac1e(y))
     assert theiler_window(y, 5) == 5  # numeric specs need no ACF
 
 
@@ -81,8 +86,52 @@ def test_theiler_numeric_specs():
             theiler_window(SERIES['sine200'], bad)
 
 
+def test_decimation_values():
+    y = SERIES['sine200']
+    d = pre_process(y, 'decimate_ac1e')
+    np.testing.assert_array_equal(d, y[::38])
+    dz = decimate_ac1e(y)
+    assert abs(dz.mean()) < 1e-12 and abs(dz.std(ddof=1) - 1) < 1e-12
+    # pre_process other cases
+    np.testing.assert_allclose(pre_process(y, 'diff1'), np.diff(y))
+    assert len(pre_process(y, 'rescale_tau')) == 1000 // 52
+    assert pre_process(y, None) is not None
+    with pytest.raises(ValueError):
+        pre_process(y, 'nope')
+
+
 def test_time_delay_embed_accepts_rule():
     y = SERIES['sine200']
     np.testing.assert_array_equal(time_delay_embed(y, 3, 'ac1e'), time_delay_embed(y, 3, 38))
     with pytest.raises(ValueError):
         time_delay_embed(np.ones(200), 3, 'ac')
+
+
+def test_decorator_decimation():
+    y = z_score(np.sin(2 * np.pi * T / 200) + 0.1 * np.cos(T))
+    seen = {}
+    f = _preprocess_decorator(True, False, 'decimate_ac1e')(lambda x: seen.setdefault('x', x) is x and len(x))
+    assert f(y) == len(decimate_ac1e(y)) < len(y)
+    np.testing.assert_allclose(seen['x'], decimate_ac1e(z_score(y)))
+    # an undefined delay gives NaN instead of calling the operation
+    h = _preprocess_decorator(False, False, 'decimate_ac1e')(lambda x: 1.0)
+    assert np.isnan(h(np.ones(300)))
+    with pytest.raises(ValueError):
+        _preprocess_decorator(True, False, 'nope')
+
+
+def test_calculator_preprocess_key_and_labels(tmp_path):
+    cfg = {'scaling': {'fast_dfa': {'base_name': 'fast_dfa', 'configs': [
+        {'zscore': True},
+        {'zscore': True, 'preprocess': 'decimate_ac1e'},
+        {'zscore': True, 'abs': True, 'preprocess': 'decimate_ac1e'},
+    ]}}}
+    p = tmp_path / 'c.yaml'
+    p.write_text(yaml.safe_dump(cfg))
+    fc = FeatureCalculator(str(p))
+    assert list(fc.feature_funcs) == ['fast_dfa', 'fast_dfa_dec', 'fast_dfa_abs_dec']
+    bad = tmp_path / 'bad.yaml'
+    bad.write_text(yaml.safe_dump({'scaling': {'fast_dfa': {'base_name': 'fast_dfa',
+                                   'configs': [{'zscore': True, 'preprocess': 'nope'}]}}}))
+    with pytest.raises(ValueError):
+        FeatureCalculator(str(bad))
