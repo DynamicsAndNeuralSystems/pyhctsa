@@ -148,7 +148,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
     if subset_how == 'uniform':
         if len(sample_p) == 1:  # size will depend on number of unique subsegments
             # num_pred+1 boundaries = num_pred portions
-            spts = np.round(np.linspace(0, N, num_pred + 1)).astype(int)
+            spts = np.floor(_linspace(0, N, num_pred + 1) + 0.5).astype(int)  # MATLAB round()
             r = np.zeros((num_pred, 2), dtype=int)
             r[:, 0] = spts[:num_pred] + 1  # +1 for 1-based indexing (if needed)
             r[:, 1] = spts[1:]
@@ -158,7 +158,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
             else:  # specified an absolute interval
                 l = int(sample_p[1])
             # num_pred boundaries
-            spts = np.round(np.linspace(1, N - l + 1, num_pred)).astype(int)
+            spts = np.floor(_linspace(1, N - l + 1, num_pred) + 0.5).astype(int)  # MATLAB round()
             r = np.zeros((num_pred, 2), dtype=int)
             r[:, 0] = spts
             r[:, 1] = spts + l - 1
