@@ -2212,3 +2212,134 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     out['stdrat_iqr'] = iqr(valid)
 
     return out
+
+
+def _zg_hmm_fit(y_train: np.ndarray, num_states: int, rng: np.random.RandomState,
+                n_cycles: int = 30, tol: float = 1e-4) -> tuple:
+    """
+    Gaussian HMM fit as Zoubin Ghahramani's ``ZG_hmm`` (used by hctsa), with hmmlearn's EM.
+
+    The initial state means are random around the data mean (scaled by the data standard
+    deviation), the start probabilities and transition matrix random, and the tied variance
+    the data variance, all drawn from ``rng``. At most ``n_cycles`` cycles of EM, stopping when
+    the proportional change in the log-likelihood falls below ``tol`` (see :func:`hmm_fit`).
+
+    Returns the fitted ``GaussianHMM`` and the log-likelihood of the training data at each
+    cycle.
+    """
+    y_col = y_train.reshape(-1, 1)
+    cov0 = np.var(y_train, ddof=1)
+    mu0 = rng.randn(num_states, 1) * np.sqrt(cov0) + np.mean(y_train)
+    pi0 = rng.random_sample(num_states)
+    pi0 = pi0 / pi0.sum()
+    p0 = rng.random_sample((num_states, num_states))
+    p0 = p0 / p0.sum(axis=1, keepdims=True)
+
+    model = GaussianHMM(n_components=num_states, covariance_type='tied',
+                        n_iter=1,  # one EM cycle per fit() call, so that we control the stopping rule
+                        tol=0, params='stmc', init_params='')
+    model.startprob_ = pi0
+    model.transmat_ = p0
+    model.means_ = mu0
+    model.covars_ = np.array([[cov0]])
+
+    LL = []  # log-likelihood of the training data at the start of each cycle
+    lik_base = 0.0
+    for cycle in range(1, n_cycles + 1):
+        model.fit(y_col)  # one E step and M step
+        lik = model.monitor_.history[-1]
+        old_lik = LL[-1] if LL else 0.0
+        LL.append(lik)
+        if cycle <= 2:
+            lik_base = lik
+        elif lik < old_lik:
+            pass  # a decrease (numerical violation): keep going, as ZG_hmm does
+        elif (lik - lik_base) < (1 + tol) * (old_lik - lik_base) or not np.isfinite(lik):
+            break
+    return model, np.array(LL)
+
+
+def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
+                         n_states: ArrayLike = (2, 3, 4),
+                         random_seed: Union[int, str, None] = 0) -> dict:
+    """
+    How the fit of hidden Markov models to the series changes with the number of hidden
+    states.
+
+    Fits Gaussian hidden Markov models (HMMs) with different numbers of states to the first
+    ``train_p`` proportion of the time series (each with at most 30 cycles of EM), and
+    compares the resulting log-likelihoods per sample on the training part and on the
+    held-out remainder. Each fit is initialized and stopped as in :func:`hmm_fit`
+    (``ZG_hmm``'s random initialization and proportional tolerance), the random draws
+    continuing through the successive fits.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    train_p : float, optional
+        The initial proportion of the time series to train the model on. Default is 0.6.
+    n_states : array-like of int, optional
+        The numbers of states to compare. Default is 2 to 4.
+    random_seed : int, 'default', 'none' or None, optional
+        Seed for the random initial parameters, reset once before the first fit as
+        ``BF_ResetSeed`` does (0, or ``'default'``, is MATLAB's default); ``'none'`` or
+        ``None`` leaves the stream alone. Default is 0.
+
+    Returns
+    -------
+    dict
+        - ``meanLLtrain``, ``maxLLtrain``: mean and maximum across models of the
+          log-likelihood per sample on the training part,
+        - ``meanLLtest``, ``maxLLtest``: the same on the test part,
+        - ``chLLtrain``, ``chLLtest``: change in training and test log-likelihood per sample
+          from the model with the fewest states to the one with the most,
+        - ``meandiffLLtt``: mean across models of the absolute difference between the test
+          and training log-likelihoods per sample,
+        - ``LLtestdiff1``, ``LLtestdiff2``, ...: change in test log-likelihood per sample
+          from the i-th to the (i+1)-th number of states in ``n_states``.
+
+        NaN if the series is too short to train on.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    n_states = np.atleast_1d(np.asarray(n_states)).astype(int)
+    n_train = int(np.floor(train_p * N))  # number of initial samples to train the model on
+
+    # reset the random seed if specified (BF_ResetSeed), once before the first fit
+    if isinstance(random_seed, str) and random_seed == 'default':
+        random_seed = 0
+    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
+        rng = np.random.RandomState()
+    else:
+        rng = _ml_rng(int(random_seed))
+
+    if n_train >= N:
+        raise ValueError(f'train_p = {train_p:g} leaves no test data for a series of length {N}')
+    if n_train < 2:
+        logger.warning(f'Time series (N = {N}) too short to train on {train_p:g} of it')
+        return np.nan
+    y_train = y[:n_train]
+    y_test = y[n_train:]
+    n_test = len(y_test)
+
+    ll_trains = np.zeros(len(n_states))
+    ll_tests = np.zeros(len(n_states))
+    for j, k in enumerate(n_states):
+        # train an HMM with k states for 30 cycles of EM (or until convergence)
+        model, LL = _zg_hmm_fit(y_train, k, rng)
+        ll_trains[j] = LL[-1] / n_train
+        # log likelihood of the test data
+        ll_tests[j] = model.score(y_test.reshape(-1, 1)) / n_test
+
+    out = {}
+    out['meanLLtrain'] = np.mean(ll_trains)
+    out['meanLLtest'] = np.mean(ll_tests)
+    out['maxLLtrain'] = np.max(ll_trains)
+    out['maxLLtest'] = np.max(ll_tests)
+    out['chLLtrain'] = ll_trains[-1] - ll_trains[0]
+    out['chLLtest'] = ll_tests[-1] - ll_tests[0]
+    out['meandiffLLtt'] = np.mean(np.abs(ll_tests - ll_trains))
+    for i in range(len(n_states) - 1):
+        out[f'LLtestdiff{i + 1}'] = ll_tests[i + 1] - ll_tests[i]
+    return out
