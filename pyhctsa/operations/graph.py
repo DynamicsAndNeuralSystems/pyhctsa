@@ -11,9 +11,9 @@ from math import factorial
 logger = logging.getLogger('pyhctsa')
 
 from pyhctsa.operations.correlation import autocorr, first_crossing
-from pyhctsa.robust import bf_fit_density_curve, bf_hist_edges, bf_residual_stats
+from pyhctsa.robust import bf_fit_density_curve, bf_residual_stats
 from pyhctsa.utils import get_tau, time_delay_embed
-from pyhctsa.operations.entropy import _ordinal_pattern_rank
+from pyhctsa.operations.entropy import _ordinal_pattern_rank, distribution_entropy
 from pyhctsa.toolboxes.distribution_fits.distfits import evfit
 
 
@@ -142,26 +142,6 @@ def _natural_vg_degrees(y: np.ndarray) -> np.ndarray:
                         jlim = min(n - 1, i + int(reach) + 1)
             j += 1
     return k
-
-
-def _degree_entropy(k: np.ndarray) -> float:
-    """
-    Entropy of the histogram of k with the square-root bin rule (hctsa's
-    ``EN_DistributionEntropy(k, 'hist', 'sqrt')``), in nats, with the Miller-Madow correction.
-
-    The bin edges are explicit (:func:`pyhctsa.robust.bf_hist_edges`). NaN for constant data,
-    for which the differential entropy is not defined.
-    """
-    n = len(k)
-    if np.ptp(k) == 0:
-        return np.nan
-    edges = bf_hist_edges(k, 'sqrt')
-    counts, _ = np.histogram(k, bins=edges)
-    px = counts / n
-    bin_widths = np.diff(edges)
-    pos = px > 0
-    out = -np.sum(px[pos] * np.log(px[pos] / bin_widths[pos]))
-    return out + (np.count_nonzero(pos) - 1) / (2 * n)
 
 
 def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] = 20000) -> dict:
@@ -335,7 +315,7 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
     out['evnlogL'] = -np.mean(gumbel_l.logpdf(kf, loc=mu, scale=sigma))
 
     # Entropy of the degree distribution
-    out['entropy'] = _degree_entropy(kf)
+    out['entropy'] = distribution_entropy(kf, 'hist', 'sqrt')  # NaN for a constant degree sequence
 
     # Autocorr
     out['kac1'] = autocorr(k, 1, 'Fourier')[0]
