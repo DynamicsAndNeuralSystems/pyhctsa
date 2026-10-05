@@ -42,6 +42,13 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
                 the square root rule.
         - 'SD1'     : Standard deviation of the Poincaré plot’s minor axis (short-term variability).
         - 'SD2'     : Standard deviation of the Poincaré plot’s major axis (long-term variability).
+        - 'CVI'     : Cardiac vagal index, log10(16*SD1*SD2) [3].
+
+    References (CVI)
+    ----------------
+    .. [3] Toichi et al., "A new method of assessing cardiac autonomic function and its
+        comparison with spectral analysis and coefficient of variation of R-R interval",
+        J. Auton. Nerv. Syst. 62(1-2), 79 (1997).
     """
     x = np.asarray(x)
     N = len(x)
@@ -76,6 +83,9 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
     return out
 
 def hrv_classic(y: ArrayLike) -> dict:
+    # CVI: cardiac vagal index (Toichi et al., 1997)
+    out['CVI'] = np.log10(out['SD1'] * out['SD2'] * 16)
+
     """
     Compute classic heart rate variability (HRV) statistics.
 
