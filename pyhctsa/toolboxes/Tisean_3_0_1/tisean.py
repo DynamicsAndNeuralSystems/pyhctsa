@@ -312,6 +312,16 @@ def c2t(c2: List[np.ndarray]) -> List[np.ndarray]:
     return out
 
 
+def _f32(x) -> np.ndarray:
+    """Round to single precision (the REAL of ``c2g.f``'s implicit typing)."""
+    return np.asarray(x, dtype=np.float64).astype(np.float32)
+
+
+def _f32_9(x: float) -> float:
+    """A single-precision value as ``write(*,*)`` prints it (9 significant digits)."""
+    return float("%.9g" % x)
+
+
 def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
     """
     Gaussian kernel correlation integral from correlation sums (``c2g``).
@@ -327,11 +337,23 @@ def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
     list of ndarray
         One ``(n_i, 3)`` array per embedding dimension: the kernel bandwidth
         ``r``, the Gaussian kernel correlation integral, and its logarithmic
-        derivative with respect to ``r``.
+        derivative with respect to ``r``. Entries are NaN or infinite where
+        ``c2g`` itself would print ``NaN`` or ``Infinity`` (see Notes).
 
     Notes
     -----
-    ``c2g.f`` increments its point counter *before* testing whether the
+    ``c2g.f`` relies on Fortran's implicit typing, so the length scales and
+    correlation sums it reads, their logarithms, the interpolation prefactor and
+    exponent of the power-law pieces, and the two output quantities are all
+    *single* precision; only the Gauss-Kronrod integration and the bandwidth
+    ``h`` are double. This is reproduced, because it changes the results
+    visibly: the prefactor ``exp((e_{k+1} c_k - e_k c_{k+1}) / (e_{k+1} - e_k))``
+    overflows to infinity for exponents above 88.7, which makes ``c2g`` print
+    ``Infinity``/``NaN`` for some series, and the printed values carry about
+    1e-7 relative error. Values are rounded to the 9 significant digits
+    ``c2g`` prints.
+
+    ``c2g.f`` also increments its point counter *before* testing whether the
     correlation sum is positive, so a block that is cut short by a zero keeps
     one trailing slot holding whatever the previous block left in the (static,
     zero-initialised) arrays. That off-by-one is reproduced here, since hctsa's
@@ -339,17 +361,18 @@ def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
     """
     out: List[np.ndarray] = []
     # Stand-ins for c2g.f's static REAL arrays, which persist between blocks.
-    e_buf = np.zeros(_MEPS)
-    c_buf = np.zeros(_MEPS)
+    e_buf = np.zeros(_MEPS, dtype=np.float32)
+    c_buf = np.zeros(_MEPS, dtype=np.float32)
 
     for block in c2:
         me = 0
         for ee, cc in block:
             me += 1
+            ee, cc = _f32(ee), _f32(cc)  # read into REAL
             if cc <= 0.0:
                 break
-            e_buf[me - 1] = math.log(ee)
-            c_buf[me - 1] = math.log(cc)
+            e_buf[me - 1] = _f32(math.log(ee))
+            c_buf[me - 1] = _f32(math.log(cc))
 
         if me == 0:
             out.append(np.empty((0, 3)))
@@ -365,19 +388,20 @@ def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
 
         # Piecewise power-law interpolation between successive points: on
         # [e_k, e_k+1] the correlation sum is f * exp(d * u).
-        de = e[1:] - e[:-1]
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-            f = np.exp((e[1:] * c[:-1] - e[:-1] * c[1:]) / de)
+            de = e[1:] - e[:-1]  # single precision throughout
+            f = _f32(np.exp((e[1:] * c[:-1] - e[:-1] * c[1:]) / de).astype(np.float64))
             d = (c[1:] - c[:-1]) / de
+        f, d = f.astype(np.float64), d.astype(np.float64)
         # c2g.f only integrates over intervals of non-zero width.
         keep = e[1:] != e[:-1]
-        a, b = e[:-1][keep], e[1:][keep]
+        a, b = e[:-1][keep].astype(np.float64), e[1:][keep].astype(np.float64)
         f, d = f[keep], d[keep]
 
-        e_last, rows = e[me - 1], []
+        e_last, rows = float(e[me - 1]), []
         with np.errstate(divide="ignore", invalid="ignore", over="ignore", under="ignore"):
             for j in range(me):
-                h = math.exp(e[j])
+                h = float(_f32(math.exp(float(e[j]))))
                 g = _gk15(lambda u: f[:, None] * np.exp((2 + d[:, None]) * u
                                                         - np.exp(2 * u) / (2 * h ** 2)),
                           a, b).sum()
@@ -385,8 +409,9 @@ def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
                                                          - np.exp(2 * u) / (2 * h ** 2)),
                            a, b).sum()
                 tail = math.exp(-math.exp(2 * e_last) / (2 * h ** 2))
-                cgauss = g / h ** 2 + tail
-                cgd = gd / h ** 4 + (2 + math.exp(2 * e_last) / h ** 2) * tail
-                rows.append((h, cgauss, -2 + cgd / cgauss))
+                cgauss = _f32(g / h ** 2 + tail)  # REAL
+                cgd = _f32(gd / h ** 4 + (2 + math.exp(2 * e_last) / h ** 2) * tail)  # REAL
+                slope = np.float32(-2) + cgd / cgauss  # single precision
+                rows.append((h, _f32_9(cgauss), _f32_9(slope)))
         out.append(np.array(rows, dtype=float).reshape(-1, 3))
     return out
