@@ -4,11 +4,13 @@ from numpy.typing import ArrayLike
 from scipy.interpolate import make_lsq_spline
 from scipy.optimize import least_squares
 from scipy.signal import lfilter, resample_poly
-from scipy.stats import boxcox
+from scipy.special import gammaln
+from scipy.stats import boxcox, norm
 import logging
 logger = logging.getLogger('pyhctsa')
 
-from ..operations.distribution import outlier_test
+from ..operations.correlation import autocorr
+from ..operations.distribution import compare_ks_fit, outlier_test
 from ..operations.stationarity import sliding_window, stat_av
 from ..utils import _round_half_away, z_score
 
@@ -138,6 +140,103 @@ def _sin_detrend(y: np.ndarray, n: int) -> np.ndarray:
     return r
 
 
+def _runstest_p(x: np.ndarray) -> float:
+    """Two-sided p-value of MATLAB's ``runstest(x)`` (exact distribution, mean cutoff).
+
+    Counts runs of values above and below the mean; values equal to the mean are dropped.
+    """
+    x = np.asarray(x, dtype=float)
+    x = x[~np.isnan(x)]
+    v = np.mean(x) if x.size else np.nan
+    x = x[x != v]
+    N = x.size
+    b = x > v
+    n1 = int(b.sum())
+    n0 = N - n1
+    if N == 0:
+        return 1.0
+    nruns = 1 + int(np.sum(b[:-1] != b[1:]))
+    if n1 == 0 or n0 == 0:
+        plist = np.array([1.0])  # exactly one run is possible
+    else:
+        def lnck(a, k):
+            a = np.asarray(a, dtype=float)
+            k = np.asarray(k, dtype=float)
+            with np.errstate(invalid='ignore'):
+                out = gammaln(a + 1) - gammaln(k + 1) - gammaln(a - k + 1)
+            return np.where((k < 0) | (k > a), -np.inf, out)
+        maxruns = 2 * min(n1, n0) + 1
+        R = np.arange(1, maxruns + 1)
+        plist = np.zeros(maxruns)
+        ev = R % 2 == 0
+        k = R[ev] // 2
+        plist[ev] = 2 * np.exp(lnck(n1 - 1, k - 1) + lnck(n0 - 1, k - 1) - lnck(N, n0))
+        k = R[~ev] // 2
+        plist[~ev] = (np.exp(lnck(n1 - 1, k - 1) + lnck(n0 - 1, k) - lnck(N, n0))
+                      + np.exp(lnck(n1 - 1, k) + lnck(n0 - 1, k - 1) - lnck(N, n0)))
+    pexact = plist[nruns - 1]
+    plo = plist[:nruns - 1].sum()
+    phi = plist[nruns:].sum()
+    return float(min(1.0, 2 * (pexact + min(plo, phi))))
+
+
+def _ksdensity(x: np.ndarray, m: int = 100) -> tuple:
+    """Normal-kernel density estimate of x on m points, like MATLAB's ``[f, xi] = ksdensity(x)``.
+
+    The bandwidth comes from the median absolute deviation (Silverman's rule) and the grid
+    covers the data range extended by 3 bandwidths, as in ``ksdensity``. (MATLAB truncates
+    the kernel at 4 bandwidths for large samples; this sums the full kernel.)
+    """
+    n = len(x)
+    sig = np.median(np.abs(x - np.median(x))) / 0.6745
+    if sig <= 0:
+        sig = np.ptp(x)
+    bw = sig * (4 / (3 * n)) ** (1 / 5)
+    xi = np.linspace(np.min(x) - 3 * bw, np.max(x) + 3 * bw, m)
+    f = np.mean(norm.pdf((xi[:, None] - x[None, :]) / bw), axis=1) / bw
+    return xi, f
+
+
+def _gauss1_kd_fit(x: np.ndarray) -> dict:
+    """Fit a Gaussian to the kernel-smoothed distribution of x: hctsa's ``DN_SimpleFit(x, 'gauss1', 0)``.
+
+    The distribution is a normal-kernel density estimate on 100 points (MATLAB's
+    ``ksdensity`` defaults, see ``_ksdensity``); the model is a1*exp(-((u - b1)/c1)^2),
+    fitted by least squares from the start point of MATLAB's ``gaussnstart``. Returns the R^2 (``r2``), the lag-1
+    autocorrelation of the residuals (``resAC1``) and the p-value of a runs test on the
+    residuals (``resruns``), or NaN if the fit fails.
+    """
+    xi, f = _ksdensity(x)
+
+    # Start point (gaussnstart, one peak)
+    k = np.nonzero(f == f.max())[0][-1]
+    a0, b0 = f[k], xi[k]
+    ok = (f > 0) & (f < a0)
+    if not ok.any():
+        return np.nan
+    c0 = np.mean(np.abs(xi[ok] - b0) / np.sqrt(np.log(a0 / f[ok]))) / 2
+
+    def basis(p):
+        b, c = p
+        return np.ones_like(xi) if c == 0 else np.exp(-((xi - b) / c) ** 2)
+
+    def resid(p):  # separable least squares: the amplitude is linear
+        A = basis(p)
+        return f - A * (A @ f) / (A @ A)
+
+    try:
+        sol = least_squares(resid, [b0, c0], method='lm', xtol=1e-14, ftol=1e-14, gtol=1e-14)
+        res = resid(sol.x)
+    except (np.linalg.LinAlgError, ValueError, FloatingPointError):
+        return np.nan
+    if not np.all(np.isfinite(res)):
+        return np.nan
+    sst = np.sum((f - np.mean(f)) ** 2)
+    return {'r2': 1 - np.sum(res ** 2) / sst,
+            'resAC1': float(np.ravel(autocorr(res, 1, 'Fourier'))[0]),
+            'resruns': _runstest_p(res)}
+
+
 def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
     """
     How time-series properties change after a preprocessing step.
@@ -197,11 +296,19 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
           by half, and 5 and 10 non-overlapping windows
         - ``swss2_1``, ``swss5_1``, ``swss10_1``: the same for the window standard
           deviations (``sliding_window`` 'std')
+        - ``kscn_olapint``: the overlap integral of the kernel-smoothed distribution
+          with the best-fitting normal (``compare_ks_fit``)
         - ``olbt_s5``: the standard deviation after trimming the 5% most extreme values
           at each end, relative to that of the full series (``outlier_test``)
 
         Differences (statistics that can be negative or zero):
 
+        - ``gauss1_kd_r2``, ``gauss1_kd_resAC1``, ``gauss1_kd_resruns``: the R^2, the
+          lag-1 autocorrelation of the residuals, and the runs-test p-value of the
+          residuals of a Gaussian fit to the kernel-smoothed distribution
+        - ``kscn_peaksepy``, ``kscn_peaksepx``, ``kscn_relent``: the peak separation in
+          height and in position, and the relative entropy, of the kernel-smoothed
+          distribution against the best-fitting normal (``compare_ks_fit``)
         - ``olbt_m2``, ``olbt_m5``: the mean after trimming the 2% and 5% most extreme
           values at each end (``outlier_test``)
 
@@ -289,6 +396,30 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
     for win, step in [(2, 1), (5, 1), (10, 1)]:
         out[f'swss{win}_{step}'] = _norm_diff(sliding_window(y_d, 'std', 'std', win, step),
                                               sliding_window(y, 'std', 'std', win, step))
+
+    # 2) Gaussianity
+    # (a) Gaussian fit to the kernel density estimate
+    me1 = _gauss1_kd_fit(y_d)
+    me2 = _gauss1_kd_fit(y)
+    if not isinstance(me1, dict) or not isinstance(me2, dict):
+        # fitting the Gaussian failed
+        for key in ['r2', 'resAC1', 'resruns']:
+            out[f'gauss1_kd_{key}'] = np.nan
+    else:
+        for key in ['r2', 'resAC1', 'resruns']:
+            out[f'gauss1_kd_{key}'] = _diff(me1[key], me2[key])
+
+    # (b) Compare the distribution to a fitted normal distribution
+    me1 = compare_ks_fit(y_d, 'norm')
+    me2 = compare_ks_fit(y, 'norm')
+    if not isinstance(me1, dict) or not isinstance(me2, dict):
+        for key in ['peaksepy', 'peaksepx', 'olapint', 'relent']:
+            out[f'kscn_{key}'] = np.nan
+    else:
+        out['kscn_peaksepy'] = _diff(me1['peaksepy'], me2['peaksepy'])
+        out['kscn_peaksepx'] = _diff(me1['peaksepx'], me2['peaksepx'])
+        out['kscn_olapint'] = _norm_diff(me1['olapint'], me2['olapint'])
+        out['kscn_relent'] = _diff(me1['relent'], me2['relent'])
 
     # 3) Outliers
     out['olbt_m2'] = _diff(outlier_test(y_d, 2, 'mean'), outlier_test(y, 2, 'mean'))
