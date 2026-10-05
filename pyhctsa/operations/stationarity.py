@@ -57,8 +57,9 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
     -------
     dict
         For a single lag: the p-value, statistic, first regression coefficient
-        and regression fit statistics. For multiple lags: summary statistics on
-        the p-values, statistics and regression fit statistics across lags.
+        and regression fit statistics (`pvalue`, `stat`, `coeff1`, `loglikelihood`,
+        `AIC`, `BIC`, `HQC`, `rmse`). For multiple lags: `minpValue`, `meanpValue`,
+        `lagmaxp`, `lagminp`, `meanstat` and `minBIC`.
         The log-likelihood and information criteria (AIC, BIC, HQC) are reported
         per observation.
     """
@@ -112,24 +113,12 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
     p_values = np.asarray(p_values)
     stats = np.asarray(stats)
     return {
-        'maxpValue': np.max(p_values),
         'minpValue': np.min(p_values),
         'meanpValue': np.mean(p_values),
-        'stdpValue': np.std(p_values, ddof=1),
         'lagmaxp': lag_list[int(np.argmax(p_values))],
         'lagminp': lag_list[int(np.argmin(p_values))],
-
         'meanstat': np.mean(stats),
-        'maxstat': np.max(stats),
-        'minstat': np.min(stats),
-
-        'meanloglikelihood': np.mean([r['LL'] for r in regs]) / n_obs,
-        'minAIC': np.min([r['AIC'] for r in regs]) / n_obs,
         'minBIC': np.min([r['BIC'] for r in regs]) / n_obs,
-        'minHQC': np.min([r['HQC'] for r in regs]) / n_obs,
-
-        'minrmse': np.min([r['RMSE'] for r in regs]),
-        'maxrmse': np.max([r['RMSE'] for r in regs]),
     }
 
 def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par',
