@@ -18,33 +18,23 @@ from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import KDTree, NearestNeighbors
 
 from ..operations.model_fit import residual_analysis
-from ..operations.correlation import first_crossing, first_min, autocorr
+from ..operations.correlation import first_crossing, autocorr
+from ..operations.information import first_min
 from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robustfit
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
 from ..toolboxes.Tisean_3_0_1.tisean import _e, _round_significant
-from ..robust import bf_hist_edges, bf_random
-from ..utils import (_linspace, _ml_randperm, _ml_rng, _round_half_away, bin_picker, get_tau,
+from ..robust import bf_hist_edges, bf_random, bf_random_seed
+from ..utils import (dict_output, _linspace, _ml_randperm, _ml_rng, _round_half_away, get_tau,
                      matlab_quantile, theiler_window, time_delay_embed)
 
 logger = logging.getLogger('pyhctsa')
 
 
-def _bf_random_seed(random_seed: Union[int, float, str, None]) -> int:
-    """The integer seed for :func:`~pyhctsa.robust.bf_random` that a ``randomSeed`` input stands
-    for (hctsa's ``BF_RandomSeed``): ``'default'`` is 0, a number is itself (rounded, made
-    non-negative, below 4e9), and ``None`` or ``'none'`` a seed drawn from NumPy's global stream."""
-    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
-        return int(np.random.randint(0, 4_000_000_000))
-    if isinstance(random_seed, str):
-        if random_seed != 'default':
-            raise ValueError(f"Not sure how to interpret the random seed '{random_seed}'")
-        return 0
-    return int(np.mod(_round_half_away(abs(float(random_seed))), 4e9))
-
 # ------------------------------------------------------------------------------
 # Embedding parameters (hctsa's NL_FNN and BF_Embed), shared by the operations below
 # ------------------------------------------------------------------------------
 
+@dict_output
 def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         theiler_win: Union[int, float, list, tuple] = ('ac', 1), just_best: bool = True,
         bestp: float = 0.4, escape_factor: Union[float, None] = None) -> Union[dict, float]:
@@ -532,6 +522,7 @@ def _ms_nlpe(y: ArrayLike, de: int, tau: int, theiler_win: int = 0) -> float:
 
     return e
 
+@dict_output
 def nsamdf(x: ArrayLike, tau_mult: Union[int, float] = 2, win_len_rel: Union[int, float] = 10,
            shift_len_rel: Union[float, int] = 0.5, degree: int = 7) -> dict:
     """
@@ -601,6 +592,7 @@ def nsamdf(x: ArrayLike, tau_mult: Union[int, float] = 2, win_len_rel: Union[int
 
     return {'L': np.sqrt(np.mean((s2n - sdn)**2))}
 
+@dict_output
 def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
          max_n: Union[int, str] = 5000,
          theiler_win: Union[int, float, list, tuple] = ('ac', 1)) -> dict:
@@ -707,6 +699,7 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
 
     return out
 
+@dict_output
 def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 10),
                past: Union[int, float, list, tuple] = ('ac', 1),
                random_seed: Union[int, None] = 0) -> dict:
@@ -735,7 +728,7 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
         ``['ac', k]`` for ``k`` times the autocorrelation time (``['ac1e', k]`` is
         also accepted). Default is ``['ac', 1]``.
     random_seed : int, str or None, optional
-        Seed of the random reference points (see :func:`_bf_random_seed`; ``'default'`` is 0).
+        Seed of the random reference points (see :func:`~pyhctsa.robust.bf_random_seed`; ``'default'`` is 0).
         They come from the portable generator :func:`~pyhctsa.robust.bf_random`, so the
         results are the same as hctsa's for the same seed. Default is 0.
 
@@ -783,7 +776,7 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
 
     # Random numbers for the reference points: the next unused number of one reproducible stream
     # (more of the same stream is generated if the numbers run out)
-    seed = _bf_random_seed(random_seed)
+    seed = bf_random_seed(random_seed)
     rand_stream = bf_random(512, seed)
     num_used = 0
 
@@ -829,6 +822,7 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
 
     return out
 
+@dict_output
 def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
     """
     Reconstructs the time series as a time-delay embedding, and performs Principal
@@ -901,6 +895,7 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
 
     return out
 
+@dict_output
 def local_density(y: ArrayLike, nnr: int = 3,
                   past: Union[int, float, list, tuple] = ('ac', 1),
                   tau: Union[str, int] = 'ac', m: Union[str, int] = 2) -> dict:
@@ -1020,7 +1015,7 @@ def local_density(y: ArrayLike, nnr: int = 3,
     out['medianden'] = np.median(locden)
 
     for i in range(1, 6):
-        out[f'ac{i}den'] = autocorr(locden, i, 'Fourier')[0]
+        out[f'ac{i}den'] = autocorr(locden, i, 'Fourier')
 
     # Estimates of correlation length:
     # first zero-crossing of the autocorrelation function:
@@ -1304,6 +1299,7 @@ def _summarise_d2_scaling(dat_v: np.ndarray, dat_M: np.ndarray, p: str,
     out[f'{p}_dimstd'] = sc['dimstd']
 
 
+@dict_output
 def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
               theiler_win: Union[int, float, list, tuple] = ('ac', 1)) -> Union[dict, float]:
     """
@@ -1485,6 +1481,7 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
 
 
 
+@dict_output
 def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
                 thwin: Union[int, float, list, tuple] = ('ac', 1), nbins: int = 20,
                 embed_params: Union[list, tuple] = ('ac', 'fnn'), do_two: int = 1) -> Union[dict, float]:
@@ -1629,7 +1626,7 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
         out['robfit_sea2'] = stats['se'][1]
         out['robfitresmeanabs'] = np.mean(np.abs(res))
         out['robfitresmeansq'] = np.mean(res ** 2)
-        out['robfitresac1'] = autocorr(res, 1, 'Fourier')[0]
+        out['robfitresac1'] = autocorr(res, 1, 'Fourier')
     else:
         for k in ('robfit_a1', 'robfit_a2', 'robfit_sigrat', 'robfit_s', 'robfit_sea1',
                   'robfit_sea2', 'robfitresmeanabs', 'robfitresmeansq', 'robfitresac1'):
@@ -1768,6 +1765,7 @@ def _fractal_dim_error(d: float, g: float, kmin: int, kmax: int, mom: np.ndarray
     return scale_err(a)
 
 
+@dict_output
 def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
                        nref: Union[int, float] = 0.2, gstart: float = 1, gend: float = 10,
                        past: Union[int, float, list, tuple] = ('ac', 1), steps: int = 32,
@@ -1831,7 +1829,7 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
         TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
     random_seed : int, str or None, optional
         Seed for choosing the random subsample of reference points (relevant when
-        ``nref != -1``; see :func:`_bf_random_seed`). The numbers come from the portable generator
+        ``nref != -1``; see :func:`~pyhctsa.robust.bf_random_seed`). The numbers come from the portable generator
         :func:`~pyhctsa.robust.bf_random`, so the subsample is the same as hctsa's. Default is 0.
 
     Returns
@@ -1877,7 +1875,7 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     if nref == -1 or nref >= n_emb:
         ref_idx = np.arange(n_emb)
     else:
-        ref_idx = bf_random(n_emb, _bf_random_seed(random_seed), 'perm')[:int(nref)] - 1  # random subsample
+        ref_idx = bf_random(n_emb, bf_random_seed(random_seed), 'perm')[:int(nref)] - 1  # random subsample
 
     # For each reference point, the distances to its 1st..kmax-th nearest neighbors outside
     # the Theiler window (a KD-tree, over-fetching neighbors to cover those excluded)
@@ -2044,6 +2042,7 @@ def _dimensions_best_m(logr: np.ndarray, log_nn: np.ndarray, prefix: str, out: d
     out[f'{prefix}_mbestfit'] = int(np.argmin(msq)) + 1
 
 
+@dict_output
 def dimensions(y: ArrayLike, num_bins: int = 50,
                embed_params: Union[list, tuple] = ('ac', 'fnn')) -> Union[dict, float]:
     """
@@ -2215,6 +2214,7 @@ def _tisean_lyap_r(y: np.ndarray, delay: int, dim: int, mindist: int, steps: int
     return np.column_stack([steps_idx[have], np.vectorize(_e)(lyap[have] / found[have] / 2.0)])
 
 
+@dict_output
 def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
                  maxtstep: Union[int, float, list, tuple] = ('ac1e', 30),
                  past: Union[int, float, list, tuple] = ('ac1e', 1), nnr: int = 3,
@@ -2518,6 +2518,7 @@ def _dvv_iaaft(x: np.ndarray, perm: np.ndarray, max_it: int = 100, tol: float = 
     return best_r
 
 
+@dict_output
 def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
         ntv: Union[int, None] = None, num_surr: int = 10, random_seed: Union[int, None] = 0,
         tau: Union[int, str] = 1) -> Union[dict, float]:
@@ -2674,6 +2675,7 @@ def _period_normalized_tau(y: np.ndarray) -> Union[int, str]:
     return max(1, int(_round_half_away(1 / f[locs[best]] / 5)))
 
 
+@dict_output
 def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, max_dim: int = 1,
                         max_n: Union[int, str] = 1000) -> Union[dict, float]:
     """
@@ -2808,6 +2810,7 @@ def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
     return boxcounts
 
 
+@dict_output
 def poincare_section(y: ArrayLike, ref: str = 'max',
                      tau: Union[int, str] = 'mi') -> Union[dict, float]:
     """
@@ -2900,8 +2903,8 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         out[f'std{lab}'] = np.std(u, ddof=1)
         out[f'iqr{lab}'] = q75 - q25
         out[f'mean{lab}'] = np.mean(u)
-        out[f'ac1{lab}'] = autocorr(u, 1, 'Fourier')[0]
-        out[f'ac2{lab}'] = autocorr(u, 2, 'Fourier')[0]
+        out[f'ac1{lab}'] = autocorr(u, 1, 'Fourier')
+        out[f'ac2{lab}'] = autocorr(u, 2, 'Fourier')
         out[f'tauac{lab}'] = first_crossing(u, 'ac', 0, 'continuous')
 
     out['boxarea'] = np.ptp(x) * np.ptp(yy)
@@ -2938,8 +2941,8 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     out['stdD'] = np.std(d, ddof=1)
     out['iqrD'] = q75 - q25
     out['meanD'] = np.mean(d)
-    out['ac1D'] = autocorr(d, 1, 'Fourier')[0]
-    out['ac2D'] = autocorr(d, 2, 'Fourier')[0]
+    out['ac1D'] = autocorr(d, 1, 'Fourier')
+    out['ac2D'] = autocorr(d, 2, 'Fourier')
     out['tauacD'] = first_crossing(d, 'ac', 0, 'continuous')
 
     # Statistics of the boxed distribution, with 5 and then 10 partitions per axis:
@@ -2961,6 +2964,7 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
 
     return out
 
+@dict_output
 def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
     """
     Singular Spectrum Analysis of a time series.
@@ -3109,7 +3113,7 @@ def _random_subset(n: int, k: int, random_seed: Union[int, str, None]) -> np.nda
     ``BF_Random(n, BF_RandomSeed(randomSeed), 'perm')``): an integer seed, ``'default'`` for
     seed 0, or ``None``/``'none'`` for a seed from NumPy's global stream.
     """
-    return bf_random(n, _bf_random_seed(random_seed), 'perm')[:k] - 1
+    return bf_random(n, bf_random_seed(random_seed), 'perm')[:k] - 1
 
 
 def _recurrence_radius(Y: np.ndarray, rr: float, random_seed: Union[int, str, None]) -> float:
@@ -3192,6 +3196,7 @@ def _recurrence_time_stats(Y: np.ndarray, radius: float, theiler: int) -> tuple:
     return float(np.mean(w)), float(np.bincount(w).max() / w.size)
 
 
+@dict_output
 def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] = 3,
                      theiler_win: Union[int, float, list, tuple] = ('ac', 1), rr: float = 0.1,
                      num_segments: int = 4, max_n: Union[int, str] = 10000,
@@ -3311,6 +3316,7 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
     return out
 
 
+@dict_output
 def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] = 3,
         theiler_win: Union[int, float, list, tuple] = ('ac', 1), rr: float = 0.1,
         lmin: int = 2, vmin: int = 2, max_n: Union[int, str] = 10000,
@@ -3462,6 +3468,7 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
     return out
 
 
+@dict_output
 def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100,
                 past: Union[int, float, list, tuple] = ('ac', 1), nref: int = -1,
                 embed_params: Union[list, tuple] = ('ac', 'fnn')) -> dict:
@@ -3656,6 +3663,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     return out
 
 
+@dict_output
 def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: int = 4,
                   max_n: Union[int, str] = 'full') -> dict:
     """
@@ -3836,6 +3844,7 @@ def _spectrum_stats(perc: np.ndarray, m: int) -> dict:
     return stats
 
 
+@dict_output
 def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
                      max_n: Union[int, str] = 2000) -> dict:
     """
@@ -3987,6 +3996,7 @@ def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
     return out
 
 
+@dict_output
 def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
                            embed_params: Union[list, tuple] = ('ac', 'fnn')) -> dict:
     """
@@ -4091,6 +4101,7 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
     return out
 
 
+@dict_output
 def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: float = 0.98,
                   theiler_win: Union[int, float, list, tuple] = ('ac', 1), n_poles: int = 200,
                   m_order: int = 5, max_n: Union[int, str] = 'full',
@@ -4504,6 +4515,7 @@ def _c1_scaling_range(slopes: np.ndarray) -> Union[tuple, None]:
     return stptr[a], endptr[b], best, np.mean(rng), np.std(rng, ddof=1)
 
 
+@dict_output
 def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = (2, 10),
               tsep: Union[int, float] = 0.02, nref: Union[int, float] = 0.5) -> Union[dict, float]:
     """
@@ -4862,6 +4874,7 @@ def _lyap_spec_sums(S, k_nn, theiler, seed):
     return 0, factor, count
 
 
+@dict_output
 def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: int = 30,
               max_n: Union[int, str] = 10000, theiler_win: Union[int, float, list, tuple] = ('ac', 1),
               random_seed: int = 42) -> Union[dict, float]:
@@ -4898,7 +4911,7 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
         The Theiler window (see :func:`pyhctsa.utils.theiler_window`): neighbors closer in time
         than this are not used. Default is ``['ac', 1]``.
     random_seed : int or str, optional
-        Seed of the added noise (see :func:`_bf_random_seed`). Default is 42.
+        Seed of the added noise (see :func:`~pyhctsa.robust.bf_random_seed`). Default is 42.
 
     Returns
     -------
@@ -4914,7 +4927,7 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
     if m < 3:
         raise ValueError('The embedding dimension, m, must be at least 3 (the outputs include LE3)')
 
-    y = y + 0.001 * np.std(y, ddof=1) * bf_random(n, _bf_random_seed(random_seed), 'normal')
+    y = y + 0.001 * np.std(y, ddof=1) * bf_random(n, bf_random_seed(random_seed), 'normal')
 
     params = _embedding_params(y, tau_method, m)
     if params is None:

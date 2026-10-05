@@ -20,12 +20,12 @@ maintainers = [
 dependencies = [
   "numpy>=2",
   "scipy",
+  "pandas",
   "pyyaml",
   "statsmodels",
   "numba",
   "scikit-learn",
   "antropy",
-  "ts2vg",
   "arch",
   "PyWavelets",
   "rich",

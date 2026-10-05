@@ -7,40 +7,7 @@ from scipy.stats import ansari
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
 from ..robust import bf_ks_density, bf_runs_z
-from ..utils import get_tau, matlab_quantile
-
-def _ksdensity(x: np.ndarray, xi: Union[None, np.ndarray] = None):
-    """
-    Gaussian kernel density estimate with MATLAB ``ksdensity``'s default settings.
-
-    The bandwidth is ``sig * (4 / (3 n)) ** (1 / 5)`` with the robust spread
-    ``sig = median(|x - median(x)|) / 0.6745`` (the range of x if that is zero,
-    and 1 if the bandwidth is still not positive). With no evaluation points
-    given, ``xi`` is 100 equally spaced points from ``min(x) - 3 bw`` to
-    ``max(x) + 3 bw``.
-
-    Returns
-    -------
-    f, xi : numpy.ndarray
-        The density estimate and the points at which it is evaluated.
-    """
-    x = np.asarray(x, dtype=float)
-    n = len(x)
-    sig = np.median(np.abs(x - np.median(x))) / 0.6745
-    if sig <= 0:
-        sig = np.max(x) - np.min(x)
-    bw = sig * (4.0 / (3.0 * n)) ** 0.2
-    if not bw > 0:
-        bw = 1.0
-    if xi is None:
-        xi = np.linspace(np.min(x) - 3 * bw, np.max(x) + 3 * bw, 100)
-    xi = np.asarray(xi, dtype=float)
-    f = np.empty(len(xi))
-    for j in range(0, len(xi), 256):  # chunked to bound memory
-        u = (xi[j:j + 256, None] - x[None, :]) / bw
-        f[j:j + 256] = np.exp(-0.5 * u * u).sum(axis=1) / (n * bw * np.sqrt(2 * np.pi))
-    return f, xi
-
+from ..utils import dict_output, get_tau, matlab_quantile
 
 def walker(y: ArrayLike, walker_rule: str = 'prop',
            walker_params: Union[None, float, int, list] = None) -> dict:
@@ -199,8 +166,8 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     out['w_mean'] = np.mean(w)
     out['w_median'] = np.median(w)
     out['w_std'] = np.std(w, ddof=1)
-    out['w_ac1'] = autocorr(w, 1, 'Fourier')[0]
-    out['w_ac2'] = autocorr(w, 2, 'Fourier')[0]
+    out['w_ac1'] = autocorr(w, 1, 'Fourier')
+    out['w_ac2'] = autocorr(w, 2, 'Fourier')
     out['w_tau'] = first_crossing(w, 'ac', 0, 'continuous')
     out['w_min'] = np.min(w)
     out['w_max'] = np.max(w)
@@ -212,7 +179,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
                          - first_crossing(w, 'ac', 0, 'continuous'))
     out['sw_stdrat'] = np.std(w, ddof=1) / np.std(y, ddof=1)
     # a difference, not a ratio, which blows up when y has ac1 near 0
-    out['sw_ac1diff'] = out['w_ac1'] - autocorr(y, 1, 'Fourier')[0]
+    out['sw_ac1diff'] = out['w_ac1'] - autocorr(y, 1, 'Fourier')
     out['sw_minrat'] = np.min(w) / np.min(y)
     out['sw_maxrat'] = np.max(w) / np.max(y)
     out['sw_propcross'] = np.sum((w[:-1] - y[:-1]) * (w[1:] - y[1:]) < 0) / (N - 1)
@@ -233,10 +200,11 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     res = w - y
     out['res_runsz'] = bf_runs_z(res)  # runs test z-statistic
     out['res_swss5_1'] = sliding_window(res, 'std', 'std', 5, 1)
-    out['res_ac1'] = autocorr(res, 1)[0]
+    out['res_ac1'] = autocorr(res, 1)
 
     return out
 
+@dict_output
 def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
                     params: Union[list, None] = None) -> dict:
     """
@@ -349,9 +317,9 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
     out['range'] = np.ptp(x)
     out['proppos'] = np.sum(x >0)/N
     out['pcross'] = np.sum(x[:-1] * x[1:] < 0) / (N - 1)
-    out['ac1'] = np.abs(autocorr(x, 1, 'Fourier')[0])
-    out['ac10'] = np.abs(autocorr(x, 10, 'Fourier')[0])
-    out['ac50'] = np.abs(autocorr(x, 50, 'Fourier')[0])
+    out['ac1'] = np.abs(autocorr(x, 1, 'Fourier'))
+    out['ac10'] = np.abs(autocorr(x, 10, 'Fourier'))
+    out['ac50'] = np.abs(autocorr(x, 50, 'Fourier'))
     out['tau'] = first_crossing(x, 'ac', 0, 'continuous')
     out['meanabs'] = np.mean(np.abs(x)) # mean magnitude of the position
 
@@ -363,6 +331,7 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
     return out
 
 
+@dict_output
 def kramers_moyal(y: ArrayLike, tau: Union[int, str] = 1, num_bins: int = 15) -> Union[dict, float]:
     """
     How the series' average drift and noise intensity depend on its current level, from its increments.

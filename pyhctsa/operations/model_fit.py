@@ -5,7 +5,6 @@ import numba
 import numpy as np
 from numpy.typing import ArrayLike
 from numpy.lib.stride_tricks import sliding_window_view
-from scipy.optimize import curve_fit
 from scipy.signal import lfilter
 from scipy.special import gammaincc
 from scipy.stats import ks_1samp, norm, t
@@ -14,12 +13,12 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 from ..operations.correlation import autocorr, first_crossing
-from ..operations.physics import _ksdensity
+from ..operations.distribution import simple_fit
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..robust import bf_exp_fit, bf_random, bf_random_seed
 from ..toolboxes.matlab.optimizers import minimize
-from ..utils import _linspace, _zscore_matlab, get_tau, matlab_quantile, z_score
+from ..utils import dict_output, _linspace, _ml_std, _zscore_matlab, get_tau, matlab_quantile, z_score
 
 @numba.njit(cache=True, error_model='numpy')
 def _zg_hmm_em(x, mu, cov, P, pi, n_cycles, tol, cov_floor):
@@ -796,11 +795,12 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     for key, value in residual_analysis(stde, y, 'full').items():
         out[f'zres_{key}'] = value
 
-    out['ac1_stde2'] = autocorr(stde2, [1], 'Fourier')[0]
-    out['diff_ac1'] = autocorr(y ** 2, [1], 'Fourier')[0] - out['ac1_stde2']
+    out['ac1_stde2'] = autocorr(stde2, 1, 'Fourier')
+    out['diff_ac1'] = autocorr(y ** 2, 1, 'Fourier') - out['ac1_stde2']
     return out
 
 
+@dict_output
 def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3),
                   qr: ArrayLike = (1, 2, 3), random_seed: Union[int, str, None] = None) -> dict:
     """
@@ -971,7 +971,7 @@ def _stabilize_matrix(a: np.ndarray, thresh: float = 1 + np.sqrt(np.finfo(float)
     Reflect eigenvalues of ``a`` that lie outside the unit circle (beyond ``thresh``) to
     ``thresh^2/lambda``, as MATLAB's ``fstab``.
     """
-    from scipy.linalg import rsf2csf, schur
+    from scipy.linalg import schur
     eigval, eigvec = np.linalg.eig(a)
     if np.linalg.cond(eigvec) > 1e8:
         t_mat, z_mat = schur(a.astype(complex), output='complex')
@@ -1099,6 +1099,7 @@ def _n4_state_space(y: np.ndarray, order: Union[int, str]) -> dict:
             'order': n}
 
 
+@dict_output
 def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.5,
                       steps: int = 1) -> dict:
     """
@@ -1131,7 +1132,8 @@ def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.
     Returns
     -------
     dict
-        From the model fitted to the entire time series:
+        All outputs NaN if the model cannot be fitted (e.g. a series too short for the order).
+        Otherwise, from the model fitted to the entire time series:
 
         - ``A_1``, ..., ``A_(ord^2)``: the entries of the state-transition matrix ``A``, counted
           down each column in turn
@@ -1170,7 +1172,10 @@ def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.
         ord = int(ord)
 
     # The model of the whole time series
-    fit = _n4_state_space(y, ord)
+    try:
+        fit = _n4_state_space(y, ord)
+    except (ValueError, np.linalg.LinAlgError):
+        return np.nan  # the model cannot be fitted (e.g. too few samples): every output is undefined
     n = fit['order']
     out = {}
     if ord == 'best':
@@ -1195,14 +1200,15 @@ def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.
     y_test = y[n_cut - 1:]
     try:
         train = _n4_state_space(y[:n_cut], ord)
-    except (ValueError, np.linalg.LinAlgError) as err:
-        raise ValueError(f"Couldn't fit the model to this time series: {err}") from err
+    except (ValueError, np.linalg.LinAlgError):
+        return np.nan
     m_residuals = -_ss_initial_state(train['A'], train['K'], train['C'], y_test, int(steps))[1]
     out.update(residual_analysis(m_residuals, y_test, 'full'))
-    out['ac1diff'] = abs(autocorr(y, [1], 'Fourier')[0]) - abs(autocorr(m_residuals, [1], 'Fourier')[0])
+    out['ac1diff'] = abs(autocorr(y, 1, 'Fourier')) - abs(autocorr(m_residuals, 1, 'Fourier'))
     return out
 
 
+@dict_output
 def state_space_comp_order(y: ArrayLike, max_order: int = 10) -> Union[dict, float]:
     """
     How the fit of a state-space model improves as its order increases.
@@ -1305,6 +1311,7 @@ def _fpe_stats(fpes: np.ndarray) -> dict:
             'fpe_min': np.min(fpes), 'fpe_range': np.ptp(fpes)}
 
 
+@dict_output
 def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, None] = 2,
                     subset_how: str = 'rand', sample_p: Union[list, tuple, int] = (20, 0.1),
                     random_seed: Union[int, str, None] = 'default') -> dict:
@@ -1520,8 +1527,8 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
             seg = y[r[i, 0] - 1:r[i, 1]]
             try:
                 fit = _n4_state_space(seg, order if isinstance(order, str) else int(order))
-            except (np.linalg.LinAlgError, ValueError) as err:
-                raise ValueError("Couldn't fit this state space model") from err
+            except (np.linalg.LinAlgError, ValueError):
+                return np.nan  # (hctsa: an error) a segment is too short for the model
             fpes[i] = _n4_fpe(fit['loss'], fit['order'], len(seg))
         out.update(_fpe_stats(fpes))
     elif model == 'arma':
@@ -1646,25 +1653,7 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
 
     return out
 
-def _gauss1_r2(x: np.ndarray) -> float:
-    """
-    R-squared of a Gaussian fit to the kernel-density estimate of x.
-
-    Equivalent to hctsa's ``DN_SimpleFit(x, 'gauss1', 0).r2``: the curve
-    a * exp(-((t - b) / c) ** 2) is fitted by nonlinear least squares to MATLAB's
-    default ``ksdensity`` estimate of x (100 points). NaN if the fit fails.
-    """
-    try:
-        dny, dnx = _ksdensity(np.asarray(x, dtype=float))
-        gauss1 = lambda t, a, b, c: a * np.exp(-((t - b) / c) ** 2)
-        i0 = int(np.argmax(dny))
-        popt, _ = curve_fit(gauss1, dnx, dny,
-                            p0=[dny[i0], dnx[i0], (dnx[-1] - dnx[0]) / 4], maxfev=10000)
-        sse = np.sum((dny - gauss1(dnx, *popt)) ** 2)
-        return float(1 - sse / np.sum((dny - np.mean(dny)) ** 2))
-    except (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
-        return np.nan
-
+@dict_output
 def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
                  train_length: Union[int, str] = 3) -> dict:
     """
@@ -1752,11 +1741,13 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
 
     # Output statistics on the residuals, res, through the shared contract ('core' level)
     out = residual_analysis(res, y, 'core')
-    #% Normality of residuals: r-squared of a Gaussian fit to their kernel-density estimate
-    out['normr2'] = _gauss1_r2(res)
+    # Normality of residuals: r-squared of a Gaussian fit to their kernel-smoothed distribution
+    fit = simple_fit(res, 'gauss1', 0)
+    out['normr2'] = fit['r2'] if isinstance(fit, dict) else np.nan
 
     return out
 
+@dict_output
 def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
                   alpha: Union[str, float] = 'best') -> dict:
     """
@@ -1920,12 +1911,6 @@ def _fit_exp_smooth(x: np.ndarray, a: float) -> np.ndarray:
         
     return xf
 
-def _zscore(x: np.ndarray) -> np.ndarray:
-    # MATLAB's zscore: no guard against (near-)constant input, which gives NaN
-    # for exactly constant data (the guarded utils.z_score raises instead)
-    with np.errstate(all='ignore'):
-        return (x - np.mean(x)) / np.std(x, ddof=1)
-
 def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
                       level: str = 'full') -> dict:
     """
@@ -2002,7 +1987,7 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
     out['maxonstd'] = 0.0 if std_e == 0 else np.max(np.abs(e)) / std_e
 
     # z-score the residuals for everything that follows (all of it is scale-free)
-    e_z = np.zeros(N) if std_e == 0 else _zscore(e)
+    e_z = np.zeros(N) if std_e == 0 else _zscore_matlab(e)
 
     # Serial correlation
     max_lag = 25
@@ -2019,7 +2004,7 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
         out['taurat'] = np.nan
     else:
         y = np.asarray(y, dtype=float).ravel()
-        tau_y = first_crossing(_zscore(y), 'ac', 0, 'continuous')
+        tau_y = first_crossing(_zscore_matlab(y), 'ac', 0, 'continuous')
         tau_e = first_crossing(e_z, 'ac', 0, 'continuous')
         if tau_y == 0 or not np.isfinite(tau_y):
             out['taurat'] = np.nan
@@ -2049,6 +2034,7 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
         out['minsbc'] = np.nan
     return out
 
+@dict_output
 def ar_cov(y: ArrayLike, p: int = 2) -> dict:
     """
     Fits an autoregressive (AR) model of a given order p.
@@ -2295,6 +2281,7 @@ def _t_quantile(dof: int, p: float) -> float:
     """Student-t quantile (ARFIT_tquant)."""
     return float(t.ppf(p, df=dof))
 
+@dict_output
 def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc') -> dict:
     """
     Statistics of a fitted AR model to a time series.
@@ -2498,11 +2485,6 @@ def is_seasonal(y: ArrayLike) -> int:
         out = 1 # test thinks the time series has strong periodicities
     
     return out
-
-def _ml_std(a: np.ndarray) -> float:
-    """MATLAB's ``std``: the sample standard deviation, 0 for a single element."""
-    return float(np.std(a, ddof=1)) if np.size(a) > 1 else 0.0
-
 
 def _ml_max(a, axis=None):
     """MATLAB ``max``: NaNs are omitted (NaN only if every element is NaN)."""
@@ -3007,6 +2989,7 @@ def _arx_losses(y_train: np.ndarray, y_test: np.ndarray, orders) -> tuple:
     return loss, n_te
 
 
+@dict_output
 def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
                test_how: Union[float, str] = 'all') -> dict:
     """
@@ -3230,6 +3213,7 @@ def _fit_predictor_model(y: np.ndarray, model: str, order):
     return lambda y_seg, steps: _kstep_residuals(a, c, y_seg, steps)
 
 
+@dict_output
 def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 2,
                 max_steps: int = 6) -> dict:
     """
@@ -3308,7 +3292,7 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
         mres = model_residuals(i)[i - 1:]
         mf_rms[j] = np.sqrt(np.mean(mres ** 2))
         mf_abs[j] = np.mean(np.abs(mres))
-        mf_ac1[j] = np.ravel(autocorr(mres, 1, 'Fourier'))[0]
+        mf_ac1[j] = autocorr(mres, 1, 'Fourier')
 
         # (2) *** Sliding mean 1 ***: predicts with the value i steps before it
         mres = y[i:] - y[:N - i]
@@ -3348,6 +3332,7 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
     return out
 
 
+@dict_output
 def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, list] = 2,
                       subset_how: str = 'rand', sample_p: Union[list, tuple] = (20, 0.1),
                       steps: int = 2, random_seed: Union[int, str, None] = 0) -> dict:
@@ -3470,7 +3455,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
 
         # statistics on the residuals
         rmserrs[i] = np.sqrt(np.mean(mres ** 2))
-        ac1s[i] = np.ravel(autocorr(mres, 1, 'Fourier'))[0]
+        ac1s[i] = autocorr(mres, 1, 'Fourier')
 
         # statistics on the output time series
         meandiffs[i] = abs(np.mean(yp) - np.mean(y_test))
@@ -3518,6 +3503,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     return out
 
 
+@dict_output
 def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
                          n_states: ArrayLike = (2, 3, 4)) -> dict:
     """
@@ -3631,6 +3617,7 @@ def _gp_init_hyp(components: list, tt: np.ndarray) -> np.ndarray:
     return np.r_[hyp, np.log(0.1)]
 
 
+@dict_output
 def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covNoise',
                        squish_or_squash: int = 1, max_n: Union[int, float, str] = 500,
                        resample_how: str = 'resample',

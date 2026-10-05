@@ -21,7 +21,6 @@ from pyhctsa.operations import pre_process as PP
 from pyhctsa.operations import scaling as SC
 from pyhctsa.operations import spectral as SP
 from pyhctsa.operations import stationarity as ST
-from pyhctsa.robust import bf_random
 
 with open(os.path.join(os.path.dirname(__file__), 'data', 'p2_b.json')) as fh:
     _FIX = json.load(fh)
@@ -29,6 +28,11 @@ SERIES = {k: np.asarray(v, dtype=float) for k, v in _FIX['inputs'].items()}
 EXP = _FIX['expected']
 ZS = ['s3', 's20', 'expn700', 'quant600', 'short60']  # z-scored series
 ALL = ZS + ['const300']
+
+
+def _all_nan(out):
+    """True for NaN, or for the dict of NaN fields a failed dict-valued function returns."""
+    return all(np.isnan(v) for v in out.values()) if isinstance(out, dict) else bool(np.isnan(out))
 
 
 def _num(v):
@@ -93,7 +97,7 @@ class TestDistribution:
                   arclength=[0.1, 0.5, 1, 2])
         for n, ml in _series('A_fks'):
             _check(D.fit_kernel_smooth(SERIES[n], **kw), ml, f'fks {n}', rtol=1e-9, atol=1e-12)
-        assert np.isnan(D.fit_kernel_smooth(SERIES['const300']))
+        assert _all_nan(D.fit_kernel_smooth(SERIES['const300']))
 
     @pytest.mark.parametrize('dist', ['norm', 'uni', 'beta'])
     def test_compare_ks_fit(self, dist):
@@ -134,17 +138,13 @@ class TestDistribution:
                 _check(D.histogram_asymmetry(SERIES[n], nb, simple), ml, f'{key} {n}', rtol=1e-12, atol=1e-12)
 
     def test_remove_points_random_matches_matlab(self):
+        # (the reference files still hold the autocorrelation outputs DN_RemovePoints no longer returns)
+        ac = ('fzcacrat', 'ac1rat', 'ac1diff', 'ac2rat', 'ac2diff', 'ac3rat', 'ac3diff', 'sumabsacfdiff')
         for n, ml in _series('G_rp_rand', ZS):
-            _check(D.remove_points(SERIES[n], 'random', 0.1, 'remove'), ml, f'rp {n}', rtol=1e-8, atol=1e-10)
+            _check(D.remove_points(SERIES[n], 'random', 0.1, 'remove'), ml, f'rp {n}', rtol=1e-8, atol=1e-10, skip=ac)
         for n, ml in _series('G_rp_rand3', ZS):
-            _check(D.remove_points(SERIES[n], 'random', 0.3, 'remove', 3), ml, f'rp seed 3 {n}', rtol=1e-8, atol=1e-10)
-
-    def test_bf_random_seed(self):
-        assert D._bf_random_seed(None) == 0 and D._bf_random_seed('default') == 0
-        assert D._bf_random_seed(3) == 3 and D._bf_random_seed(-2.4) == 2 and D._bf_random_seed(4e9 + 5) == 5
-        assert 0 <= D._bf_random_seed('none') < 4e9
-        with pytest.raises(ValueError):
-            D._bf_random_seed('garbage')
+            _check(D.remove_points(SERIES[n], 'random', 0.3, 'remove', 3), ml, f'rp seed 3 {n}',
+                   rtol=1e-8, atol=1e-10, skip=ac)
 
 
 # ------------------------------------------------------------------------------
@@ -301,7 +301,7 @@ class TestSpectralScalingMedical:
                 assert 'resrunsz' in py and 'resruns' not in py
 
     def test_sinusoid_fit_too_short(self):
-        assert np.isnan(SP.sinusoid_fit(SERIES['s3'][:9], 'sin3'))
+        assert _all_nan(SP.sinusoid_fit(SERIES['s3'][:9], 'sin3'))
         for n, ml in _series('C_sf_sin3_ten', ZS):
             _check(SP.sinusoid_fit(SERIES[n][:10], 'sin3'), ml, f'sin3 N=10 {n}', rtol=1e-4, atol=1e-5)
 

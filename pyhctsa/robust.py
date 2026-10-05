@@ -23,12 +23,12 @@ import numpy as np
 from numba import njit
 from numpy.typing import ArrayLike
 
-from .utils import _linspace, matlab_quantile
+from .utils import _linspace, _round_half_away, matlab_quantile
 
 __all__ = [
     'bf_random', 'bf_random_seed', 'bf_tie_break_noise', 'bf_runs_z', 'bf_residual_stats', 'bf_theil_sen',
     'bf_exp_fit', 'bf_fit_density_curve', 'bf_gauss_mix2', 'bf_fit_sinusoids',
-    'bf_ks_density', 'bf_hist_edges', 'bf_quantile_edges', 'bf_half_sample_mode',
+    'bf_ks_density', 'bf_hist_edges', 'bf_quantile_edges', 'bf_half_sample_mode', 'bf_remove_points',
 ]
 
 
@@ -872,3 +872,95 @@ def bf_half_sample_mode(y: ArrayLike) -> float:
             return float(np.mean(y[1:]))
         return float(y[1])
     return float(np.mean(y))
+
+
+# ------------------------------------------------------------------------------
+# BF_RemovePoints
+# ------------------------------------------------------------------------------
+def bf_remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
+                     remove_or_saturate: str = 'remove',
+                     random_seed: Union[int, str, None] = None) -> np.ndarray:
+    """
+    Remove or saturate a proportion of the points of a time series (hctsa's ``BF_RemovePoints``).
+
+    Chooses a proportion, ``p``, of the points of the (z-scored) series according to a rule, and
+    either deletes them or clips their values. Removing deletes the chosen points and closes up
+    the rest into a shorter series (in the original order). Saturating keeps them in place but
+    clips their values to the most extreme value among the points kept. Used by hctsa's
+    ``DN_RemovePoints`` (order-free statistics of the changed series) and ``CO_RemovePoints``
+    (autocorrelation statistics of the changed series).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (should be z-scored).
+    remove_how : {'absclose', 'absfar', 'min', 'max', 'random'}, optional
+        How to choose the points to remove:
+
+        - 'absclose': those closest to the mean,
+        - 'absfar': those furthest from the mean (default),
+        - 'min': the lowest values,
+        - 'max': the highest values,
+        - 'random': at random.
+    p : float, optional
+        The proportion of points to remove. Default 0.1.
+    remove_or_saturate : {'remove', 'saturate'}, optional
+        Whether to remove the points (default) or to saturate their values ('saturate'; possible
+        for 'absfar', 'min' and 'max' only).
+    random_seed : int, 'default' or 'none', optional
+        Only relevant for ``remove_how='random'``: the seed of the random ordering (see
+        :func:`bf_random_seed`; ``None`` or ``'default'`` is seed 0, so the result is reproducible).
+        The ordering is ``bf_random(N, seed, 'perm')``, the portable generator, so it matches hctsa's.
+
+    Returns
+    -------
+    numpy.ndarray
+        The series after removing (a shorter series) or saturating (the original length) the
+        chosen points.
+
+    Raises
+    ------
+    ValueError
+        For an unknown ``remove_how`` or ``remove_or_saturate``, or saturating with a method
+        that cannot be saturated.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+
+    # Order the values by the criterion, so that the points to *keep* come first
+    if remove_how == 'absclose':
+        order = np.argsort(-np.abs(y), kind='stable')   # (MATLAB sort(...,'descend') is stable)
+    elif remove_how == 'absfar':
+        order = np.argsort(np.abs(y), kind='stable')
+    elif remove_how == 'min':
+        order = np.argsort(-y, kind='stable')
+    elif remove_how == 'max':
+        order = np.argsort(y, kind='stable')
+    elif remove_how == 'random':
+        order = bf_random(n, bf_random_seed(random_seed), 'perm') - 1
+    else:
+        raise ValueError(f"Unknown method '{remove_how}'")
+
+    # Points to keep: round(N*(1 - p)) of them, in the original order
+    n_keep = int(_round_half_away(n * (1 - p)))
+    keep = np.sort(order[:n_keep])
+
+    if remove_or_saturate == 'remove':
+        return y[keep]
+    if remove_or_saturate == 'saturate':
+        y_t = y.copy()
+        if remove_how in ('max', 'min', 'absfar'):
+            kept = y[keep]
+            if kept.size == 0:
+                return y_t  # (MATLAB would error on max([]) assignment; nothing to clip to)
+            if remove_how == 'max':
+                y_t[np.setdiff1d(np.arange(n), keep)] = np.max(kept)
+            elif remove_how == 'min':
+                y_t[np.setdiff1d(np.arange(n), keep)] = np.min(kept)
+            else:
+                hi, lo = np.max(kept), np.min(kept)
+                y_t[y_t > hi] = hi
+                y_t[y_t < lo] = lo
+            return y_t
+        raise ValueError(f"Cannot 'saturate' when using '{remove_how}' method")
+    raise ValueError(f"Unknown remove_or_saturate option: '{remove_or_saturate}'")

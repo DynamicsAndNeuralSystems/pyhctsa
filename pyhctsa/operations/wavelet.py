@@ -10,7 +10,7 @@ from scipy import stats
 import logging
 logger = logging.getLogger('pyhctsa')
 
-from ..utils import sign_change
+from ..utils import dict_output, sign_change
 from pywt._extensions._pywt import (
     ContinuousWavelet,
     DiscreteContinuousWavelet,
@@ -267,6 +267,7 @@ def dwt_coeff(y: ArrayLike, w_name: str = 'db3', level: int = 3) -> dict:
     
     return out
 
+@dict_output
 def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     """
     Continuous wavelet transform of a time series.
@@ -509,6 +510,7 @@ def detail_coeffs(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] 
 
     return out
 
+@dict_output
 def wl_coeffs(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 3) -> dict:
     """
     Wavelet decomposition of the time series.
@@ -762,6 +764,7 @@ def _modwt_var(w: np.ndarray, w_name: str) -> np.ndarray:
     # Calculate the estimate of the wavelet variance
     return np.array([np.sum((c - np.mean(c))**2)/m for c, m in zip(cfs, MJ)])
 
+@dict_output
 def modwt_var(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 5) -> dict:
     """
     Multiscale variance decomposition via the maximal overlap DWT.
@@ -845,6 +848,7 @@ def _shannon_entropy(c: np.ndarray) -> float:
     return float(-np.sum(x * np.log(np.finfo(float).eps + x)))
 
 
+@dict_output
 def wpd_best_tree(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] = 5) -> Union[dict, float]:
     """
     Adaptive best-basis wavelet packet decomposition.

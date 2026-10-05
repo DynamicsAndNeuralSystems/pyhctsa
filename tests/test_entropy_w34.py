@@ -13,6 +13,11 @@ def _x():
     return (x - x.mean()) / x.std(ddof=1)
 
 
+def _all_nan(out):
+    """True for NaN, or for the dict of NaN fields a failed dict-valued function returns."""
+    return all(np.isnan(v) for v in out.values()) if isinstance(out, dict) else bool(np.isnan(out))
+
+
 def test_dispersion_entropy():
     d = dispersion_entropy(_x(), 2, 6, 1)
     np.testing.assert_allclose(
@@ -22,8 +27,8 @@ def test_dispersion_entropy():
     np.testing.assert_allclose(
         [d['dispEn'], d['normDispEn'], d['fDispEn'], d['normFDispEn']],
         [3.25592248023321, 0.78288386929189, 2.80272781425558, 0.720158588929768], rtol=1e-10)
-    assert np.isnan(dispersion_entropy(np.ones(100)))
-    assert np.isnan(dispersion_entropy(_x()[:5], 3, 6, 2))
+    assert _all_nan(dispersion_entropy(np.ones(100)))
+    assert _all_nan(dispersion_entropy(_x()[:5], 3, 6, 2))
 
 
 def test_multi_scale_entropy():
@@ -35,7 +40,7 @@ def test_multi_scale_entropy():
     np.testing.assert_allclose(
         [o['dispen_s4'], o['meanDispEn'], o['slope']],
         [0.823471080718485, 0.769342711043293, -0.0181231642192005], rtol=1e-9)
-    assert np.isnan(multi_scale_entropy(_x()[:10]))
+    assert _all_nan(multi_scale_entropy(_x()[:10]))
     with pytest.raises(ValueError):
         multi_scale_entropy(_x(), what_entropy='nope')
 

@@ -7,9 +7,8 @@ import numpy as np
 import pytest
 import yaml
 
-from pyhctsa.calculator import FeatureCalculator
-from pyhctsa.utils import (_preprocess_decorator, decimate_ac1e, get_tau, pre_process,
-                           theiler_window, time_delay_embed, z_score)
+from pyhctsa.calculator import FeatureCalculator, _preprocess_decorator
+from pyhctsa.utils import decimate_ac1e, get_tau, pre_process, theiler_window, time_delay_embed, z_score
 
 T = np.arange(1000.0)
 

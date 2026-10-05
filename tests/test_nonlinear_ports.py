@@ -14,6 +14,11 @@ def _x(n=400):
     return (x - x.mean()) / x.std(ddof=1)
 
 
+def _all_nan(out):
+    """True for NaN, or for the dict of NaN fields a failed dict-valued function returns."""
+    return all(np.isnan(v) for v in out.values()) if isinstance(out, dict) else bool(np.isnan(out))
+
+
 def test_fnn_embedding_dimension():
     # BF_Embed(x, tau, 'fnn', true)
     assert nl._embedding_params(_x(), 'mi', 'fnn') == (3, 3)
@@ -34,7 +39,7 @@ def test_fnn_users():
     d = nl.gp_corr_sum(x, -1, 0.1, ('ac', 1), 20, ('ac', 'fnn'))
     assert abs(d['robfit_a2'] - 3.66955087508) < 1e-9 and abs(d['meanlnCr'] + 8.32376735638) < 1e-9
     assert abs(nl.takens_estimator(x, -1, 0.05, ('ac', 1), ('mi', 'fnn')) - 2.14107670491) < 1e-9
-    assert np.isnan(nl.nlpe(np.ones(100), 'fnn'))
+    assert _all_nan(nl.nlpe(np.ones(100), 'fnn'))
 
 
 def test_fnn():
@@ -77,9 +82,9 @@ def test_tisean_c1():
     d = nl.tisean_c1(x[:512], 1, [1, 5], 0.02, 0.5)
     assert abs(d['bestestd'] - 0.983567228923) < 1e-8 and abs(d['longestscr'] - 4.72561510696) < 1e-8
     assert d == nl.tisean_c1(x[:511], 1, [1, 5], 0.02, 0.5)
-    assert np.isnan(nl.tisean_c1(x[:99])) and np.isnan(nl.tisean_c1(np.ones(300)))
+    assert _all_nan(nl.tisean_c1(x[:99])) and _all_nan(nl.tisean_c1(np.ones(300)))
     # TISEAN's c1 never finishes here (too few neighbors outside the Theiler window): hctsa gives up
-    assert np.isnan(nl.tisean_c1(x[:520], 2, [3, 6], 0.05, 0.3))
+    assert _all_nan(nl.tisean_c1(x[:520], 2, [3, 6], 0.05, 0.3))
     with pytest.raises(ValueError):
         nl.tisean_c1(x, 'nonsense')
 
@@ -104,8 +109,8 @@ def test_lyap_spec():
     assert d['numPos'] == 0 and d['KYdim'] == 0
     d = nl.lyap_spec(_x(600), 2, 4, 20, 'full', ('ac', 1))
     assert abs(d['LE2'] + 0.09210157) < 1e-9
-    assert np.isnan(nl.lyap_spec(_x(600)[:200], 1, 3, 30))  # too short for the local fits
-    assert np.isnan(nl.lyap_spec(np.ones(500)))
+    assert _all_nan(nl.lyap_spec(_x(600)[:200], 1, 3, 30))  # too short for the local fits
+    assert _all_nan(nl.lyap_spec(np.ones(500)))
     with pytest.raises(ValueError):
         nl.lyap_spec(_x(600), 1, 2)
 

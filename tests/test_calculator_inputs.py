@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 import yaml
 
-from pyhctsa import calculator
 from pyhctsa.calculator import FeatureCalculator, _build_label, _preprocess_decorator, _transform_input
 from pyhctsa.operations import distribution
 from pyhctsa.utils import decimate_ac1e, z_score

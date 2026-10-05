@@ -5,17 +5,17 @@ from typing import Union
 import numba
 import numpy as np
 from numpy.typing import ArrayLike
-from scipy.linalg import LinAlgError, solve_triangular
+from scipy.linalg import solve_triangular
 from scipy.optimize import curve_fit
-from scipy.stats import chi2, expon, gaussian_kde, kstest, kurtosis, skew
+from scipy.stats import chi2, expon, kstest, kurtosis, skew
 from scipy.stats import mode as smode
 from scipy.spatial import cKDTree
 from statsmodels.tsa.stattools import pacf
 
-from ..operations.information import first_min, automutual_info
+from ..operations.information import automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
-from ..robust import bf_hist_edges, bf_quantile_edges, bf_random
-from ..utils import (_zscore_matlab, bf_remove_points, bin_picker, get_tau, histc, make_mat_buffer,
+from ..robust import bf_hist_edges, bf_quantile_edges, bf_random, bf_remove_points
+from ..utils import (dict_output, _zscore_matlab, get_tau, make_mat_buffer,
                      matlab_quantile, point_of_crossing, sign_change, theiler_window,
                      time_delay_embed, z_score)
 
@@ -98,6 +98,7 @@ def _knn_kld(A: np.ndarray, B: np.ndarray, k: int, theiler_win: int) -> float:
     return float((d / n_good) * np.sum(np.log(sk[good] / rk[good]))
                  + np.log(n / (n - 1)))
 
+@dict_output
 def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int = 3,
                  theiler_win: Union[int, float, list, tuple] = ('ac', 1),
                  max_n: Union[int, str] = 'full') -> dict:
@@ -214,6 +215,7 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
 
     return out
 
+@dict_output
 def pos_neg_asymmetry(y: ArrayLike) -> dict:
     """
     Asymmetry of local dynamics between positive and negative regimes.
@@ -539,17 +541,17 @@ def falling_sticks(y: ArrayLike) -> dict:
 
     # Persistence of the fall-angle sequence
     if len(angles_pos) >= 2 and np.std(angles_pos, ddof=1) > 0:
-        z_angles_pos = z_score(angles_pos)
+        z_angles_pos = _zscore_matlab(angles_pos)
         out['tau_p'] = first_crossing(z_angles_pos, 'ac', 0, 'continuous')
-        out['ac1_p'] = autocorr(z_angles_pos, 1, 'Fourier')[0]
+        out['ac1_p'] = autocorr(z_angles_pos, 1, 'Fourier')
     else:
         out['tau_p'] = np.nan
         out['ac1_p'] = np.nan
 
     if len(angles_neg) >= 2 and np.std(angles_neg, ddof=1) > 0:
-        z_angles_neg = z_score(angles_neg)
+        z_angles_neg = _zscore_matlab(angles_neg)
         out['tau_n'] = first_crossing(z_angles_neg, 'ac', 0, 'continuous')
-        out['ac1_n'] = autocorr(z_angles_neg, 1, 'Fourier')[0]
+        out['ac1_n'] = autocorr(z_angles_neg, 1, 'Fourier')
     else:
         out['tau_n'] = np.nan
         out['ac1_n'] = np.nan
@@ -620,6 +622,7 @@ def _fall_branch(ix: ArrayLike, y: ArrayLike) -> tuple:
 
     return angles, colour_counts, case_counts
 
+@dict_output
 def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
               extra_param: Union[int, None] = None, random_seed = None) -> dict:
     """
@@ -753,8 +756,8 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     out['meanch'] = np.mean(np.diff(amis))
 
     # Autocorrelation of AMIs
-    out['ac1'] = autocorr(amis, 1, 'Fourier')[0]
-    out['ac2'] = autocorr(amis, 2, 'Fourier')[0]
+    out['ac1'] = autocorr(amis, 1, 'Fourier')
+    out['ac2'] = autocorr(amis, 2, 'Fourier')
 
     # Noise level required to reduce ami to proportion x of its initial value
     first_under_vals = [0.75, 0.50, 0.25]
@@ -905,6 +908,7 @@ def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
 
     return float(res)
 
+@dict_output
 def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
     """
     Angle autocorrelation in a 2-dimensional embedding space.
@@ -949,15 +953,15 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
             logger.warning(f'Time series (N={len(y)}) too short for embedding')
             return np.nan
 
-        stats_store[0, i] = autocorr(theta, 1, 'Fourier')[0]
-        stats_store[1, i] = autocorr(theta, 2, 'Fourier')[0]
-        stats_store[2, i] = autocorr(theta, 3, 'Fourier')[0]
+        stats_store[0, i] = autocorr(theta, 1, 'Fourier')
+        stats_store[1, i] = autocorr(theta, 2, 'Fourier')
+        stats_store[2, i] = autocorr(theta, 3, 'Fourier')
     # Compute output statistics (max and min ignore NaNs, as in MATLAB: a NaN occurs when a
     # run of equal values gives 0/0 angles)
     out = {
-        'ac1_thetaac1': autocorr(stats_store[0, :], 1, 'Fourier')[0],
-        'ac1_thetaac2': autocorr(stats_store[1, :], 1, 'Fourier')[0],
-        'ac1_thetaac3': autocorr(stats_store[2, :], 1, 'Fourier')[0],
+        'ac1_thetaac1': autocorr(stats_store[0, :], 1, 'Fourier'),
+        'ac1_thetaac2': autocorr(stats_store[1, :], 1, 'Fourier'),
+        'ac1_thetaac3': autocorr(stats_store[2, :], 1, 'Fourier'),
         'mean_thetaac1': np.mean(stats_store[0, :]),
         'max_thetaac1': np.nanmax(stats_store[0, :]),
         'min_thetaac1': np.nanmin(stats_store[0, :]),
@@ -974,6 +978,7 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
 
     return out
 
+@dict_output
 def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     """
     Statistics of the time series in a 2-dimensional embedding space.
@@ -1025,9 +1030,9 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
 
     out = {}
 
-    out['theta_ac1'] = autocorr(theta, 1, 'Fourier')[0]
-    out['theta_ac2'] = autocorr(theta, 2, 'Fourier')[0]
-    out['theta_ac3'] = autocorr(theta, 3, 'Fourier')[0]
+    out['theta_ac1'] = autocorr(theta, 1, 'Fourier')
+    out['theta_ac2'] = autocorr(theta, 2, 'Fourier')
+    out['theta_ac3'] = autocorr(theta, 3, 'Fourier')
 
     out['theta_mean'] = np.mean(theta)
     out['theta_std'] = np.std(theta, ddof=1)
@@ -1036,7 +1041,8 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     # of exactly zero from tied values or of exactly +/-pi/2 from a vertical step fall in the
     # same bin whatever the rounding):
     bin_edges = _fixed_edges(10, -np.pi/2, np.pi/2)
-    px, _ = _histcounts(theta, bin_edges=bin_edges)
+    # (NaN angles are in no bin but count in the number of elements the counts are divided by)
+    px = np.histogram(theta[~np.isnan(theta)], bins=bin_edges)[0] / len(theta)
     bin_widths = np.diff(bin_edges)
     out['hist10std'] = np.std(px, ddof=1)
     out['histent'] = -np.sum(px[px>0] * np.log(px[px>0] / bin_widths[px>0]))
@@ -1100,31 +1106,6 @@ def _fixed_edges(num_bins: int, lo: float, hi: float) -> np.ndarray:
     are none (e.g. all angles NaN)."""
     return bf_hist_edges(np.zeros(1), num_bins, [lo, hi])
 
-
-def _histcounts(x: ArrayLike, bins: Union[int, None, str] = None, 
-                bin_edges: Union[ArrayLike, None] = None) -> tuple:
-    x = np.asarray(x).flatten()
-    # (NaNs are not counted in any bin, but, as in histcounts' 'probability' normalization, they
-    # are in the number of elements the counts are divided by)
-    x_all = x
-    x = x[~np.isnan(x)]
-
-    if bin_edges is not None:
-        edges = np.asarray(bin_edges)
-    elif bins is None or bins == 'auto':
-        # Use Scott's rule for automatic binning
-        bin_width = 3.5 * np.std(x, ddof=1) / (len(x) ** (1 / 3))
-        edges = np.arange(np.min(x), np.max(x) + bin_width, bin_width)
-    elif isinstance(bins, int):
-        edges = np.linspace(np.min(x), np.max(x), bins + 1)
-    else:
-        raise ValueError("Invalid bins parameter")
-
-    n, _ = np.histogram(x, bins=edges)
-
-    n = n / len(x_all)
-
-    return n, edges
 
 def periodicity_wang(y: ArrayLike) -> dict:
     """
@@ -1349,6 +1330,7 @@ def _ami_from_binning(idx: np.ndarray, valid: np.ndarray, num_bins: int, t: int)
     return ami - (mxy - mx - my + 1) / (2 * n)
 
 
+@dict_output
 def histogram_ami(
     y: ArrayLike,
     tau: Union[str, int, ArrayLike] = 1,
@@ -1565,14 +1547,14 @@ def stick_angles(y: ArrayLike) -> dict:
     # correlations? 
     if len(zangles[0]) > 0:
         out['tau_p'] = first_crossing(zangles[0], 'ac', 0, 'continuous')
-        out['ac1_p'] = autocorr(zangles[0], 1, 'Fourier')[0]
+        out['ac1_p'] = autocorr(zangles[0], 1, 'Fourier')
     else:
         out['tau_p'] = np.nan
         out['ac1_p'] = np.nan
     
     if len(zangles[1]) > 0:
         out['tau_n'] = first_crossing(zangles[1], 'ac', 0, 'continuous')
-        out['ac1_n'] = autocorr(zangles[1], 1, 'Fourier')[0]
+        out['ac1_n'] = autocorr(zangles[1], 1, 'Fourier')
     else:
         out['tau_n'] = np.nan
         out['ac1_n'] = np.nan
@@ -1675,7 +1657,7 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
     Returns
     -------
     float
-        The computed nonlinear autocorrelation.
+        The computed nonlinear autocorrelation (NaN if the series is not longer than the largest lag).
     """
     y = np.asarray(y)
     taus = np.asarray(taus)
@@ -1687,6 +1669,8 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
 
     n = len(y)
     tmax = np.max(taus)
+    if n <= tmax:  # no product to average
+        return np.nan
 
     nlac = y[tmax:n]
 
@@ -1787,6 +1771,7 @@ def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'burg')
 
     return out
 
+@dict_output
 def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     """
     Analyzes distances in a 2-dimensional embedding space of a time series.
@@ -1842,9 +1827,9 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     d = np.sqrt(np.sum(np.diff(m, axis=0)**2, axis=1))
     
     # Calculate autocorrelations
-    out['d_ac1'] = autocorr(d, 1, 'Fourier')[0] # lag 1 ac
-    out['d_ac2'] = autocorr(d, 2, 'Fourier')[0] # lag 2 ac
-    out['d_ac3'] = autocorr(d, 3, 'Fourier')[0] # lag 3 ac
+    out['d_ac1'] = autocorr(d, 1, 'Fourier') # lag 1 ac
+    out['d_ac2'] = autocorr(d, 2, 'Fourier') # lag 2 ac
+    out['d_ac3'] = autocorr(d, 3, 'Fourier') # lag 3 ac
 
     out['d_mean'] = np.mean(d) # Mean distance
     out['d_median'] = np.median(d) # Median distance
@@ -1877,6 +1862,7 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
 
     return out
 
+@dict_output
 def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     """
     Point-density statistics in a two-dimensional delay embedding.
@@ -1978,6 +1964,7 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     
     return out
 
+@dict_output
 def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
                   shape: str = 'circle', r: float = 1.0,
                   theiler_win: Union[int, float, list, tuple, None] = ('ac', 1)) -> dict:
@@ -2080,9 +2067,9 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
 
     # Return basic statistics on the counts
     out = {}
-    out['ac1'] = autocorr(counts, 1, 'Fourier')[0]
-    out['ac2'] = autocorr(counts, 2, 'Fourier')[0]
-    out['ac3'] = autocorr(counts, 3, 'Fourier')[0]
+    out['ac1'] = autocorr(counts, 1, 'Fourier')
+    out['ac2'] = autocorr(counts, 2, 'Fourier')
+    out['ac3'] = autocorr(counts, 3, 'Fourier')
     out['tau'] = first_crossing(counts, 'ac', 0, 'continuous')
     out['std'] = np.std(counts, ddof=1)
     out['median'] = np.median(counts)
@@ -2289,11 +2276,13 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
     Returns
     --------
     float or array
-        The autocorrelation at the given time lag(s).
+        The autocorrelation at the given time lag (a float for a single ``int`` lag), or an
+        array with one value per lag for a list of lags.
 
     """
     y = np.array(y)
     N = len(y)  # time-series length
+    scalar_lag = np.ndim(tau) == 0  # a single lag gives a number, a list of lags an array
 
     if np.size(tau) > 0:
         # if list is not empty
@@ -2353,8 +2342,8 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
     
     else:
         raise ValueError(f"Unknown autocorrelation estimation method {method}")
-    
-    return out
+
+    return float(out[0]) if scalar_lag else out
 
 def autocorr_x2(y: ArrayLike, taus: ArrayLike = 1,
                 what_direction: str = 'forward') -> np.ndarray:
@@ -2543,7 +2532,7 @@ def autocorr_x2_shape(y: ArrayLike, max_lag: Union[int, str] = 'double_drown') -
 
     # Autocorrelation of the difference profile (smoothness/persistence of the
     # irreversibility signature itself), cf. the ac1 field of autocorr_shape
-    out['ac1diff'] = autocorr(diff_profile, 1, 'Fourier')[0]
+    out['ac1diff'] = autocorr(diff_profile, 1, 'Fourier')
 
     # Local extrema of the difference profile, cf. autocorr_shape
     ddiff = np.diff(diff_profile)
@@ -2728,6 +2717,7 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
 
     return out
 
+@dict_output
 def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> dict:
     """
     How the autocorrelation function changes with the time lag.
@@ -2768,7 +2758,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
         n_drown = 0 # the point at which ACF ~ 0
         # The Fourier ACF depends only on N, so compute the whole (lag-indexed) curve
         # once and read acf_full[i-1] instead of recomputing a full FFT every lag.
-        # acf_full[i-1] is bit-identical to autocorr(y, i-1, 'Fourier')[0].
+        # acf_full[i-1] is bit-identical to autocorr(y, i-1, 'Fourier').
         acf_full = autocorr(y, [], 'Fourier')
         if stop_when == 'pos_drown':
             # stop when ACF drops below threshold, th
@@ -2841,11 +2831,11 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
     min_pts_for_acf_of_acf = 5 # can't take lots of complex stats with fewer than this
 
     if nac > min_pts_for_acf_of_acf:
-        out['ac1'] = autocorr(acf, 1, 'Fourier')[0]
+        out['ac1'] = autocorr(acf, 1, 'Fourier')
         if all(acf > 0):
             out['actau'] = np.nan
         else:
-            out['actau'] = autocorr(acf, first_crossing(acf, 'ac', 0, 'discrete'), 'Fourier')[0]
+            out['actau'] = autocorr(acf, first_crossing(acf, 'ac', 0, 'discrete'), 'Fourier')
 
     else:
         out['ac1'] = np.nan
@@ -2898,6 +2888,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
         out['fexpacf_stdres'] = np.nan
     return out
 
+@dict_output
 def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
     """
     Normalized nonlinear autocorrelation (trev) function of a time series.
@@ -2968,6 +2959,7 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
 
     return out
 
+@dict_output
 def tc3(y: list, tau: Union[int, str, None] = 'ac1e') -> dict:
     """
     Normalized nonlinear autocorrelation function, tc3.
@@ -3052,7 +3044,7 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     How the autocorrelation of a time series changes when a set of points is removed or clipped.
 
     A proportion, ``p``, of the points of the (z-scored) series are removed, or saturated,
-    according to a rule (see :func:`~pyhctsa.utils.bf_remove_points`), and the autocorrelation
+    according to a rule (see :func:`~pyhctsa.robust.bf_remove_points`), and the autocorrelation
     structure is compared before and after the change. Removing deletes the chosen points and
     closes up the rest into a shorter series, which splices together points that were not
     neighbors. Saturating keeps them in place but clips their values to the most extreme value
@@ -3080,7 +3072,8 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
         Whether to remove the points ('remove', the default) or to saturate their values
         ('saturate'; not possible with 'absclose' or 'random').
     random_seed : int, optional
-        Seed for ``remove_how='random'`` (as hctsa's ``BF_ResetSeed``; default 0).
+        Seed of the random ordering for ``remove_how='random'`` (see
+        :func:`pyhctsa.robust.bf_random_seed`; default 0).
 
     Returns
     -------
@@ -3205,6 +3198,7 @@ def quantilogram(y: ArrayLike, lag: Union[int, str] = 1) -> dict:
     return out
 
 
+@dict_output
 def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
                           theiler_win: Union[int, float, list, tuple] = ('ac', 1),
                           max_n: Union[int, str] = 10000) -> Union[dict, float]:
@@ -3416,6 +3410,7 @@ def _stomp_nn(y, m, mu, sig, qt, qt1, ex_zone):
     return best_r, best_idx
 
 
+@dict_output
 def matrix_profile(y: ArrayLike, m: Union[int, list, tuple] = ('ac', 8),
                    max_n: Union[int, str] = 5000) -> Union[dict, float]:
     """

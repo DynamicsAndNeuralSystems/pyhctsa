@@ -348,15 +348,6 @@ def test_ml_randsample_unique_and_in_range():
     assert len(np.unique(v)) == 100 and v.min() >= 1 and v.max() <= 997
 
 
-def test_bf_random_seed_semantics():
-    assert nl._bf_random_seed('default') == 0
-    assert nl._bf_random_seed(3) == 3
-    assert nl._bf_random_seed(-3.4) == 3
-    assert nl._bf_random_seed(5e9) == 1e9
-    with pytest.raises(ValueError):
-        nl._bf_random_seed('weird')
-
-
 @pytest.mark.skipif(not HAS_RIPSER, reason='ripser not installed')
 def test_persistent_homology_h0_does_not_include_h1_intervals():
     t = np.arange(400)

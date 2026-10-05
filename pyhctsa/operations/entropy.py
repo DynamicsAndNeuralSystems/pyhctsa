@@ -14,8 +14,8 @@ from sklearn.neighbors import KDTree
 from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
 from ..toolboxes.physionet import sampen as _sampen_c
-from ..robust import bf_hist_edges, bf_ks_density, bf_random
-from ..utils import (_ml_rng, _zscore_matlab, get_tau, make_buffer, pre_process,
+from ..robust import bf_hist_edges, bf_ks_density, bf_random, bf_random_seed
+from ..utils import (dict_output, _zscore_matlab, get_tau, make_buffer, pre_process,
                      time_delay_embed, z_score)
 
 
@@ -335,6 +335,7 @@ def _robustfit(x: np.ndarray, y: np.ndarray, tune: float = 4.685) -> tuple:
     return b, se
 
 
+@dict_output
 def multi_scale_entropy(
     y: ArrayLike,
     scale_range: Optional[Union[list, range]] = None,
@@ -670,6 +671,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
     return {"permEn": pe, "normPermEn": pe_norm, "permEnLE": pe_le,
             "normWPE": norm_wpe, "ordAsym": ord_asym}
 
+@dict_output
 def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.12, t_max: int = -1) -> dict:
     """
     Recurrence period density entropy (RPDE).
@@ -1282,12 +1284,12 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
 
     # The random choices for every step, reproducible from the seed: two uniform draws per
     # step, as indices uniform on 0..N-1
-    from .nonlinearity import _bf_random_seed
     seed = 'default' if random_seed is None else random_seed
-    draws = np.floor(n * bf_random(4 * n, _bf_random_seed(seed))).astype(np.int64).reshape(2 * n, 2)
+    draws = np.floor(n * bf_random(4 * n, bf_random_seed(seed))).astype(np.int64).reshape(2 * n, 2)
 
     return _randomize_fit(_randomize_run(y, randomize_how, draws))
 
+@dict_output
 def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str] = 1,
                        mapping_how: str = 'ncdf') -> Union[dict, float]:
     """

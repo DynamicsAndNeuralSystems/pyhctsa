@@ -1,19 +1,17 @@
 import logging
-import warnings
 from typing import Dict, Union
 
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy import stats
-from scipy.optimize import brentq, least_squares
+from scipy.optimize import brentq
 from scipy.stats import beta as beta_dist
 from scipy.stats import gamma as gamma_dist
-from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, rayleigh, uniform, weibull_min, skew, kurtosis
+from scipy.stats import expon, gumbel_l, lognorm, norm, rayleigh, uniform, weibull_min, skew, kurtosis
 
-from ..operations.correlation import autocorr, first_crossing
 from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
-from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_random, bf_residual_stats, bf_runs_z
-from ..utils import bin_picker, histc, matlab_quantile, sign_change, simple_binner, x_corr
+from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_remove_points, bf_residual_stats
+from ..utils import dict_output, _ml_std, _round_half_away, bin_picker, histc, matlab_quantile, sign_change, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')
 
@@ -48,6 +46,7 @@ def cumulants(x: ArrayLike, cum_what_may: str = 'skew1') -> float:
     else:
         return ValueError('Unknown cumulant. Choose either skew1, skew2, kurt1, or kurt2.')
 
+@dict_output
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """
     Compares a fitted distribution with the smoothed distribution of the data.
@@ -862,12 +861,6 @@ def moments(y: ArrayLike, the_mom: int = 0, do_normalize: bool = True) -> float:
         return stats.moment(y, the_mom)
     return stats.moment(y, the_mom) / np.std(y, ddof=1) ** the_mom
 
-def _matlab_std(a) -> float:
-    """Sample standard deviation as MATLAB's std: 0 (not NaN) for a single value."""
-    a = np.asarray(a, dtype=float)
-    return float(np.std(a, ddof=1)) if a.size > 1 else 0.0
-
-
 def _fit_lin_gof(x: np.ndarray, y: np.ndarray) -> tuple:
     """Ordinary least-squares line ``a*x + b``, with R^2 and root-mean-square error (n - 2
     degrees of freedom). Returns (a, b, R^2, RMSE), all NaN for fewer than 3 points or a
@@ -891,6 +884,7 @@ def _exp_fit_outputs(x: np.ndarray, y: np.ndarray) -> tuple:
     return f['b'], f['r2'], f['rmse']
 
 
+@dict_output
 def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
                     fixed_thresh: Union[float, None] = None) -> dict:
     """
@@ -1007,11 +1001,11 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
         r1 = r + 1  # MATLAB's 1-based event times
         return {
             'meanDt': mean_dt,
-            'seDt': _matlab_std(time_diffs) / np.sqrt(len(time_diffs)),
+            'seDt': _ml_std(time_diffs) / np.sqrt(len(time_diffs)),
             'propIncluded': prop_included,
             'medianRelTime': np.median(r1) / (N / 2) - 1,
             'meanRelTime': np.mean(r1) / (N / 2) - 1,
-            'stdRelTime': _matlab_std(r) / np.sqrt(len(r)),
+            'stdRelTime': _ml_std(r) / np.sqrt(len(r)),
         }
 
     # Initialize thresholds based on method
@@ -1045,11 +1039,11 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
         r1 = r + 1  # event times use 1-based indices, as in MATLAB
         rows.append([
             np.mean(time_diffs),  # mean time between events
-            _matlab_std(time_diffs) / np.sqrt(len(time_diffs)),  # standard error
+            _ml_std(time_diffs) / np.sqrt(len(time_diffs)),  # standard error
             prop_included,
             np.median(r1) / (N / 2) - 1,  # median position (-1 to 1)
             np.mean(r1) / (N / 2) - 1,  # mean position (-1 to 1)
-            _matlab_std(r) / np.sqrt(len(r)),  # position std error
+            _ml_std(r) / np.sqrt(len(r)),  # position std error
         ])
     statistics = np.array(rows).reshape(-1, 6)
     thresholds = thresholds[:len(statistics)]
@@ -1070,21 +1064,21 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
     results.update({
         'mdtm': np.mean(statistics[:, 0]),
         'mdtmd': np.median(statistics[:, 0]),
-        'mdtstd': _matlab_std(statistics[:, 0])
+        'mdtstd': _ml_std(statistics[:, 0])
     })
 
     # Statistics on median position deviations
     results.update({
         'mdrm': np.mean(statistics[:, 3]),
         'mdrmd': np.median(statistics[:, 3]),
-        'mdrstd': _matlab_std(statistics[:, 3])
+        'mdrstd': _ml_std(statistics[:, 3])
     })
 
     # Statistics on mean position deviations
     results.update({
         'mrm': np.mean(statistics[:, 4]),
         'mrmd': np.median(statistics[:, 4]),
-        'mrstd': _matlab_std(statistics[:, 4])
+        'mrstd': _ml_std(statistics[:, 4])
     })
 
     # Cross-correlation between mean and error
@@ -1318,23 +1312,6 @@ def histogram_mode(y: ArrayLike, num_bins: Union[int, str] = 10, do_simple: bool
 
     return float(out)
 
-def _bf_random_seed(random_seed: Union[int, float, str, None] = 'default') -> int:
-    """The integer seed (for :func:`pyhctsa.robust.bf_random`) that a ``random_seed`` input stands for (hctsa ``BF_RandomSeed``).
-
-    ``'default'`` or ``None``: the fixed seed 0; a number: that seed, rounded and made non-negative
-    (modulo 4e9); ``'none'``: a seed drawn from NumPy's global random state (so repeated calls differ).
-    """
-    if random_seed is None:
-        return 0
-    if isinstance(random_seed, str):
-        if random_seed == 'default':
-            return 0
-        if random_seed == 'none':
-            return int(np.floor(4e9 * np.random.random_sample()))
-        raise ValueError(f"Not sure how to interpret the random seed '{random_seed}'")
-    return int(np.mod(np.floor(abs(float(random_seed)) + 0.5), 4e9))
-
-
 def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
                   remove_or_saturate: str = 'remove', random_seed: Union[int, str, None] = None) -> dict:
     """
@@ -1364,105 +1341,30 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
         Whether to remove points ('remove') or saturate their values ('saturate').
         Default is ``'remove'``.
     random_seed : int, optional
-        Seed of the random ordering used when ``remove_how='random'``: an integer, ``None`` or
-        ``'default'`` for seed 0, or ``'none'`` for a seed drawn from NumPy's global random state.
-        The ordering comes from the portable generator :func:`pyhctsa.robust.bf_random`, so
-        it matches hctsa's. Default is ``None`` (seed 0).
+        Seed of the random ordering used when ``remove_how='random'`` (see
+        :func:`pyhctsa.robust.bf_random_seed`; ``None`` is seed 0). The ordering comes from the portable
+        generator :func:`pyhctsa.robust.bf_random`, so it matches hctsa's.
 
     Returns
     -------
     dict
-        Statistics including the change in autocorrelation, time scales, mean, median,
-        standard deviation, skewness (``skewnessdiff``, the difference
-        skew(y_transform) - skew(y)), and kurtosis (``kurtosisrat``, the ratio
-        kurtosis(y_transform) / kurtosis(y)).
+        Order-free statistics of the changed series: ``mean``, ``median``, ``std``,
+        ``skewnessdiff`` (the difference skew(y_transform) - skew(y)) and ``kurtosisrat``
+        (the ratio kurtosis(y_transform) / kurtosis(y)). The autocorrelation statistics of the
+        same change are in :func:`pyhctsa.operations.correlation.remove_points`.
     """
-    y = np.asarray(y)
-    N = len(y)
+    y = np.asarray(y, dtype=float).ravel()
+    y_transform = bf_remove_points(y, remove_how, p, remove_or_saturate, random_seed)
 
-    is_ = None
-    if remove_how == 'absclose':
-        is_ = np.argsort(-np.abs(y), kind='stable')   # descending abs, ties stable
-    elif remove_how == 'absfar':
-        is_ = np.argsort(np.abs(y), kind='stable')     # ascending abs
-    elif remove_how == 'min':
-        is_ = np.argsort(-y, kind='stable')            # descending y
-    elif remove_how == 'max':
-        is_ = np.argsort(y, kind='stable')             # ascending y
-    elif remove_how == 'random':
-        # random ordering, reproducible: the stable argsort of N uniforms from the portable generator
-        is_ = np.argsort(bf_random(N, _bf_random_seed(random_seed)), kind='stable')
-    else:
-        raise ValueError(f"Unknown method '{remove_how}'")
-    
-    # Indices of points to *keep*:
-    # (MATLAB's round: halves go away from zero, unlike Python's round)
-    n_keep = N * (1 - p)
-    n_keep = int(np.floor(n_keep)) + int(n_keep - np.floor(n_keep) >= 0.5)
-    r_keep = np.sort(is_[:n_keep])
-
-    # Indices of points to *transform*:
-    r_transform = np.setdiff1d(np.arange(N), r_keep)
-
-    # Do the removing/saturating to convert y -> y_transform
-    if remove_or_saturate == 'remove':
-        y_transform = y[r_keep]
-    elif remove_or_saturate == 'saturate':
-        # Saturate out the targeted points
-        if remove_how == 'max':
-            y_transform = y.copy()
-            y_transform[r_transform] = np.max(y[r_keep])
-        elif remove_how == 'min':
-            y_transform = y.copy()
-            y_transform[r_transform] = np.min(y[r_keep])
-        elif remove_how == 'absfar':
-            y_transform = y.copy()
-            y_transform[y_transform > np.max(y[r_keep])] = np.max(y[r_keep])
-            y_transform[y_transform < np.min(y[r_keep])] = np.min(y[r_keep])
-        else:
-            raise ValueError(f"Cannot 'saturate' when using '{remove_how}' method")
-    else:
-        raise ValueError(f"Unknown removOrSaturate option '{remove_or_saturate}'")
-    
-    # Compute some autocorrelation properties
-    n = 8
-    acf_y = autocorr(y, list(range(1, n+1)), 'Fourier')
-    acf_y_transform = autocorr(y_transform, list(range(1, n+1)), 'Fourier')
-    # Compute output statistics
     out = {}
-
-    # Helper functions
-    f_abs_diff = lambda x1, x2: np.abs(x1 - x2) # ignores the sign
-    f_ratio = lambda x1, x2: np.divide(x1, x2) # includes the sign
-
-    out['fzcacrat'] = f_ratio(first_crossing(y_transform, 'ac', 0, 'continuous'), 
-                              first_crossing(y, 'ac', 0, 'continuous'))
-    
-    out['ac1rat'] = f_ratio(acf_y_transform[0], acf_y[0])
-    out['ac1diff'] = f_abs_diff(acf_y_transform[0], acf_y[0])
-
-    out['ac2rat'] = f_ratio(acf_y_transform[1], acf_y[1])
-    out['ac2diff'] = f_abs_diff(acf_y_transform[1], acf_y[1])
-    
-    out['ac3rat'] = f_ratio(acf_y_transform[2], acf_y[2])
-    out['ac3diff'] = f_abs_diff(acf_y_transform[2], acf_y[2])
-    
-    out['sumabsacfdiff'] = np.sum(np.abs(acf_y_transform - acf_y))
     out['mean'] = np.mean(y_transform)
     out['median'] = np.median(y_transform)
     out['std'] = np.std(y_transform, ddof=1)
-    
     # difference rather than ratio: a ratio blows up (and changes sign) when skew(y) is near 0
     out['skewnessdiff'] = stats.skew(y_transform) - stats.skew(y)
-    # return kurtosis instead of excess kurtosis
+    # the kurtosis (not the excess kurtosis), as MATLAB
     out['kurtosisrat'] = stats.kurtosis(y_transform, fisher=False) / stats.kurtosis(y, fisher=False)
-
     return out
-
-
-def _matlab_round(v: float) -> int:
-    """MATLAB's ``round`` (halves away from zero)."""
-    return int(np.sign(v) * np.floor(abs(v) + 0.5))
 
 
 def _hill_estimate(s: np.ndarray, k: int) -> float:
@@ -1540,7 +1442,7 @@ def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
     y = np.asarray(y, dtype=float).ravel()
     y = y[np.isfinite(y)]
     n = len(y)
-    k = _matlab_round(tail_frac * n)  # number of values in each tail
+    k = int(_round_half_away(tail_frac * n))  # number of values in each tail
     if k < 10 or k >= n // 2:
         return out  # too few tail values to estimate a tail index
 
@@ -1567,6 +1469,7 @@ def _fmt_threshold(prefix: str, thr: float) -> str:
     return f"{prefix}_{thr:.2f}".replace('.', '')
 
 
+@dict_output
 def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
                       numcross: Union[None, float, list] = None,
                       arclength: Union[None, float, list] = None) -> dict:
@@ -1649,6 +1552,7 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
 _SIMPLE_FIT_MODELS = {'gauss1': ('gauss', 3), 'gauss2': ('gauss2', 6), 'exp1': ('exp', 2), 'power1': ('power', 2)}
 
 
+@dict_output
 def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') -> Union[dict, float]:
     """
     Fits a simple curve to the distribution of the values.

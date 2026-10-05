@@ -61,3 +61,21 @@ Below is an example of the docstring convention for feature-computing functions 
         x += 0.1
         out = np.mean(x)
         return out
+Output Conventions
+------------------
+The calculator turns the output of a feature function into feature columns, so the shape of the output decides
+the column names, and it should match hctsa's:
+
+    - a function that returns one number (even for a single lag, as ``autocorr(y, 1)``) returns a ``float``
+      (column ``label``); a function that returns several outputs returns a ``dict`` (columns ``label.field``,
+      with hctsa's field names, which are case-sensitive);
+    - a function that cannot compute anything for the input it was given (hctsa: ``out = NaN``) returns ``nan``
+      in the scalar case, and a ``dict`` with every field NaN in the dict case: decorate dict-returning functions
+      with :func:`~pyhctsa.utils.dict_output` and return ``np.nan`` at the failure, and the decorator fills in the
+      field names (see :func:`~pyhctsa.utils.nan_outputs`);
+    - NaN means 'not appropriate for this input' (a constant series, too few samples, a fit that does not exist);
+      do not raise for these;
+    - return only the fields hctsa's function returns, with its names; hctsa registers a subset of them, which
+      the ``select:`` and ``exclude:`` keys of ``hctsa.yaml`` express;
+    - random draws come from :func:`~pyhctsa.robust.bf_random` through :func:`~pyhctsa.robust.bf_random_seed`
+      (as hctsa's ``BF_Random``), never from NumPy's global stream.

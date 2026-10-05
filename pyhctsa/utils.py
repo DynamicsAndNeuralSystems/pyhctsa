@@ -25,6 +25,58 @@ def _check_optional_deps(dep: str) -> bool:
     except PackageNotFoundError:
         return False
 
+def _reference_series() -> list:
+    """Well-behaved test series (a Gaussian AR(1), a positive series, a noisy sine, a random walk) from
+    which :func:`nan_outputs` learns the field names of a function's output."""
+    rng = np.random.RandomState(0)
+    e = rng.randn(1000)
+    ar = np.zeros(1000)
+    for i in range(1, 1000):
+        ar[i] = 0.7 * ar[i - 1] + e[i]
+    z = lambda v: (v - v.mean()) / v.std(ddof=1)
+    return [z(ar), np.exp(0.5 * z(ar)), z(np.sin(0.2 * np.arange(1000)) + 0.3 * rng.randn(1000)), z(np.cumsum(e))]
+
+_FIELD_CACHE: dict = {}
+
+def nan_outputs(func: Callable, *args, **kwargs) -> Union[dict, float]:
+    """The output of ``func(y, *args, **kwargs)`` when every one of its outputs is undefined: a dict
+    with all of its fields NaN (``nan`` if the function does not return a dict).
+
+    The field names are those of the function's own output, with the same arguments, on a
+    well-behaved reference series (found the first time they are needed, then remembered).
+    """
+    key = (func, repr(args), repr(sorted(kwargs.items())))
+    if key not in _FIELD_CACHE:
+        fields = None
+        for ref in _reference_series():
+            try:
+                with np.errstate(all='ignore'):
+                    out = func(ref, *args, **kwargs)
+            except Exception:
+                continue
+            if isinstance(out, dict):
+                fields = list(out)
+                break
+        _FIELD_CACHE[key] = fields
+    fields = _FIELD_CACHE[key]
+    return np.nan if fields is None else dict.fromkeys(fields, np.nan)
+
+def dict_output(func: Callable) -> Callable:
+    """Decorator for a feature function that returns a dict of outputs (one feature per field).
+
+    When the function cannot compute anything (hctsa: ``out = NaN``, every output undefined) and
+    would return a bare ``nan``, the decorated function returns the dict with every field NaN
+    instead (see :func:`nan_outputs`), so that the feature names stay ``<label>.<field>``
+    whatever the data.
+    """
+    @wraps(func)
+    def wrapper(y, *args, **kwargs):
+        out = func(y, *args, **kwargs)
+        if isinstance(out, (float, np.floating)) and np.isnan(out):
+            return nan_outputs(func, *args, **kwargs)
+        return out
+    return wrapper
+
 def _validate_data(ts: np.ndarray) -> bool:
     """validate a time series before computing features"""
     if len(ts) < 100:
@@ -143,62 +195,6 @@ def get_dataset(which: str = "e1000") -> list:
     logger.info(f"Loaded dataset of {len(dataset)} time series.")
     return dataset
     
-# config `preprocess:` values and the label suffix each adds
-_PREPROCESS_LABELS = {'decimate_ac1e': '_dec'}
-
-def _preprocess_decorator(zscore: bool = False, absval: bool = False,
-                          preprocess: Union[str, None] = None) -> Callable:
-    """
-    Decorator to preprocess time series data before feature computation.
-    
-    Applies optional z-score normalization, an optional hctsa ``BF_PreProcess`` step
-    and/or absolute value transformation to the input time series before passing it to
-    the decorated function.
-
-    The order is: z-score, then ``preprocess``, then absolute value. A
-    ``preprocess`` step is followed by a second z-score if ``zscore`` is True, matching
-    hctsa's ``zscore(BF_PreProcess(x_z, ...))``.
-
-    Parameters
-    ----------
-    zscore : bool, optional
-        If True, z-score normalize the input time series to have mean 0 and 
-        standard deviation 1. Default is False.
-    absval : bool, optional
-        If True, take the absolute value of all data points in the input time series.
-        Default is False.
-    preprocess : {None, 'decimate_ac1e'}, optional
-        A named pre-processing step applied to the (z-scored) series. Currently
-        ``'decimate_ac1e'``: keep one sample per floored 1/e autocorrelation time
-        (see :func:`decimate_ac1e`). If the delay cannot be determined the wrapped
-        function is not called and ``nan`` is returned. Default is None.
-    
-    Returns
-    -------
-    decorator : function
-        A decorator function that wraps a feature computation function and applies
-        the specified preprocessing operations to the input time series before
-        passing it to the wrapped function.
-    """
-    if preprocess is not None and preprocess not in _PREPROCESS_LABELS:
-        raise ValueError(f"Unknown preprocess setting '{preprocess}'; "
-                         f"supported: {sorted(_PREPROCESS_LABELS)}")
-
-    def decorator(func):
-        @wraps(func)
-        def wrapper(x, *args, **kwargs):
-            if zscore:
-                x = z_score(x)
-            if preprocess == 'decimate_ac1e':
-                x = decimate_ac1e(x, rezscore=zscore)
-                if not isinstance(x, np.ndarray):
-                    return np.nan  # no 1/e time: undefined, like hctsa's NaN
-            if absval:
-                x = np.abs(x)
-            return func(x, *args, **kwargs)
-        return wrapper
-    return decorator
-
 def z_score(x: ArrayLike) -> np.ndarray:
     """
     Z-score the input data vector.
@@ -638,6 +634,12 @@ def _round_half_away(x: float) -> float:
     return float(np.sign(x) * np.floor(np.abs(x) + 0.5))
 
 
+def _ml_std(x: ArrayLike) -> float:
+    """MATLAB's ``std``: the sample standard deviation (N - 1), which is 0 (not NaN) for a single value."""
+    x = np.asarray(x, dtype=float)
+    return float(np.std(x, ddof=1)) if x.size > 1 else 0.0
+
+
 def _acf_fourier(y: np.ndarray) -> np.ndarray:
     """ACF at lags 0..N-1 (CO_AutoCorr(y, [], 'Fourier')); all-NaN for a constant series."""
     from .operations.correlation import autocorr
@@ -1004,99 +1006,6 @@ def time_delay_embed(y: ArrayLike, m: int, tau: Union[int, str] = 1,
     embedded = y[idx]
 
     return embedded[:, ::-1] if reverse else embedded
-
-def bf_remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
-                     remove_or_saturate: str = 'remove',
-                     random_seed: Union[int, str, None] = None) -> np.ndarray:
-    """
-    Remove or saturate a proportion of the points of a time series (hctsa's ``BF_RemovePoints``).
-
-    Chooses a proportion, ``p``, of the points of the (z-scored) series according to a rule, and
-    either deletes them or clips their values. Removing deletes the chosen points and closes up
-    the rest into a shorter series (in the original order). Saturating keeps them in place but
-    clips their values to the most extreme value among the points kept. Used by hctsa's
-    ``DN_RemovePoints`` (order-free statistics of the changed series) and ``CO_RemovePoints``
-    (autocorrelation statistics of the changed series).
-
-    Parameters
-    ----------
-    y : array-like
-        The input time series (should be z-scored).
-    remove_how : {'absclose', 'absfar', 'min', 'max', 'random'}, optional
-        How to choose the points to remove:
-
-        - 'absclose': those closest to the mean,
-        - 'absfar': those furthest from the mean (default),
-        - 'min': the lowest values,
-        - 'max': the highest values,
-        - 'random': at random.
-    p : float, optional
-        The proportion of points to remove. Default 0.1.
-    remove_or_saturate : {'remove', 'saturate'}, optional
-        Whether to remove the points (default) or to saturate their values ('saturate'; possible
-        for 'absfar', 'min' and 'max' only).
-    random_seed : int, 'default' or 'none', optional
-        Only relevant for ``remove_how='random'``. As ``BF_ResetSeed``: an integer seed, or
-        ``None``/``'default'`` for seed 0 (the default, so the result is reproducible), or
-        ``'none'`` to draw from NumPy's global random state. The permutation reproduces MATLAB's
-        ``rng(seed, 'twister'); randperm(N)`` up to the ordering of exactly tied random draws.
-
-    Returns
-    -------
-    numpy.ndarray
-        The series after removing (a shorter series) or saturating (the original length) the
-        chosen points.
-
-    Raises
-    ------
-    ValueError
-        For an unknown ``remove_how`` or ``remove_or_saturate``, or saturating with a method
-        that cannot be saturated.
-    """
-    y = np.asarray(y, dtype=float).ravel()
-    n = y.size
-
-    # Order the values by the criterion, so that the points to *keep* come first
-    if remove_how == 'absclose':
-        order = np.argsort(-np.abs(y), kind='stable')   # (MATLAB sort(...,'descend') is stable)
-    elif remove_how == 'absfar':
-        order = np.argsort(np.abs(y), kind='stable')
-    elif remove_how == 'min':
-        order = np.argsort(-y, kind='stable')
-    elif remove_how == 'max':
-        order = np.argsort(y, kind='stable')
-    elif remove_how == 'random':
-        if isinstance(random_seed, str) and random_seed == 'none':
-            order = np.random.permutation(n)
-        else:
-            seed = 0 if random_seed is None or random_seed == 'default' else int(random_seed)
-            order = _ml_randperm(n, _ml_rng(seed)) - 1
-    else:
-        raise ValueError(f"Unknown method '{remove_how}'")
-
-    # Points to keep: round(N*(1 - p)) of them, in the original order
-    n_keep = int(_round_half_away(n * (1 - p)))
-    keep = np.sort(order[:n_keep])
-
-    if remove_or_saturate == 'remove':
-        return y[keep]
-    if remove_or_saturate == 'saturate':
-        y_t = y.copy()
-        if remove_how in ('max', 'min', 'absfar'):
-            kept = y[keep]
-            if kept.size == 0:
-                return y_t  # (MATLAB would error on max([]) assignment; nothing to clip to)
-            if remove_how == 'max':
-                y_t[np.setdiff1d(np.arange(n), keep)] = np.max(kept)
-            elif remove_how == 'min':
-                y_t[np.setdiff1d(np.arange(n), keep)] = np.min(kept)
-            else:
-                hi, lo = np.max(kept), np.min(kept)
-                y_t[y_t > hi] = hi
-                y_t[y_t < lo] = lo
-            return y_t
-        raise ValueError(f"Cannot 'saturate' when using '{remove_how}' method")
-    raise ValueError(f"Unknown remove_or_saturate option: '{remove_or_saturate}'")
 
 def binarize(y: ArrayLike, binarize_how: str = 'diff') -> ArrayLike:
     """

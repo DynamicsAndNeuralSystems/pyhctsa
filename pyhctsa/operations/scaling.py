@@ -8,7 +8,7 @@ logger = logging.getLogger('pyhctsa')
 from ..toolboxes.Max_Little import fastdfa
 from ..robust import bf_theil_sen
 from ..toolboxes.matlab.matlab_fit import robustfit
-from ..utils import _linspace, make_mat_buffer
+from ..utils import dict_output, _linspace, make_mat_buffer
 from ..operations.correlation import autocorr
 
 def fast_dfa(y: ArrayLike) -> float:
@@ -31,9 +31,12 @@ def fast_dfa(y: ArrayLike) -> float:
     Returns
     -------
     float
-        Estimated scaling exponent from log-log linear fit of fluctuation vs interval.
+        Estimated scaling exponent from log-log linear fit of fluctuation vs interval (NaN for fewer
+        than 10 samples).
     """
     y = np.asarray(y)
+    if y.size < 10:  # too short for the algorithm (e.g. a heavily decimated series)
+        return np.nan
     intervals, flucts = fastdfa.fastdfa(y)
     idx = np.argsort(intervals)
     intervals_sorted = intervals[idx]
@@ -45,6 +48,7 @@ def fast_dfa(y: ArrayLike) -> float:
     
     return alpha
 
+@dict_output
 def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
                          wtf: str = 'rsrange', tau_step: int = 1, k: int = 1,
                          lag: int | None = None, log_inc: bool = True) -> dict:
@@ -308,7 +312,7 @@ def _robust_linear_fit(log_tt: np.ndarray, log_ff: np.ndarray, the_range, field_
     out[f'{field_name}se1'] = np.sqrt(s2 * (1 / n + np.mean(xx) ** 2 / sxx))  # standard error in intercept
     out[f'{field_name}se2'] = np.sqrt(s2 / sxx)  # standard error in gradient
     out[f'{field_name}ssr'] = np.mean(resid ** 2)  # mean squares residual
-    out[f'{field_name}resac1'] = autocorr(resid, 1, 'Fourier')[0]  # autocorr at lag 1
+    out[f'{field_name}resac1'] = autocorr(resid, 1, 'Fourier')  # autocorr at lag 1
     return out
 
 
@@ -376,6 +380,7 @@ def _std(x, axis=None):
         )
     return np.std(x, axis=axis, ddof=1)
 
+@dict_output
 def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None, 
         q_range: None | list = None) -> dict:
     """Scale-dependent estimates of multifractal scaling in a time series.
@@ -574,6 +579,7 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
 
     return out
 
+@dict_output
 def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
     """
     Higuchi's fractal dimension of a time series.
@@ -647,10 +653,11 @@ def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
     out["intercept"] = linfit[0]
     out["se_HFD"] = stats["se"][1]  # standard error on the dimension estimate
     out["ssr"] = np.mean(resid ** 2)  # mean squared residual of the linear fit
-    out["resac1"] = autocorr(resid, 1, 'Fourier')[0]  # residual autocorrelation
+    out["resac1"] = autocorr(resid, 1, 'Fourier')  # residual autocorrelation
 
     return out
 
+@dict_output
 def mfdfa(y: ArrayLike, scale_range: list | None = None, q_range: list | None = None,
           order: int = 1) -> dict | float:
     """

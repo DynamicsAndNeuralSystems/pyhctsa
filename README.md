@@ -32,7 +32,7 @@
 ---
 
 The **PY**thon toolkit for **H**ighly **C**omparative **T**ime-**S**eries **A**nalysis (_pyhctsa_) is a living library of
-time-series analysis methods. It computes **over 5000 interpretable time-series features** from a single univariate
+time-series analysis methods. It computes **over 7000 interpretable time-series features** (7004 in the default feature set, as in `hctsa`) from a single univariate
 series — spanning distributional shape, autocorrelation, entropy and information theory, scaling, stationarity,
 nonlinear dynamics, spectral and wavelet properties, model fits, and more — making it the most comprehensive feature
 set available in native Python.
@@ -63,7 +63,7 @@ Instantiate a `FeatureCalculator` and call `extract` on your data:
 from pyhctsa.calculator import FeatureCalculator
 from pyhctsa.utils import get_dataset
 
-calc = FeatureCalculator()          # Loaded 791 master operations.
+calc = FeatureCalculator()          # Loaded 953 master operations.
 
 e1000 = get_dataset()               # bundled Empirical 1000 dataset
 data = e1000[0]                     # a list, array, or pandas Series
@@ -96,7 +96,7 @@ custom_calc = FeatureCalculator(config_path="subset.yaml")
 ```
 
 The number of master operations (callable functions) specified by the `.yaml` is displayed for verification, e.g.
-`Loaded 700 master operations.`.
+`Loaded 953 master operations.` for the default feature set.
 
 ### Calling individual operations
 

@@ -13,10 +13,10 @@ from itertools import permutations
 from numba import njit
 
 from ..operations.correlation import autocorr, first_crossing
-from ..operations.distribution import _bf_random_seed, fit_kernel_smooth, moments
+from ..operations.distribution import fit_kernel_smooth, moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
-from ..robust import bf_quantile_edges, bf_random
-from ..utils import get_tau, make_mat_buffer, matlab_quantile, sign_change, z_score
+from ..robust import bf_quantile_edges, bf_random, bf_random_seed
+from ..utils import dict_output, _round_half_away, get_tau, make_mat_buffer, matlab_quantile, sign_change, z_score
 from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit, polyfit, robustfit
 from ..toolboxes.matlab._pptest_tables import _pp_pvalue, _pp_regression
 
@@ -261,7 +261,7 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
             qs[j, 4] = sampen_out['quadSampEn1']  # SampEn_1_015
             #qs[j, 5] = sampen_out['quadSampEn2'] # SampEn_2_015
             # One FFT autocorrelation per window instead of four; index the lags.
-            # acf_w[t] is bit-identical to autocorr(y_sub, t, 'Fourier')[0]; the guards
+            # acf_w[t] is bit-identical to autocorr(y_sub, t, 'Fourier'); the guards
             # reproduce autocorr's out-of-range -> NaN behaviour exactly.
             acf_w = autocorr(y_sub, [], 'Fourier')
             Lw = len(acf_w)
@@ -294,6 +294,7 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
 
     return out
 
+@dict_output
 def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
                 w_overlap: Union[None, float] = None, mom_1: str = 'mean',
                 mom_2: str = 'std', what_transform: str = 'none') -> dict:
@@ -482,6 +483,7 @@ def _std_matlab(v: np.ndarray) -> float:
     """Sample standard deviation (N-1) with MATLAB's convention that a single value has std 0 (numpy: NaN)."""
     return float(np.std(v, ddof=1)) if np.size(v) > 1 else 0.0
 
+@dict_output
 def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = None) -> dict:
     """
     How local maximums and minimums vary across the time series.
@@ -810,10 +812,7 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
 
     return out
 
-def _matlab_round(v: float) -> int:
-    """MATLAB's round(): halves round away from zero (Python's round() rounds halves to even)."""
-    return int(np.sign(v) * np.floor(np.abs(v) + 0.5))
-
+@dict_output
 def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None] = None,
                  random_seed: Union[int, None] = None) -> dict:
     """
@@ -868,13 +867,13 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
         r = np.arange(min(n, N))
     elif subset_how == 'p':
         # take initial proportion n of time series
-        r = np.arange(_matlab_round(N*n))
+        r = np.arange(int(_round_half_away(N * n)))
     elif subset_how == 'unicg':
         r = np.floor(np.linspace(1, N, n) + 0.5).astype(int) - 1  # MATLAB round: halves away from zero
     elif subset_how == 'randcg':
         # n random points (there could be repeats): a single stochastic sample, so not
         # very statistically robust (as in hctsa)
-        r = np.floor(N * bf_random(int(n), _bf_random_seed(random_seed))).astype(int)  # (1 + floor(N u) in MATLAB)
+        r = np.floor(N * bf_random(int(n), bf_random_seed(random_seed))).astype(int)  # (1 + floor(N u) in MATLAB)
     else:
         raise ValueError(f"Unknown specifier, {subset_how}. Can be either 'l', 'p', 'unicg', or 'randcg'.")
 
@@ -897,8 +896,8 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     # use Pearson definition (normal ==> 3.0)
     global_kurt = kurtosis(y, fisher=False)
     out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/global_kurt)) if global_kurt != 0 else np.nan
-    global_ac1 = autocorr(y, 1, 'Fourier')[0]
-    out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')[0]/global_ac1)) if global_ac1 != 0 else np.nan
+    global_ac1 = autocorr(y, 1, 'Fourier')
+    out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')/global_ac1)) if global_ac1 != 0 else np.nan
 
     return out
 
@@ -991,6 +990,7 @@ def std_nth_deriv(y: ArrayLike, ndr: int = 2) -> float:
 
     return float(out)
 
+@dict_output
 def std_nth_deriv_change(y: ArrayLike, maxd: int = 10) -> dict:
     """
     How the output of :func:`std_nth_deriv` changes with the order of the derivative.
@@ -1270,6 +1270,7 @@ def peak_intervals(y: ArrayLike, min_prom: float = 1) -> dict:
 
     return out
 
+@dict_output
 def drifting_auto_corr(y: ArrayLike, tau: int = 1, what_product: str = 'ac') -> dict:
     """
     Drift in a lag-tau (auto)correlation via a cumulative-sum test.
@@ -1351,6 +1352,7 @@ def drifting_auto_corr(y: ArrayLike, tau: int = 1, what_product: str = 'ac') -> 
 
     return _cumsum_bridge_stats(p)
 
+@dict_output
 def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 100,
                         random_seed: Union[int, str, None] = 'default') -> dict:
     """
@@ -1421,7 +1423,7 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
     l = int(l)
 
     # numSegs segments, each of length l data points
-    istarts = np.floor((N - l + 1) * bf_random(num_segs, _bf_random_seed(random_seed))).astype(int)  # (0-based; 1 + floor(..) in MATLAB)
+    istarts = np.floor((N - l + 1) * bf_random(num_segs, bf_random_seed(random_seed))).astype(int)  # (0-based; 1 + floor(..) in MATLAB)
 
     qs = np.full((num_segs, 8), np.nan)
     for j in range(num_segs):
@@ -1436,8 +1438,8 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
             qs[j, 3] = kurtosis(y_sub, fisher=False)
             pe = permutation_entropy(y_sub, 3, 1) # normalized PermEn(3,1) -- cheaper and more
             qs[j, 4] = pe['normPermEn'] if isinstance(pe, dict) else np.nan # stable than SampEn on these short random segments
-            qs[j, 5] = np.asarray(autocorr(y_sub, 1, 'Fourier')).item() # AC1
-            qs[j, 6] = np.asarray(autocorr(y_sub, 2, 'Fourier')).item() # AC2
+            qs[j, 5] = autocorr(y_sub, 1, 'Fourier') # AC1
+            qs[j, 6] = autocorr(y_sub, 2, 'Fourier') # AC2
             qs[j, 7] = first_crossing(y_sub, 'ac', 0, 'continuous') # first zero crossing
 
     # The spread of each feature across subsegments of the time series: a big bootstrapped
@@ -1507,6 +1509,7 @@ def _nstat_z_error(ser, base1, base2, clength, m, tau, minn, step, causal, cente
         err += (casted - ser[base2 + i + step]) ** 2
     return err
 
+@dict_output
 def nstat_z(y: ArrayLike, num_seg: int = 5, embed_params: tuple = (1, 3)) -> dict:
     """
     Cross-forecast errors of zeroth-order time-series models.
@@ -1924,7 +1927,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
                 qs[i] = kstest(w, norm(loc=np.mean(w), scale=np.std(w, ddof=1)).cdf).statistic
     elif window_stat == 'AC1':
         for i in range(num_steps):
-            qs[i] = np.asarray(autocorr(y[_get_window(i, inc, win_length)], 1, 'Fourier')).item()
+            qs[i] = autocorr(y[_get_window(i, inc, win_length)], 1, 'Fourier')
     elif window_stat == 'asymAC1':
         # an adaptive lag is set from the whole series, not per window
         tau = get_tau(y, asym_tau)
@@ -2075,6 +2078,7 @@ def _pearson(x: np.ndarray, y: np.ndarray) -> tuple:
 
     return r, pval
 
+@dict_output
 def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] = 1) -> dict:
     """
     Monotonic trend ('ramping') in windowed statistics.
@@ -2157,7 +2161,7 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] =
     seg_ac1 = np.zeros(num_seg)
     seg_asym_ac1 = np.full(num_seg, np.nan)
     for i in range(num_seg):
-        seg_ac1[i] = autocorr(z[i, :], 1, 'Fourier')[0]
+        seg_ac1[i] = autocorr(z[i, :], 1, 'Fourier')
         if not np.isnan(tau) and tau < seg_length - 1: # need pairs to average over
             t = int(tau)
             sd = np.std(z[i, :], ddof=1)
@@ -2186,6 +2190,7 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] =
 
     return out
 
+@dict_output
 def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     """
     Slow feature analysis of windowed statistics.
@@ -2285,7 +2290,7 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     win_ac1 = np.zeros(num_windows)
     win_trev = np.zeros(num_windows)
     for i in range(num_windows):
-        win_ac1[i] = autocorr(z[i, :], 1, 'Fourier')[0]
+        win_ac1[i] = autocorr(z[i, :], 1, 'Fourier')
         dz = np.diff(z[i, :])
         with np.errstate(invalid='ignore', divide='ignore'):
             win_trev[i] = np.mean(dz**3) / np.mean(dz**2)**1.5

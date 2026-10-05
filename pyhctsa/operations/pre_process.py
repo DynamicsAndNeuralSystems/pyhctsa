@@ -10,11 +10,11 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 from ..operations.correlation import autocorr
-from ..operations.distribution import _bf_random_seed, compare_ks_fit, outlier_test, simple_fit
+from ..operations.distribution import compare_ks_fit, outlier_test, simple_fit
 from ..operations.nonlinearity import zero_one_test
 from ..operations.stationarity import sliding_window, stat_av
-from ..robust import bf_fit_sinusoids, bf_random
-from ..utils import _round_half_away, _zscore_matlab, z_score
+from ..robust import bf_fit_sinusoids, bf_random, bf_random_seed
+from ..utils import dict_output, _round_half_away, _zscore_matlab, z_score
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
     """Apply a length-k median filter to a 1D array x, as MATLAB's ``medfilt1``.
@@ -91,6 +91,7 @@ def _spline_detrend(y: np.ndarray, npieces: int, order: int) -> np.ndarray:
     return y - spl(x)
 
 
+@dict_output
 def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
     """
     How time-series properties change after a preprocessing step.
@@ -473,7 +474,7 @@ def _rank_map_gaussian(y: np.ndarray, random_seed=None, draws: np.ndarray = None
     """
     n = len(y)
     if draws is None:
-        draws = bf_random(n, _bf_random_seed(random_seed), 'normal')
+        draws = bf_random(n, bf_random_seed(random_seed), 'normal')
     out = np.zeros(n)
     out[np.argsort(y, kind='stable')] = np.sort(draws)
     return out
@@ -722,8 +723,7 @@ def preproc_schreiber_denoise(y: ArrayLike, m: int = 5, d: int = 1, num_iter: in
     out['rmsCorrection'] = float(np.sqrt(np.mean((y - y_den) ** 2)))
     out['fracVarRemoved'] = float(1 - np.var(y_den, ddof=1) / np.var(y, ddof=1))
     out['corrOrigDenoised'] = float(np.corrcoef(y, y_den)[0, 1])
-    out['ac1Change'] = float(np.ravel(autocorr(y_den, 1, 'Fourier'))[0]
-                             - np.ravel(autocorr(y, 1, 'Fourier'))[0])
+    out['ac1Change'] = autocorr(y_den, 1, 'Fourier') - autocorr(y, 1, 'Fourier')
     out['meanNeighbors'] = float(np.mean(num_neighbors))
     out['fracNoCorrection'] = float(np.mean(num_neighbors == 1))
 
