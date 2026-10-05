@@ -109,9 +109,9 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
     # Mean interval between steps:
     out["meanstepint"] = np.mean(chints) / N
 
-    # Mean interval greater than 3 samples, per sample:
+    # Mean interval greater than 3 samples (in samples):
     long_ints = chints[chints > 3]
-    out["meanstepintgt3"] = np.mean(long_ints) / N if long_ints.size else np.nan
+    out["meanstepintgt3"] = np.mean(long_ints) if long_ints.size else np.nan
 
     # Mean error on step interval distribution:
     out["meanerrstepint"] = np.std(chints, ddof=1) / np.sqrt(len(chints))
@@ -123,7 +123,7 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
     out["minstepint"] = np.min(chints) / N
 
     # Median step interval:
-    out["medianstepint"] = np.median(chints) / N
+    out["medianstepint"] = np.median(chints)
 
     return out
 
