@@ -9,6 +9,39 @@ from scipy import stats
 from ..utils import sign_change
 from ..toolboxes.infotheory.mutual_info import KraskovMI, GaussianMI
 
+def _tie_break_noise(y: np.ndarray, seed: int = 0) -> np.ndarray:
+    """Add tiny, reproducible jitter to break exact ties in ``y`` (hctsa ``BF_TieBreakNoise``).
+
+    ``y`` is returned unchanged unless it has a high proportion of repeated values
+    (fewer than 90% of its values unique), in which case Gaussian noise with standard
+    deviation ``1e-10 * std(y)`` is added. That is small enough to leave a well-behaved
+    continuous series untouched, but enough to break the exact ties that make
+    nearest-neighbour (Kraskov/KSG) mutual-information estimators degenerate on
+    quantized or periodic-orbit data.
+
+    The noise comes from a private, fixed-seed generator (not NumPy's global state), so
+    the same input always gives the same output and the caller's random state is left
+    alone. (hctsa uses a private MATLAB ``mt19937ar`` stream; the draws are not
+    bit-identical to MATLAB's, but the trigger rule and the noise scale are.)
+
+    Parameters
+    ----------
+    y : array-like
+        The input vector.
+    seed : int, optional
+        Seed of the private generator (default 0).
+    """
+    y = np.asarray(y, dtype=float)
+    if y.size < 2:
+        return y
+    unique_frac = np.unique(y).size / y.size
+    sigma = np.std(y, ddof=1)
+    if unique_frac < 0.9 and sigma > 0:
+        rng = np.random.default_rng(seed)
+        y = y + 1e-10 * sigma * rng.standard_normal(y.shape)
+    return y
+
+
 def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, None]) -> Callable:
     """Helper to return the correct correlation function based on method type."""
     from ..operations.correlation import autocorr, automutual_info
@@ -444,6 +477,10 @@ def automutual_info(
         - 'kraskov1': Kraskov estimator 1 (KSG1)
         - 'kraskov2': Kraskov estimator 2 (KSG2)
 
+        For the Kraskov estimators, a series with many repeated values (fewer than 90%
+        unique) first gets tiny, reproducible Gaussian jitter (standard deviation
+        ``1e-10 * std(y)``, fixed seed) to break the exact ties, as in hctsa.
+
         Default is `kernel`.
 
     extra_param : int or str, optional
@@ -489,6 +526,10 @@ def automutual_info(
         mi_calc = GaussianMI()
     else:
         raise ValueError(f'Unknown estimator: {est_method}')
+    if est_method in ('kraskov1', 'kraskov2'):
+        # Series with many repeated values make the nearest-neighbour estimators blow up:
+        # add tiny, reproducible tie-breaking jitter, once to the whole series (hctsa BF_TieBreakNoise)
+        y = _tie_break_noise(y)
     
     for k, delay in enumerate(time_delay):
         if delay > n - min_samples:
