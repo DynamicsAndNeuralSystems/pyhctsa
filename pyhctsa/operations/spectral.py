@@ -391,27 +391,15 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out = {}
     i_max_s = np.argmax(s)
     out = {'maxS': s[i_max_s], 'maxw': w[i_max_s]}
-    r, l = np.where(s[i_max_s + 1:] < s[i_max_s])[0], np.where(s[:i_max_s] < s[i_max_s])[0]
-    out['maxWidth'] = w[i_max_s + 1 + r[0]] - w[l[-1]] if len(r) > 0 and len(l) > 0 else 0
 
-    right_indices = np.where(s[i_max_s + 1:] < out['maxS'])[0]
-    if len(right_indices) > 0:
-        right_idx = i_max_s + 1 + right_indices[0]
-    else:
-        right_idx = None
-
-    # Find last index before i_maxS where S < maxS
-    left_indices = np.where(s[:i_max_s] < out['maxS'])[0]
-    if len(left_indices) > 0:
-        left_idx = left_indices[-1]
-    else:
-        left_idx = None
-
-    # Calculate maxWidth
-    if right_idx is not None and left_idx is not None:
-        out['maxWidth'] = w[right_idx] - w[left_idx]
-    else:
-        out['maxWidth'] = 0
+    # Half-power (-3 dB) bandwidth of the dominant peak: the frequency interval around the
+    # maximum over which the spectrum stays above half its peak value.
+    half_power = out['maxS'] / 2
+    r = np.flatnonzero(s[i_max_s + 1:] < half_power)
+    i_upper = i_max_s + 1 + r[0] if r.size else n - 1  # never drops below half power above the peak
+    l = np.flatnonzero(s[:i_max_s] < half_power)
+    i_lower = l[-1] if l.size else 0  # never drops below half power below the peak
+    out['maxWidth'] = w[i_upper] - w[i_lower]
 
     min_dist_w = 0.02
     pts_per_w = len(s) / np.pi
