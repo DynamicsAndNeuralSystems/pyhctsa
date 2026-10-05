@@ -186,7 +186,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     # OLAPINT: overlap integral between the two curves; normalized by variance
     out['olapint'] = np.sum(f * ffit * dx) * np.std(x, ddof=1)
     # RELENT: relative entropy of the two distributions
-    r = ffit > 0
+    r = (ffit > 0) & (f > 0)  # skip points where either density is zero (0*log(0) := 0)
     out['relent'] = np.sum(f[r] * np.log(f[r] / ffit[r]) * dx)
 
     return out
