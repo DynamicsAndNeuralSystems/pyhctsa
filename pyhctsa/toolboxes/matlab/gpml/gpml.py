@@ -84,6 +84,12 @@ class CovSEisoNoise:
         return K_se + K_noise
 
     @classmethod
+    def diag(cls, hyp, x):
+        """The diagonal of ``K(hyp, x)`` (gpml's ``z = 'diag'``)."""
+        K_se, K_noise, _ = cls.parts(hyp, x, 'diag')
+        return K_se + K_noise
+
+    @classmethod
     def dK(cls, hyp, x, Q, z=None):
         """
         Directional hyperparameter derivative ``dhyp(i) = tr(Q' dK/dhyp_i)``.
@@ -364,8 +370,7 @@ def gp_predict(hyp, cov, x, y, xs, nperbatch=1000, inf='gauss_lik'):
     nact = 0
     while nact < ns:              # process minibatches of test cases, as gpml does
         idx = slice(nact, min(nact + nperbatch, ns))
-        Kse_s, Knoise_s, _ = cov.parts(hyp_cov, xs[idx], 'diag')
-        kss = Kse_s + Knoise_s                                   # self-variance
+        kss = cov.diag(hyp_cov, xs[idx])                         # self-variance
         Ks = cov.K(hyp_cov, x, xs[idx])                       # cross-covariances
         ms = np.zeros(xs[idx].size)                                   # meanZero
 
