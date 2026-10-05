@@ -4,6 +4,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 import numpy as np
+import pywt
 from numpy.typing import ArrayLike
 from numba import njit
 from antropy.entropy import _xlogx
@@ -13,7 +14,7 @@ from sklearn.neighbors import KDTree
 from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
 from ..toolboxes.physionet import sampen as _sampen_c
-from ..utils import (_zscore_matlab, bin_picker, get_tau, make_buffer, pre_process,
+from ..utils import (_ml_rng, _zscore_matlab, bin_picker, get_tau, make_buffer, pre_process,
                      time_delay_embed, z_score)
 
 
@@ -612,7 +613,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
         :func:`~pyhctsa.utils.get_tau`: ``'ac'`` (first zero-crossing of the
         autocorrelation function), ``'ac1e'`` (floor of its first 1/e crossing) or ``'mi'``
         (the smaller of the first minimum of the Kraskov automutual information and the
-        ``'ac1e'`` delay). NaN is returned if the delay cannot be determined (e.g., a
+        ``'ac1e'`` delay). All outputs are NaN if the delay cannot be determined (e.g., a
         constant series). Default is 1.
 
     Returns
@@ -633,14 +634,14 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
     """
     m = int(m)
     y = np.asarray(y)
+    nan_out = {"permEn": np.nan, "normPermEn": np.nan, "permEnLE": np.nan,
+               "normWPE": np.nan, "ordAsym": np.nan}
     tau = get_tau(y, tau)
     if np.isnan(tau):  # the delay could not be determined (e.g., constant series)
-        return np.nan
+        return nan_out
     tau = int(tau)
     assert tau > 0, "delay must be greater than zero."
 
-    nan_out = {"permEn": np.nan, "normPermEn": np.nan, "permEnLE": np.nan,
-               "normWPE": np.nan, "ordAsym": np.nan}
     try:
         embedded = time_delay_embed(y, m, tau)
     except ValueError:
@@ -827,6 +828,481 @@ def _app_samp_entropy(
 
     return phi
 
+def bubble_entropy(y: ArrayLike, m: int = 10, tau: Union[int, str] = 1) -> Union[dict, float]:
+    """
+    Bubble entropy of a time series.
+
+    Manis et al.'s bubble entropy [1], an ordinal entropy that depends very little on its
+    embedding dimension. The series is cut into overlapping runs of ``m`` values spaced
+    ``tau`` samples apart. For each run, the number of swaps a bubble sort needs to put it
+    in order (equivalently, the number of pairs in which an earlier value exceeds a later
+    one, from 0 to ``m(m-1)/2``) is counted. The Renyi entropy of order 2 of the
+    distribution of this swap count, ``H_m = -log(sum_k p_k**2)``, is computed for runs of
+    ``m`` and of ``m + 1`` values. The bubble entropy is the increase in entropy on going
+    from ``m`` to ``m + 1`` values, ``H_(m+1) - H_m``, divided by ``log((m+1)/(m-1))`` to
+    normalize for the dimension. Low values indicate series whose runs have predictable
+    orderings. For white noise the long-series value is about 0.64 for ``m = 5`` and 0.69
+    for ``m = 10`` (rising slowly toward 0.75 as ``m`` grows). Port of hctsa's
+    ``EN_BubbleEn``.
+
+    A swap is counted only when an earlier value is strictly greater than a later one, so
+    tied values are never swapped (as in a standard bubble sort). The estimate is a small
+    difference between two entropies, so it is noisy when the series is short relative to
+    the number of possible swap counts: for series of about 1000 samples, embedding
+    dimensions much above 10 give poorly reproducible values.
+
+    With a delay set by the timescale of the series, the runs of ``m`` values span
+    ``(m-1)*tau`` samples, so for a slowly decorrelating series (a large delay) there are
+    few runs and the value is noisy. hctsa uses ``'mi'``, which is rarely NaN: it falls
+    back on the first automutual-information minimum when the autocorrelation function
+    never decays to 1/e. The ``'ac1e'`` delay is NaN when the autocorrelation function
+    never decays to 1/e (as for many random walks) or the runs are too few, and the first
+    zero crossing (``'ac'``) is less stable still.
+
+    References
+    ----------
+    .. [1] G. Manis, M. D. Aktaruzzaman and R. Sassi, "Bubble Entropy: An Entropy Almost
+        Free of Parameters", IEEE Trans. Biomed. Eng. 64(11), 2711 (2017).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    m : int, optional
+        The embedding dimension, at least 2. Default is 10.
+    tau : int or str, optional
+        The time delay for the embedding: an integer, or a rule understood by
+        :func:`~pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``). Default is 1.
+
+    Returns
+    -------
+    dict
+        A dictionary with a single field, 'bubbleEn', the bubble entropy
+        ``(H_(m+1) - H_m) / log((m+1)/(m-1))``. NaN if the series is constant, the delay
+        cannot be determined, or the series is too short for runs of ``m + 1`` values
+        (fewer than 10 runs).
+    """
+    m = int(m)
+    if m < 2:
+        raise ValueError(f"The embedding dimension must be at least 2 (m = {m} given)")
+    out = {'bubbleEn': np.nan}
+    y = np.asarray(y, dtype=float).ravel()
+    if not np.std(y, ddof=1) > 0:  # constant (or non-finite) series
+        return out
+    tau = get_tau(y, tau)  # resolve a rule once, so both dimensions share one delay
+    if np.isnan(tau):
+        return out
+    tau = int(tau)
+
+    # Renyi-2 entropy of the swap-count distribution at m and m + 1
+    H = np.zeros(2)
+    for j in range(2):
+        mm = m + j
+        n_vec = y.size - (mm - 1) * tau
+        if n_vec < 10:
+            return out
+        x = time_delay_embed(y, mm, tau)
+        num_swaps = np.zeros(n_vec, dtype=np.int64)
+        for a in range(mm - 1):
+            for b in range(a + 1, mm):
+                num_swaps += x[:, a] > x[:, b]  # one swap per inversion
+        p = np.bincount(num_swaps) / n_vec
+        H[j] = -np.log(np.sum(p ** 2))
+
+    out['bubbleEn'] = (H[1] - H[0]) / np.log((m + 1) / (m - 1))
+    return out
+
+def permutation_entropy_complexity(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> dict:
+    """
+    Jensen-Shannon statistical complexity of ordinal patterns.
+
+    Computes the Bandt-Pompe ordinal-pattern distribution (as in
+    :func:`permutation_entropy`) and pairs its normalized Shannon entropy with the
+    Jensen-Shannon statistical complexity of Rosso et al. [1]: the entropy-complexity
+    plane used to separate chaotic, stochastic and periodic dynamics that can look alike
+    under entropy alone.
+
+    Entropy is near its extremes (0 or ``log(m!)``) for both fully ordered *and* fully
+    random sequences. The statistical complexity ``C = Q_J[P, P_uniform] * H[P]`` is
+    instead close to zero at both those extremes and peaks for structured-but-disordered
+    ('chaotic') ordinal-pattern distributions, a distinct axis of information from
+    entropy alone. 'hNorm' reproduces the 'normPermEn' of :func:`permutation_entropy`.
+    Port of hctsa's ``EN_PermEnComplexity``.
+
+    At ``m = 2`` there are only two ordinal states, so H and C are both unimodal,
+    symmetric functions of a single probability: they are then forced to be near-perfect
+    reparameterizations of one another regardless of the input data, making
+    'jsComplexity' redundant with plain permutation entropy at that order. ``m = 3`` was
+    also found redundant on real-world data; only ``m = 4`` and ``m = 5`` are registered
+    in the default hctsa feature set.
+
+    References
+    ----------
+    .. [1] O.A. Rosso, H.A. Larrondo, M.T. Martin, A. Plastino and M.A. Fuentes,
+        "Distinguishing noise from chaos", Phys. Rev. Lett. 99, 154102 (2007).
+    .. [2] M.T. Martin, A. Plastino and O.A. Rosso, "Generalized statistical complexity
+        measures: Geometrical and analytical properties", Physica A 369(2), 439 (2006),
+        for the Q_0 normalization.
+    .. [3] P.W. Lamberti, M.T. Martin, A. Plastino and O.A. Rosso, "Intensive entropic
+        non-triviality measure", Physica A 334(1-2), 119 (2004).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    m : int, optional
+        The embedding dimension (order of the ordinal patterns). Default is 2.
+    tau : int or str, optional
+        The time delay for the embedding: an integer, or a rule understood by
+        :func:`~pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``). Default is 1.
+
+    Returns
+    -------
+    dict
+        A dictionary containing:
+
+        - 'hNorm': the normalized Shannon entropy of the ordinal-pattern distribution,
+          ``H[P] = S[P] / log2(m!)``, in [0, 1],
+        - 'jsComplexity': the Jensen-Shannon statistical complexity,
+          ``C[P] = Q_J[P, P_uniform] * H[P]``, in [0, 1].
+
+        Both are NaN if the delay cannot be determined or the series is too short to
+        embed (fewer than 5 embedding vectors).
+    """
+    m = int(m)
+    nan_out = {'hNorm': np.nan, 'jsComplexity': np.nan}
+    y = np.asarray(y, dtype=float).ravel()
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        return nan_out
+    tau = int(tau)
+    if y.size - (m - 1) * tau < 5:  # need at least 5 embedding vectors
+        logger.warning("Time series too short to embed")
+        return nan_out
+    x = time_delay_embed(y, m, tau)
+    nx = x.shape[0]
+
+    num_perms = factorial(m)
+    p = np.bincount(_ordinal_pattern_rank(x), minlength=num_perms) / nx
+
+    # Normalized Shannon entropy of P
+    p_0 = p[p > 0]
+    s_p = -np.sum(p_0 * np.log2(p_0))
+    s_max = np.log2(num_perms)
+    h_norm = s_p / s_max
+
+    # Jensen-Shannon statistical complexity of P relative to the uniform distribution Pe
+    pe = 1 / num_perms
+    p_mix = (p + pe) / 2  # every entry > 0, since pe > 0
+    s_mix = -np.sum(p_mix * np.log2(p_mix))
+    js_div = s_mix - s_p / 2 - s_max / 2  # the entropy of Pe is log2(m!)
+
+    # Normalizing constant so that Q_J is in [0, 1], attained for P a point mass
+    n = float(num_perms)
+    q0 = -2 / (((n + 1) / n) * np.log2(n + 1) - 2 * np.log2(2 * n) + np.log2(n))
+
+    return {'hNorm': h_norm, 'jsComplexity': q0 * js_div * h_norm}
+
+def wavelet_entropy(y: ArrayLike, wavelet_name: str = 'sym4', level: int = 5) -> float:
+    """
+    Wavelet entropy of a time series.
+
+    Decomposes ``y`` via the maximal-overlap discrete wavelet transform (MODWT) into
+    ``level`` detail scales plus the remaining smooth (scaling) band, i.e., ``level + 1``
+    bands, computes each band's share of the signal's total energy,
+    ``p_j = E_j / sum(E)``, and returns the Shannon entropy of this relative-energy
+    distribution across bands, normalized to [0, 1] by its maximum possible value,
+    ``log2(level + 1)`` [1]. Low values mean the energy is concentrated in few bands;
+    high values that it is spread evenly across bands. Port of hctsa's ``EN_wentropy``
+    (MATLAB's ``wentropy`` with a global energy distribution of the MODWT); the MODWT is
+    computed here by the pyramid algorithm with circular boundary handling, using the
+    filters of PyWavelets.
+
+    The output is invariant to rescaling ``y``, and is bounded in [0, 1] (the value 1 is
+    reached when the energy is equal in all ``level + 1`` bands). ``level`` is fixed by
+    default (rather than left to depend on the series length) because the number of
+    levels sets the normalizing denominator, so letting it grow with the length of ``y``
+    introduces a strong length dependence. With ``level`` fixed, the value for white noise
+    is independent of length (about 0.75). ``level = 5`` needs about 64 samples or more
+    for a non-degenerate decomposition.
+
+    References
+    ----------
+    .. [1] O. A. Rosso, S. Blanco, J. Yordanova, V. Kolev, A. Figliola, M. Schuermann,
+        E. Basar, "Wavelet entropy: a new tool for analysis of short duration brain
+        electrical signals", J. Neurosci. Methods 105(1), 65 (2001).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    wavelet_name : str, optional
+        The wavelet used for the MODWT decomposition, a PyWavelets name for an orthogonal
+        wavelet (e.g., ``'sym4'``, ``'db2'``, ``'haar'``). Default is ``'sym4'``.
+    level : int, optional
+        The number of decomposition levels. Default is 5.
+
+    Returns
+    -------
+    float
+        The normalized wavelet entropy. NaN if the decomposition fails (e.g., for a series
+        too short for the requested number of levels: ``level`` may not exceed
+        ``floor(log2(N))``) or the series has no energy.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    level = int(level)
+    n = y.size
+    if level < 1 or n < 2 or level > int(np.floor(np.log2(n))) or not np.all(np.isfinite(y)):
+        return np.nan
+    try:
+        wav = pywt.Wavelet(wavelet_name)
+    except ValueError:
+        return np.nan
+    g = np.asarray(wav.dec_lo) / np.sqrt(2)  # MODWT scaling and wavelet filters
+    h = np.asarray(wav.dec_hi) / np.sqrt(2)
+    idx = np.arange(n)
+
+    # MODWT pyramid algorithm with circular boundary: the band energies do not depend on
+    # the (circular) time alignment of the coefficients
+    v = y
+    energy = np.zeros(level + 1)
+    for j in range(1, level + 1):
+        shifts = 2 ** (j - 1) * np.arange(g.size)
+        gather = v[(idx[:, None] - shifts[None, :]) % n]
+        energy[j - 1] = np.sum((gather @ h) ** 2)
+        v = gather @ g
+    energy[level] = np.sum(v ** 2)
+
+    total = energy.sum()
+    if not total > 0:
+        return np.nan
+    p = energy / total
+    p = p[p > 0]
+    return float(-np.sum(p * np.log2(p)) / np.log2(level + 1))
+
+_RANDOMIZE_STATS = ('xcn1', 'xc1', 'd1', 'ac1', 'ac2', 'ac3', 'ac4', 'permen3_1', 'statav5',
+                    'swss5_1')
+
+
+def _randomize_stats(y: np.ndarray, y_rand: np.ndarray) -> list:
+    """The ten statistics comparing a series, ``y``, with a randomized version, ``y_rand``."""
+    from .stationarity import sliding_window, stat_av
+    from .correlation import autocorr
+    n = y.size
+
+    # Cross-correlation with the original signal at lags -1 and +1 (xcorr 'coeff')
+    norm_xc = np.sqrt(np.sum(y ** 2) * np.sum(y_rand ** 2))
+    with np.errstate(all='ignore'):
+        xcn1 = np.sum(y[:-1] * y_rand[1:]) / norm_xc
+        xc1 = np.sum(y[1:] * y_rand[:-1]) / norm_xc
+
+    # Norm of the differences between the original and randomized signals
+    d1 = np.linalg.norm(y - y_rand) / n
+
+    def safe(f, *args):
+        try:
+            return float(f(*args))
+        except Exception:  # data-dependent failure (e.g., a series too short): NaN
+            return np.nan
+
+    with np.errstate(all='ignore'):
+        ac = np.asarray(autocorr(y_rand, [1, 2, 3, 4], 'Fourier'), dtype=float).ravel()
+    if ac.size != 4:
+        ac = np.full(4, np.nan)
+
+    # Normalized permutation entropy, PermEn(3, 1)
+    permen3_1 = safe(lambda v: permutation_entropy(v, 3, 1)['normPermEn'], y_rand)
+    # Stationarity
+    statav5 = safe(stat_av, y_rand, 'seg', 5)
+    swss5_1 = safe(sliding_window, y_rand, 'std', 'std', 5, 1)
+    return [xcn1, xc1, d1, ac[0], ac[1], ac[2], ac[3], permen3_1, statav5, swss5_1]
+
+
+def _randomize_run(y: np.ndarray, randomize_how: str, draws: np.ndarray) -> np.ndarray:
+    """
+    Randomize ``y`` one point at a time for ``2N`` steps, recording the statistics at the
+    start and every ``N/10`` steps.
+
+    ``draws`` has shape ``(2N, 2)``: the (0-based) random indices consumed by each step,
+    in the order they are drawn.
+    """
+    n = y.size
+    num_calcs = 2.0 / 0.1  # randp_max / rand_inc
+    calc_ints = int(np.floor(2 * n / num_calcs))
+    if calc_ints == 0:
+        calc_ints = 1  # round up for short time series
+    calc_pts = list(range(0, 2 * n + 1, calc_ints))
+    if calc_pts[-1] != 2 * n:
+        calc_pts.append(2 * n)
+    row_of = {pt: k for k, pt in enumerate(calc_pts)}
+
+    stats = np.zeros((len(calc_pts), len(_RANDOMIZE_STATS)))
+    y_rand = y.copy()
+    stats[0] = _randomize_stats(y, y_rand)  # initial condition: apply on itself
+
+    for i in range(1, 2 * n + 1):
+        a, b = draws[i - 1]
+        if randomize_how == 'statdist':
+            # substitute a random element by a random element of the original series
+            # (MATLAB evaluates the right-hand index first: the first draw is the source)
+            y_rand[b] = y[a]
+        elif randomize_how == 'dyndist':
+            # substitute a random element by a random element of the current,
+            # already partially randomized, series
+            y_rand[b] = y_rand[a]
+        elif randomize_how == 'permute':
+            # swap two random elements, so that the distribution never changes
+            y_rand[a], y_rand[b] = y_rand[b], y_rand[a]
+        else:
+            raise ValueError(f"Unknown randomization method '{randomize_how}'.")
+        k = row_of.get(i)
+        if k is not None:
+            stats[k] = _randomize_stats(y, y_rand)
+    return stats
+
+
+def _randomize_fit(stats: np.ndarray) -> dict:
+    """Exponential fits and summaries of the trajectory of each statistic."""
+    from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr
+
+    def model2(p, x):
+        return p[0] * np.exp(p[1] * x)
+
+    def model3(p, x):
+        return p[0] * np.exp(p[1] * x) + p[2]
+
+    r = np.arange(1, stats.shape[0] + 1, dtype=float)  # an 'x-axis' for the fits
+    out = {}
+    for i, name in enumerate(_RANDOMIZE_STATS):
+        v = stats[:, i]
+        if name in ('xcn1', 'xc1'):
+            model, start = model2, [v[0], -0.1]
+        elif name in ('ac1', 'ac2', 'ac3'):
+            model, start = model2, [v[0], -0.2]
+        elif name == 'ac4':
+            model, start = model2, [v[0], -0.4]
+        elif name in ('d1', 'permen3_1'):
+            model, start = model3, [-v[-1], -0.2, v[-1]]
+        else:  # statav5, swss5_1
+            model, start = model3, [-v[-1], -0.1, v[-1]]
+        num_coeffs = len(start)
+
+        # Exponential fit (a * exp(b * k), plus an offset c for some), as MATLAB's fit
+        try:
+            with np.errstate(all='ignore'):
+                p = np.asarray(lsqcurvefit_trr(model, start, r, v), dtype=float)
+                gof = goodness_of_fit(v, model(p, r), num_coeffs)
+            if not np.all(np.isfinite(p)):
+                raise ValueError('non-finite fit')
+        except Exception:
+            p = np.full(num_coeffs, np.nan)
+            gof = {'rsquare': np.nan, 'rmse': np.nan}
+        out[name + 'fexpa'] = p[0]
+        out[name + 'fexpb'] = p[1]
+        if num_coeffs == 3:
+            out[name + 'fexpc'] = p[2]
+        out[name + 'fexpr2'] = gof['rsquare']
+        out[name + 'fexprmse'] = gof['rmse']
+
+        # Extra statistics: the absolute change, and the first checkpoint at which the
+        # statistic passes halfway between its start and end values
+        out[name + 'diff'] = abs(v[-1] - v[0])
+        half = 0.5 * (v[-1] + v[0])
+        passed = np.flatnonzero(v > half) if v[-1] > v[0] else np.flatnonzero(v < half)
+        out[name + 'hp'] = float(passed[0] + 1) if passed.size else np.nan
+    return out
+
+
+def randomize(y: ArrayLike, randomize_how: str = 'statdist',
+              random_seed: Union[int, str, None] = None) -> dict:
+    """
+    How properties of the series change as it is progressively randomized.
+
+    Randomizes a copy of the input (z-scored) series one point at a time, according to a
+    randomization procedure, repeated ``2N`` times for a series of length ``N``, and
+    compares statistics of the randomized copy with the original at 21 checkpoints: at the
+    start and after every ``N/10`` steps. Port of hctsa's ``EN_Randomize``.
+
+    The random draws are those of MATLAB's Mersenne Twister (``rng(seed, 'twister')``,
+    ``randi``) when a seed is given, so the result is reproducible and, for the same seed,
+    follows the same randomization as hctsa.
+
+    Parameters
+    ----------
+    y : array-like
+        The input (z-scored) time series.
+    randomize_how : {'statdist', 'dyndist', 'permute'}, optional
+        What one step of randomization does:
+
+        - ``'statdist'``: overwrites a random element of the series with a randomly chosen
+          element of the original series,
+        - ``'dyndist'``: overwrites a random element of the series with another random
+          element of the current, partially randomized, series,
+        - ``'permute'``: swaps two randomly chosen elements of the series, so that the
+          distribution of values never changes and only the temporal properties do.
+
+        Default is ``'statdist'``.
+    random_seed : int or {'default', 'none'}, optional
+        How to set the random seed, as hctsa's ``BF_ResetSeed``: an integer seed;
+        ``'default'`` (or None) seeds with 0; ``'none'`` does not seed (the run is then not
+        reproducible). Default is None.
+
+    Returns
+    -------
+    dict
+        For each of ten statistics measured at each checkpoint, six or seven fields
+        describing its trajectory over the 21 checkpoints. The statistics are:
+
+        - 'xcn1', 'xc1': the cross-correlation of the original and randomized series at
+          lags -1 and +1,
+        - 'd1': the distance between the original and randomized series,
+          ``norm(y - y_rand) / N``,
+        - 'ac1', 'ac2', 'ac3', 'ac4': the autocorrelation of the randomized series at
+          lags 1 to 4,
+        - 'permen3_1': the normalized permutation entropy of the randomized series,
+          PermEn(3, 1),
+        - 'statav5': StatAv with 5 segments (the standard deviation of the segment means),
+        - 'swss5_1': the standard deviation across 5 non-overlapping windows of the local
+          standard deviation, relative to the full-series standard deviation.
+
+        The fields are named by joining a statistic's name to a suffix. Fits of
+        ``a * exp(b * k)`` (``k`` the checkpoint number 1..21) for 'xcn1', 'xc1', 'ac1',
+        'ac2', 'ac3' and 'ac4' have the suffixes 'fexpa', 'fexpb' (the parameters),
+        'fexpr2' (R^2), 'fexprmse' (the standard error of the fit), 'diff' and 'hp'. Fits
+        of ``a * exp(b * k) + c`` for 'd1', 'permen3_1', 'statav5' and 'swss5_1' have the
+        same suffixes plus 'fexpc' (the offset ``c``). In all cases 'diff' is the absolute
+        change ``|s_end - s_start|`` of the statistic between the first and last
+        checkpoints and 'hp' is the number of the first checkpoint at which the statistic
+        passes halfway between its start and end values (NaN if it never does).
+
+    Notes
+    -----
+    'diff' is an absolute change, not a change relative to the starting value, because the
+    starting value (e.g., the autocorrelation of the original series at lag 2) can be near
+    0, where a relative change is unstable. The exponential fits use a port of MATLAB's
+    trust-region nonlinear least squares and the same starting points as hctsa; a fit that
+    fails gives NaN.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    if randomize_how not in ('statdist', 'dyndist', 'permute'):
+        raise ValueError(f"Unknown randomization method '{randomize_how}'.")
+    if not np.isclose(np.mean(y), 0, atol=1e-6) or not np.isclose(np.std(y, ddof=1), 1, atol=1e-6):
+        logger.warning('The input time series should be z-scored for randomize.')
+
+    # Random indices, in the order a MATLAB run draws them (randi(N) = floor(N*rand) + 1)
+    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'default'):
+        rng = _ml_rng(0)
+    elif isinstance(random_seed, str):
+        if random_seed != 'none':
+            raise ValueError(f"Not sure how to reset using '{random_seed}'")
+        rng = np.random.RandomState()
+    else:
+        rng = _ml_rng(int(random_seed))
+    draws = np.floor(n * rng.random_sample(4 * n)).astype(np.int64).reshape(2 * n, 2)
+
+    return _randomize_fit(_randomize_run(y, randomize_how, draws))
+
 def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str] = 1,
                        mapping_how: str = 'ncdf') -> Union[dict, float]:
     """
@@ -960,6 +1436,98 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
     f_disp_en = -np.sum(p_f * np.log(p_f))
     out['fDispEn'] = f_disp_en
     out['normFDispEn'] = f_disp_en / np.log(float(num_fluct))
+    return out
+
+def fuzzy_entropy(y: ArrayLike, M: int = 2, r: float = 0.2, n: float = 2) -> dict:
+    """
+    Fuzzy entropy of a time series.
+
+    Chen et al.'s fuzzy entropy [1, 2], a smooth relative of sample entropy
+    (:func:`sample_entropy`). The series is cut into overlapping runs of ``m``
+    consecutive values, and the mean of each run is subtracted from it, so runs are
+    compared by shape and not by level. Two runs are not simply 'matching' or 'not
+    matching', as in sample entropy: they are given a similarity ``exp(-(d/r)**n)``,
+    where ``d`` is the largest absolute difference between corresponding values of the
+    two (baseline-removed) runs. ``phi_m`` is the mean similarity over all pairs of
+    distinct runs of length ``m``, and the fuzzy entropy at dimension ``m`` is
+    ``log(phi_m) - log(phi_(m+1))``. Low values indicate regular, predictable series;
+    high values irregular ones. The smooth similarity makes the measure continuous in
+    ``r`` and defined for short series for which sample entropy would find no matches.
+
+    All runs of length 1, ..., M+1 are taken from the same ``N - M`` starting points, so
+    that successive dimensions are compared on the same footing. The distances are
+    computed in blocks, so memory use does not grow with the square of the series length
+    (the run time does: it is O(N^2 M)). Port of hctsa's ``EN_FuzzyEn``.
+
+    The similarity is written here as ``exp(-(d/r)**n)``, so that ``r`` is a distance (in
+    units of the standard deviation of ``y``). Chen et al. (2007) write it as
+    ``exp(-d**n/r)``, in which ``r`` is not a distance: for ``n = 2``, their ``r = 0.2``
+    on standardized data is a Gaussian width of ``sqrt(0.2) = 0.45`` standard deviations,
+    against 0.2 here. Values of ``r`` are therefore not directly comparable with those
+    quoted in that paper. To get the fuzzy entropy of the increments of a series, give
+    ``np.diff(y)`` as the input.
+
+    References
+    ----------
+    .. [1] W. Chen, Z. Wang, H. Xie and W. Yu, "Characterization of surface EMG signal
+        based on fuzzy entropy", IEEE Trans. Neural Syst. Rehabil. Eng. 15(2), 266
+        (2007).
+    .. [2] W. Chen, J. Zhuang, W. Yu and Z. Wang, "Measuring complexity using FuzzyEn,
+        ApEn, and SampEn", Med. Eng. Phys. 31(1), 61 (2009).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    M : int, optional
+        The largest embedding dimension: the fuzzy entropy is returned for
+        ``m = 1, ..., M``. Default is 2.
+    r : float, optional
+        The width of the similarity function, as a fraction of the standard deviation of
+        ``y`` (the width in the units of ``y`` is ``r * std(y)``, so the measure is
+        unchanged by any rescaling of ``y``). Default is 0.2.
+    n : float, optional
+        The exponent of the similarity function ``exp(-(d/r)**n)`` (larger values make
+        the similarity closer to a hard threshold). Default is 2.
+
+    Returns
+    -------
+    dict
+        Fields 'fuzzyEn1', 'fuzzyEn2', ..., 'fuzzyEnM': the fuzzy entropy at each
+        embedding dimension (nats). At ``m = 1`` the run mean removed is the value itself,
+        so ``phi_1 = 1`` and 'fuzzyEn1' is ``-log(phi_2)``. All fields are NaN if the
+        series is constant, has fewer than ``M + 3`` points, or has no pair of runs with
+        a nonzero similarity.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    M = int(M)
+    N = y.size
+    out = {f'fuzzyEn{m}': np.nan for m in range(1, M + 1)}
+
+    sd = np.std(y, ddof=1) if N > 1 else np.nan
+    Nv = N - M  # number of starting points shared by every embedding dimension
+    if not np.isfinite(sd) or sd == 0 or Nv < 3:
+        return out
+    width = r * sd
+
+    phi = np.zeros(M + 1)
+    block_size = max(1, int(2e6 // Nv))  # cap the size of the distance block
+    for m in range(1, M + 2):
+        Z = y[np.arange(Nv)[:, None] + np.arange(m)[None, :]]
+        Z = Z - Z.mean(axis=1, keepdims=True)  # remove each run's own mean (local baseline)
+        total = 0.0
+        for i0 in range(0, Nv, block_size):
+            Zi = Z[i0:i0 + block_size]
+            D = np.abs(Zi[:, 0][:, None] - Z[:, 0][None, :])
+            for k in range(1, m):
+                np.maximum(D, np.abs(Zi[:, k][:, None] - Z[:, k][None, :]), out=D)  # Chebyshev
+            total += np.exp(-(D / width) ** n).sum() - Zi.shape[0]  # drop self-similarity (=1)
+        phi[m - 1] = total / (Nv * (Nv - 1))
+
+    if np.any(phi <= 0):
+        return out
+    for m in range(1, M + 1):
+        out[f'fuzzyEn{m}'] = np.log(phi[m - 1]) - np.log(phi[m])
     return out
 
 def complexity_invariant_distance(y: ArrayLike) -> dict:
