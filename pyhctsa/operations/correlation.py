@@ -3031,3 +3031,89 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
         out['ac3diff'] = np.abs(acf_y_transform[2] - acf_y[2])
         out['sumabsacfdiff'] = np.sum(np.abs(acf_y_transform - acf_y))
     return out
+
+
+_QUANTILOGRAM_ALPHAS = (0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95)
+_QUANTILOGRAM_FIELDS = ('q05', 'q10', 'q25', 'q50', 'q75', 'q90', 'q95')
+
+
+def quantilogram(y: ArrayLike, lag: Union[int, str] = 1) -> dict:
+    """
+    Serial dependence of the series being below its own quantiles (the quantilogram).
+
+    Port of hctsa's ``CO_Quantilogram``. Computes the quantilogram of Linton and Whang [1]_:
+    the autocorrelation, at a given lag, of the 'hit' process that marks when the series is
+    below its alpha-quantile, for a range of quantile levels alpha from the lower tail through
+    the center to the upper tail. At level alpha, the hit process is ``h_t = 1(y_t <= q_alpha)``,
+    where ``q_alpha`` is the sample alpha-quantile, and the quantilogram is the sample
+    autocorrelation of ``h_t`` at the lag: ``sum_t (h_t - hbar)(h_{t+lag} - hbar) / sum_t (h_t - hbar)^2``.
+    It is positive when excursions below the alpha-quantile cluster in time and negative when
+    they alternate with excursions above it. For an independent series it is zero at every
+    level, with a standard error of about ``1/sqrt(N)``. Looking at the lower and upper quantile
+    levels separately captures dependence in the tails (volatility clustering, or bursts of
+    extreme values that follow one another), at the center (directional persistence), and any
+    asymmetry between them. Because the series enters only through whether each value lies below
+    a quantile, the result at a fixed lag is unchanged by any increasing monotonic rescaling of
+    the series, and is not affected by outliers (a lag set by the timescale of the series is found
+    from the series itself, so it can change with the rescaling).
+
+    References
+    ----------
+    .. [1] O. Linton and Y.-J. Whang, "The quantilogram: With an application to evaluating
+       directional predictability", J. Econometrics 141, 250 (2007).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (non-finite values are dropped).
+    lag : int or {'ac', 'ac1e', 'mi'}, optional
+        The time lag (default 1). A positive integer, or a lag set by the timescale of the
+        series (see :func:`~pyhctsa.utils.get_tau`): ``'ac'`` (the first zero-crossing of the
+        autocorrelation function of the series), ``'ac1e'`` (the floor of its first 1/e
+        crossing), or ``'mi'`` (the smaller of the first minimum of the Kraskov automutual
+        information and the ``'ac1e'`` delay).
+
+    Returns
+    -------
+    dict
+        The quantilogram at the lag for each quantile level, in the fields ``q05``, ``q10``,
+        ``q25``, ``q50``, ``q75``, ``q90`` and ``q95``, for alpha = 0.05, 0.10, 0.25, 0.50,
+        0.75, 0.90 and 0.95, respectively. A level for which the hit process is constant (a
+        constant series), or for which the lag is not smaller than N/2 (or cannot be set), is NaN.
+
+    Notes
+    -----
+    The sample quantile is the ``round(alpha*N)``-th smallest value, and the hit process is
+    centered at its sample mean rather than at alpha, which is the same for a continuous-valued
+    series (they differ by at most ``1/N``) and stays well-defined for series with tied values.
+
+    The central quantile levels measure the same persistence as the quantile-state transition
+    probabilities and the up-down motif frequencies (``transition_matrix``, ``motif_two``), so
+    hctsa registers only the tail levels (q05, q10, q90, q95 at the ``'mi'`` lag; q05 and q95
+    at lag 1). All seven levels are computed.
+    """
+    out = {f: np.nan for f in _QUANTILOGRAM_FIELDS}
+
+    y = np.asarray(y, dtype=float).ravel()
+    y = y[np.isfinite(y)]
+    n = y.size
+
+    if isinstance(lag, str):
+        if lag not in ('ac', 'ac1e', 'mi'):
+            raise ValueError(f"Unknown lag option '{lag}': use a positive integer, 'ac', 'ac1e', or 'mi'")
+        lag = get_tau(y, lag) if n > 1 else np.nan
+    if lag is None or np.isnan(lag) or lag < 1 or lag >= n / 2:
+        return out  # no lag defined, or too few pairs of observations
+    lag = int(lag)
+
+    y_sorted = np.sort(y)
+    for alpha, name in zip(_QUANTILOGRAM_ALPHAS, _QUANTILOGRAM_FIELDS):
+        # the round(alpha*N)-th smallest value (MATLAB rounding: halves away from zero)
+        q = y_sorted[max(1, int(np.floor(alpha * n + 0.5))) - 1]
+        h = (y <= q).astype(float)
+        h -= h.mean()
+        denom = np.sum(h ** 2)
+        if denom > 0:
+            out[name] = float(np.sum(h[:n - lag] * h[lag:]) / denom)
+    return out
+
