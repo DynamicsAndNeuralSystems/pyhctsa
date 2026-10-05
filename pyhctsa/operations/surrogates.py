@@ -517,7 +517,7 @@ def surrogates(
 
     # (1) time delay, tau: resolved once, from the original series
     if isinstance(tau, str) and tau == 'ac':
-        from ..operations.distribution import first_crossing
+        from ..operations.correlation import first_crossing
         tau = first_crossing(y, 'ac', 0, 'discrete')
     elif isinstance(tau, str):
         tau = get_tau(y, tau)  # 'ac1e' or 'mi'

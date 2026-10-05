@@ -5,7 +5,6 @@ import numba
 import numpy as np
 from numpy.typing import ArrayLike
 from numpy.lib.stride_tricks import sliding_window_view
-from scipy.optimize import curve_fit
 from scipy.signal import lfilter
 from scipy.special import gammaincc
 from scipy.stats import ks_1samp, norm, t
@@ -972,7 +971,7 @@ def _stabilize_matrix(a: np.ndarray, thresh: float = 1 + np.sqrt(np.finfo(float)
     Reflect eigenvalues of ``a`` that lie outside the unit circle (beyond ``thresh``) to
     ``thresh^2/lambda``, as MATLAB's ``fstab``.
     """
-    from scipy.linalg import rsf2csf, schur
+    from scipy.linalg import schur
     eigval, eigvec = np.linalg.eig(a)
     if np.linalg.cond(eigvec) > 1e8:
         t_mat, z_mat = schur(a.astype(complex), output='complex')

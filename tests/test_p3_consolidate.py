@@ -1,6 +1,5 @@
 """Output shapes and shared helpers after the consolidation pass (feature names stay 1:1 with hctsa)."""
 import numpy as np
-import pytest
 import yaml
 
 from pyhctsa.calculator import FeatureCalculator

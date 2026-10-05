@@ -8,7 +8,7 @@ from scipy import stats
 
 from ..utils import dict_output, _linspace, get_tau, matlab_quantile, sign_change, time_delay_embed
 from ..robust import bf_hist_edges, bf_tie_break_noise
-from ..toolboxes.infotheory.mutual_info import KraskovMI, GaussianMI
+from ..toolboxes.infotheory.mutual_info import KraskovMI
 
 # hctsa BF_TieBreakNoise: tiny jitter from the portable BF_Random stream (pyhctsa.robust), so the
 # draws match MATLAB's. Kept under its old private name for the callers in this module.
@@ -565,7 +565,7 @@ def automutual_info(
         If multiple time_delay:
             dict: Keys are f"ami{delay}", values are corresponding AMI values
     """
-    from ..operations.distribution import first_crossing # zzzz
+    from ..operations.correlation import first_crossing
 
     if isinstance(time_delay, str) and time_delay in ['ac', 'tau']:
         time_delay = first_crossing(y, corr_fun='ac', threshold=0, what_out='discrete')

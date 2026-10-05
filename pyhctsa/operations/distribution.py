@@ -1,18 +1,16 @@
 import logging
-import warnings
 from typing import Dict, Union
 
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy import stats
-from scipy.optimize import brentq, least_squares
+from scipy.optimize import brentq
 from scipy.stats import beta as beta_dist
 from scipy.stats import gamma as gamma_dist
-from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, rayleigh, uniform, weibull_min, skew, kurtosis
+from scipy.stats import expon, gumbel_l, lognorm, norm, rayleigh, uniform, weibull_min, skew, kurtosis
 
-from ..operations.correlation import autocorr, first_crossing
 from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
-from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_random, bf_random_seed, bf_remove_points, bf_residual_stats, bf_runs_z
+from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_remove_points, bf_residual_stats
 from ..utils import dict_output, _ml_std, _round_half_away, bin_picker, histc, matlab_quantile, sign_change, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')

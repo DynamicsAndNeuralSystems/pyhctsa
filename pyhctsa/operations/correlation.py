@@ -5,17 +5,17 @@ from typing import Union
 import numba
 import numpy as np
 from numpy.typing import ArrayLike
-from scipy.linalg import LinAlgError, solve_triangular
+from scipy.linalg import solve_triangular
 from scipy.optimize import curve_fit
-from scipy.stats import chi2, expon, gaussian_kde, kstest, kurtosis, skew
+from scipy.stats import chi2, expon, kstest, kurtosis, skew
 from scipy.stats import mode as smode
 from scipy.spatial import cKDTree
 from statsmodels.tsa.stattools import pacf
 
-from ..operations.information import first_min, automutual_info
+from ..operations.information import automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..robust import bf_hist_edges, bf_quantile_edges, bf_random, bf_remove_points
-from ..utils import (dict_output, _zscore_matlab, bin_picker, get_tau, histc, make_mat_buffer,
+from ..utils import (dict_output, _zscore_matlab, get_tau, make_mat_buffer,
                      matlab_quantile, point_of_crossing, sign_change, theiler_window,
                      time_delay_embed, z_score)
 

@@ -18,12 +18,13 @@ from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import KDTree, NearestNeighbors
 
 from ..operations.model_fit import residual_analysis
-from ..operations.correlation import first_crossing, first_min, autocorr
+from ..operations.correlation import first_crossing, autocorr
+from ..operations.information import first_min
 from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robustfit
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
 from ..toolboxes.Tisean_3_0_1.tisean import _e, _round_significant
 from ..robust import bf_hist_edges, bf_random, bf_random_seed
-from ..utils import (dict_output, _linspace, _ml_randperm, _ml_rng, _round_half_away, bin_picker, get_tau,
+from ..utils import (dict_output, _linspace, _ml_randperm, _ml_rng, _round_half_away, get_tau,
                      matlab_quantile, theiler_window, time_delay_embed)
 
 logger = logging.getLogger('pyhctsa')

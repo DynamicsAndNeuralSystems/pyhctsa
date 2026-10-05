@@ -15,7 +15,7 @@ from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
 from ..toolboxes.physionet import sampen as _sampen_c
 from ..robust import bf_hist_edges, bf_ks_density, bf_random, bf_random_seed
-from ..utils import (dict_output, _ml_rng, _zscore_matlab, get_tau, make_buffer, pre_process,
+from ..utils import (dict_output, _zscore_matlab, get_tau, make_buffer, pre_process,
                      time_delay_embed, z_score)
 
 

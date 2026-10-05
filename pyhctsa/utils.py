@@ -195,62 +195,6 @@ def get_dataset(which: str = "e1000") -> list:
     logger.info(f"Loaded dataset of {len(dataset)} time series.")
     return dataset
     
-# config `preprocess:` values and the label suffix each adds
-_PREPROCESS_LABELS = {'decimate_ac1e': '_dec'}
-
-def _preprocess_decorator(zscore: bool = False, absval: bool = False,
-                          preprocess: Union[str, None] = None) -> Callable:
-    """
-    Decorator to preprocess time series data before feature computation.
-    
-    Applies optional z-score normalization, an optional hctsa ``BF_PreProcess`` step
-    and/or absolute value transformation to the input time series before passing it to
-    the decorated function.
-
-    The order is: z-score, then ``preprocess``, then absolute value. A
-    ``preprocess`` step is followed by a second z-score if ``zscore`` is True, matching
-    hctsa's ``zscore(BF_PreProcess(x_z, ...))``.
-
-    Parameters
-    ----------
-    zscore : bool, optional
-        If True, z-score normalize the input time series to have mean 0 and 
-        standard deviation 1. Default is False.
-    absval : bool, optional
-        If True, take the absolute value of all data points in the input time series.
-        Default is False.
-    preprocess : {None, 'decimate_ac1e'}, optional
-        A named pre-processing step applied to the (z-scored) series. Currently
-        ``'decimate_ac1e'``: keep one sample per floored 1/e autocorrelation time
-        (see :func:`decimate_ac1e`). If the delay cannot be determined the wrapped
-        function is not called and ``nan`` is returned. Default is None.
-    
-    Returns
-    -------
-    decorator : function
-        A decorator function that wraps a feature computation function and applies
-        the specified preprocessing operations to the input time series before
-        passing it to the wrapped function.
-    """
-    if preprocess is not None and preprocess not in _PREPROCESS_LABELS:
-        raise ValueError(f"Unknown preprocess setting '{preprocess}'; "
-                         f"supported: {sorted(_PREPROCESS_LABELS)}")
-
-    def decorator(func):
-        @wraps(func)
-        def wrapper(x, *args, **kwargs):
-            if zscore:
-                x = z_score(x)
-            if preprocess == 'decimate_ac1e':
-                x = decimate_ac1e(x, rezscore=zscore)
-                if not isinstance(x, np.ndarray):
-                    return np.nan  # no 1/e time: undefined, like hctsa's NaN
-            if absval:
-                x = np.abs(x)
-            return func(x, *args, **kwargs)
-        return wrapper
-    return decorator
-
 def z_score(x: ArrayLike) -> np.ndarray:
     """
     Z-score the input data vector.

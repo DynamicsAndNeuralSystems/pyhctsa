@@ -21,7 +21,6 @@ from pyhctsa.operations import pre_process as PP
 from pyhctsa.operations import scaling as SC
 from pyhctsa.operations import spectral as SP
 from pyhctsa.operations import stationarity as ST
-from pyhctsa.robust import bf_random
 
 with open(os.path.join(os.path.dirname(__file__), 'data', 'p2_b.json')) as fh:
     _FIX = json.load(fh)
