@@ -1798,6 +1798,10 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
         A dictionary containing various statistics of the embedding including the 
         autocorrelation of distances, the mean distance, the spread of distances, 
         and statistics from an exponential fit to the distribution of distances.
+        ``d_expfit_meandiff`` is the mean absolute difference between the histogram of distances
+        (equal-width bins, their number the larger of the Sturges and Freedman-Diaconis
+        rules, normalized as a probability density) and the fitted exponential density at the
+        bin centers; NaN if all the distances are equal.
     """
     y = np.asarray(y)
     N = len(y) # time-series length
@@ -1841,10 +1845,13 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     n_log_l = -np.mean(expon.logpdf(d, scale=1/l))  # negative log-likelihood per observation
     out['d_expfit_nlogL'] = n_log_l
 
-    # Calculate histogram
-    # % Sum of abs differences between exp fit and observed:
-    bin_edges = bin_picker(x_min=d.min(), x_max=d.max(), n_bins=np.floor(np.sqrt(len(d))))
-    N, bin_edges = np.histogram(d, bins=bin_edges, density=True)
+    # Sum of abs differences between exp fit and observed, using a histogram with automatic
+    # binning (bf_hist_edges 'auto': explicit edges)
+    if np.ptp(d) == 0:  # all distances equal: no distribution to compare with the fit
+        out['d_expfit_meandiff'] = np.nan
+        return out
+    bin_edges = bf_hist_edges(d, 'auto')
+    N = np.histogram(d, bins=bin_edges)[0] / (len(d) * np.diff(bin_edges))  # pdf normalization
     bin_centers = np.mean(np.vstack([bin_edges[:-1], bin_edges[1:]]), axis=0)
     exp_fit = expon.pdf(bin_centers, scale=1/l)
     out['d_expfit_meandiff'] = np.mean(np.abs(N - exp_fit))
