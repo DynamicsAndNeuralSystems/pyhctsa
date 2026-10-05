@@ -121,6 +121,25 @@ def bf_random(n: int, seed: Union[int, float, ArrayLike] = 0, kind: str = 'unifo
     raise ValueError(f"Unknown kind '{kind}'")
 
 
+def bf_spread_perm(n: int) -> np.ndarray:
+    """
+    A fixed ordering of ``1..n`` whose first ``k`` elements are evenly spread, for every ``k``
+    (hctsa's ``BF_SpreadPerm``): the indices ordered by the fractional parts of ``j*phi``
+    (``phi`` the golden-ratio conjugate), the low-discrepancy Weyl sequence. A deterministic
+    substitute for the first ``k`` of a random permutation; it does not depend on any seed.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``perm`` (1-based, as hctsa's), where ``perm[j-1]`` is the rank of ``frac(j*phi)`` among
+        ``frac(1*phi), ..., frac(n*phi)``.
+    """
+    u = (np.arange(1, n + 1) * 0.6180339887498949) % 1.0
+    perm = np.empty(n, dtype=int)
+    perm[np.argsort(u, kind='stable')] = np.arange(1, n + 1)
+    return perm
+
+
 def bf_random_seed(random_seed=None) -> int:
     """The integer seed (for :func:`bf_random`) that a ``random_seed`` input stands for (hctsa ``BF_RandomSeed``).
 

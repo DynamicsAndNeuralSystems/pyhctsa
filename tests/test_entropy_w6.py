@@ -51,12 +51,16 @@ def test_wavelet_entropy():
 def test_randomize():
     # the random indices come from BF_Random (hctsa robust/finish), so the values are MATLAB's
     # for the same seed (checked against MATLAB in test_p2_a.py)
-    d = randomize(_x(), 'statdist', 'default')
+    d = randomize(_x(), 'statdist', 'default', num_reps=1)  # one randomization (hctsa's numReps = 1)
     assert abs(d['ac1diff'] - 0.8230860027955) < 1e-9 and d['ac1hp'] == 5
     assert abs(d['xc1diff'] - 0.7438524870197) < 1e-9
     assert abs(d['permen3_1diff'] - 0.0168573921147) < 1e-9 and d['statav5hp'] == 9
     assert abs(d['d1fexpc'] - 0.0735217644) < 1e-6
-    d = randomize(_x(), 'permute')
+    d = randomize(_x(), 'permute', num_reps=1)
     assert abs(d['ac1diff'] - 0.8526825194131) < 1e-9 and d['ac1hp'] == 3
     assert abs(d['xc1diff'] - 0.8730839638616) < 1e-9
     assert len(d) == 64
+    # the default averages 20 randomizations: reproducible, and the same series start
+    d20 = randomize(_x(), 'permute')
+    assert d20 == randomize(_x(), 'permute') or all(np.isclose(d20[k], v, equal_nan=True) for k, v in randomize(_x(), 'permute').items())
+    assert abs(d20['ac1diff'] - d['ac1diff']) < 0.1
