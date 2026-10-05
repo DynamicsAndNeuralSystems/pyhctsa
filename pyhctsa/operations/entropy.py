@@ -13,7 +13,7 @@ from sklearn.neighbors import KDTree
 from ..toolboxes.Michael_Small import shannon
 from ..toolboxes.Max_Little import close_returns as _close_returns_c
 from ..toolboxes.physionet import sampen as _sampen_c
-from ..utils import (_zscore_matlab, bin_picker, get_tau, histc, make_buffer, pre_process,
+from ..utils import (_zscore_matlab, bin_picker, get_tau, make_buffer, pre_process,
                      time_delay_embed, z_score)
 
 
@@ -95,10 +95,25 @@ def shannon_entropy(
 
     return out
 
+def _ksdensity_bandwidth(y: np.ndarray) -> float:
+    """
+    The default bandwidth of MATLAB's ``ksdensity`` for a Gaussian kernel (the 'normal-approx'
+    rule): ``sigma * (4 / (3 N)) ** (1/5)`` with the robust spread estimate
+    ``sigma = median(|y - median(y)|) / 0.6745`` (the range of the data if that is zero).
+    """
+    y = np.asarray(y, dtype=float)
+    sigma = np.median(np.abs(y - np.median(y))) / 0.6745
+    if sigma <= 0:
+        sigma = np.max(y) - np.min(y)
+    if sigma > 0:
+        return float(sigma * (4.0 / (3.0 * y.size)) ** 0.2)
+    return 1.0
+
+
 def distribution_entropy(
     y: ArrayLike,
     hist_or_ks: str = 'hist',
-    num_bins: Union[str, int] = 10,
+    num_bins: Union[str, int, float, None] = 10,
     olremp: float = 0
 ) -> float:
     """
@@ -117,10 +132,17 @@ def distribution_entropy(
         The input time series.
     hist_or_ks : str
         Whether to use a histogram ('hist') or kernel-smoothed ('ks') distribution. Default is ``'hist'``.
-    num_bins : int or list of int, optional
+    num_bins : int or str or float or None, optional
 
-        - (for 'hist'): an integer, uses a histogram with that many bins
-        - (for 'ks'): a positive real number, for the bandwidth parameter for the kernel density estimate.
+        - (for 'hist'): an integer, uses a histogram with that many bins; or a binning rule
+          (NumPy's 'sturges', 'fd', 'sqrt', 'auto'; the bin edges differ from MATLAB's
+          ``histcounts`` rules of the same names, which round the bin width to a 'nice' value);
+        - (for 'ks'): a positive real number, the bandwidth (standard deviation of the Gaussian
+          kernel) of the kernel density estimate; or empty (``''`` / ``None``) to select it as
+          MATLAB's ``ksdensity`` does: the normal-reference rule
+          ``sigma * (4 / (3 N)) ** (1/5)`` with ``sigma = median(|y - median(y)|) / 0.6745``.
+          The density itself is scipy's Gaussian KDE (MATLAB's ``ksdensity`` truncates the
+          kernel at 4 bandwidths and evaluates approximately, which differs at about 1e-5).
 
         Default is 10.
 
@@ -133,9 +155,16 @@ def distribution_entropy(
     -------
     float
         Estimate of entropy from the distribution.
+
+    Notes
+    -----
+    The 'ks' density is evaluated on a 200-point grid spanning the 0.1% to 99.9% quantiles
+    of ``y`` plus a 10% margin, converted to probability mass per grid cell and renormalized
+    (NaN if those quantiles coincide). A fixed absolute bandwidth makes the estimate drift with
+    the length of the series, so the automatic selection is preferable.
     """
     # (1) Remove outliers?
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float)
     if olremp != 0:
         y_hat = y[
             (y >= np.quantile(y, olremp, method='hazen')) &
@@ -151,39 +180,51 @@ def distribution_entropy(
     # (2) Form the histogram
     if hist_or_ks == 'hist':
         # use histogram to calculate pdf
-        if isinstance(num_bins, int):
-            bin_edges = bin_picker(x_min=y.min(), x_max=y.max(), n_bins=num_bins)
-            px = histc(y, bin_edges)
-            px = np.divide(px, np.sum(px))[:-1]
-        elif num_bins in ['sturges', 'fd', 'sqrt', 'auto']:
-            bin_edges = np.histogram_bin_edges(y, bins=num_bins)
-            px = histc(y, bin_edges)[:-1]
-            px = np.divide(px, np.sum(px))
+        if isinstance(num_bins, (int, np.integer)) and not isinstance(num_bins, bool):
+            bin_edges = bin_picker(x_min=y.min(), x_max=y.max(), n_bins=int(num_bins))
+        elif isinstance(num_bins, str) and num_bins in ['sturges', 'fd', 'sqrt', 'auto']:
+            bin_edges = np.histogram_bin_edges(y, bins=num_bins)  # NumPy's rules
         else:
             raise ValueError(
                 f"Unknown binning method: {num_bins}. Choose either a valid rule or manually specify numBins."
             )
+        # (the last bin includes its right edge, as MATLAB's histcounts)
+        px = np.histogram(y, bins=bin_edges)[0].astype(float)
+        px = px / np.sum(px)
         bin_widths = np.diff(bin_edges)
 
     elif hist_or_ks == 'ks':
-        # use kernel density estimate to calculate pdf
-        if isinstance(num_bins, float):
-            # uses specified width
-            bw = num_bins
-            kde = gaussian_kde(y, bw_method=bw)
-            xr = np.linspace(min(y) - 3 * bw, max(y) + 3 * bw, 100)  # 3 x bandwidth padding
-            px = kde(xr)
-        elif num_bins in ['', ' ', '[]', 'none']:
-            # determine the optimal width
-            kde = gaussian_kde(y, bw_method='silverman')  # normal-approx equivalent as per docs
-            actual_bw = kde.factor * np.std(y)  # Convert factor to actual bandwidth
-            xr = np.linspace(min(y) - 3 * actual_bw, max(y) + 3 * actual_bw, 100)
-            px = kde(xr)
+        # Evaluate the kernel density estimate on an explicit, length-stable grid. The range
+        # of a sample grows with N (as ~sqrt(2 log N) for Gaussian data), and with it the
+        # log(bin width) term in the entropy sum, so the grid is anchored to extreme quantiles
+        # instead (consistent estimators, so the interval converges as N grows).
+        num_grid_pts = 200
+        lo, hi = np.quantile(y, [0.001, 0.999], method='hazen')
+        if not hi > lo:  # degenerate (near-constant) input
+            return np.nan
+        pad = 0.1 * (hi - lo)  # a little headroom beyond the quantile range
+        xr = np.linspace(lo - pad, hi + pad, num_grid_pts)
+        if num_bins is None or (isinstance(num_bins, str) and num_bins in ['', ' ', '[]', 'none']) \
+                or (isinstance(num_bins, (list, tuple, np.ndarray)) and len(num_bins) == 0):
+            bw = _ksdensity_bandwidth(y)  # selects the width as MATLAB's ksdensity does
+        elif isinstance(num_bins, (int, float, np.integer, np.floating)) and not isinstance(num_bins, bool):
+            # uses the specified width (the standard deviation of the Gaussian kernel). NB: a
+            # fixed absolute bandwidth makes the density estimate inconsistent (for consistency
+            # the bandwidth must shrink with the sample size), so the smoothness of the
+            # estimated density, and hence its entropy, drifts with N: hctsa no longer registers
+            # the fixed-bandwidth settings, but the option remains for a specific smoothing scale.
+            bw = float(num_bins)
         else:
             raise ValueError(
                 f"Unknown type for {num_bins}. Either set to a float (which specifies the width, or leave empty.)"
             )
+        # (the kernel standard deviation is bw: scipy's factor is relative to the data's std)
+        px = gaussian_kde(y, bw_method=bw / np.std(y, ddof=1))(xr)
         bin_widths = np.ones(len(px)) * (xr[1] - xr[0])
+        # The density must be converted to probability mass per cell for the entropy sum
+        # below (shared with 'hist'), and renormalized (the grid truncates some tail mass)
+        px = px * bin_widths
+        px = px / np.sum(px)
 
     else:
         raise ValueError(f"Unknown distribution estimator: {hist_or_ks}. Use 'hist' or 'ks'.")
