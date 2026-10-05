@@ -480,64 +480,60 @@ def _f_entropy(p, num_samples=None, word_length=1, alphabet_size=2, fixed_margin
     return h
 
 
-def binary_stretch(x: ArrayLike, stretch_what: str = 'lseq1') -> float:
+def binary_stretch(x: ArrayLike, stretch_what: str = 'gaps1') -> float:
     """
-    Characterize stretches of 0s or 1s in a binarized time series.
+    Homogeneity of the gaps between like symbols in a binarized time series.
 
-    This function binarizes the input time series based on its mean:
-    values above the mean are converted to 1, and values below to 0.
-    It then computes a statistic related to the lengths of consecutive
-    0s or 1s in the resulting binary sequence, depending on the `stretch_what`
-    argument.
+    This is hctsa's SB_BinaryGapHomogeneity (formerly SB_BinaryStretch). The input is
+    binarized at zero (values above zero become 1, the rest 0; the time series is
+    typically z-scored first, so this is a split about the mean). The gaps between
+    successive 1s (or 0s) are then characterized by the longest block of gaps of one type
+    (shorter or longer than one sample) between like symbols, as a proportion of the
+    time-series length.
 
-    **Note**: Due to an implementation error in the original version, this
-    function does not correctly compute the *longest* stretch of 0s or 1s,
-    but still produces a potentially interesting statistic.
+    **Note**: Despite its former name, this does not measure the *longest run* of 0s
+    or 1s (an implementation quirk of the original that is retained), but it is a
+    potentially interesting statistic.
 
     Parameters
     ----------
     x : array-like
         The input time series.
 
-    stretch_what : str, optional
-        Specifies which binary symbol's stretch length to analyze:
+    stretch_what : {'gaps1', 'gaps0'}, optional
+        Which binary symbol's gaps to analyze (formerly ``'lseq1'`` and ``'lseq0'``):
 
-        - 'lseq1': Analyze stretches related to consecutive 1s.
-        - 'lseq0': Analyze stretches related to consecutive 0s.
+        - 'gaps1': Analyze gaps between consecutive 1s.
+        - 'gaps0': Analyze gaps between consecutive 0s.
 
-        Default is ``'lseq1'``.
+        Default is ``'gaps1'``.
 
     Returns
     -------
     float
-        A statistic related to the stretch length of consecutive 0s or 1s,
-        normalized by the time-series length.
+        The statistic, normalized by the time-series length (0 if the symbol does not
+        occur often enough to define it).
     """
     x = np.asarray(x)
     N = len(x) # time series length
     x = np.where(x > 0, 1, 0)
 
-    if stretch_what == 'lseq1':
-        # longest stretch of 1s [this code doesn't actualy measure this!]
+    if stretch_what == 'gaps1':
+        # longest stretch of 1s [this code doesn't actually measure this!]
         indices = np.where(x == 1)[0]
-        diffs = np.diff(indices) - 1.5
-        sign_changes = sign_change(diffs, 1)
-        if sign_changes.size > 1:
-            out = np.max(np.diff(sign_changes)) / N
-        else:
-            out = None
-    elif stretch_what == 'lseq0':
-        # longest stretch of 0s [this code doesn't actualy measure this!]
+    elif stretch_what == 'gaps0':
+        # longest stretch of 0s [this code doesn't actually measure this!]
         indices = np.where(x == 0)[0]
-        diffs = np.diff(indices) - 1.5
-        sign_changes = sign_change(diffs, 1)
-        if sign_changes.size > 1:
-            out = np.max(np.diff(sign_changes)) / N
-        else:
-            out = None
     else:
-        raise ValueError(f"Unknown input {stretch_what}")
-    
+        raise ValueError(f"Unknown input '{stretch_what}' (expected 'gaps1' or 'gaps0')")
+
+    diffs = np.diff(indices) - 1.5
+    sign_changes = sign_change(diffs, 1)
+    if sign_changes.size > 1:
+        out = np.max(np.diff(sign_changes)) / N
+    else:
+        out = None
+
     return out if out is not None else 0
 
 def _ml_std(x: ArrayLike) -> float:
