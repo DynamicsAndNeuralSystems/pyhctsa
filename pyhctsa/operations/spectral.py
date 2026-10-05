@@ -256,19 +256,20 @@ def _fit_aperiodic(fv: ArrayLike, log_f: ArrayLike, log_s: ArrayLike,
     # fails outright), in which case the model degenerates to the 'fixed'
     # form and we keep the robust linear fit rather than a bogus knee.
     try:
-        # fittype('a - log10(k + x^c)') names its coefficients in alphabetical
-        # order, so the fitted vector is [a, c, k]:
-        knee_model = lambda p, x: p[0] - np.log10(p[2] + x ** p[1])
+        # Coefficients ordered [a, k, c] (hctsa names the order explicitly, since
+        # fittype('a - log10(k + x^c)') would order them alphabetically as
+        # [a, c, k]); the start point and bounds below are in this order:
+        knee_model = lambda p, x: p[0] - np.log10(p[1] + x ** p[2])
         p = _bounded_lsq(knee_model,
                          [ap['offset'], 1e-3, max(ap['exponent'], 0.1)],
                          fv, log_s,
                          lower=[-np.inf, 0, 0], upper=[np.inf, np.inf, 10])
-        knee_val = p[2]
-        pred_knee = p[0] - np.log10(knee_val + fv ** p[1])
+        knee_val = p[1]
+        pred_knee = p[0] - np.log10(knee_val + fv ** p[2])
         if np.isfinite(knee_val) and knee_val > 1e-10 and np.all(np.isfinite(pred_knee)):
             ap['offset'] = p[0]
             ap['knee'] = knee_val
-            ap['exponent'] = p[1]
+            ap['exponent'] = p[2]
             ap['pred'] = pred_knee
         else:
             ap['knee'] = 0  # degenerate: no detectable knee, keep the linear fit
