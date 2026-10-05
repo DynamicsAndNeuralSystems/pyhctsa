@@ -1185,7 +1185,10 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     Returns
     -------
     dict
-        Statistics including the change in autocorrelation, time scales, mean.
+        Statistics including the change in autocorrelation, time scales, mean, median,
+        standard deviation, skewness (``skewnessdiff``, the difference
+        skew(y_transform) - skew(y)), and kurtosis (``kurtosisrat``, the ratio
+        kurtosis(y_transform) / kurtosis(y)).
     """
     y = np.asarray(y)
     N = len(y)
@@ -1258,7 +1261,8 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     out['median'] = np.median(y_transform)
     out['std'] = np.std(y_transform, ddof=1)
     
-    out['skewnessrat'] = stats.skew(y_transform) / stats.skew(y)
+    # difference rather than ratio: a ratio blows up (and changes sign) when skew(y) is near 0
+    out['skewnessdiff'] = stats.skew(y_transform) - stats.skew(y)
     # return kurtosis instead of excess kurtosis
     out['kurtosisrat'] = stats.kurtosis(y_transform, fisher=False) / stats.kurtosis(y, fisher=False)
 
