@@ -1050,6 +1050,80 @@ def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.
     return out
 
 
+def state_space_comp_order(y: ArrayLike, max_order: int = 10) -> Union[dict, float]:
+    """
+    How the fit of a state-space model improves as its order increases.
+
+    Fits state-space models (subspace identification, as ``n4sid`` in MATLAB's System
+    Identification Toolbox) of orders 1, 2, ..., ``max_order`` to the whole time series (all fits
+    are within the sample), and returns statistics on how the goodness of fit changes across this
+    range, measured by Akaike's information criterion (AIC) and by the loss function (the
+    estimated variance of the one-step prediction error), hctsa's ``MF_StateSpaceCompOrder``.
+    An order at which the model cannot be fitted is left out of the summaries, and the output is
+    NaN only if no order can be fitted.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    max_order : int, optional
+        The maximum model order to consider. Default is 10.
+
+    Returns
+    -------
+    dict or float
+        NaN if no order could be fitted. Otherwise:
+
+        - ``minaic``: the lowest AIC across orders 1 to ``max_order``
+        - ``aicopt``: the order with the lowest AIC
+        - ``minlossfn``: the lowest loss function across orders
+        - ``lossfnopt``: the order with the lowest loss function
+        - ``meandiffaic``: the mean change in AIC when the order increases by one
+        - ``maxdiffaic``: the largest increase in AIC when the order increases by one
+        - ``mindiffaic``: the largest decrease (most negative change) in AIC when the order
+          increases by one
+        - ``ndownaic``: the number of order increases at which the AIC decreases
+
+        If some orders cannot be fitted, these are taken over the orders that can; the change
+        statistics use only adjacent pairs of orders that both fitted.
+
+    Notes
+    -----
+    The AIC is normalized by the series length, ``log(loss) + 2 d/N``, where ``d`` is
+    three times the order (the number of parameters of the model once the freedom in the choice
+    of coordinates is removed, with the initial state), as MATLAB's ``aic``.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n_obs = len(y)
+    lossfns = np.full(max_order, np.nan)
+    aics = np.full(max_order, np.nan)
+    for k in range(1, max_order + 1):
+        try:
+            fit = _n4_state_space(y, k)
+        except (ValueError, np.linalg.LinAlgError) as err:
+            logger.warning(f'State-space model fitting failed for k = {k}: {err}')
+            continue
+        lossfns[k - 1] = fit['loss']
+        aics[k - 1] = np.log(fit['loss']) + 2 * 3 * k / n_obs
+
+    if np.all(np.isnan(aics)):
+        return np.nan
+    out = {}
+    out['minaic'] = np.nanmin(aics)
+    out['aicopt'] = int(np.nanargmin(aics)) + 1
+    out['minlossfn'] = np.nanmin(lossfns)
+    out['lossfnopt'] = int(np.nanargmin(lossfns)) + 1
+    daics = np.diff(aics)
+    daics = daics[~np.isnan(daics)]
+    if daics.size == 0:
+        out['meandiffaic'] = out['maxdiffaic'] = out['mindiffaic'] = np.nan
+    else:
+        out['meandiffaic'] = np.mean(daics)
+        out['maxdiffaic'] = np.max(daics)
+        out['mindiffaic'] = np.min(daics)
+    out['ndownaic'] = int(np.sum(daics < 0))
+    return out
+
 def _ar_fb(seg: np.ndarray, order: int) -> tuple:
     """
     AR model by forward-backward least squares (MATLAB's default ``ar`` estimator).
