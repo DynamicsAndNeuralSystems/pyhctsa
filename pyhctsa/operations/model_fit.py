@@ -895,7 +895,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     S = np.sqrt(S2)  # standard deviation function, S
     out = {}
     # rms error from mean function, mu
-    out['rmserr'] = np.mean(np.sqrt((y_ts - mu) ** 2))
+    out['rmserr'] = np.sqrt(np.mean((y_ts - mu) ** 2))
     out['meanstderr'] = np.mean(np.abs(y_ts - mu) / S)
     out['stdmu'] = np.std(mu, ddof=1)
     out['meanS'] = np.mean(S)
