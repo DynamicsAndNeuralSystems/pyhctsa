@@ -13,9 +13,9 @@ from itertools import permutations
 from numba import njit
 
 from ..operations.correlation import autocorr, first_crossing
-from ..operations.distribution import _bf_random_seed, fit_kernel_smooth, moments
+from ..operations.distribution import fit_kernel_smooth, moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
-from ..robust import bf_quantile_edges, bf_random
+from ..robust import bf_quantile_edges, bf_random, bf_random_seed
 from ..utils import get_tau, make_mat_buffer, matlab_quantile, sign_change, z_score
 from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit, polyfit, robustfit
 from ..toolboxes.matlab._pptest_tables import _pp_pvalue, _pp_regression
@@ -874,7 +874,7 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     elif subset_how == 'randcg':
         # n random points (there could be repeats): a single stochastic sample, so not
         # very statistically robust (as in hctsa)
-        r = np.floor(N * bf_random(int(n), _bf_random_seed(random_seed))).astype(int)  # (1 + floor(N u) in MATLAB)
+        r = np.floor(N * bf_random(int(n), bf_random_seed(random_seed))).astype(int)  # (1 + floor(N u) in MATLAB)
     else:
         raise ValueError(f"Unknown specifier, {subset_how}. Can be either 'l', 'p', 'unicg', or 'randcg'.")
 
@@ -1421,7 +1421,7 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
     l = int(l)
 
     # numSegs segments, each of length l data points
-    istarts = np.floor((N - l + 1) * bf_random(num_segs, _bf_random_seed(random_seed))).astype(int)  # (0-based; 1 + floor(..) in MATLAB)
+    istarts = np.floor((N - l + 1) * bf_random(num_segs, bf_random_seed(random_seed))).astype(int)  # (0-based; 1 + floor(..) in MATLAB)
 
     qs = np.full((num_segs, 8), np.nan)
     for j in range(num_segs):

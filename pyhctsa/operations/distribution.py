@@ -12,7 +12,7 @@ from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, rayleigh, 
 
 from ..operations.correlation import autocorr, first_crossing
 from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
-from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_random, bf_residual_stats, bf_runs_z
+from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_random, bf_random_seed, bf_residual_stats, bf_runs_z
 from ..utils import bin_picker, histc, matlab_quantile, sign_change, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')
@@ -1318,23 +1318,6 @@ def histogram_mode(y: ArrayLike, num_bins: Union[int, str] = 10, do_simple: bool
 
     return float(out)
 
-def _bf_random_seed(random_seed: Union[int, float, str, None] = 'default') -> int:
-    """The integer seed (for :func:`pyhctsa.robust.bf_random`) that a ``random_seed`` input stands for (hctsa ``BF_RandomSeed``).
-
-    ``'default'`` or ``None``: the fixed seed 0; a number: that seed, rounded and made non-negative
-    (modulo 4e9); ``'none'``: a seed drawn from NumPy's global random state (so repeated calls differ).
-    """
-    if random_seed is None:
-        return 0
-    if isinstance(random_seed, str):
-        if random_seed == 'default':
-            return 0
-        if random_seed == 'none':
-            return int(np.floor(4e9 * np.random.random_sample()))
-        raise ValueError(f"Not sure how to interpret the random seed '{random_seed}'")
-    return int(np.mod(np.floor(abs(float(random_seed)) + 0.5), 4e9))
-
-
 def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
                   remove_or_saturate: str = 'remove', random_seed: Union[int, str, None] = None) -> dict:
     """
@@ -1391,7 +1374,7 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
         is_ = np.argsort(y, kind='stable')             # ascending y
     elif remove_how == 'random':
         # random ordering, reproducible: the stable argsort of N uniforms from the portable generator
-        is_ = np.argsort(bf_random(N, _bf_random_seed(random_seed)), kind='stable')
+        is_ = np.argsort(bf_random(N, bf_random_seed(random_seed)), kind='stable')
     else:
         raise ValueError(f"Unknown method '{remove_how}'")
     

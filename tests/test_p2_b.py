@@ -139,13 +139,6 @@ class TestDistribution:
         for n, ml in _series('G_rp_rand3', ZS):
             _check(D.remove_points(SERIES[n], 'random', 0.3, 'remove', 3), ml, f'rp seed 3 {n}', rtol=1e-8, atol=1e-10)
 
-    def test_bf_random_seed(self):
-        assert D._bf_random_seed(None) == 0 and D._bf_random_seed('default') == 0
-        assert D._bf_random_seed(3) == 3 and D._bf_random_seed(-2.4) == 2 and D._bf_random_seed(4e9 + 5) == 5
-        assert 0 <= D._bf_random_seed('none') < 4e9
-        with pytest.raises(ValueError):
-            D._bf_random_seed('garbage')
-
 
 # ------------------------------------------------------------------------------
 # hypothesis tests

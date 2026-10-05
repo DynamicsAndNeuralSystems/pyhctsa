@@ -22,24 +22,12 @@ from ..operations.correlation import first_crossing, first_min, autocorr
 from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robustfit
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
 from ..toolboxes.Tisean_3_0_1.tisean import _e, _round_significant
-from ..robust import bf_hist_edges, bf_random
+from ..robust import bf_hist_edges, bf_random, bf_random_seed
 from ..utils import (_linspace, _ml_randperm, _ml_rng, _round_half_away, bin_picker, get_tau,
                      matlab_quantile, theiler_window, time_delay_embed)
 
 logger = logging.getLogger('pyhctsa')
 
-
-def _bf_random_seed(random_seed: Union[int, float, str, None]) -> int:
-    """The integer seed for :func:`~pyhctsa.robust.bf_random` that a ``randomSeed`` input stands
-    for (hctsa's ``BF_RandomSeed``): ``'default'`` is 0, a number is itself (rounded, made
-    non-negative, below 4e9), and ``None`` or ``'none'`` a seed drawn from NumPy's global stream."""
-    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
-        return int(np.random.randint(0, 4_000_000_000))
-    if isinstance(random_seed, str):
-        if random_seed != 'default':
-            raise ValueError(f"Not sure how to interpret the random seed '{random_seed}'")
-        return 0
-    return int(np.mod(_round_half_away(abs(float(random_seed))), 4e9))
 
 # ------------------------------------------------------------------------------
 # Embedding parameters (hctsa's NL_FNN and BF_Embed), shared by the operations below
@@ -735,7 +723,7 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
         ``['ac', k]`` for ``k`` times the autocorrelation time (``['ac1e', k]`` is
         also accepted). Default is ``['ac', 1]``.
     random_seed : int, str or None, optional
-        Seed of the random reference points (see :func:`_bf_random_seed`; ``'default'`` is 0).
+        Seed of the random reference points (see :func:`~pyhctsa.robust.bf_random_seed`; ``'default'`` is 0).
         They come from the portable generator :func:`~pyhctsa.robust.bf_random`, so the
         results are the same as hctsa's for the same seed. Default is 0.
 
@@ -783,7 +771,7 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
 
     # Random numbers for the reference points: the next unused number of one reproducible stream
     # (more of the same stream is generated if the numbers run out)
-    seed = _bf_random_seed(random_seed)
+    seed = bf_random_seed(random_seed)
     rand_stream = bf_random(512, seed)
     num_used = 0
 
@@ -1831,7 +1819,7 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
         TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
     random_seed : int, str or None, optional
         Seed for choosing the random subsample of reference points (relevant when
-        ``nref != -1``; see :func:`_bf_random_seed`). The numbers come from the portable generator
+        ``nref != -1``; see :func:`~pyhctsa.robust.bf_random_seed`). The numbers come from the portable generator
         :func:`~pyhctsa.robust.bf_random`, so the subsample is the same as hctsa's. Default is 0.
 
     Returns
@@ -1877,7 +1865,7 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     if nref == -1 or nref >= n_emb:
         ref_idx = np.arange(n_emb)
     else:
-        ref_idx = bf_random(n_emb, _bf_random_seed(random_seed), 'perm')[:int(nref)] - 1  # random subsample
+        ref_idx = bf_random(n_emb, bf_random_seed(random_seed), 'perm')[:int(nref)] - 1  # random subsample
 
     # For each reference point, the distances to its 1st..kmax-th nearest neighbors outside
     # the Theiler window (a KD-tree, over-fetching neighbors to cover those excluded)
@@ -3109,7 +3097,7 @@ def _random_subset(n: int, k: int, random_seed: Union[int, str, None]) -> np.nda
     ``BF_Random(n, BF_RandomSeed(randomSeed), 'perm')``): an integer seed, ``'default'`` for
     seed 0, or ``None``/``'none'`` for a seed from NumPy's global stream.
     """
-    return bf_random(n, _bf_random_seed(random_seed), 'perm')[:k] - 1
+    return bf_random(n, bf_random_seed(random_seed), 'perm')[:k] - 1
 
 
 def _recurrence_radius(Y: np.ndarray, rr: float, random_seed: Union[int, str, None]) -> float:
@@ -4898,7 +4886,7 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
         The Theiler window (see :func:`pyhctsa.utils.theiler_window`): neighbors closer in time
         than this are not used. Default is ``['ac', 1]``.
     random_seed : int or str, optional
-        Seed of the added noise (see :func:`_bf_random_seed`). Default is 42.
+        Seed of the added noise (see :func:`~pyhctsa.robust.bf_random_seed`). Default is 42.
 
     Returns
     -------
@@ -4914,7 +4902,7 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
     if m < 3:
         raise ValueError('The embedding dimension, m, must be at least 3 (the outputs include LE3)')
 
-    y = y + 0.001 * np.std(y, ddof=1) * bf_random(n, _bf_random_seed(random_seed), 'normal')
+    y = y + 0.001 * np.std(y, ddof=1) * bf_random(n, bf_random_seed(random_seed), 'normal')
 
     params = _embedding_params(y, tau_method, m)
     if params is None:

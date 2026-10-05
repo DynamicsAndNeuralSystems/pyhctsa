@@ -10,7 +10,7 @@ from scipy.stats import norm
 from ..operations.correlation import tc3, trev
 from ..operations.information import automutual_info, first_min
 from ..operations.nonlinearity import _ms_nlpe, fnn, nlpe
-from ..robust import bf_ks_density, bf_random
+from ..robust import bf_ks_density, bf_random, bf_random_seed
 from ..utils import get_tau, theiler_window
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -147,11 +147,10 @@ def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
     .. [2] "A new surrogate data method for nonstationary time series", D. L. Guarin Lopez
         et al., arXiv 1008.1804 (2010).
     """
-    from .nonlinearity import _bf_random_seed
     x = np.asarray(x, dtype=float).ravel()
     N = len(x)
     out = np.zeros(shape=(N, num_surrs))
-    seed = _bf_random_seed(random_seed)
+    seed = bf_random_seed(random_seed)
     n_free = (N - 1) // 2  # number of random phases per surrogate
 
     def uniform_block(rows, s):  # (rows, num_surrs): column k is a block of consecutive draws

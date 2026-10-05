@@ -10,10 +10,10 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 from ..operations.correlation import autocorr
-from ..operations.distribution import _bf_random_seed, compare_ks_fit, outlier_test, simple_fit
+from ..operations.distribution import compare_ks_fit, outlier_test, simple_fit
 from ..operations.nonlinearity import zero_one_test
 from ..operations.stationarity import sliding_window, stat_av
-from ..robust import bf_fit_sinusoids, bf_random
+from ..robust import bf_fit_sinusoids, bf_random, bf_random_seed
 from ..utils import _round_half_away, _zscore_matlab, z_score
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
@@ -473,7 +473,7 @@ def _rank_map_gaussian(y: np.ndarray, random_seed=None, draws: np.ndarray = None
     """
     n = len(y)
     if draws is None:
-        draws = bf_random(n, _bf_random_seed(random_seed), 'normal')
+        draws = bf_random(n, bf_random_seed(random_seed), 'normal')
     out = np.zeros(n)
     out[np.argsort(y, kind='stable')] = np.sort(draws)
     return out
