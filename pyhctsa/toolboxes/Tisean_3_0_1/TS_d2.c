@@ -278,9 +278,13 @@ static int d2_run(d2_ctx *c)
         smaller = 0;
         sn = c->scr[n - 1];
         /* d2.c boxes on components 0 and 1 when DIM > 1; with a single column
-           (all this wrapper supports) it boxes on x(t) and x(t+DELAY). */
+           (all this wrapper supports) it boxes on x(t) and x(t+DELAY). For a
+           one-dimensional embedding (EMBED == 1) d2.c still reads x(t+DELAY), which
+           is past the end of the data for the last points; that box (x, y) is only
+           used by make_c2_dim, which is not called then, so y is simply set to 0. */
         x = (int64_t)(c->series[sn] * c->epsinv) & c->imax;
-        y = (int64_t)(c->series[sn + c->DELAY] * c->epsinv) & c->imax;
+        y = (c->EMBED * c->DIM > 1)
+                ? (int64_t)(c->series[sn + c->DELAY] * c->epsinv) & c->imax : 0;
         c->list[sn] = c->box[x * NMAX + y];
         c->box[x * NMAX + y] = sn;
         c->listc1[sn] = c->boxc1[x];
@@ -305,7 +309,8 @@ static int d2_run(d2_ctx *c)
                 for (i1 = 0; i1 < n; i1++) {
                     sn = c->scr[i1];
                     x = (int64_t)(c->series[sn] * c->epsinv) & c->imax;
-                    y = (int64_t)(c->series[sn + c->DELAY] * c->epsinv) & c->imax;
+                    y = (c->EMBED * c->DIM > 1)
+                            ? (int64_t)(c->series[sn + c->DELAY] * c->epsinv) & c->imax : 0;
                     c->list[sn] = c->box[x * NMAX + y];
                     c->box[x * NMAX + y] = sn;
                     c->listc1[sn] = c->boxc1[x];
@@ -418,11 +423,9 @@ static PyObject *py_correlation_sums(PyObject *self, PyObject *args)
     c.howoften1 = (int)howoften - 1;
     c.imin = 0;
 
-    /* embed >= 2: d2.c boxes on x(t+DELAY) without shortening its loop for a
-       one-dimensional embedding, so embed == 1 reads past the end of the data. */
-    if (delay < 1 || embed < 2 || howoften < 2 || theiler < 0) {
+    if (delay < 1 || embed < 1 || howoften < 2 || theiler < 0) {
         PyErr_SetString(PyExc_ValueError,
-                        "delay must be >= 1, embed >= 2, howoften >= 2, theiler >= 0");
+                        "delay must be >= 1, embed >= 1, howoften >= 2, theiler >= 0");
         goto fail;
     }
 

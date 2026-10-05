@@ -128,3 +128,14 @@ def test_surrogate_test_nlpe_fnn(monkeypatch):
     assert out['nlpe_zscore'] == pytest.approx(
         (nl.nlpe(x, 3, 1, 5000, ('ac', 1))['msqerr'] - nlpe_s.mean()) / nlpe_s.std(ddof=1))
     assert out['nlpe_zscore'] < -10  # (mean against sum)
+
+
+def test_gp_corr_sum_m1():
+    # embedding dimension 1 (TISEAN's d2 reads past the end of the data for it; the box that does is not used)
+    d = nl.gp_corr_sum(_x(600), -1, 0.1, ('ac', 1), 20, (1, 1))
+    assert abs(d['robfit_a2'] - 0.979887300056) < 1e-9 and abs(d['meanlnCr'] + 4.46294185584) < 1e-9
+    assert abs(d['minlnr'] + 5.40215637362) < 1e-9
+    c2 = _tisean.d2(_x(600), delay=1, embed=1, theiler=6, howoften=20, epsmax=0.3)['c2']
+    assert len(c2) == 1 and c2[0].shape == (20, 2)
+    with pytest.raises(ValueError):
+        _tisean.d2(_x(600), embed=0)
