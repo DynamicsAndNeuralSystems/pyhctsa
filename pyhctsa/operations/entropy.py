@@ -85,8 +85,9 @@ def shannon_entropy(
     elif bin_range_size > 1:
         if depth_range_size == 1:
             # Statistics over different bin numbers (constant depth)
+            # Entropy scales with depth, so normalize by this factor
             ents = np.array([
-                shannon.entropy(y, int(n), int(depth)) for n in num_bins
+                shannon.entropy(y, int(n), int(depth)) / int(depth) for n in num_bins
             ])
             out = _entropy_summary(ents)
         elif depth_range_size > 1:
