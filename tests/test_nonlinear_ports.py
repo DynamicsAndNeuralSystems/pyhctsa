@@ -108,3 +108,23 @@ def test_lyap_spec():
     assert np.isnan(nl.lyap_spec(np.ones(500)))
     with pytest.raises(ValueError):
         nl.lyap_spec(_x(600), 1, 2)
+
+
+def test_surrogate_test_nlpe_fnn(monkeypatch):
+    from pyhctsa.operations import surrogates as su
+    x = _x(300)
+    rng = np.random.RandomState(3)
+    z = np.column_stack([x[rng.permutation(x.size)] for _ in range(12)])
+    monkeypatch.setattr(su, '_make_surrogates', lambda *a, **k: z)
+    out = su.surrogate_test(x, 'RandPerm', 12, ['nlpe', 'fnn'])
+    assert {k.split('_')[0] for k in out} == {'nlpe', 'fnn'}
+    assert {k.split('_', 1)[1] for k in out} == {'p', 'zscore', 'f', 'mediqr', 'prank'}
+    # the statistics, as hctsa takes them: the series' nlpe error is a mean, the surrogates' a sum
+    fnn_x = nl.fnn(x, 1, 2, ('ac', 1), False, escape_factor=5)['pfnn_2']
+    fnn_s = np.array([nl.fnn(z[:, i], 1, 2, ('ac', 1), False, escape_factor=5)['pfnn_2'] for i in range(12)])
+    assert out['fnn_zscore'] == pytest.approx((fnn_x - fnn_s.mean()) / fnn_s.std(ddof=1))
+    nlpe_s = np.array([np.sum(nl._ms_nlpe(z[:, i], 3, 1, int(nl.theiler_window(z[:, i], ('ac', 1), 300))) ** 2)
+                       for i in range(12)])
+    assert out['nlpe_zscore'] == pytest.approx(
+        (nl.nlpe(x, 3, 1, 5000, ('ac', 1))['msqerr'] - nlpe_s.mean()) / nlpe_s.std(ddof=1))
+    assert out['nlpe_zscore'] < -10  # (mean against sum)
