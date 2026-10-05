@@ -18,7 +18,7 @@ If you would like to specify a custom feature set, you can pass the correspondin
 
    custom_calc = FeatureCalculator(config_path="subset.yaml")
 
-The number of master operations (callable functions) specified by the .yaml will be displayed for verification e.g., Loaded 700 master operations.
+The number of master operations (callable functions) specified by the .yaml will be displayed for verification e.g., Loaded 953 master operations for the default feature set.
 Once a `FeatureCalculator` has been initialized, you can call the extract method to compute time series features on either a single time-series instance or a list of multiple instances:
 
 .. code-block:: python
