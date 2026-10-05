@@ -369,8 +369,9 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
         False (default): partition into non-overlapping windows of analysis.
         True: overlapping windows with a step of 1 (much longer calculations).
     scale_range : sequence of 2 numbers, optional
-        [min_scale, max_scale]. Defaults to [10, round(N/40)]. max_scale must be
-        a multiple of 5 and is rounded to one if it is not.
+        [min_scale, max_scale]. Defaults to [10, max(100, round(N/40))] (the floor of 100
+        keeps short series, N below ~4000, computable). max_scale must be a multiple of 5
+        and is rounded to one if it is not. Returns NaN if max_scale exceeds N.
     q_range : sequence of 2 numbers, optional
         [q_min, q_max] multifractal parameter range. Defaults to [-5, 5].
 
@@ -388,11 +389,17 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
     # Check inputs:
     # --------------------------------------------------------------------------
     if scale_range is None:
-        scale_range = [10, float(_round(n / 40))]
+        scale_range = [10, float(max(100, _round(n / 40)))]
     min_scale = scale_range[0]
     max_scale = scale_range[1]
 
-    if (max_scale / 5) < min_scale:
+    if max_scale > n:
+        logger.warning(
+            "Time-series (N=%u) too short for multiscale multifractal analysis "
+            "(max_scale=%u exceeds N)" % (n, max_scale)
+        )
+        return float("nan")
+    elif (max_scale / 5) < min_scale:
         logger.warning(
             "Time-series (N=%u) too short for multiscale multifractal analysis" % n
         )
