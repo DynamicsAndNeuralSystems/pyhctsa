@@ -1303,6 +1303,8 @@ def _kendall(x: np.ndarray, y: np.ndarray) -> tuple:
     # Kendall's tau-b and its two-tailed p-value, following MATLAB's corr(...,'type','Kendall'):
     # the p-value is exact (permutation distribution of K) for small samples and a
     # continuity-corrected normal approximation otherwise
+    if np.any(np.isnan(x)) or np.any(np.isnan(y)):
+        return np.nan, np.nan
     n = len(x)
     xrank, yrank = rankdata(x), rankdata(y)
     xadj, yadj = _kendall_tie_adj(xrank), _kendall_tie_adj(yrank)
@@ -1362,6 +1364,8 @@ def _kendall(x: np.ndarray, y: np.ndarray) -> tuple:
 def _pearson(x: np.ndarray, y: np.ndarray) -> tuple:
     # Pearson's linear correlation and its two-tailed p-value (NaN for constant input,
     # matching MATLAB's corr)
+    if np.any(np.isnan(x)) or np.any(np.isnan(y)):
+        return np.nan, np.nan
     if np.std(x, ddof=1) == 0 or np.std(y, ddof=1) == 0:
         return np.nan, np.nan
     with warnings.catch_warnings():
@@ -1370,7 +1374,7 @@ def _pearson(x: np.ndarray, y: np.ndarray) -> tuple:
 
     return r, pval
 
-def ramping_windows(y: ArrayLike, num_seg: int = 10) -> dict:
+def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] = 1) -> dict:
     """
     Monotonic trend ('ramping') in windowed statistics.
 
@@ -1379,6 +1383,13 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10) -> dict:
     segment, and quantifies whether each of these quantities trends monotonically
     across the segments (e.g., a variance that ramps up steadily across the series,
     rather than merely fluctuating).
+
+    The asymmetric autocorrelation 'asymAC1' is ``mean(x_t * x_{t+tau} * (x_{t+tau} - x_t))``
+    with x z-scored within each segment. It is antisymmetric under time reversal, so it is zero
+    in expectation for any time-reversible process, and a trend in it flags a trend in the
+    series' local time-asymmetry/nonlinearity. The lag ``tau`` can be set from the series' own
+    correlation time (``asym_tau='ac1e'``) so that the statistic is not dominated by smoothness
+    when the series is oversampled.
 
     Parameters
     ----------
@@ -1391,6 +1402,12 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10) -> dict:
         induce artificial serial correlation between adjacent window-statistics,
         which would inflate the apparent monotonic trend independent of any real
         ramping in the data. Default is 10.
+    asym_tau : int or str, optional
+        The lag, tau, of asymAC1: an integer number of samples, or a rule for
+        :func:`pyhctsa.utils.get_tau` (e.g., ``'ac1e'``, the floor of the first 1/e crossing of
+        the autocorrelation function of the whole series; at least 1). The asymac1_* outputs are
+        NaN if tau cannot be set from the series, or if tau >= segment length - 1 (too few
+        pairs). Default is 1.
 
     Returns
     -------
@@ -1415,6 +1432,11 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10) -> dict:
         logger.warning(f"Time series (N = {N}) too short for {num_seg} segments of a meaningful length")
         return np.nan
 
+    # Lag of asymAC1 (an adaptive lag is set from the whole series, not per segment):
+    tau = get_tau(y, asym_tau) # NaN if it cannot be set
+    if not np.isnan(tau) and tau < 1:
+        raise ValueError("asym_tau must be a positive integer or a get_tau rule (e.g., 'ac1e')")
+
     # ------------------------------------------------------------------------------
     # Segment the time series (non-overlapping, discarding any remainder)
     # ------------------------------------------------------------------------------
@@ -1432,11 +1454,14 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10) -> dict:
     seg_skew = skew(z, axis=1)
     seg_kurt = kurtosis(z, axis=1, fisher=False)
     seg_ac1 = np.zeros(num_seg)
-    seg_asym_ac1 = np.zeros(num_seg)
+    seg_asym_ac1 = np.full(num_seg, np.nan)
     for i in range(num_seg):
         seg_ac1[i] = autocorr(z[i, :], 1, 'Fourier')[0]
-        zseg = (z[i, :] - np.mean(z[i, :])) / np.std(z[i, :], ddof=1) # z-scored *within* this segment
-        seg_asym_ac1[i] = np.mean(zseg[:-1] * zseg[1:] * (zseg[1:] - zseg[:-1]))
+        if not np.isnan(tau) and tau < seg_length - 1: # need pairs to average over
+            t = int(tau)
+            sd = np.std(z[i, :], ddof=1)
+            zseg = (z[i, :] - np.mean(z[i, :])) / (sd if sd > 0 else 1.0) # z-scored *within* this segment (MATLAB zscore: constant gives zeros)
+            seg_asym_ac1[i] = np.mean(zseg[:-t] * zseg[t:] * (zseg[t:] - zseg[:-t]))
 
     # ------------------------------------------------------------------------------
     # Kendall's tau and Pearson's r (each with p-value) against segment index
