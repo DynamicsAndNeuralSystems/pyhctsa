@@ -755,7 +755,13 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
     Returns
     -------
     Dict[str, float]
-        Dictionary containing the measures of mean drift.
+        Dictionary containing the measures of mean drift: ``max``, ``min`` and ``mean``,
+        the maximum, minimum and mean of the segment means divided by the mean of the
+        segment variances, and ``meanmaxmin`` and ``meanabsmaxmin``, the average of ``max``
+        and ``min`` and of their absolute values. When the segments tile the series
+        exactly, ``mean`` is the mean of the series divided by the mean segment variance,
+        so it is zero up to rounding for a z-scored series and carries no information
+        there (hctsa no longer registers it).
     """
     y = np.asarray(y)
     N = len(y)
