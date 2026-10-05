@@ -1320,7 +1320,8 @@ def _ml_min(a, axis=None):
         return np.nanmin(a, axis=axis)
 
 
-def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50) -> np.ndarray:
+def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
+                     hyp0: Union[np.ndarray, None] = None) -> np.ndarray:
     """
     learn GP hyperparameters for the time series ``(tt, yt)``.
 
@@ -1339,14 +1340,19 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50) ->
     it does not abort the fit. ``numpy.linalg.LinAlgError`` is only raised if
     that leaves non-finite hyperparameters, the counterpart of hctsa returning
     NaN.
+
+    ``hyp0`` is the initial hyperparameter vector ``[cov..., lik]``; the default is
+    the initialization for ``covSum{covSEiso, covNoise}`` (``cov`` must then be
+    :class:`CovSEisoNoise`), see :func:`_gp_init_hyp` for the other covariances.
     """
     nhps = cov.n_hyp
     # Initial values, set component by component as in MF_GP_LearnHyperp for
     # covSum{covSEiso, covNoise}: the SE length scale is in the ballpark of the
     # difference between time elements, its log-magnitude starts at zero, the noise
     # covariance at log(0.1), and so does the likelihood noise.
-    hyp0 = np.array([np.log(np.mean(np.diff(tt))), 0.0, np.log(0.1), np.log(0.1)])
-    assert nhps == 3
+    if hyp0 is None:
+        hyp0 = np.array([np.log(np.mean(np.diff(tt))), 0.0, np.log(0.1), np.log(0.1)])
+        assert nhps == 3
 
     def _nlz(theta):
         hyp = {'cov': theta[:nhps], 'lik': theta[nhps], 'mean': np.zeros(0)}
@@ -1357,6 +1363,20 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50) ->
     if not np.all(np.isfinite(theta)):
         raise np.linalg.LinAlgError('GP hyperparameters are not finite')
     return theta
+
+
+def _gp_cov(cov_func) -> tuple:
+    """
+    The covariance function for ``cov_func`` and a function giving the initial
+    hyperparameters for a set of times. The default ``'covSEiso_covNoise'`` is the
+    closed-form :class:`CovSEisoNoise` (initialized by :func:`_gp_learn_hyperp`); others are
+    built by ``parse_cov``, initialized by :func:`_gp_init_hyp`.
+    """
+    if isinstance(cov_func, str) and cov_func == 'covSEiso_covNoise':
+        return CovSEisoNoise, (lambda tt: None)
+    from ..toolboxes.matlab.gpml.cov import parse_cov
+    cov, components = parse_cov(cov_func)
+    return cov, (lambda tt: _gp_init_hyp(components, tt))
 
 
 def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
@@ -1371,11 +1391,12 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     ----------
     y : array-like
         The input time series.
-    cov_func : str
-        The covariance function. Only ``'covSEiso_covNoise'``, the gpml
-        ``covSum`` of a squared exponential and a noise term, is supported -- it
-        is the only configuration hctsa instantiates. Default is
-        ``'covSEiso_covNoise'``.
+    cov_func : str or list
+        The covariance function, a gpml ``covSum``: the names of its components joined
+        with underscores (``'covSEiso_covNoise'``, ``'covSEiso_covPeriodic_covNoise'``,
+        ``'covMaterniso3_covNoise'``, ``'covRQiso_covNoise'``) or in the gpml form
+        ``['covSum', ['covSEiso', 'covNoise']]``. The only configuration hctsa
+        instantiates is the default, ``'covSEiso_covNoise'`` (squared exponential plus noise).
     npoints : int
         The number of points through the time series to fit the GP model to.
         Default is 20.
@@ -1395,35 +1416,33 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         - ``nlml``: the negative log marginal likelihood (gpml's ``nlZ``) of the
           whole series (or of the 2000 resampled points), divided by the number
           of points so it does not grow with the series length,
-        - ``logh1``, ``logh2``, ``logh3``: the log hyperparameters of the
-          covariance function (length scale, signal amplitude, noise standard
-          deviation),
-        - ``h_lonN``: the fitted length scale divided by the series length.
+        - ``logh1``, ``logh2``, ...: the log hyperparameters of the covariance
+          function (for ``'covSEiso_covNoise'``: length scale, signal amplitude,
+          noise standard deviation),
+        - ``h_lonN``: the fitted length scale divided by the series length (only for
+          ``'covSEiso_covNoise'``).
 
         All values are NaN if the fit fails.
     """
-    if cov_func != 'covSEiso_covNoise':
-        raise ValueError(
-            "Only cov_func='covSEiso_covNoise' is supported "
-            f"(got {cov_func!r}); it is the only variant used by hctsa.")
-
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
     npoints = int(npoints)
 
-    cov = CovSEisoNoise
+    cov, init_hyp = _gp_cov(cov_func)
     nhps = cov.n_hyp
+    nan_out = {k: np.nan for k in
+               ('stde', 'meanabs_std', 'stdmu', 'meanS', 'stdS', 'nlml',
+                *(f'logh{i + 1}' for i in range(nhps)),
+                *(('h_lonN',) if cov is CovSEisoNoise else ()))}
 
     tt = np.floor(_linspace(1, N, npoints))
     yt = y[tt.astype(int) - 1]
 
     try:
-        theta = _gp_learn_hyperp(tt, yt, cov)
+        theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt))
     except np.linalg.LinAlgError:
         logger.warning('Lack of positive definite matrix for this time series')
-        return {k: np.nan for k in
-                ('stde', 'meanabs_std', 'stdmu', 'meanS', 'stdS', 'nlml',
-                 'logh1', 'logh2', 'logh3', 'h_lonN')}
+        return nan_out
 
     loghyper = theta[:nhps]
     hyp = {'cov': loghyper, 'lik': theta[nhps], 'mean': np.zeros(0)}
@@ -1439,9 +1458,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         mu, S2, _, _ = gp_predict(hyp, cov, tt, yt, ts)
     except np.linalg.LinAlgError:
         logger.warning('Gaussian process regression failed for this time series')
-        return {k: np.nan for k in
-                ('stde', 'meanabs_std', 'stdmu', 'meanS', 'stdS', 'nlml',
-                 'logh1', 'logh2', 'logh3', 'h_lonN')}
+        return nan_out
 
     # Output statistics
     S = np.sqrt(S2)  # standard deviation function, S
@@ -1465,7 +1482,9 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         out[f'logh{i + 1}'] = loghyper[i]
 
     # Give extra output based on length parameter on length of time series
-    out['h_lonN'] = np.exp(loghyper[0]) / N
+    # (only for the squared exponential plus noise covariance)
+    if cov is CovSEisoNoise:
+        out['h_lonN'] = np.exp(loghyper[0]) / N
 
     return out
 
@@ -1485,11 +1504,12 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     ----------
     y : array-like
         The input time series.
-    cov_func : str
-        The covariance function. Only ``'covSEiso_covNoise'``, the gpml
-        ``covSum`` of a squared exponential and a noise term, is supported -- it
-        is the only configuration hctsa instantiates. Default is
-        ``'covSEiso_covNoise'``.
+    cov_func : str or list
+        The covariance function, a gpml ``covSum``: the names of its components joined
+        with underscores (``'covSEiso_covNoise'``, ``'covSEiso_covPeriodic_covNoise'``,
+        ``'covMaterniso3_covNoise'``, ``'covRQiso_covNoise'``) or in the gpml form
+        ``['covSum', ['covSEiso', 'covNoise']]``. The only configuration hctsa
+        instantiates is the default, ``'covSEiso_covNoise'`` (squared exponential plus noise).
     num_train : int
         The number of training samples (for each iteration). Default is 20.
     num_test : int
@@ -1540,16 +1560,11 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
         All values are NaN if hyperparameters cannot be learned.
     """
-    if cov_func != 'covSEiso_covNoise':
-        raise ValueError(
-            "Only cov_func='covSEiso_covNoise' is supported "
-            f"(got {cov_func!r}); it is the only variant used by hctsa.")
-
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
     num_train, num_test, num_preds = int(num_train), int(num_test), int(num_preds)
 
-    cov = CovSEisoNoise
+    cov, init_hyp = _gp_cov(cov_func)
     nhps = cov.n_hyp
 
     if pmode in ('frombefore', 'randomgap'):
@@ -1621,7 +1636,7 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
         # (1) Learn hyperparameters from the training set
         try:
-            theta = _gp_learn_hyperp(tt, yt, cov)
+            theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt))
         except np.linalg.LinAlgError:
             logger.warning('Unable to learn hyperparameters for this time series')
             return {k: np.nan for k in out_keys}
@@ -1681,4 +1696,917 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     out['minnlml'] = _ml_min(nlmls)
     out['stdnlml'] = np.std(nlmls, ddof=1)
 
+    return out
+
+
+def _arx_losses(y_train: np.ndarray, y_test: np.ndarray, orders) -> tuple:
+    """
+    Out-of-sample loss of AR models of a range of orders (MATLAB's ``arxstruc``).
+
+    For each order ``p`` an AR(p) model (no mean, no windowing) is fitted by least
+    squares to ``y_train`` and applied to ``y_test``. As in ``arxstruc``, the same
+    points are scored for every order: the first ``max(orders) + 1`` samples of the
+    training and test segments are excluded from the fit and from the sum of squared
+    one-step prediction errors, which is nonetheless divided by the full test length.
+
+    Returns the losses (one per order) and the test length.
+    """
+    m = int(np.max(orders)) + 1
+    n_tr, n_te = len(y_train), len(y_test)
+    if n_tr <= m or n_te <= m:
+        raise ValueError('time series too short for the model orders')
+    loss = np.zeros(len(orders))
+    for i, p in enumerate(orders):
+        p = int(p)
+        X = np.column_stack([y_train[m - k:n_tr - k] for k in range(1, p + 1)])
+        a = np.linalg.lstsq(X, y_train[m:], rcond=None)[0]
+        Xe = np.column_stack([y_test[m - k:n_te - k] for k in range(1, p + 1)])
+        loss[i] = np.sum((y_test[m:] - Xe @ a) ** 2) / n_te
+    return loss, n_te
+
+
+def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
+               test_how: Union[float, str] = 'all') -> dict:
+    """
+    How the out-of-sample error of an AR model changes with its order.
+
+    Fits autoregressive (AR) models of a range of orders and compares the loss of
+    each (the sum of squared one-step prediction errors on the test segment divided
+    by the test length) when the model fitted to a training segment is applied to a
+    test segment (the counterpart of MATLAB's ``arxstruc`` and ``selstruc``).
+    Statistics are taken over the loss as a function of model order, ``v``.
+
+    The first ``max(orders) + 1`` points of the training and test segments are
+    excluded from the fit and from the sum, so that every order is scored on the same
+    points, but the sum is still divided by the full test length. The loss is
+    therefore the mean squared error scaled by about
+    ``1 - (max(orders) + 1) / (test length)``, the same for every order.
+
+    With ``test_how = 'all'`` the models are tested on the data they were trained on,
+    so the loss measures in-sample fit: it cannot rise with the model order, and
+    features such as ``minv``, ``firstonmin`` and ``where01max`` mostly describe how
+    fast the fit improves with order. Use a training fraction (e.g. 0.5) for a
+    genuine out-of-sample comparison.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    orders : array-like, optional
+        The model orders to compare. Default is 1 to 10.
+    test_how : float or str, optional
+        A fraction of the time series to train on (the model is tested on the
+        remaining portion), or ``'all'`` to train and test on all the data. Default
+        is ``'all'``.
+
+    Returns
+    -------
+    dict
+        - ``maxv``, ``minv``, ``meanv``, ``medianv``: the maximum, minimum, mean and
+          median of the loss over orders,
+        - ``firstonmin``: the loss of the first order divided by the minimum loss,
+        - ``maxonmed``: the maximum loss divided by the median loss,
+        - ``meandiff``, ``stddiff``, ``maxdiff``, ``meddiff``: the mean, standard
+          deviation, maximum absolute value and median of the change in loss from
+          one order to the next,
+        - ``minstdfromi``: the minimum (over starting orders ``i``) of the standard
+          error of the loss over orders ``i`` onward,
+          ``std(v[i:]) / sqrt(len(v) - i)``, ignoring zeros,
+        - ``where01max``: the first position in the list of orders (from 1) from
+          which that standard error is below 10% of its maximum (NaN if none),
+        - ``whereen4``: the first position from which it is below 1e-4 (NaN if none),
+        - ``best_n``: the order with the smallest loss,
+        - ``aic_n``: the order that minimizes Akaike's Information Criterion,
+          ``log(loss * (1 + 2 * order / test length))``,
+        - ``bestaic``: the minimum value of that criterion over orders.
+
+        NaN if the series is too short for the largest order.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    orders = np.atleast_1d(np.asarray(orders)).ravel().astype(int)
+
+    if isinstance(test_how, str):
+        if test_how != 'all':
+            raise ValueError(f"Unknown testing set specifier '{test_how}'")
+        y_train, y_test = y, y
+    else:
+        co = int(np.floor(N * test_how))  # cutoff
+        y_train, y_test = y[:co], y[co:]
+
+    try:
+        v, n_test = _arx_losses(y_train, y_test, orders)
+    except (ValueError, np.linalg.LinAlgError):
+        logger.warning('Time series too short to compare AR models of these orders')
+        return np.nan
+
+    out = {}
+    out['maxv'] = np.max(v)
+    out['minv'] = np.min(v)
+    out['meanv'] = np.mean(v)
+    out['medianv'] = np.median(v)
+    out['firstonmin'] = v[0] / np.min(v)
+    out['maxonmed'] = np.max(v) / np.median(v)
+    dv = np.diff(v)
+    if len(dv) > 0:
+        out['meandiff'] = np.mean(dv)
+        out['stddiff'] = np.std(dv, ddof=1) if len(dv) > 1 else 0.0
+        out['maxdiff'] = np.max(np.abs(dv))
+        out['meddiff'] = np.median(dv)
+    else:
+        out['meandiff'] = out['stddiff'] = out['maxdiff'] = out['meddiff'] = np.nan
+
+    # where does it steady off?
+    nv = len(v)
+    stdfromi = np.array([(np.std(v[i:], ddof=1) if nv - i > 1 else 0.0) / np.sqrt(nv - i)
+                         for i in range(nv)])
+    pos = stdfromi[stdfromi > 0]
+    out['minstdfromi'] = np.min(pos) if len(pos) > 0 else np.nan
+    w01 = np.flatnonzero(stdfromi < np.max(stdfromi) * 0.1)
+    out['where01max'] = w01[0] + 1 if len(w01) > 0 else np.nan
+    wen4 = np.flatnonzero(stdfromi < 1e-4)
+    out['whereen4'] = wen4[0] + 1 if len(wen4) > 0 else np.nan
+
+    # 'best' order measures (selstruc): by loss, and by AIC = log(loss (1 + 2 p / Nc))
+    out['best_n'] = orders[np.argmin(v)]
+    aic = np.log(v * (1 + 2 * orders / n_test))
+    out['aic_n'] = orders[np.argmin(aic)]
+    out['bestaic'] = np.min(aic)
+
+    return out
+
+
+def _kstep_residuals_ss(F: np.ndarray, K: np.ndarray, C: np.ndarray, y: np.ndarray,
+                        steps: int) -> np.ndarray:
+    """
+    Errors, prediction minus data, of the ``steps``-ahead predictor of the innovations-form
+    state-space model ``x(t+1) = F x(t) + K e(t)``, ``y(t) = C x(t) + e(t)`` (MATLAB's
+    ``predict(m, y, steps)``).
+
+    The one-step predictor state ``x(u)`` is updated from the data, ``x(u+1) = (F - K C) x(u) +
+    K y(u)``, and the prediction of ``y(t)`` is ``C F^(steps-1) x(t - steps + 1)``. As in
+    ``predict`` (``'InitialCondition'`` ``'e'``), the state at the first sample ``x(0)`` is the
+    one that minimizes the squared prediction error, and the first ``steps - 1`` predictions
+    are the free run ``C F^t x(0)`` from it (the predictor has no earlier information).
+    """
+    n = len(y)
+    r = F.shape[0]
+    K = np.reshape(K, (r, 1))
+    Cr = np.reshape(C, (1, r))
+    Phi = F - K @ Cr                       # state update of the one-step predictor
+    CFk = Cr @ np.linalg.matrix_power(F, steps - 1)
+    # states x(u) = xz(u) + Phi^u x(0), u = 0..n-1: zero initial state response and homogeneous part
+    xz = np.zeros((n, r))
+    Pw = np.zeros((n, r, r))               # Phi^u
+    x, P = np.zeros(r), np.eye(r)
+    for u in range(n):
+        xz[u], Pw[u] = x, P
+        x = Phi @ x + K[:, 0] * y[u]
+        P = Phi @ P
+    yz = np.zeros(n)
+    B = np.zeros((n, r))
+    for t in range(n):
+        u = t - steps + 1
+        if u >= 0:
+            yz[t] = (CFk @ xz[u])[0]
+            B[t] = (CFk @ Pw[u])[0]
+        else:                              # free run from the initial state
+            B[t] = (Cr @ np.linalg.matrix_power(F, t))[0]
+    x0 = np.linalg.lstsq(B, y - yz, rcond=None)[0]
+    return yz + B @ x0 - y
+
+
+def _kstep_residuals(a: np.ndarray, c: np.ndarray, y: np.ndarray, steps: int) -> np.ndarray:
+    """
+    Errors, prediction minus data, of the ``steps``-ahead predictor of the polynomial model
+    ``a(q) y(t) = c(q) e(t)`` (MATLAB's ``predict(m, y, steps)``).
+
+    ``a`` and ``c`` are the coefficient vectors including the leading 1. The model is put in
+    innovations form (observer canonical form, ``x(t+1) = F x(t) + K e(t)``, ``y(t) = x_1(t) +
+    e(t)``) and passed to :func:`_kstep_residuals_ss`.
+    """
+    r = max(len(a), len(c)) - 1
+    if r == 0:
+        return -np.asarray(y, dtype=float)
+    ap = np.r_[a, np.zeros(r + 1 - len(a))]
+    cp = np.r_[c, np.zeros(r + 1 - len(c))]
+    F = np.zeros((r, r))
+    F[:, 0] = -ap[1:]
+    F[:-1, 1:] = np.eye(r - 1)
+    C = np.zeros(r)
+    C[0] = 1.0
+    return _kstep_residuals_ss(F, cp[1:] - ap[1:], C, y, steps)
+
+
+def _fit_polynomial_model(y: np.ndarray, model: str, order) -> Union[tuple, None]:
+    """
+    Fit the model of MF_steps_ahead / MF_CompareTestSets to the whole series ``y``.
+
+    ``model`` is ``'ar'`` (forward-backward least squares as MATLAB's ``ar``; ``order`` an
+    integer, or ``'best'`` for the order from 1 to 10 chosen by Schwarz's Bayesian criterion,
+    ARFIT), ``'arma'`` (``armax``; ``order`` is ``[p, q]``; needs ``_armax_fit``) or ``'ss'``
+    (``n4sid``; not yet implemented). Returns the polynomials ``(a, c)`` of ``a(q) y = c(q) e``
+    including the leading 1, or None if the fit fails.
+    """
+    if model == 'ar':
+        if isinstance(order, str) and order == 'best':
+            try:
+                order = len(_arfit(y, 1, 10, 'sbc', zero=True)[1])
+            except ValueError:
+                return None
+        try:
+            return np.r_[1.0, _ar_fb(y, int(order))[0]], np.ones(1)
+        except np.linalg.LinAlgError:
+            return None
+    if model == 'arma':
+        try:
+            a, c = _armax_fit(y, int(order[0]), int(order[1]))[:2]
+        except NameError:
+            raise NotImplementedError("model='arma' needs the ARMA fit (_armax_fit)")
+        except (np.linalg.LinAlgError, ValueError):
+            return None
+        return a, c
+    if model == 'ss':
+        # needs the n4sid fit; its innovations-form (A, K, C) then go to _kstep_residuals_ss
+        raise NotImplementedError("model='ss' needs the state-space (n4sid) fit")
+    raise ValueError(f"Unknown model '{model}'")
+
+
+def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 2,
+                max_steps: int = 6) -> dict:
+    """
+    How the accuracy of multi-step-ahead model predictions compares with trivial
+    predictors and changes with the horizon.
+
+    Given a model, characterizes the variation in goodness of model predictions across
+    a range of prediction lengths, ``l``, from 1-step-ahead to ``max_steps``-steps-ahead
+    predictions. The model is fitted on the full time series and then used to predict the
+    same data (so all predictions are within the sample).
+
+    At each horizon, the errors of the model are compared with those of three trivial
+    predictors: (i) the value ``l`` samples earlier (a sliding mean of length 1),
+    (ii) the average of the last two values, iterated forward ``l`` steps (a sliding mean
+    of length 2), and (iii) the mean of the full time series.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    model : {'ar', 'arma', 'ss'}, optional
+        The time-series model to fit: an AR model (forward-backward least squares, as
+        MATLAB's ``ar``), an ARMA model (``armax``, using ``_armax_fit``), or a state-space
+        model (``n4sid``; not yet implemented). Default is ``'ar'``. The predictions of the
+        fitted model are those of MATLAB's ``predict(m, y, l)``, with the initial state of
+        the predictor estimated.
+    order : int, 'best' or two-vector, optional
+        The order of the model to fit: an integer for ``'ar'`` and ``'ss'``, a two-vector
+        ``[p, q]`` for ``'arma'``, or ``'best'``. For ``'ar'``, ``'best'`` picks the order
+        (1 to 10) by Schwarz's Bayesian criterion using ARfit; for ``'ss'``, n4sid chooses
+        the order from 1 to 10 by a gap rule on its Hankel singular values. Default is 2.
+    max_steps : int, optional
+        The maximum number of steps ahead to predict. Default is 6.
+
+    Returns
+    -------
+    dict
+        - ``stde_h1``, ..., ``stde_h<max_steps>``: the root-mean-square error of the model
+          at horizon ``l``, divided by the lowest root-mean-square error of the three
+          trivial predictors at that horizon,
+        - ``meanabs_h1``, ...: the same for the mean absolute error,
+        - ``ac1_h1``, ...: the absolute lag-1 autocorrelation of the model's errors at each
+          horizon (not a ratio),
+        - ``stde_meanabs_diff``: the absolute value of the mean difference between the
+          model's root-mean-square and mean absolute errors across horizons,
+        - ``stde_meandiff``, ``stde_maxdiff``, ``stde_stddiff``: the mean, maximum, and
+          standard deviation of the change in the model's root-mean-square error from one
+          horizon to the next,
+        - ``stde_ndown``: the number of horizon steps at which the model's
+          root-mean-square error falls.
+
+        The last five outputs use the model's raw errors, not the ratios to the trivial
+        predictors. NaN if the model cannot be fitted.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    max_steps = int(max_steps)
+    if order is None:
+        order = 2
+
+    # Fit the model on the whole time series
+    fit = _fit_polynomial_model(y, model, order)
+    if fit is None:
+        return np.nan
+    a, c = fit
+
+    def model_residuals(k):
+        return _kstep_residuals(a, c, y, k)
+
+    # Statistics of the predictions at each horizon
+    mf_rms, mf_abs, mf_ac1 = (np.zeros(max_steps) for _ in range(3))
+    sm1_rms, sm1_abs = np.zeros(max_steps), np.zeros(max_steps)
+    sm2_rms, sm2_abs = np.zeros(max_steps), np.zeros(max_steps)
+    for j in range(max_steps):
+        i = j + 1
+
+        # (1) *** Model ***
+        mres = model_residuals(i)[i - 1:]
+        mf_rms[j] = np.sqrt(np.mean(mres ** 2))
+        mf_abs[j] = np.mean(np.abs(mres))
+        mf_ac1[j] = np.ravel(autocorr(mres, 1, 'Fourier'))[0]
+
+        # (2) *** Sliding mean 1 ***: predicts with the value i steps before it
+        mres = y[i:] - y[:N - i]
+        sm1_rms[j] = np.sqrt(np.mean(mres ** 2))
+        sm1_abs[j] = np.mean(np.abs(mres))
+
+        # (3) *** Sliding mean 2 ***: closed-form solution of the order-2 linear recurrence
+        # p(n) = (p(n-1) + p(n-2)) / 2 that iterating the average of the last two values
+        # i steps ahead converges to
+        weights = np.array([1 + (-1) ** (i + 1) / 2 ** i, 2 + (-1) ** i / 2 ** i]) / 3
+        sm2p = np.column_stack([y[:N - i - 1], y[1:N - i]]) @ weights
+        mres = y[i + 1:] - sm2p
+        sm2_rms[j] = np.sqrt(np.mean(mres ** 2))
+        sm2_abs[j] = np.mean(np.abs(mres))
+
+    # (global) sample mean predictor
+    sminf_res = y - np.mean(y)
+    sminf_rms = np.sqrt(np.mean(sminf_res ** 2))
+    sminf_abs = np.mean(np.abs(sminf_res))
+
+    out = {}
+    for j in range(max_steps):
+        # relative to the best null (dumb) predictor
+        out[f'stde_h{j + 1}'] = mf_rms[j] / min(sm1_rms[j], sm2_rms[j], sminf_rms)
+        out[f'meanabs_h{j + 1}'] = mf_abs[j] / min(sm1_abs[j], sm2_abs[j], sminf_abs)
+        # raw ac1 values -- ratios don't really make sense
+        out[f'ac1_h{j + 1}'] = abs(mf_ac1[j])
+
+    out['stde_meanabs_diff'] = abs(np.mean(mf_rms - mf_abs))
+
+    # Quantify shape, other than being a boring increasing curve
+    d = np.diff(mf_rms)
+    out['stde_meandiff'] = np.mean(d)
+    out['stde_maxdiff'] = np.max(d)
+    out['stde_stddiff'] = np.std(d, ddof=1)
+    out['stde_ndown'] = int(np.sum(d < 0))
+    return out
+
+
+def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, list] = 2,
+                      subset_how: str = 'rand', sample_p: Union[list, tuple] = (20, 0.1),
+                      steps: int = 2, random_seed: Union[int, str, None] = 0) -> dict:
+    """
+    How well a model fitted to the whole series predicts short stretches of it.
+
+    Fits a time-series model to the full series, then uses it to predict a set of short
+    test segments of the series (``steps`` samples ahead), and summarizes how the
+    prediction quality varies across the segments. For each segment it records the
+    root-mean-square prediction error, the lag-1 autocorrelation of the errors, the
+    absolute difference between the mean prediction and the mean of the data, and the
+    ratio of the standard deviations of the predictions and the data. It says something
+    about stationarity in the spread of values, and about the suitability of the model in
+    the level of values.
+
+    Similar to :func:`fit_subsegments`, except that the model is fitted on the full time
+    series and tested on different local segments. The predictions are those of MATLAB's
+    ``predict(m, segment, steps)``, with the initial state of the predictor estimated for
+    each segment.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    the_model : {'ss', 'ar', 'arma'}, optional
+        The type of time-series model to fit: a state-space model (``'ss'``; not yet
+        implemented), an AR model (``'ar'``) or an ARMA model (``'arma'``). Default is
+        ``'ss'``.
+    ord : int, 'best' or two-vector, optional
+        The order of the model to fit (a two-element vector for ``'arma'``), or ``'best'``
+        to select it automatically: for ``'ar'``, the order from 1 to 10 minimizing the
+        Schwarz Bayesian criterion (ARFIT); for ``'ss'``, as chosen by n4sid. Default is 2.
+    subset_how : {'rand', 'uniform'}, optional
+        How to select the test segments: at random, or evenly spaced throughout the time
+        series. Default is ``'rand'``.
+    sample_p : two-vector, optional
+        ``[number of segments, segment length]``. A segment length below 1 is a fraction of
+        the series length, capped to between 10 and 20 samples (so ``[25, 0.1]`` takes 25
+        segments of 10 to 20 samples); otherwise it is a number of samples. A single value
+        (with ``'uniform'``) partitions the series into that many segments. Default is
+        ``[20, 0.1]``.
+    steps : int, optional
+        The number of steps ahead to predict in each segment. Default is 2.
+    random_seed : int, 'default', 'none' or None, optional
+        Seed for the Mersenne Twister that picks the random segments, reset first as
+        ``BF_ResetSeed`` does (0, or ``'default'``, is MATLAB's default); ``'none'`` or
+        ``None`` leaves the stream alone. Default is 0.
+
+    Returns
+    -------
+    dict
+        - ``stde_mean``, ``stde_std``, ``stde_iqr``: the mean, standard deviation and
+          interquartile range over segments of the root-mean-square prediction error,
+        - ``ac1_mean``, ``ac1_median``: the absolute value of the mean, and of the median,
+          over segments of the lag-1 autocorrelation of the prediction errors,
+        - ``ac1_std``, ``ac1_iqr``: the standard deviation and interquartile range over
+          segments of that autocorrelation,
+        - ``meane_mean``, ``meane_std``, ``meane_iqr``: the mean, standard deviation and
+          interquartile range over segments of the absolute difference between the mean
+          prediction and the mean of the data,
+        - ``stdrat_mean``, ``stdrat_median``, ``stdrat_std``, ``stdrat_iqr``: the mean,
+          median, standard deviation and interquartile range over segments of the ratio of
+          the standard deviation of the predictions to that of the data (segments in which
+          the data are near-constant are excluded).
+
+        NaN if the model cannot be fitted.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    sigma_y = np.std(y, ddof=1)  # used to flag degenerate (near-constant) test segments
+    if ord is None:
+        ord = 2
+    sample_p = np.atleast_1d(np.asarray(sample_p, dtype=float))
+    steps = int(steps)
+    num_pred = int(sample_p[0])
+
+    # Fit the model on the whole time series (the test sets are smaller chunks of it)
+    fit = _fit_polynomial_model(y, the_model, ord)
+    if fit is None:
+        return np.nan
+    a, c = fit
+
+    # Set the ranges of the test segments (1-based, inclusive)
+    r = np.zeros((num_pred, 2), dtype=int)
+    if subset_how in ('rand', 'uniform') and len(sample_p) > 1:
+        if sample_p[1] < 1:  # a fraction of the time series, capped to between 10 and 20
+            seg_len = int(max(min(20, np.floor(N * sample_p[1])), 10))
+        else:  # an absolute interval
+            seg_len = int(sample_p[1])
+    if subset_how == 'rand':
+        # reset the random seed (BF_ResetSeed), then numPred starting points
+        if isinstance(random_seed, str) and random_seed == 'default':
+            random_seed = 0
+        if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
+            rng = np.random.RandomState()
+        else:
+            rng = _ml_rng(int(random_seed))
+        spts = 1 + np.floor((N - seg_len + 1) * rng.random_sample(num_pred)).astype(int)  # randi
+        r[:, 0] = spts
+        r[:, 1] = spts + seg_len - 1
+    elif subset_how == 'uniform':
+        if len(sample_p) == 1:  # size will depend on number of unique subsegments
+            spts = np.floor(_linspace(0, N, num_pred + 1) + 0.5).astype(int)  # MATLAB round()
+            r[:, 0] = spts[:num_pred] + 1
+            r[:, 1] = spts[1:]
+        else:
+            spts = np.floor(_linspace(1, N - seg_len + 1, num_pred) + 0.5).astype(int)
+            r[:, 0] = spts
+            r[:, 1] = spts + seg_len - 1
+    else:
+        raise ValueError(f"Unknown subset method '{subset_how}'")
+
+    # Quickly check that ranges are valid
+    if np.any(r[:, 0] >= r[:, 1]):
+        raise ValueError('Invalid settings')
+
+    # Do the series of predictions
+    rmserrs = np.zeros(num_pred)
+    ac1s = np.zeros(num_pred)
+    meandiffs = np.zeros(num_pred)
+    stdrats = np.zeros(num_pred)
+    for i in range(num_pred):
+        y_test = y[r[i, 0] - 1:r[i, 1]]
+        # step-ahead predictions across the test set, using the model fitted to all the data
+        mres = _kstep_residuals(a, c, y_test, steps)  # prediction minus data
+        yp = y_test + mres
+
+        # statistics on the residuals
+        rmserrs[i] = np.sqrt(np.mean(mres ** 2))
+        ac1s[i] = np.ravel(autocorr(mres, 1, 'Fourier'))[0]
+
+        # statistics on the output time series
+        meandiffs[i] = abs(np.mean(yp) - np.mean(y_test))
+        # near-constant test segments: the ratio of standard deviations is undefined, not just large
+        if np.std(y_test, ddof=1) < 1e-6 * sigma_y:
+            stdrats[i] = np.nan
+        else:
+            stdrats[i] = np.std(yp, ddof=1) / np.std(y_test, ddof=1)
+
+    def iqr(x):
+        return np.diff(matlab_quantile(x, [0.25, 0.75]))[0] if len(x) > 0 else np.nan
+
+    def std(x):
+        return np.std(x, ddof=1) if len(x) > 1 else (0.0 if len(x) == 1 else np.nan)
+
+    def mean(x):
+        return np.mean(x) if len(x) > 0 else np.nan
+
+    def median(x):
+        return np.median(x) if len(x) > 0 else np.nan
+
+    out = {}
+    out['stde_mean'] = mean(rmserrs)
+    out['stde_std'] = std(rmserrs)
+    out['stde_iqr'] = iqr(rmserrs)
+
+    # absolute values of operations on the raw ac1s (not the absolute values of ac1s)
+    out['ac1_mean'] = abs(mean(ac1s))
+    out['ac1_median'] = abs(median(ac1s))
+    out['ac1_std'] = std(ac1s)
+    out['ac1_iqr'] = iqr(ac1s)
+
+    # differences in mean between the predictions and the data
+    out['meane_mean'] = mean(meandiffs)
+    out['meane_std'] = std(meandiffs)
+    out['meane_iqr'] = iqr(meandiffs)
+
+    # ratio of standard deviations (omitting segments flagged as degenerate above)
+    valid = stdrats[~np.isnan(stdrats)]
+    out['stdrat_mean'] = mean(valid)
+    out['stdrat_median'] = median(valid)
+    out['stdrat_std'] = std(valid)
+    out['stdrat_iqr'] = iqr(valid)
+
+    return out
+
+
+def _zg_hmm_fit(y_train: np.ndarray, num_states: int, rng: np.random.RandomState,
+                n_cycles: int = 30, tol: float = 1e-4) -> tuple:
+    """
+    Gaussian HMM fit as Zoubin Ghahramani's ``ZG_hmm`` (used by hctsa), with hmmlearn's EM.
+
+    The initial state means are random around the data mean (scaled by the data standard
+    deviation), the start probabilities and transition matrix random, and the tied variance
+    the data variance, all drawn from ``rng``. At most ``n_cycles`` cycles of EM, stopping when
+    the proportional change in the log-likelihood falls below ``tol`` (see :func:`hmm_fit`).
+
+    Returns the fitted ``GaussianHMM`` and the log-likelihood of the training data at each
+    cycle.
+    """
+    y_col = y_train.reshape(-1, 1)
+    cov0 = np.var(y_train, ddof=1)
+    mu0 = rng.randn(num_states, 1) * np.sqrt(cov0) + np.mean(y_train)
+    pi0 = rng.random_sample(num_states)
+    pi0 = pi0 / pi0.sum()
+    p0 = rng.random_sample((num_states, num_states))
+    p0 = p0 / p0.sum(axis=1, keepdims=True)
+
+    model = GaussianHMM(n_components=num_states, covariance_type='tied',
+                        n_iter=1,  # one EM cycle per fit() call, so that we control the stopping rule
+                        tol=0, params='stmc', init_params='')
+    model.startprob_ = pi0
+    model.transmat_ = p0
+    model.means_ = mu0
+    model.covars_ = np.array([[cov0]])
+
+    LL = []  # log-likelihood of the training data at the start of each cycle
+    lik_base = 0.0
+    for cycle in range(1, n_cycles + 1):
+        model.fit(y_col)  # one E step and M step
+        lik = model.monitor_.history[-1]
+        old_lik = LL[-1] if LL else 0.0
+        LL.append(lik)
+        if cycle <= 2:
+            lik_base = lik
+        elif lik < old_lik:
+            pass  # a decrease (numerical violation): keep going, as ZG_hmm does
+        elif (lik - lik_base) < (1 + tol) * (old_lik - lik_base) or not np.isfinite(lik):
+            break
+    return model, np.array(LL)
+
+
+def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
+                         n_states: ArrayLike = (2, 3, 4),
+                         random_seed: Union[int, str, None] = 0) -> dict:
+    """
+    How the fit of hidden Markov models to the series changes with the number of hidden
+    states.
+
+    Fits Gaussian hidden Markov models (HMMs) with different numbers of states to the first
+    ``train_p`` proportion of the time series (each with at most 30 cycles of EM), and
+    compares the resulting log-likelihoods per sample on the training part and on the
+    held-out remainder. Each fit is initialized and stopped as in :func:`hmm_fit`
+    (``ZG_hmm``'s random initialization and proportional tolerance), the random draws
+    continuing through the successive fits.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    train_p : float, optional
+        The initial proportion of the time series to train the model on. Default is 0.6.
+    n_states : array-like of int, optional
+        The numbers of states to compare. Default is 2 to 4.
+    random_seed : int, 'default', 'none' or None, optional
+        Seed for the random initial parameters, reset once before the first fit as
+        ``BF_ResetSeed`` does (0, or ``'default'``, is MATLAB's default); ``'none'`` or
+        ``None`` leaves the stream alone. Default is 0.
+
+    Returns
+    -------
+    dict
+        - ``meanLLtrain``, ``maxLLtrain``: mean and maximum across models of the
+          log-likelihood per sample on the training part,
+        - ``meanLLtest``, ``maxLLtest``: the same on the test part,
+        - ``chLLtrain``, ``chLLtest``: change in training and test log-likelihood per sample
+          from the model with the fewest states to the one with the most,
+        - ``meandiffLLtt``: mean across models of the absolute difference between the test
+          and training log-likelihoods per sample,
+        - ``LLtestdiff1``, ``LLtestdiff2``, ...: change in test log-likelihood per sample
+          from the i-th to the (i+1)-th number of states in ``n_states``.
+
+        NaN if the series is too short to train on.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    n_states = np.atleast_1d(np.asarray(n_states)).astype(int)
+    n_train = int(np.floor(train_p * N))  # number of initial samples to train the model on
+
+    # reset the random seed if specified (BF_ResetSeed), once before the first fit
+    if isinstance(random_seed, str) and random_seed == 'default':
+        random_seed = 0
+    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
+        rng = np.random.RandomState()
+    else:
+        rng = _ml_rng(int(random_seed))
+
+    if n_train >= N:
+        raise ValueError(f'train_p = {train_p:g} leaves no test data for a series of length {N}')
+    if n_train < 2:
+        logger.warning(f'Time series (N = {N}) too short to train on {train_p:g} of it')
+        return np.nan
+    y_train = y[:n_train]
+    y_test = y[n_train:]
+    n_test = len(y_test)
+
+    ll_trains = np.zeros(len(n_states))
+    ll_tests = np.zeros(len(n_states))
+    for j, k in enumerate(n_states):
+        # train an HMM with k states for 30 cycles of EM (or until convergence)
+        model, LL = _zg_hmm_fit(y_train, k, rng)
+        ll_trains[j] = LL[-1] / n_train
+        # log likelihood of the test data
+        ll_tests[j] = model.score(y_test.reshape(-1, 1)) / n_test
+
+    out = {}
+    out['meanLLtrain'] = np.mean(ll_trains)
+    out['meanLLtest'] = np.mean(ll_tests)
+    out['maxLLtrain'] = np.max(ll_trains)
+    out['maxLLtest'] = np.max(ll_tests)
+    out['chLLtrain'] = ll_trains[-1] - ll_trains[0]
+    out['chLLtest'] = ll_tests[-1] - ll_tests[0]
+    out['meandiffLLtt'] = np.mean(np.abs(ll_tests - ll_trains))
+    for i in range(len(n_states) - 1):
+        out[f'LLtestdiff{i + 1}'] = ll_tests[i + 1] - ll_tests[i]
+    return out
+
+
+def _gp_init_hyp(components: list, tt: np.ndarray) -> np.ndarray:
+    """
+    Initial hyperparameters ``[cov..., lik]`` for ``MF_GP_LearnHyperp``, set component by
+    component of the ``covSum``: the length scale at the typical time step, log-magnitudes at
+    zero, the period of ``covPeriodic`` at a tenth of the time span (about ten cycles across
+    the data), ``covRQiso``'s log-shape at zero, and ``covNoise`` and the likelihood noise at
+    log(0.1).
+
+    As in hctsa, a component with a degree (``covMaterniso``) is not initialized and advances
+    the position by one only (not by its two hyperparameters), so the next component is
+    written over the Matern's second hyperparameter and the vector is zero elsewhere.
+    ``components`` is the list of ``(name, degree)`` from ``parse_cov``.
+    """
+    n_cov = int(sum({'covSEiso': 2, 'covPeriodic': 3, 'covRQiso': 3, 'covNoise': 1,
+                     'covMaterniso': 2}[name] for name, _ in components))
+    typical_dt = np.mean(np.diff(tt))  # typical time step: a length-scale prior
+    data_span = np.max(tt) - np.min(tt)
+    hyp = np.zeros(n_cov)
+    pos = 0
+    for name, degree in components:
+        if degree is not None:  # degree-parameterized component: left at zero
+            pos += 1
+        elif name == 'covSEiso':
+            hyp[pos] = np.log(typical_dt)       # length-scale
+            hyp[pos + 1] = 0.0                  # log-magnitude
+            pos += 2
+        elif name == 'covPeriodic':
+            hyp[pos] = np.log(typical_dt)       # length-scale
+            hyp[pos + 1] = np.log(data_span / 10)  # period (guess: ~10 cycles across the data)
+            hyp[pos + 2] = 0.0                  # log-magnitude
+            pos += 3
+        elif name == 'covRQiso':
+            hyp[pos] = np.log(typical_dt)       # length-scale
+            hyp[pos + 1] = 0.0                  # log-magnitude
+            hyp[pos + 2] = 0.0                  # log-alpha (shape)
+            pos += 3
+        elif name == 'covNoise':
+            hyp[pos] = np.log(0.1)              # noise magnitude
+            pos += 1
+        else:
+            pos += 1                            # unrecognized component: leave at zero
+    return np.r_[hyp, np.log(0.1)]
+
+
+def _ml_randi(imax: int, rng: np.random.RandomState) -> int:
+    """MATLAB's scalar ``randi(imax)``: ``1 + floor(imax * rand)``."""
+    return 1 + int(np.floor(imax * rng.random_sample()))
+
+
+def _ml_randsample(n: int, k: int, rng: np.random.RandomState) -> np.ndarray:
+    """MATLAB's ``randsample(n, k)`` (without replacement): 1-based indices."""
+    if 4 * k > n:
+        return _ml_randperm(n, rng)[:k]
+    selected = np.zeros(n, dtype=bool)
+    out = np.zeros(k, dtype=int)
+    nsel = 0
+    while nsel < k:
+        r = _ml_randi(n, rng)
+        if not selected[r - 1]:
+            selected[r - 1] = True
+            out[nsel] = r
+            nsel += 1
+    return out
+
+
+def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covNoise',
+                       squish_or_squash: int = 1, max_n: Union[int, float, str] = 500,
+                       resample_how: str = 'resample',
+                       random_seed: Union[int, str, None] = 0) -> dict:
+    """
+    Fits a Gaussian process to the series and reports its fitted kernel parameters and
+    goodness of fit.
+
+    Models the series as a smooth function of time using a Gaussian process (GP). A
+    zero-mean GP with a Gaussian likelihood is fitted using the covariance function
+    ``cov_func``, e.g., (i) a sum of squared exponential and noise terms, or (ii) a sum of
+    squared exponential, periodic, and noise terms. The log hyperparameters are found by
+    maximizing the marginal likelihood (at most 50 function evaluations), starting from a
+    data-informed initial guess (:func:`_gp_init_hyp`). Goodness of fit is summarized by the
+    per-point negative log marginal likelihood, the error of the fitted mean, and the GP's
+    predictive standard deviation.
+
+    Fitting is O(N^3), so the model is fitted to at most ``max_n`` samples from the time
+    series, chosen by (i) resampling the time series down to this many points, (ii) taking
+    the first ``max_n`` samples, or (iii) taking random samples. Times are the sample indices
+    (``squish_or_squash = 1``), so length scales and periods are in samples of the cut
+    series. The output is NaN if the fit fails or if the fitted mean is nearly constant
+    (standard deviation below 0.01).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (should be z-scored).
+    cov_func : str or list, optional
+        The covariance function: the names of the components of a gpml ``covSum``
+        joined with underscores (``'covSEiso_covNoise'``, ``'covSEiso_covPeriodic_covNoise'``,
+        ``'covMaterniso3_covNoise'``, ``'covRQiso_covNoise'``), or the gpml form
+        ``['covSum', ['covSEiso', 'covNoise']]`` (``['covMaterniso', 3]`` for a component
+        with a degree). Default is ``'covSEiso_covNoise'``.
+    squish_or_squash : int, optional
+        How to set the time index: if nonzero (default), t = 1, ..., N; if zero, t is
+        spread across the unit interval.
+    max_n : int, float or 'full', optional
+        The maximum length of time series to consider -- longer inputs are cut down to
+        ``max_n`` samples. A value below 1 is a proportion of the length. 0 or ``'full'``
+        disables the cut and uses the whole series. Default is 500.
+    resample_how : str, optional
+        How to cut time series longer than ``max_n`` down to ``max_n`` points:
+
+        - ``'resample'`` (default): resample the whole series down (``scipy.signal.resample_poly``),
+        - ``'first'``: take the first ``max_n`` samples,
+        - ``'random_i'``: take ``max_n`` random samples (unevenly spaced),
+        - ``'random_consec'``: take ``max_n`` consecutive samples from a random position,
+        - ``'random_both'``: take ``max_n`` consecutive samples from a random position, then
+          a random fifth of them.
+    random_seed : int, 'default', 'none' or None, optional
+        Seed for the Mersenne Twister, reset first (as ``BF_ResetSeed``) for the settings of
+        ``resample_how`` that use random numbers; ``'none'`` or ``None`` leaves the stream
+        alone. Default is 0.
+
+    Returns
+    -------
+    dict
+        - ``logh1``, ``logh2``, ...: the log hyperparameters of the fitted covariance
+          function, in the order of its components (the number depends on ``cov_func``):
+          covSEiso: [log length scale, log amplitude]; covPeriodic: [log length scale,
+          log period, log amplitude]; covMaterniso(3): [log length scale, log amplitude];
+          covRQiso: [log length scale, log amplitude, log shape parameter alpha]; covNoise:
+          [log noise standard deviation],
+        - ``nlml``: the negative log marginal likelihood of the fitted model, divided by the
+          number of points it was fitted to,
+        - ``stde``: root-mean-square error of the GP mean at the sampled times,
+        - ``meanabs_std``: mean absolute error of the GP mean, in units of the GP's
+          predictive standard deviation at each sampled time,
+        - ``std_mu_data``: standard deviation of the GP mean at the sampled times (if not
+          close to one, the GP has not followed the z-scored data),
+        - ``std_S_data``: standard deviation of the GP's predictive standard deviation at the
+          sampled times,
+        - ``maxS``, ``minS``, ``meanS``: maximum, minimum, and mean of the GP's predictive
+          standard deviation over 1000 equally spaced times spanning the sampled series.
+    """
+    from scipy.signal import resample_poly
+    from ..toolboxes.matlab.gpml.cov import parse_cov
+
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    cov, components = parse_cov(cov_func)
+    num_hps = cov.n_hyp
+
+    if isinstance(max_n, str):
+        if max_n.lower() != 'full':
+            raise ValueError(f"Invalid max_n '{max_n}'")
+        max_n = 0
+    if 0 < max_n < 1:  # a proportion of the time series length
+        max_n = int(np.ceil(N * max_n))
+    max_n = int(max_n)
+
+    def set_time_index(n):
+        return np.arange(1, n + 1, dtype=float) if squish_or_squash else _linspace(0, 1, n)
+
+    def reset_seed():  # BF_ResetSeed
+        if isinstance(random_seed, str) and random_seed == 'default':
+            return _ml_rng(0)
+        if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
+            return np.random.RandomState()
+        return _ml_rng(int(random_seed))
+
+    # Downsample long time series
+    if max_n == 0:
+        t = set_time_index(N)  # no resampling requested
+    elif N > max_n:
+        if resample_how == 'resample':  # resamples the whole time series down
+            f = max_n / N
+            y = resample_poly(y, int(np.ceil(f * 10000)), 10000)
+            if len(y) > max_n:
+                y = y[:max_n]
+            N = len(y)
+            t = set_time_index(N)
+        elif resample_how == 'random_i':  # max_n random indices (unevenly spaced)
+            t = set_time_index(N)
+            rng = reset_seed()
+            ii = np.sort(_ml_randsample(N, max_n, rng))
+            t = t[ii - 1]
+            t = (t - np.min(t)) / np.ptp(t) * (max_n - 1) + 1  # respace from 1:max_n
+            y = y[ii - 1]
+        elif resample_how == 'random_consec':  # max_n consecutive samples from a random position
+            rng = reset_seed()
+            sind = _ml_randi(N - max_n + 1, rng)  # start index
+            y = y[sind - 1:sind - 1 + max_n]
+            t = set_time_index(max_n)
+        elif resample_how == 'first':  # the first max_n samples
+            y = y[:max_n]
+            t = set_time_index(max_n)
+        elif resample_how == 'random_both':  # random start, then a random fifth of those samples
+            rng = reset_seed()
+            sind = _ml_randi(N - max_n + 1, rng)
+            y = y[sind - 1:sind - 1 + max_n]
+            N = len(y)
+            t = set_time_index(N)
+            ii = np.sort(_ml_randsample(N, int(np.ceil(max_n / 5)), rng))
+            t = t[ii - 1]
+            y = y[ii - 1]
+        else:
+            raise ValueError(f"Invalid sampling method '{resample_how}'.")
+    else:
+        t = set_time_index(N)
+
+    # Learn the hyperparameters (mean-zero process, Gaussian likelihood, exact inference)
+    try:
+        theta = _gp_learn_hyperp(t, y, cov, hyp0=_gp_init_hyp(components, t))
+    except np.linalg.LinAlgError:
+        logger.warning('Lack of positive definite matrix for this time series')
+        return np.nan
+    log_hyper = theta[:num_hps]
+    hyp = {'cov': log_hyper, 'lik': theta[num_hps], 'mean': np.zeros(0)}
+
+    out = {}
+    for i in range(num_hps):
+        out[f'logh{i + 1}'] = log_hyper[i]
+
+    # negative log marginal likelihood using the optimized hyperparameters, per point
+    out['nlml'] = gp_train(hyp, cov, t, y, want_dnlZ=False)[0] / len(t)
+
+    # mean error from the fit, evaluated at the data points
+    try:
+        mu, S2, _, _ = gp_predict(hyp, cov, t, y, t)
+    except np.linalg.LinAlgError:
+        return np.nan
+    if np.std(mu, ddof=1) < 0.01:  # hasn't fit the time series well at all -- too constant
+        logger.warning('This time series is not suited to Gaussian Process fitting')
+        return np.nan
+
+    # root-mean-square error of the mean function, mu
+    out['stde'] = np.sqrt(np.mean((y - mu) ** 2))
+    # better to look at the mean distance away in units of std
+    out['meanabs_std'] = np.mean(np.abs((y - mu) / np.sqrt(S2)))
+    out['std_mu_data'] = np.std(mu, ddof=1)  # std of the mean function at the datapoints
+    out['std_S_data'] = np.std(np.sqrt(S2), ddof=1)  # should vary a fair bit
+
+    # statistics on the predictive variance
+    xstar = _linspace(np.min(t), np.max(t), 1000)
+    try:
+        _, S2, _, _ = gp_predict(hyp, cov, t, y, xstar)
+    except np.linalg.LinAlgError:
+        return np.nan
+    S = np.sqrt(S2)  # standard deviation function (S2 is the variance)
+    out['maxS'] = np.max(S)
+    out['minS'] = np.min(S)
+    out['meanS'] = np.mean(S)
     return out
