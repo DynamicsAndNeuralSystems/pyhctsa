@@ -962,7 +962,7 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     n = n / afifth
     
     for i in range(4):
-        out[f'stdb{i+1}'] = np.std(n[:, i], ddof=1)
+        out[f'stdb{i+1}'] = np.std(n[i, :], ddof=1)  # across the five fifths
 
     # STATIONARITY of points in the space (do they move around in the space)
     # (1) in terms of distance from origin
