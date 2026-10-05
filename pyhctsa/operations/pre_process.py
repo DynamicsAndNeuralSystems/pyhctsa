@@ -1,6 +1,8 @@
 import re
 import numpy as np
 from numpy.typing import ArrayLike
+from scipy.interpolate import make_lsq_spline
+from scipy.optimize import least_squares
 from scipy.signal import lfilter, resample_poly
 from scipy.stats import boxcox
 import logging
@@ -8,7 +10,7 @@ logger = logging.getLogger('pyhctsa')
 
 from ..operations.distribution import outlier_test
 from ..operations.stationarity import sliding_window, stat_av
-from ..utils import z_score
+from ..utils import _round_half_away, z_score
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
     """Apply a length-k median filter to a 1D array x, as MATLAB's ``medfilt1``.
@@ -54,6 +56,88 @@ def _diff(proc: float, orig: float) -> float:
     return proc - orig
 
 
+def _spline_detrend(y: np.ndarray, npieces: int, order: int) -> np.ndarray:
+    """Remove a least-squares spline, as MATLAB's ``spap2(npieces, order, 1:N, y)``.
+
+    The spline has `npieces` polynomial pieces and the given order (order 4 is cubic).
+    As in ``spap2`` with a scalar first argument, the knots come from ``aptknt`` applied to
+    ``npieces - 1 + order`` data sites spread evenly over the series: the interior knots
+    are averages of ``order - 1`` consecutive sites.
+    """
+    N = len(y)
+    x = np.arange(1, N + 1, dtype=float)
+    k = min(order, N)
+    maxpieces = N - k + 1
+    if npieces < 1 or npieces > maxpieces:
+        logger.warning(f"spline: the number of pieces must be between 1 and {maxpieces}; "
+                       f"using {max(1, min(maxpieces, npieces))}.")
+        npieces = max(1, min(maxpieces, npieces))
+    if npieces == 1 and k == 1:
+        knots = np.array([x[0], x[-1]])
+    else:
+        idx = np.array([_round_half_away(v) for v in np.linspace(1, N, npieces - 1 + k)], dtype=int)
+        tau = x[idx - 1]
+        n = len(tau)
+        if k == 1:  # aptknt: midpoints between the sites
+            knots = np.concatenate([[tau[0]], tau[:-1] + np.diff(tau) / 2, [tau[-1]]])
+        else:  # aptknt: augknt([tau(1), aveknt(tau, k), tau(end)], k)
+            interior = np.array([np.mean(tau[i + 1:i + k]) for i in range(n - k)])
+            knots = np.concatenate([np.full(k, tau[0]), interior, np.full(k, tau[-1])])
+    spl = make_lsq_spline(x, y, knots, k=k - 1)
+    return y - spl(x)
+
+
+def _sin_start(y: np.ndarray, n: int) -> np.ndarray:
+    """Start frequencies of a sum of n sinusoids, as MATLAB's ``sinnstart``.
+
+    One frequency at a time: the peak of the FFT magnitude of the residuals of the fit so
+    far, ignoring the peaks already used.
+    """
+    N = len(y)
+    t = np.arange(1, N + 1, dtype=float)
+    freqs, used, res = [], [], y.copy()
+    for j in range(n):
+        fy = np.abs(np.fft.fft(res))
+        fy[used] = 0
+        m = int(np.argmax(fy[:N // 2]))  # 0-based; MATLAB's maxloc is m + 1
+        used.append(m)
+        freqs.append(2 * np.pi * max(0.5, m) / (N - 1))
+        X = np.column_stack([f(w * t) for w in freqs for f in (np.sin, np.cos)])
+        ab = np.linalg.lstsq(X, y, rcond=None)[0]
+        res = y - X @ ab
+    return np.array(freqs)
+
+
+def _sin_detrend(y: np.ndarray, n: int) -> np.ndarray:
+    """Remove a sum of n sinusoids a1*sin(b1*t + c1) + ... fitted to y against t = 1:N.
+
+    Mirrors MATLAB's ``fit(t, y, 'sin<n>')``: the amplitude and phase of each sinusoid
+    are linear coefficients (the sine and cosine weights), solved by least squares, and
+    only the frequencies are optimized, starting from the FFT peaks of the series
+    (``sinnstart``). The result is therefore the local least-squares fit nearest to that
+    start, like MATLAB's, not necessarily the global one. Returns NaN if the fit fails.
+    """
+    N = len(y)
+    t = np.arange(1, N + 1, dtype=float)
+
+    def design(b):
+        return np.column_stack([f(w * t) for w in b for f in (np.sin, np.cos)])
+
+    def resid(b):
+        X = design(b)
+        return y - X @ np.linalg.lstsq(X, y, rcond=None)[0]
+
+    try:
+        b0 = _sin_start(y, n)
+        sol = least_squares(resid, b0, method='lm', xtol=1e-14, ftol=1e-14, gtol=1e-14)
+        r = resid(sol.x)
+    except (np.linalg.LinAlgError, ValueError):
+        return np.nan
+    if not np.all(np.isfinite(r)):
+        return np.nan
+    return r
+
+
 def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
     """
     How time-series properties change after a preprocessing step.
@@ -83,6 +167,11 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
 
         - ``"poly<n>"``  : remove a polynomial of order n = 1-9, e.g., ``"poly1"``
           is a linear detrending
+        - ``"sin<n>"``   : remove a sum of n = 1-8 sinusoids a1*sin(b1*t + c1) + ...,
+          fitted against the time index, e.g., ``"sin1"``
+        - ``"spline<npieces><order>"`` : remove a least-squares spline with the given
+          number of polynomial pieces and spline order, e.g., ``"spline24"`` is a
+          cubic spline with 2 pieces
         - ``"diff<n>"``  : n successive differences, e.g., ``"diff1"``
         - ``"medianf<n>"``: running median filter of length n (zero-padded at the
           ends, like MATLAB's ``medfilt1``), e.g., ``"medianf3"``
@@ -130,6 +219,16 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
         order = int(m.group(1))
         r = np.arange(1, N + 1, dtype=float)
         y_d = y - np.polynomial.Polynomial.fit(r, y, order)(r)
+
+    elif (m := re.fullmatch(r'sin([1-8])', detrend_meth)):
+        # 2) Seasonal detrend: sum of sinusoids
+        y_d = _sin_detrend(y, int(m.group(1)))
+        if np.ndim(y_d) == 0:  # the fit failed
+            return np.nan
+
+    elif (m := re.fullmatch(r'spline(\d)(\d)', detrend_meth)):
+        # 3) Spline detrend
+        y_d = _spline_detrend(y, int(m.group(1)), int(m.group(2)))
 
     elif (m := re.fullmatch(r'diff(\d)', detrend_meth)):
         # 4) Differencing
