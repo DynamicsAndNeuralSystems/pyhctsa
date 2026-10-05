@@ -478,28 +478,36 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
 
     # Distribution
     # quantiles
-    iqr75 = np.quantile(s, 0.75, method='hazen')
-    iqr25 = np.quantile(s, 0.25, method='hazen')
-    out['iqr'] = iqr75 - iqr25
-    out['logiqr'] = np.quantile(log_s, 0.75, method='hazen') - np.quantile(log_s, 0.25, method='hazen')
-    out['q25'] = iqr25
+    q25_s, q75_s = np.quantile(s, [0.25, 0.75], method='hazen')
+    q25_log, q75_log = np.quantile(log_s, [0.25, 0.75], method='hazen')
+    out['iqr'] = q75_s - q25_s
+    out['logiqr'] = q75_log - q25_log
+    out['q25'] = q25_s
     out['median'] = np.median(s)
-    out['q75'] = iqr75
+    out['q75'] = q75_s
+    # log-domain companions (the linear spectrum is heavy-tailed, so these capture different information)
+    out['logq25'] = q25_log
+    out['logmedian'] = np.median(log_s)
+    out['logq75'] = q75_log
 
-    # Moments
+    # Moments (the standardized third moment, i.e. the skewness, of the power values)
     out['std'] = np.std(s, ddof=1)
     out['stdlog'] = np.log(out['std'])
     out['logstd'] = np.std(log_s, ddof=1)
-    out['mean'] = np.mean(s)
-    out['logmean'] = np.mean(log_s)
-    for i in range(3, 6):
-        out[f'mom{i}'] = moments(s, i)
+    out['mom3'] = moments(s, 3, True)
+    out['logmom3'] = moments(log_s, 3, True)
 
     # Autocorrelation of amplitude spectrum:
     auto_corrs_s = autocorr(s, [1, 2, 3, 4], 'Fourier')
     out['ac1'] = auto_corrs_s[0]
     out['ac2'] = auto_corrs_s[1]
     out['tau'] = first_crossing(s, 'ac', 0, 'continuous') * dw  # first zero crossing, in units of w (not bins)
+    # The same for log(S): the autocorrelation of the heavy-tailed linear spectrum is dominated by the
+    # distance of its single largest value from the rest, which log(S) compresses
+    auto_corrs_log_s = autocorr(log_s, [1, 2, 3, 4], 'Fourier')
+    out['logac1'] = auto_corrs_log_s[0]
+    out['logac2'] = auto_corrs_log_s[1]
+    out['logtau'] = first_crossing(log_s, 'ac', 0, 'continuous') * dw
 
     # Shape of cumulative sum curve: the cumulative area under the spectrum (a running
     # integral over w, not a bare running sum over bins), which rises to ~1 for a unit-variance
@@ -594,6 +602,12 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['logarea_2_2'] = np.sum(np.log(split[:, 1])) * dw
     out['statav2_m'] = np.std(np.mean(split, axis=0), ddof=1) / np.std(s, ddof=1)
     out['statav2_s'] = np.std(np.std(split, ddof=1, axis=0), axis=0, ddof=1) / np.std(s, ddof=1)
+    # The same on log(S): on the linear spectrum, whichever band contains the dominant peak swamps these
+    split_log = make_mat_buffer(log_s, int(np.floor(n / 2)))
+    if split_log.shape[1] > 2:
+        split_log = split_log[:, :2]
+    out['logstatav2_m'] = np.std(np.mean(split_log, axis=0), ddof=1) / np.std(log_s, ddof=1)
+    out['logstatav2_s'] = np.std(np.std(split_log, ddof=1, axis=0), axis=0, ddof=1) / np.std(log_s, ddof=1)
 
     # 3 bands
     split = make_mat_buffer(s, int(np.floor(n / 3)))
@@ -639,14 +653,23 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['logarea_5_5'] = np.sum(np.log(split[:, 4])) * dw
     out['statav5_m'] = np.std(np.mean(split, axis=0), ddof=1) / np.std(s, ddof=1)
     out['statav5_s'] = np.std(np.std(split, ddof=1, axis=0), axis=0, ddof=1) / np.std(s, ddof=1)
+    split_log = make_mat_buffer(log_s, int(np.floor(n / 5)))
+    if split_log.shape[1] > 5:
+        split_log = split_log[:, :5]
+    out['logstatav5_m'] = np.std(np.mean(split_log, axis=0), ddof=1) / np.std(log_s, ddof=1)
+    out['logstatav5_s'] = np.std(np.std(split_log, ddof=1, axis=0), axis=0, ddof=1) / np.std(log_s, ddof=1)
 
-    # Count crossings:
-    # Get a horizontal line and count the number of crossings with the power spectrum
-    ncrossfn_rel = lambda frac: np.sum(sign_change(s - frac * np.max(s)))
-    out['ncross_f05'] = ncrossfn_rel(0.05)
-    out['ncross_f01'] = ncrossfn_rel(0.1)
-    out['ncross_f02'] = ncrossfn_rel(0.2)
-    out['ncross_f05'] = ncrossfn_rel(0.5)
+    # Count crossings of the log spectrum with a horizontal line set a fraction of the way from
+    # min(log S) to max(log S). On the linear spectrum a threshold at a fixed fraction of max(S) sits far
+    # above the noise floor whenever there is one dominant peak (and the old ncross_f* fields were also
+    # mislabelled: ncross_f05 was assigned twice); differences in log S are power ratios (dB), so a
+    # fraction of the log range is a genuinely relative 'how far up from the noise floor' level.
+    log_range = np.max(log_s) - np.min(log_s)
+    ncrossfn_rel_log = lambda frac: np.sum(sign_change(log_s - (np.min(log_s) + frac * log_range)))
+    out['ncross_log_f05'] = ncrossfn_rel_log(0.05)
+    out['ncross_log_f10'] = ncrossfn_rel_log(0.1)
+    out['ncross_log_f20'] = ncrossfn_rel_log(0.2)
+    out['ncross_log_f50'] = ncrossfn_rel_log(0.5)
 
     return out
 
