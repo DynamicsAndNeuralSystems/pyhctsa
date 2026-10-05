@@ -211,6 +211,20 @@ def specparam(y: ArrayLike, aperiodic_mode: str = 'fixed', max_n_peaks: int = 4,
 
     return out
 
+def _bounded_lsq(fun, p0, x, y, lower, upper) -> np.ndarray:
+    # Bounded nonlinear least squares, min sum((fun(p, x) - y)^2): the
+    # trust-region-reflective algorithm, as MATLAB's fit with 'Lower'/'Upper'
+    # (tolerances 1e-6, at most 400 iterations). The start point is clipped
+    # into the bounds.
+    lower = np.asarray(lower, dtype=float)
+    upper = np.asarray(upper, dtype=float)
+    p0 = np.clip(np.asarray(p0, dtype=float), lower, upper)
+    sol = scipy.optimize.least_squares(lambda p: fun(p, x) - y, p0, bounds=(lower, upper),
+                                       method='trf', xtol=1e-6, ftol=1e-6, gtol=1e-6,
+                                       max_nfev=400)
+    return sol.x
+
+
 def _eval_aperiodic(ap: dict, fq: float) -> float:
     # Value of the fitted aperiodic curve at frequency fq.
     if 'knee' in ap and ap['knee'] > 0:
@@ -245,11 +259,10 @@ def _fit_aperiodic(fv: ArrayLike, log_f: ArrayLike, log_s: ArrayLike,
         # fittype('a - log10(k + x^c)') names its coefficients in alphabetical
         # order, so the fitted vector is [a, c, k]:
         knee_model = lambda p, x: p[0] - np.log10(p[2] + x ** p[1])
-        p = lsqcurvefit_trr(knee_model,
-                            [ap['offset'], 1e-3, max(ap['exponent'], 0.1)],
-                            fv, log_s,
-                            lower=[-np.inf, 0, 0], upper=[np.inf, np.inf, 10],
-                            max_iter=400)
+        p = _bounded_lsq(knee_model,
+                         [ap['offset'], 1e-3, max(ap['exponent'], 0.1)],
+                         fv, log_s,
+                         lower=[-np.inf, 0, 0], upper=[np.inf, np.inf, 10])
         knee_val = p[2]
         pred_knee = p[0] - np.log10(knee_val + fv ** p[1])
         if np.isfinite(knee_val) and knee_val > 1e-10 and np.all(np.isfinite(pred_knee)):
@@ -278,10 +291,9 @@ def _fit_gaussian(log_f: ArrayLike, resid: ArrayLike, i_pk: int,
 
     try:
         gauss_model = lambda p, x: p[0] * np.exp(-(x - p[1]) ** 2 / (2 * p[2] ** 2))
-        p = lsqcurvefit_trr(gauss_model, [h0, x0, w0], log_f, resid,
-                            lower=[0, np.min(log_f), peak_width_limits[0]],
-                            upper=[np.inf, np.max(log_f), peak_width_limits[1]],
-                            max_iter=400)
+        p = _bounded_lsq(gauss_model, [h0, x0, w0], log_f, resid,
+                         lower=[0, np.min(log_f), peak_width_limits[0]],
+                         upper=[np.inf, np.max(log_f), peak_width_limits[1]])
     except Exception:
         return None
 
