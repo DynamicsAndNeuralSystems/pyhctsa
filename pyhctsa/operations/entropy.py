@@ -672,9 +672,8 @@ def _lz_complexity(symbols: np.ndarray) -> int:
 
     while k < n:
         is_substring = False
-        max_i = ns - nq
-        # brute-force search
-        for i in range(max_i + 1):
+        # brute-force search over all start positions i < ns (Q may overlap itself)
+        for i in range(ns):
             match = True
             for j in range(nq):
                 if symbols[i + j] != symbols[ns + j]:
