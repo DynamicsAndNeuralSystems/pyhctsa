@@ -282,6 +282,14 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     max_scale : int, optional
         The maximum scale of wavelet analysis. Default is 32.
 
+    The scaled power is relative to the mean power, ``SC = S / mean(S)`` with
+    ``S = |coeffs|**2`` (so the mean of SC is 1, independent of the number of
+    coefficients). ``pover99``, ``pover98``, ``pover95``, ``pover90`` and ``pover80`` are the
+    energy shares of the strongest 1, 2, 5, 10 and 20% of coefficients (the sum of the
+    largest ``max(1, floor((100 - p)/100*numEntries))`` values of SC, divided by
+    ``numEntries``). ``SC_h`` is the entropy of SC relative to its maximum,
+    ``-sum(SC_a*log(SC_a)) - log(numEntries)`` with ``SC_a = SC/sum(SC)``.
+
     Returns
     -------
     dict
@@ -292,7 +300,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     scales = np.arange(1, max_scale+1)
     coeffs = _custom_cwt(data=y, scales=scales, wavelet=w_name)
     S = np.abs(coeffs * coeffs)
-    SC = 100*S/np.sum(S)
+    SC = S/np.mean(S)  # scaled power, relative to the mean power
 
     # Get statistics from CWT
     num_entries = SC.size
@@ -314,16 +322,18 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     out['maxonmeanSC'] = max_SC/mean_SC
 
     #% Proportion of coeffs matrix over ___ maximum (thresholded)
-    poverfn = lambda x : np.sum(SC[SC > x * max_SC])/num_entries
-    out['pover99'] = poverfn(0.99)
-    out['pover98'] = poverfn(0.88)  # threshold as in hctsa's WL_cwt
-    out['pover95'] = poverfn(0.95)
-    out['pover90'] = poverfn(0.90)
-    out['pover80'] = poverfn(0.80)
+    # Energy share of the strongest (100 - p)% of coefficients
+    sc_sorted = np.sort(SC.ravel())[::-1]
+    poverfn = lambda p: np.sum(sc_sorted[:max(1, int(np.floor((100 - p) / 100 * num_entries)))]) / num_entries
+    out['pover99'] = poverfn(99)
+    out['pover98'] = poverfn(98)
+    out['pover95'] = poverfn(95)
+    out['pover90'] = poverfn(90)
+    out['pover80'] = poverfn(80)
 
-    # 2D entropy
+    # 2D entropy (relative to its maximum)
     SC_a = SC/np.sum(SC)
-    out['SC_h'] = -np.sum(SC_a * np.log(SC_a))
+    out['SC_h'] = -np.sum(SC_a * np.log(SC_a)) - np.log(num_entries)
 
     # Sum across scales
     SSC = sum(SC)
@@ -332,7 +342,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     out['min_ssc'] = np.min(SSC)
     out['maxonmed_ssc'] = max_SSC / np.median(SSC)
     out['pcross_maxssc50'] = np.sum(sign_change(SSC - 0.5 * max_SSC)) / (N - 1)
-    out['std_ssc'] = np.std(SSC)
+    out['std_ssc'] = np.std(SSC, ddof=1)
 
     #Stationarity
     midpoint = N // 2  # Integer division is equivalent to floor
