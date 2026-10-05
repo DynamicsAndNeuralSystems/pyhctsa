@@ -5,7 +5,7 @@ from typing import Union
 
 import numpy as np
 from numpy.typing import ArrayLike
-from scipy.signal import detrend
+from scipy.signal import detrend, peak_prominences
 from scipy.stats import gaussian_kde, kendalltau, kurtosis, kstest, skew, pearsonr, norm, rankdata
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 from statsmodels.tsa.stattools import kpss
@@ -1176,6 +1176,83 @@ def drifting_mean_cusum(y: ArrayLike) -> dict:
     if isinstance(out, dict):
         for k in ('meanYC', 'gradient', 'intercept', 'meanYC12', 'meanYC22', 'stdBridge'):
             del out[k]
+
+    return out
+
+def _matlab_local_maxima(y: np.ndarray) -> np.ndarray:
+    """
+    Indices of the local maxima of ``y``, as MATLAB's ``findpeaks``: a plateau of equal values
+    that is higher than both neighbors is one peak, located at its *first* sample (SciPy's
+    ``find_peaks`` takes the middle); the end points are never peaks.
+    """
+    # keep only the first of each run of equal values
+    keep = np.r_[True, y[1:] != y[:-1]]
+    idx = np.flatnonzero(keep)
+    v = y[idx]
+    is_max = np.zeros(len(v), dtype=bool)
+    is_max[1:-1] = (v[1:-1] > v[:-2]) & (v[1:-1] > v[2:])
+    return idx[is_max]
+
+def peak_intervals(y: ArrayLike, min_prom: float = 1) -> dict:
+    """
+    Statistics on the prominences of, and intervals between, the peaks of a time series.
+
+    The series is z-scored (so that prominence is in units of its standard deviation) and its
+    peaks (local maxima) with prominence of at least ``min_prom`` are found, as with MATLAB's
+    ``findpeaks(y, 'MinPeakProminence', min_prom)``. Summaries are then taken of the peaks'
+    prominences and of the inter-peak intervals (in samples): a periodic series has regularly
+    spaced, equally prominent peaks (low ``cvInt``), while a noisy or aperiodic one does not.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    min_prom : float, optional
+        The minimum prominence of a peak to count it, in standard deviations of the series
+        (a peak's prominence is its height above the higher of the two lowest points between
+        it and the nearest higher peak on each side). Default is 1.
+
+    Returns
+    -------
+    dict
+        - 'meanProm': the mean prominence of the peaks (NaN if there are none),
+        - 'cvInt': the coefficient of variation (std / mean) of the inter-peak intervals (NaN
+          unless there are at least 3 intervals),
+        - 'acInt1': the lag-1 autocorrelation (Pearson correlation of successive intervals) of the
+          inter-peak intervals (NaN unless there are at least 5 intervals; 0 if the intervals
+          are all equal).
+
+        All NaN for a time series shorter than 20 samples, containing non-finite values, or
+        constant.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    out = {'meanProm': np.nan, 'cvInt': np.nan, 'acInt1': np.nan}
+
+    N = len(y)
+    if N < 20 or not np.all(np.isfinite(y)) or np.std(y, ddof=1) == 0:
+        return out
+
+    y = (y - np.mean(y)) / np.std(y, ddof=1) # prominence is in units of the series' standard deviation
+
+    locs = _matlab_local_maxima(y)
+    if len(locs) > 0:
+        proms = peak_prominences(y, locs)[0]
+        keep = proms >= min_prom
+        locs, proms = locs[keep], proms[keep]
+    else:
+        proms = np.array([])
+
+    if len(locs) >= 1:
+        out['meanProm'] = np.mean(proms)
+
+    ipi = np.diff(locs).astype(float) # inter-peak intervals (samples)
+    if len(ipi) >= 3:
+        out['cvInt'] = np.std(ipi, ddof=1) / np.mean(ipi)
+    if len(ipi) >= 5:
+        if np.all(ipi == ipi[0]):
+            out['acInt1'] = 0.0 # equal intervals (e.g., a periodic series): no serial correlation
+        else:
+            out['acInt1'] = np.corrcoef(ipi[:-1], ipi[1:])[0, 1]
 
     return out
 
