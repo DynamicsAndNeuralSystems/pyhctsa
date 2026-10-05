@@ -2883,15 +2883,17 @@ def _kstep_residuals(a: np.ndarray, c: np.ndarray, y: np.ndarray, steps: int) ->
     return _kstep_residuals_ss(F, cp[1:] - ap[1:], C, y, steps)
 
 
-def _fit_polynomial_model(y: np.ndarray, model: str, order) -> Union[tuple, None]:
+def _fit_predictor_model(y: np.ndarray, model: str, order):
     """
     Fit the model of MF_steps_ahead / MF_CompareTestSets to the whole series ``y``.
 
     ``model`` is ``'ar'`` (forward-backward least squares as MATLAB's ``ar``; ``order`` an
     integer, or ``'best'`` for the order from 1 to 10 chosen by Schwarz's Bayesian criterion,
-    ARFIT), ``'arma'`` (``armax``; ``order`` is ``[p, q]``; needs ``_armax_fit``) or ``'ss'``
-    (``n4sid``; not yet implemented). Returns the polynomials ``(a, c)`` of ``a(q) y = c(q) e``
-    including the leading 1, or None if the fit fails.
+    ARFIT), ``'arma'`` (``armax``; ``order`` is ``[p, q]``) or ``'ss'`` (``n4sid``; ``order``
+    an integer or ``'best'``). Returns a function ``predict_errors(y_seg, steps)`` giving the
+    errors, prediction minus data, of the model's ``steps``-ahead predictions of a series
+    (MATLAB's ``predict(m, y_seg, steps)``, with the initial state estimated), or None if the
+    fit fails.
     """
     if model == 'ar':
         if isinstance(order, str) and order == 'best':
@@ -2900,21 +2902,17 @@ def _fit_polynomial_model(y: np.ndarray, model: str, order) -> Union[tuple, None
             except ValueError:
                 return None
         try:
-            return np.r_[1.0, _ar_fb(y, int(order))[0]], np.ones(1)
+            a, c = np.r_[1.0, _ar_fb(y, int(order))[0]], np.ones(1)
         except np.linalg.LinAlgError:
             return None
-    if model == 'arma':
+    elif model == 'arma':
         try:
             a, c = _armax_fit(y, int(order[0]), int(order[1]))[:2]
-        except NameError:
-            raise NotImplementedError("model='arma' needs the ARMA fit (_armax_fit)")
         except (np.linalg.LinAlgError, ValueError):
             return None
-        return a, c
-    if model == 'ss':
-        # needs the n4sid fit; its innovations-form (A, K, C) then go to _kstep_residuals_ss
-        raise NotImplementedError("model='ss' needs the state-space (n4sid) fit")
-    raise ValueError(f"Unknown model '{model}'")
+    else:
+        raise ValueError(f"Unknown model '{model}'")
+    return lambda y_seg, steps: _kstep_residuals(a, c, y_seg, steps)
 
 
 def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 2,
@@ -2939,12 +2937,17 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
         The input time series.
     model : {'ar', 'arma', 'ss'}, optional
         The time-series model to fit: an AR model (forward-backward least squares, as
-        MATLAB's ``ar``), an ARMA model (``armax``, using ``_armax_fit``), or a state-space
-        model (``n4sid``; not yet implemented). Default is ``'ar'``. The predictions of the
-        fitted model are those of MATLAB's ``predict(m, y, l)``, with the initial state of
+        MATLAB's ``ar``), an ARMA model (``armax``), or a state-space model (``n4sid``). Default is ``'ar'``.
+        The predictions of the fitted model are those of MATLAB's ``predict(m, y, l)``, with the initial state of
         the predictor estimated.
     order : int, 'best' or two-vector, optional
         The order of the model to fit: an integer for ``'ar'`` and ``'ss'``, a two-vector
+    if model == 'ss':
+        try:
+            fit = _n4_state_space(y, order if isinstance(order, str) else int(order))
+        except (np.linalg.LinAlgError, ValueError):
+            return None
+        return lambda y_seg, steps: _kstep_residuals_ss(fit['A'], fit['K'], fit['C'], y_seg, steps)
         ``[p, q]`` for ``'arma'``, or ``'best'``. For ``'ar'``, ``'best'`` picks the order
         (1 to 10) by Schwarz's Bayesian criterion using ARfit; for ``'ss'``, n4sid chooses
         the order from 1 to 10 by a gap rule on its Hankel singular values. Default is 2.
@@ -2978,13 +2981,12 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
         order = 2
 
     # Fit the model on the whole time series
-    fit = _fit_polynomial_model(y, model, order)
-    if fit is None:
+    predict_errors = _fit_predictor_model(y, model, order)
+    if predict_errors is None:
         return np.nan
-    a, c = fit
 
     def model_residuals(k):
-        return _kstep_residuals(a, c, y, k)
+        return predict_errors(y, k)
 
     # Statistics of the predictions at each horizon
     mf_rms, mf_abs, mf_ac1 = (np.zeros(max_steps) for _ in range(3))
@@ -3062,8 +3064,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     y : array-like
         The input time series.
     the_model : {'ss', 'ar', 'arma'}, optional
-        The type of time-series model to fit: a state-space model (``'ss'``; not yet
-        implemented), an AR model (``'ar'``) or an ARMA model (``'arma'``). Default is
+        The type of time-series model to fit: a state-space model (``'ss'``), an AR model (``'ar'``) or an ARMA model (``'arma'``). Default is
         ``'ss'``.
     ord : int, 'best' or two-vector, optional
         The order of the model to fit (a two-element vector for ``'arma'``), or ``'best'``
@@ -3114,10 +3115,9 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     num_pred = int(sample_p[0])
 
     # Fit the model on the whole time series (the test sets are smaller chunks of it)
-    fit = _fit_polynomial_model(y, the_model, ord)
-    if fit is None:
+    predict_errors = _fit_predictor_model(y, the_model, ord)
+    if predict_errors is None:
         return np.nan
-    a, c = fit
 
     # Set the ranges of the test segments (1-based, inclusive)
     r = np.zeros((num_pred, 2), dtype=int)
@@ -3161,7 +3161,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     for i in range(num_pred):
         y_test = y[r[i, 0] - 1:r[i, 1]]
         # step-ahead predictions across the test set, using the model fitted to all the data
-        mres = _kstep_residuals(a, c, y_test, steps)  # prediction minus data
+        mres = predict_errors(y_test, steps)  # prediction minus data
         yp = y_test + mres
 
         # statistics on the residuals
