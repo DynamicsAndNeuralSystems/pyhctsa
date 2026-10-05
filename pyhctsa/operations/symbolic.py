@@ -191,6 +191,10 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
     y = np.asarray(y)
     y_bin = binarize(y, binarize_how)
 
+    # A median split fixes the marginal symbol frequencies (used for the
+    # Miller-Madow degrees of freedom in _f_entropy)
+    fixed_marginals = (binarize_how == 'median')
+
     # Define the length of the new, symbolized sequence, N
     N = len(y_bin)
 
@@ -207,7 +211,7 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
     out['u'] = np.mean(r1) # proportion 1 (corresponds to a movement up for 'diff')
     out['d'] = np.mean(r0) # proportion 0 (corresponds to a movement down for 'diff')
     pp = np.array([out['d'], out['u']])
-    out['h'] = _f_entropy(pp)
+    out['h'] = _f_entropy(pp, N, 1, 2, fixed_marginals) # Miller-Madow
 
     # Binary sequences of length 2:
     r1 = r1[:-1]
@@ -224,7 +228,7 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
     out['uu'] = np.mean(r11)  # up, up
 
     pp = np.array([out['dd'], out['du'], out['ud'], out['uu']])
-    out['hh'] = _f_entropy(pp)
+    out['hh'] = _f_entropy(pp, N - 1, 2, 2, fixed_marginals)
 
     # -----------------------------
     # Binary sequences of length 3:
@@ -259,7 +263,7 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
     ppp = np.array([out['ddd'], out['ddu'], out['dud'], 
                     out['duu'], out['udd'], out['udu'], 
                     out['uud'], out['uuu']])
-    out['hhh'] = _f_entropy(ppp)
+    out['hhh'] = _f_entropy(ppp, N - 2, 3, 2, fixed_marginals)
 
     # -------------------
     # 4
@@ -316,7 +320,7 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
                      out['uddu'], out['udud'], out['uduu'], 
                      out['uudd'], out['uudu'], out['uuud'], 
                      out['uuuu']])
-    out['hhhh'] = _f_entropy(pppp)
+    out['hhhh'] = _f_entropy(pppp, N - 3, 4, 2, fixed_marginals)
 
     return out
 
@@ -365,7 +369,7 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
 
     out = {
         'a': out1[0], 'b': out1[1], 'c': out1[2],
-        'h': _f_entropy(out1)
+        'h': _f_entropy(out1, N, 1, 3, True)
     }
 
     # ------------------------------------------------------------------------------
@@ -383,7 +387,7 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
         'aa': out2[0, 0], 'ab': out2[0, 1], 'ac': out2[0, 2],
         'ba': out2[1, 0], 'bb': out2[1, 1], 'bc': out2[1, 2],
         'ca': out2[2, 0], 'cb': out2[2, 1], 'cc': out2[2, 2],
-        'hh': _f_entropy(out2)
+        'hh': _f_entropy(out2, N - 1, 2, 3, True)
     })
 
     # ------------------------------------------------------------------------------
@@ -400,7 +404,7 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
 
     out.update({f'{chr(97+i)}{chr(97+j)}{chr(97+k)}': out3[i, j, k] 
                 for i in range(3) for j in range(3) for k in range(3)})
-    out['hhh'] = _f_entropy(out3)
+    out['hhh'] = _f_entropy(out3, N - 2, 3, 3, True)
 
     # ------------------------------------------------------------------------------
     # Words of length 4
@@ -417,13 +421,29 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
 
     out.update({f'{chr(97+i)}{chr(97+j)}{chr(97+k)}{chr(97+l)}': out4[i, j, k, l] 
                 for i in range(3) for j in range(3) for k in range(3) for l in range(3)})
-    out['hhhh'] = _f_entropy(out4)
+    out['hhhh'] = _f_entropy(out4, N - 3, 4, 3, True)
 
     return out
 
-def _f_entropy(x):
-    """Entropy of a set of counts, log(0) = 0"""
-    return -np.sum(x[x > 0] * np.log(x[x > 0]))
+def _f_entropy(p, num_samples=None, word_length=1, alphabet_size=2, fixed_marginals=False):
+    """
+    Miller-Madow-corrected entropy of a probability array, in nats (log(0) = 0).
+
+    The plug-in entropy is biased downwards by df/(2 num_samples), with
+    df = (number of occupied words) - 1. When the coarse-graining fixes the
+    marginal symbol frequencies (`fixed_marginals`), df is reduced by
+    word_length*(alphabet_size - 1), so that for words of length 1 df = 0.
+    """
+    p = np.asarray(p, dtype=float).ravel()
+    r = p > 0
+    h = -np.sum(p[r] * np.log(p[r]))
+    if num_samples is not None and num_samples > 0:
+        df = int(np.sum(r)) - 1
+        if fixed_marginals:
+            df -= word_length * (alphabet_size - 1)
+        if df > 0:
+            h += df / (2 * num_samples)
+    return h
 
 
 def binary_stretch(x: ArrayLike, stretch_what: str = 'lseq1') -> float:
