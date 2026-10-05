@@ -12,7 +12,7 @@ from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, rayleigh, 
 
 from ..operations.correlation import autocorr, first_crossing
 from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
-from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_random, bf_random_seed, bf_residual_stats, bf_runs_z
+from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_random, bf_random_seed, bf_remove_points, bf_residual_stats, bf_runs_z
 from ..utils import bin_picker, histc, matlab_quantile, sign_change, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')
@@ -1347,99 +1347,29 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
         Whether to remove points ('remove') or saturate their values ('saturate').
         Default is ``'remove'``.
     random_seed : int, optional
-        Seed of the random ordering used when ``remove_how='random'``: an integer, ``None`` or
-        ``'default'`` for seed 0, or ``'none'`` for a seed drawn from NumPy's global random state.
-        The ordering comes from the portable generator :func:`pyhctsa.robust.bf_random`, so
-        it matches hctsa's. Default is ``None`` (seed 0).
+        Seed of the random ordering used when ``remove_how='random'`` (see
+        :func:`pyhctsa.robust.bf_random_seed`; ``None`` is seed 0). The ordering comes from the portable
+        generator :func:`pyhctsa.robust.bf_random`, so it matches hctsa's.
 
     Returns
     -------
     dict
-        Statistics including the change in autocorrelation, time scales, mean, median,
-        standard deviation, skewness (``skewnessdiff``, the difference
-        skew(y_transform) - skew(y)), and kurtosis (``kurtosisrat``, the ratio
-        kurtosis(y_transform) / kurtosis(y)).
+        Order-free statistics of the changed series: ``mean``, ``median``, ``std``,
+        ``skewnessdiff`` (the difference skew(y_transform) - skew(y)) and ``kurtosisrat``
+        (the ratio kurtosis(y_transform) / kurtosis(y)). The autocorrelation statistics of the
+        same change are in :func:`pyhctsa.operations.correlation.remove_points`.
     """
-    y = np.asarray(y)
-    N = len(y)
+    y = np.asarray(y, dtype=float).ravel()
+    y_transform = bf_remove_points(y, remove_how, p, remove_or_saturate, random_seed)
 
-    is_ = None
-    if remove_how == 'absclose':
-        is_ = np.argsort(-np.abs(y), kind='stable')   # descending abs, ties stable
-    elif remove_how == 'absfar':
-        is_ = np.argsort(np.abs(y), kind='stable')     # ascending abs
-    elif remove_how == 'min':
-        is_ = np.argsort(-y, kind='stable')            # descending y
-    elif remove_how == 'max':
-        is_ = np.argsort(y, kind='stable')             # ascending y
-    elif remove_how == 'random':
-        # random ordering, reproducible: the stable argsort of N uniforms from the portable generator
-        is_ = np.argsort(bf_random(N, bf_random_seed(random_seed)), kind='stable')
-    else:
-        raise ValueError(f"Unknown method '{remove_how}'")
-    
-    # Indices of points to *keep*:
-    # (MATLAB's round: halves go away from zero, unlike Python's round)
-    n_keep = N * (1 - p)
-    n_keep = int(np.floor(n_keep)) + int(n_keep - np.floor(n_keep) >= 0.5)
-    r_keep = np.sort(is_[:n_keep])
-
-    # Indices of points to *transform*:
-    r_transform = np.setdiff1d(np.arange(N), r_keep)
-
-    # Do the removing/saturating to convert y -> y_transform
-    if remove_or_saturate == 'remove':
-        y_transform = y[r_keep]
-    elif remove_or_saturate == 'saturate':
-        # Saturate out the targeted points
-        if remove_how == 'max':
-            y_transform = y.copy()
-            y_transform[r_transform] = np.max(y[r_keep])
-        elif remove_how == 'min':
-            y_transform = y.copy()
-            y_transform[r_transform] = np.min(y[r_keep])
-        elif remove_how == 'absfar':
-            y_transform = y.copy()
-            y_transform[y_transform > np.max(y[r_keep])] = np.max(y[r_keep])
-            y_transform[y_transform < np.min(y[r_keep])] = np.min(y[r_keep])
-        else:
-            raise ValueError(f"Cannot 'saturate' when using '{remove_how}' method")
-    else:
-        raise ValueError(f"Unknown removOrSaturate option '{remove_or_saturate}'")
-    
-    # Compute some autocorrelation properties
-    n = 8
-    acf_y = autocorr(y, list(range(1, n+1)), 'Fourier')
-    acf_y_transform = autocorr(y_transform, list(range(1, n+1)), 'Fourier')
-    # Compute output statistics
     out = {}
-
-    # Helper functions
-    f_abs_diff = lambda x1, x2: np.abs(x1 - x2) # ignores the sign
-    f_ratio = lambda x1, x2: np.divide(x1, x2) # includes the sign
-
-    out['fzcacrat'] = f_ratio(first_crossing(y_transform, 'ac', 0, 'continuous'), 
-                              first_crossing(y, 'ac', 0, 'continuous'))
-    
-    out['ac1rat'] = f_ratio(acf_y_transform[0], acf_y[0])
-    out['ac1diff'] = f_abs_diff(acf_y_transform[0], acf_y[0])
-
-    out['ac2rat'] = f_ratio(acf_y_transform[1], acf_y[1])
-    out['ac2diff'] = f_abs_diff(acf_y_transform[1], acf_y[1])
-    
-    out['ac3rat'] = f_ratio(acf_y_transform[2], acf_y[2])
-    out['ac3diff'] = f_abs_diff(acf_y_transform[2], acf_y[2])
-    
-    out['sumabsacfdiff'] = np.sum(np.abs(acf_y_transform - acf_y))
     out['mean'] = np.mean(y_transform)
     out['median'] = np.median(y_transform)
     out['std'] = np.std(y_transform, ddof=1)
-    
     # difference rather than ratio: a ratio blows up (and changes sign) when skew(y) is near 0
     out['skewnessdiff'] = stats.skew(y_transform) - stats.skew(y)
-    # return kurtosis instead of excess kurtosis
+    # the kurtosis (not the excess kurtosis), as MATLAB
     out['kurtosisrat'] = stats.kurtosis(y_transform, fisher=False) / stats.kurtosis(y, fisher=False)
-
     return out
 
 

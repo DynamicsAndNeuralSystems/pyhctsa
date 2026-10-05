@@ -14,8 +14,8 @@ from statsmodels.tsa.stattools import pacf
 
 from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
-from ..robust import bf_hist_edges, bf_quantile_edges, bf_random
-from ..utils import (_zscore_matlab, bf_remove_points, bin_picker, get_tau, histc, make_mat_buffer,
+from ..robust import bf_hist_edges, bf_quantile_edges, bf_random, bf_remove_points
+from ..utils import (_zscore_matlab, bin_picker, get_tau, histc, make_mat_buffer,
                      matlab_quantile, point_of_crossing, sign_change, theiler_window,
                      time_delay_embed, z_score)
 
@@ -3052,7 +3052,7 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     How the autocorrelation of a time series changes when a set of points is removed or clipped.
 
     A proportion, ``p``, of the points of the (z-scored) series are removed, or saturated,
-    according to a rule (see :func:`~pyhctsa.utils.bf_remove_points`), and the autocorrelation
+    according to a rule (see :func:`~pyhctsa.robust.bf_remove_points`), and the autocorrelation
     structure is compared before and after the change. Removing deletes the chosen points and
     closes up the rest into a shorter series, which splices together points that were not
     neighbors. Saturating keeps them in place but clips their values to the most extreme value
@@ -3080,7 +3080,8 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
         Whether to remove the points ('remove', the default) or to saturate their values
         ('saturate'; not possible with 'absclose' or 'random').
     random_seed : int, optional
-        Seed for ``remove_how='random'`` (as hctsa's ``BF_ResetSeed``; default 0).
+        Seed of the random ordering for ``remove_how='random'`` (see
+        :func:`pyhctsa.robust.bf_random_seed`; default 0).
 
     Returns
     -------

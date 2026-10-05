@@ -134,10 +134,13 @@ class TestDistribution:
                 _check(D.histogram_asymmetry(SERIES[n], nb, simple), ml, f'{key} {n}', rtol=1e-12, atol=1e-12)
 
     def test_remove_points_random_matches_matlab(self):
+        # (the reference files still hold the autocorrelation outputs DN_RemovePoints no longer returns)
+        ac = ('fzcacrat', 'ac1rat', 'ac1diff', 'ac2rat', 'ac2diff', 'ac3rat', 'ac3diff', 'sumabsacfdiff')
         for n, ml in _series('G_rp_rand', ZS):
-            _check(D.remove_points(SERIES[n], 'random', 0.1, 'remove'), ml, f'rp {n}', rtol=1e-8, atol=1e-10)
+            _check(D.remove_points(SERIES[n], 'random', 0.1, 'remove'), ml, f'rp {n}', rtol=1e-8, atol=1e-10, skip=ac)
         for n, ml in _series('G_rp_rand3', ZS):
-            _check(D.remove_points(SERIES[n], 'random', 0.3, 'remove', 3), ml, f'rp seed 3 {n}', rtol=1e-8, atol=1e-10)
+            _check(D.remove_points(SERIES[n], 'random', 0.3, 'remove', 3), ml, f'rp seed 3 {n}',
+                   rtol=1e-8, atol=1e-10, skip=ac)
 
 
 # ------------------------------------------------------------------------------
