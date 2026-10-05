@@ -1619,6 +1619,191 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
     return num_pairs / sum_log  # Takens' estimator: 1 / mean(ln(eup/r))
 
 
+from scipy.optimize import minimize_scalar
+from ..utils import _ml_randperm
+from scipy.special import digamma
+
+
+def _fractal_dim_error(d: float, g: float, kmin: int, kmax: int, mom: np.ndarray) -> float:
+    # Robust (log(1 + e^2/2)) error between the measured k-th-neighbor-distance moments,
+    # mom[kmin:kmax], and the curve expected for dimension d, after fitting the curve's free
+    # overall scale factor (gendimest.cpp's Error_Function, van de Water & Schram 1988).
+    ks = np.arange(kmin, kmax + 1)
+    if g == 0:
+        z = np.exp(digamma(ks) / d)
+    else:
+        z = np.ones(ks.size)  # anchored at k = kmin
+        running = np.cumprod((ks[:-1] + g / d) / ks[:-1])
+        with np.errstate(invalid='ignore'):
+            z[1:] = running ** (1 / g)
+    mk = mom[kmin - 1:kmax]
+    scale_err = lambda a: np.sum(np.log(1 + 0.5 * (mk - a * z) ** 2))
+    a = minimize_scalar(scale_err, bounds=(0, 1e6), method='bounded',
+                        options={'xatol': 1e-5}).x
+    return scale_err(a)
+
+
+def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
+                       nref: Union[int, float] = 0.2, gstart: float = 1, gend: float = 10,
+                       past: Union[int, float, list, tuple] = ('ac', 1), steps: int = 32,
+                       embed_params: Union[list, tuple] = ('ac', 'fnn'),
+                       random_seed: Union[int, None] = 0) -> Union[dict, float]:
+    """
+    The spectrum of generalized (fractal) dimensions of the delay embedding, estimated
+    from nearest-neighbor distances.
+
+    Estimates :math:`D(q)`, the generalized dimension of the time-delay embedding as a
+    function of the order of the moment, from the distances of reference points to their
+    nearest neighbors, by the method of van de Water and Schram [1]_ (that of TSTOOL's
+    ``fracdims``). For each of ``nref`` reference points, the distances to its 1st to
+    ``kmax``-th nearest neighbors are found (excluding a Theiler window of ``past``
+    samples). For each moment order :math:`\\gamma` swept linearly from ``gstart`` to
+    ``gend`` (``steps`` values), the :math:`\\gamma`-th moment of the k-th-neighbor
+    distance across all reference points is
+
+    .. math::
+        M(k) = \\langle r_k^\\gamma \\rangle^{1/\\gamma}
+
+    (or :math:`\\exp\\langle \\ln r_k \\rangle` as :math:`\\gamma \\to 0`), for
+    :math:`k = 1..k_{max}`. Under an assumed dimension :math:`D` the expected relation is
+    :math:`M(k) \\propto (\\Gamma(k + \\gamma/D)/\\Gamma(k))^{1/\\gamma}` (or
+    :math:`\\exp(\\psi(k)/D)` as :math:`\\gamma \\to 0`), up to an overall scale factor that is
+    fitted separately. :math:`D(\\gamma)` is the value that best matches the measured moments
+    :math:`M(k_{min}..k_{max})` under a robust :math:`\\log(1 + e^2/2)` error, found by nested
+    bounded one-dimensional minimizations. Finally :math:`q(\\gamma) = 1 - \\gamma / D(\\gamma)`.
+    The outputs summarize :math:`D` and :math:`q` across the moments, and a straight-line
+    fit of :math:`D` against :math:`q`.
+
+    References
+    ----------
+    .. [1] W. van de Water and P. Schram, "Generalized dimensions from near-neighbor
+        information", Phys. Rev. A 37(8), 3118-3125 (1988). DOI: 10.1103/PhysRevA.37.3118
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    kmin : int, optional
+        Minimum number of neighbors for each reference point. Default is 3.
+    kmax : int, optional
+        Maximum number of neighbors for each reference point. Default is 10.
+    nref : int or float, optional
+        Number of randomly chosen reference points: ``-1`` uses all points, a value in
+        (0, 1) is a proportion of the embedded points. Default is 0.2.
+    gstart, gend : float, optional
+        Starting and ending values of the moment order. Defaults are 1 and 10.
+    past : int, float, or ``['ac', k]``, optional
+        The Theiler window of samples to exclude before and after each reference index (see
+        :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k`` times the first
+        zero-crossing of the autocorrelation function, or a number of samples. Default is
+        ``['ac', 1]``.
+    steps : int, optional
+        Number of moments to calculate. Default is 32.
+    embed_params : [tau, m], optional
+        Embedding parameters: ``tau`` is an integer or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer,
+        or ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in pyhctsa and
+        raises ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+    random_seed : int, optional
+        Seed for choosing the random subsample of reference points (relevant when
+        ``nref != -1``; the subsample differs from MATLAB's). Default is 0.
+
+    Returns
+    -------
+    dict or float
+        ``rangeDq``, ``maxDq``, ``meanDq``: range, maximum and mean of :math:`D` across the
+        moments; ``maxq``, ``rangeq``, ``meanq``: maximum, range and mean of :math:`q`;
+        ``linfit_a``, ``linfit_b``: slope and intercept of a linear fit of :math:`D` against
+        :math:`q`; ``linfit_rmsqres``: root-mean-square residual of that fit. Returns NaN
+        if the Theiler window or delay cannot be set, the embedding fails, ``kmax`` is not
+        smaller than the number of embedded points, or too few neighbors lie outside the
+        Theiler window.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+
+    # Number of reference points
+    if 0 < nref < 1:
+        nref = int(_round_half_away(n * nref))  # a proportion of time-series length
+
+    past = theiler_window(y, past)
+    if np.isnan(past):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    past = int(past)
+
+    # Embed the signal
+    tau, m = _embed_tau_m(y, embed_params)
+    if np.isnan(tau):
+        logger.warning(f'Embedding of the {n}-sample time series failed')
+        return np.nan
+    try:
+        emb = time_delay_embed(y, m, tau)
+    except ValueError as exc:  # too short to embed
+        logger.warning(f'Embedding of the {n}-sample time series failed: {exc}')
+        return np.nan
+    n_emb = emb.shape[0]
+
+    if kmax >= n_emb:  # too many neighbors requested
+        return np.nan
+
+    # Reference points
+    if nref == -1 or nref >= n_emb:
+        ref_idx = np.arange(n_emb)
+    else:
+        ref_idx = _ml_randperm(n_emb, _ml_rng(0 if random_seed is None else int(random_seed)))[:int(nref)] - 1
+    n_ref = ref_idx.size
+
+    # For each reference point, the distances to its 1st..kmax-th nearest neighbors outside
+    # the Theiler window (a KD-tree, over-fetching neighbors to cover those excluded)
+    k_fetch = min(n_emb - 1, kmax + 2 * past + 5)
+    dist, idx = cKDTree(emb).query(emb[ref_idx], k=k_fetch + 1)
+    valid = np.abs(idx - ref_idx[:, None]) > past
+    dist = np.sort(np.where(valid, dist, np.inf), axis=1)[:, :kmax]
+    for ii in np.flatnonzero(valid.sum(axis=1) < kmax):  # fall back to a full search
+        all_dists = np.linalg.norm(emb - emb[ref_idx[ii]], axis=1)
+        all_dists[np.abs(np.arange(n_emb) - ref_idx[ii]) <= past] = np.inf
+        all_dists = np.sort(all_dists)
+        if np.sum(np.isfinite(all_dists)) < kmax:
+            return np.nan  # not enough valid neighbors exist at all
+        dist[ii] = all_dists[:kmax]
+    # dist[i, k]: the i-th reference point's distance to its (k+1)-th nearest neighbor
+
+    # Sweep the moment order and fit a dimension D(gamma) to each
+    gammas = np.linspace(gstart, gend, int(steps)) if (gend - gstart > 0 and steps > 1) \
+        else np.array([gstart], dtype=float)
+    dq = np.zeros(gammas.size)
+    q = np.zeros(gammas.size)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        for gi, g in enumerate(gammas):
+            # gamma-th moment of the k-th-neighbor distance, across reference points
+            if g == 0:
+                mom = np.exp(np.mean(np.log(dist), axis=0))
+            else:
+                mom = np.mean(dist ** g, axis=0) ** (1 / g)
+            dq[gi] = minimize_scalar(
+                lambda d: _fractal_dim_error(d, g, kmin, kmax, mom),
+                bounds=(max(0.05, -g / kmin), 128), method='bounded',
+                options={'xatol': 1e-4}).x
+            q[gi] = 1 - g / dq[gi]
+
+    out = {}
+    out['rangeDq'] = np.ptp(dq)
+    out['maxDq'] = np.max(dq)
+    out['meanDq'] = np.mean(dq)
+    out['maxq'] = np.max(q)
+    out['rangeq'] = np.ptp(q)
+    out['meanq'] = np.mean(q)
+
+    # Linear fit of D against q
+    p = np.polyfit(q, dq, 1)
+    res = np.polyval(p, q) - dq
+    out['linfit_a'] = p[0]
+    out['linfit_b'] = p[1]
+    out['linfit_rmsqres'] = np.sqrt(np.mean(res ** 2))
+    return out
+
+
 def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
     """Counts of points per box, where the boxes are quantiles along each axis."""
     props = np.arange(nbox + 1) / nbox
