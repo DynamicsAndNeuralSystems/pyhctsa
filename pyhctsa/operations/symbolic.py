@@ -20,8 +20,9 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     Coarse-grains the time series, turning it into a sequence of symbols of a 
     given alphabet size (`num_groups`), and quantifies measures of surprise of 
     a process with local memory of the past `memory` values of the symbolic string.
-    For each sample, the 'information gained' (log(1/p)) is estimated using expectations 
-    calculated from the previous `memory` samples.
+    For each test point, the 'information gained' (log(1/p)) is estimated using expectations
+    calculated from the previous `memory` samples. The test points are every point with a full
+    memory before it, or, for long series, a fixed subsample of ``num_iters`` of them.
 
     Parameters
     ----------
@@ -62,9 +63,12 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
         Default is ``'quantile'``.
 
     num_iters : int, optional
-        The number of iterations to repeat the procedure for. Default is 500.
+        The number of test points to use. If there are at most ``2 * num_iters`` points with a
+        full memory before them, all of them are used; otherwise ``num_iters`` of them, spread
+        evenly by a golden-ratio sequence (deterministic, and free of aliasing with periodic
+        series). Default is 500.
     random_seed : int, optional
-        Whether (and how) to reset the random seed. Default is 0.
+        Ignored: the test points are deterministic. Kept so that existing calls still run.
 
     Returns
     -------
@@ -81,10 +85,12 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
           information gain from 1 nat,
         - 'tstat': ``effectSize * sqrt(number of test points)``.
 
-        All NaN if the coarse-graining is undefined (the embedding delay for
+        All NaN if there is no test point (the series is no longer than ``memory``) or if the
+        coarse-graining is undefined (the embedding delay for
         'embed2quadrants'/'embed2octants' cannot be determined: a constant series, or
-        ``'ac1e'`` for a series whose autocorrelation function never falls to 1/e). ``effectSize`` and ``tstat`` are NaN if
-        the information gain has no variation.
+        ``'ac1e'`` for a series whose autocorrelation function never falls to 1/e). ``effectSize``
+        and ``tstat`` are NaN if the information gain does not vary (its standard deviation at
+        rounding level relative to its mean, e.g. for a perfectly periodic series).
     """
 
     if (memory > 0) and (memory < 1): #specify memory as a proportion of the time series length
@@ -103,11 +109,16 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     num_iters = int(num_iters)
     memory = int(memory)
 
-    # Use random sampling (original behavior)
-    if random_seed is not None:
-        np.random.seed(random_seed)
-    rs = np.random.permutation(int(N - memory)) + memory
-    rs = np.sort(rs[0:min(num_iters, len(rs))])
+    # Select the test points (0-based; can't test the beginning of the time series, up to memory)
+    num_available = N - memory
+    if num_available <= 2 * num_iters:
+        rs = np.arange(memory, N)  # every point with a full memory before it
+    else:
+        # num_iters points spread over the available range by a golden-ratio sequence
+        rs = np.unique(memory + np.floor(num_available * np.mod(np.arange(1, num_iters + 1) * 0.6180339887498949, 1)).astype(int))
+    if rs.size == 0:  # the series is no longer than the memory: no test points
+        return {k: np.nan for k in ('min', 'max', 'median', 'mean', 'sum', 'std', 'lq', 'uq',
+                                    'propUnseen', 'effectSize', 'tstat')}
     rs = np.array([rs])
 
     # The alphabet size for the Krichevsky-Trofimov smoothing below. For
@@ -189,12 +200,14 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     out['propUnseen'] = prop_unseen
 
     # Standardized distance of the mean information gain from 1 (the length-stable form),
-    # and the corresponding t-statistic, which grows with the number of test points
-    if out['std'] == 0 or np.isnan(out['std']):
-        out['effectSize'] = np.nan  # can't compute this if there is no variation
+    # and the corresponding t-statistic, which grows with the number of test points. When the
+    # surprise does not vary (std at rounding level relative to the mean, e.g. for a perfectly
+    # periodic series) the ratio is rounding noise, so both are NaN
+    if not out['std'] >= 1e-8 * out['mean']:
+        out['effectSize'] = np.nan
         out['tstat'] = np.nan
     else:
-        out['effectSize'] = np.abs((out['mean'] - 1) / out['std'])
+        out['effectSize'] = np.abs(out['mean'] - 1) / out['std']
         out['tstat'] = out['effectSize'] * np.sqrt(num_test)
 
     return out
