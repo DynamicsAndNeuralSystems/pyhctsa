@@ -339,6 +339,11 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
             - 'sampen{m}': Sample entropy for each m from 0 to M
             - 'quadSampEn{m}': Quadratic sample entropy for each m
             - 'meanchsampen': Mean change in sample entropy values
+
+        As in hctsa's ``sampen_mex``, ``sampen{k}`` (and ``quadSampEn{k}``) is NaN for
+        ``k >= 1`` when no template of length ``k`` matched (there are no matches to
+        form the ratio of), and 0 when templates of length ``k`` matched but none of
+        length ``k + 1`` did.
     """
     m = int(m)
     y = np.asarray(y, dtype=np.float64)

@@ -53,6 +53,18 @@ Additional information is available at:
 #include <numpy/arrayobject.h>
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+
+/* The extension is built with -ffast-math, which lets the compiler assume that
+   NaN and Inf never occur; values that must be NaN/Inf are therefore written
+   from their IEEE bit patterns. */
+static double ieee_value(uint64_t bits)
+{
+    double d;
+    memcpy(&d, &bits, sizeof d);
+    return d;
+}
 
 /* Core sampen calculation function - unchanged from original */
 static void sampen_core(double *y, int M, double r, int n, double *sampEnt)
@@ -120,16 +132,19 @@ static void sampen_core(double *y, int M, double r, int n, double *sampEnt)
     }
     
     /* Calculate sample entropy */
+    /* As hctsa's sampen_mex.c: p = A/B is 0/0 = NaN when no template of the
+       shorter length matched (SampEn is then NaN), and a zero count of matches
+       at this length gives 0 (for m >= 1) rather than Inf. */
     N = (long) (n * (n - 1) / 2);
     if (N > 0) {
         p[0] = A[0] / N;
-        sampEnt[0] = (p[0] > 0) ? -log(p[0]) : 0;
+        sampEnt[0] = (p[0] > 0) ? -log(p[0]) : ieee_value(0x7ff0000000000000ULL); /* Inf */
         for (m = 1; m < M-1; m++) {
             if (B[m - 1] > 0) {
                 p[m] = A[m] / B[m - 1];
                 sampEnt[m] = (p[m] > 0) ? -log(p[m]) : 0;
             } else {
-                sampEnt[m] = 0;
+                sampEnt[m] = ieee_value(0x7ff8000000000000ULL); /* NaN */
             }
         }
     }
