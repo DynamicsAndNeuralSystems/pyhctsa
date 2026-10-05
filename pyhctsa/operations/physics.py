@@ -127,15 +127,14 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
         w[1] = y[1]
         for i in range(2, N):
             w_inert = w[i-1] + (w[i-1] - w[i-2])
-            w_mom = w_inert + (y[i] - w_inert) / m  # dissipative term
-            # MATLAB: if im > wl, with im the 1-based index (= i + 1 here).
-            if i + 1 > wl:
-                # MATLAB windows are y(im-wl:im) / w(im-wl:im): inclusive of the
-                # current index -> wl+1 samples. w[i] is still 0 at this point
-                # (not yet assigned), exactly mirroring MATLAB reading the
-                # unwritten w(i). Slicing i-wl : i+1 reproduces both.
-                sy = np.std(y[i-wl:i+1], ddof=1)
-                sw = np.std(w[i-wl:i+1], ddof=1)
+            w_mom = w_inert + (y[i-1] - w_inert) / m  # dissipative term
+            # MATLAB: if i > wl + 1, with i the 1-based index (= i + 1 here).
+            if i > wl:
+                # w[i] is not yet computed, so the local std of the walker is
+                # built from its previous wl values plus the provisional w_mom.
+                # The series is read one step lagged: y[i-wl-1 : i] (wl+1 samples).
+                sy = np.std(y[i-wl-1:i], ddof=1)
+                sw = np.std(np.append(w[i-wl:i], w_mom), ddof=1)
                 w[i] = w_mom * (sy / sw)
             else:
                 w[i] = w_mom
