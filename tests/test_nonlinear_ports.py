@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from pyhctsa.operations import nonlinearity as nl
+from pyhctsa.toolboxes.Tisean_3_0_1 import tisean as _tisean
 
 
 def _x(n=400):
@@ -47,3 +48,37 @@ def test_fnn():
     assert nl.fnn(_x(), 1, 10, ('ac', 1), True, 0.4, 5) == 3
     assert nl.fnn(_x(), 'ac', escape_factor=5, just_best=True, bestp=0.05) == 5
     assert np.isnan(nl.fnn(_x()[:8])) and np.isnan(nl.fnn(np.ones(100)))
+
+
+def _x600():
+    return _x(600)
+
+
+def test_tisean_c1():
+    x = _x600()
+    # the c1 + c2d -a2 output of the TISEAN binary (-d1 -m1 -M5 -t12 -n300): [length scale, slope]
+    curves = nl._c2d_slopes(nl._c1_curves(x, 1, 1, 5, 12, 300))
+    assert [c.shape[0] for c in curves] == [14] * 5
+    for blk, first, last in [(0, (0.00588210579, 1.00610375), (0.876543283, 0.908076644)),
+                             (2, (0.201452777, 2.90096092), (1.58953869, 1.4778477)),
+                             (4, (0.342286617, 3.37284517), (1.94325423, 1.78551936))]:
+        np.testing.assert_allclose(curves[blk][0], first, rtol=1e-8)
+        np.testing.assert_allclose(curves[blk][-1], last, rtol=1e-8)
+    # hctsa's NL_c1 (MATLAB)
+    d = nl.tisean_c1(x, 1, [1, 5], 0.02, 0.5)
+    assert abs(d['bestestd'] - 0.990854776154) < 1e-8 and abs(d['bestestdstd'] - 0.0251984141023) < 1e-8
+    assert abs(d['bestgoodness'] + 0.0398015858977) < 1e-8 and abs(d['mediand'] - 2.723457766) < 1e-8
+    assert abs(d['maxd'] - 3.5391226425) < 1e-8 and abs(d['meanstd'] - 0.0496644940833) < 1e-8
+    assert abs(d['longestscr'] - 4.61435478461) < 1e-8
+    d = nl.tisean_c1(x, 'ac', [2, 4], 10, 150)
+    assert abs(d['bestestd'] - 1.92153167667) < 1e-8 and abs(d['ranged'] - 0.896392209048) < 1e-8
+    assert abs(d['longestscr'] - 1.70608968983) < 1e-8
+    # a length with remainder <= 6 on division by 128 loses its last point, as in hctsa
+    d = nl.tisean_c1(x[:512], 1, [1, 5], 0.02, 0.5)
+    assert abs(d['bestestd'] - 0.983567228923) < 1e-8 and abs(d['longestscr'] - 4.72561510696) < 1e-8
+    assert d == nl.tisean_c1(x[:511], 1, [1, 5], 0.02, 0.5)
+    assert np.isnan(nl.tisean_c1(x[:99])) and np.isnan(nl.tisean_c1(np.ones(300)))
+    # TISEAN's c1 never finishes here (too few neighbors outside the Theiler window): hctsa gives up
+    assert np.isnan(nl.tisean_c1(x[:520], 2, [3, 6], 0.05, 0.3))
+    with pytest.raises(ValueError):
+        nl.tisean_c1(x, 'nonsense')
