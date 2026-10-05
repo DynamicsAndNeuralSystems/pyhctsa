@@ -306,6 +306,355 @@ def armax(y: ArrayLike, orders: Union[list, tuple] = (3, 3), p_train: float = 0.
     out.update(residual_analysis(m_residuals, y_test, 'full'))
     return out
 
+def _ar_pe_rmse(data: np.ndarray, order: int) -> float:
+    """
+    RMS in-sample prediction error of an AR model fitted by MATLAB's default ``ar`` method
+    (forward-backward least squares): ``sqrt(mean(pe(ar(data, order), data).^2))``. As in
+    ``pe``, the errors of the first ``order`` samples are zero.
+    """
+    n = len(data)
+    lagged = np.column_stack([data[order - j - 1:n - j - 1] for j in range(order)])
+    ahead = np.column_stack([data[j + 1:n - order + j + 1] for j in range(order)])
+    theta = np.linalg.lstsq(np.vstack([lagged, ahead]),
+                            np.concatenate([data[order:], data[:n - order]]), rcond=None)[0]
+    e = np.zeros(n)
+    e[order:] = data[order:] - lagged @ theta
+    return float(np.sqrt(np.mean(e ** 2)))
+
+
+def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
+    """
+    Whiten a time series by comparing a range of preprocessings (hctsa's ``BF_Whiten``).
+
+    ``'none'`` leaves the series alone; ``'detrend'`` removes a linear trend; ``'ar'``
+    removes a linear trend and then applies (``PP_PreProcess(y, 'ar', 2, 0.05, 0)``) the
+    preprocessing, from differencing (``d1`` to ``d3``), piecewise polynomial detrending
+    (``p1_5`` ... ``p2_40``) and rank-mapping onto a Gaussian (``rmgd``), after which the
+    z-scored series is the hardest for an AR(2) model to predict. It has to beat doing
+    nothing by 5% for a preprocessing to be applied. The random draws of ``rmgd`` are
+    NumPy's, seeded as ``BF_ResetSeed`` (``None``/``'default'``: seed 0, ``'none'``: NumPy's
+    global state, or an integer seed).
+    """
+    from scipy.signal import detrend
+    y = np.asarray(y, dtype=float).ravel()
+    if pre_proc in ('nothing', 'none'):
+        return y
+    y = detrend(y)
+    if pre_proc == 'detrend':
+        return y
+    if pre_proc != 'ar':
+        raise ValueError(f"Unknown preprocessing setting '{pre_proc}'")
+
+    def zscore(v):  # as MATLAB's zscore: a constant series becomes zeros
+        sd = np.std(v, ddof=1)
+        return v - np.mean(v) if sd == 0 else (v - np.mean(v)) / sd
+
+    n = len(y)
+    candidates = {'nothing': y, 'd1': np.diff(y, 1), 'd2': np.diff(y, 2), 'd3': np.diff(y, 3)}
+    for order in (1, 2):
+        for num_bits in (5, 10, 20, 40):
+            bits = np.round(np.linspace(0, n, num_bits + 1)).astype(int)
+            ydt = np.zeros(n)
+            for k in range(num_bits):
+                seg = y[bits[k]:bits[k + 1]]
+                x = np.arange(1, len(seg) + 1, dtype=float)
+                ydt[bits[k]:bits[k + 1]] = seg - np.polynomial.Polynomial.fit(x, seg, order)(x)
+            candidates[f'p{order}_{num_bits}'] = zscore(ydt)
+    # rank-map onto a Gaussian distribution (stochastic)
+    if isinstance(random_seed, str) and random_seed == 'none':
+        draws = np.random.randn(n)
+    else:
+        seed = 0 if random_seed is None or random_seed == 'default' else int(random_seed)
+        draws = _ml_rng(seed).standard_normal(n)
+    rmgd = np.zeros(n)
+    rmgd[np.argsort(y, kind='stable')] = np.sort(draws)
+    candidates['rmgd'] = rmgd
+    # (hctsa's log, log returns, Box-Cox and square-root versions need a positive series,
+    # which a detrended series never is)
+
+    names = list(candidates)
+    rmse = np.array([_ar_pe_rmse(zscore(candidates[k]), 2) for k in names])
+    if np.any(rmse > rmse[0] * 1.05):
+        return candidates[names[int(np.argmax(rmse))]]
+    return candidates['nothing']
+
+
+def _arch_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
+    """
+    p-values of Engle's ARCH test at lags ``1..max_lag`` (MATLAB's ``archtest``): the
+    test statistic is ``(N - lag) R^2`` for the regression of the squared series on a
+    constant and ``lag`` of its own lags, referred to a chi-squared distribution with
+    ``lag`` degrees of freedom.
+    """
+    from scipy.stats import chi2
+    x2 = np.asarray(x, dtype=float) ** 2
+    n = len(x2)
+    pvals = np.zeros(max_lag)
+    for lag in range(1, max_lag + 1):
+        resp = x2[lag:]
+        design = np.column_stack([np.ones(n - lag)] + [x2[lag - j:n - j] for j in range(1, lag + 1)])
+        fitted = design @ np.linalg.lstsq(design, resp, rcond=None)[0]
+        fitted = fitted - np.mean(fitted)
+        resp = resp - np.mean(resp)
+        r2 = (fitted @ fitted) / (resp @ resp)
+        pvals[lag - 1] = chi2.sf(r2 * (n - lag), lag)
+    return pvals
+
+
+def _lbq_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
+    """
+    p-values of the Ljung-Box Q-test at lags ``1..max_lag`` (MATLAB's ``lbqtest``, with the
+    degrees of freedom equal to the lag).
+    """
+    from scipy.stats import chi2
+    x = np.asarray(x, dtype=float)
+    n = len(x)
+    xc = x - np.mean(x)
+    denom = xc @ xc
+    acf = np.array([xc[k:] @ xc[:n - k] for k in range(1, max_lag + 1)]) / denom
+    stat = n * (n + 2) * np.cumsum(acf ** 2 / (n - np.arange(1, max_lag + 1)))
+    return chi2.sf(stat, np.arange(1, max_lag + 1))
+
+
+def _garch_estimate(y: np.ndarray, P: int, Q: int, model_type: str = 'garch',
+                    innovation_dist: str = 'gaussian') -> dict:
+    """
+    Maximum-likelihood fit of a zero-mean conditional variance model (the equivalent of
+    MATLAB's ``estimate`` on ``garch(P, Q)``, ``gjr(P, Q)`` or ``egarch(P, Q)`` with a free
+    constant), using the ``arch`` package.
+
+    ``P`` is the GARCH degree (lagged conditional variances) and ``Q`` the ARCH degree (lagged
+    squared innovations; ``arch``'s ``p``). As ``estimate``, the presample variance and squared
+    innovation are the mean of the squared series, and the covariance of the estimates is the
+    inverse of the outer product of the per-observation score vectors.
+
+    Returns a dict with the parameters in MATLAB's order (``constant``, ``garch``, ``arch``,
+    ``leverage``, ``dof``), their covariance matrix ``cov`` (in the same order), the
+    log-likelihood ``llf``, the conditional variances ``sigma2``, and ``exitflag``.
+    """
+    from arch import arch_model
+    from statsmodels.tools.numdiff import approx_fprime
+    dist = {'gaussian': 'normal', 't': 't'}.get(innovation_dist)
+    if dist is None:
+        raise ValueError(f"Unknown innovationDist '{innovation_dist}' (should be 'gaussian' or 't')")
+    if model_type not in ('garch', 'gjr', 'egarch'):
+        raise ValueError(f"Unknown modelType '{model_type}' (should be 'garch', 'gjr', or 'egarch')")
+    asym = model_type in ('gjr', 'egarch')
+    model = arch_model(y, mean='Zero', vol='EGARCH' if model_type == 'egarch' else 'GARCH',
+                       p=Q, o=Q if asym else 0, q=P, dist=dist, rescale=False)
+    backcast = np.mean(y ** 2)
+    if model_type == 'egarch':
+        backcast = np.log(backcast)  # (arch expects the log variance for an EGARCH backcast)
+    res = model.fit(disp='off', show_warning=False, backcast=backcast)
+    params = res.params
+    if not np.all(np.isfinite(params.values)):
+        raise ValueError('GARCH fit failed (non-finite parameter estimates)')
+
+    # Standard errors: outer product of gradients of the per-observation log-likelihood
+    resids = model.resids(model.starting_values())
+    kwargs = dict(sigma2=np.zeros(len(y)), backcast=backcast,
+                  var_bounds=model.volatility.variance_bounds(resids), individual=True)
+    scores = approx_fprime(params.values, model._loglikelihood, kwargs=kwargs)
+    cov = np.linalg.pinv(scores.T @ scores)
+
+    # Reorder from arch's (omega, alpha, gamma, beta, nu) to MATLAB's (K, GARCH, ARCH, Leverage, DoF)
+    names = list(params.index)
+    order = ([names.index('omega')]
+             + [names.index(f'beta[{i}]') for i in range(1, P + 1)]
+             + [names.index(f'alpha[{i}]') for i in range(1, Q + 1)]
+             + ([names.index(f'gamma[{i}]') for i in range(1, Q + 1)] if asym else [])
+             + ([names.index('nu')] if dist == 't' else []))
+    p = params.values[order]
+    return {'constant': p[0], 'garch': p[1:1 + P], 'arch': p[1 + P:1 + P + Q],
+            'leverage': p[1 + P + Q:1 + P + 2 * Q] if asym else np.array([]),
+            'dof': p[-1] if dist == 't' else np.nan,
+            'cov': cov[np.ix_(order, order)], 'llf': float(res.loglikelihood),
+            'sigma2': np.asarray(res.conditional_volatility) ** 2,
+            'exitflag': 1 if res.convergence_flag == 0 else 0}
+
+
+def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
+              random_seed: Union[int, str, None] = None, model_type: str = 'garch',
+              innovation_dist: str = 'gaussian') -> dict:
+    """
+    Fits a GARCH-family model to the series and reports the fit and the standardized residuals.
+
+    The series is whitened and z-scored, so the model is of the variance around a zero mean
+    (hctsa's ``MF_GARCHfit``; MATLAB's ``garch``/``gjr``/``egarch`` and ``estimate``, here fitted
+    with the ``arch`` package). Statistics are the fitted parameters and their errors, the
+    log-likelihood and information criteria, the persistence of the fitted variance process,
+    summaries of the conditional variance series, and how well the standardized residuals pass
+    tests for remaining ARCH effects (Engle's ARCH test and the Ljung-Box Q-test) compared to
+    the series itself, and :func:`residual_analysis` of the standardized residuals.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    preproc : {'ar', 'none'}, optional
+        The preprocessing applied before the fit: ``'ar'`` (default) replaces the series by
+        the preprocessing (from differencing, piecewise polynomial detrending, rank-mapping to
+        a Gaussian) that maximizes whiteness under an AR(2) model, if it beats the
+        unprocessed series by 5%; ``'none'`` applies none (the series is linearly
+        detrended and z-scored either way).
+    P : int, optional
+        The GARCH degree: the number of lagged conditional variances. Default is 1.
+    Q : int, optional
+        The ARCH degree: the number of lagged squared innovations. Default is 1.
+    random_seed : int, 'default', 'none' or None, optional
+        How to seed the random draws used by the whitening (``rmgd``), as ``BF_ResetSeed``.
+        Default is ``None`` (seed 0). The draws are NumPy's, not MATLAB's ``randn`` stream.
+    model_type : {'garch', 'gjr', 'egarch'}, optional
+        The conditional variance model: ``'garch'`` (default, symmetric response to shocks),
+        ``'gjr'`` (GJR-GARCH, adds a leverage term so negative and positive shocks can have
+        different effects on variance) or ``'egarch'`` (exponential GARCH, models the log
+        variance, also asymmetric).
+    innovation_dist : {'gaussian', 't'}, optional
+        The assumed innovation distribution: ``'gaussian'`` (default) or ``'t'`` (Student's t,
+        which estimates a degrees-of-freedom parameter to capture fat tails).
+
+    Returns
+    -------
+    dict
+        - ``constant``, ``constanterr``: the constant term of the variance equation and its error
+        - ``offset``: the mean offset of the model (0 for a z-scored series)
+        - ``GARCH_i``, ``GARCHerr_i`` (i = 1..P), ``ARCH_i``, ``ARCHerr_i`` (i = 1..Q): the
+          coefficients of the lagged variances and innovations, and their errors
+        - ``leverage``, ``leverageerr``: the leverage coefficient and its error (``'gjr'`` and
+          ``'egarch'`` only, otherwise NaN)
+        - ``distDoF``: the degrees of freedom of a Student's t distribution (otherwise NaN)
+        - ``LLF``, ``aic``, ``bic``: the log-likelihood, AIC and BIC per observation
+        - ``summaryexitflag``: 1 if the optimizer converged, otherwise 0 (MATLAB's ``estimate``
+          reports 1 or 2 on convergence)
+        - ``persistence``: the sum of the ARCH and GARCH coefficients (plus half the leverage
+          coefficient for ``'gjr'``; NaN for ``'egarch'``)
+        - ``uncondVar``: the implied long-run variance (NaN if persistence is 0.999 or more,
+          or for ``'egarch'``)
+        - ``maxsigma``, ``minsigma``, ``rangesigma``, ``stdsigma``, ``meansigma``: summaries of
+          the conditional variance series
+        - ``engle_mean_diff_p``, ``engle_max_diff_p``, ``lbq_mean_diff_p``, ``lbq_max_diff_p``:
+          the mean and maximum, over lags 1 to 20, of the change in p-value of Engle's ARCH test
+          (series to standardized residuals) and of the Ljung-Box Q-test (squared series to
+          squared standardized residuals)
+        - ``engle_pval_stde_1``, ``_5``, ``_10``, ``minenglepval_stde``, ``maxenglepval_stde``:
+          p-values of Engle's ARCH test on the standardized residuals
+        - ``lbq_pval_stde_1``, ``_5``, ``_10``, ``minlbqpval_stde2``, ``maxlbqpval_stde2``:
+          p-values of the Ljung-Box Q-test on the squared standardized residuals
+        - ``ac1_stde2``: lag-1 autocorrelation of the squared standardized residuals
+        - ``diff_ac1``: lag-1 autocorrelation of the squared series minus ``ac1_stde2``
+        - ``zres_*``: :func:`residual_analysis` of the standardized residuals
+          (``zres_meane``, ``zres_meanabs``, ``zres_stde``, ``zres_maxonstd``, ``zres_ac1``,
+          ``zres_ac2``, ``zres_ac3``, ``zres_propbth``, ``zres_ftbth``, ``zres_taurat``,
+          ``zres_normksstat``, ``zres_sws``, ``zres_swm``, ``zres_popt``, ``zres_minsbc``)
+
+    Notes
+    -----
+    The fit uses ``arch`` rather than MATLAB's Econometrics Toolbox, so the optimizer and the
+    point it stops at differ slightly: parameters agree to about 1e-3 where the likelihood is
+    well-determined, but poorly identified fits (series with no volatility clustering, where
+    the coefficients sit at their bounds) can land on different points of a flat likelihood
+    and give very different errors. The log-likelihood agrees closely. The presample variance
+    is the mean of the squared series and the errors come from the outer product of
+    gradients, as in MATLAB.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    P, Q = int(P), int(Q)
+    out = {}
+
+    # (1) Whiten and z-score
+    y = _whiten(y, preproc, random_seed)
+    y = z_score(y)
+    n = len(y)
+
+    # (2) Pre-estimation tests on the (whitened) series
+    engle_y = _arch_test_pvalues(y)
+    lbq_y2 = _lbq_test_pvalues(y ** 2)
+
+    # (3) Fit the model
+    try:
+        fit = _garch_estimate(y, P, Q, model_type, innovation_dist)
+    except (ValueError, np.linalg.LinAlgError, FloatingPointError) as err:
+        raise ValueError('GARCH fit failed (data does not allow a valid GARCH model '
+                         f'to be estimated): {err}') from err
+    errors = np.sqrt(np.abs(np.diag(fit['cov'])))
+    llf = fit['llf']
+    garch_c, arch_c, lev_c = fit['garch'], fit['arch'], fit['leverage']
+
+    # (4) Statistics on the fit
+    out['constant'] = fit['constant']
+    out['constanterr'] = errors[0]
+    out['offset'] = 0.0
+    for i in range(1, P + 1):
+        out[f'GARCH_{i}'] = garch_c[i - 1]
+        out[f'GARCHerr_{i}'] = errors[i]
+    for i in range(1, Q + 1):
+        out[f'ARCH_{i}'] = arch_c[i - 1]
+        out[f'ARCHerr_{i}'] = errors[P + i]
+    if lev_c.size > 0:
+        out['leverage'] = lev_c[0]
+        out['leverageerr'] = errors[1 + P + Q]
+    else:
+        out['leverage'] = np.nan
+        out['leverageerr'] = np.nan
+    out['distDoF'] = fit['dof'] if innovation_dist == 't' else np.nan
+
+    out['LLF'] = llf / n  # log-likelihood per observation
+    out['summaryexitflag'] = fit['exitflag']
+
+    n_params = int(np.sum(np.any(fit['cov'] != 0, axis=0)))
+    out['aic'] = (-2 * llf + 2 * n_params) / n
+    out['bic'] = (-2 * llf + n_params * np.log(n)) / n
+
+    # Persistence of the variance process and the implied unconditional variance
+    if model_type == 'garch':
+        persistence = np.sum(garch_c) + np.sum(arch_c)
+    elif model_type == 'gjr':
+        persistence = np.sum(garch_c) + np.sum(arch_c) + np.sum(lev_c) / 2
+    else:  # egarch: no simple coefficient sum
+        persistence = np.nan
+    out['persistence'] = persistence
+    out['uncondVar'] = fit['constant'] / (1 - persistence) if persistence < 0.999 else np.nan
+
+    # Sigmas, the time series of conditional variances
+    sigmas = fit['sigma2']
+    out['maxsigma'] = np.max(sigmas)
+    out['minsigma'] = np.min(sigmas)
+    out['rangesigma'] = np.max(sigmas) - np.min(sigmas)
+    out['stdsigma'] = np.std(sigmas, ddof=1)
+    out['meansigma'] = np.mean(sigmas)
+
+    # Check the standardized residuals: residuals (mean process minus data)
+    stde = (0.0 - y) / np.sqrt(sigmas)
+    stde2 = stde ** 2
+    engle_stde = _arch_test_pvalues(stde)
+    lbq_stde2 = _lbq_test_pvalues(stde2)
+
+    out['engle_mean_diff_p'] = np.mean(engle_stde - engle_y)
+    out['engle_max_diff_p'] = np.max(engle_stde - engle_y)
+    out['lbq_mean_diff_p'] = np.mean(lbq_stde2 - lbq_y2)
+    out['lbq_max_diff_p'] = np.max(lbq_stde2 - lbq_y2)
+
+    out['engle_pval_stde_1'] = engle_stde[0]
+    out['engle_pval_stde_5'] = engle_stde[4]
+    out['engle_pval_stde_10'] = engle_stde[9]
+    out['minenglepval_stde'] = np.min(engle_stde)
+    out['maxenglepval_stde'] = np.max(engle_stde)
+
+    out['lbq_pval_stde_1'] = lbq_stde2[0]
+    out['lbq_pval_stde_5'] = lbq_stde2[4]
+    out['lbq_pval_stde_10'] = lbq_stde2[9]
+    out['minlbqpval_stde2'] = np.min(lbq_stde2)
+    out['maxlbqpval_stde2'] = np.max(lbq_stde2)
+
+    # Statistics on the standardized innovations, prefixed zres_
+    for key, value in residual_analysis(stde, y, 'full').items():
+        out[f'zres_{key}'] = value
+
+    out['ac1_stde2'] = autocorr(stde2, [1], 'Fourier')[0]
+    out['diff_ac1'] = autocorr(y ** 2, [1], 'Fourier')[0] - out['ac1_stde2']
+    return out
+
+
 def _ar_fb(seg: np.ndarray, order: int) -> tuple:
     """
     AR model by forward-backward least squares (MATLAB's default ``ar`` estimator).
