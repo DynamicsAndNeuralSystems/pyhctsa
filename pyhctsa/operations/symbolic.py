@@ -47,14 +47,18 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
         information and the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`), or ``'tau'``
         (the first zero-crossing of the autocorrelation function, kept for backward
         compatibility). Default is 3.
-    coarse_grain_method : {'quantile', 'updown', 'embed2quadrants'}, optional
-        The coarse-graining or symbolization method:
+    coarse_grain_method : {'quantile', 'diff', 'updown', 'embed2quadrants', 'embed2octants'}, optional
+        The coarse-graining or symbolization method (see :func:`coarse_grain`):
 
         - 'quantile': equiprobable alphabet by value of each time-series datapoint (default),
-        - 'updown': equiprobable alphabet by incremental changes in the time-series values,
-        - 'embed2quadrants': 4-letter alphabet of the quadrant each data point resides in a 
-            2D embedding space.
-        
+        - 'diff': equiprobable alphabet by the value of the incremental changes in the
+          time series (not a literal sign split; called 'updown' before it was renamed in hctsa),
+        - 'updown': a binary split by the sign of each increment (requires ``num_groups=2``;
+          not equiprobable),
+        - 'embed2quadrants': 4-letter alphabet of the quadrant each data point resides in a
+          2D embedding space,
+        - 'embed2octants': 8-letter alphabet of the octant each data point resides in.
+
         Default is ``'quantile'``.
 
     num_iters : int, optional
@@ -1114,13 +1118,19 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str]) -> np.nda
         The method of coarse-graining.
         Options: 
 
-        - 'updown'
-        - 'quantile'
-        - 'embed2quadrants'
-        - 'embed2octants'
-        
+        - 'quantile': an equiprobable alphabet by the value of each point,
+        - 'diff': as 'quantile', but applied to the increments ``diff(y)``: an equiprobable
+          alphabet by the *value* of each increment (not a literal sign split; this was called
+          'updown' before hctsa renamed it),
+        - 'updown': a true binary up/down split by the raw sign of each increment
+          (``diff(y) > 0`` gives symbol 2, otherwise 1); ``num_groups`` must be 2. Unlike the
+          other methods this is NOT equiprobable: the two states can be arbitrarily
+          imbalanced for a drifting series,
+        - 'embed2quadrants', 'embed2octants': the alphabet is the quadrant (4 symbols) or
+          octant (8 symbols) of each point of a 2-D time-delay embedding.
+
     num_groups : int or str
-        The size of the alphabet for 'quantile' and 'updown', or the
+        The size of the alphabet for 'quantile' and 'diff' (must be 2 for 'updown'), or the
         time delay for the embedding methods: a number of samples, or a string that sets it
         from the series: ``'ac1e'`` (the floor of the first 1/e crossing of the
         autocorrelation function), ``'mi'`` (the smaller of the first minimum of the Kraskov
@@ -1139,14 +1149,26 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str]) -> np.nda
     y = np.asarray(y)
     N = len(y)
 
-    if how_to_cg not in ['updown', 'quantile', 'embed2quadrants', 'embed2octants']:
+    if how_to_cg not in ['updown', 'diff', 'quantile', 'embed2quadrants', 'embed2octants']:
         raise ValueError(f"Unknown coarse-graining method '{how_to_cg}'")
 
+    if how_to_cg == 'updown' and num_groups != 2:
+        raise ValueError(f"'updown' is a true binary up/down split: num_groups must be 2 "
+                         f"(got {num_groups}). Use 'diff' for a multi-level equiprobable "
+                         "alphabet of the increments.")
+
     # Some coarse-graining/symbolization methods require initial processing:
-    if how_to_cg == 'updown':
+    yth = None  # Ensure yth is always defined
+    if how_to_cg == 'diff':
         y = np.diff(y)
         N = N - 1 # the time series is one value shorter than the input because of differencing
         how_to_cg = 'quantile' # successive differences and then quantiles
+
+    elif how_to_cg == 'updown':
+        # True binary up/down split: 2 if the increment is positive, 1 otherwise
+        y = np.diff(y)
+        N = N - 1
+        yth = 1 + (y > 0).astype(int)
 
     elif how_to_cg in ['embed2quadrants', 'embed2octants']:
         # Construct the embedding
@@ -1182,7 +1204,6 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str]) -> np.nda
         q4r = np.logical_and(downr, m1 >= 0) # points in quadrant 4
     
     # Do the coarse graining
-    yth = None  # Ensure yth is always defined
     if how_to_cg == 'quantile':
         th = matlab_quantile(y, np.linspace(0, 1, num_groups + 1)) # thresholds for dividing the time-series values
         th[0] = th[0] - 1 # this ensures the first point is included
