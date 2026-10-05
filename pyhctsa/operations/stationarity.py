@@ -861,10 +861,14 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     raw_iqr_yr = np.percentile(y[r], 75, method='hazen') - np.percentile(y[r], 25, method='hazen')
     raw_iqr_y = np.percentile(y, 75, method='hazen') - np.percentile(y, 25, method='hazen')
     out['iqr'] = np.abs(1 - (raw_iqr_yr/raw_iqr_y)) if raw_iqr_y > 0 else np.nan
-    out['skewness'] = np.abs(1 - (skew(y[r])/skew(y)))
+    # ratios are NaN when the global statistic is exactly zero
+    global_skew = skew(y)
+    out['skewness'] = np.abs(1 - (skew(y[r])/global_skew)) if global_skew != 0 else np.nan
     # use Pearson definition (normal ==> 3.0)
-    out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/kurtosis(y, fisher=False)))
-    out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')[0]/autocorr(y, 1, 'Fourier')[0]))
+    global_kurt = kurtosis(y, fisher=False)
+    out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/global_kurt)) if global_kurt != 0 else np.nan
+    global_ac1 = autocorr(y, 1, 'Fourier')[0]
+    out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')[0]/global_ac1)) if global_ac1 != 0 else np.nan
 
     sampen_full = sample_entropy(y, 1, 0.1)['sampen1']
     sampen_r = sample_entropy(y[r], 1, 0.1)['sampen1']
