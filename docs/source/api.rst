@@ -19,6 +19,33 @@ Utilities
 
    pyhctsa.utils.get_dataset
    pyhctsa.utils.z_score
+   pyhctsa.utils.dict_output
+   pyhctsa.utils.nan_outputs
+
+Shared hctsa helpers
+--------------------
+
+Ports of hctsa's ``BF_*`` helper functions, shared by the methods below (the portable random generator and
+its seeds, robust fits, explicit histogram bin edges and kernel densities, and the removal of points).
+
+.. autosummary::
+   :toctree: generated/
+
+   pyhctsa.robust.bf_random
+   pyhctsa.robust.bf_random_seed
+   pyhctsa.robust.bf_tie_break_noise
+   pyhctsa.robust.bf_remove_points
+   pyhctsa.robust.bf_runs_z
+   pyhctsa.robust.bf_residual_stats
+   pyhctsa.robust.bf_theil_sen
+   pyhctsa.robust.bf_exp_fit
+   pyhctsa.robust.bf_fit_density_curve
+   pyhctsa.robust.bf_gauss_mix2
+   pyhctsa.robust.bf_fit_sinusoids
+   pyhctsa.robust.bf_ks_density
+   pyhctsa.robust.bf_hist_edges
+   pyhctsa.robust.bf_quantile_edges
+   pyhctsa.robust.bf_half_sample_mode
 
 .. _tsanalysismeths:
 
@@ -213,6 +240,7 @@ Model Fit
    pyhctsa.operations.model_fit.fit_subsegments
    pyhctsa.operations.model_fit.loop_local_simple
    pyhctsa.operations.model_fit.local_simple
+   pyhctsa.operations.model_fit.residual_analysis
    pyhctsa.operations.model_fit.exp_smoothing
    pyhctsa.operations.model_fit.ar_cov
    pyhctsa.operations.model_fit.ar_fit
