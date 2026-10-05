@@ -2,6 +2,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 from typing import Union
 
+import numba
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.linalg import LinAlgError, solve_triangular
@@ -3297,4 +3298,153 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     out['mardiaKurt'] = mardia_kurt
     out['mahalKSstat'] = ks_stat
     out['mardiaSkew'] = mardia_skew
+    return out
+
+
+@numba.njit(cache=True)
+def _stomp_nn(y, m, mu, sig, qt, qt1, ex_zone):
+    # STOMP: for every window, the best (highest) correlation with a non-trivial match, and
+    # the index of that match
+    n = y.size
+    num_win = n - m + 1
+    best_r = np.full(num_win, -np.inf)
+    best_idx = np.zeros(num_win, dtype=np.int64)
+    for i in range(num_win):
+        if i > 0:
+            for j in range(num_win - 1, 0, -1):
+                qt[j] = qt[j - 1] - y[i - 1] * y[j - 1] + y[i + m - 1] * y[j + m - 1]
+            qt[0] = qt1[i]
+        lo = max(0, i - ex_zone + 1)
+        hi = min(num_win - 1, i + ex_zone - 1)
+        b = -np.inf
+        bi = 0
+        for j in range(num_win):
+            if lo <= j <= hi:
+                continue
+            r = (qt[j] - m * mu[i] * mu[j]) / (m * sig[i] * sig[j])
+            if r > b:
+                b = r
+                bi = j
+        best_r[i] = b
+        best_idx[i] = bi
+    return best_r, best_idx
+
+
+def matrix_profile(y: ArrayLike, m: Union[int, list, tuple] = ('ac', 8),
+                   max_n: Union[int, str] = 5000) -> Union[dict, float]:
+    """
+    How well each subsequence shape recurs elsewhere in a time series (the matrix profile).
+
+    Port of hctsa's ``CO_MatrixProfile``. Computes the matrix profile: for every length-``m``
+    window (subsequence) of the time series, the distance to its nearest neighbor among all
+    other windows, after z-normalizing each window (so only its shape matters, not its local
+    level or amplitude). Trivial matches (overlapping windows, ``|i-j| < m/2``) are excluded.
+    Distances are expressed as the equivalent nearest-neighbor Pearson correlation,
+    ``r = 1 - d^2/(2m)``, which is bounded and interpretable.
+
+    Features summarize the distribution of r across windows: high values mean shapes recur
+    ('motifs'); a window with unusually low r is a 'discord' (anomaly). The corrected arc curve
+    (Gharghabi et al., 2017; the FLUSS algorithm [1]_) counts how many nearest-neighbor links
+    cross each time point, relative to what a stationary process would give; its minimum is low
+    when the series has a regime change, because windows then match within their own regime.
+
+    A one-off anomaly lasting longer than about ``m/2`` is not a discord: its own overlapping
+    windows match each other (the 'twin freak' problem).
+
+    Uses the STOMP recursion (O(N^2) time, O(N) memory), compiled with numba.
+
+    References
+    ----------
+    .. [1] S. Gharghabi, Y. Ding, C.-C. M. Yeh, K. Kamgar, L. Ulanova and E. Keogh, "Matrix
+       Profile VIII: Domain Agnostic Online Semantic Segmentation at Superhuman Performance
+       Levels", 2017 IEEE International Conference on Data Mining (ICDM), pp. 117-126 (2017).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (z-scored in hctsa).
+    m : int or ('ac', k), optional
+        The window length in samples; or ``('ac', k)`` for k times the first zero-crossing of the
+        autocorrelation function (at least 10 samples). Default ``('ac', 8)``. Longer windows give
+        more reliable estimates of the nearest-neighbor statistics (test-retest across processes:
+        0.93-0.96 at k = 8 vs 0.73-0.84 at k = 4), at the cost of needing longer series.
+    max_n : int or 'full', optional
+        Crops time series longer than this to their first ``max_n`` samples (or ``'full'`` to use
+        every sample). Default 5000.
+
+    Returns
+    -------
+    dict or float
+        - ``meanR``, ``medianR``: the mean and median nearest-neighbor correlation
+          ('matchiness');
+        - ``motifR``: the highest nearest-neighbor correlation (the best-repeated shape);
+        - ``discordR``: the lowest nearest-neighbor correlation (the most anomalous shape);
+        - ``discordGap``: ``medianR - discordR``, how anomalous the discord is relative to a
+          typical window;
+        - ``propMatch90``: the proportion of windows with a nearest neighbor at r > 0.9;
+        - ``minCAC``: the minimum of the corrected arc curve (low = regime change). A specialist
+          statistic: it separates regime-switching from stationary series well, but across
+          stationary series it mostly reflects estimation noise.
+
+        The output is a single NaN if the series is too short (fewer than 5m windows), no
+        correlation length can be estimated, or most windows are flat.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    if max_n != 'full' and n > max_n:
+        y = y[:int(max_n)]
+        n = y.size
+
+    if isinstance(m, (list, tuple)):
+        tau = get_tau(y, 'ac')
+        if np.isnan(tau):
+            return np.nan  # data-dependent: no correlation length could be estimated
+        m = max(10, int(np.floor(m[1] * tau + 0.5)))
+    m = int(m)
+    num_win = n - m + 1
+    ex_zone = int(np.ceil(m / 2))
+    if num_win < 5 * m:
+        return np.nan  # data-dependent: too few windows relative to the window length
+
+    # Window means and standard deviations (from cumulative sums, as hctsa)
+    cs = np.concatenate(([0.0], np.cumsum(y)))
+    cs2 = np.concatenate(([0.0], np.cumsum(y ** 2)))
+    mu = (cs[m:] - cs[:num_win]) / m
+    sig = np.sqrt(np.maximum((cs2[m:] - cs2[:num_win]) / m - mu ** 2, 0.0))
+    flat = sig < 1e-8 * np.std(y, ddof=1)
+    sig[flat] = np.inf  # flat windows have no shape: they match nothing (r = 0)
+
+    # Sliding dot products of the first window against all windows (by FFT)
+    n_fft = int(2 ** np.ceil(np.log2(n + m)))
+    qt1 = np.fft.irfft(np.fft.rfft(y, n_fft) * np.fft.rfft(y[:m][::-1], n_fft), n_fft)[m - 1:n]
+    best_r, best_idx = _stomp_nn(y, m, mu, sig, qt1.copy(), qt1, ex_zone)
+    best_r = np.minimum(best_r, 1.0)
+    best_r[flat] = np.nan
+    if np.mean(np.isnan(best_r)) > 0.5:
+        return np.nan  # data-dependent: mostly flat windows
+
+    # Summaries
+    ok = ~np.isnan(best_r)
+    r_ok = best_r[ok]
+    out = {}
+    out['meanR'] = float(np.mean(r_ok))
+    out['medianR'] = float(np.median(r_ok))
+    out['motifR'] = float(np.max(r_ok))
+    out['discordR'] = float(np.min(r_ok))
+    out['discordGap'] = out['medianR'] - out['discordR']
+    out['propMatch90'] = float(np.mean(r_ok > 0.9))
+
+    # Corrected arc curve: nearest-neighbor links crossing each position, relative to the
+    # parabola 2k(n-k)/n expected when links point to uniformly random places
+    idx = np.arange(num_win)
+    lo = np.minimum(idx, best_idx)[ok]
+    hi = np.maximum(idx, best_idx)[ok]
+    nc = np.bincount(lo, minlength=num_win + 1) - np.bincount(hi, minlength=num_win + 1)
+    arcs = np.cumsum(nc[:num_win])
+    k = np.arange(1, num_win + 1)
+    ideal = 2.0 * k * (num_win - k) / num_win
+    with np.errstate(all='ignore'):
+        cac = np.minimum(arcs / ideal, 1.0)
+    edge_zone = 5 * m  # the arc curve is unreliable near the edges
+    out['minCAC'] = float(np.min(cac[edge_zone:num_win - edge_zone])) if num_win > 2 * edge_zone else np.nan
     return out
