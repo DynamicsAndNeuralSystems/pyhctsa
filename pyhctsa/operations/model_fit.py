@@ -170,7 +170,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
     if model == 'ar':
         avals = np.zeros((num_pred,order))
         for i in range(num_pred):
-            dat = y[r[i, 0]:r[i, 1]]
+            dat = y[r[i, 0] - 1:r[i, 1]]  # r is 1-based and inclusive, as in MATLAB
             m = AutoReg(dat, lags=order, trend='n')
             results = m.fit()
             avals[i, :] = -results.params
