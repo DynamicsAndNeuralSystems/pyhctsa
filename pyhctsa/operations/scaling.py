@@ -290,19 +290,24 @@ def _colon(base, step, limit):
     if step == 0 or (step > 0 and base > limit) or (step < 0 and base < limit):
         return np.zeros(0)
 
-    n = int(np.floor((limit - base) / step + 0.5))
-    # Guard against the rounding above overshooting the limit:
-    while n > 0 and abs(base + n * step) > abs(limit) + abs(step) * 0.5:
-        n -= 1
+    # Number of steps, floored with a few-ulp tolerance so that a limit reached only up to
+    # rounding error is included (as in MATLAB), but a limit that is not on the grid is not:
+    ndelta = (limit - base) / step
+    n = int(np.floor(ndelta + 4 * np.finfo(float).eps * max(1.0, abs(ndelta))))
+    # The last element is the limit itself if the grid reaches it (to within rounding),
+    # otherwise the last grid point:
+    last = base + n * step
+    if abs(last - limit) <= 4 * np.finfo(float).eps * max(abs(base), abs(limit), abs(step)):
+        last = limit
 
     i = np.arange(n + 1, dtype=float)
     out = np.empty(n + 1)
     lower = i <= n / 2.0
     out[lower] = base + i[lower] * step
-    out[~lower] = limit - (n - i[~lower]) * step
+    out[~lower] = last - (n - i[~lower]) * step
     out[0] = base
     if n > 0:
-        out[n] = limit
+        out[n] = last
     return out
 
 def _round(x):
