@@ -5,6 +5,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from numpy.lib.stride_tricks import sliding_window_view
 from hmmlearn.hmm import GaussianHMM
+from scipy.optimize import curve_fit
 from scipy.signal import lfilter
 from scipy.stats import ks_1samp, norm, t
 from statsmodels.tsa.ar_model import AutoReg, ar_select_order
@@ -13,6 +14,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 from ..operations.correlation import autocorr, first_crossing
+from ..operations.physics import _ksdensity
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..toolboxes.matlab.optimizers import minimize
@@ -31,12 +33,18 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     num_states : int
         The number of states in the HMM. Default is 3.
     random_seed : int
-        Random seed. Default is 0.
+        Random seed for the initial parameters of the fit. Default is 0.
 
     Returns
     -------
     dict
-        Dictionary of statistics based on the fitted HMM. 
+        Dictionary of statistics based on the fitted HMM: the sorted state means
+        (``Mu_1``, ...) and their ``meanMu``, ``rangeMu``, ``maxMu``, ``minMu``;
+        the tied covariance ``Cov``; the transition matrix summaries
+        ``Pmeandiag``, ``stdmeanP``, ``maxP``, ``meanP``, ``stdP``; the training
+        log-likelihood per sample ``LLtrainpersample`` and the number of EM
+        iterations ``nit``; and the test log-likelihood per sample
+        ``LLtestpersample`` and ``LLdifference``.
 
     """
     #Actually highly stochastic, so for reproducible results helps to set the
@@ -57,15 +65,48 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     y_test_reshaped = y_test.reshape(-1, 1)
     num_states = int(num_states)
 
+    # Initialize and iterate Baum-Welch as in Zoubin Ghahramani's ZG_hmm (used by hctsa):
+    # random state means around the data mean (scaled by the data standard
+    # deviation), random start probabilities and transition matrix, a tied
+    # variance equal to the data variance; at most 30 cycles, stopping when the
+    # proportional change in the log-likelihood falls below tol. (hmmlearn's
+    # k-means initialization and absolute tolerance find different, generally
+    # poorer, local optima: the fitted-model statistics then do not follow the
+    # distribution of hctsa's.)
+    rng = _ml_rng(0 if random_seed is None else int(random_seed))
+    tol = 1e-4
+    cov0 = np.var(y_train, ddof=1)
+    mu0 = rng.randn(num_states, 1) * np.sqrt(cov0) + np.mean(y_train)
+    pi0 = rng.random_sample(num_states)
+    pi0 = pi0 / pi0.sum()
+    p0 = rng.random_sample((num_states, num_states))
+    p0 = p0 / p0.sum(axis=1, keepdims=True)
+
     model = GaussianHMM(n_components=num_states,
-                    covariance_type='tied',
-                    n_iter=30,
-                    tol=0.0001,
-                    params='stmc',
-                    init_params='stmc',
-                    random_state=random_seed)
-    
-    model.fit(y_train_reshaped)
+                        covariance_type='tied',
+                        n_iter=1,  # one EM cycle per fit() call, so that we control the stopping rule
+                        tol=0,
+                        params='stmc',
+                        init_params='')
+    model.startprob_ = pi0
+    model.transmat_ = p0
+    model.means_ = mu0
+    model.covars_ = np.array([[cov0]])
+
+    LL = []  # log-likelihood of the training data at the start of each cycle
+    lik_base = 0.0
+    for cycle in range(1, 31):
+        model.fit(y_train_reshaped)  # one E step and M step
+        lik = model.monitor_.history[-1]
+        old_lik = LL[-1] if LL else 0.0
+        LL.append(lik)
+        if cycle <= 2:
+            lik_base = lik
+        elif lik < old_lik:
+            pass  # a decrease (numerical violation): keep going, as ZG_hmm does
+        elif (lik - lik_base) < (1 + tol) * (old_lik - lik_base) or not np.isfinite(lik):
+            break
+
     means_sorted = np.sort(model.means_.flatten())
     for i, mu in enumerate(means_sorted):
         out[f'Mu_{i+1}'] = mu
@@ -81,14 +122,14 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
     p_matrix = model.transmat_
 
     out['Pmeandiag'] = np.mean(np.diag(p_matrix))
-    out['std_mean_p'] = np.std(np.mean(p_matrix, axis=0), ddof=1)
-    out['max_p'] = np.max(p_matrix)
-    out['mean_p'] = np.mean(p_matrix)
-    out['std_p'] = np.std(p_matrix, ddof=1)
+    out['stdmeanP'] = np.std(np.mean(p_matrix, axis=0), ddof=1)
+    out['maxP'] = np.max(p_matrix)
+    out['meanP'] = np.mean(p_matrix)
+    out['stdP'] = np.std(p_matrix, ddof=1)
 
     #% Within-sample log-likelihood
-    out['LLtrainpersample'] = model.monitor_.history[-1] / n_train
-    out['nit'] = model.monitor_.iter
+    out['LLtrainpersample'] = np.max(LL) / n_train
+    out['nit'] = len(LL)
 
     #Calculate log likelihood for the test data
     out['LLtestpersample'] = model.score(y_test_reshaped)/n_test
@@ -187,6 +228,31 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
         raise ValueError(f"Unknown model: {model}")
     return out
 
+def _fit_exp_curve(x: np.ndarray, y: np.ndarray, prefix: str) -> dict:
+    """
+    Fit y = a * exp(b * x) + c by nonlinear least squares.
+
+    The starting point is [range(y), -0.5, min(y)], as in hctsa's
+    FC_LoopLocalSimple. Returns the parameters (``a``, ``b``, ``c``) and the
+    goodness of fit (``r2``, ``adjr2``, ``rmse``, with ``rmse`` using the
+    degrees-of-freedom-adjusted residual variance), all NaN if the fit fails.
+    """
+    keys = [f'{prefix}_{k}' for k in ('a', 'b', 'c', 'r2', 'adjr2', 'rmse')]
+    try:
+        if not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))):
+            raise ValueError("non-finite data")
+        popt, _ = curve_fit(lambda t, a, b, c: a * np.exp(b * t) + c, x, y,
+                            p0=[np.ptp(y), -0.5, np.min(y)], maxfev=10000)
+        res = y - (popt[0] * np.exp(popt[1] * x) + popt[2])
+        sse = np.sum(res ** 2)
+        sst = np.sum((y - np.mean(y)) ** 2)
+        n, dfe = len(y), len(y) - 3
+        r2 = 1 - sse / sst
+        vals = [popt[0], popt[1], popt[2], r2, 1 - (1 - r2) * (n - 1) / dfe, np.sqrt(sse / dfe)]
+    except (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
+        vals = [np.nan] * 6
+    return dict(zip(keys, vals))
+
 def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     """
     How simple local forecasting depends on window length.
@@ -201,8 +267,8 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     forecast_meth : str, optional
         The prediction method:
 
-        - 'mean': local mean prediction
-        - 'median': local median prediction
+        - 'mean': local mean prediction, with window lengths 1, 2, ..., 10
+        - 'median': local median prediction, with window lengths 1, 3, ..., 19
 
         Default is ``'mean'``.
         
@@ -210,19 +276,27 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     -------
     dict
         Dictionary containing statistics about how forecasting performance varies
-        with window length.
+        with window length: for each of the residual standard deviation
+        (``stde``), ``sws``, ``swm``, ``ac1`` and ``ac2``, the normalized mean
+        change (``_chn``), the mean sign of the changes (``_meansgndiff``) and, for
+        the last four, ``_stdn``; ``sws_fexp_a``, ``_b``, ``_c``, ``_r2``,
+        ``_adjr2`` and ``_rmse`` (an exponential fit a*exp(b*l) + c to the
+        ``sws`` curve; NaN if the fit fails); ``stde_peakpos`` (1-based position in the list
+        of window lengths of the extreme value of the ``stde`` curve) and
+        ``stde_peaksize``.
     """
     y = np.asarray(y)
     if forecast_meth == 'mean':
         train_length_range = np.arange(1, 11)
     elif forecast_meth == 'median':
-        train_length_range = np.arange(1, 19, 2)
+        train_length_range = np.arange(1, 20, 2)  # 1:2:19, as in hctsa
     else:
         raise ValueError(f"Unknown prediction method: {forecast_meth}")
     stats_st = np.zeros((len(train_length_range), 5))
     for i in range(len(train_length_range)):
         outtmp = local_simple(y, forecast_meth, train_length_range[i])
-        stats_st[i, 0] = outtmp['stderr']
+        # local_simple's standard-deviation key is 'stde' in hctsa (renamed from 'stderr')
+        stats_st[i, 0] = outtmp['stde'] if 'stde' in outtmp else outtmp['stderr']
         stats_st[i, 1] = outtmp['sws']
         stats_st[i, 2] = outtmp['swm']
         stats_st[i, 3] = outtmp['ac1']
@@ -231,8 +305,8 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     # (1) root mean square error
     out = {}
     std_err_chnn = np.mean(np.diff(stats_st[:, 0]))/(np.ptp(stats_st[:, 0]))
-    out['stderr_chn'] = std_err_chnn
-    out['stderr_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:, 0])))
+    out['stde_chn'] = std_err_chnn
+    out['stde_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:, 0])))
     # (ii) Is there a peak?
     if std_err_chnn < 0: # on the whole decreasing, as expected: look for a maximum
         wigv = np.max(stats_st[:, 0])
@@ -249,11 +323,11 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         elif wig != len(train_length_range) - 1 and stats_st[wig + 1, 0] < wigv:
             wig = np.nan  # minimum is not a local minimum; the next value is less
     if not np.isnan(wig):
-        out['stderr_peakpos'] = wig
-        out['stderr_peaksize'] = wigv / np.mean(stats_st[:, 0])
+        out['stde_peakpos'] = wig + 1  # 1-based position, as MATLAB find
+        out['stde_peaksize'] = wigv / np.mean(stats_st[:, 0])
     else:  # put NaNs in all the outputs
-        out['stderr_peakpos'] = np.nan
-        out['stderr_peaksize'] = np.nan
+        out['stde_peakpos'] = np.nan
+        out['stde_peaksize'] = np.nan
 
     #% (2)-(5) Curve statistics for the remaining metrics:
     #%   sws (sliding window stationarity), swm (sliding window mean), ac1, ac2
@@ -262,8 +336,30 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         out[f'{name}_chn'] = np.mean(np.diff(curve)) / np.ptp(curve)
         out[f'{name}_meansgndiff'] = np.mean(np.sign(np.diff(curve)))
         out[f'{name}_stdn'] = np.std(curve, ddof=1) / np.ptp(curve)
+        if name == 'sws':
+            # exponential fit f(l) = a exp(b l) + c to the sws curve
+            out.update(_fit_exp_curve(train_length_range.astype(float), curve, 'sws_fexp'))
 
     return out
+
+def _gauss1_r2(x: np.ndarray) -> float:
+    """
+    R-squared of a Gaussian fit to the kernel-density estimate of x.
+
+    Equivalent to hctsa's ``DN_SimpleFit(x, 'gauss1', 0).r2``: the curve
+    a * exp(-((t - b) / c) ** 2) is fitted by nonlinear least squares to MATLAB's
+    default ``ksdensity`` estimate of x (100 points). NaN if the fit fails.
+    """
+    try:
+        dny, dnx = _ksdensity(np.asarray(x, dtype=float))
+        gauss1 = lambda t, a, b, c: a * np.exp(-((t - b) / c) ** 2)
+        i0 = int(np.argmax(dny))
+        popt, _ = curve_fit(gauss1, dnx, dny,
+                            p0=[dny[i0], dnx[i0], (dnx[-1] - dnx[0]) / 4], maxfev=10000)
+        sse = np.sum((dny - gauss1(dnx, *popt)) ** 2)
+        return float(1 - sse / np.sum((dny - np.mean(dny)) ** 2))
+    except (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
+        return np.nan
 
 def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
                  train_length: Union[int, str] = 3) -> dict:
@@ -295,7 +391,9 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     Returns
     -------
     dict
-        Dictionary containing output statistics on the residuals of the simple forecasting method. 
+        Dictionary containing output statistics on the residuals of the simple forecasting
+        method, including ``normr2``, the R-squared of a Gaussian fit to their
+        distribution (hctsa's former ``gofr2``).
 
     """
     y = np.asarray(y)
@@ -341,7 +439,8 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     #% Stationarity of residuals:
     out['sws'] = sliding_window(res, 'std', 'std', 5, 1) # across five non-overlapping segments
     out['swm'] = sliding_window(res, 'mean', 'std', 5, 1) # across five non-overlapping segments
-    #% TODO Normality of residuals
+    #% Normality of residuals: r-squared of a Gaussian fit to their kernel-density estimate
+    out['normr2'] = _gauss1_r2(res)
     #% Autocorrelation structure of the residuals:
     out['ac1'] = autocorr(res, 1, 'Fourier')[0]
     out['ac2'] = autocorr(res, 2, 'Fourier')[0]

@@ -2,11 +2,97 @@ from typing import Union
 
 import numpy as np
 from numpy.typing import ArrayLike
+from scipy.special import gammaln
 from scipy.stats import ansari
-from statsmodels.sandbox.stats.runs import runstest_1samp
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
+
+def _ksdensity(x: np.ndarray, xi: Union[None, np.ndarray] = None):
+    """
+    Gaussian kernel density estimate with MATLAB ``ksdensity``'s default settings.
+
+    The bandwidth is ``sig * (4 / (3 n)) ** (1 / 5)`` with the robust spread
+    ``sig = median(|x - median(x)|) / 0.6745`` (the range of x if that is zero,
+    and 1 if the bandwidth is still not positive). With no evaluation points
+    given, ``xi`` is 100 equally spaced points from ``min(x) - 3 bw`` to
+    ``max(x) + 3 bw``.
+
+    Returns
+    -------
+    f, xi : numpy.ndarray
+        The density estimate and the points at which it is evaluated.
+    """
+    x = np.asarray(x, dtype=float)
+    n = len(x)
+    sig = np.median(np.abs(x - np.median(x))) / 0.6745
+    if sig <= 0:
+        sig = np.max(x) - np.min(x)
+    bw = sig * (4.0 / (3.0 * n)) ** 0.2
+    if not bw > 0:
+        bw = 1.0
+    if xi is None:
+        xi = np.linspace(np.min(x) - 3 * bw, np.max(x) + 3 * bw, 100)
+    xi = np.asarray(xi, dtype=float)
+    f = np.empty(len(xi))
+    for j in range(0, len(xi), 256):  # chunked to bound memory
+        u = (xi[j:j + 256, None] - x[None, :]) / bw
+        f[j:j + 256] = np.exp(-0.5 * u * u).sum(axis=1) / (n * bw * np.sqrt(2 * np.pi))
+    return f, xi
+
+
+def _log_n_choose_k(n, k):
+    """log of the binomial coefficient, -inf where it is zero (as in MATLAB's gammaln)."""
+    n = np.asarray(n, dtype=float)
+    k = np.asarray(k, dtype=float)
+    with np.errstate(invalid='ignore'):
+        out = gammaln(n + 1) - gammaln(k + 1) - gammaln(n - k + 1)
+    out = np.where((k < 0) | (n - k < 0), -np.inf, out)
+    return out
+
+
+def _runstest_pvalue(x: np.ndarray) -> float:
+    """
+    Two-sided p-value of MATLAB's ``runstest(x)``.
+
+    Runs above and below the mean of x (values equal to the mean are dropped),
+    with the exact distribution of the number of runs (MATLAB's default for
+    this test), and p = min(1, 2 * (P(R = r) + min(P(R < r), P(R > r)))).
+    """
+    x = np.asarray(x, dtype=float)
+    x = x[~np.isnan(x)]
+    if len(x) == 0:
+        return 1.0
+    v = np.mean(x)
+    x = x[x != v]
+    N = len(x)
+    if N == 0:
+        return 1.0
+    b = (x > v).astype(int)
+    n1 = int(b.sum())
+    n0 = N - n1
+    nruns = 1 + int(np.sum(b[:-1] != b[1:]))
+    if n1 == 0 or n0 == 0:
+        plist = np.array([1.0])  # exactly one run
+    else:
+        maxruns = 2 * min(n1, n0) + 1
+        R = np.arange(1, maxruns + 1)
+        plist = np.zeros(len(R))
+        logdenom = _log_n_choose_k(N, n0)
+        even = R % 2 == 0
+        k = R[even] // 2
+        plist[even] = 2 * np.exp(_log_n_choose_k(n1 - 1, k - 1)
+                                 + _log_n_choose_k(n0 - 1, k - 1) - logdenom)
+        k = R[~even] // 2
+        plist[~even] = (np.exp(_log_n_choose_k(n1 - 1, k - 1)
+                               + _log_n_choose_k(n0 - 1, k) - logdenom)
+                        + np.exp(_log_n_choose_k(n1 - 1, k)
+                                 + _log_n_choose_k(n0 - 1, k - 1) - logdenom))
+    pexact = plist[nruns - 1]
+    plo = np.sum(plist[:nruns - 1])
+    phi = np.sum(plist[nruns:])
+    return float(min(1.0, 2 * (pexact + min(plo, phi))))
+
 
 def walker(y: ArrayLike, walker_rule: str = 'prop',
            walker_params: Union[None, float, int, list] = None) -> dict:
@@ -25,15 +111,23 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
         The kinematic rule by which the walker moves in response to the
         time series over time:
 
-        - 'prop': the walker narrows the gap between its value and that
-          of the time series by a given proportion p. walker_params = p
-        - 'biasprop': biased motion; narrows the gap by p_up when pushed
-          up and p_down when pushed down. walker_params = [pup, pdown]
+        - 'prop': the walker narrows the gap between its value and that of the
+          previous value of the time series by a given proportion p:
+          w[i] = w[i-1] + p * (y[i-1] - w[i-1]), with w[0] = 0.
+          walker_params = p
+        - 'biasprop': biased motion; when the time series has just gone up
+          (y[i-1] > y[i-2]) the walker narrows the gap to y[i-1] by a proportion
+          p_up, and otherwise (including at the first step) by p_down.
+          walker_params = [pup, pdown]
         - 'momentum': the walker moves with mass m and inertia from the
-          previous step; the time series acts as a force. walker_params = m
-        - 'runningvar': inertial motion as above, with values rescaled to
-          match the local variance of the time series.
-          walker_params = [m, wl] (inertial mass, window length)
+          previous step: it extrapolates its previous step,
+          w_inert = 2 w[i-1] - w[i-2], then closes a fraction 1/m of the gap
+          between w_inert and y[i-1]. walker_params = m
+        - 'runningvar': inertial motion as above, with values rescaled by the
+          ratio of the standard deviation of the last wl+1 values of y (up to
+          y[i-1]) to that of the walker over the same window, including its
+          provisional new value. walker_params = [m, wl] (inertial mass,
+          window length)
 
         Default is ``'prop'``.
 
@@ -44,7 +138,15 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     Returns
     -------
     dict
-        Summaries of the walker's trajectory and its relationship to the series.
+        Summaries of the walker's trajectory (``w_mean``, ``w_median``, ``w_std``,
+        ``w_min``, ``w_max``, ``w_ac1``, ``w_ac2``, ``w_tau``, ``w_propzcross``),
+        of the walker compared with the series (``sw_meanabsdiff``,
+        ``sw_taudiff``, ``sw_stdrat``, ``sw_minrat``, ``sw_maxrat``,
+        ``sw_ac1diff`` (lag-1 autocorrelation of w minus that of y),
+        ``sw_propcross``, ``sw_ansarib_pval``, ``sw_distdiff`` (L1 distance
+        between the kernel-smoothed densities of y and w, at most 2)), and of
+        the residual w - y (``res_runstest`` (p-value of the runs test about the
+        mean), ``res_swss5_1``, ``res_ac1``).
     """
     y = np.asarray(y, dtype=float)
     N = len(y)
@@ -160,7 +262,8 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     out['sw_taudiff'] = (first_crossing(y, 'ac', 0, 'continuous')
                          - first_crossing(w, 'ac', 0, 'continuous'))
     out['sw_stdrat'] = np.std(w, ddof=1) / np.std(y, ddof=1)
-    out['sw_ac1rat'] = out['w_ac1'] / autocorr(y, 1)[0]
+    # a difference, not a ratio, which blows up when y has ac1 near 0
+    out['sw_ac1diff'] = out['w_ac1'] - autocorr(y, 1, 'Fourier')[0]
     out['sw_minrat'] = np.min(w) / np.min(y)
     out['sw_maxrat'] = np.max(w) / np.max(y)
     out['sw_propcross'] = np.sum((w[:-1] - y[:-1]) * (w[1:] - y[1:]) < 0) / (N - 1)
@@ -169,10 +272,17 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     _, pval = ansari(w, y)
     out['sw_ansarib_pval'] = pval
 
+    # L1 distance between the kernel-smoothed densities of y and w, on a common
+    # grid of 200 points (sum times grid spacing: at most 2, independent of the
+    # range of the data)
+    r = np.linspace(min(np.min(y), np.min(w)), max(np.max(y), np.max(w)), 200)
+    dy, _ = _ksdensity(y, r)
+    dw, _ = _ksdensity(w, r)
+    out['sw_distdiff'] = np.sum(np.abs(dy - dw)) * (r[1] - r[0])
+
     # (iii) Residuals between time series and walker
     res = w - y
-    _, runs_pval = runstest_1samp(res, cutoff='mean')
-    out['res_runstest'] = runs_pval
+    out['res_runstest'] = _runstest_pvalue(res)
     out['res_swss5_1'] = sliding_window(res, 'std', 'std', 5, 1)
     out['res_ac1'] = autocorr(res, 1)[0]
 
