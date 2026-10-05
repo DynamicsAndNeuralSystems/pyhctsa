@@ -4,9 +4,9 @@ from typing import Union
 
 import numpy as np
 from numpy.typing import ArrayLike
-from scipy.linalg import LinAlgError
+from scipy.linalg import LinAlgError, solve_triangular
 from scipy.optimize import curve_fit
-from scipy.stats import expon, gaussian_kde, kurtosis, skew
+from scipy.stats import chi2, expon, gaussian_kde, kstest, kurtosis, skew
 from scipy.stats import mode as smode
 from scipy.spatial import cKDTree
 from statsmodels.tsa.stattools import pacf
@@ -3117,3 +3117,184 @@ def quantilogram(y: ArrayLike, lag: Union[int, str] = 1) -> dict:
             out[name] = float(np.sum(h[:n - lag] * h[lag:]) / denom)
     return out
 
+
+def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
+                          theiler_win: Union[int, float, list, tuple] = ('ac', 1),
+                          max_n: Union[int, str] = 10000) -> Union[dict, float]:
+    """
+    Tests for non-Gaussianity of the joint, time-lagged embedding distribution.
+
+    Port of hctsa's ``CO_JointNonGaussianity``. Embeds the time series in ``m`` dimensions at
+    time delay ``tau`` (e.g., the pair ``(x_t, x_{t+tau})`` for m=2, or the triple
+    ``(x_t, x_{t+tau}, x_{t+2tau})`` for m=3) and tests whether the resulting point cloud is
+    consistent with a multivariate Gaussian.
+
+    A linear (e.g., AR(1)) Gaussian process has a Gaussian marginal *and* a Gaussian joint
+    embedding distribution; a nonlinear or non-reversible process can look Gaussian marginally
+    while its lagged joint distribution is visibly non-elliptical (curved, multimodal, or
+    heavy/light-tailed along directions the marginal alone cannot see). This tests the whole
+    joint shape rather than one moment combination (cf. :func:`trev` and :func:`tc3`).
+
+    Two complementary statistics are based on Mardia's classical multivariate normality
+    measures [1]_, chosen because they generalize to any embedding dimension via the same
+    formula and reduce, at m=1, to ordinary skewness/kurtosis:
+
+    - Mardia's multivariate skewness, b1: detects asymmetry/curvature of the joint distribution
+      (e.g., a banana-shaped point cloud). Its population value is 0 for any joint Gaussian.
+    - Mardia's multivariate kurtosis, b2: detects joint tail weight/peakedness relative to a
+      Gaussian ellipsoid. Its population value is ``m(m+2)`` for any joint Gaussian (8 at m=2,
+      15 at m=3).
+
+    As a complementary check, the squared Mahalanobis distances of each embedded point to the
+    sample mean (the per-point terms underlying Mardia's kurtosis) are compared with their
+    theoretical distribution under joint Gaussianity, chi^2_m, via a Kolmogorov-Smirnov
+    D-statistic. This can catch departures (e.g., a bimodal or ring-shaped cloud) that the two
+    summary moments can miss.
+
+    The skewness statistic excludes near-diagonal pairs (``|i-j| <= theiler_win``) from its double
+    sum: for correlated jointly-Gaussian points, the third moment of their Mahalanobis inner
+    product is not zero, so nearby, strongly autocorrelated pairs bias the raw statistic away
+    from zero even under true joint Gaussianity. This removes most, but not all, of the bias
+    (the residual is the classical small-sample bias of whitening with the sample covariance of
+    the points being tested).
+
+    References
+    ----------
+    .. [1] K. V. Mardia, "Measures of multivariate skewness and kurtosis with applications",
+       Biometrika 57(3), 519 (1970).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    tau : int or {'ac', 'ac1e', 'mi'}, optional
+        The time delay for the embedding (see :func:`~pyhctsa.utils.get_tau`). Default ``'ac'``.
+    m : int, optional
+        The embedding dimension (default 2, the pairwise joint distribution
+        ``(x_t, x_{t+tau})``; set to 3 for the triple-wise joint distribution). hctsa's
+        false-nearest-neighbors choice of ``m`` (``{'fnn', th}``) is not available.
+    theiler_win : (str, float) or int or float, optional
+        The number of temporally adjacent embedded points excluded from the skewness double sum
+        (``|i-j| <= theiler_win``): ``('ac', k)`` for k times the first zero-crossing of the
+        autocorrelation function, ``('ac1e', k)`` for k times its 1/e delay, or a number of samples
+        (see :func:`~pyhctsa.utils.theiler_window`). Default ``('ac', 1)``.
+    max_n : int or 'full', optional
+        The maximum number of embedded points used for the skewness statistic (default 10000;
+        ``'full'`` to disable). A legacy cap, from when the skewness double sum was evaluated
+        through an N x N Gram matrix (O(N^2)); it is now evaluated exactly through the
+        third-moment tensor in O(N d^3), so the cap is kept only so that values are unchanged
+        from earlier computations. The mean, covariance, kurtosis and KS statistic always use the
+        full embedded series.
+
+    Returns
+    -------
+    dict or float
+        - ``mardiaSkew``: Mardia's raw multivariate skewness (Theiler-windowed);
+        - ``mardiaKurt``: Mardia's raw multivariate kurtosis;
+        - ``mahalKSstat``: the Kolmogorov-Smirnov D-statistic of the squared Mahalanobis
+          distances against chi^2_m.
+
+        All are unitless departure-from-joint-Gaussianity magnitudes with no attached
+        significance level (see Notes). The output is a single NaN if the embedding fails, has
+        too few points, or has a near-singular covariance (``mardiaSkew`` alone is NaN if the
+        Theiler window leaves no pairs).
+
+    Notes
+    -----
+    Only raw statistics are returned, not p-values. Mardia's classical asymptotic null
+    distributions assume the N embedded points are iid draws, but consecutive embedded vectors
+    overlap in m-1 coordinates and are strongly autocorrelated, which inflates the naive test
+    statistics (empirically up to about 30% false positives at a nominal 5% level on a
+    linear-Gaussian AR(1) process, worse at higher m). For significance testing, compare to the
+    distribution over surrogates.
+
+    The KS statistic is computed against the exact chi^2_m CDF; hctsa evaluates it on a table of
+    the CDF at values rounded to 1e-6, so the two agree to about 1e-6.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+
+    theiler_win = theiler_window(y, theiler_win, n)
+    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    theiler_win = int(theiler_win)
+
+    # Embed the signal
+    if isinstance(m, str):
+        raise ValueError("An embedding dimension chosen by false nearest neighbors is not supported; "
+                         "give m as an integer.")
+    tau = _resolve_delay(y, tau, default='ac')
+    if np.isnan(tau):
+        logger.warning('Embedding failed')
+        return np.nan
+    m = int(m)
+    if n - (m - 1) * int(tau) <= 0:
+        logger.warning('Embedding failed')
+        return np.nan
+    Y = time_delay_embed(y, m, int(tau))
+    n_emb, d = Y.shape
+
+    # Need enough points to reliably estimate a d x d covariance matrix and for the
+    # higher-moment statistics below to be reasonably stable
+    if n_emb < max(30, 10 * d * (d + 2)):
+        logger.warning(f'Too few embedded points ({n_emb}) for a meaningful joint-Gaussianity '
+                       f'test at m = {d}')
+        return np.nan
+
+    # Center and whiten
+    Yc = Y - Y.mean(axis=0)
+    S = (Yc.T @ Yc) / n_emb  # Mardia's convention: divide by N, not N-1
+    try:
+        L = np.linalg.cholesky(S)
+    except np.linalg.LinAlgError:
+        L = None
+    if L is None or 1.0 / np.linalg.cond(S, 1) < 1e-10:
+        # near-singular covariance: tau too small relative to the series' correlation length,
+        # so consecutive embedded coordinates are nearly collinear
+        logger.warning('Embedded covariance matrix is near-singular (tau too small?)')
+        return np.nan
+
+    X = solve_triangular(L, Yc.T, lower=True)  # d x n_emb: whitened points L^{-1}(Y_i - mu)
+    D2 = np.sum(X ** 2, axis=0)  # squared Mahalanobis distances
+
+    out = {}
+    # Mardia's multivariate kurtosis (population value d(d+2) under joint Gaussianity)
+    mardia_kurt = float(np.mean(D2 ** 2))
+
+    # Mahalanobis-distance-vs-chi^2_d Kolmogorov-Smirnov statistic
+    ks_stat = float(kstest(D2, chi2(d).cdf).statistic)
+
+    # Mardia's multivariate skewness: b_{1,d} = mean over pairs (i,j) outside the Theiler band
+    # of (x_i' x_j)^3 for whitened x. The full double sum is evaluated through the d x d x d
+    # third-moment tensor, sum_{i,j} (x_i' x_j)^3 = sum_{a,b,c} (sum_i x_ia x_ib x_ic)^2, in
+    # O(N d^3), and the pairs inside the band |i - j| <= w (which the mean excludes) are
+    # subtracted in O(N w).
+    if max_n != 'full' and n_emb > max_n:
+        X_skew = X[:, :int(max_n)]  # legacy cap, kept so values are unchanged
+    else:
+        X_skew = X
+    n_skew = X_skew.shape[1]
+    w = theiler_win
+    num_off_band = n_skew ** 2 - ((2 * w + 1) * n_skew - w * (w + 1))
+    if w >= n_skew or num_off_band <= 0:
+        logger.warning('theiler_win too large relative to the (possibly subsampled) skewness '
+                       'sample size')
+        mardia_skew = np.nan
+    else:
+        Xt = X_skew.T  # n_skew x d
+        full_sum = 0.0
+        for a in range(d):
+            for b in range(d):
+                full_sum += np.sum(((Xt[:, a] * Xt[:, b]) @ Xt) ** 2)
+        # pairs inside the Theiler band (including i == j), to exclude
+        band_sum = np.sum(np.sum(X_skew ** 2, axis=0) ** 3)
+        for k in range(1, min(w, n_skew - 1) + 1):
+            ip = np.sum(X_skew[:, :n_skew - k] * X_skew[:, k:], axis=0)  # x_i' x_{i+k}
+            band_sum += 2 * np.sum(ip ** 3)
+        mardia_skew = float((full_sum - band_sum) / num_off_band)
+
+    out['mardiaKurt'] = mardia_kurt
+    out['mahalKSstat'] = ks_stat
+    out['mardiaSkew'] = mardia_skew
+    return out
