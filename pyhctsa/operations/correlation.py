@@ -1177,8 +1177,13 @@ def compare_min_ami(y: ArrayLike, bin_method: str = 'std1',
     Returns
     -------
     dict
-        Dictionary containing statistics on the set of first minimums 
-        of the automutual information function.
+        Dictionary containing statistics on the set of first minimums
+        of the automutual information function. ``nprompeaks`` is the number of prominent
+        peaks (local maxima) of the first-minimum lag as a function of the number of bins: peaks
+        that rise at least 5% of the range of the lags above the higher of the valleys on
+        either side of them, so a small fluctuation does not add a peak (it replaces the earlier
+        ``nlocmax``, a count of every local maximum more than one standard deviation above the
+        mean).
     """
     y = np.asarray(y)
     n = len(y)
@@ -1220,22 +1225,36 @@ def compare_min_ami(y: ArrayLike, bin_method: str = 'std1',
     out['conv4'] = np.mean(ami_mins[-5:])
 
     # look for peaks (local maxima)
-    # % local maxima above 1*std from mean
     # inspired by curious result of periodic maxima for periodic signal with
     # bin size... ('quantiles', [2:80])
-    diff_ami_mins = np.diff(ami_mins[:-1])
-    positive_diff_indices = np.where(diff_ami_mins > 0)[0]
-    sign_change_indices = sign_change(diff_ami_mins, 1)
-
-    # Find the intersection of positive_diff_indices and sign_change_indices
-    loc_extr = np.intersect1d(positive_diff_indices, sign_change_indices) + 1
-    above_threshold_indices = np.where(ami_mins > out['mean'] + out['std'])[0]
-    big_loc_extr = np.intersect1d(above_threshold_indices, loc_extr)
-
-    # Count the number of elements in big_loc_extr
-    out['nlocmax'] = len(big_loc_extr)
+    # Only prominent peaks are counted: a count of every local maximum, or of those above a
+    # fixed height such as the mean plus one standard deviation, changes with each small
+    # fluctuation of the curve
+    out['nprompeaks'] = _num_prominent_peaks(ami_mins, 0.05 * out['range'])
 
     return out
+
+def _num_prominent_peaks(x: ArrayLike, min_prominence: float) -> int:
+    """The number of local maxima of ``x`` with prominence at least ``min_prominence``.
+
+    Interior points higher than both neighbors count (a flat top counts once). The prominence
+    is how far a peak rises above the higher of the lowest values reached on each side before
+    meeting a higher value (or the end of the series). (hctsa's ``SUB_NumProminentPeaks``.)
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    x = x[np.concatenate(([True], np.diff(x) != 0))]  # merge runs of equal values
+    num_peaks = 0
+    for i in range(1, len(x) - 1):
+        if x[i] > x[i - 1] and x[i] > x[i + 1]:
+            higher_left = np.flatnonzero(x[:i] > x[i])
+            higher_right = np.flatnonzero(x[i + 1:] > x[i])
+            i_left = higher_left[-1] if higher_left.size else 0
+            i_right = i + 1 + higher_right[0] if higher_right.size else len(x) - 1
+            valley = max(np.min(x[i_left:i + 1]), np.min(x[i:i_right + 1]))
+            if x[i] - valley >= min_prominence:
+                num_peaks += 1
+    return num_peaks
+
 
 def _ami_hist_binning(y: ArrayLike, meth: str, num_bins: int):
     """Per-sample bin index for the histogram-AMI estimators.
