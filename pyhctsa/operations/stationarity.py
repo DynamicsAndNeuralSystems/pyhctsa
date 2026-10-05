@@ -1500,10 +1500,18 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     variance. The lag-1 autocorrelation is symmetric under time reversal, so trev is
     included to let SFA pick up a slow drift in the *irreversibility* of the dynamics.
 
+    This operation is a compact variant of feature-based SFA (f-SFA) [2]_, which applies SFA
+    to sliding-window catch22/catch24 features; here five fixed window statistics are used,
+    to give a single hctsa feature.
+
     References
     ----------
     .. [1] Wiskott, L. & Sejnowski, T.J. "Slow feature analysis: unsupervised learning of
     invariances." Neural Computation 14(4), 715-770 (2002).
+    .. [2] Owens, K.S., Tamaki, M. & Fulcher, B.D. "Parameter inference from a non-stationary
+    unknown process using statistical feature-based slow feature analysis", arXiv:2609.01651
+    (2026). The full feature-based method (f-SFA: sliding-window catch22/catch24 features +
+    SFA) is implemented in the Python package fsfa: https://github.com/KieranOwens/fsfa
 
     Parameters
     ----------
