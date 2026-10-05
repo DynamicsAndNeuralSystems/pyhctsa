@@ -663,6 +663,9 @@ def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
         Various statistics on the local density estimates at each point in the
         time-delay embedding, including the minimum and maximum values, the
         range, the standard deviation, mean, median, and autocorrelation.
+        The correlation lengths of the density sequence are ``tauacden`` (first
+        zero-crossing of the autocorrelation function) and ``taumigaussden``
+        (first minimum of the Gaussian automutual information function).
     """
     if isinstance(tau, str) and tau != 'ac':
         raise ValueError(f"Invalid time-delay method: '{tau}'. Only 'ac' (or an integer) is supported.")
@@ -718,8 +721,8 @@ def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
     # Estimates of correlation length:
     # first zero-crossing of the autocorrelation function:
     out['tauacden'] = first_crossing(locden, 'ac', 0, 'continuous')
-    # first minimum of the automutual information function:
-    out['taumiden'] = first_min(locden, 'mi')
+    # first minimum of the (Gaussian) automutual information function:
+    out['taumigaussden'] = first_min(locden, 'mi-gaussian')
 
     return out
 
