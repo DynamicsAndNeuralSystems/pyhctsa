@@ -247,6 +247,9 @@ def multi_scale_entropy(
             y = z_score(np.diff(y))
         elif pre_process_how == 'rescale_tau':
             tau = first_crossing(y, 'ac', 0, 'discrete')
+            if np.isnan(tau):  # undefined ACF (e.g., constant series)
+                logger.warning("Could not determine the autocorrelation time for 'rescale_tau' pre-processing")
+                return np.nan
             y_buffer = make_buffer(y, tau)
             y = np.mean(y_buffer, 1)
             y = z_score(y)
@@ -485,7 +488,9 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: i
     m : int, optional
         Embedding dimension. Default is 2.
     tau : int or str, optional
-        Embedding time delay. Default is 1.
+        Embedding time delay: an integer, or ``'ac'`` for the first zero-crossing of the
+        autocorrelation function (NaN is returned if it is undefined, e.g. for a constant
+        series). Default is 1.
     epsilon : float, optional
         Recurrence neighbourhood radius. Default is 0.12.
     t_max : int, optional
@@ -506,7 +511,11 @@ def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: i
     """
     if tau == 'ac':
         # use the first zero crossing of the ACF
-        tau = int(first_crossing(y, 'ac', 0, 'discrete'))
+        tau = first_crossing(y, 'ac', 0, 'discrete')
+    if np.isnan(tau):
+        # the delay could not be determined (e.g., constant series)
+        logger.warning('Could not determine embedding parameters for this time series')
+        return np.nan
     y = np.asarray(y)
     m = int(m)
     tau = int(tau)
