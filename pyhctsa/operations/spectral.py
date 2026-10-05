@@ -1818,7 +1818,7 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
     # exactly the null hypothesis a bicoherence significance test needs; the 95%
     # quantile of their pooled bic2 values is the empirical threshold.
     alpha = 0.05
-    surrogates = _make_surrogates(y, 'RP', num_surr, random_seed=5489)  # = rng(0, 'twister')
+    surrogates = _make_surrogates(y, 'RP', num_surr, random_seed=0)  # hctsa: SD_MakeSurrogates(y,'RP',numSurr,[],'default'), BF_Random seed 0
     null_vals = np.concatenate([
         _bicoherence_grid(surrogates[:, s], step, num_seg, seg_length, half_n, win, pi, pj)
         for s in range(num_surr)])
