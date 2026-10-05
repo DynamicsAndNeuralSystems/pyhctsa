@@ -1,20 +1,205 @@
+import logging
+import math
+import warnings
 from typing import Union
 
 import numpy as np
+from numba import njit
 from numpy.typing import ArrayLike
-import logging
-logger = logging.getLogger('pyhctsa')
-
+from scipy.optimize import minimize_scalar
+from scipy.signal import correlate, find_peaks, welch as _welch
+from scipy.spatial import cKDTree
+from scipy.spatial.distance import pdist, squareform
+from scipy.special import digamma, gammaln
+from scipy.stats import norm as _norm, spearmanr
 from sklearn.decomposition import PCA
-from sklearn.neighbors import NearestNeighbors
-from scipy.special import gammaln
-from scipy.stats import spearmanr
-from scipy.signal import correlate
+from sklearn.metrics import silhouette_samples
+from sklearn.mixture import GaussianMixture
+from sklearn.neighbors import KDTree, NearestNeighbors
 
 from ..operations.model_fit import residual_analysis
 from ..operations.correlation import first_crossing, first_min, autocorr
+from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robustfit
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
-from ..utils import _ml_rng, get_tau, matlab_quantile, theiler_window, time_delay_embed
+from ..toolboxes.Tisean_3_0_1.tisean import _e, _round_significant
+from ..utils import (_linspace, _ml_randperm, _ml_rng, _round_half_away, bin_picker, get_tau,
+                     matlab_quantile, theiler_window, time_delay_embed)
+
+logger = logging.getLogger('pyhctsa')
+
+# ------------------------------------------------------------------------------
+# Embedding parameters (hctsa's NL_FNN and BF_Embed), shared by the operations below
+# ------------------------------------------------------------------------------
+
+def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
+        theiler_win: Union[int, float, list, tuple] = ('ac', 1), just_best: bool = True,
+        bestp: float = 0.4, escape_factor: Union[float, None] = None) -> Union[dict, float]:
+    """
+    How the fraction of false nearest neighbors falls as the embedding dimension increases.
+
+    Uses TISEAN's ``false_nearest`` (run in process; see
+    :func:`pyhctsa.toolboxes.Tisean_3_0_1.tisean.false_nearest`). For each embedding
+    dimension ``m = 1, ..., maxm``, every point's nearest neighbor (maximum norm, outside
+    the Theiler window in time) is found; the neighbor is false if, when one more
+    coordinate is added, the two points move apart by more than ``escape_factor`` times
+    their distance. For a deterministic system the fraction of false neighbors falls
+    toward zero once the embedding dimension is large enough; for noise it stays high.
+    Neighbors farther apart than the standard deviation of the data divided by the
+    escape factor are skipped.
+
+    Note: as in TISEAN 3.0.1 for a scalar series, the delay only limits the number of
+    points used; the embedding coordinates are consecutive samples.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    tau : int or str, optional
+        The time delay: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``). Default is 1.
+    maxm : int, optional
+        The maximum embedding dimension. Default is 10.
+    theiler_win : int, float, or ``['ac', k]``, optional
+        The Theiler window (see :func:`pyhctsa.utils.theiler_window`). Default is
+        ``['ac', 1]``.
+    just_best : bool, optional
+        If True, return only the first dimension at which the fraction of false nearest
+        neighbors is below ``bestp``. Default is True.
+    bestp : float, optional
+        The fraction of false neighbors defining the embedding dimension when
+        ``just_best``. Default is 0.4.
+    escape_factor : float, optional
+        TISEAN's ``-f``: a neighbor is false if its distance grows by more than this
+        factor when a dimension is added. ``None`` (the default) is TISEAN's own default,
+        2. (``BF_Embed``'s false-nearest-neighbors choice of dimension uses 5.)
+
+    Returns
+    -------
+    float or dict
+        If ``just_best``, the embedding dimension (``maxm + 1`` if the fraction never
+        falls below ``bestp``). Otherwise a dict with, for ``i = 1, ..., maxm``, ``pfnn_i``
+        (the fraction of false nearest neighbors) and ``nHood2_i`` (the typical,
+        root-mean-square, distance from a point to its nearest neighbor; NaN at a
+        dimension for which TISEAN found too few neighbors); ``minpfnn``, ``meanpfnn``,
+        ``stdpfnn``, ``maxnHood2``, ``meannHood2``; ``firstunder09`` ... ``firstunder005``
+        (the first dimension at which the fraction is below 90%, 80%, ..., 10%, 5%; ``maxm
+        + 1`` if never); ``max1stepchange`` (the largest absolute change in the fraction
+        between consecutive dimensions), ``mdrop`` (the mean change per added dimension)
+        and ``pdrop`` (the fraction of decreasing steps minus the fraction of increasing
+        steps). NaN if the series is too short (N < 10), the time delay or Theiler window
+        cannot be set, or TISEAN gives no output (constant series, or a delay too long for
+        the series).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    if n < 10:
+        logger.warning(f'Time series (N={n}) too short for fnn')
+        return np.nan
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        return np.nan
+    theiler = theiler_window(y, theiler_win, n)
+    if np.isnan(theiler):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    maxm = int(maxm)
+    # (-f%g: six significant digits)
+    escape = 2.0 if escape_factor is None else float('%g' % escape_factor)
+    try:
+        res = _tisean.false_nearest(y, int(tau), 1, maxm, int(theiler), escape)
+    except ValueError as exc:  # no output, e.g. delay times dimension too large for the series
+        logger.warning(f'No output from TISEAN routine false_nearest on the data: {exc}')
+        return np.nan
+    # (TISEAN prints these with %e, and hctsa reads that text)
+    m_dim, p_nn, n_hood2 = res['dim'], np.vectorize(_tisean._e)(res['pfnn']), np.vectorize(_tisean._e)(res['sdeps'])
+
+    if just_best:
+        return float(_tisean.fnn_first_under(m_dim, p_nn, bestp))
+
+    out = {}
+    for i in range(1, maxm + 1):
+        found = i <= m_dim.size
+        out[f'pfnn_{i}'] = p_nn[i - 1] if found else np.nan
+        out[f'nHood2_{i}'] = n_hood2[i - 1] if found else np.nan
+    out['minpfnn'] = np.min(p_nn)
+    out['meanpfnn'] = np.mean(p_nn)
+    out['stdpfnn'] = np.std(p_nn, ddof=1) if p_nn.size > 1 else 0.0
+    out['maxnHood2'] = np.max(n_hood2)
+    out['meannHood2'] = np.mean(n_hood2)
+    for name, th in (('09', 0.9), ('08', 0.8), ('07', 0.7), ('06', 0.6), ('05', 0.5),
+                     ('04', 0.4), ('03', 0.3), ('02', 0.2), ('01', 0.1), ('005', 0.05)):
+        out[f'firstunder{name}'] = float(_tisean.fnn_first_under(m_dim, p_nn, th))
+    steps = np.diff(p_nn)
+    out['max1stepchange'] = np.max(np.abs(steps)) if steps.size else np.nan
+    out['mdrop'] = np.mean(steps) if steps.size else np.nan
+    out['pdrop'] = -np.mean(np.sign(steps)) if steps.size else np.nan
+    return out
+
+
+def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.4) -> float:
+    """
+    Embedding dimension by false nearest neighbors, as hctsa's ``BF_Embed(y, tau, {'fnn',
+    threshold})``: :func:`fnn` with ten dimensions, a Theiler window of one autocorrelation
+    time and an escape factor of 5 (TISEAN's own, 2, makes the test look as if it never
+    converges), returning the first dimension at which the fraction of false nearest
+    neighbors falls below `threshold`. NaN when it cannot be determined.
+    """
+    return fnn(y, tau, 10, ('ac', 1), True, threshold, 5)
+
+
+def _embedding_params(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
+                      ) -> Union[tuple, None]:
+    """
+    The time delay and embedding dimension, as hctsa's ``BF_Embed(y, tau, m, true)``.
+
+    `tau` is an integer or a rule understood by :func:`pyhctsa.utils.get_tau`. `m` is an
+    integer, ``'fnn'`` (false nearest neighbors, threshold 0.4), or ``('fnn', threshold)``.
+    Returns ``(tau, m)``, or None if either cannot be determined.
+    """
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        logger.warning('Could not determine the time delay for the embedding')
+        return None
+    tau = int(tau)
+    if isinstance(m, (list, tuple)):
+        m = m[0] if len(m) == 1 else m
+    if isinstance(m, (list, tuple)) or isinstance(m, str):
+        if (m if isinstance(m, str) else m[0]) != 'fnn':
+            raise ValueError(f"Embedding dimension, m, incorrectly specified: {m!r}")
+        m = _fnn_embedding_dim(y, tau, 0.4 if isinstance(m, str) else m[1])
+        if np.isnan(m):
+            return None
+    return tau, int(m)
+
+
+def _embed_tau_m(y: np.ndarray, embed_params) -> tuple:
+    """
+    The delay and dimension of ``[tau, m]`` embedding parameters (hctsa's
+    ``BF_Embed(y, tau, m, true)``), without doing the embedding: see
+    :func:`_embedding_params`. Returns ``(nan, nan)`` if they cannot be determined.
+    """
+    if not isinstance(embed_params, (list, tuple)) or len(embed_params) != 2:
+        raise ValueError('Embedding parameters are formatted incorrectly -- need [tau, m]')
+    params = _embedding_params(y, embed_params[0], embed_params[1])
+    return (np.nan, np.nan) if params is None else params
+
+
+def _bf_embed(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
+              ) -> Union[np.ndarray, None]:
+    """
+    Time-delay embedding with hctsa's ``BF_Embed(y, tau, m, false)``: the embedded points as
+    rows (see :func:`_embedding_params` for `tau` and `m`), or None when it fails
+    (undetermined parameters, or a time series too short).
+    """
+    params = _embedding_params(y, tau, m)
+    if params is None:
+        return None
+    try:
+        return time_delay_embed(y, params[1], params[0])
+    except ValueError as e:
+        logger.warning(str(e))
+        return None
+
 
 def zero_one_test(y, num_c=20, max_n=10000):
     """Modified 0-1 test for chaos.
@@ -425,8 +610,10 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
     y : array-like
         Input time series (should be z-scored).
     de : int, optional
-        The embedding dimension. Default is 3. (hctsa's ``'fnn'`` option, which
-        sets it by TISEAN's false nearest neighbors, is not yet available.)
+        The embedding dimension, or ``'fnn'`` to set it by TISEAN's false nearest
+        neighbors (:func:`fnn`: first dimension at which the fraction of false
+        neighbors is below 0.05, with a Theiler window of one autocorrelation time
+        and an escape factor of 5). Default is 3.
     tau : int or str, optional
         The time-delay: an integer, or a rule understood by
         :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
@@ -479,11 +666,12 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
         return np.nan
 
     if isinstance(de, str):
-        if de == 'fnn':
-            raise NotImplementedError(
-                "nlpe(de='fnn') needs a port of TISEAN's false_nearest (hctsa's NL_FNN), "
-                "which is not yet available in pyhctsa; pass an integer embedding dimension.")
-        raise ValueError(f"Invalid embedding dimension '{de}'")
+        if de != 'fnn':
+            raise ValueError(f"Invalid embedding dimension '{de}'")
+        de = _fnn_embedding_dim(y, tau, 0.05)
+        if np.isnan(de):  # the dimension could not be determined (e.g. a delay too long)
+            return np.nan
+    de = int(de)
 
     theiler_win = theiler_window(y, theiler_win, n)
     if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
@@ -735,10 +923,10 @@ def local_density(y: ArrayLike, nnr: int = 3,
         crossing of the autocorrelation function, and ``'mi'`` the smaller of
         the first minimum of the (Kraskov) automutual information and the 1/e
         time. Default is ``'ac'``.
-    m : int, optional
-        The embedding dimension. Default is 2. (hctsa's ``'fnn'`` option, which
-        sets it by TISEAN's false nearest neighbors, is not yet available, and
-        raises ``NotImplementedError``.)
+    m : int or 'fnn', optional
+        The embedding dimension: an integer, or ``'fnn'`` (or ``['fnn', threshold]``)
+        to set it by TISEAN's false nearest neighbors (:func:`fnn`, threshold 0.4 by
+        default; as hctsa's ``BF_Embed``). Default is 2.
 
     Returns
     -------
@@ -762,21 +950,9 @@ def local_density(y: ArrayLike, nnr: int = 3,
         return np.nan
     past = int(past)
 
-    if isinstance(m, str):
-        if m == 'fnn':
-            raise NotImplementedError(
-                "local_density(m='fnn') needs a port of TISEAN's false_nearest (hctsa's "
-                "NL_FNN), which is not yet available in pyhctsa; pass an integer embedding "
-                "dimension.")
-        raise ValueError(f"Invalid embedding dimension '{m}'")
-    tau = get_tau(y, tau)
-    if np.isnan(tau):
-        logger.warning('Could not get the time delay (time series too short?)')
-        return np.nan
-    try:
-        y_embed = time_delay_embed(y, m, int(tau))
-    except ValueError as e:  # embedding failed (time series too short)
-        logger.warning(str(e))
+    y_embed = _bf_embed(y, tau, m)
+    if y_embed is None:  # the delay or dimension could not be set, or the series is too short
+        logger.warning('Embedding failed')
         return np.nan
     n_embed, m = y_embed.shape
 
@@ -893,16 +1069,16 @@ def _scaling_range_endpoints(l: int) -> tuple:
 
 
 def _best_flat_range(v: np.ndarray, gamma: float, stptr: np.ndarray,
-                     endptr: np.ndarray) -> tuple:
+                     endptr: np.ndarray, normalize: bool = True) -> tuple:
     """Scaling range over which ``v`` is most nearly constant.
 
-    Rescales ``v`` to [0,1] so the comparison is independent of its range, then
-    scores each candidate range by the spread of ``v`` across it, less a bonus
+    Rescales ``v`` to [0,1] (unless ``normalize`` is False) so the comparison is independent of
+    its range, then scores each candidate range by the spread of ``v`` across it, less a bonus
     (``gamma``) per additional point spanned. Returns the winning
     ``(start index, end index, score)`` into ``stptr``/``endptr``.
     """
     with np.errstate(invalid='ignore', divide='ignore'):
-        vnorm = (v - v.min()) / (v.max() - v.min())
+        vnorm = (v - v.min()) / (v.max() - v.min()) if normalize else v
     mybad = np.empty((stptr.size, endptr.size))
     for i, s in enumerate(stptr):
         for j, e in enumerate(endptr):
@@ -1325,35 +1501,6 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
 
     return out
 
-from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robustfit
-from ..utils import _round_half_away
-
-
-def _embed_tau_m(y: np.ndarray, embed_params) -> tuple:
-    """
-    The delay and dimension of ``[tau, m]`` embedding parameters (hctsa's
-    ``BF_Embed(y, tau, m, true)``), without doing the embedding.
-
-    ``tau`` is an integer or a rule understood by :func:`pyhctsa.utils.get_tau`;
-    ``m`` is an integer, or ``'fnn'`` (or ``['fnn', threshold]``) for the
-    embedding dimension from TISEAN's false nearest neighbors. Returns
-    ``(nan, nan)`` if the delay cannot be set.
-    """
-    if not isinstance(embed_params, (list, tuple)) or len(embed_params) != 2:
-        raise ValueError('Embedding parameters are formatted incorrectly -- need [tau, m]')
-    tau = get_tau(y, embed_params[0])
-    if np.isnan(tau):
-        return np.nan, np.nan
-    m = embed_params[1]
-    if isinstance(m, (list, tuple)):
-        m = m[0] if len(m) == 1 and not isinstance(m[0], str) else m
-    if isinstance(m, str) or isinstance(m, (list, tuple)):
-        if (m if isinstance(m, str) else m[0]) == 'fnn':
-            raise NotImplementedError(
-                "m='fnn' needs a port of TISEAN's false_nearest (hctsa's NL_FNN), which is "
-                "not yet available in pyhctsa; pass an integer embedding dimension.")
-        raise ValueError('Embedding dimension, m, incorrectly specified.')
-    return int(tau), int(m)
 
 
 def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
@@ -1398,8 +1545,8 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
     embed_params : [tau, m], optional
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an
-        integer, or ``'fnn'`` (TISEAN's false nearest neighbors, not yet available
-        in pyhctsa and raises ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+        integer, or ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
     do_two : int, optional
         Only 1 (corrsum-style log-spaced radii, the default) is supported; 2 has no
         TISEAN equivalent and raises ``ValueError``, as in hctsa.
@@ -1509,7 +1656,6 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
     return out
 
 
-from scipy.spatial import cKDTree
 
 
 def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
@@ -1557,8 +1703,8 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
     embed_params : [tau, m], optional
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an
-        integer, or ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in
-        pyhctsa and raises ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+        integer, or ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
 
     Returns
     -------
@@ -1619,9 +1765,6 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
     return num_pairs / sum_log  # Takens' estimator: 1 / mean(ln(eup/r))
 
 
-from scipy.optimize import minimize_scalar
-from ..utils import _ml_randperm
-from scipy.special import digamma
 
 
 def _fractal_dim_error(d: float, g: float, kmin: int, kmax: int, mom: np.ndarray) -> float:
@@ -1702,8 +1845,8 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     embed_params : [tau, m], optional
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer,
-        or ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in pyhctsa and
-        raises ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+        or ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
     random_seed : int, optional
         Seed for choosing the random subsample of reference points (relevant when
         ``nref != -1``; the subsample differs from MATLAB's). Default is 0.
@@ -1752,7 +1895,6 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
         ref_idx = np.arange(n_emb)
     else:
         ref_idx = _ml_randperm(n_emb, _ml_rng(0 if random_seed is None else int(random_seed)))[:int(nref)] - 1
-    n_ref = ref_idx.size
 
     # For each reference point, the distances to its 1st..kmax-th nearest neighbors outside
     # the Theiler window (a KD-tree, over-fetching neighbors to cover those excluded)
@@ -1804,14 +1946,16 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     return out
 
 
-from ..toolboxes.Tisean_3_0_1.tisean import _e, _round_significant
 
 
-def _tisean_boxcount(y: np.ndarray, delay: int, maxembed: int, epscount: int) -> tuple:
-    # TISEAN's ``boxcount -M1,<maxembed> -d<delay> -Q0.0 -#<epscount>`` (source_c/boxcount.c),
-    # in process: ln N(eps), the log of the number of occupied cells of a partition of the
-    # delay embedding into cubes of side eps, for embedding dimensions 1..maxembed.
-    # Returns (eps, logN), with eps of shape (epscount,) and logN (epscount, maxembed), both
+def _tisean_boxcount(y: np.ndarray, delay: int, maxembed: int, epscount: int, q: float = 0.0) -> tuple:
+    # TISEAN's ``boxcount -M1,<maxembed> -d<delay> -Q<q> -#<epscount>`` (source_c/boxcount.c), in
+    # process: the Renyi entropy of order q, H_q = log(sum_i p_i^q) / (1 - q) (Shannon, -sum p log p,
+    # for q = 1), of the partition of the delay embedding into cubes of side eps -- p_i being the
+    # fraction of embedded points in cube i -- for embedding dimensions 1..maxembed. For q = 0
+    # that is ln N(eps), the log of the number of occupied cubes.
+    # Returns (eps, H, dH): eps of shape (epscount,), and H and dH, of shape (epscount, maxembed),
+    # the entropy and its increment with the embedding dimension (H itself for dimension 1), all
     # rounded through C's %e as in the .box file hctsa reads back.
     y = _round_significant(np.asarray(y, dtype=float).ravel(), 7)  # BF_WriteTempFile
     ymin = np.min(y)
@@ -1827,7 +1971,7 @@ def _tisean_boxcount(y: np.ndarray, delay: int, maxembed: int, epscount: int) ->
     epsfaktor = (epsmax / epsmin) ** (1.0 / (epscount - 1))
 
     eps = np.empty(epscount)
-    log_n = np.empty((epscount, maxembed))
+    h = np.empty((epscount, maxembed))
     heps = epsmax * epsfaktor
     epsi_old = 0
     for k in range(epscount):
@@ -1841,9 +1985,11 @@ def _tisean_boxcount(y: np.ndarray, delay: int, maxembed: int, epscount: int) ->
         labels = np.zeros(length, dtype=np.int64)
         for d in range(maxembed):  # nested partition: cells are distinguished by coordinates 1..d+1
             box = (x[d * delay:d * delay + length] * epsi).astype(np.int64)
-            labels = np.unique(labels * epsi + box, return_inverse=True)[1].ravel()
-            log_n[k, d] = np.log(labels.max() + 1)
-    return np.array([_e(v) for v in eps]), np.vectorize(_e)(log_n)
+            _, labels, counts = np.unique(labels * epsi + box, return_inverse=True, return_counts=True)
+            p = counts / length
+            h[k, d] = -np.sum(p * np.log(p)) if q == 1.0 else np.log(np.sum(p ** q)) / (1.0 - q)
+    dh = np.diff(h, axis=1, prepend=0.0)
+    return np.array([_e(v) for v in eps]), np.vectorize(_e)(h), np.vectorize(_e)(dh)
 
 
 def _dimensions_scaling_range(logr: np.ndarray, log_n: np.ndarray, gamma: float = 0.02) -> tuple:
@@ -1944,8 +2090,8 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
     embed_params : [tau, m], optional
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer, or
-        ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in pyhctsa and raises
-        ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+        ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
 
     Returns
     -------
@@ -1970,7 +2116,7 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
 
     try:
         # Box counting
-        bc_r, bc_logn = _tisean_boxcount(y, tau, big_m, num_bins)
+        bc_r, bc_logn, _ = _tisean_boxcount(y, tau, big_m, num_bins)
         bc_logr = np.log(bc_r)
 
         # Correlation sum, over the same number of scales: epsilon from max_eps/10 to max_eps
@@ -2136,8 +2282,8 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
     embed_params : [tau, m], optional
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer, or
-        ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in pyhctsa and raises
-        ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+        ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
 
     Returns
     -------
@@ -2290,7 +2436,6 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
     return out
 
 
-from scipy.stats import norm as _norm
 
 
 def _dvv_draws(rng: np.random.RandomState, n: int, n_dv: int, nsub: int, num_surr: int) -> tuple:
@@ -2509,8 +2654,6 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
     return out
 
 
-from scipy.signal import find_peaks, welch as _welch
-from scipy.spatial.distance import pdist, squareform
 
 
 def _period_normalized_tau(y: np.ndarray) -> Union[int, str]:
@@ -2962,191 +3105,6 @@ def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
 # ------------------------------------------------------------------------------
 # Recurrence- and embedding-based operations (NL_RecurrenceTimes, NL_RQA, ...)
 # ------------------------------------------------------------------------------
-# (the imports for this block sit here, rather than at the top of the module, only to
-# keep the block self-contained)
-import warnings
-
-from numba import njit
-from scipy.spatial.distance import pdist, squareform
-from sklearn.neighbors import KDTree
-
-from ..utils import _linspace, _ml_randperm, _round_half_away, bin_picker
-
-
-@njit(cache=True)
-def _fnn_nearest(s, delay, max_emb, theiler):
-    """
-    For each query point and each embedding dimension 1..max_emb, the nearest neighbor
-    (max-norm, non-zero distance, outside the Theiler window) among the candidate points,
-    as TISEAN's ``false_nearest`` finds it, and whether the minimum distance is shared by
-    several candidates (a tie).
-    """
-    n_len = s.size
-    n_query = n_len - max_emb * delay
-    n_cand = n_len - (max_emb + 1) * delay
-    best = np.full((n_query, max_emb), 1.1)
-    which = np.full((n_query, max_emb), -1, dtype=np.int64)
-    tied = np.zeros((n_query, max_emb), dtype=np.bool_)
-    for n in range(n_query):
-        for e in range(n_cand):
-            if abs(e - n) <= theiler:
-                continue
-            mx = 0.0
-            for d in range(max_emb):
-                dx = abs(s[n + d] - s[e + d])
-                if dx > mx:
-                    mx = dx
-                if mx > 0.0:
-                    if mx < best[n, d]:
-                        best[n, d] = mx
-                        which[n, d] = e
-                        tied[n, d] = False
-                    elif mx == best[n, d]:
-                        tied[n, d] = True
-    return best, which, tied
-
-
-def _fnn_break_ties(s, best, which, tied, delay, max_emb, theiler, eps_grid):
-    """
-    Among tied nearest neighbors, pick the one TISEAN's box search meets first: it scans the
-    3x3 boxes (of side epsilon, in the first and the last coordinate) around the point in
-    order, and each box's points from the latest to the earliest, keeping the first minimum.
-    """
-    n_cand = s.size - (max_emb + 1) * delay
-    cand = np.arange(n_cand)
-    for n, d in zip(*np.nonzero(tied)):
-        mx = np.zeros(n_cand)
-        for k in range(d + 1):
-            mx = np.maximum(mx, np.abs(s[n + k] - s[cand + k]))
-        ties = cand[(mx == best[n, d]) & (np.abs(cand - n) > theiler)]
-        eps = eps_grid[min(np.searchsorted(eps_grid, best[n, d]), len(eps_grid) - 1)]
-        cx, cy = (s[ties] / eps).astype(np.int64) & 1023, (s[ties + d] / eps).astype(np.int64) & 1023
-        x, y = int(s[n] / eps) & 1023, int(s[n + d] / eps) & 1023
-        da, db = (cx - x + 1) & 1023, (cy - y + 1) & 1023  # offset + 1, if within the 3x3 boxes
-        visible = (da <= 2) & (db <= 2)
-        if visible.any():
-            ties, da, db = ties[visible], da[visible], db[visible]
-            which[n, d] = ties[np.lexsort((-ties, db, da))[0]]
-
-
-def _false_nearest(y: ArrayLike, delay: int = 1, max_dim: int = 10, theiler: int = 0,
-                   escape_factor: float = 2.0) -> Union[dict, None]:
-    """
-    Fraction of false nearest neighbors by embedding dimension (TISEAN's ``false_nearest``,
-    as called by hctsa's NL_FNN with ``-m1 -M1,max_dim``).
-
-    A nearest neighbor (max-norm, outside the Theiler window) of an embedded point is false
-    when, after adding the next coordinate, the distance to it grows by more than a factor
-    ``escape_factor``. The series is rescaled to [0, 1] and, as in hctsa, written to TISEAN
-    to 7 significant digits.
-
-    Returns a dictionary of arrays over the embedding dimensions TISEAN reports (``dim``,
-    ``pfnn``, ``nhood`` (mean size of the neighborhoods) and ``nhood_std``), or ``None`` when
-    TISEAN gives no output (constant or too-short series, or no neighbor within range at
-    the first dimension). TISEAN stops at the first dimension for which no neighbor is
-    found, keeping the dimensions before it.
-    """
-    y = _tisean._round_significant(np.asarray(y, dtype=float).ravel(), 7)
-    n_len = y.size
-    delay, max_dim, theiler = int(delay), int(max_dim), int(theiler)
-    if (max_dim + 1) * delay >= n_len:
-        return None
-    lo, hi = y.min(), y.max()
-    interval = hi - lo
-    if interval == 0:
-        return None
-    s = (y - lo) / interval
-    varianz = np.sqrt(np.abs(np.mean(s * s) - np.mean(s) ** 2))
-
-    best, which, tied = _fnn_nearest(s, delay, max_dim, theiler)
-    # TISEAN's grid of neighborhood sizes: 1e-5, increased by sqrt(2) up to 2*varianz/escape_factor
-    eps_grid = [1e-5]
-    while eps_grid[-1] < 2 * varianz / escape_factor:
-        eps_grid.append(eps_grid[-1] * np.sqrt(2.0))
-    _fnn_break_ties(s, best, which, tied, delay, max_dim, theiler, np.array(eps_grid))
-    rows = {'dim': [], 'pfnn': [], 'nhood': [], 'nhood_std': []}
-    for emb in range(1, max_dim + 1):
-        mindx, nbr = best[:, emb - 1], which[:, emb - 1]
-        found = (nbr >= 0) & (mindx <= varianz / escape_factor)
-        n_found = int(found.sum())
-        if n_found == 0:
-            break  # TISEAN: "Not enough points found!"
-        q = np.flatnonzero(found)
-        factor = np.abs(s[q + emb] - s[nbr[q] + emb]) / mindx[q]
-        rows['dim'].append(emb)
-        rows['pfnn'].append(_tisean._e(np.count_nonzero(factor > escape_factor) / n_found))
-        rows['nhood'].append(_tisean._e(np.mean(mindx[q]) * interval))
-        rows['nhood_std'].append(_tisean._e(np.sqrt(np.mean(mindx[q] ** 2)) * interval))
-    if not rows['dim']:
-        return None
-    return {k: np.array(v) for k, v in rows.items()}
-
-
-def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.4) -> Union[int, float]:
-    """
-    Embedding dimension by false nearest neighbors, as hctsa's ``BF_Embed(y, tau, 'fnn')``:
-    the first dimension (of 1 to 10) at which the fraction of false nearest neighbors falls
-    below `threshold` (TISEAN's ``false_nearest`` with a Theiler window of one
-    autocorrelation time and an escape factor of 5), or one more than the largest
-    dimension TISEAN reports if it never does. NaN when it cannot be determined.
-    """
-    if y.size < 10:
-        logger.warning(f'Time series (N={y.size}) too short for fnn')
-        return np.nan
-    theiler = theiler_window(y, ('ac', 1), y.size)
-    if np.isnan(theiler):
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
-        return np.nan
-    res = _false_nearest(y, tau, 10, int(theiler), 5.0)
-    if res is None:
-        logger.warning('TISEAN false_nearest produced no usable output for this data')
-        return np.nan
-    below = np.flatnonzero(res['pfnn'] < threshold)
-    return int(res['dim'][below[0]]) if below.size else int(res['dim'][-1]) + 1
-
-
-def _embedding_params(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
-                      ) -> Union[tuple, None]:
-    """
-    The time delay and embedding dimension, as hctsa's ``BF_Embed(y, tau, m, true)``.
-
-    `tau` is an integer or a rule understood by :func:`pyhctsa.utils.get_tau`. `m` is an
-    integer, ``'fnn'`` (false nearest neighbors, threshold 0.4), or ``('fnn', threshold)``.
-    Returns ``(tau, m)``, or None if either cannot be determined.
-    """
-    tau = get_tau(y, tau)
-    if np.isnan(tau):
-        logger.warning('Could not determine the time delay for the embedding')
-        return None
-    tau = int(tau)
-    if isinstance(m, (list, tuple)):
-        m = m[0] if len(m) == 1 else m
-    if isinstance(m, (list, tuple)) or isinstance(m, str):
-        if (m if isinstance(m, str) else m[0]) != 'fnn':
-            raise ValueError(f"Embedding dimension, m, incorrectly specified: {m!r}")
-        m = _fnn_embedding_dim(y, tau, 0.4 if isinstance(m, str) else m[1])
-        if np.isnan(m):
-            return None
-    return tau, int(m)
-
-
-def _bf_embed(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
-              ) -> Union[np.ndarray, None]:
-    """
-    Time-delay embedding with hctsa's ``BF_Embed(y, tau, m, false)``: the embedded points as
-    rows (see :func:`_embedding_params` for `tau` and `m`), or None when it fails
-    (undetermined parameters, or a time series too short).
-    """
-    params = _embedding_params(y, tau, m)
-    if params is None:
-        return None
-    try:
-        return time_delay_embed(y, params[1], params[0])
-    except ValueError as e:
-        logger.warning(str(e))
-        return None
-
-
 def _random_subset(n: int, k: int, random_seed: Union[int, str, None]) -> np.ndarray:
     """
     ``k`` of ``n`` indices (from zero) in random order, from the Mersenne Twister seeded as
@@ -3787,8 +3745,6 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
 
         The ``sep_*`` outputs are NaN if ``k_max < 2`` or the 2-component fit fails.
     """
-    from sklearn.metrics import silhouette_samples
-    from sklearn.mixture import GaussianMixture
 
     y = np.asarray(y, dtype=float).ravel()
     y_embed = _bf_embed(y, tau, m)
@@ -4040,51 +3996,6 @@ def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
     return out
 
 
-def _boxcount_increments(y: np.ndarray, tau: int, m_max: int, num_bins: int) -> Union[np.ndarray, None]:
-    """
-    TISEAN's ``boxcount -M1,m_max -d tau -Q2.0 -#num_bins`` (hctsa's NL_BoxCountEntropyRate): the
-    order-2 Renyi entropy of the partition of the delay-embedded series into boxes, and its
-    increments with the embedding dimension.
-
-    The series is rescaled to [0, 1] (written to TISEAN to 7 significant digits) and
-    partitioned into boxes of side 1/n_boxes, for ``num_bins`` box sizes spaced geometrically
-    from 1 down to 1/1000 (each a distinct integer number of boxes per axis). With ``p_i`` the
-    fraction of embedded points in box ``i``, ``H(eps, d) = -log(sum_i p_i^2)``. Returns an array
-    (``num_bins`` x ``m_max``) whose column ``d`` is ``H(eps, d) - H(eps, d - 1)`` (``H`` itself
-    for ``d = 1``), each value as TISEAN prints it (``%e``), or None for a constant series.
-    """
-    y = _tisean._round_significant(y, 7)
-    lo, hi = y.min(), y.max()
-    if hi - lo == 0:
-        return None
-    s = (y - lo) / (hi - lo)
-    eps_min, eps_max = 1e-3, 1.0
-    s = np.where(s >= 1.0, s - eps_min / 2.0, s)
-    length = s.size - (m_max - 1) * tau
-    if length < 1:
-        return None
-    eps_factor = (eps_max / eps_min) ** (1.0 / (num_bins - 1))
-
-    rs = np.zeros((num_bins, m_max))
-    heps, epsi_old = eps_max * eps_factor, 0
-    for k in range(num_bins):
-        while True:  # (an integer number of boxes per axis, increasing with every length scale)
-            heps /= eps_factor
-            epsi = int(1.0 / heps)
-            if epsi > epsi_old:
-                break
-        epsi_old = epsi
-        # The box (per coordinate) of each embedded point, refined one coordinate at a time
-        label = np.zeros(length, dtype=np.int64)
-        h = np.zeros(m_max)
-        for d in range(m_max):
-            box = (s[d * tau:d * tau + length] * epsi).astype(np.int64)
-            _, label, counts = np.unique(label * epsi + box, return_inverse=True, return_counts=True)
-            h[d] = -np.log(np.sum((counts / length) ** 2))
-        rs[k] = np.diff(h, prepend=0.0)
-    return np.vectorize(_tisean._e)(rs)
-
-
 def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
                            embed_params: Union[list, tuple] = ('ac', 'fnn')) -> dict:
     """
@@ -4158,9 +4069,12 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
         return np.nan
     tau, m_max = params
 
-    rs = _boxcount_increments(y, tau, m_max, int(num_bins))
-    if rs is None:
-        logger.warning('boxcount failed (constant series, or too short for these embedding parameters)')
+    # (the order-2 Renyi entropy of the partition into boxes, as a function of the box size and the
+    # embedding dimension d, and its increment with d; the increments are analyzed)
+    try:
+        rs = _tisean_boxcount(y, tau, m_max, int(num_bins), 2.0)[2]
+    except _D2DataError as exc:
+        logger.warning(f'boxcount failed: {exc}')
         return np.nan
     if m_max < 2:
         # the increment I is only defined from d = 2 (d = 1 holds H itself)
@@ -4369,4 +4283,685 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
         out['corrDimTheta'] = np.corrcoef(local_dim[valid], theta[valid])[0, 1]
     else:
         out['corrDimTheta'] = np.nan
+    return out
+
+
+# ------------------------------------------------------------------------------
+# TISEAN c1 (fixed-mass information dimension) and lyap_spec (Lyapunov spectrum)
+# ------------------------------------------------------------------------------
+
+F32 = np.float32
+
+# digamma at the integers 0..20 (as tabulated in TISEAN's d1.f)
+_C1_PSI = np.array([0., -0.57721566490, 0.42278433509, 0.92278433509, 1.25611766843,
+                    1.50611766843, 1.70611766843, 1.87278433509, 2.01564147795, 2.14064147795,
+                    2.25175258906, 2.35175258906, 2.44266167997, 2.52599501330, 2.60291809023,
+                    2.67434666166, 2.74101332832, 2.80351332832, 2.86233685773, 2.91789241329,
+                    2.97052399224], dtype=np.float32)
+
+
+def _expf(x) -> np.float32:
+    with np.errstate(over='ignore', under='ignore'):
+        return F32(np.exp(np.float64(x)))
+
+
+def _logf(x) -> np.float32:
+    with np.errstate(divide='ignore', invalid='ignore'):
+        return F32(np.log(np.float64(x)))
+
+
+@njit(cache=True)
+def _slatec_rand(state):
+    """SLATEC's ``RAND(0.)`` (the generator TISEAN's Fortran programs use): one draw in (0, 1)."""
+    iy0 = 1029 * state[1]
+    iy1 = 1536 * state[0] + 507 * (state[1] - state[0]) + iy0
+    iy0 = iy0 + 1731
+    state[1] = iy0 % 2048
+    iy1 = iy1 + (iy0 - state[1]) // 2048
+    state[0] = iy1 % 2048
+    return np.float32(state[0] * 2048 + state[1]) / np.float32(4194304.0)
+
+
+@njit(cache=True)
+def _c1_shuffle(nmax, m, delay, state, slots, ju):
+    """
+    The permutation of the reference points in TISEAN's d1.f. Its swap partner is
+    ``int(rand * nmax - (m-1) * delay) + 1`` (rather than ``rand * (nmax - (m-1) * delay)``),
+    which for ``m >= 3`` is sometimes zero or negative, i.e. outside the array. Those writes and
+    reads are kept, on a persistent ``slots`` array that starts at zero, so that the points
+    chosen are the same as in the TISEAN binary. The list ``ju`` is also kept between calls: it is
+    refilled only up to ``nmax - (m-1) * delay``, so if more reference points are requested than
+    that (``-n``) the rest are what earlier calls left there (zeros, at first).
+    """
+    n = nmax - (m - 1) * delay
+    for i in range(n):
+        ju[i] = i + (m - 1) * delay + 1
+    for i in range(1, n + 1):
+        r = _slatec_rand(state)
+        x = np.float32(r * np.float32(nmax)) - np.float32((m - 1) * delay)
+        iperm = min(int(x) + 1, n)
+        ih = ju[i - 1]
+        if iperm >= 1:
+            ju[i - 1] = ju[iperm - 1]
+            ju[iperm - 1] = ih
+        else:
+            ju[i - 1] = slots[-iperm]
+            slots[-iperm] = ih
+
+
+@njit(cache=True)
+def _c1_kth_distance(ye, off, refs, delay, m, ncomp, nmin, k):
+    """
+    For each reference point, the k-th smallest max-norm distance (float32) between its
+    m-dimensional delay vector and those of the points outside its (cyclic) Theiler window; NaN
+    where there are fewer than k such points. (TISEAN finds these by growing a box search until
+    k neighbors are inside it, then taking the k-th distance, which is this.)
+    """
+    lo = (m - 1) * delay + 1
+    hi = ncomp + (m - 1) * delay
+    out = np.empty(refs.size, dtype=np.float32)
+    buf = np.empty(max(hi - lo + 1, 1), dtype=np.float32)
+    for r in range(refs.size):
+        n = refs[r]
+        cnt = 0
+        for q in range(lo, hi + 1):
+            nmd = abs(q - n) % ncomp
+            if nmd <= nmin or nmd >= ncomp - nmin:
+                continue
+            dis = np.float32(0.0)
+            for i in range(m):
+                dx = abs(ye[off + n - i * delay] - ye[off + q - i * delay])
+                if dx > dis:
+                    dis = dx
+            buf[cnt] = dis
+            cnt += 1
+        if cnt < k:
+            out[r] = np.nan
+        else:
+            out[r] = np.partition(buf[:cnt], k - 1)[k - 1]
+    return out
+
+
+@njit(cache=True)
+def _f32_cumsum_last(v):
+    s = np.float32(0.0)
+    for i in range(v.size):
+        s = np.float32(s + v[i])
+    return s
+
+
+def _c1_curves(y: np.ndarray, delay: int, m_from: int, m_to: int, nmin: int, n_ref: int,
+               kmax: int = 100, res: float = 2.0) -> Union[list, None]:
+    """
+    TISEAN's ``c1 -d<delay> -m<m_from> -M<m_to> -t<nmin> -n<n_ref>``: for each embedding
+    dimension, the table of [mean log distance to the k-th neighbor -> exp, mass] pairs (as
+    float32, as TISEAN writes them) for masses doubling every ``1/res`` octaves. Everything
+    that is single precision in the Fortran is single precision here. None if TISEAN could not
+    finish (it would search for neighbors for ever).
+    """
+    y32 = np.array([float('%.7g' % v) for v in y], dtype=np.float32)  # BF_WriteTempFile
+    nmax = y32.size
+    # the data sit at 1..nmax of `ye`; what lies before them is not data: zero, except that the
+    # variable `res` happens to sit at index -1 in the compiled c1 (read when a reference point
+    # of the permutation above falls outside the array)
+    off = (m_to - 1) * delay + 1
+    ye = np.zeros(off + nmax + 1, dtype=np.float32)
+    ye[off + 1:off + 1 + nmax] = y32
+    ye[off - 1] = res
+    sd = F32(math.sqrt(float(F32(_f32_cumsum_last(((y32 - F32(_f32_cumsum_last(y32) / F32(nmax)))
+                                                   ** 2).astype(np.float32)) / F32(nmax)))))
+    state = np.zeros(2, np.int64)
+    _slatec_rand(state)  # the program draws once when it seeds the generator
+    slots = np.zeros(max((m_to - 1) * delay, 1) + 2, np.int64)
+    ju = np.zeros(max(nmax, n_ref) + 1, np.int64)
+    resl = F32(_logf(F32(2.0)) / F32(res))
+    sqrt2 = F32(math.sqrt(2.0))
+    curves = []
+    rln = F32(0.0)
+    for m in range(m_from, m_to + 1):
+        rows = []
+        pr = F32(0.0)
+        if nmax - (m - 1) * delay < 1:  # the delay vectors are longer than the series
+            return None
+        pl = _logf(F32(F32(1.0) / F32(nmax - (m - 1) * delay)))
+        # (a Fortran DO loop over a real: the trip count is fixed first, the variable then accumulates)
+        for _ in range(int(F32(F32(F32(0.0) - pl) + resl) / resl)):
+            ncomp = nmax - (m - 1) * delay
+            n_eff = ncomp - 2 * nmin - 1
+            if n_eff < 1:  # every point lies in every other's Theiler window: TISEAN never finds neighbors
+                return None
+            kpr = int(F32(_expf(pr) * F32(n_eff))) + 1
+            k = int(F32(_expf(pl) * F32(n_eff))) + 1
+            if k > kmax:  # fixed mass: use fewer points rather than more neighbors
+                ncomp = int(F32(F32(F32(n_eff) * F32(kmax)) / F32(k)) + F32(2 * nmin + 1))
+                k = kmax
+            psi = _C1_PSI[k] if k <= 20 else F32(_logf(F32(k)) - F32(F32(1.0) / F32(2.0 * k)))
+            pln = F32(psi - _logf(F32(ncomp - 2 * nmin - 1)))
+            if k != kpr:
+                _c1_shuffle(nmax, m, delay, state, slots, ju)
+                e = _c1_kth_distance(ye, off, ju[:n_ref], delay, m, ncomp, nmin, k)
+                if np.isnan(e).any():
+                    return None
+                # TISEAN sweeps the reference points with a neighborhood size that grows by
+                # sqrt(2) until each has k neighbors; the sum of logs is in that order
+                eps = F32(_expf(F32(pln / F32(m))) * sd)
+                eps_seq = [eps]
+                while eps <= e.max() and len(eps_seq) < 500:
+                    eps = F32(eps * sqrt2)
+                    eps_seq.append(eps)
+                sweep = np.searchsorted(np.array(eps_seq, dtype=np.float32), e, side='right')
+                order = np.argsort(sweep, kind='stable')
+                # (each sweep moves the points still waiting to the front of ``ju``)
+                waiting, wait_sweep = ju[:n_ref].copy(), sweep
+                for s_i in range(int(sweep.max()) + 1):
+                    keep = wait_sweep > s_i
+                    waiting, wait_sweep = waiting[keep], wait_sweep[keep]
+                    ju[:waiting.size] = waiting
+                log_e = np.log(np.maximum(e[order].astype(np.float64), 1e-20)).astype(np.float32)
+                rln = F32(_f32_cumsum_last(log_e) / F32(n_ref - (m - 1) * delay))
+            if pln != pr:
+                pr = pln
+                rows.append((_expf(rln), _expf(pln)))
+            pl = F32(pl + resl)
+        curves.append(np.array(rows, dtype=np.float32).reshape(-1, 2))
+    return curves
+
+
+def _c2d_slopes(curves: list, iav: int = 2) -> list:
+    """TISEAN's ``c2d -a<iav>``: local slopes of log mass against log distance over windows of
+    ``2 * iav + 1`` points (float32), keeping the positive ones."""
+    n = 2 * iav + 1
+    out = []
+    for rows in curves:
+        e = np.array([_logf(F32(r[0])) for r in rows], dtype=np.float32)
+        c = np.array([_logf(F32(r[1])) for r in rows], dtype=np.float32)
+        block = []
+        for j in range(iav, len(rows) - iav):
+            x, v = e[j - iav:j + iav + 1], c[j - iav:j + iav + 1]
+            sx = F32(0.0)
+            for xi in x:
+                sx = F32(sx + xi)
+            sa, a = F32(0.0), F32(0.0)
+            for i in range(n):
+                dev = F32(x[i] - F32(sx / F32(n)))
+                sa = F32(sa + F32(dev * dev))
+                a = F32(a + F32(v[i] * dev))
+            slope = F32(a / sa)
+            if slope > 0:
+                block.append((_expf(F32(F32(0.5) * F32(e[j + iav] + e[j - iav]))), slope))
+        # (written by TISEAN with nine significant digits, read back by MATLAB as doubles)
+        out.append(np.array([(float('%.9g' % a), float('%.9g' % b)) for a, b in block]).reshape(-1, 2))
+    return out
+
+
+def _c1_scaling_range(slopes: np.ndarray) -> Union[tuple, None]:
+    """
+    hctsa's search (inside NL_c1) for the length scales over which the slopes are most nearly
+    constant: a start in the first quarter and an end in the last three quarters, scoring the
+    standard deviation across the range less 0.005 per point it spans. Returns the 1-based
+    ``(start, end, score, mean, std)``, or None if there are too few points.
+    """
+    n = slopes.size
+    stptr = np.arange(1, n // 4)
+    endptr = np.arange(int(np.ceil(n / 4)) + 1, n + 1)
+    if stptr.size == 0 or endptr.size == 0:
+        return None
+    a, b, best = _best_flat_range(slopes, 0.005, stptr, endptr, normalize=False)
+    if a is None:
+        return None
+    rng = slopes[stptr[a] - 1:endptr[b]]
+    return stptr[a], endptr[b], best, np.mean(rng), np.std(rng, ddof=1)
+
+
+def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = (2, 10),
+              tsep: Union[int, float] = 0.02, nref: Union[int, float] = 0.5) -> Union[dict, float]:
+    """
+    Information dimension by the fixed-mass method (TISEAN's ``c1``).
+
+    For a range of embedding dimensions, ``c1`` finds the distance to the k-th nearest neighbor
+    (k increasing with the fraction of the points, the "mass", included) of a set of reference
+    points, and the information dimension is the slope of the log mass against the log of the
+    mean log distance (``c2d`` averages the local slope over five points). hctsa looks for a
+    scaling range in each dimension and summarizes the dimension estimates across them.
+
+    The routine is a port of TISEAN 3.0.1's Fortran (``c1.f``, ``d1.f``, ``c2d.f``) in single
+    precision, and reproduces the binary's output, including the permutation of the reference
+    points (its random numbers are SLATEC's ``RAND``) and the out-of-range indices it contains for
+    ``m >= 3``.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    tau : int or str, optional
+        The time delay: an integer or a rule understood by :func:`pyhctsa.utils.get_tau`
+        (``'ac'``, ``'ac1e'``, ``'mi'``). Default is 1.
+    mmm : [m_min, m_max], optional
+        The minimum and maximum embedding dimension. Default is ``[2, 10]``.
+    tsep : int or float, optional
+        The minimum time separation of neighbors (the Theiler window), in samples, or a proportion
+        of the series length if between 0 and 1 (exclusive). Default is 0.02.
+    nref : int or float, optional
+        The number of reference points: a number of samples, or a proportion of the series
+        length if at most 1. At most 2500 and, if the series is longer than 100 points, at least
+        100. Default is 0.5.
+
+    Returns
+    -------
+    dict
+        Properties of the dimension estimates of the scaling ranges: ``bestestd`` and
+        ``bestestdstd`` (the mean and standard deviation of the dimension over the scaling range
+        with the best score), ``bestgoodness`` (that score), ``mediand``, ``mind``, ``maxd``,
+        ``ranged`` (across embedding dimensions), ``maxmd`` (at the largest embedding dimension),
+        ``meanstd`` (the mean of the standard deviations), ``bestscrd`` and ``longestscr`` (the
+        dimension at, and log-length of, the longest scaling range). NaN if the series has fewer
+        than 100 points or is constant, the delay cannot be set, or no scaling range is found.
+        (Series whose length leaves a remainder of at most 6 on division by 128 lose their last
+        samples, as in hctsa, because TISEAN's ``c1`` stalls on them.)
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    if n < 100:
+        logger.warning('Time series too short for c1')
+        return np.nan
+    freaky = n % 128
+    if freaky <= 6:
+        logger.warning(f"TISEAN's c1 stalls on a series of this length: ignoring the last {freaky + 1} points")
+        y = y[:n - (freaky + 1)]
+        n = y.size
+    if np.unique(y).size == 1:
+        return np.nan
+
+    if isinstance(tau, str) and tau not in ('ac', 'ac1e', 'mi'):
+        raise ValueError(f"Unknown time delay '{tau}'")
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        return np.nan
+    tau = int(tau)
+
+    if len(mmm) != 2:
+        raise ValueError('Please set a minimum and maximum embedding dimension as a length-2 vector')
+    if 0 < tsep < 1:  # a proportion of the data length
+        tsep = _round_half_away(tsep * n)
+    if 0 < nref <= 1:
+        nref = int(np.ceil(nref * n))
+    nref = min(int(nref), 2500)
+    if nref < 100 and n > 100:
+        nref = 100
+
+    curves = _c1_curves(y, tau, int(mmm[0]), int(mmm[1]), int(tsep), nref)
+    if curves is None:
+        logger.warning("TISEAN's c1 could not find enough neighbors")
+        return np.nan
+    slopes = _c2d_slopes(curves)
+
+    sc = np.full((len(slopes), 6), np.nan)
+    for i, block in enumerate(slopes):
+        found = _c1_scaling_range(block[:, 1]) if block.shape[0] else None
+        if found is None:
+            logger.warning('Could not find a scaling range in the TISEAN c1 output (time series too short?)')
+            return np.nan
+        start, end, goodness, mean, std = found
+        sc[i] = [block[start - 1, 0], block[end - 1, 0], goodness, mean, std,
+                 np.log(block[end - 1, 0]) - np.log(block[start - 1, 0])]
+
+    best = int(np.argmin(sc[:, 2]))
+    longest = int(np.argmax(sc[:, 5]))
+    out = {}
+    out['bestestd'] = sc[best, 3]
+    out['bestestdstd'] = sc[best, 4]
+    out['bestgoodness'] = np.min(sc[:, 2])
+    out['mediand'] = np.median(sc[:, 3])
+    out['mind'] = np.min(sc[:, 3])
+    out['maxd'] = np.max(sc[:, 3])
+    out['ranged'] = np.ptp(sc[:, 3])
+    out['maxmd'] = sc[-1, 3]
+    out['meanstd'] = np.mean(sc[:, 4])
+    out['bestscrd'] = sc[longest, 3]
+    out['longestscr'] = np.max(sc[:, 5])
+    return out
+
+
+@njit(cache=True)
+def _tisean_rnd_deltas(n, seed):
+    """TISEAN's ``rnd_init(seed)``, 10000 warm-up calls of ``rnd_long``, then ``n * n`` values
+    ``rnd_long() / ULONG_MAX`` (the random starting vectors of ``lyap_spec``)."""
+    factor = np.uint64(13) ** np.uint64(13)
+    arr = np.empty(9689, dtype=np.uint64)
+    arr[0] = np.uint64(seed)
+    for i in range(1, 9689):
+        arr[i] = factor * arr[i - 1] + np.uint64(1)
+    t, t1, t2, t3 = 9688, 9688 - 157, 9688 - 314, 9688 - 471
+    out = np.empty((n, n))
+    for c in range(10000 + n * n):
+        t = (t + 1) % 9689
+        t1 = (t1 + 1) % 9689
+        t2 = (t2 + 1) % 9689
+        t3 = (t3 + 1) % 9689
+        arr[t] = arr[t] ^ arr[t1] ^ arr[t2] ^ arr[t3]
+        if c >= 10000:
+            out[(c - 10000) // n, (c - 10000) % n] = np.float64(arr[t]) / 18446744073709551615.0
+    return out
+
+
+@njit(cache=True)
+def _gram_schmidt(delta):
+    """Orthonormalize the rows of ``delta`` in place (classical Gram-Schmidt, as TISEAN); returns
+    their lengths before normalization."""
+    n = delta.shape[0]
+    dnew = np.zeros((n, n))
+    stretch = np.zeros(n)
+    for i in range(n):
+        diff = np.zeros(n)
+        for j in range(i):
+            nrm = 0.0
+            for k in range(n):
+                nrm += delta[i, k] * dnew[j, k]
+            for k in range(n):
+                diff[k] -= nrm * dnew[j, k]
+        nrm = 0.0
+        for j in range(n):
+            nrm += (delta[i, j] + diff[j]) ** 2
+        nrm = np.sqrt(nrm)
+        stretch[i] = nrm
+        for j in range(n):
+            dnew[i, j] = (delta[i, j] + diff[j]) / nrm
+    delta[:, :] = dnew
+    return stretch
+
+
+@njit(cache=True)
+def _solve_in_place(mat, vec):
+    """TISEAN's ``solvele`` (Gaussian elimination with row pivoting, in place); False if singular."""
+    n = vec.size
+    for i in range(n - 1):
+        mx = abs(mat[i, i])
+        maxi = i
+        for j in range(i + 1, n):
+            if abs(mat[j, i]) > mx:
+                mx = abs(mat[j, i])
+                maxi = j
+        if maxi != i:
+            for c in range(n):
+                tmp = mat[i, c]
+                mat[i, c] = mat[maxi, c]
+                mat[maxi, c] = tmp
+            tmp = vec[i]
+            vec[i] = vec[maxi]
+            vec[maxi] = tmp
+        pivot = mat[i, i]
+        if pivot == 0.0:
+            return False
+        for j in range(i + 1, n):
+            q = -mat[j, i] / pivot
+            mat[j, i] = 0.0
+            for k in range(i + 1, n):
+                mat[j, k] += q * mat[i, k]
+            vec[j] += q * vec[i]
+    vec[n - 1] /= mat[n - 1, n - 1]
+    for i in range(n - 2, -1, -1):
+        for j in range(n - 1, i, -1):
+            vec[i] -= mat[i, j] * vec[j]
+        vec[i] /= mat[i, i]
+    return True
+
+
+_LYAP_BOX = 512  # cells per axis of the neighbor search grid, as in lyap_spec.c
+
+
+@njit(cache=True)
+def _lyap_neighbors(S, act, theiler, k_nn, epsmin, box, link, found, dist):
+    """
+    The neighbors of point ``act`` as TISEAN's ``lyap_spec`` finds them, in its order: a grid of cells
+    (on the first and last coordinates) of side epsilon, grown by 1.2 until more than ``k_nn`` points
+    lie within epsilon in every coordinate (the point itself, and the points inside the Theiler
+    window dropped); the ``k_nn`` nearest of them, by the selection sort in ``sort()`` (so ties are
+    resolved as there). Returns (number found, average distance of the last neighbor).
+    """
+    L, m = S.shape
+    nl = L - 1  # points that have a successor
+    ib = _LYAP_BOX - 1
+    epsilon = epsmin / 1.2
+    nfound = 0
+    foundeps = 0.0
+    while True:
+        epsilon *= 1.2
+        if epsilon > 1.0:
+            epsilon = 1.0
+        for x in range(_LYAP_BOX):
+            for y in range(_LYAP_BOX):
+                box[x, y] = -1
+        for i in range(nl):
+            x = int(S[i, 0] / epsilon) & ib
+            y = int(S[i, m - 1] / epsilon) & ib
+            link[i] = box[x, y]
+            box[x, y] = i
+        nfound = 0
+        i0 = int(S[act, 0] / epsilon) & ib
+        j0 = int(S[act, m - 1] / epsilon) & ib
+        for i1 in range(i0 - 1, i0 + 2):
+            for j1 in range(j0 - 1, j0 + 2):
+                element = box[i1 & ib, j1 & ib]
+                while element != -1:
+                    inside = True
+                    for c in range(m):
+                        if abs(S[act, c] - S[element, c]) > epsilon:
+                            inside = False
+                            break
+                    if inside:
+                        found[nfound] = element
+                        nfound += 1
+                    element = link[element]
+        if theiler > 0:  # drop neighbors within the Theiler window (the point itself is kept)
+            kept = 0
+            for q in range(nfound):
+                if found[q] == act or abs(found[q] - act) > theiler:
+                    found[kept] = found[q]
+                    kept += 1
+            nfound = kept
+        if nfound > k_nn:
+            # sort(): distances to all but the point itself, which is swapped to the end
+            self_at = 0
+            for q in range(nfound):
+                if found[q] != act:
+                    d = 0.0
+                    for c in range(m):
+                        dx = abs(S[act, c] - S[found[q], c])
+                        if dx > d:
+                            d = dx
+                    dist[q] = d
+                else:
+                    self_at = q
+            if self_at != nfound - 1:
+                dist[self_at] = dist[nfound - 1]
+                found[self_at] = found[nfound - 1]
+            for i in range(k_nn):
+                for j in range(i + 1, nfound - 1):
+                    if dist[j] < dist[i]:
+                        tmp = dist[i]
+                        dist[i] = dist[j]
+                        dist[j] = tmp
+                        tmpi = found[i]
+                        found[i] = found[j]
+                        found[j] = tmpi
+            return k_nn, dist[k_nn - 1]
+        if epsilon >= 1.0:
+            break
+    return nfound, foundeps
+
+
+@njit(cache=True)
+def _lyap_spec_sums(S, k_nn, theiler, seed):
+    """
+    Sano and Sawada's method as in TISEAN's ``lyap_spec`` for the m columns of ``S`` (each
+    rescaled to [0, 1]) as the state, mapped forward one sample: at each point a local affine
+    map is fitted to the next values of its ``k_nn`` nearest neighbors (max norm, outside the
+    Theiler window), and a set of m tangent vectors is carried along it and re-orthonormalized.
+    Returns the status (0 ok, 50 too few neighbors, 1 singular fit), the sums of the log
+    stretching rates and the number of steps.
+    """
+    L, m = S.shape
+    delta = _tisean_rnd_deltas(m, seed)
+    _gram_schmidt(delta)
+    factor = np.zeros(m)
+    nl = L - 1
+    dyn = np.zeros((m, m))
+    mat = np.zeros((m + 1, m + 1))
+    hmat = np.zeros((m + 1, m + 1))
+    imat = np.zeros((m + 1, m + 1))
+    vec = np.zeros(m + 1)
+    dist = np.empty(nl)
+    found = np.empty(nl, dtype=np.int64)
+    link = np.empty(nl, dtype=np.int64)
+    box = np.empty((_LYAP_BOX, _LYAP_BOX), dtype=np.int64)
+    epsmin = 1e-3
+    aveps = 0.0
+    count = 0
+    for act in range(nl):
+        count += 1
+        nf, foundeps = _lyap_neighbors(S, act, theiler, k_nn, epsmin, box, link, found, dist)
+        aveps += foundeps
+        epsmin = aveps / count  # the neighborhood size to start the next search with
+        if nf < k_nn:
+            return 50, factor, count
+        # normal equations of the local affine fit
+        mat[:, :] = 0.0
+        for a in range(nf):
+            p = found[a]
+            mat[0, 0] += 1.0
+            for j in range(m):
+                mat[0, j + 1] += S[p, j]
+            for j in range(m):
+                for k in range(j, m):
+                    mat[j + 1, k + 1] += S[p, k] * S[p, j]
+        for i in range(m + 1):
+            for j in range(i, m + 1):
+                mat[i, j] = mat[i, j] / nf
+                mat[j, i] = mat[i, j]
+        for i in range(m + 1):  # invert column by column
+            for j in range(m + 1):
+                vec[j] = 1.0 if i == j else 0.0
+                hmat[j, :] = mat[j, :]
+            if not _solve_in_place(hmat, vec):
+                return 1, factor, count
+            imat[:, i] = vec
+        for d in range(m):
+            vec[:] = 0.0
+            for a in range(nf):
+                p = found[a]
+                hv = S[p + 1, d]
+                vec[0] += hv
+                for j in range(m):
+                    vec[j + 1] += hv * S[p, j]
+            vec /= nf
+            for i in range(1, m + 1):
+                dyn[d, i - 1] = 0.0
+                for j in range(m + 1):
+                    dyn[d, i - 1] += imat[i, j] * vec[j]
+        dnew = np.zeros((m, m))  # carry the tangent vectors along the local map
+        for i in range(m):
+            for j in range(m):
+                dnew[i, j] = dyn[j, 0] * delta[i, 0]
+                for k in range(1, m):
+                    dnew[i, j] += dyn[j, k] * delta[i, k]
+        delta[:, :] = dnew
+        stretch = _gram_schmidt(delta)
+        for j in range(m):
+            factor[j] += np.log(stretch[j])
+    return 0, factor, count
+
+
+def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: int = 30,
+              max_n: Union[int, str] = 10000, theiler_win: Union[int, float, list, tuple] = ('ac', 1),
+              random_seed: int = 42) -> Union[dict, float]:
+    """
+    The spectrum of Lyapunov exponents of the delay-embedded trajectory.
+
+    Estimates all ``m`` exponents (not just the largest, cf. :func:`largest_lyap`) with TISEAN's
+    ``lyap_spec``, an implementation of the method of Sano and Sawada: local affine maps of the
+    embedded trajectory are fitted to the neighbors of each point, and tangent vectors propagated
+    along them with periodic orthonormalization. From the spectrum come the rate of
+    volume contraction (the sum of the exponents) and the Kaplan-Yorke estimate of the
+    attractor's dimension. The routine is run in process (a port of ``lyap_spec.c``, which
+    reproduces the TISEAN binary, including its random initial vectors).
+
+    A little noise (0.001 of the standard deviation) is added to the series first, so that the
+    local fits are well posed for quantized series; ``random_seed`` seeds it (NumPy's generator,
+    not MATLAB's ``rng(42)`` stream).
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    tau_method : int or str, optional
+        The time delay of the embedding: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``). Default is 1.
+    m : int, optional
+        The embedding dimension, and the number of exponents estimated (at least 3). Default is 3.
+    k_nn : int, optional
+        The number of neighbors used for each local fit. Default is 30.
+    max_n : int or 'full', optional
+        The maximum number of samples (the series is cropped to its first ``max_n`` samples), or
+        ``'full'``. Default is 10000.
+    theiler_win : int, float, or ``['ac', k]``, optional
+        The Theiler window (see :func:`pyhctsa.utils.theiler_window`): neighbors closer in time
+        than this are not used. Default is ``['ac', 1]``.
+    random_seed : int, optional
+        Seed of the added noise. Default is 42.
+
+    Returns
+    -------
+    dict
+        ``LE1``, ``LE2``, ``LE3`` (the three largest exponents, per sample), ``sumPos`` and
+        ``numPos`` (the sum and number of positive exponents), ``sumAll`` (their sum) and ``KYdim``
+        (the Kaplan-Yorke dimension). NaN if the delay or Theiler window cannot be set, the
+        series is too short for the fits (fewer than ``10 * k_nn + 2 * theiler_win`` embedded
+        points), TISEAN finds too few neighbors, or an exponent is not finite.
+    """
+    y = _check_max_n(np.asarray(y, dtype=float).ravel(), max_n, 'lyap_spec')
+    n = y.size
+    if m < 3:
+        raise ValueError('The embedding dimension, m, must be at least 3 (the outputs include LE3)')
+
+    y = y + 0.001 * np.std(y, ddof=1) * np.random.RandomState(random_seed).randn(n)
+
+    params = _embedding_params(y, tau_method, m)
+    if params is None:
+        logger.warning('Could not determine a suitable time delay for this time series')
+        return np.nan
+    tau, m = params
+    theiler = theiler_window(y, theiler_win, n)
+    if np.isnan(theiler):
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    theiler = int(theiler)
+
+    n_emb = n - (m - 1) * tau
+    if n_emb < 10 * k_nn + 2 * theiler:
+        logger.warning(f'Time series too short to estimate the Lyapunov spectrum (N = {n}, tau = {tau}, m = {m})')
+        return np.nan
+    # the embedding as TISEAN reads it (BF writes seven significant digits), each column rescaled
+    emb = np.array([[float('%.7g' % v) for v in y[j * tau:j * tau + n_emb]] for j in range(m)]).T
+    span = emb.max(axis=0) - emb.min(axis=0)
+    if np.any(span == 0):
+        return np.nan
+    status, factor, count = _lyap_spec_sums((emb - emb.min(axis=0)) / span, int(k_nn), theiler, 0x098342)
+    if status != 0:
+        return np.nan
+    # (TISEAN prints the averages with %e)
+    le = np.array([float('%e' % (f / count)) for f in factor])
+    if not np.all(np.isfinite(le)):
+        return np.nan
+
+    out = {'LE1': le[0], 'LE2': le[1], 'LE3': le[2]}
+    out['sumPos'] = np.sum(le[le > 0])
+    out['numPos'] = int(np.sum(le > 0))
+    out['sumAll'] = np.sum(le)
+    cum = np.cumsum(le)
+    below = np.flatnonzero(cum < 0)
+    if below.size == 0:
+        out['KYdim'] = float(m)
+    else:
+        pos_k = int(below[0])  # the number of leading exponents whose cumulative sum is not negative
+        out['KYdim'] = 0.0 if pos_k == 0 else pos_k + cum[pos_k - 1] / abs(le[pos_k])
     return out

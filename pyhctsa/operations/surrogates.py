@@ -9,8 +9,9 @@ from scipy.stats import norm, zmap
 
 from ..operations.correlation import tc3, trev
 from ..operations.information import automutual_info, first_min
+from ..operations.nonlinearity import _ms_nlpe, fnn, nlpe
 from ..operations.physics import _ksdensity
-from ..utils import get_tau
+from ..utils import get_tau, theiler_window
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -281,10 +282,18 @@ def surrogate_test(
             'fmmi' (which both meant the Gaussian estimate) are accepted as
             'amigaussian1' and 'fmmigaussian' with a deprecation warning.
 
-        Default is ``'amikraskov1'``. The statistics 'nlpe' and 'fnn' of hctsa's
-        ``SD_SurrogateTest`` are not implemented. Outputs for each statistic ``s``
-        (``amikraskov``, ``fmmikraskov``, ``amigaussian``, ``fmmigaussian``, ``o3``, ``tc3``)
-        are ``s_p`` (p-value of a one- or two-sided z-test of the series' value against the
+        - 'nlpe': the mean squared error of the locally constant nonlinear prediction
+            (:func:`pyhctsa.operations.nonlinearity.nlpe`, embedding dimension 3, delay 1,
+            Theiler window of one autocorrelation time); tested one-sided (the series' error should be
+            higher than the surrogates'). Slow. NOTE: as in hctsa, the series' value is the
+            mean of the squared residuals but each surrogate's is their sum.
+        - 'fnn': the fraction of false nearest neighbors at embedding dimension 2
+            (:func:`pyhctsa.operations.nonlinearity.fnn`, delay 1, escape factor 5);
+            tested one-sided.
+
+        Default is ``'amikraskov1'``. Outputs for each statistic ``s``
+        (``amikraskov``, ``fmmikraskov``, ``amigaussian``, ``fmmigaussian``, ``o3``, ``tc3``,
+        ``nlpe``, ``fnn``) are ``s_p`` (p-value of a one- or two-sided z-test of the series' value against the
         Gaussian fitted to the surrogates' values), ``s_zscore``, ``s_f`` (kernel-smoothed
         density of the z-scored surrogates' values at the series' value; 0 outside the density
         estimate), ``s_mediqr`` (distance from the surrogates' median in interquartile ranges;
@@ -396,6 +405,39 @@ def surrogate_test(
             tmp = tc3(z[:, i], tau)
             tc3_surr[i] = tmp['raw']
         if not _compare('tc3', tc3_x, tc3_surr, 'both'):
+            return np.nan
+
+    if 'nlpe' in the_test_stat:
+        # locally constant phase space prediction error; embedding parameters fixed
+        de, tau = 3, 1
+        tmp = nlpe(x, de, tau, 5000, ('ac', 1))
+        if not isinstance(tmp, dict):  # hctsa errors on taking the field of a NaN
+            return np.nan
+        nlpe_x = tmp['msqerr']
+        nlpe_surr = np.zeros(num_surrs)
+        for i in range(num_surrs):
+            th = theiler_window(z[:, i], ('ac', 1), n)
+            if np.isnan(th):
+                return np.nan
+            res = _ms_nlpe(z[:, i], de, tau, int(th))
+            nlpe_surr[i] = np.sum(np.asarray(res, dtype=float) ** 2)  # (a sum, where the series' is a mean: as hctsa)
+        # the error should be higher for the series than for the surrogates
+        if not _compare('nlpe', nlpe_x, nlpe_surr, 'right'):
+            return np.nan
+
+    if 'fnn' in the_test_stat:
+        # false nearest neighbors at d = 2
+        tmp = fnn(x, 1, 2, ('ac', 1), False, escape_factor=5)
+        if not isinstance(tmp, dict):
+            return np.nan
+        fnn_x = tmp['pfnn_2']
+        fnn_surr = np.zeros(num_surrs)
+        for i in range(num_surrs):
+            tmp = fnn(z[:, i], 1, 2, ('ac', 1), False, escape_factor=5)
+            if not isinstance(tmp, dict):
+                return np.nan
+            fnn_surr[i] = tmp['pfnn_2']
+        if not _compare('fnn', fnn_x, fnn_surr, 'right'):
             return np.nan
 
     return out
