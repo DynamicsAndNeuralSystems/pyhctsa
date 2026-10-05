@@ -194,35 +194,52 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
     # % Linear fit the log-log plot: full range
     out = _robust_linear_fit(logtt, logFF, np.arange(0, num_timescales), '')
  
+    # minPoints scales with the number of timescales rather than being a fixed constant: a
+    # small fixed minPoints lets the search reach breakpoints right at the edge of the
+    # domain, where a segment of a handful of points trivially achieves near-zero fit
+    # error. The floor of 8 matches _robust_linear_fit's minimum length.
     sserr = np.full(num_timescales, np.nan)  # don't choose the end points
-    min_points = 6
- 
-    for i in range(min_points - 1, num_timescales - min_points):
-        r1 = slice(0, i + 1)  # first segment: points 0..i  (i+1 points)
-        p1 = np.polyfit(logtt[r1], logFF[r1], 1)
- 
-        r2 = slice(i, num_timescales)  # second segment: points i..end
-        p2 = np.polyfit(logtt[r2], logFF[r2], 1)
- 
-        # Sum of errors from fitting lines to both segments:
-        sserr[i] = (np.linalg.norm(np.polyval(p1, logtt[r1]) - logFF[r1]) +
-                    np.linalg.norm(np.polyval(p2, logtt[r2]) - logFF[r2]))
- 
-    break_pt = np.where(sserr == np.nanmin(sserr))[0][0]  # find first occurrence of minimum
-    r1 = np.arange(0, break_pt + 1)
-    r2 = np.arange(break_pt, num_timescales)
- 
-    out['prop_r1'] = len(r1) / num_timescales
-    out['logtausplit'] = logtt[break_pt]
- 
-    if guard_ratsplit and (not np.isfinite(out['ssr']) or out['ssr'] < ssr_tol):
+    min_points = max(8, int(_round(0.25 * num_timescales)))
+    if num_timescales >= 2 * min_points:
+        for i in range(min_points - 1, num_timescales - min_points):
+            r1 = slice(0, i + 1)  # first segment: points 0..i  (i+1 points)
+            p1 = np.polyfit(logtt[r1], logFF[r1], 1)
+
+            r2 = slice(i, num_timescales)  # second segment: points i..end
+            p2 = np.polyfit(logtt[r2], logFF[r2], 1)
+
+            # Mean squared error pooled across both segments, normalized by the total
+            # number of points sampled (num_timescales):
+            e1 = np.polyval(p1, logtt[r1]) - logFF[r1]
+            e2 = np.polyval(p2, logtt[r2]) - logFF[r2]
+            sserr[i] = (np.sum(e1 ** 2) + np.sum(e2 ** 2)) / num_timescales
+
+    if np.all(np.isnan(sserr)):
+        # Too few timescales to fit two distinct linear regimes meaningfully
+        r1 = r2 = np.array([], dtype=int)
+        out['prop_r1'] = np.nan
+        out['logtausplit'] = np.nan
         out['ratsplitminerr'] = np.nan
+        out['meanssr'] = np.nan
+        out['stdssr'] = np.nan
     else:
-        out['ratsplitminerr'] = np.nanmin(sserr) / out['ssr']
- 
-    out['meanssr'] = np.nanmean(sserr)
-    out['stdssr'] = np.nanstd(sserr, ddof=1)  # FIX [4]: MATLAB nanstd normalises by N-1
- 
+        break_pt = np.where(sserr == np.nanmin(sserr))[0][0]  # find first occurrence of minimum
+        r1 = np.arange(0, break_pt + 1)
+        r2 = np.arange(break_pt, num_timescales)
+
+        out['prop_r1'] = len(r1) / num_timescales
+        out['logtausplit'] = logtt[break_pt]
+
+        if guard_ratsplit and (not np.isfinite(out['ssr']) or out['ssr'] < ssr_tol):
+            out['ratsplitminerr'] = np.nan
+        else:
+            out['ratsplitminerr'] = np.nanmin(sserr) / out['ssr']
+
+        out['meanssr'] = np.nanmean(sserr)
+        valid_sserr = sserr[~np.isnan(sserr)]
+        # std of the valid errors, normalised by N-1 (as MATLAB), and 0 for a single value
+        out['stdssr'] = np.std(valid_sserr, ddof=1) if valid_sserr.size > 1 else 0.0
+
     out2 = _robust_linear_fit(logtt, logFF, r1, 'r1_')
     out3 = _robust_linear_fit(logtt, logFF, r2, 'r2_')
  
