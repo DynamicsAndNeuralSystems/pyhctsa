@@ -752,6 +752,26 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
         out[f'max_{name}'] = np.nanmax(values)
         out[f'mean_{name}'] = np.nanmean(values)
 
+def _seeded_rng(random_seed) -> np.random.RandomState:
+    """
+    The random generator after hctsa's ``BF_ResetSeed(random_seed)``: an integer seed, or
+    ``'default'`` (seed 0), seeds MATLAB's Mersenne Twister (so ``rand`` draws are MATLAB's);
+    ``'none'`` or ``None`` gives a generator that is not reset (fresh entropy).
+    """
+    if isinstance(random_seed, str) and random_seed == 'default':
+        return _ml_rng(0)
+    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
+        return np.random.RandomState()
+    return _ml_rng(int(random_seed))
+
+
+def _n4_fpe(loss: float, n_order: int, n_obs: int) -> float:
+    """Akaike's final prediction error of an ``n4sid`` fit of order ``n_order`` to ``n_obs`` samples
+    (3 * order free parameters, as MATLAB counts them in ``EstimationInfo.FPE``)."""
+    n_eff = 3 * n_order
+    return loss * (1 + n_eff / n_obs) / (1 - n_eff / n_obs)
+
+
     # The orders of the best models (first in column-major order, as MATLAB's find)
     for name, values, pick in (('LLF', llfs, np.nanargmax), ('AIC', aics, np.nanargmin),
                                ('BIC', bics, np.nanargmin)):
@@ -1035,7 +1055,7 @@ def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.
     n_eff = 3 * n
     out['noisevar'] = fit['loss'] * n_obs / (n_obs - n_eff)
     out['lossfn'] = fit['loss']
-    out['fpe'] = fit['loss'] * (1 + n_eff / n_obs) / (1 - n_eff / n_obs)
+    out['fpe'] = _n4_fpe(fit['loss'], n, n_obs)
 
     # Train on the first portion, predict the rest (overlapping by one sample)
     n_cut = int(np.floor(ptrain * n_obs))
@@ -1146,14 +1166,22 @@ def _ar_fb(seg: np.ndarray, order: int) -> tuple:
     fpe = sse_f / n * (1 + p / n) / (1 - p / n)
     return a, fpe
 
-def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how: str = 'uniform',
-                    sample_p: Union[list, tuple] = [20, 0.1]) -> dict:
+def _fpe_stats(fpes: np.ndarray) -> dict:
+    """Spread statistics of the final prediction errors across segments (``fpe_*`` outputs)."""
+    return {'fpe_std': np.std(fpes, ddof=1), 'fpe_mean': np.mean(fpes), 'fpe_max': np.max(fpes),
+            'fpe_min': np.min(fpes), 'fpe_range': np.ptp(fpes)}
+
+
+def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, None] = 2,
+                    subset_how: str = 'rand', sample_p: Union[list, tuple, int] = (20, 0.1),
+                    random_seed: Union[int, str, None] = 'default') -> dict:
     """
     Robustness of model parameters across different segments of a time series.
 
-    The spread of parameters obtained (including in-sample goodness of fit statistics) 
-    provides some indication of stationarity. Values of goodness of fit provide some 
-    indication of model suitability.
+    The spread of parameters obtained (including in-sample goodness of fit statistics)
+    provides some indication of stationarity. Values of goodness of fit provide some
+    indication of model suitability. Inherits strongly from :func:`compare_test_sets`
+    (hctsa's ``MF_FitSubsegments``).
 
     Parameters
     ----------
@@ -1179,21 +1207,32 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
             predicting model, column: predicted segment), of which the spread and
             off-diagonal statistics are returned. NaN if any segment is shorter than
             ``5 * (order + 1)`` or an AR fit fails.
-        - 'arma': Not implemented (deregistered in hctsa).
-        - 'ss': Not yet implemented.
+        - 'ss': fits a state-space model of the given order by subspace identification
+            (``n4sid``; the order can be ``'best'``). Outputs are how Akaike's final
+            prediction error (``fpe_*``) varies across segments.
+        - 'arma': fits an ARMA model by prediction-error minimization (``armax``; ``order``
+            is ``[p, q]``). Outputs are how the FPE (``fpe_*``) and the fitted AR (``p_k_*``)
+            and MA (``q_k_*``) coefficients vary across segments. (Deregistered in hctsa,
+    random_seed : int, 'default', 'none' or None, optional
+        How to reset the random seed that picks the segment starts when ``subset_how`` is
+        ``'rand'``, as hctsa's ``BF_ResetSeed``: an integer seed, or ``'default'`` for seed
+        0, seeding a Mersenne Twister so that the draws are MATLAB's; ``'none'`` or
+        ``None`` for a generator that is not reset. Default is ``'default'``.
+            as it is much like 'ar' and slow.)
 
-        Default is ``'ar'``.
+        Default is ``'ss'``.
 
-    order : int, optional
-        The order of the model to fit (used for 'ar', 'ss', or 'arma' models). Default is 2.
+    order : int or two-vector, optional
+        The order of the model to fit (used for 'ar', 'ss', or 'arma' models; a two-element
+        vector ``[p, q]`` for 'arma'). Default is 2.
     subset_how : str, optional
         How to choose segments from the time series, either:
 
-        - 'uniform' (uniformly) 
-        - 'rand' (at random) [not implemented].
+        - 'uniform' (evenly spaced)
+        - 'rand' (at random).
 
-        Default is ``'uniform'``.
-         
+        Default is ``'rand'``.
+
     sample_p : list, tuple or int, optional
         A two-vector specifying how many segments to take and of what length.
         Of the form [n_samples, length], where length can be a proportion of the time-series length.
@@ -1206,7 +1245,10 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
     -------
     dict
         Dictionary of statistics on the spread and mean of fitted model parameters 
-        and goodness of fit across segments. For ``'arcrosspred'``: ``std``, ``range``,
+        and goodness of fit across segments. For ``'ar'``, ``'ss'`` and ``'arma'``,
+        ``fpe_std``, ``fpe_mean``, ``fpe_max``, ``fpe_min``, ``fpe_range`` (of the final
+        prediction error); for ``'ar'`` ``a_k_std``, ``a_k_mean``, ``a_k_max``, ``a_k_min`` for each
+        lag ``k``, and for ``'arma'`` the same for ``p_k_*`` and ``q_k_*``. For ``'arcrosspred'``: ``std``, ``range``,
         ``iqr`` (over all entries of the cross-prediction error matrix), ``stdoffdiag``,
         ``rangeoffdiag``, ``iqroffdiag`` (over the positive off-diagonal entries),
         ``stdmean``, ``rangemean``, ``stdmedian``, ``rangemedian`` (across predicted
@@ -1215,10 +1257,9 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
         deviation of the errors) and ``mineig`` (smallest real part of the eigenvalues
         of the matrix).
     """
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float).ravel()
     N = len(y)
-    if np.ndim(sample_p) == 0:
-        sample_p = [sample_p]
+    sample_p = np.atleast_1d(sample_p)
     num_pred = int(sample_p[0])
     if model == 'arcrosspred' and (subset_how != 'uniform' or len(sample_p) != 1):
         raise ValueError("'arcrosspred' requires subset_how = 'uniform' and a scalar sample_p "
@@ -1241,7 +1282,14 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
             r[:, 0] = spts
             r[:, 1] = spts + l - 1
     elif subset_how == 'rand':
-        raise NotImplementedError("Subset method not yet implemented.")
+        if sample_p[1] < 1:  # specified a fraction of time series
+            l = int(np.floor(N * sample_p[1]))
+        else:  # specified an absolute interval
+            l = int(sample_p[1])
+        # reset the random seed (BF_ResetSeed), then numPred random starting points (randi)
+        rng = _seeded_rng(random_seed)
+        spts = 1 + np.floor((N - l + 1) * rng.random_sample(num_pred)).astype(int)
+        r = np.column_stack([spts, spts + l - 1])
     else:
         raise ValueError(f"Unknown subset method: {subset_how}")
     # Fit the model to each training set (r is 1-based and inclusive, as in MATLAB)
@@ -1277,11 +1325,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
         for i in range(num_pred):
             avals[i, :], fpes[i] = _ar_fb(y[r[i, 0] - 1:r[i, 1]], order)
         # statistics on the FPE
-        out['fpe_std'] = np.std(fpes, ddof=1)
-        out['fpe_mean'] = np.mean(fpes)
-        out['fpe_max'] = np.max(fpes)
-        out['fpe_min'] = np.min(fpes)
-        out['fpe_range'] = np.ptp(fpes)
+        out.update(_fpe_stats(fpes))
         # statistics on the fitted AR parameters, as in the polynomial 1 + a_1 z^-1 + ...
         for i in range(order):
             out[f'a_{i+1}_std'] = np.std(avals[:, i], ddof=1)
@@ -1337,8 +1381,38 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
         out['rangestd'] = np.ptp(col_std)
         out['stdstd'] = np.std(col_std, ddof=1)
         out['mineig'] = np.min(np.linalg.eigvals(xperr).real)
-    elif model in ['ss', 'arma']:
-        raise NotImplementedError("Model not yet implemented.")
+    elif model == 'ss':
+        # state-space models of the specified order: statistics on goodness of fit
+        fpes = np.zeros(num_pred)
+        for i in range(num_pred):
+            seg = y[r[i, 0] - 1:r[i, 1]]
+            try:
+                fit = _n4_state_space(seg, order if isinstance(order, str) else int(order))
+            except (np.linalg.LinAlgError, ValueError) as err:
+                raise ValueError("Couldn't fit this state space model") from err
+            fpes[i] = _n4_fpe(fit['loss'], fit['order'], len(seg))
+        out.update(_fpe_stats(fpes))
+    elif model == 'arma':
+        # ARMA models of the specified orders: goodness of fit, and the AR (p) and MA (q) coefficients
+        p_ord, q_ord = int(order[0]), int(order[1])
+        fpes = np.zeros(num_pred)
+        ps = np.zeros((num_pred, p_ord + 1))
+        qs = np.zeros((num_pred, q_ord + 1))
+        for i in range(num_pred):
+            seg = y[r[i, 0] - 1:r[i, 1]]
+            try:
+                ps[i], qs[i], loss = _armax_fit(seg, p_ord, q_ord)[:3]
+            except (np.linalg.LinAlgError, ValueError) as err:
+                raise ValueError("Couldn't fit this ARMA model") from err
+            n_par = p_ord + q_ord
+            fpes[i] = loss * (1 + n_par / len(seg)) / (1 - n_par / len(seg))
+        out.update(_fpe_stats(fpes))
+        for letter, coefs in (('p', ps), ('q', qs)):
+            for i in range(1, coefs.shape[1]):  # (the first column is 1)
+                out[f'{letter}_{i}_std'] = np.std(coefs[:, i], ddof=1)
+                out[f'{letter}_{i}_mean'] = np.mean(coefs[:, i])
+                out[f'{letter}_{i}_max'] = np.max(coefs[:, i])
+                out[f'{letter}_{i}_min'] = np.min(coefs[:, i])
     else:
         raise ValueError(f"Unknown model: {model}")
     return out
@@ -3128,12 +3202,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
             seg_len = int(sample_p[1])
     if subset_how == 'rand':
         # reset the random seed (BF_ResetSeed), then numPred starting points
-        if isinstance(random_seed, str) and random_seed == 'default':
-            random_seed = 0
-        if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
-            rng = np.random.RandomState()
-        else:
-            rng = _ml_rng(int(random_seed))
+        rng = _seeded_rng(random_seed)
         spts = 1 + np.floor((N - seg_len + 1) * rng.random_sample(num_pred)).astype(int)  # randi
         r[:, 0] = spts
         r[:, 1] = spts + seg_len - 1
@@ -3506,11 +3575,7 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         return np.arange(1, n + 1, dtype=float) if squish_or_squash else _linspace(0, 1, n)
 
     def reset_seed():  # BF_ResetSeed
-        if isinstance(random_seed, str) and random_seed == 'default':
-            return _ml_rng(0)
-        if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
-            return np.random.RandomState()
-        return _ml_rng(int(random_seed))
+        return _seeded_rng(random_seed)
 
     # Downsample long time series
     if max_n == 0:
