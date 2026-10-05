@@ -596,13 +596,14 @@ def _wrcoef(coefs, lengths, wavelet, level):
 def _find_my_threshold(x: float, det_s: ArrayLike, N: int):
     """
     Fraction of the way into ``det_s`` (sorted descending) at which the
-    coefficients first drop below ``x`` times the maximum.
+    coefficients first drop below ``x`` times the maximum: the 1-based position of the
+    first such coefficient divided by ``N`` (as MATLAB's ``find(...,1,'first')/N``).
     """
     below = det_s < x * np.max(det_s)
     if not below.any():
         return np.nan
 
-    return np.argmax(below)/N
+    return (np.argmax(below) + 1)/N
 
 def _modwt(x: ArrayLike, w_name: str, level: int) -> np.ndarray:
     """
