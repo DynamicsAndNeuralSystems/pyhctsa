@@ -1032,7 +1032,10 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     out['theta_mean'] = np.mean(theta)
     out['theta_std'] = np.std(theta, ddof=1)
     
-    bin_edges = np.linspace(-np.pi/2, np.pi/2, 11) # 10 bins in the histogram
+    # 10 equal bins on the support of the angles (-pi/2, pi/2) (explicit edges, so that angles
+    # of exactly zero from tied values or of exactly +/-pi/2 from a vertical step fall in the
+    # same bin whatever the rounding):
+    bin_edges = _fixed_edges(10, -np.pi/2, np.pi/2)
     px, _ = _histcounts(theta, bin_edges=bin_edges)
     bin_widths = np.diff(bin_edges)
     out['hist10std'] = np.std(px, ddof=1)
@@ -1040,11 +1043,11 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     
     # Stationarity in fifths of the time series
     # Use histograms with 4 bins
-    x = np.linspace(-np.pi/2, np.pi/2, 5) # 4 bins
+    bin_edges4 = _fixed_edges(4, -np.pi/2, np.pi/2)
     afifth = (N-1) // 5 # -1 because angles are correlations *between* points
-    n = np.zeros((len(x)-1, 5))
+    n = np.zeros((4, 5))
     for i in range(5):
-        n[:, i], _ = np.histogram(theta[afifth*i:afifth*(i+1)], bins=x)
+        n[:, i], _ = np.histogram(theta[afifth*i:afifth*(i+1)], bins=bin_edges4)
         
     n = n / afifth
     
@@ -1080,7 +1083,7 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     # Outliers in the embedding space
     # area of max span of all points; versus area of max span of 50% of points closest to origin
     d = np.sqrt(m[:, 0]**2 + m[:, 1]**2)
-    ix = np.argsort(d)
+    ix = np.argsort(d, kind='stable')  # (ties stay in time order, as MATLAB's sort)
     
     out['areas_all'] = np.ptp(m[:, 0]) * np.ptp(m[:, 1])
     r50 = ix[:int(np.ceil(len(ix)/2))] # ceil to match MATLAB's round fn output
@@ -1090,9 +1093,21 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
 
     return out 
 
+def _fixed_edges(num_bins: int, lo: float, hi: float) -> np.ndarray:
+    """``num_bins`` equal bins on [lo, hi] as :func:`~pyhctsa.robust.bf_hist_edges` places them
+    (explicit edges, with a tiny tolerance so a value on an edge falls in the upper bin). With a
+    given number of bins the data do not enter, so (as in hctsa) this also works when there
+    are none (e.g. all angles NaN)."""
+    return bf_hist_edges(np.zeros(1), num_bins, [lo, hi])
+
+
 def _histcounts(x: ArrayLike, bins: Union[int, None, str] = None, 
                 bin_edges: Union[ArrayLike, None] = None) -> tuple:
     x = np.asarray(x).flatten()
+    # (NaNs are not counted in any bin, but, as in histcounts' 'probability' normalization, they
+    # are in the number of elements the counts are divided by)
+    x_all = x
+    x = x[~np.isnan(x)]
 
     if bin_edges is not None:
         edges = np.asarray(bin_edges)
@@ -1107,7 +1122,7 @@ def _histcounts(x: ArrayLike, bins: Union[int, None, str] = None,
 
     n, _ = np.histogram(x, bins=edges)
 
-    n = n / len(x)
+    n = n / len(x_all)
 
     return n, edges
 
