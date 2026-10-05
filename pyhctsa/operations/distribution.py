@@ -774,8 +774,8 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
 
     where :math:`\\mu` is the mean, :math:`\\tilde{x}` is the median,
     and :math:`\\sigma` is the standard deviation. The mode-based version is
-    :math:`(\\mu - \\text{mode})/\\sigma`, with the mode estimated from a histogram
-    with automatically chosen bins (see :func:`histogram_mode`).
+    :math:`(\\mu - \\text{mode})/\\sigma`, with the mode estimated by the half-sample
+    mode (:func:`pyhctsa.robust.bf_half_sample_mode`), which needs no bins.
 
     The Bowley skewness is defined as
 
@@ -796,18 +796,17 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
 
         - ``"pearson"`` (or ``"pearsonMedian"``): Pearson skewness coefficient
           from the median.
-        - ``"pearsonMode"``: Pearson skewness coefficient from the mode of a
-          histogram (automatic bins).
+        - ``"pearsonMode"``: Pearson skewness coefficient from the half-sample
+          mode.
         - ``"bowley"``: Bowley (quartile) skewness coefficient.
 
         Default is ``"pearson"``.
 
     Notes
     -----
-    hctsa picks the histogram bins for ``"pearsonMode"`` with MATLAB's ``'auto'``
-    bin rule (Scott's rule, or integer bins for integer data of small range);
-    here NumPy's ``'auto'`` rule (the larger of the Sturges and Freedman-Diaconis
-    bin counts) is used, so the mode, and hence this value, differs somewhat.
+    The mode of a histogram depends on the number and edges of its bins, so the
+    half-sample mode is used instead: closed-form, robust, and without a smoothing
+    parameter.
 
     Returns
     -------
@@ -821,7 +820,7 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     y = np.asarray(y)
     out = 0.0
     if what_skew == 'pearsonMode':
-        out = (np.mean(y) - histogram_mode(y, 'auto')) / np.std(y, ddof=1)
+        out = (np.mean(y) - bf_half_sample_mode(y)) / np.std(y, ddof=1)
     elif what_skew in ('pearson', 'pearsonMedian'):
         out = (3 * (np.mean(y) - np.median(y)) / np.std(y, ddof=1))
     elif what_skew == 'bowley':
