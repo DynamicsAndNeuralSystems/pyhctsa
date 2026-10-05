@@ -11,7 +11,8 @@ def _compile_args():
 def _strict_compile_args():
     # The TISEAN kernels turn floating-point values into discrete decisions:
     # d2 truncates log()-derived length-scale indices to int, poincare tests
-    # samples against a crossing level, and lyap_r both truncates coordinates
+    # samples against a crossing level, false_nearest hashes scaled coordinates into
+    # grid boxes, and lyap_r both truncates coordinates
     # into boxes and compares squared distances against a search radius, so a
     # reassociated or approximated expression moves a pair to the neighbouring
     # bin, drops a cut entirely, or picks a different nearest neighbour.
@@ -87,5 +88,13 @@ def build_extensions():
         libraries=_libraries(),
     )
 
+    tisean_false_nearest = Extension(
+        "pyhctsa.toolboxes.Tisean_3_0_1.false_nearest",
+        sources=["pyhctsa/toolboxes/Tisean_3_0_1/TS_false_nearest.c"],
+        include_dirs=["pyhctsa/toolboxes/Tisean_3_0_1", np_inc],
+        extra_compile_args=_strict_compile_args(),
+        libraries=_libraries(),
+    )
+
     return [periodicity_wang, close_returns, sampen, fastdfa, shannon, tisean_d2,
-            tisean_poincare]
+            tisean_poincare, tisean_false_nearest]
