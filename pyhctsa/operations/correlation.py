@@ -1717,7 +1717,7 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     # Empirical distances distribution often fits Exponential distribution quite well
     # Fit to all values (often some extreme outliers, but oh well)
     l = 1 / np.mean(d)
-    n_log_l = -np.sum(expon.logpdf(d, scale=1/l))
+    n_log_l = -np.mean(expon.logpdf(d, scale=1/l))  # negative log-likelihood per observation
     out['d_expfit_nlogL'] = n_log_l
 
     # Calculate histogram
