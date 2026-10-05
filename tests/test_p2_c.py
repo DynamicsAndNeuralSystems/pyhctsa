@@ -27,6 +27,13 @@ CASES = {
     'car05': (lambda y: mf.compare_ar(y, np.arange(1, 11), 0.5), REAL + ['x_short'], 1e-7, 1e-9),
     'carall': (lambda y: mf.compare_ar(y, np.arange(1, 11), 'all'), REAL, 1e-7, 1e-9),
     # the GP fits run the minimize optimizer for 50 evaluations: agreement is to optimizer noise
+    # random subsamples and starts now come from BF_Random: the same draws as hctsa
+    'fs_ar': (lambda y: mf.fit_subsegments(y, 'arsbc', None, 'rand', [25, 0.1], 'default'), REAL, 1e-8, 1e-9),
+    'fs_ar3': (lambda y: mf.fit_subsegments(y, 'ar', 2, 'rand', [25, 0.1], 3), REAL, 1e-8, 1e-9),
+    'cts_ar': (lambda y: mf.compare_test_sets(y, 'ar', 4, 'rand', [25, 0.1], 1, 'default'), REAL, 1e-6, 1e-8),
+    'gh_ri2': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'random_i', 4), REAL, 1e-2, 1e-2),
+    'gh_rb': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'random_both', 2), REAL, 1e-2, 1e-2),
+    'gl_rg': (lambda y: mf.gp_local_prediction(y, COV, 10, 3, 20, 'randomgap', 'default'), REAL, 1e-2, 1e-2),
     'gpfa': (lambda y: mf.gp_fit_across(y, COV, 20), REAL, 1e-2, 1e-2),
     'gphp_first': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'first'), REAL, 1e-2, 1e-2),
     'gplp_fb': (lambda y: mf.gp_local_prediction(y, COV, 10, 3, 20, 'frombefore'), REAL, 1e-2, 1e-2),
@@ -152,3 +159,15 @@ def test_gp_matern_noise_position_and_floor():
     assert init[2] == np.log(0.1) and init[0] == np.log(1.0) and init[1] == 0
     out = mf.gp_hyperparameters(SERIES['s0'], 'covMaterniso3_covNoise', 1, 200, 'first')
     assert out['logh3'] >= np.log(0.01 * np.std(SERIES['s0'][:200], ddof=1)) - 1e-9
+
+
+def test_random_draws_are_portable_and_leave_global_state():
+    y = SERIES['s250']
+    state = np.random.get_state()[1].copy()
+    a = mf.fit_subsegments(y, 'ar', 2, 'rand', [25, 0.1], 5)
+    b = mf.fit_subsegments(y, 'ar', 2, 'rand', [25, 0.1], 5)
+    c = mf.fit_subsegments(y, 'ar', 2, 'rand', [25, 0.1], 6)
+    assert a == b and a != c
+    assert mf.fit_subsegments(y, 'ar', 2, 'rand', [25, 0.1], None) == \
+        mf.fit_subsegments(y, 'ar', 2, 'rand', [25, 0.1], 'default')
+    np.testing.assert_array_equal(np.random.get_state()[1], state)
