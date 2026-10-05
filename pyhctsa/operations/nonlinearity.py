@@ -1829,9 +1829,10 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer,
         or ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
         TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
-    random_seed : int, optional
+    random_seed : int, str or None, optional
         Seed for choosing the random subsample of reference points (relevant when
-        ``nref != -1``; the subsample differs from MATLAB's). Default is 0.
+        ``nref != -1``; see :func:`_bf_random_seed`). The numbers come from the portable generator
+        :func:`~pyhctsa.robust.bf_random`, so the subsample is the same as hctsa's. Default is 0.
 
     Returns
     -------
@@ -1876,7 +1877,7 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     if nref == -1 or nref >= n_emb:
         ref_idx = np.arange(n_emb)
     else:
-        ref_idx = _ml_randperm(n_emb, _ml_rng(0 if random_seed is None else int(random_seed)))[:int(nref)] - 1
+        ref_idx = bf_random(n_emb, _bf_random_seed(random_seed), 'perm')[:int(nref)] - 1  # random subsample
 
     # For each reference point, the distances to its 1st..kmax-th nearest neighbors outside
     # the Theiler window (a KD-tree, over-fetching neighbors to cover those excluded)
