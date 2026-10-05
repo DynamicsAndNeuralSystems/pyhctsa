@@ -209,7 +209,7 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
 
     .. math::
 
-        F(x) = \\frac{1}{\\alpha}
+        F(x) = -\\frac{1}{\\alpha}
         \\sin\\left(\\frac{x}{\\alpha}\\right).
 
     The time series provides a forcing contribution to the particle dynamics,
@@ -264,7 +264,7 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
     # force F(x) = -dV/dx for the chosen potential V(x)
     if what_potential == 'sine':
         # V(x) = -cos(x / alpha)
-        F = lambda x: np.sin(x/alpha)/alpha
+        F = lambda x: -np.sin(x/alpha)/alpha
     else:  # 'dblwell': V(x) = x^4 / 4 - alpha^2 x^2 / 2
         F = lambda x: -x**3 + alpha**2 * x
 
