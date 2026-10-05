@@ -427,46 +427,53 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     i_lower = l[-1] if l.size else 0  # never drops below half power below the peak
     out['maxWidth'] = w[i_upper] - w[i_lower]
 
+    # Characterize all peaks, run on log(S) rather than S: a linear-scale power spectrum is
+    # heavy-tailed (a single dominant peak can be >100x the mean level), so prominence-based
+    # peak detection on raw S buries smaller-but-genuine peaks under the dominant one, and the
+    # fixed prominence thresholds below are only meaningfully calibrated on the log scale.
+    # These thresholds are calibrated for a Welch-smoothed spectrum (psd_meth='welch'): for
+    # 'fft' and 'periodogram' the peak-derived fields are computed but not calibrated.
     min_dist_w = 0.02
     pts_per_w = len(s) / np.pi
     min_pk_dist = np.ceil(min_dist_w * pts_per_w)
-    pk_height, pk_loc = _findpeaks(s, min_pk_dist, 'descend')
-    pk_width = scipy.signal.peak_widths(s, pk_loc)[0]
-    pk_prom = (scipy.signal.peak_prominences(s, pk_loc)[0])
+    pk_height, pk_loc = _findpeaks(log_s, min_pk_dist, 'descend')
+    pk_width = scipy.signal.peak_widths(log_s, pk_loc)[0]
+    pk_prom = scipy.signal.peak_prominences(log_s, pk_loc)[0]
+    # Linear-domain height of each peak, for the 'power in peaks' fields: detection and
+    # prominence use log(S), but height x width only means power on the linear spectrum
+    pk_height_lin = s[pk_loc]
     pk_width = pk_width / pts_per_w
-    pk_loc = pk_loc / pts_per_w  # diff due to indexing difference
+    pk_loc = (pk_loc + 1) / pts_per_w  # +1: MATLAB's one-based sample index
 
-    # Characterize mean peak prominence
-    out['numPeaks'] = len(pk_height)
-    out['numPromPeaks_1'] = np.sum(pk_prom > 1)  # number of peaks with prominence of at least 1
-    out['numPromPeaks_2'] = np.sum(pk_prom > 2)  # number of peaks with prominence of at least 2
-    out['numPromPeaks_5'] = np.sum(pk_prom > 5)  # number of peaks with prominence of at least 5
-    # number of peaks with prominence greater than the mean (low for skewed distn)
-    out['numPeaks_overmean'] = np.sum(pk_prom > np.mean(pk_prom))
-    out['maxProm'] = np.max(pk_prom) if pk_prom.size else np.nan
-    # mean peak prominence of those with prominence of at least 2
-    out['meanProm_2'] = np.mean(pk_prom[pk_prom > 2])
-    out['meanPeakWidth_prom2'] = np.mean(pk_width[pk_prom > 2])
-    out['width_weighted_prom'] = np.sum(pk_width * pk_prom) / np.sum(pk_prom)
+    # Characterize peak prominence (thresholds in log-power units, calibrated on a Welch null)
+    num_peaks = len(pk_height)  # local only: needed for the peakPower_* fields below, not itself an output
+    with np.errstate(invalid='ignore', divide='ignore'):
+        out['numPromPeaks_3'] = np.sum(pk_prom > 3)  # number of peaks with log-prominence of at least 3
+        out['numPromPeaks_5'] = np.sum(pk_prom > 5)  # ... at least 5
+        out['numPromPeaks_8'] = np.sum(pk_prom > 8)  # ... at least 8
+        # mean peak prominence of those with log-prominence of at least 5
+        out['meanProm_5'] = _mean_or_nan(pk_prom[pk_prom > 5])
+        out['meanPeakWidth_prom5'] = _mean_or_nan(pk_width[pk_prom > 5])
+        out['width_weighted_prom'] = np.sum(pk_width * pk_prom) / np.sum(pk_prom)
 
-    # Power in top N peaks
-    nn = lambda x: np.arange(0, np.minimum(x, out['numPeaks'] - 1))
-    out['peakPower_2'] = np.sum(pk_height[nn(2)] * pk_width[nn(2)])
-    out['peakPower_5'] = np.sum(pk_height[nn(5)] * pk_width[nn(5)])
-    # power in peaks with prominence of at least 2
-    out['peakPower_prom2'] = np.sum(pk_height[pk_prom > 2] * pk_width[pk_prom > 2])
-    # note any features which depend on pKLoc will yield slightly diff answers due to one-indexing,
-    # but should be perfectly correlated
-    out['w_weighted_peak_prom'] = np.sum(pk_loc * pk_prom) / np.sum(pk_prom)
-    #where are prominent peaks located on average (weighted by height)
-    out['w_weighted_peak_height'] = np.sum(pk_loc * pk_height) / np.sum(pk_height)
+        # Power in top N peaks
+        nn = lambda x: np.arange(min(x, num_peaks))
+        out['peakPower_2'] = np.sum(pk_height_lin[nn(2)] * pk_width[nn(2)])
+        out['peakPower_5'] = np.sum(pk_height_lin[nn(5)] * pk_width[nn(5)])
+        # power in peaks with log-prominence of at least 5
+        out['peakPower_prom5'] = np.sum(pk_height_lin[pk_prom > 5] * pk_width[pk_prom > 5])
+        # where are prominent peaks located on average (weighted by prominence)
+        out['w_weighted_peak_prom'] = np.sum(pk_loc * pk_prom) / np.sum(pk_prom)
+
     # Number of peaks required to get to 50% of power in peaks
-    peak_power = pk_height * pk_width
+    peak_power = pk_height_lin * pk_width
     if peak_power.size == 0:  # no peaks found (e.g., a monotonic spectrum)
         out['numPeaks_50power'] = np.nan
         out['peakpower_1'] = np.nan
     else:
-        out['numPeaks_50power'] = np.where(np.cumsum(peak_power) > 0.5 * np.sum(peak_power))[0][0]
+        half_idx = np.flatnonzero(np.cumsum(peak_power) > 0.5 * np.sum(peak_power))
+        # a count (one-based); NaN if the peak powers are not finite
+        out['numPeaks_50power'] = half_idx[0] + 1 if half_idx.size else np.nan
         out['peakpower_1'] = peak_power[0] / np.sum(peak_power)
 
     # Distribution
@@ -643,6 +650,10 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
 
     return out
 
+def _mean_or_nan(x):
+    """Mean of an array, NaN (without a warning) when it is empty, as MATLAB's mean([])."""
+    return np.mean(x) if len(x) else np.nan
+
 def _findpeaks(s, min_pk_dist=0, sort_str='none'):
     """
     Parameters:
@@ -681,7 +692,7 @@ def _findpeaks(s, min_pk_dist=0, sort_str='none'):
         peak_heights = s[all_peaks]
 
         # sort by height (descending)
-        sort_idx = np.argsort(peak_heights)[::-1]
+        sort_idx = np.argsort(-peak_heights, kind='stable')
         sorted_peaks = all_peaks[sort_idx]
 
         # keep track of which peaks to delete
@@ -714,11 +725,11 @@ def _findpeaks(s, min_pk_dist=0, sort_str='none'):
     pk_loc = final_peaks.astype(int)
 
     if sort_str == 'descend':
-        sort_idx = np.argsort(pk_height)[::-1]
+        sort_idx = np.argsort(-pk_height, kind='stable')
         pk_height = pk_height[sort_idx]
         pk_loc = pk_loc[sort_idx]
     elif sort_str == 'ascend':
-        sort_idx = np.argsort(pk_height)
+        sort_idx = np.argsort(pk_height, kind='stable')
         pk_height = pk_height[sort_idx]
         pk_loc = pk_loc[sort_idx]
 
