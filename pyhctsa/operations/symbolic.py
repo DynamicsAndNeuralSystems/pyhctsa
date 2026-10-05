@@ -790,7 +790,7 @@ def binary_stats_ar1(y: ArrayLike, binary_method: str = 'mean') -> dict:
 
     # AR(1)-null persistence probability, via the arcsine law
     with np.errstate(all='ignore'):
-        rho = float(np.ravel(autocorr(u, 1, 'Fourier'))[0])
+        rho = autocorr(u, 1, 'Fourier')
     # guard against tiny numerical overshoot outside [-1, 1]; as MATLAB's max(min(rho,1),-1),
     # a NaN (constant series) ends up as 1
     rho = 1.0 if np.isnan(rho) else max(min(rho, 1.0), -1.0)

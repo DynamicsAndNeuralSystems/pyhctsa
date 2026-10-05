@@ -722,8 +722,7 @@ def preproc_schreiber_denoise(y: ArrayLike, m: int = 5, d: int = 1, num_iter: in
     out['rmsCorrection'] = float(np.sqrt(np.mean((y - y_den) ** 2)))
     out['fracVarRemoved'] = float(1 - np.var(y_den, ddof=1) / np.var(y, ddof=1))
     out['corrOrigDenoised'] = float(np.corrcoef(y, y_den)[0, 1])
-    out['ac1Change'] = float(np.ravel(autocorr(y_den, 1, 'Fourier'))[0]
-                             - np.ravel(autocorr(y, 1, 'Fourier'))[0])
+    out['ac1Change'] = autocorr(y_den, 1, 'Fourier') - autocorr(y, 1, 'Fourier')
     out['meanNeighbors'] = float(np.mean(num_neighbors))
     out['fracNoCorrection'] = float(np.mean(num_neighbors == 1))
 

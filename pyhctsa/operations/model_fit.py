@@ -796,8 +796,8 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     for key, value in residual_analysis(stde, y, 'full').items():
         out[f'zres_{key}'] = value
 
-    out['ac1_stde2'] = autocorr(stde2, [1], 'Fourier')[0]
-    out['diff_ac1'] = autocorr(y ** 2, [1], 'Fourier')[0] - out['ac1_stde2']
+    out['ac1_stde2'] = autocorr(stde2, 1, 'Fourier')
+    out['diff_ac1'] = autocorr(y ** 2, 1, 'Fourier') - out['ac1_stde2']
     return out
 
 
@@ -1199,7 +1199,7 @@ def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.
         raise ValueError(f"Couldn't fit the model to this time series: {err}") from err
     m_residuals = -_ss_initial_state(train['A'], train['K'], train['C'], y_test, int(steps))[1]
     out.update(residual_analysis(m_residuals, y_test, 'full'))
-    out['ac1diff'] = abs(autocorr(y, [1], 'Fourier')[0]) - abs(autocorr(m_residuals, [1], 'Fourier')[0])
+    out['ac1diff'] = abs(autocorr(y, 1, 'Fourier')) - abs(autocorr(m_residuals, 1, 'Fourier'))
     return out
 
 
@@ -3279,7 +3279,7 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
         mres = model_residuals(i)[i - 1:]
         mf_rms[j] = np.sqrt(np.mean(mres ** 2))
         mf_abs[j] = np.mean(np.abs(mres))
-        mf_ac1[j] = np.ravel(autocorr(mres, 1, 'Fourier'))[0]
+        mf_ac1[j] = autocorr(mres, 1, 'Fourier')
 
         # (2) *** Sliding mean 1 ***: predicts with the value i steps before it
         mres = y[i:] - y[:N - i]
@@ -3441,7 +3441,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
 
         # statistics on the residuals
         rmserrs[i] = np.sqrt(np.mean(mres ** 2))
-        ac1s[i] = np.ravel(autocorr(mres, 1, 'Fourier'))[0]
+        ac1s[i] = autocorr(mres, 1, 'Fourier')
 
         # statistics on the output time series
         meandiffs[i] = abs(np.mean(yp) - np.mean(y_test))

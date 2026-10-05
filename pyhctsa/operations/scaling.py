@@ -308,7 +308,7 @@ def _robust_linear_fit(log_tt: np.ndarray, log_ff: np.ndarray, the_range, field_
     out[f'{field_name}se1'] = np.sqrt(s2 * (1 / n + np.mean(xx) ** 2 / sxx))  # standard error in intercept
     out[f'{field_name}se2'] = np.sqrt(s2 / sxx)  # standard error in gradient
     out[f'{field_name}ssr'] = np.mean(resid ** 2)  # mean squares residual
-    out[f'{field_name}resac1'] = autocorr(resid, 1, 'Fourier')[0]  # autocorr at lag 1
+    out[f'{field_name}resac1'] = autocorr(resid, 1, 'Fourier')  # autocorr at lag 1
     return out
 
 
@@ -647,7 +647,7 @@ def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
     out["intercept"] = linfit[0]
     out["se_HFD"] = stats["se"][1]  # standard error on the dimension estimate
     out["ssr"] = np.mean(resid ** 2)  # mean squared residual of the linear fit
-    out["resac1"] = autocorr(resid, 1, 'Fourier')[0]  # residual autocorrelation
+    out["resac1"] = autocorr(resid, 1, 'Fourier')  # residual autocorrelation
 
     return out
 

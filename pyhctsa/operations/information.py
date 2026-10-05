@@ -27,7 +27,7 @@ def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, No
     if min_what == 'mi':
         min_what = 'mi-kraskov1'
     if min_what in ['ac', 'corr']:
-        return lambda x: autocorr(y, tau=x, method='Fourier').item()
+        return lambda x: autocorr(y, tau=x, method='Fourier')
     elif min_what == 'mi-hist':
         num_bins = int(extra_param) if extra_param else 10
         return lambda x: _mi_bin(y[:-x], y[x:], 'range', 'range', num_bins)
@@ -501,7 +501,7 @@ def automutual_info_stats(
     out['pcrossq90'] = np.mean(sign_change(ami - np.percentile(ami, 90, method='hazen')))
 
     # ac1
-    out['amiac1'] = autocorr(ami, 1, 'Fourier')[0]
+    out['amiac1'] = autocorr(ami, 1, 'Fourier')
 
     return out
     

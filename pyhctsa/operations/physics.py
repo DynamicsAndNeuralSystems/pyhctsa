@@ -166,8 +166,8 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     out['w_mean'] = np.mean(w)
     out['w_median'] = np.median(w)
     out['w_std'] = np.std(w, ddof=1)
-    out['w_ac1'] = autocorr(w, 1, 'Fourier')[0]
-    out['w_ac2'] = autocorr(w, 2, 'Fourier')[0]
+    out['w_ac1'] = autocorr(w, 1, 'Fourier')
+    out['w_ac2'] = autocorr(w, 2, 'Fourier')
     out['w_tau'] = first_crossing(w, 'ac', 0, 'continuous')
     out['w_min'] = np.min(w)
     out['w_max'] = np.max(w)
@@ -179,7 +179,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
                          - first_crossing(w, 'ac', 0, 'continuous'))
     out['sw_stdrat'] = np.std(w, ddof=1) / np.std(y, ddof=1)
     # a difference, not a ratio, which blows up when y has ac1 near 0
-    out['sw_ac1diff'] = out['w_ac1'] - autocorr(y, 1, 'Fourier')[0]
+    out['sw_ac1diff'] = out['w_ac1'] - autocorr(y, 1, 'Fourier')
     out['sw_minrat'] = np.min(w) / np.min(y)
     out['sw_maxrat'] = np.max(w) / np.max(y)
     out['sw_propcross'] = np.sum((w[:-1] - y[:-1]) * (w[1:] - y[1:]) < 0) / (N - 1)
@@ -200,7 +200,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     res = w - y
     out['res_runsz'] = bf_runs_z(res)  # runs test z-statistic
     out['res_swss5_1'] = sliding_window(res, 'std', 'std', 5, 1)
-    out['res_ac1'] = autocorr(res, 1)[0]
+    out['res_ac1'] = autocorr(res, 1)
 
     return out
 
@@ -316,9 +316,9 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
     out['range'] = np.ptp(x)
     out['proppos'] = np.sum(x >0)/N
     out['pcross'] = np.sum(x[:-1] * x[1:] < 0) / (N - 1)
-    out['ac1'] = np.abs(autocorr(x, 1, 'Fourier')[0])
-    out['ac10'] = np.abs(autocorr(x, 10, 'Fourier')[0])
-    out['ac50'] = np.abs(autocorr(x, 50, 'Fourier')[0])
+    out['ac1'] = np.abs(autocorr(x, 1, 'Fourier'))
+    out['ac10'] = np.abs(autocorr(x, 10, 'Fourier'))
+    out['ac50'] = np.abs(autocorr(x, 50, 'Fourier'))
     out['tau'] = first_crossing(x, 'ac', 0, 'continuous')
     out['meanabs'] = np.mean(np.abs(x)) # mean magnitude of the position
 

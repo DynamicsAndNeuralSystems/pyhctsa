@@ -541,7 +541,7 @@ def falling_sticks(y: ArrayLike) -> dict:
     if len(angles_pos) >= 2 and np.std(angles_pos, ddof=1) > 0:
         z_angles_pos = z_score(angles_pos)
         out['tau_p'] = first_crossing(z_angles_pos, 'ac', 0, 'continuous')
-        out['ac1_p'] = autocorr(z_angles_pos, 1, 'Fourier')[0]
+        out['ac1_p'] = autocorr(z_angles_pos, 1, 'Fourier')
     else:
         out['tau_p'] = np.nan
         out['ac1_p'] = np.nan
@@ -549,7 +549,7 @@ def falling_sticks(y: ArrayLike) -> dict:
     if len(angles_neg) >= 2 and np.std(angles_neg, ddof=1) > 0:
         z_angles_neg = z_score(angles_neg)
         out['tau_n'] = first_crossing(z_angles_neg, 'ac', 0, 'continuous')
-        out['ac1_n'] = autocorr(z_angles_neg, 1, 'Fourier')[0]
+        out['ac1_n'] = autocorr(z_angles_neg, 1, 'Fourier')
     else:
         out['tau_n'] = np.nan
         out['ac1_n'] = np.nan
@@ -753,8 +753,8 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     out['meanch'] = np.mean(np.diff(amis))
 
     # Autocorrelation of AMIs
-    out['ac1'] = autocorr(amis, 1, 'Fourier')[0]
-    out['ac2'] = autocorr(amis, 2, 'Fourier')[0]
+    out['ac1'] = autocorr(amis, 1, 'Fourier')
+    out['ac2'] = autocorr(amis, 2, 'Fourier')
 
     # Noise level required to reduce ami to proportion x of its initial value
     first_under_vals = [0.75, 0.50, 0.25]
@@ -949,15 +949,15 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
             logger.warning(f'Time series (N={len(y)}) too short for embedding')
             return np.nan
 
-        stats_store[0, i] = autocorr(theta, 1, 'Fourier')[0]
-        stats_store[1, i] = autocorr(theta, 2, 'Fourier')[0]
-        stats_store[2, i] = autocorr(theta, 3, 'Fourier')[0]
+        stats_store[0, i] = autocorr(theta, 1, 'Fourier')
+        stats_store[1, i] = autocorr(theta, 2, 'Fourier')
+        stats_store[2, i] = autocorr(theta, 3, 'Fourier')
     # Compute output statistics (max and min ignore NaNs, as in MATLAB: a NaN occurs when a
     # run of equal values gives 0/0 angles)
     out = {
-        'ac1_thetaac1': autocorr(stats_store[0, :], 1, 'Fourier')[0],
-        'ac1_thetaac2': autocorr(stats_store[1, :], 1, 'Fourier')[0],
-        'ac1_thetaac3': autocorr(stats_store[2, :], 1, 'Fourier')[0],
+        'ac1_thetaac1': autocorr(stats_store[0, :], 1, 'Fourier'),
+        'ac1_thetaac2': autocorr(stats_store[1, :], 1, 'Fourier'),
+        'ac1_thetaac3': autocorr(stats_store[2, :], 1, 'Fourier'),
         'mean_thetaac1': np.mean(stats_store[0, :]),
         'max_thetaac1': np.nanmax(stats_store[0, :]),
         'min_thetaac1': np.nanmin(stats_store[0, :]),
@@ -1025,9 +1025,9 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
 
     out = {}
 
-    out['theta_ac1'] = autocorr(theta, 1, 'Fourier')[0]
-    out['theta_ac2'] = autocorr(theta, 2, 'Fourier')[0]
-    out['theta_ac3'] = autocorr(theta, 3, 'Fourier')[0]
+    out['theta_ac1'] = autocorr(theta, 1, 'Fourier')
+    out['theta_ac2'] = autocorr(theta, 2, 'Fourier')
+    out['theta_ac3'] = autocorr(theta, 3, 'Fourier')
 
     out['theta_mean'] = np.mean(theta)
     out['theta_std'] = np.std(theta, ddof=1)
@@ -1541,14 +1541,14 @@ def stick_angles(y: ArrayLike) -> dict:
     # correlations? 
     if len(zangles[0]) > 0:
         out['tau_p'] = first_crossing(zangles[0], 'ac', 0, 'continuous')
-        out['ac1_p'] = autocorr(zangles[0], 1, 'Fourier')[0]
+        out['ac1_p'] = autocorr(zangles[0], 1, 'Fourier')
     else:
         out['tau_p'] = np.nan
         out['ac1_p'] = np.nan
     
     if len(zangles[1]) > 0:
         out['tau_n'] = first_crossing(zangles[1], 'ac', 0, 'continuous')
-        out['ac1_n'] = autocorr(zangles[1], 1, 'Fourier')[0]
+        out['ac1_n'] = autocorr(zangles[1], 1, 'Fourier')
     else:
         out['tau_n'] = np.nan
         out['ac1_n'] = np.nan
@@ -1818,9 +1818,9 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     d = np.sqrt(np.sum(np.diff(m, axis=0)**2, axis=1))
     
     # Calculate autocorrelations
-    out['d_ac1'] = autocorr(d, 1, 'Fourier')[0] # lag 1 ac
-    out['d_ac2'] = autocorr(d, 2, 'Fourier')[0] # lag 2 ac
-    out['d_ac3'] = autocorr(d, 3, 'Fourier')[0] # lag 3 ac
+    out['d_ac1'] = autocorr(d, 1, 'Fourier') # lag 1 ac
+    out['d_ac2'] = autocorr(d, 2, 'Fourier') # lag 2 ac
+    out['d_ac3'] = autocorr(d, 3, 'Fourier') # lag 3 ac
 
     out['d_mean'] = np.mean(d) # Mean distance
     out['d_median'] = np.median(d) # Median distance
@@ -2056,9 +2056,9 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
 
     # Return basic statistics on the counts
     out = {}
-    out['ac1'] = autocorr(counts, 1, 'Fourier')[0]
-    out['ac2'] = autocorr(counts, 2, 'Fourier')[0]
-    out['ac3'] = autocorr(counts, 3, 'Fourier')[0]
+    out['ac1'] = autocorr(counts, 1, 'Fourier')
+    out['ac2'] = autocorr(counts, 2, 'Fourier')
+    out['ac3'] = autocorr(counts, 3, 'Fourier')
     out['tau'] = first_crossing(counts, 'ac', 0, 'continuous')
     out['std'] = np.std(counts, ddof=1)
     out['median'] = np.median(counts)
@@ -2265,11 +2265,13 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
     Returns
     --------
     float or array
-        The autocorrelation at the given time lag(s).
+        The autocorrelation at the given time lag (a float for a single ``int`` lag), or an
+        array with one value per lag for a list of lags.
 
     """
     y = np.array(y)
     N = len(y)  # time-series length
+    scalar_lag = np.ndim(tau) == 0  # a single lag gives a number, a list of lags an array
 
     if np.size(tau) > 0:
         # if list is not empty
@@ -2329,8 +2331,8 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
     
     else:
         raise ValueError(f"Unknown autocorrelation estimation method {method}")
-    
-    return out
+
+    return float(out[0]) if scalar_lag else out
 
 def autocorr_x2(y: ArrayLike, taus: ArrayLike = 1,
                 what_direction: str = 'forward') -> np.ndarray:
@@ -2519,7 +2521,7 @@ def autocorr_x2_shape(y: ArrayLike, max_lag: Union[int, str] = 'double_drown') -
 
     # Autocorrelation of the difference profile (smoothness/persistence of the
     # irreversibility signature itself), cf. the ac1 field of autocorr_shape
-    out['ac1diff'] = autocorr(diff_profile, 1, 'Fourier')[0]
+    out['ac1diff'] = autocorr(diff_profile, 1, 'Fourier')
 
     # Local extrema of the difference profile, cf. autocorr_shape
     ddiff = np.diff(diff_profile)
@@ -2744,7 +2746,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
         n_drown = 0 # the point at which ACF ~ 0
         # The Fourier ACF depends only on N, so compute the whole (lag-indexed) curve
         # once and read acf_full[i-1] instead of recomputing a full FFT every lag.
-        # acf_full[i-1] is bit-identical to autocorr(y, i-1, 'Fourier')[0].
+        # acf_full[i-1] is bit-identical to autocorr(y, i-1, 'Fourier').
         acf_full = autocorr(y, [], 'Fourier')
         if stop_when == 'pos_drown':
             # stop when ACF drops below threshold, th
@@ -2817,11 +2819,11 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
     min_pts_for_acf_of_acf = 5 # can't take lots of complex stats with fewer than this
 
     if nac > min_pts_for_acf_of_acf:
-        out['ac1'] = autocorr(acf, 1, 'Fourier')[0]
+        out['ac1'] = autocorr(acf, 1, 'Fourier')
         if all(acf > 0):
             out['actau'] = np.nan
         else:
-            out['actau'] = autocorr(acf, first_crossing(acf, 'ac', 0, 'discrete'), 'Fourier')[0]
+            out['actau'] = autocorr(acf, first_crossing(acf, 'ac', 0, 'discrete'), 'Fourier')
 
     else:
         out['ac1'] = np.nan

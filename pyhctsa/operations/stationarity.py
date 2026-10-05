@@ -261,7 +261,7 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
             qs[j, 4] = sampen_out['quadSampEn1']  # SampEn_1_015
             #qs[j, 5] = sampen_out['quadSampEn2'] # SampEn_2_015
             # One FFT autocorrelation per window instead of four; index the lags.
-            # acf_w[t] is bit-identical to autocorr(y_sub, t, 'Fourier')[0]; the guards
+            # acf_w[t] is bit-identical to autocorr(y_sub, t, 'Fourier'); the guards
             # reproduce autocorr's out-of-range -> NaN behaviour exactly.
             acf_w = autocorr(y_sub, [], 'Fourier')
             Lw = len(acf_w)
@@ -893,8 +893,8 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     # use Pearson definition (normal ==> 3.0)
     global_kurt = kurtosis(y, fisher=False)
     out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/global_kurt)) if global_kurt != 0 else np.nan
-    global_ac1 = autocorr(y, 1, 'Fourier')[0]
-    out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')[0]/global_ac1)) if global_ac1 != 0 else np.nan
+    global_ac1 = autocorr(y, 1, 'Fourier')
+    out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')/global_ac1)) if global_ac1 != 0 else np.nan
 
     return out
 
@@ -1432,8 +1432,8 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
             qs[j, 3] = kurtosis(y_sub, fisher=False)
             pe = permutation_entropy(y_sub, 3, 1) # normalized PermEn(3,1) -- cheaper and more
             qs[j, 4] = pe['normPermEn'] if isinstance(pe, dict) else np.nan # stable than SampEn on these short random segments
-            qs[j, 5] = np.asarray(autocorr(y_sub, 1, 'Fourier')).item() # AC1
-            qs[j, 6] = np.asarray(autocorr(y_sub, 2, 'Fourier')).item() # AC2
+            qs[j, 5] = autocorr(y_sub, 1, 'Fourier') # AC1
+            qs[j, 6] = autocorr(y_sub, 2, 'Fourier') # AC2
             qs[j, 7] = first_crossing(y_sub, 'ac', 0, 'continuous') # first zero crossing
 
     # The spread of each feature across subsegments of the time series: a big bootstrapped
@@ -1920,7 +1920,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
                 qs[i] = kstest(w, norm(loc=np.mean(w), scale=np.std(w, ddof=1)).cdf).statistic
     elif window_stat == 'AC1':
         for i in range(num_steps):
-            qs[i] = np.asarray(autocorr(y[_get_window(i, inc, win_length)], 1, 'Fourier')).item()
+            qs[i] = autocorr(y[_get_window(i, inc, win_length)], 1, 'Fourier')
     elif window_stat == 'asymAC1':
         # an adaptive lag is set from the whole series, not per window
         tau = get_tau(y, asym_tau)
@@ -2153,7 +2153,7 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] =
     seg_ac1 = np.zeros(num_seg)
     seg_asym_ac1 = np.full(num_seg, np.nan)
     for i in range(num_seg):
-        seg_ac1[i] = autocorr(z[i, :], 1, 'Fourier')[0]
+        seg_ac1[i] = autocorr(z[i, :], 1, 'Fourier')
         if not np.isnan(tau) and tau < seg_length - 1: # need pairs to average over
             t = int(tau)
             sd = np.std(z[i, :], ddof=1)
@@ -2281,7 +2281,7 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     win_ac1 = np.zeros(num_windows)
     win_trev = np.zeros(num_windows)
     for i in range(num_windows):
-        win_ac1[i] = autocorr(z[i, :], 1, 'Fourier')[0]
+        win_ac1[i] = autocorr(z[i, :], 1, 'Fourier')
         dz = np.diff(z[i, :])
         with np.errstate(invalid='ignore', divide='ignore'):
             win_trev[i] = np.mean(dz**3) / np.mean(dz**2)**1.5

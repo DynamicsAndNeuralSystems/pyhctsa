@@ -318,9 +318,9 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
     out['entropy'] = distribution_entropy(kf, 'hist', 'sqrt')  # NaN for a constant degree sequence
 
     # Autocorr
-    out['kac1'] = autocorr(k, 1, 'Fourier')[0]
-    out['kac2'] = autocorr(k, 2, 'Fourier')[0]
-    out['kac3'] = autocorr(k, 3, 'Fourier')[0]
+    out['kac1'] = autocorr(k, 1, 'Fourier')
+    out['kac2'] = autocorr(k, 2, 'Fourier')
+    out['kac3'] = autocorr(k, 3, 'Fourier')
     out['ktau'] = first_crossing(k, 'ac', 0, 'continuous')
 
     return out

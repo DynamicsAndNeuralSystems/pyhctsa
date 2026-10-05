@@ -1008,7 +1008,7 @@ def local_density(y: ArrayLike, nnr: int = 3,
     out['medianden'] = np.median(locden)
 
     for i in range(1, 6):
-        out[f'ac{i}den'] = autocorr(locden, i, 'Fourier')[0]
+        out[f'ac{i}den'] = autocorr(locden, i, 'Fourier')
 
     # Estimates of correlation length:
     # first zero-crossing of the autocorrelation function:
@@ -1617,7 +1617,7 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
         out['robfit_sea2'] = stats['se'][1]
         out['robfitresmeanabs'] = np.mean(np.abs(res))
         out['robfitresmeansq'] = np.mean(res ** 2)
-        out['robfitresac1'] = autocorr(res, 1, 'Fourier')[0]
+        out['robfitresac1'] = autocorr(res, 1, 'Fourier')
     else:
         for k in ('robfit_a1', 'robfit_a2', 'robfit_sigrat', 'robfit_s', 'robfit_sea1',
                   'robfit_sea2', 'robfitresmeanabs', 'robfitresmeansq', 'robfitresac1'):
@@ -2888,8 +2888,8 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         out[f'std{lab}'] = np.std(u, ddof=1)
         out[f'iqr{lab}'] = q75 - q25
         out[f'mean{lab}'] = np.mean(u)
-        out[f'ac1{lab}'] = autocorr(u, 1, 'Fourier')[0]
-        out[f'ac2{lab}'] = autocorr(u, 2, 'Fourier')[0]
+        out[f'ac1{lab}'] = autocorr(u, 1, 'Fourier')
+        out[f'ac2{lab}'] = autocorr(u, 2, 'Fourier')
         out[f'tauac{lab}'] = first_crossing(u, 'ac', 0, 'continuous')
 
     out['boxarea'] = np.ptp(x) * np.ptp(yy)
@@ -2926,8 +2926,8 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     out['stdD'] = np.std(d, ddof=1)
     out['iqrD'] = q75 - q25
     out['meanD'] = np.mean(d)
-    out['ac1D'] = autocorr(d, 1, 'Fourier')[0]
-    out['ac2D'] = autocorr(d, 2, 'Fourier')[0]
+    out['ac1D'] = autocorr(d, 1, 'Fourier')
+    out['ac2D'] = autocorr(d, 2, 'Fourier')
     out['tauacD'] = first_crossing(d, 'ac', 0, 'continuous')
 
     # Statistics of the boxed distribution, with 5 and then 10 partitions per axis:
