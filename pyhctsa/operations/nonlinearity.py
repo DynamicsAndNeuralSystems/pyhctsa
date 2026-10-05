@@ -1325,6 +1325,190 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
 
     return out
 
+from ..toolboxes.matlab.matlab_fit import robustfit
+from ..utils import _round_half_away
+
+
+def _embed_tau_m(y: np.ndarray, embed_params) -> tuple:
+    """
+    The delay and dimension of ``[tau, m]`` embedding parameters (hctsa's
+    ``BF_Embed(y, tau, m, true)``), without doing the embedding.
+
+    ``tau`` is an integer or a rule understood by :func:`pyhctsa.utils.get_tau`;
+    ``m`` is an integer, or ``'fnn'`` (or ``['fnn', threshold]``) for the
+    embedding dimension from TISEAN's false nearest neighbors. Returns
+    ``(nan, nan)`` if the delay cannot be set.
+    """
+    if not isinstance(embed_params, (list, tuple)) or len(embed_params) != 2:
+        raise ValueError('Embedding parameters are formatted incorrectly -- need [tau, m]')
+    tau = get_tau(y, embed_params[0])
+    if np.isnan(tau):
+        return np.nan, np.nan
+    m = embed_params[1]
+    if isinstance(m, (list, tuple)):
+        m = m[0] if len(m) == 1 and not isinstance(m[0], str) else m
+    if isinstance(m, str) or isinstance(m, (list, tuple)):
+        if (m if isinstance(m, str) else m[0]) == 'fnn':
+            raise NotImplementedError(
+                "m='fnn' needs a port of TISEAN's false_nearest (hctsa's NL_FNN), which is "
+                "not yet available in pyhctsa; pass an integer embedding dimension.")
+        raise ValueError('Embedding dimension, m, incorrectly specified.')
+    return int(tau), int(m)
+
+
+def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
+                thwin: Union[int, float, list, tuple] = ('ac', 1), nbins: int = 20,
+                embed_params: Union[list, tuple] = ('ac', 'fnn'), do_two: int = 1) -> Union[dict, float]:
+    """
+    How the number of close pairs of points in the delay embedding grows with
+    distance (the correlation sum and its scaling).
+
+    Computes the correlation sum, :math:`C(\\epsilon)`, the fraction of pairs of
+    time-delay-embedded points closer than :math:`\\epsilon`, by the
+    Grassberger-Procaccia algorithm [1]_, using TISEAN's ``d2`` (hctsa no longer
+    uses TSTOOL's ``corrsum``/``corrsum2``). For a low-dimensional attractor,
+    :math:`\\ln C` rises linearly with :math:`\\ln \\epsilon`, with a slope equal to the
+    correlation dimension. The outputs summarize the range of :math:`\\ln \\epsilon`
+    and :math:`\\ln C(\\epsilon)`, and an iteratively re-weighted least squares (robust)
+    linear fit to the log-log plot.
+
+    References
+    ----------
+    .. [1] P. Grassberger and I. Procaccia, "Characterization of Strange Attractors",
+        Phys. Rev. Lett. 50(5), 346 (1983).
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    nref : int or float, optional
+        Number of (randomly chosen) reference points: ``-1`` uses all points, a
+        value in (0, 1) is a fraction of the time-series length. Default is 500.
+    r : float, optional
+        Maximum search radius, in units of ``std(y) * sqrt(m)`` where ``m`` is the
+        embedding dimension. Default is 0.05.
+    thwin : int, float, or ``['ac', k]``, optional
+        The Theiler window of samples to exclude before and after each reference
+        index (see :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k``
+        times the first zero-crossing of the autocorrelation function, or a number
+        of samples. Default is ``['ac', 1]``.
+    nbins : int, optional
+        Number of (log-spaced) radii at which the correlation sum is found.
+        Default is 20.
+    embed_params : [tau, m], optional
+        Embedding parameters: ``tau`` is an integer or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an
+        integer, or ``'fnn'`` (TISEAN's false nearest neighbors, not yet available
+        in pyhctsa and raises ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+    do_two : int, optional
+        Only 1 (corrsum-style log-spaced radii, the default) is supported; 2 has no
+        TISEAN equivalent and raises ``ValueError``, as in hctsa.
+
+    Returns
+    -------
+    dict or float
+        Only radii with a finite :math:`\\ln C(\\epsilon)` are used. ``minlnr``,
+        ``maxlnr``: the smallest and largest :math:`\\ln \\epsilon`; ``minlnCr``,
+        ``maxlnCr``, ``rangelnCr``, ``meanlnCr``: the minimum, maximum, range and
+        mean of :math:`\\ln C`; ``robfit_a1``, ``robfit_a2``: intercept and slope of a
+        robust linear fit of :math:`\\ln C` against :math:`\\ln \\epsilon`;
+        ``robfit_sigrat``: ratio of the ordinary least-squares to the robust estimate
+        of the residual standard deviation; ``robfit_s``: the robust estimate of the
+        residual standard deviation; ``robfit_sea1``, ``robfit_sea2``: standard
+        errors of the intercept and slope; ``robfitresmeanabs``, ``robfitresmeansq``,
+        ``robfitresac1``: mean absolute and mean squared residual, and lag-1
+        autocorrelation of the residuals. The fit outputs are NaN when too few radii
+        have a finite :math:`\\ln C`. Returns NaN if the delay or Theiler window cannot
+        be set, the embedding is too short, or no correlation sum is obtained.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+
+    # Number of reference points
+    if 0 < nref < 1:
+        nref = int(_round_half_away(n * nref))  # a proportion of the series length
+    if nref >= n:
+        nref = -1  # capped at the time-series length
+
+    # Remove spurious correlations of adjacent points
+    thwin = theiler_window(y, thwin, n)
+    if np.isnan(thwin):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    thwin = int(thwin)
+
+    if do_two == 2:
+        raise ValueError("gp_corr_sum: do_two = 2 (corrsum2's fixed-pairs-per-bin binning) "
+                         "has no TISEAN equivalent and is not supported.")
+
+    tau, m = _embed_tau_m(y, embed_params)
+    if np.isnan(tau):
+        logger.warning('Could not determine embedding parameters for this time series')
+        return np.nan
+
+    if (n - (m - 1) * tau) < thwin:
+        logger.warning(f'Embedded time series (N = {n}, m = {m}, tau = {tau}) too short '
+                       'to do a correlation sum')
+        return np.nan
+
+    # TISEAN's d2: -N0 uses all pairs; the radius is in standard deviations of y, scaled by
+    # sqrt(m) since a pairwise distance in an m-dimensional embedding scales as std(y)*sqrt(m)
+    max_eps = float('%g' % (r * np.std(y, ddof=1) * np.sqrt(m)))  # -R%g: six significant digits
+    try:
+        tables = _tisean.d2(y, delay=tau, embed=m, theiler=thwin, howoften=nbins,
+                            maxfound=0 if nref == -1 else int(nref), epsmax=max_eps)
+    except ValueError as exc:  # e.g. a delay vector longer than the series
+        logger.warning(f'TISEAN d2 produced invalid output: {exc}')
+        return np.nan
+
+    # [r, C(r)] at the m-th embedding dimension (the radii are log-spaced)
+    rc = tables['c2'][m - 1]
+    if rc.shape[0] == 0:
+        logger.warning("No output obtained from d2's correlation sum.")
+        return np.nan
+    with np.errstate(divide='ignore'):
+        lnr = np.log(rc[:, 0])
+        lncr = np.log(rc[:, 1])
+
+    # Only keep finite values
+    good = np.isfinite(lncr)
+    if not good.any():
+        logger.warning('No good outputs obtained from the correlation sum.')
+        return np.nan
+    lnr, lncr = lnr[good], lncr[good]
+
+    out = {}
+    out['minlnr'] = np.min(lnr)
+    out['maxlnr'] = np.max(lnr)
+    out['minlnCr'] = np.min(lncr)
+    out['maxlnCr'] = np.max(lncr)
+    out['rangelnCr'] = np.ptp(lncr)
+    out['meanlnCr'] = np.mean(lncr)
+
+    # Robust linear fit to the log-log plot (full range)
+    try:
+        a, stats = robustfit(lnr, lncr)
+    except (ValueError, np.linalg.LinAlgError):  # too few finite points to fit
+        a = None
+    if a is not None:
+        res = lncr - (a[1] * lnr + a[0])
+        out['robfit_a1'] = a[0]
+        out['robfit_a2'] = a[1]
+        out['robfit_sigrat'] = stats['ols_s'] / stats['robust_s']
+        out['robfit_s'] = stats['s']
+        out['robfit_sea1'] = stats['se'][0]
+        out['robfit_sea2'] = stats['se'][1]
+        out['robfitresmeanabs'] = np.mean(np.abs(res))
+        out['robfitresmeansq'] = np.mean(res ** 2)
+        out['robfitresac1'] = autocorr(res, 1, 'Fourier')[0]
+    else:
+        for k in ('robfit_a1', 'robfit_a2', 'robfit_sigrat', 'robfit_s', 'robfit_sea1',
+                  'robfit_sea2', 'robfitresmeanabs', 'robfitresmeansq', 'robfitresac1'):
+            out[k] = np.nan
+
+    return out
+
+
 def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
     """Counts of points per box, where the boxes are quantiles along each axis."""
     props = np.arange(nbox + 1) / nbox
