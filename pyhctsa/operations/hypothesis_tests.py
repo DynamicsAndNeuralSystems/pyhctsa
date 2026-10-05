@@ -299,12 +299,18 @@ def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
     -------
     dict
         For a single period: ``pValue``, ``stat`` (the test statistic) and ``ratio``
-        (the variance ratio). For several periods: the max, min and mean p-value
-        (``maxpValue``, ``minpValue``, ``meanpValue``), the period and IID flag at
-        which the max and min p-value occur (``periodmaxpValue``,
+        (the variance ratio). For several periods: the period and IID flag of the test
+        with the largest and smallest p-value (``periodmaxpValue``,
         ``periodminpValue``, ``IIDperiodmaxpValue``, ``IIDperiodminpValue``), the mean,
         max and min test statistic (``meanstat``, ``maxstat``, ``minstat``), and the
         mean, max and min variance ratio (``meanratio``, ``maxratio``, ``minratio``).
+
+    Notes
+    -----
+    The tests with the largest and smallest p-value are found from the absolute test
+    statistic, which orders the tests exactly as the (two-sided) p-value does but, unlike
+    it, does not saturate at 0 for strong departures from a random walk (where the
+    extremes of the p-values would be decided by the floor of double precision).
     """
     y = np.asarray(y, dtype=float)
     y = y[~np.isnan(y)]  # remove missing values
@@ -334,12 +340,9 @@ def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
     pvals, stats, ratios = res[:, 0], res[:, 1], res[:, 2]
     if len(periods) == 1:  # a single test: summarize it directly, as in hctsa
         return {'pValue': pvals[0], 'stat': stats[0], 'ratio': ratios[0]}
-    imax, imin = np.argmax(pvals), np.argmin(pvals)
+    imax, imin = np.argmin(np.abs(stats)), np.argmax(np.abs(stats))  # largest, smallest p-value (first on ties)
 
     return {
-        'maxpValue': np.max(pvals),
-        'minpValue': np.min(pvals),
-        'meanpValue': np.mean(pvals),
         'periodmaxpValue': periods[imax],
         'periodminpValue': periods[imin],
         'IIDperiodmaxpValue': iids[imax],
