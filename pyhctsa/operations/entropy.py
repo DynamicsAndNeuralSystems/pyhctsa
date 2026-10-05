@@ -354,22 +354,39 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
 
     return out
 
-def permutation_entropy(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
+def _ordinal_pattern_rank(x: np.ndarray) -> np.ndarray:
+    """
+    Index in 0..m!-1 of the ordinal pattern (the argsort permutation) of each row of `x`.
+
+    The permutation is encoded by its Lehmer code, as hctsa's BF_OrdinalPatternRank
+    does (ties are broken by position, as MATLAB's stable `sort`).
+    """
+    m = x.shape[1]
+    ix = np.argsort(x, axis=1, kind='stable')
+    rank = np.zeros(x.shape[0], dtype=np.int64)
+    for k in range(m - 1):
+        lehmer = np.sum(ix[:, k + 1:] < ix[:, [k]], axis=1)
+        rank += lehmer * factorial(m - 1 - k)
+    return rank
+
+def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> dict:
     """
     Permutation Entropy (PermEn) of a time series.
 
     Computes the permutation entropy and its normalised version for a given time series,
-    as described in [1]. 
+    as described in [1], along with a weighted permutation entropy [2] and a
+    measure of the time-reversal asymmetry of the ordinal patterns.
 
-    This implementation modifies code from the antropy package:
-    https://github.com/raphaelvallat/antropy to provide both raw and 
-    normalised permutation entropy values.
+    The ordinal patterns are ranked as in hctsa's EN_PermEn (BF_OrdinalPatternRank).
 
     References
     ----------
     .. [1] C. Bandt and B. Pompe, "Permutation Entropy: A Natural 
         Complexity Measure for Time Series",
         Phys. Rev. Lett. 88(17) 174102 (2002).
+    .. [2] B. Fadlallah, B. Chen, A. Keil and J. Principe, "Weighted-permutation
+        entropy: A complexity measure for time series incorporating amplitude
+        information", Phys. Rev. E 87, 022911 (2013).
 
     Parameters
     ----------
@@ -378,41 +395,75 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: int = 1) -> dict:
     m : int, optional
         Embedding dimension (order of the permutation entropy). Default is 2.
     tau : int or str, optional
-        Time-delay for the embedding. Default is 1.
+        Time-delay for the embedding: an integer, or ``'ac'`` for the first
+        zero-crossing of the autocorrelation function. NaN is returned if the delay
+        cannot be determined (e.g., a constant series). Default is 1.
 
     Returns
     -------
     dict
-        A dictionary containing the permutation entropy and normalized permutation entropy.
+        A dictionary containing:
+
+        - 'permEn': the permutation entropy (bits),
+        - 'normPermEn': permEn normalized by log2(m!),
+        - 'permEnLE': the permutation entropy of Bandt and Pompe with patterns of
+          probability below 1/N floored at 1/N (natural log, divided by m - 1),
+        - 'normWPE': the weighted permutation entropy normalized by log2(m!)
+          (pattern probabilities are the sums of the variances of the m values of
+          the embedding vectors with that pattern; NaN if all vectors are constant),
+        - 'ordAsym': the total variation distance between the distribution of
+          ordinal patterns of the series and that of the same embedding vectors read
+          backward (0 for a time-reversible pattern distribution).
     """
     m = int(m)
-    if tau == 'ac':
-        tau = int(first_crossing(y, 'ac', 0, 'discrete'))
-    else:
-        tau = int(tau)
     y = np.asarray(y)
-    ran_order = range(m)
-
-    hash_mult = np.power(m, ran_order)
+    if isinstance(tau, str):
+        if tau != 'ac':
+            raise ValueError(f"Unknown tau '{tau}'")
+        tau = first_crossing(y, 'ac', 0, 'discrete')
+    if np.isnan(tau):  # the delay could not be determined (e.g., constant series)
+        return np.nan
+    tau = int(tau)
     assert tau > 0, "delay must be greater than zero."
 
+    nan_out = {"permEn": np.nan, "normPermEn": np.nan, "permEnLE": np.nan,
+               "normWPE": np.nan, "ordAsym": np.nan}
     try:
-        sorted_idx = time_delay_embed(y, m, tau).argsort(kind="quicksort")
+        embedded = time_delay_embed(y, m, tau)
     except ValueError:
-        return {"permEn": np.nan, "normPermEn": np.nan}
-    nx = sorted_idx.shape[0]
+        return nan_out
+    nx = embedded.shape[0]
     if nx < 5:
         logger.warning("Time series too short to embed. Need at least 5 embedding vectors to compute permutation entropy.")
-        return {"permEn": np.nan, "normPermEn": np.nan}
-    
-    hash_val = (np.multiply(sorted_idx, hash_mult)).sum(1)
-    _, c = np.unique(hash_val, return_counts=True)
-    p = np.true_divide(c, c.sum())
-    pe = - _xlogx(p).sum()
-    pe_norm = pe / np.log2(factorial(m))
-    out = {"permEn": pe, "normPermEn": pe_norm}
+        return nan_out
 
-    return out
+    num_perms = factorial(m)
+    perm_idx = _ordinal_pattern_rank(embedded)
+    count_perms = np.bincount(perm_idx, minlength=num_perms)
+    p = count_perms / nx
+    pe = - _xlogx(p).sum()
+    pe_norm = pe / np.log2(num_perms)
+
+    # Permutation entropy with a floor of 1/N on the pattern probabilities
+    p_le = np.maximum(1 / nx, p)
+    pe_le = -np.sum(p_le * np.log(p_le)) / (m - 1) if m > 1 else np.nan
+
+    # Weighted permutation entropy: each vector is weighted by the (population)
+    # variance of its m values
+    w = np.var(embedded, axis=1)
+    if np.sum(w) > 0:
+        pw = np.bincount(perm_idx, weights=w, minlength=num_perms) / np.sum(w)
+        pw = pw[pw > 0]
+        norm_wpe = -np.sum(pw * np.log2(pw)) / np.log2(num_perms)
+    else:
+        norm_wpe = np.nan
+
+    # Time-reversal asymmetry of the ordinal patterns
+    count_perms_rev = np.bincount(_ordinal_pattern_rank(embedded[:, ::-1]), minlength=num_perms)
+    ord_asym = 0.5 * np.sum(np.abs(count_perms - count_perms_rev)) / nx
+
+    return {"permEn": pe, "normPermEn": pe_norm, "permEnLE": pe_le,
+            "normWPE": norm_wpe, "ordAsym": ord_asym}
 
 def rpde(y: ArrayLike, m: int = 2, tau: int = 1, epsilon: float = 0.12, t_max: int = -1) -> dict:
     """
