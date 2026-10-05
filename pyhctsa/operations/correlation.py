@@ -14,8 +14,8 @@ from statsmodels.tsa.stattools import pacf
 
 from ..operations.information import first_min, automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
-from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit
-from ..utils import (bf_remove_points, bin_picker, get_tau, histc, make_mat_buffer,
+from ..robust import bf_hist_edges, bf_quantile_edges, bf_random
+from ..utils import (_zscore_matlab, bf_remove_points, bin_picker, get_tau, histc, make_mat_buffer,
                      matlab_quantile, point_of_crossing, sign_change, theiler_window,
                      time_delay_embed, z_score)
 
@@ -621,22 +621,35 @@ def _fall_branch(ix: ArrayLike, y: ArrayLike) -> tuple:
     return angles, colour_counts, case_counts
 
 def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
-              extra_param: Union[int, None] = None, random_seed = None,
-              noise = None) -> dict:
+              extra_param: Union[int, None] = None, random_seed = None) -> dict:
     """
     Changes in the automutual information with the addition of noise.
 
-    Adds Gaussian-distributed noise to the time series with increasing standard deviation, eta, 
-    across the range eta = 0, 0.1, ..., 2, and measures the mutual information at each point. 
-    Can be measured using histograms with extra_param bins, or Kraskov estimators with k = extra_param.
+    Adds independent Gaussian noise of standard deviation eta to the (z-scored) time series,
+    for 50 noise levels evenly spaced from eta = 0 to eta = 3, and measures the automutual
+    information (AMI) at lag ``tau`` at each level, averaged over 10 independent noise draws
+    per level (so that the curve reflects the series rather than one particular noise
+    realization). Can be measured using histograms with ``extra_param`` bins, or Kraskov
+    estimators with k = ``extra_param``.
     The output is a set of statistics on the resulting set of automutual information
-    estimates, including a fit to an exponential decay, since the automutual information 
-    decreases with the added white noise. This algorithm is quite different, but was based 
+    estimates, including a fit to an exponential decay, since the automutual information
+    decreases with the added white noise. This algorithm is quite different, but was based
     on the idea in [1].
+
+    The noise comes from :func:`~pyhctsa.robust.bf_random` (seed ``random_seed + i`` at noise
+    level ``i``), so it is the same as in hctsa's ``CO_AddNoise``, in every release and
+    platform, and leaves NumPy's global random state untouched.
+
+    The exponential ``a * exp(b * eta)`` is fitted in closed form: least squares of
+    ``log(AMI)`` on ``eta`` weighted by ``AMI**2``, which approximates a least-squares fit of
+    the AMI itself (errors in ``log(AMI)`` scale as ``1/AMI``). Levels with ``AMI <= 0``
+    (possible for the Kraskov estimator) have no logarithm and zero weight. If fewer than two
+    levels have a positive AMI (or the AMI curve is constant) there is nothing to fit, and the
+    fit outputs are NaN.
 
     References
     ----------
-    .. [1] "Titration of chaos with added noise", Chi-Sang Poon and Mauricio Barahona 
+    .. [1] "Titration of chaos with added noise", Chi-Sang Poon and Mauricio Barahona
         P. Natl. Acad. Sci. USA, 98(13) 7107 (2001)
 
     Parameters
@@ -677,63 +690,64 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     extra_param : int, optional
         Additional parameter for the AMI estimator.
 
-        - For histogram methods: number of bins.
-        - For alternative methods: estimator-specific parameter.
-
-        Default is ``10``.
+        - For histogram methods: number of bins (default 10).
+        - For the Kraskov methods: the number of nearest neighbors (default 4).
 
     random_seed : int or None, optional
-        Seed controlling noise realisations (an independent noise vector is drawn
-        at each noise level). If ``None``, defaults internally to ``0``.
-
-    noise : array-like, optional
-        Test hook: noise to use instead of drawing it. Either a 1-D vector, reused at
-        every noise level, or a ``(50, len(y))`` array with one row per noise level.
+        Seed of the noise (a number, passed to :func:`~pyhctsa.robust.bf_random`; at noise level
+        ``i`` the seed is ``random_seed + i``). ``None`` (or a string such as ``'default'``)
+        is ``0``.
 
     Returns
     -------
     dict
-        Summary statistics of the AMI–noise curve, including exponential
+        Summary statistics of the AMI-noise curve, including exponential
         decay fit parameters and descriptive measures.
     """
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float).ravel()
+    n = len(y)
     # Set tau from the series if it is a rule: 'ac'/'tau', 'ac1e' or 'mi'
     tau = _resolve_delay(y, tau, default=1)
     if np.isnan(tau):  # undefined ACF (e.g. constant series) or no delay by the rule
         return np.nan
-    # Fresh uncorrelated Gaussian noise is drawn at each noise level (seed set once);
-    # a user-supplied ``noise`` (test hook) is either one vector reused at every level
-    # or an array with one row per level.
-    if noise is not None:
-        noise = np.asarray(noise, dtype=float)
-        noise_at = (lambda i: noise) if noise.ndim == 1 else (lambda i: noise[i])
-    else:
-        np.random.seed(0 if random_seed is None else random_seed)
-        noise_at = lambda i: np.random.randn(len(y))
+    if random_seed is None or isinstance(random_seed, str):
+        random_seed = 0
 
     # Set up noise range
-    noise_range = np.linspace(0, 3, 50) # compare properties across this noise range
-    num_repeats = len(noise_range)
+    num_levels = 50
+    num_draws = 10  # independent noise vectors to average over at each level
+    noise_range = np.linspace(0, 3, num_levels)  # compare properties across this noise range
 
-    # Compute the automutual information across a range of noise levels
-    amis = np.zeros(num_repeats)
-    if ami_method in ['std1', 'std2', 'quantiles', 'even']:
+    if ami_method in ('std1', 'std2', 'quantiles', 'even'):
         # histogram-based methods using my naive implementation in CO_Histogram
-        for i in range(num_repeats):
-            amis[i] = histogram_ami(y + noise_range[i]*noise_at(i), tau, ami_method, extra_param)
-            if np.isnan(amis[i]):
-                logger.warning('Error computing AMI: Time series too short (?)')
-                return np.nan
-    if ami_method in ['gaussian','kraskov1','kraskov2']:
-        for i in range(num_repeats):
-            amis[i] = automutual_info(y + noise_range[i]*noise_at(i), tau, ami_method, extra_param)
-            if np.isnan(amis[i]):
-                logger.warning('Error computing AMI: Time series too short (?)')
-                return np.nan
+        ami_fn = lambda yy: histogram_ami(yy, tau, ami_method, extra_param)
+    elif ami_method in ('gaussian', 'kraskov1', 'kraskov2'):
+        ami_fn = lambda yy: automutual_info(yy, tau, ami_method, extra_param)
+    else:
+        raise ValueError(f"Unknown AMI method '{ami_method}'")
+
+    # Compute the automutual information across a range of noise levels. At each level the
+    # AMI is the mean over num_draws independent, uncorrelated Gaussian noise vectors (a
+    # different stream for every level), so that the curve is not dominated by the
+    # idiosyncrasies of a single noise draw
+    amis = np.zeros(num_levels)
+    for i in range(num_levels):
+        if noise_range[i] == 0:
+            amis[i] = ami_fn(y)  # no noise to average over
+        else:
+            # column j of the (n, num_draws) matrix (MATLAB's column-major reshape) is draw j
+            noise = bf_random(n * num_draws, random_seed + i + 1, 'normal').reshape(num_draws, n)
+            for j in range(num_draws):
+                amis[i] += ami_fn(y + noise_range[i] * noise[j])
+            amis[i] = amis[i] / num_draws
+        if np.isnan(amis[i]):
+            logger.warning('Error computing AMI: Time series too short (?)')
+            return np.nan
+
     # Output statistics
     out = {}
     # Proportion decreases
-    out['pdec'] = np.sum(np.diff(amis) < 0) / (num_repeats - 1)
+    out['pdec'] = np.sum(np.diff(amis) < 0) / (num_levels - 1)
 
     # Mean change in AMI
     out['meanch'] = np.mean(np.diff(amis))
@@ -754,16 +768,29 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
     # Count number of times the AMI function crosses its mean
     c = amis - np.mean(amis)
-    out['pcrossmean'] = np.sum(c[:-1] * c[1:] < 0) / (num_repeats - 1)
+    out['pcrossmean'] = np.sum(c[:-1] * c[1:] < 0) / (num_levels - 1)
 
-    # Fit exponential decay model
-    a, b = fit_exp1(noise_range, amis, start_point=(amis[0], -1))
-    gof = goodness_of_fit(amis, a * np.exp(b * noise_range), num_coeffs=2)
-    out['fitexpa'] = a
-    out['fitexpb'] = b
-    out['fitexpr2'] = gof['rsquare']
-    out['fitexpadjr2'] = gof['adjrsquare']
-    out['fitexprmse'] = gof['rmse']
+    # Fit exponential decay, a*exp(b*eta), in closed form: least squares of log(AMI) on eta,
+    # weighted by AMI^2 (zero weight where AMI <= 0, which has no logarithm)
+    x = noise_range
+    sst = np.sum((amis - np.mean(amis)) ** 2)
+    if np.sum(amis > 0) < 2 or sst == 0:
+        out['fitexpa'] = out['fitexpb'] = out['fitexpr2'] = np.nan
+        out['fitexpadjr2'] = out['fitexprmse'] = np.nan
+    else:
+        w = np.maximum(amis, 0) ** 2
+        log_amis = np.log(np.maximum(amis, np.finfo(float).tiny))
+        S = np.array([[np.sum(w), np.sum(w * x)], [np.sum(w * x), np.sum(w * x ** 2)]])
+        coeffs = np.linalg.solve(S, [np.sum(w * log_amis), np.sum(w * x * log_amis)])  # [log a; b]
+        exp_fit = np.exp(coeffs[0]) * np.exp(coeffs[1] * x)
+        sse = np.sum((amis - exp_fit) ** 2)
+
+        # Output statistics on fit to an exponential decay
+        out['fitexpa'] = np.exp(coeffs[0])
+        out['fitexpb'] = coeffs[1]
+        out['fitexpr2'] = max(0.0, 1 - sse / sst)  # between 0 and 1
+        out['fitexpadjr2'] = 1 - (1 - out['fitexpr2']) * (num_levels - 1) / (num_levels - 2)
+        out['fitexprmse'] = np.sqrt(sse / (num_levels - 2))
 
     # Fit linear function
     p = np.polyfit(noise_range, amis, 1)
