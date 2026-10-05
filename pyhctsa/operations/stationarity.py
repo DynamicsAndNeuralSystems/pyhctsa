@@ -6,16 +6,17 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.signal import detrend, peak_prominences
-from scipy.stats import gaussian_kde, kendalltau, kurtosis, kstest, skew, pearsonr, norm, rankdata
+from scipy.stats import kendalltau, kurtosis, kstest, skew, pearsonr, norm, rankdata
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 from statsmodels.tsa.stattools import kpss
 from itertools import permutations
 from numba import njit
 
 from ..operations.correlation import autocorr, first_crossing
-from ..operations.distribution import moments
+from ..operations.distribution import _bf_random_seed, fit_kernel_smooth, moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
-from ..utils import _ml_rng, get_tau, make_mat_buffer, matlab_quantile, sign_change, z_score
+from ..robust import bf_quantile_edges, bf_random
+from ..utils import get_tau, make_mat_buffer, matlab_quantile, sign_change, z_score
 from ..toolboxes.matlab.matlab_fit import fit_exp1, goodness_of_fit, polyfit, robustfit
 from ..toolboxes.matlab._pptest_tables import _pp_pvalue, _pp_regression
 
@@ -124,12 +125,19 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
     }
 
 def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par',
-                        num_points: int = 200) -> dict:
+                        num_bins: int = 10) -> dict:
     """
     Compares the distribution in consecutive time-series segments.
 
-    Returns the L1 distance (sum of absolute differences times the grid spacing) between each kernel-smoothed distribution, either comparing each segment to the parent (full time series)
-    distribution or to all other segments.
+    Breaks the time series into ``num_segs`` consecutive segments of equal length and
+    measures how different the distributions of values in two segments are as the total
+    variation distance between their histograms: half the sum of the absolute differences
+    between the proportions of values in each bin (0 for identical distributions, 1 for
+    distributions with no bin in common). The bins are common to all segments and
+    equiprobable for the full series (edges at its quantiles,
+    :func:`pyhctsa.robust.bf_quantile_edges`), so the measure has no smoothing parameter
+    and does not depend on the scale of the data. Either each segment is compared to the
+    parent (full time series) distribution, or each to all other segments.
 
     Parameters
     ----------
@@ -144,51 +152,49 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
 
         Default is ``'par'``.
 
-    num_points : int, optional
-        Number of points to compute the distribution across in each local segment. Default is 200.
+    num_bins : int, optional
+        The number of equiprobable bins (fewer if values are tied at a quantile).
+        Default is 10.
 
     Returns
     -------
     dict
-        Mean (`meandiv`) and standard deviation (`stddiv`) of the L1 distances between distributions across the
-        different pairwise comparisons. (For 'each' with two segments, the single L1 distance is returned as a float.)
+        Mean (`meandiv`) and standard deviation (`stddiv`) of the total variation distances
+        between distributions across the different pairwise comparisons. (For 'each' with
+        two segments, the single distance is returned as a float.)
     """
     # preliminaries
-    y = np.asarray(y)
+    y = np.asarray(y, dtype=float)
     N = len(y)
-    num_points = int(num_points)
     num_segs = int(num_segs)
     lseg = int(np.floor(N / num_segs))
-    dns = np.zeros((num_points, num_segs))
-    # Make range of ksdensity uniform across all subsegments
-    r = np.linspace(np.min(y), np.max(y), num_points)
-    dr = r[1] - r[0] # grid spacing, to turn sums over the grid into integrals
-    # Compute the kernel-smoothed distribution in all num_segs segments of the time series
+    bin_edges = bf_quantile_edges(y, int(num_bins))  # bins common to all segments, equiprobable for the full series
+
+    def proportions(v):
+        counts, _ = np.histogram(v, bins=bin_edges)
+        return counts / np.sum(counts)
+
+    # Compute the distribution (proportion in each bin) in all num_segs segments of the time series
+    dns = np.zeros((len(bin_edges) - 1, num_segs))
     for i in range(num_segs):
-        start_idx = i * lseg
-        end_idx = (i + 1) * lseg
-        segment_data = y[start_idx:end_idx]
-        kde = gaussian_kde(segment_data, bw_method='scott')
-        dns[:, i] = kde.evaluate(r)
+        dns[:, i] = proportions(y[i * lseg:(i + 1) * lseg])
     # Compare the local distributions
     if each_or_par in ['par', 'parent']:
         #Compares each subdistribtuion to the parent (full signal) distribution
-        kde = gaussian_kde(y, bw_method='scott')
-        pardn = kde.evaluate(r)
+        pardn = proportions(y)
         divs = np.zeros(num_segs)
         for i in range(num_segs):
-            divs[i] = np.sum(np.abs(dns[:, i] - pardn)) * dr
+            divs[i] = 0.5 * np.sum(np.abs(dns[:, i] - pardn)) # each is just divergence to parent
     elif each_or_par == 'each':
         # Compares each subdistribtuion to the parent (full signal) distribution
         if num_segs == 2:
-            out = np.sum(np.abs(dns[:, 0] - dns[:, 1])) * dr
-            return out
+            return float(0.5 * np.sum(np.abs(dns[:, 0] - dns[:, 1])))
         # num_segs > 2
         diffmat = np.nan * np.ones((num_segs, num_segs)) 
         for i in range(num_segs):
             for j in range(num_segs):
                 if j > i:
-                    diffmat[i, j] = np.sum(np.abs(dns[:, i] - dns[:, j])) * dr
+                    diffmat[i, j] = 0.5 * np.sum(np.abs(dns[:, i] - dns[:, j])) # total variation distance
         divs = diffmat[~np.isnan(diffmat)] # % (the upper triangle of diffmat)
     else:
         raise ValueError(f"Unknown method: {each_or_par}. Should be 'each' or 'par'. ")
@@ -749,7 +755,13 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
     Returns
     -------
     Dict[str, float]
-        Dictionary containing the measures of mean drift.
+        Dictionary containing the measures of mean drift: ``max``, ``min`` and ``mean``,
+        the maximum, minimum and mean of the segment means divided by the mean of the
+        segment variances, and ``meanmaxmin`` and ``meanabsmaxmin``, the average of ``max``
+        and ``min`` and of their absolute values. When the segments tile the series
+        exactly, ``mean`` is the mean of the series divided by the mean segment variance,
+        so it is zero up to rounding for a z-scored series and carries no information
+        there (hctsa no longer registers it).
     """
     y = np.asarray(y)
     N = len(y)
@@ -826,10 +838,11 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
         
         Default `None` is 100 samples or 0.1 (10% of time series length) if proportion. 
 
-    random_seed : int, optional
-        Seed for the random number generator, for the 'randcg' option (for reproducibility;
-        the stream is numpy's, not MATLAB's, so the chosen points differ from hctsa's for
-        the same seed). Default `None` is not seeded.
+    random_seed : int, str or None, optional
+        Seed for the 'randcg' option: an integer, ``None`` or ``'default'`` for seed 0, or
+        ``'none'`` for a seed drawn from NumPy's global random state. The points come from the
+        portable generator :func:`pyhctsa.robust.bf_random` (uniform on the indices, with
+        repeats), so they are hctsa's for the same seed. Default `None` is seed 0.
 
     Returns
     --------
@@ -861,7 +874,7 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     elif subset_how == 'randcg':
         # n random points (there could be repeats): a single stochastic sample, so not
         # very statistically robust (as in hctsa)
-        r = np.random.default_rng(random_seed).integers(0, N, size=int(n))
+        r = np.floor(N * bf_random(int(n), _bf_random_seed(random_seed))).astype(int)  # (1 + floor(N u) in MATLAB)
     else:
         raise ValueError(f"Unknown specifier, {subset_how}. Can be either 'l', 'p', 'unicg', or 'randcg'.")
 
@@ -1367,10 +1380,10 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
         The number of randomly-selected local segments to analyze. Default is 100.
     random_seed : int, str or None, optional
         Seed of the random number generator, for reproducibility: an integer, or ``'default'``
-        (or ``None``) for seed 0 (hctsa's default), or ``'none'`` for an unseeded generator.
-        The start points are drawn from a Mersenne Twister seeded as MATLAB's ``rng(seed,
-        'twister')`` and mapped as ``randi``, so they reproduce hctsa's draws. Default is
-        ``'default'``.
+        (or ``None``) for seed 0 (hctsa's default), or ``'none'`` for a seed drawn from NumPy's
+        global random state. The start points are ``floor((N - l + 1) u)`` for uniforms from the
+        portable generator :func:`pyhctsa.robust.bf_random`, so they reproduce hctsa's draws.
+        Default is ``'default'``.
 
     Returns
     -------
@@ -1408,17 +1421,12 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
     l = int(l)
 
     # numSegs segments, each of length l data points
-    if isinstance(random_seed, str) and random_seed == 'none':
-        rng = np.random.RandomState()
-    elif random_seed is None or (isinstance(random_seed, str) and random_seed == 'default'):
-        rng = _ml_rng(0)
-    else:
-        rng = _ml_rng(int(random_seed))
+    istarts = np.floor((N - l + 1) * bf_random(num_segs, _bf_random_seed(random_seed))).astype(int)  # (0-based; 1 + floor(..) in MATLAB)
 
     qs = np.full((num_segs, 8), np.nan)
     for j in range(num_segs):
         # pick a range; in this implementation, ranges CAN overlap
-        ist = int(np.floor((N - l + 1) * rng.random_sample())) # random start point (0-based; MATLAB's randi(N - l + 1) - 1)
+        ist = istarts[j] # random start point (not exceeding the endpoint)
         y_sub = y[ist:ist + l] # contiguous subsegment of the time series
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
@@ -1813,7 +1821,8 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         - 'ent': distribution entropy (kernel-smoothed)
         - 'permen': normalized permutation entropy, PermEn(3, 1)
         - 'specen': normalized Shannon spectral entropy of the window's power spectrum
-          (window mean removed before the FFT)
+          (window mean removed before the FFT; the DC bin is excluded and the entropy is
+          normalized by the log of the number of frequencies, ``floor(n/2)``)
         - 'mom3': skewness (standardized third moment)
         - 'mom4': kurtosis (standardized fourth moment)
         - 'mom5': standardized fifth moment
@@ -1833,7 +1842,9 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         Method to summarize the sequence of local estimates:
 
         - 'std': standard deviation, normalized by that of the full series
-        - 'ent': (kernel-smoothed) distributional entropy
+        - 'ent': (kernel-smoothed) distributional entropy of the sequence of local
+          estimates (:func:`pyhctsa.operations.distribution.fit_kernel_smooth`; NaN if the
+          local estimates are all the same)
         - 'permen': normalized permutation entropy, PermEn(3, 1), of the sequence of local
           estimates
         - 'apen', 'sampen': approximate entropy (m=1, r=0.2) and sample entropy (m=2, r=0.15)
@@ -1947,13 +1958,9 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         out = sampen_dict['quadSampEn1']
     elif across_win_stat == 'ent':
         #% get a load of statistics from kernel-smoothed distribution
-        q = qs[~np.isnan(qs)]
-        kde = gaussian_kde(q)
-        xi = np.linspace(q.min() - 3 * np.std(q, ddof=1), q.max() + 3 * np.std(q, ddof=1), 100)
-        f = kde(xi)
-        f_pos = f[f > 0]
-        dx = xi[1] - xi[0]
-        out = -np.sum(f_pos * np.log(f_pos) * dx)
+        ks_outs = fit_kernel_smooth(qs[~np.isnan(qs)])
+        # (NaN if the local estimates are all the same: no scale to smooth over)
+        out = ks_outs['entropy'] if isinstance(ks_outs, dict) else np.nan
     else:
         raise ValueError(f"Unknown statistic '{across_win_stat}'")
 
@@ -1965,14 +1972,17 @@ def _perm_en_norm(v: np.ndarray) -> float:
     return res['normPermEn'] if isinstance(res, dict) else np.nan
 
 def _spectral_entropy_norm(w: np.ndarray) -> float:
-    """Normalized Shannon entropy of the one-sided power spectrum of a window (mean removed)."""
+    """Normalized Shannon entropy of the one-sided power spectrum of a window (mean removed, DC bin excluded)."""
     Fy = np.fft.fft(w - np.mean(w))
-    Py = np.abs(Fy[:len(w)//2 + 1])**2
-    Py = Py[Py > 0] # avoid log(0)
+    # One-sided power spectrum without the DC bin (zero after removing the mean, up to
+    # rounding), so that the number of frequencies, floor(n/2), does not depend on the
+    # last bit of the mean:
+    Py = np.abs(Fy[1:len(w)//2 + 1])**2
     if len(Py) < 2 or np.sum(Py) == 0:
         return np.nan
     Py = Py / np.sum(Py)
-    return -np.sum(Py * np.log2(Py)) / np.log2(len(Py))
+    Py = Py[Py > 0] # 0*log(0) = 0
+    return -np.sum(Py * np.log2(Py)) / np.log2(len(w)//2)
 
 def _get_window(step_ind, inc, win_length):
     # helper function to convert a step index (stepInd) to a range of indices corresponding to that window

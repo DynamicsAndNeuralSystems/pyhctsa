@@ -2,11 +2,11 @@ from numpy.typing import ArrayLike
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.linalg import qr, solve_triangular
-import statsmodels.api as sm
 import logging
 logger = logging.getLogger('pyhctsa')
 
 from ..toolboxes.Max_Little import fastdfa
+from ..robust import bf_theil_sen
 from ..toolboxes.matlab.matlab_fit import robustfit
 from ..utils import _linspace, make_mat_buffer
 from ..operations.correlation import autocorr
@@ -47,8 +47,7 @@ def fast_dfa(y: ArrayLike) -> float:
 
 def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
                          wtf: str = 'rsrange', tau_step: int = 1, k: int = 1,
-                         lag: int | None = None, log_inc: bool = True,
-                         guard_ratsplit: bool = False, ssr_tol: float = 1e-12) -> dict:
+                         lag: int | None = None, log_inc: bool = True) -> dict:
     """
     Implements fluctuation analysis by a variety of methods.
  
@@ -98,12 +97,6 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
         Optional time-lag, as in Alvarez-Ramirez [3]. Default is `None`.
     log_inc : bool, optional
         Whether to use logarithmic increments in tau (it should be logarithmic). Default is `True`.
-    guard_ratsplit : bool, optional
-        If True, return NaN for ``ratsplitminerr`` when the full-range fit residual
-        (``ssr``) underflows ``ssr_tol``, where the statistic is numerically
-        meaningless. Default is False (exact MATLAB parity). Default is `False`.
-    ssr_tol : float, optional
-        Tolerance for the ``guard_ratsplit`` underflow check. Default is 1e-12.
  
     Returns
     -------
@@ -111,8 +104,29 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
         Statistics of fitting a linear function to a plot of log(F) as
         a function of log(tau), and for fitting two straight lines to the same data,
         choosing the split point at tau = tau_{split} as that which minimizes the
-        combined fitting errors.
- 
+        combined fitting errors. The lines are fitted by the Theil-Sen method (the
+        median of the slopes between all pairs of points, a robust estimator with a
+        closed form: :func:`pyhctsa.robust.bf_theil_sen`).
+
+        - ``linfitint``, ``alpha``, ``se1``, ``se2``, ``ssr``, ``resac1``: the intercept,
+          slope (the scaling exponent alpha), standard errors of the intercept and the
+          slope (the usual least-squares formulas applied to the residuals of the robust
+          fit), mean squared residual, and lag-1 autocorrelation of the residuals, of the
+          single line fitted over all timescales; ``r1_*`` and ``r2_*``: the same for the
+          first (shorter-timescale) and the second line of the two-line fit.
+        - ``logtausplit``, ``prop_r1``: the value of log(tau) at the split between the two
+          lines, and the proportion of the timescales covered by the first line.
+        - ``splitgain``: the proportional reduction in mean squared error from fitting two
+          least-squares lines rather than one over the whole range, one minus the ratio of the
+          minimum two-line error to the one-line error (between 0 and 1; NaN if the one-line
+          fit is exact).
+        - ``meanssr``, ``stdssr``: the mean and the standard deviation of the two-line
+          fitting error across the candidate split points.
+        - ``alphadiff``: the difference ``r1_alpha - r2_alpha`` between the scaling
+          exponents of the two lines.
+
+        NaN if there are too few timescales; the two-line outputs are NaN if the
+        timescales are too few to support two lines.
     """
     # Compute integrated sequence
     if (lag is None) | (lag == 1):
@@ -205,6 +219,9 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
     sserr = np.full(num_timescales, np.nan)  # don't choose the end points
     min_points = max(8, int(_round(0.25 * num_timescales)))
     if num_timescales >= 2 * min_points:
+        # Single straight line over the whole range (least squares), for comparison
+        p0 = np.polyfit(logtt, logFF, 1)
+        ssr1 = np.sum((np.polyval(p0, logtt) - logFF) ** 2) / num_timescales
         for i in range(min_points - 1, num_timescales - min_points):
             r1 = slice(0, i + 1)  # first segment: points 0..i  (i+1 points)
             p1 = np.polyfit(logtt[r1], logFF[r1], 1)
@@ -213,7 +230,7 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
             p2 = np.polyfit(logtt[r2], logFF[r2], 1)
 
             # Mean squared error pooled across both segments, normalized by the total
-            # number of points sampled (num_timescales):
+            # number of points sampled (num_timescales), so that it is comparable to ssr1:
             e1 = np.polyval(p1, logtt[r1]) - logFF[r1]
             e2 = np.polyval(p2, logtt[r2]) - logFF[r2]
             sserr[i] = (np.sum(e1 ** 2) + np.sum(e2 ** 2)) / num_timescales
@@ -223,21 +240,26 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
         r1 = r2 = np.array([], dtype=int)
         out['prop_r1'] = np.nan
         out['logtausplit'] = np.nan
-        out['ratsplitminerr'] = np.nan
+        out['splitgain'] = np.nan
         out['meanssr'] = np.nan
         out['stdssr'] = np.nan
     else:
-        break_pt = np.where(sserr == np.nanmin(sserr))[0][0]  # find first occurrence of minimum
+        # The error curve can be flat, so take the first split whose error is within a tiny
+        # relative tolerance of the minimum, rather than testing for exact equality (which
+        # rounding errors can decide)
+        min_err = np.nanmin(sserr)
+        break_pt = np.where(sserr <= min_err * (1 + 1e-9))[0][0]
         r1 = np.arange(0, break_pt + 1)
         r2 = np.arange(break_pt, num_timescales)
 
         out['prop_r1'] = len(r1) / num_timescales
         out['logtausplit'] = logtt[break_pt]
-
-        if guard_ratsplit and (not np.isfinite(out['ssr']) or out['ssr'] < ssr_tol):
-            out['ratsplitminerr'] = np.nan
+        # The proportional reduction in squared error from using two lines rather than one
+        # (NaN if the single line is exact to rounding error, when the ratio is meaningless)
+        if ssr1 > 1e-24:
+            out['splitgain'] = max(0.0, 1 - min_err / ssr1)
         else:
-            out['ratsplitminerr'] = np.nanmin(sserr) / out['ssr']
+            out['splitgain'] = np.nan
 
         out['meanssr'] = np.nanmean(sserr)
         valid_sserr = sserr[~np.isnan(sserr)]
@@ -249,17 +271,19 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
  
     out_final = out | out2 | out3
  
-    if np.isnan(out_final['r1_alpha']) or np.isnan(out_final['r2_alpha']):
-        out_final['alpharat'] = np.nan
-    else:
-        out_final['alpharat'] = out_final['r1_alpha'] / out_final['r2_alpha']
+    # Change in scaling exponent between the two regimes:
+    out_final['alphadiff'] = out_final['r1_alpha'] - out_final['r2_alpha']
  
     return out_final
  
  
 def _robust_linear_fit(log_tt: np.ndarray, log_ff: np.ndarray, the_range, field_name):
     """
-    Robust linear fit using Tukey's biweight function for M-estimation.
+    Robust (Theil-Sen) linear fit statistics on a scaling range.
+
+    The line is the Theil-Sen fit (:func:`pyhctsa.robust.bf_theil_sen`); the standard errors
+    are the usual least-squares formulas applied to its residuals. All outputs are NaN for
+    fewer than 8 points or an all-NaN segment.
     """
     seg = log_ff[the_range]
     if np.size(the_range) < 8 or np.all(np.isnan(seg)):
@@ -271,19 +295,20 @@ def _robust_linear_fit(log_tt: np.ndarray, log_ff: np.ndarray, the_range, field_
             f'{field_name}ssr': np.nan,
             f'{field_name}resac1': np.nan,
         }
- 
-    x = sm.add_constant(log_tt[the_range])
-    rlm = sm.RLM(seg, x, M=sm.robust.norms.TukeyBiweight())
-    results = rlm.fit()
-    linfit = results.params  # [intercept, slope]
+
+    xx = log_tt[the_range]
+    slope, intercept = bf_theil_sen(xx, seg)
+    resid = seg - (slope * xx + intercept)
+    n = len(xx)
+    sxx = np.sum((xx - np.mean(xx)) ** 2)
+    s2 = np.sum(resid ** 2) / (n - 2)
     out = {}
-    # Store results in dictionary (Python equivalent of MATLAB struct)
-    out[f'{field_name}linfitint'] = linfit[0]  # linear fit intercept
-    out[f'{field_name}alpha'] = linfit[1]  # linear fit gradient
-    out[f'{field_name}se1'] = results.bse[0]  # standard error in intercept
-    out[f'{field_name}se2'] = results.bse[1]  # standard error in slope
-    out[f'{field_name}ssr'] = np.mean(results.resid ** 2)  # mean squares residual
-    out[f'{field_name}resac1'] = autocorr(results.resid, 1, 'Fourier')[0]  # autocorr at lag 1
+    out[f'{field_name}linfitint'] = intercept  # linear fit intercept
+    out[f'{field_name}alpha'] = slope  # linear fit gradient
+    out[f'{field_name}se1'] = np.sqrt(s2 * (1 / n + np.mean(xx) ** 2 / sxx))  # standard error in intercept
+    out[f'{field_name}se2'] = np.sqrt(s2 / sxx)  # standard error in gradient
+    out[f'{field_name}ssr'] = np.mean(resid ** 2)  # mean squares residual
+    out[f'{field_name}resac1'] = autocorr(resid, 1, 'Fourier')[0]  # autocorr at lag 1
     return out
 
 

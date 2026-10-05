@@ -298,7 +298,8 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     dict
         Dictionary of statistics on the CWT coefficients, including ``gam1`` and
         ``gam2`` (the shape and scale of a gamma distribution fitted to SC by maximum
-        likelihood) and ``dd_SC_h`` (the entropy of the maximum of SC in each of 10 time
+        likelihood; NaN if any scaled power is exactly zero, which the gamma distribution
+        cannot describe) and ``dd_SC_h`` (the entropy of the maximum of SC in each of 10 time
         boxes at each scale).
     """
     y = np.asarray(y)
@@ -349,17 +350,23 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     out['pover80'] = poverfn(80)
 
     # Gamma distribution fitted to the scaled power (maximum likelihood, as gamfit)
-    try:
-        gam_shape, _, gam_scale = stats.gamma.fit(SC.ravel(), floc=0)
-    except (stats.FitError, ValueError, RuntimeError):
-        # (e.g., exact zeros or NaNs in SC for degenerate series)
+    if np.any(SC <= 0):
+        # A gamma distribution has no mass at exactly zero power (a coefficient that is exactly
+        # zero, as for an exactly constant stretch of the series), so its maximum-likelihood fit
+        # does not exist
         gam_shape = gam_scale = np.nan
+    else:
+        try:
+            gam_shape, _, gam_scale = stats.gamma.fit(SC.ravel(), floc=0)
+        except (stats.FitError, ValueError, RuntimeError):
+            gam_shape = gam_scale = np.nan
     out['gam1'] = gam_shape
     out['gam2'] = gam_scale
 
     # 2D entropy (relative to its maximum)
     SC_a = SC/np.sum(SC)
-    out['SC_h'] = -np.sum(SC_a * np.log(SC_a)) - np.log(num_entries)
+    SC_pos = SC_a[SC_a > 0]  # (0*log(0) = 0 by continuity)
+    out['SC_h'] = -np.sum(SC_pos * np.log(SC_pos)) - np.log(num_entries)
 
     # Entropy of the maximum of SC in each of 10 time boxes at each scale
     num_boxes = 10
@@ -372,6 +379,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
         dd_SC[:, j] = np.max(SC[:, cutoffs[j]:cutoffs[j + 1]], axis=1)
     dd_SC = dd_SC / np.sum(dd_SC)
     dd_SC_o = dd_SC.ravel()
+    dd_SC_o = dd_SC_o[dd_SC_o > 0]  # (0*log(0) = 0 by continuity)
     out['dd_SC_h'] = -np.sum(dd_SC_o * np.log(dd_SC_o))
 
     # Sum across scales

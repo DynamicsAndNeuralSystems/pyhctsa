@@ -11,6 +11,7 @@ from scipy.optimize import brentq
 from scipy.special import gammaln, log_ndtr
 from scipy.stats import binom, chi2, norm, rankdata, rayleigh, expon, gumbel_l, lognorm, uniform, weibull_min
 
+from ..robust import bf_runs_z
 from ..utils import ljung_box_pvalue
 from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
 from ..toolboxes.distribution_fits.jbtest_tables import (ALPHAS as JB_ALPHAS, CRITICAL_VALUES as JB_CRITICAL_VALUES,
@@ -298,12 +299,18 @@ def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
     -------
     dict
         For a single period: ``pValue``, ``stat`` (the test statistic) and ``ratio``
-        (the variance ratio). For several periods: the max, min and mean p-value
-        (``maxpValue``, ``minpValue``, ``meanpValue``), the period and IID flag at
-        which the max and min p-value occur (``periodmaxpValue``,
+        (the variance ratio). For several periods: the period and IID flag of the test
+        with the largest and smallest p-value (``periodmaxpValue``,
         ``periodminpValue``, ``IIDperiodmaxpValue``, ``IIDperiodminpValue``), the mean,
         max and min test statistic (``meanstat``, ``maxstat``, ``minstat``), and the
         mean, max and min variance ratio (``meanratio``, ``maxratio``, ``minratio``).
+
+    Notes
+    -----
+    The tests with the largest and smallest p-value are found from the absolute test
+    statistic, which orders the tests exactly as the (two-sided) p-value does but, unlike
+    it, does not saturate at 0 for strong departures from a random walk (where the
+    extremes of the p-values would be decided by the floor of double precision).
     """
     y = np.asarray(y, dtype=float)
     y = y[~np.isnan(y)]  # remove missing values
@@ -333,12 +340,9 @@ def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
     pvals, stats, ratios = res[:, 0], res[:, 1], res[:, 2]
     if len(periods) == 1:  # a single test: summarize it directly, as in hctsa
         return {'pValue': pvals[0], 'stat': stats[0], 'ratio': ratios[0]}
-    imax, imin = np.argmax(pvals), np.argmin(pvals)
+    imax, imin = np.argmin(np.abs(stats)), np.argmax(np.abs(stats))  # largest, smallest p-value (first on ties)
 
     return {
-        'maxpValue': np.max(pvals),
-        'minpValue': np.min(pvals),
-        'meanpValue': np.mean(pvals),
         'periodmaxpValue': periods[imax],
         'periodminpValue': periods[imin],
         'IIDperiodmaxpValue': iids[imax],
@@ -370,17 +374,18 @@ def hypothesis_test(x: ArrayLike, the_test: str = 'signtest') -> float:
         Type of hypothesis test to perform:
 
         - 'signtest', 'vartest', 'ztest', 'signrank', 'jbtest': see :func:`marginal_tests`
-        - 'runstest', 'lbq': see :func:`independence_tests`
+        - 'runsz', 'runstest', 'lbq': see :func:`independence_tests`
 
         Default is ``'signtest'``.
 
     Returns
     -------
     float
-        P-value from the statistical test. A small p-value (< 0.05) typically
-        indicates rejection of the null hypothesis.
+        P-value from the statistical test (identical to that of the function it
+        dispatches to; the z-statistic of the runs test for 'runsz'). A small p-value
+        (< 0.05) typically indicates rejection of the null hypothesis.
     """
-    if the_test in ('runstest', 'lbq'):
+    if the_test in ('runsz', 'runstest', 'lbq'):
         return independence_tests(x, the_test)
     if the_test in ('signtest', 'vartest', 'ztest', 'signrank', 'jbtest'):
         return marginal_tests(x, the_test)
@@ -588,34 +593,44 @@ def marginal_tests(y: ArrayLike, the_test: str = 'signtest') -> float:
     raise ValueError(f"Unknown hypothesis test '{the_test}'.")
 
 
-def independence_tests(y: ArrayLike, the_test: str = 'runstest') -> float:
+def independence_tests(y: ArrayLike, the_test: str = 'runsz') -> float:
     """
-    p-value of a hypothesis test of serial independence.
+    Statistic or p-value of a test of serial independence.
 
-    Tests whether the values of the time series are independent of one another (a
-    small p-value indicates serial dependence). Unlike the tests in
-    :func:`marginal_tests`, the p-value depends on the temporal order of the values.
-    This is the part of hctsa's former ``HT_HypothesisTest`` that tests dependence.
+    Tests whether the values of the time series are independent of one another. Unlike
+    the tests in :func:`marginal_tests`, the result depends on the temporal order of the
+    values. This is the part of hctsa's former ``HT_HypothesisTest`` that tests
+    dependence. The runs test is returned as its z-statistic (in closed form), the other
+    tests as p-values.
 
     Parameters
     ----------
     y : array-like
         The input time series.
-    the_test : {'runstest', 'lbq'}, optional
+    the_test : {'runsz', 'runstest', 'lbq'}, optional
         The test:
 
-        - 'runstest': runs test for randomness of runs above and below the mean
-          (exact distribution of the number of runs);
+        - 'runsz': runs test for randomness of the runs of values above and below the
+          median; returns the signed z-statistic of the number of runs
+          (:func:`pyhctsa.robust.bf_runs_z`): negative for fewer runs than expected
+          (positive serial dependence), positive for more (alternation), and
+          approximately standard normal under the null hypothesis;
+        - 'runstest': the p-value of the same hypothesis (runs above and below the mean,
+          exact distribution of the number of runs; as MATLAB's ``runstest``);
         - 'lbq': Ljung-Box Q-test for autocorrelation up to lag 20.
 
-        Default is ``'runstest'``.
+        Default is ``'runsz'``.
 
     Returns
     -------
     float
-        The p-value of the test.
+        The z-statistic of the test for 'runsz', otherwise its p-value: the probability,
+        under the null hypothesis, of a test statistic at least as extreme as that
+        observed. Small values are evidence of serial dependence.
     """
     y = np.asarray(y, dtype=float).ravel()
+    if the_test == 'runsz':
+        return bf_runs_z(y)
     if the_test == 'runstest':
         return runstest_pvalue(y)
     if the_test == 'lbq':

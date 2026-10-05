@@ -11,7 +11,8 @@ from scipy.stats import gamma as gamma_dist
 from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, rayleigh, uniform, weibull_min, skew, kurtosis
 
 from ..operations.correlation import autocorr, first_crossing
-from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, gpfit, wblfit
+from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
+from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_random, bf_residual_stats, bf_runs_z
 from ..utils import bin_picker, histc, matlab_quantile, sign_change, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')
@@ -46,48 +47,6 @@ def cumulants(x: ArrayLike, cum_what_may: str = 'skew1') -> float:
         return kurtosis(x, bias=False, fisher=True)
     else:
         return ValueError('Unknown cumulant. Choose either skew1, skew2, kurt1, or kurt2.')
-
-def _ksdensity(x: np.ndarray, xi: Union[None, np.ndarray] = None, npoints: int = 100) -> tuple:
-    """
-    Gaussian kernel density estimate of x, in the manner of MATLAB's ``ksdensity``.
-
-    The bandwidth is MATLAB's default, ``sig * (4 / (3 n)) ** (1 / 5)`` with the
-    robust spread ``sig = median(|x - median(x)|) / 0.6745`` (the range of x if that
-    is zero, and 1 if the bandwidth is still not positive), applied through
-    ``scipy.stats.gaussian_kde``. With no evaluation points given, ``npoints`` equally
-    spaced points from ``min(x) - 3 bw`` to ``max(x) + 3 bw`` are used, as in MATLAB.
-
-    A constant series has a singular covariance, for which ``gaussian_kde`` raises
-    ``LinAlgError``; there the kernels are summed directly (bandwidth 1, as MATLAB).
-
-    Note that MATLAB's ``ksdensity`` truncates the kernel at four bandwidths when
-    there are many data points; ``gaussian_kde`` does not, so values differ slightly
-    (about 1e-4 relative to the peak) for series of more than a few hundred points.
-
-    Returns
-    -------
-    f, xi : numpy.ndarray
-        The density estimate and the points at which it is evaluated.
-    """
-    x = np.asarray(x, dtype=float)
-    n = len(x)
-    sig = np.median(np.abs(x - np.median(x))) / 0.6745
-    if sig <= 0:
-        sig = np.ptp(x)
-    bw = sig * (4 / (3 * n)) ** (1 / 5)
-    if not bw > 0:
-        bw = 1.0
-    if xi is None:
-        xi = np.linspace(np.min(x) - 3 * bw, np.max(x) + 3 * bw, npoints)
-    xi = np.asarray(xi, dtype=float)
-    std_x = np.std(x, ddof=1) if n > 1 else 0.0
-    if std_x > 0:
-        # (scipy multiplies the bw_method factor by std(x, ddof=1))
-        f = gaussian_kde(x, bw_method=bw / std_x)(xi)
-    else:
-        u = (xi[:, None] - x[None, :]) / bw
-        f = np.exp(-0.5 * u * u).sum(axis=1) / (n * bw * np.sqrt(2 * np.pi))
-    return f, xi
 
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     """
@@ -265,7 +224,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     # ----------------------------
     # Estimate smoothed empirical distribution
     # ----------------------------
-    f, xi = _ksdensity(x)
+    f, xi, _ = bf_ks_density(x)
     xi = xi[f > 1e-6]  # only keep values greater than 1E-6
     if xi.size == 0:
         return np.nan
@@ -277,7 +236,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
 
     # Rerun both over the same range
     xi = np.linspace(x1, x2, 1000)
-    f, _ = _ksdensity(x, xi)
+    f, _, _ = bf_ks_density(x, xi)
     with np.errstate(all='ignore'):
         ffit = pdf_func(xi)
 
@@ -726,7 +685,10 @@ def cv(x: ArrayLike, k: int = 1) -> float:
         \\left( \\frac{\\sigma}{\\mu} \\right)^{k},
 
     where :math:`\\sigma` is the standard deviation and :math:`\\mu` is the
-    mean of the input data.
+    mean of the input data. It is negative (for odd :math:`k`) when the mean is
+    negative, and undefined when the mean is zero, so NaN is returned when the mean
+    is at the level of rounding error relative to the spread
+    (:math:`|\\mu| < 10^{-10}\\sigma`, as for a centered or z-scored series).
 
     Parameters
     ----------
@@ -739,14 +701,21 @@ def cv(x: ArrayLike, k: int = 1) -> float:
     Returns
     -------
     float
-        The coefficient of variation of order :math:`k`.
+        The coefficient of variation of order :math:`k`, or NaN if the mean is zero
+        up to rounding error.
     """
     if not isinstance(k, int) or k < 0:
         logger.warning('k should probably be a positive integer')
         # carry on with just this warning, though
-    
+
     # Compute the coefficient of variation (of order k) of the data
-    return (np.std(x, ddof=1) ** k) / (np.mean(x) ** k)
+    mu = np.mean(x)
+    sigma = np.std(x, ddof=1)
+    if abs(mu) < 1e-10 * sigma:
+        # the mean is zero up to rounding error (e.g., a centered or z-scored series), so
+        # the ratio is rounding noise of order 1e17
+        return np.nan
+    return float((sigma / mu) ** k)
 
 def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     """
@@ -763,8 +732,8 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
 
     where :math:`\\mu` is the mean, :math:`\\tilde{x}` is the median,
     and :math:`\\sigma` is the standard deviation. The mode-based version is
-    :math:`(\\mu - \\text{mode})/\\sigma`, with the mode estimated from a histogram
-    with automatically chosen bins (see :func:`histogram_mode`).
+    :math:`(\\mu - \\text{mode})/\\sigma`, with the mode estimated by the half-sample
+    mode (:func:`pyhctsa.robust.bf_half_sample_mode`), which needs no bins.
 
     The Bowley skewness is defined as
 
@@ -785,18 +754,17 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
 
         - ``"pearson"`` (or ``"pearsonMedian"``): Pearson skewness coefficient
           from the median.
-        - ``"pearsonMode"``: Pearson skewness coefficient from the mode of a
-          histogram (automatic bins).
+        - ``"pearsonMode"``: Pearson skewness coefficient from the half-sample
+          mode.
         - ``"bowley"``: Bowley (quartile) skewness coefficient.
 
         Default is ``"pearson"``.
 
     Notes
     -----
-    hctsa picks the histogram bins for ``"pearsonMode"`` with MATLAB's ``'auto'``
-    bin rule (Scott's rule, or integer bins for integer data of small range);
-    here NumPy's ``'auto'`` rule (the larger of the Sturges and Freedman-Diaconis
-    bin counts) is used, so the mode, and hence this value, differs somewhat.
+    The mode of a histogram depends on the number and edges of its bins, so the
+    half-sample mode is used instead: closed-form, robust, and without a smoothing
+    parameter.
 
     Returns
     -------
@@ -810,7 +778,7 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     y = np.asarray(y)
     out = 0.0
     if what_skew == 'pearsonMode':
-        out = (np.mean(y) - histogram_mode(y, 'auto')) / np.std(y, ddof=1)
+        out = (np.mean(y) - bf_half_sample_mode(y)) / np.std(y, ddof=1)
     elif what_skew in ('pearson', 'pearsonMedian'):
         out = (3 * (np.mean(y) - np.median(y)) / np.std(y, ddof=1))
     elif what_skew == 'bowley':
@@ -900,44 +868,27 @@ def _matlab_std(a) -> float:
     return float(np.std(a, ddof=1)) if a.size > 1 else 0.0
 
 
-def _fit_exp_gof(x: np.ndarray, y: np.ndarray, start: list) -> tuple:
-    """Nonlinear least-squares fit of a*exp(b*x) + c from the given start point, as hctsa's
-    fit(x, y, fittype('a*exp(b*x)+c')). Returns (a, b, c, R^2, RMSE), all NaN if the fit fails.
-
-    These fits are often ill-conditioned (a and c large and opposite in sign when b is
-    near 0). This solver (Levenberg-Marquardt, run to convergence) and MATLAB's
-    trust-region solver (TolFun = TolX = 1e-6, MaxIter = 400) can then stop at different
-    points along the same valley, so a, b, c (and the fit quality) can differ in those
-    cases; where they do, this one has the lower (or equal) error.
-    """
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            res = least_squares(lambda p: p[0] * np.exp(p[1] * x) + p[2] - y, start, method='lm',
-                                ftol=1e-10, xtol=1e-10, gtol=1e-10, max_nfev=5000)
-            sse = np.sum(res.fun ** 2)
-            sst = np.sum((y - np.mean(y)) ** 2)
-            return (*res.x, 1 - sse / sst, np.sqrt(sse / (len(y) - 3)))
-    except (RuntimeError, ValueError, TypeError, FloatingPointError, np.linalg.LinAlgError) as exc:
-        logger.warning("DN_OutlierInclude: error fitting an exponential: %s", exc)
-        return (np.nan,) * 5
-
-
 def _fit_lin_gof(x: np.ndarray, y: np.ndarray) -> tuple:
-    """Least-squares fit of a*x + b, as hctsa's fit(x, y, fittype('a*x+b')).
-    Returns (a, b, R^2, RMSE), all NaN if the fit fails."""
-    try:
-        if len(x) < 2:
-            raise ValueError("too few points")
-        design = np.column_stack((x, np.ones(len(x))))
-        (a, b), *_ = np.linalg.lstsq(design, y, rcond=None)
-        sse = np.sum((y - (a * x + b)) ** 2)
-        sst = np.sum((y - np.mean(y)) ** 2)
-        with np.errstate(divide='ignore', invalid='ignore'):
-            return a, b, 1 - sse / sst, np.sqrt(sse / (len(y) - 2))
-    except (ValueError, np.linalg.LinAlgError, FloatingPointError) as exc:
-        logger.warning("DN_OutlierInclude: error fitting a linear trend: %s", exc)
+    """Ordinary least-squares line ``a*x + b``, with R^2 and root-mean-square error (n - 2
+    degrees of freedom). Returns (a, b, R^2, RMSE), all NaN for fewer than 3 points or a
+    constant curve."""
+    n = len(y)
+    sst = np.sum((y - np.mean(y)) ** 2)
+    if n < 3 or not sst > 0:
         return (np.nan,) * 4
+    a, b = np.polyfit(x, y, 1)
+    sse = np.sum((y - (a * x + b)) ** 2)
+    return a, b, 1 - sse / sst, np.sqrt(sse / (n - 2))
+
+
+def _exp_fit_outputs(x: np.ndarray, y: np.ndarray) -> tuple:
+    """Rate b, R^2 and RMSE of the global exponential fit ``a*exp(b*x) + c`` (:func:`pyhctsa.robust.bf_exp_fit`).
+
+    The amplitude a and offset c are not output: they are poorly determined when the
+    curve is close to a straight line, as a and c then become large and opposite in sign.
+    """
+    f = bf_exp_fit(x, y, True)
+    return f['b'], f['r2'], f['rmse']
 
 
 def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
@@ -961,8 +912,10 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
 
     The sweep stops when events are 2% or fewer of the points. The outputs measure how
     these curves change with th, using exponential [f(x) = a*exp(b*x) + c] and linear
-    [f(x) = a*x + b] fits, and simple statistics across thresholds. If a fit fails, its
-    outputs are NaN.
+    [f(x) = a*x + b] fits, and simple statistics across thresholds. The exponential fits
+    are global least-squares fits (:func:`pyhctsa.robust.bf_exp_fit`), which need no
+    starting point; only the rate b and the fit quality are returned. If a fit is
+    degenerate (a constant curve, too few points), its outputs are NaN.
 
     If ``fixed_thresh`` is given, the sweep and fits are skipped, and the statistics in
     (1)-(3) are returned for that one threshold.
@@ -990,11 +943,10 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
     dict
         From the sweep (``fixed_thresh`` not given):
 
-        - ``mfexpa``, ``mfexpb``, ``mfexpc``, ``mfexpr2``, ``mfexprmse``: the parameters
-          a, b, c, R^2 and root-mean-square error of the exponential fit to the mean
-          gap vs. th;
-        - ``nfexpa``, ``nfexpb``, ``nfexpc``, ``nfexpr2``, ``nfexprmse``: the same for an
-          exponential fit to the percentage of points that are events vs. th;
+        - ``mfexpb``, ``mfexpr2``, ``mfexprmse``: the rate b, R^2 and root-mean-square
+          error of the exponential fit to the mean gap vs. th;
+        - ``nfexpb``, ``nfexpr2``, ``nfexprmse``: the same for an exponential fit to the
+          percentage of points that are events vs. th;
         - ``nfla``, ``nflb``, ``nflr2``, ``nflrmse``: slope a, intercept b, R^2 and
           RMSE of a linear fit to the percentage of points that are events vs. th;
         - ``mdtm``, ``mdtmd``, ``mdtstd``: mean, median and standard deviation of the
@@ -1004,8 +956,8 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
         - ``mrm``, ``mrmd``, ``mrstd``: the same for the mean time of the events;
         - ``xcmerr1``, ``xcmerrn1``: cross-correlation between the mean gap and its
           standard error across thresholds, at lags +1 and -1;
-        - ``stdrfexpa``, ``stdrfexpb``, ``stdrfexpc``, ``stdrfexpr2``, ``stdrfexprmse``:
-          the parameters and fit quality of an exponential fit to
+        - ``stdrfexpb``, ``stdrfexpr2``, ``stdrfexprmse``:
+          the rate and fit quality of an exponential fit to
           std(times)/sqrt(their number) vs. th;
         - ``stdrfla``, ``stdrflb``, ``stdrflr2``, ``stdrflrmse``: the same for a linear fit.
 
@@ -1105,12 +1057,12 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
     results = {}
 
     # Fit an exponential to the mean inter-event interval as a function of the threshold
-    mfexp = _fit_exp_gof(thresholds, statistics[:, 0], [0.1, 2.5, 1])
-    results.update(dict(zip(['mfexpa', 'mfexpb', 'mfexpc', 'mfexpr2', 'mfexprmse'], mfexp)))
+    mfexp = _exp_fit_outputs(thresholds, statistics[:, 0])
+    results.update(dict(zip(['mfexpb', 'mfexpr2', 'mfexprmse'], mfexp)))
 
     # Fit an exponential, then a linear trend, to the percentage of points included
-    nfexp = _fit_exp_gof(thresholds, statistics[:, 2], [120, -1, -16])
-    results.update(dict(zip(['nfexpa', 'nfexpb', 'nfexpc', 'nfexpr2', 'nfexprmse'], nfexp)))
+    nfexp = _exp_fit_outputs(thresholds, statistics[:, 2])
+    results.update(dict(zip(['nfexpb', 'nfexpr2', 'nfexprmse'], nfexp)))
     nfl = _fit_lin_gof(thresholds, statistics[:, 2])
     results.update(dict(zip(['nfla', 'nflb', 'nflr2', 'nflrmse'], nfl)))
 
@@ -1143,8 +1095,8 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
     })
 
     # Fit an exponential, then a linear trend, to the std of event times
-    stdrfexp = _fit_exp_gof(thresholds, statistics[:, 5], [5, 1, 15])
-    results.update(dict(zip(['stdrfexpa', 'stdrfexpb', 'stdrfexpc', 'stdrfexpr2', 'stdrfexprmse'], stdrfexp)))
+    stdrfexp = _exp_fit_outputs(thresholds, statistics[:, 5])
+    results.update(dict(zip(['stdrfexpb', 'stdrfexpr2', 'stdrfexprmse'], stdrfexp)))
     stdrfl = _fit_lin_gof(thresholds, statistics[:, 5])
     results.update(dict(zip(['stdrfla', 'stdrflb', 'stdrflr2', 'stdrflrmse'], stdrfl)))
 
@@ -1253,6 +1205,19 @@ def trimmed_mean(x: ArrayLike, p_exclude: float = 0.0) -> float:
 
     return float(out)
 
+def _explicit_histogram(y: np.ndarray, num_bins: int) -> tuple:
+    """Counts in ``num_bins`` equal-width bins spanning ``y``, with explicit edges (``bf_hist_edges``).
+
+    An empty ``y`` (nothing on this side of the mean) has no histogram: zero counts and NaN edges.
+    """
+    num_bins = int(num_bins)
+    if len(y) == 0:
+        return np.zeros(num_bins), np.full(num_bins + 1, np.nan)
+    edges = bf_hist_edges(y, num_bins)
+    counts, _ = np.histogram(y, bins=edges)
+    return counts, edges
+
+
 def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> dict:
     """
     Calculate measures of histogram asymmetry for a time series.
@@ -1267,12 +1232,14 @@ def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True
     num_bins : int, optional
         Number of bins to use in histogram calculation. Default is 10.
     do_simple : bool, optional
-        If True, uses linearly spaced bins. If False, uses optimized bin edges. Default is `True`.
+        If True, uses linearly spaced bins. If False, uses equal-width bins spanning the
+        values on each side, with explicit edges (:func:`pyhctsa.robust.bf_hist_edges`).
+        Default is `True`.
 
     Returns
     -------
     dict
-        Dictionary containing asymmetry measures.
+        Dictionary containing asymmetry measures (NaN modes for a side with no values).
     """
     y = np.asarray(y)
     # compute the histogram seperately from positive and negative values in the data
@@ -1283,10 +1250,8 @@ def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True
         counts_pos, bin_edges_pos = simple_binner(y_pos, num_bins)
         counts_neg, bin_edges_neg = simple_binner(y_neg, num_bins)
     else:
-        bin_edges_pos = bin_picker(y_pos.min(), y_pos.max(), num_bins)
-        counts_pos = histc(y_pos, bin_edges_pos)[:-1]
-        bin_edges_neg = bin_picker(y_neg.min(), y_neg.max(), num_bins)
-        counts_neg = histc(y_neg, bin_edges_neg)[:-1]
+        counts_pos, bin_edges_pos = _explicit_histogram(y_pos, num_bins)
+        counts_neg, bin_edges_neg = _explicit_histogram(y_neg, num_bins)
     # normalise by the total counts
     n_non_zero = np.sum(y != 0)
     p_pos = np.divide(counts_pos, n_non_zero)
@@ -1315,28 +1280,33 @@ def histogram_mode(y: ArrayLike, num_bins: Union[int, str] = 10, do_simple: bool
     Measures the mode of the data vector using histograms with a given number
     of bins.
 
+    The mode is the center of the fullest bin of an equal-width histogram (the mean of
+    the centers if several bins are equally full). The bin edges are given explicitly
+    (:func:`pyhctsa.robust.bf_hist_edges`), so that the result does not depend on how a
+    histogram routine rounds its bin limits and width.
+
     Parameters
     -----------
     y : array-like
         The input time series.
     num_bins : int or str, optional
-        The number of bins to use in the histogram, or a bin-selection rule
-        understood by :func:`numpy.histogram_bin_edges` (such as ``'auto'``; hctsa's
-        ``'auto'`` is MATLAB's rule, which NumPy's only approximates). Default is 10.
+        The number of bins to use in the histogram, or the name of a rule for the
+        number of bins (``'auto'``, ``'fd'``, ``'sqrt'`` or ``'sturges'``; see
+        :func:`pyhctsa.robust.bf_hist_edges`). Default is 10.
     do_simple : bool, optional
-        Whether to use a simple binning method (linearly spaced bins) when
-        ``num_bins`` is a number. Default is `True`.
+        Whether to use equal-width bins between the minimum and maximum with explicit
+        edges (`True`, the default), or bins with limits and width rounded to 'nice'
+        values (`False`). Ignored if ``num_bins`` is a rule name.
 
     Returns
     --------
     float
         The mode of the data vector using histograms with num_bins bins. 
     """
-    y = np.asarray(y)
-    if isinstance(num_bins, str):
-        N, bin_edges = np.histogram(y, bins=num_bins)
-    elif do_simple:
-        N, bin_edges = simple_binner(y, num_bins)
+    y = np.asarray(y, dtype=float)
+    if isinstance(num_bins, str) or do_simple:
+        bin_edges = bf_hist_edges(y, num_bins)
+        N, _ = np.histogram(y, bins=bin_edges)
     else:
         bin_edges = bin_picker(y.min(), y.max(), num_bins)
         N = histc(y, bin_edges)[:-1]
@@ -1348,8 +1318,25 @@ def histogram_mode(y: ArrayLike, num_bins: Union[int, str] = 10, do_simple: bool
 
     return float(out)
 
+def _bf_random_seed(random_seed: Union[int, float, str, None] = 'default') -> int:
+    """The integer seed (for :func:`pyhctsa.robust.bf_random`) that a ``random_seed`` input stands for (hctsa ``BF_RandomSeed``).
+
+    ``'default'`` or ``None``: the fixed seed 0; a number: that seed, rounded and made non-negative
+    (modulo 4e9); ``'none'``: a seed drawn from NumPy's global random state (so repeated calls differ).
+    """
+    if random_seed is None:
+        return 0
+    if isinstance(random_seed, str):
+        if random_seed == 'default':
+            return 0
+        if random_seed == 'none':
+            return int(np.floor(4e9 * np.random.random_sample()))
+        raise ValueError(f"Not sure how to interpret the random seed '{random_seed}'")
+    return int(np.mod(np.floor(abs(float(random_seed)) + 0.5), 4e9))
+
+
 def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
-                  remove_or_saturate: str = 'remove', random_seed: Union[int, None] = None) -> dict:
+                  remove_or_saturate: str = 'remove', random_seed: Union[int, str, None] = None) -> dict:
     """
     How time-series properties change as points are removed.
 
@@ -1377,8 +1364,10 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
         Whether to remove points ('remove') or saturate their values ('saturate').
         Default is ``'remove'``.
     random_seed : int, optional
-        Seed for the random ordering used when ``remove_how='random'``, for
-        reproducibility. Default is ``None`` (unseeded).
+        Seed of the random ordering used when ``remove_how='random'``: an integer, ``None`` or
+        ``'default'`` for seed 0, or ``'none'`` for a seed drawn from NumPy's global random state.
+        The ordering comes from the portable generator :func:`pyhctsa.robust.bf_random`, so
+        it matches hctsa's. Default is ``None`` (seed 0).
 
     Returns
     -------
@@ -1401,7 +1390,8 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     elif remove_how == 'max':
         is_ = np.argsort(y, kind='stable')             # ascending y
     elif remove_how == 'random':
-        is_ = np.random.default_rng(random_seed).permutation(N)
+        # random ordering, reproducible: the stable argsort of N uniforms from the portable generator
+        is_ = np.argsort(bf_random(N, _bf_random_seed(random_seed)), kind='stable')
     else:
         raise ValueError(f"Unknown method '{remove_how}'")
     
@@ -1497,14 +1487,21 @@ def _moment_estimate(s: np.ndarray, k: int) -> float:
 
 
 def _gpd_shape(exceed: np.ndarray) -> float:
-    """Shape parameter of a generalized Pareto distribution (threshold 0) fitted by maximum likelihood."""
+    """Shape parameter of a generalized Pareto distribution (threshold 0), by probability-weighted moments.
+
+    Hosking and Wallis (1987): with ``a0`` the mean of the exceedances and ``a1`` the
+    mean of ``(1 - p_i) z_i`` for the ascending exceedances ``z_i`` with plotting
+    positions ``p_i = (i - 0.35)/n``, the shape is ``2 - a0/(a0 - 2 a1)``.
+    """
     if np.any(exceed <= 0):
         return np.nan  # ties between the tail values and the threshold
-    try:
-        c, _ = gpfit(exceed)
-    except (ValueError, RuntimeError, FloatingPointError):
-        return np.nan
-    return float(c) if np.isfinite(c) else np.nan
+    n = len(exceed)
+    z = np.sort(exceed)
+    a0 = np.mean(z)
+    a1 = np.mean((1 - (np.arange(1, n + 1) - 0.35) / n) * z)
+    with np.errstate(all='ignore'):
+        xi = 2 - a0 / (a0 - 2 * a1)
+    return float(xi) if np.isfinite(xi) else np.nan
 
 
 def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
@@ -1514,7 +1511,8 @@ def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
     The tail index is estimated in several ways from the ``k = round(tail_frac * N)``
     most extreme values in each tail (taken relative to the median of the data):
     Hill's estimator, a moment estimator, and the shape parameter of a generalized
-    Pareto distribution fitted to the exceedances over the (k+1)-th most extreme value.
+    Pareto distribution fitted to the exceedances over the (k+1)-th most extreme value
+    (by probability-weighted moments, Hosking and Wallis 1987, which has a closed form).
     A larger index means a heavier tail (a power-law tail of exponent alpha has index
     1/alpha; a Gaussian has an index of about zero). NaN is returned for every
     output if there are fewer than 10 tail values or if k is at least N/2.
@@ -1535,11 +1533,6 @@ def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
         estimator for the distances from the median; gpdUpper, gpdLower: the generalized
         Pareto shape parameter for the upper and lower exceedances; gpdAsym: their
         difference.
-
-    Notes
-    -----
-    The generalized Pareto fit repeats MATLAB's ``gpfit`` (a Nelder-Mead search with loose
-    tolerances), so the ``gpd*`` values are not exact maximum-likelihood estimates.
     """
     names = ['hillUpper', 'hillLower', 'hillAsym', 'momentAbs', 'gpdUpper', 'gpdLower', 'gpdAsym']
     out = dict.fromkeys(names, np.nan)
@@ -1569,12 +1562,6 @@ def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
     return out
 
 
-def _ratio(a: float, b: float) -> float:
-    """``a / b`` with MATLAB's semantics for a zero denominator (Inf, -Inf or NaN)."""
-    with np.errstate(all='ignore'):
-        return float(np.float64(a) / np.float64(b))
-
-
 def _fmt_threshold(prefix: str, thr: float) -> str:
     """Output name hctsa gives a threshold: sprintf('%s_%.2f') with the dot removed."""
     return f"{prefix}_{thr:.2f}".replace('.', '')
@@ -1586,8 +1573,9 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
     """
     Statistics of a kernel-smoothed distribution of the data.
 
-    The data are smoothed with a Gaussian kernel (100 points, MATLAB's default
-    bandwidth) and the smoothed density, f, is summarized by its number of peaks,
+    The data are smoothed with a Gaussian kernel with a normal-reference bandwidth
+    (:func:`pyhctsa.robust.bf_ks_density`: 100 points from three bandwidths below the
+    minimum to three above the maximum) and the smoothed density, f, is summarized by its number of peaks,
     maximum, entropy, and asymmetry about the mean, plus optional threshold-based
     statistics.
 
@@ -1609,16 +1597,12 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
     dict
         npeaks: the number of 'large enough' maxima of f (those with second difference
         below -0.0002); max: the maximum of f; entropy: the entropy of f; asym: the
-        area of f above the mean divided by that below it; plsym: the ratio of the
-        total variation of f below the mean to that above it; and, for each threshold t,
+        area of f above the mean divided by that below it (NaN if there is essentially
+        none below); plsym: the ratio of the total variation of f below the mean to that
+        above it (NaN if there is none above); and, for each threshold t,
         ``numcross_t``, ``area_t``, ``arclength_t`` (t formatted to two decimals with the
-        dot removed, e.g. ``numcross_005`` for 0.05).
-
-    Notes
-    -----
-    Uses ``scipy.stats.gaussian_kde`` with MATLAB's default bandwidth. MATLAB's
-    ``ksdensity`` truncates the kernel at four bandwidths for large samples, so
-    values differ slightly (about 1e-4 relative to the peak) for N above a few hundred.
+        dot removed, e.g. ``numcross_005`` for 0.05). NaN (not a dict) for a constant
+        series, which has no scale to smooth over.
     """
     x = np.asarray(x, dtype=float).ravel()
     for name, v in (('area', area), ('numcross', numcross), ('arclength', arclength)):
@@ -1628,7 +1612,9 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
                                  for v in (area, numcross, arclength))
 
     m = np.mean(x)
-    f, xi = _ksdensity(x)
+    f, xi, _ = bf_ks_density(x)
+    if np.any(np.isnan(f)):  # constant data: no scale to smooth over
+        return np.nan
     dx = xi[1] - xi[0]
     out = {}
 
@@ -1639,9 +1625,13 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
     out['max'] = float(np.max(f))  # maximum of the distribution
     fp = f[f > 0]
     out['entropy'] = float(-np.sum(fp * np.log(fp) * dx))
-    out['asym'] = _ratio(np.sum(f[xi > m] * dx), np.sum(f[xi < m] * dx))
-    out['plsym'] = _ratio(np.sum(np.abs(np.diff(f[xi < m])) * dx),
-                          np.sum(np.abs(np.diff(f[xi > m])) * dx))
+    mass_above = np.sum(f[xi > m] * dx)
+    mass_below = np.sum(f[xi < m] * dx)
+    # (essentially) no mass below the mean: the ratio is not meaningful
+    out['asym'] = np.nan if mass_below < 1e-10 else float(mass_above / mass_below)
+    var_below = np.sum(np.abs(np.diff(f[xi < m])) * dx)
+    var_above = np.sum(np.abs(np.diff(f[xi > m])) * dx)
+    out['plsym'] = np.nan if var_above < 1e-10 else float(var_below / var_above)  # no variation above the mean
 
     if numcross is not None:  # crossing statistics
         for thr in numcross:
@@ -1656,144 +1646,104 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
     return out
 
 
-def _gauss_sum(t, *p):
-    """Sum of Gaussians a*exp(-((t-b)/c)^2) with parameters (a1, b1, c1, a2, b2, c2, ...)."""
-    out = np.zeros_like(t, dtype=float)
-    for i in range(0, len(p), 3):
-        out += p[i] * np.exp(-((t - p[i + 1]) / p[i + 2]) ** 2)
-    return out
-
-
-def _fit_curve(dnx: np.ndarray, dny: np.ndarray, dmodel: str):
-    """Least-squares fit of a curve of the named type; returns (fitted values, number of coefficients)."""
-    from scipy.optimize import curve_fit
-
-    span = np.ptp(dnx) if len(dnx) > 1 else 1.0
-    i0 = int(np.argmax(dny))
-    best = None
-    if dmodel in ('gauss1', 'gauss2'):
-        npk = 1 if dmodel == 'gauss1' else 2
-        a0, b0, c0 = dny[i0], dnx[i0], span / 4
-        starts = []
-        if npk == 1:
-            starts.append([a0, b0, c0])
-        else:
-            # a second peak at a number of positions across the range, and half-height peaks
-            for frac in (0.1, 0.25, 0.4, 0.6, 0.75, 0.9):
-                b2 = dnx[0] + frac * span
-                starts.append([a0, b0, c0, a0 / 2, b2, c0 / 2])
-        model = _gauss_sum
-        k = 3 * npk
-    elif dmodel == 'exp1':
-        pos = dny > 0
-        if np.sum(pos) >= 2 and np.ptp(dnx[pos]) > 0:
-            b1, a1 = np.polyfit(dnx[pos], np.log(dny[pos]), 1)
-            starts = [[np.exp(a1), b1]]
-        else:
-            starts = [[1.0, 0.0]]
-        starts.append([1.0, 0.0])
-        model = lambda t, a, b: a * np.exp(b * t)
-        k = 2
-    elif dmodel == 'power1':
-        pos = dny > 0
-        if np.sum(pos) >= 2 and np.ptp(np.log(dnx[pos])) > 0:
-            b1, a1 = np.polyfit(np.log(dnx[pos]), np.log(dny[pos]), 1)
-            starts = [[np.exp(a1), b1]]
-        else:
-            starts = [[1.0, 1.0]]
-        starts.append([1.0, 1.0])
-        model = lambda t, a, b: a * np.power(t, b)
-        k = 2
-    else:
-        raise ValueError(f"Invalid distribution model '{dmodel}' specified")
-
-    for p0 in starts:
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter('ignore')
-                popt, _ = curve_fit(model, dnx, dny, p0=p0, maxfev=20000)
-        except (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
-            continue
-        fit = model(dnx, *popt)
-        if not np.all(np.isfinite(fit)):
-            continue
-        sse = np.sum((dny - fit) ** 2)
-        if best is None or sse < best[0]:
-            best = (sse, fit)
-    if best is None:
-        return None, k
-    return best[1], k
+_SIMPLE_FIT_MODELS = {'gauss1': ('gauss', 3), 'gauss2': ('gauss2', 6), 'exp1': ('exp', 2), 'power1': ('power', 2)}
 
 
 def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') -> Union[dict, float]:
     """
     Fits a simple curve to the distribution of the values.
 
-    The distribution of the data, estimated either as a histogram or by kernel
-    smoothing, is fitted by nonlinear least squares with a simple curve, and the
-    goodness of fit and the structure of the residuals are returned.
+    Fits a simple parametric curve to an estimate of the distribution of values in the
+    time series, ignoring their temporal ordering. The distribution is estimated either
+    as a histogram, with a specified number of bins, or as a kernel-smoothed density.
+    The outputs measure the goodness of fit, and test the residuals (in order of
+    increasing value) for remaining structure. The curve is fitted by least squares to
+    the density in a deterministic way, with no random starts and no optimizer defaults
+    (:func:`pyhctsa.robust.bf_fit_density_curve`).
 
     Parameters
     ----------
     x : array-like
         The input data vector.
     dmodel : {'gauss1', 'gauss2', 'exp1', 'power1'}
-        The curve to fit: a Gaussian, the sum of two Gaussians, an exponential, or a
-        power law ``a * x ** b`` (positive data only). (hctsa's time-series models, the
-        sinusoids and Fourier series, are fitted by ``sinusoid_fit`` in the spectral
-        module.)
+        The curve to fit: a Gaussian, the sum of two Gaussians, an exponential
+        ``a*exp(b*x)``, or a power law ``a * x ** b`` (cannot be fit if any bin center is
+        not positive; NaN is returned). NaN is also returned if there are no more bins
+        than parameters of the model. (hctsa's time-series models, the sinusoids and
+        Fourier series, are fitted by ``sinusoid_fit`` in the spectral module; the
+        names 'sin1', 'sin2', 'sin3' are passed on to it, as hctsa does.)
     num_bins : int or str, optional
-        How to estimate the distribution: a binning rule understood by
-        :func:`numpy.histogram_bin_edges` (default ``'sqrt'``), the number of
-        histogram bins, or 0 for a kernel-smoothed density.
+        How to estimate the distribution: the name of a rule for the number of histogram bins
+        (default ``'sqrt'``), the number of histogram bins, or 0 for a kernel-smoothed density.
 
     Returns
     -------
     dict
         r2: R-squared of the fit; adjr2: R-squared adjusted for the number of
-        coefficients; rmse: root-mean-square error of the fit, scaled by the standard
-        deviation of the data; resAC1, resAC2: autocorrelations of the residuals at lags
-        1 and 2; resruns: p-value of a runs test on the residuals. NaN (not a dict)
-        if the model cannot be fitted.
+        coefficients; rmse: root-mean-square error of the fit, in units of probability
+        density of the standardized series (multiplied by the standard deviation of the
+        data); resAC1, resAC2: autocorrelations of the residuals, in order of increasing
+        value, at lags 1 and 2; resrunsz: the signed z-statistic of a runs test on the
+        residuals (:func:`pyhctsa.robust.bf_runs_z`; negative when the residuals have
+        fewer runs about their median than expected for a random order). NaN (not a
+        dict) if the model cannot be fitted, or for a constant series with ``num_bins = 0``.
 
     Notes
     -----
-    Fits use ``scipy.optimize.curve_fit`` (Levenberg-Marquardt, from heuristic starting
-    points; several for ``'gauss2'``, keeping the best), where hctsa uses the
-    trust-region fit of MATLAB's ``fit``, so values can differ where the fit is
-    ill-conditioned or has local minima. Histogram bin edges follow NumPy's rules, not
-    MATLAB's, which are rounded to 'nice' values.
+    The histogram has equal-width bins spanning the data with explicit edges
+    (:func:`pyhctsa.robust.bf_hist_edges`; a number of bins or a rule: ``'auto'``, ``'fd'``,
+    ``'sqrt'``, ``'sturges'``), and the kernel-smoothed density is
+    :func:`pyhctsa.robust.bf_ks_density`, so neither depends on the rounding of a histogram or
+    kernel-density routine's defaults.
     """
-    from .hypothesis_tests import independence_tests
-    from ..toolboxes.matlab.matlab_fit import goodness_of_fit
-
     x = np.asarray(x, dtype=float).ravel()
-    if dmodel not in ('gauss1', 'gauss2', 'exp1', 'power1'):
+    if dmodel in ('sin1', 'sin2', 'sin3', 'fourier1', 'fourier2', 'fourier3'):
+        from .spectral import sinusoid_fit
+        return sinusoid_fit(x, dmodel)
+    if dmodel not in _SIMPLE_FIT_MODELS:
         raise ValueError(f"Invalid distribution model '{dmodel}' specified")
 
     if isinstance(num_bins, str) or num_bins != 0:
-        counts, edges = np.histogram(x, bins=num_bins)
+        # histogram with an explicit number of equal-width bins (a number, or a rule)
+        edges = bf_hist_edges(x, num_bins)
+        counts, _ = np.histogram(x, bins=edges)
         dnx = (edges[:-1] + edges[1:]) / 2
         dny = counts / (np.sum(counts) * np.mean(np.diff(edges)))  # counts -> probability density
-    else:  # kernel-smoothed distribution instead of a histogram
-        dny, dnx = _ksdensity(x)
+    else:  # kernel-smoothed density instead of a histogram
+        dny, dnx, _ = bf_ks_density(x)
+        if np.any(np.isnan(dny)):  # constant series: no distribution to fit
+            return np.nan
 
     if dmodel == 'power1' and np.any(dnx <= 0):
         logger.warning(f"The model '{dmodel}' can not be applied to non-positive data")
         return np.nan
 
-    fit, k = _fit_curve(dnx, dny, dmodel)
-    if fit is None:
-        logger.warning(f"Error fitting the model '{dmodel}' to this data")
+    curve, num_params = _SIMPLE_FIT_MODELS[dmodel]
+    dfe = len(dny) - num_params  # degrees of freedom of the error
+    if dfe < 1:  # no more bins than parameters: the fit is not meaningful
         return np.nan
 
-    gof = goodness_of_fit(dny, fit, k)
-    res = dny - fit
+    # Fit the model by least squares for the density
+    dny_fit = bf_fit_density_curve(dnx, dny, curve)
+
+    # Residuals (in order of increasing value) and goodness of fit as in the Curve Fitting
+    # Toolbox: R^2, R^2 adjusted for the number of fitted parameters, and the root-mean-square
+    # error from the residual sum of squares divided by the degrees of freedom of the error
+    res = dny - dny_fit
+    sse = np.sum(res ** 2)
+    sstot = np.sum((dny - np.mean(dny)) ** 2)
+    with np.errstate(all='ignore'):
+        r2 = 1 - sse / sstot
+        adjr2 = 1 - (1 - r2) * (len(dny) - 1) / dfe
+    rmse = np.sqrt(sse / dfe)
+
+    # Remaining structure in the residuals, in order of increasing value:
+    res_ac1, res_ac2, res_runsz = bf_residual_stats(res, sstot)
     return {
-        'r2': float(gof['rsquare']),
-        'adjr2': float(gof['adjrsquare']),
-        'rmse': float(gof['rmse'] * np.std(x, ddof=1)),
-        'resAC1': float(np.ravel(autocorr(res, 1, 'Fourier'))[0]),
-        'resAC2': float(np.ravel(autocorr(res, 2, 'Fourier'))[0]),
-        'resruns': independence_tests(res, 'runstest'),
+        'r2': float(r2),
+        'adjr2': float(adjr2),
+        'rmse': float(rmse * np.std(x, ddof=1)),
+        'resAC1': float(res_ac1),
+        'resAC2': float(res_ac2),
+        'resrunsz': float(res_runsz),
     }

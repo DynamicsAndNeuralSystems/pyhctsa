@@ -3,17 +3,16 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 import scipy
-from scipy.optimize import least_squares
-from scipy.special import gammaln
+from numba import njit
 from scipy.stats import expon, gumbel_l, norm
-from ts2vg import NaturalVG
 import logging
 from math import factorial
 
 logger = logging.getLogger('pyhctsa')
 
 from pyhctsa.operations.correlation import autocorr, first_crossing
-from pyhctsa.utils import bin_picker, get_tau, time_delay_embed
+from pyhctsa.robust import bf_fit_density_curve, bf_hist_edges, bf_residual_stats
+from pyhctsa.utils import get_tau, time_delay_embed
 from pyhctsa.operations.entropy import _ordinal_pattern_rank
 from pyhctsa.toolboxes.distribution_fits.distfits import evfit
 
@@ -102,155 +101,63 @@ def _horiz_vgraph_degrees(ts_data: ArrayLike) -> np.ndarray:
     return np.bincount(endpoints, minlength=N)
 
 
-def _runstest_pvalue(x: np.ndarray) -> float:
+@njit(cache=True)
+def _natural_vg_degrees(y: np.ndarray) -> np.ndarray:
     """
-    Exact two-sided p-value of the runs test about the mean, as MATLAB's ``runstest(x)``.
+    Degree sequence of the natural visibility graph, without an adjacency matrix.
 
-    Values equal to the mean are omitted. The exact distribution of the number
-    of runs above/below the mean is used (MATLAB's default for this test).
+    A forward sweep from each node i keeps the largest slope seen so far: node j is
+    visible from i iff its slope ``(y[j] - y[i])/(j - i)`` exceeds that of every node in
+    between. Slopes that agree to within rounding error (collinear nodes, as for tied or
+    quantized values) are treated as equal, which blocks the view, so the graph does not
+    depend on how a slope was rounded: a slope must exceed the running maximum by a
+    relative 1e-12. Once the running maximum slope ``m`` is positive, nodes beyond
+    distance ``(max(y) - y[i])/m`` would have to lie above ``max(y)``, so the scan stops
+    early.
     """
-    x = np.asarray(x, dtype=float)
-    x = x[~np.isnan(x)]
-    if x.size == 0:
-        return 1.0
-    v = np.mean(x)
-    x = x[x != v]
-    N = x.size
-    above = x > v
-    n1 = int(np.sum(above))
-    n0 = N - n1
-    if n1 == 0 or n0 == 0:
-        return 1.0  # exactly one run
-    nruns = 1 + int(np.sum(above[:-1] != above[1:]))
-
-    def log_choose(n, k):
-        if k < 0 or k > n:
-            return -np.inf
-        return gammaln(n + 1) - gammaln(k + 1) - gammaln(n - k + 1)
-
-    def prob(r):
-        denom = log_choose(N, n0)
-        if r % 2 == 0:
-            k = r // 2
-            return 2 * np.exp(log_choose(n1 - 1, k - 1) + log_choose(n0 - 1, k - 1) - denom)
-        k = r // 2
-        return (np.exp(log_choose(n1 - 1, k - 1) + log_choose(n0 - 1, k) - denom)
-                + np.exp(log_choose(n1 - 1, k) + log_choose(n0 - 1, k - 1) - denom))
-
-    plist = np.array([prob(r) for r in range(1, 2 * min(n1, n0) + 2)])
-    pexact = plist[nruns - 1]
-    plo = np.sum(plist[:nruns - 1])
-    phi = np.sum(plist[nruns:])
-    return float(min(1.0, 2 * (pexact + min(plo, phi))))
-
-
-_SIMPLE_FIT_NAN = {'r2': np.nan, 'adjr2': np.nan, 'rmse': np.nan,
-                   'resAC1': np.nan, 'resAC2': np.nan, 'resruns': np.nan}
-
-
-def _simple_fit(x: np.ndarray, dmodel: str, num_bins: int) -> dict:
-    """
-    Fit a simple curve to the histogram of the values of x (hctsa's ``DN_SimpleFit``).
-
-    The histogram of x with ``num_bins`` equal-width bins is normalized to a
-    probability density, and a single Gaussian (``'gauss1'``, ``a*exp(-((x-b)/c)^2)``),
-    exponential (``'exp1'``, ``a*exp(b*x)``) or power law (``'power1'``, ``a*x^b``)
-    is fitted by nonlinear least squares. Returns the goodness-of-fit outputs
-    (r2, adjr2, rmse, resAC1, resAC2, resruns), all NaN if the model cannot
-    be fitted.
-
-    The rmse is in units of probability density of the standardized series
-    (rmse of the fit multiplied by the standard deviation of x).
-    """
-    nan_out = dict(_SIMPLE_FIT_NAN)
-    num_bins = int(num_bins)
-    if num_bins < 1 or x.size < 2:
-        return nan_out
-
-    counts, edges = np.histogram(x, bins=num_bins)
-    dnx = (edges[:-1] + edges[1:]) / 2
-    dny = counts / (np.sum(counts) * np.mean(np.diff(edges)))
-
-    if dmodel == 'gauss1':
-        def model(t, a, b, c):
-            return a * np.exp(-((t - b) / c) ** 2)
-        width = max(dnx[-1] - dnx[0], np.finfo(float).eps)
-        i0 = int(np.argmax(dny))
-        wmean = np.sum(dnx * dny) / np.sum(dny) if np.sum(dny) > 0 else dnx[i0]
-        starts = [(dny[i0], b, c) for b in (dnx[i0], wmean) for c in (width / 8, width / 4, width / 2, width)]
-    elif dmodel == 'exp1':
-        def model(t, a, b):
-            return a * np.exp(b * t)
-        pos = dny > 0
-        starts = []
-        if np.sum(pos) >= 2:
-            slope, icpt = np.polyfit(dnx[pos], np.log(dny[pos]), 1)
-            starts.append((np.exp(icpt), slope))
-        starts += [(np.max(dny), 0.0), (np.max(dny), -1.0 / max(np.ptp(dnx), 1e-12)),
-                   (np.max(dny), 1.0 / max(np.ptp(dnx), 1e-12))]
-    elif dmodel == 'power1':
-        if np.any(dnx <= 0):
-            return nan_out  # power functions cannot be fit to non-positive x
-        def model(t, a, b):
-            return a * t ** b
-        pos = dny > 0
-        starts = []
-        if np.sum(pos) >= 2:
-            slope, icpt = np.polyfit(np.log(dnx[pos]), np.log(dny[pos]), 1)
-            starts.append((np.exp(icpt), slope))
-        starts += [(np.max(dny), -1.0), (np.max(dny), 1.0), (np.mean(dny), 0.0)]
-    else:
-        raise ValueError(f"Invalid distribution model '{dmodel}' specified")
-
-    nparams = len(starts[0])
-    if len(dnx) < nparams:
-        return nan_out  # fewer data points than coefficients
-    # Bound the Gaussian width away from zero: its sign is irrelevant and c -> 0 is degenerate
-    lower = [-np.inf, -np.inf, 1e-12] if dmodel == 'gauss1' else [-np.inf] * nparams
-    best_sse, best_p = np.inf, None
-    for p0 in starts:
-        try:
-            with np.errstate(all='ignore'):
-                sol = least_squares(lambda p: model(dnx, *p) - dny, p0, bounds=(lower, np.inf),
-                                    method='trf', x_scale='jac', xtol=1e-12, ftol=1e-12,
-                                    gtol=1e-12, max_nfev=2000)
-                sse = np.sum((dny - model(dnx, *sol.x)) ** 2)
-        except (RuntimeError, ValueError, FloatingPointError):
-            continue
-        if np.isfinite(sse) and sse < best_sse:
-            best_sse, best_p = sse, sol.x
-    if best_p is None:
-        return nan_out
-
-    res = dny - model(dnx, *best_p)
-    n = len(dnx)
-    dfe = n - nparams
-    sst = np.sum((dny - np.mean(dny)) ** 2)
-    out = dict(nan_out)
-    out['r2'] = 1 - best_sse / sst if sst > 0 else np.nan
-    out['adjr2'] = 1 - (1 - out['r2']) * (n - 1) / dfe if dfe > 0 else np.nan
-    out['rmse'] = np.sqrt(best_sse / dfe) * np.std(x, ddof=1) if dfe > 0 else np.nan
-    out['resAC1'] = autocorr(res, 1, 'Fourier')[0]
-    out['resAC2'] = autocorr(res, 2, 'Fourier')[0]
-    out['resruns'] = _runstest_pvalue(res)
-    return out
+    n = y.shape[0]
+    k = np.zeros(n, dtype=np.int64)
+    ymax = np.max(y)
+    vis_tol = 1e-12  # relative tolerance of the visibility test
+    for i in range(n - 1):
+        yi = y[i]
+        m = y[i + 1] - yi  # largest slope from i seen so far: the neighbor is always visible
+        k[i + 1] += 1
+        k[i] += 1
+        jlim = n - 1  # last node that can still be visible
+        if m > 0:
+            reach = np.floor((ymax - yi) / m)
+            if reach < n:
+                jlim = min(n - 1, i + int(reach) + 1)
+        j = i + 2
+        while j <= jlim:
+            sj = (y[j] - yi) / (j - i)
+            if sj > m + vis_tol * abs(m):
+                m = sj
+                k[j] += 1
+                k[i] += 1
+                if m > 0:
+                    reach = np.floor((ymax - yi) / m)
+                    if reach < n:
+                        jlim = min(n - 1, i + int(reach) + 1)
+            j += 1
+    return k
 
 
 def _degree_entropy(k: np.ndarray) -> float:
     """
-    Entropy of the histogram of k with MATLAB's ``'sqrt'`` binning rule (hctsa's
+    Entropy of the histogram of k with the square-root bin rule (hctsa's
     ``EN_DistributionEntropy(k, 'hist', 'sqrt')``), in nats, with the Miller-Madow correction.
 
-    MATLAB's ``histcounts(..., 'BinMethod', 'sqrt')`` picks ``ceil(sqrt(N))`` bins' worth
-    of width, then rounds the width and the edges to "nice" values (the ``binpicker``
-    rule), which for integer-valued degrees differs from NumPy's ``'sqrt'`` rule.
+    The bin edges are explicit (:func:`pyhctsa.robust.bf_hist_edges`). NaN for constant data,
+    for which the differential entropy is not defined.
     """
     n = len(k)
-    nbins = max(int(np.ceil(np.sqrt(n))), 1)
-    xmin, xmax = np.float64(np.min(k)), np.float64(np.max(k))
-    edges = bin_picker(xmin, xmax, None, (xmax - xmin) / nbins)
+    if np.ptp(k) == 0:
+        return np.nan
+    edges = bf_hist_edges(k, 'sqrt')
     counts, _ = np.histogram(k, bins=edges)
-    px = counts / np.sum(counts)
+    px = counts / n
     bin_widths = np.diff(edges)
     pos = px > 0
     out = -np.sum(px[pos] * np.log(px[pos] / bin_widths[pos]))
@@ -319,15 +226,22 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
         - ``olu90``: how far the mean of the top 5% of degrees lies above the overall mean,
           in standard deviations of the degrees
         - ``dgaussk_*``, ``dexpk_*``, ``dpowerk_*`` (``r2``, ``adjr2``, ``rmse``,
-          ``resAC1``, ``resAC2``, ``resruns``): goodness of fit and residual tests for a
-          single Gaussian, exponential and power law fitted to the histogram of degrees
-          (with as many bins as the range of the degrees; the rmse is in units of
-          probability density of the degrees divided by their standard deviation)
+          ``resAC1``, ``resAC2``, ``resrunsz``): goodness of fit, autocorrelation of the
+          residuals at lags 1 and 2, and the signed z-statistic of a runs test on the
+          residuals (:func:`pyhctsa.robust.bf_runs_z`), for a single Gaussian, exponential
+          and power law fitted by deterministic least squares
+          (:func:`pyhctsa.robust.bf_fit_density_curve`) to the distribution of degrees (the
+          proportion of nodes at each integer degree, from the minimum to the maximum
+          degree; the rmse is in units of probability density of the degrees divided by
+          their standard deviation, so it does not depend on the number of nodes). Each is
+          NaN if the degrees take no more distinct values than the fit has parameters
+          (3 for the Gaussian, 2 for the others), or if the fit is exact
         - ``gaussnlogL``, ``expnlogL``: mean negative log-likelihood per node of a
           Gaussian and of an exponential distribution fitted to the degrees
         - ``evparam1``, ``evparam2``, ``evnlogL``: location and scale of an extreme-value
           distribution fitted to the degrees, and its mean negative log-likelihood per node
-        - ``entropy``: entropy of the histogram of degrees (square-root binning), in nats
+        - ``entropy``: entropy of the histogram of degrees (square-root bin rule with explicit
+          edges), in nats
         - ``kac1``, ``kac2``, ``kac3``: autocorrelation of the degree sequence (in time
           order) at lags 1, 2 and 3
         - ``ktau``: lag at which the autocorrelation of the degree sequence first
@@ -353,9 +267,7 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
         # O(N) time and memory
         k = _horiz_vgraph_degrees(y)
     elif meth == 'norm':
-        vg = NaturalVG()
-        vg.build(y, only_degrees=True)
-        k = vg._degrees
+        k = _natural_vg_degrees(np.asarray(y, dtype=np.float64))
     else:
         raise ValueError(f"Unknown visibility graph method '{meth}'")
 
@@ -382,12 +294,34 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
     out['ol90'] = np.mean(k[(k >= q05) & (k <= q95)])/meank
     out['olu90'] = np.mean(k[k >= q95] - meank)/stdk
 
-    # Fit distributions to the degree distribution (histogram with range(k) bins)
+    # Distribution of the degrees: the proportion of nodes at each integer degree from the
+    # minimum to the maximum (bins of width 1, so proportions are probability densities)
     kf = k.astype(float)
-    for prefix, dmodel in (('dgaussk', 'gauss1'), ('dexpk', 'exp1'), ('dpowerk', 'power1')):
-        fit = _simple_fit(kf, dmodel, int(np.ptp(k)))
-        for name in ('r2', 'adjr2', 'rmse', 'resAC1', 'resAC2', 'resruns'):
-            out[f'{prefix}_{name}'] = fit[name]
+    k_vals = np.arange(np.min(k), np.max(k) + 1, dtype=float)
+    k_prob = np.bincount(k - np.min(k), minlength=len(k_vals)) / len(k)
+
+    # Least-squares fits of a Gaussian, an exponential and a power law to the distribution
+    # (deterministic: pyhctsa.robust.bf_fit_density_curve)
+    for prefix, curve, num_params in (('dgaussk', 'gauss', 3), ('dexpk', 'exp', 2), ('dpowerk', 'power', 2)):
+        if np.sum(k_prob > 0) <= num_params:  # too few distinct degrees to fit this model meaningfully
+            r2 = adjr2 = rmse = res_ac1 = res_ac2 = res_runsz = np.nan
+        else:
+            k_fit = bf_fit_density_curve(k_vals, k_prob, curve)
+            res = k_prob - k_fit  # residuals, in order of increasing degree
+            sse = np.sum(res ** 2)
+            sstot = np.sum((k_prob - np.mean(k_prob)) ** 2)
+            dfe = len(k_vals) - num_params  # degrees of freedom of the error
+            with np.errstate(all='ignore'):
+                r2 = 1 - sse / sstot
+                adjr2 = 1 - (1 - r2) * (len(k_vals) - 1) / dfe
+            rmse = np.sqrt(sse / dfe) * stdk  # in density units of the standardized degrees
+            res_ac1, res_ac2, res_runsz = bf_residual_stats(res, sstot)
+        out[f'{prefix}_r2'] = r2
+        out[f'{prefix}_adjr2'] = adjr2
+        out[f'{prefix}_rmse'] = rmse
+        out[f'{prefix}_resAC1'] = res_ac1
+        out[f'{prefix}_resAC2'] = res_ac2
+        out[f'{prefix}_resrunsz'] = res_runsz
 
     # Likelihood: mean negative log-likelihood per node (the summed value is proportional
     # to the number of nodes)
