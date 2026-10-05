@@ -1,10 +1,11 @@
 import logging
+import warnings
 from typing import Dict, Union
 
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy import stats
-from scipy.optimize import brentq
+from scipy.optimize import brentq, least_squares
 from scipy.stats import beta as beta_dist
 from scipy.stats import gamma as gamma_dist
 from scipy.stats import expon, gaussian_kde, gumbel_l, lognorm, norm, rayleigh, uniform, weibull_min, skew, kurtosis
@@ -833,131 +834,260 @@ def moments(y: ArrayLike, the_mom: int = 0, do_normalize: bool = True) -> float:
         return stats.moment(y, the_mom)
     return stats.moment(y, the_mom) / np.std(y, ddof=1) ** the_mom
 
-def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01) -> dict:
+def _matlab_std(a) -> float:
+    """Sample standard deviation as MATLAB's std: 0 (not NaN) for a single value."""
+    a = np.asarray(a, dtype=float)
+    return float(np.std(a, ddof=1)) if a.size > 1 else 0.0
+
+
+def _fit_exp_gof(x: np.ndarray, y: np.ndarray, start: list) -> tuple:
+    """Nonlinear least-squares fit of a*exp(b*x) + c from the given start point, as hctsa's
+    fit(x, y, fittype('a*exp(b*x)+c')). Returns (a, b, c, R^2, RMSE), all NaN if the fit fails.
+
+    These fits are often ill-conditioned (a and c large and opposite in sign when b is
+    near 0). This solver (Levenberg-Marquardt, run to convergence) and MATLAB's
+    trust-region solver (TolFun = TolX = 1e-6, MaxIter = 400) can then stop at different
+    points along the same valley, so a, b, c (and the fit quality) can differ in those
+    cases; where they do, this one has the lower (or equal) error.
     """
-    How statistics depend on distributional outliers.
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            res = least_squares(lambda p: p[0] * np.exp(p[1] * x) + p[2] - y, start, method='lm',
+                                ftol=1e-10, xtol=1e-10, gtol=1e-10, max_nfev=5000)
+            sse = np.sum(res.fun ** 2)
+            sst = np.sum((y - np.mean(y)) ** 2)
+            return (*res.x, 1 - sse / sst, np.sqrt(sse / (len(y) - 3)))
+    except (RuntimeError, ValueError, TypeError, FloatingPointError, np.linalg.LinAlgError) as exc:
+        logger.warning("DN_OutlierInclude: error fitting an exponential: %s", exc)
+        return (np.nan,) * 5
 
-    Measures how various statistics of a time series change as more and more outliers 
-    are included in the calculation, according to a specified rule for defining outliers.
 
-    At each threshold, the mean, standard error, proportion of included points, median, 
-    and standard deviation are calculated. Outputs summarize how these statistics change 
-    as more extreme points are included.
+def _fit_lin_gof(x: np.ndarray, y: np.ndarray) -> tuple:
+    """Least-squares fit of a*x + b, as hctsa's fit(x, y, fittype('a*x+b')).
+    Returns (a, b, R^2, RMSE), all NaN if the fit fails."""
+    try:
+        if len(x) < 2:
+            raise ValueError("too few points")
+        design = np.column_stack((x, np.ones(len(x))))
+        (a, b), *_ = np.linalg.lstsq(design, y, rcond=None)
+        sse = np.sum((y - (a * x + b)) ** 2)
+        sst = np.sum((y - np.mean(y)) ** 2)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return a, b, 1 - sse / sst, np.sqrt(sse / (len(y) - 2))
+    except (ValueError, np.linalg.LinAlgError, FloatingPointError) as exc:
+        logger.warning("DN_OutlierInclude: error fitting a linear trend: %s", exc)
+        return (np.nan,) * 4
+
+
+def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
+                    fixed_thresh: Union[float, None] = None) -> dict:
+    """
+    How the timing and spacing of extreme values change as the threshold rises.
+
+    Raises a threshold th from 0 to the maximum value of the series, in increments of
+    ``inc``, and at each threshold takes the "events": the points at or beyond it (for
+    'abs', values with abs(y) >= th; for 'pos', y >= th; for 'neg', y <= -th). The
+    threshold is applied to y itself, so the series should be z-scored. At each
+    threshold it records:
+
+    1. the mean gap (in samples) between successive events, and its standard error
+       (std of the gaps / sqrt of their number),
+    2. the percentage of points that are events (the number of gaps over the number of
+       candidate points, times 100),
+    3. the median and mean time of the events, rescaled so that the start of the series
+       is -1, the middle is 0 and the end is 1, and std(times)/sqrt(their number)
+       (in samples).
+
+    The sweep stops when events are 2% or fewer of the points. The outputs measure how
+    these curves change with th, using exponential [f(x) = a*exp(b*x) + c] and linear
+    [f(x) = a*x + b] fits, and simple statistics across thresholds. If a fit fails, its
+    outputs are NaN.
+
+    If ``fixed_thresh`` is given, the sweep and fits are skipped, and the statistics in
+    (1)-(3) are returned for that one threshold.
 
     Parameters
     ----------
     y : array-like
-        The input time series.
+        The input time series (ideally z-scored).
     threshold_how : {'abs', 'pos', 'neg'}, optional
         The method for determining outliers:
 
-            - 'abs': Outliers are furthest from the mean (default).
-            - 'pos': Outliers are the greatest positive deviations from the mean.
-            - 'neg': Outliers are the greatest negative deviations from the mean.
+            - 'abs': values furthest from zero in either direction (default).
+            - 'pos': the greatest positive values.
+            - 'neg': the greatest negative values.
 
     inc : float, optional
-        The increment to move through thresholds (as a fraction of the standard deviation).
-        Default is 0.01.
+        The increment to move through (in units of the standard deviation if the
+        time series is z-scored). Default is 0.01. Unused when ``fixed_thresh`` is given.
+    fixed_thresh : float, optional
+        A single threshold (in the units of y, e.g., 2 for two standard deviations of a
+        z-scored series). If given, the sweep is skipped.
 
     Returns
     -------
     dict
-        Dictionary containing statistics describing how the statistics change as more outliers are included.
+        From the sweep (``fixed_thresh`` not given):
+
+        - ``mfexpa``, ``mfexpb``, ``mfexpc``, ``mfexpr2``, ``mfexprmse``: the parameters
+          a, b, c, R^2 and root-mean-square error of the exponential fit to the mean
+          gap vs. th;
+        - ``nfexpa``, ``nfexpb``, ``nfexpc``, ``nfexpr2``, ``nfexprmse``: the same for an
+          exponential fit to the percentage of points that are events vs. th;
+        - ``nfla``, ``nflb``, ``nflr2``, ``nflrmse``: slope a, intercept b, R^2 and
+          RMSE of a linear fit to the percentage of points that are events vs. th;
+        - ``mdtm``, ``mdtmd``, ``mdtstd``: mean, median and standard deviation of the
+          mean gap across thresholds;
+        - ``mdrm``, ``mdrmd``, ``mdrstd``: mean, median and standard deviation, across
+          thresholds, of the median time of the events (-1 to 1);
+        - ``mrm``, ``mrmd``, ``mrstd``: the same for the mean time of the events;
+        - ``xcmerr1``, ``xcmerrn1``: cross-correlation between the mean gap and its
+          standard error across thresholds, at lags +1 and -1;
+        - ``stdrfexpa``, ``stdrfexpb``, ``stdrfexpc``, ``stdrfexpr2``, ``stdrfexprmse``:
+          the parameters and fit quality of an exponential fit to
+          std(times)/sqrt(their number) vs. th;
+        - ``stdrfla``, ``stdrflb``, ``stdrflr2``, ``stdrflrmse``: the same for a linear fit.
+
+        From a single threshold (``fixed_thresh`` given; all NaN except ``propIncluded``
+        if events are 2% or fewer of the points): ``meanDt``, ``seDt`` (the mean gap
+        between events and its standard error), ``propIncluded`` (the percentage of
+        points that are events), ``medianRelTime``, ``meanRelTime`` (the median and mean
+        time of the events, -1 to 1) and ``stdRelTime`` (std(times)/sqrt(their number),
+        in samples).
+
+        A constant time series returns NaN.
     """
     y = np.asarray(y)
-    
+
     # Handle constant time series
     if np.all(y[0] == y):
+        logger.warning("The time series is a constant!")
         return np.nan
-    
+
     N = len(y)
-    results = {}
-    
+    if threshold_how not in ('abs', 'pos', 'neg'):
+        raise ValueError(f"Invalid thresholdHow: '{threshold_how}'. Must be 'abs', 'pos', or 'neg'.")
+
+    def _events(idx, th):
+        """Indices (of those in idx) of events at threshold th."""
+        if threshold_how == 'abs':
+            return idx[np.abs(y[idx]) >= th]
+        if threshold_how == 'pos':
+            return idx[y[idx] >= th]
+        return idx[y[idx] <= -th]
+
+    total_points = {'abs': N, 'pos': np.sum(y >= 0), 'neg': np.sum(y <= 0)}[threshold_how]
+    trim_threshold = 2  # percent
+
+    # ----------------------------
+    # Single threshold: skip the sweep and curve fits
+    # ----------------------------
+    if fixed_thresh is not None:
+        r = _events(np.arange(N), fixed_thresh)
+        time_diffs = np.diff(r)
+        mean_dt = np.mean(time_diffs) if len(time_diffs) > 0 else np.nan
+        prop_included = len(time_diffs) / total_points * 100
+        # Same "too few events to say anything meaningful" bar as the sweep
+        if np.isnan(mean_dt) or prop_included <= trim_threshold:
+            return {'meanDt': np.nan, 'seDt': np.nan, 'propIncluded': prop_included,
+                    'medianRelTime': np.nan, 'meanRelTime': np.nan, 'stdRelTime': np.nan}
+        r1 = r + 1  # MATLAB's 1-based event times
+        return {
+            'meanDt': mean_dt,
+            'seDt': _matlab_std(time_diffs) / np.sqrt(len(time_diffs)),
+            'propIncluded': prop_included,
+            'medianRelTime': np.median(r1) / (N / 2) - 1,
+            'meanRelTime': np.mean(r1) / (N / 2) - 1,
+            'stdRelTime': _matlab_std(r) / np.sqrt(len(r)),
+        }
+
     # Initialize thresholds based on method
     if threshold_how == 'abs':
         thresholds = np.arange(0, max(abs(y)), inc)
-        total_points = N
     elif threshold_how == 'pos':
         thresholds = np.arange(0, max(y), inc)
-        total_points = np.sum(y >= 0)
-    elif threshold_how == 'neg':
-        thresholds = np.arange(0, max(-y), inc)
-        total_points = np.sum(y <= 0)
     else:
-        raise ValueError(f"Invalid thresholdHow: '{threshold_how}'. Must be 'abs', 'pos', or 'neg'.")
-    
+        thresholds = np.arange(0, max(-y), inc)
+
     if len(thresholds) == 0:
         logger.warning("Error setting increments through the time-series values")
         return np.nan
-    
-    # Initialize statistics matrix
+
+    # Calculate statistics of over-threshold events, looping over thresholds. Stop as
+    # soon as too few events remain to be useful: raising the threshold can only shrink
+    # the set of events, so the criteria keep failing for all higher thresholds. This
+    # also lets each threshold search only the previous one's events (in time order).
     # Columns: [mean_diff, std_err, percentage, median_pos, mean_pos, std_pos]
-    statistics = np.zeros((len(thresholds), 6))
-    
-    # Calculate statistics for each threshold
-    for i, threshold in enumerate(thresholds):
-        # Find indices exceeding threshold
-        if threshold_how == 'abs':
-            over_threshold_idx = np.argwhere(abs(y) >= threshold).flatten()
-        elif threshold_how == 'pos':
-            over_threshold_idx = np.argwhere(y >= threshold).flatten()
-        elif threshold_how == 'neg':
-            over_threshold_idx = np.argwhere(y <= -threshold).flatten()
-            
-        # Calculate differences between consecutive over-threshold events
-        time_diffs = np.diff(over_threshold_idx)
-        
-        # Store statistics
-        statistics[i, 0] = np.mean(time_diffs)  # Mean time between events
-        statistics[i, 1] = np.std(time_diffs, ddof=1) / np.sqrt(len(time_diffs))  # Standard error
-        statistics[i, 2] = len(time_diffs) / total_points * 100  # Percentage of events
-        # event times use 1-based indices, as in MATLAB
-        statistics[i, 3] = (np.median(over_threshold_idx + 1) / (N / 2)) - 1  # Median position deviation
-        statistics[i, 4] = np.mean(over_threshold_idx + 1) / (N / 2) - 1  # Mean position deviation
-        statistics[i, 5] = np.std(over_threshold_idx, ddof=1) / np.sqrt(len(over_threshold_idx))  # Position std error
-    
-    # Trim data where statistics become invalid
-    first_nan_idx = np.argmax(np.isnan(statistics[:, 0])) if np.any(np.isnan(statistics[:, 0])) else None
-    if first_nan_idx and first_nan_idx > 0:
-        statistics = statistics[:first_nan_idx, :]
-        thresholds = thresholds[:first_nan_idx]
-    
-    # Further trim based on percentage threshold
-    trim_threshold = 2 # percent
-    valid_indices = np.argwhere(statistics[:, 2] > trim_threshold).flatten()
-    if len(valid_indices) > 0:
-        last_valid_idx = valid_indices[-1]
-        statistics = statistics[:last_valid_idx + 1, :]
-        thresholds = thresholds[:last_valid_idx + 1]
-    
+    rows = []
+    r = np.arange(N)
+    for threshold in thresholds:
+        r = _events(r, threshold)
+        # Intervals between consecutive over-threshold events
+        time_diffs = np.diff(r)
+        if len(time_diffs) == 0:
+            break
+        prop_included = len(time_diffs) / total_points * 100  # percentage of events
+        if prop_included <= trim_threshold:
+            break
+        r1 = r + 1  # event times use 1-based indices, as in MATLAB
+        rows.append([
+            np.mean(time_diffs),  # mean time between events
+            _matlab_std(time_diffs) / np.sqrt(len(time_diffs)),  # standard error
+            prop_included,
+            np.median(r1) / (N / 2) - 1,  # median position (-1 to 1)
+            np.mean(r1) / (N / 2) - 1,  # mean position (-1 to 1)
+            _matlab_std(r) / np.sqrt(len(r)),  # position std error
+        ])
+    statistics = np.array(rows).reshape(-1, 6)
+    thresholds = thresholds[:len(statistics)]
+
+    results = {}
+
+    # Fit an exponential to the mean inter-event interval as a function of the threshold
+    mfexp = _fit_exp_gof(thresholds, statistics[:, 0], [0.1, 2.5, 1])
+    results.update(dict(zip(['mfexpa', 'mfexpb', 'mfexpc', 'mfexpr2', 'mfexprmse'], mfexp)))
+
+    # Fit an exponential, then a linear trend, to the percentage of points included
+    nfexp = _fit_exp_gof(thresholds, statistics[:, 2], [120, -1, -16])
+    results.update(dict(zip(['nfexpa', 'nfexpb', 'nfexpc', 'nfexpr2', 'nfexprmse'], nfexp)))
+    nfl = _fit_lin_gof(thresholds, statistics[:, 2])
+    results.update(dict(zip(['nfla', 'nflb', 'nflr2', 'nflrmse'], nfl)))
+
     # Basic statistics on mean times
     results.update({
         'mdtm': np.mean(statistics[:, 0]),
         'mdtmd': np.median(statistics[:, 0]),
-        'mdtstd': np.std(statistics[:, 0], ddof=1)
+        'mdtstd': _matlab_std(statistics[:, 0])
     })
-    
+
     # Statistics on median position deviations
     results.update({
         'mdrm': np.mean(statistics[:, 3]),
         'mdrmd': np.median(statistics[:, 3]),
-        'mdrstd': np.std(statistics[:, 3], ddof=1)
+        'mdrstd': _matlab_std(statistics[:, 3])
     })
-    
+
     # Statistics on mean position deviations
     results.update({
         'mrm': np.mean(statistics[:, 4]),
         'mrmd': np.median(statistics[:, 4]),
-        'mrstd': np.std(statistics[:, 4], ddof=1)
+        'mrstd': _matlab_std(statistics[:, 4])
     })
-    
+
     # Cross-correlation between mean and error
     _, cross_corr = x_corr(statistics[:, 0], statistics[:, 1], max_lags=1)
     results.update({
         'xcmerr1': cross_corr[-1],
         'xcmerrn1': cross_corr[0]
     })
-    
+
+    # Fit an exponential, then a linear trend, to the std of event times
+    stdrfexp = _fit_exp_gof(thresholds, statistics[:, 5], [5, 1, 15])
+    results.update(dict(zip(['stdrfexpa', 'stdrfexpb', 'stdrfexpc', 'stdrfexpr2', 'stdrfexprmse'], stdrfexp)))
+    stdrfl = _fit_lin_gof(thresholds, statistics[:, 5])
+    results.update(dict(zip(['stdrfla', 'stdrflb', 'stdrflr2', 'stdrflrmse'], stdrfl)))
+
     return results
 
 def outlier_test(y: ArrayLike, p: float = 2,
