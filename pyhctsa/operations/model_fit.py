@@ -201,8 +201,8 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     forecast_meth : str, optional
         The prediction method:
 
-        - 'mean': local mean prediction
-        - 'median': local median prediction
+        - 'mean': local mean prediction, with window lengths 1, 2, ..., 10
+        - 'median': local median prediction, with window lengths 1, 3, ..., 19
 
         Default is ``'mean'``.
         
@@ -221,7 +221,7 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     if forecast_meth == 'mean':
         train_length_range = np.arange(1, 11)
     elif forecast_meth == 'median':
-        train_length_range = np.arange(1, 19, 2)
+        train_length_range = np.arange(1, 20, 2)  # 1:2:19, as in hctsa
     else:
         raise ValueError(f"Unknown prediction method: {forecast_meth}")
     stats_st = np.zeros((len(train_length_range), 5))
