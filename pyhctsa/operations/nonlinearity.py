@@ -22,10 +22,24 @@ from ..operations.correlation import first_crossing, first_min, autocorr
 from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robustfit
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
 from ..toolboxes.Tisean_3_0_1.tisean import _e, _round_significant
+from ..robust import bf_hist_edges, bf_random
 from ..utils import (_linspace, _ml_randperm, _ml_rng, _round_half_away, bin_picker, get_tau,
                      matlab_quantile, theiler_window, time_delay_embed)
 
 logger = logging.getLogger('pyhctsa')
+
+
+def _bf_random_seed(random_seed: Union[int, float, str, None]) -> int:
+    """The integer seed for :func:`~pyhctsa.robust.bf_random` that a ``randomSeed`` input stands
+    for (hctsa's ``BF_RandomSeed``): ``'default'`` is 0, a number is itself (rounded, made
+    non-negative, below 4e9), and ``None`` or ``'none'`` a seed drawn from NumPy's global stream."""
+    if random_seed is None or (isinstance(random_seed, str) and random_seed == 'none'):
+        return int(np.random.randint(0, 4_000_000_000))
+    if isinstance(random_seed, str):
+        if random_seed != 'default':
+            raise ValueError(f"Not sure how to interpret the random seed '{random_seed}'")
+        return 0
+    return int(np.mod(_round_half_away(abs(float(random_seed))), 4e9))
 
 # ------------------------------------------------------------------------------
 # Embedding parameters (hctsa's NL_FNN and BF_Embed), shared by the operations below
@@ -720,8 +734,10 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
         for value-neighbors, i.e., the Theiler window: a number of samples, or
         ``['ac', k]`` for ``k`` times the autocorrelation time (``['ac1e', k]`` is
         also accepted). Default is ``['ac', 1]``.
-    random_seed : int or None, optional
-        Seed for the Mersenne Twister used to draw the reference points.
+    random_seed : int, str or None, optional
+        Seed of the random reference points (see :func:`_bf_random_seed`; ``'default'`` is 0).
+        They come from the portable generator :func:`~pyhctsa.robust.bf_random`, so the
+        results are the same as hctsa's for the same seed. Default is 0.
 
     Returns
     -------
@@ -765,7 +781,11 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
     # index[r] is the position in the time series of the (r+1)th smallest value
     index = np.argsort(y[:length], kind='stable')
 
-    rng = np.random.RandomState() if random_seed is None else _ml_rng(random_seed)
+    # Random numbers for the reference points: the next unused number of one reproducible stream
+    # (more of the same stream is generated if the numbers run out)
+    seed = _bf_random_seed(random_seed)
+    rand_stream = bf_random(512, seed)
+    num_used = 0
 
     err = np.zeros(max_delay + 1)
     for _ in range(iterations):
@@ -773,7 +793,10 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
         # that clears the Theiler window (as hctsa, give up with NaN after
         # max_attempts draws, which is data dependent).
         for _ in range(max_attempts):
-            ref = int(np.ceil(rng.random_sample()*length))  # a random value-rank (from one)
+            if num_used >= len(rand_stream):
+                rand_stream = bf_random(4 * len(rand_stream), seed)  # same stream, longer
+            ref = int(np.ceil(rand_stream[num_used]*length))  # a random value-rank (from one)
+            num_used += 1
             actual = index[ref-1]
             below, above = index[:ref-1], index[ref:]
             pre_candidates = below[np.abs(below - actual) > past]
