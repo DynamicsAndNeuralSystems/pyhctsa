@@ -103,7 +103,9 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
         # biased motion: [p_up, p_down]
         pup, pdown = walker_params
         for i in range(1, N):
-            if y[i] > y[i-1]:  # time series increases
+            # direction of the change just observed, y[i-1] vs y[i-2];
+            # p_down at the first step (no previous change)
+            if i >= 2 and y[i-1] > y[i-2]:
                 w[i] = w[i-1] + pup * (y[i-1] - w[i-1])
             else:
                 w[i] = w[i-1] + pdown * (y[i-1] - w[i-1])
