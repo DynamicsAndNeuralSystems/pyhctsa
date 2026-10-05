@@ -127,42 +127,39 @@ def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
     N = len(x)
     out = np.zeros(shape=(N, num_surrs))
     if surr_method == 'RP':
-        # random phase surrogates
-        n2 = (N // 2) if (N % 2 == 0) else ((N - 1) // 2)  # floor(N/2)
-        fft_len = 2 * n2  
+        # random phase surrogates: the magnitude spectrum of x (at full length N)
+        # is kept, and every phase is randomized except the DC (and, for even N,
+        # Nyquist) phase, which is kept (necessarily 0 or pi for a real signal).
+        # Randomized phases are negated onto the conjugate-symmetric half so the
+        # result is real for any N.
+        n_free = (N // 2 - 1) if (N % 2 == 0) else ((N - 1) // 2)
 
         # RNG
         rng = np.random.RandomState(random_seed)
 
         # FFT
-        z = np.fft.fft(x, n=fft_len)
+        z = np.fft.fft(x)
         z_mag = np.abs(z)
         z_phase = np.angle(z)
 
         for s in range(num_surrs):
-            if n2 - 1 > 0:
-                rand_phase = rng.uniform(0.0, 2.0 * np.pi, size=n2 - 1)
+            rand_phase = rng.uniform(0.0, 2.0 * np.pi, size=max(n_free, 0))
+            if N % 2 == 0:
+                new_phase = np.concatenate((
+                    z_phase[0:1],
+                    rand_phase,
+                    z_phase[N // 2:N // 2 + 1],
+                    -rand_phase[::-1]
+                ))
             else:
-                rand_phase = np.empty(0)
+                new_phase = np.concatenate((
+                    z_phase[0:1],
+                    rand_phase,
+                    -rand_phase[::-1]
+                ))
 
-            new_phase = np.concatenate((
-                np.array([0.0]),
-                rand_phase,
-                np.array([z_phase[n2]]),     
-                -rand_phase[::-1]
-            ))
-
-            # Symmetric magnitudes: [zMag(1:n2+1), flipud(zMag(2:n2))]
-            mag_sym = np.concatenate((
-                z_mag[0:n2 + 1],
-                z_mag[1:n2][::-1]
-            ))
-
-            # Apply randomized phases, keep magnitudes
-            z_new = mag_sym * np.exp(1j * new_phase)
-
-            # Back to time domain; ifft length N
-            x_new = np.fft.ifft(z_new, n=N).real
+            # Apply randomized phases, keep magnitudes; back to the time domain
+            x_new = np.fft.ifft(z_mag * np.exp(1j * new_phase)).real
             out[:, s] = x_new
 
     elif surr_method == "AAFT":
