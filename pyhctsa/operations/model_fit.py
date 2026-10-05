@@ -20,7 +20,7 @@ from ..operations.physics import _ksdensity
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..toolboxes.matlab.optimizers import minimize
-from ..utils import _linspace, _ml_randperm, _ml_rng, get_tau, z_score
+from ..utils import _linspace, _ml_randperm, _ml_rng, get_tau, matlab_quantile, z_score
 
 def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed: int = 0) -> dict:
     """
@@ -139,6 +139,28 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3, random_seed
 
     return out
 
+def _ar_fb(seg: np.ndarray, order: int) -> tuple:
+    """
+    AR model by forward-backward least squares (MATLAB's default ``ar`` estimator).
+
+    Minimizes the sum of the squared forward and backward prediction errors over the
+    segment (no windowing, no mean removal). Returns the coefficients of the polynomial
+    ``1 + a_1 z^-1 + ... + a_p z^-p`` (the negative of the usual AR coefficients) and
+    Akaike's final prediction error, ``FPE = (SSE/N) (1 + p/N) / (1 - p/N)``, where
+    ``SSE`` is the sum of squared forward residuals.
+    """
+    n = len(seg)
+    p = order
+    fwd = sliding_window_view(seg, p + 1)            # rows: y[t-p], ..., y[t]
+    lags_f, tgt_f = fwd[:, p - 1::-1], fwd[:, p]     # y[t-1], ..., y[t-p]; y[t]
+    lags_b, tgt_b = fwd[:, 1:], fwd[:, 0]    # y[t+1], ..., y[t+p]; y[t]
+    X = -np.vstack([lags_f, lags_b])
+    b = np.concatenate([tgt_f, tgt_b])
+    a = np.linalg.lstsq(X, b, rcond=None)[0]
+    sse_f = np.sum((tgt_f + lags_f @ a) ** 2)
+    fpe = sse_f / n * (1 + p / n) / (1 - p / n)
+    return a, fpe
+
 def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how: str = 'uniform',
                     sample_p: Union[list, tuple] = [20, 0.1]) -> dict:
     """
@@ -155,10 +177,24 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
     model : str, optional
         The model to fit in each segment of the time series:
 
-        - 'ar': fits an AR model of a specified order.
-            Outputs are how the fitted AR parameters vary across the different 
-            segments of time series.
-        - 'arma': Not yet implemented.
+        - 'arsbc': fits an AR model of the best order (1 to 10) by the Schwarz
+            Bayesian criterion (ARFIT algorithm, zero mean). Outputs are how the
+            optimal order and the SBC vary across segments (``orders_*``, ``sbcs_*``).
+            The ``order`` input is not used.
+        - 'ar': fits an AR model of a specified order by forward-backward least
+            squares (MATLAB's default ``ar`` estimator). Outputs are how Akaike's
+            final prediction error (``fpe_*``) and the fitted AR parameters
+            (``a_k_*``, as in the polynomial 1 + a_1 z^-1 + ..., the negative of the
+            usual coefficients) vary across segments.
+        - 'arcrosspred': splits the series into ``sample_p`` non-overlapping segments
+            (requires ``subset_how='uniform'`` and a scalar-like ``sample_p``, a segment
+            count), fits an AR model of the given order to each, and uses every
+            segment's model to predict, one step ahead, every segment (including itself).
+            The result is a matrix of cross-prediction root-mean-square errors (row:
+            predicting model, column: predicted segment), of which the spread and
+            off-diagonal statistics are returned. NaN if any segment is shorter than
+            ``5 * (order + 1)`` or an AR fit fails.
+        - 'arma': Not implemented (deregistered in hctsa).
         - 'ss': Not yet implemented.
 
         Default is ``'ar'``.
@@ -173,21 +209,35 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
 
         Default is ``'uniform'``.
          
-    sample_p : list or tuple, optional
+    sample_p : list, tuple or int, optional
         A two-vector specifying how many segments to take and of what length.
         Of the form [n_samples, length], where length can be a proportion of the time-series length.
         For example, [20, 0.1] takes 20 segments of 10% the time-series length.
+        For ``model='arcrosspred'``, an integer (or length-1 list): the number of
+        non-overlapping segments to partition the series into.
         Default is [20, 0.1].
 
     Returns
     -------
     dict
         Dictionary of statistics on the spread and mean of fitted model parameters 
-        and goodness of fit across segments.
+        and goodness of fit across segments. For ``'arcrosspred'``: ``std``, ``range``,
+        ``iqr`` (over all entries of the cross-prediction error matrix), ``stdoffdiag``,
+        ``rangeoffdiag``, ``iqroffdiag`` (over the positive off-diagonal entries),
+        ``stdmean``, ``rangemean``, ``stdmedian``, ``rangemedian`` (across predicted
+        segments, of the mean and of the median error), ``rangerange``, ``stdrange``,
+        ``rangestd``, ``stdstd`` (across predicted segments, of the range or standard
+        deviation of the errors) and ``mineig`` (smallest real part of the eigenvalues
+        of the matrix).
     """
     y = np.asarray(y)
     N = len(y)
-    num_pred = sample_p[0]
+    if np.ndim(sample_p) == 0:
+        sample_p = [sample_p]
+    num_pred = int(sample_p[0])
+    if model == 'arcrosspred' and (subset_how != 'uniform' or len(sample_p) != 1):
+        raise ValueError("'arcrosspred' requires subset_how = 'uniform' and a scalar sample_p "
+                         "(a non-overlapping segment count)")
     if subset_how == 'uniform':
         if len(sample_p) == 1:  # size will depend on number of unique subsegments
             # num_pred+1 boundaries = num_pred portions
@@ -209,22 +259,100 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
         raise NotImplementedError("Subset method not yet implemented.")
     else:
         raise ValueError(f"Unknown subset method: {subset_how}")
-    # Fit the model to each training set
-    if model == 'ar':
-        avals = np.zeros((num_pred,order))
+    # Fit the model to each training set (r is 1-based and inclusive, as in MATLAB)
+    out = {}
+    if model == 'arsbc':
+        # AR model of the best order (1-10) by SBC, zero mean
+        orders = np.zeros(num_pred)
+        sbcs = np.zeros(num_pred)
         for i in range(num_pred):
-            dat = y[r[i, 0] - 1:r[i, 1]]  # r is 1-based and inclusive, as in MATLAB
-            m = AutoReg(dat, lags=order, trend='n')
-            results = m.fit()
-            avals[i, :] = -results.params
-        #% Statistics on fitted AR parameters
-        out = {}
+            try:
+                _, A_est, _, sbc, _, _ = _arfit(y[r[i, 0] - 1:r[i, 1]], 1, 10, 'sbc', zero=True)
+            except ValueError as err:
+                logger.warning(f'Time series segment is too short for ARFIT: {err}')
+                return np.nan
+            orders[i] = len(A_est)
+            sbcs[i] = np.min(sbc)
+        vals, counts = np.unique(orders, return_counts=True)
+        out['orders_mode'] = vals[np.argmax(counts)]  # smallest value among ties, as MATLAB mode
+        out['orders_mean'] = np.mean(orders)
+        out['orders_std'] = np.std(orders, ddof=1)
+        out['orders_max'] = np.max(orders)
+        out['orders_min'] = np.min(orders)
+        out['orders_range'] = np.ptp(orders)
+        out['sbcs_mean'] = np.mean(sbcs)
+        out['sbcs_std'] = np.std(sbcs, ddof=1)
+        out['sbcs_range'] = np.ptp(sbcs)
+        out['sbcs_min'] = np.min(sbcs)
+        out['sbcs_max'] = np.max(sbcs)
+    elif model == 'ar':
+        # AR model of the specified order (forward-backward least squares)
+        fpes = np.zeros(num_pred)
+        avals = np.zeros((num_pred, order))
+        for i in range(num_pred):
+            avals[i, :], fpes[i] = _ar_fb(y[r[i, 0] - 1:r[i, 1]], order)
+        # statistics on the FPE
+        out['fpe_std'] = np.std(fpes, ddof=1)
+        out['fpe_mean'] = np.mean(fpes)
+        out['fpe_max'] = np.max(fpes)
+        out['fpe_min'] = np.min(fpes)
+        out['fpe_range'] = np.ptp(fpes)
+        # statistics on the fitted AR parameters, as in the polynomial 1 + a_1 z^-1 + ...
         for i in range(order):
             out[f'a_{i+1}_std'] = np.std(avals[:, i], ddof=1)
             out[f'a_{i+1}_mean'] = np.mean(avals[:, i])
             out[f'a_{i+1}_max'] = np.max(avals[:, i])
             out[f'a_{i+1}_min'] = np.min(avals[:, i])
-    elif model in ['arsbc', 'ss', 'arma']:
+    elif model == 'arcrosspred':
+        # AR model for each of num_pred non-overlapping segments; every model then
+        # predicts, one step ahead, every segment (including its own)
+        seg_len = r[:, 1] - r[:, 0] + 1
+        if np.any(seg_len < 5 * (order + 1)):
+            logger.warning(f'Segments too short to reliably cross-predict with an AR({order}) model')
+            return np.nan
+        segs = [y[r[i, 0] - 1:r[i, 1]] for i in range(num_pred)]
+        try:
+            coefs = [_ar_fb(seg, order)[0] for seg in segs]
+        except np.linalg.LinAlgError:
+            return np.nan
+        xperr = np.zeros((num_pred, num_pred))
+        for j, seg in enumerate(segs):
+            # lags y[t-1], ..., y[t-p] for t = p, ..., n-1
+            lags = sliding_window_view(seg, order + 1)[:, order - 1::-1]
+            target = seg[order:]
+            for i in range(num_pred):
+                # MATLAB's predict estimates the initial conditions, which makes the
+                # first `order` one-step errors zero: only t >= order contribute
+                e = -lags @ coefs[i] - target
+                xperr[i, j] = np.sqrt(np.sum(e ** 2) / len(seg))
+        if not np.all(np.isfinite(xperr)):
+            return np.nan
+        iqr = lambda v: np.diff(matlab_quantile(v, [0.25, 0.75]))[0]
+        out['std'] = np.std(xperr.ravel(), ddof=1)
+        out['range'] = np.ptp(xperr)
+        out['iqr'] = iqr(xperr.ravel())
+        offdiag = np.concatenate([xperr[np.tril_indices(num_pred, -1)],
+                                  xperr[np.triu_indices(num_pred, 1)]])
+        offdiag = offdiag[offdiag > 0]
+        if offdiag.size == 0:
+            out['iqroffdiag'] = out['stdoffdiag'] = out['rangeoffdiag'] = np.nan
+        else:
+            out['iqroffdiag'] = iqr(offdiag)
+            out['stdoffdiag'] = np.std(offdiag, ddof=1) if offdiag.size > 1 else 0.0
+            out['rangeoffdiag'] = np.ptp(offdiag)
+        # how differently each segment's model behaves as a predictor vs as a target
+        col_mean, col_med = np.mean(xperr, axis=0), np.median(xperr, axis=0)
+        col_range, col_std = np.ptp(xperr, axis=0), np.std(xperr, axis=0, ddof=1)
+        out['stdmean'] = np.std(col_mean, ddof=1)
+        out['rangemean'] = np.ptp(col_mean)
+        out['stdmedian'] = np.std(col_med, ddof=1)
+        out['rangemedian'] = np.ptp(col_med)
+        out['rangerange'] = np.ptp(col_range)
+        out['stdrange'] = np.std(col_range, ddof=1)
+        out['rangestd'] = np.ptp(col_std)
+        out['stdstd'] = np.std(col_std, ddof=1)
+        out['mineig'] = np.min(np.linalg.eigvals(xperr).real)
+    elif model in ['ss', 'arma']:
         raise NotImplementedError("Model not yet implemented.")
     else:
         raise ValueError(f"Unknown model: {model}")
