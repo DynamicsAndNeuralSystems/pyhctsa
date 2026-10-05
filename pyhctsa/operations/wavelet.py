@@ -486,10 +486,9 @@ def wl_coeffs(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 3) -> 
     dict
         Dictionary containing statistics of the wavelet coefficients, including:
 
-        - 'mean_coeff': Mean of sorted absolute detail coefficients.
-        - 'max_coeff': Maximum of sorted absolute detail coefficients.
-        - 'med_coeff': Median of sorted absolute detail coefficients.
-        - 'wb75m', 'wb50m', 'wb25m', 'wb10m', 'wb1m': Decay rate statistics (fraction of coefficients below a threshold of the maximum).
+        - 'wb99m', 'wb90m', 'wb75m', 'wb50m', 'wb25m', 'wb10m', 'wb1m': Decay rate statistics
+          (the position, as a proportion of the series length, at which the sorted
+          absolute detail coefficients first drop below the given proportion of the maximum).
     """
     y = np.asarray(y)
     N = len(y)
@@ -509,10 +508,6 @@ def wl_coeffs(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 3) -> 
 
     #%% Return statistics
     out = {}
-    out['mean_coeff'] = np.mean(det_s)
-    out['max_coeff'] = np.max(det_s)
-    out['med_coeff'] = np.median(det_s)
-
     #% Decay rate stats ('where below _ maximum' = 'wb_m')
     out['wb99m'] = _find_my_threshold(0.99, det_s, N)
     out['wb90m'] = _find_my_threshold(0.90, det_s, N)
