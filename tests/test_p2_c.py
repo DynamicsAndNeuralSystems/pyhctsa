@@ -140,3 +140,15 @@ def test_loop_local_simple_outputs():
     for kept in ('sws_fexp_b', 'sws_fexp_r2', 'sws_fexp_adjr2', 'sws_fexp_rmse'):
         assert kept in out and np.isfinite(out[kept])
     assert 0 <= out['sws_fexp_r2'] <= 1
+
+
+def test_gp_matern_noise_position_and_floor():
+    # a degree-parameterized component has two hyperparameters: covNoise follows at index 2
+    comps = [('covMaterniso', 3), ('covNoise', None)]
+    assert mf._gp_noise_pos(comps) == [2]
+    t = np.arange(1, 61, dtype=float)
+    yt = np.sin(t / 8)
+    init = mf._gp_init_hyp(comps, t)
+    assert init[2] == np.log(0.1) and init[0] == np.log(1.0) and init[1] == 0
+    out = mf.gp_hyperparameters(SERIES['s0'], 'covMaterniso3_covNoise', 1, 200, 'first')
+    assert out['logh3'] >= np.log(0.01 * np.std(SERIES['s0'][:200], ddof=1)) - 1e-9
