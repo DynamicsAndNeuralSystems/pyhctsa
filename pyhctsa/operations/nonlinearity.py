@@ -2290,6 +2290,225 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
     return out
 
 
+from scipy.stats import norm as _norm
+
+
+def _dvv_draws(rng: np.random.RandomState, n: int, n_dv: int, nsub: int, num_surr: int) -> tuple:
+    # The random draws of NL_DVV, in the order hctsa makes them: the reference delay vectors
+    # (randsample without replacement) for the data, one random permutation per surrogate, then
+    # the reference delay vectors for each surrogate. Returns 0-based (refs, perms).
+    refs = [_ml_randperm(n_dv, rng)[:nsub] - 1]
+    perms = [_ml_randperm(n, rng) - 1 for _ in range(num_surr)]
+    refs += [_ml_randperm(n_dv, rng)[:nsub] - 1 for _ in range(num_surr)]
+    return refs, perms
+
+
+def _dvv_curve(x: np.ndarray, m: int, nsub: int, nd: float, ntv: int, tau: int,
+               ref: np.ndarray) -> np.ndarray:
+    # Delay vector variance (Gautama, Mandic & Van Hulle 2004; the DVV toolbox's dvv.m as modified
+    # in hctsa): the target variance (of the value following each delay vector) of the sets of
+    # delay vectors within distance rd of each of the nsub reference vectors ``ref`` (indices of
+    # delay vectors), averaged over references and normalized by the variance of x, at ntv
+    # values of rd spanning the mean distance between delay vectors +/- nd standard deviations.
+    # Returns the ntv x 2 array of the standardized distance and the target variance.
+    n = x.size
+    n_dv = n - m * tau  # number of delay vectors (each with a target)
+    dvs = x[np.arange(n_dv)[:, None] + tau * np.arange(m)[None, :]]
+    d = np.sqrt(np.sum((dvs[:, None, :] - dvs[ref][None, :, :]) ** 2, axis=2))  # n_dv x nsub
+
+    # Mean and standard deviation of the distances over all (reference, vector) pairs except
+    # each reference with itself
+    count = nsub * n_dv - nsub
+    avg = np.sum(d) / count
+    sd = np.sqrt((np.sum((d - avg) ** 2) - nsub * avg ** 2) / (count - 1))
+    rd = avg - nd * sd + (2 * nd * sd * np.arange(ntv)) / (ntv - 1)
+
+    # For each reference, the variance of the targets of the delay vectors within each rd (from
+    # cumulative sums of the targets sorted by distance); only sets of at least 30 count
+    tot = np.zeros(ntv)
+    num = np.zeros(ntv)
+    for k in range(nsub):
+        order = np.argsort(d[:, k], kind='stable')
+        ds = d[order, k]
+        xs = x[order + m * tau]
+        s1 = np.cumsum(xs)
+        s2 = np.cumsum(xs ** 2)
+        c = np.searchsorted(ds, rd, side='right')  # number of vectors within each rd
+        t1 = np.where(c > 0, s1[np.maximum(c, 1) - 1], 0.0)
+        t2 = np.where(c > 0, s2[np.maximum(c, 1) - 1], 0.0)
+        # hctsa excludes from each set the target with (1-based) index k, the loop counter
+        # rather than the reference's own index (a quirk of the original toolbox, kept)
+        if k + 1 > m * tau:
+            inside = d[k - m * tau, k] <= rd
+            c = c - inside
+            t1 = t1 - inside * x[k]
+            t2 = t2 - inside * x[k] ** 2
+        ok = (c >= 30) & (rd > 0)
+        tot[ok] += (t2[ok] - t1[ok] ** 2 / c[ok]) / (c[ok] - 1)
+        num[ok] += 1
+    y = np.full(ntv, np.nan)
+    has = num > 0
+    y[has] = tot[has] / (num[has] * np.var(x, ddof=1))
+    return np.column_stack([(rd - avg) / sd, y])
+
+
+def _dvv_iaaft(x: np.ndarray, perm: np.ndarray, max_it: int = 100, tol: float = 1e-5) -> np.ndarray:
+    # Iterated amplitude-adjusted Fourier transform surrogate (the DVV toolbox's surrogate.m,
+    # real-valued branch as modified in hctsa): from the permutation ``perm`` of x, alternately
+    # impose the amplitude spectrum and rank-order back onto the sorted values of x, returning the
+    # iterate (of at most max_it) that matches the amplitude spectrum best.
+    x_amp = np.abs(np.fft.fft(x))
+    x_sorted = np.sort(x)
+    r_prev = x[perm]
+    mse, mse_prev = np.inf, 0.0
+    best_mse, best_r = np.inf, r_prev
+    it = 0
+    while abs(mse - mse_prev) > tol and it < max_it:
+        mse_prev = mse
+        s = np.fft.ifft(x_amp * np.exp(1j * np.angle(np.fft.fft(r_prev)))).real
+        r = np.empty_like(x)
+        r[np.argsort(s, kind='stable')] = x_sorted
+        mse = np.mean(np.abs(x_amp - np.abs(np.fft.fft(r))))
+        if mse < best_mse:
+            best_mse, best_r = mse, r
+        r_prev = r
+        it += 1
+    return best_r
+
+
+def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
+        ntv: Union[int, None] = None, num_surr: int = 10, random_seed: Union[int, None] = 0,
+        tau: Union[int, str] = 1) -> Union[dict, float]:
+    """
+    How well nearby delay vectors predict the next value, compared with surrogates.
+
+    The delay vector variance (DVV) method [1]_ for detecting determinism and nonlinearity. A
+    delay vector is a run of ``m`` values (spaced ``tau`` apart) and its target is the value
+    that follows. For each of ``num_dvs`` randomly chosen reference vectors, the variance of the
+    targets of all delay vectors within a distance ``rd`` of the reference is found (only if at
+    least 30 vectors lie within ``rd``). The mean of these variances over the references, divided
+    by the variance of the series, is the target variance; it is computed at ``ntv`` values of
+    ``rd`` that span the mean distance between delay vectors plus or minus ``nd`` standard
+    deviations. The same curve is found for ``num_surr`` iterated amplitude-adjusted Fourier
+    transform (IAAFT) surrogates, and the outputs summarize the data curve and its difference
+    from the mean surrogate curve.
+
+    References
+    ----------
+    .. [1] T. Gautama, D.P. Mandic and M.M. Van Hulle, "The delay vector variance method for
+        detecting determinism and nonlinearity in time series", Physica D 190(3-4), 167-176
+        (2004). DOI: 10.1016/j.physd.2003.11.001
+
+    Notes
+    -----
+    The surrogates keep the best-matching of (at most) 100 IAAFT iterates, as hctsa's patched
+    DVV toolbox does. In MATLAB, the rank-ordering step of hctsa's ``DVV_surrogate.m`` sorts
+    the output of ``ifft``, which carries a negligible imaginary part (from the sign of the
+    zero-frequency and Nyquist components) in most iterations; MATLAB then ranks it by
+    magnitude rather than by value. Here the real part is always ranked by value, as the
+    IAAFT algorithm intends, so surrogate-based outputs differ from MATLAB's in distribution.
+    The reference vectors and surrogate permutations are drawn from a numpy random stream
+    (seeded by ``random_seed``) rather than MATLAB's.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series (real-valued).
+    m : int, optional
+        The delay embedding dimension. Default is 3.
+    num_dvs : int, optional
+        Number of reference delay vectors to consider. Default is 100.
+    nd : float, optional
+        Span over which to perform DVV, in standard deviations of the distances between delay
+        vectors. Default is 2.
+    ntv : int, optional
+        Number of points on the horizontal (distance) axis. Default is ``25 * nd``.
+    num_surr : int, optional
+        Number of surrogates to compare to. Default is 10.
+    random_seed : int, optional
+        Seed for the random choices of reference vectors and surrogates. Default is 0.
+    tau : int or str, optional
+        The time delay between delay-vector elements: an integer number of samples, or a rule
+        understood by :func:`pyhctsa.utils.get_tau` (``'ac1e'``, ``'mi'``, ...). The same delay
+        is used for the data and the surrogates. An adaptive delay makes the statistics much less
+        dependent on the sampling rate. Default is 1.
+
+    Returns
+    -------
+    dict or float
+        Statistics of the curve of target variance against standardized distance (the data curve,
+        at the distances where it is defined): ``trend`` (slope of a linear fit), ``max``,
+        ``min``, ``mean``, ``meanDiff`` and ``stdDiff`` (mean and standard deviation of its
+        successive differences), ``trendDiff`` (slope of a linear fit to them); and against the
+        mean surrogate curve: ``rmsDiffSurr``, ``meanDiffSurr``, ``dataSurrCorr``,
+        ``trendDataSurr`` (slope of the surrogate curve against the data curve),
+        ``numZeroCrossings`` (sign changes of the difference), ``trendSurr``,
+        ``meanDiffTrendSurr`` (``trendSurr`` minus ``trend``) and ``meanNormCDF`` (the mean over
+        distances of the Gaussian cumulative probability of the data value given the mean and
+        standard deviation across surrogates). Returns NaN if no delay can be set, the series is
+        too short to draw ``num_dvs`` reference vectors, or the data curve is defined at fewer
+        than two distances.
+    """
+    x = np.asarray(y, dtype=float).ravel()
+    n = x.size
+    nd = float(nd)
+    ntv = int(25 * nd) if ntv is None else int(ntv)
+
+    tau = get_tau(x, tau)
+    if np.isnan(tau):
+        return np.nan  # no delay can be set (e.g. a constant series)
+    tau = int(tau)
+
+    if n - m * tau < num_dvs:
+        logger.warning(f'Time series (N = {n}) too short to draw {num_dvs} reference delay '
+                       f'vectors at m = {m}, tau = {tau}')
+        return np.nan
+    n_dv = n - m * tau
+
+    refs, perms = _dvv_draws(_ml_rng(0 if random_seed is None else int(random_seed)),
+                             n, n_dv, num_dvs, num_surr)
+    dvv_data = _dvv_curve(x, m, num_dvs, nd, ntv, tau, refs[0])
+    dvv_surr = np.stack([_dvv_curve(_dvv_iaaft(x, perms[i]), m, num_dvs, nd, ntv, tau, refs[i + 1])[:, 1]
+                         for i in range(num_surr)], axis=1)  # ntv x num_surr
+    mean_surr = np.mean(dvv_surr, axis=1)
+
+    # Data curve, using only the distances where it is defined
+    good = ~np.isnan(dvv_data[:, 1])
+    if good.sum() < 2:
+        logger.warning('The data curve is defined at fewer than two distances')
+        return np.nan
+    t_d, v_d = dvv_data[good, 0], dvv_data[good, 1]
+    d_v = np.diff(v_d)
+
+    out = {}
+    out['trend'] = np.polyfit(t_d, v_d, 1)[0]
+    out['max'] = np.max(v_d)
+    out['min'] = np.min(v_d)
+    out['mean'] = np.mean(v_d)
+    out['meanDiff'] = np.mean(d_v)
+    out['stdDiff'] = np.std(d_v, ddof=1)
+    out['trendDiff'] = np.polyfit(t_d[:-1], d_v, 1)[0]
+
+    # Comparison to the surrogates, where both are defined
+    both = good & ~np.isnan(mean_surr)
+    if both.sum() < 2:
+        logger.warning('Too few distances at which both the data and surrogate curves are defined')
+        return np.nan
+    t_b, v_b, s_b = dvv_data[both, 0], dvv_data[both, 1], mean_surr[both]
+    out['rmsDiffSurr'] = np.sqrt(np.mean((v_b - s_b) ** 2))
+    out['meanDiffSurr'] = np.mean(v_b - s_b)
+    out['dataSurrCorr'] = np.corrcoef(v_b, s_b)[0, 1]
+    out['trendDataSurr'] = np.polyfit(v_b, s_b, 1)[0]
+    out['numZeroCrossings'] = np.sum((v_b - s_b)[1:] * (v_b - s_b)[:-1] < 0)
+    out['trendSurr'] = np.polyfit(t_b, s_b, 1)[0]
+    out['meanDiffTrendSurr'] = out['trendSurr'] - out['trend']
+    with np.errstate(invalid='ignore', divide='ignore'):
+        probs = _norm.cdf(v_b, loc=np.mean(dvv_surr[both], axis=1),
+                          scale=np.std(dvv_surr[both], axis=1, ddof=1))
+    out['meanNormCDF'] = np.mean(probs)
+    return out
+
+
 def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
     """Counts of points per box, where the boxes are quantiles along each axis."""
     props = np.arange(nbox + 1) / nbox
