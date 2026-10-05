@@ -447,8 +447,10 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
     Returns
     -------
     dict
-        Measures of the mean error of the nonlinear predictor, and a
-        set of measures on the correlation, Gaussianity, etc. of the residuals.
+        Measures of the mean error of the nonlinear predictor (``msqerr``), and the
+        ``'full'`` residual analysis (:func:`pyhctsa.operations.model_fit.residual_analysis`:
+        correlation, Gaussianity, etc. of the residuals, and ``taurat`` relative to the
+        series used, i.e. after any ``max_n`` crop).
         Returns NaN if the delay or Theiler window cannot be set, or the series
         is too short.
     """
@@ -497,7 +499,7 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
     # compute outputs
     out = {}
     out['msqerr'] = np.mean(res**2)
-    res = residual_analysis(res)
+    res = residual_analysis(res, y, 'full')
     # combine with residual analysis results
     out = out | res
 
