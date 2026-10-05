@@ -61,8 +61,7 @@ def zero_one_test(y, num_c=20, max_n=10000):
         if n > 50_000:
             logger.warning(
                 f"Time series ({n} samples) exceeds 50000 with "
-                "maxN='full'; computation may be slow.",
-                RuntimeWarning,
+                "maxN='full'; computation may be slow."
             )
 
     else:
@@ -71,8 +70,7 @@ def zero_one_test(y, num_c=20, max_n=10000):
         if n > max_n:
             logger.warning(
                 f"Time series ({n} samples) exceeds maxN={max_n}; "
-                f"analyzing the first {max_n} samples.",
-                RuntimeWarning,
+                f"analyzing the first {max_n} samples."
             )
             y = y[:max_n]
             n = max_n
@@ -80,8 +78,7 @@ def zero_one_test(y, num_c=20, max_n=10000):
     if n < 200:
         logger.warning(
             f"Time series (N={n}) too short for a meaningful "
-            "0-1 test (need >= 200).",
-            RuntimeWarning,
+            "0-1 test (need >= 200)."
         )
 
         return {
@@ -663,6 +660,9 @@ def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
         Various statistics on the local density estimates at each point in the
         time-delay embedding, including the minimum and maximum values, the
         range, the standard deviation, mean, median, and autocorrelation.
+        The correlation lengths of the density sequence are ``tauacden`` (first
+        zero-crossing of the autocorrelation function) and ``taumigaussden``
+        (first minimum of the Gaussian automutual information function).
     """
     if isinstance(tau, str) and tau != 'ac':
         raise ValueError(f"Invalid time-delay method: '{tau}'. Only 'ac' (or an integer) is supported.")
@@ -718,10 +718,53 @@ def local_density(y: ArrayLike, nnr: int = 3, past: int = 40,
     # Estimates of correlation length:
     # first zero-crossing of the autocorrelation function:
     out['tauacden'] = first_crossing(locden, 'ac', 0, 'continuous')
-    # first minimum of the automutual information function:
-    out['taumiden'] = first_min(locden, 'mi')
+    # first minimum of the (Gaussian) automutual information function:
+    out['taumigaussden'] = first_min(locden, 'mi-gaussian')
 
     return out
+
+class _D2DataError(ValueError):
+    """A data-dependent failure of :func:`tisean_d2`, for which hctsa returns NaN."""
+
+
+def _c2g_overflows(c2: list) -> bool:
+    """
+    Whether TISEAN's ``c2g`` binary would write ``Infinity``/``NaN`` for these correlation sums.
+
+    ``c2g.f`` keeps the log-lengths and log-correlation sums in single precision, and the
+    prefactor ``f = exp((e(k+1)c(k) - e(k)c(k+1))/(e(k+1) - e(k)))`` of its piecewise
+    power-law interpolation overflows (above about 88.7 in the exponent) for some series,
+    which contaminates the whole block with ``Infinity``/``NaN``. hctsa cannot read that
+    output and returns NaN (``NL_d2``: 'Inf/NaN-contaminated output'). The vendored
+    :func:`pyhctsa.toolboxes.Tisean_3_0_1.tisean.c2g` works in double precision and does
+    not overflow, so this reproduces the single-precision condition from the same
+    buffers (including the leftover slot of a block cut short by a zero).
+    """
+    meps = 1000
+    e_buf = np.zeros(meps, dtype=np.float32)
+    c_buf = np.zeros(meps, dtype=np.float32)
+    for block in c2:
+        me = 0
+        for ee, cc in block:
+            me += 1
+            if cc <= 0.0:
+                break
+            e_buf[me - 1] = np.log(np.float32(ee))
+            c_buf[me - 1] = np.log(np.float32(cc))
+        if me == 0:
+            continue
+        order = _tisean._tisean_argsort(e_buf[:me])
+        e_buf[:me] = e_buf[:me][order]
+        c_buf[:me] = c_buf[:me][order]
+        e, c = e_buf[:me], c_buf[:me]
+        with np.errstate(all='ignore'):
+            de = e[1:] - e[:-1]
+            f = np.exp((e[1:] * c[:-1] - e[:-1] * c[1:]) / de)
+        # intervals of zero width are skipped by c2g.f
+        if np.any(~np.isfinite(f[de != 0])):
+            return True
+    return False
+
 
 def _argmin_first_colmajor(m: np.ndarray):
     """First index of the minimum in column-major order; NaNs ignored."""
@@ -846,14 +889,16 @@ def _findscalingr_ind(x: np.ndarray) -> np.ndarray:
     gamma = 1E-3  # regularization parameter selected 'empirically'
     stptr, endptr = _scaling_range_endpoints(l)
     if stptr.size == 0 or endptr.size == 0:
-        raise ValueError('time series is too short to contain a scaling range')
+        raise _D2DataError('time series is too short to contain a scaling range')
 
     results = np.full((ndim, 4), np.nan)
     for c in range(ndim):
         v = x[c, :]
         a, b, best = _best_flat_range(v, gamma, stptr, endptr)
         if a is None:
-            continue
+            # every candidate range scored NaN (e.g. a constant curve): no scaling range
+            # (MATLAB's assignment from an empty index fails here)
+            raise _D2DataError('no scaling range in the TISEAN d2 output')
         results[c] = [stptr[a], endptr[b], best, np.mean(v[stptr[a] - 1:endptr[b]])]
     return results
 
@@ -864,7 +909,7 @@ def _sub_celltomat(blocks: list, column: int) -> tuple:
     # restrict every block to the span they all share.
     blocks = [np.asarray(b, dtype=float) for b in blocks]
     if any(b.size == 0 for b in blocks):
-        raise ValueError('no data returned by TISEAN for at least one dimension')
+        raise _D2DataError('no data returned by TISEAN for at least one dimension')
 
     mini = max(b[:, 0].min() for b in blocks)
     maxi = min(b[:, 0].max() for b in blocks)
@@ -903,7 +948,7 @@ def _sub_getslopes(x: np.ndarray, Y: np.ndarray) -> np.ndarray:
         v = np.diff(Y[c, :]) / dx  # vector of local gradients
         a, b, best = _best_flat_range(v, gamma, stptr, endptr)
         if a is None:
-            continue
+            return None  # no scaling range (MATLAB's assignment from an empty index fails)
         results[c] = [stptr[a], endptr[b], best, np.mean(v[stptr[a] - 1:endptr[b]])]
     return results
 
@@ -951,7 +996,8 @@ def _summarise_d2_scaling(dat_v: np.ndarray, dat_M: np.ndarray, p: str,
     try:
         benfind = _findscalingr_ind(dat_M)
     except Exception as exc:
-        raise ValueError('Error finding scaling range') from exc
+        raise _D2DataError('Could not find a scaling range in the TISEAN d2 output '
+                           'for this series') from exc
 
     # rows: increasing embedding m; columns: stpt, endpt, goodness, dim
     out[f'ben{p}_mindim'] = np.min(benfind[:, 3])
@@ -971,8 +1017,14 @@ def _summarise_d2_scaling(dat_v: np.ndarray, dat_M: np.ndarray, p: str,
     out[f'benmmin{p}_linrmserr'] = mmin['linrmserr']
 
     # Reshaped: only for large enough m (as determined by the criteria above),
-    # then find a scaling region across m for a saturated range of m.
-    sc = _findscalingr(dat_M[mmin['ri1'] - 1:, :])
+    # then find a scaling region across m for a saturated range of m. Without a
+    # starting dimension there are no rows to search (an empty selection in
+    # MATLAB), and all of the outputs below are NaN.
+    if mmin['ri1'] is None:
+        sc = {'ri1': None, 'ri2': None, 'goodness': np.nan,
+              'dimest': np.nan, 'dimstd': np.nan}
+    else:
+        sc = _findscalingr(dat_M[mmin['ri1'] - 1:, :])
     out[f'{p}_logminscr'] = (np.nan if sc['ri1'] is None
                              else np.log(dat_v[sc['ri1'] - 1]))
     out[f'{p}_logmaxscr'] = (np.nan if sc['ri2'] is None
@@ -1033,7 +1085,10 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     dict or float
         Statistics summarising Takens' estimator, the local slopes of the
         correlation sum (raw and Gaussian-kernel smoothed), and the correlation
-        entropy. Returns NaN if the time series is too short.
+        entropy. Returns NaN, as hctsa does, if the time series is too short, the time
+        delay cannot be determined, or the TISEAN output is unusable for this series
+        (no valid output for a long delay, Inf/NaN-contaminated correlation sums, no
+        correlation-dimension data, or no scaling range).
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size  # data length (number of samples)
@@ -1044,7 +1099,8 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     # Time delay, tau
     tau = _resolve_time_delay(y, tau)
     if np.isnan(tau):
-        raise ValueError('Time series cannot be embedded (too short?)')
+        logger.warning('Time series cannot be embedded (could not get the time delay)')
+        return np.nan
     tau = int(tau)
 
     # Theiler window
@@ -1052,7 +1108,24 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         theiler_win = round(theiler_win * n)
     theiler_win = int(theiler_win)
 
-    tables = _tisean.d2(y, delay=tau, embed=maxm, theiler=theiler_win)
+    # Data-dependent failures (no usable TISEAN output, no scaling range, ...) return
+    # NaN, as in hctsa, rather than raising
+    try:
+        return _tisean_d2_summary(y, tau, maxm, theiler_win)
+    except _D2DataError as exc:
+        logger.warning(str(exc))
+        return np.nan
+
+
+def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> dict:
+    # Run TISEAN's d2 and summarise it; raises _D2DataError where hctsa returns NaN.
+    try:
+        tables = _tisean.d2(y, delay=tau, embed=maxm, theiler=theiler_win)
+    except ValueError as exc:  # e.g. a delay vector longer than the series
+        raise _D2DataError(f'TISEAN d2 produced invalid output (perhaps due to long '
+                           f'tau = {tau}, N = {y.size}): {exc}') from exc
+    if _c2g_overflows(tables['c2']):
+        raise _D2DataError('TISEAN d2 produced Inf/NaN-contaminated output for this data')
     c2gdat = _tisean.c2g(tables['c2'])
     c2tdat = _tisean.c2t(tables['c2'])
     d2dat, h2dat = tables['d2'], tables['h2']
@@ -1087,7 +1160,8 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     # (2) D2: local slopes of the correlation integral
     # --------------------------------------------------------------------------
     if all(b.size == 0 for b in d2dat):
-        raise ValueError('No data...')
+        raise _D2DataError('TISEAN d2 returned no usable correlation-dimension data '
+                           'for this series')
     d2dat_v, d2dat_M = _sub_celltomat(d2dat, 2)
     _summarise_d2_scaling(d2dat_v, d2dat_M, 'd2', out)
 
