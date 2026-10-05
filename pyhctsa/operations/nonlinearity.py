@@ -16,6 +16,179 @@ from ..operations.correlation import first_crossing, first_min, autocorr
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
 from ..utils import _ml_rng, get_tau, matlab_quantile, theiler_window, time_delay_embed
 
+# ------------------------------------------------------------------------------
+# Embedding parameters (hctsa's NL_FNN and BF_Embed), shared by the operations below
+# ------------------------------------------------------------------------------
+
+def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
+        theiler_win: Union[int, float, list, tuple] = ('ac', 1), just_best: bool = True,
+        bestp: float = 0.4, escape_factor: Union[float, None] = None) -> Union[dict, float]:
+    """
+    How the fraction of false nearest neighbors falls as the embedding dimension increases.
+
+    Uses TISEAN's ``false_nearest`` (run in process; see
+    :func:`pyhctsa.toolboxes.Tisean_3_0_1.tisean.false_nearest`). For each embedding
+    dimension ``m = 1, ..., maxm``, every point's nearest neighbor (maximum norm, outside
+    the Theiler window in time) is found; the neighbor is false if, when one more
+    coordinate is added, the two points move apart by more than ``escape_factor`` times
+    their distance. For a deterministic system the fraction of false neighbors falls
+    toward zero once the embedding dimension is large enough; for noise it stays high.
+    Neighbors farther apart than the standard deviation of the data divided by the
+    escape factor are skipped.
+
+    Note: as in TISEAN 3.0.1 for a scalar series, the delay only limits the number of
+    points used; the embedding coordinates are consecutive samples.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    tau : int or str, optional
+        The time delay: an integer, or a rule understood by
+        :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``). Default is 1.
+    maxm : int, optional
+        The maximum embedding dimension. Default is 10.
+    theiler_win : int, float, or ``['ac', k]``, optional
+        The Theiler window (see :func:`pyhctsa.utils.theiler_window`). Default is
+        ``['ac', 1]``.
+    just_best : bool, optional
+        If True, return only the first dimension at which the fraction of false nearest
+        neighbors is below ``bestp``. Default is True.
+    bestp : float, optional
+        The fraction of false neighbors defining the embedding dimension when
+        ``just_best``. Default is 0.4.
+    escape_factor : float, optional
+        TISEAN's ``-f``: a neighbor is false if its distance grows by more than this
+        factor when a dimension is added. ``None`` (the default) is TISEAN's own default,
+        2. (``BF_Embed``'s false-nearest-neighbors choice of dimension uses 5.)
+
+    Returns
+    -------
+    float or dict
+        If ``just_best``, the embedding dimension (``maxm + 1`` if the fraction never
+        falls below ``bestp``). Otherwise a dict with, for ``i = 1, ..., maxm``, ``pfnn_i``
+        (the fraction of false nearest neighbors) and ``nHood2_i`` (the typical,
+        root-mean-square, distance from a point to its nearest neighbor; NaN at a
+        dimension for which TISEAN found too few neighbors); ``minpfnn``, ``meanpfnn``,
+        ``stdpfnn``, ``maxnHood2``, ``meannHood2``; ``firstunder09`` ... ``firstunder005``
+        (the first dimension at which the fraction is below 90%, 80%, ..., 10%, 5%; ``maxm
+        + 1`` if never); ``max1stepchange`` (the largest absolute change in the fraction
+        between consecutive dimensions), ``mdrop`` (the mean change per added dimension)
+        and ``pdrop`` (the fraction of decreasing steps minus the fraction of increasing
+        steps). NaN if the series is too short (N < 10), the time delay or Theiler window
+        cannot be set, or TISEAN gives no output (constant series, or a delay too long for
+        the series).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    if n < 10:
+        logger.warning(f'Time series (N={n}) too short for fnn')
+        return np.nan
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        return np.nan
+    theiler = theiler_window(y, theiler_win, n)
+    if np.isnan(theiler):  # the autocorrelation function never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+    maxm = int(maxm)
+    # (-f%g: six significant digits)
+    escape = 2.0 if escape_factor is None else float('%g' % escape_factor)
+    try:
+        res = _tisean.false_nearest(y, int(tau), 1, maxm, int(theiler), escape)
+    except ValueError as exc:  # no output, e.g. delay times dimension too large for the series
+        logger.warning(f'No output from TISEAN routine false_nearest on the data: {exc}')
+        return np.nan
+    m_dim, p_nn, n_hood2 = res['dim'], res['pfnn'], res['sdeps']
+
+    if just_best:
+        return float(_tisean.fnn_first_under(m_dim, p_nn, bestp))
+
+    out = {}
+    for i in range(1, maxm + 1):
+        found = i <= m_dim.size
+        out[f'pfnn_{i}'] = p_nn[i - 1] if found else np.nan
+        out[f'nHood2_{i}'] = n_hood2[i - 1] if found else np.nan
+    out['minpfnn'] = np.min(p_nn)
+    out['meanpfnn'] = np.mean(p_nn)
+    out['stdpfnn'] = np.std(p_nn, ddof=1) if p_nn.size > 1 else 0.0
+    out['maxnHood2'] = np.max(n_hood2)
+    out['meannHood2'] = np.mean(n_hood2)
+    for name, th in (('09', 0.9), ('08', 0.8), ('07', 0.7), ('06', 0.6), ('05', 0.5),
+                     ('04', 0.4), ('03', 0.3), ('02', 0.2), ('01', 0.1), ('005', 0.05)):
+        out[f'firstunder{name}'] = float(_tisean.fnn_first_under(m_dim, p_nn, th))
+    steps = np.diff(p_nn)
+    out['max1stepchange'] = np.max(np.abs(steps)) if steps.size else np.nan
+    out['mdrop'] = np.mean(steps) if steps.size else np.nan
+    out['pdrop'] = -np.mean(np.sign(steps)) if steps.size else np.nan
+    return out
+
+
+def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.4) -> float:
+    """
+    Embedding dimension by false nearest neighbors, as hctsa's ``BF_Embed(y, tau, {'fnn',
+    threshold})``: :func:`fnn` with ten dimensions, a Theiler window of one autocorrelation
+    time and an escape factor of 5 (TISEAN's own, 2, makes the test look as if it never
+    converges), returning the first dimension at which the fraction of false nearest
+    neighbors falls below `threshold`. NaN when it cannot be determined.
+    """
+    return fnn(y, tau, 10, ('ac', 1), True, threshold, 5)
+
+
+def _embedding_params(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
+                      ) -> Union[tuple, None]:
+    """
+    The time delay and embedding dimension, as hctsa's ``BF_Embed(y, tau, m, true)``.
+
+    `tau` is an integer or a rule understood by :func:`pyhctsa.utils.get_tau`. `m` is an
+    integer, ``'fnn'`` (false nearest neighbors, threshold 0.4), or ``('fnn', threshold)``.
+    Returns ``(tau, m)``, or None if either cannot be determined.
+    """
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        logger.warning('Could not determine the time delay for the embedding')
+        return None
+    tau = int(tau)
+    if isinstance(m, (list, tuple)):
+        m = m[0] if len(m) == 1 else m
+    if isinstance(m, (list, tuple)) or isinstance(m, str):
+        if (m if isinstance(m, str) else m[0]) != 'fnn':
+            raise ValueError(f"Embedding dimension, m, incorrectly specified: {m!r}")
+        m = _fnn_embedding_dim(y, tau, 0.4 if isinstance(m, str) else m[1])
+        if np.isnan(m):
+            return None
+    return tau, int(m)
+
+
+def _embed_tau_m(y: np.ndarray, embed_params) -> tuple:
+    """
+    The delay and dimension of ``[tau, m]`` embedding parameters (hctsa's
+    ``BF_Embed(y, tau, m, true)``), without doing the embedding: see
+    :func:`_embedding_params`. Returns ``(nan, nan)`` if they cannot be determined.
+    """
+    if not isinstance(embed_params, (list, tuple)) or len(embed_params) != 2:
+        raise ValueError('Embedding parameters are formatted incorrectly -- need [tau, m]')
+    params = _embedding_params(y, embed_params[0], embed_params[1])
+    return (np.nan, np.nan) if params is None else params
+
+
+def _bf_embed(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
+              ) -> Union[np.ndarray, None]:
+    """
+    Time-delay embedding with hctsa's ``BF_Embed(y, tau, m, false)``: the embedded points as
+    rows (see :func:`_embedding_params` for `tau` and `m`), or None when it fails
+    (undetermined parameters, or a time series too short).
+    """
+    params = _embedding_params(y, tau, m)
+    if params is None:
+        return None
+    try:
+        return time_delay_embed(y, params[1], params[0])
+    except ValueError as e:
+        logger.warning(str(e))
+        return None
+
+
 def zero_one_test(y, num_c=20, max_n=10000):
     """Modified 0-1 test for chaos.
 
@@ -425,8 +598,10 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
     y : array-like
         Input time series (should be z-scored).
     de : int, optional
-        The embedding dimension. Default is 3. (hctsa's ``'fnn'`` option, which
-        sets it by TISEAN's false nearest neighbors, is not yet available.)
+        The embedding dimension, or ``'fnn'`` to set it by TISEAN's false nearest
+        neighbors (:func:`fnn`: first dimension at which the fraction of false
+        neighbors is below 0.05, with a Theiler window of one autocorrelation time
+        and an escape factor of 5). Default is 3.
     tau : int or str, optional
         The time-delay: an integer, or a rule understood by
         :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
@@ -479,11 +654,12 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
         return np.nan
 
     if isinstance(de, str):
-        if de == 'fnn':
-            raise NotImplementedError(
-                "nlpe(de='fnn') needs a port of TISEAN's false_nearest (hctsa's NL_FNN), "
-                "which is not yet available in pyhctsa; pass an integer embedding dimension.")
-        raise ValueError(f"Invalid embedding dimension '{de}'")
+        if de != 'fnn':
+            raise ValueError(f"Invalid embedding dimension '{de}'")
+        de = _fnn_embedding_dim(y, tau, 0.05)
+        if np.isnan(de):  # the dimension could not be determined (e.g. a delay too long)
+            return np.nan
+    de = int(de)
 
     theiler_win = theiler_window(y, theiler_win, n)
     if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
@@ -735,10 +911,10 @@ def local_density(y: ArrayLike, nnr: int = 3,
         crossing of the autocorrelation function, and ``'mi'`` the smaller of
         the first minimum of the (Kraskov) automutual information and the 1/e
         time. Default is ``'ac'``.
-    m : int, optional
-        The embedding dimension. Default is 2. (hctsa's ``'fnn'`` option, which
-        sets it by TISEAN's false nearest neighbors, is not yet available, and
-        raises ``NotImplementedError``.)
+    m : int or 'fnn', optional
+        The embedding dimension: an integer, or ``'fnn'`` (or ``['fnn', threshold]``)
+        to set it by TISEAN's false nearest neighbors (:func:`fnn`, threshold 0.4 by
+        default; as hctsa's ``BF_Embed``). Default is 2.
 
     Returns
     -------
@@ -762,21 +938,9 @@ def local_density(y: ArrayLike, nnr: int = 3,
         return np.nan
     past = int(past)
 
-    if isinstance(m, str):
-        if m == 'fnn':
-            raise NotImplementedError(
-                "local_density(m='fnn') needs a port of TISEAN's false_nearest (hctsa's "
-                "NL_FNN), which is not yet available in pyhctsa; pass an integer embedding "
-                "dimension.")
-        raise ValueError(f"Invalid embedding dimension '{m}'")
-    tau = get_tau(y, tau)
-    if np.isnan(tau):
-        logger.warning('Could not get the time delay (time series too short?)')
-        return np.nan
-    try:
-        y_embed = time_delay_embed(y, m, int(tau))
-    except ValueError as e:  # embedding failed (time series too short)
-        logger.warning(str(e))
+    y_embed = _bf_embed(y, tau, m)
+    if y_embed is None:  # the delay or dimension could not be set, or the series is too short
+        logger.warning('Embedding failed')
         return np.nan
     n_embed, m = y_embed.shape
 
@@ -1329,33 +1493,6 @@ from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robu
 from ..utils import _round_half_away
 
 
-def _embed_tau_m(y: np.ndarray, embed_params) -> tuple:
-    """
-    The delay and dimension of ``[tau, m]`` embedding parameters (hctsa's
-    ``BF_Embed(y, tau, m, true)``), without doing the embedding.
-
-    ``tau`` is an integer or a rule understood by :func:`pyhctsa.utils.get_tau`;
-    ``m`` is an integer, or ``'fnn'`` (or ``['fnn', threshold]``) for the
-    embedding dimension from TISEAN's false nearest neighbors. Returns
-    ``(nan, nan)`` if the delay cannot be set.
-    """
-    if not isinstance(embed_params, (list, tuple)) or len(embed_params) != 2:
-        raise ValueError('Embedding parameters are formatted incorrectly -- need [tau, m]')
-    tau = get_tau(y, embed_params[0])
-    if np.isnan(tau):
-        return np.nan, np.nan
-    m = embed_params[1]
-    if isinstance(m, (list, tuple)):
-        m = m[0] if len(m) == 1 and not isinstance(m[0], str) else m
-    if isinstance(m, str) or isinstance(m, (list, tuple)):
-        if (m if isinstance(m, str) else m[0]) == 'fnn':
-            raise NotImplementedError(
-                "m='fnn' needs a port of TISEAN's false_nearest (hctsa's NL_FNN), which is "
-                "not yet available in pyhctsa; pass an integer embedding dimension.")
-        raise ValueError('Embedding dimension, m, incorrectly specified.')
-    return int(tau), int(m)
-
-
 def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
                 thwin: Union[int, float, list, tuple] = ('ac', 1), nbins: int = 20,
                 embed_params: Union[list, tuple] = ('ac', 'fnn'), do_two: int = 1) -> Union[dict, float]:
@@ -1398,8 +1535,8 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
     embed_params : [tau, m], optional
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an
-        integer, or ``'fnn'`` (TISEAN's false nearest neighbors, not yet available
-        in pyhctsa and raises ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+        integer, or ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
     do_two : int, optional
         Only 1 (corrsum-style log-spaced radii, the default) is supported; 2 has no
         TISEAN equivalent and raises ``ValueError``, as in hctsa.
@@ -1557,8 +1694,8 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
     embed_params : [tau, m], optional
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an
-        integer, or ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in
-        pyhctsa and raises ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+        integer, or ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
 
     Returns
     -------
@@ -1702,8 +1839,8 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     embed_params : [tau, m], optional
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer,
-        or ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in pyhctsa and
-        raises ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+        or ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
     random_seed : int, optional
         Seed for choosing the random subsample of reference points (relevant when
         ``nref != -1``; the subsample differs from MATLAB's). Default is 0.
@@ -1944,8 +2081,8 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
     embed_params : [tau, m], optional
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer, or
-        ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in pyhctsa and raises
-        ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+        ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
 
     Returns
     -------
@@ -2136,8 +2273,8 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
     embed_params : [tau, m], optional
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer, or
-        ``'fnn'`` (TISEAN's false nearest neighbors, not yet available in pyhctsa and raises
-        ``NotImplementedError``). Default is ``['ac', 'fnn']``.
+        ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
 
     Returns
     -------
@@ -2966,185 +3103,10 @@ def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
 # keep the block self-contained)
 import warnings
 
-from numba import njit
 from scipy.spatial.distance import pdist, squareform
 from sklearn.neighbors import KDTree
 
 from ..utils import _linspace, _ml_randperm, _round_half_away, bin_picker
-
-
-@njit(cache=True)
-def _fnn_nearest(s, delay, max_emb, theiler):
-    """
-    For each query point and each embedding dimension 1..max_emb, the nearest neighbor
-    (max-norm, non-zero distance, outside the Theiler window) among the candidate points,
-    as TISEAN's ``false_nearest`` finds it, and whether the minimum distance is shared by
-    several candidates (a tie).
-    """
-    n_len = s.size
-    n_query = n_len - max_emb * delay
-    n_cand = n_len - (max_emb + 1) * delay
-    best = np.full((n_query, max_emb), 1.1)
-    which = np.full((n_query, max_emb), -1, dtype=np.int64)
-    tied = np.zeros((n_query, max_emb), dtype=np.bool_)
-    for n in range(n_query):
-        for e in range(n_cand):
-            if abs(e - n) <= theiler:
-                continue
-            mx = 0.0
-            for d in range(max_emb):
-                dx = abs(s[n + d] - s[e + d])
-                if dx > mx:
-                    mx = dx
-                if mx > 0.0:
-                    if mx < best[n, d]:
-                        best[n, d] = mx
-                        which[n, d] = e
-                        tied[n, d] = False
-                    elif mx == best[n, d]:
-                        tied[n, d] = True
-    return best, which, tied
-
-
-def _fnn_break_ties(s, best, which, tied, delay, max_emb, theiler, eps_grid):
-    """
-    Among tied nearest neighbors, pick the one TISEAN's box search meets first: it scans the
-    3x3 boxes (of side epsilon, in the first and the last coordinate) around the point in
-    order, and each box's points from the latest to the earliest, keeping the first minimum.
-    """
-    n_cand = s.size - (max_emb + 1) * delay
-    cand = np.arange(n_cand)
-    for n, d in zip(*np.nonzero(tied)):
-        mx = np.zeros(n_cand)
-        for k in range(d + 1):
-            mx = np.maximum(mx, np.abs(s[n + k] - s[cand + k]))
-        ties = cand[(mx == best[n, d]) & (np.abs(cand - n) > theiler)]
-        eps = eps_grid[min(np.searchsorted(eps_grid, best[n, d]), len(eps_grid) - 1)]
-        cx, cy = (s[ties] / eps).astype(np.int64) & 1023, (s[ties + d] / eps).astype(np.int64) & 1023
-        x, y = int(s[n] / eps) & 1023, int(s[n + d] / eps) & 1023
-        da, db = (cx - x + 1) & 1023, (cy - y + 1) & 1023  # offset + 1, if within the 3x3 boxes
-        visible = (da <= 2) & (db <= 2)
-        if visible.any():
-            ties, da, db = ties[visible], da[visible], db[visible]
-            which[n, d] = ties[np.lexsort((-ties, db, da))[0]]
-
-
-def _false_nearest(y: ArrayLike, delay: int = 1, max_dim: int = 10, theiler: int = 0,
-                   escape_factor: float = 2.0) -> Union[dict, None]:
-    """
-    Fraction of false nearest neighbors by embedding dimension (TISEAN's ``false_nearest``,
-    as called by hctsa's NL_FNN with ``-m1 -M1,max_dim``).
-
-    A nearest neighbor (max-norm, outside the Theiler window) of an embedded point is false
-    when, after adding the next coordinate, the distance to it grows by more than a factor
-    ``escape_factor``. The series is rescaled to [0, 1] and, as in hctsa, written to TISEAN
-    to 7 significant digits.
-
-    Returns a dictionary of arrays over the embedding dimensions TISEAN reports (``dim``,
-    ``pfnn``, ``nhood`` (mean size of the neighborhoods) and ``nhood_std``), or ``None`` when
-    TISEAN gives no output (constant or too-short series, or no neighbor within range at
-    the first dimension). TISEAN stops at the first dimension for which no neighbor is
-    found, keeping the dimensions before it.
-    """
-    y = _tisean._round_significant(np.asarray(y, dtype=float).ravel(), 7)
-    n_len = y.size
-    delay, max_dim, theiler = int(delay), int(max_dim), int(theiler)
-    if (max_dim + 1) * delay >= n_len:
-        return None
-    lo, hi = y.min(), y.max()
-    interval = hi - lo
-    if interval == 0:
-        return None
-    s = (y - lo) / interval
-    varianz = np.sqrt(np.abs(np.mean(s * s) - np.mean(s) ** 2))
-
-    best, which, tied = _fnn_nearest(s, delay, max_dim, theiler)
-    # TISEAN's grid of neighborhood sizes: 1e-5, increased by sqrt(2) up to 2*varianz/escape_factor
-    eps_grid = [1e-5]
-    while eps_grid[-1] < 2 * varianz / escape_factor:
-        eps_grid.append(eps_grid[-1] * np.sqrt(2.0))
-    _fnn_break_ties(s, best, which, tied, delay, max_dim, theiler, np.array(eps_grid))
-    rows = {'dim': [], 'pfnn': [], 'nhood': [], 'nhood_std': []}
-    for emb in range(1, max_dim + 1):
-        mindx, nbr = best[:, emb - 1], which[:, emb - 1]
-        found = (nbr >= 0) & (mindx <= varianz / escape_factor)
-        n_found = int(found.sum())
-        if n_found == 0:
-            break  # TISEAN: "Not enough points found!"
-        q = np.flatnonzero(found)
-        factor = np.abs(s[q + emb] - s[nbr[q] + emb]) / mindx[q]
-        rows['dim'].append(emb)
-        rows['pfnn'].append(_tisean._e(np.count_nonzero(factor > escape_factor) / n_found))
-        rows['nhood'].append(_tisean._e(np.mean(mindx[q]) * interval))
-        rows['nhood_std'].append(_tisean._e(np.sqrt(np.mean(mindx[q] ** 2)) * interval))
-    if not rows['dim']:
-        return None
-    return {k: np.array(v) for k, v in rows.items()}
-
-
-def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.4) -> Union[int, float]:
-    """
-    Embedding dimension by false nearest neighbors, as hctsa's ``BF_Embed(y, tau, 'fnn')``:
-    the first dimension (of 1 to 10) at which the fraction of false nearest neighbors falls
-    below `threshold` (TISEAN's ``false_nearest`` with a Theiler window of one
-    autocorrelation time and an escape factor of 5), or one more than the largest
-    dimension TISEAN reports if it never does. NaN when it cannot be determined.
-    """
-    if y.size < 10:
-        logger.warning(f'Time series (N={y.size}) too short for fnn')
-        return np.nan
-    theiler = theiler_window(y, ('ac', 1), y.size)
-    if np.isnan(theiler):
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
-        return np.nan
-    res = _false_nearest(y, tau, 10, int(theiler), 5.0)
-    if res is None:
-        logger.warning('TISEAN false_nearest produced no usable output for this data')
-        return np.nan
-    below = np.flatnonzero(res['pfnn'] < threshold)
-    return int(res['dim'][below[0]]) if below.size else int(res['dim'][-1]) + 1
-
-
-def _embedding_params(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
-                      ) -> Union[tuple, None]:
-    """
-    The time delay and embedding dimension, as hctsa's ``BF_Embed(y, tau, m, true)``.
-
-    `tau` is an integer or a rule understood by :func:`pyhctsa.utils.get_tau`. `m` is an
-    integer, ``'fnn'`` (false nearest neighbors, threshold 0.4), or ``('fnn', threshold)``.
-    Returns ``(tau, m)``, or None if either cannot be determined.
-    """
-    tau = get_tau(y, tau)
-    if np.isnan(tau):
-        logger.warning('Could not determine the time delay for the embedding')
-        return None
-    tau = int(tau)
-    if isinstance(m, (list, tuple)):
-        m = m[0] if len(m) == 1 else m
-    if isinstance(m, (list, tuple)) or isinstance(m, str):
-        if (m if isinstance(m, str) else m[0]) != 'fnn':
-            raise ValueError(f"Embedding dimension, m, incorrectly specified: {m!r}")
-        m = _fnn_embedding_dim(y, tau, 0.4 if isinstance(m, str) else m[1])
-        if np.isnan(m):
-            return None
-    return tau, int(m)
-
-
-def _bf_embed(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
-              ) -> Union[np.ndarray, None]:
-    """
-    Time-delay embedding with hctsa's ``BF_Embed(y, tau, m, false)``: the embedded points as
-    rows (see :func:`_embedding_params` for `tau` and `m`), or None when it fails
-    (undetermined parameters, or a time series too short).
-    """
-    params = _embedding_params(y, tau, m)
-    if params is None:
-        return None
-    try:
-        return time_delay_embed(y, params[1], params[0])
-    except ValueError as e:
-        logger.warning(str(e))
-        return None
 
 
 def _random_subset(n: int, k: int, random_seed: Union[int, str, None]) -> np.ndarray:
