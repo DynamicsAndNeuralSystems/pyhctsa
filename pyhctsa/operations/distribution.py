@@ -239,7 +239,7 @@ def withinp(x: ArrayLike, p: float = 1.0, mean_or_median: str = 'mean') -> float
     elif mean_or_median == 'median':
         mu = np.median(x)
         iqr_val = np.percentile(x, 75, method='hazen') - np.percentile(x, 25, method='hazen')
-        sig = 1.35 * iqr_val
+        sig = iqr_val / 1.35
     else:
         raise ValueError(f"Unknown setting: '{mean_or_median}'")
 
