@@ -735,17 +735,19 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     """
     Compute custom skewness measures of a time series.
 
-    Calculates either the Pearson skewness or the Bowley (quartile)
-    skewness coefficient.
+    Calculates the Pearson skewness (using the median or the mode) or the Bowley
+    (quartile) skewness coefficient.
 
-    The Pearson skewness is defined as
+    The Pearson skewness (with the median) is defined as
 
     .. math::
 
         \\frac{3(\\mu - \\tilde{x})}{\\sigma},
 
     where :math:`\\mu` is the mean, :math:`\\tilde{x}` is the median,
-    and :math:`\\sigma` is the standard deviation.
+    and :math:`\\sigma` is the standard deviation. The mode-based version is
+    :math:`(\\mu - \\text{mode})/\\sigma`, with the mode estimated from a histogram
+    with automatically chosen bins (see :func:`histogram_mode`).
 
     The Bowley skewness is defined as
 
@@ -764,10 +766,20 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     what_skew : str, optional
         Skewness measure to compute.
 
-        - ``"pearson"``: Pearson skewness coefficient.
+        - ``"pearson"`` (or ``"pearsonMedian"``): Pearson skewness coefficient
+          from the median.
+        - ``"pearsonMode"``: Pearson skewness coefficient from the mode of a
+          histogram (automatic bins).
         - ``"bowley"``: Bowley (quartile) skewness coefficient.
 
         Default is ``"pearson"``.
+
+    Notes
+    -----
+    hctsa picks the histogram bins for ``"pearsonMode"`` with MATLAB's ``'auto'``
+    bin rule (Scott's rule, or integer bins for integer data of small range);
+    here NumPy's ``'auto'`` rule (the larger of the Sturges and Freedman-Diaconis
+    bin counts) is used, so the mode, and hence this value, differs somewhat.
 
     Returns
     -------
@@ -780,11 +792,15 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     """
     y = np.asarray(y)
     out = 0.0
-    if what_skew == 'pearson':
+    if what_skew == 'pearsonMode':
+        out = (np.mean(y) - histogram_mode(y, 'auto')) / np.std(y, ddof=1)
+    elif what_skew in ('pearson', 'pearsonMedian'):
         out = (3 * (np.mean(y) - np.median(y)) / np.std(y, ddof=1))
     elif what_skew == 'bowley':
         qs = np.quantile(y, [0.25, 0.5, 0.75], method='hazen')
         out = (qs[2]+qs[0] - 2 * qs[1]) / (qs[2] - qs[0]) 
+    else:
+        raise ValueError(f"Unknown skewness type '{what_skew}'.")
     
     return float(out)
 
@@ -1277,7 +1293,7 @@ def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True
 
     return out
 
-def histogram_mode(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> float:
+def histogram_mode(y: ArrayLike, num_bins: Union[int, str] = 10, do_simple: bool = True) -> float:
     """
     Measures the mode of the data vector using histograms with a given number
     of bins.
@@ -1286,10 +1302,13 @@ def histogram_mode(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> 
     -----------
     y : array-like
         The input time series.
-    num_bins : int, optional
-        The number of bins to use in the histogram. Default is 10.
+    num_bins : int or str, optional
+        The number of bins to use in the histogram, or a bin-selection rule
+        understood by :func:`numpy.histogram_bin_edges` (such as ``'auto'``; hctsa's
+        ``'auto'`` is MATLAB's rule, which NumPy's only approximates). Default is 10.
     do_simple : bool, optional
-        Whether to use a simple binning method (linearly spaced bins). Default is `True`.
+        Whether to use a simple binning method (linearly spaced bins) when
+        ``num_bins`` is a number. Default is `True`.
 
     Returns
     --------
@@ -1297,7 +1316,9 @@ def histogram_mode(y: ArrayLike, num_bins: int = 10, do_simple: bool = True) -> 
         The mode of the data vector using histograms with num_bins bins. 
     """
     y = np.asarray(y)
-    if do_simple:
+    if isinstance(num_bins, str):
+        N, bin_edges = np.histogram(y, bins=num_bins)
+    elif do_simple:
         N, bin_edges = simple_binner(y, num_bins)
     else:
         bin_edges = bin_picker(y.min(), y.max(), num_bins)
