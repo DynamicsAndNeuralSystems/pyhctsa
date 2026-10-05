@@ -468,7 +468,7 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     auto_corrs_s = autocorr(s, [1, 2, 3, 4], 'Fourier')
     out['ac1'] = auto_corrs_s[0]
     out['ac2'] = auto_corrs_s[1]
-    out['tau'] = first_crossing(s, 'ac', 0, 'continuous')  # first zero crossing
+    out['tau'] = first_crossing(s, 'ac', 0, 'continuous') * dw  # first zero crossing, in units of w (not bins)
 
     # Shape of cumulative sum curve
     cs_s = np.cumsum(s)
