@@ -1,4 +1,6 @@
+from typing import Union
 import re
+import numba
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.interpolate import make_lsq_spline
@@ -11,8 +13,9 @@ logger = logging.getLogger('pyhctsa')
 
 from ..operations.correlation import autocorr
 from ..operations.distribution import compare_ks_fit, outlier_test
+from ..operations.nonlinearity import zero_one_test
 from ..operations.stationarity import sliding_window, stat_av
-from ..utils import _round_half_away, z_score
+from ..utils import _ml_rng, _round_half_away, _zscore_matlab, z_score
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
     """Apply a length-k median filter to a 1D array x, as MATLAB's ``medfilt1``.
@@ -197,17 +200,16 @@ def _ksdensity(x: np.ndarray, m: int = 100) -> tuple:
     return xi, f
 
 
-def _gauss1_kd_fit(x: np.ndarray) -> dict:
-    """Fit a Gaussian to the kernel-smoothed distribution of x: hctsa's ``DN_SimpleFit(x, 'gauss1', 0)``.
+def _gauss1_fit(x: np.ndarray, xi: np.ndarray, f: np.ndarray) -> dict:
+    """Fit a Gaussian to a distribution of x, as hctsa's ``DN_SimpleFit(x, 'gauss1', ...)``.
 
-    The distribution is a normal-kernel density estimate on 100 points (MATLAB's
-    ``ksdensity`` defaults, see ``_ksdensity``); the model is a1*exp(-((u - b1)/c1)^2),
-    fitted by least squares from the start point of MATLAB's ``gaussnstart``. Returns the R^2 (``r2``), the lag-1
+    The distribution is given as points ``xi`` and heights ``f`` (a kernel density estimate
+    or a histogram density); the model is a1*exp(-((u - b1)/c1)^2), fitted by least squares
+    from the start point of MATLAB's ``gaussnstart``. Returns the R^2 (``r2``), the root-mean-square
+    error (``rmse``, as hctsa, in units of the standard deviation of x), the lag-1
     autocorrelation of the residuals (``resAC1``) and the p-value of a runs test on the
     residuals (``resruns``), or NaN if the fit fails.
     """
-    xi, f = _ksdensity(x)
-
     # Start point (gaussnstart, one peak)
     k = np.nonzero(f == f.max())[0][-1]
     a0, b0 = f[k], xi[k]
@@ -232,9 +234,59 @@ def _gauss1_kd_fit(x: np.ndarray) -> dict:
     if not np.all(np.isfinite(res)):
         return np.nan
     sst = np.sum((f - np.mean(f)) ** 2)
-    return {'r2': 1 - np.sum(res ** 2) / sst,
+    sse = np.sum(res ** 2)
+    dfe = len(f) - 3  # three fitted coefficients
+    return {'r2': 1 - sse / sst,
+            'rmse': float(np.sqrt(sse / dfe) * np.std(x, ddof=1)) if dfe > 0 else np.nan,
             'resAC1': float(np.ravel(autocorr(res, 1, 'Fourier'))[0]),
             'resruns': _runstest_p(res)}
+
+
+def _gauss1_kd_fit(x: np.ndarray) -> dict:
+    """Fit a Gaussian to the kernel-smoothed distribution of x: hctsa's ``DN_SimpleFit(x, 'gauss1', 0)``.
+
+    The distribution is a normal-kernel density estimate on 100 points (MATLAB's
+    ``ksdensity`` defaults, see ``_ksdensity``). See ``_gauss1_fit`` for the outputs.
+    """
+    xi, f = _ksdensity(x)
+    return _gauss1_fit(x, xi, f)
+
+
+def _sqrt_rule_edges(x: np.ndarray) -> np.ndarray:
+    """Histogram bin edges of MATLAB's ``histcounts(x, 'BinMethod', 'sqrt')``.
+
+    The raw bin width is range / ceil(sqrt(N)); it is rounded to a "nice" value (1, 2, 3, 5 or
+    10 times a power of ten) and the edges are placed at multiples of that width, covering the data.
+    """
+    xmin, xmax = float(np.min(x)), float(np.max(x))
+    raw = (xmax - xmin) / max(int(np.ceil(np.sqrt(len(x)))), 1)
+    xscale = max(abs(xmin), abs(xmax))
+    if not xmax - xmin > max(np.sqrt(np.finfo(float).eps) * xscale, np.finfo(float).tiny):
+        return np.array([np.floor(2 * (xmin - 0.25)) / 2, np.ceil(2 * (xmax + 0.25)) / 2])  # constant data: one bin
+    raw = max(raw, np.spacing(xscale))
+    pow10 = 10.0 ** np.floor(np.log10(raw))
+    rel = raw / pow10
+    width = pow10 * (1 if rel < 1.5 else 2 if rel < 2.5 else 3 if rel < 4 else 5 if rel < 7.5 else 10)
+    left = min(width * np.floor(xmin / width), xmin)
+    nb = max(1, int(np.ceil((xmax - left) / width)))
+    right = max(left + nb * width, xmax)
+    return np.concatenate([[left], left + np.arange(1, nb) * width, [right]])
+
+
+def _gauss1_hist_fit(x: np.ndarray, bin_method: str = 'sqrt') -> dict:
+    """Fit a Gaussian to a histogram of x: hctsa's ``DN_SimpleFit(x, 'gauss1', bin_method)``.
+
+    The histogram uses MATLAB's square-root rule for its bin edges (see ``_sqrt_rule_edges``) or the
+    given number of equal-width bins, and is normalized to a probability density.
+    See ``_gauss1_fit`` for the outputs.
+    """
+    if bin_method == 'sqrt':
+        counts, edges = np.histogram(x, bins=_sqrt_rule_edges(x))
+    else:
+        counts, edges = np.histogram(x, bins=int(bin_method))
+    xi = (edges[:-1] + edges[1:]) / 2
+    f = counts / (counts.sum() * np.mean(np.diff(edges)))
+    return _gauss1_fit(x, xi, f)
 
 
 def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
@@ -426,4 +478,447 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
     out['olbt_m5'] = _diff(outlier_test(y_d, 5, 'mean'), outlier_test(y, 5, 'mean'))
     out['olbt_s5'] = _norm_diff(outlier_test(y_d, 5, 'std'), outlier_test(y, 5, 'std'))
 
+    return out
+
+
+def _iterate_stats(y: np.ndarray, y_d: np.ndarray) -> np.ndarray:
+    """The ten statistics of ``preproc_iterate`` for one processed series ``y_d`` (and original ``y``)."""
+    y = z_score(y)
+    y_d = z_score(y_d)
+    f = np.full(10, np.nan)
+
+    # 1) Stationarity: StatAv, sliding-window mean and standard deviation
+    f[0] = stat_av(y_d, 'seg', 5)
+    f[1] = sliding_window(y_d, 'mean', 'std', 5, 2)
+    f[2] = sliding_window(y_d, 'std', 'std', 5, 2) / sliding_window(y, 'std', 'std', 5, 2)
+
+    # 2) Gaussianity: Gaussian fits to the kernel density and to a histogram, and a normal fit
+    me = _gauss1_kd_fit(y_d)
+    f[3] = me['rmse'] if isinstance(me, dict) else np.nan
+    me = _gauss1_hist_fit(y_d, 'sqrt')
+    f[4] = me['rmse'] if isinstance(me, dict) else np.nan
+    me = compare_ks_fit(y_d, 'norm')
+    f[5] = me['adiff'] if isinstance(me, dict) else np.nan
+
+    # 3) Outliers
+    f[6] = outlier_test(y_d, 5, 'mean')
+
+    # Cross-correlation with, and distance to, the original signal
+    if len(y) == len(y_d):
+        norm = np.sqrt(np.sum(y ** 2) * np.sum(y_d ** 2))
+        f[7] = np.dot(y[:-1], y_d[1:]) / norm  # lag -1 of xcorr(y, y_d, 1, 'coeff')
+        f[8] = np.dot(y[1:], y_d[:-1]) / norm  # lag +1
+        f[9] = np.linalg.norm(y - y_d) / len(y)
+    return f
+
+
+def _profile_trend_jump(f: np.ndarray) -> tuple:
+    """Trend and jump of a profile of a statistic across processing strengths.
+
+    The profile is z-scored. The trend is the sum of its successive differences (last minus first).
+    The jump is the largest t-statistic for a step change in the mean, over all split points: the
+    split with the greatest absolute difference between the means before and after is chosen,
+    and its difference is divided by the combined standard error of the two means.
+    (NaN, NaN if any value is not finite.)
+    """
+    if not np.all(np.isfinite(f)):
+        return np.nan, np.nan
+    f = _zscore_matlab(f)
+    n = len(f)
+    trend = float(np.sum(np.diff(f)))
+
+    def sd(v):  # MATLAB std: the standard deviation of a single value is 0
+        return np.std(v, ddof=1) if len(v) > 1 else 0.0
+
+    m1 = np.array([np.mean(f[:j + 1]) for j in range(n)])
+    m2 = np.array([np.mean(f[j:]) for j in range(n)])
+    se1 = np.array([sd(f[:j + 1]) / np.sqrt(j + 1) for j in range(n)])
+    se2 = np.array([sd(f[j:]) / np.sqrt(n - j) for j in range(n)])
+    i = int(np.argmax(np.abs(m1 - m2)))
+    with np.errstate(divide='ignore', invalid='ignore'):
+        jump = float(np.abs((m1[i] - m2[i]) / np.sqrt(se1[i] ** 2 + se2[i] ** 2)))
+    return trend, jump
+
+
+def preproc_iterate(y: ArrayLike, dt_meth: str = 'diff') -> dict:
+    """
+    How time-series properties change as a preprocessing step is applied more and more strongly.
+
+    A preprocessing transformation is applied to the time series with increasing strength
+    (for the number of times, or the window size, given by the method), and a set of
+    statistics is computed on the (z-scored) processed series at each strength. Each
+    statistic's profile across the strengths is then z-scored and summarized by a trend
+    (the sum of its successive differences, i.e., the last minus the first value) and a jump
+    (the largest t-statistic for a step change in the mean, over all split points).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    dt_meth : str, optional
+        The preprocessing to apply:
+
+        - ``"spline"``: remove a least-squares cubic spline with 1, ..., 20 pieces
+        - ``"diff"``: take incremental differences, 1, ..., 5 times (the method hctsa uses)
+        - ``"medianf"``: a median filter with 25 window lengths from 1 to N/25
+        - ``"rav"``: a running mean filter with 25 window lengths from 1 to N/25
+        - ``"resampleup"``: progressively upsample the series, by factors 1, ..., 20
+        - ``"resampledown"``: progressively downsample the series, by factors 1, ..., 20
+
+        Default is ``"diff"``.
+
+    Returns
+    -------
+    dict
+        For each of the following statistics, measured on the processed series at each
+        strength, a trend (key ending ``_trend``) and a jump (ending ``_jump``) of its profile
+        across the strengths:
+
+        - ``statav5``: StatAv with 5 segments (``stat_av``)
+        - ``swms5_2``: the standard deviation of the window means in 5 windows overlapping by half
+        - ``swss5_2``: the standard deviation of the window standard deviations in 5 windows
+          overlapping by half, relative to that of the original series
+        - ``gauss1_kd``: the root-mean-square error of a Gaussian fit to the kernel-smoothed
+          distribution of values
+        - ``gauss1_hsqrt``: the root-mean-square error of a Gaussian fit to a histogram of the
+          values (square-root rule for the number of bins)
+        - ``norm_kscomp``: the area between the kernel-smoothed distribution of the values and the
+          best-fitting normal distribution (``compare_ks_fit``)
+        - ``ol``: the mean after trimming the 5% highest and 5% lowest values (``outlier_test``)
+        - ``xcn1``, ``xc1``: the cross-correlation between the original and processed series
+          at lags -1 and +1
+        - ``normdiff``: the distance between the original and processed series,
+          norm(y - y_processed) / N
+
+        The last three statistics need the processed series to be as long as the original, so
+        they are NaN for ``'diff'`` and the resampling methods.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+
+    # The number of times (or the strength with which) the processing is performed
+    if dt_meth in ('spline', 'resampleup', 'resampledown'):
+        n_range = np.arange(1, 21)
+    elif dt_meth == 'diff':
+        n_range = np.arange(1, 6)
+    elif dt_meth in ('medianf', 'rav'):
+        n_range = np.array([_round_half_away(v) for v in np.linspace(1, N / 25, 25)], dtype=int)
+    else:
+        raise ValueError(f"Unknown detrending method '{dt_meth}'")
+
+    # Progressive processing with a running statistical evaluation
+    outmat = np.full((len(n_range), 10), np.nan)
+    for q, n in enumerate(n_range):
+        n = int(n)
+        if dt_meth == 'spline':
+            y_d = _spline_detrend(y, n, 4)  # n pieces, cubic
+        elif dt_meth == 'diff':
+            y_d = np.diff(y, n=n)
+        elif dt_meth == 'medianf':
+            y_d = _med_filt_1d(y, n)
+        elif dt_meth == 'rav':
+            y_d = lfilter(np.ones(n) / n, [1], y)
+        elif dt_meth == 'resampleup':
+            y_d = resample_poly(y, n, 1)
+        else:  # resampledown
+            y_d = resample_poly(y, 1, n)
+        outmat[q] = _iterate_stats(y, y_d)
+
+    names = ['statav5', 'swms5_2', 'swss5_2', 'gauss1_kd', 'gauss1_hsqrt', 'norm_kscomp',
+             'ol', 'xcn1', 'xc1', 'normdiff']
+    out = {}
+    for t, name in enumerate(names):
+        out[f'{name}_trend'], out[f'{name}_jump'] = _profile_trend_jump(outmat[:, t])
+    return out
+
+
+def _piecewise_poly_detrend(y: np.ndarray, order: int, num_bits: int) -> np.ndarray:
+    """Remove a polynomial of the given order from each of ``num_bits`` equal pieces (z-scored result).
+
+    The pieces come from hctsa's ``PP_PreProcess`` (``SUB_rempt``): boundaries at
+    ``round(linspace(0, N, num_bits + 1))``, with the fit made against 1, ..., length of piece.
+    """
+    n = len(y)
+    bits = np.array([_round_half_away(v) for v in np.linspace(0, n, num_bits + 1)], dtype=int)
+    out = np.zeros(n)
+    for k in range(num_bits):
+        seg = y[bits[k]:bits[k + 1]]
+        x = np.arange(1, len(seg) + 1, dtype=float)
+        out[bits[k]:bits[k + 1]] = seg - np.polynomial.Polynomial.fit(x, seg, order)(x)
+    return z_score(out)
+
+
+def _rank_map_gaussian(y: np.ndarray, random_seed=None, draws: np.ndarray = None) -> np.ndarray:
+    """Replace the values of y by Gaussian values of the same rank (hctsa's ``rmgd``).
+
+    N Gaussian values are drawn and sorted, and the k-th smallest is given to the k-th smallest
+    value of y. ``random_seed`` is as in ``bf_remove_points``: an integer, ``None``/``'default'``
+    for seed 0, or ``'none'`` for NumPy's global random state. (The draws come from NumPy's
+    generator, so they are not MATLAB's ``randn`` stream for the same seed.) The sorted draws
+    can instead be supplied as ``draws``.
+    """
+    n = len(y)
+    if draws is None:
+        if isinstance(random_seed, str) and random_seed == 'none':
+            draws = np.random.randn(n)
+        else:
+            seed = 0 if random_seed is None or random_seed == 'default' else int(random_seed)
+            draws = _ml_rng(seed).standard_normal(n)
+    out = np.zeros(n)
+    out[np.argsort(y, kind='stable')] = np.sort(draws)
+    return out
+
+
+def _ar_rms_error(data: np.ndarray, order: int) -> float:
+    """In-sample RMS one-step prediction error of an AR model: ``sqrt(mean(pe(ar(data, order), data).^2))``.
+
+    The model is MATLAB's default ``ar`` fit, forward-backward least squares on the samples with a
+    full set of lagged values ('fb/now'). As ``pe`` does, the prediction errors of the first
+    ``order`` samples are 0 (they are counted in the mean).
+    """
+    n = len(data)
+    p = order
+    # Forward and backward prediction regressions, solved jointly
+    A = np.vstack([np.column_stack([data[p - j - 1:n - j - 1] for j in range(p)]),
+                   np.column_stack([data[j + 1:n - p + j + 1] for j in range(p)])])
+    b = np.concatenate([data[p:], data[:n - p]])
+    theta = np.linalg.lstsq(A, b, rcond=None)[0]
+    e = np.zeros(n)
+    e[p:] = data[p:] - np.column_stack([data[p - j - 1:n - j - 1] for j in range(p)]) @ theta
+    return float(np.sqrt(np.mean(e ** 2)))
+
+
+def preproc_model_fit(y: ArrayLike, model: str = 'ar', order: int = 2,
+                      random_seed: Union[int, str, None] = None) -> dict:
+    """
+    How the error of an AR model changes after preprocessing the series.
+
+    Fits an autoregressive (AR) model to the time series and to a set of preprocessed versions of
+    it, and returns the in-sample root-mean-square (RMS) one-step prediction error for each
+    preprocessed version as a ratio of the RMS prediction error for the original series. Every
+    version is z-scored before the model is fitted. The AR model is MATLAB's default
+    ``ar`` fit (forward-backward least squares).
+
+    Only one representative of each family of preprocessings (from hctsa's ``PP_PreProcess``)
+    is fitted, as the other candidates were found to correlate at r >= 0.95 with one of these:
+
+    - ``d1``: incremental differencing (first differences)
+    - ``d2``: second differences
+    - ``p1_20``: a straight line removed in each of 20 equal segments (piece-wise linear detrending)
+    - ``p2_5``: a quadratic removed in each of 5 equal segments (piece-wise quadratic detrending)
+    - ``rmgd``: the values replaced by Gaussian values of the same rank (rank mapping to a
+      Gaussian distribution)
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    model : str, optional
+        The time-series model to fit to the transformed series (currently ``'ar'`` is the only
+        option).
+    order : int, optional
+        The order of the AR model to fit. Default is 2.
+    random_seed : int, 'default', 'none' or None, optional
+        How to seed the random draws used by ``rmgd``, as hctsa's ``BF_ResetSeed``: an integer
+        seed, ``'default'`` or ``None`` for seed 0, or ``'none'`` to use NumPy's global random
+        state. The draws are NumPy's, not MATLAB's ``randn`` stream.
+
+    Returns
+    -------
+    dict
+        The ratios of the RMS prediction error of the AR model for the preprocessed series to
+        that for the original series: ``stderat_d1``, ``stderat_d2``, ``stderat_p1_20``,
+        ``stderat_p2_5``, ``stderat_rmgd``. A ratio above 1 means the preprocessing left the
+        series harder to predict, as when it removes a trend or slow dynamics that the model
+        had been exploiting.
+    """
+    if model != 'ar':
+        raise ValueError(f"Unknown model '{model}'")
+    y = np.asarray(y, dtype=float).ravel()
+    versions = {
+        'nothing': y,
+        'd1': np.diff(y, 1),
+        'd2': np.diff(y, 2),
+        'p1_20': _piecewise_poly_detrend(y, 1, 20),
+        'p2_5': _piecewise_poly_detrend(y, 2, 5),
+        'rmgd': _rank_map_gaussian(y, random_seed),
+    }
+    rms = {k: _ar_rms_error(z_score(v), order) for k, v in versions.items()}
+    return {f'stderat_{k}': rms[k] / rms['nothing'] for k in ('d1', 'd2', 'p1_20', 'p2_5', 'rmgd')}
+
+
+_NRLAZY_BOX = 512  # side of the hash grid used by TISEAN's nrlazy to find neighbors
+
+
+@numba.njit(cache=True)
+def _nrlazy_numba(x, m, d, num_iter, eps):
+    """Schreiber's simple nonlinear noise reduction, a port of TISEAN's ``nrlazy`` (one component).
+
+    ``x`` is the series rescaled to [0, 1] and ``eps`` the neighborhood radius in these units
+    (maximum norm). Each iteration corrects every embedding vector to the mean of its neighbors
+    (all vectors within ``eps`` in every coordinate, including itself), found as in the C code by
+    hashing the first and last coordinates into a ``_NRLAZY_BOX``-squared grid. Each sample
+    becomes the average of its corrections from the (up to m) vectors that contain it.
+    Returns the new series and, for the last iteration, the number of neighbors of each vector
+    (1 for the first (m-1)*d samples, which start no vector).
+    """
+    n = len(x)
+    back = (m - 1) * d
+    ibox = _NRLAZY_BOX - 1
+    epsinv = 1.0 / eps
+    nmf = np.ones(n, dtype=np.int64)
+    for _ in range(num_iter):
+        box = -np.ones((_NRLAZY_BOX, _NRLAZY_BOX), dtype=np.int64)
+        nxt = np.zeros(n, dtype=np.int64)
+        for i in range(back, n):
+            bx = int(x[i] / eps) & ibox
+            by = int(x[i - back] / eps) & ibox
+            nxt[i] = box[bx, by]
+            box[bx, by] = i
+        corr = np.zeros(n)
+        nf = np.zeros(n, dtype=np.int64)
+        nmf[:] = 1
+        hcor = np.zeros(m)
+        for k in range(back, n):
+            for q in range(m):
+                hcor[q] = 0.0
+            i = int(x[k] * epsinv) & ibox
+            j = int(x[k - back] * epsinv) & ibox
+            nfound = 0
+            for i1 in range(i - 1, i + 2):
+                i2 = i1 & ibox
+                for j1 in range(j - 1, j + 2):
+                    element = box[i2, j1 & ibox]
+                    while element != -1:
+                        q = 0
+                        while q < m:
+                            if abs(x[k - q * d] - x[element - q * d]) > eps:
+                                break
+                            q += 1
+                        if q == m:
+                            nfound += 1
+                            for q in range(m):
+                                hcor[q] += x[element - q * d]
+                        element = nxt[element]
+            for q in range(m):
+                corr[k - q * d] += hcor[q] / nfound
+                nf[k - q * d] += 1
+            nmf[k] = nfound
+        for k in range(n):
+            if nf[k] > 0:
+                x[k] = corr[k] / nf[k]
+    return x, nmf
+
+
+def _nrlazy(y: np.ndarray, m: int, d: int, num_iter: int, neighborhood_std: float):
+    """Run ``_nrlazy_numba`` as TISEAN's ``nrlazy -m1,m -d -i -v`` does on the series ``y``.
+
+    Returns ``(y_denoised, num_neighbors)``, or ``None`` where TISEAN would exit with an error
+    (a constant series).
+    """
+    y = np.asarray(y, dtype=float)
+    lo = y.min()
+    interval = y.max() - lo
+    if not interval > 0:
+        return None
+    x = (y - lo) / interval
+    dvar = np.sqrt(abs(np.mean(x ** 2) - np.mean(x) ** 2))  # TISEAN 'variance': the standard deviation
+    if not dvar > 0:
+        return None
+    x, nmf = _nrlazy_numba(x.copy(), int(m), int(d), int(num_iter), neighborhood_std * dvar)
+    return x * interval + lo, nmf
+
+
+def preproc_schreiber_denoise(y: ArrayLike, m: int = 5, d: int = 1, num_iter: int = 1,
+                              neighborhood_std: float = 0.5) -> dict:
+    """
+    Nonlinear noise reduction, and how it changes the series.
+
+    Applies Schreiber's simple nonlinear noise-reduction method, replacing each embedded point by
+    the average of its state-space neighbors, as TISEAN's ``nrlazy`` (a C reimplementation that
+    corrects the whole embedding vector, of the original single-component-correcting Fortran
+    ``lazy``; it tends to do better than ``lazy`` on flow-like data). This is a Python (numba)
+    port of ``nrlazy``, for a scalar time series. The method is that of
+
+    Schreiber, T. "Extremely simple nonlinear noise reduction method", Phys. Rev. E 47, 2401
+    (1993).
+
+    It is the first stage of the pipeline of Toker et al., used for diagnosing oversampling and
+    for classifying chaos with the 0-1 test.
+
+    Denoising is not itself a scalar feature, so this function reports how several properties
+    of the series change as a result of applying it.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    m : int, optional
+        The embedding dimension (nrlazy ``-m``). Default is 5.
+    d : int, optional
+        The embedding delay (nrlazy ``-d``). Default is 1.
+    num_iter : int, optional
+        The number of correction passes (nrlazy ``-i``). More iterations denoise more
+        aggressively but risk distorting real dynamics; TISEAN's own default, and most published
+        use, is 1.
+    neighborhood_std : float, optional
+        The neighborhood radius in units of the standard deviation of the data (nrlazy ``-v``;
+        scale-invariant, unlike the raw ``-r`` option, which is a fixed fraction of the data
+        interval). Default is 0.5.
+
+    Returns
+    -------
+    dict
+        - ``rmsCorrection``: the root-mean-square size of the correction made to the series
+        - ``fracVarRemoved``: 1 - var(denoised) / var(original), the fraction of the variance
+          attributed to noise and removed
+        - ``corrOrigDenoised``: the correlation coefficient between the original and denoised series
+        - ``ac1Change``: the lag-1 autocorrelation of the denoised series minus that of the
+          original (denoising should smooth the series, increasing it)
+        - ``meanNeighbors``: the mean number of neighbors per point found by nrlazy, counting
+          the point itself
+        - ``fracNoCorrection``: the fraction of points with a neighbor count of 1, that is, with no
+          neighbors besides themselves, so that no correction was possible there (diagnoses whether
+          ``neighborhood_std`` was too small for these data)
+        - ``KDenoised``: the statistic K of the 0-1 test for chaos (``zero_one_test``) computed on
+          the denoised series, since measurement noise inflates the apparent diffusion of the
+          test's (p, q) trajectory
+        - ``KChange``: ``KDenoised`` minus K of the original series: does removing noise change
+          the chaos verdict for this series?
+
+        All values are NaN if the series is too short for the embedding, or if nrlazy cannot
+        process it (a constant series). The 0-1 test needs at least 200 samples, so ``KDenoised``
+        and ``KChange`` are NaN for shorter series.
+    """
+    keys = ['rmsCorrection', 'fracVarRemoved', 'corrOrigDenoised', 'ac1Change', 'meanNeighbors',
+            'fracNoCorrection', 'KDenoised', 'KChange']
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    nan_out = {k: np.nan for k in keys}
+
+    # Need enough points for an embedding vector, with margin for the local statistics
+    if N < max(50, 10 * ((m - 1) * d + 1)):
+        logger.warning(f"Time series too short to denoise at m={m}, d={d}")
+        return nan_out
+
+    res = _nrlazy(y, m, d, num_iter, neighborhood_std)
+    if res is None or not np.all(np.isfinite(res[0])):
+        logger.warning("nrlazy cannot denoise this series")
+        return nan_out
+    y_den, num_neighbors = res
+
+    out = {}
+    out['rmsCorrection'] = float(np.sqrt(np.mean((y - y_den) ** 2)))
+    out['fracVarRemoved'] = float(1 - np.var(y_den, ddof=1) / np.var(y, ddof=1))
+    out['corrOrigDenoised'] = float(np.corrcoef(y, y_den)[0, 1])
+    out['ac1Change'] = float(np.ravel(autocorr(y_den, 1, 'Fourier'))[0]
+                             - np.ravel(autocorr(y, 1, 'Fourier'))[0])
+    out['meanNeighbors'] = float(np.mean(num_neighbors))
+    out['fracNoCorrection'] = float(np.mean(num_neighbors == 1))
+
+    # Does denoising change the 0-1-test chaos verdict?
+    k_orig = zero_one_test(y, 20)['K']
+    k_den = zero_one_test(y_den, 20)['K']
+    out['KDenoised'] = float(k_den)
+    out['KChange'] = float(k_den - k_orig)
     return out
