@@ -2072,15 +2072,12 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
                                                                            25, method='hazen')
     out['iqronrange'] = out['iqr']/np.ptp(counts)
 
-    # distribution - using sqrt binning method (as MATLAB's histcounts: the bin width is
-    # (range / ceil(sqrt(N))), rounded to a "nice" value by the bin picker)
-    num_bins_to_use = max(int(np.ceil(np.sqrt(len(counts)))), 1)
-    min_x, max_x = np.min(counts), np.max(counts)
-    bin_edges = bin_picker(min_x, max_x, n_bins=None,
-                           bin_width_est=(max_x - min_x) / num_bins_to_use)
-    bin_counts = histc(counts, bin_edges)
+    # distribution - using the sqrt binning rule, with explicit edges (the local densities are
+    # fractions k/n, so many lie exactly on a bin edge)
+    bin_edges = bf_hist_edges(counts, 'sqrt')
+    bin_counts = np.histogram(counts, bins=bin_edges)[0]
     # normalise bin counts
-    bin_counts_norm = np.divide(bin_counts, np.sum(bin_counts))
+    bin_counts_norm = np.divide(bin_counts, len(counts))
     # get bin centres
     bin_centres = (bin_edges[:-1] + bin_edges[1:]) / 2
     out['mode_val'] = np.max(bin_counts_norm)
