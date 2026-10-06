@@ -1884,9 +1884,9 @@ model_fit:
     base_name: gp_local_prediction
     dependencies:
     configs:
-      - {cov_func: 'covSEiso_covNoise', num_train: 5, num_test: 3, num_preds: 10, pmode: 'beforeafter', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'q90abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},5,3,10,'beforeafter')
-      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'frombefore', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'q90abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},10,3,20,'frombefore')
-      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'spreadgap', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'maxabs_run', 'maxabs_std_run', 'minabs_std_run', 'maxerrbar', 'maxnlml', 'q90nlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},10,3,20,'spreadgap')
+      - {cov_func: 'covSEiso_covNoise', num_train: 5, num_test: 3, num_preds: 10, pmode: 'beforeafter', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'q90abs_run', 'q10abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},5,3,10,'beforeafter')
+      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'frombefore', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'q90abs_run', 'q10abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},10,3,20,'frombefore')
+      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'spreadgap', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'maxabs_run', 'maxabs_std_run', 'minabs_std_run', 'maxerrbar', 'maxnlml', 'q90nlml', 'minabs_run']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},10,3,20,'spreadgap')
     legacy_name: MF_GP_LocalPrediction
     ordered_args: ['cov_func', 'num_train', 'num_test', 'num_preds', 'pmode']
 
@@ -1935,12 +1935,12 @@ model_fit:
     dependencies:
     configs:
       - {cov_func: 'covSEiso_covNoise', max_n: 50, resample_how: 'random_i', zscore: True, exclude: ['maxS']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,50,'random_i','default')
-      - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'first', zscore: True}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,200,'first')
-      - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'resample', zscore: True}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,200,'resample')
-      - {cov_func: 'covSEiso_covPeriodic_covNoise', max_n: 200, resample_how: 'first', zscore: True}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covPeriodic','covNoise'}},1,200,'first')
-      - {cov_func: 'covSEiso_covPeriodic_covNoise', max_n: 200, resample_how: 'resample', zscore: True}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covPeriodic','covNoise'}},1,200,'resample')
-      - {cov_func: 'covMaterniso3_covNoise', max_n: 200, resample_how: 'first', zscore: True}   # MF_GP_Hyperparameters(x_z,{'covSum',{{'covMaterniso',3},'covNoise'}},1,200,'first')
-      - {cov_func: 'covRQiso_covNoise', max_n: 200, resample_how: 'first', zscore: True}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covRQiso','covNoise'}},1,200,'first')
+      - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,200,'first')
+      - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'resample', zscore: True, exclude: ['oosmedabserr']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,200,'resample')
+      - {cov_func: 'covSEiso_covPeriodic_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covPeriodic','covNoise'}},1,200,'first')
+      - {cov_func: 'covSEiso_covPeriodic_covNoise', max_n: 200, resample_how: 'resample', zscore: True, exclude: ['oosmedabserr']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covPeriodic','covNoise'}},1,200,'resample')
+      - {cov_func: 'covMaterniso3_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr']}   # MF_GP_Hyperparameters(x_z,{'covSum',{{'covMaterniso',3},'covNoise'}},1,200,'first')
+      - {cov_func: 'covRQiso_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covRQiso','covNoise'}},1,200,'first')
     legacy_name: MF_GP_Hyperparameters
     ordered_args: ['cov_func', 'max_n', 'resample_how']
 
