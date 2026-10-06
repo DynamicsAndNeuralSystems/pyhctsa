@@ -17,7 +17,7 @@ def test_meannumsurr_equal_matlab(s, c):
     x = np.array(FIX[s]['y'], dtype=float)
     d = FIX[s][c]
     out = su.surrogates(x, d['tau'], 20, d['m'], d['fn'], 42)
-    for k in ('meannumsurr', 'meansurr', 'stdsurr'):
+    for k in ('meannumsurr', 'meansurr', 'stdsurr', 'zsigned'):
         assert out[k] == pytest.approx(d[k], rel=1e-7, abs=1e-9), (s, c, k)
 
 

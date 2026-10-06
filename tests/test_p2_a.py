@@ -133,7 +133,7 @@ def test_surrogates_equal_surrogates_give_nan_kernel_outputs(monkeypatch):
     monkeypatch.setattr(su, 'tc3', lambda x, tau: {'raw': 0.5, 'num': 0.1})
     out = su.surrogates(np.random.RandomState(0).randn(60), 1, 10, 3, 'tc3', 0)
     assert isinstance(out, dict)
-    for k in ('normpatponmax', 'stdfrommean', 'ztestp', 'kspminfromext', 'ksphereonmax'):
+    for k in ('normpatponmax', 'stdfrommean', 'ztestp', 'kspminfromext', 'ksphereonmax', 'zsigned'):
         assert np.isnan(out[k]), k
 
 

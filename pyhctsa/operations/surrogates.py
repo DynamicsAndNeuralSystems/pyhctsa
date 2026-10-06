@@ -510,6 +510,10 @@ def surrogates(
         - ``'normpatponmax'``: the Gaussian density N(muhat, sigmahat) at ``s`` relative to
           its peak value.
         - ``'stdfrommean'``: ``|s - muhat| / sigmahat``.
+        - ``'zsigned'``: ``(s - muhat) / sigmahat``, the z-score of the series' statistic
+          against the surrogates keeping its sign (whether the series has more or less of
+          the statistic than the null ensemble); NaN if ``sigmahat`` is at the rounding
+          level of the surrogates' values (``sigmahat <= 1e-10 * max|value|``).
         - ``'ztestp'``: the p-value of a z-test of ``s`` against N(muhat, sigmahat).
         - ``'iqrsfrommedian'``: ``|s - median| / iqrsurr`` (NaN if ``iqrsurr`` is 0).
         - ``'kspminfromext'``: the smaller of the kernel-density probabilities of a value
@@ -580,6 +584,12 @@ def surrogates(
         out['stdfrommean'] = np.abs(tc3_y - muhat) / sigmahat
         # (~equivalent to a z-test:)
         out['ztestp'] = 2 * norm.sf(np.abs((tc3_y - muhat) / sigmahat))
+
+    # signed z-score (NaN if the surrogates' spread is at rounding level)
+    if sigmahat <= 1e-10 * np.max(np.abs(tc3_surr)):
+        out['zsigned'] = np.nan
+    else:
+        out['zsigned'] = (tc3_y - muhat) / sigmahat
 
     # iqrs from median
     iqrsurr = np.quantile(tc3_surr, 0.75, method='hazen') - np.quantile(tc3_surr, 0.25, method='hazen')
