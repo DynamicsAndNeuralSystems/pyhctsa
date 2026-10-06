@@ -809,9 +809,9 @@ entropy:
     base_name: randomize
     dependencies:
     configs:
-      - {randomize_how: 'dyndist', zscore: True, exclude: ['d1diff', 'd1fexpa', 'd1fexpc', 'd1fexprmse']}   # EN_Randomize(x_z,'dyndist','default')
-      - {randomize_how: 'permute', zscore: True, exclude: ['d1diff', 'd1fexpa', 'd1fexpc', 'd1fexprmse', 'd1hp']}   # EN_Randomize(x_z,'permute','default')
-      - {randomize_how: 'statdist', zscore: True, exclude: ['d1diff', 'd1fexpa', 'd1fexpc', 'd1fexprmse']}   # EN_Randomize(x_z,'statdist','default')
+      - {randomize_how: 'dyndist', zscore: True, exclude: ['d1diff', 'd1fexpa', 'd1fexpc', 'd1fexprmse', 'ac1fexpb', 'ac1fexprmse', 'ac1hp', 'ac2fexpb', 'ac2fexprmse', 'ac2hp', 'ac3fexpb', 'ac3fexprmse', 'ac3hp', 'ac4fexpb', 'ac4fexprmse', 'ac4hp', 'd1fexpb', 'd1fexpr2', 'permen3_1hp', 'statav5fexpb', 'statav5fexpc', 'statav5fexprmse', 'statav5hp', 'swss5_1fexpa', 'swss5_1fexpb', 'swss5_1fexpc', 'swss5_1hp', 'xc1fexpb', 'xc1fexprmse', 'xc1hp', 'xcn1fexpb', 'xcn1fexprmse', 'xcn1hp']}   # EN_Randomize(x_z,'dyndist','default')
+      - {randomize_how: 'permute', zscore: True, exclude: ['d1diff', 'd1fexpa', 'd1fexpc', 'd1fexprmse', 'd1hp', 'ac1fexpb', 'ac1fexprmse', 'ac1hp', 'ac2fexpb', 'ac2fexprmse', 'ac2hp', 'ac3fexpb', 'ac3fexprmse', 'ac3hp', 'ac4fexpb', 'ac4fexprmse', 'ac4hp', 'd1fexpb', 'd1fexpr2', 'permen3_1fexpc', 'permen3_1hp', 'statav5fexpa', 'statav5fexpc', 'statav5hp', 'swss5_1fexpa', 'swss5_1hp', 'xc1fexpb', 'xc1fexprmse', 'xc1hp', 'xcn1fexpb', 'xcn1fexprmse', 'xcn1hp']}   # EN_Randomize(x_z,'permute','default')
+      - {randomize_how: 'statdist', zscore: True, exclude: ['d1diff', 'd1fexpa', 'd1fexpc', 'd1fexprmse', 'ac1fexpb', 'ac1fexprmse', 'ac1hp', 'ac2fexpb', 'ac2fexprmse', 'ac2hp', 'ac3fexpb', 'ac3fexprmse', 'ac3hp', 'ac4fexpb', 'ac4fexprmse', 'ac4hp', 'd1fexpb', 'd1fexpr2', 'permen3_1hp', 'statav5fexpb', 'statav5fexpc', 'statav5fexprmse', 'statav5hp', 'swss5_1fexpa', 'swss5_1fexpb', 'swss5_1hp', 'xc1fexpb', 'xc1fexprmse', 'xc1hp', 'xcn1fexpb', 'xcn1fexprmse', 'xcn1hp']}   # EN_Randomize(x_z,'statdist','default')
     legacy_name: EN_Randomize
     ordered_args: ['randomize_how']
 
@@ -1886,7 +1886,7 @@ model_fit:
     configs:
       - {cov_func: 'covSEiso_covNoise', num_train: 5, num_test: 3, num_preds: 10, pmode: 'beforeafter', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'q90abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},5,3,10,'beforeafter')
       - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'frombefore', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'q90abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},10,3,20,'frombefore')
-      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'spreadgap', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'maxabs_run', 'maxabs_std_run', 'minabs_std_run', 'maxerrbar', 'maxnlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},10,3,20,'spreadgap')
+      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'spreadgap', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'maxabs_run', 'maxabs_std_run', 'minabs_std_run', 'maxerrbar', 'maxnlml', 'q90nlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},10,3,20,'spreadgap')
     legacy_name: MF_GP_LocalPrediction
     ordered_args: ['cov_func', 'num_train', 'num_test', 'num_preds', 'pmode']
 
@@ -1934,7 +1934,7 @@ model_fit:
     base_name: gp_hyperparameters
     dependencies:
     configs:
-      - {cov_func: 'covSEiso_covNoise', max_n: 50, resample_how: 'random_i', zscore: True}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,50,'random_i','default')
+      - {cov_func: 'covSEiso_covNoise', max_n: 50, resample_how: 'random_i', zscore: True, exclude: ['maxS']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,50,'random_i','default')
       - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'first', zscore: True}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,200,'first')
       - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'resample', zscore: True}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,200,'resample')
       - {cov_func: 'covSEiso_covPeriodic_covNoise', max_n: 200, resample_how: 'first', zscore: True}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covPeriodic','covNoise'}},1,200,'first')
@@ -2104,18 +2104,16 @@ surrogates:
     base_name: surrogates
     dependencies:
     configs:
-      - {tau: 1, nsurr: 100, surr_method: 1, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr']}   # SD_Surrogates(x_z,1,100,1,'tc3','default')
-      - {tau: 1, nsurr: 100, surr_method: 1, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr']}   # SD_Surrogates(x_z,1,100,1,'trev','default')
+      - {tau: 1, nsurr: 100, surr_method: 1, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr']}   # SD_Surrogates(x_z,1,100,1,'tc3','default')
+      - {tau: 1, nsurr: 100, surr_method: 1, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr']}   # SD_Surrogates(x_z,1,100,1,'trev','default')
       - {tau: 1, nsurr: 100, surr_method: 2, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meansurr']}   # SD_Surrogates(x_z,1,100,2,'tc3','default')
-      - {tau: 1, nsurr: 100, surr_method: 2, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr']}   # SD_Surrogates(x_z,1,100,2,'trev','default')
-      - {tau: 1, nsurr: 100, surr_method: 3, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr']}   # SD_Surrogates(x_z,1,100,3,'tc3','default')
-      - {tau: 1, nsurr: 100, surr_method: 3, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr']}   # SD_Surrogates(x_z,1,100,3,'trev','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 1, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr']}   # SD_Surrogates(x_z,'mi',100,1,'tc3','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 1, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr']}   # SD_Surrogates(x_z,'mi',100,1,'trev','default')
+      - {tau: 1, nsurr: 100, surr_method: 2, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr']}   # SD_Surrogates(x_z,1,100,2,'trev','default')
+      - {tau: 1, nsurr: 100, surr_method: 3, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr']}   # SD_Surrogates(x_z,1,100,3,'trev','default')
+      - {tau: 'mi', nsurr: 100, surr_method: 1, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr']}   # SD_Surrogates(x_z,'mi',100,1,'tc3','default')
+      - {tau: 'mi', nsurr: 100, surr_method: 1, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr']}   # SD_Surrogates(x_z,'mi',100,1,'trev','default')
       - {tau: 'mi', nsurr: 100, surr_method: 2, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meansurr']}   # SD_Surrogates(x_z,'mi',100,2,'tc3','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 2, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr']}   # SD_Surrogates(x_z,'mi',100,2,'trev','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 3, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr']}   # SD_Surrogates(x_z,'mi',100,3,'tc3','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 3, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr']}   # SD_Surrogates(x_z,'mi',100,3,'trev','default')
+      - {tau: 'mi', nsurr: 100, surr_method: 2, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr']}   # SD_Surrogates(x_z,'mi',100,2,'trev','default')
+      - {tau: 'mi', nsurr: 100, surr_method: 3, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr']}   # SD_Surrogates(x_z,'mi',100,3,'trev','default')
     legacy_name: SD_Surrogates
     ordered_args: ['tau', 'surr_method', 'surrfn']
 
