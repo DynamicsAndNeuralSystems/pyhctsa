@@ -1,4 +1,4 @@
-sphinx
+sphinx<9  # sphinx-immaterial search breaks on Sphinx 9 (stopwords became a Set)
 furo
 sphinx-immaterial
 nbsphinx
