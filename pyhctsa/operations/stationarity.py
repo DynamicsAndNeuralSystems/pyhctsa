@@ -205,7 +205,6 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     # segments of the time series
     out = {}
     out['meandiv'] = np.mean(divs)
-    out['maxdiv'] = np.max(divs)
     out['stddiv'] = np.std(divs, ddof=1)
 
     return out
@@ -385,6 +384,7 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
 
     out = {}
     rmat = np.corrcoef(M1, M2)
+    out['R'] = rmat[0, 1]
     out['absR'] = np.abs(rmat[0, 1])
     # density of points in M1--M2 space: (number of windows) / (bounding-box area)
     with np.errstate(divide='ignore', invalid='ignore'):
