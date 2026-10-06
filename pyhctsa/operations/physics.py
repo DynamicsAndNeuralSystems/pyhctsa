@@ -103,7 +103,9 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
         # biased motion: [p_up, p_down]
         pup, pdown = walker_params
         for i in range(1, N):
-            if y[i] > y[i-1]:  # time series increases
+            # direction of the change just observed, y[i-1] vs y[i-2];
+            # p_down at the first step (no previous change)
+            if i >= 2 and y[i-1] > y[i-2]:
                 w[i] = w[i-1] + pup * (y[i-1] - w[i-1])
             else:
                 w[i] = w[i-1] + pdown * (y[i-1] - w[i-1])
@@ -115,7 +117,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
         w[1] = y[1]
         for i in range(2, N):
             w_inert = w[i-1] + (w[i-1] - w[i-2])
-            w[i] = w_inert + (y[i] - w_inert) / m  # dissipative term
+            w[i] = w_inert + (y[i-1] - w_inert) / m  # dissipative term
 
     elif walker_rule == 'runningvar':
         # inertial motion rescaled by local standard deviation
@@ -125,15 +127,14 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
         w[1] = y[1]
         for i in range(2, N):
             w_inert = w[i-1] + (w[i-1] - w[i-2])
-            w_mom = w_inert + (y[i] - w_inert) / m  # dissipative term
-            # MATLAB: if im > wl, with im the 1-based index (= i + 1 here).
-            if i + 1 > wl:
-                # MATLAB windows are y(im-wl:im) / w(im-wl:im): inclusive of the
-                # current index -> wl+1 samples. w[i] is still 0 at this point
-                # (not yet assigned), exactly mirroring MATLAB reading the
-                # unwritten w(i). Slicing i-wl : i+1 reproduces both.
-                sy = np.std(y[i-wl:i+1], ddof=1)
-                sw = np.std(w[i-wl:i+1], ddof=1)
+            w_mom = w_inert + (y[i-1] - w_inert) / m  # dissipative term
+            # MATLAB: if i > wl + 1, with i the 1-based index (= i + 1 here).
+            if i > wl:
+                # w[i] is not yet computed, so the local std of the walker is
+                # built from its previous wl values plus the provisional w_mom.
+                # The series is read one step lagged: y[i-wl-1 : i] (wl+1 samples).
+                sy = np.std(y[i-wl-1:i], ddof=1)
+                sw = np.std(np.append(w[i-wl:i], w_mom), ddof=1)
                 w[i] = w_mom * (sy / sw)
             else:
                 w[i] = w_mom
@@ -173,7 +174,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     _, runs_pval = runstest_1samp(res, cutoff='mean')
     out['res_runstest'] = runs_pval
     out['res_swss5_1'] = sliding_window(res, 'std', 'std', 5, 1)
-    out['res_ac1'] = autocorr(res, 1)
+    out['res_ac1'] = autocorr(res, 1)[0]
 
     return out
 
@@ -209,7 +210,7 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
 
     .. math::
 
-        F(x) = \\frac{1}{\\alpha}
+        F(x) = -\\frac{1}{\\alpha}
         \\sin\\left(\\frac{x}{\\alpha}\\right).
 
     The time series provides a forcing contribution to the particle dynamics,
@@ -264,7 +265,7 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
     # force F(x) = -dV/dx for the chosen potential V(x)
     if what_potential == 'sine':
         # V(x) = -cos(x / alpha)
-        F = lambda x: np.sin(x/alpha)/alpha
+        F = lambda x: -np.sin(x/alpha)/alpha
     else:  # 'dblwell': V(x) = x^4 / 4 - alpha^2 x^2 / 2
         F = lambda x: -x**3 + alpha**2 * x
 
