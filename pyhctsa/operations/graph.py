@@ -11,19 +11,23 @@ from pyhctsa.operations.correlation import autocorr, first_crossing
 
 def _hvg_links(x: np.ndarray) -> tuple:
     """
-    Nearest strictly-taller neighbour to the left and to the right of every node.
+    Nearest neighbour at least as tall to the left and to the right of every node.
 
     Returns
     -------
     prev, nxt : ndarray of intp, shape (N,)
-        ``prev[i]`` is the largest ``j < i`` with ``x[j] > x[i]``, or -1 if none.
-        ``nxt[i]`` is the smallest ``j > i`` with ``x[j] > x[i]``, or -1 if none.
+        ``prev[i]`` is the largest ``j < i`` with ``x[j] >= x[i]``, or -1 if none.
+        ``nxt[i]`` is the smallest ``j > i`` with ``x[j] >= x[i]``, or -1 if none.
 
     Notes
     -----
     Two monotonic-stack passes, O(N) total.
+    Ties must terminate the search (``>=``, not ``>``), otherwise equal-valued
+    points are never linked and pairs separated by an equal-valued intermediate
+    are linked wrongly; with ``>=`` the links reproduce the horizontal
+    visibility graph (``x[k] < min(x[i], x[j])`` for all intermediate k).
     NaN nodes neither block visibility nor count as taller neighbours, matching
-    the all-False semantics of ``slice > nan``.
+    the all-False semantics of ``slice >= nan``.
     """
     N = x.shape[0]
     prev = np.full(N, -1, dtype=np.intp)
@@ -39,7 +43,7 @@ def _hvg_links(x: np.ndarray) -> tuple:
         v = xl[i]
         if v != v:  # NaN: never taller, never occluding
             continue
-        while stack and not (xl[stack[-1]] > v):
+        while stack and not (xl[stack[-1]] >= v):
             stack.pop()
         if stack:
             prev[i] = stack[-1]
@@ -50,7 +54,7 @@ def _hvg_links(x: np.ndarray) -> tuple:
         v = xl[i]
         if v != v:
             continue
-        while stack and not (xl[stack[-1]] > v):
+        while stack and not (xl[stack[-1]] >= v):
             stack.pop()
         if stack:
             nxt[i] = stack[-1]
@@ -64,9 +68,10 @@ def _horiz_vgraph_degrees(ts_data: ArrayLike) -> np.ndarray:
     Degree sequence of the horizontal visibility graph, without materialising
     the N x N adjacency matrix.
 
-    The forward and backward link sets are disjoint as unordered pairs --
-    ``nxt[i] == j`` requires ``x[j] > x[i]`` while ``prev[j] == i`` requires
-    ``x[i] > x[j]`` -- so no edge is double counted and a bincount over edge
+    The forward and backward link sets overlap only for pairs of equal value
+    (``nxt[i] == j`` requires ``x[j] >= x[i]`` while ``prev[j] == i`` requires
+    ``x[i] >= x[j]``), and those are found by both passes, so the backward
+    copy is dropped. Then no edge is double counted and a bincount over edge
     endpoints gives the degrees exactly.
     """
     x = np.asarray(ts_data)
@@ -77,6 +82,10 @@ def _horiz_vgraph_degrees(ts_data: ArrayLike) -> np.ndarray:
     prev, nxt = _hvg_links(x)
     pm = prev >= 0
     nm = nxt >= 0
+    # equal-valued pairs are found by both passes: keep only the forward copy
+    eq = np.zeros(N, dtype=bool)
+    eq[pm] = x[prev[pm]] == x[pm]
+    pm = pm & ~eq
     endpoints = np.concatenate((
         np.flatnonzero(pm), prev[pm],
         np.flatnonzero(nm), nxt[nm],
@@ -152,7 +161,7 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: int = 5000) -> di
     out = {}
     # Degree distribution: basic statistics
     out['mode'] = scipy.stats.mode(k).mode
-    out['propmode'] = np.sum(k == out['mode'])/np.sum(k)
+    out['propmode'] = np.sum(k == out['mode'])/len(k)
     out['meank'] = meank # mean number of links per node
     out['mediank'] = mediank
     out['stdk'] = stdk

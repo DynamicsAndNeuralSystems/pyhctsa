@@ -598,6 +598,9 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
     except ValueError as e:  # embedding failed (time series too short)
         logger.warning(str(e))
         return np.nan
+    if y_embed.shape[0] - 1 < m or m < 2:
+        logger.warning(f'Not enough embedding vectors ({y_embed.shape[0]}) for a rank-{m} PCA')
+        return np.nan
     # do the PCA
     pca = PCA().fit(y_embed)
     #proportion of variance explained
@@ -897,7 +900,7 @@ def _sub_getslopes(x: np.ndarray, Y: np.ndarray) -> np.ndarray:
 
     results = np.full((ndim, 4), np.nan)
     for c in range(ndim):
-        v = np.diff(Y[c, :]) * dx  # vector of local gradients
+        v = np.diff(Y[c, :]) / dx  # vector of local gradients
         a, b, best = _best_flat_range(v, gamma, stptr, endptr)
         if a is None:
             continue
@@ -920,7 +923,7 @@ def _sub_doesflatten(x: np.ndarray, Y: np.ndarray) -> np.ndarray:
 
     results = np.full((ndim, 2), np.nan)
     for c in range(ndim):
-        v = np.diff(Y[c, :]) * dx
+        v = np.diff(Y[c, :]) / dx
         with np.errstate(invalid='ignore', divide='ignore'):
             vnorm = np.abs(v) / np.abs(v).max()
         # the two outside regions each depend on a single endpoint, so they only
@@ -957,9 +960,12 @@ def _summarise_d2_scaling(dat_v: np.ndarray, dat_M: np.ndarray, p: str,
     out[f'ben{p}_meangoodness'] = np.mean(benfind[:, 2])
 
     mmin = _sub_findmmin(benfind[:, 3])
-    # minimum scale at which a scaling range is observed:
-    out[f'benmmin{p}_logminl'] = (np.nan if mmin['ri1'] is None
-                                  else np.log(dat_v[mmin['ri1'] - 1]))
+    # minimum scale at which a scaling range is observed: the start of the
+    # scaling range found for embedding dimension m_min (column 0 of benfind
+    # holds the 1-based start index into dat_v)
+    start = np.nan if mmin['ri1'] is None else benfind[mmin['ri1'] - 1, 0]
+    out[f'benmmin{p}_logminl'] = (np.nan if np.isnan(start)
+                                  else np.log(dat_v[int(start) - 1]))
     out[f'benmmin{p}_goodness'] = mmin['goodness']
     out[f'benmmin{p}_stabledim'] = mmin['stabled']
     out[f'benmmin{p}_linrmserr'] = mmin['linrmserr']
@@ -1179,8 +1185,8 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     dict or float
         Statistics on the x- and y-components of the vectors on the Poincare
         surface, on distances between adjacent points and from the mean
-        position, and on the entropy of the boxed vector cloud. Returns NaN if
-        fewer than two section points were found.
+        position, and on the (Miller-Madow-corrected) entropy of the boxed vector
+        cloud. Returns NaN if fewer than two section points were found.
     """
     if ref == 'max':
         direction = 0  # crossing from below (heading toward a local maximum)
@@ -1281,8 +1287,11 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         out[f'zerospbox{num_partitions}'] = np.sum(pbox == 0)
         out[f'meanpbox{num_partitions}'] = np.mean(pbox)
         out[f'rangepbox{num_partitions}'] = np.ptp(pbox)
-        # This probably needs to be normalized:
-        out[f'hboxcounts{num_partitions}'] = -np.sum(pos * np.log(pos))
+        # Box-occupancy entropy, Miller-Madow corrected: the plug-in estimator
+        # -sum(p log p) is biased low by (M-1)/(2n) for M occupied boxes and n
+        # points on the section, so the raw value tracks the series length.
+        out[f'hboxcounts{num_partitions}'] = (
+            -np.sum(pos * np.log(pos)) + (pos.size - 1) / (2 * nn))
         out[f'tracepbox{num_partitions}'] = np.sum(np.diag(pbox))  # trace
 
     return out
