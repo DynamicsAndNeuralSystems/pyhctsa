@@ -7,7 +7,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from numba import njit
 from antropy.entropy import _xlogx
-from scipy.stats import gaussian_kde
+from scipy.stats import gaussian_kde, rankdata
 from sklearn.neighbors import KDTree
 
 from ..operations.correlation import first_crossing
@@ -85,8 +85,9 @@ def shannon_entropy(
     elif bin_range_size > 1:
         if depth_range_size == 1:
             # Statistics over different bin numbers (constant depth)
+            # Entropy scales with depth, so normalize by this factor
             ents = np.array([
-                shannon.entropy(y, int(n), int(depth)) for n in num_bins
+                shannon.entropy(y, int(n), int(depth)) / int(depth) for n in num_bins
             ])
             out = _entropy_summary(ents)
         elif depth_range_size > 1:
@@ -191,8 +192,14 @@ def distribution_entropy(
     mask = px > 0
     p = px[mask]
     log_p = np.log(p / bin_widths[mask])
+    out = -np.sum(p * log_p)
 
-    return -np.sum(p * log_p)
+    if hist_or_ks == 'hist':
+        # Miller-Madow correction for the downward bias of the plug-in estimate,
+        # using this call's own sample size (y is y_hat inside the olremp recursion)
+        out += (np.count_nonzero(px) - 1) / (2 * len(y))
+
+    return out
 
 def multi_scale_entropy(
     y: ArrayLike,
@@ -628,8 +635,8 @@ def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2,
         Default is `None`.
 
     rng : int, optional
-        Random seed for reproducibility. Used for adding small random
-        noise to break ties during symbolization. Default is 0.
+        Unused (ties are now broken deterministically by average ranks); kept for
+        backward compatibility. Default is 0.
 
     Returns
     -------
@@ -637,7 +644,6 @@ def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2,
         Normalized Lempel-Ziv complexity: the number of distinct symbol sequences
         divided by the expected number for a noise sequence.
     """
-    rng = np.random.RandomState(rng) # fix the seed for reproducibility
     x = np.asarray(x, dtype=np.float64).ravel()
     if pre_proc == "diff":
         x = z_score(np.diff(x))
@@ -645,10 +651,14 @@ def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2,
     if x.size == 0 or n_bits < 2:
         return 0.0
 
-    symbols = _symbolise_lz(x, n_bits, rng)
+    symbols = _symbolise_lz(x, n_bits)
     c = _lz_complexity(symbols)
 
-    return (c * np.log(x.size)) / (x.size * np.log(n_bits))
+    # normalize by the number of symbols actually present (as MS_complexitybs.c does),
+    # which can be fewer than n_bits when many values are tied
+    bins = int(symbols.max())
+
+    return (c * np.log(x.size)) / (x.size * np.log(bins))
 
 @njit(cache=True, fastmath=True)
 def _lz_complexity(symbols: np.ndarray) -> int:
@@ -666,9 +676,8 @@ def _lz_complexity(symbols: np.ndarray) -> int:
 
     while k < n:
         is_substring = False
-        max_i = ns - nq
-        # brute-force search
-        for i in range(max_i + 1):
+        # brute-force search over all start positions i < ns (Q may overlap itself)
+        for i in range(ns):
             match = True
             for j in range(nq):
                 if symbols[i + j] != symbols[ns + j]:
@@ -688,14 +697,11 @@ def _lz_complexity(symbols: np.ndarray) -> int:
 
     return c
 
-def _symbolise_lz(x: np.ndarray, n_bins: int, rng) -> np.ndarray:
-    """Helper function for lempel_ziv_complexity"""
-    nx = x.size
-    noisy = x + np.finfo(np.float64).eps * rng.randn(nx)
-    order = np.argsort(noisy, kind="mergesort")
-    ranks = np.arange(1, nx + 1)
-    symbols = np.floor(ranks * (n_bins / (nx + 1)))
+def _symbolise_lz(x: np.ndarray, n_bins: int) -> np.ndarray:
+    """Helper function for lempel_ziv_complexity: equiprobable symbols from ranks.
 
-    out = np.empty_like(symbols)
-    out[order] = symbols + 1
-    return out
+    Tied values share an (average) rank and therefore always get the same symbol.
+    """
+    nx = x.size
+    ranks = rankdata(x, method="average")
+    return np.floor(ranks * (n_bins / (nx + 1))) + 1

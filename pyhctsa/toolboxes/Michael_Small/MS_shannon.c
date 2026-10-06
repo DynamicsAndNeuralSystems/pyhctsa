@@ -25,7 +25,8 @@
 int compare(const void *arg1, const void *arg2)
      /* compare two doubles and return arg1-arg2 */
 {
-  return( *(int *)arg1 - *(int *)arg2 );
+  double a = *(const double *)arg1, b = *(const double *)arg2;
+  return (a > b) - (a < b);
 }
 
 /**
@@ -45,7 +46,7 @@ double shannon_entropy(double *data, int length, int bins, int depth) {
     // Allocate memory
     unsigned short *symbols = calloc(length, sizeof(unsigned short));
     double *sorted = calloc(length, sizeof(double));
-    float *thresholds = calloc(bins - 1, sizeof(float));
+    double *thresholds = calloc(bins - 1, sizeof(double));
     unsigned long *tally = calloc((unsigned long)pow(bins, depth), sizeof(unsigned long));
     
     if (!symbols || !sorted || !thresholds || !tally) {
@@ -64,7 +65,7 @@ double shannon_entropy(double *data, int length, int bins, int depth) {
     
     // Extract percentile thresholds for n-bin encoding
     for (int i = 1; i < bins; i++) {
-        thresholds[i-1] = (float)sorted[i * length / bins];  // Cast to float like original
+        thresholds[i-1] = sorted[i * length / bins];
     }
     
     // Encode the data into symbols
