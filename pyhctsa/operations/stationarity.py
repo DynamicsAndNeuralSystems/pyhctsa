@@ -205,7 +205,6 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     # segments of the time series
     out = {}
     out['meandiv'] = np.mean(divs)
-    out['maxdiv'] = np.max(divs)
     out['stddiv'] = np.std(divs, ddof=1)
 
     return out
