@@ -5,16 +5,13 @@ logger = logging.getLogger('pyhctsa')
 import numpy as np
 from numpy.typing import ArrayLike
 from arch.unitroot import VarianceRatio
-from scipy.interpolate import PchipInterpolator
-from scipy.optimize import brentq
 from scipy.stats import beta as beta_dist
 from scipy.stats import gamma as gamma_dist
-from scipy.stats import jarque_bera, norm, wilcoxon, rayleigh, expon, gumbel_l, kstwo, lognorm, uniform, weibull_min, chi2
+from scipy.stats import jarque_bera, norm, wilcoxon, rayleigh, expon, gumbel_l, lognorm, uniform, weibull_min
 from statsmodels.sandbox.stats.runs import runstest_1samp
 from statsmodels.stats.descriptivestats import sign_test
 
 from ..utils import ljung_box_pvalue
-from ..toolboxes.distribution_fits._lilliefors_tables import LILLIE_ALPHAS, LILLIE_TABLES
 from ..toolboxes.distribution_fits.distfits import betafit, evfit
 
 def _fit_distribution_cdf(x: np.ndarray, the_distn: str) -> tuple:
@@ -57,12 +54,10 @@ def _fit_distribution_cdf(x: np.ndarray, the_distn: str) -> tuple:
     raise ValueError(f"Unknown distribution '{the_distn}'.")
 
 
-def _lilliefors_pvalue(x: np.ndarray, the_distn: str) -> float:
-    """Lilliefors test p-value, matching MATLAB's lillietest.
-
-    The p-value is found by inverse PCHIP interpolation into the tabulated
-    critical values and is clipped to the table range [0.001, 0.5].
-    """
+def _lilliefors_statistic(x: np.ndarray, the_distn: str) -> float:
+    """Lilliefors test statistic, matching the KS statistic returned by MATLAB's
+    lillietest (the maximum distance between the empirical CDF and the CDF of
+    the distribution fitted to the data)."""
     n = len(x)
     if n < 4:
         return np.nan
@@ -77,31 +72,11 @@ def _lilliefors_pvalue(x: np.ndarray, the_distn: str) -> float:
         null_cdf = gumbel_l.cdf(ux, loc=loc, scale=scale)
     else:
         raise ValueError(f"Unknown distribution '{the_distn}' for Lilliefors test.")
-    ks_stat = _ks_statistic(counts, null_cdf, n)
+    return _ks_statistic(counts, null_cdf, n)
 
-    table = LILLIE_TABLES[the_distn]
-    if n <= 20:
-        cvs = table['quantiles'][n - 4]
-    else:
-        c1, c2, c3 = table['asymptotic']
-        cvs = c1 / np.sqrt(n) - c2 / n - c3 / n ** 1.5
-
-    if np.isnan(ks_stat):
-        return 0.0  # Inf data; declare highly significant
-    if ks_stat < cvs[-1]:  # smallest critical value at end
-        return float(LILLIE_ALPHAS[-1])
-    if ks_stat >= cvs[0]:  # largest critical value at beginning
-        return float(LILLIE_ALPHAS[0])
-    # 1-D inverse interpolation into the tabulated quantiles
-    pp = PchipInterpolator(LILLIE_ALPHAS, cvs)
-    i = int(np.argmax(ks_stat > cvs))  # first index where ks_stat > cvs[i]
-    if i == 0:
-        return float(LILLIE_ALPHAS[-1])  # ks_stat == cvs[-1] exactly
-    return float(brentq(lambda a: pp(a) - ks_stat, LILLIE_ALPHAS[i - 1], LILLIE_ALPHAS[i]))
-
-def _chi2gof_pvalue(x: np.ndarray, cdf_func, num_bins: int, n_params: int,
-                    e_min: int = 5) -> float:
-    """Chi^2 goodness-of-fit p-value, matching MATLAB's chi2gof.
+def _chi2gof_effect(x: np.ndarray, cdf_func, num_bins: int, e_min: int = 5) -> float:
+    """Chi^2 goodness-of-fit effect size, chi^2 statistic / N, where the
+    statistic matches MATLAB's chi2gof.
 
     Data are binned into num_bins equal-width bins spanning the data range;
     tail bins with expected counts below e_min are pooled with neighbors.
@@ -140,10 +115,7 @@ def _chi2gof_pvalue(x: np.ndarray, cdf_func, num_bins: int, n_params: int,
         obs = obs[i:j + 1]
 
     chi2_stat = np.sum((obs - exp_counts) ** 2 / exp_counts)
-    df = len(obs) - 1 - n_params
-    if df <= 0:
-        return np.nan
-    return float(chi2.sf(chi2_stat, df))
+    return float(chi2_stat / n)
 
 def _ks_statistic(counts: np.ndarray, null_cdf: np.ndarray, n: int) -> float:
     """Two-sided KS statistic between an ECDF (from counts at the unique
@@ -174,21 +146,14 @@ def _kstest_statistic(x: np.ndarray, cdf_func) -> float:
     return _ks_statistic(counts, null_cdf, n)
 
 
-def _kstest_pvalue(x: np.ndarray, cdf_func) -> float:
-    """One-sample two-sided KS test p-value, matching MATLAB's kstest as
-    called by HT_DistributionTest (null CDF tabulated on the data values
-    rounded to 6 decimal places, then linearly interpolated)."""
-    n = len(x)
-    ks_stat = _kstest_statistic(x, cdf_func)
-
-    s = n * ks_stat ** 2
-    if (s > 7.24) or ((s > 3.76) and (n > 99)):
-        # MATLAB's far-tail approximation (p-values below ~1e-3)
-        p = 2 * np.exp(-(2.000071 + 0.331 / np.sqrt(n) + 1.409 / n) * s)
-    else:
-        # Exact two-sided p-value (Marsaglia, Tsang & Wang), as in MATLAB
-        p = kstwo.sf(ks_stat, n)
-    return float(min(max(p, 0.0), 1.0))
+def _kstest_effect(x: np.ndarray, cdf_func) -> float:
+    """One-sample two-sided KS statistic D (the effect size), matching MATLAB's
+    kstest as called by HT_DistributionTest. NaN if the fitted CDF is
+    non-finite everywhere (degenerate fit)."""
+    if not np.any(np.isfinite(cdf_func(np.unique(x)))):
+        logger.warning("Fitted CDF is degenerate for this data; no KS test possible.")
+        return np.nan
+    return _kstest_statistic(x, cdf_func)
 
 def distribution_test(x: ArrayLike, the_test: str = 'chi2gof', the_distn: str = 'norm',
                       num_bins: int = 10) -> float:
@@ -196,7 +161,9 @@ def distribution_test(x: ArrayLike, the_test: str = 'chi2gof', the_distn: str = 
     Hypothesis test for distributional fits to a data vector.
 
     Fits a distribution to the data and then performs an appropriate hypothesis
-    test to quantify the difference between the two distributions.
+    test to quantify the difference between the two distributions. Returns an
+    effect size rather than a p-value (p-values underflow for long series and
+    depend on the series length), so larger values indicate a worse fit.
 
     Parameters
     ----------
@@ -205,9 +172,10 @@ def distribution_test(x: ArrayLike, the_test: str = 'chi2gof', the_distn: str = 
     the_test : str, optional
         The hypothesis test to perform:
 
-        - 'chi2gof': chi^2 goodness of fit test
-        - 'ks': Kolmogorov-Smirnov test
-        - 'lillie': Lilliefors test (only defined for 'norm', 'ev', and 'exp')
+        - 'chi2gof': chi^2 goodness of fit test (effect size: chi^2 statistic / N)
+        - 'ks': Kolmogorov-Smirnov test (effect size: the KS statistic D)
+        - 'lillie': Lilliefors test (effect size: the KS statistic D; only defined
+          for 'norm', 'ev', and 'exp')
 
         Default is ``'chi2gof'``.
     the_distn : str, optional
@@ -231,8 +199,9 @@ def distribution_test(x: ArrayLike, the_test: str = 'chi2gof', the_distn: str = 
     Returns
     -------
     float
-        P-value from the hypothesis test. NaN when the fit is not valid for
-        the data (e.g., a positive-only distribution fitted to data with
+        Effect size from the hypothesis test (chi^2 statistic / N for 'chi2gof';
+        the KS statistic D for 'ks' and 'lillie'). NaN when the fit is not valid
+        for the data (e.g., a positive-only distribution fitted to data with
         negative values).
     """
     x = np.asarray(x, dtype=float)
@@ -241,7 +210,7 @@ def distribution_test(x: ArrayLike, the_test: str = 'chi2gof', the_distn: str = 
     if the_distn == 'beta':
         # clumsily scale to the range (0,1), as in MATLAB
         sd = np.std(x, ddof=1)
-        x = (x - np.min(x) + 0.01 * sd) / (np.max(x) - np.min(x) + 0.01 * sd)
+        x = (x - np.min(x) + 0.01 * sd) / (np.max(x) - np.min(x) + 0.02 * sd)
     elif the_distn in ('rayleigh', 'exp', 'gamma'):
         if np.any(x < 0):
             return np.nan
@@ -253,15 +222,15 @@ def distribution_test(x: ArrayLike, the_test: str = 'chi2gof', the_distn: str = 
 
     if the_test == 'lillie':
         if the_distn in ('norm', 'ev', 'exp'):
-            return _lilliefors_pvalue(x, the_distn)
+            return _lilliefors_statistic(x, the_distn)
         logger.warning("Lilliefors test is only defined for 'norm', 'ev', and 'exp' distributions.")
         return np.nan
 
-    cdf_func, n_params = _fit_distribution_cdf(x, the_distn)
+    cdf_func, _ = _fit_distribution_cdf(x, the_distn)
     if the_test == 'chi2gof':
-        return _chi2gof_pvalue(x, cdf_func, num_bins, n_params)
+        return _chi2gof_effect(x, cdf_func, num_bins)
     elif the_test == 'ks':
-        return _kstest_pvalue(x, cdf_func)
+        return _kstest_effect(x, cdf_func)
     raise ValueError(f"Unknown test '{the_test}'.")
 
 def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
