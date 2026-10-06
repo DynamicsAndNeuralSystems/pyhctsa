@@ -148,7 +148,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
     if subset_how == 'uniform':
         if len(sample_p) == 1:  # size will depend on number of unique subsegments
             # num_pred+1 boundaries = num_pred portions
-            spts = np.round(np.linspace(0, N, num_pred + 1)).astype(int)
+            spts = np.floor(_linspace(0, N, num_pred + 1) + 0.5).astype(int)  # MATLAB round()
             r = np.zeros((num_pred, 2), dtype=int)
             r[:, 0] = spts[:num_pred] + 1  # +1 for 1-based indexing (if needed)
             r[:, 1] = spts[1:]
@@ -158,7 +158,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
             else:  # specified an absolute interval
                 l = int(sample_p[1])
             # num_pred boundaries
-            spts = np.round(np.linspace(1, N - l + 1, num_pred)).astype(int)
+            spts = np.floor(_linspace(1, N - l + 1, num_pred) + 0.5).astype(int)  # MATLAB round()
             r = np.zeros((num_pred, 2), dtype=int)
             r[:, 0] = spts
             r[:, 1] = spts + l - 1
@@ -170,7 +170,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ar', order: int = 2, subset_how:
     if model == 'ar':
         avals = np.zeros((num_pred,order))
         for i in range(num_pred):
-            dat = y[r[i, 0]:r[i, 1]]
+            dat = y[r[i, 0] - 1:r[i, 1]]  # r is 1-based and inclusive, as in MATLAB
             m = AutoReg(dat, lags=order, trend='n')
             results = m.fit()
             avals[i, :] = -results.params
@@ -234,7 +234,7 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     out['stderr_chn'] = std_err_chnn
     out['stderr_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:, 0])))
     # (ii) Is there a peak?
-    if std_err_chnn < 1: # on the whole decreasing, as expected
+    if std_err_chnn < 0: # on the whole decreasing, as expected: look for a maximum
         wigv = np.max(stats_st[:, 0])
         wig = np.where(stats_st[:, 0] == wigv)[0][0]  # find first occurrence
         if wig != 0 and stats_st[wig - 1, 0] > wigv:
@@ -288,8 +288,9 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
 
     train_length : int or str, optional
         The number of time-series values to use to forecast the next value.
-        If 'ac', uses first zero-crossing of autocorrelation function.
-        Default is 1.
+        If 'ac', uses first zero-crossing of autocorrelation function (at least 2
+        for the 'lfit' method, since a straight line needs two points).
+        Default is 3.
         
     Returns
     -------
@@ -302,6 +303,11 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     # % Do the local prediction
     if train_length == 'ac':
         lp = first_crossing(y, 'ac', 0, 'discrete')
+        if np.isnan(lp):
+            logger.warning("Could not set the training length from the autocorrelation function")
+            return np.nan
+        if forecast_meth == 'lfit':
+            lp = max(lp, 2)  # a straight line needs at least two points
     else:
         #the e length of the subsegment preceding to use to predict the subsequent value
         train_length = int(train_length)
@@ -352,7 +358,9 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
 
     Fits an exponential smoothing model to the time series using a training set to
     fit the optimal smoothing parameter, alpha, and then applies the result to
-    predict the rest of the time series.
+    predict the rest of the time series. The residual statistics are computed on
+    the held-out samples only (those after the first ``n_train``), and ``nan`` is
+    returned if fewer than 50 samples remain after the training set.
 
     References
     ----------
@@ -397,7 +405,7 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
         logger.info(f"Training set size increased from {n_train} to {min_train}.")
         n_train = min_train
         
-    if N < n_train:
+    if N < n_train + 50:  # too few samples held out after the training set
         logger.warning("Time series is too short for the specified training size.")
         return np.nan
         
@@ -465,7 +473,8 @@ def exp_smoothing(x: ArrayLike, n_train: Union[None, int, float] = None,
 
     # --- Final Fit and Residual Analysis ---
     y_fit = _fit_exp_smooth(x, alpha)
-    yp, xp = y_fit[2:], x[2:]
+    # residuals on the held-out part only (after the n_train samples used to fit alpha)
+    yp, xp = y_fit[n_train:], x[n_train:]
     
     if len(yp) < 2:
         logger.warning("Not enough points to calculate residual statistics.")
@@ -694,7 +703,7 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
         if popt >= i:
             out[f'A{i}'] = Aest[i-1]
         else:
-            out[f'A{i}'] = 0 # % set all the higher order coefficients are all zero
+            out[f'A{i}'] = np.nan  # not estimated at the selected order (NaN, not 0)
     # (ii) Summary statistics on the coefficients
     out['maxA'] = np.max(Aest)
     out['minA'] = np.min(Aest)
@@ -806,11 +815,12 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50) ->
     definiteness, the counterpart of gpml's ``MATLAB:posdef`` error.
     """
     nhps = cov.n_hyp
-    # Initial values: the length parameter is in the ballpark of the difference
-    # between time elements; the remaining log-hyperparameters start at zero and
-    # the likelihood noise at log(0.1).
-    hyp0 = np.concatenate([[np.log(np.mean(np.diff(tt)))],
-                           np.zeros(nhps - 1), [np.log(0.1)]])
+    # Initial values, set component by component as in MF_GP_LearnHyperp for
+    # covSum{covSEiso, covNoise}: the SE length scale is in the ballpark of the
+    # difference between time elements, its log-magnitude starts at zero, the noise
+    # covariance at log(0.1), and so does the likelihood noise.
+    hyp0 = np.array([np.log(np.mean(np.diff(tt))), 0.0, np.log(0.1), np.log(0.1)])
+    assert nhps == 3
 
     def _nlz(theta):
         hyp = {'cov': theta[:nhps], 'lik': theta[nhps], 'mean': np.zeros(0)}
@@ -886,7 +896,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     S = np.sqrt(S2)  # standard deviation function, S
     out = {}
     # rms error from mean function, mu
-    out['rmserr'] = np.mean(np.sqrt((y_ts - mu) ** 2))
+    out['rmserr'] = np.sqrt(np.mean((y_ts - mu) ** 2))
     out['meanstderr'] = np.mean(np.abs(y_ts - mu) / S)
     out['stdmu'] = np.std(mu, ddof=1)
     out['meanS'] = np.mean(S)
@@ -946,8 +956,8 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
         Default is ``'frombefore'``.
     random_seed : int or None
-        Seed for the Mersenne Twister, reset before each prediction (as
-        ``BF_ResetSeed`` does), used by the ``'randomgap'`` mode. ``None``
+        Seed for the Mersenne Twister, reset once before the loop over windows
+        (as ``BF_ResetSeed`` does), used by the ``'randomgap'`` mode. ``None``
         leaves the stream alone, matching ``BF_ResetSeed('none')``. Default
         is 0.
 
@@ -993,6 +1003,10 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     loghypers = np.zeros((nhps, num_preds))      # log-hyperparameters
 
     rng = np.random.RandomState() if random_seed is None else None
+    if pmode == 'randomgap' and random_seed is not None:
+        # reset the seed once, before the loop over windows: successive windows
+        # then draw different random splits (a reproducible sequence)
+        rng = _ml_rng(random_seed)
 
     for i in range(num_preds):
         # (0) Set up test and training sets
@@ -1004,8 +1018,6 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
             ys = y[sp - 1 + num_train:sp - 1 + num_train + num_test]  # test data
 
         elif pmode == 'randomgap':
-            if random_seed is not None:
-                rng = _ml_rng(random_seed)
             n = num_train + num_test
             t = np.arange(1, n + 1, dtype=float)
             r = _ml_randperm(n, rng)
