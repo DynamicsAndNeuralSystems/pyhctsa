@@ -1884,9 +1884,9 @@ model_fit:
     base_name: gp_local_prediction
     dependencies:
     configs:
-      - {cov_func: 'covSEiso_covNoise', num_train: 5, num_test: 3, num_preds: 10, pmode: 'beforeafter', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},5,3,10,'beforeafter')
-      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'frombefore', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},10,3,20,'frombefore')
-      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'randomgap', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},10,3,20,'randomgap','default')
+      - {cov_func: 'covSEiso_covNoise', num_train: 5, num_test: 3, num_preds: 10, pmode: 'beforeafter', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'q90abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},5,3,10,'beforeafter')
+      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'frombefore', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'q90abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},10,3,20,'frombefore')
+      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'spreadgap', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'maxabs_run', 'maxabs_std_run', 'minabs_std_run', 'maxerrbar', 'maxnlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},10,3,20,'spreadgap')
     legacy_name: MF_GP_LocalPrediction
     ordered_args: ['cov_func', 'num_train', 'num_test', 'num_preds', 'pmode']
 
