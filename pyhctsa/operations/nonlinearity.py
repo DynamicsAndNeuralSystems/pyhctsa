@@ -4301,35 +4301,29 @@ def _logf(x) -> np.float32:
 
 
 @njit(cache=True)
-def _slatec_rand(state):
-    """SLATEC's ``RAND(0.)`` (the generator TISEAN's Fortran programs use): one draw in (0, 1)."""
-    iy0 = 1029 * state[1]
-    iy1 = 1536 * state[0] + 507 * (state[1] - state[0]) + iy0
-    iy0 = iy0 + 1731
-    state[1] = iy0 % 2048
-    iy1 = iy1 + (iy0 - state[1]) // 2048
-    state[0] = iy1 % 2048
-    return np.float32(state[0] * 2048 + state[1]) / np.float32(4194304.0)
-
-
-@njit(cache=True)
-def _c1_shuffle(nmax, m, delay, state, ju):
+def _c1_centers(nmax, m, delay, ju):
     """
-    The permutation of the reference points in TISEAN's d1.f: ``ju`` starts as the embedded points
-    ``(m-1) * delay + 1 .. nmax`` and each entry is swapped with a partner drawn uniformly from
-    them, ``int(rand * (nmax - (m-1) * delay)) + 1`` (as patched in hctsa's copy of TISEAN; stock
-    TISEAN 3.0.1 subtracts ``(m-1) * delay`` from the random number instead, which reaches outside
-    the array).
+    The order of the reference points in hctsa's d1.f: the embedded points ``(m-1) * delay + 1 ..
+    nmax`` (``nvalid`` of them) taken as ``i -> (i * s mod nvalid)``, with ``s`` the golden-ratio
+    stride (computed in single precision, as in the Fortran) raised until it is coprime to
+    ``nvalid``. Every prefix is spread evenly over the series and the order is fixed (stock TISEAN
+    used the first entries of a random permutation, so the estimate depended on the draw).
     """
-    n = nmax - (m - 1) * delay
-    for i in range(n):
-        ju[i] = i + (m - 1) * delay + 1
-    for i in range(1, n + 1):
-        r = _slatec_rand(state)
-        iperm = min(int(np.float32(r * np.float32(n))) + 1, n)
-        ih = ju[i - 1]
-        ju[i - 1] = ju[iperm - 1]
-        ju[iperm - 1] = ih
+    nvalid = nmax - (m - 1) * delay
+    istr = int(np.float32(np.float32(nvalid) * np.float32(0.6180339887)))
+    if istr < 1:
+        istr = 1
+    while True:
+        a, b = istr, nvalid
+        while b != 0:
+            a, b = b, a % b
+        if a == 1 or nvalid <= 1:
+            break
+        istr += 1
+    acc = 0
+    for i in range(nvalid):
+        ju[i] = acc + 1 + (m - 1) * delay
+        acc = (acc + istr) % nvalid
 
 
 @njit(cache=True)
@@ -4391,8 +4385,6 @@ def _c1_curves(y: np.ndarray, delay: int, m_from: int, m_to: int, nmin: int, n_r
     off = 0
     sd = F32(math.sqrt(float(F32(_f32_cumsum_last(((y32 - F32(_f32_cumsum_last(y32) / F32(nmax)))
                                                    ** 2).astype(np.float32)) / F32(nmax)))))
-    state = np.zeros(2, np.int64)
-    _slatec_rand(state)  # the program draws once when it seeds the generator
     ju = np.zeros(nmax + 1, np.int64)
     resl = F32(_logf(F32(2.0)) / F32(res))
     sqrt2 = F32(math.sqrt(2.0))
@@ -4423,7 +4415,7 @@ def _c1_curves(y: np.ndarray, delay: int, m_from: int, m_to: int, nmin: int, n_r
             psi = _C1_PSI[k] if k <= 20 else F32(_logf(F32(k)) - F32(F32(1.0) / F32(2.0 * k)))
             pln = F32(psi - _logf(F32(ncomp - 2 * nmin - 1)))
             if k != kpr:
-                _c1_shuffle(nmax, m, delay, state, ju)
+                _c1_centers(nmax, m, delay, ju)
                 refs = ju[:min(n_ref, nvalid)].copy()  # at most as many centers as embedded points
                 e = _c1_kth_distance(ye, off, refs, delay, m, ncomp, nmin, k)
                 # TISEAN sweeps the reference points with a neighborhood size that grows by
@@ -4508,9 +4500,9 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
 
     The routine is a port of TISEAN 3.0.1's Fortran (``c1.f``, ``d1.f``, ``c2d.f``) in single
     precision, with the corrections of hctsa's copy of TISEAN, and reproduces that binary's output,
-    including the permutation of the reference points (its random numbers are SLATEC's ``RAND``).
-    The stock TISEAN code picks the partner for each swap of that permutation from outside the
-    valid range, uses stale memory when more reference points are requested than there are
+    with hctsa's choice of reference points: the first of a fixed golden-ratio lattice ordering of
+    the embedded points, spread evenly over the series (stock TISEAN takes the first entries of a
+    random permutation, so the estimates depend on the draw). The stock code also uses stale memory when more reference points are requested than there are
     embedded points, and never finishes when it asks for more neighbors than exist (for example
     when the number of embedded points is a power of two); those cases are fixed here. The stock
     code also divides the sum of the log distances by ``nref - (m - 1) * tau`` instead of the
@@ -4531,8 +4523,9 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
         of the series length if between 0 and 1 (exclusive). Default is 0.02.
     nref : int or float, optional
         The number of reference points: a number of samples, or a proportion of the series
-        length if at most 1. At most 2500 and, if the series is longer than 100 points, at least
-        100. Default is 0.5.
+        length if at most 1. At most 2500 and, if the series is longer than 500 points, at least
+        500 (fewer make the best-scaling-range outputs depend on which points are the reference
+        points). Default is 0.5.
 
     Returns
     -------
@@ -4568,8 +4561,8 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
     if 0 < nref <= 1:
         nref = int(np.ceil(nref * n))
     nref = min(int(nref), 2500)
-    if nref < 100 and n > 100:
-        nref = 100
+    if nref < 500 and n > 500:
+        nref = 500
 
     curves = _c1_curves(y, tau, int(mmm[0]), int(mmm[1]), int(tsep), nref)
     slopes = _c2d_slopes(curves)
