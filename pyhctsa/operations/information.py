@@ -265,6 +265,11 @@ def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
     mask = (p_ixp_j > 0) & (p_ij > 0)
     if np.any(mask):
         mi = np.sum(p_ij[mask] * np.log(p_ij[mask] / p_ixp_j[mask]))
+        # Miller-Madow (Panzeri-Treves) bias correction: the plug-in estimate is biased
+        # upwards by ~(Mxy - Mx - My + 1)/(2N) nats, with M the numbers of occupied
+        # joint and marginal bins.
+        mi -= (np.count_nonzero(mask) - np.count_nonzero(p_i > 0)
+               - np.count_nonzero(p_j > 0) + 1) / (2 * N)
     else:
         logger.warning("The histograms aren't catching any points. Perhaps due to an inappropriate custom range for binning the data.")
         mi = np.nan
@@ -360,7 +365,10 @@ def automutual_info_stats(
     dami = np.diff(ami)
     extrema_i = np.where((dami[:-1] * dami[1:]) < 0)[0]
     out['pextrema'] = len(extrema_i) / (lami - 1)
-    out['fmmi'] = min(extrema_i) + 1 if len(extrema_i) > 0 else lami
+    # fmmi: lag of the first true local minimum (extrema_i is 0-based into dami, so the
+    # extremum sits at ami[j+1], i.e. lag j+2); lami if there is none
+    minima = extrema_i[dami[extrema_i] < 0]
+    out['fmmi'] = int(minima.min()) + 2 if minima.size > 0 else lami
 
     # Look for periodicities in local maxima
     maxima_i = np.where((dami[:-1] > 0) & (dami[1:] < 0))[0] + 1

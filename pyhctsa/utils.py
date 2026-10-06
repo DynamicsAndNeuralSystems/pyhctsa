@@ -462,8 +462,15 @@ def point_of_crossing(x: ArrayLike, threshold: float) -> tuple:
         tuple: (firstCrossing, pointOfCrossing)
         firstCrossing (int): the first discrete value after which a crossing event has occurred
         pointOfCrossing (float): the (linearly) interpolated point of crossing
+        Both are NaN if every element of x is NaN.
     """
     x = np.asarray(x)
+
+    # An entirely undefined input (e.g. the autocorrelation of a constant series is
+    # 0/0 at every lag) has no answer; this differs from a well-defined sequence that
+    # simply never crosses the threshold, which saturates at the last element below.
+    if np.all(np.isnan(x)):
+        return np.nan, np.nan
 
     if x[0] > threshold:
         crossings = np.where((x - threshold) < 0)[0]
