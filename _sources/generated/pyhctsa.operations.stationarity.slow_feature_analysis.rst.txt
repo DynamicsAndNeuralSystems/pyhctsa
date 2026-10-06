@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.slow\_feature\_analysis
+=======================================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: slow_feature_analysis

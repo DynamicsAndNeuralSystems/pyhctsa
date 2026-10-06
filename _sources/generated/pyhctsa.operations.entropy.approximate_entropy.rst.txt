@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.approximate\_entropy
+===============================================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: approximate_entropy

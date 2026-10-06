@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.symbolic.motif\_three
+========================================
+
+.. currentmodule:: pyhctsa.operations.symbolic
+
+.. autofunction:: motif_three

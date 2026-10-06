@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.distribution\_entropy
+================================================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: distribution_entropy

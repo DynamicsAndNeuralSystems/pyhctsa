@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.spectral.specparam
+=====================================
+
+.. currentmodule:: pyhctsa.operations.spectral
+
+.. autofunction:: specparam

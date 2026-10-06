@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.trev
+===================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: trev

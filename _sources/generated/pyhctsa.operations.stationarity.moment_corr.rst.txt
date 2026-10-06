@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.moment\_corr
+============================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: moment_corr

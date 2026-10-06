@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.time\_rev\_kaplan
+================================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: time_rev_kaplan

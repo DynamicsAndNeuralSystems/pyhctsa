@@ -1,0 +1,25 @@
+﻿pyhctsa.distribute.LocalDistributor
+===================================
+
+.. currentmodule:: pyhctsa.distribute
+
+.. autoclass:: LocalDistributor
+
+   
+   .. automethod:: __init__
+
+   
+   .. rubric:: Methods
+
+   .. autosummary::
+   
+      ~LocalDistributor.__init__
+      ~LocalDistributor.calculate_chunk_size
+      ~LocalDistributor.close
+      ~LocalDistributor.map
+   
+   
+
+   
+   
+   

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.pleft
+=====================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: pleft

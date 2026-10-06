@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.embed2\_basic
+============================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: embed2_basic

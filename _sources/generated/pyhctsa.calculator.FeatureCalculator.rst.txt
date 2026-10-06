@@ -1,0 +1,23 @@
+﻿pyhctsa.calculator.FeatureCalculator
+====================================
+
+.. currentmodule:: pyhctsa.calculator
+
+.. autoclass:: FeatureCalculator
+
+   
+   .. automethod:: __init__
+
+   
+   .. rubric:: Methods
+
+   .. autosummary::
+   
+      ~FeatureCalculator.__init__
+      ~FeatureCalculator.extract
+   
+   
+
+   
+   
+   

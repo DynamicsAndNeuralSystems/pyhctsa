@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.pre\_process.preproc\_compare
+================================================
+
+.. currentmodule:: pyhctsa.operations.pre_process
+
+.. autofunction:: preproc_compare

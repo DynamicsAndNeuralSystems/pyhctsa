@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.local\_simple
+===========================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: local_simple

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.proportion\_values
+==================================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: proportion_values

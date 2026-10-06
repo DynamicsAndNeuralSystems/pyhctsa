@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.lempel\_ziv\_complexity
+==================================================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: lempel_ziv_complexity

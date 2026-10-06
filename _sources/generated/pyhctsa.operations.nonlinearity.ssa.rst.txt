@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.nonlinearity.ssa
+===================================
+
+.. currentmodule:: pyhctsa.operations.nonlinearity
+
+.. autofunction:: ssa
