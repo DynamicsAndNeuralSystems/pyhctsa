@@ -114,8 +114,6 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
         combined fitting errors.
  
     """
-    N = len(x)
- 
     # Compute integrated sequence
     if (lag is None) | (lag == 1):
         # normal cumsum
@@ -123,6 +121,7 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
     else:
         # if a lag is specified, do a decimation...
         y = np.cumsum(x[::lag])
+    N = len(y)  # length of the integrated series (shorter than x if a lag is used)
  
     # perform scaling over a range of tau, up to a fifth of the time-series length
     if log_inc:
@@ -195,35 +194,52 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
     # % Linear fit the log-log plot: full range
     out = _robust_linear_fit(logtt, logFF, np.arange(0, num_timescales), '')
  
+    # minPoints scales with the number of timescales rather than being a fixed constant: a
+    # small fixed minPoints lets the search reach breakpoints right at the edge of the
+    # domain, where a segment of a handful of points trivially achieves near-zero fit
+    # error. The floor of 8 matches _robust_linear_fit's minimum length.
     sserr = np.full(num_timescales, np.nan)  # don't choose the end points
-    min_points = 6
- 
-    for i in range(min_points - 1, num_timescales - min_points):
-        r1 = slice(0, i + 1)  # first segment: points 0..i  (i+1 points)
-        p1 = np.polyfit(logtt[r1], logFF[r1], 1)
- 
-        r2 = slice(i, num_timescales)  # second segment: points i..end
-        p2 = np.polyfit(logtt[r2], logFF[r2], 1)
- 
-        # Sum of errors from fitting lines to both segments:
-        sserr[i] = (np.linalg.norm(np.polyval(p1, logtt[r1]) - logFF[r1]) +
-                    np.linalg.norm(np.polyval(p2, logtt[r2]) - logFF[r2]))
- 
-    break_pt = np.where(sserr == np.nanmin(sserr))[0][0]  # find first occurrence of minimum
-    r1 = np.arange(0, break_pt + 1)
-    r2 = np.arange(break_pt, num_timescales)
- 
-    out['prop_r1'] = len(r1) / num_timescales
-    out['logtausplit'] = logtt[break_pt]
- 
-    if guard_ratsplit and (not np.isfinite(out['ssr']) or out['ssr'] < ssr_tol):
+    min_points = max(8, int(_round(0.25 * num_timescales)))
+    if num_timescales >= 2 * min_points:
+        for i in range(min_points - 1, num_timescales - min_points):
+            r1 = slice(0, i + 1)  # first segment: points 0..i  (i+1 points)
+            p1 = np.polyfit(logtt[r1], logFF[r1], 1)
+
+            r2 = slice(i, num_timescales)  # second segment: points i..end
+            p2 = np.polyfit(logtt[r2], logFF[r2], 1)
+
+            # Mean squared error pooled across both segments, normalized by the total
+            # number of points sampled (num_timescales):
+            e1 = np.polyval(p1, logtt[r1]) - logFF[r1]
+            e2 = np.polyval(p2, logtt[r2]) - logFF[r2]
+            sserr[i] = (np.sum(e1 ** 2) + np.sum(e2 ** 2)) / num_timescales
+
+    if np.all(np.isnan(sserr)):
+        # Too few timescales to fit two distinct linear regimes meaningfully
+        r1 = r2 = np.array([], dtype=int)
+        out['prop_r1'] = np.nan
+        out['logtausplit'] = np.nan
         out['ratsplitminerr'] = np.nan
+        out['meanssr'] = np.nan
+        out['stdssr'] = np.nan
     else:
-        out['ratsplitminerr'] = np.nanmin(sserr) / out['ssr']
- 
-    out['meanssr'] = np.nanmean(sserr)
-    out['stdssr'] = np.nanstd(sserr, ddof=1)  # FIX [4]: MATLAB nanstd normalises by N-1
- 
+        break_pt = np.where(sserr == np.nanmin(sserr))[0][0]  # find first occurrence of minimum
+        r1 = np.arange(0, break_pt + 1)
+        r2 = np.arange(break_pt, num_timescales)
+
+        out['prop_r1'] = len(r1) / num_timescales
+        out['logtausplit'] = logtt[break_pt]
+
+        if guard_ratsplit and (not np.isfinite(out['ssr']) or out['ssr'] < ssr_tol):
+            out['ratsplitminerr'] = np.nan
+        else:
+            out['ratsplitminerr'] = np.nanmin(sserr) / out['ssr']
+
+        out['meanssr'] = np.nanmean(sserr)
+        valid_sserr = sserr[~np.isnan(sserr)]
+        # std of the valid errors, normalised by N-1 (as MATLAB), and 0 for a single value
+        out['stdssr'] = np.std(valid_sserr, ddof=1) if valid_sserr.size > 1 else 0.0
+
     out2 = _robust_linear_fit(logtt, logFF, r1, 'r1_')
     out3 = _robust_linear_fit(logtt, logFF, r2, 'r2_')
  
@@ -274,19 +290,24 @@ def _colon(base, step, limit):
     if step == 0 or (step > 0 and base > limit) or (step < 0 and base < limit):
         return np.zeros(0)
 
-    n = int(np.floor((limit - base) / step + 0.5))
-    # Guard against the rounding above overshooting the limit:
-    while n > 0 and abs(base + n * step) > abs(limit) + abs(step) * 0.5:
-        n -= 1
+    # Number of steps, floored with a few-ulp tolerance so that a limit reached only up to
+    # rounding error is included (as in MATLAB), but a limit that is not on the grid is not:
+    ndelta = (limit - base) / step
+    n = int(np.floor(ndelta + 4 * np.finfo(float).eps * max(1.0, abs(ndelta))))
+    # The last element is the limit itself if the grid reaches it (to within rounding),
+    # otherwise the last grid point:
+    last = base + n * step
+    if abs(last - limit) <= 4 * np.finfo(float).eps * max(abs(base), abs(limit), abs(step)):
+        last = limit
 
     i = np.arange(n + 1, dtype=float)
     out = np.empty(n + 1)
     lower = i <= n / 2.0
     out[lower] = base + i[lower] * step
-    out[~lower] = limit - (n - i[~lower]) * step
+    out[~lower] = last - (n - i[~lower]) * step
     out[0] = base
     if n > 0:
-        out[n] = limit
+        out[n] = last
     return out
 
 def _round(x):
@@ -353,8 +374,9 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
         False (default): partition into non-overlapping windows of analysis.
         True: overlapping windows with a step of 1 (much longer calculations).
     scale_range : sequence of 2 numbers, optional
-        [min_scale, max_scale]. Defaults to [10, round(N/40)]. max_scale must be
-        a multiple of 5 and is rounded to one if it is not.
+        [min_scale, max_scale]. Defaults to [10, max(100, round(N/40))] (the floor of 100
+        keeps short series, N below ~4000, computable). max_scale must be a multiple of 5
+        and is rounded to one if it is not. Returns NaN if max_scale exceeds N.
     q_range : sequence of 2 numbers, optional
         [q_min, q_max] multifractal parameter range. Defaults to [-5, 5].
 
@@ -372,11 +394,17 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
     # Check inputs:
     # --------------------------------------------------------------------------
     if scale_range is None:
-        scale_range = [10, float(_round(n / 40))]
+        scale_range = [10, float(max(100, _round(n / 40)))]
     min_scale = scale_range[0]
     max_scale = scale_range[1]
 
-    if (max_scale / 5) < min_scale:
+    if max_scale > n:
+        logger.warning(
+            "Time-series (N=%u) too short for multiscale multifractal analysis "
+            "(max_scale=%u exceeds N)" % (n, max_scale)
+        )
+        return float("nan")
+    elif (max_scale / 5) < min_scale:
         logger.warning(
             "Time-series (N=%u) too short for multiscale multifractal analysis" % n
         )
@@ -455,7 +483,7 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
     for si, s_val in enumerate(s_list):
         for qi, q_val in enumerate(q_list):
             mask = (
-                (fqs_ll[:, 0] == q_val)
+                (np.abs(fqs_ll[:, 0] - q_val) < 1e-8)
                 & (fqs_ll[:, 1] >= s_val)
                 & (fqs_ll[:, 1] <= 5 * s_val)
             )
