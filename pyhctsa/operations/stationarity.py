@@ -59,6 +59,8 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
         For a single lag: the p-value, statistic, first regression coefficient
         and regression fit statistics. For multiple lags: summary statistics on
         the p-values, statistics and regression fit statistics across lags.
+        The log-likelihood and information criteria (AIC, BIC, HQC) are reported
+        per observation.
     """
     y = np.asarray(y, dtype=float)
     y = y[~np.isnan(y)]  # remove missing values
@@ -76,6 +78,7 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
     lag_list = [int(lags)] if single else [int(l) for l in lags]
 
     T = len(y) - 1
+    n_obs = len(y)  # log-likelihood and information criteria are reported per observation
     p_values, stats, regs = [], [], []
     for l in lag_list:
         reg = _pp_regression(y, l, model)
@@ -98,10 +101,10 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
             'pvalue': p_values[0],
             'stat': stats[0],
             'coeff1': reg['coeff'][0],  # could be multiple, depending on the model
-            'loglikelihood': reg['LL'],
-            'AIC': reg['AIC'],
-            'BIC': reg['BIC'],
-            'HQC': reg['HQC'],
+            'loglikelihood': reg['LL'] / n_obs,
+            'AIC': reg['AIC'] / n_obs,
+            'BIC': reg['BIC'] / n_obs,
+            'HQC': reg['HQC'] / n_obs,
             'rmse': reg['RMSE'],
         }
 
@@ -120,10 +123,10 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
         'maxstat': np.max(stats),
         'minstat': np.min(stats),
 
-        'meanloglikelihood': np.mean([r['LL'] for r in regs]),
-        'minAIC': np.min([r['AIC'] for r in regs]),
-        'minBIC': np.min([r['BIC'] for r in regs]),
-        'minHQC': np.min([r['HQC'] for r in regs]),
+        'meanloglikelihood': np.mean([r['LL'] for r in regs]) / n_obs,
+        'minAIC': np.min([r['AIC'] for r in regs]) / n_obs,
+        'minBIC': np.min([r['BIC'] for r in regs]) / n_obs,
+        'minHQC': np.min([r['HQC'] for r in regs]) / n_obs,
 
         'minrmse': np.min([r['RMSE'] for r in regs]),
         'maxrmse': np.max([r['RMSE'] for r in regs]),
@@ -134,7 +137,7 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     """
     Compares the distribution in consecutive time-series segments.
 
-    Returns the sum of differences between each kernel-smoothed distribution, either comparing each segment to the parent (full time series)
+    Returns the L1 distance (sum of absolute differences times the grid spacing) between each kernel-smoothed distribution, either comparing each segment to the parent (full time series)
     distribution or to all other segments.
 
     Parameters
@@ -167,6 +170,7 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     dns = np.zeros((num_points, num_segs))
     # Make range of ksdensity uniform across all subsegments
     r = np.linspace(np.min(y), np.max(y), num_points)
+    dr = r[1] - r[0] # grid spacing, to turn sums over the grid into integrals
     # Compute the kernel-smoothed distribution in all num_segs segments of the time series
     for i in range(num_segs):
         start_idx = i * lseg
@@ -181,18 +185,18 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
         pardn = kde.evaluate(r)
         divs = np.zeros(num_segs)
         for i in range(num_segs):
-            divs[i] = np.sum(np.abs(dns[:, i] - pardn))
+            divs[i] = np.sum(np.abs(dns[:, i] - pardn)) * dr
     elif each_or_par == 'each':
         # Compares each subdistribtuion to the parent (full signal) distribution
         if num_segs == 2:
-            out = np.sum(np.abs(dns[:, 0] - dns[:, 1]))
+            out = np.sum(np.abs(dns[:, 0] - dns[:, 1])) * dr
             return out
         # num_segs > 2
         diffmat = np.nan * np.ones((num_segs, num_segs)) 
         for i in range(num_segs):
             for j in range(num_segs):
                 if j > i:
-                    diffmat[i, j] = np.sum(np.abs(dns[:, i] - dns[:, j]))
+                    diffmat[i, j] = np.sum(np.abs(dns[:, i] - dns[:, j])) * dr
         divs = diffmat[~np.isnan(diffmat)] # % (the upper triangle of diffmat)
     else:
         raise ValueError(f"Unknown method: {each_or_par}. Should be 'each' or 'par'. ")
@@ -363,7 +367,7 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
         raise ValueError(f"Unknown transformation {what_transform}")
     
     # create the windows
-    x_buff = make_mat_buffer(x, window_length, w_overlap)
+    x_buff = make_mat_buffer(x, window_length, w_overlap, 'nodelay')
     num_windows = (N/(window_length - w_overlap)) # number of windows
 
     if np.size(x_buff, 1) > num_windows:
@@ -382,7 +386,9 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
     out = {}
     rmat = np.corrcoef(M1, M2)
     out['absR'] = np.abs(rmat[0, 1])
-    out['density'] = np.ptp(M1) * np.ptp(M2) / N
+    # density of points in M1--M2 space: (number of windows) / (bounding-box area)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        out['density'] = len(M1) / (np.ptp(M1) * np.ptp(M2))
 
     return out
 
@@ -543,25 +549,30 @@ def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = 
     loc_ext[exti] = loc_min[exti] # local extrema (furthest from mean; either maxs or mins)
     abs_loc_ext = np.abs(loc_ext) # the magnitude of the most extreme events in each window
 
+    # Scale of a local extreme under a Gaussian null: the expected maximum of
+    # window_length iid standard normals (Blom's approximation). Location
+    # statistics are divided by this so that they do not grow with window length.
+    exp_max = norm.ppf((window_length - 0.375) / (window_length + 0.25))
+
     # Return Outputs
     out = {
         'meanrat': np.mean(loc_max) / np.mean(abs_loc_min),
         'medianrat': np.median(loc_max) / np.median(abs_loc_min),
-        'minmax': np.min(loc_max),
-        'minabsmin': np.min(abs_loc_min),
+        'minmax': np.min(loc_max) / exp_max,
+        'minabsmin': np.min(abs_loc_min) / exp_max,
         'minmaxonminabsmin': np.min(loc_max) / np.min(abs_loc_min),
-        'meanmax': np.mean(loc_max),
-        'meanabsmin': np.mean(abs_loc_min),
-        'meanext': np.mean(loc_ext),
-        'medianmax': np.median(loc_max),
-        'medianabsmin': np.median(abs_loc_min),
-        'medianext': np.median(loc_ext),
+        'meanmax': np.mean(loc_max) / exp_max,
+        'meanabsmin': np.mean(abs_loc_min) / exp_max,
+        'meanext': np.mean(loc_ext) / exp_max,
+        'medianmax': np.median(loc_max) / exp_max,
+        'medianabsmin': np.median(abs_loc_min) / exp_max,
+        'medianext': np.median(loc_ext) / exp_max,
         'stdmax': np.std(loc_max, ddof=1),
         'stdmin': np.std(loc_min, ddof=1),
         'stdext': np.std(loc_ext, ddof=1),
         'zcext': np.sum((loc_ext[:-1] * loc_ext[1:]) < 0) / num_windows,
-        'meanabsext': np.mean(abs_loc_ext),
-        'medianabsext': np.median(abs_loc_ext),
+        'meanabsext': np.mean(abs_loc_ext) / exp_max,
+        'medianabsext': np.median(abs_loc_ext) / exp_max,
         'diffmaxabsmin': np.sum(np.abs(loc_max - abs_loc_min)) / num_windows,
         'uord': np.sum(np.sign(loc_ext)) / num_windows,
         'maxmaxmed': np.max(loc_max) / np.median(loc_max),
@@ -853,10 +864,14 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     raw_iqr_yr = np.percentile(y[r], 75, method='hazen') - np.percentile(y[r], 25, method='hazen')
     raw_iqr_y = np.percentile(y, 75, method='hazen') - np.percentile(y, 25, method='hazen')
     out['iqr'] = np.abs(1 - (raw_iqr_yr/raw_iqr_y)) if raw_iqr_y > 0 else np.nan
-    out['skewness'] = np.abs(1 - (skew(y[r])/skew(y)))
+    # ratios are NaN when the global statistic is exactly zero
+    global_skew = skew(y)
+    out['skewness'] = np.abs(1 - (skew(y[r])/global_skew)) if global_skew != 0 else np.nan
     # use Pearson definition (normal ==> 3.0)
-    out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/kurtosis(y, fisher=False)))
-    out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')[0]/autocorr(y, 1, 'Fourier')[0]))
+    global_kurt = kurtosis(y, fisher=False)
+    out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/global_kurt)) if global_kurt != 0 else np.nan
+    global_ac1 = autocorr(y, 1, 'Fourier')[0]
+    out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')[0]/global_ac1)) if global_ac1 != 0 else np.nan
 
     sampen_full = sample_entropy(y, 1, 0.1)['sampen1']
     sampen_r = sample_entropy(y[r], 1, 0.1)['sampen1']
@@ -890,7 +905,7 @@ def fit_polynomial(y: ArrayLike, k: int = 1) -> float:
     # Fit a polynomial to the time series
     cf = np.polyfit(t, y, k)
     f = np.polyval(cf, t) # evaluate the fitted poly
-    out = np.mean((y - f)**2) # mean RMS error of fit
+    out = np.sqrt(np.mean((y - f)**2)) # RMS error of fit
 
     return float(out)
 
