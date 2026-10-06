@@ -496,6 +496,17 @@ def surrogates(
 
         - ``'meansurr'``, ``'stdsurr'``: the mean and standard deviation of the statistic
           over the surrogates.
+        - ``'meannumsurr'``: the mean over the surrogates of the statistic's numerator
+          (``<x_n x_{n-tau} x_{n-2tau}>`` for 'tc3', ``<d^3>`` for 'trev'). Unlike
+          ``meansurr`` it has no denominator, so it is not dominated by the few surrogates
+          whose denominator is near zero. It is the mean third-order moment of the null
+          ensemble: for AAFT surrogates (``surr_method=2``) it measures how much
+          ``<x_n x_{n-tau} x_{n-2tau}>`` a static monotone transform of a linear Gaussian
+          process with this series' distribution and autocorrelation produces. For 'trev'
+          and for random-phase surrogates its expectation is near zero for every series
+          (the null processes are time-reversible, and random phases cancel third-order
+          moments of a zero-mean series); for permuted surrogates it depends only on the
+          series' distribution.
         - ``'normpatponmax'``: the Gaussian density N(muhat, sigmahat) at ``s`` relative to
           its peak value.
         - ``'stdfrommean'``: ``|s - muhat| / sigmahat``.
@@ -540,11 +551,13 @@ def surrogates(
 
     def stat(x):
         res = stat_fn(x, tau)
-        return res['raw'] if isinstance(res, dict) else np.nan
+        return (res['raw'], res['num']) if isinstance(res, dict) else (np.nan, np.nan)
 
-    tc3_y = stat(y)
+    tc3_y = stat(y)[0]
     surr = _make_surrogates(y, native_methods[surr_method], nsurr, random_seed)
-    tc3_surr = np.array([stat(surr[:, i]) for i in range(nsurr)])
+    stats_surr = np.array([stat(surr[:, i]) for i in range(nsurr)])
+    tc3_surr = stats_surr[:, 0]
+    num_surr = stats_surr[:, 1]  # the statistic's numerator on each surrogate
 
     if np.isnan(tc3_surr).any():
         logger.warning(f"Surrogate statistic '{surrfn}' failed for a surrogate")
@@ -578,6 +591,7 @@ def surrogates(
     # 3) basic info on the surrogates
     out['stdsurr'] = sigmahat
     out['meansurr'] = muhat
+    out['meannumsurr'] = np.mean(num_surr)
 
     # 4) kernel density test
     ksf, ksx, _ = bf_ks_density(tc3_surr)
