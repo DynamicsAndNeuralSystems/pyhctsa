@@ -81,25 +81,37 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     rs = np.sort(rs[0:min(num_iters, len(rs))])
     rs = np.array([rs])
 
+    # The alphabet size for the Krichevsky-Trofimov smoothing below. For
+    # 'embed2quadrants'/'embed2octants', num_groups is the embedding delay, not an
+    # alphabet size, so the alphabet size is fixed by the number of quadrants/octants.
+    if coarse_grain_method == 'embed2quadrants':
+        num_symbols = 4
+    elif coarse_grain_method == 'embed2octants':
+        num_symbols = 8
+    else:
+        num_symbols = num_groups
+
     # COMPUTE EMPIRICAL PROBABILITIES FROM TIME SERIES
-    store = np.zeros([num_iters, 1])
-    for i in range(0, rs.size): # rs.size
+    # Sized to the number of test points actually available, min(num_iters, N-memory)
+    num_test = rs.size
+    store = np.zeros(num_test)
+    for i in range(0, num_test):
         if what_prior == 'dist':
             # uses the distribution up to memory to inform the next point
             # had to be careful with indexing, arange() works like matlab's : operator
-            p = np.sum(yth[rs[0, i]-memory:rs[0, i]] == yth[rs[0, i]])/memory
-            store[i] = p
+            num_matches = np.sum(yth[rs[0, i]-memory:rs[0, i]] == yth[rs[0, i]])
+            n_antecedent = memory
         elif what_prior == 'T1':
             # uses one-point correlations in memory to inform the next point
             # estimate transition probabilities from data in memory
             # find where in memory this has been observbed before, and preceded it
             memory_data = yth[rs[0, i] - memory:rs[0, i]]
             inmem = np.where(memory_data[:-1] == yth[rs[0, i] - 1])[0]
-            if len(inmem) == 0:
-                p = 0
+            n_antecedent = len(inmem)
+            if n_antecedent == 0:
+                num_matches = 0
             else:
-                p = np.mean(memory_data[inmem + 1] == yth[rs[0, i]])
-            store[i] = p
+                num_matches = np.sum(memory_data[inmem + 1] == yth[rs[0, i]])
 
         elif what_prior == 'T2':
             # Uses two-point correlations in memory to inform the next point
@@ -107,20 +119,20 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
             # Previous value observed in memory here
             inmem1 = np.where(memory_data[1:-1] == yth[rs[0, i] - 1])[0]
             inmem2 = np.where(memory_data[inmem1] == yth[rs[0, i] - 2])[0]
-            if len(inmem2) == 0:
-                p = 0
+            n_antecedent = len(inmem2)
+            if n_antecedent == 0:
+                num_matches = 0
             else:
-                p = np.sum(memory_data[inmem2 + 2] == yth[rs[0, i]]) / len(inmem2)
-            store[i] = p
+                # inmem2 indexes into inmem1, not directly into memory_data
+                num_matches = np.sum(memory_data[inmem1[inmem2] + 2] == yth[rs[0, i]])
         else:
             raise ValueError(f"Unknown method: {what_prior}")
-    # INFORMATION GAINED FROM NEXT OBSERVATION IS log(1/p) = -log(p)
-    store[store == 0] = 1 # so that we set log[0] == 0
+        # Krichevsky-Trofimov-style smoothed probability estimate: always in (0, 1),
+        # the uniform prior 1/num_symbols when the antecedent was never observed
+        store[i] = (num_matches + 0.5) / (n_antecedent + 0.5 * num_symbols)
 
+    # INFORMATION GAINED FROM NEXT OBSERVATION IS log(1/p) = -log(p)
     out = {} # dictionary for outputs
-    for i in range(0, len(store)):
-        if store[i] == 0:
-            store[i] = 1
 
     store = -(np.log(store))
     #minimum amount of information you can gain in this way
@@ -179,6 +191,10 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
     y = np.asarray(y)
     y_bin = binarize(y, binarize_how)
 
+    # A median split fixes the marginal symbol frequencies (used for the
+    # Miller-Madow degrees of freedom in _f_entropy)
+    fixed_marginals = (binarize_how == 'median')
+
     # Define the length of the new, symbolized sequence, N
     N = len(y_bin)
 
@@ -195,7 +211,7 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
     out['u'] = np.mean(r1) # proportion 1 (corresponds to a movement up for 'diff')
     out['d'] = np.mean(r0) # proportion 0 (corresponds to a movement down for 'diff')
     pp = np.array([out['d'], out['u']])
-    out['h'] = _f_entropy(pp)
+    out['h'] = _f_entropy(pp, N, 1, 2, fixed_marginals) # Miller-Madow
 
     # Binary sequences of length 2:
     r1 = r1[:-1]
@@ -212,7 +228,7 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
     out['uu'] = np.mean(r11)  # up, up
 
     pp = np.array([out['dd'], out['du'], out['ud'], out['uu']])
-    out['hh'] = _f_entropy(pp)
+    out['hh'] = _f_entropy(pp, N - 1, 2, 2, fixed_marginals)
 
     # -----------------------------
     # Binary sequences of length 3:
@@ -247,7 +263,7 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
     ppp = np.array([out['ddd'], out['ddu'], out['dud'], 
                     out['duu'], out['udd'], out['udu'], 
                     out['uud'], out['uuu']])
-    out['hhh'] = _f_entropy(ppp)
+    out['hhh'] = _f_entropy(ppp, N - 2, 3, 2, fixed_marginals)
 
     # -------------------
     # 4
@@ -304,7 +320,7 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff') -> dict:
                      out['uddu'], out['udud'], out['uduu'], 
                      out['uudd'], out['uudu'], out['uuud'], 
                      out['uuuu']])
-    out['hhhh'] = _f_entropy(pppp)
+    out['hhhh'] = _f_entropy(pppp, N - 3, 4, 2, fixed_marginals)
 
     return out
 
@@ -353,7 +369,7 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
 
     out = {
         'a': out1[0], 'b': out1[1], 'c': out1[2],
-        'h': _f_entropy(out1)
+        'h': _f_entropy(out1, N, 1, 3, True)
     }
 
     # ------------------------------------------------------------------------------
@@ -371,7 +387,7 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
         'aa': out2[0, 0], 'ab': out2[0, 1], 'ac': out2[0, 2],
         'ba': out2[1, 0], 'bb': out2[1, 1], 'bc': out2[1, 2],
         'ca': out2[2, 0], 'cb': out2[2, 1], 'cc': out2[2, 2],
-        'hh': _f_entropy(out2)
+        'hh': _f_entropy(out2, N - 1, 2, 3, True)
     })
 
     # ------------------------------------------------------------------------------
@@ -388,7 +404,7 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
 
     out.update({f'{chr(97+i)}{chr(97+j)}{chr(97+k)}': out3[i, j, k] 
                 for i in range(3) for j in range(3) for k in range(3)})
-    out['hhh'] = _f_entropy(out3)
+    out['hhh'] = _f_entropy(out3, N - 2, 3, 3, True)
 
     # ------------------------------------------------------------------------------
     # Words of length 4
@@ -405,13 +421,29 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile') -> dict:
 
     out.update({f'{chr(97+i)}{chr(97+j)}{chr(97+k)}{chr(97+l)}': out4[i, j, k, l] 
                 for i in range(3) for j in range(3) for k in range(3) for l in range(3)})
-    out['hhhh'] = _f_entropy(out4)
+    out['hhhh'] = _f_entropy(out4, N - 3, 4, 3, True)
 
     return out
 
-def _f_entropy(x):
-    """Entropy of a set of counts, log(0) = 0"""
-    return -np.sum(x[x > 0] * np.log(x[x > 0]))
+def _f_entropy(p, num_samples=None, word_length=1, alphabet_size=2, fixed_marginals=False):
+    """
+    Miller-Madow-corrected entropy of a probability array, in nats (log(0) = 0).
+
+    The plug-in entropy is biased downwards by df/(2 num_samples), with
+    df = (number of occupied words) - 1. When the coarse-graining fixes the
+    marginal symbol frequencies (`fixed_marginals`), df is reduced by
+    word_length*(alphabet_size - 1), so that for words of length 1 df = 0.
+    """
+    p = np.asarray(p, dtype=float).ravel()
+    r = p > 0
+    h = -np.sum(p[r] * np.log(p[r]))
+    if num_samples is not None and num_samples > 0:
+        df = int(np.sum(r)) - 1
+        if fixed_marginals:
+            df -= word_length * (alphabet_size - 1)
+        if df > 0:
+            h += df / (2 * num_samples)
+    return h
 
 
 def binary_stretch(x: ArrayLike, stretch_what: str = 'lseq1') -> float:
@@ -543,6 +575,7 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
         out['meanstretch1'] = 0
         out['meanstretch1norm'] = 0
         out['stdstretch1'] = np.nan
+        out['stdstretch1norm'] = np.nan
     else:
         out['longstretch1'] = np.max(stretch1)
         out['longstretch1norm'] = np.max(stretch1) / N
@@ -608,6 +641,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
             raise ValueError(f"Unknown tau '{tau}'")
         # determine tau from the first zero-crossing of the ACF
         tau = first_crossing(y, 'ac', 0, 'discrete')
+        if tau > len(y) / 50:  # cap at 2% of the series length so it stays long enough
+            tau = int(np.floor(len(y) / 50))
     if np.isnan(tau):
         raise ValueError('Time series too short to estimate tau')
     tau = int(tau)
@@ -885,7 +920,7 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
     else:
         mba = np.zeros((n, 2))  # means before and after
         sba = np.zeros((n, 2))  # standard deviation before and after
-        for i in range(2, n):
+        for i in range(2, n - 2):
             mba[i, 0] = _seq_mean(store[:i, 3])
             sba[i, 0] = _seq_std(store[:i, 3]) / np.sqrt(i)
             after = store[i + 1:, 3]
