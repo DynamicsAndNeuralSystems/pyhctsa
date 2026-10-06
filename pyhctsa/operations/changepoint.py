@@ -57,7 +57,7 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
         out = {
             "E": E[0] / N,        # energy per sample (E sums over the series)
             "s": s[0],          # collapses to 1 for some parameter values
-            "lambdamax": lambda_max,
+            "lambdamax": lambda_max / np.sqrt(N),
         }
         # Get step indices from steppedy; these give the index of the start of
         # each run. Kept 1-based to match MATLAB, since every statistic below
@@ -106,21 +106,9 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
     # Proportion of really short steps:
     out["pshort_3"] = np.sum(chints <= 3) / N
 
-    # Mean interval between steps:
-    out["meanstepint"] = np.mean(chints) / N
-
     # Mean interval greater than 3 samples (in samples):
     long_ints = chints[chints > 3]
     out["meanstepintgt3"] = np.mean(long_ints) if long_ints.size else np.nan
-
-    # Mean error on step interval distribution:
-    out["meanerrstepint"] = np.std(chints, ddof=1) / np.sqrt(len(chints))
-
-    # Maximum step interval:
-    out["maxstepint"] = np.max(chints) / N
-
-    # Minimum step interval:
-    out["minstepint"] = np.min(chints) / N
 
     # Median step interval:
     out["medianstepint"] = np.median(chints)
