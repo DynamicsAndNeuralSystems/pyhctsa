@@ -1206,14 +1206,17 @@ def _randomize_fit(stats: np.ndarray) -> dict:
 
 
 def randomize(y: ArrayLike, randomize_how: str = 'statdist',
-              random_seed: Union[int, str, None] = None) -> dict:
+              random_seed: Union[int, str, None] = None, num_reps: int = 20) -> dict:
     """
     How properties of the series change as it is progressively randomized.
 
     Randomizes a copy of the input (z-scored) series one point at a time, according to a
     randomization procedure, repeated ``2N`` times for a series of length ``N``, and
     compares statistics of the randomized copy with the original at 21 checkpoints: at the
-    start and after every ``N/10`` steps. Port of hctsa's ``EN_Randomize``.
+    start and after every ``N/10`` steps. The randomization is repeated ``num_reps`` times from
+    the same series and the statistics at each checkpoint are averaged over the repeats (a
+    single randomization gives a noisy trajectory, and the fitted parameters would mostly reflect
+    that noise). Port of hctsa's ``EN_Randomize``.
 
     The random indices come from the portable generator :func:`~pyhctsa.robust.bf_random`
     (two uniform draws per step, as indices uniform on 1..N), so the result is reproducible
@@ -1238,6 +1241,8 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
         The seed of the random choices, as hctsa's ``BF_RandomSeed``: a number;
         ``'default'`` (or None) is 0; ``'none'`` draws a seed from NumPy's global stream (the
         run is then not reproducible). Default is None.
+    num_reps : int, optional
+        The number of independent randomizations whose statistics are averaged. Default is 20.
 
     Returns
     -------
@@ -1285,9 +1290,13 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
     # The random choices for every step, reproducible from the seed: two uniform draws per
     # step, as indices uniform on 0..N-1
     seed = 'default' if random_seed is None else random_seed
-    draws = np.floor(n * bf_random(4 * n, bf_random_seed(seed))).astype(np.int64).reshape(2 * n, 2)
+    # (repeat r uses the r-th block of 2N steps of one stream)
+    draws = np.floor(n * bf_random(4 * n * num_reps, bf_random_seed(seed))).astype(np.int64).reshape(num_reps, 2 * n, 2)
 
-    return _randomize_fit(_randomize_run(y, randomize_how, draws))
+    runs = np.stack([_randomize_run(y, randomize_how, draws[r]) for r in range(num_reps)])
+    with np.errstate(all='ignore'):
+        stats = np.nanmean(runs, axis=0)  # average over the repeats
+    return _randomize_fit(stats)
 
 @dict_output
 def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str] = 1,

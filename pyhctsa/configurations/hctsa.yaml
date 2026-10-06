@@ -1755,7 +1755,7 @@ spectral:
     base_name: bicoherence
     dependencies:
     configs:
-      - {zscore: True}   # SP_Bicoherence(x_z,64,'full',25)
+      - {zscore: True}   # SP_Bicoherence(x_z,64,'full',100)
     legacy_name: SP_Bicoherence
 
   envelope_stats:
@@ -1857,7 +1857,7 @@ model_fit:
     configs:
       - {model: 'ar', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True}
       - {model: 'arcrosspred', order: 2, subset_how: 'uniform', sample_p: 5, zscore: True}   # MF_FitSubsegments(x_z,'arcrosspred',2,'uniform',5)
-      - {model: 'arsbc', subset_how: 'rand', sample_p: [[25, 0.1]], zscore: True}   # MF_FitSubsegments(x_z,'arsbc',[],'rand',[25,0.1],'default')
+      - {model: 'arsbc', subset_how: 'spread', sample_p: [[25, 0.1]], zscore: True}   # MF_FitSubsegments(x_z,'arsbc',[],'spread',[25,0.1])
       - {model: 'arsbc', subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True}   # MF_FitSubsegments(x_z,'arsbc',[],'uniform',[25,0.1])
       - {model: 'ss', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True}   # MF_FitSubsegments(x_z,'ss',2,'uniform',[25,0.1])
     legacy_name: MF_FitSubsegments
@@ -1903,7 +1903,7 @@ model_fit:
     base_name: compare_test_sets
     dependencies:
     configs:
-      - {the_model: 'ar', ord: 4, subset_how: 'rand', sample_p: [[25, 0.1]], steps: 1, zscore: True}   # MF_CompareTestSets(x_z,'ar',4,'rand',[25,0.1],1,'default')
+      - {the_model: 'ar', ord: 4, subset_how: 'spread', sample_p: [[25, 0.1]], steps: 1, zscore: True}   # MF_CompareTestSets(x_z,'ar',4,'spread',[25,0.1],1)
       - {the_model: 'ar', ord: 'best', subset_how: 'uniform', sample_p: [[25, 0.1]], steps: 1, zscore: True}   # MF_CompareTestSets(x_z,'ar','best','uniform',[25,0.1],1)
       - {the_model: 'ss', ord: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], steps: 1, zscore: True}   # MF_CompareTestSets(x_z,'ss',2,'uniform',[25,0.1],1)
       - {the_model: 'ss', ord: 'best', subset_how: 'uniform', sample_p: [[25, 0.1]], steps: 1, zscore: True}   # MF_CompareTestSets(x_z,'ss','best','uniform',[25,0.1],1)

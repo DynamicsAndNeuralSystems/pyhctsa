@@ -1364,6 +1364,8 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         How to choose segments from the time series, either:
 
         - 'uniform' (evenly spaced)
+        - 'spread' (start points from the golden-ratio sequence ``frac(j*phi)``: deterministic and
+          evenly spread, without the aliasing a regular spacing has with periodic series)
         - 'rand' (at random).
 
         Default is ``'rand'``.
@@ -1421,6 +1423,14 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
             r = np.zeros((num_pred, 2), dtype=int)
             r[:, 0] = spts
             r[:, 1] = spts + l - 1
+    elif subset_how == 'spread':
+        if sample_p[1] < 1:  # specified a fraction of time series
+            l = int(np.floor(N * sample_p[1]))
+        else:  # specified an absolute interval
+            l = int(sample_p[1])
+        # start points on 1..N-l+1 from the golden-ratio (Weyl) sequence frac(j*phi): deterministic, evenly spread
+        spts = 1 + np.floor((N - l + 1) * ((np.arange(1, num_pred + 1) * 0.6180339887498949) % 1.0)).astype(int)
+        r = np.column_stack([spts, spts + l - 1])
     elif subset_how == 'rand':
         if sample_p[1] < 1:  # specified a fraction of time series
             l = int(np.floor(N * sample_p[1]))
@@ -2737,7 +2747,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
                         num_train: int = 20, num_test: int = 5,
                         num_preds: int = 10, pmode: str = 'frombefore',
-                        random_seed: int = 0) -> dict:
+                        random_seed: int = 0, num_splits: int = 8) -> dict:
     """
     Gaussian Process time-series model for local prediction.
 
@@ -2781,6 +2791,10 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         seed drawn from NumPy's global state. One block of uniforms from the portable generator
         (:func:`pyhctsa.robust.bf_random`) gives each window its own split (the ranks of its
         column), so the splits are hctsa's. Default is 0.
+    num_splits : int, optional
+        For ``'randomgap'``, the number of different random splits made of each window; each
+        split is fitted and predicted as a window of its own, so the outputs summarize
+        ``num_preds * num_splits`` fits. Default is 8.
 
     Returns
     -------
@@ -2824,6 +2838,11 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     else:
         raise ValueError(f"Unknown prediction mode {pmode!r}")
     spns = spns.astype(int)
+    # each window is used num_splits times (with a different random split each time; 'randomgap' only)
+    if pmode != 'randomgap':
+        num_splits = 1
+    spns = np.repeat(spns, int(num_splits))
+    num_preds = num_preds * int(num_splits)
 
     out_keys = (
         'maxabs_std', 'maxabs', 'minabs_std', 'minabs', 'meanabs_std',
@@ -3369,9 +3388,10 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
         The order of the model to fit (a two-element vector for ``'arma'``), or ``'best'``
         to select it automatically: for ``'ar'``, the order from 1 to 10 minimizing the
         Schwarz Bayesian criterion (ARFIT); for ``'ss'``, as chosen by n4sid. Default is 2.
-    subset_how : {'rand', 'uniform'}, optional
-        How to select the test segments: at random, or evenly spaced throughout the time
-        series. Default is ``'rand'``.
+    subset_how : {'rand', 'spread', 'uniform'}, optional
+        How to select the test segments: at random, with start points from the golden-ratio
+        sequence ``frac(j*phi)`` (deterministic and evenly spread), or evenly spaced throughout
+        the time series. Default is ``'rand'``.
     sample_p : two-vector, optional
         ``[number of segments, segment length]``. A segment length below 1 is a fraction of
         the series length, capped to between 10 and 20 samples (so ``[25, 0.1]`` takes 25
@@ -3421,12 +3441,17 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
 
     # Set the ranges of the test segments (1-based, inclusive)
     r = np.zeros((num_pred, 2), dtype=int)
-    if subset_how in ('rand', 'uniform') and len(sample_p) > 1:
+    if subset_how in ('rand', 'spread', 'uniform') and len(sample_p) > 1:
         if sample_p[1] < 1:  # a fraction of the time series, capped to between 10 and 20
             seg_len = int(max(min(20, np.floor(N * sample_p[1])), 10))
         else:  # an absolute interval
             seg_len = int(sample_p[1])
-    if subset_how == 'rand':
+    if subset_how == 'spread':
+        # start points on 1..N-seg_len+1 from the golden-ratio (Weyl) sequence frac(j*phi): deterministic, evenly spread
+        spts = 1 + np.floor((N - seg_len + 1) * ((np.arange(1, num_pred + 1) * 0.6180339887498949) % 1.0)).astype(int)
+        r[:, 0] = spts
+        r[:, 1] = spts + seg_len - 1
+    elif subset_how == 'rand':
         # numPred random starting points (uniform on 1..N-seg_len+1), reproducible from the seed
         spts = 1 + np.floor((N - seg_len + 1) * bf_random(num_pred, bf_random_seed(random_seed))).astype(int)
         r[:, 0] = spts
@@ -3626,7 +3651,7 @@ def _gp_init_hyp(components: list, tt: np.ndarray) -> np.ndarray:
 def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covNoise',
                        squish_or_squash: int = 1, max_n: Union[int, float, str] = 500,
                        resample_how: str = 'resample',
-                       random_seed: Union[int, str, None] = 0) -> dict:
+                       random_seed: Union[int, str, None] = 0, num_draws: int = 20) -> dict:
     """
     Fits a Gaussian process to the series and reports its fitted kernel parameters and
     goodness of fit.
@@ -3678,6 +3703,11 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         hctsa's ``BF_RandomSeed``: a number, ``'default'`` or ``None`` for seed 0, or ``'none'``
         for a seed drawn from NumPy's global state. The draws come from the portable generator
         (:func:`pyhctsa.robust.bf_random`), so they are hctsa's. Default is 0.
+    num_draws : int, optional
+        The number of independent random samples to fit, for the settings of ``resample_how``
+        that use random numbers (draw ``d`` uses the seed ``2*num_draws*seed + 2*(d - 1)``, so that different seeds share no draws). The outputs are
+        the means over the draws that gave a valid fit (NaN if fewer than half did): a single
+        random sample of a few tens of points is dominated by which points were drawn. Default is 20.
 
     Returns
     -------
@@ -3720,6 +3750,16 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         return np.arange(1, n + 1, dtype=float) if squish_or_squash else _linspace(0, 1, n)
 
     # Downsample long time series
+    if (num_draws > 1 and max_n > 0 and N > max_n
+            and resample_how in ('random_i', 'random_consec', 'random_both')):
+        seed0 = bf_random_seed(random_seed)
+        draws = [gp_hyperparameters(y, cov_func, squish_or_squash, max_n, resample_how,
+                                    2 * int(num_draws) * seed0 + 2 * d, 1) for d in range(int(num_draws))]
+        valid = [d for d in draws if isinstance(d, dict) and not all(np.isnan(v) for v in d.values())]
+        if len(valid) < num_draws / 2:
+            return np.nan
+        return {k: float(np.nanmean([d[k] for d in valid])) for k in valid[0]}
+
     if max_n == 0:
         t = set_time_index(N)  # no resampling requested
     elif N > max_n:

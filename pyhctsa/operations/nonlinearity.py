@@ -23,7 +23,7 @@ from ..operations.information import first_min
 from ..toolboxes.matlab.matlab_fit import goodness_of_fit, lsqcurvefit_trr, robustfit
 from ..toolboxes.Tisean_3_0_1 import tisean as _tisean
 from ..toolboxes.Tisean_3_0_1.tisean import _e, _round_significant
-from ..robust import bf_hist_edges, bf_random, bf_random_seed
+from ..robust import bf_hist_edges, bf_random, bf_random_seed, bf_spread_perm
 from ..utils import (dict_output, _linspace, _ml_randperm, _ml_rng, _round_half_away, get_tau,
                      matlab_quantile, theiler_window, time_delay_embed)
 
@@ -728,9 +728,8 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
         ``['ac', k]`` for ``k`` times the autocorrelation time (``['ac1e', k]`` is
         also accepted). Default is ``['ac', 1]``.
     random_seed : int, str or None, optional
-        Seed of the random reference points (see :func:`~pyhctsa.robust.bf_random_seed`; ``'default'`` is 0).
-        They come from the portable generator :func:`~pyhctsa.robust.bf_random`, so the
-        results are the same as hctsa's for the same seed. Default is 0.
+        Not used: the 256 reference points are deterministic (the golden-ratio sequence over the
+        sorted values), as in hctsa. Kept so that existing calls still work.
 
     Returns
     -------
@@ -768,16 +767,15 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
         logger.warning('No autocorrelation zero-crossing to set the Theiler window')
         return np.nan
 
-    iterations = 64
+    iterations = 256
     max_attempts = 1000
     length = N - max_delay
     # index[r] is the position in the time series of the (r+1)th smallest value
     index = np.argsort(y[:length], kind='stable')
 
-    # Random numbers for the reference points: the next unused number of one reproducible stream
-    # (more of the same stream is generated if the numbers run out)
-    seed = bf_random_seed(random_seed)
-    rand_stream = bf_random(512, seed)
+    # The reference points are the value-ranks given by the golden-ratio (Weyl) sequence
+    # frac(j*phi): evenly spread and deterministic (random_seed is not used); the next one is
+    # used whenever a reference has no valid neighbors on both sides
     num_used = 0
 
     err = np.zeros(max_delay + 1)
@@ -786,10 +784,8 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
         # that clears the Theiler window (as hctsa, give up with NaN after
         # max_attempts draws, which is data dependent).
         for _ in range(max_attempts):
-            if num_used >= len(rand_stream):
-                rand_stream = bf_random(4 * len(rand_stream), seed)  # same stream, longer
-            ref = int(np.ceil(rand_stream[num_used]*length))  # a random value-rank (from one)
             num_used += 1
+            ref = max(1, int(np.ceil(((num_used * 0.6180339887498949) % 1.0) * length)))  # a value-rank (from one)
             actual = index[ref-1]
             below, above = index[:ref-1], index[ref:]
             pre_candidates = below[np.abs(below - actual) > past]
@@ -1828,9 +1824,8 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
         or ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
         TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
     random_seed : int, str or None, optional
-        Seed for choosing the random subsample of reference points (relevant when
-        ``nref != -1``; see :func:`~pyhctsa.robust.bf_random_seed`). The numbers come from the portable generator
-        :func:`~pyhctsa.robust.bf_random`, so the subsample is the same as hctsa's. Default is 0.
+        Not used: the reference points (when ``nref != -1``) are the first of a fixed, evenly
+        spread ordering (:func:`~pyhctsa.robust.bf_spread_perm`), as in hctsa.
 
     Returns
     -------
@@ -1875,7 +1870,7 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     if nref == -1 or nref >= n_emb:
         ref_idx = np.arange(n_emb)
     else:
-        ref_idx = bf_random(n_emb, bf_random_seed(random_seed), 'perm')[:int(nref)] - 1  # random subsample
+        ref_idx = bf_spread_perm(n_emb)[:int(nref)] - 1  # evenly spread subsample (deterministic)
 
     # For each reference point, the distances to its 1st..kmax-th nearest neighbors outside
     # the Theiler window (a KD-tree, over-fetching neighbors to cover those excluded)
@@ -3108,21 +3103,19 @@ def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
 # ------------------------------------------------------------------------------
 def _random_subset(n: int, k: int, random_seed: Union[int, str, None]) -> np.ndarray:
     """
-    The first ``k`` of a random permutation of ``n`` indices (from zero), from the portable
-    generator :func:`~pyhctsa.robust.bf_random` (as hctsa's
-    ``BF_Random(n, BF_RandomSeed(randomSeed), 'perm')``): an integer seed, ``'default'`` for
-    seed 0, or ``None``/``'none'`` for a seed from NumPy's global stream.
+    The first ``k`` of a fixed, evenly spread ordering of ``n`` indices (from zero), as hctsa's
+    ``BF_SpreadPerm(n)(1:k)``: deterministic, so ``random_seed`` is not used.
     """
-    return bf_random(n, bf_random_seed(random_seed), 'perm')[:k] - 1
+    return bf_spread_perm(n)[:k] - 1
 
 
 def _recurrence_radius(Y: np.ndarray, rr: float, random_seed: Union[int, str, None]) -> float:
     """
     Neighborhood radius giving the target recurrence rate `rr`: its quantile of the pairwise
-    distances between (at most) 500 randomly chosen embedded points.
+    distances between all embedded points (at most 2000 of them, spread evenly over the series).
     """
     n_emb = Y.shape[0]
-    sub = _random_subset(n_emb, min(500, n_emb), random_seed)
+    sub = _random_subset(n_emb, min(2000, n_emb), random_seed)
     return float(matlab_quantile(pdist(Y[sub]), rr)[0])
 
 
@@ -3254,10 +3247,8 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
         The maximum number of samples to consider (the first ``max_n``); ``'full'`` to
         disable cropping. Default is 10000.
     random_seed : int, str or None, optional
-        The seed of the random subsample used to set the radius, as hctsa's ``BF_RandomSeed``:
-        an integer, ``'default'`` (seed 0), or ``None``/``'none'`` (a seed from NumPy's global
-        stream). The subsample is the first 500 of a :func:`~pyhctsa.robust.bf_random`
-        permutation, so the radius is the same as hctsa's. Default is ``'default'``.
+        Not used: the radius is set from all the embedded points (above 2000, from 2000 spread
+        evenly over the series), so nothing is random. Kept so that existing calls still work.
 
     Returns
     -------
@@ -3372,10 +3363,8 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
         ``max_n`` points, since the number of recurrent pairs grows as ``rr * N**2``.
         ``'full'`` disables cropping (a warning is logged above N = 20000). Default is 10000.
     random_seed : int, str or None, optional
-        The seed of the random subsample used to set the radius, as hctsa's ``BF_RandomSeed``:
-        an integer, ``'default'`` (seed 0), or ``None``/``'none'`` (a seed from NumPy's global
-        stream). The subsample is the first 500 of a :func:`~pyhctsa.robust.bf_random`
-        permutation, so the radius is the same as hctsa's. Default is ``'default'``.
+        Not used: the radius is set from all the embedded points (above 2000, from 2000 spread
+        evenly over the series), so nothing is random. Kept so that existing calls still work.
 
     Returns
     -------
@@ -3775,7 +3764,7 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
     reg_val = 1e-6 * np.mean(np.var(y_embed, axis=0, ddof=1))
 
     def fit(k):
-        gm = GaussianMixture(n_components=k, covariance_type='full', reg_covar=reg_val, n_init=3,
+        gm = GaussianMixture(n_components=k, covariance_type='full', reg_covar=reg_val, n_init=10,
                              init_params='k-means++', max_iter=500, tol=1e-6, random_state=0)
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')  # (replicates that do not converge are expected)
@@ -4186,10 +4175,9 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
         The maximum number of samples to consider (the first ``max_n``); ``'full'`` for no
         cropping (a warning is logged above 50000 samples). Default is ``'full'``.
     random_seed : int, str or None, optional
-        The seed for sampling the poles, as hctsa's ``BF_RandomSeed``: an integer, ``'default'``
-        (seed 0), or ``None``/``'none'`` (a seed from NumPy's global stream). The poles are the
-        first of a :func:`~pyhctsa.robust.bf_random` permutation, so they are the same as
-        hctsa's. Default is ``'default'``.
+        Not used: the poles are the first of a fixed, evenly spread ordering of the embedded
+        points (:func:`~pyhctsa.robust.bf_spread_perm`), as in hctsa. Kept so that existing
+        calls still work.
 
     Returns
     -------

@@ -1379,13 +1379,11 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
 
         Default is 100.
     num_segs : int, optional
-        The number of randomly-selected local segments to analyze. Default is 100.
+        The number of local segments to analyze. Default is 100.
     random_seed : int, str or None, optional
-        Seed of the random number generator, for reproducibility: an integer, or ``'default'``
-        (or ``None``) for seed 0 (hctsa's default), or ``'none'`` for a seed drawn from NumPy's
-        global random state. The start points are ``floor((N - l + 1) u)`` for uniforms from the
-        portable generator :func:`pyhctsa.robust.bf_random`, so they reproduce hctsa's draws.
-        Default is ``'default'``.
+        Not used: the segment start points are ``floor((N - l + 1) u_j)`` with ``u_j`` the
+        golden-ratio (Weyl) sequence ``frac(j*phi)``, evenly spread and deterministic, as in
+        hctsa. Kept so that existing calls still work.
 
     Returns
     -------
@@ -1423,7 +1421,7 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
     l = int(l)
 
     # numSegs segments, each of length l data points
-    istarts = np.floor((N - l + 1) * bf_random(num_segs, bf_random_seed(random_seed))).astype(int)  # (0-based; 1 + floor(..) in MATLAB)
+    istarts = np.floor((N - l + 1) * ((np.arange(1, num_segs + 1) * 0.6180339887498949) % 1.0)).astype(int)  # (0-based; 1 + floor(..) in MATLAB)
 
     qs = np.full((num_segs, 8), np.nan)
     for j in range(num_segs):
