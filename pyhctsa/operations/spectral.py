@@ -333,6 +333,10 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     y = np.asarray(y)
     ny = len(y)
 
+    if np.all(y == y[0]):  # constant series has an all-zero spectrum -> log(0)
+        warnings.warn("Constant time series has no spectral structure")
+        return np.nan
+
     window = None
     # Set window (for periodogram and welch):
     if window_type == 'none':
@@ -359,6 +363,12 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
         s = scipy.fft.fft(y, nfft)  # do the fourier transform
         s = 2 * np.abs(s[:int(nfft / 2) + 1]) ** 2 / ny  # single-sided power spectral density
         s = s / (2 * np.pi)  # convert to angular freq space
+        # Drop the DC bin (w = 0). A z-scored series has a zero sum up to rounding, so s[0] is
+        # not a spectral estimate but the square of a ~1e-14 residual, and log(s[0]) is a
+        # random outlier near -70 that would dominate every log-domain statistic. (The
+        # windowed/Welch estimates have a genuine non-zero DC bin from leakage.)
+        w = w[1:]
+        s = s[1:]
 
     elif psd_meth == 'welch':
         # welch power spectral density estimate
@@ -391,27 +401,15 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out = {}
     i_max_s = np.argmax(s)
     out = {'maxS': s[i_max_s], 'maxw': w[i_max_s]}
-    r, l = np.where(s[i_max_s + 1:] < s[i_max_s])[0], np.where(s[:i_max_s] < s[i_max_s])[0]
-    out['maxWidth'] = w[i_max_s + 1 + r[0]] - w[l[-1]] if len(r) > 0 and len(l) > 0 else 0
 
-    right_indices = np.where(s[i_max_s + 1:] < out['maxS'])[0]
-    if len(right_indices) > 0:
-        right_idx = i_max_s + 1 + right_indices[0]
-    else:
-        right_idx = None
-
-    # Find last index before i_maxS where S < maxS
-    left_indices = np.where(s[:i_max_s] < out['maxS'])[0]
-    if len(left_indices) > 0:
-        left_idx = left_indices[-1]
-    else:
-        left_idx = None
-
-    # Calculate maxWidth
-    if right_idx is not None and left_idx is not None:
-        out['maxWidth'] = w[right_idx] - w[left_idx]
-    else:
-        out['maxWidth'] = 0
+    # Half-power (-3 dB) bandwidth of the dominant peak: the frequency interval around the
+    # maximum over which the spectrum stays above half its peak value.
+    half_power = out['maxS'] / 2
+    r = np.flatnonzero(s[i_max_s + 1:] < half_power)
+    i_upper = i_max_s + 1 + r[0] if r.size else n - 1  # never drops below half power above the peak
+    l = np.flatnonzero(s[:i_max_s] < half_power)
+    i_lower = l[-1] if l.size else 0  # never drops below half power below the peak
+    out['maxWidth'] = w[i_upper] - w[i_lower]
 
     min_dist_w = 0.02
     pts_per_w = len(s) / np.pi
@@ -429,7 +427,7 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['numPromPeaks_5'] = np.sum(pk_prom > 5)  # number of peaks with prominence of at least 5
     # number of peaks with prominence greater than the mean (low for skewed distn)
     out['numPeaks_overmean'] = np.sum(pk_prom > np.mean(pk_prom))
-    out['maxProm'] = np.max(pk_prom)
+    out['maxProm'] = np.max(pk_prom) if pk_prom.size else np.nan
     # mean peak prominence of those with prominence of at least 2
     out['meanProm_2'] = np.mean(pk_prom[pk_prom > 2])
     out['meanPeakWidth_prom2'] = np.mean(pk_width[pk_prom > 2])
@@ -448,8 +446,12 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['w_weighted_peak_height'] = np.sum(pk_loc * pk_height) / np.sum(pk_height)
     # Number of peaks required to get to 50% of power in peaks
     peak_power = pk_height * pk_width
-    out['numPeaks_50power'] = np.where(np.cumsum(peak_power) > 0.5 * np.sum(peak_power))[0][0]
-    out['peakpower_1'] = peak_power[0] / sum(peak_power)
+    if peak_power.size == 0:  # no peaks found (e.g., a monotonic spectrum)
+        out['numPeaks_50power'] = np.nan
+        out['peakpower_1'] = np.nan
+    else:
+        out['numPeaks_50power'] = np.where(np.cumsum(peak_power) > 0.5 * np.sum(peak_power))[0][0]
+        out['peakpower_1'] = peak_power[0] / np.sum(peak_power)
 
     # Distribution
     # quantiles
@@ -474,7 +476,7 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     auto_corrs_s = autocorr(s, [1, 2, 3, 4], 'Fourier')
     out['ac1'] = auto_corrs_s[0]
     out['ac2'] = auto_corrs_s[1]
-    out['tau'] = first_crossing(s, 'ac', 0, 'continuous')  # first zero crossing
+    out['tau'] = first_crossing(s, 'ac', 0, 'continuous') * dw  # first zero crossing, in units of w (not bins)
 
     # Shape of cumulative sum curve
     cs_s = np.cumsum(s)
@@ -649,7 +651,7 @@ def _findpeaks(s, min_pk_dist=0, sort_str='none'):
     all_peaks = np.sort(all_peaks)
 
     if len(all_peaks) == 0:
-        return np.array([]), np.array([]), np.array([]), np.array([])
+        return np.array([]), np.array([], dtype=int)
 
     # apply minimum peak distance constraint
     if min_pk_dist > 0:
@@ -684,7 +686,7 @@ def _findpeaks(s, min_pk_dist=0, sort_str='none'):
         final_peaks = all_peaks
 
     if len(final_peaks) == 0:
-        return np.array([]), np.array([]), np.array([]), np.array([])
+        return np.array([]), np.array([], dtype=int)
 
     pk_height = s[final_peaks]
     pk_loc = final_peaks.astype(int)
@@ -882,6 +884,10 @@ def spectral_summaries_phase(y: ArrayLike) -> dict:
 
     sc = scipy.fft.fft(y - np.mean(y), nfft)  # mean-subtracted, so the DC bin is (numerically) exactly zero
     sc = sc[:nfft // 2 + 1]  # single-sided
+    # Reference the phase to the centre of the series rather than the first sample. This
+    # removes a linear term of ~pi*N/NFFT per bin that would otherwise dominate the
+    # unwrapped phase (groupDelay ~ N/2 for any stationary series).
+    sc = sc * np.exp(1j * w * (ny - 1) / 2)
     mag = np.abs(sc)
     ph = np.angle(sc)
 
@@ -917,9 +923,9 @@ def spectral_summaries_phase(y: ArrayLike) -> dict:
     X = np.column_stack((np.ones(len(ww)), ww))
     XtW = X.T * wgt
     beta = np.linalg.solve(XtW @ X, XtW @ ph_unwrap)
-    out['groupDelay'] = -beta[1]
+    out['groupDelay'] = -beta[1] / ny  # relative to the series centre, as a fraction of its length
     resid = ph_unwrap - X @ beta
-    out['phaseLinearity'] = np.sqrt(np.sum(wgt * resid ** 2))
+    out['phaseLinearity'] = np.sqrt(np.sum(wgt * resid ** 2)) / np.sqrt(len(ww))
 
     # Magnitude-phase correlation
     out['magPhaseCorr'] = np.corrcoef(mag, ph)[0, 1]
@@ -1009,7 +1015,10 @@ def cepstrum(y: ArrayLike, max_period: int = 100, min_period: int = 4) -> dict:
     nHalf = NFFT // 2 + 1
     halfLogMag = logMag[:nHalf]
     fIdx = np.arange(nHalf, dtype=float) / (nHalf - 1) # normalized frequency axis for conditioning
-    pEnv = polyfit(fIdx, halfLogMag, envOrder)
+    # The fit excludes the zero-frequency (DC) bin: a z-scored series has (almost) no
+    # power there, so log|X| at DC is a huge negative outlier (about -30) that would
+    # otherwise bend the fitted envelope. The detrending below still covers all bins.
+    pEnv = polyfit(fIdx[1:], halfLogMag[1:], envOrder)
     halfDetrended = halfLogMag - np.polyval(pEnv, fIdx)
 
     # Mirror back to a full Hermitian-symmetric spectrum so the cepstrum is real:
