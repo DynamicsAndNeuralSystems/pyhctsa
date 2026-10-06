@@ -140,9 +140,10 @@ def test_tisean_c1_mean_over_reference_points_used():
 
 
 def _henon(n):
+    # x * x, not x ** 2: the map is chaotic, so the series must not depend on the platform's pow()
     a, b, x = 1.4, 0.3, [0.1, 0.1]
     for _ in range(n + 100):
-        x.append(1 - a * x[-1] ** 2 + b * x[-2])
+        x.append(1 - a * (x[-1] * x[-1]) + b * x[-2])
     x = np.array(x[102:])
     return (x - x.mean()) / x.std(ddof=1)
 
