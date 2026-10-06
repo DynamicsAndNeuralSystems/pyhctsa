@@ -3705,7 +3705,7 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         (:func:`pyhctsa.robust.bf_random`), so they are hctsa's. Default is 0.
     num_draws : int, optional
         The number of independent random samples to fit, for the settings of ``resample_how``
-        that use random numbers (draw ``d`` uses the seed ``seed + 2*(d - 1)``). The outputs are
+        that use random numbers (draw ``d`` uses the seed ``2*num_draws*seed + 2*(d - 1)``, so that different seeds share no draws). The outputs are
         the means over the draws that gave a valid fit (NaN if fewer than half did): a single
         random sample of a few tens of points is dominated by which points were drawn. Default is 20.
 
@@ -3754,7 +3754,7 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
             and resample_how in ('random_i', 'random_consec', 'random_both')):
         seed0 = bf_random_seed(random_seed)
         draws = [gp_hyperparameters(y, cov_func, squish_or_squash, max_n, resample_how,
-                                    seed0 + 2 * d, 1) for d in range(int(num_draws))]
+                                    2 * int(num_draws) * seed0 + 2 * d, 1) for d in range(int(num_draws))]
         valid = [d for d in draws if isinstance(d, dict) and not all(np.isnan(v) for v in d.values())]
         if len(valid) < num_draws / 2:
             return np.nan
