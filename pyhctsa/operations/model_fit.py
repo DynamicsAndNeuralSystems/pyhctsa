@@ -2824,6 +2824,8 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         - ``q90abs_run``, ``q90abs_std_run``: the 90th percentile (MATLAB's ``quantile``)
           over windows of the mean absolute error in a window, without and with each error
           in units of the error bar,
+        - ``q10abs_run``: the 10th percentile over windows of the mean absolute error in a
+          window,
         - ``low25abs_std_run``: the mean over the lowest quarter of the windows (the
           ``ceil(n/4)`` smallest of the ``n`` values) of the mean absolute error in a
           window, in units of the error bar (these three summarize the tails robustly: the
@@ -2871,7 +2873,7 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         'meanerrbar', 'minerrbar',
         *(f'{s}logh{i + 1}' for i in range(nhps) for s in ('mean', 'std')),
         'maxnlml', 'minnlml', 'stdnlml',
-        'q90abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml',
+        'q90abs_run', 'q10abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml',
     )
 
     mus = np.zeros((num_test, num_preds))        # predicted values
@@ -3002,6 +3004,7 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     # single badly conditioned one), and so depends on which splits were made; a high (low)
     # quantile, or the mean of the highest (lowest) quarter, is reproducible
     out['q90abs_run'] = _nan_quantile(abserr_run, 0.9)
+    out['q10abs_run'] = _nan_quantile(abserr_run, 0.1)
     out['q90abs_std_run'] = _nan_quantile(stderr_run, 0.9)
     out['low25abs_std_run'] = _tail_mean(stderr_run, 'low')
 
@@ -3787,7 +3790,13 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         - ``std_S_data``: standard deviation of the GP's predictive standard deviation at the
           sampled times,
         - ``maxS``, ``minS``, ``meanS``: maximum, minimum, and mean of the GP's predictive
-          standard deviation over 1000 equally spaced times spanning the sampled series.
+          standard deviation over 1000 equally spaced times spanning the sampled series,
+        - ``oosmedabserr``: out-of-sample error, for the random-subsample settings of
+          ``resample_how`` (``'random_i'``, ``'random_both'``): the median absolute difference
+          between the series and the GP mean at the times between the first and last sampled
+          time that were not sampled (so are not seen by the fit), in units of the series'
+          standard deviation; NaN when every point in that span was sampled (e.g.,
+          ``'first'``, ``'resample'``, or a series no longer than ``max_n``).
     """
     from scipy.signal import resample_poly
     from ..toolboxes.matlab.gpml.cov import parse_cov
@@ -3808,6 +3817,7 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     def set_time_index(n):
         return np.arange(1, n + 1, dtype=float) if squish_or_squash else _linspace(0, 1, n)
 
+    t_out = y_out = None  # times and values of unsampled points within the sampled span
     # Downsample long time series
     if (num_draws > 1 and max_n > 0 and N > max_n
             and resample_how in ('random_i', 'random_consec', 'random_both')):
@@ -3833,6 +3843,10 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
             t = set_time_index(N)
             # max_n distinct indices, chosen reproducibly from the seed (the first max_n of a permutation)
             ii = np.sort(bf_random(N, bf_random_seed(random_seed), 'perm')[:max_n])
+            # the unsampled points between the first and last sampled ones (for oosmedabserr)
+            i_out = np.setdiff1d(np.arange(ii[0], ii[-1] + 1), ii)
+            t_out = (t[i_out - 1] - t[ii[0] - 1]) / (t[ii[-1] - 1] - t[ii[0] - 1]) * (max_n - 1) + 1
+            y_out = y[i_out - 1]
             t = t[ii - 1]
             t = (t - np.min(t)) / np.ptp(t) * (max_n - 1) + 1  # respace from 1:max_n
             y = y[ii - 1]
@@ -3852,6 +3866,8 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
             t = set_time_index(N)
             # (a second stream, independent of the start index)
             ii = np.sort(bf_random(N, seed + 1, 'perm')[:int(np.ceil(max_n / 5))])
+            i_out = np.setdiff1d(np.arange(ii[0], ii[-1] + 1), ii)  # unsampled points within the span
+            t_out, y_out = t[i_out - 1], y[i_out - 1]
             t = t[ii - 1]
             y = y[ii - 1]
         else:
@@ -3902,4 +3918,10 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     out['maxS'] = np.max(S)
     out['minS'] = np.min(S)
     out['meanS'] = np.mean(S)
+    # out-of-sample error: the GP mean at the unsampled times within the sampled span
+    if t_out is not None and t_out.size:
+        mu_out = gp_predict(hyp, cov, t, y, t_out)[0]
+        out['oosmedabserr'] = float(np.median(np.abs(y_out - mu_out)))
+    else:
+        out['oosmedabserr'] = np.nan
     return out
