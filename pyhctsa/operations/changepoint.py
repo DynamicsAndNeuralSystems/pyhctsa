@@ -55,7 +55,7 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
         # Round to remove numerical fluctuations of order less than 1e-4
         steppedy = np.round(steppedy * 1e4) / 1e4
         out = {
-            "E": E[0],
+            "E": E[0] / N,        # energy per sample (E sums over the series)
             "s": s[0],          # collapses to 1 for some parameter values
             "lambdamax": lambda_max,
         }
@@ -75,7 +75,7 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
     num_change_points = len(chpts)
 
     # Intervals -- of change
-    chints = np.diff(np.concatenate([chpts, [N]]))
+    chints = np.diff(np.concatenate([chpts, [N + 1]]))  # chpts are 1-based starts of runs
 
     # Number of constant segments per sample
     out["nsegments"] = num_change_points / N  # will be 1 if there are no changes
@@ -109,9 +109,9 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
     # Mean interval between steps:
     out["meanstepint"] = np.mean(chints) / N
 
-    # Mean interval greater than 3 samples, per sample:
+    # Mean interval greater than 3 samples (in samples):
     long_ints = chints[chints > 3]
-    out["meanstepintgt3"] = np.mean(long_ints) / N if long_ints.size else np.nan
+    out["meanstepintgt3"] = np.mean(long_ints) if long_ints.size else np.nan
 
     # Mean error on step interval distribution:
     out["meanerrstepint"] = np.std(chints, ddof=1) / np.sqrt(len(chints))
@@ -123,7 +123,7 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
     out["minstepint"] = np.min(chints) / N
 
     # Median step interval:
-    out["medianstepint"] = np.median(chints) / N
+    out["medianstepint"] = np.median(chints)
 
     return out
 
