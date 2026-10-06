@@ -1,3 +1,5 @@
+import math
+import itertools
 import warnings
 from typing import Union
 
@@ -16,7 +18,7 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import simple_fit
 from ..operations.stationarity import sliding_window
 from ..toolboxes.matlab.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
-from ..robust import bf_exp_fit, bf_random, bf_random_seed
+from ..robust import bf_exp_fit, bf_random, bf_random_seed, bf_spread_perm
 from ..toolboxes.matlab.optimizers import minimize
 from ..utils import dict_output, _linspace, _ml_std, _zscore_matlab, get_tau, matlab_quantile, z_score
 
@@ -2782,7 +2784,13 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         - ``'beforeafter'``: predicts the preceding time series values by
           training on the following values,
         - ``'randomgap'``: predicts random values within a segment of time
-          series by training on the other values in that segment.
+          series by training on the other values in that segment,
+        - ``'spreadgap'``: as ``'randomgap'``, but with deterministic splits: the test
+          sets are taken, in the evenly spread order of
+          :func:`pyhctsa.robust.bf_spread_perm`, from the list of all
+          ``C(num_train + num_test, num_test)`` possible test sets (in lexicographic
+          order), a different one for each fit (cycling through the list when there are
+          more fits than test sets). The outputs do not depend on a seed.
 
         Default is ``'frombefore'``.
     random_seed : int, 'default', 'none' or None, optional
@@ -2792,7 +2800,7 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         (:func:`pyhctsa.robust.bf_random`) gives each window its own split (the ranks of its
         column), so the splits are hctsa's. Default is 0.
     num_splits : int, optional
-        For ``'randomgap'``, the number of different random splits made of each window; each
+        For ``'randomgap'`` and ``'spreadgap'``, the number of different splits made of each window; each
         split is fitted and predicted as a window of its own, so the outputs summarize
         ``num_preds * num_splits`` fits. Default is 8.
 
@@ -2813,13 +2821,24 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
           minimum over windows of the mean absolute error in a window,
         - ``meanabs_std_run``, ``maxabs_std_run``, ``minabs_std_run``: the same,
           in units of the error bar,
+        - ``q90abs_run``, ``q90abs_std_run``: the 90th percentile (MATLAB's ``quantile``)
+          over windows of the mean absolute error in a window, without and with each error
+          in units of the error bar,
+        - ``low25abs_std_run``: the mean over the lowest quarter of the windows (the
+          ``ceil(n/4)`` smallest of the ``n`` values) of the mean absolute error in a
+          window, in units of the error bar (these three summarize the tails robustly: the
+          maximum and minimum over windows are each set by a single fit),
         - ``maxerrbar``, ``meanerrbar``, ``minerrbar``: maximum, mean and
           minimum error-bar half-width over all predicted points,
+        - ``high25errbar``: the mean of the largest quarter of these error bars,
         - ``meanlogh1``, ..., ``stdlogh1``, ...: mean and standard deviation
           across windows of each log hyperparameter,
         - ``maxnlml``, ``minnlml``, ``stdnlml``: maximum, minimum and standard
           deviation across windows of the negative log marginal likelihood on
-          the window's training data, divided by the number of training points.
+          the window's training data, divided by the number of training points,
+        - ``q90nlml``: the 90th percentile of the same across windows.
+
+        For ``'randomgap'`` and ``'spreadgap'``, each split counts as a window.
 
         All values are NaN if hyperparameters cannot be learned, or if the training data
         of every window are constant.
@@ -2831,15 +2850,16 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     cov, init_hyp, noise_pos, _ = _gp_cov(cov_func)
     nhps = cov.n_hyp
 
-    if pmode in ('frombefore', 'randomgap'):
+    if pmode in ('frombefore', 'randomgap', 'spreadgap'):
         spns = np.floor(_linspace(1, N - (num_test + num_train), num_preds))
     elif pmode == 'beforeafter':
         spns = np.floor(_linspace(1, N - (num_test + num_train * 2), num_preds))
     else:
         raise ValueError(f"Unknown prediction mode {pmode!r}")
     spns = spns.astype(int)
-    # each window is used num_splits times (with a different random split each time; 'randomgap' only)
-    if pmode != 'randomgap':
+    # each window is used num_splits times (with a different split each time; 'randomgap' and
+    # 'spreadgap' only)
+    if pmode not in ('randomgap', 'spreadgap'):
         num_splits = 1
     spns = np.repeat(spns, int(num_splits))
     num_preds = num_preds * int(num_splits)
@@ -2851,6 +2871,7 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         'meanerrbar', 'minerrbar',
         *(f'{s}logh{i + 1}' for i in range(nhps) for s in ('mean', 'std')),
         'maxnlml', 'minnlml', 'stdnlml',
+        'q90abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml',
     )
 
     mus = np.zeros((num_test, num_preds))        # predicted values
@@ -2859,7 +2880,22 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     nlmls = np.full(num_preds, np.nan)           # per-point negative log marginal likelihoods (NaN: skipped window)
     loghypers = np.zeros((nhps, num_preds))      # log-hyperparameters
 
-    if pmode == 'randomgap':
+    if pmode == 'spreadgap':
+        # deterministic splits: the test sets are taken from the list of all
+        # C(num_train + num_test, num_test) possible ones (in lexicographic order) in the evenly
+        # spread order of bf_spread_perm, a different one for each of the num_preds (windows x
+        # splits) fits (cycling through the list if it is shorter)
+        n = num_train + num_test
+        num_splits_all = math.comb(n, num_test)
+        if num_splits_all > 1e6:
+            raise ValueError(f"Too many possible splits ({num_splits_all}) for 'spreadgap'")
+        test_sets = np.array(list(itertools.combinations(range(1, n + 1), num_test)))
+        spread_order = bf_spread_perm(num_splits_all)
+        random_splits = np.zeros((n, num_preds), dtype=int)
+        for i in range(num_preds):
+            test_set = test_sets[spread_order[i % num_splits_all] - 1]
+            random_splits[:, i] = np.concatenate([np.setdiff1d(np.arange(1, n + 1), test_set), test_set])
+    elif pmode == 'randomgap':
         # the random train/test splits, one column per window (so that the windows get different
         # splits), reproducible from the seed: the ranks of one block of uniforms
         random_splits = 1 + np.argsort(
@@ -2875,7 +2911,7 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
             ts = np.arange(num_train + 1, num_train + num_test + 1, dtype=float)
             ys = y[sp - 1 + num_train:sp - 1 + num_train + num_test]  # test data
 
-        elif pmode == 'randomgap':
+        elif pmode in ('randomgap', 'spreadgap'):
             n = num_train + num_test
             t = np.arange(1, n + 1, dtype=float)
             r = random_splits[:, i]
@@ -2962,11 +2998,18 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     out['maxabs_run'] = _ml_max(abserr_run)
     out['minabs_std_run'] = _ml_min(stderr_run)
     out['minabs_run'] = _ml_min(abserr_run)
+    # Upper (and lower) tails over the fits: the maximum (minimum) is set by one fit (often a
+    # single badly conditioned one), and so depends on which splits were made; a high (low)
+    # quantile, or the mean of the highest (lowest) quarter, is reproducible
+    out['q90abs_run'] = _nan_quantile(abserr_run, 0.9)
+    out['q90abs_std_run'] = _nan_quantile(stderr_run, 0.9)
+    out['low25abs_std_run'] = _tail_mean(stderr_run, 'low')
 
     # Error bar stats:
     out['maxerrbar'] = _ml_max(stderrs)     # largest error bar
     out['meanerrbar'] = np.mean(stderrs)   # mean error bar length
     out['minerrbar'] = _ml_min(stderrs)     # minimum error bar length
+    out['high25errbar'] = _tail_mean(stderrs, 'high')  # mean of the largest quarter of the error bars
 
     # (2) Hyperparameter measures: mean and std for each hyperparameter
     for i in range(nhps):
@@ -2975,10 +3018,26 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
     # (3) Negative log marginal likelihood measures
     out['maxnlml'] = _ml_max(nlmls)
+    out['q90nlml'] = _nan_quantile(nlmls, 0.9)
     out['minnlml'] = _ml_min(nlmls)
     out['stdnlml'] = _ml_std(nlmls)
 
     return out
+
+
+def _nan_quantile(x: np.ndarray, p: float) -> float:
+    """MATLAB's ``quantile(x, p)`` of a vector (NaN values are left out, as MATLAB does)."""
+    x = np.asarray(x, dtype=float).ravel()
+    x = x[~np.isnan(x)]
+    return float(matlab_quantile(x, p)[0]) if x.size else np.nan
+
+
+def _tail_mean(x: np.ndarray, which: str) -> float:
+    """Mean of the highest (``'high'``) or lowest (``'low'``) quarter of the values: the
+    ``ceil(n/4)`` largest or smallest of the ``n`` values (MATLAB's sort, NaN last)."""
+    x = np.sort(np.asarray(x, dtype=float).ravel(), kind='stable')
+    k = int(np.ceil(x.size / 4))
+    return float(np.mean(x[-k:])) if which == 'high' else float(np.mean(x[:k]))
 
 
 def _arx_losses(y_train: np.ndarray, y_test: np.ndarray, orders) -> tuple:
