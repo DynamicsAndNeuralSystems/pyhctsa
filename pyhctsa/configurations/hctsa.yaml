@@ -1755,7 +1755,7 @@ spectral:
     base_name: bicoherence
     dependencies:
     configs:
-      - {zscore: True}   # SP_Bicoherence(x_z,64,'full',25)
+      - {zscore: True}   # SP_Bicoherence(x_z,64,'full',100)
     legacy_name: SP_Bicoherence
 
   envelope_stats:

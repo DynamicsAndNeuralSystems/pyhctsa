@@ -1700,7 +1700,7 @@ def _bicoherence_grid(y: np.ndarray, step: int, num_seg: int, seg_length: int, h
 
 @dict_output
 def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'full',
-                num_surr: int = 25) -> Union[dict, float]:
+                num_surr: int = 100) -> Union[dict, float]:
     """
     Quadratic phase coupling between frequencies, from the squared bicoherence.
 
@@ -1738,7 +1738,7 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
         destroy phase coupling) used to calibrate the significance threshold
         empirically, in place of its asymptotic approximation. The threshold is the
         95% quantile of squared bicoherence values pooled across all frequency pairs
-        and all surrogates. Default is 25.
+        and all surrogates (the threshold of a few tens of surrogates depends on which were drawn). Default is 100.
 
     Returns
     -------

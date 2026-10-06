@@ -3764,7 +3764,7 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
     reg_val = 1e-6 * np.mean(np.var(y_embed, axis=0, ddof=1))
 
     def fit(k):
-        gm = GaussianMixture(n_components=k, covariance_type='full', reg_covar=reg_val, n_init=3,
+        gm = GaussianMixture(n_components=k, covariance_type='full', reg_covar=reg_val, n_init=10,
                              init_params='k-means++', max_iter=500, tol=1e-6, random_state=0)
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')  # (replicates that do not converge are expected)
