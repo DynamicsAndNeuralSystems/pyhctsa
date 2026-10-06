@@ -845,7 +845,7 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
         r = np.arange(min(n, N))
     elif subset_how == 'p':
         # take initial proportion n of time series
-        r = np.arange(int(np.floor(N*n)))
+        r = np.arange(int(np.floor(N*n + 0.5)))
     elif subset_how == 'unicg':
         r = np.round(np.linspace(1, N, n)).astype(int) - 1
     else:
