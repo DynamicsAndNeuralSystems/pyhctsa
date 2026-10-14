@@ -703,9 +703,7 @@ def _garch_estimate(y: np.ndarray, P: int, Q: int, model_type: str = 'garch',
     asym = model_type in ('gjr', 'egarch')
     model = arch_model(y, mean='Zero', vol='EGARCH' if model_type == 'egarch' else 'GARCH',
                        p=Q, o=Q if asym else 0, q=P, dist=dist, rescale=False)
-    backcast = np.mean(y ** 2)
-    if model_type == 'egarch':
-        backcast = np.log(backcast)  # (arch expects the log variance for an EGARCH backcast)
+    backcast = np.mean(y ** 2)  # (arch takes the log itself for an EGARCH backcast)
     res = model.fit(disp='off', show_warning=False, backcast=backcast)
     params = res.params
     if not np.all(np.isfinite(params.values)):
@@ -713,7 +711,7 @@ def _garch_estimate(y: np.ndarray, P: int, Q: int, model_type: str = 'garch',
 
     # Standard errors: outer product of gradients of the per-observation log-likelihood
     resids = model.resids(model.starting_values())
-    kwargs = dict(sigma2=np.zeros(len(y)), backcast=backcast,
+    kwargs = dict(sigma2=np.zeros(len(y)), backcast=model.volatility.backcast_transform(backcast),
                   var_bounds=model.volatility.variance_bounds(resids), individual=True)
     scores = approx_fprime(params.values, model._loglikelihood, kwargs=kwargs)
     cov = np.linalg.pinv(scores.T @ scores)
@@ -780,7 +778,8 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
         - ``constant``, ``constanterr``: the constant term of the variance equation and its error
         - ``offset``: the mean offset of the model (0 for a z-scored series)
         - ``GARCH_i``, ``GARCHerr_i`` (i = 1..P), ``ARCH_i``, ``ARCHerr_i`` (i = 1..Q): the
-          coefficients of the lagged variances and innovations, and their errors
+          coefficients of the lagged variances and innovations, and their errors (also for a
+          coefficient at its lower bound of 0)
         - ``leverage``, ``leverageerr``: the leverage coefficient and its error (``'gjr'`` and
           ``'egarch'`` only, otherwise NaN)
         - ``distDoF``: the degrees of freedom of a Student's t distribution (otherwise NaN)
@@ -812,8 +811,9 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     The models are fitted by maximum likelihood (:func:`_garch_estimate`, ``arch`` package);
     poorly identified fits (series with no volatility clustering, where the coefficients sit at
     their bounds) can stop at different points of a flat likelihood and give very different
-    errors, while the log-likelihood is well determined. The presample variance is the mean of
-    the squared series and the errors come from the outer product of gradients.
+    coefficients (e.g. ``GARCH_1`` near 0 or near 1) and errors, while the log-likelihood is
+    well determined. The presample variance is the mean of the squared series and the errors
+    come from the outer product of gradients.
     """
     y = np.asarray(y, dtype=float).ravel()
     P, Q = int(P), int(Q)
@@ -844,11 +844,12 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     out['offset'] = 0.0
     for i in range(1, P + 1):
         out[f'GARCH_{i}'] = garch_c[i - 1]
-        # (a coefficient estimated at exactly zero has no error: NaN, as hctsa)
-        out[f'GARCHerr_{i}'] = np.nan if garch_c[i - 1] == 0 else errors[i]
+        # (a coefficient at its lower bound of 0 keeps its outer-product-of-gradients error, the
+        # limit of the error as the coefficient goes to 0)
+        out[f'GARCHerr_{i}'] = errors[i]
     for i in range(1, Q + 1):
         out[f'ARCH_{i}'] = arch_c[i - 1]
-        out[f'ARCHerr_{i}'] = np.nan if arch_c[i - 1] == 0 else errors[P + i]
+        out[f'ARCHerr_{i}'] = errors[P + i]
     if lev_c.size > 0:
         out['leverage'] = lev_c[0]
         out['leverageerr'] = errors[1 + P + Q]
