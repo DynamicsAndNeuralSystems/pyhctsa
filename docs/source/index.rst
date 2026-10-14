@@ -34,8 +34,8 @@
    :target: https://github.com/pyOpenSci/software-submission/issues/282
    :alt: pyOpenSci publication
 
-.. |zenodo| image:: https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529935-blue?style=flat-square
-   :target: https://doi.org/10.5281/zenodo.18529935
+.. |zenodo| image:: https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529934-blue?style=flat-square
+   :target: https://doi.org/10.5281/zenodo.18529934
    :alt: Zenodo DOI
 
 .. |license| image:: https://img.shields.io/github/license/DynamicsAndNeuralSystems/pyhctsa.svg
@@ -176,4 +176,5 @@ at the University of Sydney.
    development/index
    mappings/index
    authors
+   acknowledgements
    license
