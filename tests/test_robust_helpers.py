@@ -266,6 +266,24 @@ class TestEdges:
         counts = np.histogram(S['lattice'], edges)[0]
         np.testing.assert_array_equal(counts, 10)
 
+    def test_hist_edges_roundoff_spreads(self):
+        # values that are equal but for their last bits (as computed distances between lattice points can be)
+        # give the same bins as the exact ties
+        eps = np.finfo(float).eps
+        tied = np.r_[np.zeros(20), np.ones(60), 2 * np.ones(20)]
+        jittered = tied.copy()
+        jittered[20:80] = 1 + np.arange(60) * eps
+        q = np.quantile(jittered, [0.25, 0.75], method='hazen')
+        assert q[1] - q[0] > 0  # the IQR is round-off, not 0
+        np.testing.assert_allclose(bf_hist_edges(jittered, 'auto'), bf_hist_edges(tied, 'auto'), atol=1e-12)
+        assert bf_hist_edges(jittered, 'fd').size - 1 == np.ceil(np.log2(100) + 1)  # Sturges, as for IQR = 0
+        # data constant to within rounding: one bin, as for constant data
+        near_const = 1 + np.arange(10) * eps
+        assert bf_hist_edges(near_const, 10).size == 2
+        assert bf_hist_edges(near_const, 'auto').size == 2
+        # explicit limits are still honored
+        assert bf_hist_edges(near_const, 4, [0, 2]).size == 5
+
     @pytest.mark.parametrize('name', NAMES)
     def test_quantile_edges(self, name):
         _eq(bf_quantile_edges(S[name], 10), f'qe_{name}_10', atol=1e-14, rtol=1e-14)

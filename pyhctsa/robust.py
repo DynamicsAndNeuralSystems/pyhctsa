@@ -772,6 +772,13 @@ def bf_hist_edges(y: ArrayLike, bin_rule: Union[int, str] = 'auto',
     always fall just above it, in the upper bin. Pass the result to ``np.histogram`` /
     ``np.searchsorted`` (right-open bins).
 
+    Spreads at the level of rounding are treated as zero: data whose range is at most
+    ``1e-12`` of their largest magnitude are treated as constant (one bin), and an IQR at
+    most ``1e-12`` of the largest magnitude counts as zero in the rules. Values that are
+    mathematically equal but computed by different arithmetic (e.g., distances between
+    points of a lattice-valued series) differ in their last bits, and would otherwise set
+    the number of bins, or the bins themselves, by round-off.
+
     Parameters
     ----------
     y : array-like
@@ -793,16 +800,19 @@ def bf_hist_edges(y: ArrayLike, bin_rule: Union[int, str] = 'auto',
     y = y[~np.isnan(y)]
     n = y.size
     data_range = np.max(y) - np.min(y)
-    if limits is not None and np.size(limits) > 0:
+    round_off = 1e-12 * np.max(np.abs(y))  # spreads at or below this are rounding
+    use_limits = limits is not None and np.size(limits) > 0
+    if use_limits:
         lo, hi = float(limits[0]), float(limits[1])
     else:
         lo, hi = float(np.min(y)), float(np.max(y))
 
     if isinstance(bin_rule, str):
         num_sturges = np.ceil(np.log2(n) + 1)
-        if data_range > 0:
-            q = np.nanquantile(y, [0.25, 0.75], method='hazen')
-            fd_width = 2 * (q[1] - q[0]) * n ** (-1 / 3)
+        q = np.nanquantile(y, [0.25, 0.75], method='hazen')
+        iqr = q[1] - q[0]
+        if data_range > 0 and iqr > round_off:  # (an IQR at the level of rounding counts as 0)
+            fd_width = 2 * iqr * n ** (-1 / 3)
         else:
             fd_width = 0.0
         num_fd = np.ceil(data_range / fd_width) if fd_width > 0 else num_sturges
@@ -821,7 +831,8 @@ def bf_hist_edges(y: ArrayLike, bin_rule: Union[int, str] = 'auto',
         num_bins = bin_rule
     num_bins = int(num_bins)
 
-    if hi == lo:  # constant data: one bin of unit width
+    if hi == lo or (not use_limits and data_range <= round_off):
+        # constant data (or constant to within rounding): one bin of unit width
         return lo + np.array([-0.5, 0.5])
     bin_width = (hi - lo) / num_bins
     tol = 1e-6 * bin_width
