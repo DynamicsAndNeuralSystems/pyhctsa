@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.remove\_points
+==============================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: remove_points

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.symbolic.surprise
+====================================
+
+.. currentmodule:: pyhctsa.operations.symbolic
+
+.. autofunction:: surprise

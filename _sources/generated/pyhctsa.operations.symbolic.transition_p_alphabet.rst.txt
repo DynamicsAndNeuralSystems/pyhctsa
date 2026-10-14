@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.symbolic.transition\_p\_alphabet
+===================================================
+
+.. currentmodule:: pyhctsa.operations.symbolic
+
+.. autofunction:: transition_p_alphabet

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.graph.visibility\_graph
+==========================================
+
+.. currentmodule:: pyhctsa.operations.graph
+
+.. autofunction:: visibility_graph

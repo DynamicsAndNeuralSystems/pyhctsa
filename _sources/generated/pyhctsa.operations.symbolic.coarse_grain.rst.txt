@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.symbolic.coarse\_grain
+=========================================
+
+.. currentmodule:: pyhctsa.operations.symbolic
+
+.. autofunction:: coarse_grain

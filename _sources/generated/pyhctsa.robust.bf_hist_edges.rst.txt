@@ -1,0 +1,6 @@
+﻿pyhctsa.robust.bf\_hist\_edges
+==============================
+
+.. currentmodule:: pyhctsa.robust
+
+.. autofunction:: bf_hist_edges

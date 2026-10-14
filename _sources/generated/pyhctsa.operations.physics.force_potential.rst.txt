@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.physics.force\_potential
+===========================================
+
+.. currentmodule:: pyhctsa.operations.physics
+
+.. autofunction:: force_potential

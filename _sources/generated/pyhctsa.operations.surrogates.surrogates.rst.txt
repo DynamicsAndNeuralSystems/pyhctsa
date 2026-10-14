@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.surrogates.surrogates
+========================================
+
+.. currentmodule:: pyhctsa.operations.surrogates
+
+.. autofunction:: surrogates

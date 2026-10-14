@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.scaling.higuchi\_fd
+======================================
+
+.. currentmodule:: pyhctsa.operations.scaling
+
+.. autofunction:: higuchi_fd

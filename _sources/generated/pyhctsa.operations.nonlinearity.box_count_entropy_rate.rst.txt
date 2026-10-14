@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.nonlinearity.box\_count\_entropy\_rate
+=========================================================
+
+.. currentmodule:: pyhctsa.operations.nonlinearity
+
+.. autofunction:: box_count_entropy_rate

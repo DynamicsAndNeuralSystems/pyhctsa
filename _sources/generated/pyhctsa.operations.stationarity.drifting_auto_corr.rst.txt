@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.drifting\_auto\_corr
+====================================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: drifting_auto_corr

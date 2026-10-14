@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.wavelet.wpd\_best\_tree
+==========================================
+
+.. currentmodule:: pyhctsa.operations.wavelet
+
+.. autofunction:: wpd_best_tree
