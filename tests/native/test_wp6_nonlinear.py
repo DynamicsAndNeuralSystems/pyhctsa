@@ -212,7 +212,7 @@ def _gaussian_ar1(phi, n, seed=0):
 
 def test_embed_cluster_output_keys():
     out = nonlinearity.embed_cluster(_two_state_switching(4.0), tau=1, m=2)
-    assert list(out) == ['bestK', 'bicgain', 'sep_pp', 'sep_mahal']
+    assert list(out) == ['sep_pp', 'sep_mahal', 'valley', 'nongauss']
 
 
 def test_optimal_two_means_split_matches_brute_force():
@@ -230,10 +230,10 @@ def test_optimal_two_means_split_matches_brute_force():
 
 def test_embed_cluster_separation_increases_with_state_gap():
     outs = [nonlinearity.embed_cluster(_two_state_switching(g), tau=1, m=2) for g in (0.0, 2.0, 4.0, 6.0)]
-    for key in ('sep_pp', 'bicgain', 'sep_mahal'):
+    for key in ('sep_pp', 'sep_mahal', 'nongauss'):
         vals = [o[key] for o in outs]
         assert all(b > a for a, b in zip(vals, vals[1:])), (key, vals)
-    assert outs[0]['bicgain'] == 0 and outs[0]['bestK'] == 1
+    assert outs[0]['valley'] == 0 and outs[-1]['valley'] > 0.9
     assert outs[-1]['sep_pp'] > 0.9
 
 
@@ -241,7 +241,7 @@ def test_embed_cluster_gaussian_ar_has_no_cluster_structure():
     # For Gaussian data the best 1-D two-means split explains 2/pi of the variance
     out = nonlinearity.embed_cluster(_gaussian_ar1(0.8, 6000), tau=1, m=2)
     assert out['sep_pp'] == pytest.approx(2 / np.pi, abs=0.03)
-    assert out['bestK'] == 1 and out['bicgain'] == 0
+    assert out['valley'] == 0 and abs(out['nongauss']) < 0.05
 
 
 def test_embed_cluster_two_point_masses_have_unit_sep_pp():
@@ -263,19 +263,40 @@ def test_embed_cluster_is_stable_to_tiny_perturbation():
     rng = np.random.default_rng(5)
     a = nonlinearity.embed_cluster(y, tau=1, m=2)
     b = nonlinearity.embed_cluster(y + 1e-6 * rng.standard_normal(y.size), tau=1, m=2)
-    assert a['bestK'] == b['bestK']
-    for key in ('bicgain', 'sep_pp', 'sep_mahal'):
+    for key in ('sep_pp', 'sep_mahal', 'valley', 'nongauss'):
         assert b[key] == pytest.approx(a[key], abs=1e-4)
 
 
-def test_embed_cluster_degenerate_clouds_still_get_a_two_component_fit():
-    # A single spike: the optimal two-means split isolates the (two) embedded points containing it,
-    # too few for a full-rank covariance, so the median-split start is used
+def test_knn_negentropy_gaussian_and_point_masses():
+    from scipy.special import digamma
+    # Near 0 for a Gaussian cloud
+    rng = np.random.default_rng(3)
+    assert abs(nonlinearity._knn_negentropy(rng.standard_normal((4000, 2)))) < 0.05
+    # Two point masses: every nearest-neighbor distance is 0, floored at 0.01, so the value is finite
+    pts = np.repeat(np.array([[-1.0, -1.0], [1.0, 1.0]]), 500, axis=0)
+    h = digamma(1000) - digamma(5) + np.log(np.pi) + 2 * np.log(0.01)
+    assert nonlinearity._knn_negentropy(pts) == pytest.approx(np.log(2 * np.pi * np.e) - h, rel=1e-12)
+
+
+def test_valley_depth_unimodal_and_gap():
+    rng = np.random.default_rng(4)
+    x = rng.standard_normal(2000)
+    assert nonlinearity._valley_depth(x / x.std(ddof=1), 0.0) < 0.05
+    x = np.r_[rng.standard_normal(1000) - 5, rng.standard_normal(1000) + 5]
+    x = (x - x.mean()) / x.std(ddof=1)
+    assert nonlinearity._valley_depth(x, 0.0) > 0.99
+
+
+def test_embed_cluster_sep_mahal_nan_without_a_two_component_fit():
+    # A single spike: every split (two-means or median) isolates the two embedded points containing
+    # it, too few for a full-rank covariance, so no 2-component fit is possible; the other
+    # statistics are still defined
     y = np.zeros(1000)
     y[500] = 50.0
     out = nonlinearity.embed_cluster(_zscore(y), tau=1, m=2)
     assert out['sep_pp'] == pytest.approx(1.0, abs=1e-6)
-    assert np.isfinite(out['sep_mahal'])
+    assert np.isnan(out['sep_mahal'])
+    assert np.isfinite(out['valley']) and np.isfinite(out['nongauss'])
 
 
 # ------------------------------------------------------------------ DVV: draws and statistics

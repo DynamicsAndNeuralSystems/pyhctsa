@@ -3542,8 +3542,46 @@ def _gmm2_from_labels(y_embed: np.ndarray, labels: np.ndarray, reg_covar: float)
         return None
 
 
+def _valley_depth(proj: np.ndarray, thr: float) -> float:
+    """
+    Depth of the density valley at the cut ``thr`` of the projected points ``proj`` (unit
+    variance): one minus the Gaussian-kernel density at ``thr`` relative to the smaller of the
+    densities at the two groups' lower median points, floored at 0. The bandwidth is Silverman's
+    rule of thumb for unit variance, ``0.9 * N ** (-1/5)``.
+    """
+    h = 0.9 * proj.size ** (-1 / 5)
+
+    def kde(x):
+        return np.mean(np.exp(-0.5 * ((x - proj) / h) ** 2))
+
+    lo = np.sort(proj[proj <= thr])
+    hi = np.sort(proj[proj > thr])
+    if lo.size == 0 or hi.size == 0:
+        return 0.0
+    # (lower median points: data points, so both reference densities are positive)
+    f_ref = min(kde(lo[(lo.size + 1) // 2 - 1]), kde(hi[(hi.size + 1) // 2 - 1]))
+    return max(0.0, 1 - kde(thr) / f_ref)
+
+
+def _knn_negentropy(y: np.ndarray, k: int = 5, floor: float = 0.01) -> float:
+    """
+    Negentropy (nats) of a whitened point cloud ``y`` (one point per row): the entropy of the
+    identity-covariance Gaussian, ``(m/2) log(2 pi e)``, minus the Kozachenko-Leonenko
+    nearest-neighbor entropy estimate with ``k`` neighbors, each nearest-neighbor distance
+    floored at ``floor`` (so that repeated values give a finite, saturating value).
+    """
+    from scipy.spatial import cKDTree
+    from scipy.special import digamma, gammaln
+    n, m = y.shape
+    # (the k+1 nearest points include the point itself)
+    r = np.maximum(cKDTree(y).query(y, k + 1)[0][:, -1], floor)
+    log_vol_unit_ball = (m / 2) * np.log(np.pi) - gammaln(m / 2 + 1)
+    h = digamma(n) - digamma(k) + log_vol_unit_ball + m * np.mean(np.log(r))
+    return (m / 2) * np.log(2 * np.pi * np.e) - h
+
+
 @dict_output
-def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: int = 4,
+def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
                   max_n: Union[int, str] = 'full') -> dict:
     """
     Whether the time-delay embedding of the series forms separate clusters of points.
@@ -3552,29 +3590,26 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
     asks whether the resulting point cloud is made of distinct groups. A process whose
     trajectory visits distinct regions of phase space (e.g., alternating between two attractor
     states, or a system with intermittent bursts) leaves a multi-modal point cloud in the
-    embedding; a process with a single smooth (e.g., unimodal-stochastic or single-loop
-    periodic) attractor does not. This is a distinct signal from marginal-distribution
-    multi-modality, since two states can overlap entirely in amplitude yet still separate
-    cleanly once lagged coordinates are added, and from regime-switching detected by hidden
-    Markov models, which cluster points in raw-amplitude (not lagged/embedded) space.
+    embedding; a process with a single smooth (e.g., unimodal-stochastic) attractor does not.
+    This is a distinct signal from marginal-distribution multi-modality, since two states can
+    overlap entirely in amplitude yet still separate cleanly once lagged coordinates are added,
+    and from regime-switching detected by hidden Markov models, which cluster points in
+    raw-amplitude (not lagged/embedded) space.
 
-    Two kinds of statistic are computed. ``bestK`` and ``bicgain`` come from Gaussian mixture
-    models with 1, ..., ``k_max`` components, and describe how much non-Gaussian mixture
-    structure the cloud has. ``sep_mahal`` and ``sep_pp`` measure the separation of a
-    two-group split of the cloud; both are always defined, even when two groups are not
-    favored over one, so they are small (but nonzero) for a unimodal cloud and grow with the
-    separation of genuine clusters.
+    All statistics are computed on the whitened cloud (zero mean, identity covariance, along
+    its principal axes, each eigenvector signed so that its largest-magnitude element is
+    positive), so they do not depend on its scale or orientation. ``sep_pp``, ``sep_mahal`` and
+    ``valley`` measure the separation of a two-group split of the cloud; they are always
+    defined, even when two groups are not favored over one, and grow with the separation of
+    genuine clusters. ``nongauss`` measures how far the cloud is from a single Gaussian,
+    whatever the reason.
 
     A curved-but-unimodal manifold (e.g., the ring traced out by a periodic signal in a 2-d
-    embedding) is poorly fit by any single elliptical Gaussian and so also raises ``bestK`` and
-    ``bicgain``, despite having no distinct dynamical states; ``bicgain == 0`` (``bestK == 1``)
-    is a clean "no mixture structure at all" signal.
-
-    The mixtures behind ``bestK`` and ``bicgain`` are fitted with scikit-learn's
-    ``GaussianMixture`` (full covariances, k-means++ initialization, 10 initializations, at most
-    500 iterations, covariance regularization of ``1e-6`` times the mean variance of the
-    embedded coordinates), seeded with 0. The two-component fit behind ``sep_mahal`` and the
-    projection-pursuit statistic ``sep_pp`` involve no random numbers.
+    embedding) has a bimodal projection along any direction, and so also raises ``sep_pp``,
+    ``sep_mahal`` and ``valley``, despite having no distinct dynamical states; it also raises
+    ``nongauss``, which measures departure from Gaussianity in general (e.g., a skewed marginal
+    distribution also raises it), not separation specifically. No statistic involves random
+    numbers.
 
     Parameters
     ----------
@@ -3588,41 +3623,46 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
         (Kraskov) automutual information and the 1/e time. Default is ``'ac'``.
     m : int, optional
         The embedding dimension. Default is 2.
-    k_max : int, optional
-        The maximum number of Gaussian mixture components to consider when searching for the
-        BIC-optimal component count. Default is 4.
     max_n : int or 'full', optional
         The maximum number of embedded points used: longer embeddings are reduced to their first
-        ``max_n`` points (a memory/time cap; the separation estimates keep sharpening with more
-        points), or ``'full'`` for no cropping. Default is ``'full'``.
+        ``max_n`` points (a memory/time cap; the estimates keep sharpening with more points), or
+        ``'full'`` for no cropping. Default is ``'full'``.
 
     Returns
     -------
     dict or float
-        NaN if the embedding fails, there are fewer than ``20 * m * k_max`` embedded points,
-        the embedded point cloud is constant, or the single-component fit fails. Otherwise:
+        NaN if the embedding fails, there are fewer than ``80 * m`` embedded points, or the
+        embedded point cloud is constant. Otherwise:
 
-        - ``bestK``: the BIC-optimal number of mixture components over ``1:k_max``
-        - ``bicgain``: the BIC improvement of the best fit over a single Gaussian fit, per
-          embedded point, ``(BIC_1 - BIC_best) / (2N)`` for ``N`` embedded points (the
-          gain in maximized log-likelihood per point, less the penalty for the extra
-          parameters); 0 when ``bestK == 1``
+        - ``sep_pp``: projection-pursuit two-means separation. The whitened cloud is projected
+          onto a fixed grid of directions (``m = 2``: 90 equally spaced angles; ``m = 3``: 300
+          Fibonacci-lattice points on a hemisphere; other dimensions: 1 direction for ``m = 1``
+          and 300 low-discrepancy directions for ``m > 3``). For each direction the exact optimal
+          1-D two-means split is found, and its between-cluster fraction of the total variance is
+          recorded. ``sep_pp`` is the maximum over directions: about ``2/pi`` (0.64) for Gaussian
+          data, 1 for two distinct point masses.
         - ``sep_mahal``: ``log1p`` of the Mahalanobis separation between the two component
           means of a 2-component Gaussian mixture fit, using their pooled covariance
           (log-compressed to tame the heavy tail from near-singular covariance on
-          near-deterministic embeddings). The EM fit starts from a deterministic hard split of the
-          points at the optimal 1-D two-means threshold along the first principal component, and
-          again from the split found for ``sep_pp``; the fit of higher likelihood is kept. If
+          near-deterministic embeddings). The EM fit (covariance regularization of ``1e-6`` times
+          the mean variance of the embedded coordinates) starts from a deterministic hard split of
+          the points at the optimal 1-D two-means threshold along the first principal component,
+          and again from the split found for ``sep_pp``; the fit of higher likelihood is kept. If
           neither split can start a fit (e.g., a group with too few points), splits at the median of
-          the same two projections are used, and then the 2-component fit of the BIC search (if
-          ``k_max >= 2``). NaN only if no 2-component fit is possible.
-        - ``sep_pp``: projection-pursuit two-means separation. The embedded cloud is whitened
-          (zero mean, identity covariance) and projected onto a fixed grid of directions (``m = 2``:
-          90 equally spaced angles; ``m = 3``: 300 Fibonacci-lattice points on a hemisphere; other
-          dimensions: 1 direction for ``m = 1`` and 300 low-discrepancy directions for
-          ``m > 3``). For each direction the exact optimal 1-D two-means split is found, and its
-          between-cluster fraction of the total variance is recorded. ``sep_pp`` is the maximum over
-          directions: about ``2/pi`` (0.64) for Gaussian data, 1 for two distinct point masses.
+          the same two projections are used. NaN only if no 2-component fit is possible.
+        - ``valley``: the depth of the density valley at the ``sep_pp`` split. The points are
+          projected onto the ``sep_pp`` direction (unit variance) and their density is estimated
+          with a Gaussian kernel of bandwidth ``0.9 * N ** (-1/5)`` (Silverman's rule of thumb for
+          unit variance); ``valley`` is one minus the density at the cut relative to the smaller of
+          the densities at the two groups' lower median points, floored at 0. 0 when the projected
+          density has no dip at the cut (e.g., any unimodal cloud), 1 when the two groups are
+          separated by an empty gap.
+        - ``nongauss``: the negentropy of the whitened cloud, in nats: the entropy of a Gaussian
+          with the same covariance, ``(m/2) log(2 pi e)``, minus the cloud's entropy estimated with
+          the Kozachenko-Leonenko nearest-neighbor estimator (5 neighbors, each nearest-neighbor
+          distance floored at 0.01 in whitened units, so that repeated values give a finite,
+          saturating value). Near 0 for Gaussian data, and larger the more structured (clustered,
+          curved, skewed or heavy-tailed) the cloud.
     """
 
     y = np.asarray(y, dtype=float).ravel()
@@ -3631,12 +3671,11 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
         logger.warning('Embedding parameters are not suitable for this time series')
         return np.nan
 
-    # Enough points, relative to m and k_max, for a well-posed full-covariance fit at the
-    # largest component count considered
+    # Enough points, relative to m, for well-posed two-group fits and density estimates
     n_embed = y_embed.shape[0]
-    if n_embed < 20 * m * k_max:
-        logger.warning(f'Not enough embedded points ({n_embed}) for a stable {m}-dimensional, '
-                       f'up-to-{k_max}-component mixture fit')
+    if n_embed < 80 * m:
+        logger.warning(f'Not enough embedded points ({n_embed}) for stable {m}-dimensional '
+                       'cluster statistics')
         return np.nan
 
     # A constant (or near-constant) embedded point cloud cannot be usefully clustered
@@ -3647,35 +3686,9 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
         if max_n != 'full':
             raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
     elif n_embed > max_n:
-        logger.warning(f'Cropping to the first {int(max_n)} of {n_embed} embedded points for mixture '
-                       'fitting (memory/time cap, not a convergence point)')
+        logger.warning(f'Cropping to the first {int(max_n)} of {n_embed} embedded points '
+                       '(memory/time cap, not a convergence point)')
         y_embed = y_embed[:int(max_n)]
-    n_pts = y_embed.shape[0]
-
-    # Regularize covariance estimates proportionally to the data's own scale
-    reg_val = 1e-6 * np.mean(np.var(y_embed, axis=0, ddof=1))
-
-    def fit(k):
-        gm = GaussianMixture(n_components=k, covariance_type='full', reg_covar=reg_val, n_init=10,
-                             init_params='k-means++', max_iter=500, tol=1e-6, random_state=0)
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')  # (replicates that do not converge are expected)
-            return gm.fit(y_embed)
-
-    # Fit k = 1, ..., k_max, and record their BIC
-    bic = np.full(k_max, np.nan)
-    models = [None] * k_max
-    for k in range(1, k_max + 1):
-        try:
-            models[k - 1] = fit(k)
-            bic[k - 1] = models[k - 1].bic(y_embed)
-        except Exception:  # (e.g., an empty or near-singular component)
-            if k == 1:  # no useful mixture structure can be assessed either
-                return np.nan
-    best_k = int(np.nanargmin(bic)) + 1
-
-    out = {'bestK': best_k}
-    out['bicgain'] = 0.0 if best_k == 1 else (bic[0] - bic[best_k - 1]) / (2 * n_pts)
 
     # Principal axes of the cloud, and the whitened cloud (zero mean, identity covariance)
     centered = y_embed - y_embed.mean(axis=0)
@@ -3693,11 +3706,12 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
     for lo in range(0, len(directions), 50):  # (chunked to bound memory for long series)
         r2[lo:lo + 50], thr[lo:lo + 50] = _optimal_two_means_splits(white @ directions[lo:lo + 50].T)
     i_best = int(np.argmax(r2))
-    out['sep_pp'] = r2[i_best]
+    out = {'sep_pp': r2[i_best]}
     pp_proj = white @ directions[i_best]
 
     # Separation of a 2-component Gaussian mixture, from deterministic hard-split starts:
     # the optimal 2-means split along PC1 and along the sep_pp direction
+    reg_val = 1e-6 * np.mean(np.var(y_embed, axis=0, ddof=1))  # (proportional to the data's scale)
     pc1_thr = _optimal_two_means_splits(pc1[:, None])[1][0]
     starts = [pp_proj > thr[i_best], pc1 > pc1_thr]
     gm2 = None
@@ -3709,16 +3723,16 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
         if fits:
             gm2 = max(fits, key=lambda gm: gm.score(y_embed))
             break
-    if gm2 is None and k_max >= 2:
-        gm2 = models[1]  # (last resort: the k-means++ fit from the BIC search)
     if gm2 is None:
         out['sep_mahal'] = np.nan
-        return out
+    else:
+        pooled_cov = (gm2.covariances_[0] + gm2.covariances_[1]) / 2
+        d_mu = gm2.means_[0] - gm2.means_[1]
+        # (log1p-compressed: the raw value explodes for near-singular pooled covariance)
+        out['sep_mahal'] = np.log1p(np.sqrt(d_mu @ np.linalg.solve(pooled_cov, d_mu)))
 
-    pooled_cov = (gm2.covariances_[0] + gm2.covariances_[1]) / 2
-    d_mu = gm2.means_[0] - gm2.means_[1]
-    # (log1p-compressed: the raw value explodes for near-singular pooled covariance)
-    out['sep_mahal'] = np.log1p(np.sqrt(d_mu @ np.linalg.solve(pooled_cov, d_mu)))
+    out['valley'] = _valley_depth(pp_proj, thr[i_best])
+    out['nongauss'] = _knn_negentropy(white)
     return out
 
 
