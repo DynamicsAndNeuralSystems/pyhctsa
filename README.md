@@ -133,6 +133,6 @@ Full credits are on the [Acknowledgements](https://dynamicsandneuralsystems.gith
 
 ## AI usage disclosure
 
-Portions of this codebase (including tests and function documentation) were refactored and generated with the
-assistance of Large Language Models (LLMs). All AI-generated contributions have been reviewed and verified by the
-human maintainers.
+Much of _pyhctsa_ 2.0, including the clean-room re-implementations, tests and documentation, was written with AI coding
+assistants (Anthropic's Claude) under the direction of the maintainers. Not every AI-generated contribution has been
+reviewed line by line by a human; each is instead verified against the outputs of _hctsa_ or by appropriate tests.
