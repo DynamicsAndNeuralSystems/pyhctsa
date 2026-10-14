@@ -1882,7 +1882,7 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
 
     # Sum of abs differences between exp fit and observed, using a histogram with automatic
     # binning (bf_hist_edges 'auto': explicit edges)
-    if np.ptp(d) == 0:  # all distances equal: no distribution to compare with the fit
+    if np.ptp(d) <= 1e-12 * np.max(d):  # all distances equal (to within rounding): no distribution to compare with the fit
         out['d_expfit_meandiff'] = np.nan
         return out
     bin_edges = bf_hist_edges(d, 'auto')
