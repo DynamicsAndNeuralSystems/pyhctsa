@@ -18,7 +18,7 @@
   <br>
   <a href="https://doi.org/10.21105/joss.10581"><img src="https://joss.theoj.org/papers/10.21105/joss.10581/status.svg" alt="JOSS"></a>
   <a href="https://github.com/pyOpenSci/software-submission/issues/282"><img src="https://pyopensci.org/badges/peer-reviewed.svg" alt="pyOpenSci Peer-Reviewed"></a>
-  <a href="https://doi.org/10.5281/zenodo.20820138"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.20820138-blue.svg" alt="Zenodo DOI"></a>
+  <a href="https://doi.org/10.5281/zenodo.18529934"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18529934-blue.svg" alt="Zenodo DOI"></a>
 </p>
 
 <p align="center">
@@ -81,71 +81,14 @@ print(res.shape)                    # (10, F) -> N series x F features
 Results are returned as a `pandas.DataFrame` of shape *N* × *F*, where *N* is the number of time-series
 instances and *F* is the number of time-series features.
 
-New to _pyhctsa_? Step-by-step notebooks and example workflows live in [`/tutorials`](https://github.com/DynamicsAndNeuralSystems/pyhctsa/tree/main/tutorials), and a walkthrough
-is available in the [getting started guide](https://dynamicsandneuralsystems.github.io/pyhctsa/usage/getting_started.html).
+## Next steps
 
-## Usage
-
-### Custom feature sets
-
-By default, `FeatureCalculator` initializes the full feature set. To compute a subset, pass the corresponding
-configuration `.yaml` file:
-
-```python
-custom_calc = FeatureCalculator(config_path="subset.yaml")
-```
-
-The number of master operations (callable functions) specified by the `.yaml` is displayed for verification, e.g.
-`Loaded 939 master operations.` for the default feature set.
-
-### Calling individual operations
-
-Individual operations can be imported directly from their module. For example, `raw_hrv_meas` lives in the `medical`
-module:
-
-```python
-from pyhctsa.operations.medical import raw_hrv_meas
-
-data = ...              # your ArrayLike data
-res = raw_hrv_meas(data)  # a dictionary or scalar value
-```
-
-> [!NOTE]
-> Individual operations can only be called directly on individual time-series instances.
-
-Operations are grouped into the following modules — see the
-[method list](https://dynamicsandneuralsystems.github.io/pyhctsa/methods/index.html) for the full catalogue:
-
-| | | | |
-|---|---|---|---|
-| `changepoint` | `correlation` | `criticality` | `distribution` |
-| `entropy` | `extreme_events` | `graph` | `hypothesis_tests` |
-| `information` | `medical` | `model_fit` | `nonlinearity` |
-| `physics` | `pre_process` | `scaling` | `spectral` |
-| `stationarity` | `surrogates` | `symbolic` | `wavelet` |
-
-> [!NOTE]
-> These conceptual groupings are a convenience only, and are not intended as definitive classifications.
-
-### Parallel computing
-
-Time-series feature extraction is computationally intensive. To speed up processing, _pyhctsa_ can distribute the
-workload across multiple CPU cores on your local machine using the `LocalDistributor`:
-
-```python
-from pyhctsa.calculator import FeatureCalculator
-from pyhctsa.distribute import LocalDistributor
-
-calc = FeatureCalculator()
-
-# it is generally recommended to set n_workers to the number of physical CPU cores
-dist = LocalDistributor(n_workers=4)
-
-res = calc.extract(data, distributor=dist)
-```
-
-Coming from MATLAB _hctsa_? A mapping between legacy operation names and their _pyhctsa_ equivalents is available in
-the [name mappings table](https://dynamicsandneuralsystems.github.io/pyhctsa/mappings/index.html).
+- [Getting started](https://dynamicsandneuralsystems.github.io/pyhctsa/usage/getting_started.html): computing features, calling individual operations, and
+  parallel computing with `LocalDistributor`.
+- [Advanced usage](https://dynamicsandneuralsystems.github.io/pyhctsa/usage/advanced_usage.html): custom feature sets from your own `.yaml` configuration,
+  and feature filtering.
+- [Method list](https://dynamicsandneuralsystems.github.io/pyhctsa/methods/index.html) and [API reference](https://dynamicsandneuralsystems.github.io/pyhctsa/api.html): every operation and its outputs.
+- [Tutorials](https://github.com/DynamicsAndNeuralSystems/pyhctsa/tree/main/tutorials): step-by-step notebooks.
 
 ## Version 2 and this repository's history
 
@@ -182,70 +125,11 @@ Machine-readable metadata is provided in [`CITATION.cff`](https://github.com/Dyn
 
 ## Licenses
 
-### pyhctsa
-
 _pyhctsa_ is licensed under the [GNU General Public License v3.0 or later](LICENSE). It is a Python implementation of
-the feature library of [_hctsa_](https://github.com/benfulcher/hctsa) (Ben D. Fulcher). The _hctsa_ feature code is
-GPL-3.0-or-later; the few _hctsa_ helper functions that were released under CC BY-NC-SA 4.0 were written solely by
-Ben D. Fulcher, who has relicensed their Python translations in _pyhctsa_ under GPL-3.0-or-later.
-
-### Acknowledgements and third-party code
-
-Some features use code written by others. Third-party code is kept in
-[`pyhctsa/toolboxes/<name>/`](pyhctsa/toolboxes), each directory with its original copyright notice and license; full
-texts are in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md). We thank the authors.
-
-| Component | Authors | License | Location in pyhctsa | Reference |
-|---|---|---|---|---|
-| TISEAN 3.0.1 (d2, c2g/c2t, poincare, false_nearest, boxcount, lyap_r, lyap_spec, c1/d1/c2d, nrlazy, nstat_z) | R. Hegger, H. Kantz, T. Schreiber | GPL-2.0-or-later | `toolboxes/Tisean_3_0_1/` | Hegger, Kantz & Schreiber, Chaos 9, 413 (1999) |
-| GPML (Gaussian process inference, covariance functions, `minimize`) | C. E. Rasmussen, H. Nickisch | BSD-2-Clause (FreeBSD) | `toolboxes/gpml/` | Rasmussen & Nickisch, JMLR 11, 3011 (2010) |
-| catch22 (PD_PeriodicityWang, splinefit) | C. H. Lubba, B. D. Fulcher et al.; splinefit after J. Lundgren | GPL-3.0; splinefit BSD-2-Clause | `toolboxes/c22/` | Lubba et al., Data Min. Knowl. Disc. 33, 1821 (2019) |
-| Delay vector variance (DVV) toolbox | D. P. Mandic, T. Gautama | GPL-2.0-or-later | `toolboxes/DVV/` | Gautama, Mandic & Van Hulle, Physica D 190, 167 (2004) |
-| Sample entropy (sampen.c) | D. Lake, J. R. Moorman, G. Moody (PhysioNet) | GPL-2.0-or-later | `toolboxes/physionet/` | Richman & Moorman, Am. J. Physiol. 278, H2039 (2000) |
-| Multiscale multifractal analysis (MMA) | J. Gieraltowski (PhysioNet) | GPL-2.0-or-later | `toolboxes/physionet/` | Gieraltowski, Zebrowski & Baranowski, Phys. Rev. E 85, 021915 (2012) |
-| Steps and bumps toolkit (l1pwc) | M. A. Little; after S.-J. Kim, K. Koh, S. Boyd, D. Gorinevsky (l1_tf) | GPL-2.0-or-later | `toolboxes/Max_Little/` | Little & Jones, ICASSP (2010) |
-| Rescaled auto-density (RAD) | B. Harris | MIT | `toolboxes/RAD/` | Harris et al., Phys. Rev. X 14, 031021 (2024) |
-| Continuous wavelet transform (cut-down `pywt.cwt`) | The PyWavelets developers | MIT | `toolboxes/pywavelets/` | Lee et al., JOSS 4, 1237 (2019) |
-
-Further credits:
-
-- The falling sticks statistic (`CO_FallingSticks`) is adapted from the Python FALLstick implementation written by
-  Eugene Chon, a student of B. D. Fulcher, for _hctsa_.
-- The heart-rate-variability measures (`MD_*`) are Copyright (C) 2016 Max A. Little and Ben D. Fulcher.
-- The permutation-entropy variant is that of B. Land and D. Elias (Cornell University).
-- The visibility-graph measures follow Lacasa et al., PNAS 105, 4972 (2008) and Luque et al., Phys. Rev. E 80, 046103
-  (2009).
-- The Kraskov-Stoegbauer-Grassberger and Gaussian mutual-information estimators (`pyhctsa/ksg.py`) are written from the
-  published method (Kraskov et al., Phys. Rev. E 69, 066138, 2004); the Java Information Dynamics Toolkit (J. T. Lizier,
-  Front. Robot. AI 1, 11, 2014) is credited as the method reference used by _hctsa_. No JIDT code is included.
-- Several methods follow TSTOOL (C. Merkwirth, U. Parlitz, I. Wedekind, D. Engster, W. Lauterborn): the tc3, trev,
-  delay-time, fractal-dimension and return-time measures.
-
-#### Clean-room re-implementations (implemented from the published method)
-
-The following methods are implemented in _pyhctsa_ from their published descriptions, without use of the original
-source code, and we credit the authors whose software defined them in _hctsa_: ARFIT stepwise autoregressive fitting
-(T. Schneider, A. Neumaier; Neumaier & Schneider, ACM TOMS 27, 27 (2001)); Lempel-Ziv complexity, Shannon block
-entropy, nonlinear prediction error as in M. Small's toolbox (Kaspar & Schuster, Phys. Rev. A
-36, 842 (1987); Small, _Applied Nonlinear Time Series Analysis_, 2005); the Theiler, crinkle and time-reversal
-statistics (D. Kaplan; Theiler et al., Physica D 58, 77 (1992); Kaplan & Glass, _Understanding Nonlinear Dynamics_,
-1995); nsAMDF (T. E. Özkurt; NeuroImage 223, 117356 (2020)); RPDE and close returns (M. A. Little; Little et al.,
-BioMed. Eng. OnLine 6, 23 (2007)); and the fractal-dimension error function (van de Water & Schram, Phys. Rev. A 37,
-3118 (1988)). Approximate entropy is implemented from Pincus, PNAS 88, 2297 (1991). Clean-room provenance logs are in
-[`docs/provenance/`](docs/provenance).
-
-Daniel Kaplan's statistics are re-implemented from his published methods; his `DK_*` files in _hctsa_ are GPL-3 and none of
-that source is included. The exponential-smoothing feature (`MF_ExpSmoothing`) follows the design of the code provided by
-S. Arora for _hctsa_ (training/held-out split, a smoothing parameter chosen on the training part, residual analysis); the
-smoothing itself is computed with statsmodels.
-
-#### Dependencies
-
-Runtime dependencies, called through their public interfaces (no code copied; all GPL-compatible):
-NumPy, SciPy, pandas, statsmodels and scikit-learn (BSD-3-Clause), numba (BSD-2-Clause), PyYAML, PyWavelets and rich (MIT),
-pathos, lmfit and [hmmlearn](https://github.com/hmmlearn/hmmlearn) (BSD-3-Clause; hmmlearn replaces Z. Ghahramani's HMM code
-used in _hctsa_), [arch](https://github.com/bashtage/arch) (NCSA), and, optionally,
-[ripser](https://github.com/scikit-tda/ripser.py) (MIT). See [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md), section 4.2.
+the feature library of [_hctsa_](https://github.com/benfulcher/hctsa). Some features use third-party code, bundled in
+[`pyhctsa/toolboxes/`](pyhctsa/toolboxes) under its own GPL-compatible license (full texts in
+[`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)); others are clean-room re-implementations of published methods.
+Full credits are on the [Acknowledgements](https://dynamicsandneuralsystems.github.io/pyhctsa/acknowledgements.html) page of the documentation.
 
 ## AI usage disclosure
 
