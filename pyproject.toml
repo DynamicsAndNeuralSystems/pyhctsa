@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=77", "numpy>=2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyhctsa"
+version = "2.0.0"
+description = "Highly comparative time-series analysis in Python."
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = [
+  "LICENSE",
+  "THIRD_PARTY_LICENSES.md",
+  "pyhctsa/toolboxes/**/LICENSE*",
+  "pyhctsa/toolboxes/**/COPYING*",
+  "pyhctsa/toolboxes/**/NOTICE*",
+]
+requires-python = ">=3.10"
+authors = [
+  {name = "Joshua B. Moore", email = "joshua.moore@sydney.edu.au"}, 
+  {name = "Ben D. Fulcher", email = "ben.fulcher@sydney.edu.au"}]
+maintainers = [
+  {name = "Joshua B. Moore", email = "joshua.moore@sydney.edu.au"},
+  {name = "Ben D. Fulcher", email = "ben.fulcher@sydney.edu.au"}
+]
+
+dependencies = [
+  "numpy>=2",
+  "scipy",
+  "pandas",
+  "pyyaml",
+  "statsmodels",
+  "numba",
+  "scikit-learn",
+  "hmmlearn",
+  "arch",
+  "PyWavelets",
+  "rich",
+  "pathos",
+  "lmfit"
+]
+
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14"
+]
+
+[project.optional-dependencies]
+tda = ["ripser"]  # persistent_homology (NL_PersistentHomology); skipped by the calculator without it
+test = ["pytest>=6.0", "pytest-cov", "pytest-mock", "ripser"]
+
+[project.urls]
+Homepage = "https://dynamicsandneuralsystems.github.io/pyhctsa/"
+Repository = "https://github.com/DynamicsAndNeuralSystems/pyhctsa"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pyhctsa*"]  # keep tests/, docs/, scripts/ out of the wheel
+
+[tool.setuptools.package-data]
+pyhctsa = [
+  "configurations/*.yaml",
+  "data/*.txt",
+  "toolboxes/**/*.py",
+  "toolboxes/**/LICENSE*",
+  "toolboxes/**/COPYING*",
+  "toolboxes/**/NOTICE*",
+  "toolboxes/**/README*",
+]

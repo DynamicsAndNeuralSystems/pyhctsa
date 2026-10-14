@@ -1,0 +1,15 @@
+TISEAN 3.0.1 (Nonlinear time series analysis)
+Copyright (c) 1998-2007 Rainer Hegger, Holger Kantz, Thomas Schreiber.
+Distributed under the GNU General Public License, version 2 or (at your option) any later
+version ("Starting from release 3.0.0 TISEAN is licensed under the terms of the GPL (version 2 or
+later)"; https://www.pks.mpg.de/tisean/Tisean_3.0.1/docs/indexf.html). COPYING in this directory is
+the GNU GPL version 2; under the "or later" option the code is distributed within pyhctsa under
+GPL-3.0-or-later. The copyright to each TISEAN program is held by the person(s) named in its source
+code (R. Hegger or T. Schreiber).
+Reference: Hegger, Kantz & Schreiber, Chaos 9, 413-435 (1999).
+
+Programs and routines ported here: d2, c2g, c2t, poincare, false_nearest (TS_*.c, tisean.py);
+boxcount, lyap_r, lyap_spec (with routines/rand.c, solvele.c, invert_matrix.c), c1/d1/c2d, nrlazy
+and nstat_z (ports.py). All are modified for pyhctsa: made re-entrant, called in-process from
+Python on NumPy arrays, and (for the Fortran programs c2g, c2t, c1, d1, c2d) translated to
+Python. Per-file notices state the individual changes.

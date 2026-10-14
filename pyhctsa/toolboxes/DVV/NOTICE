@@ -1,0 +1,10 @@
+Delay Vector Variance (DVV) toolbox for MATLAB
+(c) Copyright Danilo P. Mandic 2008 (with T. Gautama)
+http://www.commsp.ee.ic.ac.uk/~mandic/dvv.htm
+Released under the GNU General Public License, version 2 or (at your option) any later version.
+COPYING in this directory is the GNU GPL version 2. Under the "or later" option the code is
+distributed within pyhctsa under GPL-3.0-or-later.
+Reference: Gautama, Mandic & Van Hulle, Physica D 190, 167-176 (2004).
+
+dvv.py is a Python port of DVV_dvv.m and DVV_surrogate.m (the hctsa copies of the toolbox, which
+add a delay parameter tau) and is modified for pyhctsa.

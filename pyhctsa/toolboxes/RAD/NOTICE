@@ -1,0 +1,5 @@
+RAD (rescaled auto-density), from the Criticality package by Brendan Harris
+https://github.com/brendanjohnharris/Criticality
+Copyright (c) 2021 Brendan Harris <brendanjohnharris@gmail.com> and contributors; MIT licence (LICENSE in
+this directory). rad.py is a Python port of RAD.m as used in hctsa (CR_RAD.m), modified for pyhctsa.
+Reference: Harris et al., Phys. Rev. X 14, 031021 (2024).

@@ -1,0 +1,15 @@
+Two components from PhysioNet (https://physionet.org/), both GPL-2.0-or-later (COPYING in this
+directory is the GNU GPL version 2; under the "or later" option the code is distributed within
+pyhctsa under GPL-3.0-or-later). The PhysioNet project pages additionally state the Open Data
+Commons Attribution License v1.0, which is satisfied by this attribution.
+
+1. sampen.c -- "sampen: calculate Sample Entropy", Copyright (C) 2002-2004 Doug Lake.
+   Revisions by George Moody. https://physionet.org/content/sampen/1.0.0/
+   Reference: Richman & Moorman, Am. J. Physiol. Heart Circ. Physiol. 278, H2039 (2000).
+   The original file header is kept in sampen.c; the core calculation is unchanged and a Python
+   extension interface was added for pyhctsa.
+
+2. mma.py -- Multiscale Multifractal Analysis (MMA.m), Copyright (C) 2014 Jan Gieraltowski.
+   https://physionet.org/content/mma/1.0.0/
+   Reference: Gieraltowski, Zebrowski & Baranowski, Phys. Rev. E 85, 021915 (2012).
+   Python port of MMA.m as modified for hctsa (SC_MMA.m, B. D. Fulcher) and for pyhctsa.

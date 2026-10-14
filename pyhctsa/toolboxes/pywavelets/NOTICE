@@ -1,0 +1,6 @@
+PyWavelets
+Copyright (c) 2006-2012 Filip Wasilewski <http://en.ig.ma/>
+Copyright (c) 2012-     The PyWavelets Developers <https://github.com/PyWavelets/pywt>
+MIT licence (LICENSE in this directory). cwt.py is a cut-down copy of pywt.cwt adapted to handle
+complex-valued wavelets, modified for pyhctsa.
+Reference: Lee et al., J. Open Source Softw. 4, 1237 (2019).

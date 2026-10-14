@@ -1,0 +1,12 @@
+GPML (Gaussian Processes for Machine Learning toolbox), v4.2
+Copyright (c) 2005-2018 Carl Edward Rasmussen & Hannes Nickisch. All rights reserved.
+Released under the FreeBSD License (BSD-2-Clause); see LICENSE in this directory.
+Source: http://gaussianprocess.org/gpml/code/matlab/doc/
+Reference: Rasmussen & Nickisch, J. Mach. Learn. Res. 11, 3011-3015 (2010).
+
+Files here: gpml.py, cov.py (covariance functions, Gaussian-likelihood inference, training and
+prediction) and optimizers.py (the conjugate-gradient minimizer ``minimize``) are Python ports of
+the corresponding GPML routines, modified for pyhctsa (MATLAB to Python/NumPy, restructured for
+scalar inputs and in-process use). The Laplace-approximation inference path and ``brentmin`` of
+GPML are not included. The ports are distributed as part of pyhctsa under GPL-3.0-or-later; the
+BSD-2-Clause notice and disclaimer in LICENSE apply to the GPML-derived code.

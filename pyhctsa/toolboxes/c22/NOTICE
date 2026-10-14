@@ -1,0 +1,43 @@
+catch22 (CAnonical Time-series CHaracteristics)
+Copyright (C) 2018- Carl H. Lubba, Ben D. Fulcher and contributors.
+Released under the GNU General Public License v3.0 (see LICENSE in this directory).
+Source: https://github.com/DynamicsAndNeuralSystems/catch22
+Reference: Lubba et al., Data Min. Knowl. Discov. 33, 1821-1852 (2019).
+
+Files here (PD_PeriodicityWang.c/.h, splinefit.c/.h, stats.c/.h, helper_functions.c/.h) come from
+catch22 and are modified for pyhctsa (Python C-extension build; blocked autocorrelation in
+PD_PeriodicityWang.c). The lines "Copyright (C) 2018 Carl Henning Lubba. All rights reserved."
+in the headers are Xcode file-template text; they are retained as the attribution of the original
+author and do not restrict the GPL-3.0 grant under which catch22 is released.
+
+SPLINEFIT
+---------
+splinefit.c is based on SPLINEFIT by Jonas Lundgren (MATLAB Central File Exchange, entry 13812),
+which is distributed under the following BSD licence (text as reproduced in Jonas Lundgren's
+private function __splinefit__.m shipped with GNU Octave,
+https://github.com/gnu-octave/octave/blob/default/scripts/polynomial/private/__splinefit__.m):
+
+  Copyright (c) 2010, Jonas Lundgren
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions are
+  met:
+
+      * Redistributions of source code must retain the above copyright
+        notice, this list of conditions and the following disclaimer.
+      * Redistributions in binary form must reproduce the above copyright
+        notice, this list of conditions and the following disclaimer in
+        the documentation and/or other materials provided with the distribution
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  POSSIBILITY OF SUCH DAMAGE.

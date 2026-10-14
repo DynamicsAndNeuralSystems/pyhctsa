@@ -1,0 +1,2272 @@
+import logging
+logger = logging.getLogger('pyhctsa')
+import warnings
+from typing import Union
+
+import numpy as np
+from numpy.typing import ArrayLike
+from scipy.signal import detrend, find_peaks
+from scipy.stats import kendalltau, kurtosis, kstest, skew, pearsonr, norm
+from statsmodels.tools.sm_exceptions import InterpolationWarning
+from statsmodels.tsa.stattools import kpss
+
+from ..operations.correlation import autocorr, first_crossing
+from ..operations.distribution import fit_kernel_smooth, moments
+from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
+from ..toolboxes.Tisean_3_0_1.ports import _nstat_z_error, _nstat_z_std
+from ..robust import bf_exp_fit, bf_quantile_edges, bf_random, bf_random_seed
+from ..utils import dict_output, _round_half_away, _sample_std, get_tau, frame_signal, sign_change, z_score
+from ..fitting import polyfit, robust_linear_fit
+
+_PP_TREND = {'ar': 'n', 'ard': 'c', 'ts': 'ct'}
+_PP_TEST_TYPE = {'t1': 'tau', 't2': 'rho'}
+
+
+def _pp_ols_summary(y: np.ndarray, model: str) -> dict:
+    """Least-squares fit of the Phillips-Perron test regression with Gaussian information criteria.
+
+    Regresses ``y_t`` on ``[1, t,] y_{t-1}`` (constant and trend according to ``model``) and
+    returns the coefficients ``coeff`` (the coefficient of ``y_{t-1}`` last), the residual standard
+    error ``RMSE`` (``sqrt(SSE / (T - k))``) and the Gaussian log-likelihood ``LL`` evaluated at
+    that variance with ``AIC``, ``BIC`` and ``HQC`` (Akaike 1974; Schwarz 1978; Hannan & Quinn
+    1979; ``k`` coefficients, ``T`` observations; none normalized by the sample size). NaN for
+    an exact fit or a rank-deficient design (e.g. a constant series).
+    """
+    ylag, yt = y[:-1], y[1:]
+    T = len(yt)
+    cols = [ylag[:, None]]
+    if model in ('ard', 'ts'):
+        cols.insert(0, np.ones((T, 1)))
+    if model == 'ts':
+        cols.insert(1, np.arange(T, dtype=float)[:, None])  # the trend regressor t = 0, ..., T-1
+    X = np.hstack(cols)
+    k = X.shape[1]
+    nan = {key: np.nan for key in ('RMSE', 'LL', 'AIC', 'BIC', 'HQC')}
+    nan['coeff'] = np.full(k, np.nan)
+    if T <= k:
+        return nan
+    beta, _, rank, _ = np.linalg.lstsq(X, yt, rcond=None)
+    u = yt - X @ beta
+    sse = float(u @ u)
+    if rank < k or sse <= 1e-24 * float(yt @ yt):
+        return nan
+    mse = sse / (T - k)
+    ll = -0.5 * T * np.log(2.0 * np.pi * mse) - 0.5 * (T - k)
+    return {'coeff': beta, 'RMSE': float(np.sqrt(mse)), 'LL': float(ll),
+            'AIC': float(2.0 * k - 2.0 * ll), 'BIC': float(k * np.log(T) - 2.0 * ll),
+            'HQC': float(2.0 * k * np.log(np.log(T)) - 2.0 * ll)}
+
+
+def _pp_statistic_pvalue(y: np.ndarray, q: int, model: str, test_statistic: str) -> tuple:
+    """Phillips-Perron statistic and p-value (``arch.unitroot.PhillipsPerron``); NaN if undefined."""
+    from arch.unitroot import PhillipsPerron
+    if not np.ptp(y) > 0:
+        return np.nan, np.nan
+    try:
+        res = PhillipsPerron(y, lags=q, trend=_PP_TREND[model], test_type=_PP_TEST_TYPE[test_statistic])
+        return float(res.stat), float(res.pvalue)
+    except (np.linalg.LinAlgError, ZeroDivisionError, FloatingPointError):
+        return np.nan, np.nan
+
+
+def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
+            test_statistic: str = 't1') -> dict:
+    """
+    Phillips-Perron unit-root test statistics and p-values.
+
+    Tests the null hypothesis that the series has a unit root (is a random walk) against a
+    stationary alternative. For each requested number of Newey-West lags, ``y_t`` is regressed
+    on ``y_{t-1}`` (plus an optional constant and trend), the Phillips-Perron statistic is
+    formed with a Bartlett-kernel long-run variance estimate, and its left-tail p-value is
+    obtained from the Dickey-Fuller null distribution with MacKinnon's response-surface
+    approximation (both via ``arch.unitroot.PhillipsPerron``).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (NaNs are removed; infinite values raise ``ValueError``).
+    lags : int or list of int, optional
+        Number of autocovariance lags in the Newey-West long-run variance. A scalar gives the
+        single-lag outputs; a list gives summaries over the lags. Default is ``[0, 1, 2, 3, 4, 5]``.
+    model : {'ar', 'ard', 'ts'}, optional
+        Alternative model: AR(1) without deterministic terms, with drift (constant), or
+        trend stationary (constant and linear trend). Default is ``'ar'``.
+    test_statistic : {'t1', 't2'}, optional
+        ``'t1'``: modification of the t statistic (Z_tau); ``'t2'``: modification of the
+        unstudentized statistic ``T (a - 1)`` (Z_rho). Default is ``'t1'``.
+
+    Returns
+    -------
+    dict
+        Single lag: ``pvalue``, ``stat``, ``coeff1`` (first regression coefficient),
+        ``loglikelihood``, ``AIC``, ``BIC``, ``HQC`` (each divided by the series length) and
+        ``rmse``. Several lags: ``minpValue``, ``meanpValue``, ``lagmaxp``, ``lagminp``
+        (the lags with the largest and smallest p-value; the first in list order on ties),
+        ``meanstat`` and ``minBIC`` (divided by the series length).
+
+    Notes
+    -----
+    Phillips & Perron (1988), Biometrika 75:335-346; Hamilton (1994), Time Series Analysis,
+    Sec. 17.6; Newey & West (1987), Econometrica 55:703-708; MacKinnon (1994) J. Business &
+    Economic Statistics 12:167-176 and (2010) Queen's Economics Department Working Paper 1227
+    for the p-values, which are not clamped.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    y = y[~np.isnan(y)]
+    if not np.all(np.isfinite(y)):
+        raise ValueError("The data must be finite.")
+    model = str(model).lower()
+    if model not in _PP_TREND:
+        raise ValueError(f"Unknown model '{model}'; select 'ar', 'ard' or 'ts'.")
+    test_statistic = str(test_statistic).lower()
+    if test_statistic not in _PP_TEST_TYPE:
+        raise ValueError(f"Unknown test statistic '{test_statistic}'; select 't1' or 't2'.")
+
+    single = lags is not None and np.isscalar(lags)
+    lag_list = [0, 1, 2, 3, 4, 5] if lags is None else ([int(lags)] if single else [int(l) for l in lags])
+
+    n_obs = len(y)
+    T = n_obs - 1
+    if min(lag_list) < 0 or max(lag_list) > T - 1:
+        raise ValueError(f"The number of lags must be between 0 and {T - 1}.")
+    reg = _pp_ols_summary(y, model)                  # the regression does not depend on the lag
+    pairs = [_pp_statistic_pvalue(y, q, model, test_statistic) for q in lag_list]
+    stats, pvals = np.array([p[0] for p in pairs]), np.array([p[1] for p in pairs])
+
+    if single:
+        return {'pvalue': pvals[0], 'stat': stats[0], 'coeff1': reg['coeff'][0],
+                'loglikelihood': reg['LL'] / n_obs, 'AIC': reg['AIC'] / n_obs,
+                'BIC': reg['BIC'] / n_obs, 'HQC': reg['HQC'] / n_obs, 'rmse': reg['RMSE']}
+
+    if np.all(np.isnan(pvals)):
+        imax = imin = 0
+        pmin = pmean = np.nan
+    else:
+        imax, imin = int(np.nanargmax(pvals)), int(np.nanargmin(pvals))
+        pmin, pmean = np.nanmin(pvals), np.mean(pvals)
+    return {'minpValue': pmin,
+            'meanpValue': pmean,
+            'lagmaxp': lag_list[imax],
+            'lagminp': lag_list[imin],
+            'meanstat': np.mean(stats),
+            'minBIC': reg['BIC'] / n_obs}
+
+
+def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par',
+                        num_bins: int = 10) -> dict:
+    """
+    Compares the distribution in consecutive time-series segments.
+
+    Breaks the time series into ``num_segs`` consecutive segments of equal length and
+    measures how different the distributions of values in two segments are as the total
+    variation distance between their histograms: half the sum of the absolute differences
+    between the proportions of values in each bin (0 for identical distributions, 1 for
+    distributions with no bin in common). The bins are common to all segments and
+    equiprobable for the full series (edges at its quantiles,
+    :func:`pyhctsa.robust.bf_quantile_edges`), so the measure has no smoothing parameter
+    and does not depend on the scale of the data. Either each segment is compared to the
+    parent (full time series) distribution, or each to all other segments.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    num_segs : int, optional
+        The number of segments to break the time series into. Default is 5.
+    each_or_par : {'par', 'each'}, optional
+
+        - 'par': compares each local distribution to the parent (full time series) distribution.
+        - 'each': compares each local distribution to all other local distributions.
+
+        Default is ``'par'``.
+
+    num_bins : int, optional
+        The number of equiprobable bins (fewer if values are tied at a quantile).
+        Default is 10.
+
+    Returns
+    -------
+    dict
+        Mean (`meandiv`) and standard deviation (`stddiv`) of the total variation distances
+        between distributions across the different pairwise comparisons. (For 'each' with
+        two segments, the single distance is returned as a float.)
+    """
+    # preliminaries
+    y = np.asarray(y, dtype=float)
+    N = len(y)
+    num_segs = int(num_segs)
+    lseg = int(np.floor(N / num_segs))
+    bin_edges = bf_quantile_edges(y, int(num_bins))  # bins common to all segments, equiprobable for the full series
+
+    def proportions(v):
+        counts, _ = np.histogram(v, bins=bin_edges)
+        return counts / np.sum(counts)
+
+    # Compute the distribution (proportion in each bin) in all num_segs segments of the time series
+    dns = np.zeros((len(bin_edges) - 1, num_segs))
+    for i in range(num_segs):
+        dns[:, i] = proportions(y[i * lseg:(i + 1) * lseg])
+    # Compare the local distributions
+    if each_or_par in ['par', 'parent']:
+        #Compares each subdistribtuion to the parent (full signal) distribution
+        pardn = proportions(y)
+        divs = np.zeros(num_segs)
+        for i in range(num_segs):
+            divs[i] = 0.5 * np.sum(np.abs(dns[:, i] - pardn)) # each is just divergence to parent
+    elif each_or_par == 'each':
+        # Compares each subdistribtuion to the parent (full signal) distribution
+        if num_segs == 2:
+            return float(0.5 * np.sum(np.abs(dns[:, 0] - dns[:, 1])))
+        # num_segs > 2
+        diffmat = np.nan * np.ones((num_segs, num_segs)) 
+        for i in range(num_segs):
+            for j in range(num_segs):
+                if j > i:
+                    diffmat[i, j] = 0.5 * np.sum(np.abs(dns[:, i] - dns[:, j])) # total variation distance
+        divs = diffmat[~np.isnan(diffmat)] # % (the upper triangle of diffmat)
+    else:
+        raise ValueError(f"Unknown method: {each_or_par}. Should be 'each' or 'par'. ")
+
+    # Return basic statistics on differences in distributions in different
+    # segments of the time series
+    out = {}
+    out['meandiv'] = np.mean(divs)
+    out['stddiv'] = np.std(divs, ddof=1)
+
+    return out
+
+def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
+    """
+    How stationarity estimates depend on the number of time-series subsegments.
+
+    Specifically, variation in a range of local measures are implemented: mean,
+    standard deviation, skewness, kurtosis, ApEn(1,0.2), SampEn(1,0.2), AC(1),
+    AC(2), and the first zero-crossing of the autocorrelation function.
+
+    The standard deviation of local estimates of these quantities across the time
+    series are calculated as an estimate of the stationarity in this quantity as a
+    function of the number of splits, n_{seg}, of the time series.
+
+    Parameters
+    -----------
+    y: array-like
+        The time series to analyze.
+    max_num_segments: int, optional
+        The maximum number of segments to consider. Sweeps from 2 to
+        max_num_segments. Defaults to 10.
+
+    Returns
+    -------
+    out
+        The standard deviation of this set of 'stationarity' estimates across these window sizes
+    """
+    y = np.asarray(y)
+    nsegr = np.arange(2, max_num_segments + 1, 1)  # range of nseg to sweep across
+    nmov = 1  # controls window overlap
+    num_features = 11  # num of features
+    fs = np.zeros((len(nsegr), num_features))  # standard deviation of feature values over windows
+    tau_g = first_crossing(y, 'ac', 0, 'discrete')  # global tau
+
+    for i, nseg in enumerate(nsegr):
+        wlen = int(np.floor(len(y) / nseg))  # window length
+        inc = int(np.floor(wlen / nmov))  # increment to move at each step
+        # if increment is rounded to zero, prop it up
+        if inc == 0:
+            inc = 1
+
+        num_steps = int(np.floor((len(y) - wlen) / inc) + 1)
+        qs = np.zeros((num_steps, num_features))
+
+        for j in range(num_steps):
+            y_sub = y[j * inc:j * inc + wlen]
+            tau_l = first_crossing(y_sub, 'ac', 0, 'discrete')
+
+            qs[j, 0] = np.mean(y_sub)
+            qs[j, 1] = np.std(y_sub, ddof=1)
+            qs[j, 2] = skew(y_sub)
+            qs[j, 3] = kurtosis(y_sub)
+            sampen_out = sample_entropy(y_sub, 2, 0.15)
+            qs[j, 4] = sampen_out['quadSampEn1']  # SampEn_1_015
+            #qs[j, 5] = sampen_out['quadSampEn2'] # SampEn_2_015
+            # One FFT autocorrelation per window instead of four; index the lags.
+            # acf_w[t] equals autocorr(y_sub, t, 'Fourier'); the guards give NaN for
+            # out-of-range lags, as autocorr does.
+            acf_w = autocorr(y_sub, [], 'Fourier')
+            Lw = len(acf_w)
+            _pick = lambda t: acf_w[t] if 0 <= t <= Lw - 1 else np.nan
+            qs[j, 6] = acf_w[1] if Lw > 1 else np.nan  # AC1
+            qs[j, 7] = acf_w[2] if Lw > 2 else np.nan  # AC2
+            # (Sometimes tau_g or taul can be longer than ySub; then these will output NaNs:)
+            qs[j, 8] = _pick(tau_g)  # AC_glob_tau
+            qs[j, 9] = _pick(tau_l)  # AC_loc_tau
+            qs[j, 10] = tau_l
+
+        fs[i, :num_features] = np.std(qs, ddof=1, axis=0)
+
+    # fs contains std of quantities at all different 'scales' (segment lengths)
+    # how much does the 'std stationarity' vary over different scales?
+    fs = np.std(fs, ddof=1, axis=0)
+
+    # Outputs
+    out = {}
+    out['stdmean'] = fs[0]
+    out['stdstd'] = fs[1]
+    out['stdskew'] = fs[2]
+    out['stdkurt'] = fs[3]
+    out['stdsampen1_015'] = fs[4]
+    out['stdac1'] = fs[6]
+    out['stdac2'] = fs[7]
+    out['stdactaug'] = fs[8]
+    out['stdactaul'] = fs[9]
+    out['stdtaul'] = fs[10]
+
+    return out
+
+@dict_output
+def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
+                w_overlap: Union[None, float] = None, mom_1: str = 'mean',
+                mom_2: str = 'std', what_transform: str = 'none') -> dict:
+    """
+    Correlations between simple statistics in local windows of a time series.
+    The idea to implement this was that of Prof. Nick S. Jones (Imperial College London).
+
+    Parameters
+    ---------
+    x : array-like
+        The input time series.
+    window_length : float, optional
+        The sliding window length (can be a fraction to specify or a proportion of 
+        the time-series length). Default is `None`.
+    w_overlap : 
+        The overlap between consecutive windows as a fraction of the window length. Default is `None`.
+    mom_1, mom_2 : str, optional
+        The statistics to investigate correlations between (in each window)
+
+        - 'iqr': interquartile range
+        - 'median': median
+        - 'std': standard deviation (about the local mean)
+        - 'mean': mean
+
+        Default is ``'mean'``. 
+
+    what_transform: str, optional
+        The pre-processing what_transform to apply to the time series before analyzing it
+
+        - 'abs': takes absolute values of all data points
+        - 'sqrt': takes the square root of absolute values of all data points
+        - 'sq': takes the square of every data point
+        - 'none': does no what_transform
+
+        Default is ``'none'``.
+    
+    Returns
+    --------
+    out
+        Dictionary of statistics related to the correlation between simple statistics in local windows of the input
+        time series: the correlation coefficient `R`, its absolute value `absR`, and `density`, the number of
+        windows divided by the bounding-box area in the M1--M2 plane.
+    """
+    x = np.asarray(x)
+    N = len(x) # length of the time series
+
+    if window_length is None:
+        window_length = 0.02 # 2% of the time-series length
+    
+    if window_length < 1:
+        window_length = int(np.ceil(N * window_length))
+    
+    # sliding window overlap length
+    if w_overlap is None:
+        w_overlap = 1/5
+    
+    if w_overlap < 1:
+        w_overlap = int(np.floor(window_length * w_overlap))
+
+    # Apply the specified what_transformation
+    if what_transform == 'abs':
+        x = np.abs(x)
+    elif what_transform == 'sq':
+        x = x**2
+    elif what_transform == 'sqrt':
+        x = np.sqrt(np.abs(x))
+    elif what_transform == 'none':
+        pass
+    else:
+        raise ValueError(f"Unknown transformation {what_transform}")
+    
+    # create the windows
+    x_buff = frame_signal(x, window_length, w_overlap)
+    num_windows = (N/(window_length - w_overlap)) # number of windows
+
+    if np.size(x_buff, 1) > num_windows:
+        x_buff = x_buff[:, :-1] # lose the last point
+
+    points_per_window = np.size(x_buff, 0)
+    if points_per_window == 1:
+        logger.warning(f"This time series (N = {N}) is too short to extract {num_windows}")
+        return np.nan
+    
+    # okay now we have the sliding window ('buffered') signal, x_buff
+    # first calculate the first moment in all the windows
+    M1 = _calc_me_moments(x_buff, mom_1)
+    M2 = _calc_me_moments(x_buff, mom_2)
+
+    out = {}
+    rmat = np.corrcoef(M1, M2)
+    out['R'] = rmat[0, 1]  # correlation coefficient
+    out['absR'] = np.abs(rmat[0, 1])  # absolute value of the correlation coefficient
+    # density of points in M1--M2 space: (number of windows) / (bounding-box area)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        out['density'] = len(M1) / (np.ptp(M1) * np.ptp(M2))
+
+    return out
+
+def _calc_me_moments(x_buff: ArrayLike, mom_type: str):
+    """Helper function for `moment_corr`"""
+    if mom_type == 'mean':
+        moms = np.mean(x_buff, axis=0)
+    elif mom_type == 'std':
+        moms = np.std(x_buff, axis=0, ddof=1)
+    elif mom_type == 'median':
+        moms = np.median(x_buff, axis=0)
+    elif mom_type == 'iqr':
+        moms = np.percentile(x_buff, 75, method='hazen', axis=0) - np.percentile(x_buff, 25, method='hazen', axis=0)
+    else:
+        raise ValueError(f"Unknown statistic {mom_type}")
+    
+    return moms
+
+def simple_stats(x: ArrayLike, what_stat: str = 'zcross') -> dict:
+    """
+    Basic statistics about an input time series.
+
+    This function computes various statistical measures about zero-crossings and local 
+    extrema in a time series.
+
+    Parameters
+    ----------
+    x : array-like
+        The input time series.
+    what_stat : str, optional
+        The statistic to return:
+
+        - 'zcross': proportion of zero-crossings (for z-scored input, returns mean-crossings)
+        - 'maxima': proportion of points that are local maxima
+        - 'minima': proportion of points that are local minima
+        - 'pmcross': ratio of crossings above +1σ to crossings below -1σ
+        - 'zsczcross': ratio of zero-crossings in raw vs detrended time series
+
+        Default is `zcross`.
+
+    Returns
+    -------
+    float
+        The calculated statistic based on what_stat
+    """
+    x = np.asarray(x)
+    N = len(x)
+
+    out = None
+    if what_stat == 'zcross':
+        # Proportion of zero-crossings of the time series
+        # (% in the case of z-scored input, crosses its mean)
+        xch = x[:-1] * x[1:]
+        out = np.sum(xch < 0)/N
+
+    elif what_stat == 'maxima':
+        # proportion of local maxima in the time series
+        dx = np.diff(x)
+        out = np.sum((dx[:-1] > 0) & (dx[1:] < 0)) / (N - 1)
+    elif what_stat == 'minima':
+        # proportion of local minima in the time series
+        dx = np.diff(x)
+        out = np.sum((dx[:-1] < 0) & (dx[1:] > 0)) / (N-1)
+    elif what_stat == 'pmcross':
+        # ratio of times cross 1 to -1
+        c1sig = np.sum(sign_change(x-1)) # num times cross 1
+        c2sig = np.sum(sign_change(x+1)) # num times cross -1
+        if c2sig == 0:
+            out = np.nan
+        else:
+            out = c1sig/c2sig
+    elif what_stat == 'zsczcross':
+        # ratio of zero crossings of raw to detrended time series
+        # where the raw has zero mean
+        x = z_score(x)
+        xch = x[:-1] * x[1:]
+        h1 = np.sum(xch < 0) # num of zscross of raw series
+        y = detrend(x)
+        ych = y[:-1] * y[1:]
+        h2 = np.sum(ych < 0) # % of detrended series
+        if h1 == 0:
+            out = np.nan
+        else:
+            out = h2/h1
+    else:
+        raise(ValueError(f"Unknown statistic {what_stat}"))
+    
+    return out
+
+@dict_output
+def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = None) -> dict:
+    """
+    How local maximums and minimums vary across the time series.
+
+    Finds maximums and minimums within given segments of the time series and
+    analyzes the results.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series
+    how_to_window : str, optional
+        Method to determine window size (default is 'l'):
+
+        - 'l': windows of a given length (n specifies the window length)
+        - 'n': specified number of windows to break the time series into (n specifies number of windows)
+        - 'tau': sets window length equal to correlation length (first zero-crossing of autocorrelation)
+
+        Default is ``'l'``.
+
+    n : int, optional
+        Specifies either:
+
+        - Window length when how_to_window='l' (defaults to 100)
+        - Number of windows when how_to_window='n' (defaults to 5)
+        - Not used when how_to_window='tau'
+
+        Default is `None`.
+
+    Returns
+    -------
+    dict
+        Statistics about local extrema.
+    """
+    y = np.asarray(y)
+    if n is None:
+        if how_to_window == 'l':
+            n = 100 # 100 sample windows
+        elif how_to_window == 'n':
+            n = 5 # 5 windows
+    N = len(y)
+    # Set the window length
+    if how_to_window == 'l':
+        window_length = n # window length
+    elif how_to_window == 'n':
+        window_length = int(np.floor(N/n))
+    elif how_to_window == 'tau':
+        window_length = first_crossing(y, 'ac', 0, 'discrete')
+    else:
+        raise ValueError(f"Unknown method {how_to_window}")
+    
+    if np.isnan(window_length) or (window_length > N) or (window_length <= 1):
+        # This feature is unsuitable if the window length exceeds ts (or is undefined)
+        return np.nan
+    
+    # Buffer the time series
+    y_buff = frame_signal(y, int(window_length)) # no overlap
+    # each column is a window of samples
+    if y_buff[-1, -1] == 0:
+        y_buff = y_buff[:, :-1]  # remove last window if zero-padded
+    
+    num_windows = np.size(y_buff, 1) # number of windows
+    # Find local extrema
+    loc_max = np.max(y_buff, axis=0) # summary of local maxima
+    loc_min = np.min(y_buff, axis=0) # summary of local minima
+    abs_loc_min = np.abs(loc_min) # abs val of local minima
+    exti = np.where(abs_loc_min > loc_max)
+    loc_ext = loc_max.copy()
+    loc_ext[exti] = loc_min[exti] # local extrema (furthest from mean; either maxs or mins)
+    abs_loc_ext = np.abs(loc_ext) # the magnitude of the most extreme events in each window
+
+    # Scale of a local extreme under a Gaussian null: the expected maximum of
+    # window_length iid standard normals (Blom's approximation). Location
+    # statistics are divided by this so that they do not grow with window length.
+    exp_max = norm.ppf((window_length - 0.375) / (window_length + 0.25))
+
+    # Return Outputs
+    out = {
+        'meanrat': np.mean(loc_max) / np.mean(abs_loc_min),
+        'medianrat': np.median(loc_max) / np.median(abs_loc_min),
+        'minmax': np.min(loc_max) / exp_max,
+        'minabsmin': np.min(abs_loc_min) / exp_max,
+        'minmaxonminabsmin': np.min(loc_max) / np.min(abs_loc_min),
+        'meanmax': np.mean(loc_max) / exp_max,
+        'meanabsmin': np.mean(abs_loc_min) / exp_max,
+        'meanext': np.mean(loc_ext) / exp_max,
+        'medianmax': np.median(loc_max) / exp_max,
+        'medianabsmin': np.median(abs_loc_min) / exp_max,
+        'medianext': np.median(loc_ext) / exp_max,
+        'stdmax': _sample_std(loc_max),
+        'stdmin': _sample_std(loc_min),
+        'stdext': _sample_std(loc_ext),
+        'zcext': np.sum((loc_ext[:-1] * loc_ext[1:]) < 0) / num_windows,
+        'meanabsext': np.mean(abs_loc_ext) / exp_max,
+        'medianabsext': np.median(abs_loc_ext) / exp_max,
+        'diffmaxabsmin': np.sum(np.abs(loc_max - abs_loc_min)) / num_windows,
+        'uord': np.sum(np.sign(loc_ext)) / num_windows,
+        'maxmaxmed': np.max(loc_max) / np.median(loc_max),
+        'minminmed': np.min(loc_min) / np.median(loc_min),
+        'maxabsext': np.max(abs_loc_ext) / np.median(abs_loc_ext)
+    }
+
+    return out
+
+def kpss_test(y: ArrayLike, lags: Union[int, list] = 0) -> dict:
+    """
+    Performs the KPSS (Kwiatkowski-Phillips-Schmidt-Shin) stationarity test.
+
+    This implementation uses the statsmodels `kpss` function to test whether a time series
+    is trend stationary. The null hypothesis is that the time series is trend stationary,
+    while the alternative hypothesis is that it is a non-stationary unit-root process.
+
+    The test was introduced in [1].
+
+    The function can be used in two ways:
+    1. With a single lag value - returns basic test statistic and p-value
+    2. With multiple lag values - returns statistics about how the test results 
+       change across different lags
+    
+    References
+    ----------
+    .. [1] Kwiatkowski, D., Phillips, P. C., Schmidt, P., & Shin, Y. (1992). Testing the null 
+        hypothesis of stationarity against the alternative of a unit root: How sure are we 
+        that economic time series have a unit root? Journal of Econometrics, 54(1-3), 159-178.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series to analyze for stationarity
+    lags : Union[int, list], optional
+        Either:
+
+        - A single lag value (int) to compute the test statistic and p-value
+        - A list of lag values to analyze how the test results vary across lags
+
+        Default is 0.
+
+    Returns
+    -------
+    Dict[str, float]
+        The KPSS test statistic and p-value of the test.
+    """
+    if isinstance(lags, list):
+        # evaluate kpss at multiple lags
+        p_value = np.zeros(len(lags))
+        stat = np.zeros(len(lags))
+        for (i, l) in enumerate(lags):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=InterpolationWarning)
+                s, pv, _, _ = kpss(y, nlags=l, regression='ct')
+            p_value[i] = pv
+            stat[i] = s
+        out = {}
+        # return stats on outputs
+        out['maxpValue'] = np.max(p_value)
+        out['minpValue'] = np.min(p_value)
+        out['maxstat'] = np.max(stat)
+        out['minstat'] = np.min(stat)
+        out['lagmaxstat'] = lags[np.argmax(stat)]
+        out['lagminstat'] = lags[np.argmin(stat)]
+    else:
+        if isinstance(lags, (int, float)):
+            lags = int(lags)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=InterpolationWarning)
+                stat, p_value, _, _ = kpss(y, nlags=lags, regression='ct')
+            # return the statistic and pvalue
+            out = {'stat': stat, 'pValue': p_value}
+        else:
+            raise TypeError("Expected either a single lag (as an int) or list of lags.")
+    return out
+
+def range_evolve(y: ArrayLike) -> dict:
+    """
+    Analyze how the time-series range changes across time.
+
+    This operation measures the range (peak-to-peak) of the time series as a function
+    of time by calculating range(x_{1:i}) for i = 1, 2, ..., N, where N is the 
+    length of the time series. It provides insights into how new extreme events 
+    emerge over time.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series to analyze.
+
+    Returns
+    -------
+    Dict[str, float]
+        Dictionary containing various metrics about range evolution.
+    """
+    y = np.asarray(y)
+    N = len(y)
+    out = {} # initialise storage
+    # Running peak-to-peak == cumulative max minus cumulative min: O(N) one pass
+    # instead of O(N^2) np.ptp over growing prefixes. Picks the same values.
+    cums = (np.maximum.accumulate(y) - np.minimum.accumulate(y)).astype(float)
+
+    fullr = np.ptp(y)
+
+    # return number of unique entries in a vector, x
+    lunique = lambda x : len(np.unique(x))
+    out['totnuq'] = lunique(cums)
+
+    # how many of the unique extrema are in the first <proportions> of time series?
+    cumtox = lambda x : lunique(cums[:int(np.floor(N*x))])/out['totnuq']
+    out['nuqp1'] = cumtox(0.01)
+    out['nuqp10'] = cumtox(0.1)
+    out['nuqp20'] = cumtox(0.2)
+    out['nuqp50'] = cumtox(0.5)
+
+    # how many unique extrema are in the first <length> of time series?
+    ns = [10, 50, 100, 1000]
+    for n_val in ns:
+        if N >= n_val:
+            out[f'nuql{n_val}'] = lunique(cums[:n_val])/out['totnuq']
+        else:
+            out[f'nuql{n_val}'] = np.nan
+    # (**2**) Actual proportion of full range captured at different points
+    out['p1'] = cums[int(np.ceil(N * 0.01)) - 1]/fullr
+    out['p10'] = cums[int(np.ceil(N * 0.1)) - 1]/fullr
+    out['p20'] = cums[int(np.ceil(N * 0.2)) - 1]/fullr
+    out['p50'] = cums[int(np.ceil(N * 0.5)) - 1]/fullr
+
+    for n_val in ns:
+        if N >= n_val:
+            out[f'l{n_val}'] = cums[n_val-1]/fullr
+        else:
+            out[f'l{n_val}'] = np.nan
+
+    return out
+
+def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
+    """
+    Measures mean drift by analyzing mean and variance in time-series subsegments.
+
+    This operation splits a time series into segments, computes the mean and variance 
+    in each segment, and compares the maximum and minimum means to the mean variance. 
+    This helps identify if the time series has a drifting mean by comparing local 
+    statistics across different segments.
+
+    The method follows this approach:
+    1. Splits signal into frames of length N (or num segments)
+    2. Computes means of each frame
+    3. Computes variance for each frame
+    4. Compares ratio of max/min means with mean variance
+
+    Original idea by Rune from the Matlab Central forum:
+    http://www.mathworks.de/matlabcentral/newsreader/view_thread/136539
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series
+    segment_how : str, optional
+        Method to segment the time series:
+
+        - 'fix': fixed-length segments of length l
+        - 'num': splits into l number of segments
+
+        Default is ``'fix'``.
+
+    l : int, optional
+        Specifies either:
+
+        - The length of segments when segment_how='fix' (default=20)
+        - The number of segments when segment_how='num'
+
+        Default is 20.
+
+    Returns
+    -------
+    Dict[str, float]
+        Dictionary containing the measures of mean drift: ``max``, ``min`` and ``mean``,
+        the maximum, minimum and mean of the segment means divided by the mean of the
+        segment variances, and ``meanmaxmin`` and ``meanabsmaxmin``, the average of ``max``
+        and ``min`` and of their absolute values. When the segments tile the series
+        exactly, ``mean`` is the mean of the series divided by the mean segment variance,
+        so it is zero up to rounding for a z-scored series and carries no information
+        there (hctsa no longer registers it).
+    """
+    y = np.asarray(y)
+    N = len(y)
+    
+    # Set default segment parameters
+    if l is None:
+        l = 200 if segment_how == 'fix' else 5
+    l = int(l)
+    # Calculate segment length
+    if segment_how == 'num':
+        segment_length = int(np.floor(N/l))
+    elif segment_how == 'fix':
+        segment_length = l
+    else:
+        raise ValueError(f"segment_how must be 'fix' or 'num', got {segment_how}")
+    
+    # Validate segment length
+    if segment_length <= 1 or segment_length > N:
+        return {
+            'max': np.nan,
+            'min': np.nan,
+            'mean': np.nan,
+            'meanmaxmin': np.nan,
+            'meanabsmaxmin': np.nan
+        }
+    
+    # Calculate number of complete segments
+    num_segments = int(np.floor(N/segment_length))
+    
+    # More efficient segmentation using array operations
+    segments = y[:num_segments * segment_length].reshape(num_segments, segment_length)
+    
+    # Calculate statistics
+    segment_means = np.mean(segments, axis=1)
+    segment_vars = np.var(segments, axis=1, ddof=1)
+    mean_var = np.mean(segment_vars)
+    
+    # Prepare output statistics
+    out = {
+        'max': np.max(segment_means) / mean_var,
+        'min': np.min(segment_means) / mean_var,
+        'mean': np.mean(segment_means) / mean_var
+    }
+    out['meanmaxmin'] = (out['max'] + out['min']) / 2
+    out['meanabsmaxmin'] = (np.abs(out['max']) + np.abs(out['min'])) / 2
+
+    return out
+
+@dict_output
+def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None] = None,
+                 random_seed: Union[int, None] = None) -> dict:
+    """
+    Compare local statistics to global statistics of a time series.
+
+    Parameters
+    -----------
+    y : array-like
+        The time series to analyse.
+    subset_how : str, optional
+        The method to select the local subset of time series:
+
+        - 'l': the first n points in a time series
+        - 'p': an initial proportion of the full time series (round(N*n) points, halves rounded up)
+        - 'unicg': n evenly-spaced points throughout the time series
+        - 'randcg': n randomly-chosen points from the time series (chosen with replacement)
+
+        Default is ``'l'``.
+
+    n : int or float, optional
+        The parameter for the method specified by subset_how.
+        
+        Default `None` is 100 samples or 0.1 (10% of time series length) if proportion. 
+
+    random_seed : int, str or None, optional
+        Seed for the 'randcg' option: an integer, ``None`` or ``'default'`` for seed 0, or
+        ``'none'`` for a seed drawn from NumPy's global random state. The points come from the
+        portable generator :func:`pyhctsa.robust.bf_random` (uniform on the indices, with
+        repeats), so they are hctsa's for the same seed. Default `None` is seed 0.
+
+    Returns
+    --------
+    dict
+        A dictionary containing various statistical measures comparing
+        the subset to the full time series: `absmean`, `std`, `median`, `iqr`, `skewness`, `kurtosis`, `ac1`
+        (the last four are the absolute relative deviation of the subset statistic from the full-series
+        one, NaN when the full-series statistic is zero).
+    """
+    # check input time series is z-scored
+    y = np.asarray(y)
+
+    if n is None:
+        if subset_how in ['l', 'unicg', 'randcg']:
+            n = 100 # 100 samples
+        elif subset_how == 'p':
+            n = 0.1 # 10 % of time series
+    N = len(y)
+
+    # Determine subset range to use: r
+    if subset_how == 'l':
+        # take first n pts of time series
+        r = np.arange(min(n, N))
+    elif subset_how == 'p':
+        # take initial proportion n of time series
+        r = np.arange(int(_round_half_away(N * n)))
+    elif subset_how == 'unicg':
+        # n evenly spaced indices over 0..N-1, rounded half up in exact integer arithmetic
+        # (floating-point spacing would make exact .5 ties unreliable)
+        n = int(n)
+        r = np.zeros(1, dtype=int) if n == 1 else (2 * np.arange(n) * (N - 1) + (n - 1)) // (2 * (n - 1))
+    elif subset_how == 'randcg':
+        # n random points (there could be repeats): a single stochastic sample, so not
+        # very statistically robust (as in hctsa)
+        r = np.floor(N * bf_random(int(n), bf_random_seed(random_seed))).astype(int)  
+    else:
+        raise ValueError(f"Unknown specifier, {subset_how}. Can be either 'l', 'p', 'unicg', or 'randcg'.")
+
+    if len(r) < 5:
+        # It's not really appropriate to compute statistics on less than 5 datapoints
+        logger.warning(f"Time series (of length {N}) is too short")
+        return np.nan
+    
+    # Compare statistics of this subset to those obtained from the full time series
+    out = {}
+    out['absmean'] = np.abs(np.mean(y[r])) # Makes sense without normalization if y is z-scored
+    out['std'] = np.std(y[r], ddof=1) # Makes sense without normalization if y is z-scored
+    out['median'] = np.median(y[r]) # if median is very small then normalization could be very noisy
+    raw_iqr_yr = np.percentile(y[r], 75, method='hazen') - np.percentile(y[r], 25, method='hazen')
+    raw_iqr_y = np.percentile(y, 75, method='hazen') - np.percentile(y, 25, method='hazen')
+    out['iqr'] = np.abs(1 - (raw_iqr_yr/raw_iqr_y)) if raw_iqr_y > 0 else np.nan
+    # ratios are NaN when the global statistic is exactly zero
+    global_skew = skew(y)
+    out['skewness'] = np.abs(1 - (skew(y[r])/global_skew)) if global_skew != 0 else np.nan
+    # use Pearson definition (normal ==> 3.0)
+    global_kurt = kurtosis(y, fisher=False)
+    out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/global_kurt)) if global_kurt != 0 else np.nan
+    global_ac1 = autocorr(y, 1, 'Fourier')
+    out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')/global_ac1)) if global_ac1 != 0 else np.nan
+
+    return out
+
+def fit_polynomial(y: ArrayLike, k: int = 1) -> float:
+    """
+    Goodness of a polynomial fit to a time series
+
+    Usually kind of a stupid thing to do with a time series, but it's sometimes
+    somehow informative for time series with large trends.
+
+    Parameters
+    -----------
+    y : array-like
+        the time series to analyze.
+    k : int, optional
+        the order of the polynomial to fit to y. Default is 1.
+
+    Returns
+    --------
+    float
+        RMS error of the fit.
+    """
+    y = np.asarray(y)
+    N = len(y)
+    t = np.arange(N)
+
+    # Fit a polynomial to the time series
+    cf = np.polyfit(t, y, k)
+    f = np.polyval(cf, t) # evaluate the fitted poly
+    out = np.sqrt(np.mean((y - f)**2)) # RMS error of fit
+
+    return float(out)
+
+def ts_length(y: ArrayLike) -> int:
+    """
+    Length of an input data vector.
+
+    Parameters
+    -----------
+    y : array-like
+        The time series to analyze.
+
+    Returns
+    --------
+    int
+        The length of the time series.
+    """
+    return len(np.asarray(y))
+
+def std_nth_deriv(y: ArrayLike, ndr: int = 2) -> float:
+    """
+    Standard deviation of the nth derivative of the time series.
+
+    Estimates derivatives using successive increments of the time series and computes
+    their standard deviation. The process is repeated n times to obtain higher order
+    derivatives. This method is particularly popular in heart-rate variability analysis.
+
+    Based on an idea by Vladimir Vassilevsky, a DSP and Mixed Signal Design
+    Consultant in a Matlab forum, who stated that "You can measure the standard
+    deviation of the nth derivative, if you like".
+    cf. http://www.mathworks.de/matlabcentral/newsreader/view_thread/136539
+
+    This approach is widely used in heart-rate variability literature, see [1].
+
+    References
+    ----------
+    .. [1] "Do Existing Measures of Long-Term Heart Rate Variability...", Brennan et al. (2001)
+        IEEE Trans Biomed Eng 48(11)
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series to analyze.
+    ndr : int, optional
+        The order of derivative to analyze.
+        Uses successive differences to estimate derivatives. Default is 2.
+
+    Returns
+    -------
+    float
+        The standard deviation of the nth derivative of the time series.
+    """
+    # crude method of taking a derivative that could be improved upon in future...
+    y = np.asarray(y)
+    yd = np.diff(y, n=ndr)
+    if len(yd) == 0:
+        logger.warning(f"Time series (N = {len(y)}) too short to compute differences at n = {ndr}")
+        return np.nan
+    return float(_sample_std(yd))
+
+@dict_output
+def std_nth_deriv_change(y: ArrayLike, maxd: int = 10) -> dict:
+    """
+    How the output of :func:`std_nth_deriv` changes with the order of the derivative.
+
+    Computes ``std_nth_deriv(y, n)`` (the standard deviation of the nth difference of the
+    time series) for orders n = 1, ..., ``maxd``, and characterizes how it varies with n in
+    two ways: by an exponential fit, and directly through the order at which it is smallest.
+
+    An exponential function, ``f(x) = a*exp(b*x)``, is fitted to the variation across
+    successive derivatives: regular signals decrease, irregular signals increase. This
+    exponential-decay/growth picture only holds when ``std(diff(y, n))`` is monotonic across
+    n. Many real (especially oversampled/smooth) series instead show successive differencing
+    reduce the standard deviation up to some order (removing trend or nonstationary drift)
+    before over-differencing increases it again: a classic Box-Jenkins ARIMA-order-selection
+    U-shape that a monotonic exponential cannot represent. ``minOrder``, ``minOrderInterp``,
+    ``minRatio``, ``overDiffRatio`` and ``isInterior`` characterize this directly, alongside
+    the exponential fit. The exponential is fitted by least squares with
+    :func:`~pyhctsa.robust.bf_exp_fit` (the global optimum over rates
+    ``|b| <= 40 / (maxd - 1)``, with no starting point to choose); if it cannot be fitted (e.g.
+    a constant curve), the ``fexp_*`` outputs are NaN and the others are still returned.
+
+    Operation inspired by a comment in a comp.soft-sys.matlab (MATLAB newsgroup) posting:
+    "You can measure the standard deviation of the n-th derivative, if you like." (Vladimir
+    Vassilevsky, DSP and Mixed Signal Design Consultant).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    maxd : int, optional
+        The maximum derivative (difference) order to take. Default is 10.
+
+    Returns
+    -------
+    dict
+        - 'fexp_a', 'fexp_b', 'fexp_r2', 'fexp_rmse': the parameters a and b, the R^2, and
+          the root-mean-square error of the exponential fit f(n) = a*exp(b*n),
+        - 'minOrder': the order (1 to ``maxd``) at which the standard deviation is smallest,
+        - 'minOrderInterp': that order refined between integers by a parabola through the
+          three points around the minimum (equal to ``minOrder`` if the minimum is at either end),
+        - 'minRatio': the smallest standard deviation divided by that at order 1,
+        - 'overDiffRatio': the standard deviation at order ``maxd`` divided by the smallest,
+        - 'isInterior': 1 if the minimum is strictly between order 1 and ``maxd`` (a U shape),
+          else 0.
+
+        NaN if the time series is too short to take ``maxd`` differences.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    maxd = 10 if maxd is None else int(maxd)
+
+    if len(y) <= maxd:
+        return np.nan  # too short to take maxd differences (hctsa's SY_StdNthDer errors)
+    ms = np.array([std_nth_deriv(y, i) for i in range(1, maxd + 1)])
+
+    out = {}
+    # Least-squares exponential fit f(n) = a*exp(b*n) (NaN fields if it cannot be fitted)
+    f_exp = bf_exp_fit(np.arange(1, maxd + 1, dtype=float), ms, with_offset=False, max_rate=40)
+    out['fexp_a'] = f_exp['a']
+    out['fexp_b'] = f_exp['b']  # this is important
+    out['fexp_r2'] = f_exp['r2']  # this is more important!
+    out['fexp_rmse'] = f_exp['rmse']
+
+    # The order at which the standard deviation is smallest (NaN entries are ignored)
+    min_ind = int(np.nanargmin(ms)) + 1 if not np.all(np.isnan(ms)) else 1
+    min_std = ms[min_ind - 1]
+    out['minOrder'] = min_ind
+    out['minRatio'] = min_std / ms[0]  # how much differencing helped, relative to order 1
+    out['overDiffRatio'] = ms[-1] / min_std  # how much std rises again past the optimum
+    out['isInterior'] = float(min_ind > 1 and min_ind < maxd)  # genuine U-shape vs. monotonic
+    if out['isInterior']:
+        y0, y1, y2 = ms[min_ind - 2], ms[min_ind - 1], ms[min_ind]
+        denom = y0 - 2 * y1 + y2
+        out['minOrderInterp'] = min_ind + 0.5 * (y0 - y2) / denom if denom != 0 else float(min_ind)
+    else:
+        out['minOrderInterp'] = float(min_ind)
+
+    return out
+
+def _is_zscored(x: np.ndarray) -> bool:
+    # hctsa's BF_iszscored
+    tol = 100 * np.finfo(float).eps
+    return bool(abs(np.mean(x)) < tol and abs(np.std(x, ddof=1) - 1) < tol)
+
+def _cumsum_bridge_stats(p: ArrayLike) -> Union[dict, float]:
+    """
+    CUSUM/bridge stationarity statistics on a cumulative sum (hctsa's BF_CumSumBridgeStats).
+
+    Given a series ``p`` whose mean is being tested for stationarity, forms ``cumsum(p)`` and
+    computes: linear-fit statistics on the cumsum (cf. :func:`trend`), a CUSUM 'bridge'
+    relative to the endpoint-to-endpoint line (cf. Inclan-Tiao's test for a change point in
+    variance), and a comparison between an ordinary least-squares and a robust (bisquare)
+    linear fit to the cumsum -- large disagreement between the two indicates the OLS trend is
+    either outlier-driven or genuinely curved (accelerating/decelerating drift) rather than a
+    clean linear trend.
+
+    Returns a dict of statistics (meanYC, gradient, intercept, meanYC12, meanYC22, maxBridge,
+    posMaxBridge, stdBridge, gradientDiffSE, residStdRatio, varRatioTrend), or NaN if ``p`` is
+    shorter than 20 samples.
+    """
+    p = np.asarray(p, dtype=float).ravel()
+    Np = len(p)
+    if Np < 20:
+        return np.nan
+
+    t = np.arange(1, Np + 1, dtype=float)  # the number of samples summed (the bridge is defined on these counts)
+    t0 = t - 1.0                           # the time of each sample, 0..Np-1, for the regressions
+    yC = np.cumsum(p)
+
+    # Ordinary least-squares linear fit to the cumsum
+    out = {}
+    out['meanYC'] = np.mean(yC)
+    coeffs_ols = polyfit(t0, yC, 1)
+    out['gradient'] = coeffs_ols[0] # ~ std(yC) too (r > 0.99 empirically); kept as the interpretable one
+    out['intercept'] = coeffs_ols[1]
+    resid_ols = yC - (coeffs_ols[0] * t0 + coeffs_ols[1])
+
+    # Mean cumsum in first and second half of the time series (cf. trend)
+    out['meanYC12'] = np.mean(yC[:Np // 2])
+    out['meanYC22'] = np.mean(yC[Np // 2:])
+
+    # CUSUM bridge relative to the endpoint-to-endpoint line (Inclan-Tiao-style)
+    bridge = yC - (t / Np) * yC[-1]
+    scale_factor = np.std(p, ddof=1) * np.sqrt(Np)
+    out['maxBridge'] = np.max(np.abs(bridge)) / scale_factor if scale_factor > 0 else np.nan
+    out['posMaxBridge'] = (np.argmax(np.abs(bridge)) + 1) / Np # where the largest deviation from stationarity occurs
+    out['stdBridge'] = np.std(bridge, ddof=1)
+
+    # Robust vs. OLS regression: is the OLS trend outlier-driven or genuine drift?
+    rob_coeffs, rob_stats = robust_linear_fit(t0, yC)
+    robust_gradient = rob_coeffs[1] # not output directly: r > 0.98 with out['gradient']
+    rob_resid = yC - (rob_coeffs[0] + rob_coeffs[1] * t0)
+    se_grad = rob_stats['se'][1]
+    out['gradientDiffSE'] = (out['gradient'] - robust_gradient) / se_grad if se_grad > 0 else np.nan
+    std_rob_resid = np.std(rob_resid, ddof=1)
+    out['residStdRatio'] = np.std(resid_ols, ddof=1) / std_rob_resid if std_rob_resid > 0 else np.nan
+
+    # Variance-standardized residual trend: the bridge is not white even under a stationary
+    # null -- it has the Brownian-bridge variance envelope Var(bridge(t)) = var(p).t.(Np-t)/Np
+    # (an arch shape) -- so standardize by that, then ask whether the standardized squared
+    # bridge trends with time (Kendall rank correlation)
+    var_p = np.var(p, ddof=1)
+    if var_p > 0 and Np > 21:
+        t_int = t[:-1]
+        null_var = var_p * t_int * (Np - t_int) / Np
+        std_resid = bridge[:-1] ** 2 / null_var # ~chi-square(1), mean 1, under the null
+        log_std_resid = np.log(std_resid + np.finfo(float).eps) # chi-square(1) is heavy-tailed; log stabilizes the trend estimate
+        out['varRatioTrend'] = kendalltau(t_int, log_std_resid).statistic
+    else:
+        out['varRatioTrend'] = np.nan
+
+    return out
+
+def drifting_mean_cusum(y: ArrayLike) -> dict:
+    """
+    Drift in the mean, via a cumulative-sum (CUSUM) test.
+
+    Tests whether the mean of the (z-scored) time series is stationary using CUSUM/bridge
+    statistics on its cumulative sum, ``cumsum(y)``. Under a stationary mean the cumulative sum
+    grows ~linearly; systematic curvature, or a localized departure from that line, indicates
+    drift (cf. Inclan-Tiao's test for a change point in variance, and :func:`trend`, which
+    fits a line to ``y`` itself). The statistics that merely re-express the linear trend of
+    ``y`` (meanYC, gradient, intercept, meanYC12, meanYC22, stdBridge) are not output.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (assumed z-scored).
+
+    Returns
+    -------
+    dict
+        Statistics on ``yC = cumsum(y)``, or NaN if ``y`` has fewer than 20 samples:
+
+        - 'maxBridge': the largest absolute deviation of ``yC`` from the straight line joining
+          0 to its final value (the 'bridge'), divided by ``std(y)*sqrt(N)``,
+        - 'posMaxBridge': the position (from 0 to 1) of that largest deviation,
+        - 'gradientDiffSE': the difference between the OLS and a robust (bisquare) slope fit to
+          ``yC``, in standard errors of the robust slope,
+        - 'residStdRatio': the standard deviation of the OLS residuals over that of the
+          robust-fit residuals,
+        - 'varRatioTrend': the Kendall rank correlation between time and the log of the
+          squared bridge divided by its Brownian-bridge null variance: whether the bridge
+          wanders more (or less) later in the series than expected under stationarity.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if not _is_zscored(y):
+        logger.warning('The input time series should be z-scored')
+    out = _cumsum_bridge_stats(y)
+    if isinstance(out, dict):
+        for k in ('meanYC', 'gradient', 'intercept', 'meanYC12', 'meanYC22', 'stdBridge'):
+            del out[k]
+
+    return out
+
+def peak_intervals(y: ArrayLike, min_prom: float = 1) -> dict:
+    """
+    Statistics on the prominences of, and intervals between, the peaks of a time series.
+
+    The series is z-scored (so that prominence is in units of its standard deviation) and its
+    peaks (local maxima; a flat-topped peak counts once, at the middle of its plateau) with
+    prominence of at least ``min_prom`` are found with ``scipy.signal.find_peaks``. Summaries are then taken of the peaks'
+    prominences and of the inter-peak intervals (in samples): a periodic series has regularly
+    spaced, equally prominent peaks (low ``cvInt``), while a noisy or aperiodic one does not.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    min_prom : float, optional
+        The minimum prominence of a peak to count it, in standard deviations of the series
+        (a peak's prominence is its height above the higher of the two lowest points between
+        it and the nearest higher peak on each side). Default is 1.
+
+    Returns
+    -------
+    dict
+        - 'meanProm': the mean prominence of the peaks (NaN if there are none),
+        - 'cvInt': the coefficient of variation (std / mean) of the inter-peak intervals (NaN
+          unless there are at least 3 intervals),
+        - 'acInt1': the lag-1 autocorrelation (Pearson correlation of successive intervals) of the
+          inter-peak intervals (NaN unless there are at least 5 intervals; 0 if the intervals
+          are all equal).
+
+        All NaN for a time series shorter than 20 samples, containing non-finite values, or
+        constant.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    out = {'meanProm': np.nan, 'cvInt': np.nan, 'acInt1': np.nan}
+
+    N = len(y)
+    if N < 20 or not np.all(np.isfinite(y)) or np.std(y, ddof=1) == 0:
+        return out
+
+    y = (y - np.mean(y)) / np.std(y, ddof=1) # prominence is in units of the series' standard deviation
+
+    locs, props = find_peaks(y, prominence=min_prom)
+    proms = props['prominences']
+
+    if len(locs) >= 1:
+        out['meanProm'] = np.mean(proms)
+
+    ipi = np.diff(locs).astype(float) # inter-peak intervals (samples)
+    if len(ipi) >= 3:
+        out['cvInt'] = np.std(ipi, ddof=1) / np.mean(ipi)
+    if len(ipi) >= 5:
+        if np.all(ipi == ipi[0]):
+            out['acInt1'] = 0.0 # equal intervals (e.g., a periodic series): no serial correlation
+        else:
+            out['acInt1'] = np.corrcoef(ipi[:-1], ipi[1:])[0, 1]
+
+    return out
+
+@dict_output
+def drifting_auto_corr(y: ArrayLike, tau: int = 1, what_product: str = 'ac') -> dict:
+    """
+    Drift in a lag-tau (auto)correlation via a cumulative-sum test.
+
+    Forms a lag-tau cross-term product series ``p_t`` and tests whether its mean (i.e., the
+    corresponding linear or nonlinear correlation statistic) is stationary, via CUSUM/bridge
+    statistics on ``cumsum(p)`` (see :func:`drifting_mean_cusum`). Under stationarity
+    ``cumsum(p)`` grows ~linearly; systematic curvature or a localized departure from that line
+    indicates that the correlation structure, not just the mean or variance of ``y`` itself, is
+    drifting over the course of the time series. This is a CUSUM-style stationarity test (cf.
+    Inclan-Tiao's test for a change point in variance) applied to a lag-product series rather
+    than to ``y`` itself, mirroring what :func:`trend` does for ``y``'s own cumsum.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (assumed z-scored).
+    tau : int, optional
+        The lag defining the cross term. Default is 1.
+    what_product : {'ac', 'forward', 'backward', 'asymmetry'}, optional
+        Which cross term ``p_t`` to test for drift:
+
+        - 'ac': ``y(t) * y(t+tau)``, the linear autocorrelation,
+        - 'forward': ``y(t) * y(t+tau)^2``, nonlinear/asymmetric (does the signed value now
+          predict the squared, energy-like value later? cf. :func:`autocorr_x2`),
+        - 'backward': ``y(t)^2 * y(t+tau)``, the other direction (does the squared value now
+          predict the signed value later?),
+        - 'asymmetry': ``y(t) * y(t+tau) * (y(t+tau) - y(t))`` = forward - backward, the
+          leverage/time-irreversibility signature itself (it vanishes in expectation for
+          time-reversible linear processes); tests whether that asymmetry, not just its forward
+          or backward half, is drifting over the time series.
+
+        Default is ``'ac'``.
+
+    Returns
+    -------
+    dict
+        Statistics on the cumulative sum ``yC = cumsum(p)`` (``p`` has N - tau values), or NaN
+        if there are fewer than 20 products, or ``tau >= N - 1``:
+
+        - 'meanYC': the mean of ``yC``,
+        - 'gradient', 'intercept': slope and intercept of an ordinary least-squares line fit to
+          ``yC`` against time,
+        - 'meanYC12', 'meanYC22': the mean of ``yC`` in the first and second half of the series,
+        - 'maxBridge': the largest absolute deviation of ``yC`` from the straight line joining 0
+          to its final value (the 'bridge'), divided by ``std(p)*sqrt(N-tau)``,
+        - 'posMaxBridge': the position (from 0 to 1) of that largest deviation,
+        - 'stdBridge': the standard deviation of the bridge,
+        - 'gradientDiffSE': the difference between the OLS and a robust (bisquare) slope fit to
+          ``yC``, in standard errors of the robust slope,
+        - 'residStdRatio': the standard deviation of the OLS residuals over that of the
+          robust-fit residuals,
+        - 'varRatioTrend': the Kendall rank correlation between time and the log of the squared
+          bridge divided by its Brownian-bridge null variance: whether the bridge wanders more
+          (or less) later in the series than expected under stationarity.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    tau = 1 if tau is None else int(tau)
+    if not _is_zscored(y):
+        logger.warning('The input time series should be z-scored')
+    N = len(y)
+
+    # Lag-tau product series
+    if tau >= N - 1:
+        return np.nan
+    y_earlier = y[:N - tau] # y(t)
+    y_later = y[tau:]       # y(t+tau)
+    if what_product == 'ac':
+        p = y_earlier * y_later
+    elif what_product == 'forward':
+        p = y_earlier * y_later ** 2
+    elif what_product == 'backward':
+        p = y_earlier ** 2 * y_later
+    elif what_product == 'asymmetry':
+        p = y_earlier * y_later * (y_later - y_earlier)
+    else:
+        raise ValueError(f"Unknown what_product '{what_product}' (should be 'ac', 'forward', "
+                         "'backward', or 'asymmetry')")
+
+    return _cumsum_bridge_stats(p)
+
+@dict_output
+def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 100,
+                        random_seed: Union[int, str, None] = 'default') -> dict:
+    """
+    Bootstrap-based stationarity measure.
+
+    ``num_segs`` time-series segments of length ``l`` are selected at random from the time
+    series (at random start points; segments can overlap) and in each segment some statistic
+    is calculated: mean, standard deviation, skewness, kurtosis, PermEn(3,1), AC(1), AC(2), and
+    the first zero-crossing of the autocorrelation function. Outputs summarize how these
+    quantities vary in different local segments of the time series, as the standard deviation
+    of each across the segments. (The mean of each set is not output, since it just
+    re-estimates the corresponding global statistic, already covered elsewhere, rather than
+    measuring stationarity.) Returns NaN if ``l`` is longer than 90% of the time series.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    l : int or str, optional
+        The length of local time-series segments to analyze, as a positive integer, or:
+
+        - 'ac2': twice the first zero-crossing of the autocorrelation function,
+        - 'ac5': five times the first zero-crossing of the autocorrelation function.
+
+        Default is 100.
+    num_segs : int, optional
+        The number of local segments to analyze. Default is 100.
+    random_seed : int, str or None, optional
+        Not used: the segment start points are ``floor((N - l + 1) u_j)`` with ``u_j`` the
+        golden-ratio (Weyl) sequence ``frac(j*phi)``, evenly spread and deterministic, as in
+        hctsa. Kept so that existing calls still work.
+
+    Returns
+    -------
+    dict
+        - 'stdmean', 'stdstd', 'stdskew', 'stdkurt': the standard deviation, across segments,
+          of the segment mean, standard deviation, skewness, and kurtosis,
+        - 'stdpermen': the standard deviation of the normalized permutation entropy PermEn(3,1),
+        - 'stdac1', 'stdac2': the standard deviation of the autocorrelation at lags 1 and 2,
+        - 'stdtaul': the standard deviation of the first zero-crossing of the autocorrelation
+          function (interpolated, in samples).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+
+    if l is None:
+        l = 100 # by default use 100 samples
+    if isinstance(l, str):
+        taug = first_crossing(y, 'ac', 0, 'discrete') # tau (global)
+        if l == 'ac2':
+            l = 2 * taug
+        elif l == 'ac5':
+            l = 5 * taug
+        else:
+            raise ValueError(f"Unknown specifier '{l}'")
+        # Very short l for this sort of time series:
+        if not np.isnan(l) and l < 5:
+            logger.warning(f"This time series has a very short correlation length; setting l={l} "
+                           "means that changes estimates will be difficult to compare...")
+    num_segs = 100 if num_segs is None else int(num_segs)
+
+    # Check the parameters are appropriate for the length of the input time series:
+    if np.isnan(l) or l > 0.9 * N: # operation is not suitable -- time series is too short
+        logger.warning(f"This time series (N = {N}) is too short to use l = {l:.1f}")
+        return np.nan
+    l = int(l)
+
+    # numSegs segments, each of length l data points
+    istarts = np.floor((N - l + 1) * ((np.arange(1, num_segs + 1) * 0.6180339887498949) % 1.0)).astype(int)
+
+    qs = np.full((num_segs, 8), np.nan)
+    for j in range(num_segs):
+        # pick a range; in this implementation, ranges CAN overlap
+        ist = istarts[j] # random start point (not exceeding the endpoint)
+        y_sub = y[ist:ist + l] # contiguous subsegment of the time series
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            qs[j, 0] = np.mean(y_sub)
+            qs[j, 1] = np.std(y_sub, ddof=1)
+            qs[j, 2] = skew(y_sub)
+            qs[j, 3] = kurtosis(y_sub, fisher=False)
+            pe = permutation_entropy(y_sub, 3, 1) # normalized PermEn(3,1) -- cheaper and more
+            qs[j, 4] = pe['normPermEn'] if isinstance(pe, dict) else np.nan # stable than SampEn on these short random segments
+            qs[j, 5] = autocorr(y_sub, 1, 'Fourier') # AC1
+            qs[j, 6] = autocorr(y_sub, 2, 'Fourier') # AC2
+            qs[j, 7] = first_crossing(y_sub, 'ac', 0, 'continuous') # first zero crossing
+
+    # The spread of each feature across subsegments of the time series: a big bootstrapped
+    # distribution of the time series at a scale given by the length l. (The mean of each is
+    # not output: it re-estimates a global statistic.)
+    def _nanstd(v):
+        v = v[~np.isnan(v)]
+        return _sample_std(v) if v.size > 0 else np.nan
+
+    names = ['stdmean', 'stdstd', 'stdskew', 'stdkurt', 'stdpermen', 'stdac1', 'stdac2', 'stdtaul']
+    return {name: _nanstd(qs[:, k]) for k, name in enumerate(names)}
+
+@dict_output
+def nstat_z(y: ArrayLike, num_seg: int = 5, embed_params: tuple = (1, 3)) -> dict:
+    """
+    Cross-forecast errors of zeroth-order time-series models.
+
+    A Python port of the ``nstat_z`` routine from the TISEAN package for nonlinear time-series
+    analysis [1]_, which looks for nonstationarity in a time series by dividing it into a number
+    of segments and calculating the cross-forecast errors between the different segments. The
+    model is the zeroth-order model proposed by Schreiber: each point of the segment being
+    forecast is predicted one step ahead by averaging what followed its nearest neighbors in the
+    time-delay embedding of the predicting segment. The error between segment i (predicting) and
+    segment j (forecast) is the root-mean-square forecast error divided by the standard
+    deviation of segment j, collected in a ``num_seg`` x ``num_seg`` matrix. As in TISEAN, the
+    series is first rescaled to [0, 1], neighbors are within a maximum-norm distance eps that
+    grows (from 1e-3, by a factor 1.2) until there are at least 30 of them, and neighbors within
+    the causality window of the forecast point are excluded.
+
+    References
+    ----------
+    .. [1] R. Hegger, H. Kantz, and T. Schreiber, "Practical implementation of nonlinear time
+        series methods: The TISEAN package", Chaos 9(2), 413 (1999).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    num_seg : int, optional
+        The number of equally-spaced segments to divide the time series into, each used to
+        predict the other segments. Default is 5.
+    embed_params : tuple, optional
+        The embedding parameters ``(tau, m)``: a time delay, tau (an integer, or a rule for
+        :func:`pyhctsa.utils.get_tau`, e.g. ``'ac'`` or ``'ac1e'``), and an embedding dimension,
+        m (an integer). Default is ``(1, 3)``.
+
+    Returns
+    -------
+    dict
+        Statistics on the cross-prediction error matrix (below, 'rows' of the matrix are
+        predicting segments, 'columns' are the segments forecast); NaN if the time series is
+        too short for this many segments:
+
+        - 'trace': the trace of the matrix (segments predicting themselves),
+        - 'mean', 'median', 'min', 'max', 'iqr', 'std', 'range': of all entries of the matrix,
+        - 'minlower', 'minupper': the minimum nonzero error below and above the diagonal,
+        - 'minoffdiag', 'iqroffdiag', 'stdoffdiag', 'rangeoffdiag': the minimum, interquartile
+          range, standard deviation, and range of the nonzero off-diagonal entries,
+        - 'stdmean', 'rangemean', 'stdmedian', 'rangemedian': the standard deviation and range,
+          across columns, of the column means and of the column medians,
+        - 'rangerange', 'stdrange': the range and standard deviation, across columns, of the
+          column ranges,
+        - 'rangestd', 'stdstd': the range and standard deviation, across columns, of the column
+          standard deviations,
+        - 'maximageig', 'minimageig': the largest and smallest imaginary parts of the
+          eigenvalues of the matrix,
+        - 'rangeeig', 'stdeig', 'mineig', 'maxeig': the range, standard deviation, minimum, and
+          maximum of the real parts of the eigenvalues.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    num_seg = 5 if num_seg is None else int(num_seg)
+    tau, m = embed_params
+    if isinstance(m, str) or not float(m).is_integer():
+        raise ValueError("The embedding dimension, m, must be an integer")
+    m = int(m)
+    tau = get_tau(y, tau) # NaN if it cannot be determined
+    if np.isnan(tau):
+        logger.warning('Could not determine embedding parameters for this time series')
+        return np.nan
+    tau = int(tau)
+
+    # Preliminary checks
+    step = 1 # step increment (TISEAN's -s; also its causal-window default (-C) when unset)
+    min_neighbors = 30 # minimum number of neighbors for the fit (TISEAN's -k default)
+    pstart = (m - 1) * tau
+    clength = (N - pstart) / num_seg
+    # nstat_z's neighbor search grows its radius without bound until every point has enough
+    # neighbors after excluding a window of width (2*causal + pstart - 1) around it; this is the
+    # exact bound for that always to succeed
+    if clength < min_neighbors + 3 * step + 2 * pstart - 1:
+        logger.warning('Not enough neighbors to reliably estimate prediction errors with these settings')
+        return np.nan
+    clength = (N - pstart) // num_seg # (integer division, as in TISEAN)
+
+    # Rescale the series to [0, 1] (TISEAN's rescale_data)
+    lo, hi = np.min(y), np.max(y)
+    if hi - lo == 0:
+        return np.nan # TISEAN exits: the data have no range
+    ser = (y - lo) / (hi - lo)
+
+    # The standard deviation (population) of each segment
+    rms = np.array([_nstat_z_std(ser[i * clength:(i + 1) * clength]) for i in range(num_seg)])
+    if np.any(rms == 0):
+        return np.nan # TISEAN exits: zero variance in a segment
+
+    center = clength - step
+    xperr = np.zeros((num_seg, num_seg)) # cross prediction error from using segment i to forecast segment j
+    for first in range(num_seg):
+        for second in range(num_seg):
+            err = _nstat_z_error(ser, first * clength, second * clength, clength, m, tau,
+                                 min_neighbors, step, step, center, 1e-3, 1.2)
+            xperr[first, second] = np.sqrt(err / center) / rms[second]
+    if np.any(np.isnan(xperr)):
+        return np.nan
+
+    return _cross_prediction_stats(xperr)
+
+def _cross_prediction_stats(xperr: np.ndarray) -> dict:
+    # Output statistics on the matrix of cross-prediction errors
+    def _range(v):
+        return np.max(v) - np.min(v)
+    def _iqr(v):
+        q = np.quantile(v, [0.25, 0.75], method='hazen')
+        return q[1] - q[0]
+
+    out = {}
+    # diagonal elements are using a segment to predict itself -- ought to be pretty good
+    out['trace'] = np.trace(xperr)
+    flat = xperr.ravel()
+    out['mean'] = np.mean(flat)
+    out['median'] = np.median(flat)
+    out['min'] = np.min(flat) # the best you can do
+    out['max'] = np.max(flat) # the worst you can do
+    # measures of spread of prediction error: stationarity
+    out['iqr'] = _iqr(flat)
+    out['std'] = _sample_std(flat)
+    out['range'] = _range(flat)
+
+    # minimum prediction error not on diagonal
+    lowertri = np.tril(xperr, -1)
+    lowertri = lowertri[lowertri > 0]
+    uppertri = np.triu(xperr, 1)
+    uppertri = uppertri[uppertri > 0]
+    offdiag = np.concatenate((lowertri, uppertri))
+    out['minlower'] = np.min(lowertri) if lowertri.size else np.nan
+    out['minupper'] = np.min(uppertri) if uppertri.size else np.nan
+    if offdiag.size == 0:
+        out['minoffdiag'] = out['iqroffdiag'] = out['stdoffdiag'] = out['rangeoffdiag'] = np.nan
+    else:
+        out['minoffdiag'] = np.min(offdiag)
+        # measures of spread: non-stationarity
+        out['iqroffdiag'] = _iqr(offdiag)
+        out['stdoffdiag'] = _sample_std(offdiag)
+        out['rangeoffdiag'] = _range(offdiag)
+
+    # Comparing columns
+    col_mean, col_median = np.mean(xperr, axis=0), np.median(xperr, axis=0)
+    col_range = np.max(xperr, axis=0) - np.min(xperr, axis=0)
+    col_std = np.array([_sample_std(xperr[:, j]) for j in range(xperr.shape[1])])
+    out['stdmean'] = _sample_std(col_mean)
+    out['rangemean'] = _range(col_mean)
+    out['stdmedian'] = _sample_std(col_median)
+    out['rangemedian'] = _range(col_median)
+    out['rangerange'] = _range(col_range)
+    out['stdrange'] = _sample_std(col_range)
+    out['rangestd'] = _range(col_std)
+    out['stdstd'] = _sample_std(col_std)
+
+    # Eigenvalues
+    eigs = np.linalg.eigvals(xperr)
+    imag_eigs, real_eigs = eigs.imag, eigs.real
+    out['maximageig'] = np.max(imag_eigs)
+    out['minimageig'] = np.min(imag_eigs) # for a real matrix, eigenvalues come in conjugate pairs, so maximageig = -minimageig exactly
+    out['rangeeig'] = _range(real_eigs) # range of real parts of eigenvalues
+    out['stdeig'] = _sample_std(real_eigs)
+    out['mineig'] = np.min(real_eigs)
+    out['maxeig'] = np.max(real_eigs)
+
+    return out
+
+def trend(y: ArrayLike) -> dict:
+    """
+    Quantifies various measures of trend in a time series.
+
+    This function analyzes trends by:
+    1. Computing ratio of standard deviations before/after linear detrending
+    2. Fitting a linear trend and extracting parameters
+    3. Analyzing statistics of the cumulative sum
+
+    For strong linear trends, the standard deviation ratio will be low since
+    detrending removes significant variance.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+
+    Returns
+    -------
+    Dict[str, float]
+        Dictionary containing trend measures.
+    """
+    y = np.asarray(y)
+    N = len(y)
+
+    # ratio of std before and after linear detrending
+    out = {}
+    dt_y = detrend(y)
+    out['stdRatio'] = np.std(dt_y, ddof=1) / np.std(y, ddof=1)
+    
+    # do a linear fit
+    # time is indexed 0..N-1 (this fixes the definition of the intercept features)
+    coeffs = np.polyfit(np.arange(N), y, 1)
+    out['gradient'] = coeffs[0]
+    out['intercept'] = coeffs[1]
+
+    # Stats on the cumulative sum
+    yc = np.cumsum(y)
+    out['meanYC'] = np.mean(yc)
+    out['stdYC'] = np.std(yc, ddof=1)
+    coeffs_yc = np.polyfit(np.arange(N), yc, 1)
+    out['gradientYC'] = coeffs_yc[0]
+    out['interceptYC'] = coeffs_yc[1]
+
+    # Mean cumsum in first and second half of the time series
+    out['meanYC12'] = np.mean(yc[:int(np.floor(N/2))])
+    out['meanYC22'] = np.mean(yc[int(np.floor(N/2)):])
+
+    return out
+
+def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float:
+    """
+    Simple mean-stationarity metric using the StatAv measure.
+
+    This function divides the time series into non-overlapping subsegments,
+    calculates the mean in each segment and returns the standard deviation
+    of this set of means. The method provides a simple way to quantify 
+    mean-stationarity in time series data.
+
+    For mean-stationary data, the StatAv metric will approach zero, while
+    higher values indicate non-stationarity in the mean.
+
+    This implementation is based on [1].
+
+    References
+    ----------
+    .. [1] "Heart rate control in normal and aborted-SIDS infants", S. M. Pincus et al.
+        Am J. Physiol. Regul. Integr. Comp. Physiol. 264(3) R638 (1993)
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series
+    what_type : str, optional
+        Method to segment the time series:
+
+        - 'seg': divide into n segments
+        - 'len': divide into segments of length n
+
+        Default is ``'seg'``.
+
+    extra_param : int, optional
+        Specifies either:
+
+        - Number of segments when what_type='seg'
+        - Segment length when what_type='len'
+
+        Default is 5.
+
+    Returns
+    -------
+    float
+        The stat_av statistic. Values closer to zero indicate more 
+        stationary means across segments.
+    """
+    y = np.asarray(y)
+    N = len(y)
+
+    if what_type == 'seg':
+        # divide time series into n segments
+        p = int(np.floor(N / extra_param))  # integer division, lose the last N mod n data points
+        M = np.array([np.mean(y[p*j:p*(j+1)]) for j in range(extra_param)])
+    elif what_type == 'len':
+        if N > 2*extra_param:
+            pn = int(np.floor(N / extra_param))
+            M = np.array([np.mean(y[j*extra_param:(j+1)*extra_param]) for j in range(pn)])
+        else:
+            logger.warning(f"This time series (N = {N}) is too short for stat_av({what_type},'{extra_param}')")
+            return np.nan
+    else:
+        raise ValueError(f"Error evaluating stat_av of type '{what_type}', please select either 'seg' or 'len'")
+
+    s = np.std(y, ddof=1)  # should be 1 (for a z-scored time-series input)
+    sdav = np.std(M, ddof=1)
+    out = sdav / s
+
+    return float(out)
+
+def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str = 'std',
+                 num_seg: int = 5, inc_move: int = 2, asym_tau: Union[int, str] = 1) -> float:
+    """
+    Sliding window measures of stationarity.
+
+    Slides a window along the time series, measures a statistic (``window_stat``) in each
+    window, and outputs a summary (``across_win_stat``) of this set of local estimates of
+    that statistic. Each window is ``1/num_seg`` of the series long and moves on by
+    ``1/inc_move`` of its own length at each step. A stationary series gives similar
+    values in every window.
+
+    References
+    ----------
+    .. [1] "Heart rate control in normal and aborted-SIDS infants", S. M. Pincus et al.
+        Am J. Physiol. Regul. Integr. Comp. Physiol. 264(3) R638 (1993)
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series to analyze.
+    window_stat : str, optional (default='mean')
+        Statistic to calculate in each window:
+
+        - 'mean': arithmetic mean
+        - 'std': standard deviation
+        - 'ent': distribution entropy (kernel-smoothed)
+        - 'permen': normalized permutation entropy, PermEn(3, 1)
+        - 'specen': normalized Shannon spectral entropy of the window's power spectrum
+          (window mean removed before the FFT; the DC bin is excluded and the entropy is
+          normalized by the log of the number of frequencies, ``floor(n/2)``)
+        - 'mom3': skewness (standardized third moment)
+        - 'mom4': kurtosis (standardized fourth moment)
+        - 'mom5': standardized fifth moment
+        - 'lillie': the Lilliefors test statistic (KS distance from a fitted Gaussian CDF),
+          not its p-value
+        - 'AC1': lag-1 autocorrelation
+        - 'asymAC1': ``mean(x_t * x_{t+tau} * (x_{t+tau} - x_t))`` with x z-scored within
+          the window (``tau = asym_tau``): a nonlinear autocorrelation variant that is
+          antisymmetric under time reversal, so zero in expectation for any
+          time-reversible process
+        - 'apen', 'sampen': approximate entropy (m=1, r=0.2) and sample entropy (m=2, r=0.1)
+          of each window (kept for backward compatibility; hctsa no longer offers them)
+
+        Default is ``'mean'``.
+
+    across_win_stat : str, optional
+        Method to summarize the sequence of local estimates:
+
+        - 'std': standard deviation, normalized by that of the full series
+        - 'ent': (kernel-smoothed) distributional entropy of the sequence of local
+          estimates (:func:`pyhctsa.operations.distribution.fit_kernel_smooth`; NaN if the
+          local estimates are all the same)
+        - 'permen': normalized permutation entropy, PermEn(3, 1), of the sequence of local
+          estimates
+        - 'apen', 'sampen': approximate entropy (m=1, r=0.2) and sample entropy (m=2, r=0.15)
+          (kept for backward compatibility; hctsa no longer offers them)
+
+        Default is ``'std'``.
+
+    num_seg : int, optional
+        Number of segments to divide the time series into, which sets the window length,
+        ``floor(N / num_seg)``. Default is 5.
+    inc_move : int, optional
+        Controls window overlap - window moves by window_length/inc_move at each step
+        (e.g., inc_move=2 means 50% overlap between windows). Default is 2.
+    asym_tau : int or str, optional
+        The lag, tau, of the 'asymAC1' window statistic (ignored for other statistics): an
+        integer number of samples, or a rule for :func:`pyhctsa.utils.get_tau` (e.g.,
+        ``'ac1e'``, the floor of the first 1/e crossing of the autocorrelation function) applied
+        to the whole series, so that the lag reflects the series' own correlation time.
+        A window that is not longer than ``tau + 1`` samples gives NaN. Default is 1.
+
+    Returns
+    -------
+    float
+        The summary, ``across_win_stat``, of the local estimates of ``window_stat``: how the
+        local statistic varies across the time series (for 'std', relative to the full-series
+        standard deviation). NaN if the windows are too short, or if all window statistics are NaN.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    win_length = np.floor(len(y)/num_seg)
+    if win_length == 0:
+        logger.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
+        return np.nan
+    inc = np.floor(win_length/inc_move) # increment to move at each step
+    # if incrment rounded down to zero, prop it up
+    if inc == 0:
+        inc = 1
+
+    num_steps = int(np.floor((len(y)-win_length)/inc) + 1)
+    qs = np.zeros(num_steps)
+
+    if window_stat == 'mean':
+        for i in range(num_steps):
+            qs[i] = np.mean(y[_get_window(i, inc, win_length)])
+    elif window_stat == 'std':
+        for i in range(num_steps):
+            qs[i] = _sample_std(y[_get_window(i, inc, win_length)])
+    elif window_stat == 'ent':
+        for i in range(num_steps):
+            qs[i] = distribution_entropy(y[_get_window(i, inc, win_length)], 'ks','[]')
+    elif window_stat == 'permen':
+        for i in range(num_steps):
+            qs[i] = _perm_en_norm(y[_get_window(i, inc, win_length)])
+    elif window_stat == 'specen':
+        for i in range(num_steps):
+            qs[i] = _spectral_entropy_norm(y[_get_window(i, inc, win_length)])
+    elif window_stat == 'apen':
+        for i in range(num_steps):
+            qs[i] = approximate_entropy(y[_get_window(i, inc, win_length)], 1, 0.2)
+    elif window_stat == 'sampen':
+        for i in range(num_steps):
+            sampen_dict = sample_entropy(y[_get_window(i, inc, win_length)], 1, 0.1)
+            qs[i] = sampen_dict['sampen1']
+    elif window_stat in ('mom3', 'mom4', 'mom5'):
+        the_mom = int(window_stat[3:])
+        for i in range(num_steps):
+            qs[i] = moments(y[_get_window(i, inc, win_length)], the_mom)
+    elif window_stat == 'lillie':
+        # Lilliefors statistic (as lillietest's kstat): KS distance between the empirical CDF
+        # and a normal CDF with the window's own mean and std (N-1)
+        for i in range(num_steps):
+            w = y[_get_window(i, inc, win_length)]
+            if len(w) < 4:
+                qs[i] = np.nan # lillietest needs at least 4 observations
+            elif np.std(w, ddof=1) == 0:
+                qs[i] = 1.0 # a constant window: lillietest's kstat is 1
+            else:
+                qs[i] = kstest(w, norm(loc=np.mean(w), scale=np.std(w, ddof=1)).cdf).statistic
+    elif window_stat == 'AC1':
+        for i in range(num_steps):
+            qs[i] = autocorr(y[_get_window(i, inc, win_length)], 1, 'Fourier')
+    elif window_stat == 'asymAC1':
+        # an adaptive lag is set from the whole series, not per window
+        tau = get_tau(y, asym_tau)
+        if not np.isnan(tau) and tau < 1:
+            raise ValueError("asym_tau must be a positive integer or a get_tau rule (e.g., 'ac1e')")
+        qs[:] = np.nan
+        if not np.isnan(tau) and tau < win_length - 1: # need pairs to average over
+            tau = int(tau)
+            for i in range(num_steps):
+                w = y[_get_window(i, inc, win_length)]
+                sd = np.std(w, ddof=1)
+                zw = (w - np.mean(w)) / (sd if sd > 0 else 1.0) # a constant window gives zeros
+                qs[i] = np.mean(zw[:-tau] * zw[tau:] * (zw[tau:] - zw[:-tau]))
+    else:
+        raise ValueError(f"Unknown statistic '{window_stat}'")
+
+    # Check for all errors (e.g., short time series):
+    if np.all(np.isnan(qs)):
+        logger.warning('These sliding window settings are not suitable for this time series')
+        return np.nan
+
+    if across_win_stat == 'std':
+        #% normalized by std of full time series
+        out = _sample_std(qs)/np.std(y, ddof=1)
+    elif across_win_stat == 'permen':
+        out = _perm_en_norm(qs)
+    elif across_win_stat == 'apen':
+        out = approximate_entropy(qs, 1, 0.2)
+    elif across_win_stat == 'sampen':
+        sampen_dict = sample_entropy(qs, 2, 0.15)
+        out = sampen_dict['quadSampEn1']
+    elif across_win_stat == 'ent':
+        #% get a load of statistics from kernel-smoothed distribution
+        ks_outs = fit_kernel_smooth(qs[~np.isnan(qs)])
+        # (NaN if the local estimates are all the same: no scale to smooth over)
+        out = ks_outs['entropy'] if isinstance(ks_outs, dict) else np.nan
+    else:
+        raise ValueError(f"Unknown statistic '{across_win_stat}'")
+
+    return out
+
+def _perm_en_norm(v: np.ndarray) -> float:
+    """Normalized permutation entropy PermEn(3, 1); NaN if it cannot be computed (too short)."""
+    res = permutation_entropy(v, 3, 1)
+    return res['normPermEn'] if isinstance(res, dict) else np.nan
+
+def _spectral_entropy_norm(w: np.ndarray) -> float:
+    """Normalized Shannon entropy of the one-sided power spectrum of a window (mean removed, DC bin excluded)."""
+    Fy = np.fft.fft(w - np.mean(w))
+    # One-sided power spectrum without the DC bin (zero after removing the mean, up to
+    # rounding), so that the number of frequencies, floor(n/2), does not depend on the
+    # last bit of the mean:
+    Py = np.abs(Fy[1:len(w)//2 + 1])**2
+    if len(Py) < 2 or np.sum(Py) == 0:
+        return np.nan
+    Py = Py / np.sum(Py)
+    Py = Py[Py > 0] # 0*log(0) = 0
+    return -np.sum(Py * np.log2(Py)) / np.log2(len(w)//2)
+
+def _get_window(step_ind, inc, win_length):
+    # helper function to convert a step index (stepInd) to a range of indices corresponding to that window
+    start_idx = (step_ind) * inc
+    end_idx = (step_ind) * inc + win_length
+    
+    return np.arange(start_idx, end_idx).astype(int)
+
+def _kendall(x: np.ndarray, y: np.ndarray) -> tuple:
+    """
+    Kendall's tau-b and its two-tailed p-value (``scipy.stats.kendalltau``).
+
+    ``tau_b = S / sqrt((n0 - n1)(n0 - n2))`` with ``S = sum_{i<j} sign(x_i - x_j) sign(y_i - y_j)``
+    and ``n1``, ``n2`` the numbers of tied pairs. The p-value is exact for small samples without
+    ties and otherwise the normal approximation to S with the tie-corrected variance.
+
+    Returns
+    -------
+    tuple
+        ``(tau, p)``; ``(nan, nan)`` if either input contains NaN, has fewer than 2 values,
+        or is constant.
+
+    Notes
+    -----
+    Kendall (1970), Rank Correlation Methods, 4th ed., Ch. 3-4; Hollander & Wolfe (1999),
+    Nonparametric Statistical Methods, Sec. 8.1.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    y = np.asarray(y, dtype=float).ravel()
+    if len(x) != len(y):
+        raise ValueError("x and y must have the same length.")
+    if len(x) < 2 or np.any(np.isnan(x)) or np.any(np.isnan(y)):
+        return np.nan, np.nan
+    if np.ptp(x) == 0 or np.ptp(y) == 0:
+        return np.nan, np.nan
+    res = kendalltau(x, y, variant='b', method='auto')
+    return float(res.statistic), float(res.pvalue)
+
+def _pearson(x: np.ndarray, y: np.ndarray) -> tuple:
+    """
+    Pearson correlation and its two-tailed p-value.
+
+    The p-value is from the Student t distribution with ``n - 2`` degrees of freedom for
+    ``t = r sqrt((n - 2)/(1 - r^2))`` (Fisher, 1915, Biometrika 10:507-521).
+
+    Returns
+    -------
+    tuple
+        ``(r, p)``; ``(nan, nan)`` if either input contains NaN, has fewer than 2 values,
+        or has zero variance.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    y = np.asarray(y, dtype=float).ravel()
+    if len(x) < 2 or np.any(np.isnan(x)) or np.any(np.isnan(y)):
+        return np.nan, np.nan
+    if np.ptp(x) == 0 or np.ptp(y) == 0:
+        return np.nan, np.nan
+    res = pearsonr(x, y)
+    return float(res[0]), float(res[1])
+
+@dict_output
+def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] = 1) -> dict:
+    """
+    Monotonic trend ('ramping') in windowed statistics.
+
+    Splits the time series into ``num_seg`` non-overlapping segments, computes the
+    mean, variance, skewness, kurtosis, and lag-1 autocorrelation (AC1) within each
+    segment, and quantifies whether each of these quantities trends monotonically
+    across the segments (e.g., a variance that ramps up steadily across the series,
+    rather than merely fluctuating).
+
+    The asymmetric autocorrelation 'asymAC1' is ``mean(x_t * x_{t+tau} * (x_{t+tau} - x_t))``
+    with x z-scored within each segment. It is antisymmetric under time reversal, so it is zero
+    in expectation for any time-reversible process, and a trend in it flags a trend in the
+    series' local time-asymmetry/nonlinearity. The lag ``tau`` can be set from the series' own
+    correlation time (``asym_tau='ac1e'``) so that the statistic is not dominated by smoothness
+    when the series is oversampled.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    num_seg : int, optional
+        The number of non-overlapping segments to divide the time series into.
+        Non-overlapping segments are used deliberately (rather than
+        :func:`sliding_window`'s overlapping windows): overlap between windows would
+        induce artificial serial correlation between adjacent window-statistics,
+        which would inflate the apparent monotonic trend independent of any real
+        ramping in the data. Default is 10.
+    asym_tau : int or str, optional
+        The lag, tau, of asymAC1: an integer number of samples, or a rule for
+        :func:`pyhctsa.utils.get_tau` (e.g., ``'ac1e'``, the floor of the first 1/e crossing of
+        the autocorrelation function of the whole series; at least 1). The asymac1_* outputs are
+        NaN if tau cannot be set from the series, or if tau >= segment length - 1 (too few
+        pairs). Default is 1.
+
+    Returns
+    -------
+    dict
+        Kendall's tau and Pearson's r (each with its p-value) between segment index
+        and each windowed statistic. Returns NaN if the time series is too short for
+        the requested number of segments.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    num_seg = int(num_seg)
+
+    min_num_seg = 5 # need enough segments for a meaningful trend statistic
+    min_seg_length = 20 # heuristic minimum for meaningful skewness/kurtosis/AC1 estimates
+
+    if num_seg < min_num_seg:
+        raise ValueError(f"num_seg = {num_seg} is too few segments for a meaningful "
+                         f"trend statistic (need >= {min_num_seg})")
+
+    seg_length = N // num_seg
+    if seg_length < min_seg_length:
+        logger.warning(f"Time series (N = {N}) too short for {num_seg} segments of a meaningful length")
+        return np.nan
+
+    # Lag of asymAC1 (an adaptive lag is set from the whole series, not per segment):
+    tau = get_tau(y, asym_tau) # NaN if it cannot be set
+    if not np.isnan(tau) and tau < 1:
+        raise ValueError("asym_tau must be a positive integer or a get_tau rule (e.g., 'ac1e')")
+
+    # ------------------------------------------------------------------------------
+    # Segment the time series (non-overlapping, discarding any remainder)
+    # ------------------------------------------------------------------------------
+    z = y[:seg_length * num_seg].reshape(num_seg, seg_length) # num_seg x seg_length
+
+    # ------------------------------------------------------------------------------
+    # Within-segment statistics
+    # ------------------------------------------------------------------------------
+    seg_mean = np.mean(z, axis=1)
+    seg_var = np.var(z, axis=1, ddof=1)
+    # Standardized (not moments-style raw/std) skewness and kurtosis: keeps the
+    # shape-trend signal from being conflated with the (separately tracked)
+    # scale-trend signal in seg_var, since moments normalizes by std^1 regardless of
+    # moment order rather than std^3/std^4.
+    seg_skew = skew(z, axis=1)
+    seg_kurt = kurtosis(z, axis=1, fisher=False)
+    seg_ac1 = np.zeros(num_seg)
+    seg_asym_ac1 = np.full(num_seg, np.nan)
+    for i in range(num_seg):
+        seg_ac1[i] = autocorr(z[i, :], 1, 'Fourier')
+        if not np.isnan(tau) and tau < seg_length - 1: # need pairs to average over
+            t = int(tau)
+            sd = np.std(z[i, :], ddof=1)
+            zseg = (z[i, :] - np.mean(z[i, :])) / (sd if sd > 0 else 1.0) # z-scored *within* this segment (a constant segment gives zeros)
+            seg_asym_ac1[i] = np.mean(zseg[:-t] * zseg[t:] * (zseg[t:] - zseg[:-t]))
+
+    # ------------------------------------------------------------------------------
+    # Kendall's tau and Pearson's r (each with p-value) against segment index
+    # ------------------------------------------------------------------------------
+    seg_idx = np.arange(num_seg, dtype=float)
+
+    out = {}
+    out['mean_tau'], out['mean_p'] = _kendall(seg_idx, seg_mean)
+    out['var_tau'], out['var_p'] = _kendall(seg_idx, seg_var)
+    out['skew_tau'], out['skew_p'] = _kendall(seg_idx, seg_skew)
+    out['kurt_tau'], out['kurt_p'] = _kendall(seg_idx, seg_kurt)
+    out['ac1_tau'], out['ac1_p'] = _kendall(seg_idx, seg_ac1)
+    out['asymac1_tau'], out['asymac1_p'] = _kendall(seg_idx, seg_asym_ac1)
+
+    out['mean_pearson_r'], out['mean_pearson_p'] = _pearson(seg_idx, seg_mean)
+    out['var_pearson_r'], out['var_pearson_p'] = _pearson(seg_idx, seg_var)
+    out['skew_pearson_r'], out['skew_pearson_p'] = _pearson(seg_idx, seg_skew)
+    out['kurt_pearson_r'], out['kurt_pearson_p'] = _pearson(seg_idx, seg_kurt)
+    out['ac1_pearson_r'], out['ac1_pearson_p'] = _pearson(seg_idx, seg_ac1)
+    out['asymac1_pearson_r'], out['asymac1_pearson_p'] = _pearson(seg_idx, seg_asym_ac1)
+
+    return out
+
+@dict_output
+def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
+    """
+    Slow feature analysis of windowed statistics.
+
+    Splits the time series into ``num_windows`` non-overlapping segments (same
+    segmentation and per-segment statistics as :func:`ramping_windows`: mean,
+    variance, skewness, and lag-1 autocorrelation, plus lag-1 trev, a normalized
+    third-order cross-moment measuring time-reversal asymmetry, ``mean(dz^3) /
+    mean(dz^2)^(3/2)`` with ``dz = diff(window)``, forming a ``num_windows`` x 5
+    matrix), then applies Slow Feature Analysis (SFA) to find the linear combination
+    of these five statistics that varies as *slowly* as possible across the sequence
+    of windows -- i.e., minimizes the variance of its own increments, subject to unit
+    variance. The lag-1 autocorrelation is symmetric under time reversal, so trev is
+    included to let SFA pick up a slow drift in the *irreversibility* of the dynamics.
+
+    This operation is a compact variant of feature-based SFA (f-SFA) [2]_, which applies SFA
+    to sliding-window catch22/catch24 features; here five fixed window statistics are used,
+    to give a single hctsa feature.
+
+    References
+    ----------
+    .. [1] Wiskott, L. & Sejnowski, T.J. "Slow feature analysis: unsupervised learning of
+    invariances." Neural Computation 14(4), 715-770 (2002).
+    .. [2] Owens, K.S., Tamaki, M. & Fulcher, B.D. "Parameter inference from a non-stationary
+    unknown process using statistical feature-based slow feature analysis", arXiv:2609.01651
+    (2026). The full feature-based method (f-SFA: sliding-window catch22/catch24 features +
+    SFA) is implemented in the Python package fsfa: https://github.com/KieranOwens/fsfa
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    num_windows : int, optional
+        The number of non-overlapping segments to divide the time series into.
+        Non-overlapping segments are used for the same reason as
+        :func:`ramping_windows`: overlap would induce artificial serial correlation
+        between adjacent window statistics, which would make the derivative-based
+        slowness measure spuriously small regardless of any real slow structure in
+        the data. 20 was chosen (rather than :func:`ramping_windows`' default of 10)
+        because SFA needs enough windows to estimate the underlying 5x5 covariance
+        matrices (of the statistics, and of their increments) reasonably reliably --
+        at ``num_windows = 10`` the null-distribution spread of the slowness
+        eigenvalues is considerably wider, making individual values a noisier signal.
+        Default is 20.
+
+    Returns
+    -------
+    dict
+        - ``eta1``: the smallest (slowest) SFA eigenvalue.
+        - ``etaEnd``: the largest (fastest/noisiest) SFA eigenvalue.
+        - ``etaStd``: the standard deviation of all SFA eigenvalues (spread of
+          the slowness spectrum).
+        - ``pc1VarFrac``: the fraction of total variance (across the five statistics)
+          explained by the leading PCA component.
+        - ``slowPCA1corr``: the absolute correlation between the slowest SFA
+          component's scores and the leading PCA component's scores -- near 1 means
+          the slow direction is simply the dominant (highest-variance) direction PCA
+          would already find; near 0 means SFA has isolated a genuinely separate,
+          low-variance slow mode.
+        - ``slowCorrMean``, ``slowCorrVar``, ``slowCorrSkew``, ``slowCorrAC1``,
+          ``slowCorrTrev``: the absolute correlation between each raw per-window statistic
+          (mean, variance, skewness, AC1, trev, before whitening) and the slowest SFA
+          component's scores, indicating which statistic drives the slow mode (NaN for a
+          constant statistic).
+
+        Returns NaN if the time series is too short for the requested number of
+        windows, or if fewer than two directions survive the whitening threshold.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    num_windows = int(num_windows)
+
+    min_num_windows = 10 # need enough windows to estimate the 5x5 covariance matrices reliably
+    min_window_length = 20 # heuristic minimum for meaningful skewness/AC1/trev estimates
+
+    if num_windows < min_num_windows:
+        raise ValueError(f"num_windows = {num_windows} is too few for a reliable slow "
+                         f"feature analysis (need >= {min_num_windows})")
+
+    win_length = N // num_windows
+    if win_length < min_window_length:
+        logger.warning(f"Time series (N = {N}) too short for {num_windows} windows of a meaningful length")
+        return np.nan
+
+    # ------------------------------------------------------------------------------
+    # Segment the time series (non-overlapping, discarding any remainder)
+    # ------------------------------------------------------------------------------
+    z = y[:win_length * num_windows].reshape(num_windows, win_length) # num_windows x win_length
+
+    # ------------------------------------------------------------------------------
+    # Per-window statistics: mean, variance, skewness, AC1 (as in ramping_windows) and
+    # trev (lag-1 time-reversal asymmetry, tau fixed to 1 rather than estimated per window)
+    # ------------------------------------------------------------------------------
+    win_mean = np.mean(z, axis=1)
+    win_var = np.var(z, axis=1, ddof=1)
+    win_skew = skew(z, axis=1)
+    win_ac1 = np.zeros(num_windows)
+    win_trev = np.zeros(num_windows)
+    for i in range(num_windows):
+        win_ac1[i] = autocorr(z[i, :], 1, 'Fourier')
+        dz = np.diff(z[i, :])
+        with np.errstate(invalid='ignore', divide='ignore'):
+            win_trev[i] = np.mean(dz**3) / np.mean(dz**2)**1.5
+    X = np.column_stack((win_mean, win_var, win_skew, win_ac1, win_trev)) # num_windows x 5
+
+    # ------------------------------------------------------------------------------
+    # PCA (variance-maximizing directions) and SFA (slowness-minimizing directions)
+    # ------------------------------------------------------------------------------
+    Xc = X - np.mean(X, axis=0)
+    Cx = np.cov(Xc, rowvar=False) # 5 x 5
+    if not np.all(np.isfinite(Cx)):
+        # a degenerate (e.g. constant) window leaves its skewness/AC1 -- and hence
+        # the covariance -- undefined
+        return np.nan
+
+    eig_vals, Vp = np.linalg.eigh(Cx)
+    ord_ = np.argsort(-eig_vals, kind='stable')
+    pca_eigs = eig_vals[ord_]
+    Vp = Vp[:, ord_]
+    pc_scores = Xc @ Vp # num_windows x 5, PC1 = pc_scores[:, 0]
+
+    # Whitening (symmetric/ZCA, avoids an arbitrary rotation among near-degenerate
+    # directions). Directions with near-zero variance relative to the leading one
+    # (e.g. a per-window statistic that barely varies across windows) are dropped
+    # rather than whitened: full whitening would divide by their near-zero std and
+    # amplify what is essentially estimation noise into a spuriously enormous
+    # "fast" eigenvalue. pca_eigs[0] (the leading, largest eigenvalue) is never
+    # itself dropped by this relative threshold.
+    rel_floor = 1e-2
+    keep = pca_eigs > rel_floor * pca_eigs[0]
+    if np.sum(keep) < 2:
+        return np.nan
+    Vk = Vp[:, keep]
+    Zw = Xc @ Vk / np.sqrt(pca_eigs[keep]) # num_windows x sum(keep), approx unit covariance
+
+    dZ = np.diff(Zw, axis=0) # (num_windows-1) x sum(keep), the whitened derivative signal
+    Cd = np.cov(dZ, rowvar=False)
+    eta_vals, Us = np.linalg.eigh(Cd)
+    ord2 = np.argsort(eta_vals, kind='stable') # slowness eigenvalues, ascending = slowest first
+    etas = eta_vals[ord2]
+    Us = Us[:, ord2]
+    slow_scores = Zw @ Us # num_windows x sum(keep), slowest component = slow_scores[:, 0]
+
+    # ------------------------------------------------------------------------------
+    # Output statistics
+    # ------------------------------------------------------------------------------
+    out = {}
+    out['eta1'] = etas[0]
+    out['etaEnd'] = etas[-1]
+    out['etaStd'] = np.std(etas, ddof=1)
+
+    out['pc1VarFrac'] = pca_eigs[0] / np.sum(pca_eigs)
+
+    # Pearson's linear correlation (absolute) with the slowest SFA component's scores,
+    # NaN for a constant input (the correlation is undefined)
+    s0 = slow_scores[:, 0]
+
+    def _abs_corr(a, b):
+        if np.std(a, ddof=1) == 0 or np.std(b, ddof=1) == 0:
+            return np.nan
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return abs(pearsonr(a, b)[0])
+
+    out['slowPCA1corr'] = _abs_corr(s0, pc_scores[:, 0])
+    out['slowCorrMean'] = _abs_corr(win_mean, s0)
+    out['slowCorrVar'] = _abs_corr(win_var, s0)
+    out['slowCorrSkew'] = _abs_corr(win_skew, s0)
+    out['slowCorrAC1'] = _abs_corr(win_ac1, s0)
+    out['slowCorrTrev'] = _abs_corr(win_trev, s0)
+
+    return out

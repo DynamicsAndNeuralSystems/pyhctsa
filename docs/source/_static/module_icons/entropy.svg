@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 160 100"
+   width="160"
+   height="100"
+   version="1.1"
+   id="svg9"
+   sodipodi:docname="entropy.svg"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs9" />
+  <sodipodi:namedview
+     id="namedview9"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="3.7741824"
+     inkscape:cx="72.068588"
+     inkscape:cy="94.457543"
+     inkscape:window-width="1920"
+     inkscape:window-height="1022"
+     inkscape:window-x="0"
+     inkscape:window-y="152"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg9" />
+  <rect
+     x="16"
+     y="64.3"
+     width="13"
+     height="21.7"
+     rx="1"
+     fill="#cfe0f3"
+     stroke="#727272"
+     stroke-width="1"
+     id="rect1" />
+  <rect
+     x="33"
+     y="42.6"
+     width="13"
+     height="43.4"
+     rx="1"
+     fill="#cfe0f3"
+     stroke="#727272"
+     stroke-width="1"
+     id="rect2" />
+  <rect
+     x="50"
+     y="55"
+     width="13"
+     height="31"
+     rx="1"
+     fill="#cfe0f3"
+     stroke="#727272"
+     stroke-width="1"
+     id="rect3" />
+  <rect
+     x="67"
+     y="30.2"
+     width="13"
+     height="55.8"
+     rx="1"
+     fill="#cfe0f3"
+     stroke="#727272"
+     stroke-width="1"
+     id="rect4" />
+  <rect
+     x="84"
+     y="47.56"
+     width="13"
+     height="38.44"
+     rx="1"
+     fill="#cfe0f3"
+     stroke="#727272"
+     stroke-width="1"
+     id="rect5" />
+  <rect
+     x="101"
+     y="61.2"
+     width="13"
+     height="24.8"
+     rx="1"
+     fill="#cfe0f3"
+     stroke="#727272"
+     stroke-width="1"
+     id="rect6" />
+  <rect
+     x="118"
+     y="37.64"
+     width="13"
+     height="48.36"
+     rx="1"
+     fill="#cfe0f3"
+     stroke="#727272"
+     stroke-width="1"
+     id="rect7" />
+  <rect
+     x="135"
+     y="68.64"
+     width="13"
+     height="17.36"
+     rx="1"
+     fill="#cfe0f3"
+     stroke="#727272"
+     stroke-width="1"
+     id="rect8" />
+  <line
+     x1="12"
+     y1="86"
+     x2="152"
+     y2="86"
+     stroke="#727272"
+     stroke-width="1.1"
+     id="line8" />
+  <line
+     x1="12"
+     y1="51.871193"
+     x2="152"
+     y2="51.871193"
+     stroke="#c0453f"
+     stroke-width="1"
+     stroke-dasharray="4, 3"
+     id="line9" />
+</svg>

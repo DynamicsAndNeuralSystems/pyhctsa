@@ -1,0 +1,8 @@
+recursive-include pyhctsa/configurations *.yaml
+recursive-include pyhctsa/data *.txt
+recursive-include pyhctsa/operations *.py
+recursive-include pyhctsa/toolboxes *.py *.c *.h
+recursive-include pyhctsa/toolboxes LICENSE* COPYING* NOTICE* README*
+recursive-include pyhctsa/_build *.py
+include LICENSE
+include THIRD_PARTY_LICENSES.md

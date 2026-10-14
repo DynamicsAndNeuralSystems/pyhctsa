@@ -1,0 +1,26 @@
+functions:
+  add_noise:
+    python_module: correlation
+    python_func: add_noise
+    matlab_func: CO_AddNoise
+    matlab_orientation: row
+    matlab_signature: [y, tau, amiMethod, extraParam, randomSeed]
+    arg_map:
+      ami_method: amiMethod
+      extra_param: extraParam
+      random_seed: randomSeed
+    seed_param: random_seed
+    noise_param: noise
+    noise_seed: default
+    test_cases:
+      - {tau: 1, ami_method: quantiles, extra_param: 10, zscore: true}
+      - {tau: 1,   ami_method: 'even',      extra_param: 10, zscore: True}
+      - {tau: 1,   ami_method: 'std1',      extra_param: 10, zscore: True}
+      - {tau: 1,   ami_method: 'gaussian',                   zscore: True}
+      - {tau: 1,   ami_method: 'kraskov1',  extra_param: 4,  zscore: True}
+
+      - {tau: 'ac', ami_method: 'quantiles', extra_param: 10, zscore: True}
+      - {tau: 'ac', ami_method: 'even',      extra_param: 10, zscore: True}
+      - {tau: 'ac', ami_method: 'std1',      extra_param: 10, zscore: True}
+      - {tau: 'ac', ami_method: 'gaussian',                   zscore: True}
+      - {tau: 'ac', ami_method: 'kraskov1',  extra_param: 4,  zscore: True}

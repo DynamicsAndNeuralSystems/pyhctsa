@@ -1,0 +1,15 @@
+Steps and bumps toolkit, by Max A. Little
+ML_l1pwc.py is a Python port of ML_l1pwc.m and ML_l1pwclmax.m, (c) Max Little, 2010, "based around
+code originally written by S.J. Kim, K. Koh, S. Boyd and D. Gorinevsky" (l1_tf,
+https://web.stanford.edu/~boyd/l1_tf/). The MATLAB source states: "This code is released under
+the terms of GNU General Public License as published by the Free Software Foundation; version 2
+or later." COPYING in this directory is the GNU GPL version 2; under the "or later" option the
+code is distributed within pyhctsa under GPL-3.0-or-later.
+References: Little & Jones, ICASSP 2010 Proceedings (2010); Kim, Koh, Boyd & Gorinevsky,
+SIAM Rev. 51, 339-360 (2009).
+
+Scope: this licence statement covers the l1pwc files, the only code in this directory.
+M. A. Little's fastdfa and close-returns C sources (no upstream licence) are not included:
+SC_FastDFA was dropped (fluctuation_analysis computes DFA), and RPDE / close returns are a
+clean-room re-implementation in pyhctsa/operations/entropy.py, written from Little et al.,
+BioMed. Eng. OnLine 6, 23 (2007).

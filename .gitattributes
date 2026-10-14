@@ -1,0 +1,8 @@
+# mark third-party toolbox code as vendored to exclude from language stats
+pyhctsa/toolboxes/** linguist-vendored
+paper/** linguist-documentation
+tutorials/** linguist-documentation
+img/** linguist-documentation
+
+# ensure all HTML files are ignored regardless of location
+*.html linguist-vendored

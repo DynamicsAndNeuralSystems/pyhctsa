@@ -1,0 +1,258 @@
+# Derived from the GPML Matlab code v4.2 (http://gaussianprocess.org/gpml/code/matlab/doc/),
+# Copyright (c) 2005-2018 Carl Edward Rasmussen & Hannes Nickisch. All rights reserved.
+# Released under the FreeBSD License (BSD-2-Clause); see LICENSE in this directory.
+# Python port and modifications (c) 2025-2026 the pyhctsa authors, distributed under GPL-3.0-or-later.
+import numpy as np
+from scipy.linalg import cho_solve, cholesky, solve_triangular
+
+
+_EPS = np.finfo(float).eps
+
+class CovSEisoNoise:
+    """
+    ``{'covSum', {'covSEiso', 'covNoise'}}`` for scalar (D=1) inputs.
+
+    k(x, z) = sf^2 * exp(-maha(x, z) / 2) + sn^2 * delta(x, z)
+
+    with ``maha(x, z) = (x - z)^2 / ell^2`` and hyperparameters
+    ``hyp = [log(ell), log(sf), log(sn)]``. Two points count as equal in the
+    cross-covariance term when their squared distance falls below ``eps^2``,
+    matching ``covEye``.
+    """
+
+    n_hyp = 3
+
+    @staticmethod
+    def _maha(hyp, x, z=None):
+        """
+        gpml ``covMaha`` in 'iso' mode: squared Mahalanobis distance.
+
+        The mean subtraction is not cosmetic -- gpml removes it to keep
+        ``a^2 - 2ab + b^2`` stable, and which mean gets removed depends on
+        whether this is the symmetric or the cross-covariance case.
+        """
+        ell2_inv = np.exp(-2.0 * hyp[0])
+        x = np.asarray(x, dtype=float).reshape(-1, 1)
+        n = x.shape[0]
+        if z is None:                                    # symmetric matrix D2xx
+            mu = x.mean(axis=0)
+            xc = x - mu
+            Ax = xc * ell2_inv
+            sax = np.sum(xc * Ax, axis=1)
+            saz = sax
+            Az = Ax
+        else:                                                 # cross terms D2xz
+            z = np.asarray(z, dtype=float).reshape(-1, 1)
+            m = z.shape[0]
+            mu = (m / (n + m)) * z.mean(axis=0) + (n / (n + m)) * x.mean(axis=0)
+            xc = x - mu
+            zc = z - mu
+            Ax = xc * ell2_inv
+            Az = zc * ell2_inv
+            sax = np.sum(xc * Ax, axis=1)
+            saz = np.sum(zc * Az, axis=1)
+        # remove numerical noise at the end and ensure that D2 >= 0
+        D2 = sax[:, None] + (saz[None, :] - 2.0 * (xc @ Az.T))
+        return np.maximum(D2, 0.0)
+
+    @classmethod
+    def parts(cls, hyp, x, z=None):
+        """
+        Return ``(K_se, K_noise, D2)``, the two summands and the squared
+        distances backing the SE term. ``z='diag'`` gives the diagonals.
+        """
+        hyp = np.asarray(hyp, dtype=float).ravel()
+        sf2 = np.exp(2.0 * hyp[1])
+        sn2 = np.exp(2.0 * hyp[2])
+        x = np.asarray(x, dtype=float).reshape(-1, 1)
+        n = x.shape[0]
+
+        if isinstance(z, str) and z == 'diag':
+            D2 = np.zeros(n)
+            return sf2 * np.ones(n), sn2 * np.ones(n), D2
+
+        D2 = cls._maha(hyp, x, z)
+        K_se = sf2 * np.exp(-D2 / 2.0)
+        if z is None:
+            K_noise = sn2 * np.eye(n)
+        else:
+            zz = np.asarray(z, dtype=float).reshape(-1, 1)
+            d2 = (x - zz.T) ** 2
+            K_noise = sn2 * (d2 < _EPS * _EPS).astype(float)
+        return K_se, K_noise, D2
+
+    @classmethod
+    def K(cls, hyp, x, z=None):
+        K_se, K_noise, _ = cls.parts(hyp, x, z)
+        return K_se + K_noise
+
+    @classmethod
+    def diag(cls, hyp, x):
+        """The diagonal of ``K(hyp, x)`` (gpml's ``z = 'diag'``)."""
+        K_se, K_noise, _ = cls.parts(hyp, x, 'diag')
+        return K_se + K_noise
+
+    @classmethod
+    def dK(cls, hyp, x, Q, z=None):
+        """
+        Directional hyperparameter derivative ``dhyp(i) = tr(Q' dK/dhyp_i)``.
+
+        Closed form for this covariance, equivalent to the chain of
+        ``covSum`` -> ``covScale`` -> ``covMaha`` closures in gpml:
+
+            d/dlog(ell) : sum(Q .* K_se .* D2)
+            d/dlog(sf)  : 2 * sum(Q .* K_se)
+            d/dlog(sn)  : 2 * sum(Q .* K_noise)
+        """
+        K_se, K_noise, D2 = cls.parts(hyp, x, z)
+        return np.array([
+            np.sum(Q * K_se * D2),
+            2.0 * np.sum(Q * K_se),
+            2.0 * np.sum(Q * K_noise),
+        ])
+
+def _solve_chol(L, B):
+    """gpml ``solve_chol``: ``L \\ (L' \\ B)`` for an upper-triangular L."""
+    return cho_solve((L, False), B, check_finite=False)
+
+
+def _ldB2_exact(W, K):
+    """
+    gpml ``apx/ldB2_exact`` for strictly positive W.
+
+    A Gaussian likelihood gives ``W = 1/sn2 > 0`` everywhere, so only the
+    symmetric Cholesky branch ``B = I + sW*K*sW`` is ever reachable; the
+    asymmetric LU branch for negative W is not ported.
+    """
+    n = W.size
+    sW = np.sqrt(W)
+    L = cholesky(np.eye(n) + (sW[:, None] * sW[None, :]) * K,
+                 lower=False, check_finite=False)
+    ldB2 = np.sum(np.log(np.diag(L)))
+
+    def solveKiW(r):
+        # bsxfun(@times, ., sW) scales rows, for both vector and matrix r
+        s = sW if r.ndim == 1 else sW[:, None]
+        return s * _solve_chol(L, s * r)
+
+    return ldB2, solveKiW, L, sW
+
+
+def inf_gauss_lik(hyp, cov, x, y, want_dnlZ=True):
+    """
+    gpml ``infGaussLik``: exact inference for a zero mean and a Gaussian
+    likelihood.
+
+    This is a closed-form, deterministic computation: ``alpha = (K + sn2 I) \\ y`` from one Cholesky
+    factorisation of ``B = I + sW K sW`` with ``sW = 1/sn``.
+
+    Returns ``(post, nlZ, dnlZ)``. ``post['L']`` is the upper-triangular
+    Cholesky factor of ``B`` (as in gpml's ``apx`` exact mode), which
+    ``gp_predict`` recognises, as ``gp.m`` does, and uses for the predictive
+    variances.
+    """
+    hyp_cov = np.asarray(hyp['cov'], dtype=float).ravel()
+    hyp_lik = float(np.ravel(hyp['lik'])[0])
+    x = np.asarray(x, dtype=float).ravel()
+    y = np.asarray(y, dtype=float).ravel()
+    n = x.size
+
+    m = np.zeros(n)                                                 # meanZero
+    sn2 = np.exp(2.0 * hyp_lik)
+    W = np.ones(n) / sn2                          # noise precision of likGauss
+    K = cov.K(hyp_cov, x)
+    ldB2, solveKiW, L, sW = _ldB2_exact(W, K)       # functionality depending on W
+
+    alpha = solveKiW(y - m)
+    post = {'alpha': alpha, 'sW': sW, 'L': L}
+    nlZ = (y - m).dot(alpha) / 2 + ldB2 + n * np.log(2 * np.pi * sn2) / 2
+    if not want_dnlZ:
+        return post, nlZ, None
+
+    Q = (1.0 / sW)[:, None] * _solve_chol(L, np.diag(sW))
+    dW = np.sum(Q * K, axis=1) / 2        # d log(det(B))/2 / dW = diag(inv(inv(K)+W))
+    dnlZ_cov = cov.dK(hyp_cov, x, (Q * W[:, None]) - np.outer(alpha, alpha)) / 2
+    dnlZ_lik = -sn2 * alpha.dot(alpha) - 2 * np.sum(dW) / sn2 + n
+    dnlZ = {'cov': dnlZ_cov, 'lik': np.array([dnlZ_lik]), 'mean': np.zeros(0)}
+    return post, nlZ, dnlZ
+
+
+_INF = {'gauss_lik': inf_gauss_lik}
+
+
+def gp_train(hyp, cov, x, y, want_dnlZ=True, inf='gauss_lik'):
+    """
+    gpml ``gp(hyp, inf, mean, cov, lik, x, y)`` -- training mode.
+
+    Returns ``(nlZ, dnlZ)``: the negative log marginal likelihood and its
+    partial derivatives w.r.t. the hyperparameters. ``nlZ`` is computed
+    identically either way; pass ``want_dnlZ=False`` when only the marginal
+    likelihood is needed to skip the (dominant) derivative computation, in
+    which case ``dnlZ`` is ``None``.
+
+    ``inf`` selects the inference method; only ``'gauss_lik'`` (exact, hctsa's
+    choice) is implemented.
+
+    As in ``gp.m``, a failed inference (e.g., ``numpy.linalg.LinAlgError`` when
+    ``I + K/sn2`` loses positive definiteness) does not raise: ``nlZ`` is NaN
+    and ``dnlZ`` is zero ("Inference method failed .. attempting to continue").
+    """
+    try:
+        _, nlZ, dnlZ = _INF[inf](hyp, cov, x, y, want_dnlZ=want_dnlZ)
+    except np.linalg.LinAlgError:
+        n_cov = np.size(hyp['cov'])
+        dnlZ = ({'cov': np.zeros(n_cov), 'lik': np.zeros(1), 'mean': np.zeros(0)}
+                if want_dnlZ else None)
+        return np.nan, dnlZ
+    return nlZ, dnlZ
+
+
+def gp_predict(hyp, cov, x, y, xs, nperbatch=1000, inf='gauss_lik'):
+    """
+    gpml ``gp(hyp, inf, mean, cov, lik, x, y, xs)`` -- prediction mode.
+
+    Returns ``(ymu, ys2, fmu, fs2)``. ``ys2`` is the predictive *output*
+    variance, i.e. ``fs2 + sn2``.
+
+    ``nperbatch`` is not tunable in practice: gpml fixes it at 1000, and because
+    the covariance re-centres on the current batch the value affects the result
+    in the last few digits.
+    """
+    hyp_cov = np.asarray(hyp['cov'], dtype=float).ravel()
+    hyp_lik = float(np.ravel(hyp['lik'])[0])
+    sn2 = np.exp(2.0 * hyp_lik)
+    x = np.asarray(x, dtype=float).ravel()
+    y = np.asarray(y, dtype=float).ravel()
+    xs = np.asarray(xs, dtype=float).ravel()
+
+    post, _, _ = _INF[inf](hyp, cov, x, y, want_dnlZ=False)
+    alpha = post['alpha']
+    L = post['L']
+    sW = post['sW']
+    # gp.m: a numeric, upper-triangular L with a positive diagonal is a Cholesky
+    # factor of I + sW*sW'.*K (use alpha, sW, L); otherwise L is a callback
+    L_is_chol = isinstance(L, np.ndarray)
+
+    ns = xs.size
+    fmu = np.zeros(ns)
+    fs2 = np.zeros(ns)
+    nact = 0
+    while nact < ns:              # process minibatches of test cases, as gpml does
+        idx = slice(nact, min(nact + nperbatch, ns))
+        kss = cov.diag(hyp_cov, xs[idx])                         # self-variance
+        Ks = cov.K(hyp_cov, x, xs[idx])                       # cross-covariances
+        ms = np.zeros(xs[idx].size)                                   # meanZero
+
+        fmu[idx] = ms + Ks.T @ alpha                       # conditional mean fs|f
+        if L_is_chol:                    # Cholesky parametrisation (alpha, sW, L)
+            V = solve_triangular(L, sW[:, None] * Ks, trans='T', lower=False,
+                                 check_finite=False)
+            fs2[idx] = kss - np.sum(V * V, axis=0)
+        else:                              # alternative parametrisation, callback L
+            fs2[idx] = kss + np.sum(Ks * L(Ks), axis=0)
+        fs2[idx] = np.maximum(fs2[idx], 0)     # remove numerical noise, i.e. < 0
+        nact = min(nact + nperbatch, ns)
+
+    ymu = fmu                                                 # likGauss moments
+    ys2 = fs2 + sn2
+    return ymu, ys2, fmu, fs2
