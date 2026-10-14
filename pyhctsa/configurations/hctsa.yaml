@@ -2233,9 +2233,9 @@ nonlinearity:
     base_name: embed_cluster
     dependencies:
     configs:
-      - {tau: 1, m: 2, zscore: True}   # NL_EmbedCluster(x_z,1,2,4,'full')
-      - {tau: 'ac1e', m: 2, zscore: True}   # NL_EmbedCluster(x_z,'ac1e',2,4,'full')
-      - {tau: 'mi', m: 3, zscore: True}   # NL_EmbedCluster(x_z,'mi',3,4,'full')
+      - {tau: 1, m: 2, zscore: True}   # NL_EmbedCluster(x_z,1,2,'full')
+      - {tau: 'ac1e', m: 2, zscore: True}   # NL_EmbedCluster(x_z,'ac1e',2,'full')
+      - {tau: 'mi', m: 3, zscore: True}   # NL_EmbedCluster(x_z,'mi',3,'full')
     legacy_name: NL_EmbedCluster
     ordered_args: ['tau', 'm']
 
