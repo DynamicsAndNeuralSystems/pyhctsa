@@ -47,6 +47,9 @@ CASES = {
 # fits of the exactly periodic series x_sine that are not determined by the data (an exact fit leaves some model
 # parameters, e.g. a noise gain or an MA coefficient, set by rounding)
 SINE_SKIP = {'ss1', 'ss3', 'ssbest', 'armax31'}
+# outputs that count sign changes of a quantity which, for x_sine, is itself at the level of rounding (a perfect
+# predictor's root-mean-square error, about 1e-14, across horizons), so the count depends on the platform's BLAS
+SINE_ROUNDOFF_KEYS = {'stde_ndown'}
 
 
 def _is_nan(v):
@@ -67,6 +70,8 @@ def test_matches_hctsa(label, name):
     for key, exp in expected.items():
         if key not in out:
             continue   # (an output that pyhctsa does not compute, e.g. np/Ts constants)
+        if name == 'x_sine' and key in SINE_ROUNDOFF_KEYS:
+            continue
         got = out[key]
         if _is_nan(exp):
             assert np.isnan(got), key
