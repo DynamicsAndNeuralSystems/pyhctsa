@@ -125,14 +125,12 @@ Machine-readable metadata is provided in [`CITATION.cff`](https://github.com/Dyn
 
 ## Licenses
 
-_pyhctsa_ is licensed under the [GNU General Public License v3.0 or later](LICENSE). It is a Python implementation of
-the feature library of [_hctsa_](https://github.com/benfulcher/hctsa). Some features use third-party code, bundled in
-[`pyhctsa/toolboxes/`](pyhctsa/toolboxes) under its own GPL-compatible license (full texts in
-[`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)); others are clean-room re-implementations of published methods.
+_pyhctsa_ is licensed under the [GNU General Public License v3.0 or later](LICENSE).
+It is a Python implementation of the feature library of [_hctsa_](https://github.com/benfulcher/hctsa).
+Some features use third-party code, bundled in [`pyhctsa/toolboxes/`](pyhctsa/toolboxes) under its own GPL-compatible license (full texts in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)); others are clean-room re-implementations of published methods.
 Full credits are on the [Acknowledgements](https://dynamicsandneuralsystems.github.io/pyhctsa/acknowledgements.html) page of the documentation.
 
 ## AI usage disclosure
 
-Much of _pyhctsa_ 2.0, including the clean-room re-implementations, tests and documentation, was written with AI coding
-assistants (Anthropic's Claude) under the direction of the maintainers. Not every AI-generated contribution has been
-reviewed line by line by a human; each is instead verified against the outputs of _hctsa_ or by appropriate tests.
+Much of _pyhctsa_ 2.0, including the clean-room re-implementations, tests and documentation, was written with AI coding assistants (Anthropic's Claude) under the direction of the maintainers.
+Not every AI-generated contribution has been reviewed line by line by a human; each is instead verified against the outputs of _hctsa_ or by appropriate tests.
