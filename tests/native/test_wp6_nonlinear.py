@@ -278,6 +278,58 @@ def test_embed_cluster_degenerate_clouds_still_get_a_two_component_fit():
     assert np.isfinite(out['sep_mahal'])
 
 
+def _three_blob_cloud(m, n=600, seed=3):
+    rng = np.random.default_rng(seed)
+    centers = np.zeros((3, m))
+    centers[1, 0] = 4.0
+    centers[2, -1] = 4.0
+    return np.concatenate([c + rng.standard_normal((n // 3, m)) for c in centers])
+
+
+@pytest.mark.parametrize('m, k', [(2, 1), (2, 2), (2, 4), (3, 3), (1, 2)])
+def test_gmm_fit_full_matches_sklearn(m, k):
+    # The fit is scikit-learn's GaussianMixture one (same starts, updates and stopping rule),
+    # evaluated faster: identical to the last bit on the platform it was written on, which we
+    # only ask to rounding error here since the platform's BLAS could order the sums differently
+    from sklearn.mixture import GaussianMixture
+    x = _three_blob_cloud(m)
+    reg = 1e-6 * np.mean(np.var(x, axis=0, ddof=1))
+    gm = GaussianMixture(n_components=k, covariance_type='full', reg_covar=reg, n_init=4,
+                         init_params='k-means++', max_iter=500, tol=1e-6, random_state=0).fit(x)
+    fit = nonlinearity._gmm_fit_full(x, k, reg, n_init=4, max_iter=500, tol=1e-6, random_state=0)
+    np.testing.assert_allclose(fit.weights_, gm.weights_, rtol=1e-7)
+    np.testing.assert_allclose(fit.means_, gm.means_, rtol=1e-7, atol=1e-9)
+    np.testing.assert_allclose(fit.covariances_, gm.covariances_, rtol=1e-7, atol=1e-9)
+    assert fit.bic_ == pytest.approx(gm.bic(x), rel=1e-9)
+    assert fit.score_ == pytest.approx(gm.score(x), rel=1e-9)
+
+
+def test_gmm_fit_full_rejects_what_sklearn_rejects():
+    x = _three_blob_cloud(2)
+    with pytest.raises(ValueError):
+        nonlinearity._gmm_fit_full(np.where(np.arange(x.size).reshape(x.shape) == 5, np.nan, x), 2, 1e-6)
+    with pytest.raises(ValueError):  # (a constant cloud: no positive-definite covariance at reg_covar = 0)
+        nonlinearity._gmm_fit_full(np.ones((50, 2)), 2, 0.0)
+
+
+def test_gmm2_from_labels_matches_sklearn():
+    from sklearn.mixture import GaussianMixture
+    x = _three_blob_cloud(2)
+    labels = (x[:, 0] > 2).astype(int)
+    reg = 1e-6 * np.mean(np.var(x, axis=0, ddof=1))
+    fit = nonlinearity._gmm2_from_labels(x, labels, reg)
+    groups = [labels == 0, labels == 1]
+    gm = GaussianMixture(n_components=2, covariance_type='full', reg_covar=reg, n_init=1, max_iter=500, tol=1e-6,
+                         weights_init=np.array([g.mean() for g in groups]),
+                         means_init=np.array([x[g].mean(axis=0) for g in groups]),
+                         precisions_init=np.array([np.linalg.inv(np.cov(x[g], rowvar=False) + reg * np.eye(2))
+                                                   for g in groups])).fit(x)
+    np.testing.assert_allclose(fit.means_, gm.means_, rtol=1e-7, atol=1e-9)
+    np.testing.assert_allclose(fit.covariances_, gm.covariances_, rtol=1e-7, atol=1e-9)
+    assert fit.score_ == pytest.approx(gm.score(x), rel=1e-9)
+    assert nonlinearity._gmm2_from_labels(x, np.zeros(len(x), int), reg) is None  # (an empty group)
+
+
 # ------------------------------------------------------------------ DVV: draws and statistics
 def test_dvv_draws_are_valid_reproducible_and_seed_dependent():
     n, n_dv, nsub, ns = 300, 290, 40, 6

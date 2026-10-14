@@ -1,8 +1,10 @@
 import logging
+import math
 import warnings
 from typing import Union
 
 import numpy as np
+import scipy.linalg
 from numpy.typing import ArrayLike
 from scipy.optimize import minimize_scalar
 from scipy.signal import correlate, find_peaks, welch as _welch
@@ -10,8 +12,9 @@ from scipy.spatial import cKDTree
 from scipy.spatial.distance import pdist, squareform
 from scipy.special import digamma, gammaln
 from scipy.stats import norm as _norm, spearmanr
+from scipy.linalg.lapack import dtrtrs as _lapack_trtrs
+from sklearn.cluster import kmeans_plusplus
 from sklearn.decomposition import PCA
-from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import KDTree, NearestNeighbors
 
 from ._nlpe import _nn_prediction_residuals
@@ -3517,11 +3520,206 @@ def _split_directions(m: int) -> np.ndarray:
     return dirs * np.where(dirs[:, [0]] < 0, -1.0, 1.0)
 
 
+class _GMMFit:
+    """
+    The result of a Gaussian mixture fit of :class:`_FullGMM`: the mixing ``weights_``, ``means_``
+    and ``covariances_`` of the components, the mean log-likelihood per point, ``score_``, and
+    the BIC, ``bic_``.
+    """
+
+    def __init__(self, weights, means, covariances, score, bic):
+        self.weights_, self.means_, self.covariances_ = weights, means, covariances
+        self.score_, self.bic_ = score, bic
+
+
+def _batched_cholesky_works() -> bool:
+    """Whether ``scipy.linalg.cholesky`` takes a stack of matrices (recent SciPy versions do)."""
+    try:
+        a = np.array([[[4.0, 1.0], [1.0, 3.0]], [[2.0, 0.5], [0.5, 1.0]]])
+        return bool(np.array_equal(scipy.linalg.cholesky(a, lower=True)[1],
+                                   scipy.linalg.cholesky(a[1], lower=True)))
+    except Exception:
+        return False
+
+
+_BATCHED_CHOLESKY = _batched_cholesky_works()
+
+
+class _FullGMM:
+    """
+    Expectation-maximization for full-covariance Gaussian mixtures with ``k`` components on the
+    points ``X`` (rows), which gives the fits of scikit-learn's ``GaussianMixture`` faster.
+
+    The updates are those of ``GaussianMixture(covariance_type='full', reg_covar=reg_covar)``
+    and its stopping rule (the mean log-likelihood changing by less than ``tol``, or ``max_iter``
+    iterations), evaluated by array operations that give the same floating-point result: on the
+    platform they were written on, to the last bit (``test_gmm_fit_full_matches_sklearn``). They
+    are several times faster because they avoid scikit-learn's per-call overhead (input validation,
+    array-API dispatch, SciPy's wrappers around LAPACK, and a Python loop over components in every
+    step), which dominates when the data are a thousand points in two or three dimensions and the
+    EM takes hundreds of iterations from each of ten starts. Each sum and product is arranged as
+    scikit-learn's is (the order in which components or points are summed, and how a matrix
+    product is laid out, set the rounding), so a change to how an update is evaluated can alter
+    the result in the last digits and, through the slow convergence of the EM, in more.
+
+    Methods raise ``ValueError`` where scikit-learn does (non-finite data, a component whose
+    covariance is not positive definite).
+    """
+
+    def __init__(self, X: np.ndarray, k: int, reg_covar: float):
+        X = np.ascontiguousarray(X, dtype=float)
+        if X.ndim != 2 or not np.isfinite(X).all():
+            raise ValueError('The data must be a finite 2-d array')
+        n, d = X.shape
+        if n < max(k, 2):
+            raise ValueError('Too few samples for the number of components')
+        self.X, self.Xt, self.k, self.n, self.d, self.reg_covar = X, np.ascontiguousarray(X.T), k, n, d, reg_covar
+        self.eye = np.eye(d)
+        self.diag_idx = np.arange(d) * (d + 1)
+        self.const = d * math.log(2 * math.pi)
+        # (sums over the few components, or coordinates, as NumPy sums a short row: from the first
+        # to the last in turn; eight or more are summed in blocks, so left to NumPy)
+        self.by_columns_k, self.by_columns_d = k < 8, 1 < d < 8
+
+    def parameters(self, resp):
+        """The sums ``nk``, ``means`` and ``covariances`` of the components given the (n, k) responsibilities."""
+        X, Xt, k = self.X, self.Xt, self.k
+        nk = resp.sum(axis=0) + 10 * np.finfo(float).eps
+        means = (resp.T @ X) / nk[:, np.newaxis]
+        dt = Xt[np.newaxis, :, :] - means[:, :, np.newaxis]  # (k, d, n)
+        covs = np.matmul(resp.T[:, np.newaxis, :] * dt, dt.transpose(0, 2, 1))
+        covs /= nk[:, np.newaxis, np.newaxis]
+        covs.reshape(k, -1)[:, self.diag_idx] += self.reg_covar
+        return nk, means, covs
+
+    def precisions_cholesky(self, covs):
+        """The Cholesky factors of the precision matrices, from the covariances."""
+        try:
+            if _BATCHED_CHOLESKY:
+                chol = scipy.linalg.cholesky(covs, lower=True)
+            else:
+                chol = np.array([scipy.linalg.cholesky(c, lower=True) for c in covs])
+        except np.linalg.LinAlgError:
+            raise ValueError('Fitting the mixture model failed because some components have '
+                             'ill-defined empirical covariance')
+        d = self.d
+        prec = np.empty((self.k, d, d))
+        for j in range(self.k):
+            # (the inverse of a Cholesky factor as SciPy's solve_triangular finds it for a
+            # factor that is not Fortran-ordered: from the transposed upper-triangular system)
+            inv_chol, info = _lapack_trtrs(chol[j].T, self.eye, lower=0, trans=1)
+            if info != 0:
+                raise ValueError('Singular Cholesky factor')
+            prec[j] = inv_chol.T
+        return prec
+
+    def weighted_log_prob(self, means, prec, weights):
+        """The (n, k) log of each component's weight times its density at each point."""
+        n, k, d = self.n, self.k, self.d
+        log_det = np.log(prec.reshape(k, -1)[:, ::d + 1]).sum(axis=1)
+        y = self.X @ prec.transpose(1, 0, 2).reshape(d, k * d)  # (the points seen from each component)
+        y -= np.matmul(means[:, np.newaxis, :], prec).reshape(k * d)
+        sq = np.square(y).reshape(n, k, d)
+        if self.by_columns_d:
+            lp = sq[:, :, 0] + sq[:, :, 1]
+            for i in range(2, d):
+                lp += sq[:, :, i]
+        else:
+            lp = sq.sum(axis=2)
+        lp += self.const
+        lp *= -0.5
+        lp += log_det
+        lp += np.log(weights)
+        return lp
+
+    def logsumexp(self, a):
+        """The log of the sum of the exponentials of each row of ``a``."""
+        n, k = self.n, self.k
+        if self.by_columns_k:
+            a_max = a[:, 0].copy()
+            for j in range(1, k):
+                np.maximum(a_max, a[:, j], out=a_max)
+            if np.isfinite(a_max).all():
+                diff = a - a_max[:, np.newaxis]
+                not_max = diff != 0
+                if np.count_nonzero(not_max) == n * (k - 1):  # (one maximum per row, the usual case)
+                    e = np.exp(diff)
+                    e *= not_max
+                    s = e[:, 0].copy()
+                    for j in range(1, k):
+                        s += e[:, j]
+                    return np.log1p(s) + a_max
+        a_max = a.max(axis=1, keepdims=True)
+        is_max = a == a_max
+        a = a.copy()
+        a[is_max] = -np.inf
+        m = is_max.astype(float).sum(axis=1, keepdims=True)
+        s = np.exp(a - np.where(np.isfinite(a_max), a_max, 0)).sum(axis=1, keepdims=True)
+        s = np.where(s == 0, s, s / m)
+        return (np.log1p(s) + np.log(m) + a_max)[:, 0]
+
+    def em(self, weights, means, prec, max_iter, tol):
+        """Iterate the E- and M-steps from the given parameters; returns the final mean log-likelihood and parameters."""
+        lb = -np.inf
+        covs = None
+        for _ in range(max_iter):
+            prev_lb = lb
+            wlp = self.weighted_log_prob(means, prec, weights)  # E-step
+            lpn = self.logsumexp(wlp)
+            lb = lpn.mean()
+            nk, means, covs = self.parameters(np.exp(wlp - lpn[:, np.newaxis]))  # M-step
+            weights = nk / nk.sum()
+            prec = self.precisions_cholesky(covs)
+            if abs(lb - prev_lb) < tol:
+                break
+        return lb, (weights, means, covs, prec)
+
+    def result(self, params):
+        """The :class:`_GMMFit` of the given ``(weights, means, covariances, precisions_cholesky)``."""
+        weights, means, covs, prec = params
+        score = float(self.logsumexp(self.weighted_log_prob(means, prec, weights)).mean())
+        k, d, n = self.k, self.d, self.n
+        n_params = int(k * d * (d + 1) / 2.0 + d * k + k - 1)
+        return _GMMFit(weights, means, covs, score, -2 * score * n + n_params * math.log(n))
+
+
+def _gmm_fit_full(X: np.ndarray, k: int, reg_covar: float, n_init: int = 10, max_iter: int = 500,
+                  tol: float = 1e-6, random_state: int = 0) -> _GMMFit:
+    """
+    Full-covariance Gaussian mixture with ``k`` components fitted by EM from ``n_init``
+    k-means++ initializations (the best log-likelihood is kept), together with its BIC.
+
+    This is the fit of ``sklearn.mixture.GaussianMixture(n_components=k, covariance_type='full',
+    reg_covar=reg_covar, n_init=n_init, init_params='k-means++', max_iter=max_iter, tol=tol,
+    random_state=random_state).fit(X)`` followed by ``.bic(X)``, with the same initializations
+    (see :class:`_FullGMM` for the EM).
+    """
+    gmm = _FullGMM(X, k, reg_covar)
+    rng = np.random.RandomState(random_state)
+    best_lb, best = -np.inf, None
+    with warnings.catch_warnings(), np.errstate(all='ignore'):
+        warnings.simplefilter('ignore')  # (replicates that do not converge are expected)
+        for _ in range(n_init):
+            # initialization: the k-means++ seeds as the hard assignment of their own points
+            _, seeds = kmeans_plusplus(gmm.X, k, random_state=rng)
+            resp = np.zeros((gmm.n, k))
+            resp[seeds, np.arange(k)] = 1
+            nk, means, covs = gmm.parameters(resp)
+            lb, params = gmm.em(nk / gmm.n, means, gmm.precisions_cholesky(covs), max_iter, tol)
+            if lb > best_lb or best_lb == -np.inf:
+                best_lb, best = lb, params
+        return gmm.result(best)
+
+
 def _gmm2_from_labels(y_embed: np.ndarray, labels: np.ndarray, reg_covar: float):
     """
     Two-component full-covariance Gaussian mixture fitted by EM, started from a hard
     assignment of the points (mixing weights, means and covariances of the two groups).
     Returns None if either group is too small to have a full-rank covariance or the fit fails.
+
+    The fit is that of ``GaussianMixture(n_components=2, covariance_type='full',
+    reg_covar=reg_covar, n_init=1, max_iter=500, tol=1e-6, weights_init=..., means_init=...,
+    precisions_init=...)`` (see :class:`_FullGMM` for the EM).
     """
     n, m = y_embed.shape
     groups = [labels == 0, labels == 1]
@@ -3531,13 +3729,17 @@ def _gmm2_from_labels(y_embed: np.ndarray, labels: np.ndarray, reg_covar: float)
     means = np.array([y_embed[g].mean(axis=0) for g in groups])
     precisions = np.array([np.linalg.inv(np.cov(y_embed[g], rowvar=False).reshape(m, m)
                                          + reg_covar * np.eye(m)) for g in groups])
-    gm = GaussianMixture(n_components=2, covariance_type='full', reg_covar=reg_covar, n_init=1,
-                         max_iter=500, tol=1e-6, weights_init=weights, means_init=means,
-                         precisions_init=precisions)
     try:
-        with warnings.catch_warnings():
+        with warnings.catch_warnings(), np.errstate(all='ignore'):
             warnings.simplefilter('ignore')  # (a fit that does not converge is still usable)
-            return gm.fit(y_embed)
+            # (the starting precisions must be symmetric and positive definite, and their
+            # Cholesky factors are found from the matrices turned upside down and back)
+            for p in precisions:
+                if not (np.all(np.isclose(p, p.T)) and np.all(np.linalg.eigvalsh(p) > 0.0)):
+                    return None
+            prec = np.stack([np.flip(scipy.linalg.cholesky(np.flip(p), lower=True)) for p in precisions])
+            gmm = _FullGMM(y_embed, 2, reg_covar)
+            return gmm.result(gmm.em(weights, means, prec, 500, 1e-6)[1])
     except (ValueError, np.linalg.LinAlgError):
         return None
 
@@ -3570,10 +3772,11 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
     ``bicgain``, despite having no distinct dynamical states; ``bicgain == 0`` (``bestK == 1``)
     is a clean "no mixture structure at all" signal.
 
-    The mixtures behind ``bestK`` and ``bicgain`` are fitted with scikit-learn's
+    The mixtures behind ``bestK`` and ``bicgain`` are those of scikit-learn's
     ``GaussianMixture`` (full covariances, k-means++ initialization, 10 initializations, at most
     500 iterations, covariance regularization of ``1e-6`` times the mean variance of the
-    embedded coordinates), seeded with 0. The two-component fit behind ``sep_mahal`` and the
+    embedded coordinates), seeded with 0, computed by an equivalent routine that is several
+    times faster for point clouds of this size. The two-component fit behind ``sep_mahal`` and the
     projection-pursuit statistic ``sep_pp`` involve no random numbers.
 
     Parameters
@@ -3656,11 +3859,7 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
     reg_val = 1e-6 * np.mean(np.var(y_embed, axis=0, ddof=1))
 
     def fit(k):
-        gm = GaussianMixture(n_components=k, covariance_type='full', reg_covar=reg_val, n_init=10,
-                             init_params='k-means++', max_iter=500, tol=1e-6, random_state=0)
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')  # (replicates that do not converge are expected)
-            return gm.fit(y_embed)
+        return _gmm_fit_full(y_embed, k, reg_val, n_init=10, max_iter=500, tol=1e-6, random_state=0)
 
     # Fit k = 1, ..., k_max, and record their BIC
     bic = np.full(k_max, np.nan)
@@ -3668,7 +3867,7 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
     for k in range(1, k_max + 1):
         try:
             models[k - 1] = fit(k)
-            bic[k - 1] = models[k - 1].bic(y_embed)
+            bic[k - 1] = models[k - 1].bic_
         except Exception:  # (e.g., an empty or near-singular component)
             if k == 1:  # no useful mixture structure can be assessed either
                 return np.nan
@@ -3707,7 +3906,7 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k_max: 
         fits = [_gmm2_from_labels(y_embed, start.astype(int), reg_val) for start in starts]
         fits = [gm for gm in fits if gm is not None]
         if fits:
-            gm2 = max(fits, key=lambda gm: gm.score(y_embed))
+            gm2 = max(fits, key=lambda gm: gm.score_)
             break
     if gm2 is None and k_max >= 2:
         gm2 = models[1]  # (last resort: the k-means++ fit from the BIC search)
