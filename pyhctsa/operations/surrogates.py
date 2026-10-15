@@ -19,8 +19,8 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str) -> dict:
     """Compute statistics on the surrogate distribution: the z-score of the series' value against
     the surrogates' (NaN if they are all equal), its distance from their median in interquartile ranges
-    (NaN if the interquartile range is 0) and a rank-based p-value (as hctsa, which no longer returns
-    a p-value or kernel density of the z-scored value, redundant with these)."""
+    (NaN if the interquartile range is 0) and a rank-based p-value (as in hctsa; a p-value or kernel
+    density of the z-scored value is not returned, being redundant with these)."""
     num_surrs = len(stat_surr)
     out = {}
     if np.isnan(stat_surr).any():
@@ -276,7 +276,7 @@ def surrogate_test(
             the Gaussian estimate of the automutual information. That is a function of
             the autocorrelation only, which random-phase surrogates preserve, so
             these tests cannot detect anything (their p-values are close to uniform for
-            every series); hctsa no longer registers them. The earlier names 'ami1' and
+            every series); hctsa does not register them. The earlier names 'ami1' and
             'fmmi' (which both meant the Gaussian estimate) are accepted as
             'amigaussian1' and 'fmmigaussian' with a deprecation warning.
 
@@ -297,8 +297,7 @@ def surrogate_test(
         NaN if the interquartile range is 0) and ``s_prank`` (rank-based p-value
         ``(k + 1) / (num_surrs + 1)``, with ``k`` the number of surrogates at least as extreme
         as the series in the tested direction; doubled and capped at 1 for two-sided tests).
-        As in hctsa, the p-value and kernel density of earlier versions (``s_p`` and ``s_f``)
-        are no longer returned.
+        As in hctsa, no Gaussian p-value or kernel density (``s_p``, ``s_f``) is returned.
 
     random_seed : int, str or None, optional
         The seed of the surrogates (see :func:`_make_surrogates`; ``'default'`` is 0, as in hctsa's
@@ -319,7 +318,7 @@ def surrogate_test(
     if isinstance(the_test_stat, str):
         the_test_stat = [the_test_stat]  # a bare string would be searched for substrings
     the_test_stat = list(the_test_stat)
-    # earlier names of the Gaussian-estimate statistics
+    # deprecated names of the Gaussian-estimate statistics
     for old, new in (('ami1', 'amigaussian1'), ('fmmi', 'fmmigaussian')):
         if old in the_test_stat:
             warnings.warn(

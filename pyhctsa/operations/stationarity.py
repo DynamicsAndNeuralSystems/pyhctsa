@@ -787,7 +787,7 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
         and ``min`` and of their absolute values. When the segments tile the series
         exactly, ``mean`` is the mean of the series divided by the mean segment variance,
         so it is zero up to rounding for a z-scored series and carries no information
-        there (hctsa no longer registers it).
+        there (hctsa does not register it).
     """
     y = np.asarray(y)
     N = len(y)
@@ -1128,7 +1128,7 @@ def _cumsum_bridge_stats(p: ArrayLike) -> Union[dict, float]:
     out = {}
     out['meanYC'] = np.mean(yC)
     coeffs_ols = polyfit(t0, yC, 1)
-    out['gradient'] = coeffs_ols[0] # ~ std(yC) too (r > 0.99 empirically); kept as the interpretable one
+    out['gradient'] = coeffs_ols[0] # ~ std(yC) too (nearly collinear); kept as the interpretable one
     out['intercept'] = coeffs_ols[1]
     resid_ols = yC - (coeffs_ols[0] * t0 + coeffs_ols[1])
 
@@ -1145,7 +1145,7 @@ def _cumsum_bridge_stats(p: ArrayLike) -> Union[dict, float]:
 
     # Robust vs. OLS regression: is the OLS trend outlier-driven or genuine drift?
     rob_coeffs, rob_stats = robust_linear_fit(t0, yC)
-    robust_gradient = rob_coeffs[1] # not output directly: r > 0.98 with out['gradient']
+    robust_gradient = rob_coeffs[1] # not output directly: nearly collinear with out['gradient']
     rob_resid = yC - (rob_coeffs[0] + rob_coeffs[1] * t0)
     se_grad = rob_stats['se'][1]
     out['gradientDiffSE'] = (out['gradient'] - robust_gradient) / se_grad if se_grad > 0 else np.nan
@@ -1776,7 +1776,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
           antisymmetric under time reversal, so zero in expectation for any
           time-reversible process
         - 'apen', 'sampen': approximate entropy (m=1, r=0.2) and sample entropy (m=2, r=0.1)
-          of each window (kept for backward compatibility; hctsa no longer offers them)
+          of each window (kept for backward compatibility; hctsa does not offer them)
 
         Default is ``'mean'``.
 
@@ -1790,7 +1790,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         - 'permen': normalized permutation entropy, PermEn(3, 1), of the sequence of local
           estimates
         - 'apen', 'sampen': approximate entropy (m=1, r=0.2) and sample entropy (m=2, r=0.15)
-          (kept for backward compatibility; hctsa no longer offers them)
+          (kept for backward compatibility; hctsa does not offer them)
 
         Default is ``'std'``.
 

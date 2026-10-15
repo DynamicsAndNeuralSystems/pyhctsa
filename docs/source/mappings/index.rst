@@ -11,9 +11,9 @@ functions and equivalent `pyhctsa` implementations for reference.
 
 .. note::
 
-   Names follow the current `hctsa` ``main`` branch. In August 2026, `hctsa` standardized the
+   Names follow the current `hctsa` ``main`` branch. `hctsa` has standardized the
    capitalization of 33 function names (e.g., ``DN_cv`` → ``DN_CV``,
-   ``EN_MS_LZcomplexity`` → ``EN_LZComplexity``, ``NL_TISEAN_d2`` → ``NL_d2``), and later renamed
+   ``EN_MS_LZcomplexity`` → ``EN_LZComplexity``, ``NL_TISEAN_d2`` → ``NL_d2``) and renamed
    ``SB_BinaryStretch`` → ``SB_BinaryGapHomogeneity``. A few ported functions (``CO_RM_AMInformation``,
    ``DN_HighLowMu``, ``SY_DynWin``) have since been removed from `hctsa` and are listed under their last name.
 

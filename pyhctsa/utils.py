@@ -876,8 +876,6 @@ def get_tau(y: ArrayLike, rule: Union[int, str] = 'ac1e') -> Union[int, float]:
           suppresses minima that are only estimator noise. If the ACF never falls to 1/e, the
           AMI is searched up to ``N // 10`` lags for its first local minimum, or else its first
           drop below ``-0.5 * log(1 - exp(-2))`` (the Gaussian AMI at a correlation of 1/e).
-          (Earlier versions used the raw AMI of the raw data, which was unstable for quantized
-          series and for series with shallow, noise-sized AMI minima.)
         - ``'mi-gaussian'``: the first local minimum of the Gaussian AMI (the rule 'mi' meant
           in earlier versions of hctsa; a monotonic function of |ACF|, so not a nonlinear
           timescale);

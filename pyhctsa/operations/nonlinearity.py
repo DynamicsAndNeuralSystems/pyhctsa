@@ -840,8 +840,7 @@ def local_density(y: ArrayLike, nnr: int = 3,
     keeps the statistics well behaved (the density itself is heavy-tailed). To
     avoid infinite densities when there are repeated values (zero neighbor
     distance, as in quantized or held series), distances are smoothed as
-    ``sqrt(r^2 + (0.01*median(r[r > 0]))^2)``. (hctsa previously used TSTOOL's
-    ``localdensity`` and then ``1/r^m``; neither is used any more.)
+    ``sqrt(r^2 + (0.01*median(r[r > 0]))^2)``.
 
     Parameters
     ----------
@@ -1405,9 +1404,8 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
 
     Computes the correlation sum, :math:`C(\\epsilon)`, the fraction of pairs of
     time-delay-embedded points closer than :math:`\\epsilon`, by the
-    Grassberger-Procaccia algorithm [1]_, using TISEAN's ``d2`` (hctsa no longer
-    uses TSTOOL's ``corrsum``/``corrsum2``). For a low-dimensional attractor,
-    :math:`\\ln C` rises linearly with :math:`\\ln \\epsilon`, with a slope equal to the
+    Grassberger-Procaccia algorithm [1]_, using TISEAN's ``d2``. For a low-dimensional
+    attractor, :math:`\\ln C` rises linearly with :math:`\\ln \\epsilon`, with a slope equal to the
     correlation dimension. The outputs summarize the range of :math:`\\ln \\epsilon`
     and :math:`\\ln C(\\epsilon)`, and an iteratively re-weighted least squares (robust)
     linear fit to the log-log plot.
@@ -1565,12 +1563,12 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
 
     the mean taken over all pairs ``(i, j)`` of delay vectors with max-norm distance
     :math:`r_{ij} < \\epsilon_{up}`, excluding pairs closer in time than the Theiler
-    window and exact duplicate vectors. It is computed natively (a KD-tree range search
-    at the one radius needed), exactly at ``eup`` from the pair distances themselves,
-    rather than from the logarithmically binned correlation sum of TISEAN's ``d2``
-    followed by ``c2t`` as in earlier versions of hctsa. Kantz and Schreiber's
-    recommendation of half a standard deviation for the length scale is used the same
-    way in :func:`tisean_d2`.
+    window and exact duplicate vectors. As in hctsa, it is computed natively (a KD-tree
+    range search at the one radius needed), exactly at ``eup`` from the pair distances
+    themselves, rather than from the logarithmically binned correlation sum of TISEAN's
+    ``d2`` followed by ``c2t`` (the same estimator, evaluated at the first bin above
+    ``eup``). Kantz and Schreiber's recommendation of half a standard deviation for the
+    length scale is used the same way in :func:`tisean_d2`.
 
     References
     ----------
@@ -1961,8 +1959,7 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
     minimizing the mean absolute error of a linear fit less 0.02 per point spanned) for
     ``m`` = 1, 2, 3 and the embedding dimension ``m``, and the embedding dimension with the best
     scaling fit. Unlike hctsa, which shells out to installed TISEAN binaries, this runs the
-    vendored ``d2`` and an in-process port of ``boxcount`` (hctsa's TSTOOL-based version of
-    this operation is no longer used).
+    vendored ``d2`` and an in-process port of ``boxcount``.
 
     Parameters
     ----------
@@ -2622,10 +2619,8 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         "from below", ``-C0``) and ``'min'`` those heading toward a local
         minimum (descending, ``-C1``). Default is ``'max'``.
 
-        hctsa's operation previously used TSTOOL's ``poincare``, which cut a
-        hyperplane orthogonal to the local tangent vector at a chosen reference
-        point -- a construction TISEAN has no equivalent for -- and ``ref`` was
-        repurposed to pick the crossing direction when it moved to TISEAN.
+        The name ``ref`` follows hctsa's signature; it selects the crossing
+        direction, not a reference point.
     tau : int or str, optional
         The time-delay of the embedding: an integer, or a rule understood by
         :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
@@ -3262,10 +3257,10 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     (excluding a Theiler window of ``past`` samples either side), and the time offset ``T`` of
     each neighbor from the reference point is recorded. The histogram of these offsets over
     the ``num_lags`` lags beyond the Theiler window, ``T = past + 1, ..., past + num_lags``
-    (the "return-time profile"), is analyzed. This follows TSTOOL's ``return_time``
-    (which hctsa previously called), with one change: each lag's count is divided by its
-    expected count if neighbors were placed at random among the valid (Theiler-excluded)
-    candidates, rather than by TSTOOL's ``2 * nnr * (N - T)``, so that the profile is about 1
+    (the "return-time profile"), is analyzed. This follows TSTOOL's ``return_time``, with
+    one change: each lag's count is divided by its expected count if neighbors were placed
+    at random among the valid (Theiler-excluded) candidates, rather than by TSTOOL's
+    ``2 * nnr * (N - T)``, so that the profile is about 1
     at every lag for an uncorrelated process at any series length (TSTOOL's normalization
     scaled as 1/N). Values above 1 mark lags at which the trajectory preferentially returns
     to its neighborhood. The profile is closely related to the tau-recurrence rate of
@@ -3775,16 +3770,14 @@ def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
     absolute terms (its RBF feature space is far higher-dimensional than the embedding
     itself), so the kernel-to-linear ratios (``top2_ratio``, ``nto80_ratio``,
     ``nto50_ratio``) are below 1 (``top2_ratio``) or at least 1 (``nto*_ratio``) for every
-    series. In simulations (N = 1000), the ratios are nearer 1 for series on a curved
-    low-dimensional manifold than for the linear (Gaussian) process with the same power
-    spectrum: for the logistic and Henon maps, ``top2_ratio`` is 0.77 and 0.73 against 0.52
-    and 0.50 for their phase-randomized surrogates (``tau = 'ac'``, ``m = 3``). The signal is
-    weaker for the Lorenz system and absent for a Roessler oscillator, which is close to
-    linear at this sampling. The ratios are not a stand-alone nonlinearity test, however: they
-    also rise with linear autocorrelation (``top2_ratio`` is about 0.52 for white noise and AR(1)
-    with phi = 0.5, but 0.61-0.71 for AR(1) with phi = 0.99), so a smooth linear process can look
-    more 'nonlinear' than a chaotic map. Compare against surrogates to isolate nonlinearity.
-    ``std_ratio`` did not separate nonlinear from linear series consistently.
+    series. The ratios tend to be nearer 1 for series on a curved low-dimensional manifold
+    (such as the logistic and Henon maps) than for the linear (Gaussian) process with the same
+    power spectrum; the difference is weaker for flows such as the Lorenz system, and can be
+    absent for a near-linear oscillator. The ratios are not a stand-alone nonlinearity test,
+    however: they also rise with linear autocorrelation (strongly autocorrelated AR(1)
+    processes have higher ratios than white noise), so a smooth linear process can look more
+    'nonlinear' than a chaotic map. Compare against surrogates to isolate nonlinearity.
+    ``std_ratio`` does not separate nonlinear from linear series consistently.
 
     References
     ----------
@@ -3810,7 +3803,7 @@ def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
         eigendecomposition costs O(N^3). Longer embeddings are reduced to their first ``max_n``
         points (a memory/time cap, not a convergence point: the spectrum estimate keeps
         sharpening with more points); ``'full'`` disables this, with a warning above 5000
-        points, where the eigendecomposition takes several seconds. Default is 2000.
+        points, where the eigendecomposition becomes slow. Default is 2000.
 
     Returns
     -------
@@ -3919,9 +3912,8 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
     dimension.
 
     Time-delay embeds the series in ``d = 1, ..., m`` dimensions and partitions the space into
-    boxes of side ``epsilon``, using TISEAN's ``boxcount`` (this operation previously used
-    TSTOOL's ``corrdim``). With ``p_i`` the fraction of embedded points in box ``i``,
-    ``boxcount`` gives the order-2 Renyi (collision) entropy
+    boxes of side ``epsilon``, using TISEAN's ``boxcount``. With ``p_i`` the fraction of
+    embedded points in box ``i``, ``boxcount`` gives the order-2 Renyi (collision) entropy
     ``H(epsilon, d) = -log(sum_i p_i^2)`` for a sweep of ``num_bins`` box sizes, from the full
     range of the series downward, and the increment over the ``(d-1)``-dimensional embedding,
     ``I(epsilon, d) = H(epsilon, d) - H(epsilon, d-1)`` (defined for ``d = 2, ..., m``; at
@@ -3932,10 +3924,10 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
 
     The increment ``I`` approaches the entropy rate of the process (the K2 entropy, per delay
     step) rather than a slope against ``log(epsilon)``, so these features are entropy-rate-like,
-    not correlation dimensions. (This function was previously named NL_BoxCorrDim in hctsa,
-    after the TSTOOL correlation-dimension code it replaced.) hctsa registers ``meanr``,
-    ``medianr``, ``minr`` and ``meanchr`` at ``r`` = 2, 3, 4, 6, 8, 11, 14, 17, 20, 24, 28, 32,
-    36 of ``num_bins = 50`` (2 to 429 boxes per axis): coarse scales change quickly with ``r``
+    not correlation dimensions (despite hctsa's former name for this operation,
+    NL_BoxCorrDim). hctsa registers ``meanr``, ``medianr``, ``minr`` and ``meanchr`` at
+    ``r`` = 2, 3, 4, 6, 8, 11, 14, 17, 20, 24, 28, 32, 36 of ``num_bins = 50``
+    (2 to 429 boxes per axis): coarse scales change quickly with ``r``
     and are sampled densely; neighboring finer scales are nearly redundant; for flows (long
     delays) the informative scales lie beyond ``r = 18``; and beyond ``r = 36`` the
     5-dimensional embedding saturates (``I = 0``) for series of a few thousand points.
@@ -3973,8 +3965,8 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
         - ``medianstretch``, ``iqrstretch``: median and interquartile range of ``I`` over all
           length scales and embedding dimensions ``2, ..., m``
 
-        (The minima over all length scales, formerly ``mind<d>`` and ``minstretch``, were removed:
-        the coarsest scale is a single box, where ``I = 0``, so they were always 0.)
+        (The minima over all length scales are not returned: the coarsest scale is a single box,
+        where ``I = 0``, so they are always 0.)
     """
     y = np.asarray(y, dtype=float).ravel()
     if num_bins < 2:

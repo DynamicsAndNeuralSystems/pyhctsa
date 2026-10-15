@@ -94,9 +94,10 @@ def hrv_classic(y: ArrayLike) -> dict:
     ``sigD = median(|d - median(d)|)/0.6745`` with ``d = diff(y)`` [1]. If ``sigD`` is
     at rounding-error level (``<= 1e-10*std(y)``, i.e. more than half the increments are
     equal) the mean absolute deviation about the median times ``sqrt(pi/2)`` is used
-    instead; if that is also negligible (all increments equal) all five are NaN. These
-    replace the earlier fixed-threshold pnn5, pnn10, pnn20, pnn30 and pnn40, which were
-    almost always ~1 for a z-scored series.
+    instead; if that is also negligible (all increments equal) all five are NaN. Thresholds
+    relative to the spread of the increments are used because fixed thresholds (such as
+    pNN5 to pNN40, in the units of the series) give proportions close to 1 for almost every
+    z-scored series.
 
     2. **Frequency-domain measures**
     Power spectral density ratios computed over standard frequency bands (e.g., LF, HF) [2].

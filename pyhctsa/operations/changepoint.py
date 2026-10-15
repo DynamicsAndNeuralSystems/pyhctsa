@@ -353,7 +353,7 @@ def _num_changes_penalized(J: np.ndarray, t_est: np.ndarray, N: int, tau: float 
     Zhang, N. R. and Siegmund, D. O. (2007) "A modified Bayes information criterion with
     applications to the analysis of comparative genomic hybridization data", Biometrics
     63(1):22-32. The use of the penalty with a variance-inflation adjustment, and its
-    unit multiplier, were calibrated on simulations (see ``cleanroom/wvarchg_calibration``).
+    unit multiplier, were calibrated on simulations.
     """
     best, kbest = np.inf, 0
     for k in range(len(J)):
@@ -402,10 +402,9 @@ def _wvarchg(y: np.ndarray, K: int, d: int) -> int:
     D. O. (2007) Biometrics 63(1):22-32, applied to the contrast divided by the
     variance-inflation factor of the signal. Calibrated by simulation so that, for
     stationary noise (white, AR(1), fGn, heavy-tailed) passed through the same wavelet
-    pipeline, the probability of reporting at least one change point is about 5%, for
-    N = 500..5000 (see ``cleanroom/wvarchg_calibration/report.md``). The earlier
-    penalized-contrast rule of Lavielle (2005) (:func:`_lavielle_num_changes`, S = 0.75)
-    reported at least one change point in roughly 75% of stationary series.
+    pipeline, the probability of reporting at least one change point is about 5%. The
+    penalized-contrast rule of Lavielle (2005) (:func:`_lavielle_num_changes`) is not used
+    for this: it reports spurious change points in most stationary series.
     """
     y = np.asarray(y, dtype=float).ravel()
     if y.size < 2 or not np.all(np.isfinite(y)) or K < 1:

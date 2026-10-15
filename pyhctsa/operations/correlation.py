@@ -535,9 +535,8 @@ def falling_sticks(y: ArrayLike) -> dict:
     out['propCase2_all'] = _fall_prop_case2(case_pos + case_neg)
 
     # Distribution shape
-    # (The 90th percentile is omitted: across two independent redundancy-check
-    # datasets it landed exactly on the pi/2 flat-fall spike every time, since
-    # most series have >=10% flat falls -- it carries no information.)
+    # (The 90th percentile is omitted: it typically lands exactly on the pi/2
+    # flat-fall spike, since flat falls are common, so it carries no information.)
     if len(all_angles) >= 2 and not _fall_is_constant(all_angles):
         out['skewness_all'] = skew(all_angles)
         out['kurtosis_all'] = kurtosis(all_angles, fisher=False)
@@ -1209,9 +1208,7 @@ def compare_min_ami(y: ArrayLike, bin_method: str = 'std1',
         of the automutual information function. ``nprompeaks`` is the number of prominent
         peaks (local maxima) of the first-minimum lag as a function of the number of bins: peaks
         that rise at least 5% of the range of the lags above the higher of the valleys on
-        either side of them, so a small fluctuation does not add a peak (it replaces the earlier
-        ``nlocmax``, a count of every local maximum more than one standard deviation above the
-        mean).
+        either side of them, so a small fluctuation does not add a peak.
     """
     y = np.asarray(y)
     n = len(y)
@@ -2038,7 +2035,7 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
         A dictionary containing various statistics of the constructed time series
         (``ac1``, ``ac2``, ``ac3``, ``tau``, ``std``, ``median``, ``mean``, ``iqr``,
         ``iqronrange``, ``mode_val``, ``mode``, ``hist_ent``, ``statav5_m``, ``statav5_s``).
-        As in hctsa, the maximum (``max``) is no longer returned. If no point has any neighbor
+        As in hctsa, the maximum (``max``) is not returned. If no point has any neighbor
         within ``r``, a fixed set of values is returned (``std``, ``median``, ``mean``, ``iqr``,
         ``hist_ent`` = 0; ``mode_val`` = 1; ``mode`` = 0; the rest NaN).
     """
@@ -3331,11 +3328,11 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
         (see :func:`~pyhctsa.utils.theiler_window`). Default ``('ac', 1)``.
     max_n : int or 'full', optional
         The maximum number of embedded points used for the skewness statistic (default 10000;
-        ``'full'`` to disable). A legacy cap, from when the skewness double sum was evaluated
-        through an N x N Gram matrix (O(N^2)); it is now evaluated exactly through the
-        third-moment tensor in O(N d^3), so the cap is kept only so that values are unchanged
-        from earlier computations. The mean, covariance, kurtosis and KS statistic always use the
-        full embedded series.
+        ``'full'`` to disable). Only the first ``max_n`` embedded points enter the skewness, as
+        in hctsa (where the cap bounds an N x N Gram matrix). Here the skewness double sum is
+        evaluated exactly through the third-moment tensor in O(N d^3), so the cap does not save
+        time; it keeps values consistent with hctsa. The mean, covariance, kurtosis and KS
+        statistic always use the full embedded series.
 
     Returns
     -------
@@ -3355,9 +3352,9 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     Only raw statistics are returned, not p-values. Mardia's classical asymptotic null
     distributions assume the N embedded points are iid draws, but consecutive embedded vectors
     overlap in m-1 coordinates and are strongly autocorrelated, which inflates the naive test
-    statistics (empirically up to about 30% false positives at a nominal 5% level on a
-    linear-Gaussian AR(1) process, worse at higher m). For significance testing, compare to the
-    distribution over surrogates.
+    statistics (giving far more false positives than the nominal level even for a
+    linear-Gaussian AR(1) process, and more so at higher m). For significance testing, compare
+    to the distribution over surrogates.
 
     The KS statistic is computed against the exact chi^2_m CDF; hctsa evaluates it on a table of
     the CDF at values rounded to 1e-6, so the two agree to about 1e-6.
@@ -3422,7 +3419,7 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     # O(N d^3), and the pairs inside the band |i - j| <= w (which the mean excludes) are
     # subtracted in O(N w).
     if max_n != 'full' and n_emb > max_n:
-        X_skew = X[:, :int(max_n)]  # legacy cap, kept so values are unchanged
+        X_skew = X[:, :int(max_n)]  # hctsa's cap, kept so values match hctsa
     else:
         X_skew = X
     n_skew = X_skew.shape[1]

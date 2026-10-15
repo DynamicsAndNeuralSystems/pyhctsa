@@ -774,9 +774,9 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
 
     # Count crossings of the log spectrum with a horizontal line set a fraction of the way from
     # min(log S) to max(log S). On the linear spectrum a threshold at a fixed fraction of max(S) sits far
-    # above the noise floor whenever there is one dominant peak (and the old ncross_f* fields were also
-    # mislabelled: ncross_f05 was assigned twice); differences in log S are power ratios (dB), so a
-    # fraction of the log range is a genuinely relative 'how far up from the noise floor' level.
+    # above the noise floor whenever there is one dominant peak; differences in log S are power
+    # ratios (dB), so a fraction of the log range is a genuinely relative 'how far up from the
+    # noise floor' level.
     log_range = np.max(log_s) - np.min(log_s)
     ncrossfn_rel_log = lambda frac: np.sum(sign_change(log_s - (np.min(log_s) + frac * log_range)))
     out['ncross_log_f05'] = ncrossfn_rel_log(0.05)

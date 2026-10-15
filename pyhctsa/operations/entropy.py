@@ -203,7 +203,7 @@ def distribution_entropy(
             # uses the specified width (the standard deviation of the Gaussian kernel). NB: a
             # fixed absolute bandwidth makes the density estimate inconsistent (for consistency
             # the bandwidth must shrink with the sample size), so the smoothness of the
-            # estimated density, and hence its entropy, drifts with N: hctsa no longer registers
+            # estimated density, and hence its entropy, drifts with N: hctsa does not register
             # the fixed-bandwidth settings, but the option remains for a specific smoothing scale.
             bw = float(num_bins)
         else:
@@ -886,8 +886,8 @@ def permutation_entropy_complexity(y: ArrayLike, m: int = 2, tau: Union[int, str
     At ``m = 2`` there are only two ordinal states, so H and C are both unimodal,
     symmetric functions of a single probability: they are then forced to be near-perfect
     reparameterizations of one another regardless of the input data, making
-    'jsComplexity' redundant with plain permutation entropy at that order. ``m = 3`` was
-    also found redundant on real-world data; only ``m = 4`` and ``m = 5`` are registered
+    'jsComplexity' redundant with plain permutation entropy at that order. ``m = 3`` is
+    also largely redundant in practice; only ``m = 4`` and ``m = 5`` are registered
     in the default hctsa feature set.
 
     References
@@ -1771,7 +1771,7 @@ def complexity_invariant_distance(y: ArrayLike) -> dict:
     y = np.asarray(y)
 
     # Original definition (Table 2 of the cited paper). sum -> mean to deal with
-    # non-equal time-series lengths (now scales properly with length).
+    # non-equal time-series lengths (so it scales properly with length).
     def f_CE1(v):
         return np.sqrt(np.mean(np.power(np.diff(v), 2)))
 
@@ -1823,7 +1823,7 @@ def lempel_ziv_complexity(x: ArrayLike, n_bits: int = 2,
         Default is `None`.
 
     rng : int, optional
-        Unused (ties are now broken deterministically by average ranks); kept for
+        Unused (ties are broken deterministically by average ranks); kept for
         backward compatibility. Default is 0.
 
     Returns

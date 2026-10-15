@@ -11,7 +11,7 @@ from ..robust import bf_hist_edges, bf_tie_break_noise
 from ..ksg import ksg_mi
 
 # hctsa BF_TieBreakNoise: tiny jitter from hctsa's portable BF_Random stream (pyhctsa.robust),
-# so the draws are reproducible across platforms. Kept under its old private name for the
+# so the draws are reproducible across platforms. Aliased to a private name for the
 # callers in this module.
 _tie_break_noise = bf_tie_break_noise
 
