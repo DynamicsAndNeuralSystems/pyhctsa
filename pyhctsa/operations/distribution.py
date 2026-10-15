@@ -28,7 +28,7 @@ def cumulants(x: ArrayLike, cum_what_may: str = 'skew1') -> float:
         The type of higher order moment:
             - 'skew1': skewness
             - 'skew2': skewness correcting for bias
-            - 'kurt1': kurtosis
+            - 'kurt1': kurtosis (3 for a Gaussian, not the excess kurtosis)
             - 'kurt2': kurtosis correcting for bias
 
     Returns
@@ -37,15 +37,15 @@ def cumulants(x: ArrayLike, cum_what_may: str = 'skew1') -> float:
         The specified higher order moment.
     """
     if cum_what_may == 'skew1':
-        return skew(x, bias=False)
-    if cum_what_may == 'skew2':
         return skew(x, bias=True)
+    if cum_what_may == 'skew2':
+        return skew(x, bias=False)
     if cum_what_may == 'kurt1':
-        return kurtosis(x, bias=True, fisher=True)
+        return kurtosis(x, bias=True, fisher=False)
     if cum_what_may == 'kurt2':
-        return kurtosis(x, bias=False, fisher=True)
+        return kurtosis(x, bias=False, fisher=False)
     else:
-        return ValueError('Unknown cumulant. Choose either skew1, skew2, kurt1, or kurt2.')
+        raise ValueError('Unknown cumulant. Choose either skew1, skew2, kurt1, or kurt2.')
 
 @dict_output
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
