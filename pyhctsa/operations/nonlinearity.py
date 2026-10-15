@@ -81,14 +81,15 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     Returns
     -------
     float or dict
-        If ``just_best``, the embedding dimension (``maxm + 1`` if the fraction never
+        If ``just_best``, the embedding dimension (one more than the largest dimension
+        computed, ``maxm + 1`` unless TISEAN stopped early, if the fraction never
         falls below ``bestp``). Otherwise a dict with, for ``i = 1, ..., maxm``, ``pfnn_i``
         (the fraction of false nearest neighbors) and ``nHood2_i`` (the typical,
         root-mean-square, distance from a point to its nearest neighbor; NaN at a
         dimension for which TISEAN found too few neighbors); ``minpfnn``, ``meanpfnn``,
         ``stdpfnn``, ``maxnHood2``, ``meannHood2``; ``firstunder09`` ... ``firstunder005``
-        (the first dimension at which the fraction is below 90%, 80%, ..., 10%, 5%; ``maxm
-        + 1`` if never); ``max1stepchange`` (the largest absolute change in the fraction
+        (the first dimension at which the fraction is below 90%, 80%, ..., 10%, 5%; one more
+        than the largest dimension computed if never); ``max1stepchange`` (the largest absolute change in the fraction
         between consecutive dimensions), ``mdrop`` (the mean change per added dimension)
         and ``pdrop`` (the fraction of decreasing steps minus the fraction of increasing
         steps). NaN if the series is too short (N < 10), the time delay or Theiler window
@@ -512,9 +513,11 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
     """
     Normalized drop-one-out constant interpolation nonlinear prediction error.
 
-    Computes the nlpe for a time-delay embedded time series using Michael Small's
-    code, nlpe [1]. Neighbors within a Theiler window in time are excluded from
-    the search for the nearest neighbor of each embedded point.
+    Computes the nlpe of Small [1] for a time-delay embedded time series, using an
+    independent (clean-room) implementation of the drop-one-out nearest-neighbor
+    predictor (:func:`pyhctsa.operations._nlpe._nn_prediction_residuals`). The value
+    following each embedded state is predicted by the value that followed its nearest
+    neighbor, with neighbors within a Theiler window in time excluded from the search.
 
     Modifications by Joshua B. Moore for incorporating into pyhctsa.
 
@@ -626,10 +629,13 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
     """
     Optimal delay time using the method of Parlitz and Wichard.
 
-    For a set of randomly chosen reference points, the nearest neighbors in value
-    (one just below and one just above the reference value) are found, and the
-    mean absolute difference between the following values of the neighbor and
-    reference is tracked as a function of the delay.
+    For each of 256 reference points (spread evenly over the sorted values of the
+    series by a deterministic low-discrepancy sequence), the nearest neighbors in
+    value (one just below and one just above the reference value) are found.
+    The absolute differences between the following values of each neighbor and
+    the reference are summed over the two neighbors and averaged over the
+    reference points, giving a curve ``tau`` over delays 0, 1, ..., ``max_delay``
+    (twice the mean separation of a neighbor from the reference).
 
     Method as implemented in the TSTOOL package for nonlinear time-series analysis (C.
     Merkwirth, U. Parlitz, I. Wedekind, D. Engster and W. Lauterborn; GNU GPL), here
@@ -1420,8 +1426,11 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
     y : array-like
         Input time series.
     nref : int or float, optional
-        Number of (randomly chosen) reference points: ``-1`` uses all points, a
-        value in (0, 1) is a fraction of the time-series length. Default is 500.
+        Maximum number of pairs of points counted at each length scale (TISEAN's
+        ``d2 -N``, ``maxfound``), not a number of reference points: a length scale that
+        has this many pairs (at the largest embedding dimension) is no longer updated.
+        ``-1`` counts all pairs, a value in (0, 1) is a fraction of the time-series
+        length. Default is 500.
     r : float, optional
         Maximum search radius, in units of ``std(y) * sqrt(m)`` where ``m`` is the
         embedding dimension. Default is 0.05.
@@ -1734,7 +1743,9 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     :math:`\\exp(\\psi(k)/D)` as :math:`\\gamma \\to 0`), up to an overall scale factor that is
     fitted separately. :math:`D(\\gamma)` is the value that best matches the measured moments
     :math:`M(k_{min}..k_{max})` under a robust :math:`\\log(1 + e^2/2)` error, found by nested
-    bounded one-dimensional minimizations. Finally :math:`q(\\gamma) = 1 - \\gamma / D(\\gamma)`.
+    bounded one-dimensional minimizations. The error has a fixed width (1) in the units of
+    the moments, so :math:`D(\\gamma)` depends on the scale of the series. Finally
+    :math:`q(\\gamma) = 1 - \\gamma / D(\\gamma)`.
     The outputs summarize :math:`D` and :math:`q` across the moments, and a straight-line
     fit of :math:`D` against :math:`q`.
 
@@ -1756,8 +1767,9 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     kmax : int, optional
         Maximum number of neighbors for each reference point. Default is 10.
     nref : int or float, optional
-        Number of randomly chosen reference points: ``-1`` uses all points, a value in
-        (0, 1) is a proportion of the embedded points. Default is 0.2.
+        Number of reference points, spread evenly over the embedded series (a deterministic
+        subset): ``-1`` uses all points, a value in (0, 1) is a proportion of the embedded
+        points. Default is 0.2.
     gstart, gend : float, optional
         Starting and ending values of the moment order. Defaults are 1 and 10.
     past : int, float, or ``['ac', k]``, optional
@@ -2308,13 +2320,13 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
         ntv: Union[int, None] = None, num_surr: int = 10, random_seed: Union[int, None] = 0,
         tau: Union[int, str] = 1) -> Union[dict, float]:
     """
-    How well nearby delay vectors predict the next value, compared with surrogates.
+    How well nearby delay vectors predict their target value, compared with surrogates.
 
     The delay vector variance (DVV) method [1]_ for detecting determinism and nonlinearity. A
     delay vector is a run of ``m`` values (spaced ``tau`` apart) and its target is the value
-    that follows. For each of ``num_dvs`` randomly chosen reference vectors, the variance of the
-    targets of all delay vectors within a distance ``rd`` of the reference is found (only if at
-    least 30 vectors lie within ``rd``). The mean of these variances over the references, divided
+    ``tau`` samples after the last of them. For each of ``num_dvs`` randomly chosen reference
+    vectors, the variance of the targets of all delay vectors within a distance ``rd`` of the
+    reference is found (only if at least 30 vectors lie within ``rd``). The mean of these variances over the references, divided
     by the variance of the series, is the target variance; it is computed at ``ntv`` values of
     ``rd`` that span the mean distance between delay vectors plus or minus ``nd`` standard
     deviations. The same curve is found for ``num_surr`` iterated amplitude-adjusted Fourier
@@ -2777,7 +2789,7 @@ def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
     y : array-like
         The input time series.
     L : int, optional
-        The window length (default: floor(N/4)). Must satisfy
+        The window length (default: min(floor(N/4), 200)). Must satisfy
         ``4 <= L <= floor(N/2)``.
 
     Returns
@@ -2993,7 +3005,7 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
     set of recurrence times.
 
     The neighborhood radius is set once, from the full embedded series, to the `rr`-quantile
-    of a random subsample of pairwise distances; the same radius is then reused for every
+    of a subsample of pairwise distances; the same radius is then reused for every
     segment, so that segment-to-segment differences reflect the dynamics rather than a
     re-calibrated threshold. The Theiler band around each point counts as recurrent, so
     that no white line spans the excluded band.
@@ -3001,8 +3013,8 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
     References
     ----------
     .. [1] Ngamga, E.J., Nandi, A., Ramaswamy, R., Romano, M.C., Thiel, M. and Kurths, J.
-        "Recurrence-time distributions in strange nonchaotic systems", Phys. Rev. E
-        75, 036222 (2007).
+        "Recurrence analysis of strange nonchaotic dynamics", Phys. Rev. E
+        75, 036222 (2007), doi: 10.1103/PhysRevE.75.036222.
 
     Parameters
     ----------
@@ -3134,7 +3146,7 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
         ``['ac', 1]``.
     rr : float, optional
         The target recurrence rate used to set the neighborhood radius: the radius is the
-        ``rr``-quantile of a random subsample of pairwise distances in the embedded space
+        ``rr``-quantile of a subsample of pairwise distances in the embedded space
         (standard RQA practice, to fix the recurrence rate for comparability across
         series). Default is 0.1.
     lmin : int, optional
@@ -3316,9 +3328,11 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
         - ``pzeros``: the proportion of lags with no neighbors
         - ``pg05``: the proportion of lags at which the profile exceeds half its maximum
         - ``meanpeaksep``, ``maxpeaksep``, ``minpeaksep``, ``rangepeaksep``, ``stdpeaksep``:
-          statistics of the spacings between successive crossings of half the maximum, as a
-          proportion of the number of lags (``stdpeaksep`` is divided by the square root of the
-          number of lags instead); all are NaN with fewer than 3 crossings
+          statistics of the intervals between successive crossings of half the maximum (which
+          are alternately the widths of peaks and the gaps between them, those shorter than
+          0.4 of the longest interval being dropped), as a proportion of the number of lags
+          (``stdpeaksep`` is divided by the square root of the number of lags instead); all
+          are NaN with fewer than 3 crossings
         - ``statrtys``, ``statrtym``: the ratio of the standard deviation (``statrtys``) or mean
           (``statrtym``) of the profile over the first half of the lags to that over the second
         - ``hhist``: the entropy of the profile as a distribution over lags

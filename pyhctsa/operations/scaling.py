@@ -126,9 +126,9 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
         Statistics of fitting a linear function to a plot of log(F) as
         a function of log(tau), and for fitting two straight lines to the same data,
         choosing the split point at tau = tau_{split} as that which minimizes the
-        combined fitting errors. The lines are fitted by the Theil-Sen method (the
-        median of the slopes between all pairs of points, a robust estimator with a
-        closed form: :func:`pyhctsa.robust.bf_theil_sen`).
+        combined fitting errors of two least-squares lines. The lines reported are then
+        fitted by the Theil-Sen method (the median of the slopes between all pairs of
+        points, a robust estimator with a closed form: :func:`pyhctsa.robust.bf_theil_sen`).
 
         - ``linfitint``, ``alpha``, ``se1``, ``se2``, ``ssr``, ``resac1``: the intercept,
           slope (the scaling exponent alpha), standard errors of the intercept and the
@@ -164,7 +164,7 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
     y = np.cumsum(x_prof)
     N = len(y)  # length of the integrated series (shorter than x if a lag is used)
  
-    # perform scaling over a range of tau, up to a fifth of the time-series length
+    # perform scaling over a range of tau, up to half the time-series length
     if log_inc:
         taur = np.unique(_round_half_away_array(np.exp(np.linspace(np.log(5), np.log(np.floor(N / 2)), int(tau_step)))))
     else:

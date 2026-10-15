@@ -488,21 +488,23 @@ def pleft(y: ArrayLike, th: float = 0.1) -> float:
     """
     Distance from the mean at which a given proportion of data are more distant.
     
-    Measures the maximum distance from the mean at which a given fixed proportion, `th`, of 
-    the time-series data points are further. Normalizes by the standard deviation of the time 
-    series.
+    Finds the distance from the mean that is exceeded by a given proportion, `th`, of 
+    the time-series data points (deviations above and below the mean are pooled). Normalizes 
+    by the standard deviation of the time series.
     
     Parameters
     ----------
     y : array-like
         The input data vector.
     th : float, optional
-        The proportion of data further than `th` from the mean. Default is 0.1.
+        The proportion of data points further from the mean than the returned distance. 
+        Default is 0.1.
     
     Returns
     -------
     float
-        The distance from the mean normalized by the standard deviation.
+        The distance from the mean exceeded by a proportion `th` of the data, normalized by 
+        the standard deviation.
     """
     y = np.asarray(y)
     p = np.quantile(np.abs(y - np.mean(y)), 1-th, method='hazen')
@@ -561,7 +563,7 @@ def mean(y: ArrayLike, mean_type: str = 'arithmetic') -> float:
         - 'iqm': interquartile mean (mean of values between Q1 and Q3)
         - 'midhinge': average of first and third quartiles
 
-        Default is ``'arithmtic'``.
+        Default is ``'arithmetic'``.
 
     Returns
     -------
@@ -946,7 +948,7 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
           thresholds, of the median time of the events (-1 to 1);
         - ``mrm``, ``mrmd``, ``mrstd``: the same for the mean time of the events;
         - ``xcmerr1``, ``xcmerrn1``: cross-correlation between the mean gap and its
-          standard error across thresholds, at lags +1 and -1;
+          standard error across thresholds, at lags +1 and -1 (the means are not removed);
         - ``stdrfexpb``, ``stdrfexpr2``, ``stdrfexprmse``:
           the rate and fit quality of an exponential fit to
           std(times)/sqrt(their number) vs. th;
@@ -1096,9 +1098,10 @@ def outlier_test(y: ArrayLike, p: float = 2,
     """
     How distributional statistics depend on distributional outliers.
 
-    Removes the p% of highest and lowest values in the time series (i.e., 2*p% removed in total)
-    and returns the ratio of either the mean or the standard deviation of the time series,
-    before and after this transformation.
+    Removes the p% of highest and lowest values in the time series (i.e., 2*p% removed in total;
+    values strictly between the p-th and (100-p)-th percentiles are kept) and returns the mean
+    of the remaining values and their standard deviation divided by the standard deviation of
+    the full series.
 
     Parameters
     ----------
@@ -1110,15 +1113,17 @@ def outlier_test(y: ArrayLike, p: float = 2,
         If specified, just returns a number:
 
         - 'mean': returns the mean of the middle portion of the data
-        - 'std': returns the std of the middle portion of the data
+        - 'std': returns the std of the middle portion of the data, divided by the std of the
+          full series
 
         If None (default), returns a dictionary.
 
     Returns
     -------
     float or dict
-        If just_me is specified, returns the mean or std of the middle portion of the data.
-        Otherwise, returns a dictionary.
+        If just_me is specified, returns the mean of the middle portion of the data, or its std
+        divided by the std of the full series. Otherwise, returns a dictionary with both
+        (keys ``mean`` and ``std``).
     """
 
     # mean of the middle (100-2*p)% of the data
@@ -1146,16 +1151,19 @@ def trimmed_mean(x: ArrayLike, p_exclude: float = 0.0) -> float:
     """
     Mean of the trimmed time series.
 
-    Returns the mean of the time series after removing a specified percentage of 
-    the highest and lowest values.
+    Returns the mean of the time series after removing a specified total percentage of 
+    values, half from the highest and half from the lowest. The number removed from each end
+    is N*p_exclude/200, rounded to the nearest integer (halves round down), so small
+    percentages can remove nothing (e.g., 1% removes no values for N <= 100).
 
     Parameters
     ----------
     x : array-like
         The input time series or data vector
     p_exclude : float, optional
-        The percentage of highest and lowest values to exclude from the mean 
-        calculation. Default is 0.0, which gives the standard mean.
+        The total percentage of values to exclude from the mean calculation, half from the
+        highest and half from the lowest values (e.g., 10 excludes the highest 5% and the
+        lowest 5%). Default is 0.0, which gives the standard mean.
 
     Returns
     -------
@@ -1221,14 +1229,16 @@ def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True
     num_bins : int, optional
         Number of bins to use in histogram calculation. Default is 10.
     do_simple : bool, optional
-        If True, uses linearly spaced bins. If False, uses equal-width bins spanning the
-        values on each side, with explicit edges (:func:`pyhctsa.robust.bf_hist_edges`).
+        If True, uses linearly spaced bins; a series with no positive values or no
+        negative values then raises a ValueError. If False, uses equal-width bins spanning
+        the values on each side, with explicit edges (:func:`pyhctsa.robust.bf_hist_edges`).
         Default is `True`.
 
     Returns
     -------
     dict
-        Dictionary containing asymmetry measures (NaN modes for a side with no values).
+        Dictionary containing asymmetry measures (with ``do_simple=False``, NaN modes for a
+        side with no values).
     """
     y = np.asarray(y)
     # compute the histogram seperately from positive and negative values in the data
@@ -1470,7 +1480,8 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
     """
     Statistics of a kernel-smoothed distribution of the data.
 
-    The data are smoothed with a Gaussian kernel with a normal-reference bandwidth
+    The data are smoothed with a Gaussian kernel with Silverman's normal-reference bandwidth
+    using a robust (median absolute deviation) scale estimate
     (:func:`pyhctsa.robust.bf_ks_density`: 100 points from three bandwidths below the
     minimum to three above the maximum) and the smoothed density, f, is summarized by its number of peaks,
     maximum, entropy, and asymmetry about the mean, plus optional threshold-based

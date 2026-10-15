@@ -132,8 +132,8 @@ def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
     num_surrs : int, optional
         The number of surrogates to generate. Default is 1.
     random_seed : int, str or None, optional
-        The seed of the random numbers, as hctsa's ``BF_RandomSeed``: a number, ``'default'`` (0),
-        or ``None``/``'none'`` (a seed from NumPy's global stream). Default is 0.
+        The seed of the random numbers, as hctsa's ``BF_RandomSeed``: a number, ``'default'`` or
+        ``None`` (0), or ``'none'`` (a seed from NumPy's global stream). Default is 0.
     extra_params : float, optional
         The cut-off frequency for 'TFT', in frequency bins (a value below 1 is taken as a
         proportion of N). Default is N/8.

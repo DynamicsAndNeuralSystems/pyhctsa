@@ -751,10 +751,10 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
         The input time series.
     preproc : {'ar', 'none'}, optional
         The preprocessing applied before the fit: ``'ar'`` (default) replaces the series by
-        the preprocessing (from differencing, piecewise polynomial detrending, rank-mapping to
-        a Gaussian) that maximizes whiteness under an AR(2) model, if it beats the
-        unprocessed series by 5%; ``'none'`` applies none (the series is linearly
-        detrended and z-scored either way).
+        the linearly detrended series by the preprocessing (from differencing, piecewise
+        polynomial detrending, rank-mapping to a Gaussian) that maximizes whiteness under an
+        AR(2) model, if it beats the detrended series by 5%; ``'none'`` applies none (the
+        series is not detrended). The series is z-scored either way.
     P : int, optional
         The GARCH degree: the number of lagged conditional variances. Default is 1.
     Q : int, optional
@@ -932,8 +932,9 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
     y : array-like
         The input time series.
     pre_proc : {'none', 'ar'}, optional
-        A preprocessing to apply after detrending: ``'none'`` (default), or ``'ar'``, which
-        applies the preprocessing that maximizes AR(2) whiteness (see :func:`garch_fit`).
+        A preprocessing to apply: ``'none'`` (default; the series is not detrended), or
+        ``'ar'``, which detrends the series and applies the preprocessing that maximizes AR(2)
+        whiteness (see :func:`garch_fit`).
     pr : array-like of int, optional
         The model orders p to compare. Default is ``(1, 2, 3)``.
     qr : array-like of int, optional

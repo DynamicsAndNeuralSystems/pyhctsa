@@ -214,7 +214,7 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
         for i in range(num_segs):
             divs[i] = 0.5 * np.sum(np.abs(dns[:, i] - pardn)) # each is just divergence to parent
     elif each_or_par == 'each':
-        # Compares each subdistribtuion to the parent (full signal) distribution
+        # Compares each subdistribution to every other subdistribution
         if num_segs == 2:
             return float(0.5 * np.sum(np.abs(dns[:, 0] - dns[:, 1])))
         # num_segs > 2
@@ -776,7 +776,7 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
         - The length of segments when segment_how='fix' (default=20)
         - The number of segments when segment_how='num'
 
-        Default is 20.
+        Default is 20. If None, 200 samples for ``'fix'`` or 5 segments for ``'num'``.
 
     Returns
     -------
@@ -1354,11 +1354,11 @@ def drifting_auto_corr(y: ArrayLike, tau: int = 1, what_product: str = 'ac') -> 
 def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 100,
                         random_seed: Union[int, str, None] = 'default') -> dict:
     """
-    Bootstrap-based stationarity measure.
+    How local statistics vary across many overlapping segments of the time series.
 
-    ``num_segs`` time-series segments of length ``l`` are selected at random from the time
-    series (at random start points; segments can overlap) and in each segment some statistic
-    is calculated: mean, standard deviation, skewness, kurtosis, PermEn(3,1), AC(1), AC(2), and
+    ``num_segs`` time-series segments of length ``l`` are selected from the time
+    series (with start points spread evenly over it; segments can overlap) and in each
+    segment some statistic is calculated: mean, standard deviation, skewness, kurtosis, PermEn(3,1), AC(1), AC(2), and
     the first zero-crossing of the autocorrelation function. Outputs summarize how these
     quantities vary in different local segments of the time series, as the standard deviation
     of each across the segments. (The mean of each set is not output, since it just
@@ -1424,7 +1424,7 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
     qs = np.full((num_segs, 8), np.nan)
     for j in range(num_segs):
         # pick a range; in this implementation, ranges CAN overlap
-        ist = istarts[j] # random start point (not exceeding the endpoint)
+        ist = istarts[j] # start point (not exceeding the endpoint)
         y_sub = y[ist:ist + l] # contiguous subsegment of the time series
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
@@ -1438,8 +1438,8 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
             qs[j, 6] = autocorr(y_sub, 2, 'Fourier') # AC2
             qs[j, 7] = first_crossing(y_sub, 'ac', 0, 'continuous') # first zero crossing
 
-    # The spread of each feature across subsegments of the time series: a big bootstrapped
-    # distribution of the time series at a scale given by the length l. (The mean of each is
+    # The spread of each feature across subsegments of the time series: a distribution of
+    # local statistics at a scale given by the length l. (The mean of each is
     # not output: it re-estimates a global statistic.)
     def _nanstd(v):
         v = v[~np.isnan(v)]
@@ -1463,7 +1463,9 @@ def nstat_z(y: ArrayLike, num_seg: int = 5, embed_params: tuple = (1, 3)) -> dic
     deviation of segment j, collected in a ``num_seg`` x ``num_seg`` matrix. As in TISEAN, the
     series is first rescaled to [0, 1], neighbors are within a maximum-norm distance eps that
     grows (from 1e-3, by a factor 1.2) until there are at least 30 of them, and neighbors within
-    the causality window of the forecast point are excluded.
+    the causality window of the forecast point are excluded. The window is applied to the
+    position of each point within its own segment, so it also excludes the points at similar
+    positions within the predicting segment when that segment differs from the forecast one.
 
     References
     ----------
@@ -2219,9 +2221,10 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     Vp = Vp[:, ord_]
     pc_scores = Xc @ Vp # num_windows x 5, PC1 = pc_scores[:, 0]
 
-    # Whitening (symmetric/ZCA, avoids an arbitrary rotation among near-degenerate
-    # directions). Directions with near-zero variance relative to the leading one
-    # (e.g. a per-window statistic that barely varies across windows) are dropped
+    # Whitening (PCA whitening: the scores on the retained principal axes, each scaled
+    # to unit variance; any rotation of the whitened space gives the same slowness
+    # eigenvalues and slow components below). Directions with near-zero variance relative
+    # to the leading one (e.g. a per-window statistic that barely varies across windows) are dropped
     # rather than whitened: full whitening would divide by their near-zero std and
     # amplify what is essentially estimation noise into a spuriously enormous
     # "fast" eigenvalue. pca_eigs[0] (the leading, largest eigenvalue) is never

@@ -104,9 +104,8 @@ def l1pwc(y: np.ndarray, lam: float | np.ndarray, display: bool = True,
 
     References
     ----------
-    .. [1] S.J. Kim, K. Koh, S. Boyd and D. Gorinevsky (2007) "An Interior-Point Method for Large-Scale 
-        ℓ1 -Regularized Least Squares," in IEEE Journal of Selected Topics in Signal Processing, 
-        vol. 1, no. 4, pp. 606-617, Dec. 2007, doi: 10.1109/JSTSP.2007.910971. 
+    .. [1] S.J. Kim, K. Koh, S. Boyd and D. Gorinevsky (2009) "ℓ1 Trend Filtering", SIAM Review,
+        vol. 51, no. 2, pp. 339-360, doi: 10.1137/070690274.
     .. [2] M.A. Little, Nick S. Jones (2010) "Sparse Bayesian Step-Filtering for
         High-Throughput Analysis of Molecular Machine Dynamics", in 2010 IEEE
         International Conference on Acoustics, Speech and Signal Processing,

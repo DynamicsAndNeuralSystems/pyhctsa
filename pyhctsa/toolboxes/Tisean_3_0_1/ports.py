@@ -733,6 +733,8 @@ def _nstat_z_error(ser, base1, base2, clength, m, tau, minn, step, causal, cente
     what followed its neighbors (embedding vectors within the maximum-norm distance eps, with
     eps grown from ``eps0`` by the factor ``epsf`` until there are at least ``minn``) in the
     segment starting at ``base1``, excluding neighbors within the causality window of the point.
+    The window is applied to the index within each segment, so it also applies when the two
+    segments differ.
     Returns NaN if some point can never find ``minn`` neighbors.
     """
     pstart = (m - 1) * tau
