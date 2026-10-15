@@ -4504,7 +4504,9 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         - ``std_mu_data``: standard deviation of the GP mean at the sampled times (if not
           close to one, the GP has not followed the z-scored data),
         - ``std_S_data``: standard deviation of the GP's predictive standard deviation at the
-          sampled times,
+          sampled times (informative only for irregularly sampled times, as with
+          ``'random_i'``: for evenly spaced times the predictive standard deviation is constant
+          except near the ends),
         - ``maxS``, ``minS``, ``meanS``: maximum, minimum, and mean of the GP's predictive
           standard deviation over 1000 equally spaced times spanning the sampled series,
         - ``oosmedabserr``: out-of-sample error, for the random-subsample settings of
