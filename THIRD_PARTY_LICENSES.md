@@ -71,7 +71,7 @@ These components are used with credit. No unlicensed third-party source is inclu
 
 | Component | Credit |
 |---|---|
-| `falling_sticks` (CO_FallingSticks) | Adapted from the Python FALLstick implementation written by Eugene Chon, a student of B. D. Fulcher, for *hctsa*. |
+| `falling_sticks` (CO_FallingSticks) | Adapted from the Python FALLstick implementation written by Eugene Chon ([@EugeneChon04](https://github.com/EugeneChon04)), a student of B. D. Fulcher, for *hctsa*. |
 | `MD_*` heart-rate-variability measures | (C) 2016 Max A. Little and Ben D. Fulcher. |
 | Permutation entropy variant (`permEnLE`) | Bruce Land and Damian Elias, Cornell University (https://people.ece.cornell.edu/land/PROJECTS/Complexity/). The variant is a one-line formula. |
 | Visibility-graph measures | Lacasa et al., *PNAS* 105, 4972 (2008); Luque et al., *Phys. Rev. E* 80, 046103 (2009). The degree algorithms in *pyhctsa* are original. |

@@ -75,7 +75,7 @@ Further credits
 ---------------
 
 - The falling sticks statistic (``CO_FallingSticks``) is adapted from the Python FALLstick implementation written by
-  Eugene Chon, a student of B. D. Fulcher, for *hctsa*.
+  Eugene Chon (`@EugeneChon04 <https://github.com/EugeneChon04>`_), a student of B. D. Fulcher, for *hctsa*.
 - The heart-rate-variability measures (``MD_*``) are Copyright (C) 2016 Max A. Little and Ben D. Fulcher.
 - The permutation-entropy variant is that of B. Land and D. Elias (Cornell University).
 - The visibility-graph measures follow Lacasa et al., PNAS 105, 4972 (2008) and Luque et al., Phys. Rev. E 80, 046103

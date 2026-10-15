@@ -459,7 +459,8 @@ def falling_sticks(y: ArrayLike) -> dict:
     intervening short one) that the purely local (i, i+1) comparison cannot
     see.
 
-    Adapted from a Python implementation ('FALLstick') by Eugene Chon, who wrote the original
+    Adapted from a Python implementation ('FALLstick') by Eugene Chon
+    (`@EugeneChon04 <https://github.com/EugeneChon04>`_), who wrote the original
     Python version for hctsa; this is a port of hctsa's ``CO_FallingSticks``.
 
     Parameters
