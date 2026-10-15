@@ -50,7 +50,8 @@ def test_multi_scale_entropy():
 
 def test_sample_entropy_nan_without_matches():
     o = sample_entropy(_x()[:40], 5, 0.02)
-    assert o['sampen1'] == 0
+    # matches at length 1 but none at length 2: -log(1/B) with B = 9 matching pairs
+    assert o['sampen1'] == pytest.approx(np.log(9))
     assert np.isnan(o['sampen2']) and np.isnan(o['sampen3'])
 
 

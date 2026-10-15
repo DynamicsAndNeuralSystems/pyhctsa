@@ -132,9 +132,11 @@ static void sampen_core(double *y, int M, double r, int n, double *sampEnt)
     }
     
     /* Calculate sample entropy */
-    /* As hctsa's sampen_mex.c: p = A/B is 0/0 = NaN when no template of the
-       shorter length matched (SampEn is then NaN), and a zero count of matches
-       at this length gives 0 (for m >= 1) rather than Inf. */
+    /* As hctsa's sampen_mex.c: SampEn is NaN when no template of the shorter
+       length matched (B = 0). When templates matched at length m but none at
+       length m+1 (A = 0, B > 0) the estimate is infinite in the limit, and the
+       finite convention of one match, -log(1/B), is used (Richman and Moorman,
+       2000) for m >= 1. */
     N = (long) (n * (n - 1) / 2);
     if (N > 0) {
         p[0] = A[0] / N;
@@ -142,7 +144,7 @@ static void sampen_core(double *y, int M, double r, int n, double *sampEnt)
         for (m = 1; m < M-1; m++) {
             if (B[m - 1] > 0) {
                 p[m] = A[m] / B[m - 1];
-                sampEnt[m] = (p[m] > 0) ? -log(p[m]) : 0;
+                sampEnt[m] = (p[m] > 0) ? -log(p[m]) : -log(1.0 / B[m - 1]);
             } else {
                 sampEnt[m] = ieee_value(0x7ff8000000000000ULL); /* NaN */
             }

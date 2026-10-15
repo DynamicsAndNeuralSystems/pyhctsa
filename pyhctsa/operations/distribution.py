@@ -834,7 +834,9 @@ def moments(y: ArrayLike, the_mom: int = 0, do_normalize: bool = True) -> float:
     """
     A moment of the distribution of the input time series.
     Returns the standardized central moment: the ``the_mom``-th central moment
-    divided by the standard deviation raised to the power ``the_mom`` (or, with
+    divided by the (population, divisor N) standard deviation raised to the power
+    ``the_mom``, so that ``the_mom = 3`` is the skewness and ``the_mom = 4`` the
+    kurtosis (3 for a Gaussian) (or, with
     ``do_normalize=False``, the raw central moment, as hctsa's
     ``DN_Moments(y, theMom, false)``).
 
@@ -845,7 +847,7 @@ def moments(y: ArrayLike, the_mom: int = 0, do_normalize: bool = True) -> float:
     the_mom: int, optional
         The moment to calculate. Default is 0.
     do_normalize: bool, optional
-        Whether to divide by std(y)**the_mom, giving the scale-invariant
+        Whether to divide by std(y, ddof=0)**the_mom, giving the scale-invariant
         standardized moment (True, the default), or to return the raw central
         moment (False).
 
@@ -858,7 +860,7 @@ def moments(y: ArrayLike, the_mom: int = 0, do_normalize: bool = True) -> float:
 
     if not do_normalize:
         return stats.moment(y, the_mom)
-    return stats.moment(y, the_mom) / np.std(y, ddof=1) ** the_mom
+    return stats.moment(y, the_mom) / np.std(y, ddof=0) ** the_mom
 
 def _fit_lin_gof(x: np.ndarray, y: np.ndarray) -> tuple:
     """Ordinary least-squares line ``a*x + b``, with R^2 and root-mean-square error (n - 2

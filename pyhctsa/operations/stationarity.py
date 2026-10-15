@@ -365,6 +365,12 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
         Dictionary of statistics related to the correlation between simple statistics in local windows of the input
         time series: the correlation coefficient `R`, its absolute value `absR`, and `density`, the number of
         windows divided by the bounding-box area in the M1--M2 plane.
+
+    Notes
+    -----
+    Only full windows are used: windows start every ``window_length - w_overlap`` samples
+    from the first sample, and a final window that would run past the end of the series is
+    not included.
     """
     x = np.asarray(x)
     N = len(x) # length of the time series
@@ -395,15 +401,14 @@ def moment_corr(x: ArrayLike, window_length: Union[None, float] = None,
         raise ValueError(f"Unknown transformation {what_transform}")
     
     # create the windows
+    step = window_length - w_overlap
     x_buff = frame_signal(x, window_length, w_overlap)
-    num_windows = (N/(window_length - w_overlap)) # number of windows
-
-    if np.size(x_buff, 1) > num_windows:
-        x_buff = x_buff[:, :-1] # lose the last point
+    num_windows = (N - window_length) // step + 1 # number of full windows
+    x_buff = x_buff[:, :max(num_windows, 0)] # keep only full windows (frame_signal zero-pads the last)
 
     points_per_window = np.size(x_buff, 0)
     if points_per_window == 1:
-        logger.warning(f"This time series (N = {N}) is too short to extract {num_windows}")
+        logger.warning(f"This time series (N = {N}) is too short to extract {num_windows} windows")
         return np.nan
     
     # okay now we have the sliding window ('buffered') signal, x_buff

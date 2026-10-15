@@ -448,8 +448,9 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
 
         As in hctsa's ``sampen_mex``, ``sampen{k}`` (and ``quadSampEn{k}``) is NaN for
         ``k >= 1`` when no template of length ``k`` matched (there are no matches to
-        form the ratio of), and 0 when templates of length ``k`` matched but none of
-        length ``k + 1`` did.
+        form the ratio of). When templates of length ``k`` matched (``B`` pairs) but none
+        of length ``k + 1`` did, the entropy would be infinite and is set to
+        ``-log(1/B)``, the value for a single match at length ``k + 1``.
     """
     m = int(m)
     y = np.asarray(y, dtype=np.float64)
@@ -1441,7 +1442,7 @@ def randomize_ordinal(y: ArrayLike, tau: Union[int, str] = 1) -> Union[dict, flo
         - 'halftime': the randomization time ``t/N`` (the number of replacements per sample)
           at which the permutation entropy of the expected pattern distribution is halfway
           between its value for the original series and its value for the fully randomized
-          series (NaN if the two are equal, so that nothing decays). A long halftime means
+          series (NaN if the two are equal to within rounding error, so that nothing decays). A long halftime means
           that much of the ordinal structure survives the replacement of single samples (it
           is carried by the order of pairs of samples); a short one that it depends on the
           joint configuration of all three samples of a window,
@@ -1478,7 +1479,7 @@ def randomize_ordinal(y: ArrayLike, tau: Union[int, str] = 1) -> Union[dict, flo
            'normPermEnRep1': _ro_norm_entropy(S[4:7].mean(axis=0))[0],
            'normPermEnInf': _ro_norm_entropy(S[0])[0]}
     H0, Hinf = out['normPermEn0'], out['normPermEnInf']
-    if abs(Hinf - H0) < 1e-12:
+    if abs(Hinf - H0) <= 8 * np.finfo(float).eps:
         out['halftime'] = np.nan
         return out
     target = 0.5 * (H0 + Hinf)
