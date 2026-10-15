@@ -44,13 +44,17 @@ def test_modwt_var_always_has_a_scaling_band(N):
     assert out['scalingFrac'] == pytest.approx(wvar[-1] / wvar.sum())
 
 
-def test_sample_entropy_one_match_when_none_at_next_length():
-    # A = 0 matches at length m + 1, B > 0 at length m: -log(1/B), not 0
+def test_sample_entropy_nan_when_none_at_next_length():
+    # A = 0 matches at length m + 1, B > 0 at length m: the estimate is infinite, so NaN
     z = np.random.default_rng(1).standard_normal(200)
     z = (z - z.mean()) / z.std(ddof=1)
-    out = en.sample_entropy(z, 5, 0.1 * np.std(z, ddof=1))
-    assert out['sampen3'] == pytest.approx(np.log(2))  # B = 2 pairs match on 3 values, none on 4
-    assert np.isnan(out['sampen4'])  # no matches at length 4: still NaN
+    r = 0.1 * np.std(z, ddof=1)
+    out = en.sample_entropy(z, 5, r)
+    _, a, b = en._sampen_c.calculate(z, 6, r, True)
+    assert a[3] == 0 and b[3] == 2  # B = 2 pairs match on 3 values, none on 4
+    assert np.isfinite(out['sampen2']) and np.isnan(out['sampen3'])
+    assert np.isnan(out['sampen4'])  # no matches at length 4 (B = 0): NaN
+    assert np.isnan(out['meanchsampen'])
 
 
 def test_randomize_ordinal_guard_is_at_machine_precision(monkeypatch):

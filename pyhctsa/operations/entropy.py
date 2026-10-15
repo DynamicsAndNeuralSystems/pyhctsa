@@ -260,13 +260,20 @@ def multi_scale_entropy(
     At each scale ``s`` the time series is coarse-grained by averaging over non-overlapping
     windows of ``s`` samples (scale 1 is the original series), and the entropy of the
     coarse-grained series is computed: by default the sample entropy, SampEn(m, r)
-    (:func:`sample_entropy`), as in the multiscale entropy of Costa et al. [1]. Scales are
-    handled as Composite Multiscale Entropy [2]: the value at scale ``s`` is the mean over all
-    ``s`` possible starting offsets of the windows, instead of just offset 0 (single-offset
-    estimates can swing several-fold depending on the arbitrary start). Offsets for which the
-    coarse-grained series has fewer than 20 samples are omitted from the mean, and a scale
-    for which all are is NaN. The entropy is also summarized across scales (extremes and where
-    they occur, mean, spread, trend).
+    (:func:`sample_entropy`), as in the multiscale entropy of Costa et al. [1]. All ``s``
+    possible starting offsets of the windows are used, instead of just offset 0 (single-offset
+    estimates can swing several-fold depending on the arbitrary start). The sample entropy at
+    scale ``s`` is the refined composite multiscale entropy (RCMSE) of Wu et al. [3]
+    (their Eq. (8)): the template matches of length ``m`` and ``m + 1`` are counted for each
+    of the ``s`` coarse-grained series (as in :func:`sample_entropy`, with the same tolerance
+    ``r`` at every scale), and the value is ``-log`` of the summed matches of length ``m + 1``
+    over the summed matches of length ``m``. Pooling the counts before the log keeps the value
+    defined when some offsets have no matches of length ``m + 1``. For the dispersion settings
+    the value at scale ``s`` is the mean over the offsets (composite MSE [2]). Offsets for which
+    the coarse-grained series has fewer than 20 samples are skipped, and a scale with no
+    remaining offsets, or with no matches, is NaN. The entropy is also summarized across scales
+    (extremes and where they occur, mean, spread, trend); these summaries are NaN if the
+    entropy at any scale is NaN.
 
     References
     ----------
@@ -274,7 +281,10 @@ def multi_scale_entropy(
         biological signals", Phys. Rev. E 71, 021906 (2005).
     .. [2] S.-D. Wu, C.-W. Wu, S.-G. Lin, C.-C. Wang and K.-Y. Lee, "Time series analysis using
         composite multiscale entropy", Entropy 15(3), 1069 (2013).
-    .. [3] H. Azami, M. Rostaghi, D. Abasolo and J. Escudero, "Refined Composite Multiscale
+    .. [3] S.-D. Wu, C.-W. Wu, S.-G. Lin, K.-Y. Lee and C.-K. Peng, "Analysis of complex time
+        series using refined composite multiscale entropy", Physics Letters A 378, 1369-1374
+        (2014). DOI: 10.1016/j.physleta.2014.03.034
+    .. [4] H. Azami, M. Rostaghi, D. Abasolo and J. Escudero, "Refined Composite Multiscale
         Dispersion Entropy and its Application to Biomedical Signals", IEEE Trans. Biomed. Eng.
         64(12), 2872 (2017).
 
@@ -301,7 +311,7 @@ def multi_scale_entropy(
     what_entropy : {'sampen', 'dispen', 'fdispen'}, optional
         The entropy evaluated at each scale: sample entropy (``'sampen'``, the classical
         multiscale entropy), normalized dispersion entropy (``'dispen'``, i.e. multiscale
-        dispersion entropy [3]; :func:`dispersion_entropy` with ``tau = 1``) or its
+        dispersion entropy [4]; :func:`dispersion_entropy` with ``tau = 1``) or its
         fluctuation-based variant (``'fdispen'``). Output names carry the corresponding
         suffix (``dispen_s1``, ``meanDispEn``, ...). Default is ``'sampen'``.
     num_classes : int, optional
@@ -320,8 +330,10 @@ def multi_scale_entropy(
           coefficient of variation across scales;
         - 'meanch': the mean change from one scale to the next;
         - 'slope', 'slopeSE': the slope, and its standard error, of a robust (Tukey bisquare
-          iteratively reweighted least squares) linear fit of the entropy against scale; NaN unless at
-          least 4 scales have valid values.
+          iteratively reweighted least squares) linear fit of the entropy against scale; NaN for
+          fewer than 3 scales.
+
+        The summaries (all but 'sampen_s{k}') are NaN if the entropy at any scale is NaN.
 
         NaN (scalar) if no scale has enough samples.
     """
@@ -347,24 +359,39 @@ def multi_scale_entropy(
             return np.nan
         y = _zscore_or_zeros(y)
 
-    # Composite coarse-graining and entropy across scales: at each scale, the mean over all
-    # `scale` possible non-overlapping starting offsets (Eq. (16) of Costa et al. is the
-    # offset-0 coarse-graining)
-    samp_ens = np.zeros(num_scales)
+    # Coarse-graining and entropy across scales, using all `scale` possible non-overlapping
+    # starting offsets (Eq. (16) of Costa et al. is the offset-0 coarse-graining)
+    y = np.ascontiguousarray(y, dtype=np.float64)
+    samp_ens = np.full(num_scales, np.nan)
     for si, scale in enumerate(scale_range):
         scale = int(scale)
-        offset_vals = np.full(scale, np.nan)
-        for off in range(scale):
-            y_cg = np.mean(make_buffer(y[off:], scale), axis=1) if y.size - off >= scale else np.empty(0)
-            if len(y_cg) < min_ts_length:
-                continue
-            if what_entropy == 'sampen':
-                offset_vals[off] = sample_entropy(y_cg, m, r)[f'sampen{m}']
-            else:
+        if what_entropy == 'sampen':
+            # Refined composite multiscale entropy: pool the template-match counts over
+            # the offsets before taking the log
+            n_matches_m1 = 0.0  # matches at length m + 1
+            n_matches_m = 0.0  # matches at length m
+            for off in range(scale):
+                y_cg = np.mean(make_buffer(y[off:], scale), axis=1) if y.size - off >= scale else np.empty(0)
+                if len(y_cg) < min_ts_length:
+                    continue
+                _, count_a, count_b = _sampen_c.calculate(
+                    np.ascontiguousarray(y_cg, dtype=np.float64), m + 1, float(r), True)
+                n_matches_m1 += count_a[m]
+                n_matches_m += count_b[m]
+            if n_matches_m1 > 0 and n_matches_m > 0:
+                samp_ens[si] = -np.log(n_matches_m1 / n_matches_m)
+        else:
+            # Dispersion entropy: the mean over the offsets (composite)
+            offset_vals = np.full(scale, np.nan)
+            for off in range(scale):
+                y_cg = np.mean(make_buffer(y[off:], scale), axis=1) if y.size - off >= scale else np.empty(0)
+                if len(y_cg) < min_ts_length:
+                    continue
                 disp = dispersion_entropy(y_cg, m, num_classes, 1)
                 if isinstance(disp, dict):
                     offset_vals[off] = disp['normDispEn' if what_entropy == 'dispen' else 'normFDispEn']
-        samp_ens[si] = np.mean(offset_vals[~np.isnan(offset_vals)]) if not np.all(np.isnan(offset_vals)) else np.nan
+            if not np.all(np.isnan(offset_vals)):
+                samp_ens[si] = np.mean(offset_vals[~np.isnan(offset_vals)])
 
     # Outputs: multiscale entropy
     if np.all(np.isnan(samp_ens)):
@@ -375,12 +402,17 @@ def multi_scale_entropy(
     # Output raw values
     out = {f'{en_prefix}_s{scale_range[i]}': samp_ens[i] for i in range(num_scales)}
 
-    # Summary statistics of the variation (max, min, mean, std, diff all ignore NaN, as hctsa)
-    valid = samp_ens[~np.isnan(samp_ens)]
-    max_ind = int(np.nanargmax(samp_ens))
-    min_ind = int(np.nanargmin(samp_ens))
-    mean_val = np.mean(valid)
-    std_val = np.std(valid, ddof=1) if valid.size > 1 else 0.0
+    # Summary statistics of the variation across scales (NaN if any scale is NaN)
+    summary_keys = [f'max{en_name}', 'maxScale', f'min{en_name}', 'minScale', f'mean{en_name}',
+                    f'std{en_name}', f'cv{en_name}', 'meanch', 'slope', 'slopeSE']
+    if np.any(np.isnan(samp_ens)):
+        out.update({k: np.nan for k in summary_keys})
+        return out
+
+    max_ind = int(np.argmax(samp_ens))
+    min_ind = int(np.argmin(samp_ens))
+    mean_val = np.mean(samp_ens)
+    std_val = np.std(samp_ens, ddof=1) if num_scales > 1 else 0.0
     out[f'max{en_name}'] = samp_ens[max_ind]
     out['maxScale'] = scale_range[max_ind]
     out[f'min{en_name}'] = samp_ens[min_ind]
@@ -389,14 +421,12 @@ def multi_scale_entropy(
     out[f'std{en_name}'] = std_val
     with np.errstate(divide='ignore', invalid='ignore'):
         out[f'cv{en_name}'] = std_val / mean_val
-    d = np.diff(samp_ens)
-    d = d[~np.isnan(d)]
-    out['meanch'] = np.mean(d) if d.size else np.nan
+    out['meanch'] = np.mean(np.diff(samp_ens)) if num_scales > 1 else np.nan
 
-    # Trend across scales: a robust linear fit of the entropy against scale
-    good = ~np.isnan(samp_ens)
-    if good.sum() >= 4:
-        b, se = _robust_linear_fit_se(np.asarray(scale_range, dtype=float)[good], samp_ens[good])
+    # Trend across scales: a robust linear fit of the entropy against scale (which needs
+    # more points than its two coefficients)
+    if num_scales > 2:
+        b, se = _robust_linear_fit_se(np.asarray(scale_range, dtype=float), samp_ens)
         out['slope'] = b[1]
         out['slopeSE'] = se[1]
     else:
@@ -446,14 +476,13 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
             - 'quadSampEn{m}': Quadratic sample entropy for each m
             - 'meanchsampen': Mean change in sample entropy values
 
-        As in hctsa's ``sampen_mex``, ``sampen{k}`` (and ``quadSampEn{k}``) is NaN for
-        ``k >= 1`` when no template of length ``k`` matched (there are no matches to
-        form the ratio of). When templates of length ``k`` matched (``B`` pairs) but none
-        of length ``k + 1`` did, the entropy would be infinite and is set to
-        ``-log(1/B)``, the value for a single match at length ``k + 1``.
+        ``sampen{k}`` (and ``quadSampEn{k}``) is NaN when templates of length ``k`` match
+        but none of length ``k + 1`` do (for ``sampen0``, when no two values are within
+        ``r``): the estimate is then infinite, so the data cannot support it at this ``k``,
+        ``r`` and length. It is also NaN when no templates of length ``k`` match.
     """
     m = int(m)
-    y = np.asarray(y, dtype=np.float64)
+    y = np.ascontiguousarray(y, dtype=np.float64)
     if r is None:
         r = 0.1 * np.std(y, ddof=1)
     if pre_process_how == 'diff1':
