@@ -1595,8 +1595,11 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
         - 'fDispEn': the fluctuation-based dispersion entropy (nats; NaN for ``m = 1``),
         - 'normFDispEn': 'fDispEn' normalized by ``log((2c-1)**(m-1))`` (NaN for ``m = 1``).
 
-        NaN (scalar) if the delay cannot be determined, the series is constant, or it is
-        too short for the embedding (fewer than 5 embedding vectors).
+        A constant series (all values equal, up to floating-point rounding at their own
+        magnitude: a range of at most four units in the last place of ``max(abs(y))``) has a
+        single dispersion pattern, so all four values are 0 (the fluctuation-based ones are
+        NaN for ``m = 1``, as always). NaN (scalar) if the delay cannot be determined or the
+        series is too short for the embedding (fewer than 5 embedding vectors).
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size
@@ -1617,21 +1620,22 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
         logger.warning(f"Time series (N = {n}) too short for dispersion entropy at m = {m}, tau = {tau}")
         return np.nan
 
+    if mapping_how not in ('ncdf', 'linear'):
+        raise ValueError(f"Unknown mapping '{mapping_how}' (expected 'ncdf' or 'linear')")
+
+    # A constant series (values differing by at most a few units in the last place of their
+    # magnitude, e.g., averages of the same repeating values summed in different orders) is a
+    # single dispersion pattern: zero entropy. (Its rounding-level deviations must not be
+    # classified: the mapping would stretch them over the classes.)
+    if np.ptp(y) <= 4 * np.spacing(np.max(np.abs(y))):
+        f = np.nan if m < 2 else 0.0
+        return {'dispEn': 0.0, 'normDispEn': 0.0, 'fDispEn': f, 'normFDispEn': f}
+
     # Map the series onto (0, 1), then onto the c amplitude classes
     if mapping_how == 'ncdf':
-        sigma = np.std(y, ddof=1)
-        if not sigma > 0:
-            logger.warning("Constant time series has no dispersion structure")
-            return np.nan
-        y_mapped = norm.cdf(y, loc=np.mean(y), scale=sigma)
-    elif mapping_how == 'linear':
-        y_range = np.max(y) - np.min(y)
-        if not y_range > 0:
-            logger.warning("Constant time series has no dispersion structure")
-            return np.nan
-        y_mapped = (y - np.min(y)) / y_range
+        y_mapped = norm.cdf(y, loc=np.mean(y), scale=np.std(y, ddof=1))
     else:
-        raise ValueError(f"Unknown mapping '{mapping_how}' (expected 'ncdf' or 'linear')")
+        y_mapped = (y - np.min(y)) / (np.max(y) - np.min(y))
 
     # Classes 1..c as z = round(c*y + 0.5) (Rostaghi & Azami), i.e. floor(c*y) + 1 for y >= 0,
     # then clamp into 1..c (y = 1 would give c + 1)

@@ -84,9 +84,11 @@ def test_hmm_fit_keeps_the_best_start():
                   y.mean() + y.std(ddof=1) * np.linspace(-1, 1, 3)):
         for rho in (0.9, 0.5, 0.99):
             p0 = 0.5 * (1 - rho) * np.ones((3, 3)) + (rho - 0.5 * (1 - rho)) * np.eye(3)
-            ll_start = mf._gaussian_hmm_em(y, means, np.var(y, ddof=1), p0, np.ones(3) / 3, 30, 1e-4,
-                                     0.01 * np.var(y, ddof=1))[4]
-            assert ll[-1] >= ll_start[-1] - 1e-9
+            fit = mf._gaussian_hmm_em(y, means, np.var(y, ddof=1), p0, np.ones(3) / 3, 30, 1e-4,
+                                      0.01 * np.var(y, ddof=1))
+            # each start is scored by the log-likelihood of its returned parameters
+            ll_start = mf._gaussian_hmm_loglik(y, *fit[:4])
+            assert ll >= ll_start - 1e-9
 
 
 def test_hmm_flat_likelihood_series_matches_hctsa_log_likelihood():

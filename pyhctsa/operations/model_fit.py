@@ -130,7 +130,10 @@ def _gaussian_hmm_fit(y_train: np.ndarray, num_states: int, n_cycles: int = 30,
 
     Baum-Welch EM (``hmmlearn``'s ``GaussianHMM``, see :func:`_gaussian_hmm_em`) is run from
     six fixed starting points (the initialization is fully specified here, so the fit does not
-    depend on any random number generator) and the fit with the highest final training log-likelihood is kept. The starts have a shared
+    depend on any random number generator) and the fit with the highest training log-likelihood is
+    kept. Each fit is scored by the log-likelihood of the training data under its returned
+    parameters (:func:`_gaussian_hmm_loglik`): the log-likelihoods recorded during EM are those of
+    the parameters at the start of each cycle, before its M step. The starts have a shared
     variance equal to the variance of the data, equal initial-state probabilities, and a
     transition matrix with probability ``rho`` of staying in a state (and ``(1-rho)/(K-1)`` of
     moving to each other one) for each ``rho`` in ``rhos``, and two placements of the K state
@@ -140,9 +143,9 @@ def _gaussian_hmm_fit(y_train: np.ndarray, num_states: int, n_cycles: int = 30,
     stopping when the relative gain in log-likelihood falls below ``tol`` (see
     :func:`_gaussian_hmm_em`).
 
-    Returns ``(mu, cov, P, pi, LL)``: state means, shared variance, transition matrix,
-    initial-state probabilities and the log-likelihood at each cycle (NaN-filled parameters
-    and ``LL = [nan]`` if no start gives a finite fit).
+    Returns ``(mu, cov, P, pi, ll)``: state means, shared variance, transition matrix,
+    initial-state probabilities and the log-likelihood of ``y_train`` under these parameters
+    (NaN-filled parameters and ``ll = nan`` if no start gives a finite fit).
     """
     x = np.ascontiguousarray(y_train, dtype=float).ravel()
     K = int(num_states)
@@ -153,7 +156,7 @@ def _gaussian_hmm_fit(y_train: np.ndarray, num_states: int, n_cycles: int = 30,
     mean_sets = [xs[idx], np.mean(x) + np.std(x, ddof=1) * np.linspace(-1, 1, K)]
     pi0 = np.ones(K) / K
     best_ll = -np.inf
-    best = (np.full(K, np.nan), np.nan, np.full((K, K), np.nan), np.full(K, np.nan), np.array([np.nan]))
+    best = (np.full(K, np.nan), np.nan, np.full((K, K), np.nan), np.full(K, np.nan), np.nan)
     for r in range(2 * len(rhos)):
         mu0 = mean_sets[0 if r < len(rhos) else 1]
         rho = rhos[r % len(rhos)]
@@ -164,9 +167,13 @@ def _gaussian_hmm_fit(y_train: np.ndarray, num_states: int, n_cycles: int = 30,
         mu, cov, P, pi, LL = _gaussian_hmm_em(x, mu0, v, P0, pi0, n_cycles, tol, floor_frac * v)
         ok = np.all(np.isfinite(mu)) and np.isfinite(cov) and np.all(np.isfinite(P)) \
             and np.all(np.isfinite(pi)) and np.isfinite(LL[-1])
-        if ok and LL[-1] > best_ll:
-            best_ll = LL[-1]
-            best = (mu, cov, P, pi, LL)
+        if not ok:
+            continue
+        # score the fit by the log-likelihood of the data under its returned parameters
+        ll = _gaussian_hmm_loglik(x, mu, cov, P, pi)
+        if np.isfinite(ll) and ll > best_ll:
+            best_ll = ll
+            best = (mu, cov, P, pi, ll)
     return best
 
 
@@ -198,9 +205,10 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3) -> dict:
     The fit is deterministic. EM is run from six fixed starting points (state means at the
     quantiles ``(k-1/2)/num_states`` of the training data, or evenly spaced within one standard
     deviation of its mean; a variance equal to that of the training data; and probabilities
-    0.5, 0.9 and 0.99 of staying in a state); the fit with the highest training log-likelihood is
-    kept (see :func:`_gaussian_hmm_fit`). The shared variance cannot fall below 1% of the variance of
-    the training data, so that states placed on a few repeated values do not give unbounded
+    0.5, 0.9 and 0.99 of staying in a state); the fit with the highest training log-likelihood
+    (of the training data under the fit's final parameters) is kept (see
+    :func:`_gaussian_hmm_fit`). The shared variance cannot fall below 1% of the variance of the
+    training data, so that states placed on a few repeated values do not give unbounded
     likelihoods.
 
     Parameters
@@ -219,8 +227,8 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3) -> dict:
         (``Mu_1``, ...) and their ``meanMu``, ``rangeMu``, ``maxMu``, ``minMu``;
         the tied covariance ``Cov``; the transition matrix summaries
         ``Pmeandiag``, ``stdmeanP`` (standard deviation across states of the mean probability
-        of moving into each state), ``maxP`` and ``stdP``; the training
-        log-likelihood per sample ``LLtrainpersample`` (the highest reached);
+        of moving into each state), ``maxP`` and ``stdP``; the log-likelihood per sample of
+        the training part under the fitted model, ``LLtrainpersample``;
         and the test log-likelihood per sample ``LLtestpersample`` and
         ``LLdifference`` (test minus training).
 
@@ -242,7 +250,7 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3) -> dict:
     num_states = int(num_states)
 
     # 2. Train the HMM (deterministic EM from fixed starts, see _gaussian_hmm_fit)
-    mu, cov, p_matrix, pi, LL = _gaussian_hmm_fit(y_train, num_states)
+    mu, cov, p_matrix, pi, ll_train = _gaussian_hmm_fit(y_train, num_states)
 
     means_sorted = np.sort(mu)
     for i, m in enumerate(means_sorted):
@@ -262,7 +270,7 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3) -> dict:
     out['stdP'] = np.std(p_matrix, ddof=1)
 
     # Within-sample log-likelihood
-    out['LLtrainpersample'] = np.max(LL) / n_train
+    out['LLtrainpersample'] = ll_train / n_train
 
     # Log-likelihood of the test data
     out['LLtestpersample'] = _gaussian_hmm_loglik(y_test, mu, cov, p_matrix, pi) / n_test
@@ -4339,7 +4347,7 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
     -------
     dict
         - ``meanLLtrain``, ``maxLLtrain``: mean and maximum across models of the
-          log-likelihood per sample on the training part,
+          log-likelihood per sample of the training part (under each fitted model),
         - ``meanLLtest``, ``maxLLtest``: the same on the test part,
         - ``chLLtrain``, ``chLLtest``: change in training and test log-likelihood per sample
           from the model with the fewest states to the one with the most,
@@ -4368,8 +4376,8 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
     ll_tests = np.zeros(len(n_states))
     for j, k in enumerate(n_states):
         # train an HMM with k states for 30 cycles of EM (or until convergence)
-        mu, cov, p_matrix, pi, LL = _gaussian_hmm_fit(y_train, k)
-        ll_trains[j] = LL[-1] / n_train
+        mu, cov, p_matrix, pi, ll_train = _gaussian_hmm_fit(y_train, k)
+        ll_trains[j] = ll_train / n_train  # training data under the fitted model
         # log likelihood of the test data
         ll_tests[j] = _gaussian_hmm_loglik(y_test, mu, cov, p_matrix, pi) / n_test
 

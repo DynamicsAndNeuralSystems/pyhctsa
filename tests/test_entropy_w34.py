@@ -28,7 +28,11 @@ def test_dispersion_entropy():
     np.testing.assert_allclose(
         [d['dispEn'], d['normDispEn'], d['fDispEn'], d['normFDispEn']],
         [3.25592248023321, 0.78288386929189, 2.80272781425558, 0.720158588929768], rtol=1e-10)
-    assert _all_nan(dispersion_entropy(np.ones(100)))
+    # a constant series (exactly, or up to rounding) is a single pattern: zero entropy
+    for y in (np.ones(100), 0.3 + np.tile([0.0, 1e-17, 5.5e-17, 0.0], 25)):
+        d = dispersion_entropy(y)
+        assert [d['dispEn'], d['normDispEn'], d['fDispEn'], d['normFDispEn']] == [0, 0, 0, 0]
+    assert np.isnan(dispersion_entropy(np.ones(100), 1)['fDispEn'])
     assert _all_nan(dispersion_entropy(_x()[:5], 3, 6, 2))
 
 

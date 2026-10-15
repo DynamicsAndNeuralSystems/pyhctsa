@@ -313,8 +313,10 @@ def fnn_embedding_dimension(
 
     This is the first dimension (1 to ``maxemb``) at which the fraction of false
     nearest neighbors, :func:`false_nearest` with the given ``theiler`` window and
-    ``escape_factor``, falls below ``threshold``; one more than the largest dimension computed
-    (``maxemb + 1`` unless TISEAN stopped early) if it never does.
+    ``escape_factor``, falls below ``threshold``. If it never does, this is one more than the
+    largest dimension computed when TISEAN stopped early (no neighbors left within its search
+    range at the next dimension), and ``maxemb`` otherwise (the dimension is never larger
+    than ``maxemb``).
     hctsa's defaults are reproduced: threshold 0.4, 10 dimensions, escape factor 5
     (NL_nlpe uses a threshold of 0.05). NaN where TISEAN produces no output.
 
@@ -342,7 +344,7 @@ def fnn_embedding_dimension(
         t = false_nearest(y, delay, 1, maxemb, theiler, escape_factor)
     except ValueError:
         return float("nan")
-    return float(fnn_first_under(t["dim"], t["pfnn"], threshold))
+    return float(min(fnn_first_under(t["dim"], t["pfnn"], threshold), int(maxemb)))
 
 
 def _gk15(f, a: np.ndarray, b: np.ndarray) -> np.ndarray:

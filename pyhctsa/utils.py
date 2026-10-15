@@ -310,9 +310,11 @@ def z_score(x: ArrayLike) -> np.ndarray:
     """
     Z-score the input data vector.
 
-    This function standardizes the input array by removing the mean and scaling to unit variance.
-    It performs the z-scoring operation twice to reduce numerical error, as recommended for 
-    high-precision applications.
+    This function standardizes the input array by removing the mean and scaling to unit variance
+    (sample standard deviation, ``n - 1`` in the denominator). It performs the z-scoring operation
+    twice to reduce numerical error. The check for a constant series is scale-free: there is no
+    threshold on the variance or range, so data of any scale (however small its units) is
+    standardized.
 
     Parameters
     ----------
@@ -323,13 +325,22 @@ def z_score(x: ArrayLike) -> np.ndarray:
     -------
     np.ndarray
         The z-scored version of the input data.
+
+    Raises
+    ------
+    TypeError
+        If the input cannot be converted to a numeric array.
+    ValueError
+        If the input is empty, contains NaN or Inf, or is constant: all values equal, up to
+        floating-point rounding at their own magnitude (a range of at most a few units in the
+        last place of the largest absolute value), so that there is no variation to standardize.
     """
     # Convert input to numpy array
     try:
         x = np.asarray(x, dtype=float)
     except (TypeError, ValueError) as e:
         raise TypeError(f"Input cannot be converted to numeric array: {e}")
-    
+
     if x.size == 0:
         raise ValueError("Input array is empty.")
 
@@ -337,15 +348,12 @@ def z_score(x: ArrayLike) -> np.ndarray:
     if not np.isfinite(x).all():
         raise ValueError(f"data contains non-finite values (NaN/inf) at "
                          f"idxs: {np.argwhere(np.isfinite(x) == False)}")
-    
-    # robust checks for constant values
-    var_x = np.var(x, ddof=1)
-    if var_x < 1e-10:
-        raise ValueError(f"Data has sample variance {var_x:.2e} < 1e-10. "
-                         "Values appear to be constant.")
+
+    # A constant series (relative to the precision of its own values: scale-free)
     data_range = np.ptp(x)  # peak-to-peak (max - min)
-    if data_range < 1e-10:
-        raise ValueError(f"Data range {data_range:.2e} < 1e-10. Values appear to be constant.")
+    if data_range <= 4 * np.spacing(np.max(np.abs(x))):
+        raise ValueError(f"Data range {data_range:.2e} is zero up to rounding. "
+                         "Values appear to be constant.")
 
     # Z-score twice to reduce numerical error
     zscored_data = np.divide((x - np.mean(x)), np.std(x, ddof=1))

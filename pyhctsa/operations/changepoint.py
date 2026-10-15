@@ -35,7 +35,8 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
         variance from removing the piece-wise constants, and stationarity in the
         occurrence of change points. The keys are `E` (objective per sample), `s`,
         `lambdamax` (scaled by 1/sqrt(N)), `nsegments`, `rmsoff`, `rmsoffpstep`,
-        `ratn12`, `diffn12`, `pshort_3`, `meanstepintgt3` (in samples), `cvstepint`
+        `ratn12`, `diffn12` (the absolute difference between the numbers of change points in
+        the two halves, as a proportion of the number of segments), `pshort_3`, `meanstepintgt3` (in samples), `cvstepint`
         (std/mean of the step intervals) and `medianstepint` (in samples).
     """
 
@@ -94,8 +95,8 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
         out["ratn12"] = 0
 
     # Difference between number of change points in first and second half of data
-    # as a proportion of total number of change points
-    # Maximal (1) when all change points are in one half of data
+    # as a proportion of the number of segments (k change points give k + 1 segments)
+    # Maximal, k/(k + 1), when all k change points are in one half of data
     # Minimal (0) when same number of change points in both halves
     out["diffn12"] = abs(sum1 - sum2) / num_change_points
 

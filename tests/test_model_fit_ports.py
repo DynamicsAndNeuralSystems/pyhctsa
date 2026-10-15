@@ -101,8 +101,10 @@ def test_hmm_fit_uses_shared_em_loop():
     # hmm_fit is the shared deterministic multi-start EM (_gaussian_hmm_fit) on the training part
     y = _x()
     n_train = int(np.floor(0.7 * len(y)))
-    mu, cov, P, pi, LL = mf._gaussian_hmm_fit(y[:n_train], 3)
+    mu, cov, P, pi, ll = mf._gaussian_hmm_fit(y[:n_train], 3)
     out = mf.hmm_fit(y, 0.7, 3)
-    assert abs(out['LLtrainpersample'] - np.max(LL) / n_train) < 1e-12
+    assert abs(out['LLtrainpersample'] - ll / n_train) < 1e-12
+    # the training log-likelihood is that of the returned parameters
+    assert abs(ll - mf._gaussian_hmm_loglik(y[:n_train], mu, cov, P, pi)) < 1e-9
     assert abs(out['Cov'] - np.ravel(cov)[0]) < 1e-12
     assert mf.hmm_fit(y, 0.7, 3) == out  # deterministic

@@ -382,7 +382,7 @@ correlation:
     base_name: stick_angles
     dependencies:
     configs:
-      - {zscore: True}
+      - {zscore: True, exclude: ['statav2_all_m', 'statav3_all_m', 'statav4_all_m', 'statav5_all_m', 'statav5_all_s']}
     legacy_name: CO_StickAngles
     ordered_args:
   
@@ -720,13 +720,13 @@ entropy:
     base_name: sample_entropy
     dependencies:
     configs:
-      - {m: 5, r: 0.05, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
-      - {m: 5, r: 0.1, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
-      - {m: 5, r: 0.15, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
-      - {m: 5, r: 0.2, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
+      - {m: 5, r: 0.05, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen3', 'sampen4', 'sampen5', 'meanchsampen']}
+      - {m: 5, r: 0.1, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen3', 'sampen4', 'sampen5', 'meanchsampen']}
+      - {m: 5, r: 0.15, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen4', 'sampen5', 'meanchsampen']}
+      - {m: 5, r: 0.2, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen4', 'sampen5', 'meanchsampen']}
       - {m: 5, r: 0.3, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
-      - {m: 5, r: 0.1, pre_process_how: 'diff1', zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
-      - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
+      - {m: 5, r: 0.1, pre_process_how: 'diff1', zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen3', 'sampen4', 'sampen5', 'meanchsampen']}
+      - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen4', 'sampen5', 'meanchsampen']}
       - {m: 5, r: 0.2, zscore: True, preprocess: decimate_ac1e, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}   # EN_SampEn(zscore(BF_PreProcess(x_z,'decimate_ac1e')),5,0.2)
     legacy_name: EN_SampEn
     ordered_args: ['m', 'r', 'pre_process_how']
@@ -1353,8 +1353,8 @@ distribution:
     base_name: fit_kernel_smooth
     dependencies:
     configs:
-      - {area: [[0.05, 0.1, 0.2, 0.3, 0.4, 0.5]], numcross: [[0.05, 0.1, 0.2, 0.3, 0.4, 0.5]], arclength: [[0.1, 0.5, 1, 2]], zscore: False}   # DN_FitKernelSmooth(x,'numcross',[0.05,0.1,0.2,0.3,0.4,0.5],'area',[0.05,0.1,0.2,0.3,0.4,0.5],'arclength',[0.1,0.5,1,2])
-      - {zscore: True, select: ['entropy', 'max']}   # DN_FitKernelSmooth(x_z)
+      - {zscore: False, exclude: ['max', 'entropy']}   # DN_FitKernelSmooth(x)
+      - {area: [[0.05, 0.1, 0.2, 0.3]], arclength: [[0.5, 2]], zscore: True, exclude: ['npeaks', 'asym', 'plsym']}   # DN_FitKernelSmooth(x_z,'area',[0.05,0.1,0.2,0.3],'arclength',[0.5,2])
     legacy_name: DN_FitKernelSmooth
     ordered_args: ['none']   # keeps the settings out of the label
 

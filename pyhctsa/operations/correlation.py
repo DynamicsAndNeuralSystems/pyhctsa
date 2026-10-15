@@ -942,66 +942,78 @@ def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
 @dict_output
 def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
     """
-    Angle autocorrelation in a 2-dimensional embedding space.
+    Angle autocorrelation in a 2-dimensional delay embedding, over delays.
 
-    Investigates how the autocorrelation of angles between successive points in
-    the two-dimensional time-series embedding change as tau varies from
-    tau = 1, 2, ..., max_tau.
+    Investigates how the autocorrelation of the angles between successive points in the
+    two-dimensional delay embedding ``(y[t], y[t + tau])`` changes as tau varies from 1, 2,
+    ..., ``max_tau``. For each tau the angle of each step is measured from the horizontal, as
+    in :func:`embed2`, and its autocorrelation is taken at lags 1, 2 and 3. A step between two
+    coincident points (a repeated pair of values) has no direction (0/0), so its angle is
+    undefined and is removed from the sequence of angles before the autocorrelations are
+    computed. The outputs summarize the three resulting curves as a function of tau.
 
     Parameters
     ----------
     y : array-like
         The input time series.
     max_tau : int
-        The maximum time lag to consider.
+        The maximum time delay to consider.
 
     Returns
     -------
     dict
-        Dictionary containing statistics of the autocorrelation of angles for each tau,
-        including mean, max, min, and autocorrelation at different lags.
+        - ``ac1_thetaac1``, ``ac1_thetaac2``, ``ac1_thetaac3``: the lag-1 autocorrelation
+          (across tau) of the lag-1, lag-2 and lag-3 angle autocorrelations
+        - ``mean_thetaac1``, ``mean_thetaac2``, ``mean_thetaac3``: their means across tau
+        - ``max_thetaac1``, ... and ``min_thetaac1``, ...: their maxima and minima
+        - ``meanrat_thetaac12``: the ratio ``mean_thetaac1 / mean_thetaac2``
+        - ``diff_thetaac12``: the sum across tau of the absolute difference between the
+          lag-2 and lag-1 angle autocorrelations
+
+        All are NaN if an angle autocorrelation is undefined at any tau (e.g., when no step
+        at that tau has a defined angle, or all of its angles are equal). A scalar NaN is
+        returned if the series is too short to embed.
     """
     tau_range = np.arange(1, max_tau + 1)
     num_tau = len(tau_range)
-
-    # Ensure y is a column vector
-    y = np.atleast_2d(y)
-    if y.shape[0] < y.shape[1]:
-        y = y.T
+    y = np.asarray(y, dtype=float).ravel()
 
     stats_store = np.zeros((3, num_tau))
 
     for i, tau in enumerate(tau_range):
-        m = np.column_stack((y[:-tau], y[tau:]))
-        diff_x = np.diff(m[:, 0])
-        diff_y = np.diff(m[:, 1])
-        # Handle division by zero
+        diff_x = np.diff(y[:-tau])
+        diff_y = np.diff(y[tau:])
         with np.errstate(divide='ignore', invalid='ignore'):
-            theta = diff_y / diff_x
-        theta = np.arctan(theta)
+            theta = np.arctan(diff_y / diff_x)  # measured as deviation from the horizontal
 
         if len(theta) == 0:
-            logger.warning(f'Time series (N={len(y)}) too short for embedding')
+            logger.warning(f'Time series (N={len(y)}) too short for embedding at tau = {tau}')
             return np.nan
+
+        # remove undefined angles (0/0, from steps between coincident points)
+        theta = theta[~np.isnan(theta)]
+        if len(theta) == 0:
+            stats_store[:, i] = np.nan
+            continue
 
         stats_store[0, i] = autocorr(theta, 1, 'Fourier')
         stats_store[1, i] = autocorr(theta, 2, 'Fourier')
         stats_store[2, i] = autocorr(theta, 3, 'Fourier')
-    # Compute output statistics (max and min ignore NaNs: a NaN occurs when a
-    # run of equal values gives 0/0 angles)
+
+    # (an undefined autocorrelation at any tau gives NaN for every statistic of its curve)
     out = {
         'ac1_thetaac1': autocorr(stats_store[0, :], 1, 'Fourier'),
         'ac1_thetaac2': autocorr(stats_store[1, :], 1, 'Fourier'),
         'ac1_thetaac3': autocorr(stats_store[2, :], 1, 'Fourier'),
         'mean_thetaac1': np.mean(stats_store[0, :]),
-        'max_thetaac1': np.nanmax(stats_store[0, :]),
-        'min_thetaac1': np.nanmin(stats_store[0, :]),
+        'max_thetaac1': np.max(stats_store[0, :]),
+        'min_thetaac1': np.min(stats_store[0, :]),
         'mean_thetaac2': np.mean(stats_store[1, :]),
-        'max_thetaac2': np.nanmax(stats_store[1, :]),
-        'min_thetaac2': np.nanmin(stats_store[1, :]),
+        'max_thetaac2': np.max(stats_store[1, :]),
+        'min_thetaac2': np.min(stats_store[1, :]),
         'mean_thetaac3': np.mean(stats_store[2, :]),
-        'max_thetaac3': np.nanmax(stats_store[2, :]),
-        'min_thetaac3': np.nanmin(stats_store[2, :]),
+        'max_thetaac3': np.max(stats_store[2, :]),
+        'min_thetaac3': np.min(stats_store[2, :]),
     }
 
     out['meanrat_thetaac12'] = out['mean_thetaac1'] / out['mean_thetaac2']
@@ -1444,7 +1456,13 @@ def stick_angles(y: ArrayLike) -> dict:
     angle between successive sticks is the arctangent of the slope from one stick's tip to the
     next: the difference in height divided by the number of samples between them.
     Statistics are returned on the positive angles (``_p``), the negative angles (``_n``) and
-    all of them.
+    all of them (``_all``, and the outputs with no suffix). The ``tau``, ``ac1``, quantile and
+    ``statav`` outputs use the angle sequences standardized to zero mean and unit variance.
+    The set of all angles is the positive set's sequence followed by the negative set's: its
+    distributional statistics (``std``, ``mean``, ``median``, quantiles, skewness, kurtosis)
+    do not depend on that order, but its ``statav`` outputs do, and compare the positive with
+    the negative set (and, for more than two parts, parts within each set) rather than
+    segments in time.
 
     Parameters
     -----------
@@ -1454,11 +1472,21 @@ def stick_angles(y: ArrayLike) -> dict:
     Returns
     --------
     dict
-        A dictionary of statistics on the obtained sequence of angles, theta.
-        Statistics include the mean and spread of theta,
-        the difference between positive and negative angles, measures of symmetry of
-        the angles, stationarity, autocorrelation, and measures of the distribution of
-        these stick angles.
+        - ``mean_p``, ``median_p``, ``mean_n``, ``median_n``, ``mean``, ``median``, ``std``:
+          the mean, median and standard deviation of the angles (positive set, negative set,
+          or all angles)
+        - ``statav{2,3,4,5}_{p,n}_{m,s}``, ``statav{2,3,4,5}_all_m``, ``statav5_all_s``: the
+          standard deviation across 2, 3, 4 or 5 equal parts of the sequence of the mean
+          (``_m``) or the standard deviation (``_s``) of the angles, divided by their overall
+          standard deviation (for ``_all``, parts of the positive-then-negative sequence)
+        - ``tau_p``, ``tau_n``: the first zero-crossing of the autocorrelation function of
+          the positive or negative set's angle sequence (interpolated); ``ac1_p``, ``ac1_n``:
+          their lag-1 autocorrelations
+        - ``q1_*``, ``q10_*``, ``q90_*``, ``q99_*`` (``_p``, ``_n``, ``_all``): quantiles of the
+          standardized angles; ``skewness_*``, ``kurtosis_*``: skewness and kurtosis of the
+          angles
+        - ``ratmean_p``, ``ratmean_n``: the mean of the positive angles divided by the mean of
+          the negative angles within the positive or negative set
 
         ``pnsumabsdiff`` is the summed absolute difference between the histograms (the proportion
         of angles in each of 20 bins spanning -pi/2 to pi/2) of the positive and negative angles

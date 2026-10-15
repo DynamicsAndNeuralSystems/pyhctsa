@@ -68,8 +68,8 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         The Theiler window (see :func:`pyhctsa.utils.theiler_window`). Default is
         ``['ac', 1]``.
     just_best : bool, optional
-        If True, return only the first dimension at which the fraction of false nearest
-        neighbors is below ``bestp``. Default is True.
+        If True, return only an embedding dimension: the first dimension at which the
+        fraction of false nearest neighbors is below ``bestp``. Default is True.
     bestp : float, optional
         The fraction of false neighbors defining the embedding dimension when
         ``just_best``. Default is 0.4.
@@ -81,9 +81,10 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     Returns
     -------
     float or dict
-        If ``just_best``, the embedding dimension (one more than the largest dimension
-        computed, ``maxm + 1`` unless TISEAN stopped early, if the fraction never
-        falls below ``bestp``). Otherwise a dict with, for ``i = 1, ..., maxm``, ``pfnn_i``
+        If ``just_best``, the embedding dimension: if the fraction never falls below
+        ``bestp``, one more than the largest dimension computed when TISEAN stopped early
+        (no neighbors left within its search range at the next dimension), and ``maxm``
+        otherwise (the dimension is never larger than ``maxm``). Otherwise a dict with, for ``i = 1, ..., maxm``, ``pfnn_i``
         (the fraction of false nearest neighbors) and ``nHood2_i`` (the typical,
         root-mean-square, distance from a point to its nearest neighbor; NaN at a
         dimension for which TISEAN found too few neighbors); ``minpfnn``, ``meanpfnn``,
@@ -118,7 +119,8 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     m_dim, p_nn, n_hood2 = res['dim'], res['pfnn'], res['sdeps']
 
     if just_best:
-        return float(_tisean.fnn_first_under(m_dim, p_nn, bestp))
+        # (capped at maxm, the largest dimension tested: "not below bestp up to maxm" gives maxm)
+        return float(min(_tisean.fnn_first_under(m_dim, p_nn, bestp), maxm))
 
     out = {}
     for i in range(1, maxm + 1):
@@ -146,7 +148,9 @@ def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.4) -> float
     threshold})``: :func:`fnn` with ten dimensions, a Theiler window of one autocorrelation
     time and an escape factor of 5 (TISEAN's own, 2, makes the test look as if it never
     converges), returning the first dimension at which the fraction of false nearest
-    neighbors falls below `threshold`. NaN when it cannot be determined.
+    neighbors falls below `threshold`; if it never does, 10 (the largest dimension tested), or
+    one more than the largest dimension computed when TISEAN stopped early (see :func:`fnn`).
+    NaN when it cannot be determined.
     """
     return fnn(y, tau, 10, ('ac', 1), True, threshold, 5)
 
@@ -534,8 +538,8 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
     de : int, optional
         The embedding dimension, or ``'fnn'`` to set it by TISEAN's false nearest
         neighbors (:func:`fnn`: first dimension at which the fraction of false
-        neighbors is below 0.05, with a Theiler window of one autocorrelation time
-        and an escape factor of 5). Default is 3.
+        neighbors is below 0.05, at most 10, with a Theiler window of one autocorrelation
+        time and an escape factor of 5). Default is 3.
     tau : int or str, optional
         The time-delay: an integer, or a rule understood by
         :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
@@ -546,7 +550,9 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
     max_n : int or 'full', optional
         The maximum length of the time series on which to compute the nlpe (the
         first ``max_n`` samples are used), or ``'full'`` to use the whole series
-        (memory use grows quadratically with length). Default is 5000.
+        (memory use grows quadratically with length). The time delay, the Theiler
+        window and an ``'fnn'`` embedding dimension are all computed from the cropped
+        series. Default is 5000.
     theiler_win : int, float, or ``['ac', k]``, optional
         The Theiler window (see :func:`pyhctsa.utils.theiler_window`), computed
         on the (cropped) series: a number of samples, or ``['ac', k]`` for ``k``
@@ -573,12 +579,6 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
     y = np.asarray(y, dtype=float).ravel()
     n = len(y)
 
-    tau = get_tau(y, tau)
-    if np.isnan(tau):
-        logger.warning('Time series cannot be embedded (could not get the time delay)')
-        return np.nan
-    tau = int(tau)
-
     #% nlpe can cause memory pains for long time series
     #% Let's do this dirty cheat
     if isinstance(max_n, str):
@@ -593,6 +593,13 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
     if n < 20: # short time series cause problems
         logger.warning(f'Time series (N = {len(y)}) is too short.')
         return np.nan
+
+    # the time delay of the series analyzed (after any max_n crop)
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        logger.warning('Time series cannot be embedded (could not get the time delay)')
+        return np.nan
+    tau = int(tau)
 
     if isinstance(de, str):
         if de != 'fnn':
@@ -1275,7 +1282,9 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     dict or float
         Statistics summarising Takens' estimator, the local slopes of the
         correlation sum (raw and Gaussian-kernel smoothed), and the correlation
-        entropy. Returns NaN, as hctsa does, if the time series is too short, the time
+        entropy. All ten ``takens05`` outputs are NaN if Takens' estimate is undefined
+        at any embedding dimension (the correlation sum has no length scale above 0.5
+        there). Returns NaN, as hctsa does, if the time series is too short, the time
         delay cannot be determined, or the TISEAN output is unusable for this series
         (no valid output for a long delay, no correlation-dimension data, or no scaling
         range).
@@ -1328,26 +1337,32 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
     # Correlation dimension at an upper length scale of 0.5: for a z-scored time
     # series that is half the standard deviation, as Kantz & Schreiber recommend.
     takens05 = _sub_takens(c2tdat, 0.5)
-    out['takens05_mean'] = np.mean(takens05)
-    out['takens05_median'] = np.median(takens05)
-    out['takens05_max'] = np.nanmax(takens05)
-    out['takens05_min'] = np.nanmin(takens05)
-    out['takens05_std'] = np.std(takens05, ddof=1)
-    if np.all(np.isnan(takens05)):
-        out['takens05_iqr'] = np.nan
+    takens_keys = ['takens05_mean', 'takens05_median', 'takens05_max', 'takens05_min',
+                   'takens05_std', 'takens05_iqr', 'takens05mmin_ri', 'takens05mmin_goodness',
+                   'takens05mmin_stabled', 'takens05mmin_linrmserr']
+    if np.any(np.isnan(takens05)):
+        # The estimate is undefined at some embedding dimension (no length scale above 0.5),
+        # so statistics across dimensions are undefined (not computed over a subset)
+        for key in takens_keys:
+            out[key] = np.nan
     else:
-        q75, q25 = np.percentile(takens05[~np.isnan(takens05)], [75, 25], method='hazen')
+        out['takens05_mean'] = np.mean(takens05)
+        out['takens05_median'] = np.median(takens05)
+        out['takens05_max'] = np.max(takens05)
+        out['takens05_min'] = np.min(takens05)
+        out['takens05_std'] = np.std(takens05, ddof=1)
+        q75, q25 = np.percentile(takens05, [75, 25], method='hazen')
         out['takens05_iqr'] = q75 - q25
 
-    # Find outliers as a means of inferring m_min: look for the estimate
-    # approaching a constant for m > m_min
-    mmintakens05 = _sub_findmmin(takens05)
-    # minimum dimension at which a scaling range is observed:
-    out['takens05mmin_ri'] = (np.nan if mmintakens05['ri1'] is None
-                              else mmintakens05['ri1'])
-    out['takens05mmin_goodness'] = mmintakens05['goodness']
-    out['takens05mmin_stabled'] = mmintakens05['stabled']
-    out['takens05mmin_linrmserr'] = mmintakens05['linrmserr']
+        # Find outliers as a means of inferring m_min: look for the estimate
+        # approaching a constant for m > m_min
+        mmintakens05 = _sub_findmmin(takens05)
+        # minimum dimension at which a scaling range is observed:
+        out['takens05mmin_ri'] = (np.nan if mmintakens05['ri1'] is None
+                                  else mmintakens05['ri1'])
+        out['takens05mmin_goodness'] = mmintakens05['goodness']
+        out['takens05mmin_stabled'] = mmintakens05['stabled']
+        out['takens05mmin_linrmserr'] = mmintakens05['linrmserr']
 
     # --------------------------------------------------------------------------
     # (2) D2: local slopes of the correlation integral
@@ -2487,8 +2502,11 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
     cloud, and summarizes the lifetimes (death minus birth, as a proportion of the filtration
     threshold, the maximum distance between 300 evenly spaced embedded points) of its
     one-dimensional holes (loops, H1; a periodic series gives a long-lived loop) and its
-    connected components (H0). Uses ripser [1]_ (the ``ripser`` Python package, an optional
-    dependency; hctsa runs the ripser executable).
+    connected components (H0). The filtration stops at the threshold, so a class still alive
+    there is counted as dying at the threshold (lifetime ``(threshold - birth)/threshold``),
+    except for the single essential H0 class (the connected component that never dies), which
+    is dropped. Uses ripser [1]_ (the ``ripser`` Python package, an optional dependency; hctsa
+    runs the ripser executable).
 
     References
     ----------
@@ -2522,7 +2540,7 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
         ``maxPersistenceH1``, ``totalPersistenceH1``, ``persistenceEntropyH1``: the maximum and
         sum of the (normalized) lifetimes of the H1 classes and the entropy of their distribution
         (all 0 if there are none); ``totalPersistenceH0``: the sum of the lifetimes of the H0
-        classes. Returns NaN if the delay cannot be set, the embedding fails, there are fewer than 20
+        classes other than the essential one. Returns NaN if the delay cannot be set, the embedding fails, there are fewer than 20
         embedded points, or the point cloud is degenerate (e.g. a constant series).
 
     Raises
@@ -2569,9 +2587,14 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
     dgms = ripser(squareform(pdist(x)),
                   maxdim=int(max_dim), thresh=threshold, distance_matrix=True)['dgms']
 
-    def lifetimes(d):  # finite lifetimes as a proportion of the threshold (essential classes dropped)
-        p = (d[:, 1] - d[:, 0]) if d.size else np.empty(0)
-        return p[np.isfinite(p)] / threshold
+    def lifetimes(d):  # lifetimes as a proportion of the threshold; a class alive there dies there
+        d = np.asarray(d, dtype=float).reshape(-1, 2)
+        return (np.minimum(d[:, 1], threshold) - d[:, 0]) / threshold
+
+    def drop_essential(d):  # drop the single essential H0 class (the component that never dies)
+        d = np.asarray(d, dtype=float).reshape(-1, 2)
+        inf = np.flatnonzero(~np.isfinite(d[:, 1]))
+        return np.delete(d, inf[:1], axis=0)
 
     out = {}
     pers1 = lifetimes(dgms[1]) if len(dgms) > 1 else np.empty(0)
@@ -2586,7 +2609,7 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
         pos = pers1[pers1 > 0]
         p = pos / np.sum(pos)
         out['persistenceEntropyH1'] = -np.sum(p * np.log(p)) if p.size else 0.0
-    out['totalPersistenceH0'] = np.sum(lifetimes(dgms[0]))
+    out['totalPersistenceH0'] = np.sum(lifetimes(drop_essential(dgms[0])))
     return out
 
 
