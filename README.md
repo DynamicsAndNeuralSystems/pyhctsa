@@ -49,6 +49,14 @@ _pyhctsa_ requires Python 3.10 or newer:
 pip install pyhctsa
 ```
 
+This gives 6783 of the 6791 features of the _hctsa_ v3.0.0 feature set.
+The other 8, the persistent-homology features (`NL_PersistentHomology`), need the optional `ripser` package; without it the calculator skips them and warns.
+For the full feature set, install with the `tda` extra:
+
+```bash
+pip install "pyhctsa[tda]"
+```
+
 We strongly recommend installing into a fresh virtual environment to prevent dependency clashes:
 
 ```bash

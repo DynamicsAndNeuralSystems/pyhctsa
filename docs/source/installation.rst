@@ -11,6 +11,15 @@ The easiest way to install `pyhctsa` is using `pip <https://pypi.org/project/pyh
 
    > pip install pyhctsa
 
+This gives 6783 of the 6791 features of the *hctsa* v3.0.0 feature set.
+The other 8, the persistent-homology features (``NL_PersistentHomology``), need the optional
+`ripser <https://github.com/scikit-tda/ripser.py>`_ package; without it the calculator skips them and
+warns. For the full feature set, install with the ``tda`` extra:
+
+.. code-block:: bash
+
+   > pip install "pyhctsa[tda]"
+
 From Source
 -----------
 You can also install `pyhctsa` directly from the source code:
@@ -30,12 +39,4 @@ To verify that `pyhctsa` is installed correctly, you can run:
 
    pip show pyhctsa
 
-If `pyhctsa` has been successfully installed, you will see information about the package version, license info, etc: ::
-
-   Name: pyhctsa
-   Version: 0.1.0
-   Summary: Highly comparative time-series analysis in Python.
-   Home-page: https://github.com/DynamicsAndNeuralSystems/pyhctsa
-   Author: 
-   Author-email: "Joshua B. Moore" <joshua.moore@sydney.edu.au>, "Ben D. Fulcher" <ben.fulcher@sydney.edu.au>
-   License: GNU GENERAL PUBLIC LICENSE
+If `pyhctsa` has been successfully installed, this shows its version, license and dependencies.
