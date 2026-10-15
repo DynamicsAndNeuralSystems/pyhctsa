@@ -276,39 +276,6 @@ def _variance_segmentations(y: np.ndarray, K: int, d: int) -> tuple:
     return J, t_est
 
 
-def _lavielle_num_changes(J: np.ndarray, S: float = 0.75) -> int:
-    """
-    Number of change points from the contrast curve, by the penalized-contrast rule.
-
-    ``J[k]`` is the minimal contrast with k change points (only the leading finite
-    entries are used). With m = k + 1 segments, Mmax = number of finite entries, the
-    normalized contrast ``Jt_m = (J_Mmax - J_m)/(J_Mmax - J_1) (Mmax - 1) + 1`` and its
-    second differences ``D_m = Jt_{m-1} - 2 Jt_m + Jt_{m+1}`` (m = 2..Mmax-1), the number
-    of segments is ``max{m : D_m > S}`` (1 if none).
-
-    Notes
-    -----
-    Lavielle, M. (2005) "Using penalized contrasts for the change-point problem",
-    Signal Processing 85(8):1501-1510; S = 0.75 is the threshold proposed there.
-    """
-    J = np.asarray(J, dtype=float)
-    fin = np.isfinite(J)
-    mmax = int(fin.sum()) if fin.all() or not fin.any() else int(np.argmin(fin))
-    if mmax < 3:
-        return 0
-    Jm = J[:mmax]
-    denom = Jm[-1] - Jm[0]
-    if not np.isfinite(denom) or denom == 0:
-        return 0
-    Jt = (Jm[-1] - Jm) / denom * (mmax - 1) + 1.0
-    D = Jt[:-2] - 2.0 * Jt[1:-1] + Jt[2:]  # D for m = 2..mmax-1
-    above = np.nonzero(D > S)[0]
-    if above.size == 0:
-        return 0
-    m_hat = int(above[-1]) + 2
-    return m_hat - 1
-
-
 def _variance_inflation(x: np.ndarray, max_lag: int = 200) -> float:
     """
     Variance inflation of segment-wise mean squares caused by serial dependence and heavy tails.
@@ -403,8 +370,8 @@ def _wvarchg(y: np.ndarray, K: int, d: int) -> int:
     variance-inflation factor of the signal. Calibrated by simulation so that, for
     stationary noise (white, AR(1), fGn, heavy-tailed) passed through the same wavelet
     pipeline, the probability of reporting at least one change point is about 5%. The
-    penalized-contrast rule of Lavielle (2005) (:func:`_lavielle_num_changes`) is not used
-    for this: it reports spurious change points in most stationary series.
+    penalized-contrast rule of Lavielle (2005) is not used for this: it reports spurious
+    change points in most stationary series.
     """
     y = np.asarray(y, dtype=float).ravel()
     if y.size < 2 or not np.all(np.isfinite(y)) or K < 1:

@@ -3927,10 +3927,11 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
     not correlation dimensions (despite hctsa's former name for this operation,
     NL_BoxCorrDim). hctsa registers ``meanr``, ``medianr``, ``minr`` and ``meanchr`` at
     ``r`` = 2, 3, 4, 6, 8, 11, 14, 17, 20, 24, 28, 32, 36 of ``num_bins = 50``
-    (2 to 429 boxes per axis): coarse scales change quickly with ``r``
-    and are sampled densely; neighboring finer scales are nearly redundant; for flows (long
-    delays) the informative scales lie beyond ``r = 18``; and beyond ``r = 36`` the
-    5-dimensional embedding saturates (``I = 0``) for series of a few thousand points.
+    (2 to 429 boxes per axis). Testing indicated that coarse scales change quickly with ``r``
+    (so they are sampled densely), that neighboring finer scales are nearly redundant, that
+    for flows (long delays) the informative scales lie beyond ``r = 18``, and that beyond
+    ``r = 36`` the 5-dimensional embedding saturates (``I = 0``) for series of a few thousand
+    points.
 
     Parameters
     ----------
