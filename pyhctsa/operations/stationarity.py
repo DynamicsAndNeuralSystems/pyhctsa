@@ -102,7 +102,9 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
         ``loglikelihood``, ``AIC``, ``BIC``, ``HQC`` (each divided by the series length) and
         ``rmse``. Several lags: ``minpValue``, ``meanpValue``, ``lagmaxp``, ``lagminp``
         (the lags with the largest and smallest p-value; the first in list order on ties),
-        ``meanstat`` and ``minBIC`` (divided by the series length).
+        ``meanstat`` and ``minBIC`` (divided by the series length; the test regression
+        does not depend on the lag, which only enters the variance correction of the
+        statistic, so this is the BIC of that one regression).
 
     Notes
     -----
