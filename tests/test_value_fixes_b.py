@@ -8,7 +8,7 @@ from pyhctsa.operations import correlation as co
 from pyhctsa.operations import model_fit as mf
 from pyhctsa.operations import nonlinearity as nl
 from pyhctsa.operations import pre_process as pp
-from pyhctsa.utils import z_score
+from pyhctsa.utils import theiler_window, z_score
 
 
 def _ar1(n, phi, seed):
@@ -90,22 +90,23 @@ def test_hmm_training_loglik_is_of_the_returned_parameters():
 
 
 # ------------------------------------------------------------------------------
-# False nearest neighbors: the dimension is at most the largest dimension tested
+# False nearest neighbors: the dimension is the smallest one not ruled out
 # ------------------------------------------------------------------------------
-def test_fnn_dimension_capped_at_largest_tested():
-    # fnn's own firstunder* outputs flag "never below" with maxm + 1; the embedding dimension is
-    # capped at maxm
+def test_fnn_dimension_smallest_not_ruled_out():
+    # never below the threshold up to maxm: maxm + 1 (a lower bound), as fnn's firstunder*
     t = np.arange(4000)
     x = np.sin(2 * np.pi * t / 37) + np.sin(2 * np.pi * t / (37 * np.sqrt(2))) \
         + 0.5 * np.random.default_rng(6).standard_normal(4000)
     d = nl.fnn(x, 1, 3, ('ac', 1), False, escape_factor=5)
     assert d['firstunder005'] == 4  # not below 5% up to maxm = 3
-    assert nl.fnn(x, 1, 3, ('ac', 1), True, 0.05, 5) == 3
-    # otherwise (including TISEAN stopping early) the dimension is the first one below the threshold
+    assert nl.fnn(x, 1, 3, ('ac', 1), True, 0.05, 5) == 4
+    from pyhctsa.toolboxes.Tisean_3_0_1 import tisean
+    assert tisean.fnn_embedding_dimension(x, 1, int(theiler_window(x, ['ac', 1], x.size)), 0.05, 3) == 4
+    # in general the dimension is firstunder* at the threshold (including TISEAN stopping early)
     for x2 in (np.random.default_rng(7).standard_normal(1000), x):
         d = nl.fnn(x2, 1, 10, ('ac', 1), False, escape_factor=5)
         m = nl.fnn(x2, 1, 10, ('ac', 1), True, 0.05, 5)
-        assert m == min(d['firstunder005'], 10)
+        assert m == d['firstunder005']
         assert nl._fnn_embedding_dim(x2, 1, 0.05) == m
 
 

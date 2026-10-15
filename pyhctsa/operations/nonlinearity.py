@@ -68,8 +68,8 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         The Theiler window (see :func:`pyhctsa.utils.theiler_window`). Default is
         ``['ac', 1]``.
     just_best : bool, optional
-        If True, return only an embedding dimension: the first dimension at which the
-        fraction of false nearest neighbors is below ``bestp``. Default is True.
+        If True, return only an embedding dimension: the smallest dimension not ruled out
+        by the test (see Returns). Default is True.
     bestp : float, optional
         The fraction of false neighbors defining the embedding dimension when
         ``just_best``. Default is 0.4.
@@ -81,10 +81,14 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     Returns
     -------
     float or dict
-        If ``just_best``, the embedding dimension: if the fraction never falls below
-        ``bestp``, one more than the largest dimension computed when TISEAN stopped early
-        (no neighbors left within its search range at the next dimension), and ``maxm``
-        otherwise (the dimension is never larger than ``maxm``). Otherwise a dict with, for ``i = 1, ..., maxm``, ``pfnn_i``
+        If ``just_best``, the embedding dimension: the smallest dimension not ruled out by
+        the test. This is the first dimension at which the fraction of false nearest
+        neighbors is below ``bestp``; if it never is, one more than the largest dimension
+        TISEAN computed (``maxm + 1`` when every dimension up to ``maxm`` was computed; one
+        more than the last when TISEAN stopped early, having no neighbors left within its
+        search range). In that non-converged case the value is a lower bound: every
+        dimension below it was tested and failed the criterion.
+        Otherwise a dict with, for ``i = 1, ..., maxm``, ``pfnn_i``
         (the fraction of false nearest neighbors) and ``nHood2_i`` (the typical,
         root-mean-square, distance from a point to its nearest neighbor; NaN at a
         dimension for which TISEAN found too few neighbors); ``minpfnn``, ``meanpfnn``,
@@ -119,8 +123,8 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     m_dim, p_nn, n_hood2 = res['dim'], res['pfnn'], res['sdeps']
 
     if just_best:
-        # (capped at maxm, the largest dimension tested: "not below bestp up to maxm" gives maxm)
-        return float(min(_tisean.fnn_first_under(m_dim, p_nn, bestp), maxm))
+        # the smallest dimension not ruled out (a lower bound if never below bestp)
+        return float(_tisean.fnn_first_under(m_dim, p_nn, bestp))
 
     out = {}
     for i in range(1, maxm + 1):
@@ -147,10 +151,10 @@ def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.4) -> float
     Embedding dimension by false nearest neighbors, as hctsa's ``BF_Embed(y, tau, {'fnn',
     threshold})``: :func:`fnn` with ten dimensions, a Theiler window of one autocorrelation
     time and an escape factor of 5 (TISEAN's own, 2, makes the test look as if it never
-    converges), returning the first dimension at which the fraction of false nearest
-    neighbors falls below `threshold`; if it never does, 10 (the largest dimension tested), or
-    one more than the largest dimension computed when TISEAN stopped early (see :func:`fnn`).
-    NaN when it cannot be determined.
+    converges), returning the smallest dimension not ruled out: the first dimension at which
+    the fraction of false nearest neighbors falls below `threshold`, or, if it never does, one
+    more than the largest dimension TISEAN computed (11 when all ten were computed; see
+    :func:`fnn`), which is then a lower bound. NaN when it cannot be determined.
     """
     return fnn(y, tau, 10, ('ac', 1), True, threshold, 5)
 
@@ -537,9 +541,11 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
         Input time series (should be z-scored).
     de : int, optional
         The embedding dimension, or ``'fnn'`` to set it by TISEAN's false nearest
-        neighbors (:func:`fnn`: first dimension at which the fraction of false
-        neighbors is below 0.05, at most 10, with a Theiler window of one autocorrelation
-        time and an escape factor of 5). Default is 3.
+        neighbors (:func:`fnn` with dimensions 1 to 10, a Theiler window of one
+        autocorrelation time and an escape factor of 5: the first dimension at which the
+        fraction of false neighbors is below 0.05, or, if it never is, one more than the
+        largest dimension TISEAN computed (11 when all ten were computed), a lower bound on
+        the dimension). Default is 3.
     tau : int or str, optional
         The time-delay: an integer, or a rule understood by
         :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the

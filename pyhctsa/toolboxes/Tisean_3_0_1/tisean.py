@@ -311,12 +311,13 @@ def fnn_embedding_dimension(
     Embedding dimension chosen by false nearest neighbors, as hctsa's
     ``BF_Embed(y, tau, {'fnn', threshold})`` does.
 
-    This is the first dimension (1 to ``maxemb``) at which the fraction of false
-    nearest neighbors, :func:`false_nearest` with the given ``theiler`` window and
-    ``escape_factor``, falls below ``threshold``. If it never does, this is one more than the
-    largest dimension computed when TISEAN stopped early (no neighbors left within its search
-    range at the next dimension), and ``maxemb`` otherwise (the dimension is never larger
-    than ``maxemb``).
+    This is the smallest dimension not ruled out by the test: the first dimension (1 to
+    ``maxemb``) at which the fraction of false nearest neighbors, :func:`false_nearest` with
+    the given ``theiler`` window and ``escape_factor``, falls below ``threshold``. If it never
+    does, it is one more than the largest dimension computed (``maxemb + 1`` when every
+    dimension was computed; one more than the last when TISEAN stopped early, having no
+    neighbors left within its search range), and is then a lower bound: every dimension below
+    it was tested and failed the criterion.
     hctsa's defaults are reproduced: threshold 0.4, 10 dimensions, escape factor 5
     (NL_nlpe uses a threshold of 0.05). NaN where TISEAN produces no output.
 
@@ -344,7 +345,7 @@ def fnn_embedding_dimension(
         t = false_nearest(y, delay, 1, maxemb, theiler, escape_factor)
     except ValueError:
         return float("nan")
-    return float(min(fnn_first_under(t["dim"], t["pfnn"], threshold), int(maxemb)))
+    return float(fnn_first_under(t["dim"], t["pfnn"], threshold))
 
 
 def _gk15(f, a: np.ndarray, b: np.ndarray) -> np.ndarray:
