@@ -34,8 +34,8 @@ from . import d2 as _d2_c
 from . import false_nearest as _fnn_c
 from . import poincare as _poincare_c
 
-__all__ = ["d2", "c2g", "c2t", "poincare", "false_nearest", "fnn_first_under",
-           "fnn_embedding_dimension"]
+__all__ = ["d2", "c2g", "c2t", "poincare", "false_nearest", "fnn_min_count",
+           "fnn_first_under", "fnn_embedding_dimension"]
 
 
 # 15-point Gauss-Kronrod rule, as tabulated in SLATEC's dqk15.f (which is what
@@ -265,12 +265,13 @@ def false_nearest(
     Returns
     -------
     dict
-        ``'dim'``, ``'pfnn'``, ``'aveps'`` and ``'sdeps'``: arrays with one entry per
-        embedding dimension completed, which are the four columns TISEAN prints:
-        the dimension, the fraction of false nearest neighbors, and the mean and the
-        standard deviation of the distance to the nearest neighbor (in the units of
-        ``y``). If no neighbor can be found at some dimension, TISEAN stops there and
-        the arrays hold the dimensions before it.
+        ``'dim'``, ``'pfnn'``, ``'aveps'``, ``'sdeps'`` and ``'count'``: arrays with one
+        entry per embedding dimension completed: the dimension, the fraction of false
+        nearest neighbors, the mean and the standard deviation of the distance to the
+        nearest neighbor (in the units of ``y``), and the number of points that found a
+        neighbor within the search range (the denominator of the fraction). If no neighbor
+        can be found at some dimension, TISEAN stops there and the arrays hold the
+        dimensions before it.
 
     Raises
     ------
@@ -285,25 +286,59 @@ def false_nearest(
     if rows.shape[0] == 0:
         raise ValueError("false_nearest: " + _FNN_FAILURES.get(status, "failed"))
     return {"dim": rows[:, 0].astype(int), "pfnn": rows[:, 1],
-            "aveps": rows[:, 2], "sdeps": rows[:, 3]}
+            "aveps": rows[:, 2], "sdeps": rows[:, 3], "count": rows[:, 4].astype(int)}
 
 
-def fnn_first_under(dim: ArrayLike, pfnn: ArrayLike, threshold: float) -> int:
+def fnn_min_count(threshold: float) -> int:
     """
-    First embedding dimension at which the fraction of false nearest neighbors
-    drops below ``threshold`` (``firstunderf`` in hctsa's ``NL_FNN``); one more
-    than the largest dimension if it never does.
+    Smallest number of points on which a fraction of false nearest neighbors can show
+    that the true fraction is below ``threshold``: ``ceil(3 / threshold)`` (60 at 0.05).
+
+    If none of ``n`` independent points has a false neighbor, every true fraction ``p``
+    with ``(1 - p)**n >= 0.05`` is still consistent with that at the 5% level, i.e. the
+    one-sided 95% upper confidence bound on ``p`` is ``1 - 0.05**(1/n)``, about ``3/n``.
+    So with fewer than ``3/threshold`` points even a fraction of zero leaves a true
+    fraction at or above the threshold plausible, and the dimension cannot be accepted.
+    """
+    return int(math.ceil(3.0 / threshold))
+
+
+def fnn_first_under(dim: ArrayLike, pfnn: ArrayLike, threshold: float,
+                    count: Optional[ArrayLike] = None, min_count: Optional[int] = None) -> int:
+    """
+    Smallest embedding dimension not ruled out by false nearest neighbors at ``threshold``
+    (``firstunderf`` in hctsa's ``NL_FNN``).
+
+    A dimension is ruled out when its fraction of false nearest neighbors is at least
+    ``threshold`` and rests on at least :func:`fnn_min_count` points. The result is the
+    first dimension that is not ruled out: either its fraction is below the threshold on
+    enough points, or too few points found a neighbor there for the fraction to decide
+    (at high dimensions few points have a neighbor within TISEAN's search range, typically
+    for a noisy or stochastic series, and the fraction becomes meaningless). If every
+    computed dimension is ruled out, it is one more than the largest. Unless the fraction
+    fell below the threshold on enough points, the result is a lower bound: every smaller
+    dimension was ruled out.
+
+    ``count`` holds the number of points behind each fraction (:func:`false_nearest`'s
+    ``'count'``); without it every fraction is taken at face value. ``min_count`` replaces
+    :func:`fnn_min_count` of ``threshold`` as the number of points needed.
     """
     dim = np.asarray(dim)
-    below = np.flatnonzero(np.asarray(pfnn) < threshold)
-    return int(dim[below[0]]) if below.size else int(dim[-1]) + 1
+    p = np.asarray(pfnn)
+    if count is None:
+        enough = np.ones(p.shape, dtype=bool)
+    else:
+        need = fnn_min_count(threshold) if min_count is None else min_count
+        enough = np.asarray(count) >= need
+    open_ = np.flatnonzero((p < threshold) | ~enough)
+    return int(dim[open_[0]]) if open_.size else int(dim[-1]) + 1
 
 
 def fnn_embedding_dimension(
     y: ArrayLike,
     delay: int = 1,
     theiler: int = 0,
-    threshold: float = 0.4,
+    threshold: float = 0.05,
     maxemb: int = 10,
     escape_factor: float = 5.0,
 ) -> float:
@@ -311,15 +346,17 @@ def fnn_embedding_dimension(
     Embedding dimension chosen by false nearest neighbors, as hctsa's
     ``BF_Embed(y, tau, {'fnn', threshold})`` does.
 
-    This is the smallest dimension not ruled out by the test: the first dimension (1 to
-    ``maxemb``) at which the fraction of false nearest neighbors, :func:`false_nearest` with
-    the given ``theiler`` window and ``escape_factor``, falls below ``threshold``. If it never
-    does, it is one more than the largest dimension computed (``maxemb + 1`` when every
-    dimension was computed; one more than the last when TISEAN stopped early, having no
-    neighbors left within its search range), and is then a lower bound: every dimension below
-    it was tested and failed the criterion.
-    hctsa's defaults are reproduced: threshold 0.4, 10 dimensions, escape factor 5
-    (NL_nlpe uses a threshold of 0.05). NaN where TISEAN produces no output.
+    This is the smallest dimension not ruled out by the test (:func:`fnn_first_under` on
+    :func:`false_nearest` with the given ``theiler`` window and ``escape_factor``): the first
+    dimension (1 to ``maxemb``) at which the fraction of false nearest neighbors falls below
+    ``threshold`` on at least :func:`fnn_min_count` points, or at which too few points found a
+    neighbor for the fraction to decide. If neither happens, it is one more than the largest
+    dimension computed (``maxemb + 1`` when every dimension was computed; one more than the
+    last when TISEAN stopped early, having no neighbors left within its search range).
+    Unless the fraction fell below the threshold, the value is a lower bound: every dimension
+    below it was tested and ruled out.
+    hctsa's defaults are reproduced: threshold 0.05, 10 dimensions, escape factor 5.
+    NaN where TISEAN produces no output.
 
     Parameters
     ----------
@@ -330,7 +367,7 @@ def fnn_embedding_dimension(
     theiler : int, optional
         Theiler window in samples; hctsa uses one autocorrelation time. Default is 0.
     threshold : float, optional
-        Fraction of false nearest neighbors to get under. Default is 0.4.
+        Fraction of false nearest neighbors to get under. Default is 0.05.
     maxemb : int, optional
         Largest dimension tested. Default is 10.
     escape_factor : float, optional
@@ -345,7 +382,7 @@ def fnn_embedding_dimension(
         t = false_nearest(y, delay, 1, maxemb, theiler, escape_factor)
     except ValueError:
         return float("nan")
-    return float(fnn_first_under(t["dim"], t["pfnn"], threshold))
+    return float(fnn_first_under(t["dim"], t["pfnn"], threshold, t["count"]))
 
 
 def _gk15(f, a: np.ndarray, b: np.ndarray) -> np.ndarray:

@@ -8,7 +8,9 @@
  *   survives repeated in-process calls, so the algorithm has been made
  *   re-entrant here: every global lives in an `fnn_ctx`, the series arrives
  *   as a numpy array, and the rows the program would have printed are handed
- *   back as an (n_rows, 4) array.
+ *   back as an (n_rows, 5) array: the four columns the program prints plus the
+ *   number of points that found a neighbor within the search range at that
+ *   dimension (the denominator of the fraction of false nearest neighbors).
  *
  *   The numerics are a transcription of false_nearest.c (single
  *   component case; the embedding coordinates are lagged by `delay` samples,
@@ -127,10 +129,11 @@ PyDoc_STRVAR(run_doc,
 "\n"
 "Returns\n"
 "-------\n"
-"rows : ndarray, shape (n, 4)\n"
+"rows : ndarray, shape (n, 5)\n"
 "    One row per embedding dimension completed: the dimension, the fraction\n"
 "    of false nearest neighbours, the mean and the standard deviation of the\n"
-"    neighbour distance (in the original units).\n"
+"    neighbour distance (in the original units), and the number of points\n"
+"    that found a neighbour (the denominator of the fraction).\n"
 "status : int\n"
 "    0 if every dimension was done, 1 constant series, 2 delay * (maxemb+1)\n"
 "    not smaller than the length, 3 no neighbour found at some dimension.\n");
@@ -175,7 +178,7 @@ static PyObject *py_run(PyObject *self, PyObject *args)
         goto done;
     }
 
-    rows = (double *)malloc(sizeof(double) * 4 * (size_t)(maxemb - minemb + 1));
+    rows = (double *)malloc(sizeof(double) * 5 * (size_t)(maxemb - minemb + 1));
     if (rows == NULL) { PyErr_NoMemory(); goto done; }
 
     if ((int64_t)(maxemb + 1) * delay >= c.length) {
@@ -241,21 +244,22 @@ static PyObject *py_run(PyObject *self, PyObject *args)
         if (donesofar == 0) { status = FNN_NOT_ENOUGH; break; }
         c.aveps *= (1. / (double)donesofar);
         c.vareps *= (1. / (double)donesofar);
-        rows[4 * nrows + 0] = (double)(dim + 1);
-        rows[4 * nrows + 1] = (double)c.toolarge / (double)donesofar;
-        rows[4 * nrows + 2] = c.aveps * interval;
-        rows[4 * nrows + 3] = sqrt(c.vareps) * interval;
+        rows[5 * nrows + 0] = (double)(dim + 1);
+        rows[5 * nrows + 1] = (double)c.toolarge / (double)donesofar;
+        rows[5 * nrows + 2] = c.aveps * interval;
+        rows[5 * nrows + 3] = sqrt(c.vareps) * interval;
+        rows[5 * nrows + 4] = (double)donesofar;
         nrows++;
     }
     Py_END_ALLOW_THREADS
 
 build:
     dims[0] = (npy_intp)nrows;
-    dims[1] = 4;
+    dims[1] = 5;
     out = (PyArrayObject *)PyArray_SimpleNew(2, dims, NPY_DOUBLE);
     if (out == NULL) goto done;
     if (nrows > 0)
-        memcpy(PyArray_DATA(out), rows, sizeof(double) * 4 * (size_t)nrows);
+        memcpy(PyArray_DATA(out), rows, sizeof(double) * 5 * (size_t)nrows);
     result = Py_BuildValue("Oi", (PyObject *)out, status);
 
 done:

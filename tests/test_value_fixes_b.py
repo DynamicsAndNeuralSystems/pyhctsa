@@ -184,6 +184,28 @@ def test_tisean_d2_takens_nan_at_one_dimension(monkeypatch):
 # ------------------------------------------------------------------------------
 # preproc_schreiber_denoise: neighbor statistics over the points with an embedding vector
 # ------------------------------------------------------------------------------
+def test_fnn_fraction_needs_enough_points():
+    from pyhctsa.toolboxes.Tisean_3_0_1 import tisean
+    assert tisean.fnn_min_count(0.05) == 60 and tisean.fnn_min_count(0.5) == 6
+    # white noise: the points with a neighbor within the search range dwindle with the dimension,
+    # and the last fraction (2 points) is 0; that dimension is not accepted: the dimension is the
+    # first one whose fraction rests on fewer than 60 points (a lower bound)
+    x = np.random.default_rng(3).standard_normal(1000)
+    r = tisean.false_nearest(x, 1, 1, 10, 1, 5.0)
+    assert r['count'].shape == r['pfnn'].shape and r['count'][-1] < 60 and r['pfnn'][-1] < 0.05
+    first_low = int(np.flatnonzero(r['count'] < 60)[0])
+    assert np.all(r['pfnn'][:first_low] >= 0.05)
+    assert nl.fnn(x, 1, 10, 1, True, 0.05, 5) == r['dim'][first_low]
+    assert tisean.fnn_first_under(r['dim'], r['pfnn'], 0.05) == r['dim'][-1]  # without counts
+    assert tisean.fnn_embedding_dimension(x, 1, 1, 0.05) == r['dim'][first_low]
+    # firstunder* share the minimum count, so they never decrease as the threshold falls
+    d = nl.fnn(x, 1, 10, 1, False, escape_factor=5)
+    fu = [d[f'firstunder{k}'] for k in ('09', '08', '07', '06', '05', '04', '03', '02', '01', '005')]
+    assert np.all(np.diff(fu) >= 0) and fu[-1] == r['dim'][first_low]
+    # 0.05 is the default threshold
+    assert nl.fnn(x, 1, 10, 1, True, escape_factor=5) == nl.fnn(x, 1, 10, 1, True, 0.05, 5)
+
+
 def test_schreiber_neighbor_stats_skip_first_samples():
     y = z_score(np.sin(np.arange(1000) * 2 * np.pi / 40) + 0.05 * np.random.default_rng(10).standard_normal(1000))
     out = pp.preproc_schreiber_denoise(y, 5, 1, 1, 0.3)

@@ -23,11 +23,14 @@ def test_fnn_embedding_dimension():
     # BF_Embed(x, tau, 'fnn', true)
     # (the MATLAB 'mi' delay of this series is 3; the pyhctsa 'mi' rule -- smoothed Kraskov AMI of
     # tie-aware ranks -- gives 4 here, so the MATLAB values are checked with the delay passed as 3)
-    assert nl._embedding_params(_x(), 3, 'fnn') == (3, 3)
-    assert nl._embedding_params(_x(), 'mi', 'fnn') == (4, 2)  # = ac1e's
-    assert nl._embedding_params(_x(), 'ac1e', 'fnn') == (4, 2)
+    # (threshold 0.05 by default, with the minimum number of points behind a fraction)
+    assert nl._embedding_params(_x(), 3, 'fnn') == (3, 5)
+    assert nl._embedding_params(_x(), 'mi', 'fnn') == (4, 5)  # = ac1e's
+    assert nl._embedding_params(_x(), 'ac1e', 'fnn') == (4, 5)
     assert nl._embedding_params(_x(), 'ac1e', ['fnn', 0.05]) == (4, 5)
-    assert nl._embed_tau_m(_x(), [3, 'fnn']) == (3, 3)
+    assert nl._embedding_params(_x(), 'ac1e', ['fnn', 0.4]) == (4, 2)
+    assert nl._embedding_params(_x(), 3, ['fnn', 0.4]) == (3, 3)
+    assert nl._embed_tau_m(_x(), [3, 'fnn']) == (3, 5)
     assert nl._embed_tau_m(_x(), ['mi', 'fnn'])[0] == 4
     assert nl._embedding_params(_x(), 2, 6) == (2, 6)
     assert nl._embedding_params(np.ones(100), 'ac1e', 'fnn') is None
@@ -37,13 +40,15 @@ def test_fnn_embedding_dimension():
 
 def test_fnn_users():
     x = _x()
-    assert abs(nl.nlpe(x, 'fnn', 3, 5000, ('ac', 1))['msqerr'] - 0.207584162764) < 1e-9
+    assert abs(nl.nlpe(x, 'fnn', 3, 5000, ('ac', 1))['msqerr'] - 0.236829945826) < 1e-9
     d = nl.local_density(x, 5, ('ac', 1), 'ac1e', 'fnn')
-    assert abs(d['meanden'] + 2.37340122116) < 1e-9 and abs(d['stdden'] - 0.723311553717) < 1e-9
+    assert abs(d['meanden'] + 3.94632951994) < 1e-9 and abs(d['stdden'] - 1.21148304) < 1e-8
     d = nl.gp_corr_sum(x, -1, 0.1, ('ac', 1), 20, ('ac', 'fnn'))
-    # (1e-6: the series is no longer rounded to the 7 significant digits of hctsa's text-file interface)
-    assert abs(d['robfit_a2'] - 3.66955087508) < 1e-6 and abs(d['meanlnCr'] + 8.32376735638) < 1e-6
-    assert abs(nl.takens_estimator(x, -1, 0.05, ('ac', 1), (3, 'fnn')) - 2.14107670491) < 1e-9
+    # (5e-6: the robust fit is an iterative search, run in MATLAB and in Python)
+    assert abs(d['robfit_a2'] - 3.34830651338) < 5e-6 and abs(d['meanlnCr'] + 9.35558688873) < 1e-6
+    assert abs(nl.takens_estimator(x, -1, 0.05, ('ac', 1), (3, 3)) - 2.14107670491) < 1e-9
+    # five dimensions are too many for Takens' estimator on 400 points (no scaling range)
+    assert np.isnan(nl.takens_estimator(x, -1, 0.05, ('ac', 1), (3, 'fnn')))
     assert _all_nan(nl.nlpe(np.ones(100), 'fnn'))
 
 
@@ -56,7 +61,8 @@ def test_fnn():
     assert (d['firstunder09'], d['firstunder05'], d['firstunder02'], d['firstunder005']) == (2, 3, 4, 5)
     assert d['pdrop'] == pytest.approx(2 / 3)
     assert nl.fnn(_x(), 1, 10, ('ac', 1), True, 0.4, 5) == 3
-    assert nl.fnn(_x(), 'ac', escape_factor=5, just_best=True, bestp=0.05) == 6
+    assert nl.fnn(_x(), 'ac', escape_factor=5, just_best=True, bestp=0.05) == 5
+    assert nl.fnn(_x(), 1, 10, ('ac', 1), True, 0.05, 5) == nl.fnn(_x(), 1, 10, ('ac', 1), True, escape_factor=5)
     assert np.isnan(nl.fnn(_x()[:8])) and np.isnan(nl.fnn(np.ones(100)))
 
 
