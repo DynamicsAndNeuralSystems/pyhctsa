@@ -21,6 +21,14 @@
  *   would exit() is reported as a status code; rows already completed at that
  *   point are returned (the program had already printed them).
  *
+ *   As in hctsa's copy of false_nearest.c, distances are compared with a
+ *   tolerance (DIST_TOL, in the units of the data rescaled to [0,1]), so the
+ *   result does not depend on rounding: distances within DIST_TOL of each other
+ *   are equal, and a pair closer than DIST_TOL is a repeated point (no
+ *   neighbor). When several neighbors are equally near, each point contributes
+ *   the fraction of them that are false (the expected outcome of choosing one of
+ *   them at random), so the result does not depend on the search order.
+ *
  *   TISEAN is Copyright (c) 1998-2007 Rainer Hegger, Holger Kantz,
  *   Thomas Schreiber, and is distributed under the GNU General Public License
  *   version 2 or later.
@@ -36,6 +44,9 @@
 
 #define BOX 1024
 #define IBOX (BOX - 1)
+/* distances closer than this (data rescaled to [0,1]) are equal: some 10^4 times the
+   rounding error of the rescaled data (about 10^-16), far finer than measured data resolve */
+#define DIST_TOL 1.0e-12
 
 /* status codes (0 = ran to completion) */
 #define FNN_OK 0
@@ -51,7 +62,7 @@ typedef struct {
     double rt;              /* escape factor (false_nearest -f)               */
     double varianz;
     double aveps, vareps;
-    int64_t toolarge;
+    double toolarge;        /* number of false neighbours (fractional for ties) */
     int64_t *box;           /* BOX * BOX                                      */
     int64_t *list;
 } fnn_ctx;
@@ -73,16 +84,30 @@ static void mmb(fnn_ctx *c, int64_t maxemb, int64_t delay, int64_t hemb, double 
 }
 
 /* component 0 only: embedding coordinate i is the sample at lag vemb[i] = i * delay
-   (vcomp[i] = 0). */
+   (vcomp[i] = 0). The max-norm distance between points n and e in dim + 1 dimensions. */
+static double maxnorm(const double *s, int64_t n, int64_t e, int64_t dim, int64_t delay)
+{
+    int64_t i;
+    double dx, maxdx = fabs(s[n] - s[e]);
+    for (i = 1; i <= dim; i++) {
+        dx = fabs(s[n + i * delay] - s[e + i * delay]);
+        if (dx > maxdx)
+            maxdx = dx;
+    }
+    return maxdx;
+}
+
 static char find_nearest(fnn_ctx *c, int64_t n, int64_t dim, int64_t delay, double eps)
 {
-    int64_t x, y, x1, x2, y1, i, element, which = -1;
-    double dx, maxdx, mindx = 1.1, hfactor, factor;
+    int64_t x, y, x1, x2, y1, element, which = -1, nnear = 0, nfalse = 0;
+    double maxdx, mindx = 1.1;
     const double *s = c->series;
+    const int64_t next = (dim + 1) * delay;
 
     x = (int64_t)(s[n] / eps) & IBOX;
     y = (int64_t)(s[n + dim * delay] / eps) & IBOX;
 
+    /* the distance to the nearest neighbour (repeated points excluded) */
     for (x1 = x - 1; x1 <= x + 1; x1++) {
         x2 = x1 & IBOX;
         for (y1 = y - 1; y1 <= y + 1; y1++) {
@@ -91,13 +116,8 @@ static char find_nearest(fnn_ctx *c, int64_t n, int64_t dim, int64_t delay, doub
                 int64_t d = element - n;
                 if (d < 0) d = -d;
                 if (d > c->theiler) {
-                    maxdx = fabs(s[n] - s[element]);
-                    for (i = 1; i <= dim; i++) {
-                        dx = fabs(s[n + i * delay] - s[element + i * delay]);
-                        if (dx > maxdx)
-                            maxdx = dx;
-                    }
-                    if ((maxdx < mindx) && (maxdx > 0.0)) {
+                    maxdx = maxnorm(s, n, element, dim, delay);
+                    if ((maxdx < mindx) && (maxdx > DIST_TOL)) {
                         which = element;
                         mindx = maxdx;
                     }
@@ -107,16 +127,33 @@ static char find_nearest(fnn_ctx *c, int64_t n, int64_t dim, int64_t delay, doub
         }
     }
 
-    if ((which != -1) && (mindx <= eps) && (mindx <= c->varianz / c->rt)) {
+    /* every point within mindx + DIST_TOL is in the 3 x 3 boxes once mindx + DIST_TOL <= eps */
+    if ((which != -1) && (mindx + DIST_TOL <= eps) && (mindx <= c->varianz / c->rt)) {
         c->aveps += mindx;
         c->vareps += mindx * mindx;
-        /* comp == 1: the next component is the next delay coordinate */
-        hfactor = fabs(s[n + (dim + 1) * delay] - s[which + (dim + 1) * delay]) / mindx;
-        factor = 0.0;
-        if (hfactor > factor)
-            factor = hfactor;
-        if (factor > c->rt)
-            c->toolarge++;
+        /* the nearest neighbours: all within DIST_TOL of the nearest distance */
+        for (x1 = x - 1; x1 <= x + 1; x1++) {
+            x2 = x1 & IBOX;
+            for (y1 = y - 1; y1 <= y + 1; y1++) {
+                element = c->box[x2 * BOX + (y1 & IBOX)];
+                while (element != -1) {
+                    int64_t d = element - n;
+                    if (d < 0) d = -d;
+                    if (d > c->theiler) {
+                        maxdx = maxnorm(s, n, element, dim, delay);
+                        if ((maxdx > DIST_TOL) && (maxdx <= mindx + DIST_TOL)) {
+                            nnear++;
+                            /* false if the next coordinate separates them by more than rt
+                               times their distance */
+                            if (fabs(s[n + next] - s[element + next]) > c->rt * maxdx + DIST_TOL)
+                                nfalse++;
+                        }
+                    }
+                    element = c->list[element];
+                }
+            }
+        }
+        c->toolarge += (double)nfalse / (double)nnear;
         return 1;
     }
     return 0;
@@ -222,7 +259,7 @@ static PyObject *py_run(PyObject *self, PyObject *args)
     for (emb = minemb; emb <= maxemb; emb++) {
         dim = emb - 1;
         epsilon = eps0;
-        c.toolarge = 0;
+        c.toolarge = 0.0;
         alldone = 0;
         donesofar = 0;
         c.aveps = 0.0;
@@ -245,7 +282,7 @@ static PyObject *py_run(PyObject *self, PyObject *args)
         c.aveps *= (1. / (double)donesofar);
         c.vareps *= (1. / (double)donesofar);
         rows[5 * nrows + 0] = (double)(dim + 1);
-        rows[5 * nrows + 1] = (double)c.toolarge / (double)donesofar;
+        rows[5 * nrows + 1] = c.toolarge / (double)donesofar;
         rows[5 * nrows + 2] = c.aveps * interval;
         rows[5 * nrows + 3] = sqrt(c.vareps) * interval;
         rows[5 * nrows + 4] = (double)donesofar;

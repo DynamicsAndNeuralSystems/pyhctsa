@@ -53,6 +53,17 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     escape factor are skipped, so the fraction rests only on the points that found a
     neighbor within that range; at high dimensions these can be few.
 
+    Exact ties (repeated values, e.g. quantized data or periodic orbits) are resolved so
+    that the result does not depend on rounding or on the order in which neighbors are
+    searched: distances (in the data rescaled to [0, 1]) within ``1e-12`` of each other
+    count as equal, a pair closer than that is a repeated point and not a neighbor, a
+    neighbor is false if the extra coordinate separates the pair by more than
+    ``escape_factor`` times their distance plus ``1e-12``, and when several neighbors are
+    equally near, a point contributes the fraction of them that are false (the expected
+    outcome of choosing one at random). Where the nearest neighbor is unique this is the
+    published test (Hegger, Kantz & Schreiber 1999, Chaos 9, 413,
+    https://doi.org/10.1063/1.166424).
+
     A dimension is ruled out when its fraction is at least the threshold and rests on at
     least ``ceil(3 / threshold)`` points (:func:`pyhctsa.toolboxes.Tisean_3_0_1.tisean.fnn_min_count`;
     60 at 0.05): with fewer points, even a fraction of zero does not show at the 95% level

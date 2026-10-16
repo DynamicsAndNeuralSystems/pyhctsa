@@ -242,6 +242,17 @@ def false_nearest(
     within a fraction ``1/escape_factor`` of the standard deviation of the
     (range-scaled) series count.
 
+    Exact ties (repeated values, e.g. quantized data or periodic orbits) are resolved so
+    that the result does not depend on rounding or on the order in which neighbors are
+    searched: distances (in the data rescaled to [0, 1]) within ``1e-12`` of each other
+    count as equal, a pair closer than that is a repeated point and not a neighbor, a
+    neighbor is false if the extra coordinate separates the pair by more than
+    ``escape_factor`` times their distance plus ``1e-12``, and when several neighbors are
+    equally near, a point contributes the fraction of them that are false (the expected
+    outcome of choosing one at random). Where the nearest neighbor is unique this is the
+    published test (Hegger, Kantz & Schreiber 1999, Chaos 9, 413,
+    https://doi.org/10.1063/1.166424).
+
     Parameters
     ----------
     y : array-like
