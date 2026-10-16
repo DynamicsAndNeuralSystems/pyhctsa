@@ -2275,9 +2275,8 @@ nonlinearity:
     base_name: gp_corr_sum
     dependencies:
     configs:
-      - {nref: -1, r: 0.1, nbins: 20, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['maxlnCr', 'maxlnr']}   # NL_GPCorrSum(x_z,-1,0.1,{'ac',1},20,{'ac',{'fnn',0.05}},1)
-      - {nref: -1, r: 0.1, nbins: 40, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['maxlnr']}   # NL_GPCorrSum(x_z,-1,0.1,{'ac',1},40,{'ac',{'fnn',0.05}},1)
-      - {nref: -1, r: 0.5, nbins: 20, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['maxlnr']}   # NL_GPCorrSum(x_z,-1,0.5,{'ac',1},20,{'ac',{'fnn',0.05}},1)
+      - {nref: -1, r: 0.1, nbins: 40, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['maxlnr', 'robfit_sea1', 'robfitresmeansq', 'minlnr']}   # NL_GPCorrSum(x_z,-1,0.1,{'ac',1},40,{'ac',{'fnn',0.05}},1)
+      - {nref: -1, r: 0.5, nbins: 20, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['maxlnr', 'robfit_sea1', 'robfitresmeanabs']}   # NL_GPCorrSum(x_z,-1,0.5,{'ac',1},20,{'ac',{'fnn',0.05}},1)
     legacy_name: NL_GPCorrSum
     ordered_args: ['r', 'nbins', 'embed_params']
 
@@ -2338,14 +2337,13 @@ nonlinearity:
     base_name: takens_estimator
     dependencies:
     configs:
-      - {rad: 0.1, embed_params: [[1, 10]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.1,{'ac',1},{1,10})
-      - {rad: 0.05, embed_params: [[1, 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.05,{'ac',1},{1,3})
-      - {rad: 0.05, embed_params: [[1, 8]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.05,{'ac',1},{1,8})
-      - {rad: 0.05, embed_params: [['ac', 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.05,{'ac',1},{'ac',3})
-      - {rad: 0.05, embed_params: [['mi', 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.05,{'ac',1},{'mi',3})
-      - {rad: 0.05, embed_params: [['mi', ['fnn', 0.05]]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.05,{'ac',1},{'mi',{'fnn',0.05}},'default')
+      - {c0: 0.01, embed_params: [[1, 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{1,3})
+      - {c0: 0.01, embed_params: [[1, 8]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{1,8})
+      - {c0: 0.01, embed_params: [['ac', 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{'ac',3})
+      - {c0: 0.01, embed_params: [['mi', 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{'mi',3})
+      - {c0: 0.01, embed_params: [['mi', ['fnn', 0.05]]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{'mi',{'fnn',0.05}},'default')
     legacy_name: NL_TakensEstimator
-    ordered_args: ['rad', 'embed_params']
+    ordered_args: ['c0', 'embed_params']
 
   tisean_c1:
     base_name: tisean_c1

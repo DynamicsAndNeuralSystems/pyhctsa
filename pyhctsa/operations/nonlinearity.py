@@ -1303,10 +1303,12 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     Estimates the correlation sum, the correlation dimension and the correlation
     entropy of the time series [1]_, then summarises the results.
 
-    Takens' estimator [2]_ is computed for the correlation dimension, along with
+    Takens' estimator is computed for the correlation dimension, at a fixed upper
+    length scale of 0.5 standard deviations (the estimator is a reasonable dimension
+    estimate when evaluated at the upper end of the scaling range [1]_), along with
     related statistics: other dimension estimates obtained by finding suitable
-    scaling ranges, and a search for a flat region in the output of TISEAN's
-    ``h2`` algorithm, which indicates determinism/deterministic chaos [3]_.
+    scaling ranges (with a Theiler window [2]_), and a search for a flat region in the
+    output of TISEAN's ``h2`` algorithm, which indicates determinism/deterministic chaos [3]_.
 
     To find a suitable scaling range, a penalized regression procedure is used to
     determine an optimal scaling range that simultaneously spans the greatest
@@ -1320,7 +1322,8 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     References
     ----------
     .. [1] R. Hegger, H. Kantz and T. Schreiber, "Practical implementation of
-        nonlinear time series methods: The TISEAN package", Chaos 9(2) 413 (1999)
+        nonlinear time series methods: The TISEAN package", Chaos 9(2) 413-435 (1999).
+        DOI: 10.1063/1.166424
     .. [2] J. Theiler, "Spurious dimension from correlation algorithms applied to
         limited time-series data", Phys. Rev. A 34(3) 2427 (1986)
     .. [3] H. Kantz and T. Schreiber, "Nonlinear Time Series Analysis",
@@ -1403,8 +1406,8 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
     # --------------------------------------------------------------------------
     # (1) Takens estimator
     # --------------------------------------------------------------------------
-    # Correlation dimension at an upper length scale of 0.5: for a z-scored time
-    # series that is half the standard deviation, as Kantz & Schreiber recommend.
+    # Correlation dimension at an upper length scale of 0.5 (standard deviations of the
+    # z-scored series), a fixed scale that is the same for every embedding dimension.
     takens05 = _sub_takens(c2tdat, 0.5)
     takens_keys = ['takens05_mean', 'takens05_median', 'takens05_max', 'takens05_min',
                    'takens05_std', 'takens05_iqr', 'takens05mmin_ri', 'takens05mmin_goodness',
@@ -1493,8 +1496,8 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
     distance (the correlation sum and its scaling).
 
     Computes the correlation sum, :math:`C(\\epsilon)`, the fraction of pairs of
-    time-delay-embedded points closer than :math:`\\epsilon`, by the
-    Grassberger-Procaccia algorithm [1]_, using TISEAN's ``d2``. For a low-dimensional
+    time-delay-embedded points closer than :math:`\\epsilon` (in the max norm, as ``d2``
+    measures distances), by the Grassberger-Procaccia algorithm [1]_, using TISEAN's ``d2``. For a low-dimensional
     attractor, :math:`\\ln C` rises linearly with :math:`\\ln \\epsilon`, with a slope equal to the
     correlation dimension. The outputs summarize the range of :math:`\\ln \\epsilon`
     and :math:`\\ln C(\\epsilon)`, and an iteratively re-weighted least squares (robust)
@@ -1517,7 +1520,10 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
         length. Default is 500.
     r : float, optional
         Maximum search radius, in units of ``std(y) * sqrt(m)`` where ``m`` is the
-        embedding dimension. Default is 0.05.
+        embedding dimension. Default is 0.05. The factor ``sqrt(m)`` is a convention:
+        under the max norm the share of pairs within a fixed radius falls roughly
+        geometrically with ``m``, and the growing radius keeps the scanned range
+        populated with pairs.
     thwin : int, float, or ``['ac', k]``, optional
         The Theiler window of samples to exclude before and after each reference
         index (see :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k``
@@ -1549,7 +1555,12 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
         errors of the intercept and slope; ``robfitresmeanabs``, ``robfitresmeansq``,
         ``robfitresac1``: mean absolute and mean squared residual, and lag-1
         autocorrelation of the residuals. The fit outputs are NaN when too few radii
-        have a finite :math:`\\ln C`. Returns NaN if the delay or Theiler window cannot
+        have a finite :math:`\\ln C`; ``robfit_sigrat`` is NaN when the robust estimate of
+        the residual standard deviation, and ``robfitresac1`` when the standard deviation of
+        the residuals, is at floating-point round-off (at most ``10 * N * eps`` times the
+        root-mean-square of the fitted :math:`\\ln C`, over ``N`` radii, as in
+        :func:`pyhctsa.robust.bf_residual_stats`), since a ratio of rounding noise carries
+        no information. Returns NaN if the delay or Theiler window cannot
         be set, the embedding is too short, or no correlation sum is obtained.
     """
     y = np.asarray(y, dtype=float).ravel()
@@ -1582,8 +1593,14 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
                        'to do a correlation sum')
         return np.nan
 
-    # TISEAN's d2: -N0 uses all pairs; the radius is in standard deviations of y, scaled by
-    # sqrt(m) since a pairwise distance in an m-dimensional embedding scales as std(y)*sqrt(m)
+    # TISEAN's d2: -N0 uses all pairs. The maximum radius is r standard deviations of y times
+    # sqrt(m). d2 uses the max norm, under which the share of pairs within a fixed radius falls
+    # roughly geometrically with m (as (r/sqrt(pi))^m for a noise-like series); sqrt(m) is a
+    # convention, not derived from the norm, that lets the radius grow with m so that the
+    # scanned range stays populated (with r = 0.5 the fraction of pairs within the top radius
+    # stays between about 0.04 and 0.4 for typical series at their 'fnn' dimensions, whereas a
+    # fixed radius of 0.1 standard deviations leaves many noise-like series with too few radii
+    # holding pairs to fit).
     max_eps = float(r * np.std(y, ddof=1) * np.sqrt(m))
     try:
         tables = _tisean.d2(y, delay=tau, embed=m, theiler=thwin, howoften=nbins,
@@ -1625,13 +1642,18 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
         res = lncr - (a[1] * lnr + a[0])
         out['robfit_a1'] = a[0]
         out['robfit_a2'] = a[1]
-        out['robfit_sigrat'] = stats['ols_s'] / stats['robust_s']
+        # residuals at floating-point round-off (a standard deviation of at most 10*N*eps times
+        # the rms of the fitted ln C) give NaN rather than ratios of rounding noise
+        round_off = 10 * lncr.size * np.finfo(float).eps * np.sqrt(np.mean(lncr ** 2))
+        out['robfit_sigrat'] = (np.nan if stats['robust_s'] <= round_off
+                                else stats['ols_s'] / stats['robust_s'])
         out['robfit_s'] = stats['s']
         out['robfit_sea1'] = stats['se'][0]
         out['robfit_sea2'] = stats['se'][1]
         out['robfitresmeanabs'] = np.mean(np.abs(res))
         out['robfitresmeansq'] = np.mean(res ** 2)
-        out['robfitresac1'] = autocorr(res, 1, 'Fourier')
+        out['robfitresac1'] = (np.nan if np.std(res, ddof=1) <= round_off
+                               else autocorr(res, 1, 'Fourier'))
     else:
         for k in ('robfit_a1', 'robfit_a2', 'robfit_sigrat', 'robfit_s', 'robfit_sea1',
                   'robfit_sea2', 'robfitresmeanabs', 'robfitresmeansq', 'robfitresac1'):
@@ -1642,26 +1664,60 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
 
 
 
-def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
+def takens_estimator(y: ArrayLike, nref: int = -1, c0: float = 0.01,
                      past: Union[int, float, list, tuple] = ('ac', 1),
                      embed_params: Union[list, tuple] = ('ac', 'fnn')) -> float:
     """
-    Takens' estimator for the correlation dimension.
+    Takens' estimator of the correlation dimension, at the length scale enclosing a fixed
+    fraction of pairs.
 
-    Takens' maximum-likelihood estimator [1]_ of the correlation dimension at an
-    upper length scale ``eup = rad * std(y)``:
+    Estimates the correlation dimension, :math:`D`, of a time-delay embedding of ``y`` with
+    Takens' estimator [1]_, at an upper length scale :math:`\\epsilon_{up}` set by the data: the
+    ``c0`` quantile of the max-norm distances between pairs of delay vectors (pairs closer in
+    time than the Theiler window, and repeated points, are excluded). With :math:`r_{ij}` the
+    :math:`n` pair distances below :math:`\\epsilon_{up}`,
 
     .. math::
-        D_T = 1 / \\langle \\ln(\\epsilon_{up} / r_{ij}) \\rangle,
+        D = (n - 1) / \\sum \\ln(\\epsilon_{up} / r_{ij}).
 
-    the mean taken over all pairs ``(i, j)`` of delay vectors with max-norm distance
-    :math:`r_{ij} < \\epsilon_{up}`, excluding pairs closer in time than the Theiler
-    window and exact duplicate vectors. As in hctsa, it is computed natively (a KD-tree
-    range search at the one radius needed), exactly at ``eup`` from the pair distances
-    themselves, rather than from the logarithmically binned correlation sum of TISEAN's
-    ``d2`` followed by ``c2t`` (the same estimator, evaluated at the first bin above
-    ``eup``). Kantz and Schreiber's recommendation of half a standard deviation for the
-    length scale is used the same way in :func:`tisean_d2`.
+    Under the estimator's model, :math:`C(r) \\propto r^D` below :math:`\\epsilon_{up}`, the
+    :math:`\\ln(\\epsilon_{up} / r_{ij})` are independent exponential variables with rate
+    :math:`D` given :math:`\\epsilon_{up}` ([1]_; with :math:`\\epsilon_{up}` an order statistic of
+    the distances, [2]_), so their sum is Gamma(:math:`n`, :math:`D`) and :math:`(n - 1)/\\sum` is
+    the unbiased estimate of :math:`D` (the maximum-likelihood form :math:`n/\\sum` is biased
+    upward by :math:`n/(n - 1)` [3]_).
+
+    Setting the length scale by a fraction of pairs, rather than as a fixed radius, keeps it at
+    a small scale that always holds the same share of pairs, whatever the embedding dimension and
+    the spread of the embedded points, and its target (the scale below which a fraction ``c0``
+    of pairs lie) does not depend on the length of the series. (At a fixed radius, noise-like
+    series embedded in several dimensions have no pairs at all at small scales.) Takens'
+    estimator is a reasonable dimension estimate when evaluated at the upper end of the scaling
+    range [4]_, which for a low-dimensional attractor lies at small scales.
+
+    Details:
+
+    - Distances that differ by at most ``tol = 1e-12 * (max(y) - min(y))`` are equal (they are
+      merged into one level after sorting, not snapped to a grid), and pairs of delay vectors
+      closer than ``tol`` are repeated points: they carry no length-scale information, and a
+      positive fraction of them makes the estimator inconsistent [3]_, so they are left out.
+      Pairs within ``tol`` of :math:`\\epsilon_{up}` lie at it and are not among the pairs below
+      it. The tolerance is relative to the range, so shifting, rescaling or reflecting ``y``
+      leaves the output unchanged, apart from distances within round-off of ``tol``.
+    - Quantized values: if all differences between distinct values of ``y`` are within 1% of
+      integer multiples of a common step :math:`q` (the smallest difference divided by the
+      smallest :math:`k = 1, ..., 100` that fits, well above ``tol``; :math:`q` is then fitted to
+      the differences by least squares), distances are rounded to multiples of :math:`q`, since
+      finer differences are not resolved by the data. This also covers quantized data stored
+      with rounding, whose distances would otherwise form near-equal clusters.
+    - If fewer than two distinct distances lie below :math:`\\epsilon_{up}` (values on a lattice
+      coarser than the ``c0`` quantile), :math:`\\epsilon_{up}` is raised to the next distance
+      present until two do: a scaling exponent needs at least two resolved length scales.
+    - The output is NaN if ``c0`` times the number of pairs that are not repeated points is
+      below 33, the smallest number of pairs for which the 95% sampling interval of the
+      estimate (for independent pairs) spans less than a factor of two.
+    - The pairs are ``(i, j)`` with ``i`` among the first ``nref`` delay vectors and
+      ``j > i + past``.
 
     References
     ----------
@@ -1669,6 +1725,13 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
         in B.L.J. Braaksma, H.W. Broer and F. Takens (eds.), Dynamical Systems and
         Bifurcations (Groningen, 1984), Lecture Notes in Mathematics 1125, 99-106,
         Springer, Berlin (1985). DOI: 10.1007/BFb0075637
+    .. [2] B.M. Hill, "A simple general approach to inference about the tail of a
+        distribution", Ann. Statist. 3(5), 1163-1174 (1975). DOI: 10.1214/aos/1176343247
+    .. [3] S. Borovkova, R. Burton and H. Dehling, "Consistency of the Takens estimator for
+        the correlation dimension", Ann. Appl. Probab. 9(2), 376-390 (1999).
+        DOI: 10.1214/aoap/1029962747
+    .. [4] R. Hegger, H. Kantz and T. Schreiber, "Practical implementation of nonlinear time
+        series methods: The TISEAN package", Chaos 9(2), 413-435 (1999). DOI: 10.1063/1.166424
 
     Parameters
     ----------
@@ -1677,9 +1740,10 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
     nref : int, optional
         The number of reference points (the first ``nref`` delay vectors); ``-1`` uses
         all points. Default is -1.
-    rad : float, optional
-        The upper length scale at which to read off the dimension estimate, in standard
-        deviations of ``y``. Default is 0.05.
+    c0 : float, optional
+        The fraction of pairs (other than repeated points) that lie below the upper length
+        scale.
+        Default is 0.01.
     past : int, float, or ``['ac', k]``, optional
         The Theiler window (see :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for
         ``k`` times the first zero-crossing of the autocorrelation function, or a number
@@ -1693,19 +1757,22 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
     Returns
     -------
     float
-        Takens' estimator of the correlation dimension. NaN if the delay or Theiler
-        window cannot be set, the series cannot be embedded, it is constant, or no pair
-        of delay vectors lies within the length scale (or all such pairs are exact
-        duplicates, e.g. heavily quantized data). For high embedding dimensions of
-        noise-like series no pair may fall within the length scale at all.
+        The estimate of the correlation dimension. NaN if the delay or Theiler window cannot
+        be set, the series cannot be embedded or is constant, ``c0`` times the number of pairs
+        that are not repeated points is below 33, or fewer than three distinct pair distances
+        exist.
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size
+    if not 0 < c0 < 1:
+        raise ValueError('c0, the fraction of pairs below the upper length scale, must be in (0, 1)')
+    min_pairs = 33  # fewest pairs below the upper length scale for an estimate
 
     past = theiler_window(y, past, n)
     if np.isnan(past):  # the autocorrelation function never crosses zero
         logger.warning('No autocorrelation zero-crossing to set the Theiler window')
         return np.nan
+    past = int(past)
 
     tau, m = _embed_tau_m(y, embed_params)
     if np.isnan(tau):
@@ -1717,36 +1784,84 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
         logger.warning(str(exc))
         return np.nan
     n_emb = emb.shape[0]
-
-    # Reference points: the first nref delay vectors, or all
     n_ref = n_emb if (nref == -1 or nref >= n_emb) else int(nref)
 
-    eup = rad * np.std(y, ddof=1)  # upper length scale, in data units
-    if not eup > 0:
+    # Distances within tol = 1e-12 of the range of y are equal (merged after sorting, not snapped
+    # to a grid), and pairs closer than tol are repeated points, left out
+    span = np.max(y) - np.min(y)  # no max-norm distance exceeds the range of y
+    if not span > 0:
         return np.nan  # constant series
+    tol = 1e-12 * span
+    # Quantized values: if the differences between distinct values are all within 1% of integer
+    # multiples of a common step q (the smallest difference divided by the smallest k = 1, ...,
+    # 100 that fits, well above tol), distances are rounded to multiples of the least-squares q
+    gaps = np.diff(np.unique(y))
+    gaps = gaps[gaps > tol]
+    if gaps.size == 0:
+        return np.nan  # constant to within tol
+    q = 0.0
+    for k in range(1, 101):
+        step = np.min(gaps) / k
+        if step <= 1000 * tol:
+            break
+        mult = np.floor(gaps / step + 0.5)
+        if np.all(np.abs(gaps - step * mult) <= 0.01 * step):
+            q = np.sum(gaps * mult) / np.sum(mult ** 2)
+            break
+    chunk = max(1, int(2.5e6 // n_emb))  # reference points per block
 
-    # Sum ln(eup / r_ij) over pairs with r_ij <= eup (max norm) outside the Theiler window,
-    # over reference points in chunks (a low-dimensional attractor can have O(N^2) pairs
-    # within eup, so they are never all held at once)
-    tree = cKDTree(emb)
-    sum_log, num_pairs = 0.0, 0
-    chunk = 500
+    def distances(i1, i2, r_max):
+        # Max-norm distances (rounded to multiples of q for quantized values) above tol and below
+        # r_max between reference points i1..i2-1 and the delay vectors j > i + past
+        j1 = i1 + past + 1
+        if j1 >= n_emb:
+            return np.zeros(0)
+        ii = np.arange(i1, i2)[:, None]
+        jj = np.arange(j1, n_emb)[None, :]
+        d = np.abs(emb[i1:i2, 0][:, None] - emb[j1:, 0][None, :])
+        for k in range(1, emb.shape[1]):
+            d = np.maximum(d, np.abs(emb[i1:i2, k][:, None] - emb[j1:, k][None, :]))
+        if q > 0:
+            d = q * np.floor(d / q + 0.5)
+        return d[(jj > ii + past) & (d > tol) & (d < r_max)]
+
+    # Pass 1: histogram of the distances, to locate the c0 quantile
+    num_bins = 200
+    edges = tol * np.logspace(0, np.log10(2 * span / tol + 1), num_bins + 1)
+    counts = np.zeros(num_bins)
     for c in range(0, n_ref, chunk):
-        refs = np.arange(c, min(c + chunk, n_ref))
-        pairs = cKDTree(emb[refs]).sparse_distance_matrix(
-            tree, eup, p=np.inf, output_type='ndarray')
-        keep = np.abs(pairs['j'] - refs[pairs['i']]) > past  # outside the Theiler window
-        d = pairs['v'][keep]
-        d = d[d > 0]  # exact duplicates carry no length-scale information (ln -> Inf)
-        sum_log += np.sum(np.log(eup / d))
-        num_pairs += d.size
-
-    if num_pairs == 0:
-        logger.warning(f'No pairs within {rad:g} standard deviations of each other to '
-                       'estimate a correlation dimension from')
+        counts += np.histogram(distances(c, min(c + chunk, n_ref), np.inf), bins=edges)[0]
+    num_pos = counts.sum()  # pairs that are not repeated points
+    K = int(np.ceil(c0 * num_pos))  # the c0 quantile is the K-th smallest distance
+    if K < min_pairs:
+        logger.warning(f'Too few pairs ({K} below the {c0:g} quantile) to estimate a dimension')
         return np.nan
 
-    return num_pairs / sum_log  # Takens' estimator: 1 / mean(ln(eup/r))
+    # Pass 2: collect the distances below a bin edge beyond the quantile (further if needed)
+    b = int(np.flatnonzero(np.cumsum(counts) >= K)[0])
+    while True:
+        r_max = edges[b + 1]
+        p = np.sort(np.concatenate([np.zeros(0)] + [distances(c, min(c + chunk, n_ref), r_max)
+                                                     for c in range(0, n_ref, chunk)]))
+        if p.size >= K:
+            # merge distances within tol into levels (each takes its smallest value)
+            level = np.concatenate([[0], np.cumsum(np.diff(p) > tol)])
+            first = np.flatnonzero(np.concatenate([[True], np.diff(level) > 0]))
+            value = p[first]
+            # eup is the level of the K-th distance, raised to a later level until at least two
+            # levels lie below it (every distance below that level has been collected)
+            k = max(int(level[K - 1]), 2)
+            if k < value.size:
+                break
+        later = np.flatnonzero(counts[b + 1:] > 0)  # the next bin holding any distances
+        if later.size == 0:
+            logger.warning('Fewer than three distinct pair distances')
+            return np.nan
+        b += 1 + int(later[0])
+
+    eup = value[k]
+    r = value[level[level < k]]  # the pairs below eup, at the values of their levels
+    return (r.size - 1) / np.sum(np.log(eup / r))
 
 
 

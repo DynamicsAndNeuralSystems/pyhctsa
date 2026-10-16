@@ -46,9 +46,9 @@ def test_fnn_users():
     d = nl.gp_corr_sum(x, -1, 0.1, ('ac', 1), 20, ('ac', 'fnn'))
     # (5e-6: the robust fit is an iterative search, run in MATLAB and in Python)
     assert abs(d['robfit_a2'] - 3.34830651338) < 5e-6 and abs(d['meanlnCr'] + 9.35558688873) < 1e-6
-    assert abs(nl.takens_estimator(x, -1, 0.05, ('ac', 1), (3, 3)) - 2.14107670491) < 1e-9
-    # five dimensions are too many for Takens' estimator on 400 points (no scaling range)
-    assert np.isnan(nl.takens_estimator(x, -1, 0.05, ('ac', 1), (3, 'fnn')))
+    assert abs(nl.takens_estimator(x, -1, 0.01, ('ac', 1), (3, 3)) - 2.86282933331) < 1e-9
+    # at the length scale enclosing 1% of the pairs, five dimensions still give an estimate
+    assert abs(nl.takens_estimator(x, -1, 0.01, ('ac', 1), (3, 'fnn')) - 3.75193225272) < 1e-9
     assert _all_nan(nl.nlpe(np.ones(100), 'fnn'))
 
 
@@ -223,3 +223,65 @@ def test_gp_corr_sum_m1():
     assert len(c2) == 1 and c2[0].shape == (20, 2)
     with pytest.raises(ValueError):
         _tisean.d2(_x(600), embed=0)
+
+
+def test_takens_estimator_fraction_of_pairs():
+    # Takens' estimator at the 1% quantile of the pair distances (MATLAB values from NL_TakensEstimator)
+    x = _x()
+    assert abs(nl.takens_estimator(x, 200, 0.01, ('ac', 1), (3, 3)) - 2.90343923633) < 1e-9
+    assert abs(nl.takens_estimator(x, -1, 0.05, ('ac', 1), (3, 3)) - 2.71397436245) < 1e-9
+    # quantized values: distances on a lattice of step 0.25 (before z-scoring)
+    q = np.round(x / 0.25) * 0.25
+    q = (q - q.mean()) / q.std(ddof=1)
+    assert abs(nl.takens_estimator(q, -1, 0.01, ('ac', 1), (3, 3)) - 1.70646837008) < 1e-9
+    # many coinciding delay vectors (a zero-inflated series): coinciding pairs are left out
+    z = np.maximum(x - 0.5, 0)
+    z = (z - z.mean()) / z.std(ddof=1)
+    assert abs(nl.takens_estimator(z, -1, 0.01, ('ac', 1), (2, 3)) - 1.10192541585) < 1e-9
+    # NaN: too few pairs (1% of them below 33), fewer than three distinct distances, a constant series
+    assert np.isnan(nl.takens_estimator(x[:60], -1, 0.01, ('ac', 1), (3, 3)))
+    assert np.isnan(nl.takens_estimator(np.sign(x), -1, 0.01, ('ac', 1), (1, 2)))
+    assert np.isnan(nl.takens_estimator(np.ones(100), -1, 0.01, 2, (1, 2)))
+    with pytest.raises(ValueError):
+        nl.takens_estimator(x, -1, 1.5, ('ac', 1), (3, 3))
+    # a dimension estimate: about m for noise, about 1 for the logistic map
+    rng = np.random.default_rng(3)
+    w = rng.standard_normal(2000)
+    assert abs(nl.takens_estimator(w, -1, 0.01, 0, (1, 3)) - 3) < 0.3
+    lg = np.empty(2000)
+    lg[0] = 0.3
+    for i in range(1, 2000):
+        lg[i] = 4 * lg[i - 1] * (1 - lg[i - 1])
+    assert abs(nl.takens_estimator(lg, -1, 0.01, 0, (1, 3)) - 1) < 0.2
+
+
+def _ints_and_orbit(n=1500):
+    t = np.arange(1, n + 1)
+    ints = np.floor(6 * np.mod(t * 0.6180339887498949, 1.0)) + np.floor(3 * np.mod(t * 0.41421356, 1.0))
+    lg = np.empty(n)
+    lg[0] = 0.3
+    for k in range(1, n):
+        lg[k] = 3.84 * lg[k - 1] * (1 - lg[k - 1])  # a transient converging to a period-3 orbit
+    return ints, lg
+
+
+def test_takens_estimator_shift_scale_reflection():
+    # the tolerance is relative to the range: y, 3.7*y - 12 and -y give the same estimate
+    # (MATLAB values from NL_TakensEstimator)
+    from pyhctsa.utils import z_score
+    ints, lg = _ints_and_orbit()
+    for f in (lambda v: v, lambda v: 3.7 * v - 12, lambda v: -v):
+        assert abs(nl.takens_estimator(z_score(f(ints)), -1, 0.01, ('ac', 1), (1, 3)) - 1.552890298234) < 1e-9
+        # a converging transient has distances near 1e-12 of the range, whose relative round-off
+        # (about 1e-4) leaves a difference of order 1e-5 under the affine map
+        assert abs(nl.takens_estimator(z_score(f(lg)), -1, 0.01, ('ac', 1), (1, 3)) - 0.225759457779) < 5e-5
+    assert abs(nl.takens_estimator(z_score(-lg), -1, 0.01, ('ac', 1), (1, 3)) - 0.225759457779) < 1e-9
+
+
+def test_gp_corr_sum_roundoff_ratios():
+    # an exactly periodic series: residuals at round-off give NaN, not a ratio of rounding noise
+    from pyhctsa.utils import z_score
+    tab = np.sin(2 * np.pi * np.arange(7) / 7 + 0.3)
+    y = z_score(tab[np.arange(1000) % 7])
+    d = nl.gp_corr_sum(y, -1, 0.5, ('ac', 1), 20, ['ac', ['fnn', 0.05]])
+    assert np.isnan(d['robfit_sigrat']) and np.isnan(d['robfitresac1'])
