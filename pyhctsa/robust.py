@@ -256,20 +256,30 @@ def bf_runs_z(y: ArrayLike) -> float:
     return float((r - mu) / np.sqrt(v))
 
 
-def bf_residual_stats(res: ArrayLike, sstot: float) -> Tuple[float, float, float]:
+def bf_residual_stats(res: ArrayLike, y: ArrayLike) -> Tuple[float, float, float]:
     """Statistics of the residuals of a fit, for remaining structure (hctsa ``BF_ResidualStats``).
 
     The autocorrelation of the residuals at lags 1 and 2 (the Fourier method of
     ``CO_AutoCorr``) and a runs test (:func:`bf_runs_z`). The residuals are taken in the
-    order given. If the fit is exact (residual sum of squares at most ``1e-12 * sstot``)
-    all three outputs are NaN: only numerical error is left.
+    order given.
+
+    All three outputs are NaN if the residuals have no variation beyond floating-point
+    round-off, as for an exact fit: the autocorrelation and runs of round-off are not
+    meaningful (and differ between implementations). The criterion is a standard deviation
+    of the residuals of at most ``10 * N * eps`` times the root-mean-square of the fitted
+    data (N values), a bound on the rounding error of a fit to them: a fitted value
+    accumulates rounding over sums of up to N terms (at most about ``N * eps / 2`` of the
+    magnitude of the data), and a sinusoid evaluated at times up to N has a phase rounding
+    error of up to about ``1.5 * pi * N * eps`` (see
+    :func:`pyhctsa.operations.pre_process.preproc_compare`). Small but genuine residuals,
+    such as the quantization noise left by an exact fit to 24-bit data, are computed.
 
     Parameters
     ----------
     res : array-like
         The residuals.
-    sstot : float
-        The total sum of squares of the fitted data about its mean.
+    y : array-like
+        The fitted data, whose magnitude sets the round-off scale.
 
     Returns
     -------
@@ -278,8 +288,9 @@ def bf_residual_stats(res: ArrayLike, sstot: float) -> Tuple[float, float, float
     """
     from .operations.correlation import autocorr
     res = np.asarray(res, dtype=float).ravel()
-    if np.sum(res ** 2) <= 1e-12 * sstot:
-        return np.nan, np.nan, np.nan
+    y = np.asarray(y, dtype=float).ravel()
+    if np.std(res, ddof=1) <= 10 * res.size * np.finfo(float).eps * np.sqrt(np.mean(y ** 2)):
+        return np.nan, np.nan, np.nan  # nothing but round-off is left (an exact fit)
     with np.errstate(all='ignore'):
         ac = np.asarray(autocorr(res, [1, 2], 'Fourier'), dtype=float).ravel()
     return float(ac[0]), float(ac[1]), bf_runs_z(res)
@@ -606,20 +617,23 @@ def bf_fit_density_curve(x: ArrayLike, p: ArrayLike, model: str) -> np.ndarray:
 # ------------------------------------------------------------------------------
 # BF_FitSinusoids
 # ------------------------------------------------------------------------------
-def _sin_design(f: np.ndarray, t: np.ndarray) -> np.ndarray:
-    """Sine and cosine columns at each frequency in ``f``."""
-    x = np.empty((t.size, 2 * len(f)))
+def _sin_design(f: np.ndarray, t: np.ndarray, constant: bool = False) -> np.ndarray:
+    """Sine and cosine columns at each frequency in ``f`` (after a column of ones if ``constant``)."""
+    o = int(constant)
+    x = np.empty((t.size, o + 2 * len(f)))
+    if constant:
+        x[:, 0] = 1.0
     for i, fi in enumerate(f):
-        x[:, 2 * i] = np.sin(2 * np.pi * fi * t)
-        x[:, 2 * i + 1] = np.cos(2 * np.pi * fi * t)
+        x[:, o + 2 * i] = np.sin(2 * np.pi * fi * t)
+        x[:, o + 2 * i + 1] = np.cos(2 * np.pi * fi * t)
     return x
 
 
-def _sin_basis(f: np.ndarray, t: np.ndarray) -> np.ndarray:
-    """Orthonormal basis of the sinusoids at frequencies ``f``."""
-    if len(f) == 0:
+def _sin_basis(f: np.ndarray, t: np.ndarray, constant: bool = False) -> np.ndarray:
+    """Orthonormal basis of the sinusoids at frequencies ``f`` (and the constant if ``constant``)."""
+    if len(f) == 0 and not constant:
         return np.zeros((t.size, 0))
-    return np.linalg.qr(_sin_design(f, t), mode='reduced')[0]
+    return np.linalg.qr(_sin_design(f, t, constant), mode='reduced')[0]
 
 
 def _sin_rss(y: np.ndarray, q: np.ndarray, fc: np.ndarray, t: np.ndarray) -> np.ndarray:
@@ -649,15 +663,27 @@ def _sin_rss(y: np.ndarray, q: np.ndarray, fc: np.ndarray, t: np.ndarray) -> np.
     return rss
 
 
-def bf_fit_sinusoids(y: ArrayLike, k: int) -> Tuple[np.ndarray, np.ndarray]:
+def bf_fit_sinusoids(y: ArrayLike, k: int, constant: bool = False) -> Tuple[np.ndarray, np.ndarray]:
     """Least-squares fit of a sum of ``k`` sinusoids to a time series (hctsa ``BF_FitSinusoids``).
 
-    Fits ``y(t) = sum_i a_i sin(2 pi f_i t) + b_i cos(2 pi f_i t)``, ``t = 0..N-1``. The
-    amplitudes and phases are linear, found by least squares for given frequencies, so
-    only the ``k`` frequencies are searched (variable projection), deterministically:
-    each frequency is added at the grid frequency (``2N`` points on
-    ``[1/(2N), 1/2 - 1/(2N)]``) that most reduces the residual sum of squares given those
-    already chosen, then each is refined twice in turn by 8 zooming local grids.
+    Fits ``y(t) = sum_i a_i sin(2 pi f_i t) + b_i cos(2 pi f_i t)``, ``t = 0..N-1`` (plus a
+    constant ``c`` if ``constant``). The amplitudes and phases (and ``c``) are linear, found
+    by least squares for given frequencies, so only the ``k`` frequencies are searched
+    (variable projection), deterministically and stagewise: each frequency is added at the
+    grid frequency (``2N`` points on ``[1/N, 1/2 - 1/(2N)]``) that most reduces the residual
+    sum of squares given those already chosen (with the constant, if there is one, fitted
+    jointly throughout), and then all of the chosen frequencies are refined, twice in turn by
+    8 zooming local grids and then together by Gauss-Newton iterations
+    (:func:`_sin_refine`), to the least-squares minimum at machine precision, before the
+    next is added (so that the residual of an exact sum of sinusoids is rounding error, and
+    each frequency is added to the least-squares fit of those before it rather than to the
+    leakage left by their grid resolution).
+
+    The frequencies are bounded to ``[1/N, 1/2 - 1/(2N)]`` cycles per sample. Each sinusoid
+    is an oscillation that completes at least one full cycle within the series: a component
+    with less than one cycle in the window is a trend, not an oscillation (its period is not
+    observed, and below ``1/(2N)`` its sine and cosine terms are not distinguishable from a
+    constant and a linear trend). A frequency at 1/2 has a zero sine term.
 
     Parameters
     ----------
@@ -665,6 +691,8 @@ def bf_fit_sinusoids(y: ArrayLike, k: int) -> Tuple[np.ndarray, np.ndarray]:
         The time series.
     k : int
         The number of sinusoids.
+    constant : bool, optional
+        Whether the model includes a constant term (default ``False``).
 
     Returns
     -------
@@ -677,31 +705,105 @@ def bf_fit_sinusoids(y: ArrayLike, k: int) -> Tuple[np.ndarray, np.ndarray]:
     n = y.size
     k = int(k)
     t = np.arange(n, dtype=float)
-    f_lims = np.array([1, n - 1]) / (2 * n)  # allowed frequency range
+    f_lims = np.array([1 / n, (n - 1) / (2 * n)])  # allowed frequency range: at least one full cycle
     f_grid = np.linspace(f_lims[0], f_lims[1], int(2 * n))  # search grid, spacing ~ 1/(4N)
 
-    # Greedy search: add the grid frequency that most reduces the residual sum of squares
-    f = np.zeros(k)
-    for j in range(k):
-        q = _sin_basis(f[:j], t)
-        f[j] = f_grid[int(np.argmin(_sin_rss(y, q, f_grid, t)))]
-
-    # Refine each frequency in turn (the others held fixed) by zooming local grids
+    # Stagewise search: add the grid frequency that most reduces the residual sum of squares
+    # given those already chosen, then refine all of the chosen frequencies before adding the
+    # next (so that each is added to the least-squares fit of the others, not to the leakage
+    # left by their grid resolution)
     h0 = f_grid[1] - f_grid[0]
-    for _ in range(2):
-        for j in range(k):
-            q = _sin_basis(np.delete(f, j), t)
-            h = h0
-            for _zoom in range(8):
-                fc = np.minimum(np.maximum(f[j] + h * np.linspace(-1, 1, 21), f_lims[0]), f_lims[1])
-                f[j] = fc[int(np.argmin(_sin_rss(y, q, fc, t)))]
-                h = h / 5
+    f = np.zeros(0)
+    for _ in range(k):
+        q = _sin_basis(f, t, constant)
+        f = np.append(f, f_grid[int(np.argmin(_sin_rss(y, q, f_grid, t)))])
+
+        # Refine each frequency in turn (the others held fixed) by zooming local grids
+        for _pass in range(2):
+            for j in range(f.size):
+                q = _sin_basis(np.delete(f, j), t, constant)
+                h = h0
+                for _zoom in range(8):
+                    fc = np.minimum(np.maximum(f[j] + h * np.linspace(-1, 1, 21), f_lims[0]), f_lims[1])
+                    f[j] = fc[int(np.argmin(_sin_rss(y, q, fc, t)))]
+                    h = h / 5
+
+        # Converge to the least-squares minimum (the grids resolve a frequency to about 1e-10
+        # cycles per sample, which would leave a residual of relative amplitude ~1e-6 for an
+        # exact sum of sinusoids)
+        f = _sin_refine(y, f, t, f_lims, constant)
     freqs = np.sort(f)
 
     # Amplitudes and phases by least squares at the final frequencies
-    x = _sin_design(freqs, t)
+    x = _sin_design(freqs, t, constant)
     yfit = x @ np.linalg.lstsq(x, y, rcond=None)[0]
     return yfit, freqs
+
+
+def _pinv_step(d: np.ndarray, r: np.ndarray) -> np.ndarray:
+    """Least-squares solution of ``d @ step = r`` by the pseudo-inverse, ignoring singular values
+    below ``max(d.shape) * eps`` of the largest (zero if ``d`` is zero)."""
+    u, s, vt = np.linalg.svd(d, full_matrices=False)
+    if not s[0] > 0:
+        return np.zeros(d.shape[1])
+    keep = s > max(d.shape) * np.finfo(float).eps * s[0]
+    return vt[keep].T @ ((u[:, keep].T @ r) / s[keep])
+
+
+def _sin_refine(y: np.ndarray, f: np.ndarray, t: np.ndarray, f_lims: np.ndarray,
+                constant: bool = False, max_iter: int = 20) -> np.ndarray:
+    """Gauss-Newton refinement of the frequencies of a sum of sinusoids.
+
+    Variable projection (Golub and Pereyra, 1973, with Kaufman's Jacobian): the amplitudes
+    and phases are eliminated by least squares, and each step solves the linearized problem
+    for the frequencies alone, by the pseudo-inverse of the projected Jacobian (directions
+    whose singular value is below ``max(size) * eps`` of the largest are not moved, as for a
+    sinusoid of zero amplitude). A step is accepted only if it reduces the residual sum of
+    squares; the iteration stops when it does not (the residual sum of squares cannot be
+    reduced beyond rounding error), or when the step is below the floating-point resolution
+    of the frequencies: at the minimum to machine precision. (The start, from the grids, is
+    within about 1e-10 of a well-determined minimum, where the full Gauss-Newton step is
+    accurate; when it does not reduce the residual, the fit is ill-determined, e.g., two
+    sinusoids converging on one frequency, and the grid result is kept.) The frequencies
+    are kept in ``f_lims`` (one at a bound that a step would take outside it is held
+    there); ``constant`` adds a constant term to the model.
+    """
+    f = np.array(f, dtype=float)
+    k = f.size
+    o = int(constant)
+    eps = np.finfo(float).eps
+    x = _sin_design(f, t, constant)
+    coef = np.linalg.lstsq(x, y, rcond=None)[0]
+    r = y - x @ coef
+    rss = r @ r
+    for _ in range(max_iter):
+        # derivative of a*sin(2 pi f t) + b*cos(2 pi f t) with respect to f, projected onto the
+        # complement of the span of the sinusoids (the amplitudes and phases readjust)
+        d = np.empty((t.size, k))
+        for i in range(k):
+            arg = 2 * np.pi * f[i] * t
+            d[:, i] = 2 * np.pi * t * (coef[o + 2 * i] * np.cos(arg) - coef[o + 2 * i + 1] * np.sin(arg))
+        q = np.linalg.qr(x, mode='reduced')[0]
+        d = d - q @ (q.T @ d)
+        step = _pinv_step(d, r)
+        # a frequency at a bound that the step would take outside it is held there, and the
+        # step is recomputed for the others
+        held = ((f <= f_lims[0]) & (step < 0)) | ((f >= f_lims[1]) & (step > 0))
+        if np.any(held):
+            step = np.zeros(k)
+            if not np.all(held):
+                step[~held] = _pinv_step(d[:, ~held], r)
+        if np.all(np.abs(step) <= eps * f):
+            break  # below the resolution of the frequencies
+        f_new = np.minimum(np.maximum(f + step, f_lims[0]), f_lims[1])
+        x_new = _sin_design(f_new, t, constant)
+        coef_new = np.linalg.lstsq(x_new, y, rcond=None)[0]
+        r_new = y - x_new @ coef_new
+        rss_new = r_new @ r_new
+        if not rss_new < rss:
+            break  # no further reduction: at the minimum to rounding error
+        f, x, coef, r, rss = f_new, x_new, coef_new, r_new, rss_new
+    return f
 
 
 # ------------------------------------------------------------------------------

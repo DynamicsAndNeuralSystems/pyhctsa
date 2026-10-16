@@ -1596,7 +1596,9 @@ def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') ->
         data); resAC1, resAC2: autocorrelations of the residuals, in order of increasing
         value, at lags 1 and 2; resrunsz: the signed z-statistic of a runs test on the
         residuals (:func:`pyhctsa.robust.bf_runs_z`; negative when the residuals have
-        fewer runs about their median than expected for a random order). NaN (not a
+        fewer runs about their median than expected for a random order); resAC1, resAC2
+        and resrunsz are NaN if the residuals have no variation beyond floating-point
+        round-off, as for an exact fit (:func:`pyhctsa.robust.bf_residual_stats`). NaN (not a
         dict) if the model cannot be fitted, or for a constant series with ``num_bins = 0``.
 
     Notes
@@ -1649,7 +1651,7 @@ def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') ->
     rmse = np.sqrt(sse / dfe)
 
     # Remaining structure in the residuals, in order of increasing value:
-    res_ac1, res_ac2, res_runsz = bf_residual_stats(res, sstot)
+    res_ac1, res_ac2, res_runsz = bf_residual_stats(res, dny)
     return {
         'r2': float(r2),
         'adjr2': float(adjr2),

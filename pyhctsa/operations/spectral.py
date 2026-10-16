@@ -1351,13 +1351,17 @@ def sinusoid_fit(y: ArrayLike, model: str = 'sin1') -> Union[dict, float]:
     The fitted models are:
 
     - ``'sinK'``: a sum of K sinusoids, ``sum_i a_i*sin(2*pi*f_i*t + c_i)``, with free
-      amplitudes, phases, and frequencies ``f_i`` in ``[1/(2N), 1/2 - 1/(2N)]`` cycles
+      amplitudes, phases, and frequencies ``f_i`` in ``[1/N, 1/2 - 1/(2N)]`` cycles
       per sample. The amplitudes and phases are linear parameters, found by least squares
       for given frequencies, and the frequencies are searched deterministically (no
-      random starts, no iterative optimizer): :func:`pyhctsa.robust.bf_fit_sinusoids`.
-      The frequencies are bounded below by ``1/(2N)`` because a sinusoid of lower
-      frequency cannot be told apart from a constant plus a linear trend, so that its
-      amplitude and phase are not determined.
+      random starts: a grid search refined by Gauss-Newton iterations):
+      :func:`pyhctsa.robust.bf_fit_sinusoids`.
+      The frequencies are bounded below by ``1/N``, so that each sinusoid completes at
+      least one full cycle within the series: these models measure how well the series is
+      described by oscillations, and a component with less than one cycle in the window is
+      a trend (its period is not observed), which would let a sinusoid fit a trending
+      series as if it were periodic (and below ``1/(2N)`` its amplitude and phase are not
+      determined: it cannot be told apart from a constant plus a linear trend).
     - ``'fourierK'``: a K-term Fourier series,
       ``a0 + sum_i (a_i*cos(i*w*t) + b_i*sin(i*w*t))``, with a single fitted
       fundamental frequency ``w``, so that the terms are harmonically related.
@@ -1389,8 +1393,9 @@ def sinusoid_fit(y: ArrayLike, model: str = 'sin1') -> Union[dict, float]:
           runs about their median than expected for a random order (slowly varying
           residuals).
 
-        The three residual outputs are NaN if the fit is exact (nothing but rounding
-        error is left). NaN is returned instead of a dict if the model cannot be fitted
+        The three residual outputs are NaN if the residuals have no variation beyond
+        floating-point round-off, as for an exact fit
+        (:func:`pyhctsa.robust.bf_residual_stats`). NaN is returned instead of a dict if the model cannot be fitted
         (or, for K sinusoids, if there are fewer than ``3K + 1`` samples).
 
     Notes
@@ -1454,7 +1459,7 @@ def sinusoid_fit(y: ArrayLike, model: str = 'sin1') -> Union[dict, float]:
         rmse = np.sqrt(sse / dfe) if dfe > 0 else np.nan
     out = {'r2': float(r2), 'adjr2': float(adjr2), 'rmse': float(rmse)}
     # Remaining structure in the residuals
-    out['resAC1'], out['resAC2'], out['resrunsz'] = bf_residual_stats(res, sstot)
+    out['resAC1'], out['resAC2'], out['resrunsz'] = bf_residual_stats(res, y)
     return out
 
 

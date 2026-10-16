@@ -24,9 +24,9 @@ nm = {'ar_pos','ar_neg','white','trend','quant','binary','mostmax','const','two'
 R.runs = zeros(numel(nm), 1);
 for i = 1:numel(nm), R.runs(i) = BF_RunsZ(S.(nm{i})); end
 % --- BF_ResidualStats
-[a1, a2, rz] = BF_ResidualStats(S.res, sum((S.res - mean(S.res)).^2) * 3);
+[a1, a2, rz] = BF_ResidualStats(S.res, 3*S.res);
 R.resstats = [a1 a2 rz];
-[a1, a2, rz] = BF_ResidualStats(S.res_exact, 1e6);
+[a1, a2, rz] = BF_ResidualStats(S.res_exact, 1e7*ones(size(S.res_exact)));
 R.resstats_exact = [a1 a2 rz];
 % --- BF_TheilSen
 R.ts1 = BF_TheilSen(S.x, S.y_lin_out);

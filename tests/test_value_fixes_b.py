@@ -38,13 +38,54 @@ def test_zscore_constant_up_to_rounding_raises(x):
 # ------------------------------------------------------------------------------
 # preproc_compare / preproc_iterate
 # ------------------------------------------------------------------------------
-def test_preproc_compare_exact_fit_residual_is_nan():
-    # one sinusoid fits a pure sinusoid up to numerical error (here a variance ratio of about 1e-14)
-    t = np.arange(1, 1001)
-    y = np.sin(2 * np.pi * t / 20)
-    assert all(np.isnan(v) for v in pp.preproc_compare(y, 'sin1').values())
-    # an exactly zero residual too
-    assert all(np.isnan(v) for v in pp.preproc_compare(np.arange(100.0), 'poly1').values())
+_T = np.arange(1, 1001.0)
+_SIN = 2 + np.sin(2 * np.pi * 0.0523 * _T + 0.3)  # not a whole number of periods
+_U = 2 * _T / 1000 - 1
+_CUBIC = 2 + np.polyval([1, -2, 0.5, 1], _U)
+_WHITE = np.random.default_rng(42).standard_normal(1000)
+_COLORED = _ar1(1000, 0.9, 43)
+
+
+def _all_nan(out):
+    return all(np.isnan(v) for v in out.values())
+
+
+def _all_finite(out):
+    return all(np.isfinite(v) for v in out.values())
+
+
+@pytest.mark.parametrize("y, meth", [
+    (_SIN, 'sin1'), (_SIN, 'sin2'), (1e3 + np.sin(2 * np.pi * _T / 3), 'sin1'),
+    (2 + 0.37 * _T, 'poly1'), (_CUBIC, 'poly3'), (_CUBIC, 'poly9'), (_CUBIC, 'spline24'),
+    (1e3 + 0.37 * _T, 'diff1'), (2 + np.polyval([1, -2, 0.5], _U), 'diff2'), (np.full(500, 7.3), 'medianf3')])
+def test_preproc_compare_roundoff_is_nan(y, meth):
+    # the processed series is floating-point round-off (an exact fit, the differences of a
+    # polynomial, a constant): no statistics
+    assert _all_nan(pp.preproc_compare(y, meth))
+
+
+@pytest.mark.parametrize("noise", [_WHITE, _COLORED])
+@pytest.mark.parametrize("level", [1e-2, 1e-4, 1e-6])
+def test_preproc_compare_small_genuine_residual_is_computed(noise, level):
+    e = level * noise / np.std(noise)
+    assert _all_finite(pp.preproc_compare(_SIN + e, 'sin1'))
+    assert _all_finite(pp.preproc_compare(_CUBIC + e, 'poly3'))
+    assert _all_finite(pp.preproc_compare(_CUBIC + e, 'spline24'))
+
+
+@pytest.mark.parametrize("bits", [16, 24])
+def test_preproc_compare_quantized_sinusoid_is_computed(bits):
+    # the quantization noise left by an exact fit (about 2**-bits of the amplitude) is genuine
+    q = 2.0 ** (bits - 1)
+    y = 2 + np.round(np.sin(2 * np.pi * 0.0523 * _T + 0.3) * q) / q
+    assert _all_finite(pp.preproc_compare(y, 'sin1'))
+
+
+def test_preproc_iterate_roundoff_is_nan():
+    quad = 2 + np.polyval([1, -2, 0.5], _U)
+    assert _all_nan(pp.preproc_iterate(quad, 'diff'))  # the second differences are constant
+    out = pp.preproc_iterate(quad + 1e-6 * _WHITE, 'diff')
+    assert all(np.isfinite(v) for k, v in out.items() if not k.startswith(('xc', 'normdiff')))
 
 
 @pytest.mark.parametrize("meth", ['diff1', 'medianf3', 'poly1', 'resample_1_2'])
@@ -65,10 +106,43 @@ def test_preproc_iterate_does_not_depend_on_the_scale():
             assert b[k] == pytest.approx(a[k], rel=1e-6, abs=1e-9), k
 
 
-def test_iterate_stats_nan_for_negligible_processed_variance():
+def test_iterate_stats_nan_for_roundoff_processed_series():
+    # round-off: a standard deviation at most 10 * N * eps (6.7e-13 for N = 300) of the rms of y
     y = _ar1(300, 0.5, 3)
-    assert np.all(np.isnan(pp._iterate_stats(y, 1e-6 * _ar1(300, 0.5, 4))))
-    assert not np.all(np.isnan(pp._iterate_stats(y, 1e-4 * _ar1(300, 0.5, 4))))
+    z = _ar1(300, 0.5, 4) * np.sqrt(np.mean(y ** 2)) / np.std(_ar1(300, 0.5, 4), ddof=1)
+    assert np.all(np.isnan(pp._iterate_stats(y, 1e-13 * z)))
+    assert not np.all(np.isnan(pp._iterate_stats(y, 1e-11 * z)))
+
+
+def test_fit_sinusoids_at_least_one_cycle():
+    from pyhctsa.robust import bf_fit_sinusoids
+    trend = _T + np.random.default_rng(5).standard_normal(1000)
+    for constant in (False, True):
+        assert bf_fit_sinusoids(trend, 1, constant=constant)[1][0] >= 1 / 1000 - 1e-12
+
+
+def test_residual_stats_roundoff_only():
+    # an exact fit leaves round-off: no residual statistics; the quantization noise left by an
+    # exact fit to 24-bit data is genuine
+    from pyhctsa.operations.spectral import sinusoid_fit
+    from pyhctsa.robust import bf_residual_stats
+    s = np.sin(2 * np.pi * 0.0523 * _T + 0.3)
+    out = sinusoid_fit(s, 'sin1')
+    assert np.isnan(out['resAC1']) and np.isnan(out['resAC2']) and np.isnan(out['resrunsz'])
+    q = 2.0 ** 23
+    out = sinusoid_fit(np.round(s * q) / q, 'sin1')
+    assert np.isfinite(out['resAC1']) and np.isfinite(out['resAC2']) and np.isfinite(out['resrunsz'])
+    e = 1e-9 * np.random.default_rng(8).standard_normal(120)
+    assert all(np.isnan(bf_residual_stats(e, np.full(120, 1e7))))
+    assert all(np.isfinite(bf_residual_stats(e, np.ones(120))))
+
+
+def test_fit_sinusoids_exact_sum_reaches_roundoff():
+    from pyhctsa.robust import bf_fit_sinusoids
+    y = 2 + np.sin(2 * np.pi * 0.0711 * _T) + 0.5 * np.cos(2 * np.pi * 0.21 * _T + 1)
+    yfit, f = bf_fit_sinusoids(y, 2, constant=True)
+    np.testing.assert_allclose(f, [0.0711, 0.21], rtol=1e-12)
+    assert np.std(y - yfit) <= 1000 * np.finfo(float).eps * np.sqrt(np.mean(y ** 2))
 
 
 # ------------------------------------------------------------------------------
@@ -108,6 +182,72 @@ def test_fnn_dimension_smallest_not_ruled_out():
         m = nl.fnn(x2, 1, 10, ('ac', 1), True, 0.05, 5)
         assert m == d['dim005']
         assert nl._fnn_embedding_dim(x2, 1, 0.05) == m
+
+
+def test_fnn_fraction_needs_enough_points():
+    from pyhctsa.toolboxes.Tisean_3_0_1 import tisean
+    assert tisean.fnn_min_count(0.05) == 60 and tisean.fnn_min_count(0.5) == 6
+    # white noise: the points with a neighbor within the search range dwindle with the dimension,
+    # and the last fraction (2 points) is 0; that dimension is not accepted: the dimension is the
+    # first one whose fraction rests on fewer than 60 points (a lower bound)
+    x = np.random.default_rng(3).standard_normal(1000)
+    r = tisean.false_nearest(x, 1, 1, 10, 1, 5.0)
+    assert r['count'].shape == r['pfnn'].shape and r['count'][-1] < 60 and r['pfnn'][-1] < 0.05
+    first_low = int(np.flatnonzero(r['count'] < 60)[0])
+    assert np.all(r['pfnn'][:first_low] >= 0.05)
+    assert nl.fnn(x, 1, 10, 1, True, 0.05, 5) == r['dim'][first_low]
+    assert tisean.fnn_first_under(r['dim'], r['pfnn'], 0.05) == r['dim'][-1]  # without counts
+    assert tisean.fnn_embedding_dimension(x, 1, 1, 0.05) == r['dim'][first_low]
+    # dim* share the minimum count, so they never decrease as the threshold falls
+    d = nl.fnn(x, 1, 10, 1, False, escape_factor=5)
+    fu = [d[f'dim{k}'] for k in ('09', '08', '07', '06', '05', '04', '03', '02', '01', '005')]
+    assert np.all(np.diff(fu) >= 0) and fu[-1] == r['dim'][first_low]
+    # 0.05 is the default threshold
+    assert nl.fnn(x, 1, 10, 1, True, escape_factor=5) == nl.fnn(x, 1, 10, 1, True, 0.05, 5)
+
+
+def _smoothed_noise(n, seed=2):
+    z = np.convolve(np.random.default_rng(seed).standard_normal(n + 100), np.ones(20) / 20, 'same')
+    return z[50:50 + n]
+
+
+@pytest.mark.parametrize('n', [250, 1000])
+def test_fnn_embedding_dimension_limited_by_length(n):
+    # when 'fnn' chooses the dimension for another algorithm it is at most floor(2 log10 N);
+    # fnn itself is not capped
+    cap = int(np.floor(2 * np.log10(n)))
+    assert nl._max_embedding_dim(n) == cap
+    x = np.random.default_rng(1).standard_normal(n)
+    m_fnn = nl.fnn(x, 1, 10, ('ac', 1), True, 0.05, 5)
+    assert nl._embedding_params(x, 1, ['fnn', 0.05]) == (1, min(m_fnn, cap))
+    assert nl._embedding_params(x, 1, 'fnn') == nl._embedding_params(x, 1, ['fnn', 0.05])
+    # smoothed noise: the fraction never falls below 0.05 and many points stay behind it, so the
+    # FNN answer exceeds the limit and the limit binds
+    z = _smoothed_noise(n)
+    assert nl.fnn(z, 1, 10, ('ac', 1), True, 0.05, 5) > cap
+    assert nl._embedding_params(z, 1, ['fnn', 0.05]) == (1, cap)
+
+
+def test_fnn_threshold_syntax_in_operations():
+    x = np.random.default_rng(3).standard_normal(600)
+    def same(a, b):
+        return all((np.isnan(a[k]) and np.isnan(b[k])) or a[k] == b[k] for k in a)
+    assert same(nl.rqa(x, 'mi', ['fnn', 0.05]), nl.rqa(x, 'mi', 'fnn'))
+    assert same(nl.local_density(x, 5, ('ac', 1), 'ac1e', ['fnn', 0.05]),
+                nl.local_density(x, 5, ('ac', 1), 'ac1e', 'fnn'))
+    assert same(nl.nlpe(x, ['fnn', 0.05], 'mi'), nl.nlpe(x, 'fnn', 'mi'))
+    with pytest.raises(ValueError):
+        nl.nlpe(x, ['nonsense', 0.05], 'mi')
+
+
+def test_nlpe_fnn_limit_uses_cropped_length():
+    # nlpe crops to max_n samples first; the limit on an 'fnn' dimension is floor(2 log10 max_n)
+    z = z_score(_smoothed_noise(6000))
+    assert nl.fnn(z[:1000], 1, 10, ('ac', 1), True, 0.05, 5) > 6
+    a = nl.nlpe(z, ['fnn', 0.05], 1, 1000)
+    b = nl.nlpe(z, 6, 1, 1000)
+    assert all((np.isnan(a[k]) and np.isnan(b[k])) or a[k] == b[k] for k in a)
+    assert a['meanabs'] != nl.nlpe(z, 7, 1, 1000)['meanabs']
 
 
 # ------------------------------------------------------------------------------
@@ -184,72 +324,6 @@ def test_tisean_d2_takens_nan_at_one_dimension(monkeypatch):
 # ------------------------------------------------------------------------------
 # preproc_schreiber_denoise: neighbor statistics over the points with an embedding vector
 # ------------------------------------------------------------------------------
-def test_fnn_fraction_needs_enough_points():
-    from pyhctsa.toolboxes.Tisean_3_0_1 import tisean
-    assert tisean.fnn_min_count(0.05) == 60 and tisean.fnn_min_count(0.5) == 6
-    # white noise: the points with a neighbor within the search range dwindle with the dimension,
-    # and the last fraction (2 points) is 0; that dimension is not accepted: the dimension is the
-    # first one whose fraction rests on fewer than 60 points (a lower bound)
-    x = np.random.default_rng(3).standard_normal(1000)
-    r = tisean.false_nearest(x, 1, 1, 10, 1, 5.0)
-    assert r['count'].shape == r['pfnn'].shape and r['count'][-1] < 60 and r['pfnn'][-1] < 0.05
-    first_low = int(np.flatnonzero(r['count'] < 60)[0])
-    assert np.all(r['pfnn'][:first_low] >= 0.05)
-    assert nl.fnn(x, 1, 10, 1, True, 0.05, 5) == r['dim'][first_low]
-    assert tisean.fnn_first_under(r['dim'], r['pfnn'], 0.05) == r['dim'][-1]  # without counts
-    assert tisean.fnn_embedding_dimension(x, 1, 1, 0.05) == r['dim'][first_low]
-    # dim* share the minimum count, so they never decrease as the threshold falls
-    d = nl.fnn(x, 1, 10, 1, False, escape_factor=5)
-    fu = [d[f'dim{k}'] for k in ('09', '08', '07', '06', '05', '04', '03', '02', '01', '005')]
-    assert np.all(np.diff(fu) >= 0) and fu[-1] == r['dim'][first_low]
-    # 0.05 is the default threshold
-    assert nl.fnn(x, 1, 10, 1, True, escape_factor=5) == nl.fnn(x, 1, 10, 1, True, 0.05, 5)
-
-
-def _smoothed_noise(n, seed=2):
-    z = np.convolve(np.random.default_rng(seed).standard_normal(n + 100), np.ones(20) / 20, 'same')
-    return z[50:50 + n]
-
-
-@pytest.mark.parametrize('n', [250, 1000])
-def test_fnn_embedding_dimension_limited_by_length(n):
-    # when 'fnn' chooses the dimension for another algorithm it is at most floor(2 log10 N);
-    # fnn itself is not capped
-    cap = int(np.floor(2 * np.log10(n)))
-    assert nl._max_embedding_dim(n) == cap
-    x = np.random.default_rng(1).standard_normal(n)
-    m_fnn = nl.fnn(x, 1, 10, ('ac', 1), True, 0.05, 5)
-    assert nl._embedding_params(x, 1, ['fnn', 0.05]) == (1, min(m_fnn, cap))
-    assert nl._embedding_params(x, 1, 'fnn') == nl._embedding_params(x, 1, ['fnn', 0.05])
-    # smoothed noise: the fraction never falls below 0.05 and many points stay behind it, so the
-    # FNN answer exceeds the limit and the limit binds
-    z = _smoothed_noise(n)
-    assert nl.fnn(z, 1, 10, ('ac', 1), True, 0.05, 5) > cap
-    assert nl._embedding_params(z, 1, ['fnn', 0.05]) == (1, cap)
-
-
-def test_fnn_threshold_syntax_in_operations():
-    x = np.random.default_rng(3).standard_normal(600)
-    def same(a, b):
-        return all((np.isnan(a[k]) and np.isnan(b[k])) or a[k] == b[k] for k in a)
-    assert same(nl.rqa(x, 'mi', ['fnn', 0.05]), nl.rqa(x, 'mi', 'fnn'))
-    assert same(nl.local_density(x, 5, ('ac', 1), 'ac1e', ['fnn', 0.05]),
-                nl.local_density(x, 5, ('ac', 1), 'ac1e', 'fnn'))
-    assert same(nl.nlpe(x, ['fnn', 0.05], 'mi'), nl.nlpe(x, 'fnn', 'mi'))
-    with pytest.raises(ValueError):
-        nl.nlpe(x, ['nonsense', 0.05], 'mi')
-
-
-def test_nlpe_fnn_limit_uses_cropped_length():
-    # nlpe crops to max_n samples first; the limit on an 'fnn' dimension is floor(2 log10 max_n)
-    z = z_score(_smoothed_noise(6000))
-    assert nl.fnn(z[:1000], 1, 10, ('ac', 1), True, 0.05, 5) > 6
-    a = nl.nlpe(z, ['fnn', 0.05], 1, 1000)
-    b = nl.nlpe(z, 6, 1, 1000)
-    assert all((np.isnan(a[k]) and np.isnan(b[k])) or a[k] == b[k] for k in a)
-    assert a['meanabs'] != nl.nlpe(z, 7, 1, 1000)['meanabs']
-
-
 def test_schreiber_neighbor_stats_skip_first_samples():
     y = z_score(np.sin(np.arange(1000) * 2 * np.pi / 40) + 0.05 * np.random.default_rng(10).standard_normal(1000))
     out = pp.preproc_schreiber_denoise(y, 5, 1, 1, 0.3)
