@@ -93,20 +93,20 @@ def test_hmm_training_loglik_is_of_the_returned_parameters():
 # False nearest neighbors: the dimension is the smallest one not ruled out
 # ------------------------------------------------------------------------------
 def test_fnn_dimension_smallest_not_ruled_out():
-    # never below the threshold up to maxm: maxm + 1 (a lower bound), as fnn's firstunder*
+    # never below the threshold up to maxm: maxm + 1 (a lower bound), as fnn's dim*
     t = np.arange(4000)
     x = np.sin(2 * np.pi * t / 37) + np.sin(2 * np.pi * t / (37 * np.sqrt(2))) \
         + 0.5 * np.random.default_rng(6).standard_normal(4000)
     d = nl.fnn(x, 1, 3, ('ac', 1), False, escape_factor=5)
-    assert d['firstunder005'] == 4  # not below 5% up to maxm = 3
+    assert d['dim005'] == 4  # not below 5% up to maxm = 3
     assert nl.fnn(x, 1, 3, ('ac', 1), True, 0.05, 5) == 4
     from pyhctsa.toolboxes.Tisean_3_0_1 import tisean
     assert tisean.fnn_embedding_dimension(x, 1, int(theiler_window(x, ['ac', 1], x.size)), 0.05, 3) == 4
-    # in general the dimension is firstunder* at the threshold (including TISEAN stopping early)
+    # in general the dimension is dim* at the threshold (including TISEAN stopping early)
     for x2 in (np.random.default_rng(7).standard_normal(1000), x):
         d = nl.fnn(x2, 1, 10, ('ac', 1), False, escape_factor=5)
         m = nl.fnn(x2, 1, 10, ('ac', 1), True, 0.05, 5)
-        assert m == d['firstunder005']
+        assert m == d['dim005']
         assert nl._fnn_embedding_dim(x2, 1, 0.05) == m
 
 
@@ -198,12 +198,56 @@ def test_fnn_fraction_needs_enough_points():
     assert nl.fnn(x, 1, 10, 1, True, 0.05, 5) == r['dim'][first_low]
     assert tisean.fnn_first_under(r['dim'], r['pfnn'], 0.05) == r['dim'][-1]  # without counts
     assert tisean.fnn_embedding_dimension(x, 1, 1, 0.05) == r['dim'][first_low]
-    # firstunder* share the minimum count, so they never decrease as the threshold falls
+    # dim* share the minimum count, so they never decrease as the threshold falls
     d = nl.fnn(x, 1, 10, 1, False, escape_factor=5)
-    fu = [d[f'firstunder{k}'] for k in ('09', '08', '07', '06', '05', '04', '03', '02', '01', '005')]
+    fu = [d[f'dim{k}'] for k in ('09', '08', '07', '06', '05', '04', '03', '02', '01', '005')]
     assert np.all(np.diff(fu) >= 0) and fu[-1] == r['dim'][first_low]
     # 0.05 is the default threshold
     assert nl.fnn(x, 1, 10, 1, True, escape_factor=5) == nl.fnn(x, 1, 10, 1, True, 0.05, 5)
+
+
+def _smoothed_noise(n, seed=2):
+    z = np.convolve(np.random.default_rng(seed).standard_normal(n + 100), np.ones(20) / 20, 'same')
+    return z[50:50 + n]
+
+
+@pytest.mark.parametrize('n', [250, 1000])
+def test_fnn_embedding_dimension_limited_by_length(n):
+    # when 'fnn' chooses the dimension for another algorithm it is at most floor(2 log10 N);
+    # fnn itself is not capped
+    cap = int(np.floor(2 * np.log10(n)))
+    assert nl._max_embedding_dim(n) == cap
+    x = np.random.default_rng(1).standard_normal(n)
+    m_fnn = nl.fnn(x, 1, 10, ('ac', 1), True, 0.05, 5)
+    assert nl._embedding_params(x, 1, ['fnn', 0.05]) == (1, min(m_fnn, cap))
+    assert nl._embedding_params(x, 1, 'fnn') == nl._embedding_params(x, 1, ['fnn', 0.05])
+    # smoothed noise: the fraction never falls below 0.05 and many points stay behind it, so the
+    # FNN answer exceeds the limit and the limit binds
+    z = _smoothed_noise(n)
+    assert nl.fnn(z, 1, 10, ('ac', 1), True, 0.05, 5) > cap
+    assert nl._embedding_params(z, 1, ['fnn', 0.05]) == (1, cap)
+
+
+def test_fnn_threshold_syntax_in_operations():
+    x = np.random.default_rng(3).standard_normal(600)
+    def same(a, b):
+        return all((np.isnan(a[k]) and np.isnan(b[k])) or a[k] == b[k] for k in a)
+    assert same(nl.rqa(x, 'mi', ['fnn', 0.05]), nl.rqa(x, 'mi', 'fnn'))
+    assert same(nl.local_density(x, 5, ('ac', 1), 'ac1e', ['fnn', 0.05]),
+                nl.local_density(x, 5, ('ac', 1), 'ac1e', 'fnn'))
+    assert same(nl.nlpe(x, ['fnn', 0.05], 'mi'), nl.nlpe(x, 'fnn', 'mi'))
+    with pytest.raises(ValueError):
+        nl.nlpe(x, ['nonsense', 0.05], 'mi')
+
+
+def test_nlpe_fnn_limit_uses_cropped_length():
+    # nlpe crops to max_n samples first; the limit on an 'fnn' dimension is floor(2 log10 max_n)
+    z = z_score(_smoothed_noise(6000))
+    assert nl.fnn(z[:1000], 1, 10, ('ac', 1), True, 0.05, 5) > 6
+    a = nl.nlpe(z, ['fnn', 0.05], 1, 1000)
+    b = nl.nlpe(z, 6, 1, 1000)
+    assert all((np.isnan(a[k]) and np.isnan(b[k])) or a[k] == b[k] for k in a)
+    assert a['meanabs'] != nl.nlpe(z, 7, 1, 1000)['meanabs']
 
 
 def test_schreiber_neighbor_stats_skip_first_samples():

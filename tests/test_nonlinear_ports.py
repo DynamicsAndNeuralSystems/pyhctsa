@@ -58,7 +58,7 @@ def test_fnn():
     assert abs(d['nHood2_4'] - 0.1496798) < 1e-6 and abs(d['meannHood2'] - 0.131032955) < 1e-6
     assert abs(d['stdpfnn'] - 0.331280804587) < 1e-6 and abs(d['max1stepchange'] - 0.4061888) < 1e-6
     assert abs(d['mdrop'] + 0.108831911111) < 1e-6
-    assert (d['firstunder09'], d['firstunder05'], d['firstunder02'], d['firstunder005']) == (2, 3, 4, 5)
+    assert (d['dim09'], d['dim05'], d['dim02'], d['dim005']) == (2, 3, 4, 5)
     assert d['pdrop'] == pytest.approx(2 / 3)
     assert nl.fnn(_x(), 1, 10, ('ac', 1), True, 0.4, 5) == 3
     assert nl.fnn(_x(), 'ac', escape_factor=5, just_best=True, bestp=0.05) == 5

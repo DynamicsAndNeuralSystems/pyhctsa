@@ -307,7 +307,7 @@ def fnn_first_under(dim: ArrayLike, pfnn: ArrayLike, threshold: float,
                     count: Optional[ArrayLike] = None, min_count: Optional[int] = None) -> int:
     """
     Smallest embedding dimension not ruled out by false nearest neighbors at ``threshold``
-    (``firstunderf`` in hctsa's ``NL_FNN``).
+    (``firstunderf`` in hctsa's ``NL_FNN``, which gives its ``justBest`` and ``dim*`` outputs).
 
     A dimension is ruled out when its fraction of false nearest neighbors is at least
     ``threshold`` and rests on at least :func:`fnn_min_count` points. The result is the
@@ -343,8 +343,10 @@ def fnn_embedding_dimension(
     escape_factor: float = 5.0,
 ) -> float:
     """
-    Embedding dimension chosen by false nearest neighbors, as hctsa's
-    ``BF_Embed(y, tau, {'fnn', threshold})`` does.
+    Embedding dimension estimated by false nearest neighbors, as hctsa's
+    ``NL_FNN(y, delay, maxemb, theiler, 1, threshold, escape_factor)`` (no limit from the series
+    length: ``BF_Embed``'s ``{'fnn', threshold}``, when it chooses the dimension for another
+    algorithm, also caps it at ``floor(2 log10 N)``).
 
     This is the smallest dimension not ruled out by the test (:func:`fnn_first_under` on
     :func:`false_nearest` with the given ``theiler`` window and ``escape_factor``): the first
