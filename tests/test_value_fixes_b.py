@@ -302,23 +302,52 @@ def test_embed2_angle_tau_undefined_tau_gives_nan_for_every_statistic():
 
 
 # ------------------------------------------------------------------------------
-# tisean_d2: one NaN treatment for every Takens' statistic
+# tisean_d2: Takens' statistics over the dimensions up to the first without an estimate
 # ------------------------------------------------------------------------------
-def test_tisean_d2_takens_nan_at_one_dimension(monkeypatch):
+def test_tisean_d2_takens_over_leading_dimensions(monkeypatch):
     y = z_score(np.sin(np.arange(1500) * 0.1) + 0.1 * np.random.default_rng(9).standard_normal(1500))
     full = nl.tisean_d2(y, 1, 5, ('ac', 1))
+    takens = [k for k in full if k.startswith('takens05')]
+    assert len(takens) == 10 and all(np.isfinite(full[k]) for k in takens)
     orig = nl._sub_takens
+    vals = {}
 
-    def with_nan(dat, eup):
-        t = orig(dat, eup)
-        t[-1] = np.nan
-        return t
+    def drop(k):
+        def f(dat, eup, c2, num_pairs):
+            t, c = orig(dat, eup, c2, num_pairs)
+            vals['t'] = t.copy()
+            t[k] = np.nan
+            return t, c
+        return f
 
-    monkeypatch.setattr(nl, '_sub_takens', with_nan)
+    # an estimate missing at the last dimension: statistics over the first four
+    monkeypatch.setattr(nl, '_sub_takens', drop(4))
     out = nl.tisean_d2(y, 1, 5, ('ac', 1))
-    takens = [k for k in out if k.startswith('takens05')]
-    assert len(takens) == 10 and all(np.isnan(out[k]) for k in takens)
-    assert all(np.isfinite(full[k]) for k in takens)
+    assert np.isclose(out['takens05_max'], np.max(vals['t'][:4]))
+    assert np.isclose(out['takens05_mean'], np.mean(vals['t'][:4]))
+    # missing at the second dimension: fewer than two dimensions, so all ten are NaN
+    monkeypatch.setattr(nl, '_sub_takens', drop(1))
+    out = nl.tisean_d2(y, 1, 5, ('ac', 1))
+    assert all(np.isnan(out[k]) for k in takens)
+
+
+def test_tisean_d2_takens_needs_33_pairs():
+    # white noise, N = 1000: at m = 9, 10 the length scale 0.5 holds only a handful of pairs,
+    # whose estimate (up to 20) is not a dimension estimate; the statistics stop before
+    y = z_score(np.random.default_rng(0).standard_normal(1000))
+    out = nl.tisean_d2(y, 1, 10, ('ac', 1))
+    assert out['takens05_max'] < 8
+
+
+def test_tisean_d2_findmmin_roundoff_constant():
+    # estimates equal to within round-off are a constant curve: NaN, as for exactly equal ones,
+    # rather than a rescaling of their round-off differences
+    flat = 0.22048796773549684 + np.array([0, 1.6e-16, 0, -2.8e-16, 3.3e-16, 1.4e-16, 0, -0.6e-16, 1.9e-16, -2.8e-16])
+    for d in (flat, np.full(10, 0.2)):
+        r = nl._sub_findmmin(d)
+        assert r['ri1'] is None and np.isnan(r['goodness']) and np.isnan(r['linrmserr'])
+    r = nl._sub_findmmin(np.array([1.0, 2.0, 2.5, 2.6, 2.6, 2.6]))  # a curve that levels off
+    assert r['ri1'] is not None and np.isfinite(r['goodness'])
 
 
 # ------------------------------------------------------------------------------

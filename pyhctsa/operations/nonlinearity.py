@@ -1063,17 +1063,24 @@ def _best_flat_range(v: np.ndarray, gamma: float, stptr: np.ndarray,
     return _argmin_first_colmajor(mybad)
 
 
-def _sub_takens(dat: list, eup: float) -> np.ndarray:
-    # Takens' estimator at the cutoff length scale eup, one value per embedding
-    # dimension (NaN where the scan never reached eup).
+def _sub_takens(dat: list, eup: float, c2: list, num_pairs: int) -> tuple:
+    # Takens' estimator at the first length scale above eup, one value per embedding
+    # dimension (NaN where the scan never reached eup), and the number of pairs of delay
+    # vectors within that length scale (the correlation sum there times the number of pairs)
     out = np.full(len(dat), np.nan)
+    count = np.zeros(len(dat))
     for i, d in enumerate(dat):
         if d.size == 0:
             continue
         idx = np.flatnonzero(d[:, 0] > eup)
         if idx.size > 0:
             out[i] = d[idx[0], 1]
-    return out
+            r = d[idx[0], 0]
+            ci = c2[i]
+            if ci.size:
+                j = int(np.argmin(np.abs(np.log(ci[:, 0]) - np.log(r))))
+                count[i] = ci[j, 1] * num_pairs
+    return out, count
 
 
 def _sub_findmmin(ds: ArrayLike) -> dict:
@@ -1084,8 +1091,14 @@ def _sub_findmmin(ds: ArrayLike) -> dict:
     gamma = 0.1  # regularizer, chosen ad hoc; rewards a longer constant region
     dsraw = ds
     dsmin = np.min(ds)
-    with np.errstate(invalid='ignore', divide='ignore'):
-        dsn = (ds - dsmin) / (np.max(ds) - dsmin)  # rescale to [0,1] so weights are consistent
+    if np.max(ds) - dsmin <= 1e-12 * np.max(np.abs(ds)):
+        # values equal to within round-off are a constant curve, which cannot be rescaled to
+        # [0,1] (rescaling the round-off differences would give arbitrary values): NaN, as
+        # for exactly equal values
+        dsn = np.full_like(ds, np.nan)
+    else:
+        with np.errstate(invalid='ignore', divide='ignore'):
+            dsn = (ds - dsmin) / (np.max(ds) - dsmin)  # rescale to [0,1] so weights are consistent
 
     out = {'ri1': None, 'goodness': np.nan, 'stabled': np.nan, 'linrmserr': np.nan}
     if l < 2:
@@ -1354,12 +1367,24 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     dict or float
         Statistics summarising Takens' estimator, the local slopes of the
         correlation sum (raw and Gaussian-kernel smoothed), and the correlation
-        entropy. All ten ``takens05`` outputs are NaN if Takens' estimate is undefined
-        at any embedding dimension (the correlation sum has no length scale above 0.5
-        there). Returns NaN, as hctsa does, if the time series is too short, the time
-        delay cannot be determined, or the TISEAN output is unusable for this series
-        (no valid output for a long delay, no correlation-dimension data, or no scaling
-        range).
+        entropy. The ten ``takens05`` outputs summarise Takens' estimator at the first length
+        scale above 0.5 over the embedding dimensions ``m = 1, ..., m_v`` at which it rests on
+        at least 33 pairs of delay vectors within that scale (the number of pairs falls with
+        ``m``; ``m_v`` is the last such dimension, and stops before any estimate above
+        ``2m``). With fewer pairs the estimate is set by a handful of pairs in the few
+        occupied radii of the correlation sum and is not a dimension estimate (33 is the
+        smallest number of pairs for which the 95% sampling interval of Takens' estimator,
+        for independent pairs, spans less than a factor of two). An estimate above ``2m`` is
+        not a dimension estimate either: a set with a scaling region below the length scale
+        has a dimension of at most ``m``, and larger values arise when the correlation sum
+        rises much faster than ``r^m``, as in nonstationary series. All ten are NaN if fewer
+        than two dimensions qualify. The ``*mmin_*`` outputs (the smallest embedding
+        dimension from which a quantity is roughly constant, and its goodness, stable value
+        and linear-fit error) are NaN when the quantity is the same at every dimension, to
+        within round-off, since it cannot then be rescaled. Returns NaN, as hctsa does, if
+        the time series is too short, the time delay cannot be determined, or the TISEAN
+        output is unusable for this series (no valid output for a long delay, no
+        correlation-dimension data, or no scaling range).
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size  # data length (number of samples)
@@ -1408,13 +1433,24 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
     # --------------------------------------------------------------------------
     # Correlation dimension at an upper length scale of 0.5 (standard deviations of the
     # z-scored series), a fixed scale that is the same for every embedding dimension.
-    takens05 = _sub_takens(c2tdat, 0.5)
+    # Only embedding dimensions whose estimate rests on at least 33 pairs of delay vectors
+    # within that length scale enter the statistics (with fewer, the estimate is dominated by
+    # a handful of pairs in the few occupied radii, and is not a dimension estimate): the
+    # dimensions m = 1, ..., m_v up to the first one without an estimate on 33 pairs (the
+    # count falls with m) or with an estimate above 2m (see the docstring)
+    n_emb = y.size - (maxm - 1) * tau
+    num_pairs = max(0, (n_emb - theiler_win - 1) * (n_emb - theiler_win) // 2)
+    takens05_all, takens05_count = _sub_takens(c2tdat, 0.5, tables['c2'], num_pairs)
+    with np.errstate(invalid='ignore'):
+        ok = (np.isfinite(takens05_all) & (takens05_count >= 33)
+              & (takens05_all <= 2 * np.arange(1, takens05_all.size + 1)))
+    m_v = ok.size if ok.all() else int(np.argmin(ok))
+    takens05 = takens05_all[:m_v]
     takens_keys = ['takens05_mean', 'takens05_median', 'takens05_max', 'takens05_min',
                    'takens05_std', 'takens05_iqr', 'takens05mmin_ri', 'takens05mmin_goodness',
                    'takens05mmin_stabled', 'takens05mmin_linrmserr']
-    if np.any(np.isnan(takens05)):
-        # The estimate is undefined at some embedding dimension (no length scale above 0.5),
-        # so statistics across dimensions are undefined (not computed over a subset)
+    if m_v < 2:
+        # Fewer than two embedding dimensions with an estimate: no statistics across them
         for key in takens_keys:
             out[key] = np.nan
     else:
