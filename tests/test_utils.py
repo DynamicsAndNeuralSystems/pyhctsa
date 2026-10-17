@@ -183,6 +183,12 @@ class TestPeripheryFuncs:
         assert int(np.sum(res_iqr)) == 5000
         with pytest.raises(ValueError):
             pyhctsa.utils.binarize(d, binarize_how='test')
+    def test_binarize_iqr_ties(self):
+        # quantized series: the 75th percentile is a repeated value, and points equal to it
+        # are inside the interquartile range (above the 25th percentile, up to the 75th)
+        y = np.repeat([0.0, 1.0, 2.0], [30, 40, 30])
+        res_iqr = pyhctsa.utils.binarize(np.roll(y, 17), binarize_how='iqr')
+        assert int(np.sum(res_iqr)) == 70
     def test_xcorr(self):
         d1, d2 = load_e1000_subset()[0], load_e1000_subset()[1]
         # basic test, 5 lags

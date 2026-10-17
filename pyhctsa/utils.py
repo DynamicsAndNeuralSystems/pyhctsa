@@ -1182,9 +1182,10 @@ def binarize(y: ArrayLike, binarize_how: str = 'diff') -> ArrayLike:
         y_bin = _step_binary(y - np.median(y))
     
     elif binarize_how == 'iqr':
-        # Binary signal: 1 if inside interquartile range, 0 otherwise
+        # Binary signal: 1 if inside the interquartile range (above the 25th percentile
+        # and up to the 75th), 0 otherwise
         iqr = np.quantile(y,[.25,.75], method='hazen')
-        iniqr = np.logical_and(y > iqr[0], y<iqr[1])
+        iniqr = np.logical_and(y > iqr[0], y <= iqr[1])
         y_bin = np.zeros(len(y))
         y_bin[iniqr] = 1
     else:
