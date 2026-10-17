@@ -1664,6 +1664,40 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
 
 
 
+from numba import njit as _njit  # noqa: E402 (used by the Takens' estimator kernel below)
+
+
+@_njit(cache=True)
+def _takens_pairs_below(emb, i_refs, past, tol, r_max, out):
+    """Max-norm distances below ``r_max`` between the delay vectors ``i`` in ``i_refs`` and
+    ``j > i + past``: those above ``tol`` are written to ``out`` (as far as it reaches); returns
+    their number and the number of pairs within ``tol`` (repeated points)."""
+    n_emb, m = emb.shape
+    cap = out.shape[0]
+    cnt = 0
+    rep = 0
+    for i in i_refs:
+        for j in range(i + past + 1, n_emb):
+            d = 0.0
+            far = False
+            for k in range(m):
+                v = abs(emb[i, k] - emb[j, k])
+                if v > d:
+                    d = v
+                    if d >= r_max:
+                        far = True
+                        break
+            if far:
+                continue
+            if d <= tol:
+                rep += 1
+            else:
+                if cnt < cap:
+                    out[cnt] = d
+                cnt += 1
+    return cnt, rep
+
+
 def takens_estimator(y: ArrayLike, nref: int = -1, c0: float = 0.01,
                      past: Union[int, float, list, tuple] = ('ac', 1),
                      embed_params: Union[list, tuple] = ('ac', 'fnn')) -> float:
@@ -1697,22 +1731,30 @@ def takens_estimator(y: ArrayLike, nref: int = -1, c0: float = 0.01,
 
     Details:
 
-    - Distances that differ by at most ``tol = 1e-12 * (max(y) - min(y))`` are equal (they are
-      merged into one level after sorting, not snapped to a grid), and pairs of delay vectors
-      closer than ``tol`` are repeated points: they carry no length-scale information, and a
-      positive fraction of them makes the estimator inconsistent [3]_, so they are left out.
-      Pairs within ``tol`` of :math:`\\epsilon_{up}` lie at it and are not among the pairs below
-      it. The tolerance is relative to the range, so shifting, rescaling or reflecting ``y``
-      leaves the output unchanged, apart from distances within round-off of ``tol``.
-    - Quantized values: if all differences between distinct values of ``y`` are within 1% of
-      integer multiples of a common step :math:`q` (the smallest difference divided by the
-      smallest :math:`k = 1, ..., 100` that fits, well above ``tol``; :math:`q` is then fitted to
-      the differences by least squares), distances are rounded to multiples of :math:`q`, since
-      finer differences are not resolved by the data. This also covers quantized data stored
-      with rounding, whose distances would otherwise form near-equal clusters.
-    - If fewer than two distinct distances lie below :math:`\\epsilon_{up}` (values on a lattice
-      coarser than the ``c0`` quantile), :math:`\\epsilon_{up}` is raised to the next distance
-      present until two do: a scaling exponent needs at least two resolved length scales.
+    - Pairs of delay vectors closer than ``tol = 1e-12 * (max(y) - min(y))`` are repeated
+      points: they carry no length-scale information, and a positive fraction of them makes the
+      estimator inconsistent [3]_, so they are left out.
+    - Distances closer than ``tol`` are equal. If the values of ``y`` lie on a lattice, i.e., all
+      differences between distinct values are within 1% of integer multiples of a common step
+      :math:`q` (the smallest difference divided by the smallest :math:`k = 1, ..., 100` that
+      fits, well above ``tol``, with :math:`q` fitted to the differences by least squares;
+      quantized data, also when stored with rounding), distances closer than :math:`q/2` are
+      equal, since finer differences are not resolved by the data. Equal distances are merged
+      into levels after sorting (not snapped to a grid), each level taking its smallest value;
+      pairs at the level of :math:`\\epsilon_{up}` lie at :math:`\\epsilon_{up}`. The
+      tolerances are relative to the data, so shifting, rescaling or reflecting ``y`` leaves the
+      output unchanged, apart from distances within round-off of ``tol``.
+    - The output is NaN if fewer than 3 distinct distances lie below :math:`\\epsilon_{up}`:
+      the data then do not resolve the length scale (:math:`\\epsilon_{up}` lies within two
+      resolution steps of the smallest distance), and the estimate is set by the lattice of
+      the values rather than by the dynamics.
+    - The output is NaN if the estimate exceeds :math:`2m` for an :math:`m`-dimensional
+      embedding: a set with a scaling region below :math:`\\epsilon_{up}` has a dimension of
+      at most :math:`m`, and finite-sample and finite-scale effects keep estimates for sets
+      with a scaling region well below :math:`2m`. Larger values arise when the correlation
+      sum rises much faster than :math:`r^m` below :math:`\\epsilon_{up}`, as when the pairs
+      outside the Theiler window are all far apart (a Theiler window that is a large fraction
+      of a nonstationary series), so there is no scaling region at that scale.
     - The output is NaN if ``c0`` times the number of pairs that are not repeated points is
       below 33, the smallest number of pairs for which the 95% sampling interval of the
       estimate (for independent pairs) spans less than a factor of two.
@@ -1759,8 +1801,9 @@ def takens_estimator(y: ArrayLike, nref: int = -1, c0: float = 0.01,
     float
         The estimate of the correlation dimension. NaN if the delay or Theiler window cannot
         be set, the series cannot be embedded or is constant, ``c0`` times the number of pairs
-        that are not repeated points is below 33, or fewer than three distinct pair distances
-        exist.
+        that are not repeated points is below 33, fewer than 3 distinct distances lie below
+        the upper length scale, or the estimate exceeds twice the embedding dimension (see
+        Details).
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size
@@ -1786,15 +1829,14 @@ def takens_estimator(y: ArrayLike, nref: int = -1, c0: float = 0.01,
     n_emb = emb.shape[0]
     n_ref = n_emb if (nref == -1 or nref >= n_emb) else int(nref)
 
-    # Distances within tol = 1e-12 of the range of y are equal (merged after sorting, not snapped
-    # to a grid), and pairs closer than tol are repeated points, left out
+    # Pairs closer than tol = 1e-12 of the range of y are repeated points, left out
     span = np.max(y) - np.min(y)  # no max-norm distance exceeds the range of y
     if not span > 0:
         return np.nan  # constant series
     tol = 1e-12 * span
     # Quantized values: if the differences between distinct values are all within 1% of integer
     # multiples of a common step q (the smallest difference divided by the smallest k = 1, ...,
-    # 100 that fits, well above tol), distances are rounded to multiples of the least-squares q
+    # 100 that fits, well above tol), distances closer than q/2 are not resolved by the data
     gaps = np.diff(np.unique(y))
     gaps = gaps[gaps > tol]
     if gaps.size == 0:
@@ -1808,60 +1850,50 @@ def takens_estimator(y: ArrayLike, nref: int = -1, c0: float = 0.01,
         if np.all(np.abs(gaps - step * mult) <= 0.01 * step):
             q = np.sum(gaps * mult) / np.sum(mult ** 2)
             break
-    chunk = max(1, int(2.5e6 // n_emb))  # reference points per block
+    merge = max(tol, q / 2)  # distances closer than this are equal
 
-    def distances(i1, i2, r_max):
-        # Max-norm distances (rounded to multiples of q for quantized values) above tol and below
-        # r_max between reference points i1..i2-1 and the delay vectors j > i + past
-        j1 = i1 + past + 1
-        if j1 >= n_emb:
-            return np.zeros(0)
-        ii = np.arange(i1, i2)[:, None]
-        jj = np.arange(j1, n_emb)[None, :]
-        d = np.abs(emb[i1:i2, 0][:, None] - emb[j1:, 0][None, :])
-        for k in range(1, emb.shape[1]):
-            d = np.maximum(d, np.abs(emb[i1:i2, k][:, None] - emb[j1:, k][None, :]))
-        if q > 0:
-            d = q * np.floor(d / q + 0.5)
-        return d[(jj > ii + past) & (d > tol) & (d < r_max)]
+    # The pairs: i among the first n_ref delay vectors, j > i + past
+    emb = np.ascontiguousarray(emb, dtype=float)
+    first_j = np.arange(n_ref) + past + 1
+    num_pairs = int(np.sum(np.maximum(0, n_emb - first_j)))
+    refs = np.arange(n_ref, dtype=np.int64)
 
-    # Pass 1: histogram of the distances, to locate the c0 quantile
-    num_bins = 200
-    edges = tol * np.logspace(0, np.log10(2 * span / tol + 1), num_bins + 1)
-    counts = np.zeros(num_bins)
-    for c in range(0, n_ref, chunk):
-        counts += np.histogram(distances(c, min(c + chunk, n_ref), np.inf), bins=edges)[0]
-    num_pos = counts.sum()  # pairs that are not repeated points
-    K = int(np.ceil(c0 * num_pos))  # the c0 quantile is the K-th smallest distance
-    if K < min_pairs:
-        logger.warning(f'Too few pairs ({K} below the {c0:g} quantile) to estimate a dimension')
-        return np.nan
-
-    # Pass 2: collect the distances below a bin edge beyond the quantile (further if needed)
-    b = int(np.flatnonzero(np.cumsum(counts) >= K)[0])
+    # A first guess at the radius holding the c0 quantile, from the pairs of a subset of reference
+    # points; the count below is exact whatever the guess (it is enlarged until it suffices)
+    sub = refs[np.unique(np.linspace(0, n_ref - 1, min(n_ref, 200)).astype(np.int64))]
+    buf = np.empty(int(np.sum(np.maximum(0, n_emb - sub - past - 1))) + 1)
+    c, _ = _takens_pairs_below(emb, sub, past, tol, np.inf, buf)
+    r_max = np.quantile(buf[:c], min(1.0, 3 * c0)) * (1 + 1e-9) if c > 0 else span
     while True:
-        r_max = edges[b + 1]
-        p = np.sort(np.concatenate([np.zeros(0)] + [distances(c, min(c + chunk, n_ref), r_max)
-                                                     for c in range(0, n_ref, chunk)]))
-        if p.size >= K:
-            # merge distances within tol into levels (each takes its smallest value)
-            level = np.concatenate([[0], np.cumsum(np.diff(p) > tol)])
-            first = np.flatnonzero(np.concatenate([[True], np.diff(level) > 0]))
-            value = p[first]
-            # eup is the level of the K-th distance, raised to a later level until at least two
-            # levels lie below it (every distance below that level has been collected)
-            k = max(int(level[K - 1]), 2)
-            if k < value.size:
-                break
-        later = np.flatnonzero(counts[b + 1:] > 0)  # the next bin holding any distances
-        if later.size == 0:
-            logger.warning('Fewer than three distinct pair distances')
+        buf = np.empty(max(1, int(4 * c0 * num_pairs)))
+        cnt, rep = _takens_pairs_below(emb, refs, past, tol, r_max, buf)
+        if cnt > buf.size:  # the guess at the count was short: collect again with room for all
+            buf = np.empty(cnt)
+            cnt, rep = _takens_pairs_below(emb, refs, past, tol, r_max, buf)
+        K = int(np.ceil(c0 * (num_pairs - rep)))  # the c0 quantile is the K-th smallest distance
+        if K < min_pairs:
+            logger.warning(f'Too few pairs ({K} below the {c0:g} quantile) to estimate a dimension')
             return np.nan
-        b += 1 + int(later[0])
+        if cnt >= K or r_max > 2 * span:
+            break
+        r_max *= 2
+    p = np.sort(buf[:cnt])
 
+    # Merge distances closer than `merge` into levels (each takes its smallest value); eup is the
+    # level of the K-th distance
+    level = np.concatenate([[0], np.cumsum(np.diff(p) > merge)])
+    value = p[np.flatnonzero(np.concatenate([[True], np.diff(level) > 0]))]
+    k = int(level[K - 1])
+    if k < 3:  # too few distinct distances below eup: the data do not resolve this scale
+        logger.warning('Fewer than 3 distinct pair distances below the upper length scale')
+        return np.nan
     eup = value[k]
     r = value[level[level < k]]  # the pairs below eup, at the values of their levels
-    return (r.size - 1) / np.sum(np.log(eup / r))
+    D = (r.size - 1) / np.sum(np.log(eup / r))
+    if D > 2 * m:  # far above m: no scaling region at this scale
+        logger.warning(f'Dimension estimate {D:.3g} exceeds twice the embedding dimension {m}')
+        return np.nan
+    return D
 
 
 

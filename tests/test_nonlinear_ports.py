@@ -230,10 +230,11 @@ def test_takens_estimator_fraction_of_pairs():
     x = _x()
     assert abs(nl.takens_estimator(x, 200, 0.01, ('ac', 1), (3, 3)) - 2.90343923633) < 1e-9
     assert abs(nl.takens_estimator(x, -1, 0.05, ('ac', 1), (3, 3)) - 2.71397436245) < 1e-9
-    # quantized values: distances on a lattice of step 0.25 (before z-scoring)
+    # quantized values on a lattice of step 0.25 (before z-scoring): fewer than 3 distinct
+    # distances below the length scale, too discrete for an estimate
     q = np.round(x / 0.25) * 0.25
     q = (q - q.mean()) / q.std(ddof=1)
-    assert abs(nl.takens_estimator(q, -1, 0.01, ('ac', 1), (3, 3)) - 1.70646837008) < 1e-9
+    assert np.isnan(nl.takens_estimator(q, -1, 0.01, ('ac', 1), (3, 3)))
     # many coinciding delay vectors (a zero-inflated series): coinciding pairs are left out
     z = np.maximum(x - 0.5, 0)
     z = (z - z.mean()) / z.std(ddof=1)
@@ -255,27 +256,41 @@ def test_takens_estimator_fraction_of_pairs():
     assert abs(nl.takens_estimator(lg, -1, 0.01, 0, (1, 3)) - 1) < 0.2
 
 
-def _ints_and_orbit(n=1500):
-    t = np.arange(1, n + 1)
-    ints = np.floor(6 * np.mod(t * 0.6180339887498949, 1.0)) + np.floor(3 * np.mod(t * 0.41421356, 1.0))
-    lg = np.empty(n)
+def _maps():
+    lg = np.empty(1500)
     lg[0] = 0.3
-    for k in range(1, n):
+    for k in range(1, 1500):
         lg[k] = 3.84 * lg[k - 1] * (1 - lg[k - 1])  # a transient converging to a period-3 orbit
-    return ints, lg
+    ch = np.empty(1500)
+    ch[0] = 0.3141
+    for k in range(1, 1500):
+        ch[k] = 3.9 * ch[k - 1] * (1 - ch[k - 1])
+    return lg, np.round(4095 * ch)  # the orbit, and a chaotic series quantized to 12 bits
 
 
 def test_takens_estimator_shift_scale_reflection():
-    # the tolerance is relative to the range: y, 3.7*y - 12 and -y give the same estimate
+    # the tolerances are relative to the data: y, 3.7*y - 12 and -y give the same output
     # (MATLAB values from NL_TakensEstimator)
     from pyhctsa.utils import z_score
-    ints, lg = _ints_and_orbit()
+    lg, int12 = _maps()
     for f in (lambda v: v, lambda v: 3.7 * v - 12, lambda v: -v):
-        assert abs(nl.takens_estimator(z_score(f(ints)), -1, 0.01, ('ac', 1), (1, 3)) - 1.552890298234) < 1e-9
-        # a converging transient has distances near 1e-12 of the range, whose relative round-off
-        # (about 1e-4) leaves a difference of order 1e-5 under the affine map
-        assert abs(nl.takens_estimator(z_score(f(lg)), -1, 0.01, ('ac', 1), (1, 3)) - 0.225759457779) < 5e-5
-    assert abs(nl.takens_estimator(z_score(-lg), -1, 0.01, ('ac', 1), (1, 3)) - 0.225759457779) < 1e-9
+        assert abs(nl.takens_estimator(z_score(f(int12)), -1, 0.01, ('ac', 1), (1, 3)) - 1.002896002752) < 1e-9
+        assert abs(nl.takens_estimator(z_score(f(int12)), -1, 0.01, ('ac', 1), (1, 2)) - 1.019092095706) < 1e-9
+        # a period-3 orbit: too few distinct distances below the length scale
+        assert np.isnan(nl.takens_estimator(z_score(f(lg)), -1, 0.01, ('ac', 1), (1, 3)))
+
+
+def test_takens_estimator_above_m():
+    # a random walk (with chaotic increments) whose 'ac' delay and Theiler window are about a third
+    # of the series: the estimate at m = 3 would be 9.4, so NaN; tau = 1 gives an estimate
+    from pyhctsa.utils import z_score
+    x = np.empty(2000)
+    x[0] = 0.3141
+    for k in range(1, 2000):
+        x[k] = 4 * x[k - 1] * (1 - x[k - 1])
+    y = z_score(np.cumsum(x - 0.5))
+    assert np.isnan(nl.takens_estimator(y, -1, 0.01, ('ac', 1), ('ac', 3)))
+    assert abs(nl.takens_estimator(y, -1, 0.01, ('ac', 1), (1, 3)) - 1.93575005343) < 1e-9
 
 
 def test_gp_corr_sum_roundoff_ratios():
