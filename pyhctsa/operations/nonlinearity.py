@@ -1980,6 +1980,13 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     The outputs summarize :math:`D` and :math:`q` across the moments, and a straight-line
     fit of :math:`D` against :math:`q`.
 
+    :math:`D(\\gamma)` is identified only where the error has a minimum inside the search
+    interval for :math:`D`, and the moments are not zero: a minimum at either end of the interval
+    (for instance at the upper end when the moments do not grow with k, as on a periodic orbit) is
+    no estimate, nor is a fit to moments that are zero (to within 1e-12 of the range of ``y``;
+    every kth neighbor coincides with its reference point, so the error is flat in :math:`D`),
+    and the outputs are then NaN.
+
     Method as implemented in the TSTOOL package for nonlinear time-series analysis (C.
     Merkwirth, U. Parlitz, I. Wedekind, D. Engster and W. Lauterborn; GNU GPL), here
     re-implemented through hctsa's ``NL_FractalDimensions``.
@@ -2027,8 +2034,8 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
         ``linfit_a``, ``linfit_b``: slope and intercept of a linear fit of :math:`D` against
         :math:`q`; ``linfit_rmsqres``: root-mean-square residual of that fit. Returns NaN
         if the Theiler window or delay cannot be set, the embedding fails, ``kmax`` is not
-        smaller than the number of embedded points, or too few neighbors lie outside the
-        Theiler window.
+        smaller than the number of embedded points, too few neighbors lie outside the Theiler
+        window, or :math:`D` is not identified at every moment order.
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size
@@ -2069,6 +2076,7 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     k_fetch = min(n_emb - 1, kmax + 2 * past + 5)
     dist, idx = cKDTree(emb).query(emb[ref_idx], k=k_fetch + 1)
     valid = np.abs(idx - ref_idx[:, None]) > past
+    tol = 1e-12 * np.ptp(y)  # distances below this are zero up to rounding
     dist = np.sort(np.where(valid, dist, np.inf), axis=1)[:, :kmax]
     for ii in np.flatnonzero(valid.sum(axis=1) < kmax):  # fall back to a full search
         all_dists = np.linalg.norm(emb - emb[ref_idx[ii]], axis=1)
@@ -2091,10 +2099,15 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
                 mom = np.exp(np.mean(np.log(dist), axis=0))
             else:
                 mom = np.mean(dist ** g, axis=0) ** (1 / g)
+            if np.any(mom[kmin - 1:kmax] <= tol):
+                return np.nan  # zero moments: the error is flat in D
+            d_min, d_max = max(0.05, -g / kmin), 128
             dq[gi] = minimize_scalar(
                 lambda d: _fractal_dim_error(d, g, kmin, kmax, mom),
-                bounds=(max(0.05, -g / kmin), 128), method='bounded',
+                bounds=(d_min, d_max), method='bounded',
                 options={'xatol': 1e-4}).x
+            if min(dq[gi] - d_min, d_max - dq[gi]) <= 10 * 1e-4:
+                return np.nan  # the minimum lies at an end of the search interval: D is not identified
             q[gi] = 1 - g / dq[gi]
 
     out = {}
@@ -2296,11 +2309,21 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
     Unlike hctsa, which shells out to installed TISEAN binaries, this runs an in-process port
     of ``lyap_r``.
 
+    Distances are compared with a tolerance of 1e-12 (of the range of the data), so that the
+    result depends neither on rounding nor on the order in which neighbors are searched: a point
+    closer than that to the reference point is the same state visited again, not a neighbor;
+    when several points are equally near (within the tolerance), each contributes its
+    log-distance curve with weight one over their number (the expected curve for a random choice
+    among them); and a pair that merges (comes within the tolerance) within the ``maxtstep``
+    steps is left out at every step, so that every step averages over the same pairs. With a
+    unique nearest neighbor and no merging, as for continuously distributed data, this is the
+    published method.
+
     References
     ----------
     .. [1] M. T. Rosenstein, J. J. Collins, and C. J. De Luca, "A practical method for
         calculating largest Lyapunov exponents from small data sets", Physica D 65(1-2),
-        117-134 (1993).
+        117-134 (1993). DOI: 10.1016/0167-2789(93)90009-P
 
     Parameters
     ----------
@@ -2336,7 +2359,7 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
         of the maximum; ``vse_*`` and ``ve_*`` (``meanabsres``, ``rmsres``, ``gradient``,
         ``intercept``, ``minbad``, and ``gradient_pertau``, the gradient per autocorrelation
         time): the straight-line fits (NaN if the rise to 95% of the maximum takes at most three
-        steps); ``expfit_a``, ``expfit_b``, ``expfit_r2``, ``expfit_adjr2``, ``expfit_rmse``: the
+        steps, or :math:`p` never rises above its value at :math:`t = 0`); ``expfit_a``, ``expfit_b``, ``expfit_r2``, ``expfit_adjr2``, ``expfit_rmse``: the
         least-squares fit of a saturating exponential, ``a*(1 - exp(b*t))`` (the global optimum
         over rates 1e-5 <= ``|b|`` <= 5 per time step; see ``_saturating_exp_fit``). Returns NaN
         if the delay, horizon, or Theiler window cannot be set, the series is too short for the
@@ -2422,10 +2445,9 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
         out[f'to{lab}max'] = np.nan if i is None else i - 1
 
     imax = time_to(0.95)
-    if imax is None:
-        return np.nan  # cannot be (a flat curve at its maximum of zero)
-    if imax <= 3:
-        # not a suitable range for finding scaling
+    if imax is None or imax <= 3:
+        # not a suitable range for finding scaling (or, if p never rises above its value at
+        # t = 0, as for neighbors that converge, no rise to fit)
         for pre in ('vse', 've'):
             for lab in ('meanabsres', 'rmsres', 'gradient', 'intercept', 'minbad'):
                 out[f'{pre}_{lab}'] = np.nan
@@ -2569,6 +2591,9 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
     .. [1] T. Gautama, D.P. Mandic and M.M. Van Hulle, "The delay vector variance method for
         detecting determinism and nonlinearity in time series", Physica D 190(3-4), 167-176
         (2004). DOI: 10.1016/j.physd.2003.11.001
+    .. [2] T.F. Chan, G.H. Golub and R.J. LeVeque, "Algorithms for computing the sample
+        variance: analysis and recommendations", Am. Stat. 37(3), 242-247 (1983) (the two-pass
+        variance). DOI: 10.1080/00031305.1983.10483115
 
     Notes
     -----
@@ -2619,9 +2644,14 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
         ``numZeroCrossings`` (sign changes of the difference), ``trendSurr``,
         ``meanDiffTrendSurr`` (``trendSurr`` minus ``trend``) and ``meanNormCDF`` (the mean over
         distances of the Gaussian cumulative probability of the data value given the mean and
-        standard deviation across surrogates). Returns NaN if no delay can be set, the series is
-        too short to draw ``num_dvs`` reference vectors, or the data curve is defined at fewer
-        than two distances.
+        standard deviation across surrogates, over the distances at which the surrogate values
+        differ; NaN if they never do). ``dataSurrCorr`` and ``trendDataSurr`` are NaN if the data
+        curve is constant. Returns NaN if no delay can be set, the series is too short to draw
+        ``num_dvs`` reference vectors, or the data curve is defined at fewer than two distances.
+
+        The target variance of a set is computed in two passes (mean, then mean squared
+        deviation) [2]_, so it is never negative; a variance below the square of 1e-12 of the range of
+        the series comes from targets that are equal up to rounding, and is 0.
     """
     x = np.asarray(y, dtype=float).ravel()
     n = x.size
@@ -2671,15 +2701,21 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
     t_b, v_b, s_b = dvv_data[both, 0], dvv_data[both, 1], mean_surr[both]
     out['rmsDiffSurr'] = np.sqrt(np.mean((v_b - s_b) ** 2))
     out['meanDiffSurr'] = np.mean(v_b - s_b)
-    out['dataSurrCorr'] = np.corrcoef(v_b, s_b)[0, 1]
-    out['trendDataSurr'] = np.polyfit(v_b, s_b, 1)[0]
+    # target variances are 0 below the square of 1e-12 of the range of x (see _dvv_curve), which
+    # on the normalized scale of the curves is tol_v; with no spread in a regressor or across the
+    # surrogates, a slope or a Gaussian probability is undefined
+    tol_v = (1e-12 * np.ptp(x)) ** 2 / np.var(x, ddof=1)
+    flat = np.ptp(v_b) <= tol_v
+    with np.errstate(invalid='ignore', divide='ignore'):
+        out['dataSurrCorr'] = np.nan if flat else np.corrcoef(v_b, s_b)[0, 1]
+    out['trendDataSurr'] = np.nan if flat else np.polyfit(v_b, s_b, 1)[0]
     out['numZeroCrossings'] = np.sum((v_b - s_b)[1:] * (v_b - s_b)[:-1] < 0)
     out['trendSurr'] = np.polyfit(t_b, s_b, 1)[0]
     out['meanDiffTrendSurr'] = out['trendSurr'] - out['trend']
-    with np.errstate(invalid='ignore', divide='ignore'):
-        probs = _norm.cdf(v_b, loc=np.mean(dvv_surr[both], axis=1),
-                          scale=np.std(dvv_surr[both], axis=1, ddof=1))
-    out['meanNormCDF'] = np.mean(probs)
+    sd_surr = np.std(dvv_surr[both], axis=1, ddof=1)
+    spread = sd_surr > tol_v
+    probs = _norm.cdf(v_b[spread], loc=np.mean(dvv_surr[both][spread], axis=1), scale=sd_surr[spread])
+    out['meanNormCDF'] = np.mean(probs) if probs.size else np.nan  # (NaN if the surrogates never spread)
     return out
 
 
@@ -3523,6 +3559,13 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     points rather than having a fixed radius. (For the distribution of *first* return times to
     a neighborhood, see :func:`recurrence_times`.)
 
+    The neighborhood of a reference point is the ball out to its ``nnr``-th nearest neighbor,
+    boundary included, with distances that differ by at most 1e-12 of the range of ``y`` treated
+    as equal: so the neighborhood, and the profile, do not depend on rounding or on the order in
+    which neighbors are found. With exactly repeated delay vectors (quantized data, periodic
+    orbits) a neighborhood can hold more than ``nnr`` points, and the expected count uses the
+    number it holds.
+
     Method as implemented in the TSTOOL package for nonlinear time-series analysis (C.
     Merkwirth, U. Parlitz, I. Wedekind, D. Engster and W. Lauterborn; GNU GPL), here
     re-implemented through hctsa's ``NL_ReturnTime``.
@@ -3576,8 +3619,11 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
           0.4 of the longest interval being dropped), as a proportion of the number of lags
           (``stdpeaksep`` is divided by the square root of the number of lags instead); all
           are NaN with fewer than 3 crossings
-        - ``statrtys``, ``statrtym``: the ratio of the standard deviation (``statrtys``) or mean
-          (``statrtym``) of the profile over the first half of the lags to that over the second
+        - ``fracsdrt``, ``fracmeanrt``: the share of the first half of the lags in the standard
+          deviation (``fracsdrt``) or mean (``fracmeanrt``) of the profile, ``a / (a + b)`` with
+          ``a`` and ``b`` the statistic over the first and second halves. This lies in [0, 1]:
+          0.5 when the halves match and 1 when all the variation (or mass) is at short lags;
+          NaN if both halves are constant (or empty)
         - ``hhist``: the entropy of the profile as a distribution over lags
         - ``hcgdist``, ``rangecgdist``, ``pzeroscgdist``: the entropy, range and proportion of
           zeros of the profile after summing it into 20 equal bins of lags (as a distribution
@@ -3618,6 +3664,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     # at most 2*past + 1 points (the reference point itself included) fall within the Theiler
     # window, so nnr + 2*past + 1 neighbors always hold nnr valid ones
     k = min(n_emb, nnr + 2 * past + 1)
+    tol = 1e-12 * np.ptp(y)  # distances closer than this are equal
     tree = KDTree(Y)
     r2 = np.full(n_emb, np.nan)
     chunk = max(1, int(2e6 // k))
@@ -3626,7 +3673,22 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
         dist, idx = tree.query(Y[the_refs], k=k)
         is_valid = np.abs(idx - the_refs[:, None]) > past
         which_col = np.argmax(np.cumsum(is_valid, axis=1) >= nnr, axis=1)
-        r2[the_refs] = dist[np.arange(the_refs.size), which_col] ** 2 * (1 + 1e-9)
+        # (the boundary is included, with the tolerance, so that every point at the nnr-th
+        # neighbor's distance is in, whatever the arithmetic path to it)
+        r2[the_refs] = (dist[np.arange(the_refs.size), which_col] + tol) ** 2
+
+    # The number of valid (Theiler-excluded) points in each neighborhood: nnr, or more where
+    # points tie with the nnr-th neighbor
+    n_near = np.zeros(n_emb)
+    chunk = max(1, int(2e6 // n_emb))
+    pos = np.arange(n_emb)
+    for c in range(0, refs.size, chunk):
+        the_refs = refs[c:c + chunk]
+        d2 = np.zeros((n_emb, the_refs.size))
+        for j in range(Y.shape[1]):
+            d2 += (Y[:, j][:, None] - Y[the_refs, j][None, :]) ** 2
+        in_ball = (d2 <= r2[the_refs][None, :]) & (np.abs(pos[:, None] - the_refs[None, :]) > past)
+        n_near[the_refs] = in_ball.sum(axis=0)
 
     # Count the neighbors at each lag, relative to the count expected by chance
     lags = np.arange(past + 1, max_t + 1)
@@ -3636,12 +3698,12 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
         bwd = refs[refs - lag >= 0]  # references with a partner `lag` behind
         counts[i] = (np.sum(np.sum((Y[fwd + lag] - Y[fwd]) ** 2, axis=1) <= r2[fwd])
                      + np.sum(np.sum((Y[bwd - lag] - Y[bwd]) ** 2, axis=1) <= r2[bwd]))
-    # By chance, a given valid candidate is one of reference i's nnr neighbors with probability
-    # nnr/V_i, where V_i is the number of points outside i's Theiler window
+    # By chance, a given valid candidate is one of the n_i points in reference i's neighborhood
+    # with probability n_i/V_i, where V_i is the number of points outside i's Theiler window
     i = np.arange(n_emb)
     v = n_emb - (np.minimum(i, past) + np.minimum(n_emb - 1 - i, past) + 1)
     w = np.zeros(n_emb)
-    w[refs] = nnr / v[refs]
+    w[refs] = n_near[refs] / v[refs]
     cw = np.cumsum(w)
     expected = cw[n_emb - lags - 1] + (cw[-1] - cw[lags - 1])  # forward + backward partners
     trett = counts / expected
@@ -3670,10 +3732,16 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
         for name in ('meanpeaksep', 'maxpeaksep', 'minpeaksep', 'rangepeaksep', 'stdpeaksep'):
             out[name] = np.nan
 
-    # Short lags compared to long lags
+    # Short lags compared to long lags, as the first half's share of each statistic (bounded, and
+    # defined unless both halves are constant, or empty)
     half = nn // 2
-    out['statrtys'] = np.std(trett[:half], ddof=1) / np.std(trett[half:], ddof=1)
-    out['statrtym'] = np.mean(trett[:half]) / np.mean(trett[half:])
+    tol_trett = 1e-12 * max_trett
+    sd_short, sd_long = np.std(trett[:half], ddof=1), np.std(trett[half:], ddof=1)
+    mean_short, mean_long = np.mean(trett[:half]), np.mean(trett[half:])
+    out['fracsdrt'] = (sd_short / (sd_short + sd_long)
+                       if sd_short + sd_long > tol_trett else np.nan)
+    out['fracmeanrt'] = (mean_short / (mean_short + mean_long)
+                         if mean_short + mean_long > tol_trett else np.nan)
 
     # Entropy of the histogram, as a distribution over lags
     p_trett = trett / np.sum(trett)
@@ -4266,6 +4334,17 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
     return out
 
 
+def _merge_ties(d: np.ndarray, tol: float) -> np.ndarray:
+    # Values within tol of their neighbor in sorted order are equal: each run of them takes its
+    # smallest value (merging, unlike rounding to a grid, never separates two values closer than tol)
+    ix = np.argsort(d, kind='stable')
+    ds = d[ix]
+    run_start = np.concatenate(([True], np.diff(ds) > tol))
+    out = np.empty_like(d)
+    out[ix] = ds[np.flatnonzero(run_start)[np.cumsum(run_start) - 1]]
+    return out
+
+
 @dict_output
 def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: float = 0.98,
                   theiler_win: Union[int, float, list, tuple] = ('ac', 1), n_poles: int = 200,
@@ -4301,6 +4380,12 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
     and persistence separately at each of several poles and reports how they are distributed
     (and covary) across the attractor, capturing multifractal-style local heterogeneity that a
     single global exponent cannot.
+
+    Both estimates assume that the distances to a pole are continuously distributed. Distances
+    within 1e-12 of the range of ``y`` of each other are therefore equal (they are merged, so the
+    exceedances do not depend on rounding), an embedded point within that distance of the pole is
+    the same state visited again rather than a close return, and a pole whose exceedances take
+    fewer than 15 distinct distances (quantized data, finite orbits) has no estimate.
 
     References
     ----------
@@ -4362,7 +4447,8 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
         too short for the exceedances required. Otherwise:
 
         - ``propValidPoles``: the proportion of poles that gave a valid local dimension (at least
-          15 exceedances; such a pole also has a valid persistence, as long as ``m_order`` is
+          15 exceedances, at 15 or more distinct distances; such a pole also has a valid
+          persistence, as long as ``m_order`` is
           smaller than the number of returns used): a diagnostic of whether ``q``, ``n_poles`` and
           the series length were adequate, not a property of the dynamics
         - ``meanLocalDim``, ``stdLocalDim``: mean and standard deviation of the local dimension
@@ -4390,6 +4476,7 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
     theiler = int(theiler)
 
     min_exceed = 15  # the minimum number of exceedances for a pole's estimate to be trusted
+    tol = 1e-12 * np.ptp(y)  # distances closer than this are equal
     min_n_emb = int(np.ceil(min_exceed / (1 - q))) + 2 * theiler + m_order + 1
     if n_emb < max(min_n_emb, 100):
         return np.nan
@@ -4406,16 +4493,16 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
         # original chronological order
         keep = np.abs(idx - j) > theiler
         dist_j = np.sqrt(np.sum((Y[keep] - Y[j]) ** 2, axis=1))
-        dist_j = dist_j[dist_j > 0]  # excludes exact duplicate embedded points
+        dist_j = dist_j[dist_j > tol]  # excludes repeats of the pole (the same state again)
         if dist_j.size < min_exceed / (1 - q):
             continue
-        g = -np.log(dist_j)  # (chronological order preserved)
+        g = -np.log(_merge_ties(dist_j, tol))  # (chronological order preserved)
 
         u = np.quantile(g, q, method='hazen')
         exceed = g > u  # exceedance indicator, in chronological order
         n_u = int(exceed.sum())
-        if n_u < min_exceed:
-            continue
+        if n_u < min_exceed or np.unique(g[exceed]).size < min_exceed:
+            continue  # too few exceedances, or too few distinct ones for a continuous tail
 
         # Local dimension: the reciprocal of the mean exceedance (the exponential, or
         # shape-0 generalized Pareto, scale maximum-likelihood estimate)
@@ -4496,7 +4583,12 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
     when the number of embedded points is a power of two); those cases are fixed here. The stock
     code also divides the sum of the log distances by ``nref - (m - 1) * tau`` instead of the
     number of reference points used, which biases the dimension estimates low; the mean is taken
-    over the reference points used.
+    over the reference points used. A reference point that coincides with its k-th neighbor (to
+    within 1e-12 of the range of the data; the routine works in single precision, so in practice
+    to single precision) is a repeated point: at least that mass of the points sits on it, and
+    its log distance is minus infinity. The mean log distance at that mass is then not finite, so
+    the mass is skipped (with no masses left, there is no scaling range and the output is NaN, as
+    for a periodic orbit).
 
     Parameters
     ----------

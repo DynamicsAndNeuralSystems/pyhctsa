@@ -14,9 +14,11 @@ permitted by the "or later" clause of the TISEAN licence.
 Routine, TISEAN source file, and author named in that file:
 
 - ``tisean_boxcount``: ``source_c/boxcount.c`` (Rainer Hegger).
-- ``tisean_lyap_r``: ``source_c/lyap_r.c`` (Rainer Hegger), as modified in hctsa.
+- ``tisean_lyap_r``: ``source_c/lyap_r.c`` (Rainer Hegger), as modified in hctsa (repeated points
+  are not neighbors; equally near neighbors are averaged; merging pairs are left out).
 - ``c1_curves`` and helpers: ``source_f/c1.f`` (Thomas Schreiber, 1999) and ``source_f/d1.f`` (the
-  digamma table ``_C1_PSI`` is d1.f's), as modified in hctsa (a fixed order of reference points).
+  digamma table ``_C1_PSI`` is d1.f's), as modified in hctsa (a fixed order of reference points;
+  a mass at which a reference point is repeated is skipped).
 - ``c2d_slopes``: ``source_f/c2d.f`` (Thomas Schreiber, 1998).
 - ``tisean_rnd_deltas``: ``source_c/routines/rand.c`` (Rainer Hegger).
 - ``gram_schmidt``, ``solve_in_place``, ``lyap_neighbors``, ``lyap_spec_sums``:
@@ -97,13 +99,16 @@ def _tisean_boxcount(y: np.ndarray, delay: int, maxembed: int, epscount: int, q:
 
 def _tisean_lyap_r(y: np.ndarray, delay: int, dim: int, mindist: int, steps: int) -> Union[tuple, None]:
     # TISEAN's ``lyap_r -d<delay> -m<dim> -t<mindist> -s<steps>`` (Rosenstein et al.; source_c/lyap_r.c
-    # as modified in hctsa), in process. For every reference vector, the nearest neighbor (outside
-    # the Theiler window ``mindist``) is found at the first length scale of the geometric sequence
-    # 1e-3 * 1.1^k (of the data interval) at which any neighbor lies within it, and the logarithm
-    # of the distance between the two trajectories is averaged over all references at each of
-    # ``steps`` + 1 times. Returns the (time, mean ln distance) rows as in the .ros file, or None
-    # where TISEAN gives no output (a reference point has no neighbor within the search radius:
-    # exit status 54).
+    # as modified in hctsa), in process. For every reference vector, the nearest neighbors (outside
+    # the Theiler window ``mindist``) are found: all the vectors whose distance to it is within
+    # 1e-12 (of the data interval) of the nearest distance below 1, vectors closer than 1e-12 to it
+    # being repeats of it and not neighbors. Each pair is followed for ``steps`` steps; a pair
+    # that merges (comes within 1e-12) is left out at every step, and each reference contributes
+    # the mean of the log distance over its nearest neighbors, weighted by the fraction of them
+    # kept (the expected curve if one of them were chosen at random, so the result does not depend
+    # on the order of a neighbor search). Returns the (time, mean ln distance) rows as in the .ros
+    # file, or None where TISEAN gives no output (a reference point has no neighbor within the
+    # search radius: exit status 54).
     y = np.asarray(y, dtype=float).ravel()
     length = y.size
     ymin = np.min(y)
@@ -118,17 +123,10 @@ def _tisean_lyap_r(y: np.ndarray, delay: int, dim: int, mindist: int, steps: int
     n_cand = length - delay_span - steps  # reference vectors that can be neighbors
     emb = x[np.arange(length - delay_span)[:, None] + delay * np.arange(dim)[None, :]]
     refs = np.arange(maxlength + 1)
-
-    # Length-scale sequence over which neighbors are looked for
-    eps_seq = []
-    eps = 1e-3
-    while eps <= 2.0:
-        eps_seq.append(eps)
-        eps *= 1.1
-    eps_sq = np.square(eps_seq)
+    tol2 = 1e-12 ** 2  # (squared) distances closer than 1e-12 are equal; DIST_TOL in lyap_r.c
 
     # Nearest neighbors, in chunks of reference points
-    neighbor = np.full(refs.size, -1)
+    pair_ref, pair_nb, n_near = [], [], np.zeros(refs.size)
     cand = np.arange(n_cand)
     chunk = max(1, int(2e6 // (n_cand * dim)))
     for c in range(0, refs.size, chunk):
@@ -136,47 +134,35 @@ def _tisean_lyap_r(y: np.ndarray, delay: int, dim: int, mindist: int, steps: int
         d2 = np.zeros((r.size, n_cand))
         for k in range(dim):
             d2 += np.square(emb[r, k][:, None] - emb[:n_cand, k][None, :])
-        d2[np.abs(r[:, None] - cand[None, :]) <= mindist] = np.inf
-        d2[d2 >= 1.0] = np.inf  # only neighbors within squared distance 1 are accepted
-        dmin = d2.min(axis=1)
-        if np.any(dmin > eps_sq[-1]):
+        d2[(np.abs(r[:, None] - cand[None, :]) <= mindist) | (d2 <= tol2)] = np.inf
+        dmin = np.where(d2 < 1.0, d2, np.inf).min(axis=1)  # only a neighbor within 1 is accepted
+        if np.any(np.isinf(dmin)):
             return None  # some reference point never gets a neighbor
-        # the neighbor is the nearest one with a positive distance, if within the first scale
-        # at which anything (even an exact duplicate) was found
-        k_found = np.searchsorted(eps_sq, dmin, side='left')
-        d2[d2 == 0] = np.inf
-        jmin = d2.argmin(axis=1)
-        dnear = d2[np.arange(r.size), jmin]
-        ok = dnear <= eps_sq[k_found]
-        # Exactly tied neighbors (quantized data): lyap_r takes the first met scanning its
-        # 256 x 256 grid of boxes (cells of side eps in the first and last coordinates, rows
-        # then columns, newest point first within a cell)
-        for ri in np.flatnonzero(ok & (np.sum(d2 == dnear[:, None], axis=1) > 1)):
-            tied = np.flatnonzero(d2[ri] == dnear[ri])
-            epsinv = 1.0 / eps_seq[k_found[ri]]
-            cell = [(emb[:, k] * epsinv).astype(int) & 255 for k in (0, dim - 1)]
-            rank = [(cell[k][tied] - cell[k][r[ri]] + 128) % 256 - 128 for k in (0, 1)]
-            jmin[ri] = tied[np.lexsort((-tied, rank[1], rank[0]))[0]]
-        neighbor[c:c + chunk] = np.where(ok, jmin, -1)
+        lim = np.square(np.sqrt(dmin) + 1e-12)
+        ri, ci = np.nonzero(d2 <= lim[:, None])
+        pair_ref.append(r[ri])
+        pair_nb.append(ci)
+        n_near[c:c + chunk] = np.bincount(ri, minlength=r.size)
+    pair_ref = np.concatenate(pair_ref)
+    pair_nb = np.concatenate(pair_nb)
+    weight = 1.0 / n_near[pair_ref]
 
     # Divergence of the neighbor pairs over time
-    found = np.zeros(steps + 1)
+    found = 0.0
     lyap = np.zeros(steps + 1)
-    use = refs[neighbor >= 0]
-    nb = neighbor[neighbor >= 0]
     chunk = max(1, int(2e6 // ((steps + 1) * dim)))
     steps_idx = np.arange(steps + 1)
-    for c in range(0, use.size, chunk):
-        a = use[c:c + chunk, None] + steps_idx[None, :]
-        b = nb[c:c + chunk, None] + steps_idx[None, :]
+    for c in range(0, pair_ref.size, chunk):
+        a = pair_ref[c:c + chunk, None] + steps_idx[None, :]
+        b = pair_nb[c:c + chunk, None] + steps_idx[None, :]
         dx = np.sum(np.square(emb[a] - emb[b]), axis=2)
-        pos = dx > 0
-        found += pos.sum(axis=0)
-        lyap += np.sum(np.log(np.where(pos, dx, 1.0)), axis=0)
-    have = found > 0
-    if not have.any():
+        kept = ~np.any(dx[:, 1:] <= tol2, axis=1)  # pairs that never merge
+        w = weight[c:c + chunk][kept]
+        found += np.sum(w)
+        lyap += np.sum(w[:, None] * np.log(dx[kept]), axis=0)
+    if found == 0:
         return np.empty((0, 2))
-    return np.column_stack([steps_idx[have], lyap[have] / found[have] / 2.0])
+    return np.column_stack([steps_idx, lyap / found / 2.0])
 
 
 # ------------------------------------------------------------------------------
@@ -280,7 +266,9 @@ def _c1_curves(y: np.ndarray, delay: int, m_from: int, m_to: int, nmin: int, n_r
     Everything that is single precision in the Fortran is single precision here. A mass for which
     no point has a neighbor outside the Theiler window is skipped, the number of neighbors asked
     for never exceeds the number that exist, and at most as many reference points are used as there
-    are embedded points.
+    are embedded points. A reference point that coincides with its k-th neighbor (to within 1e-12
+    of the range of the data) is a repeated point (its log distance is minus infinity), so a mass
+    at which any reference point is one has no finite mean log distance and is skipped.
     """
     y32 = np.asarray(y, dtype=np.float32)
     nmax = y32.size
@@ -290,6 +278,7 @@ def _c1_curves(y: np.ndarray, delay: int, m_from: int, m_to: int, nmin: int, n_r
     sd = F32(math.sqrt(float(F32(_f32_cumsum_last(((y32 - F32(_f32_cumsum_last(y32) / F32(nmax)))
                                                    ** 2).astype(np.float32)) / F32(nmax)))))
     ju = np.zeros(nmax + 1, np.int64)
+    tol = F32(F32(1e-12) * F32(np.max(y32) - np.min(y32)))  # closer than this: a repeated point
     resl = F32(_logf(F32(2.0)) / F32(res))
     sqrt2 = F32(math.sqrt(2.0))
     curves = []
@@ -334,7 +323,13 @@ def _c1_curves(y: np.ndarray, delay: int, m_from: int, m_to: int, nmin: int, n_r
                     pl = F32(pl + resl)
                     continue
                 order = np.argsort(sweep, kind='stable')
-                log_e = np.log(np.maximum(e[order].astype(np.float64), 1e-20)).astype(np.float32)
+                # a center whose k-th neighbor is within tol of it is a repeated point: its log
+                # distance is minus infinity, so the mean log distance at this mass is not
+                # finite, and the mass is skipped
+                if np.any(e <= tol):
+                    pl = F32(pl + resl)
+                    continue
+                log_e = np.log(e[order].astype(np.float64)).astype(np.float32)
                 rln = F32(_f32_cumsum_last(log_e) / F32(refs.size))  # mean over the centers used
             if pln != pr:
                 pr = pln
