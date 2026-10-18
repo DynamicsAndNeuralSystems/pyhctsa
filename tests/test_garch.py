@@ -154,3 +154,34 @@ def test_garch_compare():
     assert w['hasStructure'] == 0 and w['Ks_vary_p'] == 0 and w['minK'] == w['maxK']
     assert w['maxLLF'] >= w['minLLF']
     assert (w['bestpAIC'], w['bestqAIC'], w['bestpBIC'], w['bestqBIC']) == (0, 0, 0, 0)
+
+
+def _rossler_z(n=5000, dt=0.2):
+    from scipy.integrate import solve_ivp
+    t = np.arange(0, n * dt + 300, dt)
+    sol = solve_ivp(lambda _, s: [-s[1] - s[2], s[0] + 0.2 * s[1], 0.2 + s[2] * (s[0] - 5.5)],
+                    (0, t[-1]), [1, 1, 0], t_eval=t, rtol=1e-9, atol=1e-9)
+    return sol.y[2][-n:]
+
+
+def test_at_floor():
+    assert G.at_floor(np.array([1e-6, 0.1, 0.8])) and G.at_floor(np.array([1.005e-6]))
+    assert not G.at_floor(np.array([1.02e-6, 0.1, 0.8]))
+
+
+def test_floor_gives_nan_for_likelihood_and_variance_path():
+    # a flow with long near-zero stretches: the Gaussian likelihood has no maximum, the constant sits at its floor
+    z = _rossler_z()
+    out = mf.garch_fit(z, 'ar')
+    assert out['hasStructure'] == 1
+    for key in ('LLF', 'aic', 'bic', 'constant', 'maxsigma', 'minsigma', 'uncondVar', 'zres_meanabs',
+                'engle_pval_stde_5', 'ARCHerr_1'):
+        assert np.isnan(out[key]), key
+    for key in ('ARCH_1', 'GARCH_1', 'persistence', 'offset'):
+        assert np.isfinite(out[key]), key
+    cmp_ = mf.garch_compare(z, 'ar')
+    for key in ('maxLLF', 'bestpBIC', 'bestqAIC', 'minK', 'max_meanarchps', 'Ks_vary_p'):
+        assert np.isnan(cmp_[key]), key
+    # ordinary series are not affected
+    y = _simulate(1000, 0.1, 0.12, 0.8, seed=7)
+    assert np.isfinite(mf.garch_fit(y, 'none')['LLF']) and np.isfinite(mf.garch_compare(y, 'none')['maxLLF'])

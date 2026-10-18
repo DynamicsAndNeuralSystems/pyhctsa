@@ -53,6 +53,7 @@ MU_COARSE = (1e-3, 1e-4, 1e-5)
 MU_FINE = (1e-6, 1e-7, 1e-8, 1e-9, 1e-10)
 NU_MAX = 1 / KAPPA_LO
 MAX_GRID = 12   # grid starting points that are run (the best by likelihood)
+FLOOR_TOL = 0.01   # the variance constant is 'at its floor' within this relative tolerance of W_LO
 
 # Structure test: likelihood-ratio statistic needed to report a variance model, calibrated by
 # simulation of white noise (3% to 6% of white-noise series of 100 to 10000 samples exceed 4;
@@ -402,3 +403,13 @@ def tail_starts(fit_gauss, S_t):
         th[S_t.ik] = kp
         out.append(th)
     return out
+
+
+def at_floor(theta):
+    """Whether the variance constant of a fit sits at its lower bound (within ``FLOOR_TOL`` of it).
+
+    The Gaussian likelihood of a series with long stretches of (near) zero values has no maximum
+    (the variance can shrink without limit where the series is zero), so a fit at the floor has a
+    likelihood and a variance path that depend on the bound rather than on the data.
+    """
+    return bool(theta[0] <= W_LO * (1 + FLOOR_TOL))

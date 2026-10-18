@@ -680,6 +680,9 @@ def _lbq_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
         return np.asarray(acorr_ljungbox(x, lags=max_lag, return_df=True)['lb_pvalue'], dtype=float)
 
 
+_FLOOR_KEEP = ('hasStructure', 'offset', 'leverage', 'distDoF', 'persistence', 'summaryexitflag')
+
+
 def _garch_models(D: _garch.Data, P: int, Q: int, gjr: bool, tdist: bool) -> dict:
     """
     Fit the requested model and decide whether the series has any conditional heteroskedasticity.
@@ -810,10 +813,13 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     50:50 mixture of chi-squared(0) and chi-squared(1) because a Gaussian is the limit of
     infinite degrees of freedom, is above 2.7055, the 5% point); otherwise the upper bound, 100.
     The constant of the variance equation is bounded below by 1e-6 (the variance of 0.1% of a
-    standard deviation): for series with long stretches of (near) zero values the Gaussian
+    standard deviation). For series with long stretches of (near) zero values the Gaussian
     likelihood has no maximum, because the variance can shrink without limit where the series is
-    zero, so their log-likelihood and conditional variance depend on that bound (the coefficients
-    much less).
+    zero; the fit then sits at the bound (the constant within 1% of it). In that case the
+    log-likelihood, AIC and BIC are NaN, and, if the variance model is reported, so is everything
+    computed from the conditional variance (the constant, the standard errors, ``uncondVar``,
+    the sigma summaries and the statistics of the standardized residuals). The coefficients,
+    ``persistence``, ``leverage`` and ``distDoF`` are still reported.
 
     T. Bollerslev, J. Econometrics 31 (1986) 307-327 (DOI 10.1016/0304-4076(86)90063-1);
     L. R. Glosten, R. Jagannathan and D. E. Runkle, J. Finance 48 (1993) 1779-1801
@@ -923,6 +929,16 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
 
     out['ac1_stde2'] = autocorr(stde2, 1, 'Fourier')
     out['diff_ac1'] = autocorr(y ** 2, 1, 'Fourier') - out['ac1_stde2']
+
+    # A fit with the variance constant at its floor has no likelihood maximum: what depends on the
+    # likelihood or on the variance path is then not a property of the series
+    if _garch.at_floor(ml['theta']):
+        for key in ('LLF', 'aic', 'bic'):
+            out[key] = np.nan
+        if has:
+            for key in out:
+                if key not in _FLOOR_KEEP and not key.startswith(('GARCH_', 'ARCH_')):
+                    out[key] = np.nan
     return out
 
 
@@ -941,6 +957,11 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
     If the GARCH(min p, min q) model does not beat constant variance in the structure test of
     :func:`garch_fit`, the constant term and the residual statistics are those of constant variance
     (the likelihood and information criteria are always those of the fitted models).
+    A fit with the variance constant at its floor (within 1% of the bound 1e-6; see
+    :func:`garch_fit`) has no likelihood maximum: a summary that such a model determines is NaN
+    (the minimum or maximum over the models if that model attains it, the mean if any model is at
+    the floor, an order pick if the chosen model is), and the constant and residual statistics
+    only if the variance model is reported.
 
     Parameters
     ----------
@@ -1009,6 +1030,7 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
     lr, has = _garch.structure_test(first, null, D)
 
     llfs, aics, bics, ks, mean_arch, max_arch, mean_lbq, max_lbq = (np.full(shape, np.nan) for _ in range(8))
+    floor_ml = np.zeros(shape, dtype=bool)   # the fit has its variance constant at the floor
     for i, p in enumerate(pr):
         for j, q in enumerate(qr):
             ml = fits.get((p, q))
@@ -1017,6 +1039,7 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
             # (the likelihood and information criteria are those of the maximum-likelihood fit;
             # the constant and the residual tests those of the reported fit)
             fit = ml if has else null
+            floor_ml[i, j] = _garch.at_floor(ml['theta'])
             llfs[i, j] = ml['llf']
             aics[i, j] = -2 * ml['llf'] + 2 * ml['k']
             bics[i, j] = -2 * ml['llf'] + ml['k'] * np.log(n)
@@ -1026,40 +1049,52 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
             lbq = _lbq_test_pvalues(stde ** 2)
             mean_arch[i, j], max_arch[i, j] = np.mean(engle), np.max(engle)
             mean_lbq[i, j], max_lbq[i, j] = np.mean(lbq), np.max(lbq)
+    # (the constant and the residual statistics come from the variance model only if it is reported)
+    floor_var = floor_ml & has
+
+    def _summary(values, flags, kind):
+        # min, max or mean over the models; NaN if a model at the floor determines it (for the mean: any)
+        ok = ~np.isnan(values)
+        if not ok.any():
+            return np.nan
+        if kind == 'mean':
+            return np.nan if flags[ok].any() else np.nanmean(values)
+        v, f = values.ravel(order='F'), flags.ravel(order='F')   # (ties go to the first in column-major order)
+        idx = np.nanargmin(v) if kind == 'min' else np.nanargmax(v)
+        return np.nan if f[idx] else v[idx]
 
     # Log-likelihoods and information criteria per observation
     llf_n, aic_n, bic_n = llfs / n, aics / n, bics / n
 
     out = {'hasStructure': float(has)}
-    for name, values in (('LLF', llf_n), ('BIC', bic_n), ('AIC', aic_n), ('K', ks)):
-        out[f'min{name}'] = np.nanmin(values)
-        out[f'max{name}'] = np.nanmax(values)
-        out[f'mean{name}'] = np.nanmean(values)
+    for name, values, flags in (('LLF', llf_n, floor_ml), ('BIC', bic_n, floor_ml), ('AIC', aic_n, floor_ml),
+                                ('K', ks, floor_var)):
+        for kind in ('min', 'max', 'mean'):
+            out[f'{kind}{name}'] = _summary(values, flags, kind)
     for name, values in (('meanarchps', mean_arch), ('maxarchps', max_arch),
                          ('meanlbqps', mean_lbq), ('maxlbqps', max_lbq)):
-        out[f'min_{name}'] = np.nanmin(values)
-        out[f'max_{name}'] = np.nanmax(values)
-        out[f'mean_{name}'] = np.nanmean(values)
+        for kind in ('min', 'max', 'mean'):
+            out[f'{kind}_{name}'] = _summary(values, floor_var, kind)
 
     # The orders of the best models, among the grid and the constant-variance model (0, 0)
     # (ties go to the smaller model: (0, 0) first, then column-major order)
     null_aic, null_bic = -2 * null['llf'] + 2 * null['k'], -2 * null['llf'] + null['k'] * np.log(n)
     for name, values, null_value in (('AIC', aics, null_aic), ('BIC', bics, null_bic)):
-        best, bp, bq = null_value, 0, 0
+        best, bp, bq, bad = null_value, 0, 0, False
         for j, q in enumerate(qr):
             for i, p in enumerate(pr):
                 if values[i, j] < best:
-                    best, bp, bq = values[i, j], p, q
-        out[f'bestp{name}'] = bp
-        out[f'bestq{name}'] = bq
+                    best, bp, bq, bad = values[i, j], p, q, floor_ml[i, j]
+        out[f'bestp{name}'] = np.nan if bad else bp
+        out[f'bestq{name}'] = np.nan if bad else bq
 
     # How much the constant varies with each order
     def _std_omitnan(values):
         # standard deviation of each column over its non-NaN entries (0 for a single entry)
         return np.array([_sample_std(col[~np.isnan(col)]) for col in values.T])
 
-    out['Ks_vary_p'] = np.nanmean(_std_omitnan(ks))
-    out['Ks_vary_q'] = np.nanmean(_std_omitnan(ks.T))
+    out['Ks_vary_p'] = np.nan if floor_var.any() else np.nanmean(_std_omitnan(ks))
+    out['Ks_vary_q'] = np.nan if floor_var.any() else np.nanmean(_std_omitnan(ks.T))
     return out
 
 
