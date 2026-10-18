@@ -26,14 +26,15 @@ CASES = {
     'loopm': (lambda y: mf.loop_local_simple(y, 'mean'), REAL, 1e-6, 1e-7),
     'arfit18': (lambda y: mf.ar_fit(y, 1, 8, 'sbc'), list(SERIES), 1e-6, 1e-8),
     # (ar_cov, compare_ar and fit_subsegments 'ar' are checked against hctsa in tests/test_mf_hctsa_parity.py)
-    # the GP fits run the minimize optimizer for 50 evaluations: agreement is to optimizer noise
-    # random subsamples and starts now come from BF_Random: the same draws as hctsa
+    # random subsamples and starts come from BF_Random: the same draws as hctsa. The GP fits run to
+    # convergence, so they agree with hctsa to rounding; the local predictions still stop after a
+    # fixed number of optimizer evaluations, so they agree to optimizer noise
     'fs_ar': (lambda y: mf.fit_subsegments(y, 'arsbc', None, 'rand', [25, 0.1], 'default'), REAL, 1e-8, 1e-9),
-    'gh_ri2': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'random_i', 4), REAL, 1e-2, 1e-2),
-    'gh_rb': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'random_both', 2), REAL, 1e-2, 1e-2),
+    'gh_ri2': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'random_i', 4), REAL, 1e-5, 1e-7),
+    'gh_rb': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'random_both', 2), REAL, 1e-5, 1e-7),
     'gl_rg': (lambda y: mf.gp_local_prediction(y, COV, 10, 3, 20, 'randomgap', 'default'), REAL, 1e-2, 1e-2),
-    'gpfa': (lambda y: mf.gp_fit_across(y, COV, 20), REAL, 1e-2, 1e-2),
-    'gphp_first': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'first'), REAL, 1e-2, 1e-2),
+    'gpfa': (lambda y: mf.gp_fit_across(y, COV, 20), REAL, 1e-5, 1e-7),
+    'gphp_first': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'first'), REAL, 1e-5, 1e-7),
     'gplp_fb': (lambda y: mf.gp_local_prediction(y, COV, 10, 3, 20, 'frombefore'), REAL, 1e-2, 1e-2),
 }
 

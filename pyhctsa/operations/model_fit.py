@@ -3148,9 +3148,67 @@ def is_seasonal(y: ArrayLike) -> int:
     
     return out
 
+def _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos=(), len_lo=-np.inf, len_hi=np.inf, amp_pos=()):
+    """
+    The objective of the GP hyperparameter fit, with its clamp: returns ``(clamp, nlz)`` where
+    ``nlz(theta)`` is gpml's negative log marginal likelihood and its gradient for the flat
+    vector ``theta = [cov..., lik]``, with the noise standard deviations clamped below at 1% of
+    that of the data, the ``covRQiso`` shape parameters clamped above at ``alpha_cap`` and the
+    log length scales (at ``len_pos``) clamped to ``[len_lo, len_hi]``, and the log signal amplitudes (at
+    ``amp_pos``) clamped below at the same floor as the noise (zero gradient wherever a coordinate is
+    clamped and the likelihood does not improve towards the inside).
+    """
+    nhps = cov.n_hyp
+    noise_pos = np.asarray(noise_pos, dtype=int)
+    alpha_pos = np.asarray(alpha_pos, dtype=int)
+    len_pos = np.asarray(len_pos, dtype=int)
+    amp_pos = np.asarray(amp_pos, dtype=int)
+    with np.errstate(divide='ignore'):
+        noise_floor = np.log(0.01 * np.std(yt, ddof=1))  # lower bound on the log noise standard deviations and amplitudes
+
+    def _clamp(theta):
+        theta = np.array(theta, dtype=float)
+        theta[nhps] = max(theta[nhps], noise_floor)
+        theta[noise_pos] = np.maximum(theta[noise_pos], noise_floor)
+        theta[alpha_pos] = np.minimum(theta[alpha_pos], alpha_cap)
+        theta[len_pos] = np.minimum(np.maximum(theta[len_pos], len_lo), len_hi)
+        theta[amp_pos] = np.maximum(theta[amp_pos], noise_floor)
+        return theta
+
+    def _nlz(theta):
+        # gpml's negative log marginal likelihood with the bounded hyperparameters clamped
+        # (and zero gradient wherever they are clamped)
+        clamp_lik = theta[nhps] < noise_floor
+        clamp_cov = noise_pos[theta[noise_pos] < noise_floor]
+        at_cap = alpha_pos[theta[alpha_pos] >= alpha_cap]
+        amp_low = amp_pos[theta[amp_pos] <= noise_floor]
+        len_low = len_pos[theta[len_pos] <= len_lo]
+        len_high = len_pos[theta[len_pos] >= len_hi]
+        theta = _clamp(theta)
+        hyp = {'cov': theta[:nhps], 'lik': theta[nhps], 'mean': np.zeros(0)}
+        nlZ, dnlZ = gp_train(hyp, cov, tt, yt)   # NaN if the inference fails (as gp.m)
+        d_cov = np.array(dnlZ['cov'], dtype=float)
+        d_lik = np.array(dnlZ['lik'], dtype=float)
+        d_cov[clamp_cov] = 0
+        d_cov[amp_low[d_cov[amp_low] >= 0]] = 0
+        d_cov[len_low[d_cov[len_low] >= 0]] = 0
+        d_cov[len_high[d_cov[len_high] <= 0]] = 0
+        d_cov[at_cap[d_cov[at_cap] <= 0]] = 0  # at the cap, only where the likelihood still improves beyond it
+        if clamp_lik:
+            d_lik[:] = 0
+        return nlZ, np.concatenate([d_cov, d_lik, dnlZ['mean']])
+
+    return _clamp, _nlz
+
+
 def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
                      hyp0: Union[np.ndarray, None] = None,
-                     noise_pos: Union[tuple, list, None] = None) -> np.ndarray:
+                     noise_pos: Union[tuple, list, None] = None,
+                     alpha_pos: Union[tuple, list, None] = None,
+                     alpha_cap: float = np.inf,
+                     len_pos: Union[tuple, list, None] = None,
+                     len_lo: float = -np.inf, len_hi: float = np.inf,
+                     amp_pos: Union[tuple, list, None] = None) -> np.ndarray:
     """
     learn GP hyperparameters for the time series ``(tt, yt)``.
 
@@ -3182,8 +3240,14 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
     e^-12 or less, so the fitted noise depends on where the optimizer stops. The bound is a
     clamp of those hyperparameters inside the objective, with a zero gradient for a clamped
     coordinate.
+
+    ``alpha_pos`` are the 0-based positions of the log shape parameters of ``covRQiso`` among the
+    covariance hyperparameters, bounded above by ``alpha_cap`` (a log value) in the same way, and
+    ``len_pos`` those of the log length scales, bounded to ``[len_lo, len_hi]``, and ``amp_pos`` those of
+    the log signal amplitudes, bounded below like the noise.
     """
     nhps = cov.n_hyp
+    alpha_pos = np.asarray([] if alpha_pos is None else alpha_pos, dtype=int)
     if noise_pos is None:
         if cov is not CovSEisoNoise:
             raise ValueError('noise_pos is required for this covariance function')
@@ -3197,35 +3261,275 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
         hyp0 = np.array([np.log(np.mean(np.diff(tt))), 0.0, np.log(0.1), np.log(0.1)])
         assert nhps == 3
 
-    with np.errstate(divide='ignore'):
-        noise_floor = np.log(0.01 * np.std(yt, ddof=1))  # lower bound on the log noise standard deviations
-
-    def _clamp(theta):
-        theta = np.array(theta, dtype=float)
-        theta[nhps] = max(theta[nhps], noise_floor)
-        theta[noise_pos] = np.maximum(theta[noise_pos], noise_floor)
-        return theta
-
-    def _nlz(theta):
-        # gpml's negative log marginal likelihood with the noise hyperparameters clamped at
-        # the floor (and zero gradient wherever they are clamped)
-        clamp_lik = theta[nhps] < noise_floor
-        clamp_cov = noise_pos[theta[noise_pos] < noise_floor]
-        theta = _clamp(theta)
-        hyp = {'cov': theta[:nhps], 'lik': theta[nhps], 'mean': np.zeros(0)}
-        nlZ, dnlZ = gp_train(hyp, cov, tt, yt)   # NaN if the inference fails (as gp.m)
-        d_cov = np.array(dnlZ['cov'], dtype=float)
-        d_lik = np.array(dnlZ['lik'], dtype=float)
-        d_cov[clamp_cov] = 0
-        if clamp_lik:
-            d_lik[:] = 0
-        return nlZ, np.concatenate([d_cov, d_lik, dnlZ['mean']])
+    len_pos = np.asarray([] if len_pos is None else len_pos, dtype=int)
+    amp_pos = np.asarray([] if amp_pos is None else amp_pos, dtype=int)
+    _clamp, _nlz = _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos, len_lo, len_hi, amp_pos)
 
     theta, _, _ = minimize(_clamp(hyp0), _nlz, nfevals)
     theta = _clamp(theta)  # (clamped coordinates can drift: same objective value)
     if not np.all(np.isfinite(theta)):
         raise np.linalg.LinAlgError('GP hyperparameters are not finite')
     return theta
+
+
+def _gp_latent(components: list, noise_pos, theta: np.ndarray, n_cov: int):
+    """
+    The model of the latent function, to make predictions with: all noise is observation noise,
+    so the ``covNoise`` terms are merged with the likelihood noise (only the sum of their
+    variances enters the marginal likelihood) and the covariance of the latent function has no
+    noise term. Predictions at the training inputs with the ``covNoise`` term kept in the
+    covariance would include it in the cross-covariance (it is a delta function), so that the
+    posterior mean would reproduce part of the noise. Returns ``(cov, hyp, log_noise)``: the
+    covariance of the latent function, its hyperparameters in gpml's form, and the log standard
+    deviation of the total observation noise.
+    """
+    from ..toolboxes.gpml.cov import parse_cov
+    noise_pos = np.asarray(noise_pos, dtype=int)
+    names = [n + (str(d) if d is not None else '') for n, d in components if n != 'covNoise']
+    cov_lat, _ = parse_cov('_'.join(names))
+    keep = np.setdiff1d(np.arange(n_cov), noise_pos)
+    log_noise = 0.5 * np.log(np.exp(2 * theta[n_cov]) + np.sum(np.exp(2 * theta[noise_pos])))
+    hyp = {'cov': theta[keep], 'lik': log_noise, 'mean': np.zeros(0)}
+    return cov_lat, hyp, log_noise
+
+
+def _gp_alpha_pos(components: list) -> list:
+    """0-based positions of the log shape parameters of ``covRQiso`` among the covariance hyperparameters."""
+    pos = 0
+    alpha = []
+    for name, _ in components:
+        if name in ('covSEiso', 'covMaterniso'):
+            pos += 2
+        elif name == 'covPeriodic':
+            pos += 3
+        elif name == 'covRQiso':
+            alpha.append(pos + 2)
+            pos += 3
+        else:
+            pos += 1
+    return alpha
+
+
+def _gp_newton_polish(tt: np.ndarray, yt: np.ndarray, cov, theta: np.ndarray, noise_pos,
+                      alpha_pos, alpha_cap: float, len_pos=(), len_lo=-np.inf, len_hi=np.inf, amp_pos=()) -> np.ndarray:
+    """
+    Newton polish of a conjugate-gradient optimum. Conjugate gradients stop when function values
+    can no longer be compared, so the hyperparameters are only known to about the square root of
+    machine precision over the curvature (much worse along a flat valley); Newton iterations on
+    the gradient, which is accurate to round-off, locate the optimum to round-off. The ``covNoise``
+    and Gaussian-likelihood noise terms are interchangeable (only the sum of their variances
+    matters) and stay equal from the symmetric start, so they are tied here; a noise bounded at its
+    floor, a shape parameter at its cap, a length scale at a bound, or an amplitude at its floor is held there. Returns ``theta`` unchanged when the
+    Hessian is not positive definite (a flat or ridge-like optimum).
+    """
+    n_cov = cov.n_hyp
+    noise_pos = np.asarray(noise_pos, dtype=int)
+    if len(noise_pos) != 1:
+        return theta
+    k = noise_pos[0]
+    x = np.array(theta[:n_cov], dtype=float)
+    if abs(theta[n_cov] - x[k]) > 1e-9:
+        return theta
+    alpha_pos = np.asarray(alpha_pos, dtype=int)
+    len_pos = np.asarray(len_pos, dtype=int)
+    amp_pos = np.asarray(amp_pos, dtype=int)
+    _, nlz = _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos, len_lo, len_hi, amp_pos)
+    with np.errstate(divide='ignore'):
+        floor = np.log(0.01 * np.std(yt, ddof=1))
+    free = np.ones(n_cov, dtype=bool)
+    if x[k] <= floor + 1e-9:
+        free[k] = False
+    free[alpha_pos[x[alpha_pos] >= alpha_cap - 1e-9]] = False
+    free[len_pos[(x[len_pos] <= len_lo + 1e-9) | (x[len_pos] >= len_hi - 1e-9)]] = False
+    free[amp_pos[x[amp_pos] <= floor + 1e-9]] = False
+    idx = np.where(free)[0]
+
+    def obj(xx):
+        f, g = nlz(np.r_[xx, xx[k]])
+        g_cov = np.array(g[:n_cov], dtype=float)
+        g_cov[k] += g[n_cov]
+        return f, g_cov
+
+    for _ in range(20):
+        f, g = obj(x)
+        if not np.isfinite(f) or np.max(np.abs(g[idx])) < 1e-10:
+            break
+        H = np.zeros((len(idx), len(idx)))
+        for a, i in enumerate(idx):
+            h = 1e-5 * max(1.0, abs(x[i]))
+            xp, xm = x.copy(), x.copy()
+            xp[i] += h
+            xm[i] -= h
+            H[:, a] = (obj(xp)[1][idx] - obj(xm)[1][idx]) / (2 * h)
+        H = (H + H.T) / 2
+        ev = np.linalg.eigvalsh(H)
+        if not np.all(np.isfinite(ev)) or ev.min() <= 1e-9 * ev.max():
+            break  # not positive definite
+        dx = -np.linalg.solve(H, g[idx])
+        m = np.max(np.abs(dx))
+        if m > 0.5:
+            dx *= 0.5 / m
+        accepted = False
+        for _ in range(10):
+            xn = x.copy()
+            xn[idx] = x[idx] + dx
+            fn = obj(xn)[0]
+            if np.isfinite(fn) and fn <= f + 1e-12 * max(1.0, abs(f)):
+                accepted = True
+                break
+            dx = dx / 2
+        if not accepted:
+            break
+        x = xn
+        if np.max(np.abs(dx)) < 1e-12:
+            break
+    return np.r_[x, x[k]]
+
+
+def _gp_amp_pos(components: list) -> list:
+    """0-based positions of the log signal amplitudes among the covariance hyperparameters."""
+    pos = 0
+    amps = []
+    for name, _ in components:
+        if name in ('covSEiso', 'covMaterniso', 'covRQiso'):
+            amps.append(pos + 1)
+        elif name == 'covPeriodic':
+            amps.append(pos + 2)
+        pos += {'covSEiso': 2, 'covMaterniso': 2, 'covPeriodic': 3, 'covRQiso': 3}.get(name, 1)
+    return amps
+
+
+def _gp_shape_pos(components: list) -> list:
+    """
+    0-based positions, among the covariance hyperparameters, of those that are not identified
+    without correlation structure: the length scales, the period of ``covPeriodic`` and the
+    shape of ``covRQiso``.
+    """
+    pos = 0
+    shape = []
+    for name, _ in components:
+        if name in ('covSEiso', 'covMaterniso'):
+            shape.append(pos)
+        elif name == 'covPeriodic':
+            shape += [pos, pos + 1]
+        elif name == 'covRQiso':
+            shape += [pos, pos + 2]
+        pos += {'covSEiso': 2, 'covMaterniso': 2, 'covPeriodic': 3, 'covRQiso': 3}.get(name, 1)
+    return shape
+
+
+def _gp_shape_bounds(components: list, tt: np.ndarray) -> dict:
+    """
+    The values reported for the hyperparameters of :func:`_gp_shape_pos` when the series shows no
+    correlation structure, keyed by position: for a length scale, the sampling interval (a bound:
+    the data do not resolve a length scale above it); NaN for periods and shape parameters.
+    """
+    dt = np.mean(np.diff(tt))
+    lens = set(_gp_len_pos(components))
+    return {p: (np.log(dt) if p in lens else np.nan) for p in _gp_shape_pos(components)}
+
+
+def _gp_len_pos(components: list) -> list:
+    """0-based positions of the log length scales among the covariance hyperparameters."""
+    pos = 0
+    lens = []
+    for name, _ in components:
+        if name in ('covSEiso', 'covMaterniso', 'covRQiso'):
+            lens.append(pos)
+        pos += {'covSEiso': 2, 'covMaterniso': 2, 'covPeriodic': 3, 'covRQiso': 3}.get(name, 1)
+    return lens
+
+
+def _gp_fit_converged(tt: np.ndarray, yt: np.ndarray, cov, components: list, noise_pos,
+                      max_evals: int = 500, rounds: int = 3):
+    """
+    Converged fit of the GP hyperparameters; returns ``(theta, nlZ)``, or ``(None, nan)`` if the
+    fit fails.
+
+    The fit starts from the best of a deterministic grid of length scales (16, log-spaced from
+    the sampling interval to half the span) and signal fractions (0.2, 0.6, 0.95) at the total
+    variance of the data, scored by the marginal likelihood. It is minimized with the gpml
+    conjugate-gradient ``minimize`` (up to ``max_evals`` function evaluations per run, as
+    :func:`_gp_learn_hyperp`) and re-started from where it stopped (a fresh search direction)
+    until the marginal likelihood stops improving (at most ``rounds`` runs), then polished by
+    Newton iterations (:func:`_gp_newton_polish`). The length scales are bounded between the
+    sampling interval and the span of the series (a shorter or longer length scale cannot be told
+    apart from white noise or a polynomial trend), the ``covRQiso`` shape parameter above at
+    100 (where it is indistinguishable from ``covSEiso``) and the signal amplitudes below at 1% of the
+    standard deviation of the data (as for the noise: a series without correlation structure has a
+    fitted amplitude at this floor, rather than running to zero).
+    """
+    noise_pos = np.asarray(noise_pos, dtype=int)
+    alpha_pos = _gp_alpha_pos(components)
+    alpha_cap = np.log(100.0)
+    len_pos = _gp_len_pos(components)
+    amp_pos = _gp_amp_pos(components)
+    dt = np.mean(np.diff(tt))
+    span = np.max(tt) - np.min(tt)
+    len_lo, len_hi = np.log(dt), np.log(span)
+    n_cov = cov.n_hyp
+    clamp, nlz_fun = _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos, len_lo, len_hi, amp_pos)
+
+    theta0 = clamp(_gp_init_hyp(components, tt))
+    if len(len_pos) and len_pos[0] == 0 and n_cov >= 2:
+        sd = np.std(yt, ddof=1)
+        best_v = np.inf
+        with np.errstate(divide='ignore'):
+            floor = np.log(0.01 * sd)
+            for log_len in np.linspace(np.log(dt), np.log(span / 2), 16):
+                for phi in (0.2, 0.6, 0.95):
+                    th = theta0.copy()
+                    th[0] = log_len
+                    th[1] = max(np.log(np.sqrt(phi) * sd), floor)
+                    log_noise = max(np.log(np.sqrt((1 - phi) / len(noise_pos)) * sd), floor)
+                    th[noise_pos] = log_noise
+                    th[n_cov] = log_noise
+                    try:
+                        v = nlz_fun(clamp(th))[0]
+                    except np.linalg.LinAlgError:
+                        continue
+                    if np.isfinite(v) and v < best_v:
+                        best_v, theta_start = v, th
+        if np.isfinite(best_v):
+            theta0 = clamp(theta_start)
+
+    theta, nlz_prev = theta0, np.inf
+    try:
+        for _ in range(rounds):
+            theta = _gp_learn_hyperp(tt, yt, cov, nfevals=-max_evals, hyp0=theta, noise_pos=noise_pos,
+                                     alpha_pos=alpha_pos, alpha_cap=alpha_cap,
+                                     len_pos=len_pos, len_lo=len_lo, len_hi=len_hi, amp_pos=amp_pos)
+            nlz = nlz_fun(theta)[0]
+            improved = nlz_prev - nlz
+            nlz_prev = nlz
+            if not improved >= 1e-10 * max(1.0, abs(nlz)):
+                break
+    except np.linalg.LinAlgError:
+        return None, np.nan
+    if not np.isfinite(nlz_prev):
+        return None, np.nan
+    try:
+        polished = _gp_newton_polish(tt, yt, cov, theta, noise_pos, alpha_pos, alpha_cap, len_pos, len_lo, len_hi, amp_pos)
+        nlz_pol = nlz_fun(polished)[0]
+        if np.isfinite(nlz_pol):
+            theta, nlz_prev = polished, nlz_pol
+    except np.linalg.LinAlgError:
+        pass  # keep the unpolished optimum
+    return theta, nlz_prev
+
+
+def _gp_beats_white_noise(nlz: float, yt: np.ndarray, n_kernel_hyp: int) -> bool:
+    """
+    Likelihood-ratio test of the fitted GP against its nested white-noise special case
+    (zero-mean, variance at its maximum-likelihood value): the correlated model is preferred
+    if it improves the negative log marginal likelihood by more than half the 95% chi-squared
+    quantile with ``n_kernel_hyp`` degrees of freedom (the non-noise kernel hyperparameters).
+    """
+    from scipy.stats import chi2
+    n = len(yt)
+    nlz_wn = 0.5 * n * np.log(2 * np.pi * np.mean(yt ** 2)) + 0.5 * n
+    return (nlz_wn - nlz) >= 0.5 * chi2.ppf(0.95, n_kernel_hyp)
+
 
 
 def _gp_noise_pos(components: list) -> list:
@@ -3311,7 +3615,11 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         - ``h_lonN``: the fitted length scale divided by the series length (only for
           ``'covSEiso_covNoise'``).
 
-        All values are NaN if the fit fails.
+        All values are NaN if the fit fails. If the training points show no correlation structure (the
+        fitted model must beat its white-noise special case in a likelihood-ratio test, see
+        :func:`_gp_beats_white_noise`), the length scale (``logh1``, ``h_lonN``) is not identified, and
+        is reported as the spacing of the training points, the bound the data allow; the other
+        outputs approach those of white noise.
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
@@ -3329,14 +3637,20 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     tt = _even_split_points(0, N - 1, npoints, 'floor').astype(float)   # times 0..N-1
     yt = y[tt.astype(int)]
 
-    try:
-        theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt), noise_pos=noise_pos)
-    except np.linalg.LinAlgError:
+    theta, nlz_fit = _gp_fit_converged(tt, yt, cov, components, noise_pos)
+    if theta is None:
         logger.warning('Lack of positive definite matrix for this time series')
         return nan_out
+    # Without correlation structure (the white-noise model is not beaten) the length scale is
+    # not identified; the other outputs approach those of white noise
+    has_structure = _gp_beats_white_noise(nlz_fit, yt, nhps - len(noise_pos))
 
-    loghyper = theta[:nhps]
-    hyp = {'cov': loghyper, 'lik': theta[nhps], 'mean': np.zeros(0)}
+    loghyper = theta[:nhps].copy()
+    # (the noise is reported as the total standard deviation of the observation noise; predictions
+    # use the latent-function model, see _gp_latent)
+    cov_in = cov
+    cov, hyp, log_noise = _gp_latent(components, noise_pos, theta, nhps)
+    loghyper[noise_pos] = log_noise
 
     # Evaluate over the whole space now, predicting at the test times ts
     if N <= 2000:
@@ -3369,13 +3683,14 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         out['nlml'] = np.nan
 
     # Log-hyperparameters
+    bounds = _gp_shape_bounds(components, tt)
     for i in range(nhps):
-        out[f'logh{i + 1}'] = loghyper[i]
+        out[f'logh{i + 1}'] = loghyper[i] if (has_structure or i not in bounds) else bounds[i]
 
     # Give extra output based on length parameter on length of time series
     # (only for the squared exponential plus noise covariance)
     if is_se_noise:
-        out['h_lonN'] = np.exp(loghyper[0]) / N
+        out['h_lonN'] = np.exp(out['logh1']) / N
 
     return out
 
@@ -4447,17 +4762,22 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     zero-mean GP with a Gaussian likelihood is fitted using the covariance function
     ``cov_func``, e.g., (i) a sum of squared exponential and noise terms, or (ii) a sum of
     squared exponential, periodic, and noise terms. The log hyperparameters are found by
-    maximizing the marginal likelihood (at most 50 function evaluations), starting from a
-    data-informed initial guess (:func:`_gp_init_hyp`). Goodness of fit is summarized by the
-    per-point negative log marginal likelihood, the error of the fitted mean, and the GP's
-    predictive standard deviation.
+    maximizing the marginal likelihood to convergence (:func:`_gp_fit_converged`), with the
+    noise standard deviation and signal amplitudes bounded below by 1% of that of the data and
+    the length scales between the sampling interval and the span of the series. The length scales
+    are reported only when the fitted model beats its white-noise special case in a
+    likelihood-ratio test (:func:`_gp_beats_white_noise`), as otherwise they are not identified:
+    they are then the sampling interval, the bound the data allow (periods and shape parameters
+    are then NaN). The other outputs are always reported, and approach those of white noise as the
+    structure vanishes. Goodness of fit is summarized by the per-point
+    negative log marginal likelihood, the error of the fitted mean, and the GP's predictive
+    standard deviation.
 
     Fitting is O(N^3), so the model is fitted to at most ``max_n`` samples from the time
     series, chosen by (i) resampling the time series down to this many points, (ii) taking
     the first ``max_n`` samples, or (iii) taking random samples. Times are the sample indices
     (``squish_or_squash = 1``), so length scales and periods are in samples of the cut
-    series. The output is NaN if the fit fails or if the fitted mean is nearly constant
-    (standard deviation below 0.01).
+    series. The output is NaN if the fit fails.
 
     Parameters
     ----------
@@ -4603,18 +4923,27 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         t = set_time_index(N)
 
     # Learn the hyperparameters (mean-zero process, Gaussian likelihood, exact inference)
-    try:
-        theta = _gp_learn_hyperp(t, y, cov, hyp0=_gp_init_hyp(components, t),
-                                 noise_pos=_gp_noise_pos(components))
-    except np.linalg.LinAlgError:
+    noise_pos = _gp_noise_pos(components)
+    theta, nlz = _gp_fit_converged(t, y, cov, components, noise_pos)
+    if theta is None:
         logger.warning('Lack of positive definite matrix for this time series')
         return np.nan
-    log_hyper = theta[:num_hps]
-    hyp = {'cov': log_hyper, 'lik': theta[num_hps], 'mean': np.zeros(0)}
+    # Is there any correlation structure to fit? If the white-noise model is not beaten, the
+    # length scales (and periods and shape parameters) are not identified: a length scale below
+    # the sampling interval, or a vanishing amplitude, fits as well. A length scale is then
+    # reported as the sampling interval, the bound the data allow. The other outputs are
+    # identified, and approach those of white noise.
+    has_structure = _gp_beats_white_noise(nlz, y, num_hps - len(noise_pos))
+    bounds = _gp_shape_bounds(components, t)
+    log_hyper = theta[:num_hps].copy()
+    # (the noise is reported as the total standard deviation of the observation noise; predictions
+    # use the latent-function model, see _gp_latent)
+    cov, hyp, log_noise = _gp_latent(components, noise_pos, theta, num_hps)
+    log_hyper[noise_pos] = log_noise
 
     out = {}
     for i in range(num_hps):
-        out[f'logh{i + 1}'] = log_hyper[i]
+        out[f'logh{i + 1}'] = log_hyper[i] if (has_structure or i not in bounds) else bounds[i]
 
     # negative log marginal likelihood using the optimized hyperparameters, per point
     out['nlml'] = gp_train(hyp, cov, t, y, want_dnlZ=False)[0] / len(t)
@@ -4624,10 +4953,6 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         mu, S2, _, _ = gp_predict(hyp, cov, t, y, t)
     except np.linalg.LinAlgError:
         return np.nan
-    if np.std(mu, ddof=1) < 0.01:  # hasn't fit the time series well at all -- too constant
-        logger.warning('This time series is not suited to Gaussian Process fitting')
-        return np.nan
-
     # root-mean-square error of the mean function, mu
     out['stde'] = np.sqrt(np.mean((y - mu) ** 2))
     # better to look at the mean distance away in units of std
