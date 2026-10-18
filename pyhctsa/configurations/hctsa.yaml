@@ -1898,19 +1898,17 @@ model_fit:
   garch_compare:
     base_name: garch_compare
     dependencies:
-      - arch
     configs:
-      - {pre_proc: 'ar', zscore: True, exclude: ['bestpLLF', 'bestqLLF', 'maxAIC', 'meanAIC', 'meanBIC', 'meanLLF', 'minAIC', 'minBIC', 'minLLF']}   # MF_GARCHcompare(x_z,'ar',1:3,1:3)
+      - {pre_proc: 'ar', zscore: True, exclude: ['hasStructure', 'Ks_vary_p', 'Ks_vary_q', 'max_maxarchps', 'max_maxlbqps', 'max_meanlbqps', 'maxAIC', 'maxBIC', 'maxK', 'mean_maxarchps', 'mean_maxlbqps', 'mean_meanarchps', 'mean_meanlbqps', 'meanAIC', 'meanBIC', 'meanK', 'meanLLF', 'min_maxarchps', 'min_maxlbqps', 'min_meanlbqps', 'minAIC', 'minBIC', 'minK', 'minLLF']}   # MF_GARCHcompare(x_z,'ar',1:3,1:3)
     legacy_name: MF_GARCHcompare
     ordered_args: ['pre_proc']
 
   garch_fit:
     base_name: garch_fit
     dependencies:
-      - arch
     configs:
-      - {zscore: True, exclude: ['aic', 'bic', 'constant', 'constanterr', 'distDoF', 'engle_pval_stde_1', 'GARCHerr_1', 'leverage', 'leverageerr', 'offset', 'summaryexitflag']}   # MF_GARCHfit(x_z,'ar',1,1)
-      - {model_type: 'gjr', innovation_dist: 'gaussian', zscore: True, select: ['leverage', 'leverageerr']}   # MF_GARCHfit(x_z,'ar',1,1,'default','gjr','gaussian')
+      - {zscore: True, exclude: ['aic', 'ARCHerr_1', 'bic', 'constant', 'constanterr', 'distDoF', 'engle_pval_stde_1', 'engle_pval_stde_10', 'GARCHerr_1', 'hasStructure', 'lbq_max_diff_p', 'lbq_mean_diff_p', 'lbq_pval_stde_10', 'lbq_pval_stde_5', 'leverage', 'leverageerr', 'maxenglepval_stde', 'maxlbqpval_stde2', 'meansigma', 'minenglepval_stde', 'minlbqpval_stde2', 'offset', 'rangesigma', 'stdsigma', 'summaryexitflag', 'uncondVar', 'zres_ac1', 'zres_ac2', 'zres_ac3', 'zres_ftbth', 'zres_meane', 'zres_minsbc', 'zres_popt', 'zres_propbth', 'zres_stde', 'zres_swm', 'zres_taurat']}   # MF_GARCHfit(x_z,'ar',1,1)
+      - {model_type: 'gjr', innovation_dist: 'gaussian', zscore: True, select: ['leverage']}   # MF_GARCHfit(x_z,'ar',1,1,'default','gjr','gaussian')
       - {model_type: 'garch', innovation_dist: 't', zscore: True, select: ['distDoF']}   # MF_GARCHfit(x_z,'ar',1,1,'default','garch','t')
     legacy_name: MF_GARCHfit
     ordered_args: ['model_type', 'innovation_dist']

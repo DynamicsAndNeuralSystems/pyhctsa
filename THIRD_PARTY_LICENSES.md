@@ -112,7 +112,7 @@ No code from these is copied; they are called through their public interfaces an
 | [statsmodels](https://www.statsmodels.org) | time-series models, including exponential smoothing (the design of *hctsa*'s `MF_ExpSmoothing` is credited to S. Arora above) | BSD-3-Clause |
 | [numba](https://numba.pydata.org) | compiled inner loops | BSD-2-Clause |
 | [scikit-learn](https://scikit-learn.org) | PCA, Gaussian mixtures, neighbor searches and silhouette scores | BSD-3-Clause |
-| [arch](https://github.com/bashtage/arch) | GARCH models, Phillips-Perron and variance-ratio tests | NCSA (University of Illinois/NCSA Open Source License) |
+| [arch](https://github.com/bashtage/arch) | Phillips-Perron and variance-ratio tests | NCSA (University of Illinois/NCSA Open Source License) |
 | [PyWavelets](https://pywavelets.readthedocs.io) | discrete wavelet transforms (a cut-down `cwt` is also bundled, section 2) | MIT |
 | [rich](https://github.com/Textualize/rich) | progress bars | MIT |
 | [pathos](https://github.com/uqfoundation/pathos) | process-based parallel computation | BSD-3-Clause |

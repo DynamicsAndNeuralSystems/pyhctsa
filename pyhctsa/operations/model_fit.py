@@ -15,6 +15,7 @@ from lmfit.models import SineModel
 import logging
 logger = logging.getLogger('pyhctsa')
 
+from . import _garch
 from ._ar_stepwise import _arfit, _arfit_residuals, _arfit_modes
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import simple_fit
@@ -679,79 +680,51 @@ def _lbq_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
         return np.asarray(acorr_ljungbox(x, lags=max_lag, return_df=True)['lb_pvalue'], dtype=float)
 
 
-def _garch_estimate(y: np.ndarray, P: int, Q: int, model_type: str = 'garch',
-                    innovation_dist: str = 'gaussian') -> dict:
+def _garch_models(D: _garch.Data, P: int, Q: int, gjr: bool, tdist: bool) -> dict:
     """
-    Maximum-likelihood fit of a zero-mean GARCH, GJR-GARCH or EGARCH(P, Q) conditional
-    variance model with a free constant, using the ``arch`` package.
+    Fit the requested model and decide whether the series has any conditional heteroskedasticity.
 
-    ``P`` is the GARCH degree (lagged conditional variances) and ``Q`` the ARCH degree (lagged
-    squared innovations; ``arch``'s ``p``). The presample variance and squared innovation are
-    the mean of the squared series, and the covariance of the estimates is the inverse of the
-    outer product of the per-observation score vectors (the outer-product-of-gradients
-    estimator).
-
-    Returns a dict with the parameters in the order ``constant``, ``garch``, ``arch``,
-    ``leverage``, ``dof``, their covariance matrix ``cov`` (in the same order), the
-    log-likelihood ``llf``, the conditional variances ``sigma2``, and ``exitflag``.
-
-    Notes
-    -----
-    T. Bollerslev, J. Econometrics 31 (1986) 307-327 (GARCH); L. R. Glosten, R. Jagannathan
-    and D. E. Runkle, J. Finance 48 (1993) 1779-1801 (GJR); D. B. Nelson, Econometrica 59
-    (1991) 347-370 (EGARCH).
+    Returns a dict with the fit that is reported (``fit``: the maximum-likelihood fit if the
+    variance model beats constant variance in the structure test, otherwise the constant-variance
+    fit), the maximum-likelihood fit itself (``ml``), ``has_structure``, ``lr`` (the scaled likelihood-ratio statistic), the Gaussian fit
+    (``gauss``) and, for t innovations, the degrees of freedom (``dof``).
     """
-    from arch import arch_model
-    from statsmodels.tools.numdiff import approx_fprime
-    dist = {'gaussian': 'normal', 't': 't'}.get(innovation_dist)
-    if dist is None:
-        raise ValueError(f"Unknown innovationDist '{innovation_dist}' (should be 'gaussian' or 't')")
-    if model_type not in ('garch', 'gjr', 'egarch'):
-        raise ValueError(f"Unknown modelType '{model_type}' (should be 'garch', 'gjr', or 'egarch')")
-    asym = model_type in ('gjr', 'egarch')
-    model = arch_model(y, mean='Zero', vol='EGARCH' if model_type == 'egarch' else 'GARCH',
-                       p=Q, o=Q if asym else 0, q=P, dist=dist, rescale=False)
-    backcast = np.mean(y ** 2)  # (arch takes the log itself for an EGARCH backcast)
-    res = model.fit(disp='off', show_warning=False, backcast=backcast)
-    params = res.params
-    if not np.all(np.isfinite(params.values)):
-        raise ValueError('GARCH fit failed (non-finite parameter estimates)')
-
-    # Standard errors: outer product of gradients of the per-observation log-likelihood
-    resids = model.resids(model.starting_values())
-    kwargs = dict(sigma2=np.zeros(len(y)), backcast=model.volatility.backcast_transform(backcast),
-                  var_bounds=model.volatility.variance_bounds(resids), individual=True)
-    scores = approx_fprime(params.values, model._loglikelihood, kwargs=kwargs)
-    cov = np.linalg.pinv(scores.T @ scores)
-
-    # Reorder from arch's (omega, alpha, gamma, beta, nu) to (constant, GARCH, ARCH, leverage, DoF)
-    names = list(params.index)
-    order = ([names.index('omega')]
-             + [names.index(f'beta[{i}]') for i in range(1, P + 1)]
-             + [names.index(f'alpha[{i}]') for i in range(1, Q + 1)]
-             + ([names.index(f'gamma[{i}]') for i in range(1, Q + 1)] if asym else [])
-             + ([names.index('nu')] if dist == 't' else []))
-    p = params.values[order]
-    return {'constant': p[0], 'garch': p[1:1 + P], 'arch': p[1 + P:1 + P + Q],
-            'leverage': p[1 + P + Q:1 + P + 2 * Q] if asym else np.array([]),
-            'dof': p[-1] if dist == 't' else np.nan,
-            'cov': cov[np.ix_(order, order)], 'llf': float(res.loglikelihood),
-            'sigma2': np.asarray(res.conditional_volatility) ** 2,
-            'exitflag': 1 if res.convergence_flag == 0 else 0}
+    gauss = _garch.mle(D, P, Q, gjr, False)
+    null_g = _garch.null_fit(D, False)
+    if tdist:
+        S_t = _garch.Spec(P, Q, gjr, True)
+        alt = _garch.mle(D, P, Q, gjr, True, extra_starts=_garch.tail_starts(gauss, S_t))
+        null = _garch.null_fit(D, True)
+    else:
+        alt, null = gauss, null_g
+    if not (np.isfinite(alt['llf']) and np.all(np.isfinite(alt['theta']))):
+        raise ValueError('GARCH fit failed (non-finite estimates)')
+    lr, has_structure = _garch.structure_test(alt, null, D, gjr)
+    fit = alt if has_structure else null
+    out = dict(fit=fit, ml=alt, has_structure=has_structure, lr=lr, gauss=gauss)
+    if tdist:
+        # Student-t against Gaussian innovations with the same variance model
+        lr_nu = 2 * ((alt['llf'] - gauss['llf']) if has_structure else (null['llf'] - null_g['llf']))
+        kappa = fit['theta'][fit['spec'].ik]
+        out['dof'] = 1 / kappa if lr_nu >= _garch.TAIL_LR else _garch.NU_MAX
+    return out
 
 
 def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
               random_seed: Union[int, str, None] = None, model_type: str = 'garch',
               innovation_dist: str = 'gaussian') -> dict:
     """
-    Fits a GARCH-family model to the series and reports the fit and the standardized residuals.
+    A GARCH model of the changing variance of the series, and what it leaves in the residuals.
 
     The series is whitened and z-scored, so the model is of the variance around a zero mean
-    (hctsa's ``MF_GARCHfit``; the models are fitted with the ``arch`` package). Statistics are the fitted parameters and their errors, the
-    log-likelihood and information criteria, the persistence of the fitted variance process,
-    summaries of the conditional variance series, and how well the standardized residuals pass
-    tests for remaining ARCH effects (Engle's ARCH test and the Ljung-Box Q-test) compared to
-    the series itself, and :func:`residual_analysis` of the standardized residuals.
+    (hctsa's ``MF_GARCHfit``). A GARCH, GJR-GARCH or t-GARCH(P, Q) model is fitted by maximum
+    likelihood (:func:`pyhctsa.operations._garch.mle`), unless the series shows no evidence of
+    conditional heteroskedasticity, in which case the constant-variance model is reported.
+    Statistics are the fitted parameters, the log-likelihood and information criteria, the
+    persistence of the fitted variance process, summaries of the conditional variance series, and
+    how well the standardized residuals pass tests for remaining ARCH effects (Engle's ARCH test
+    and the Ljung-Box Q-test) compared to the series itself, and :func:`residual_analysis` of the
+    standardized residuals.
 
     Parameters
     ----------
@@ -771,11 +744,10 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
         The seed of the random Gaussian draws used by the whitening (``rmgd``), as hctsa's
         ``BF_RandomSeed``. Default is ``None`` (seed 0). The draws come from the portable
         generator (:func:`pyhctsa.robust.bf_random`), so they are hctsa's.
-    model_type : {'garch', 'gjr', 'egarch'}, optional
-        The conditional variance model: ``'garch'`` (default, symmetric response to shocks),
+    model_type : {'garch', 'gjr'}, optional
+        The conditional variance model: ``'garch'`` (default, symmetric response to shocks) or
         ``'gjr'`` (GJR-GARCH, adds a leverage term so negative and positive shocks can have
-        different effects on variance) or ``'egarch'`` (exponential GARCH, models the log
-        variance, also asymmetric).
+        different effects on variance).
     innovation_dist : {'gaussian', 't'}, optional
         The assumed innovation distribution: ``'gaussian'`` (default) or ``'t'`` (Student's t,
         which estimates a degrees-of-freedom parameter to capture fat tails).
@@ -783,20 +755,23 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     Returns
     -------
     dict
+        - ``hasStructure``: 1 if the fitted variance model beats constant variance in the
+          structure test, otherwise 0
         - ``constant``, ``constanterr``: the constant term of the variance equation and its error
         - ``offset``: the mean offset of the model (0 for a z-scored series)
         - ``GARCH_i``, ``GARCHerr_i`` (i = 1..P), ``ARCH_i``, ``ARCHerr_i`` (i = 1..Q): the
-          coefficients of the lagged variances and innovations, and their errors (also for a
-          coefficient at its lower bound of 0)
-        - ``leverage``, ``leverageerr``: the leverage coefficient and its error (``'gjr'`` and
-          ``'egarch'`` only, otherwise NaN)
-        - ``distDoF``: the degrees of freedom of a Student's t distribution (otherwise NaN)
-        - ``LLF``, ``aic``, ``bic``: the log-likelihood, AIC and BIC per observation
+          coefficients of the lagged variances and innovations, and their errors (0 and NaN
+          without structure)
+        - ``leverage``, ``leverageerr``: the leverage coefficient and its error (``'gjr'`` only,
+          otherwise NaN; 0 and NaN without structure)
+        - ``distDoF``: the degrees of freedom of a Student's t distribution (otherwise NaN; the
+          upper bound, 100, when the t does not fit better than a Gaussian)
+        - ``LLF``, ``aic``, ``bic``: the log-likelihood, AIC and BIC per observation, of the
+          maximum-likelihood fit
         - ``summaryexitflag``: 1 if the optimizer converged, otherwise 0
         - ``persistence``: the sum of the ARCH and GARCH coefficients (plus half the leverage
-          coefficient for ``'gjr'``; NaN for ``'egarch'``)
-        - ``uncondVar``: the implied long-run variance (NaN if persistence is 0.999 or more,
-          or for ``'egarch'``)
+          coefficient for ``'gjr'``)
+        - ``uncondVar``: the implied long-run variance (NaN if persistence is 0.999 or more)
         - ``maxsigma``, ``minsigma``, ``rangesigma``, ``stdsigma``, ``meansigma``: summaries of
           the conditional variance series
         - ``engle_mean_diff_p``, ``engle_max_diff_p``, ``lbq_mean_diff_p``, ``lbq_max_diff_p``:
@@ -816,15 +791,42 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
 
     Notes
     -----
-    The models are fitted by maximum likelihood (:func:`_garch_estimate`, ``arch`` package);
-    poorly identified fits (series with no volatility clustering, where the coefficients sit at
-    their bounds) can stop at different points of a flat likelihood and give very different
-    coefficients (e.g. ``GARCH_1`` near 0 or near 1) and errors, while the log-likelihood is
-    well determined. The presample variance is the mean of the squared series and the errors
-    come from the outer product of gradients.
+    The estimator is specified in :mod:`pyhctsa.operations._garch`: a deterministic grid start,
+    a log-barrier Newton method to convergence within explicit bounds (all coefficients
+    non-negative, persistence at most 0.9999), and a presample variance equal to the mean
+    squared series. Without conditional heteroskedasticity the ARCH and GARCH coefficients are
+    not identified (the likelihood is flat in the GARCH coefficient), so the variance model is
+    reported only if its likelihood-ratio statistic against constant variance (for Gaussian
+    innovations rescaled by ``2 / (kurtosis - 1)`` of the standardized residuals) is at least 4
+    (6 for GJR). The null distribution of the statistic is not chi-squared because a parameter
+    lies on the boundary and another is not identified under the null (D. W. K. Andrews,
+    Econometrica 69, 683-734 (2001), DOI 10.1111/1468-0262.00210); the critical values were
+    calibrated by simulation of white noise (3% to 6% of white-noise series of 100 to 10000 samples
+    exceed 4, and about 5% exceed 6 for GJR).
+    Otherwise the constant-variance model is reported: the ARCH, GARCH, leverage coefficients
+    and persistence are 0, the conditional variance is the mean squared series, and the
+    standard errors are NaN. For t innovations the degrees of freedom are reported only if the t
+    fits significantly better than a Gaussian (the likelihood-ratio statistic, whose null is a
+    50:50 mixture of chi-squared(0) and chi-squared(1) because a Gaussian is the limit of
+    infinite degrees of freedom, is above 2.7055, the 5% point); otherwise the upper bound, 100.
+    The constant of the variance equation is bounded below by 1e-6 (the variance of 0.1% of a
+    standard deviation): for series with long stretches of (near) zero values the Gaussian
+    likelihood has no maximum, because the variance can shrink without limit where the series is
+    zero, so their log-likelihood and conditional variance depend on that bound (the coefficients
+    much less).
+
+    T. Bollerslev, J. Econometrics 31 (1986) 307-327 (DOI 10.1016/0304-4076(86)90063-1);
+    L. R. Glosten, R. Jagannathan and D. E. Runkle, J. Finance 48 (1993) 1779-1801
+    (DOI 10.1111/j.1540-6261.1993.tb05128.x); T. Bollerslev, Rev. Econ. Stat. 69 (1987)
+    542-547 (DOI 10.2307/1925546).
     """
     y = np.asarray(y, dtype=float).ravel()
     P, Q = int(P), int(Q)
+    if model_type not in ('garch', 'gjr'):
+        raise ValueError(f"Unknown modelType '{model_type}' (should be 'garch' or 'gjr')")
+    if innovation_dist not in ('gaussian', 't'):
+        raise ValueError(f"Unknown innovationDist '{innovation_dist}' (should be 'gaussian' or 't')")
+    gjr, tdist = model_type == 'gjr', innovation_dist == 't'
     out = {}
 
     # (1) Whiten and z-score
@@ -837,58 +839,59 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     lbq_y2 = _lbq_test_pvalues(y ** 2)
 
     # (3) Fit the model
+    D = _garch.Data(y)
     try:
-        fit = _garch_estimate(y, P, Q, model_type, innovation_dist)
+        res = _garch_models(D, P, Q, gjr, tdist)
     except (ValueError, np.linalg.LinAlgError, FloatingPointError) as err:
         raise ValueError('GARCH fit failed (data does not allow a valid GARCH model '
                          f'to be estimated): {err}') from err
-    errors = np.sqrt(np.abs(np.diag(fit['cov'])))
-    llf = fit['llf']
-    garch_c, arch_c, lev_c = fit['garch'], fit['arch'], fit['leverage']
+    fit, has = res['fit'], res['has_structure']
+    S, theta = fit['spec'], fit['theta']
 
     # (4) Statistics on the fit
-    out['constant'] = fit['constant']
-    out['constanterr'] = errors[0]
+    out['hasStructure'] = float(has)
     out['offset'] = 0.0
-    for i in range(1, P + 1):
-        out[f'GARCH_{i}'] = garch_c[i - 1]
-        # (a coefficient at its lower bound of 0 keeps its outer-product-of-gradients error, the
-        # limit of the error as the coefficient goes to 0)
-        out[f'GARCHerr_{i}'] = errors[i]
-    for i in range(1, Q + 1):
-        out[f'ARCH_{i}'] = arch_c[i - 1]
-        out[f'ARCHerr_{i}'] = errors[P + i]
-    if lev_c.size > 0:
-        out['leverage'] = lev_c[0]
-        out['leverageerr'] = errors[1 + P + Q]
+    out['constant'] = theta[0]
+    if has:
+        errors = _garch.opg_errors(theta, D, S)
+        out['constanterr'] = errors[0]
+        for i in range(1, P + 1):
+            out[f'GARCH_{i}'] = theta[S.ib[i - 1]]
+            out[f'GARCHerr_{i}'] = errors[S.ib[i - 1]]
+        for i in range(1, Q + 1):
+            out[f'ARCH_{i}'] = theta[S.ia[i - 1]]
+            out[f'ARCHerr_{i}'] = errors[S.ia[i - 1]]
+        lev = theta[S.ig[0]] if gjr else np.nan
+        out['leverage'] = lev
+        out['leverageerr'] = errors[S.ig[0]] if gjr else np.nan
+        persistence = (np.sum(theta[S.ib]) + np.sum(theta[S.ia])
+                       + (np.sum(theta[S.ig]) / 2 if gjr else 0.0))
     else:
-        out['leverage'] = np.nan
+        out['constanterr'] = np.nan
+        for i in range(1, P + 1):
+            out[f'GARCH_{i}'], out[f'GARCHerr_{i}'] = 0.0, np.nan
+        for i in range(1, Q + 1):
+            out[f'ARCH_{i}'], out[f'ARCHerr_{i}'] = 0.0, np.nan
+        out['leverage'] = 0.0 if gjr else np.nan
         out['leverageerr'] = np.nan
-    out['distDoF'] = fit['dof'] if innovation_dist == 't' else np.nan
+        persistence = 0.0
+    out['distDoF'] = res['dof'] if tdist else np.nan
 
-    out['LLF'] = llf / n  # log-likelihood per observation
-    out['summaryexitflag'] = fit['exitflag']
-
-    n_params = int(np.sum(np.any(fit['cov'] != 0, axis=0)))
-    out['aic'] = (-2 * llf + 2 * n_params) / n
-    out['bic'] = (-2 * llf + n_params * np.log(n)) / n
-
-    # Persistence of the variance process and the implied unconditional variance
-    if model_type == 'garch':
-        persistence = np.sum(garch_c) + np.sum(arch_c)
-    elif model_type == 'gjr':
-        persistence = np.sum(garch_c) + np.sum(arch_c) + np.sum(lev_c) / 2
-    else:  # egarch: no simple coefficient sum
-        persistence = np.nan
+    # (the likelihood of the fitted model is determined even where its parameters are not)
+    ml = res['ml']
+    out['LLF'] = ml['llf'] / n  # log-likelihood per observation
+    out['summaryexitflag'] = 1.0 if ml['dec'] < 1e-8 else 0.0
+    out['aic'] = (-2 * ml['llf'] + 2 * ml['k']) / n
+    out['bic'] = (-2 * ml['llf'] + ml['k'] * np.log(n)) / n
     out['persistence'] = persistence
-    out['uncondVar'] = fit['constant'] / (1 - persistence) if persistence < 0.999 else np.nan
+    out['uncondVar'] = theta[0] / (1 - persistence) if persistence < 0.999 else np.nan
 
     # Sigmas, the time series of conditional variances
-    sigmas = fit['sigma2']
+    sigmas = fit['h']
     out['maxsigma'] = np.max(sigmas)
     out['minsigma'] = np.min(sigmas)
-    out['rangesigma'] = np.max(sigmas) - np.min(sigmas)
-    out['stdsigma'] = np.std(sigmas, ddof=1)
+    out['rangesigma'] = np.max(sigmas) - np.min(sigmas) if has else 0.0
+    out['stdsigma'] = np.std(sigmas, ddof=1) if has else 0.0   # (exactly 0 for constant variance)
     out['meansigma'] = np.mean(sigmas)
 
     # Check the standardized residuals: residuals (mean process minus data)
@@ -933,7 +936,11 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
     z-scored) time series (hctsa's ``MF_GARCHcompare``) and returns statistics on the goodness
     of fit across a range of p (the number of lagged variances) and q (the number of lagged
     squared innovations): summaries across the grid of fitted models, and the orders that fit
-    best. See :func:`garch_fit` for how the models are fitted.
+    best. The models are fitted as in :func:`garch_fit`, in order of increasing p and q, each
+    started also from its smaller neighbors (so the log-likelihood never decreases with an order).
+    If the GARCH(min p, min q) model does not beat constant variance in the structure test of
+    :func:`garch_fit`, the constant term and the residual statistics are those of constant variance
+    (the likelihood and information criteria are always those of the fitted models).
 
     Parameters
     ----------
@@ -952,10 +959,11 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
 
     Returns
     -------
-    dict or float
-        NaN if no model could be fitted. Otherwise, statistics across the (p, q) models that
-        fitted (the log-likelihood, AIC and BIC are per observation):
+    dict
+        Statistics across the (p, q) models (the log-likelihood, AIC and BIC are per
+        observation):
 
+        - ``hasStructure``: 1 if the structure test of :func:`garch_fit` is passed, otherwise 0
         - ``minLLF``, ``maxLLF``, ``meanLLF``: the log-likelihood
         - ``minBIC``, ``maxBIC``, ``meanBIC``: the Bayesian information criterion
         - ``minAIC``, ``maxAIC``, ``meanAIC``: Akaike's information criterion
@@ -967,52 +975,63 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
         - ``min_meanlbqps``, ``max_meanlbqps``, ``mean_meanlbqps``: across models, the mean
           p-value of the Ljung-Box Q-test on the squared standardized residuals
         - ``min_maxlbqps``, ``max_maxlbqps``, ``mean_maxlbqps``: the same for the maximum
-        - ``bestpLLF``, ``bestqLLF``: the orders p and q of the model with the maximum
-          log-likelihood
         - ``bestpAIC``, ``bestqAIC``, ``bestpBIC``, ``bestqBIC``: the orders of the models with
-          the minimum AIC and BIC
+          the minimum AIC and BIC, among the grid and the constant-variance model (orders 0, 0)
         - ``Ks_vary_p``, ``Ks_vary_q``: how much the constant term varies with p and with q: the
           standard deviation of the constant across one order, averaged over the other
     """
     y = np.asarray(y, dtype=float).ravel()
-    pr = [int(v) for v in np.atleast_1d(pr)]
-    qr = [int(v) for v in np.atleast_1d(qr)]
+    pr = sorted(int(v) for v in np.atleast_1d(pr))
+    qr = sorted(int(v) for v in np.atleast_1d(qr))
 
     y = z_score(_whiten(y, pre_proc, random_seed))
     n = len(y)
+    D = _garch.Data(y)
+    null = _garch.null_fit(D, False)
 
     shape = (len(pr), len(qr))
+    fits = {}
+    for i, p in enumerate(pr):
+        for j, q in enumerate(qr):
+            S = _garch.Spec(p, q)
+            warm = [_garch.embed(fits[key]['theta'], fits[key]['spec'], S)
+                    for key in ((p, qr[j - 1]) if j else None, (pr[i - 1], q) if i else None)
+                    if key is not None and key in fits]
+            try:
+                fits[(p, q)] = _garch.mle(D, p, q, False, False, extra_starts=warm,
+                                          grid=(i == 0 and j == 0), npolish=2)
+            except (ValueError, np.linalg.LinAlgError, FloatingPointError):
+                logger.warning(f'Bad fit at p = {p}, q = {q}')
+    first = fits.get((pr[0], qr[0]))
+    if first is None:
+        logger.warning('None of the ARCH or GARCH models could be fit.')
+        return np.nan
+    lr, has = _garch.structure_test(first, null, D)
+
     llfs, aics, bics, ks, mean_arch, max_arch, mean_lbq, max_lbq = (np.full(shape, np.nan) for _ in range(8))
     for i, p in enumerate(pr):
         for j, q in enumerate(qr):
-            try:
-                fit = _garch_estimate(y, p, q)
-            except (ValueError, np.linalg.LinAlgError, FloatingPointError):
-                logger.warning(f'Bad fit at p = {p}, q = {q}')
-                continue  # didn't fit successfully; everything stays NaN
-            n_params = int(np.sum(np.any(fit['cov'] != 0, axis=0)))
-            if n_params < p + q + 1:
-                logger.warning(f'Bad fit at p = {p}, q = {q}')
+            ml = fits.get((p, q))
+            if ml is None:
                 continue
-            llfs[i, j] = fit['llf']
-            aics[i, j] = -2 * fit['llf'] + 2 * n_params
-            bics[i, j] = -2 * fit['llf'] + n_params * np.log(n)
-            ks[i, j] = fit['constant']
-            stde = (0.0 - y) / np.sqrt(fit['sigma2'])
+            # (the likelihood and information criteria are those of the maximum-likelihood fit;
+            # the constant and the residual tests those of the reported fit)
+            fit = ml if has else null
+            llfs[i, j] = ml['llf']
+            aics[i, j] = -2 * ml['llf'] + 2 * ml['k']
+            bics[i, j] = -2 * ml['llf'] + ml['k'] * np.log(n)
+            ks[i, j] = fit['theta'][0]
+            stde = y / np.sqrt(fit['h'])
             engle = _arch_test_pvalues(stde)
             lbq = _lbq_test_pvalues(stde ** 2)
             mean_arch[i, j], max_arch[i, j] = np.mean(engle), np.max(engle)
             mean_lbq[i, j], max_lbq[i, j] = np.mean(lbq), np.max(lbq)
 
-    if np.all(np.isnan(llfs)):
-        logger.warning('None of the ARCH or GARCH models could be fit.')
-        return np.nan
-
     # Log-likelihoods and information criteria per observation
-    llfs, aics, bics = llfs / n, aics / n, bics / n
+    llf_n, aic_n, bic_n = llfs / n, aics / n, bics / n
 
-    out = {}
-    for name, values in (('LLF', llfs), ('BIC', bics), ('AIC', aics), ('K', ks)):
+    out = {'hasStructure': float(has)}
+    for name, values in (('LLF', llf_n), ('BIC', bic_n), ('AIC', aic_n), ('K', ks)):
         out[f'min{name}'] = np.nanmin(values)
         out[f'max{name}'] = np.nanmax(values)
         out[f'mean{name}'] = np.nanmean(values)
@@ -1022,12 +1041,17 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
         out[f'max_{name}'] = np.nanmax(values)
         out[f'mean_{name}'] = np.nanmean(values)
 
-    # The orders of the best models (ties go to the first in column-major order)
-    for name, values, pick in (('LLF', llfs, np.nanargmax), ('AIC', aics, np.nanargmin),
-                               ('BIC', bics, np.nanargmin)):
-        a, b = np.unravel_index(pick(values.ravel(order='F')), shape, order='F')
-        out[f'bestp{name}'] = pr[a]
-        out[f'bestq{name}'] = qr[b]
+    # The orders of the best models, among the grid and the constant-variance model (0, 0)
+    # (ties go to the smaller model: (0, 0) first, then column-major order)
+    null_aic, null_bic = -2 * null['llf'] + 2 * null['k'], -2 * null['llf'] + null['k'] * np.log(n)
+    for name, values, null_value in (('AIC', aics, null_aic), ('BIC', bics, null_bic)):
+        best, bp, bq = null_value, 0, 0
+        for j, q in enumerate(qr):
+            for i, p in enumerate(pr):
+                if values[i, j] < best:
+                    best, bp, bq = values[i, j], p, q
+        out[f'bestp{name}'] = bp
+        out[f'bestq{name}'] = bq
 
     # How much the constant varies with each order
     def _std_omitnan(values):
@@ -1037,6 +1061,7 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
     out['Ks_vary_p'] = np.nanmean(_std_omitnan(ks))
     out['Ks_vary_q'] = np.nanmean(_std_omitnan(ks.T))
     return out
+
 
 def _n4_fpe(loss: float, n_order: int, n_obs: int) -> float:
     """
