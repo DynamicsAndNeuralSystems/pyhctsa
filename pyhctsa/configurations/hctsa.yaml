@@ -132,17 +132,17 @@ correlation:
     base_name: add_noise
     dependencies:
     configs:
-      - {tau: 1,   ami_method: 'quantiles', extra_param: 10, zscore: True, exclude: ['fitexpadjr2']}
-      - {tau: 1,   ami_method: 'even',      extra_param: 10, zscore: True, exclude: ['fitexpadjr2']}
-      - {tau: 1,   ami_method: 'std1',      extra_param: 10, zscore: True, exclude: ['fitexpadjr2']}
-      - {tau: 1,   ami_method: 'gaussian',                   zscore: True, exclude: ['fitexpadjr2', 'meanch']}
-      - {tau: 1,   ami_method: 'kraskov1',  extra_param: 4,  zscore: True, exclude: ['fitexpadjr2']}
+      - {tau: 1,   ami_method: 'quantiles', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'quantiles',10,'default',10)
+      - {tau: 1,   ami_method: 'even',      extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'even',10,'default',10)
+      - {tau: 1,   ami_method: 'std1',      extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'std1',10,'default',10)
+      - {tau: 1,   ami_method: 'gaussian',                   num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'meanch', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'gaussian',[],'default',10)
+      - {tau: 1,   ami_method: 'kraskov1',  extra_param: 4,  num_draws: 5, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'kraskov1','4','default',5)
 
-      - {tau: 'ac', ami_method: 'gaussian',                   zscore: True, exclude: ['fitexpadjr2']}
-      - {tau: 'ac1e', ami_method: 'even', extra_param: 10, zscore: True, exclude: ['fitexpadjr2']}   # CO_AddNoise(x_z,'ac1e','even',10,'default')
-      - {tau: 'ac1e', ami_method: 'kraskov1', extra_param: 4, zscore: True, exclude: ['fitexpadjr2']}   # CO_AddNoise(x_z,'ac1e','kraskov1','4','default')
-      - {tau: 'ac1e', ami_method: 'quantiles', extra_param: 10, zscore: True, exclude: ['fitexpadjr2']}   # CO_AddNoise(x_z,'ac1e','quantiles',10,'default')
-      - {tau: 'ac1e', ami_method: 'std1', extra_param: 10, zscore: True, exclude: ['fitexpadjr2']}   # CO_AddNoise(x_z,'ac1e','std1',10,'default')
+      - {tau: 'ac', ami_method: 'gaussian',                   num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac','gaussian',[],'default',10)
+      - {tau: 'ac1e', ami_method: 'even', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac1e','even',10,'default',10)
+      - {tau: 'ac1e', ami_method: 'kraskov1', extra_param: 4, num_draws: 5, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac1e','kraskov1','4','default',5)
+      - {tau: 'ac1e', ami_method: 'quantiles', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac1e','quantiles',10,'default',10)
+      - {tau: 'ac1e', ami_method: 'std1', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac1e','std1',10,'default',10)
     legacy_name: CO_AddNoise
     ordered_args: ['tau', 'ami_method', 'extra_param']
 
@@ -2064,7 +2064,7 @@ surrogates:
     base_name: surrogate_test
     dependencies:
     configs:
-      - {the_test_stat: [['amikraskov1', 'fmmikraskov', 'o3', 'tc3']], zscore: True, exclude: ['tc3_mediqr']}   # SD_SurrogateTest(x_z,'RP',99,[],{'amikraskov1','fmmikraskov','o3','tc3'},'default')
+      - {the_test_stat: [['amikraskov1', 'o3', 'tc3']], zscore: True, exclude: ['tc3_mediqr']}   # SD_SurrogateTest(x_z,'RP',99,[],{'amikraskov1','o3','tc3'},'default')
     legacy_name: SD_SurrogateTest
     ordered_args: ['surr_meth', 'num_surrs', 'the_test_stat']
 
@@ -2190,7 +2190,7 @@ nonlinearity:
     base_name: dimensions
     dependencies:
     configs:
-      - {embed_params: [['ac1e', ['fnn', 0.05]]], zscore: True, exclude: ['bc_lfitmeansqdev1', 'bc_mindiff', 'bc_minm1', 'bc_minm2', 'bc_minm3', 'bc_minmmax', 'bc_range1', 'bc_range2', 'bc_range3', 'bc_rangemmax', 'co_lfitb1', 'co_lfitb2', 'co_lfitb3', 'co_lfitm1', 'co_lfitm2', 'co_lfitm3', 'co_lfitmeansqdev1', 'co_lfitmeansqdev2', 'co_lfitmeansqdev3', 'co_lfitmmax', 'co_minscalingexp', 'co_range1', 'co_range2', 'co_range3', 'co_rangemmax', 'scr_bc_m1_meanabsres', 'scr_bc_m2_meanabsres', 'scr_bc_m3_meanabsres', 'scr_bc_mopt_meanabsres', 'scr_co_m1_logrmax', 'scr_co_m1_logrmin', 'scr_co_m1_logrrange', 'scr_co_m1_meanabsres', 'scr_co_m1_minbad', 'scr_co_m1_pgone', 'scr_co_m2_logrmin', 'scr_co_m2_meanabsres', 'scr_co_m2_minbad', 'scr_co_m2_pgone', 'scr_co_m3_logrmax', 'scr_co_m3_meanabsres', 'scr_co_m3_minbad', 'scr_co_m3_pgone', 'scr_co_mopt_meanabsres', 'scr_co_mopt_scaling_exp']}   # NL_Dimensions(x_z,50,{'ac1e',{'fnn',0.05}})
+      - {embed_params: [['ac1e', ['fnn', 0.05]]], thwin: [['ac', 1]], zscore: True, exclude: ['bc_lfitmeansqdev1', 'bc_mindiff', 'bc_minm1', 'bc_minm2', 'bc_minm3', 'bc_minmmax', 'bc_range1', 'bc_range2', 'bc_range3', 'bc_rangemmax', 'co_lfitb1', 'co_lfitb2', 'co_lfitb3', 'co_lfitm1', 'co_lfitm2', 'co_lfitm3', 'co_lfitmeansqdev1', 'co_lfitmeansqdev2', 'co_lfitmeansqdev3', 'co_lfitmmax', 'co_minscalingexp', 'co_range1', 'co_range2', 'co_range3', 'co_rangemmax', 'scr_bc_m1_meanabsres', 'scr_bc_m2_meanabsres', 'scr_bc_m3_meanabsres', 'scr_bc_mopt_meanabsres', 'scr_co_m1_logrmax', 'scr_co_m1_logrmin', 'scr_co_m1_logrrange', 'scr_co_m1_meanabsres', 'scr_co_m1_minbad', 'scr_co_m1_pgone', 'scr_co_m2_logrmin', 'scr_co_m2_meanabsres', 'scr_co_m2_minbad', 'scr_co_m2_pgone', 'scr_co_m3_logrmax', 'scr_co_m3_meanabsres', 'scr_co_m3_minbad', 'scr_co_m3_pgone', 'scr_co_mopt_meanabsres', 'scr_co_mopt_scaling_exp']}   # NL_Dimensions(x_z,50,{'ac1e',{'fnn',0.05}},{'ac',1})
     legacy_name: NL_Dimensions
     ordered_args: ['embed_params']
 

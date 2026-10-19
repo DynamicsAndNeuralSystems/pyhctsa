@@ -641,13 +641,14 @@ def _fall_branch(ix: ArrayLike, y: ArrayLike) -> tuple:
 
 @dict_output
 def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
-              extra_param: Union[int, None] = None, random_seed = None) -> dict:
+              extra_param: Union[int, None] = None, random_seed = None,
+              num_draws: int = 10) -> dict:
     """
     Changes in the automutual information with the addition of noise.
 
     Adds independent Gaussian noise of standard deviation eta to the (z-scored) time series,
     for 50 noise levels evenly spaced from eta = 0 to eta = 3, and measures the automutual
-    information (AMI) at lag ``tau`` at each level, averaged over 10 independent noise draws
+    information (AMI) at lag ``tau`` at each level, averaged over ``num_draws`` independent noise draws
     per level (so that the curve reflects the series rather than one particular noise
     realization). Can be measured using histograms with ``extra_param`` bins, or Kraskov
     estimators with k = ``extra_param``.
@@ -718,6 +719,11 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
         ``i``, counting from 0, the seed is ``random_seed + i + 1``). ``None`` (or a string such as ``'default'``)
         is ``0``.
 
+    num_draws : int, optional
+        Number of independent noise vectors averaged at each noise level (default 10). The
+        draws at a level are consecutive blocks of ``len(y)`` values of one stream, so fewer
+        draws are cheaper but make the curve noisier. hctsa's Kraskov settings use 5.
+
     Returns
     -------
     dict
@@ -735,7 +741,9 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
     # Set up noise range
     num_levels = 50
-    num_draws = 10  # independent noise vectors to average over at each level
+    num_draws = int(num_draws)  # independent noise vectors to average over at each level
+    if num_draws < 1:
+        raise ValueError("num_draws must be a positive integer")
     noise_range = np.linspace(0, 3, num_levels)  # compare properties across this noise range
 
     if ami_method in ('std1', 'std2', 'quantiles', 'even'):

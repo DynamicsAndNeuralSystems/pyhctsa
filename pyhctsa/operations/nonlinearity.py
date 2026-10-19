@@ -2236,7 +2236,8 @@ def _dimensions_best_m(logr: np.ndarray, log_nn: np.ndarray, prefix: str, out: d
 
 @dict_output
 def dimensions(y: ArrayLike, num_bins: int = 50,
-               embed_params: Union[list, tuple] = ('ac', 'fnn')) -> Union[dict, float]:
+               embed_params: Union[list, tuple] = ('ac', 'fnn'),
+               thwin: Union[int, float, list, tuple] = ('ac', 1)) -> Union[dict, float]:
     """
     Box-counting and correlation-sum estimates of the dimension of the delay embedding, and
     how they change with the embedding dimension.
@@ -2265,6 +2266,14 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer, or
         ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
         TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.05 by default; at most ``floor(2 log10 N)``, see :func:`_embedding_params`). Default is ``['ac', 'fnn']``.
+    thwin : int, float, or ``['ac', k]``, optional
+        Theiler window of the correlation sum: pairs of embedded points at most ``thwin``
+        samples apart (``|i - j| <= thwin``) are not counted, since they are close only because
+        successive values are correlated (Theiler, Phys. Rev. A 34, 2427, 1986). A number of
+        samples, or ``['ac', k]`` for ``k`` times the first zero crossing of the autocorrelation
+        function (see :func:`pyhctsa.utils.theiler_window`); NaN is returned if the ACF never
+        crosses zero. Does not affect the box-counting (``bc``) outputs. Default is
+        ``['ac', 1]``; use 0 for the old behavior.
 
     Returns
     -------
@@ -2281,6 +2290,11 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
     """
     y = np.asarray(y, dtype=float).ravel()
 
+    thwin = theiler_window(y, thwin)
+    if np.isnan(thwin):  # the ACF never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+
     tau, mopt = _embed_tau_m(y, embed_params)
     if np.isnan(tau):
         logger.warning('Could not determine embedding parameters for this time series')
@@ -2295,7 +2309,7 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
         # Correlation sum, over the same number of scales: epsilon from max_eps/10 to max_eps
         max_eps = float(np.std(y, ddof=1) * np.sqrt(big_m))
         min_eps = max_eps / 10
-        tables = _tisean.d2(y, delay=tau, embed=big_m, theiler=0, howoften=num_bins,
+        tables = _tisean.d2(y, delay=tau, embed=big_m, theiler=int(thwin), howoften=num_bins,
                             maxfound=0, epsmax=max_eps, epsmin=min_eps)
         if any(b.shape[0] != num_bins for b in tables['c2']):
             raise _D2DataError("TISEAN d2 returned an unexpected number of length scales")
