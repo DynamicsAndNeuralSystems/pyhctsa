@@ -271,9 +271,9 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff', tau: Union[int, str] = 1
     binarize_how : str, optional
         The method used for binary transformation. One of:
 
-        - 'diff': Encode increases in the time series as 1, and decreases as 0.
-        - 'mean': Encode values above the mean as 1, and below as 0.
-        - 'median': Encode values above the median as 1, and below as 0.
+        - 'diff': Encode increases in the time series as 1, and decreases or no change as 0.
+        - 'mean': Encode values above the mean as 1, and at or below the mean as 0.
+        - 'median': Encode values above the median as 1, and at or below the median as 0.
 
         Default is ``'diff'``.
 
@@ -652,6 +652,8 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
         - 'diff': Encode as 1 if the time-series difference is positive, and 0 otherwise.
         - 'mean': Encode as 1 if the value is above the mean, 0 otherwise.
         - 'median': Encode as 1 if the value is above the median, 0 otherwise.
+        - 'iqr': Encode as 1 if the value is within the interquartile range (above the 25th
+          percentile and below the 75th), 0 otherwise.
 
         Default is ``'diff'``.
 
@@ -836,7 +838,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
 
     References
     ----------
-    .. [1] Andriana et al. (2011). Duality between Time Series and Networks. PLoS ONE.
+    .. [1] Campanharo, A. S. L. O., Sirer, M. I., Malmgren, R. D., Ramos, F. M. & Amaral, L. A. N. (2011).
+        Duality between Time Series and Networks. PLoS ONE 6(8), e23378.
         https://doi.org/10.1371/journal.pone.0023378
 
     Parameters

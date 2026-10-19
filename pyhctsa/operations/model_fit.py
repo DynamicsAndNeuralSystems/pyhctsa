@@ -1,6 +1,8 @@
 import math
 import itertools
+import threading
 import warnings
+from collections import OrderedDict
 from typing import Union
 
 import numba
@@ -15,6 +17,7 @@ from lmfit.models import SineModel
 import logging
 logger = logging.getLogger('pyhctsa')
 
+from . import _garch
 from ._ar_stepwise import _arfit, _arfit_residuals, _arfit_modes
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import simple_fit
@@ -130,7 +133,10 @@ def _gaussian_hmm_fit(y_train: np.ndarray, num_states: int, n_cycles: int = 30,
 
     Baum-Welch EM (``hmmlearn``'s ``GaussianHMM``, see :func:`_gaussian_hmm_em`) is run from
     six fixed starting points (the initialization is fully specified here, so the fit does not
-    depend on any random number generator) and the fit with the highest final training log-likelihood is kept. The starts have a shared
+    depend on any random number generator) and the fit with the highest training log-likelihood is
+    kept. Each fit is scored by the log-likelihood of the training data under its returned
+    parameters (:func:`_gaussian_hmm_loglik`): the log-likelihoods recorded during EM are those of
+    the parameters at the start of each cycle, before its M step. The starts have a shared
     variance equal to the variance of the data, equal initial-state probabilities, and a
     transition matrix with probability ``rho`` of staying in a state (and ``(1-rho)/(K-1)`` of
     moving to each other one) for each ``rho`` in ``rhos``, and two placements of the K state
@@ -140,9 +146,9 @@ def _gaussian_hmm_fit(y_train: np.ndarray, num_states: int, n_cycles: int = 30,
     stopping when the relative gain in log-likelihood falls below ``tol`` (see
     :func:`_gaussian_hmm_em`).
 
-    Returns ``(mu, cov, P, pi, LL)``: state means, shared variance, transition matrix,
-    initial-state probabilities and the log-likelihood at each cycle (NaN-filled parameters
-    and ``LL = [nan]`` if no start gives a finite fit).
+    Returns ``(mu, cov, P, pi, ll)``: state means, shared variance, transition matrix,
+    initial-state probabilities and the log-likelihood of ``y_train`` under these parameters
+    (NaN-filled parameters and ``ll = nan`` if no start gives a finite fit).
     """
     x = np.ascontiguousarray(y_train, dtype=float).ravel()
     K = int(num_states)
@@ -153,7 +159,7 @@ def _gaussian_hmm_fit(y_train: np.ndarray, num_states: int, n_cycles: int = 30,
     mean_sets = [xs[idx], np.mean(x) + np.std(x, ddof=1) * np.linspace(-1, 1, K)]
     pi0 = np.ones(K) / K
     best_ll = -np.inf
-    best = (np.full(K, np.nan), np.nan, np.full((K, K), np.nan), np.full(K, np.nan), np.array([np.nan]))
+    best = (np.full(K, np.nan), np.nan, np.full((K, K), np.nan), np.full(K, np.nan), np.nan)
     for r in range(2 * len(rhos)):
         mu0 = mean_sets[0 if r < len(rhos) else 1]
         rho = rhos[r % len(rhos)]
@@ -164,9 +170,13 @@ def _gaussian_hmm_fit(y_train: np.ndarray, num_states: int, n_cycles: int = 30,
         mu, cov, P, pi, LL = _gaussian_hmm_em(x, mu0, v, P0, pi0, n_cycles, tol, floor_frac * v)
         ok = np.all(np.isfinite(mu)) and np.isfinite(cov) and np.all(np.isfinite(P)) \
             and np.all(np.isfinite(pi)) and np.isfinite(LL[-1])
-        if ok and LL[-1] > best_ll:
-            best_ll = LL[-1]
-            best = (mu, cov, P, pi, LL)
+        if not ok:
+            continue
+        # score the fit by the log-likelihood of the data under its returned parameters
+        ll = _gaussian_hmm_loglik(x, mu, cov, P, pi)
+        if np.isfinite(ll) and ll > best_ll:
+            best_ll = ll
+            best = (mu, cov, P, pi, ll)
     return best
 
 
@@ -198,9 +208,10 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3) -> dict:
     The fit is deterministic. EM is run from six fixed starting points (state means at the
     quantiles ``(k-1/2)/num_states`` of the training data, or evenly spaced within one standard
     deviation of its mean; a variance equal to that of the training data; and probabilities
-    0.5, 0.9 and 0.99 of staying in a state); the fit with the highest training log-likelihood is
-    kept (see :func:`_gaussian_hmm_fit`). The shared variance cannot fall below 1% of the variance of
-    the training data, so that states placed on a few repeated values do not give unbounded
+    0.5, 0.9 and 0.99 of staying in a state); the fit with the highest training log-likelihood
+    (of the training data under the fit's final parameters) is kept (see
+    :func:`_gaussian_hmm_fit`). The shared variance cannot fall below 1% of the variance of the
+    training data, so that states placed on a few repeated values do not give unbounded
     likelihoods.
 
     Parameters
@@ -219,8 +230,8 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3) -> dict:
         (``Mu_1``, ...) and their ``meanMu``, ``rangeMu``, ``maxMu``, ``minMu``;
         the tied covariance ``Cov``; the transition matrix summaries
         ``Pmeandiag``, ``stdmeanP`` (standard deviation across states of the mean probability
-        of moving into each state), ``maxP`` and ``stdP``; the training
-        log-likelihood per sample ``LLtrainpersample`` (the highest reached);
+        of moving into each state), ``maxP`` and ``stdP``; the log-likelihood per sample of
+        the training part under the fitted model, ``LLtrainpersample``;
         and the test log-likelihood per sample ``LLtestpersample`` and
         ``LLdifference`` (test minus training).
 
@@ -242,7 +253,7 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3) -> dict:
     num_states = int(num_states)
 
     # 2. Train the HMM (deterministic EM from fixed starts, see _gaussian_hmm_fit)
-    mu, cov, p_matrix, pi, LL = _gaussian_hmm_fit(y_train, num_states)
+    mu, cov, p_matrix, pi, ll_train = _gaussian_hmm_fit(y_train, num_states)
 
     means_sorted = np.sort(mu)
     for i, m in enumerate(means_sorted):
@@ -262,7 +273,7 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3) -> dict:
     out['stdP'] = np.std(p_matrix, ddof=1)
 
     # Within-sample log-likelihood
-    out['LLtrainpersample'] = np.max(LL) / n_train
+    out['LLtrainpersample'] = ll_train / n_train
 
     # Log-likelihood of the test data
     out['LLtestpersample'] = _gaussian_hmm_loglik(y_test, mu, cov, p_matrix, pi) / n_test
@@ -671,79 +682,137 @@ def _lbq_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
         return np.asarray(acorr_ljungbox(x, lags=max_lag, return_df=True)['lb_pvalue'], dtype=float)
 
 
-def _garch_estimate(y: np.ndarray, P: int, Q: int, model_type: str = 'garch',
-                    innovation_dist: str = 'gaussian') -> dict:
+# Work shared by garch_fit and garch_compare on the same series: the whitening, and for the
+# whitened, z-scored series its maximum-likelihood fits and pre-estimation tests. Everything is
+# keyed on the exact input values (and every argument that the result depends on), and the
+# estimator is deterministic, so a cached result is the one that would be computed. The
+# whitening is not cached when its random draws are unseeded (random_seed='none'), where every
+# call draws a new seed. The most recent few series are kept.
+_GARCH_CACHE_SIZE = 2
+_garch_whiten_cache = OrderedDict()
+_garch_series_cache = OrderedDict()
+
+
+def _cache_get(cache: OrderedDict, key, make):
+    if key in cache:
+        cache.move_to_end(key)
+        return cache[key]
+    value = make()
+    cache[key] = value
+    while len(cache) > _GARCH_CACHE_SIZE:
+        cache.popitem(last=False)
+    return value
+
+
+def _garch_whiten(y: np.ndarray, pre_proc: str, random_seed) -> np.ndarray:
+    """The whitened, z-scored series (``z_score(_whiten(y, pre_proc, random_seed))``), shared
+    between calls on the same series with a seeded (reproducible) whitening."""
+    if isinstance(random_seed, str) and random_seed == 'none':
+        return z_score(_whiten(y, pre_proc, random_seed))
+    key = (y.tobytes(), pre_proc, bf_random_seed(random_seed))
+    return _cache_get(_garch_whiten_cache, key,
+                      lambda: z_score(_whiten(y, pre_proc, random_seed))).copy()
+
+
+class _GarchSeries:
+    """A whitened series with its maximum-likelihood fits and pre-estimation tests, each computed once."""
+
+    def __init__(self, y: np.ndarray):
+        self.D = _garch.Data(y)
+        self._fits = {}
+        self._tests = None
+        self._res_tests = {}
+
+    def mle(self, P, Q, gjr=False, t=False, extra_starts=(), grid=True, npolish=2) -> dict:
+        starts = tuple(np.asarray(st, dtype=float).tobytes() for st in extra_starts)
+        key = (int(P), int(Q), bool(gjr), bool(t), starts, bool(grid), int(npolish))
+        if key not in self._fits:
+            self._fits[key] = _garch.mle(self.D, P, Q, gjr, t, extra_starts=extra_starts,
+                                         grid=grid, npolish=npolish)
+        fit = self._fits[key]
+        return dict(fit, theta=fit['theta'].copy(), h=fit['h'].copy())
+
+    def null_fit(self, t=False) -> dict:
+        if t:
+            return self.mle(0, 0, False, True)
+        return _garch.null_fit(self.D, False)  # (closed form)
+
+    def tests(self):
+        """Engle's ARCH test p-values of the series and Ljung-Box p-values of its squares."""
+        if self._tests is None:
+            y = self.D.y
+            self._tests = (_arch_test_pvalues(y), _lbq_test_pvalues(y ** 2))
+        return self._tests[0].copy(), self._tests[1].copy()
+
+    def residual_tests(self, h: np.ndarray):
+        """The same tests of the standardized residuals ``y / sqrt(h)`` for the variance path ``h``.
+
+        Both tests depend on the residuals only through their squares (Engle's test regresses the
+        squared series on its lags), so they are the same for ``-y / sqrt(h)``. Fits that report
+        the same variance path (e.g., the constant-variance model reported in place of every
+        model of a series without structure) share them.
+        """
+        key = h.tobytes()
+        if key not in self._res_tests:
+            stde = self.D.y / np.sqrt(h)
+            self._res_tests[key] = (_arch_test_pvalues(stde), _lbq_test_pvalues(stde ** 2))
+        engle, lbq = self._res_tests[key]
+        return engle.copy(), lbq.copy()
+
+
+def _garch_series(y: np.ndarray) -> _GarchSeries:
+    return _cache_get(_garch_series_cache, y.tobytes(), lambda: _GarchSeries(y.copy()))
+
+
+_FLOOR_KEEP = ('hasStructure', 'offset', 'leverage', 'distDoF', 'persistence', 'summaryexitflag')
+
+
+def _garch_models(G: _GarchSeries, P: int, Q: int, gjr: bool, tdist: bool) -> dict:
     """
-    Maximum-likelihood fit of a zero-mean GARCH, GJR-GARCH or EGARCH(P, Q) conditional
-    variance model with a free constant, using the ``arch`` package.
+    Fit the requested model and decide whether the series has any conditional heteroskedasticity.
 
-    ``P`` is the GARCH degree (lagged conditional variances) and ``Q`` the ARCH degree (lagged
-    squared innovations; ``arch``'s ``p``). The presample variance and squared innovation are
-    the mean of the squared series, and the covariance of the estimates is the inverse of the
-    outer product of the per-observation score vectors (the outer-product-of-gradients
-    estimator).
-
-    Returns a dict with the parameters in the order ``constant``, ``garch``, ``arch``,
-    ``leverage``, ``dof``, their covariance matrix ``cov`` (in the same order), the
-    log-likelihood ``llf``, the conditional variances ``sigma2``, and ``exitflag``.
-
-    Notes
-    -----
-    T. Bollerslev, J. Econometrics 31 (1986) 307-327 (GARCH); L. R. Glosten, R. Jagannathan
-    and D. E. Runkle, J. Finance 48 (1993) 1779-1801 (GJR); D. B. Nelson, Econometrica 59
-    (1991) 347-370 (EGARCH).
+    Returns a dict with the fit that is reported (``fit``: the maximum-likelihood fit if the
+    variance model beats constant variance in the structure test, otherwise the constant-variance
+    fit), the maximum-likelihood fit itself (``ml``), ``has_structure``, ``lr`` (the scaled likelihood-ratio statistic), the Gaussian fit
+    (``gauss``) and, for t innovations, the degrees of freedom (``dof``).
     """
-    from arch import arch_model
-    from statsmodels.tools.numdiff import approx_fprime
-    dist = {'gaussian': 'normal', 't': 't'}.get(innovation_dist)
-    if dist is None:
-        raise ValueError(f"Unknown innovationDist '{innovation_dist}' (should be 'gaussian' or 't')")
-    if model_type not in ('garch', 'gjr', 'egarch'):
-        raise ValueError(f"Unknown modelType '{model_type}' (should be 'garch', 'gjr', or 'egarch')")
-    asym = model_type in ('gjr', 'egarch')
-    model = arch_model(y, mean='Zero', vol='EGARCH' if model_type == 'egarch' else 'GARCH',
-                       p=Q, o=Q if asym else 0, q=P, dist=dist, rescale=False)
-    backcast = np.mean(y ** 2)  # (arch takes the log itself for an EGARCH backcast)
-    res = model.fit(disp='off', show_warning=False, backcast=backcast)
-    params = res.params
-    if not np.all(np.isfinite(params.values)):
-        raise ValueError('GARCH fit failed (non-finite parameter estimates)')
-
-    # Standard errors: outer product of gradients of the per-observation log-likelihood
-    resids = model.resids(model.starting_values())
-    kwargs = dict(sigma2=np.zeros(len(y)), backcast=model.volatility.backcast_transform(backcast),
-                  var_bounds=model.volatility.variance_bounds(resids), individual=True)
-    scores = approx_fprime(params.values, model._loglikelihood, kwargs=kwargs)
-    cov = np.linalg.pinv(scores.T @ scores)
-
-    # Reorder from arch's (omega, alpha, gamma, beta, nu) to (constant, GARCH, ARCH, leverage, DoF)
-    names = list(params.index)
-    order = ([names.index('omega')]
-             + [names.index(f'beta[{i}]') for i in range(1, P + 1)]
-             + [names.index(f'alpha[{i}]') for i in range(1, Q + 1)]
-             + ([names.index(f'gamma[{i}]') for i in range(1, Q + 1)] if asym else [])
-             + ([names.index('nu')] if dist == 't' else []))
-    p = params.values[order]
-    return {'constant': p[0], 'garch': p[1:1 + P], 'arch': p[1 + P:1 + P + Q],
-            'leverage': p[1 + P + Q:1 + P + 2 * Q] if asym else np.array([]),
-            'dof': p[-1] if dist == 't' else np.nan,
-            'cov': cov[np.ix_(order, order)], 'llf': float(res.loglikelihood),
-            'sigma2': np.asarray(res.conditional_volatility) ** 2,
-            'exitflag': 1 if res.convergence_flag == 0 else 0}
+    D = G.D
+    gauss = G.mle(P, Q, gjr, False)
+    null_g = G.null_fit(False)
+    if tdist:
+        S_t = _garch.Spec(P, Q, gjr, True)
+        alt = G.mle(P, Q, gjr, True, extra_starts=_garch.tail_starts(gauss, S_t))
+        null = G.null_fit(True)
+    else:
+        alt, null = gauss, null_g
+    if not (np.isfinite(alt['llf']) and np.all(np.isfinite(alt['theta']))):
+        raise ValueError('GARCH fit failed (non-finite estimates)')
+    lr, has_structure = _garch.structure_test(alt, null, D, gjr)
+    fit = alt if has_structure else null
+    out = dict(fit=fit, ml=alt, has_structure=has_structure, lr=lr, gauss=gauss)
+    if tdist:
+        # Student-t against Gaussian innovations with the same variance model
+        lr_nu = 2 * ((alt['llf'] - gauss['llf']) if has_structure else (null['llf'] - null_g['llf']))
+        kappa = fit['theta'][fit['spec'].ik]
+        out['dof'] = 1 / kappa if lr_nu >= _garch.TAIL_LR else _garch.NU_MAX
+    return out
 
 
 def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
               random_seed: Union[int, str, None] = None, model_type: str = 'garch',
               innovation_dist: str = 'gaussian') -> dict:
     """
-    Fits a GARCH-family model to the series and reports the fit and the standardized residuals.
+    A GARCH model of the changing variance of the series, and what it leaves in the residuals.
 
     The series is whitened and z-scored, so the model is of the variance around a zero mean
-    (hctsa's ``MF_GARCHfit``; the models are fitted with the ``arch`` package). Statistics are the fitted parameters and their errors, the
-    log-likelihood and information criteria, the persistence of the fitted variance process,
-    summaries of the conditional variance series, and how well the standardized residuals pass
-    tests for remaining ARCH effects (Engle's ARCH test and the Ljung-Box Q-test) compared to
-    the series itself, and :func:`residual_analysis` of the standardized residuals.
+    (hctsa's ``MF_GARCHfit``). A GARCH, GJR-GARCH or t-GARCH(P, Q) model is fitted by maximum
+    likelihood (:func:`pyhctsa.operations._garch.mle`), unless the series shows no evidence of
+    conditional heteroskedasticity, in which case the constant-variance model is reported.
+    Statistics are the fitted parameters, the log-likelihood and information criteria, the
+    persistence of the fitted variance process, summaries of the conditional variance series, and
+    how well the standardized residuals pass tests for remaining ARCH effects (Engle's ARCH test
+    and the Ljung-Box Q-test) compared to the series itself, and :func:`residual_analysis` of the
+    standardized residuals.
 
     Parameters
     ----------
@@ -751,10 +820,10 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
         The input time series.
     preproc : {'ar', 'none'}, optional
         The preprocessing applied before the fit: ``'ar'`` (default) replaces the series by
-        the preprocessing (from differencing, piecewise polynomial detrending, rank-mapping to
-        a Gaussian) that maximizes whiteness under an AR(2) model, if it beats the
-        unprocessed series by 5%; ``'none'`` applies none (the series is linearly
-        detrended and z-scored either way).
+        the linearly detrended series by the preprocessing (from differencing, piecewise
+        polynomial detrending, rank-mapping to a Gaussian) that maximizes whiteness under an
+        AR(2) model, if it beats the detrended series by 5%; ``'none'`` applies none (the
+        series is not detrended). The series is z-scored either way.
     P : int, optional
         The GARCH degree: the number of lagged conditional variances. Default is 1.
     Q : int, optional
@@ -763,11 +832,10 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
         The seed of the random Gaussian draws used by the whitening (``rmgd``), as hctsa's
         ``BF_RandomSeed``. Default is ``None`` (seed 0). The draws come from the portable
         generator (:func:`pyhctsa.robust.bf_random`), so they are hctsa's.
-    model_type : {'garch', 'gjr', 'egarch'}, optional
-        The conditional variance model: ``'garch'`` (default, symmetric response to shocks),
+    model_type : {'garch', 'gjr'}, optional
+        The conditional variance model: ``'garch'`` (default, symmetric response to shocks) or
         ``'gjr'`` (GJR-GARCH, adds a leverage term so negative and positive shocks can have
-        different effects on variance) or ``'egarch'`` (exponential GARCH, models the log
-        variance, also asymmetric).
+        different effects on variance).
     innovation_dist : {'gaussian', 't'}, optional
         The assumed innovation distribution: ``'gaussian'`` (default) or ``'t'`` (Student's t,
         which estimates a degrees-of-freedom parameter to capture fat tails).
@@ -775,20 +843,23 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     Returns
     -------
     dict
+        - ``hasStructure``: 1 if the fitted variance model beats constant variance in the
+          structure test, otherwise 0
         - ``constant``, ``constanterr``: the constant term of the variance equation and its error
         - ``offset``: the mean offset of the model (0 for a z-scored series)
         - ``GARCH_i``, ``GARCHerr_i`` (i = 1..P), ``ARCH_i``, ``ARCHerr_i`` (i = 1..Q): the
-          coefficients of the lagged variances and innovations, and their errors (also for a
-          coefficient at its lower bound of 0)
-        - ``leverage``, ``leverageerr``: the leverage coefficient and its error (``'gjr'`` and
-          ``'egarch'`` only, otherwise NaN)
-        - ``distDoF``: the degrees of freedom of a Student's t distribution (otherwise NaN)
-        - ``LLF``, ``aic``, ``bic``: the log-likelihood, AIC and BIC per observation
+          coefficients of the lagged variances and innovations, and their errors (0 and NaN
+          without structure)
+        - ``leverage``, ``leverageerr``: the leverage coefficient and its error (``'gjr'`` only,
+          otherwise NaN; 0 and NaN without structure)
+        - ``distDoF``: the degrees of freedom of a Student's t distribution (otherwise NaN; the
+          upper bound, 100, when the t does not fit better than a Gaussian)
+        - ``LLF``, ``aic``, ``bic``: the log-likelihood, AIC and BIC per observation, of the
+          maximum-likelihood fit
         - ``summaryexitflag``: 1 if the optimizer converged, otherwise 0
         - ``persistence``: the sum of the ARCH and GARCH coefficients (plus half the leverage
-          coefficient for ``'gjr'``; NaN for ``'egarch'``)
-        - ``uncondVar``: the implied long-run variance (NaN if persistence is 0.999 or more,
-          or for ``'egarch'``)
+          coefficient for ``'gjr'``)
+        - ``uncondVar``: the implied long-run variance (NaN if persistence is 0.999 or more)
         - ``maxsigma``, ``minsigma``, ``rangesigma``, ``stdsigma``, ``meansigma``: summaries of
           the conditional variance series
         - ``engle_mean_diff_p``, ``engle_max_diff_p``, ``lbq_mean_diff_p``, ``lbq_max_diff_p``:
@@ -808,86 +879,115 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
 
     Notes
     -----
-    The models are fitted by maximum likelihood (:func:`_garch_estimate`, ``arch`` package);
-    poorly identified fits (series with no volatility clustering, where the coefficients sit at
-    their bounds) can stop at different points of a flat likelihood and give very different
-    coefficients (e.g. ``GARCH_1`` near 0 or near 1) and errors, while the log-likelihood is
-    well determined. The presample variance is the mean of the squared series and the errors
-    come from the outer product of gradients.
+    The estimator is specified in :mod:`pyhctsa.operations._garch`: a deterministic grid start,
+    a log-barrier Newton method to convergence within explicit bounds (all coefficients
+    non-negative, persistence at most 0.9999), and a presample variance equal to the mean
+    squared series. Without conditional heteroskedasticity the ARCH and GARCH coefficients are
+    not identified (the likelihood is flat in the GARCH coefficient), so the variance model is
+    reported only if its likelihood-ratio statistic against constant variance (for Gaussian
+    innovations rescaled by ``2 / (kurtosis - 1)`` of the standardized residuals) is at least 4
+    (6 for GJR). The null distribution of the statistic is not chi-squared because a parameter
+    lies on the boundary and another is not identified under the null (D. W. K. Andrews,
+    Econometrica 69, 683-734 (2001), DOI 10.1111/1468-0262.00210); the critical values were
+    calibrated by simulation of white noise (3% to 6% of white-noise series of 100 to 10000 samples
+    exceed 4, and about 5% exceed 6 for GJR).
+    Otherwise the constant-variance model is reported: the ARCH, GARCH, leverage coefficients
+    and persistence are 0, the conditional variance is the mean squared series, and the
+    standard errors are NaN. For t innovations the degrees of freedom are reported only if the t
+    fits significantly better than a Gaussian (the likelihood-ratio statistic, whose null is a
+    50:50 mixture of chi-squared(0) and chi-squared(1) because a Gaussian is the limit of
+    infinite degrees of freedom, is above 2.7055, the 5% point); otherwise the upper bound, 100.
+    The constant of the variance equation is bounded below by 1e-6 (the variance of 0.1% of a
+    standard deviation). For series with long stretches of (near) zero values the Gaussian
+    likelihood has no maximum, because the variance can shrink without limit where the series is
+    zero; the fit then sits at the bound (the constant within 1% of it). In that case the
+    log-likelihood, AIC and BIC are NaN, and, if the variance model is reported, so is everything
+    computed from the conditional variance (the constant, the standard errors, ``uncondVar``,
+    the sigma summaries and the statistics of the standardized residuals). The coefficients,
+    ``persistence``, ``leverage`` and ``distDoF`` are still reported.
+
+    T. Bollerslev, J. Econometrics 31 (1986) 307-327 (DOI 10.1016/0304-4076(86)90063-1);
+    L. R. Glosten, R. Jagannathan and D. E. Runkle, J. Finance 48 (1993) 1779-1801
+    (DOI 10.1111/j.1540-6261.1993.tb05128.x); T. Bollerslev, Rev. Econ. Stat. 69 (1987)
+    542-547 (DOI 10.2307/1925546).
     """
     y = np.asarray(y, dtype=float).ravel()
     P, Q = int(P), int(Q)
+    if model_type not in ('garch', 'gjr'):
+        raise ValueError(f"Unknown modelType '{model_type}' (should be 'garch' or 'gjr')")
+    if innovation_dist not in ('gaussian', 't'):
+        raise ValueError(f"Unknown innovationDist '{innovation_dist}' (should be 'gaussian' or 't')")
+    gjr, tdist = model_type == 'gjr', innovation_dist == 't'
     out = {}
 
     # (1) Whiten and z-score
-    y = _whiten(y, preproc, random_seed)
-    y = z_score(y)
+    y = _garch_whiten(y, preproc, random_seed)
     n = len(y)
+    G = _garch_series(y)
 
     # (2) Pre-estimation tests on the (whitened) series
-    engle_y = _arch_test_pvalues(y)
-    lbq_y2 = _lbq_test_pvalues(y ** 2)
+    engle_y, lbq_y2 = G.tests()
 
     # (3) Fit the model
+    D = G.D
     try:
-        fit = _garch_estimate(y, P, Q, model_type, innovation_dist)
+        res = _garch_models(G, P, Q, gjr, tdist)
     except (ValueError, np.linalg.LinAlgError, FloatingPointError) as err:
         raise ValueError('GARCH fit failed (data does not allow a valid GARCH model '
                          f'to be estimated): {err}') from err
-    errors = np.sqrt(np.abs(np.diag(fit['cov'])))
-    llf = fit['llf']
-    garch_c, arch_c, lev_c = fit['garch'], fit['arch'], fit['leverage']
+    fit, has = res['fit'], res['has_structure']
+    S, theta = fit['spec'], fit['theta']
 
     # (4) Statistics on the fit
-    out['constant'] = fit['constant']
-    out['constanterr'] = errors[0]
+    out['hasStructure'] = float(has)
     out['offset'] = 0.0
-    for i in range(1, P + 1):
-        out[f'GARCH_{i}'] = garch_c[i - 1]
-        # (a coefficient at its lower bound of 0 keeps its outer-product-of-gradients error, the
-        # limit of the error as the coefficient goes to 0)
-        out[f'GARCHerr_{i}'] = errors[i]
-    for i in range(1, Q + 1):
-        out[f'ARCH_{i}'] = arch_c[i - 1]
-        out[f'ARCHerr_{i}'] = errors[P + i]
-    if lev_c.size > 0:
-        out['leverage'] = lev_c[0]
-        out['leverageerr'] = errors[1 + P + Q]
+    out['constant'] = theta[0]
+    if has:
+        errors = _garch.opg_errors(theta, D, S)
+        out['constanterr'] = errors[0]
+        for i in range(1, P + 1):
+            out[f'GARCH_{i}'] = theta[S.ib[i - 1]]
+            out[f'GARCHerr_{i}'] = errors[S.ib[i - 1]]
+        for i in range(1, Q + 1):
+            out[f'ARCH_{i}'] = theta[S.ia[i - 1]]
+            out[f'ARCHerr_{i}'] = errors[S.ia[i - 1]]
+        lev = theta[S.ig[0]] if gjr else np.nan
+        out['leverage'] = lev
+        out['leverageerr'] = errors[S.ig[0]] if gjr else np.nan
+        persistence = (np.sum(theta[S.ib]) + np.sum(theta[S.ia])
+                       + (np.sum(theta[S.ig]) / 2 if gjr else 0.0))
     else:
-        out['leverage'] = np.nan
+        out['constanterr'] = np.nan
+        for i in range(1, P + 1):
+            out[f'GARCH_{i}'], out[f'GARCHerr_{i}'] = 0.0, np.nan
+        for i in range(1, Q + 1):
+            out[f'ARCH_{i}'], out[f'ARCHerr_{i}'] = 0.0, np.nan
+        out['leverage'] = 0.0 if gjr else np.nan
         out['leverageerr'] = np.nan
-    out['distDoF'] = fit['dof'] if innovation_dist == 't' else np.nan
+        persistence = 0.0
+    out['distDoF'] = res['dof'] if tdist else np.nan
 
-    out['LLF'] = llf / n  # log-likelihood per observation
-    out['summaryexitflag'] = fit['exitflag']
-
-    n_params = int(np.sum(np.any(fit['cov'] != 0, axis=0)))
-    out['aic'] = (-2 * llf + 2 * n_params) / n
-    out['bic'] = (-2 * llf + n_params * np.log(n)) / n
-
-    # Persistence of the variance process and the implied unconditional variance
-    if model_type == 'garch':
-        persistence = np.sum(garch_c) + np.sum(arch_c)
-    elif model_type == 'gjr':
-        persistence = np.sum(garch_c) + np.sum(arch_c) + np.sum(lev_c) / 2
-    else:  # egarch: no simple coefficient sum
-        persistence = np.nan
+    # (the likelihood of the fitted model is determined even where its parameters are not)
+    ml = res['ml']
+    out['LLF'] = ml['llf'] / n  # log-likelihood per observation
+    out['summaryexitflag'] = 1.0 if ml['dec'] < 1e-8 else 0.0
+    out['aic'] = (-2 * ml['llf'] + 2 * ml['k']) / n
+    out['bic'] = (-2 * ml['llf'] + ml['k'] * np.log(n)) / n
     out['persistence'] = persistence
-    out['uncondVar'] = fit['constant'] / (1 - persistence) if persistence < 0.999 else np.nan
+    out['uncondVar'] = theta[0] / (1 - persistence) if persistence < 0.999 else np.nan
 
     # Sigmas, the time series of conditional variances
-    sigmas = fit['sigma2']
+    sigmas = fit['h']
     out['maxsigma'] = np.max(sigmas)
     out['minsigma'] = np.min(sigmas)
-    out['rangesigma'] = np.max(sigmas) - np.min(sigmas)
-    out['stdsigma'] = np.std(sigmas, ddof=1)
+    out['rangesigma'] = np.max(sigmas) - np.min(sigmas) if has else 0.0
+    out['stdsigma'] = np.std(sigmas, ddof=1) if has else 0.0   # (exactly 0 for constant variance)
     out['meansigma'] = np.mean(sigmas)
 
     # Check the standardized residuals: residuals (mean process minus data)
     stde = (0.0 - y) / np.sqrt(sigmas)
     stde2 = stde ** 2
-    engle_stde = _arch_test_pvalues(stde)
-    lbq_stde2 = _lbq_test_pvalues(stde2)
+    engle_stde, lbq_stde2 = G.residual_tests(sigmas)
 
     out['engle_mean_diff_p'] = np.mean(engle_stde - engle_y)
     out['engle_max_diff_p'] = np.max(engle_stde - engle_y)
@@ -912,6 +1012,16 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
 
     out['ac1_stde2'] = autocorr(stde2, 1, 'Fourier')
     out['diff_ac1'] = autocorr(y ** 2, 1, 'Fourier') - out['ac1_stde2']
+
+    # A fit with the variance constant at its floor has no likelihood maximum: what depends on the
+    # likelihood or on the variance path is then not a property of the series
+    if _garch.at_floor(ml['theta']):
+        for key in ('LLF', 'aic', 'bic'):
+            out[key] = np.nan
+        if has:
+            for key in out:
+                if key not in _FLOOR_KEEP and not key.startswith(('GARCH_', 'ARCH_')):
+                    out[key] = np.nan
     return out
 
 
@@ -925,15 +1035,25 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
     z-scored) time series (hctsa's ``MF_GARCHcompare``) and returns statistics on the goodness
     of fit across a range of p (the number of lagged variances) and q (the number of lagged
     squared innovations): summaries across the grid of fitted models, and the orders that fit
-    best. See :func:`garch_fit` for how the models are fitted.
+    best. The models are fitted as in :func:`garch_fit`, in order of increasing p and q, each
+    started also from its smaller neighbors (so the log-likelihood never decreases with an order).
+    If the GARCH(min p, min q) model does not beat constant variance in the structure test of
+    :func:`garch_fit`, the constant term and the residual statistics are those of constant variance
+    (the likelihood and information criteria are always those of the fitted models).
+    A fit with the variance constant at its floor (within 1% of the bound 1e-6; see
+    :func:`garch_fit`) has no likelihood maximum: a summary that such a model determines is NaN
+    (the minimum or maximum over the models if that model attains it, the mean if any model is at
+    the floor, an order pick if the chosen model is), and the constant and residual statistics
+    only if the variance model is reported.
 
     Parameters
     ----------
     y : array-like
         The input time series.
     pre_proc : {'none', 'ar'}, optional
-        A preprocessing to apply after detrending: ``'none'`` (default), or ``'ar'``, which
-        applies the preprocessing that maximizes AR(2) whiteness (see :func:`garch_fit`).
+        A preprocessing to apply: ``'none'`` (default; the series is not detrended), or
+        ``'ar'``, which detrends the series and applies the preprocessing that maximizes AR(2)
+        whiteness (see :func:`garch_fit`).
     pr : array-like of int, optional
         The model orders p to compare. Default is ``(1, 2, 3)``.
     qr : array-like of int, optional
@@ -943,10 +1063,11 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
 
     Returns
     -------
-    dict or float
-        NaN if no model could be fitted. Otherwise, statistics across the (p, q) models that
-        fitted (the log-likelihood, AIC and BIC are per observation):
+    dict
+        Statistics across the (p, q) models (the log-likelihood, AIC and BIC are per
+        observation):
 
+        - ``hasStructure``: 1 if the structure test of :func:`garch_fit` is passed, otherwise 0
         - ``minLLF``, ``maxLLF``, ``meanLLF``: the log-likelihood
         - ``minBIC``, ``maxBIC``, ``meanBIC``: the Bayesian information criterion
         - ``minAIC``, ``maxAIC``, ``meanAIC``: Akaike's information criterion
@@ -958,76 +1079,106 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
         - ``min_meanlbqps``, ``max_meanlbqps``, ``mean_meanlbqps``: across models, the mean
           p-value of the Ljung-Box Q-test on the squared standardized residuals
         - ``min_maxlbqps``, ``max_maxlbqps``, ``mean_maxlbqps``: the same for the maximum
-        - ``bestpLLF``, ``bestqLLF``: the orders p and q of the model with the maximum
-          log-likelihood
         - ``bestpAIC``, ``bestqAIC``, ``bestpBIC``, ``bestqBIC``: the orders of the models with
-          the minimum AIC and BIC
+          the minimum AIC and BIC, among the grid and the constant-variance model (orders 0, 0)
         - ``Ks_vary_p``, ``Ks_vary_q``: how much the constant term varies with p and with q: the
           standard deviation of the constant across one order, averaged over the other
     """
     y = np.asarray(y, dtype=float).ravel()
-    pr = [int(v) for v in np.atleast_1d(pr)]
-    qr = [int(v) for v in np.atleast_1d(qr)]
+    pr = sorted(int(v) for v in np.atleast_1d(pr))
+    qr = sorted(int(v) for v in np.atleast_1d(qr))
 
-    y = z_score(_whiten(y, pre_proc, random_seed))
+    y = _garch_whiten(y, pre_proc, random_seed)
     n = len(y)
+    G = _garch_series(y)
+    D = G.D
+    null = G.null_fit(False)
 
     shape = (len(pr), len(qr))
-    llfs, aics, bics, ks, mean_arch, max_arch, mean_lbq, max_lbq = (np.full(shape, np.nan) for _ in range(8))
+    fits = {}
     for i, p in enumerate(pr):
         for j, q in enumerate(qr):
+            S = _garch.Spec(p, q)
+            warm = [_garch.embed(fits[key]['theta'], fits[key]['spec'], S)
+                    for key in ((p, qr[j - 1]) if j else None, (pr[i - 1], q) if i else None)
+                    if key is not None and key in fits]
             try:
-                fit = _garch_estimate(y, p, q)
+                fits[(p, q)] = G.mle(p, q, False, False, extra_starts=warm,
+                                     grid=(i == 0 and j == 0), npolish=2)
             except (ValueError, np.linalg.LinAlgError, FloatingPointError):
                 logger.warning(f'Bad fit at p = {p}, q = {q}')
-                continue  # didn't fit successfully; everything stays NaN
-            n_params = int(np.sum(np.any(fit['cov'] != 0, axis=0)))
-            if n_params < p + q + 1:
-                logger.warning(f'Bad fit at p = {p}, q = {q}')
-                continue
-            llfs[i, j] = fit['llf']
-            aics[i, j] = -2 * fit['llf'] + 2 * n_params
-            bics[i, j] = -2 * fit['llf'] + n_params * np.log(n)
-            ks[i, j] = fit['constant']
-            stde = (0.0 - y) / np.sqrt(fit['sigma2'])
-            engle = _arch_test_pvalues(stde)
-            lbq = _lbq_test_pvalues(stde ** 2)
-            mean_arch[i, j], max_arch[i, j] = np.mean(engle), np.max(engle)
-            mean_lbq[i, j], max_lbq[i, j] = np.mean(lbq), np.max(lbq)
-
-    if np.all(np.isnan(llfs)):
+    first = fits.get((pr[0], qr[0]))
+    if first is None:
         logger.warning('None of the ARCH or GARCH models could be fit.')
         return np.nan
+    lr, has = _garch.structure_test(first, null, D)
+
+    llfs, aics, bics, ks, mean_arch, max_arch, mean_lbq, max_lbq = (np.full(shape, np.nan) for _ in range(8))
+    floor_ml = np.zeros(shape, dtype=bool)   # the fit has its variance constant at the floor
+    for i, p in enumerate(pr):
+        for j, q in enumerate(qr):
+            ml = fits.get((p, q))
+            if ml is None:
+                continue
+            # (the likelihood and information criteria are those of the maximum-likelihood fit;
+            # the constant and the residual tests those of the reported fit)
+            fit = ml if has else null
+            floor_ml[i, j] = _garch.at_floor(ml['theta'])
+            llfs[i, j] = ml['llf']
+            aics[i, j] = -2 * ml['llf'] + 2 * ml['k']
+            bics[i, j] = -2 * ml['llf'] + ml['k'] * np.log(n)
+            ks[i, j] = fit['theta'][0]
+            engle, lbq = G.residual_tests(fit['h'])
+            mean_arch[i, j], max_arch[i, j] = np.mean(engle), np.max(engle)
+            mean_lbq[i, j], max_lbq[i, j] = np.mean(lbq), np.max(lbq)
+    # (the constant and the residual statistics come from the variance model only if it is reported)
+    floor_var = floor_ml & has
+
+    def _summary(values, flags, kind):
+        # min, max or mean over the models; NaN if a model at the floor determines it (for the mean: any)
+        ok = ~np.isnan(values)
+        if not ok.any():
+            return np.nan
+        if kind == 'mean':
+            return np.nan if flags[ok].any() else np.nanmean(values)
+        v, f = values.ravel(order='F'), flags.ravel(order='F')   # (ties go to the first in column-major order)
+        idx = np.nanargmin(v) if kind == 'min' else np.nanargmax(v)
+        return np.nan if f[idx] else v[idx]
 
     # Log-likelihoods and information criteria per observation
-    llfs, aics, bics = llfs / n, aics / n, bics / n
+    llf_n, aic_n, bic_n = llfs / n, aics / n, bics / n
 
-    out = {}
-    for name, values in (('LLF', llfs), ('BIC', bics), ('AIC', aics), ('K', ks)):
-        out[f'min{name}'] = np.nanmin(values)
-        out[f'max{name}'] = np.nanmax(values)
-        out[f'mean{name}'] = np.nanmean(values)
+    out = {'hasStructure': float(has)}
+    for name, values, flags in (('LLF', llf_n, floor_ml), ('BIC', bic_n, floor_ml), ('AIC', aic_n, floor_ml),
+                                ('K', ks, floor_var)):
+        for kind in ('min', 'max', 'mean'):
+            out[f'{kind}{name}'] = _summary(values, flags, kind)
     for name, values in (('meanarchps', mean_arch), ('maxarchps', max_arch),
                          ('meanlbqps', mean_lbq), ('maxlbqps', max_lbq)):
-        out[f'min_{name}'] = np.nanmin(values)
-        out[f'max_{name}'] = np.nanmax(values)
-        out[f'mean_{name}'] = np.nanmean(values)
+        for kind in ('min', 'max', 'mean'):
+            out[f'{kind}_{name}'] = _summary(values, floor_var, kind)
 
-    # The orders of the best models (ties go to the first in column-major order)
-    for name, values, pick in (('LLF', llfs, np.nanargmax), ('AIC', aics, np.nanargmin),
-                               ('BIC', bics, np.nanargmin)):
-        a, b = np.unravel_index(pick(values.ravel(order='F')), shape, order='F')
-        out[f'bestp{name}'] = pr[a]
-        out[f'bestq{name}'] = qr[b]
+    # The orders of the best models, among the grid and the constant-variance model (0, 0)
+    # (ties go to the smaller model: (0, 0) first, then column-major order)
+    null_aic, null_bic = -2 * null['llf'] + 2 * null['k'], -2 * null['llf'] + null['k'] * np.log(n)
+    for name, values, null_value in (('AIC', aics, null_aic), ('BIC', bics, null_bic)):
+        best, bp, bq, bad = null_value, 0, 0, False
+        for j, q in enumerate(qr):
+            for i, p in enumerate(pr):
+                if values[i, j] < best:
+                    best, bp, bq, bad = values[i, j], p, q, floor_ml[i, j]
+        out[f'bestp{name}'] = np.nan if bad else bp
+        out[f'bestq{name}'] = np.nan if bad else bq
 
     # How much the constant varies with each order
     def _std_omitnan(values):
         # standard deviation of each column over its non-NaN entries (0 for a single entry)
         return np.array([_sample_std(col[~np.isnan(col)]) for col in values.T])
 
-    out['Ks_vary_p'] = np.nanmean(_std_omitnan(ks))
-    out['Ks_vary_q'] = np.nanmean(_std_omitnan(ks.T))
+    out['Ks_vary_p'] = np.nan if floor_var.any() else np.nanmean(_std_omitnan(ks))
+    out['Ks_vary_q'] = np.nan if floor_var.any() else np.nanmean(_std_omitnan(ks.T))
     return out
+
 
 def _n4_fpe(loss: float, n_order: int, n_obs: int) -> float:
     """
@@ -1063,7 +1214,50 @@ def _n4_fpe(loss: float, n_order: int, n_obs: int) -> float:
     return float(loss * (1 + ratio) / (1 - ratio))
 
 
-_AIC_AR_ORDER_CACHE = [None, None]  # the last series and its AIC-selected AR order
+class _SeriesCache:
+    """
+    Results computed from a time series, kept for the few series used most recently.
+
+    A value is stored under the exact bytes of the series and a key, so it is returned only for a
+    bitwise-identical series; at most ``max_series`` series are kept (least recently used first
+    out). A ``ValueError`` or ``LinAlgError`` raised by the computation is remembered too, and a
+    new exception of the same type and message is raised at every later request.
+    """
+
+    def __init__(self, max_series: int):
+        self.max_series = max(int(max_series), 1)
+        self.entries = []   # [(series bytes, {key: value}), ...], most recently used last
+        self.lock = threading.Lock()
+
+    def _slot(self, y: np.ndarray) -> dict:
+        b = np.ascontiguousarray(y, dtype=float).tobytes()
+        with self.lock:
+            for i, (yb, d) in enumerate(self.entries):
+                if yb == b:
+                    self.entries.append(self.entries.pop(i))
+                    return d
+            d = {}
+            self.entries.append((b, d))
+            del self.entries[:-self.max_series]
+            return d
+
+    def get(self, y: np.ndarray, key, compute):
+        slot = self._slot(y)
+        if key not in slot:
+            try:
+                slot[key] = (True, compute())
+            except (ValueError, np.linalg.LinAlgError) as exc:
+                slot[key] = (False, (type(exc), exc.args))
+        ok, value = slot[key]
+        if not ok:
+            raise value[0](*value[1])
+        return value
+
+
+# Subspace-identification results for the last few series: the order-independent subspace step
+# (:func:`_n4_subspace`) and the fitted models (:func:`_n4_core`), which the state-space operations
+# (state_space_n4sid, state_space_comp_order, compare_test_sets, steps_ahead) share for a series.
+_N4_CACHE = _SeriesCache(3)
 
 
 def _pinv(m: np.ndarray, rel_tol: float = 1e-10) -> np.ndarray:
@@ -1116,9 +1310,10 @@ def _n4_arx_order(y: np.ndarray) -> int:
     Moor, *Subspace Identification for Linear Systems*, Kluwer, 1996.
     """
     y = np.asarray(y, dtype=float).ravel()
-    cached_y, cached_p = _AIC_AR_ORDER_CACHE
-    if cached_y is not None and np.array_equal(cached_y, y):
-        return cached_p
+    return _N4_CACHE.get(y, ('arx_order',), lambda: _n4_arx_order_compute(y))
+
+
+def _n4_arx_order_compute(y: np.ndarray) -> int:
     n_obs = len(y)
     lmax = max(min(20, n_obs // 10), 1)
     if n_obs - lmax < lmax + 2:
@@ -1136,9 +1331,7 @@ def _n4_arx_order(y: np.ndarray) -> int:
                 x = lags[:, :k]
                 res = target - x @ (_pinv(x) @ target)
             aic[k] = np.log(max(np.mean(res ** 2), floor_s2)) + 2.0 * k / n
-    p = int(np.argmin(aic))
-    _AIC_AR_ORDER_CACHE[0], _AIC_AR_ORDER_CACHE[1] = y.copy(), p
-    return p
+    return int(np.argmin(aic))
 
 
 def _n4_horizons(y: np.ndarray, order: int) -> tuple:
@@ -1647,13 +1840,29 @@ def _filter_riccati(a: np.ndarray, c: np.ndarray, q: np.ndarray, r: np.ndarray,
     raise np.linalg.LinAlgError("Riccati equation has no stabilizing solution")
 
 
-def _n4_core(y: np.ndarray, n: int, r: int, s: int, return_sv: bool = False) -> dict:
-    """Subspace identification of an order-``n`` innovations model with future/past horizons ``r``/``s``."""
+def _n4_subspace(y: np.ndarray, r: int, s: int) -> dict:
+    """
+    The order-independent part of the subspace identification (:func:`_n4_core`).
+
+    The block-Hankel data matrices with future/past horizons ``r``/``s``, the orthogonal
+    projections of the future outputs on the past, the canonical-variate weighting, and the
+    singular value decomposition of the weighted projection. None of these depends on the model
+    order, so models of every order with the same horizons share them (the results are kept for
+    the last few series, :class:`_SeriesCache`, read-only).
+
+    Only the left singular vectors and the singular values of the weighted projection
+    ``W O`` (``r`` by ``j``, ``j = N - r - s + 1`` columns) are used, so its thin SVD is computed:
+    the right singular vectors of the full SVD would be a ``j`` by ``j`` orthogonal matrix, whose
+    cost grows as ``N^2`` in memory and faster than ``N^2`` in time, while the left singular vectors
+    and singular values are the same.
+    """
     y = np.asarray(y, dtype=float).ravel()
+    return _N4_CACHE.get(y, ('subspace', int(r), int(s)), lambda: _n4_subspace_compute(y, int(r), int(s)))
+
+
+def _n4_subspace_compute(y: np.ndarray, r: int, s: int) -> dict:
     n_obs = len(y)
     j = n_obs - r - s + 1
-    if n < 1 or s < n or r < n + 1 or j < r + s + 1:
-        raise ValueError("The series is too short for the requested order and horizons")
     t = s + np.arange(j)
     y_past = y[t[None, :] - 1 - np.arange(s)[:, None]]      # (s, j)
     y_fut = y[t[None, :] + np.arange(r)[:, None]]           # (r, j)
@@ -1676,8 +1885,40 @@ def _n4_core(y: np.ndarray, n: int, r: int, s: int, return_sv: bool = False) -> 
         raise ValueError("The series has no variation")
     root = np.sqrt(evals + 1e-3 * np.mean(evals))
     w_mat = (evecs / root) @ evecs.T
-    u, sv, _ = np.linalg.svd(w_mat @ o_mat)
-    gamma = ((evecs * root) @ evecs.T) @ u[:, :n]           # extended observability matrix (r, n)
+    u, sv, _ = np.linalg.svd(w_mat @ o_mat, full_matrices=False)   # thin SVD: u (r, r), sv (r,)
+    sub = {'y_fut': y_fut, 'o_mat': o_mat, 'o_minus': o_minus,
+           'w_inv': (evecs * root) @ evecs.T, 'u': u, 'sv': sv}
+    for v in sub.values():
+        if isinstance(v, np.ndarray):
+            v.flags.writeable = False
+    return sub
+
+
+def _n4_core(y: np.ndarray, n: int, r: int, s: int, return_sv: bool = False) -> dict:
+    """
+    Subspace identification of an order-``n`` innovations model with future/past horizons ``r``/``s``.
+
+    The fit is a deterministic function of the series, ``n``, ``r`` and ``s``; it is kept for the
+    last few series (:class:`_SeriesCache`), so that the operations fitting the same model to the
+    same series share it. Each call returns its own copy.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n, r, s = int(n), int(r), int(s)
+    fit = _N4_CACHE.get(y, ('core', n, r, s), lambda: _n4_core_compute(y, n, r, s))
+    out = {key: (v.copy() if isinstance(v, np.ndarray) else v) for key, v in fit.items()}
+    if not return_sv:
+        del out['sv']
+    return out
+
+
+def _n4_core_compute(y: np.ndarray, n: int, r: int, s: int) -> dict:
+    n_obs = len(y)
+    j = n_obs - r - s + 1
+    if n < 1 or s < n or r < n + 1 or j < r + s + 1:
+        raise ValueError("The series is too short for the requested order and horizons")
+    sub = _n4_subspace(y, r, s)
+    y_fut, o_mat, o_minus, u, sv = sub['y_fut'], sub['o_mat'], sub['o_minus'], sub['u'], sub['sv']
+    gamma = sub['w_inv'] @ u[:, :n]                         # extended observability matrix (r, n)
 
     g_up = gamma[:-1, :]
     g_pinv = _pinv(g_up)
@@ -1708,10 +1949,8 @@ def _n4_core(y: np.ndarray, n: int, r: int, s: int, return_sv: bool = False) -> 
     c_mat = c_mat * sign[None, :]
 
     err = _defined_errors(_prediction_errors((a_mat, k_mat[:, 0], c_mat[0]), y, 1))
-    out = {'A': a_mat, 'K': k_mat, 'C': c_mat, 'loss': float(np.mean(err ** 2)), 'order': int(n)}
-    if return_sv:
-        out['sv'] = sv
-    return out
+    return {'A': a_mat, 'K': k_mat, 'C': c_mat, 'loss': float(np.mean(err ** 2)), 'order': int(n),
+            'sv': sv}
 
 
 def _n4_state_space(y: np.ndarray, order: Union[int, str]) -> dict:
@@ -3139,9 +3378,80 @@ def is_seasonal(y: ArrayLike) -> int:
     
     return out
 
+def _gp_roundoff_constant(yt: np.ndarray, n: int) -> bool:
+    """True when the values to be fitted are constant to within round-off.
+
+    A Gaussian process has nothing to describe in a constant series, and its fit has no scale to
+    work with (the noise floor is set relative to the standard deviation), so the operations
+    return NaN. The bound is the rounding error accumulated over sums of up to ``n`` terms (the
+    length of the series acted on), relative to the root-mean-square of the values:
+    ``std <= 10 * n * eps * rms``, as in :func:`pyhctsa.operations.pre_process.preproc_compare`.
+    """
+    yt = np.asarray(yt, dtype=float)
+    return bool(np.std(yt, ddof=1) <= 10 * n * np.finfo(float).eps * np.sqrt(np.mean(yt ** 2)))
+
+
+def _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos=(), len_lo=-np.inf, len_hi=np.inf, amp_pos=()):
+    """
+    The objective of the GP hyperparameter fit, with its clamp: returns ``(clamp, nlz)`` where
+    ``nlz(theta)`` is gpml's negative log marginal likelihood and its gradient for the flat
+    vector ``theta = [cov..., lik]``, with the noise standard deviations clamped below at 1% of
+    that of the data, the ``covRQiso`` shape parameters clamped above at ``alpha_cap`` and the
+    log length scales (at ``len_pos``) clamped to ``[len_lo, len_hi]``, and the log signal amplitudes (at
+    ``amp_pos``) clamped below at the same floor as the noise (zero gradient wherever a coordinate is
+    clamped and the likelihood does not improve towards the inside).
+    """
+    nhps = cov.n_hyp
+    noise_pos = np.asarray(noise_pos, dtype=int)
+    alpha_pos = np.asarray(alpha_pos, dtype=int)
+    len_pos = np.asarray(len_pos, dtype=int)
+    amp_pos = np.asarray(amp_pos, dtype=int)
+    with np.errstate(divide='ignore'):
+        noise_floor = np.log(0.01 * np.std(yt, ddof=1))  # lower bound on the log noise standard deviations and amplitudes
+
+    def _clamp(theta):
+        theta = np.array(theta, dtype=float)
+        theta[nhps] = max(theta[nhps], noise_floor)
+        theta[noise_pos] = np.maximum(theta[noise_pos], noise_floor)
+        theta[alpha_pos] = np.minimum(theta[alpha_pos], alpha_cap)
+        theta[len_pos] = np.minimum(np.maximum(theta[len_pos], len_lo), len_hi)
+        theta[amp_pos] = np.maximum(theta[amp_pos], noise_floor)
+        return theta
+
+    def _nlz(theta):
+        # gpml's negative log marginal likelihood with the bounded hyperparameters clamped
+        # (and zero gradient wherever they are clamped)
+        clamp_lik = theta[nhps] < noise_floor
+        clamp_cov = noise_pos[theta[noise_pos] < noise_floor]
+        at_cap = alpha_pos[theta[alpha_pos] >= alpha_cap]
+        amp_low = amp_pos[theta[amp_pos] <= noise_floor]
+        len_low = len_pos[theta[len_pos] <= len_lo]
+        len_high = len_pos[theta[len_pos] >= len_hi]
+        theta = _clamp(theta)
+        hyp = {'cov': theta[:nhps], 'lik': theta[nhps], 'mean': np.zeros(0)}
+        nlZ, dnlZ = gp_train(hyp, cov, tt, yt)   # NaN if the inference fails (as gp.m)
+        d_cov = np.array(dnlZ['cov'], dtype=float)
+        d_lik = np.array(dnlZ['lik'], dtype=float)
+        d_cov[clamp_cov] = 0
+        d_cov[amp_low[d_cov[amp_low] >= 0]] = 0
+        d_cov[len_low[d_cov[len_low] >= 0]] = 0
+        d_cov[len_high[d_cov[len_high] <= 0]] = 0
+        d_cov[at_cap[d_cov[at_cap] <= 0]] = 0  # at the cap, only where the likelihood still improves beyond it
+        if clamp_lik:
+            d_lik[:] = 0
+        return nlZ, np.concatenate([d_cov, d_lik, dnlZ['mean']])
+
+    return _clamp, _nlz
+
+
 def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
                      hyp0: Union[np.ndarray, None] = None,
-                     noise_pos: Union[tuple, list, None] = None) -> np.ndarray:
+                     noise_pos: Union[tuple, list, None] = None,
+                     alpha_pos: Union[tuple, list, None] = None,
+                     alpha_cap: float = np.inf,
+                     len_pos: Union[tuple, list, None] = None,
+                     len_lo: float = -np.inf, len_hi: float = np.inf,
+                     amp_pos: Union[tuple, list, None] = None) -> np.ndarray:
     """
     learn GP hyperparameters for the time series ``(tt, yt)``.
 
@@ -3173,8 +3483,14 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
     e^-12 or less, so the fitted noise depends on where the optimizer stops. The bound is a
     clamp of those hyperparameters inside the objective, with a zero gradient for a clamped
     coordinate.
+
+    ``alpha_pos`` are the 0-based positions of the log shape parameters of ``covRQiso`` among the
+    covariance hyperparameters, bounded above by ``alpha_cap`` (a log value) in the same way, and
+    ``len_pos`` those of the log length scales, bounded to ``[len_lo, len_hi]``, and ``amp_pos`` those of
+    the log signal amplitudes, bounded below like the noise.
     """
     nhps = cov.n_hyp
+    alpha_pos = np.asarray([] if alpha_pos is None else alpha_pos, dtype=int)
     if noise_pos is None:
         if cov is not CovSEisoNoise:
             raise ValueError('noise_pos is required for this covariance function')
@@ -3188,35 +3504,275 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
         hyp0 = np.array([np.log(np.mean(np.diff(tt))), 0.0, np.log(0.1), np.log(0.1)])
         assert nhps == 3
 
-    with np.errstate(divide='ignore'):
-        noise_floor = np.log(0.01 * np.std(yt, ddof=1))  # lower bound on the log noise standard deviations
-
-    def _clamp(theta):
-        theta = np.array(theta, dtype=float)
-        theta[nhps] = max(theta[nhps], noise_floor)
-        theta[noise_pos] = np.maximum(theta[noise_pos], noise_floor)
-        return theta
-
-    def _nlz(theta):
-        # gpml's negative log marginal likelihood with the noise hyperparameters clamped at
-        # the floor (and zero gradient wherever they are clamped)
-        clamp_lik = theta[nhps] < noise_floor
-        clamp_cov = noise_pos[theta[noise_pos] < noise_floor]
-        theta = _clamp(theta)
-        hyp = {'cov': theta[:nhps], 'lik': theta[nhps], 'mean': np.zeros(0)}
-        nlZ, dnlZ = gp_train(hyp, cov, tt, yt)   # NaN if the inference fails (as gp.m)
-        d_cov = np.array(dnlZ['cov'], dtype=float)
-        d_lik = np.array(dnlZ['lik'], dtype=float)
-        d_cov[clamp_cov] = 0
-        if clamp_lik:
-            d_lik[:] = 0
-        return nlZ, np.concatenate([d_cov, d_lik, dnlZ['mean']])
+    len_pos = np.asarray([] if len_pos is None else len_pos, dtype=int)
+    amp_pos = np.asarray([] if amp_pos is None else amp_pos, dtype=int)
+    _clamp, _nlz = _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos, len_lo, len_hi, amp_pos)
 
     theta, _, _ = minimize(_clamp(hyp0), _nlz, nfevals)
     theta = _clamp(theta)  # (clamped coordinates can drift: same objective value)
     if not np.all(np.isfinite(theta)):
         raise np.linalg.LinAlgError('GP hyperparameters are not finite')
     return theta
+
+
+def _gp_latent(components: list, noise_pos, theta: np.ndarray, n_cov: int):
+    """
+    The model of the latent function, to make predictions with: all noise is observation noise,
+    so the ``covNoise`` terms are merged with the likelihood noise (only the sum of their
+    variances enters the marginal likelihood) and the covariance of the latent function has no
+    noise term. Predictions at the training inputs with the ``covNoise`` term kept in the
+    covariance would include it in the cross-covariance (it is a delta function), so that the
+    posterior mean would reproduce part of the noise. Returns ``(cov, hyp, log_noise)``: the
+    covariance of the latent function, its hyperparameters in gpml's form, and the log standard
+    deviation of the total observation noise.
+    """
+    from ..toolboxes.gpml.cov import parse_cov
+    noise_pos = np.asarray(noise_pos, dtype=int)
+    names = [n + (str(d) if d is not None else '') for n, d in components if n != 'covNoise']
+    cov_lat, _ = parse_cov('_'.join(names))
+    keep = np.setdiff1d(np.arange(n_cov), noise_pos)
+    log_noise = 0.5 * np.log(np.exp(2 * theta[n_cov]) + np.sum(np.exp(2 * theta[noise_pos])))
+    hyp = {'cov': theta[keep], 'lik': log_noise, 'mean': np.zeros(0)}
+    return cov_lat, hyp, log_noise
+
+
+def _gp_alpha_pos(components: list) -> list:
+    """0-based positions of the log shape parameters of ``covRQiso`` among the covariance hyperparameters."""
+    pos = 0
+    alpha = []
+    for name, _ in components:
+        if name in ('covSEiso', 'covMaterniso'):
+            pos += 2
+        elif name == 'covPeriodic':
+            pos += 3
+        elif name == 'covRQiso':
+            alpha.append(pos + 2)
+            pos += 3
+        else:
+            pos += 1
+    return alpha
+
+
+def _gp_newton_polish(tt: np.ndarray, yt: np.ndarray, cov, theta: np.ndarray, noise_pos,
+                      alpha_pos, alpha_cap: float, len_pos=(), len_lo=-np.inf, len_hi=np.inf, amp_pos=()) -> np.ndarray:
+    """
+    Newton polish of a conjugate-gradient optimum. Conjugate gradients stop when function values
+    can no longer be compared, so the hyperparameters are only known to about the square root of
+    machine precision over the curvature (much worse along a flat valley); Newton iterations on
+    the gradient, which is accurate to round-off, locate the optimum to round-off. The ``covNoise``
+    and Gaussian-likelihood noise terms are interchangeable (only the sum of their variances
+    matters) and stay equal from the symmetric start, so they are tied here; a noise bounded at its
+    floor, a shape parameter at its cap, a length scale at a bound, or an amplitude at its floor is held there. Returns ``theta`` unchanged when the
+    Hessian is not positive definite (a flat or ridge-like optimum).
+    """
+    n_cov = cov.n_hyp
+    noise_pos = np.asarray(noise_pos, dtype=int)
+    if len(noise_pos) != 1:
+        return theta
+    k = noise_pos[0]
+    x = np.array(theta[:n_cov], dtype=float)
+    if abs(theta[n_cov] - x[k]) > 1e-9:
+        return theta
+    alpha_pos = np.asarray(alpha_pos, dtype=int)
+    len_pos = np.asarray(len_pos, dtype=int)
+    amp_pos = np.asarray(amp_pos, dtype=int)
+    _, nlz = _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos, len_lo, len_hi, amp_pos)
+    with np.errstate(divide='ignore'):
+        floor = np.log(0.01 * np.std(yt, ddof=1))
+    free = np.ones(n_cov, dtype=bool)
+    if x[k] <= floor + 1e-9:
+        free[k] = False
+    free[alpha_pos[x[alpha_pos] >= alpha_cap - 1e-9]] = False
+    free[len_pos[(x[len_pos] <= len_lo + 1e-9) | (x[len_pos] >= len_hi - 1e-9)]] = False
+    free[amp_pos[x[amp_pos] <= floor + 1e-9]] = False
+    idx = np.where(free)[0]
+
+    def obj(xx):
+        f, g = nlz(np.r_[xx, xx[k]])
+        g_cov = np.array(g[:n_cov], dtype=float)
+        g_cov[k] += g[n_cov]
+        return f, g_cov
+
+    for _ in range(20):
+        f, g = obj(x)
+        if not np.isfinite(f) or np.max(np.abs(g[idx])) < 1e-10:
+            break
+        H = np.zeros((len(idx), len(idx)))
+        for a, i in enumerate(idx):
+            h = 1e-5 * max(1.0, abs(x[i]))
+            xp, xm = x.copy(), x.copy()
+            xp[i] += h
+            xm[i] -= h
+            H[:, a] = (obj(xp)[1][idx] - obj(xm)[1][idx]) / (2 * h)
+        H = (H + H.T) / 2
+        ev = np.linalg.eigvalsh(H)
+        if not np.all(np.isfinite(ev)) or ev.min() <= 1e-9 * ev.max():
+            break  # not positive definite
+        dx = -np.linalg.solve(H, g[idx])
+        m = np.max(np.abs(dx))
+        if m > 0.5:
+            dx *= 0.5 / m
+        accepted = False
+        for _ in range(10):
+            xn = x.copy()
+            xn[idx] = x[idx] + dx
+            fn = obj(xn)[0]
+            if np.isfinite(fn) and fn <= f + 1e-12 * max(1.0, abs(f)):
+                accepted = True
+                break
+            dx = dx / 2
+        if not accepted:
+            break
+        x = xn
+        if np.max(np.abs(dx)) < 1e-12:
+            break
+    return np.r_[x, x[k]]
+
+
+def _gp_amp_pos(components: list) -> list:
+    """0-based positions of the log signal amplitudes among the covariance hyperparameters."""
+    pos = 0
+    amps = []
+    for name, _ in components:
+        if name in ('covSEiso', 'covMaterniso', 'covRQiso'):
+            amps.append(pos + 1)
+        elif name == 'covPeriodic':
+            amps.append(pos + 2)
+        pos += {'covSEiso': 2, 'covMaterniso': 2, 'covPeriodic': 3, 'covRQiso': 3}.get(name, 1)
+    return amps
+
+
+def _gp_shape_pos(components: list) -> list:
+    """
+    0-based positions, among the covariance hyperparameters, of those that are not identified
+    without correlation structure: the length scales, the period of ``covPeriodic`` and the
+    shape of ``covRQiso``.
+    """
+    pos = 0
+    shape = []
+    for name, _ in components:
+        if name in ('covSEiso', 'covMaterniso'):
+            shape.append(pos)
+        elif name == 'covPeriodic':
+            shape += [pos, pos + 1]
+        elif name == 'covRQiso':
+            shape += [pos, pos + 2]
+        pos += {'covSEiso': 2, 'covMaterniso': 2, 'covPeriodic': 3, 'covRQiso': 3}.get(name, 1)
+    return shape
+
+
+def _gp_shape_bounds(components: list, tt: np.ndarray) -> dict:
+    """
+    The values reported for the hyperparameters of :func:`_gp_shape_pos` when the series shows no
+    correlation structure, keyed by position: for a length scale, the sampling interval (a bound:
+    the data do not resolve a length scale above it); NaN for periods and shape parameters.
+    """
+    dt = np.mean(np.diff(tt))
+    lens = set(_gp_len_pos(components))
+    return {p: (np.log(dt) if p in lens else np.nan) for p in _gp_shape_pos(components)}
+
+
+def _gp_len_pos(components: list) -> list:
+    """0-based positions of the log length scales among the covariance hyperparameters."""
+    pos = 0
+    lens = []
+    for name, _ in components:
+        if name in ('covSEiso', 'covMaterniso', 'covRQiso'):
+            lens.append(pos)
+        pos += {'covSEiso': 2, 'covMaterniso': 2, 'covPeriodic': 3, 'covRQiso': 3}.get(name, 1)
+    return lens
+
+
+def _gp_fit_converged(tt: np.ndarray, yt: np.ndarray, cov, components: list, noise_pos,
+                      max_evals: int = 500, rounds: int = 3):
+    """
+    Converged fit of the GP hyperparameters; returns ``(theta, nlZ)``, or ``(None, nan)`` if the
+    fit fails.
+
+    The fit starts from the best of a deterministic grid of length scales (16, log-spaced from
+    the sampling interval to half the span) and signal fractions (0.2, 0.6, 0.95) at the total
+    variance of the data, scored by the marginal likelihood. It is minimized with the gpml
+    conjugate-gradient ``minimize`` (up to ``max_evals`` function evaluations per run, as
+    :func:`_gp_learn_hyperp`) and re-started from where it stopped (a fresh search direction)
+    until the marginal likelihood stops improving (at most ``rounds`` runs), then polished by
+    Newton iterations (:func:`_gp_newton_polish`). The length scales are bounded between the
+    sampling interval and the span of the series (a shorter or longer length scale cannot be told
+    apart from white noise or a polynomial trend), the ``covRQiso`` shape parameter above at
+    100 (where it is indistinguishable from ``covSEiso``) and the signal amplitudes below at 1% of the
+    standard deviation of the data (as for the noise: a series without correlation structure has a
+    fitted amplitude at this floor, rather than running to zero).
+    """
+    noise_pos = np.asarray(noise_pos, dtype=int)
+    alpha_pos = _gp_alpha_pos(components)
+    alpha_cap = np.log(100.0)
+    len_pos = _gp_len_pos(components)
+    amp_pos = _gp_amp_pos(components)
+    dt = np.mean(np.diff(tt))
+    span = np.max(tt) - np.min(tt)
+    len_lo, len_hi = np.log(dt), np.log(span)
+    n_cov = cov.n_hyp
+    clamp, nlz_fun = _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos, len_lo, len_hi, amp_pos)
+
+    theta0 = clamp(_gp_init_hyp(components, tt))
+    if len(len_pos) and len_pos[0] == 0 and n_cov >= 2:
+        sd = np.std(yt, ddof=1)
+        best_v = np.inf
+        with np.errstate(divide='ignore'):
+            floor = np.log(0.01 * sd)
+            for log_len in np.linspace(np.log(dt), np.log(span / 2), 16):
+                for phi in (0.2, 0.6, 0.95):
+                    th = theta0.copy()
+                    th[0] = log_len
+                    th[1] = max(np.log(np.sqrt(phi) * sd), floor)
+                    log_noise = max(np.log(np.sqrt((1 - phi) / len(noise_pos)) * sd), floor)
+                    th[noise_pos] = log_noise
+                    th[n_cov] = log_noise
+                    try:
+                        v = nlz_fun(clamp(th))[0]
+                    except np.linalg.LinAlgError:
+                        continue
+                    if np.isfinite(v) and v < best_v:
+                        best_v, theta_start = v, th
+        if np.isfinite(best_v):
+            theta0 = clamp(theta_start)
+
+    theta, nlz_prev = theta0, np.inf
+    try:
+        for _ in range(rounds):
+            theta = _gp_learn_hyperp(tt, yt, cov, nfevals=-max_evals, hyp0=theta, noise_pos=noise_pos,
+                                     alpha_pos=alpha_pos, alpha_cap=alpha_cap,
+                                     len_pos=len_pos, len_lo=len_lo, len_hi=len_hi, amp_pos=amp_pos)
+            nlz = nlz_fun(theta)[0]
+            improved = nlz_prev - nlz
+            nlz_prev = nlz
+            if not improved >= 1e-10 * max(1.0, abs(nlz)):
+                break
+    except np.linalg.LinAlgError:
+        return None, np.nan
+    if not np.isfinite(nlz_prev):
+        return None, np.nan
+    try:
+        polished = _gp_newton_polish(tt, yt, cov, theta, noise_pos, alpha_pos, alpha_cap, len_pos, len_lo, len_hi, amp_pos)
+        nlz_pol = nlz_fun(polished)[0]
+        if np.isfinite(nlz_pol):
+            theta, nlz_prev = polished, nlz_pol
+    except np.linalg.LinAlgError:
+        pass  # keep the unpolished optimum
+    return theta, nlz_prev
+
+
+def _gp_beats_white_noise(nlz: float, yt: np.ndarray, n_kernel_hyp: int) -> bool:
+    """
+    Likelihood-ratio test of the fitted GP against its nested white-noise special case
+    (zero-mean, variance at its maximum-likelihood value): the correlated model is preferred
+    if it improves the negative log marginal likelihood by more than half the 95% chi-squared
+    quantile with ``n_kernel_hyp`` degrees of freedom (the non-noise kernel hyperparameters).
+    """
+    from scipy.stats import chi2
+    n = len(yt)
+    nlz_wn = 0.5 * n * np.log(2 * np.pi * np.mean(yt ** 2)) + 0.5 * n
+    return (nlz_wn - nlz) >= 0.5 * chi2.ppf(0.95, n_kernel_hyp)
+
 
 
 def _gp_noise_pos(components: list) -> list:
@@ -3302,7 +3858,12 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         - ``h_lonN``: the fitted length scale divided by the series length (only for
           ``'covSEiso_covNoise'``).
 
-        All values are NaN if the fit fails.
+        All values are NaN if the fit fails, or if the training values are constant to within
+        round-off (see :func:`_gp_roundoff_constant`). If the training points show no correlation structure (the
+        fitted model must beat its white-noise special case in a likelihood-ratio test, see
+        :func:`_gp_beats_white_noise`), the length scale (``logh1``, ``h_lonN``) is not identified, and
+        is reported as the spacing of the training points, the bound the data allow; the other
+        outputs approach those of white noise.
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
@@ -3319,15 +3880,23 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
     tt = _even_split_points(0, N - 1, npoints, 'floor').astype(float)   # times 0..N-1
     yt = y[tt.astype(int)]
-
-    try:
-        theta = _gp_learn_hyperp(tt, yt, cov, hyp0=init_hyp(tt), noise_pos=noise_pos)
-    except np.linalg.LinAlgError:
-        logger.warning('Lack of positive definite matrix for this time series')
+    if _gp_roundoff_constant(yt, N):
         return nan_out
 
-    loghyper = theta[:nhps]
-    hyp = {'cov': loghyper, 'lik': theta[nhps], 'mean': np.zeros(0)}
+    theta, nlz_fit = _gp_fit_converged(tt, yt, cov, components, noise_pos)
+    if theta is None:
+        logger.warning('Lack of positive definite matrix for this time series')
+        return nan_out
+    # Without correlation structure (the white-noise model is not beaten) the length scale is
+    # not identified; the other outputs approach those of white noise
+    has_structure = _gp_beats_white_noise(nlz_fit, yt, nhps - len(noise_pos))
+
+    loghyper = theta[:nhps].copy()
+    # (the noise is reported as the total standard deviation of the observation noise; predictions
+    # use the latent-function model, see _gp_latent)
+    cov_in = cov
+    cov, hyp, log_noise = _gp_latent(components, noise_pos, theta, nhps)
+    loghyper[noise_pos] = log_noise
 
     # Evaluate over the whole space now, predicting at the test times ts
     if N <= 2000:
@@ -3360,13 +3929,14 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         out['nlml'] = np.nan
 
     # Log-hyperparameters
+    bounds = _gp_shape_bounds(components, tt)
     for i in range(nhps):
-        out[f'logh{i + 1}'] = loghyper[i]
+        out[f'logh{i + 1}'] = loghyper[i] if (has_structure or i not in bounds) else bounds[i]
 
     # Give extra output based on length parameter on length of time series
     # (only for the squared exponential plus noise covariance)
     if is_se_noise:
-        out['h_lonN'] = np.exp(loghyper[0]) / N
+        out['h_lonN'] = np.exp(out['logh1']) / N
 
     return out
 
@@ -4338,7 +4908,7 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
     -------
     dict
         - ``meanLLtrain``, ``maxLLtrain``: mean and maximum across models of the
-          log-likelihood per sample on the training part,
+          log-likelihood per sample of the training part (under each fitted model),
         - ``meanLLtest``, ``maxLLtest``: the same on the test part,
         - ``chLLtrain``, ``chLLtest``: change in training and test log-likelihood per sample
           from the model with the fewest states to the one with the most,
@@ -4367,8 +4937,8 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
     ll_tests = np.zeros(len(n_states))
     for j, k in enumerate(n_states):
         # train an HMM with k states for 30 cycles of EM (or until convergence)
-        mu, cov, p_matrix, pi, LL = _gaussian_hmm_fit(y_train, k)
-        ll_trains[j] = LL[-1] / n_train
+        mu, cov, p_matrix, pi, ll_train = _gaussian_hmm_fit(y_train, k)
+        ll_trains[j] = ll_train / n_train  # training data under the fitted model
         # log likelihood of the test data
         ll_tests[j] = _gaussian_hmm_loglik(y_test, mu, cov, p_matrix, pi) / n_test
 
@@ -4438,17 +5008,23 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     zero-mean GP with a Gaussian likelihood is fitted using the covariance function
     ``cov_func``, e.g., (i) a sum of squared exponential and noise terms, or (ii) a sum of
     squared exponential, periodic, and noise terms. The log hyperparameters are found by
-    maximizing the marginal likelihood (at most 50 function evaluations), starting from a
-    data-informed initial guess (:func:`_gp_init_hyp`). Goodness of fit is summarized by the
-    per-point negative log marginal likelihood, the error of the fitted mean, and the GP's
-    predictive standard deviation.
+    maximizing the marginal likelihood to convergence (:func:`_gp_fit_converged`), with the
+    noise standard deviation and signal amplitudes bounded below by 1% of that of the data and
+    the length scales between the sampling interval and the span of the series. The length scales
+    are reported only when the fitted model beats its white-noise special case in a
+    likelihood-ratio test (:func:`_gp_beats_white_noise`), as otherwise they are not identified:
+    they are then the sampling interval, the bound the data allow (periods and shape parameters
+    are then NaN). The other outputs are always reported, and approach those of white noise as the
+    structure vanishes. Goodness of fit is summarized by the per-point
+    negative log marginal likelihood, the error of the fitted mean, and the GP's predictive
+    standard deviation.
 
     Fitting is O(N^3), so the model is fitted to at most ``max_n`` samples from the time
     series, chosen by (i) resampling the time series down to this many points, (ii) taking
     the first ``max_n`` samples, or (iii) taking random samples. Times are the sample indices
     (``squish_or_squash = 1``), so length scales and periods are in samples of the cut
-    series. The output is NaN if the fit fails or if the fitted mean is nearly constant
-    (standard deviation below 0.01).
+    series. The output is NaN if the fit fails, or if the values fitted are constant to within
+    round-off (see :func:`_gp_roundoff_constant`).
 
     Parameters
     ----------
@@ -4504,7 +5080,9 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         - ``std_mu_data``: standard deviation of the GP mean at the sampled times (if not
           close to one, the GP has not followed the z-scored data),
         - ``std_S_data``: standard deviation of the GP's predictive standard deviation at the
-          sampled times,
+          sampled times (informative only for irregularly sampled times, as with
+          ``'random_i'``: for evenly spaced times the predictive standard deviation is constant
+          except near the ends),
         - ``maxS``, ``minS``, ``meanS``: maximum, minimum, and mean of the GP's predictive
           standard deviation over 1000 equally spaced times spanning the sampled series,
         - ``oosmedabserr``: out-of-sample error, for the random-subsample settings of
@@ -4519,6 +5097,7 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
 
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
+    n_in = N  # length of the input series (N changes when the series is cut below)
     cov, components = parse_cov(cov_func)
     num_hps = cov.n_hyp
 
@@ -4591,19 +5170,31 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     else:
         t = set_time_index(N)
 
+    if _gp_roundoff_constant(y, n_in):
+        return np.nan
+
     # Learn the hyperparameters (mean-zero process, Gaussian likelihood, exact inference)
-    try:
-        theta = _gp_learn_hyperp(t, y, cov, hyp0=_gp_init_hyp(components, t),
-                                 noise_pos=_gp_noise_pos(components))
-    except np.linalg.LinAlgError:
+    noise_pos = _gp_noise_pos(components)
+    theta, nlz = _gp_fit_converged(t, y, cov, components, noise_pos)
+    if theta is None:
         logger.warning('Lack of positive definite matrix for this time series')
         return np.nan
-    log_hyper = theta[:num_hps]
-    hyp = {'cov': log_hyper, 'lik': theta[num_hps], 'mean': np.zeros(0)}
+    # Is there any correlation structure to fit? If the white-noise model is not beaten, the
+    # length scales (and periods and shape parameters) are not identified: a length scale below
+    # the sampling interval, or a vanishing amplitude, fits as well. A length scale is then
+    # reported as the sampling interval, the bound the data allow. The other outputs are
+    # identified, and approach those of white noise.
+    has_structure = _gp_beats_white_noise(nlz, y, num_hps - len(noise_pos))
+    bounds = _gp_shape_bounds(components, t)
+    log_hyper = theta[:num_hps].copy()
+    # (the noise is reported as the total standard deviation of the observation noise; predictions
+    # use the latent-function model, see _gp_latent)
+    cov, hyp, log_noise = _gp_latent(components, noise_pos, theta, num_hps)
+    log_hyper[noise_pos] = log_noise
 
     out = {}
     for i in range(num_hps):
-        out[f'logh{i + 1}'] = log_hyper[i]
+        out[f'logh{i + 1}'] = log_hyper[i] if (has_structure or i not in bounds) else bounds[i]
 
     # negative log marginal likelihood using the optimized hyperparameters, per point
     out['nlml'] = gp_train(hyp, cov, t, y, want_dnlZ=False)[0] / len(t)
@@ -4613,10 +5204,6 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         mu, S2, _, _ = gp_predict(hyp, cov, t, y, t)
     except np.linalg.LinAlgError:
         return np.nan
-    if np.std(mu, ddof=1) < 0.01:  # hasn't fit the time series well at all -- too constant
-        logger.warning('This time series is not suited to Gaussian Process fitting')
-        return np.nan
-
     # root-mean-square error of the mean function, mu
     out['stde'] = np.sqrt(np.mean((y - mu) ** 2))
     # better to look at the mean distance away in units of std

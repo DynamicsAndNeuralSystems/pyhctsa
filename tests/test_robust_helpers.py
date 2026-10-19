@@ -134,8 +134,9 @@ class TestRunsAndResiduals:
 
     def test_residual_stats(self):
         r = S['res']
-        _eq(bf_residual_stats(r, np.sum((r - r.mean()) ** 2) * 3), 'resstats', atol=1e-12)
-        out = bf_residual_stats(S['res_exact'], 1e6)  # exact fit: nothing but numerical error left
+        _eq(bf_residual_stats(r, 3 * r), 'resstats', atol=1e-12)
+        # residuals of 1e-9 against data of magnitude 1e7: round-off (an exact fit)
+        out = bf_residual_stats(S['res_exact'], np.full(S['res_exact'].size, 1e7))
         assert all(np.isnan(out))
         _eq(out, 'resstats_exact')
 

@@ -5,6 +5,7 @@ import pytest
 from pyhctsa.operations.entropy import (
     approximate_entropy, dispersion_entropy, distribution_entropy,
     multi_scale_entropy, permutation_entropy, sample_entropy)
+from pyhctsa.toolboxes.physionet import sampen as _sampen_c
 
 
 def _x():
@@ -27,7 +28,11 @@ def test_dispersion_entropy():
     np.testing.assert_allclose(
         [d['dispEn'], d['normDispEn'], d['fDispEn'], d['normFDispEn']],
         [3.25592248023321, 0.78288386929189, 2.80272781425558, 0.720158588929768], rtol=1e-10)
-    assert _all_nan(dispersion_entropy(np.ones(100)))
+    # a constant series (exactly, or up to rounding) is a single pattern: zero entropy
+    for y in (np.ones(100), 0.3 + np.tile([0.0, 1e-17, 5.5e-17, 0.0], 25)):
+        d = dispersion_entropy(y)
+        assert [d['dispEn'], d['normDispEn'], d['fDispEn'], d['normFDispEn']] == [0, 0, 0, 0]
+    assert np.isnan(dispersion_entropy(np.ones(100), 1)['fDispEn'])
     assert _all_nan(dispersion_entropy(_x()[:5], 3, 6, 2))
 
 
@@ -35,10 +40,10 @@ def test_multi_scale_entropy():
     o = multi_scale_entropy(_x(), range(1, 11), 2, 0.15)
     np.testing.assert_allclose(
         [o['sampen_s3'], o['meanSampEn'], o['slope']],
-        [0.816877861512244, 1.02179390506592, -0.0235069683559523], rtol=1e-9)
+        [0.810930216216329, 0.999876654612307, -0.0302895740419296], rtol=1e-9)
     # the clean-room robust (bisquare) fit agrees with MATLAB's robustfit to ~1e-8 relative in the
     # standard error (iteration stopping tolerance)
-    np.testing.assert_allclose(o['slopeSE'], 0.0433827817660596, rtol=1e-7)
+    np.testing.assert_allclose(o['slopeSE'], 0.0416403276927917, rtol=1e-7)
     o = multi_scale_entropy(_x(), range(1, 11), 2, 0.15, what_entropy='dispen', num_classes=6)
     np.testing.assert_allclose(
         [o['dispen_s4'], o['meanDispEn'], o['slope']],
@@ -50,8 +55,46 @@ def test_multi_scale_entropy():
 
 def test_sample_entropy_nan_without_matches():
     o = sample_entropy(_x()[:40], 5, 0.02)
-    assert o['sampen1'] == 0
+    # matches at length 1 (B = 9 pairs) but none at length 2 (A = 0): NaN, as with no matches
+    _, a, b = _sampen_c.calculate(_x()[:40], 6, 0.02, True)
+    assert a[1] == 0 and b[1] == 9
+    assert np.isnan(o['sampen1'])
     assert np.isnan(o['sampen2']) and np.isnan(o['sampen3'])
+    # sampen0 is NaN when no two values are within r
+    assert np.isnan(sample_entropy(np.arange(6.0), 2, 0.5)['sampen0'])
+
+
+def _counts(y, k, r):
+    """Template-match counts of length k + 1 and k (independent of the C code)."""
+    n = len(y)
+    pairs = [(i, j) for i in range(n - k) for j in range(i + 1, n - k)]
+    match = lambda i, j, L: all(abs(y[i + t] - y[j + t]) < r for t in range(L))
+    return sum(match(i, j, k + 1) for i, j in pairs), sum(match(i, j, k) for i, j in pairs)
+
+
+def test_multi_scale_entropy_refined_composite():
+    # at each scale, -log of the match counts pooled over the coarse-graining offsets
+    y = np.random.default_rng(3).standard_normal(250)
+    o = multi_scale_entropy(y, range(1, 11), 2, 0.15)
+    for s in (1, 4, 10):
+        a = b = 0
+        for off in range(s):
+            nw = (len(y) - off) // s
+            ai, bi = _counts(y[off:off + nw * s].reshape(nw, s).mean(axis=1), 2, 0.15)
+            a, b = a + ai, b + bi
+        assert o[f'sampen_s{s}'] == pytest.approx(-np.log(a / b), rel=1e-12)
+
+
+def test_multi_scale_entropy_strict_summaries():
+    # scales 8-10 have no matches of length m + 1 (NaN), so every summary is NaN
+    o = multi_scale_entropy(_x()[:150], range(1, 11), 2, 0.15)
+    assert not np.isnan(o['sampen_s7']) and np.isnan(o['sampen_s8'])
+    for k in ['maxSampEn', 'maxScale', 'minSampEn', 'minScale', 'meanSampEn', 'stdSampEn',
+              'cvSampEn', 'meanch', 'slope', 'slopeSE']:
+        assert np.isnan(o[k])
+    # a robust fit needs at least 3 scales
+    o = multi_scale_entropy(_x(), [1, 2], 2, 0.15)
+    assert np.isnan(o['slope']) and o['meanSampEn'] == pytest.approx(1.37086621228729, rel=1e-12)
 
 
 def test_delay_rules():

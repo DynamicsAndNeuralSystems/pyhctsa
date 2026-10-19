@@ -19,8 +19,8 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str) -> dict:
     """Compute statistics on the surrogate distribution: the z-score of the series' value against
     the surrogates' (NaN if they are all equal), its distance from their median in interquartile ranges
-    (NaN if the interquartile range is 0) and a rank-based p-value (as hctsa, which no longer returns
-    a p-value or kernel density of the z-scored value, redundant with these)."""
+    (NaN if the interquartile range is 0) and a rank-based p-value (as in hctsa; a p-value or kernel
+    density of the z-scored value is not returned, being redundant with these)."""
     num_surrs = len(stat_surr)
     out = {}
     if np.isnan(stat_surr).any():
@@ -132,8 +132,8 @@ def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
     num_surrs : int, optional
         The number of surrogates to generate. Default is 1.
     random_seed : int, str or None, optional
-        The seed of the random numbers, as hctsa's ``BF_RandomSeed``: a number, ``'default'`` (0),
-        or ``None``/``'none'`` (a seed from NumPy's global stream). Default is 0.
+        The seed of the random numbers, as hctsa's ``BF_RandomSeed``: a number, ``'default'`` or
+        ``None`` (0), or ``'none'`` (a seed from NumPy's global stream). Default is 0.
     extra_params : float, optional
         The cut-off frequency for 'TFT', in frequency bins (a value below 1 is taken as a
         proportion of N). Default is N/8.
@@ -267,6 +267,12 @@ def surrogate_test(
         - 'amikraskov1': the automutual information at lag 1, estimated with the Kraskov
             nearest-neighbor estimator (``automutual_info(y, 1, 'kraskov1', 4)``); tested
             one-sided (surrogates should have lower values), cf. [2].
+        - 'amikraskovmi': as 'amikraskov1', but at the delay ``get_tau(x, 'mi')`` of the
+            original series, used for the series and every surrogate; it also detects
+            nonlinear dependence that builds up over several steps (e.g., in oversampled
+            flows). That delay is at most the autocorrelation's 1/e time, which the
+            surrogates share, so choosing it does not favor the series (a lag at the
+            series' own first AMI minimum would). One-sided.
         - 'fmmikraskov': the first minimum of the Kraskov automutual information function
             (``first_min(y, 'mi-kraskov1')``); tested one-sided.
         - 'o3': a third-order statistic used in [3] (the mean cubed increment at lag 1);
@@ -276,7 +282,7 @@ def surrogate_test(
             the Gaussian estimate of the automutual information. That is a function of
             the autocorrelation only, which random-phase surrogates preserve, so
             these tests cannot detect anything (their p-values are close to uniform for
-            every series); hctsa no longer registers them. The earlier names 'ami1' and
+            every series); hctsa does not register them. The earlier names 'ami1' and
             'fmmi' (which both meant the Gaussian estimate) are accepted as
             'amigaussian1' and 'fmmigaussian' with a deprecation warning.
 
@@ -290,15 +296,14 @@ def surrogate_test(
             tested one-sided.
 
         Default is ``'amikraskov1'``. Outputs for each statistic ``s``
-        (``amikraskov``, ``fmmikraskov``, ``amigaussian``, ``fmmigaussian``, ``o3``, ``tc3``,
+        (``amikraskov``, ``amikraskovmi``, ``fmmikraskov``, ``amigaussian``, ``fmmigaussian``, ``o3``, ``tc3``,
         ``nlpe``, ``fnn``) are ``s_zscore`` (the z-statistic of the series' value against the
         Gaussian fitted to the surrogates' values; NaN if all surrogates have the same value),
         ``s_mediqr`` (distance from the surrogates' median in interquartile ranges;
         NaN if the interquartile range is 0) and ``s_prank`` (rank-based p-value
         ``(k + 1) / (num_surrs + 1)``, with ``k`` the number of surrogates at least as extreme
         as the series in the tested direction; doubled and capped at 1 for two-sided tests).
-        As in hctsa, the p-value and kernel density of earlier versions (``s_p`` and ``s_f``)
-        are no longer returned.
+        As in hctsa, no Gaussian p-value or kernel density (``s_p``, ``s_f``) is returned.
 
     random_seed : int, str or None, optional
         The seed of the surrogates (see :func:`_make_surrogates`; ``'default'`` is 0, as in hctsa's
@@ -319,7 +324,7 @@ def surrogate_test(
     if isinstance(the_test_stat, str):
         the_test_stat = [the_test_stat]  # a bare string would be searched for substrings
     the_test_stat = list(the_test_stat)
-    # earlier names of the Gaussian-estimate statistics
+    # deprecated names of the Gaussian-estimate statistics
     for old, new in (('ami1', 'amigaussian1'), ('fmmi', 'fmmigaussian')):
         if old in the_test_stat:
             warnings.warn(
@@ -353,6 +358,22 @@ def surrogate_test(
         # surrogates should have lower AMI than the original signal
         if not _compare('amikraskov', ami_x, ami_surr, 'right'):
             return np.nan
+
+    if 'amikraskovmi' in the_test_stat:
+        # as above, at a delay set from the original series (the same for every surrogate)
+        tau_mi = get_tau(x, 'mi')
+        if np.isnan(tau_mi):
+            for k in ('zscore', 'mediqr', 'prank'):
+                out[f'amikraskovmi_{k}'] = np.nan
+        else:
+            if tau_mi == 1 and 'amikraskov1' in the_test_stat:
+                ami_x_mi, ami_surr_mi = ami_x, ami_surr  # already computed
+            else:
+                ami_x_mi = automutual_info(x, int(tau_mi), 'kraskov1', 4)
+                ami_surr_mi = np.array([automutual_info(z[:, i], int(tau_mi), 'kraskov1', 4)
+                                        for i in range(num_surrs)])
+            if not _compare('amikraskovmi', ami_x_mi, ami_surr_mi, 'right'):
+                return np.nan
 
     if 'fmmikraskov' in the_test_stat:
         # first minimum of the Kraskov automutual information of the surrogates compared to

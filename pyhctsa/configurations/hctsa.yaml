@@ -10,7 +10,7 @@ medical:
     base_name: pnn
     dependencies:
     configs:
-      - {zscore: False}
+      - {zscore: False, exclude: ['pnn30', 'pnn40', 'pnn60', 'pnn70', 'pnn80', 'pnn90']}
     legacy_name: MD_pNN 
 
   pol_var:
@@ -39,7 +39,7 @@ medical:
     base_name: hrv_meas
     dependencies:
     configs:
-      - {zscore: False}
+      - {zscore: False, exclude: ['tri10']}
     legacy_name: MD_RawHRVMeas
   
   porta:
@@ -123,8 +123,8 @@ correlation:
     base_name: acx2_shape
     dependencies:
     configs:
-      - {max_lag: 15, exclude: ['maxLag', 'sumdiff'], zscore: True}
-      - {max_lag: 'double_drown', zscore: True}   # CO_AutoCorrX2Shape(x_z,'doubleDrown')
+      - {max_lag: 15, exclude: ['maxLag', 'meanabsdiff', 'sumdiff'], zscore: True}
+      - {max_lag: 'double_drown', zscore: True, exclude: ['meanabsdiff']}   # CO_AutoCorrX2Shape(x_z,'doubleDrown')
     legacy_name: CO_AutoCorrX2Shape
     ordered_args: ['max_lag']
   
@@ -132,17 +132,17 @@ correlation:
     base_name: add_noise
     dependencies:
     configs:
-      - {tau: 1,   ami_method: 'quantiles', extra_param: 10, zscore: True, exclude: ['fitexpadjr2']}
-      - {tau: 1,   ami_method: 'even',      extra_param: 10, zscore: True, exclude: ['fitexpadjr2']}
-      - {tau: 1,   ami_method: 'std1',      extra_param: 10, zscore: True, exclude: ['fitexpadjr2']}
-      - {tau: 1,   ami_method: 'gaussian',                   zscore: True, exclude: ['fitexpadjr2', 'meanch']}
-      - {tau: 1,   ami_method: 'kraskov1',  extra_param: 4,  zscore: True, exclude: ['fitexpadjr2']}
+      - {tau: 1,   ami_method: 'quantiles', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'quantiles',10,'default',10)
+      - {tau: 1,   ami_method: 'even',      extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'even',10,'default',10)
+      - {tau: 1,   ami_method: 'std1',      extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'std1',10,'default',10)
+      - {tau: 1,   ami_method: 'gaussian',                   num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'meanch', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'gaussian',[],'default',10)
+      - {tau: 1,   ami_method: 'kraskov1',  extra_param: 4,  num_draws: 5, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'kraskov1','4','default',5)
 
-      - {tau: 'ac', ami_method: 'gaussian',                   zscore: True, exclude: ['fitexpadjr2']}
-      - {tau: 'ac1e', ami_method: 'even', extra_param: 10, zscore: True, exclude: ['fitexpadjr2']}   # CO_AddNoise(x_z,'ac1e','even',10,'default')
-      - {tau: 'ac1e', ami_method: 'kraskov1', extra_param: 4, zscore: True, exclude: ['fitexpadjr2']}   # CO_AddNoise(x_z,'ac1e','kraskov1','4','default')
-      - {tau: 'ac1e', ami_method: 'quantiles', extra_param: 10, zscore: True, exclude: ['fitexpadjr2']}   # CO_AddNoise(x_z,'ac1e','quantiles',10,'default')
-      - {tau: 'ac1e', ami_method: 'std1', extra_param: 10, zscore: True, exclude: ['fitexpadjr2']}   # CO_AddNoise(x_z,'ac1e','std1',10,'default')
+      - {tau: 'ac', ami_method: 'gaussian',                   num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac','gaussian',[],'default',10)
+      - {tau: 'ac1e', ami_method: 'even', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac1e','even',10,'default',10)
+      - {tau: 'ac1e', ami_method: 'kraskov1', extra_param: 4, num_draws: 5, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac1e','kraskov1','4','default',5)
+      - {tau: 'ac1e', ami_method: 'quantiles', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac1e','quantiles',10,'default',10)
+      - {tau: 'ac1e', ami_method: 'std1', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac1e','std1',10,'default',10)
     legacy_name: CO_AddNoise
     ordered_args: ['tau', 'ami_method', 'extra_param']
 
@@ -251,7 +251,7 @@ correlation:
     base_name: embed2_dist
     dependencies:
     configs:
-      - {tau: 'tau', zscore: True, exclude: ['d_expfit_nlogL']}
+      - {tau: 'tau', zscore: True, exclude: ['d_expfit_nlogL', 'd_mean']}
       - {tau: 1, zscore: True, select: ['d_ac1', 'd_ac3']}   # CO_Embed2_Dist(x_z,1)
     legacy_name: CO_Embed2_Dist
     ordered_args: ['tau']
@@ -269,7 +269,7 @@ correlation:
     dependencies:
       - statsmodels
     configs:
-      - {max_tau: 20, what_method: 'burg', zscore: True}   # CO_PartialAutoCorr(x_z,20,'burg')
+      - {max_tau: 20, what_method: 'burg', zscore: True, exclude: ['pac_1']}   # CO_PartialAutoCorr(x_z,20,'burg')
     legacy_name: CO_PartialAutoCorr
     ordered_args: ['max_tau', 'what_method']
 
@@ -382,7 +382,7 @@ correlation:
     base_name: stick_angles
     dependencies:
     configs:
-      - {zscore: True}
+      - {zscore: True, exclude: ['statav2_all_m', 'statav3_all_m', 'statav4_all_m', 'statav5_all_m', 'statav5_all_s', 'tau_n']}
     legacy_name: CO_StickAngles
     ordered_args:
   
@@ -390,7 +390,7 @@ correlation:
     base_name: falling_sticks
     dependencies:
     configs:
-      - {zscore: True, exclude: ['median_all', 'median_n', 'median_p']}
+      - {zscore: True, exclude: ['kurtosis_all', 'median_all', 'median_n', 'median_p']}
     legacy_name: CO_FallingSticks
     ordered_args:
   
@@ -409,7 +409,7 @@ correlation:
     configs:
       - {shape: 'circle', d: 1.5, how_to_move: 'pts', zscore: True, exclude: ['max']}
       - {shape: 'circle', d: 2.5, how_to_move: 'pts', zscore: True, exclude: ['max']}
-      - {shape: 'circle', d: 3.5, how_to_move: 'pts', zscore: True, exclude: ['max']}
+      - {shape: 'circle', d: 3.5, how_to_move: 'pts', zscore: True, exclude: ['max', 'sevens']}
       - {shape: 'rectangle', d: 2, how_to_move: 'pts', zscore: True, exclude: ['max']}
       - {d: 2.5, zscore: True, preprocess: decimate_ac1e, exclude: ['max']}   # CO_TranslateShape(zscore(BF_PreProcess(x_z,'decimate_ac1e')),'circle',2.5,'pts')
     legacy_name: CO_TranslateShape
@@ -692,7 +692,7 @@ entropy:
     base_name: complexity_invariant_distance
     dependencies:
     configs:
-      - {zscore: True, exclude: ['CE1']}
+      - {zscore: True, exclude: ['CE1', 'CE2', 'minCE1']}
     legacy_name: EN_CID
   
   approximate_entropy:
@@ -711,8 +711,8 @@ entropy:
     base_name: rpde
     dependencies:
     configs:
-      - {m: 3, tau: 1, zscore: True}
-      - {m: 3, tau: 'ac', zscore: True}
+      - {m: 3, tau: 1, zscore: True, exclude: ['meanNonZero']}
+      - {m: 3, tau: 'ac', zscore: True, exclude: ['meanNonZero']}
     legacy_name: EN_rpde
     ordered_args: ['m', 'tau']
   
@@ -720,13 +720,13 @@ entropy:
     base_name: sample_entropy
     dependencies:
     configs:
-      - {m: 5, r: 0.05, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
-      - {m: 5, r: 0.1, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
-      - {m: 5, r: 0.15, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
-      - {m: 5, r: 0.2, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
+      - {m: 5, r: 0.05, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen3', 'sampen4', 'sampen5', 'meanchsampen']}
+      - {m: 5, r: 0.1, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen3', 'sampen4', 'sampen5', 'meanchsampen']}
+      - {m: 5, r: 0.15, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen4', 'sampen5', 'meanchsampen']}
+      - {m: 5, r: 0.2, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen4', 'sampen5', 'meanchsampen']}
       - {m: 5, r: 0.3, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
-      - {m: 5, r: 0.1, pre_process_how: 'diff1', zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
-      - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
+      - {m: 5, r: 0.1, pre_process_how: 'diff1', zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen3', 'sampen4', 'sampen5', 'meanchsampen']}
+      - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen4', 'sampen5', 'meanchsampen']}
       - {m: 5, r: 0.2, zscore: True, preprocess: decimate_ac1e, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}   # EN_SampEn(zscore(BF_PreProcess(x_z,'decimate_ac1e')),5,0.2)
     legacy_name: EN_SampEn
     ordered_args: ['m', 'r', 'pre_process_how']
@@ -748,11 +748,9 @@ entropy:
     configs:
       - {num_bins: 2, depth: 2, zscore: True}
       - {num_bins: 2, depth: 3, zscore: True}
-      - {num_bins: 3, depth: 2, zscore: True}
-      - {num_bins: [[2, 3, 4, 5, 6, 7, 8, 9, 10]], depth: 2, zscore: True}
-      - {num_bins: [[2, 3, 4, 5, 6, 7, 8, 9, 10]], depth: 3, zscore: True}
+      - {num_bins: [[2, 3, 4, 5, 6, 7, 8, 9, 10]], depth: 2, zscore: True, exclude: ['medent', 'minent']}
+      - {num_bins: [[2, 3, 4, 5, 6, 7, 8, 9, 10]], depth: 3, zscore: True, exclude: ['medent', 'minent']}
       - {num_bins: 2, depth: 5, zscore: True}   # EN_Shannon(x_z,2,5)
-      - {num_bins: 3, depth: 3, zscore: True}   # EN_Shannon(x_z,3,3)
     legacy_name: EN_Shannon
     ordered_args: ['num_bins', 'depth']
   
@@ -835,14 +833,6 @@ stationarity:
     legacy_name: SY_Trend
     ordered_args: 
   
-  std_nth_deriv:
-    base_name: std_nth_deriv
-    dependencies:
-    configs:
-      - {ndr: 1, zscore: True}
-    legacy_name: SY_StdNthDer
-    ordered_args: ['ndr']
-
   ts_length:
     base_name: ts_length
     dependencies:
@@ -965,7 +955,7 @@ stationarity:
     base_name: pp_test
     dependencies:
     configs:
-      - {lags: [[0, 1, 2, 3, 4, 5]], model: 'ar', test_statistic: 't1', zscore: True, exclude: ['lagmaxp', 'lagminp']}   # lagmaxp/lagminp deregistered in hctsa
+      - {lags: [[0, 1, 2, 3, 4, 5]], model: 'ar', test_statistic: 't1', zscore: True, exclude: ['lagmaxp', 'lagminp', 'minBIC']}   # lagmaxp/lagminp deregistered in hctsa
     legacy_name: SY_PPtest
     ordered_args: ['lags', 'model', 'test_statistic']
 
@@ -985,7 +975,6 @@ stationarity:
     base_name: simple_stats
     dependencies:
     configs:
-      - {what_stat: 'zcross', zscore: True}
       - {what_stat: 'pmcross', zscore: True}
     legacy_name: ST_SimpleStats
     ordered_args: ['what_stat']
@@ -1079,15 +1068,15 @@ stationarity:
     base_name: std_nth_deriv_change
     dependencies:
     configs:
-      - {zscore: True}   # SY_StdNthDerChange(x_z)
+      - {zscore: True, exclude: ['minOrderInterp']}   # SY_StdNthDerChange(x_z)
     legacy_name: SY_StdNthDerChange
 
   nstat_z:
     base_name: nstat_z
     dependencies:
     configs:
-      - {num_seg: 4, zscore: True, exclude: ['maximageig']}   # SY_nstat_z(x_z,4,{1,3})
-      - {num_seg: 5, zscore: True, exclude: ['maximageig']}   # SY_nstat_z(x_z,5,{1,3})
+      - {num_seg: 4, zscore: True, exclude: ['maxeig', 'maximageig', 'rangeeig', 'rangemean', 'rangemedian', 'rangerange', 'rangestd']}   # SY_nstat_z(x_z,4,{1,3})
+      - {num_seg: 5, zscore: True, exclude: ['maxeig', 'maximageig', 'rangeeig', 'rangemean', 'rangemedian', 'rangerange', 'rangestd']}   # SY_nstat_z(x_z,5,{1,3})
     legacy_name: SY_nstat_z
     ordered_args: ['num_seg']
 
@@ -1282,7 +1271,6 @@ distribution:
     base_name: trimmed_mean
     dependencies:
     configs:
-      - {p_exclude: 1}
       - {p_exclude: 5}
       - {p_exclude: 10}
       - {p_exclude: 25}
@@ -1294,7 +1282,7 @@ distribution:
     base_name: histogram_asymmetry
     dependencies:
     configs:
-      - {num_bins: 11, do_simple: False, zscore: True}
+      - {num_bins: 11, do_simple: False, zscore: True, exclude: ['densityDiff']}
     legacy_name: DN_HistogramAsymmetry
     ordered_args: ['num_bins']
   
@@ -1353,8 +1341,8 @@ distribution:
     base_name: fit_kernel_smooth
     dependencies:
     configs:
-      - {area: [[0.05, 0.1, 0.2, 0.3, 0.4, 0.5]], numcross: [[0.05, 0.1, 0.2, 0.3, 0.4, 0.5]], arclength: [[0.1, 0.5, 1, 2]], zscore: False}   # DN_FitKernelSmooth(x,'numcross',[0.05,0.1,0.2,0.3,0.4,0.5],'area',[0.05,0.1,0.2,0.3,0.4,0.5],'arclength',[0.1,0.5,1,2])
-      - {zscore: True, select: ['entropy', 'max']}   # DN_FitKernelSmooth(x_z)
+      - {zscore: False, exclude: ['max', 'entropy']}   # DN_FitKernelSmooth(x)
+      - {area: [[0.05, 0.1, 0.2, 0.3]], arclength: [[0.5, 2]], zscore: True, exclude: ['npeaks', 'asym', 'plsym']}   # DN_FitKernelSmooth(x_z,'area',[0.05,0.1,0.2,0.3],'arclength',[0.5,2])
     legacy_name: DN_FitKernelSmooth
     ordered_args: ['none']   # keeps the settings out of the label
 
@@ -1436,13 +1424,13 @@ symbolic:
     dependencies:
     configs:
       - {how_to_cg: 'quantile', num_groups: 3, tau: 1, zscore: True, select: ['lam2mod', 'maximeig', 'mineig', 'ondiag', 'secondeig', 'stddiag', 'stdeig', 'sumdiagcov', 'symdiff', 'symsumdiff', 'transEntropy', 'transKLdiv']}
-      - {how_to_cg: 'quantile', num_groups: 4, tau: 1, zscore: True, exclude: ['maxeig', 'mineigcov', 'specgap']}
-      - {how_to_cg: 'quantile', num_groups: 5, tau: 1, zscore: True, exclude: ['maxeig', 'mineigcov', 'specgap']}
+      - {how_to_cg: 'quantile', num_groups: 4, tau: 1, zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}
+      - {how_to_cg: 'quantile', num_groups: 5, tau: 1, zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}
 
       - {how_to_cg: 'quantile', num_groups: 2, tau: 'mi', zscore: True, select: ['T1', 'sumdiagcov']}   # SB_TransitionMatrix(x_z,'quantile',2,'mi')
-      - {how_to_cg: 'quantile', num_groups: 3, tau: 'mi', zscore: True, exclude: ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'maxeig', 'mineigcov', 'specgap']}   # SB_TransitionMatrix(x_z,'quantile',3,'mi')
-      - {how_to_cg: 'quantile', num_groups: 4, tau: 'mi', zscore: True, exclude: ['maxeig', 'mineigcov', 'specgap']}   # SB_TransitionMatrix(x_z,'quantile',4,'mi')
-      - {how_to_cg: 'quantile', num_groups: 5, tau: 'mi', zscore: True, exclude: ['maxeig', 'mineigcov', 'specgap']}   # SB_TransitionMatrix(x_z,'quantile',5,'mi')
+      - {how_to_cg: 'quantile', num_groups: 3, tau: 'mi', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap', 'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9']}   # SB_TransitionMatrix(x_z,'quantile',3,'mi')
+      - {how_to_cg: 'quantile', num_groups: 4, tau: 'mi', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}   # SB_TransitionMatrix(x_z,'quantile',4,'mi')
+      - {how_to_cg: 'quantile', num_groups: 5, tau: 'mi', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}   # SB_TransitionMatrix(x_z,'quantile',5,'mi')
       - {how_to_cg: 'updown', num_groups: 2, tau: 'ac', zscore: True, select: ['lam2mod', 'stddiag', 'sumdiagcov']}   # SB_TransitionMatrix(x_z,'updown',2,'ac')
       - {how_to_cg: 'updown', num_groups: 2, tau: 1, zscore: True, select: ['lam2mod', 'stddiag', 'sumdiagcov']}   # SB_TransitionMatrix(x_z,'updown',2,1)
     legacy_name: SB_TransitionMatrix
@@ -1671,7 +1659,7 @@ hypothesis_tests:
     configs:
       - {periods: 2, iids: 0, zscore: True, select: ['ratio']}
       - {periods: 4, iids: 0, zscore: True, select: ['ratio']}
-      - {periods: [[2, 4, 6, 8, 2, 4, 6, 8]], iids: [[0, 0, 0, 0, 1, 1, 1, 1]], zscore: True, exclude: ['maxstat', 'meanstat', 'minstat']}   # SY_VarRatioTest(x_z,[2,4,6,8,2,4,6,8],[0,0,0,0,1,1,1,1])
+      - {periods: [[2, 4, 6, 8, 2, 4, 6, 8]], iids: [[0, 0, 0, 0, 1, 1, 1, 1]], zscore: True, exclude: ['maxratio', 'maxstat', 'meanratio', 'meanstat', 'minstat']}   # SY_VarRatioTest(x_z,[2,4,6,8,2,4,6,8],[0,0,0,0,1,1,1,1])
     legacy_name: SY_VarRatioTest
     ordered_args: ['periods', 'iids']
 
@@ -1708,9 +1696,9 @@ spectral:
     base_name: spectral_summaries
     dependencies:
     configs:
-      - {psd_meth: 'periodogram', window_type: 'hamming', zscore: True, exclude: ['fpoly2_sse', 'linfitloglog_all_sea1', 'linfitloglog_hf_sea1', 'linfitsemilog_all_sea1', 'meanPeakWidth_prom5', 'meanProm_5', 'median', 'numPeaks_50power', 'numPromPeaks_3', 'numPromPeaks_5', 'numPromPeaks_8', 'peakPower_2', 'peakPower_5', 'peakPower_prom5', 'peakpower_1', 'q25', 'q75', 'w_weighted_peak_prom', 'width_weighted_prom']}
-      - {psd_meth: 'welch', window_type: 'rect', zscore: True, exclude: ['fpoly2_sse', 'linfitloglog_all_sea1', 'linfitloglog_hf_sea1', 'linfitsemilog_all_sea1', 'median', 'q25', 'q75']}
-      - {zscore: True, exclude: ['fpoly2_sse', 'linfitloglog_all_sea1', 'linfitloglog_hf_sea1', 'linfitsemilog_all_sea1', 'meanPeakWidth_prom5', 'meanProm_5', 'median', 'numPeaks_50power', 'numPromPeaks_3', 'numPromPeaks_5', 'numPromPeaks_8', 'peakPower_2', 'peakPower_5', 'peakPower_prom5', 'peakpower_1', 'q25', 'q75', 'w_weighted_peak_prom', 'width_weighted_prom']}   # SP_Summaries(x_z,'fft',[],[],false)
+      - {psd_meth: 'periodogram', window_type: 'hamming', zscore: True, exclude: ['fpoly2_sse', 'linfitloglog_all_sea1', 'linfitloglog_hf_sea1', 'linfitsemilog_all_sea1', 'meanPeakWidth_prom5', 'meanProm_5', 'median', 'numPeaks_50power', 'numPromPeaks_3', 'numPromPeaks_5', 'numPromPeaks_8', 'peakpower_1', 'peakPower_2', 'peakPower_5', 'peakPower_prom5', 'q25', 'q75', 'spect_shann_ent', 'std', 'w_weighted_peak_prom', 'width_weighted_prom']}
+      - {psd_meth: 'welch', window_type: 'rect', zscore: True, exclude: ['fpoly2_sse', 'linfitloglog_all_sea1', 'linfitloglog_hf_sea1', 'linfitsemilog_all_sea1', 'median', 'q25', 'q75', 'spect_shann_ent', 'std']}
+      - {zscore: True, exclude: ['fpoly2_sse', 'linfitloglog_all_sea1', 'linfitloglog_hf_sea1', 'linfitsemilog_all_sea1', 'meanPeakWidth_prom5', 'meanProm_5', 'median', 'numPeaks_50power', 'numPromPeaks_3', 'numPromPeaks_5', 'numPromPeaks_8', 'peakpower_1', 'peakPower_2', 'peakPower_5', 'peakPower_prom5', 'q25', 'q75', 'spect_shann_ent', 'std', 'w_weighted_peak_prom', 'width_weighted_prom']}   # SP_Summaries(x_z,'fft',[],[],false)
     legacy_name: SP_Summaries
     ordered_args: ['psd_meth', 'window_type']
   
@@ -1790,11 +1778,11 @@ model_fit:
     dependencies:
       - statsmodels
     configs:
-      - {p: 1, zscore: True, exclude: ['a1', 'a2', 'noisevar']}
-      - {p: 2, zscore: True, exclude: ['a1']}
-      - {p: 3, zscore: True, exclude: ['a1']}
-      - {p: 4, zscore: True, exclude: ['a1']}
-      - {p: 5, zscore: True, exclude: ['a1']}
+      - {p: 1, zscore: True, exclude: ['a1', 'a2', 'noisevar', 'stde']}
+      - {p: 2, zscore: True, exclude: ['a1', 'stde']}
+      - {p: 3, zscore: True, exclude: ['a1', 'stde']}
+      - {p: 4, zscore: True, exclude: ['a1', 'stde']}
+      - {p: 5, zscore: True, exclude: ['a1', 'stde']}
     legacy_name: MF_AR_arcov
     ordered_args: ['p']
 
@@ -1810,7 +1798,7 @@ model_fit:
     base_name: ar_fit
     dependencies:
     configs:
-      - {p_min: 1, p_max: 8, selector: 'sbc', zscore: True, exclude: ['C', 'aroundmin_sbc', 'fpe_8', 'minsbc', 'popt_sbc', 'sbc_1', 'sbc_2', 'sbc_3', 'sbc_4', 'sbc_5', 'sbc_6', 'sbc_7', 'sbc_8']}
+      - {p_min: 1, p_max: 8, selector: 'sbc', zscore: True, exclude: ['A1', 'aroundmin_sbc', 'C', 'fpe_1', 'fpe_2', 'fpe_3', 'fpe_4', 'fpe_5', 'fpe_6', 'fpe_7', 'fpe_8', 'meanabs', 'minfpe', 'minsbc', 'popt_sbc', 'sbc_1', 'sbc_2', 'sbc_3', 'sbc_4', 'sbc_5', 'sbc_6', 'sbc_7', 'sbc_8', 'stde']}
     legacy_name: MF_arfit
     ordered_args: ['p_min', 'p_max', 'selector']
 
@@ -1841,7 +1829,7 @@ model_fit:
     base_name: loop_local_simple
     dependencies:
     configs:
-      - {forecast_meth: 'mean', zscore: True, exclude: ['sws_fexp_r2']}
+      - {forecast_meth: 'mean', zscore: True, exclude: ['stde_peaksize', 'sws_fexp_r2']}
     legacy_name: FC_LoopLocalSimple
     ordered_args: ['forecast_meth']
   
@@ -1850,11 +1838,11 @@ model_fit:
     dependencies:
       - statsmodels
     configs:
-      - {model: 'ar', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True}
-      - {model: 'arcrosspred', order: 2, subset_how: 'uniform', sample_p: 5, zscore: True}   # MF_FitSubsegments(x_z,'arcrosspred',2,'uniform',5)
+      - {model: 'ar', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True, exclude: ['a_1_mean', 'fpe_range']}
+      - {model: 'arcrosspred', order: 2, subset_how: 'uniform', sample_p: 5, zscore: True, exclude: ['iqr', 'range', 'rangemean', 'rangemedian', 'rangeoffdiag', 'rangerange', 'rangestd', 'stdmedian', 'stdrange']}   # MF_FitSubsegments(x_z,'arcrosspred',2,'uniform',5)
       - {model: 'arsbc', subset_how: 'spread', sample_p: [[25, 0.1]], zscore: True}   # MF_FitSubsegments(x_z,'arsbc',[],'spread',[25,0.1])
       - {model: 'arsbc', subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True}   # MF_FitSubsegments(x_z,'arsbc',[],'uniform',[25,0.1])
-      - {model: 'ss', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True}   # MF_FitSubsegments(x_z,'ss',2,'uniform',[25,0.1])
+      - {model: 'ss', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True, exclude: ['fpe_range']}   # MF_FitSubsegments(x_z,'ss',2,'uniform',[25,0.1])
     legacy_name: MF_FitSubsegments
     ordered_args: ['model', 'order', 'subset_how', 'sample_p']
   
@@ -1871,26 +1859,16 @@ model_fit:
     base_name: gp_fit_across
     dependencies:
     configs:
-      - {cov_func: 'covSEiso_covNoise', zscore: True}   # MF_GP_FitAcross(x_z,{'covSum',{'covSEiso','covNoise'}},20)
+      - {cov_func: 'covSEiso_covNoise', zscore: True, exclude: ['logh1', 'logh2', 'logh3']}   # MF_GP_FitAcross(x_z,{'covSum',{'covSEiso','covNoise'}},20)
     legacy_name: MF_GP_FitAcross
     ordered_args: ['cov_func', 'npoints']
-
-  gp_local_prediction:
-    base_name: gp_local_prediction
-    dependencies:
-    configs:
-      - {cov_func: 'covSEiso_covNoise', num_train: 5, num_test: 3, num_preds: 10, pmode: 'beforeafter', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'q90abs_run', 'q10abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},5,3,10,'beforeafter')
-      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'frombefore', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'q90abs_run', 'q10abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},10,3,20,'frombefore')
-      - {cov_func: 'covSEiso_covNoise', num_train: 10, num_test: 3, num_preds: 20, pmode: 'spreadgap', zscore: True, exclude: ['maxabs', 'maxabs_std', 'meanabs', 'meanabs_std', 'minabs', 'minabs_std', 'maxabs_run', 'maxabs_std_run', 'minabs_std_run', 'maxerrbar', 'maxnlml', 'q90nlml', 'minabs_run']}   # MF_GP_LocalPrediction(x_z,{'covSum',{'covSEiso','covNoise'}},10,3,20,'spreadgap')
-    legacy_name: MF_GP_LocalPrediction
-    ordered_args: ['cov_func', 'num_train', 'num_test', 'num_preds', 'pmode']
 
   compare_ar:
     base_name: compare_ar
     dependencies:
     configs:
-      - {orders: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], test_how: 0.5, zscore: True}   # MF_CompareAR(x_z,1:10,0.5)
-      - {orders: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], test_how: 'all', zscore: True, exclude: ['best_n']}   # MF_CompareAR(x_z,1:10,'all')
+      - {orders: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], test_how: 0.5, zscore: True, exclude: ['bestaic', 'maxdiff', 'medianv']}   # MF_CompareAR(x_z,1:10,0.5)
+      - {orders: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], test_how: 'all', zscore: True, exclude: ['best_n', 'bestaic', 'maxdiff', 'medianv']}   # MF_CompareAR(x_z,1:10,'all')
     legacy_name: MF_CompareAR
     ordered_args: ['test_how']
 
@@ -1908,19 +1886,17 @@ model_fit:
   garch_compare:
     base_name: garch_compare
     dependencies:
-      - arch
     configs:
-      - {pre_proc: 'ar', zscore: True, exclude: ['bestpLLF', 'bestqLLF', 'maxAIC', 'meanAIC', 'meanBIC', 'meanLLF', 'minAIC', 'minBIC', 'minLLF']}   # MF_GARCHcompare(x_z,'ar',1:3,1:3)
+      - {pre_proc: 'ar', zscore: True, exclude: ['hasStructure', 'Ks_vary_p', 'Ks_vary_q', 'max_maxarchps', 'max_maxlbqps', 'max_meanlbqps', 'maxAIC', 'maxBIC', 'maxK', 'mean_maxarchps', 'mean_maxlbqps', 'mean_meanarchps', 'mean_meanlbqps', 'meanAIC', 'meanBIC', 'meanK', 'meanLLF', 'min_maxarchps', 'min_maxlbqps', 'min_meanarchps', 'min_meanlbqps', 'minAIC', 'minBIC', 'minK', 'minLLF']}   # MF_GARCHcompare(x_z,'ar',1:3,1:3)
     legacy_name: MF_GARCHcompare
     ordered_args: ['pre_proc']
 
   garch_fit:
     base_name: garch_fit
     dependencies:
-      - arch
     configs:
-      - {zscore: True, exclude: ['aic', 'bic', 'constant', 'constanterr', 'distDoF', 'engle_pval_stde_1', 'GARCHerr_1', 'leverage', 'leverageerr', 'offset', 'summaryexitflag']}   # MF_GARCHfit(x_z,'ar',1,1)
-      - {model_type: 'gjr', innovation_dist: 'gaussian', zscore: True, select: ['leverage', 'leverageerr']}   # MF_GARCHfit(x_z,'ar',1,1,'default','gjr','gaussian')
+      - {zscore: True, exclude: ['ac1_stde2', 'aic', 'ARCHerr_1', 'bic', 'constant', 'constanterr', 'distDoF', 'engle_pval_stde_1', 'engle_pval_stde_10', 'GARCHerr_1', 'hasStructure', 'lbq_max_diff_p', 'lbq_mean_diff_p', 'lbq_pval_stde_1', 'lbq_pval_stde_10', 'lbq_pval_stde_5', 'leverage', 'leverageerr', 'maxenglepval_stde', 'maxlbqpval_stde2', 'meansigma', 'minenglepval_stde', 'minlbqpval_stde2', 'offset', 'rangesigma', 'stdsigma', 'summaryexitflag', 'uncondVar', 'zres_ac1', 'zres_ac2', 'zres_ac3', 'zres_ftbth', 'zres_meane', 'zres_minsbc', 'zres_popt', 'zres_propbth', 'zres_stde', 'zres_swm', 'zres_taurat']}   # MF_GARCHfit(x_z,'ar',1,1)
+      - {model_type: 'gjr', innovation_dist: 'gaussian', zscore: True, select: ['leverage']}   # MF_GARCHfit(x_z,'ar',1,1,'default','gjr','gaussian')
       - {model_type: 'garch', innovation_dist: 't', zscore: True, select: ['distDoF']}   # MF_GARCHfit(x_z,'ar',1,1,'default','garch','t')
     legacy_name: MF_GARCHfit
     ordered_args: ['model_type', 'innovation_dist']
@@ -1929,13 +1905,11 @@ model_fit:
     base_name: gp_hyperparameters
     dependencies:
     configs:
-      - {cov_func: 'covSEiso_covNoise', max_n: 50, resample_how: 'random_i', zscore: True, exclude: ['maxS']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,50,'random_i','default')
-      - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,200,'first')
-      - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'resample', zscore: True, exclude: ['oosmedabserr']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,200,'resample')
-      - {cov_func: 'covSEiso_covPeriodic_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covPeriodic','covNoise'}},1,200,'first')
-      - {cov_func: 'covSEiso_covPeriodic_covNoise', max_n: 200, resample_how: 'resample', zscore: True, exclude: ['oosmedabserr']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covPeriodic','covNoise'}},1,200,'resample')
-      - {cov_func: 'covMaterniso3_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr']}   # MF_GP_Hyperparameters(x_z,{'covSum',{{'covMaterniso',3},'covNoise'}},1,200,'first')
-      - {cov_func: 'covRQiso_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covRQiso','covNoise'}},1,200,'first')
+      - {cov_func: 'covSEiso_covNoise', max_n: 50, resample_how: 'random_i', zscore: True, exclude: ['maxS', 'stde', 'minS', 'meanS']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,50,'random_i','default')
+      - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'logh3', 'stde', 'maxS', 'minS', 'meanS']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,200,'first')
+      - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'resample', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'stde', 'std_mu_data', 'maxS', 'minS', 'meanS']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,200,'resample')
+      - {cov_func: 'covMaterniso3_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'nlml', 'stde', 'meanabs_std', 'std_mu_data', 'maxS', 'minS', 'meanS']}   # MF_GP_Hyperparameters(x_z,{'covSum',{{'covMaterniso',3},'covNoise'}},1,200,'first')
+      - {cov_func: 'covRQiso_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'logh2', 'logh3', 'logh4', 'nlml', 'stde', 'std_mu_data', 'maxS', 'minS', 'meanS']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covRQiso','covNoise'}},1,200,'first')
     legacy_name: MF_GP_Hyperparameters
     ordered_args: ['cov_func', 'max_n', 'resample_how']
 
@@ -1943,7 +1917,7 @@ model_fit:
     base_name: state_space_comp_order
     dependencies:
     configs:
-      - {max_order: 8, zscore: True, exclude: ['meandiffaic']}   # MF_StateSpaceCompOrder(x_z,8)
+      - {max_order: 8, zscore: True, exclude: ['meandiffaic', 'minaic', 'minlossfn']}   # MF_StateSpaceCompOrder(x_z,8)
     legacy_name: MF_StateSpaceCompOrder
     ordered_args: ['max_order']
 
@@ -1990,8 +1964,8 @@ graph:
     base_name: visibility_graph
     dependencies:
     configs:
-      - {meth: 'norm', zscore: True, exclude: ['dexpk_adjr2', 'dgaussk_adjr2', 'dpowerk_adjr2', 'expnlogL', 'gaussnlogL']}
-      - {max_l: 'full', zscore: True, exclude: ['dexpk_adjr2', 'dgaussk_adjr2', 'dpowerk_adjr2', 'expnlogL', 'gaussnlogL']}   # NW_VisibilityGraph(x_z,'horiz','full')
+      - {meth: 'norm', zscore: True, exclude: ['dexpk_adjr2', 'dgaussk_adjr2', 'dpowerk_adjr2', 'expnlogL', 'gaussnlogL', 'rangek']}
+      - {max_l: 'full', zscore: True, exclude: ['dexpk_adjr2', 'dgaussk_adjr2', 'dpowerk_adjr2', 'expnlogL', 'gaussnlogL', 'rangek']}   # NW_VisibilityGraph(x_z,'horiz','full')
     legacy_name: NW_VisibilityGraph
     ordered_args: ['meth']
 
@@ -2080,8 +2054,8 @@ pre_process:
     base_name: preproc_schreiber_denoise
     dependencies:
     configs:
-      - {num_iter: 1, neighborhood_std: 0.3, zscore: True}   # PP_SchreiberDenoise(x_z,5,1,1,0.3)
-      - {num_iter: 4, neighborhood_std: 0.3, zscore: True}   # PP_SchreiberDenoise(x_z,5,1,4,0.3)
+      - {num_iter: 1, neighborhood_std: 0.3, zscore: True, exclude: ['corrOrigDenoised']}   # PP_SchreiberDenoise(x_z,5,1,1,0.3)
+      - {num_iter: 4, neighborhood_std: 0.3, zscore: True, exclude: ['corrOrigDenoised']}   # PP_SchreiberDenoise(x_z,5,1,4,0.3)
     legacy_name: PP_SchreiberDenoise
     ordered_args: ['num_iter']
 
@@ -2090,7 +2064,7 @@ surrogates:
     base_name: surrogate_test
     dependencies:
     configs:
-      - {the_test_stat: [['amikraskov1', 'fmmikraskov', 'o3', 'tc3']], zscore: True}   # SD_SurrogateTest(x_z,'RP',99,[],{'amikraskov1','fmmikraskov','o3','tc3'},'default')
+      - {the_test_stat: [['amikraskov1', 'amikraskovmi', 'o3', 'tc3']], zscore: True, exclude: ['tc3_mediqr']}   # SD_SurrogateTest(x_z,'RP',99,[],{'amikraskov1','amikraskovmi','o3','tc3'},'default')
     legacy_name: SD_SurrogateTest
     ordered_args: ['surr_meth', 'num_surrs', 'the_test_stat']
 
@@ -2126,7 +2100,7 @@ nonlinearity:
     configs:
       - {de: 2, tau: 'mi', zscore: True, exclude: ['msqerr']}
       - {de: 3, tau: 'ac1e', zscore: True, exclude: ['msqerr']}   # NL_nlpe(x_z,3,'ac1e',5000,{'ac',1})
-      - {de: 'fnn', tau: 'mi', zscore: True, exclude: ['msqerr']}   # NL_nlpe(x_z,'fnn','mi',5000,{'ac',1})
+      - {de: [['fnn', 0.05]], tau: 'mi', zscore: True, exclude: ['msqerr']}   # NL_nlpe(x_z,{'fnn',0.05},'mi',5000,{'ac',1})
     legacy_name: NL_nlpe
     ordered_args: ['de', 'tau']
   
@@ -2134,9 +2108,9 @@ nonlinearity:
     base_name: embed_pca
     dependencies:
     configs:
-      - {tau: 'mi', m: 10, zscore: True, exclude: ['max', 'perc_10', 'perc_6', 'perc_7', 'perc_8', 'perc_9']}
-      - {tau: 1, m: 10, zscore: True, exclude: ['max', 'perc_10', 'perc_6', 'perc_7', 'perc_8', 'perc_9']}
-      - {tau: 'ac', m: 3, zscore: True, exclude: ['fb001', 'max', 'min', 'perc_3']}
+      - {tau: 'mi', m: 10, zscore: True, exclude: ['max', 'perc_1', 'perc_10', 'perc_6', 'perc_7', 'perc_8', 'perc_9']}
+      - {tau: 1, m: 10, zscore: True, exclude: ['max', 'perc_1', 'perc_10', 'perc_6', 'perc_7', 'perc_8', 'perc_9']}
+      - {tau: 'ac', m: 3, zscore: True, exclude: ['fb001', 'max', 'min', 'perc_1', 'perc_3']}
     legacy_name: NL_EmbedPCA
     ordered_args: ['tau', 'm']
   
@@ -2164,7 +2138,7 @@ nonlinearity:
     configs:
       - {nnr: 5, tau: 1, m: 3, zscore: True}   # NL_LocalDensity(x_z,5,{'ac',1},{1,3})
       - {nnr: 5, tau: 'ac1e', m: 2, zscore: True}   # NL_LocalDensity(x_z,5,{'ac',1},{'ac1e',2})
-      - {nnr: 5, tau: 'ac1e', m: 'fnn', zscore: True}   # NL_LocalDensity(x_z,5,{'ac',1},{'ac1e','fnn'})
+      - {nnr: 5, tau: 'ac1e', m: [['fnn', 0.05]], zscore: True}   # NL_LocalDensity(x_z,5,{'ac',1},{'ac1e',{'fnn',0.05}})
     legacy_name: NL_LocalDensity
     ordered_args: ['nnr', 'past', 'tau', 'm']
   
@@ -2172,8 +2146,8 @@ nonlinearity:
     base_name: tisean_d2
     dependencies:
     configs:
-      - {tau: 1, zscore: True}   # NL_d2(x_z,1,10,{'ac',1})
-      - {tau: 'ac1e', zscore: True}   # NL_d2(x_z,'ac1e',10,{'ac',1})
+      - {tau: 1, zscore: True, exclude: ['bend2g_meandim']}   # NL_d2(x_z,1,10,{'ac',1})
+      - {tau: 'ac1e', zscore: True, exclude: ['bend2g_meandim']}   # NL_d2(x_z,'ac1e',10,{'ac',1})
     legacy_name: NL_d2
     ordered_args: ['tau', 'maxm', 'theiler_win']
     
@@ -2191,7 +2165,7 @@ nonlinearity:
     base_name: delay_time
     dependencies:
     configs:
-      - {zscore: True}   # NL_DelayTime(x_z,{'ac',10},{'ac',1},'default')
+      - {zscore: True, exclude: ['mintau']}   # NL_DelayTime(x_z,{'ac',10},{'ac',1},'default')
     legacy_name: NL_DelayTime
     ordered_args: ['max_delay', 'past']
 
@@ -2199,7 +2173,7 @@ nonlinearity:
     base_name: box_count_entropy_rate
     dependencies:
     configs:
-      - {num_bins: 50, embed_params: [['ac1e', 5]], zscore: True, select: ['iqrstretch', 'meanchr11', 'meanchr14', 'meanchr17', 'meanchr2', 'meanchr20', 'meanchr24', 'meanchr28', 'meanchr3', 'meanchr32', 'meanchr36', 'meanchr4', 'meanchr6', 'meanchr8', 'meand2', 'meand3', 'meand4', 'meand5', 'meanr11', 'meanr14', 'meanr17', 'meanr2', 'meanr20', 'meanr24', 'meanr28', 'meanr3', 'meanr32', 'meanr36', 'meanr4', 'meanr6', 'meanr8', 'mediand2', 'mediand3', 'mediand4', 'mediand5', 'medianr11', 'medianr14', 'medianr17', 'medianr2', 'medianr20', 'medianr24', 'medianr28', 'medianr3', 'medianr32', 'medianr36', 'medianr4', 'medianr6', 'medianr8', 'medianstretch', 'minr11', 'minr14', 'minr17', 'minr2', 'minr20', 'minr24', 'minr28', 'minr3', 'minr32', 'minr36', 'minr4', 'minr6', 'minr8', 'stdmean', 'stdmedian']}   # NL_BoxCountEntropyRate(x_z,50,{'ac1e',5})
+      - {num_bins: 50, embed_params: [['ac1e', 5]], zscore: True, select: ['iqrstretch', 'meanchr11', 'meanchr14', 'meanchr17', 'meanchr2', 'meanchr20', 'meanchr24', 'meanchr28', 'meanchr3', 'meanchr32', 'meanchr36', 'meanchr4', 'meanchr6', 'meanchr8', 'meand2', 'meand3', 'meand4', 'meand5', 'meanr11', 'meanr14', 'meanr17', 'meanr2', 'meanr20', 'meanr24', 'meanr28', 'meanr3', 'meanr32', 'meanr36', 'meanr4', 'meanr6', 'meanr8', 'mediand2', 'mediand3', 'mediand4', 'mediand5', 'medianr11', 'medianr14', 'medianr17', 'medianr20', 'medianr24', 'medianr28', 'medianr3', 'medianr32', 'medianr36', 'medianr4', 'medianr6', 'medianr8', 'medianstretch', 'minr11', 'minr14', 'minr17', 'minr2', 'minr20', 'minr24', 'minr28', 'minr3', 'minr32', 'minr36', 'minr4', 'minr6', 'minr8', 'stdmean', 'stdmedian']}   # NL_BoxCountEntropyRate(x_z,50,{'ac1e',5})
     legacy_name: NL_BoxCountEntropyRate
     ordered_args: ['num_bins', 'embed_params']
 
@@ -2216,7 +2190,7 @@ nonlinearity:
     base_name: dimensions
     dependencies:
     configs:
-      - {embed_params: [['ac1e', 'fnn']], zscore: True, exclude: ['bc_mindiff', 'bc_minm1', 'bc_minm2', 'bc_minm3', 'bc_minmmax', 'bc_range1', 'bc_range2', 'bc_range3', 'bc_rangemmax', 'co_range1', 'co_range2', 'co_range3', 'co_rangemmax', 'scr_co_m1_pgone', 'scr_co_m2_pgone', 'scr_co_m3_pgone']}   # NL_Dimensions(x_z,50,{'ac1e','fnn'})
+      - {embed_params: [['ac1e', ['fnn', 0.05]]], thwin: [['ac', 1]], zscore: True, exclude: ['bc_lfitmeansqdev1', 'bc_mindiff', 'bc_minm1', 'bc_minm2', 'bc_minm3', 'bc_minmmax', 'bc_range1', 'bc_range2', 'bc_range3', 'bc_rangemmax', 'co_lfitb1', 'co_lfitb2', 'co_lfitb3', 'co_lfitm1', 'co_lfitm2', 'co_lfitm3', 'co_lfitmeansqdev1', 'co_lfitmeansqdev2', 'co_lfitmeansqdev3', 'co_lfitmmax', 'co_minscalingexp', 'co_range1', 'co_range2', 'co_range3', 'co_rangemmax', 'scr_bc_m1_meanabsres', 'scr_bc_m2_meanabsres', 'scr_bc_m3_meanabsres', 'scr_bc_mopt_meanabsres', 'scr_co_m1_logrmax', 'scr_co_m1_logrmin', 'scr_co_m1_logrrange', 'scr_co_m1_meanabsres', 'scr_co_m1_minbad', 'scr_co_m1_pgone', 'scr_co_m2_logrmin', 'scr_co_m2_meanabsres', 'scr_co_m2_minbad', 'scr_co_m2_pgone', 'scr_co_m3_logrmax', 'scr_co_m3_meanabsres', 'scr_co_m3_minbad', 'scr_co_m3_pgone', 'scr_co_mopt_meanabsres', 'scr_co_mopt_scaling_exp']}   # NL_Dimensions(x_z,50,{'ac1e',{'fnn',0.05}},{'ac',1})
     legacy_name: NL_Dimensions
     ordered_args: ['embed_params']
 
@@ -2263,11 +2237,11 @@ nonlinearity:
     base_name: fractal_dimensions
     dependencies:
     configs:
-      - {kmin: 2, kmax: 10, nref: -1, gend: 5, embed_params: [[1, 5]], zscore: True}   # NL_FractalDimensions(x_z,2,10,-1,1,5,{'ac',1},32,{1,5},'default')
-      - {kmin: 2, kmax: 100, nref: 0.2, gend: 5, embed_params: [[1, 5]], zscore: True}   # NL_FractalDimensions(x_z,2,100,0.2,1,5,{'ac',1},32,{1,5},'default')
-      - {kmin: 2, kmax: 100, nref: 0.2, gend: 5, embed_params: [['ac1e', 5]], zscore: True}   # NL_FractalDimensions(x_z,2,100,0.2,1,5,{'ac',1},32,{'ac1e',5},'default')
-      - {kmin: 5, kmax: 20, nref: 0.2, gend: 10, embed_params: [['ac', 'fnn']], zscore: True}   # NL_FractalDimensions(x_z,5,20,0.2,1,10,{'ac',1},32,{'ac','fnn'},'default')
-      - {kmin: 5, kmax: 100, nref: 0.2, gend: 10, embed_params: [['ac1e', 3]], zscore: True}   # NL_FractalDimensions(x_z,5,100,0.2,1,10,{'ac',1},32,{'ac1e',3},'default')
+      - {kmin: 2, kmax: 10, nref: -1, gend: 5, embed_params: [[1, 5]], zscore: True, exclude: ['meanDq']}   # NL_FractalDimensions(x_z,2,10,-1,1,5,{'ac',1},32,{1,5},'default')
+      - {kmin: 2, kmax: 100, nref: 0.2, gend: 5, embed_params: [[1, 5]], zscore: True, exclude: ['meanDq']}   # NL_FractalDimensions(x_z,2,100,0.2,1,5,{'ac',1},32,{1,5},'default')
+      - {kmin: 2, kmax: 100, nref: 0.2, gend: 5, embed_params: [['ac1e', 5]], zscore: True, exclude: ['meanDq']}   # NL_FractalDimensions(x_z,2,100,0.2,1,5,{'ac',1},32,{'ac1e',5},'default')
+      - {kmin: 5, kmax: 20, nref: 0.2, gend: 10, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['meanDq']}   # NL_FractalDimensions(x_z,5,20,0.2,1,10,{'ac',1},32,{'ac',{'fnn',0.05}},'default')
+      - {kmin: 5, kmax: 100, nref: 0.2, gend: 10, embed_params: [['ac1e', 3]], zscore: True, exclude: ['meanDq']}   # NL_FractalDimensions(x_z,5,100,0.2,1,10,{'ac',1},32,{'ac1e',3},'default')
     legacy_name: NL_FractalDimensions
     ordered_args: ['kmin', 'kmax', 'nref', 'gend', 'embed_params']
 
@@ -2275,18 +2249,17 @@ nonlinearity:
     base_name: gp_corr_sum
     dependencies:
     configs:
-      - {nref: -1, r: 0.1, nbins: 20, zscore: True, exclude: ['maxlnCr', 'maxlnr']}   # NL_GPCorrSum(x_z,-1,0.1,{'ac',1},20,{'ac','fnn'},1)
-      - {nref: -1, r: 0.1, nbins: 40, zscore: True, exclude: ['maxlnr']}   # NL_GPCorrSum(x_z,-1,0.1,{'ac',1},40,{'ac','fnn'},1)
-      - {nref: -1, r: 0.5, nbins: 20, zscore: True, exclude: ['maxlnr']}   # NL_GPCorrSum(x_z,-1,0.5,{'ac',1},20,{'ac','fnn'},1)
+      - {nref: -1, r: 0.1, nbins: 40, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['maxlnr', 'robfit_sea1', 'robfitresmeansq', 'minlnr']}   # NL_GPCorrSum(x_z,-1,0.1,{'ac',1},40,{'ac',{'fnn',0.05}},1)
+      - {nref: -1, r: 0.5, nbins: 20, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['maxlnr', 'robfit_sea1', 'robfitresmeanabs']}   # NL_GPCorrSum(x_z,-1,0.5,{'ac',1},20,{'ac',{'fnn',0.05}},1)
     legacy_name: NL_GPCorrSum
-    ordered_args: ['r', 'nbins']
+    ordered_args: ['r', 'nbins', 'embed_params']
 
   largest_lyap:
     base_name: largest_lyap
     dependencies:
     configs:
       - {embed_params: [[1, 4]], zscore: True, exclude: ['expfit_adjr2', 'p1']}   # NL_LargestLyap(x_z,-1,{'ac1e',30},{'ac1e',1},3,{1,4})
-      - {embed_params: [['mi', 'fnn']], zscore: True, exclude: ['expfit_adjr2', 'p1']}   # NL_LargestLyap(x_z,-1,{'ac1e',30},{'ac1e',1},3,{'mi','fnn'})
+      - {embed_params: [['mi', ['fnn', 0.05]]], zscore: True, exclude: ['expfit_adjr2', 'p1']}   # NL_LargestLyap(x_z,-1,{'ac1e',30},{'ac1e',1},3,{'mi',{'fnn',0.05}})
     legacy_name: NL_LargestLyap
     ordered_args: ['embed_params']
 
@@ -2312,7 +2285,7 @@ nonlinearity:
     base_name: rqa
     dependencies:
     configs:
-      - {tau: 'mi', m: 'fnn', max_n: 'full', zscore: True, exclude: ['DIV']}   # NL_RQA(x_z,'mi','fnn',{'ac',1},0.1,2,2,'full','default')
+      - {tau: 'mi', m: [['fnn', 0.05]], max_n: 'full', zscore: True, exclude: ['DIV']}   # NL_RQA(x_z,'mi',{'fnn',0.05},{'ac',1},0.1,2,2,'full','default')
     legacy_name: NL_RQA
     ordered_args: ['tau', 'm', 'max_n']
 
@@ -2320,7 +2293,7 @@ nonlinearity:
     base_name: recurrence_times
     dependencies:
     configs:
-      - {tau: 'mi', m: 'fnn', max_n: 'full', zscore: True}   # NL_RecurrenceTimes(x_z,'mi','fnn',{'ac',1},0.1,4,'full','default')
+      - {tau: 'mi', m: [['fnn', 0.05]], max_n: 'full', zscore: True}   # NL_RecurrenceTimes(x_z,'mi',{'fnn',0.05},{'ac',1},0.1,4,'full','default')
     legacy_name: NL_RecurrenceTimes
     ordered_args: ['tau', 'm', 'max_n']
 
@@ -2338,21 +2311,20 @@ nonlinearity:
     base_name: takens_estimator
     dependencies:
     configs:
-      - {rad: 0.1, embed_params: [[1, 10]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.1,{'ac',1},{1,10})
-      - {rad: 0.05, embed_params: [[1, 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.05,{'ac',1},{1,3})
-      - {rad: 0.05, embed_params: [[1, 8]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.05,{'ac',1},{1,8})
-      - {rad: 0.05, embed_params: [['ac', 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.05,{'ac',1},{'ac',3})
-      - {rad: 0.05, embed_params: [['mi', 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.05,{'ac',1},{'mi',3})
-      - {rad: 0.05, embed_params: [['mi', 'fnn']], zscore: True}   # NL_TakensEstimator(x_z,-1,0.05,{'ac',1},{'mi','fnn'},'default')
+      - {c0: 0.01, embed_params: [[1, 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{1,3})
+      - {c0: 0.01, embed_params: [[1, 8]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{1,8})
+      - {c0: 0.01, embed_params: [['ac', 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{'ac',3})
+      - {c0: 0.01, embed_params: [['mi', 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{'mi',3})
+      - {c0: 0.01, embed_params: [['mi', ['fnn', 0.05]]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{'mi',{'fnn',0.05}},'default')
     legacy_name: NL_TakensEstimator
-    ordered_args: ['rad', 'embed_params']
+    ordered_args: ['c0', 'embed_params']
 
   tisean_c1:
     base_name: tisean_c1
     dependencies:
     configs:
-      - {mmm: [[1, 7]], tsep: 0.02, nref: 0.5, zscore: True}   # NL_c1(x_z,1,[1,7],0.02,0.5)
-      - {mmm: [[2, 6]], tsep: 25, nref: 0.1, zscore: True}   # NL_c1(x_z,1,[2,6],25,0.1)
+      - {mmm: [[1, 7]], tsep: 0.02, nref: 0.5, zscore: True, exclude: ['maxd']}   # NL_c1(x_z,1,[1,7],0.02,0.5)
+      - {mmm: [[2, 6]], tsep: 25, nref: 0.1, zscore: True, exclude: ['maxd']}   # NL_c1(x_z,1,[2,6],25,0.1)
     legacy_name: NL_c1
     ordered_args: ['mmm', 'tsep', 'nref']
 

@@ -163,10 +163,12 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
 
         - ``"poly<n>"``  : remove a polynomial of order n = 1-9, e.g., ``"poly1"``
           is a linear detrending
-        - ``"sin<n>"``   : remove a sum of n = 1-8 sinusoids a1*sin(2*pi*f1*t + c1) + ... fitted
-          by least squares to the mean-subtracted series, with frequencies searched
-          deterministically between 1/(2N) and 1/2 - 1/(2N) cycles per sample
-          (:func:`pyhctsa.robust.bf_fit_sinusoids`), e.g., ``"sin1"``
+        - ``"sin<n>"``   : remove a constant plus a sum of n = 1-8 sinusoids
+          a1*sin(2*pi*f1*t + c1) + ..., fitted jointly by least squares, with frequencies
+          searched deterministically between 1/N and 1/2 - 1/(2N) cycles per sample
+          (:func:`pyhctsa.robust.bf_fit_sinusoids`), e.g., ``"sin1"``: this removes
+          oscillations, and a component with less than one full cycle in the series is a
+          trend, not an oscillation (trends are removed by ``"poly"`` and ``"spline"``)
         - ``"spline<npieces><order>"`` : remove a least-squares spline with the given
           number of polynomial pieces and spline order, e.g., ``"spline24"`` is a
           cubic spline with 2 pieces
@@ -211,11 +213,21 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
         - ``olbt_m2``, ``olbt_m5``: the mean after trimming the 2% and 5% most extreme
           values at each end (``outlier_test``)
 
-        A scalar NaN is returned if the processed series is identically zero (or, for
-        ``'logr'`` and ``'boxcox'``, if the data are not all positive).
+        A scalar NaN is returned if the processed series has no variation beyond
+        floating-point round-off, as statistics of round-off are not meaningful: this is the
+        case for the residual of an exact fit (e.g., a polynomial or a sum of sinusoids that
+        the series is), or the differences of an exact linear trend. The criterion is a
+        standard deviation of at most 10*N*eps times the root-mean-square of the series the
+        processing acts on (its length N; the log of the series for ``'logr'``, and the
+        transformed series itself for ``'boxcox'``), a bound on the rounding error of the
+        processing (sums of up to N terms, and the phase of sinusoids evaluated at times up
+        to N). Small but genuine variation, such as the quantization noise left by an exact
+        fit to 24-bit data (about 1e-7 of the amplitude), is computed. NaN is also returned
+        for ``'logr'`` and ``'boxcox'`` if the data are not all positive.
     """
     y = np.asarray(y, dtype=float)
     N = len(y)
+    y_ref = y  # the series the processing acts on (its magnitude sets the round-off below)
 
     # ------------------------------------------------------------------
     # Apply preprocessing: y (raw) -> y_d (detrended/transformed)
@@ -228,13 +240,12 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
 
     elif (m := re.fullmatch(r'sin([1-8])', detrend_meth)):
         # 2) Seasonal detrend: sum of sinusoids
-        # (the mean is removed first: the sinusoids have no offset, and the frequencies are
-        # bounded away from zero, so they could not otherwise absorb a non-zero mean)
+        # (a constant is fitted jointly, so that a constant plus sinusoids is removed exactly:
+        # the frequencies are bounded away from zero, so the sinusoids cannot absorb a mean)
         num_sin = int(m.group(1))
-        if N <= 3 * num_sin:
-            return np.nan  # too short to fit this many sinusoids
-        y_c = y - np.mean(y)
-        y_d = y_c - bf_fit_sinusoids(y_c, num_sin)[0]
+        if N <= 3 * num_sin + 1:
+            return np.nan  # too short to fit this many sinusoids and a constant
+        y_d = y - bf_fit_sinusoids(y, num_sin, constant=True)[0]
 
     elif (m := re.fullmatch(r'spline(\d)(\d)', detrend_meth)):
         # 3) Spline detrend
@@ -261,13 +272,15 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
         # 8) Log returns
         if not np.all(y > 0):
             return np.nan
-        y_d = np.diff(np.log(y))
+        y_ref = np.log(y)
+        y_d = np.diff(y_ref)
 
     elif detrend_meth == 'boxcox':
         # 9) Box-Cox transformation
         if not np.all(y > 0):
             return np.nan
         y_d = boxcox(y)[0]
+        y_ref = y_d  # a transformation, not a residual: only a constant result is degenerate
 
     else:
         raise ValueError(f"Invalid detrending method '{detrend_meth}'")
@@ -275,7 +288,8 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
     # ------------------------------------------------------------------
     # Quick check that outputs are meaningful
     # ------------------------------------------------------------------
-    if np.all(y_d == 0):
+    # A processed series that is round-off of the processing has no meaningful statistics
+    if _is_roundoff(y_d, y_ref):
         return np.nan
 
     # ------------------------------------------------------------------
@@ -332,11 +346,30 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
     return out
 
 
+def _is_roundoff(y_d: np.ndarray, y_ref: np.ndarray) -> bool:
+    """True if the processed series ``y_d`` has no variation beyond floating-point round-off.
+
+    The criterion is ``std(y_d) <= 10 * N * eps * rms(y_ref)``, with ``y_ref`` the series the
+    processing acts on and ``N`` its length: a bound on the rounding error of the processing,
+    relative to the magnitude (root-mean-square) of the values it acts on. A fitted or
+    filtered value accumulates rounding over sums of up to N terms (at most about N*eps/2),
+    and a sinusoid of frequency up to 1/2 evaluated at times up to N has a rounding error in
+    its phase of up to about 1.5*pi*N*eps (three roundings of 2*pi*f*t), in both the data and
+    the fit. Averaged over the series (the phase error grows with t), these are below about
+    8*N*eps of the root-mean-square, so 10*N*eps covers them.
+    """
+    eps = np.finfo(float).eps
+    return bool(np.std(y_d, ddof=1) <= 10 * y_ref.size * eps * np.sqrt(np.mean(y_ref ** 2)))
+
+
 def _iterate_stats(y: np.ndarray, y_d: np.ndarray) -> np.ndarray:
-    """The ten statistics of ``preproc_iterate`` for one processed series ``y_d`` (and original ``y``)."""
+    """The ten statistics of ``preproc_iterate`` for one processed series ``y_d`` (and original ``y``);
+    all NaN if ``y_d`` is round-off of the processing of ``y`` (see :func:`_is_roundoff`)."""
+    f = np.full(10, np.nan)
+    if _is_roundoff(y_d, y):
+        return f
     y = z_score(y)
     y_d = z_score(y_d)
-    f = np.full(10, np.nan)
 
     # 1) Stationarity: StatAv, sliding-window mean and standard deviation
     f[0] = stat_av(y_d, 'seg', 5)
@@ -439,7 +472,11 @@ def preproc_iterate(y: ArrayLike, dt_meth: str = 'diff') -> dict:
           norm(y - y_processed) / N
 
         The last three statistics need the processed series to be as long as the original, so
-        they are NaN for ``'diff'`` and the resampling methods.
+        they are NaN for ``'diff'`` and the resampling methods. All outputs are NaN if, at any
+        strength, the processed series has no variation beyond floating-point round-off (a
+        standard deviation of at most 10*N*eps times the root-mean-square of the original, a
+        bound on the rounding error of the processing; as in :func:`preproc_compare`), as
+        statistics of round-off are not meaningful. Small but genuine variation is computed.
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
@@ -661,6 +698,9 @@ def preproc_schreiber_denoise(y: ArrayLike, m: int = 5, d: int = 1, num_iter: in
         - ``fracNoCorrection``: the fraction of points with a neighbor count of 1, that is, with no
           neighbors besides themselves, so that no correction was possible there (diagnoses whether
           ``neighborhood_std`` was too small for these data)
+
+        (``meanNeighbors`` and ``fracNoCorrection`` are over the points that have a full embedding
+        vector, samples ``(m-1)*d + 1`` to ``N``; the first ``(m-1)*d`` samples are never corrected.)
         - ``KDenoised``: the statistic K of the 0-1 test for chaos (``zero_one_test``) computed on
           the denoised series, since measurement noise inflates the apparent diffusion of the
           test's (p, q) trajectory
@@ -693,6 +733,9 @@ def preproc_schreiber_denoise(y: ArrayLike, m: int = 5, d: int = 1, num_iter: in
     out['fracVarRemoved'] = float(1 - np.var(y_den, ddof=1) / np.var(y, ddof=1))
     out['corrOrigDenoised'] = float(np.corrcoef(y, y_den)[0, 1])
     out['ac1Change'] = autocorr(y_den, 1, 'Fourier') - autocorr(y, 1, 'Fourier')
+    # (over the points with a full embedding vector: the first (m-1)*d samples have no
+    # embedding vector, are never corrected, and nrlazy reports a count of 1 for them)
+    num_neighbors = np.asarray(num_neighbors)[(m - 1) * d:]
     out['meanNeighbors'] = float(np.mean(num_neighbors))
     out['fracNoCorrection'] = float(np.mean(num_neighbors == 1))
 

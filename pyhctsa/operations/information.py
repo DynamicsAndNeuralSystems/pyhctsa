@@ -11,7 +11,7 @@ from ..robust import bf_hist_edges, bf_tie_break_noise
 from ..ksg import ksg_mi
 
 # hctsa BF_TieBreakNoise: tiny jitter from hctsa's portable BF_Random stream (pyhctsa.robust),
-# so the draws are reproducible across platforms. Kept under its old private name for the
+# so the draws are reproducible across platforms. Aliased to a private name for the
 # callers in this module.
 _tie_break_noise = bf_tie_break_noise
 
@@ -442,6 +442,8 @@ def automutual_info_stats(
         of the AMI from lag 1 to ``fmmi``), ``pmaxima``, ``modeperiodmax``,
         ``pmodeperiodmax``, ``pminima``, ``modeperiodmin``, ``pmodeperiodmin``,
         ``pcrossmean``, ``pcrossmedian``, ``pcrossq10``, ``pcrossq90`` and ``amiac1``.
+        ``pmaxima`` and ``pminima`` are the number of intervals between successive local
+        maxima (minima) divided by the integer part of half the number of lags.
     """
     from ..operations.correlation import autocorr
 
@@ -575,7 +577,7 @@ def automutual_info(
         unique) first gets tiny, reproducible Gaussian jitter (standard deviation
         ``1e-10 * std(y)``, fixed seed) to break the exact ties, as in hctsa.
 
-        Default is `kernel`.
+        Default is ``'gaussian'``.
 
     extra_param : int or str, optional
         Extra parameter for the estimator. For Kraskov estimators,

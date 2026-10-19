@@ -28,7 +28,7 @@ def cumulants(x: ArrayLike, cum_what_may: str = 'skew1') -> float:
         The type of higher order moment:
             - 'skew1': skewness
             - 'skew2': skewness correcting for bias
-            - 'kurt1': kurtosis
+            - 'kurt1': kurtosis (3 for a Gaussian, not the excess kurtosis)
             - 'kurt2': kurtosis correcting for bias
 
     Returns
@@ -37,15 +37,15 @@ def cumulants(x: ArrayLike, cum_what_may: str = 'skew1') -> float:
         The specified higher order moment.
     """
     if cum_what_may == 'skew1':
-        return skew(x, bias=False)
-    if cum_what_may == 'skew2':
         return skew(x, bias=True)
+    if cum_what_may == 'skew2':
+        return skew(x, bias=False)
     if cum_what_may == 'kurt1':
-        return kurtosis(x, bias=True, fisher=True)
+        return kurtosis(x, bias=True, fisher=False)
     if cum_what_may == 'kurt2':
-        return kurtosis(x, bias=False, fisher=True)
+        return kurtosis(x, bias=False, fisher=False)
     else:
-        return ValueError('Unknown cumulant. Choose either skew1, skew2, kurt1, or kurt2.')
+        raise ValueError('Unknown cumulant. Choose either skew1, skew2, kurt1, or kurt2.')
 
 @dict_output
 def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
@@ -488,21 +488,23 @@ def pleft(y: ArrayLike, th: float = 0.1) -> float:
     """
     Distance from the mean at which a given proportion of data are more distant.
     
-    Measures the maximum distance from the mean at which a given fixed proportion, `th`, of 
-    the time-series data points are further. Normalizes by the standard deviation of the time 
-    series.
+    Finds the distance from the mean that is exceeded by a given proportion, `th`, of 
+    the time-series data points (deviations above and below the mean are pooled). Normalizes 
+    by the standard deviation of the time series.
     
     Parameters
     ----------
     y : array-like
         The input data vector.
     th : float, optional
-        The proportion of data further than `th` from the mean. Default is 0.1.
+        The proportion of data points further from the mean than the returned distance. 
+        Default is 0.1.
     
     Returns
     -------
     float
-        The distance from the mean normalized by the standard deviation.
+        The distance from the mean exceeded by a proportion `th` of the data, normalized by 
+        the standard deviation.
     """
     y = np.asarray(y)
     p = np.quantile(np.abs(y - np.mean(y)), 1-th, method='hazen')
@@ -561,7 +563,7 @@ def mean(y: ArrayLike, mean_type: str = 'arithmetic') -> float:
         - 'iqm': interquartile mean (mean of values between Q1 and Q3)
         - 'midhinge': average of first and third quartiles
 
-        Default is ``'arithmtic'``.
+        Default is ``'arithmetic'``.
 
     Returns
     -------
@@ -832,7 +834,9 @@ def moments(y: ArrayLike, the_mom: int = 0, do_normalize: bool = True) -> float:
     """
     A moment of the distribution of the input time series.
     Returns the standardized central moment: the ``the_mom``-th central moment
-    divided by the standard deviation raised to the power ``the_mom`` (or, with
+    divided by the (population, divisor N) standard deviation raised to the power
+    ``the_mom``, so that ``the_mom = 3`` is the skewness and ``the_mom = 4`` the
+    kurtosis (3 for a Gaussian) (or, with
     ``do_normalize=False``, the raw central moment, as hctsa's
     ``DN_Moments(y, theMom, false)``).
 
@@ -843,7 +847,7 @@ def moments(y: ArrayLike, the_mom: int = 0, do_normalize: bool = True) -> float:
     the_mom: int, optional
         The moment to calculate. Default is 0.
     do_normalize: bool, optional
-        Whether to divide by std(y)**the_mom, giving the scale-invariant
+        Whether to divide by std(y, ddof=0)**the_mom, giving the scale-invariant
         standardized moment (True, the default), or to return the raw central
         moment (False).
 
@@ -856,7 +860,7 @@ def moments(y: ArrayLike, the_mom: int = 0, do_normalize: bool = True) -> float:
 
     if not do_normalize:
         return stats.moment(y, the_mom)
-    return stats.moment(y, the_mom) / np.std(y, ddof=1) ** the_mom
+    return stats.moment(y, the_mom) / np.std(y, ddof=0) ** the_mom
 
 def _fit_lin_gof(x: np.ndarray, y: np.ndarray) -> tuple:
     """Ordinary least-squares line ``a*x + b``, with R^2 and root-mean-square error (n - 2
@@ -946,7 +950,7 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
           thresholds, of the median time of the events (-1 to 1);
         - ``mrm``, ``mrmd``, ``mrstd``: the same for the mean time of the events;
         - ``xcmerr1``, ``xcmerrn1``: cross-correlation between the mean gap and its
-          standard error across thresholds, at lags +1 and -1;
+          standard error across thresholds, at lags +1 and -1 (the means are not removed);
         - ``stdrfexpb``, ``stdrfexpr2``, ``stdrfexprmse``:
           the rate and fit quality of an exponential fit to
           std(times)/sqrt(their number) vs. th;
@@ -1096,9 +1100,10 @@ def outlier_test(y: ArrayLike, p: float = 2,
     """
     How distributional statistics depend on distributional outliers.
 
-    Removes the p% of highest and lowest values in the time series (i.e., 2*p% removed in total)
-    and returns the ratio of either the mean or the standard deviation of the time series,
-    before and after this transformation.
+    Removes the p% of highest and lowest values in the time series (i.e., 2*p% removed in total;
+    values strictly between the p-th and (100-p)-th percentiles are kept) and returns the mean
+    of the remaining values and their standard deviation divided by the standard deviation of
+    the full series.
 
     Parameters
     ----------
@@ -1110,15 +1115,17 @@ def outlier_test(y: ArrayLike, p: float = 2,
         If specified, just returns a number:
 
         - 'mean': returns the mean of the middle portion of the data
-        - 'std': returns the std of the middle portion of the data
+        - 'std': returns the std of the middle portion of the data, divided by the std of the
+          full series
 
         If None (default), returns a dictionary.
 
     Returns
     -------
     float or dict
-        If just_me is specified, returns the mean or std of the middle portion of the data.
-        Otherwise, returns a dictionary.
+        If just_me is specified, returns the mean of the middle portion of the data, or its std
+        divided by the std of the full series. Otherwise, returns a dictionary with both
+        (keys ``mean`` and ``std``).
     """
 
     # mean of the middle (100-2*p)% of the data
@@ -1146,16 +1153,19 @@ def trimmed_mean(x: ArrayLike, p_exclude: float = 0.0) -> float:
     """
     Mean of the trimmed time series.
 
-    Returns the mean of the time series after removing a specified percentage of 
-    the highest and lowest values.
+    Returns the mean of the time series after removing a specified total percentage of 
+    values, half from the highest and half from the lowest. The number removed from each end
+    is N*p_exclude/200, rounded to the nearest integer (halves round down), so small
+    percentages can remove nothing (e.g., 1% removes no values for N <= 100).
 
     Parameters
     ----------
     x : array-like
         The input time series or data vector
     p_exclude : float, optional
-        The percentage of highest and lowest values to exclude from the mean 
-        calculation. Default is 0.0, which gives the standard mean.
+        The total percentage of values to exclude from the mean calculation, half from the
+        highest and half from the lowest values (e.g., 10 excludes the highest 5% and the
+        lowest 5%). Default is 0.0, which gives the standard mean.
 
     Returns
     -------
@@ -1221,14 +1231,16 @@ def histogram_asymmetry(y: ArrayLike, num_bins: int = 10, do_simple: bool = True
     num_bins : int, optional
         Number of bins to use in histogram calculation. Default is 10.
     do_simple : bool, optional
-        If True, uses linearly spaced bins. If False, uses equal-width bins spanning the
-        values on each side, with explicit edges (:func:`pyhctsa.robust.bf_hist_edges`).
+        If True, uses linearly spaced bins; a series with no positive values or no
+        negative values then raises a ValueError. If False, uses equal-width bins spanning
+        the values on each side, with explicit edges (:func:`pyhctsa.robust.bf_hist_edges`).
         Default is `True`.
 
     Returns
     -------
     dict
-        Dictionary containing asymmetry measures (NaN modes for a side with no values).
+        Dictionary containing asymmetry measures (with ``do_simple=False``, NaN modes for a
+        side with no values).
     """
     y = np.asarray(y)
     # compute the histogram seperately from positive and negative values in the data
@@ -1470,7 +1482,8 @@ def fit_kernel_smooth(x: ArrayLike, area: Union[None, float, list] = None,
     """
     Statistics of a kernel-smoothed distribution of the data.
 
-    The data are smoothed with a Gaussian kernel with a normal-reference bandwidth
+    The data are smoothed with a Gaussian kernel with Silverman's normal-reference bandwidth
+    using a robust (median absolute deviation) scale estimate
     (:func:`pyhctsa.robust.bf_ks_density`: 100 points from three bandwidths below the
     minimum to three above the maximum) and the smoothed density, f, is summarized by its number of peaks,
     maximum, entropy, and asymmetry about the mean, plus optional threshold-based
@@ -1583,7 +1596,9 @@ def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') ->
         data); resAC1, resAC2: autocorrelations of the residuals, in order of increasing
         value, at lags 1 and 2; resrunsz: the signed z-statistic of a runs test on the
         residuals (:func:`pyhctsa.robust.bf_runs_z`; negative when the residuals have
-        fewer runs about their median than expected for a random order). NaN (not a
+        fewer runs about their median than expected for a random order); resAC1, resAC2
+        and resrunsz are NaN if the residuals have no variation beyond floating-point
+        round-off, as for an exact fit (:func:`pyhctsa.robust.bf_residual_stats`). NaN (not a
         dict) if the model cannot be fitted, or for a constant series with ``num_bins = 0``.
 
     Notes
@@ -1636,7 +1651,7 @@ def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') ->
     rmse = np.sqrt(sse / dfe)
 
     # Remaining structure in the residuals, in order of increasing value:
-    res_ac1, res_ac2, res_runsz = bf_residual_stats(res, sstot)
+    res_ac1, res_ac2, res_runsz = bf_residual_stats(res, dny)
     return {
         'r2': float(r2),
         'adjr2': float(adjr2),

@@ -73,8 +73,9 @@ def moving_threshold(y: ArrayLike, a: float = 1.0, b: float = 0.1) -> dict:
     This algorithm uses the occurrence of extreme events to modify a hypothetical
     'barrier' that classifies new points as 'extreme' or not. The barrier begins
     at sigma (standard deviation), and if the absolute value of the next data point
-    is greater than the barrier, the barrier is increased by a proportion 'a',
-    otherwise the position of the barrier is decreased by a proportion 'b'.
+    is greater than the barrier, the barrier is moved to (1+a) times that absolute
+    value (above the new observation), otherwise the position of the barrier is
+    decreased by a proportion 'b'.
 
     References
     ----------
@@ -86,7 +87,8 @@ def moving_threshold(y: ArrayLike, a: float = 1.0, b: float = 0.1) -> dict:
     y : array-like
         The input time series (should be z-scored).
     a : float, optional
-        The barrier jump parameter - how much to increase barrier after extreme event. Default is 1.0.
+        The barrier jump parameter: after an extreme event the barrier is set to (1+a) times
+        the absolute value of the data point. Default is 1.0.
     b : float, optional
         The barrier decay proportion (0-1) - how much to decrease barrier otherwise. Default is 0.1.
 

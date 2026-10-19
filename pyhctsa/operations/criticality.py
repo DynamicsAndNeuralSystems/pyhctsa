@@ -65,7 +65,7 @@ def rad(x: ArrayLike, tau: Union[int, str] = 1, centre: bool = True) -> float:
 
         Default is 1.
     centre : bool, optional
-        Whether to center the time series at zero and take absolute values before 
+        Whether to center the time series at its median and take absolute values before 
         analysis. Default is `True`.
 
     Returns
@@ -77,7 +77,7 @@ def rad(x: ArrayLike, tau: Union[int, str] = 1, centre: bool = True) -> float:
     # ensure that x is in the form of a numpy array
     x = np.asarray(x)
     
-    # if specified: centre the time series and take the absolute value
+    # if specified: centre the time series at its median and take the absolute value
     if centre:
         x = rad_centre(x)
     

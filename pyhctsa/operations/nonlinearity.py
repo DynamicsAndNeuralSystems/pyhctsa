@@ -1,8 +1,10 @@
+import hashlib
 import logging
 import warnings
 from typing import Union
 
 import numpy as np
+from numba import njit as _njit
 from numpy.typing import ArrayLike
 from scipy.optimize import minimize_scalar
 from scipy.signal import correlate, find_peaks, welch as _welch
@@ -38,7 +40,7 @@ logger = logging.getLogger('pyhctsa')
 @dict_output
 def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         theiler_win: Union[int, float, list, tuple] = ('ac', 1), just_best: bool = True,
-        bestp: float = 0.4, escape_factor: Union[float, None] = None) -> Union[dict, float]:
+        bestp: float = 0.05, escape_factor: Union[float, None] = None) -> Union[dict, float]:
     """
     How the fraction of false nearest neighbors falls as the embedding dimension increases.
 
@@ -50,7 +52,26 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     their distance. For a deterministic system the fraction of false neighbors falls
     toward zero once the embedding dimension is large enough; for noise it stays high.
     Neighbors farther apart than the standard deviation of the data divided by the
-    escape factor are skipped.
+    escape factor are skipped, so the fraction rests only on the points that found a
+    neighbor within that range; at high dimensions these can be few.
+
+    Exact ties (repeated values, e.g. quantized data or periodic orbits) are resolved so
+    that the result does not depend on rounding or on the order in which neighbors are
+    searched: distances (in the data rescaled to [0, 1]) within ``1e-12`` of each other
+    count as equal, a pair closer than that is a repeated point and not a neighbor, a
+    neighbor is false if the extra coordinate separates the pair by more than
+    ``escape_factor`` times their distance plus ``1e-12``, and when several neighbors are
+    equally near, a point contributes the fraction of them that are false (the expected
+    outcome of choosing one at random). Where the nearest neighbor is unique this is the
+    published test (Hegger, Kantz & Schreiber 1999, Chaos 9, 413,
+    https://doi.org/10.1063/1.166424).
+
+    A dimension is ruled out when its fraction is at least the threshold and rests on at
+    least ``ceil(3 / threshold)`` points (:func:`pyhctsa.toolboxes.Tisean_3_0_1.tisean.fnn_min_count`;
+    60 at 0.05): with fewer points, even a fraction of zero does not show at the 95% level
+    that the true fraction is below the threshold (if none of ``n`` points has a false
+    neighbor, the upper confidence bound on the true fraction is about ``3/n``), so such a
+    dimension is neither accepted nor ruled out.
 
     The series is embedded with delay ``tau``: the point at time ``t`` is
     ``(y[t], y[t + tau], ..., y[t + (m - 1) * tau])``.
@@ -68,11 +89,11 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         The Theiler window (see :func:`pyhctsa.utils.theiler_window`). Default is
         ``['ac', 1]``.
     just_best : bool, optional
-        If True, return only the first dimension at which the fraction of false nearest
-        neighbors is below ``bestp``. Default is True.
+        If True, return only an embedding dimension: the smallest dimension not ruled out
+        by the test (see Returns). Default is True.
     bestp : float, optional
         The fraction of false neighbors defining the embedding dimension when
-        ``just_best``. Default is 0.4.
+        ``just_best``. Default is 0.05.
     escape_factor : float, optional
         TISEAN's ``-f``: a neighbor is false if its distance grows by more than this
         factor when a dimension is added. ``None`` (the default) is TISEAN's own default,
@@ -81,14 +102,28 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     Returns
     -------
     float or dict
-        If ``just_best``, the embedding dimension (``maxm + 1`` if the fraction never
-        falls below ``bestp``). Otherwise a dict with, for ``i = 1, ..., maxm``, ``pfnn_i``
+        If ``just_best``, the embedding dimension: the smallest dimension not ruled out by
+        the test. This is the first dimension at which the fraction of false nearest
+        neighbors is below ``bestp`` on enough points, or at which too few points found a
+        neighbor for the fraction to decide; if neither happens, one more than the largest
+        dimension TISEAN computed (``maxm + 1`` when every dimension up to ``maxm`` was
+        computed; one more than the last when TISEAN stopped early, having no neighbors
+        left within its search range). Unless the fraction fell below ``bestp``, the value
+        is a lower bound: every smaller dimension was tested and ruled out. It is not
+        limited by the length of the series (the ``'fnn'`` choice of dimension for another
+        algorithm, :func:`_embedding_params`, is).
+        Otherwise a dict with, for ``i = 1, ..., maxm``, ``pfnn_i``
         (the fraction of false nearest neighbors) and ``nHood2_i`` (the typical,
         root-mean-square, distance from a point to its nearest neighbor; NaN at a
         dimension for which TISEAN found too few neighbors); ``minpfnn``, ``meanpfnn``,
-        ``stdpfnn``, ``maxnHood2``, ``meannHood2``; ``firstunder09`` ... ``firstunder005``
-        (the first dimension at which the fraction is below 90%, 80%, ..., 10%, 5%; ``maxm
-        + 1`` if never); ``max1stepchange`` (the largest absolute change in the fraction
+        ``stdpfnn``, ``maxnHood2``, ``meannHood2``; ``dim09``, ``dim08``, ..., ``dim01``,
+        ``dim005`` (the embedding-dimension estimate at a threshold ``p`` of 0.9, 0.8, ..., 0.1,
+        0.05: the smallest dimension not ruled out, where a dimension is ruled out if its
+        fraction of false nearest neighbors is at least ``p`` and rests on at least
+        ``ceil(3 / 0.05) = 60`` points (one minimum count for all ten, so they use the same
+        dimensions and never decrease as ``p`` falls); if no dimension up to ``maxm``
+        qualifies, one more than the last dimension tested, a lower bound; not limited by the
+        length of the series); ``max1stepchange`` (the largest absolute change in the fraction
         between consecutive dimensions), ``mdrop`` (the mean change per added dimension)
         and ``pdrop`` (the fraction of decreasing steps minus the fraction of increasing
         steps). NaN if the series is too short (N < 10), the time delay or Theiler window
@@ -114,10 +149,11 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     except ValueError as exc:  # no output, e.g. delay times dimension too large for the series
         logger.warning(f'No output from TISEAN routine false_nearest on the data: {exc}')
         return np.nan
-    m_dim, p_nn, n_hood2 = res['dim'], res['pfnn'], res['sdeps']
+    m_dim, p_nn, n_hood2, n_pts = res['dim'], res['pfnn'], res['sdeps'], res['count']
 
     if just_best:
-        return float(_tisean.fnn_first_under(m_dim, p_nn, bestp))
+        # the smallest dimension not ruled out (a lower bound unless below bestp)
+        return float(_tisean.fnn_first_under(m_dim, p_nn, bestp, n_pts))
 
     out = {}
     for i in range(1, maxm + 1):
@@ -129,9 +165,12 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     out['stdpfnn'] = np.std(p_nn, ddof=1) if p_nn.size > 1 else 0.0
     out['maxnHood2'] = np.max(n_hood2)
     out['meannHood2'] = np.mean(n_hood2)
+    # one minimum count for all ten (that of the smallest threshold), so a dimension either
+    # decides at every threshold or at none
+    min_count = _tisean.fnn_min_count(0.05)
     for name, th in (('09', 0.9), ('08', 0.8), ('07', 0.7), ('06', 0.6), ('05', 0.5),
                      ('04', 0.4), ('03', 0.3), ('02', 0.2), ('01', 0.1), ('005', 0.05)):
-        out[f'firstunder{name}'] = float(_tisean.fnn_first_under(m_dim, p_nn, th))
+        out[f'dim{name}'] = float(_tisean.fnn_first_under(m_dim, p_nn, th, n_pts, min_count))
     steps = np.diff(p_nn)
     out['max1stepchange'] = np.max(np.abs(steps)) if steps.size else np.nan
     out['mdrop'] = np.mean(steps) if steps.size else np.nan
@@ -139,15 +178,53 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     return out
 
 
-def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.4) -> float:
+def _max_embedding_dim(n: int) -> int:
     """
-    Embedding dimension by false nearest neighbors, as hctsa's ``BF_Embed(y, tau, {'fnn',
-    threshold})``: :func:`fnn` with ten dimensions, a Theiler window of one autocorrelation
-    time and an escape factor of 5 (TISEAN's own, 2, makes the test look as if it never
-    converges), returning the first dimension at which the fraction of false nearest
-    neighbors falls below `threshold`. NaN when it cannot be determined.
+    The largest embedding dimension that ``n`` points can resolve, ``floor(2 log10 n)`` (at
+    least 1): a set of dimension ``d`` needs about ``n**2 * rho**d >> 1`` pairs within a
+    fraction ``rho = 0.1`` of its diameter, so ``d < 2 log10 n`` [1]_; in more dimensions typical
+    points have no neighbor at that scale. E.g. 4, 5, 6, 7 for ``n`` = 250, 500, 1000, 5000.
+
+    References
+    ----------
+    .. [1] J.-P. Eckmann and D. Ruelle, "Fundamental limitations for estimating dimensions and
+       Lyapunov exponents in dynamical systems", Physica D 56(2-3), 185-187 (1992).
+       https://doi.org/10.1016/0167-2789(92)90023-g
     """
-    return fnn(y, tau, 10, ('ac', 1), True, threshold, 5)
+    return max(1, int(np.floor(2 * np.log10(n))))
+
+
+_FNN_DIM_CACHE: list = []  # ((digest, N, tau, threshold), m); small FIFO cache
+_FNN_DIM_CACHE_SIZE = 8
+
+
+def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.05) -> float:
+    """
+    Embedding dimension chosen by false nearest neighbors for another algorithm, as hctsa's
+    ``BF_Embed(y, tau, {'fnn', threshold})``: ``min(m_fnn, floor(2 log10 N))`` with ``N`` the
+    length of `y` (see :func:`_max_embedding_dim`). ``m_fnn`` is :func:`fnn` with ten
+    dimensions, a Theiler window of one autocorrelation time and an escape factor of 5
+    (TISEAN's own, 2, makes the test look as if it never converges): the smallest dimension
+    not ruled out, i.e. the first dimension at which the fraction of false nearest neighbors
+    falls below `threshold` on enough points, or at which too few points found a neighbor to
+    decide, or else one more than the largest dimension TISEAN computed (11 when all ten were
+    computed); unless the fraction fell below the threshold it is a lower bound. NaN when it
+    cannot be determined.
+    """
+    # many operations embed the same series with the same delay and threshold: the last few
+    # results are kept (keyed on the series' values), as for the delays of :func:`get_tau`
+    y = np.ascontiguousarray(np.asarray(y, dtype=float).ravel())
+    digest = hashlib.blake2b(y.tobytes(), digest_size=16).digest()
+    key = (digest, y.size, int(tau), float(threshold))
+    for c_key, c_m in _FNN_DIM_CACHE:
+        if c_key == key:
+            return c_m
+    m = fnn(y, tau, 10, ('ac', 1), True, threshold, 5)
+    if not np.isnan(m):
+        m = float(min(m, _max_embedding_dim(y.size)))
+    _FNN_DIM_CACHE.append((key, m))
+    del _FNN_DIM_CACHE[:-_FNN_DIM_CACHE_SIZE]
+    return m
 
 
 def _embedding_params(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
@@ -156,8 +233,9 @@ def _embedding_params(y: np.ndarray, tau: Union[int, str], m: Union[int, str, li
     The time delay and embedding dimension, as hctsa's ``BF_Embed(y, tau, m, true)``.
 
     `tau` is an integer or a rule understood by :func:`pyhctsa.utils.get_tau`. `m` is an
-    integer, ``'fnn'`` (false nearest neighbors, threshold 0.4), or ``('fnn', threshold)``.
-    Returns ``(tau, m)``, or None if either cannot be determined.
+    integer, ``'fnn'`` (false nearest neighbors, threshold 0.05), or ``['fnn', threshold]``:
+    the dimension from :func:`_fnn_embedding_dim`, at most ``floor(2 log10 N)`` for the ``N``
+    points of `y`. Returns ``(tau, m)``, or None if either cannot be determined.
     """
     tau = get_tau(y, tau)
     if np.isnan(tau):
@@ -169,7 +247,7 @@ def _embedding_params(y: np.ndarray, tau: Union[int, str], m: Union[int, str, li
     if isinstance(m, (list, tuple)) or isinstance(m, str):
         if (m if isinstance(m, str) else m[0]) != 'fnn':
             raise ValueError(f"Embedding dimension, m, incorrectly specified: {m!r}")
-        m = _fnn_embedding_dim(y, tau, 0.4 if isinstance(m, str) else m[1])
+        m = _fnn_embedding_dim(y, tau, 0.05 if isinstance(m, str) else m[1])
         if np.isnan(m):
             return None
     return tau, int(m)
@@ -512,9 +590,11 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
     """
     Normalized drop-one-out constant interpolation nonlinear prediction error.
 
-    Computes the nlpe for a time-delay embedded time series using Michael Small's
-    code, nlpe [1]. Neighbors within a Theiler window in time are excluded from
-    the search for the nearest neighbor of each embedded point.
+    Computes the nlpe of Small [1] for a time-delay embedded time series, using an
+    independent (clean-room) implementation of the drop-one-out nearest-neighbor
+    predictor (:func:`pyhctsa.operations._nlpe._nn_prediction_residuals`). The value
+    following each embedded state is predicted by the value that followed its nearest
+    neighbor, with neighbors within a Theiler window in time excluded from the search.
 
     Modifications by Joshua B. Moore for incorporating into pyhctsa.
 
@@ -528,11 +608,19 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
     ----------
     y : array-like
         Input time series (should be z-scored).
-    de : int, optional
-        The embedding dimension, or ``'fnn'`` to set it by TISEAN's false nearest
-        neighbors (:func:`fnn`: first dimension at which the fraction of false
-        neighbors is below 0.05, with a Theiler window of one autocorrelation time
-        and an escape factor of 5). Default is 3.
+    de : int, str or list, optional
+        The embedding dimension: an integer, or ``['fnn', threshold]`` (``'fnn'`` for a
+        threshold of 0.05) to set it by TISEAN's false nearest neighbors, at most
+        ``floor(2 log10 N)`` for the ``N`` samples analyzed (after the ``max_n`` crop): the
+        smaller of that limit and the smallest dimension not ruled out by :func:`fnn` (dimensions
+        1 to 10, a Theiler window of one autocorrelation time, an escape factor of 5), i.e. the
+        first dimension at which the fraction of false neighbors is below the threshold on at
+        least ``ceil(3 / threshold)`` points, or at which too few points found a neighbor to
+        decide, or else one more than the largest dimension TISEAN computed (11 when all ten
+        were computed); that dimension is a lower bound unless the fraction fell below the
+        threshold. The limit is the largest dimension the data can resolve: in more dimensions
+        typical points have no neighbor within a tenth of the diameter of the set (Eckmann &
+        Ruelle 1992, doi:10.1016/0167-2789(92)90023-g; see ``_max_embedding_dim``). Default is 3.
     tau : int or str, optional
         The time-delay: an integer, or a rule understood by
         :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
@@ -543,7 +631,9 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
     max_n : int or 'full', optional
         The maximum length of the time series on which to compute the nlpe (the
         first ``max_n`` samples are used), or ``'full'`` to use the whole series
-        (memory use grows quadratically with length). Default is 5000.
+        (memory use grows quadratically with length). The time delay, the Theiler
+        window and an ``'fnn'`` embedding dimension are all computed from the cropped
+        series, and so is the limit on an ``'fnn'`` dimension. Default is 5000.
     theiler_win : int, float, or ``['ac', k]``, optional
         The Theiler window (see :func:`pyhctsa.utils.theiler_window`), computed
         on the (cropped) series: a number of samples, or ``['ac', k]`` for ``k``
@@ -570,12 +660,6 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
     y = np.asarray(y, dtype=float).ravel()
     n = len(y)
 
-    tau = get_tau(y, tau)
-    if np.isnan(tau):
-        logger.warning('Time series cannot be embedded (could not get the time delay)')
-        return np.nan
-    tau = int(tau)
-
     #% nlpe can cause memory pains for long time series
     #% Let's do this dirty cheat
     if isinstance(max_n, str):
@@ -591,10 +675,20 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
         logger.warning(f'Time series (N = {len(y)}) is too short.')
         return np.nan
 
-    if isinstance(de, str):
-        if de != 'fnn':
-            raise ValueError(f"Invalid embedding dimension '{de}'")
-        de = _fnn_embedding_dim(y, tau, 0.05)
+    # the time delay of the series analyzed (after any max_n crop)
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        logger.warning('Time series cannot be embedded (could not get the time delay)')
+        return np.nan
+    tau = int(tau)
+
+    if isinstance(de, (list, tuple)) and len(de) == 1:
+        de = de[0]
+    if isinstance(de, (str, list, tuple)):
+        if (de if isinstance(de, str) else de[0]) != 'fnn':
+            raise ValueError(f"Invalid embedding dimension {de!r}")
+        # at most floor(2 log10 n) for the n samples analyzed (after the max_n crop)
+        de = _fnn_embedding_dim(y, tau, 0.05 if isinstance(de, str) else float(de[1]))
         if np.isnan(de):  # the dimension could not be determined (e.g. a delay too long)
             return np.nan
     de = int(de)
@@ -626,10 +720,13 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
     """
     Optimal delay time using the method of Parlitz and Wichard.
 
-    For a set of randomly chosen reference points, the nearest neighbors in value
-    (one just below and one just above the reference value) are found, and the
-    mean absolute difference between the following values of the neighbor and
-    reference is tracked as a function of the delay.
+    For each of 256 reference points (spread evenly over the sorted values of the
+    series by a deterministic low-discrepancy sequence), the nearest neighbors in
+    value (one just below and one just above the reference value) are found.
+    The absolute differences between the following values of each neighbor and
+    the reference are summed over the two neighbors and averaged over the
+    reference points, giving a curve ``tau`` over delays 0, 1, ..., ``max_delay``
+    (twice the mean separation of a neighbor from the reference).
 
     Method as implemented in the TSTOOL package for nonlinear time-series analysis (C.
     Merkwirth, U. Parlitz, I. Wedekind, D. Engster and W. Lauterborn; GNU GPL), here
@@ -840,8 +937,7 @@ def local_density(y: ArrayLike, nnr: int = 3,
     keeps the statistics well behaved (the density itself is heavy-tailed). To
     avoid infinite densities when there are repeated values (zero neighbor
     distance, as in quantized or held series), distances are smoothed as
-    ``sqrt(r^2 + (0.01*median(r[r > 0]))^2)``. (hctsa previously used TSTOOL's
-    ``localdensity`` and then ``1/r^m``; neither is used any more.)
+    ``sqrt(r^2 + (0.01*median(r[r > 0]))^2)``.
 
     Parameters
     ----------
@@ -863,8 +959,9 @@ def local_density(y: ArrayLike, nnr: int = 3,
         time. Default is ``'ac'``.
     m : int or 'fnn', optional
         The embedding dimension: an integer, or ``'fnn'`` (or ``['fnn', threshold]``)
-        to set it by TISEAN's false nearest neighbors (:func:`fnn`, threshold 0.4 by
-        default; as hctsa's ``BF_Embed``). Default is 2.
+        to set it by TISEAN's false nearest neighbors (:func:`fnn`, threshold 0.05 by
+        default, at most ``floor(2 log10 N)``; as hctsa's ``BF_Embed``, see
+        :func:`_embedding_params`). Default is 2.
 
     Returns
     -------
@@ -982,17 +1079,24 @@ def _best_flat_range(v: np.ndarray, gamma: float, stptr: np.ndarray,
     return _argmin_first_colmajor(mybad)
 
 
-def _sub_takens(dat: list, eup: float) -> np.ndarray:
-    # Takens' estimator at the cutoff length scale eup, one value per embedding
-    # dimension (NaN where the scan never reached eup).
+def _sub_takens(dat: list, eup: float, c2: list, num_pairs: int) -> tuple:
+    # Takens' estimator at the first length scale above eup, one value per embedding
+    # dimension (NaN where the scan never reached eup), and the number of pairs of delay
+    # vectors within that length scale (the correlation sum there times the number of pairs)
     out = np.full(len(dat), np.nan)
+    count = np.zeros(len(dat))
     for i, d in enumerate(dat):
         if d.size == 0:
             continue
         idx = np.flatnonzero(d[:, 0] > eup)
         if idx.size > 0:
             out[i] = d[idx[0], 1]
-    return out
+            r = d[idx[0], 0]
+            ci = c2[i]
+            if ci.size:
+                j = int(np.argmin(np.abs(np.log(ci[:, 0]) - np.log(r))))
+                count[i] = ci[j, 1] * num_pairs
+    return out, count
 
 
 def _sub_findmmin(ds: ArrayLike) -> dict:
@@ -1003,8 +1107,14 @@ def _sub_findmmin(ds: ArrayLike) -> dict:
     gamma = 0.1  # regularizer, chosen ad hoc; rewards a longer constant region
     dsraw = ds
     dsmin = np.min(ds)
-    with np.errstate(invalid='ignore', divide='ignore'):
-        dsn = (ds - dsmin) / (np.max(ds) - dsmin)  # rescale to [0,1] so weights are consistent
+    if np.max(ds) - dsmin <= 1e-12 * np.max(np.abs(ds)):
+        # values equal to within round-off are a constant curve, which cannot be rescaled to
+        # [0,1] (rescaling the round-off differences would give arbitrary values): NaN, as
+        # for exactly equal values
+        dsn = np.full_like(ds, np.nan)
+    else:
+        with np.errstate(invalid='ignore', divide='ignore'):
+            dsn = (ds - dsmin) / (np.max(ds) - dsmin)  # rescale to [0,1] so weights are consistent
 
     out = {'ri1': None, 'goodness': np.nan, 'stabled': np.nan, 'linrmserr': np.nan}
     if l < 2:
@@ -1222,10 +1332,12 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     Estimates the correlation sum, the correlation dimension and the correlation
     entropy of the time series [1]_, then summarises the results.
 
-    Takens' estimator [2]_ is computed for the correlation dimension, along with
+    Takens' estimator is computed for the correlation dimension, at a fixed upper
+    length scale of 0.5 standard deviations (the estimator is a reasonable dimension
+    estimate when evaluated at the upper end of the scaling range [1]_), along with
     related statistics: other dimension estimates obtained by finding suitable
-    scaling ranges, and a search for a flat region in the output of TISEAN's
-    ``h2`` algorithm, which indicates determinism/deterministic chaos [3]_.
+    scaling ranges (with a Theiler window [2]_), and a search for a flat region in the
+    output of TISEAN's ``h2`` algorithm, which indicates determinism/deterministic chaos [3]_.
 
     To find a suitable scaling range, a penalized regression procedure is used to
     determine an optimal scaling range that simultaneously spans the greatest
@@ -1239,7 +1351,8 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     References
     ----------
     .. [1] R. Hegger, H. Kantz and T. Schreiber, "Practical implementation of
-        nonlinear time series methods: The TISEAN package", Chaos 9(2) 413 (1999)
+        nonlinear time series methods: The TISEAN package", Chaos 9(2) 413-435 (1999).
+        DOI: 10.1063/1.166424
     .. [2] J. Theiler, "Spurious dimension from correlation algorithms applied to
         limited time-series data", Phys. Rev. A 34(3) 2427 (1986)
     .. [3] H. Kantz and T. Schreiber, "Nonlinear Time Series Analysis",
@@ -1270,10 +1383,24 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     dict or float
         Statistics summarising Takens' estimator, the local slopes of the
         correlation sum (raw and Gaussian-kernel smoothed), and the correlation
-        entropy. Returns NaN, as hctsa does, if the time series is too short, the time
-        delay cannot be determined, or the TISEAN output is unusable for this series
-        (no valid output for a long delay, no correlation-dimension data, or no scaling
-        range).
+        entropy. The ten ``takens05`` outputs summarise Takens' estimator at the first length
+        scale above 0.5 over the embedding dimensions ``m = 1, ..., m_v`` at which it rests on
+        at least 33 pairs of delay vectors within that scale (the number of pairs falls with
+        ``m``; ``m_v`` is the last such dimension, and stops before any estimate above
+        ``2m``). With fewer pairs the estimate is set by a handful of pairs in the few
+        occupied radii of the correlation sum and is not a dimension estimate (33 is the
+        smallest number of pairs for which the 95% sampling interval of Takens' estimator,
+        for independent pairs, spans less than a factor of two). An estimate above ``2m`` is
+        not a dimension estimate either: a set with a scaling region below the length scale
+        has a dimension of at most ``m``, and larger values arise when the correlation sum
+        rises much faster than ``r^m``, as in nonstationary series. All ten are NaN if fewer
+        than two dimensions qualify. The ``*mmin_*`` outputs (the smallest embedding
+        dimension from which a quantity is roughly constant, and its goodness, stable value
+        and linear-fit error) are NaN when the quantity is the same at every dimension, to
+        within round-off, since it cannot then be rescaled. Returns NaN, as hctsa does, if
+        the time series is too short, the time delay cannot be determined, or the TISEAN
+        output is unusable for this series (no valid output for a long delay, no
+        correlation-dimension data, or no scaling range).
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size  # data length (number of samples)
@@ -1320,29 +1447,46 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
     # --------------------------------------------------------------------------
     # (1) Takens estimator
     # --------------------------------------------------------------------------
-    # Correlation dimension at an upper length scale of 0.5: for a z-scored time
-    # series that is half the standard deviation, as Kantz & Schreiber recommend.
-    takens05 = _sub_takens(c2tdat, 0.5)
-    out['takens05_mean'] = np.mean(takens05)
-    out['takens05_median'] = np.median(takens05)
-    out['takens05_max'] = np.nanmax(takens05)
-    out['takens05_min'] = np.nanmin(takens05)
-    out['takens05_std'] = np.std(takens05, ddof=1)
-    if np.all(np.isnan(takens05)):
-        out['takens05_iqr'] = np.nan
+    # Correlation dimension at an upper length scale of 0.5 (standard deviations of the
+    # z-scored series), a fixed scale that is the same for every embedding dimension.
+    # Only embedding dimensions whose estimate rests on at least 33 pairs of delay vectors
+    # within that length scale enter the statistics (with fewer, the estimate is dominated by
+    # a handful of pairs in the few occupied radii, and is not a dimension estimate): the
+    # dimensions m = 1, ..., m_v up to the first one without an estimate on 33 pairs (the
+    # count falls with m) or with an estimate above 2m (see the docstring)
+    n_emb = y.size - (maxm - 1) * tau
+    num_pairs = max(0, (n_emb - theiler_win - 1) * (n_emb - theiler_win) // 2)
+    takens05_all, takens05_count = _sub_takens(c2tdat, 0.5, tables['c2'], num_pairs)
+    with np.errstate(invalid='ignore'):
+        ok = (np.isfinite(takens05_all) & (takens05_count >= 33)
+              & (takens05_all <= 2 * np.arange(1, takens05_all.size + 1)))
+    m_v = ok.size if ok.all() else int(np.argmin(ok))
+    takens05 = takens05_all[:m_v]
+    takens_keys = ['takens05_mean', 'takens05_median', 'takens05_max', 'takens05_min',
+                   'takens05_std', 'takens05_iqr', 'takens05mmin_ri', 'takens05mmin_goodness',
+                   'takens05mmin_stabled', 'takens05mmin_linrmserr']
+    if m_v < 2:
+        # Fewer than two embedding dimensions with an estimate: no statistics across them
+        for key in takens_keys:
+            out[key] = np.nan
     else:
-        q75, q25 = np.percentile(takens05[~np.isnan(takens05)], [75, 25], method='hazen')
+        out['takens05_mean'] = np.mean(takens05)
+        out['takens05_median'] = np.median(takens05)
+        out['takens05_max'] = np.max(takens05)
+        out['takens05_min'] = np.min(takens05)
+        out['takens05_std'] = np.std(takens05, ddof=1)
+        q75, q25 = np.percentile(takens05, [75, 25], method='hazen')
         out['takens05_iqr'] = q75 - q25
 
-    # Find outliers as a means of inferring m_min: look for the estimate
-    # approaching a constant for m > m_min
-    mmintakens05 = _sub_findmmin(takens05)
-    # minimum dimension at which a scaling range is observed:
-    out['takens05mmin_ri'] = (np.nan if mmintakens05['ri1'] is None
-                              else mmintakens05['ri1'])
-    out['takens05mmin_goodness'] = mmintakens05['goodness']
-    out['takens05mmin_stabled'] = mmintakens05['stabled']
-    out['takens05mmin_linrmserr'] = mmintakens05['linrmserr']
+        # Find outliers as a means of inferring m_min: look for the estimate
+        # approaching a constant for m > m_min
+        mmintakens05 = _sub_findmmin(takens05)
+        # minimum dimension at which a scaling range is observed:
+        out['takens05mmin_ri'] = (np.nan if mmintakens05['ri1'] is None
+                                  else mmintakens05['ri1'])
+        out['takens05mmin_goodness'] = mmintakens05['goodness']
+        out['takens05mmin_stabled'] = mmintakens05['stabled']
+        out['takens05mmin_linrmserr'] = mmintakens05['linrmserr']
 
     # --------------------------------------------------------------------------
     # (2) D2: local slopes of the correlation integral
@@ -1404,10 +1548,9 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
     distance (the correlation sum and its scaling).
 
     Computes the correlation sum, :math:`C(\\epsilon)`, the fraction of pairs of
-    time-delay-embedded points closer than :math:`\\epsilon`, by the
-    Grassberger-Procaccia algorithm [1]_, using TISEAN's ``d2`` (hctsa no longer
-    uses TSTOOL's ``corrsum``/``corrsum2``). For a low-dimensional attractor,
-    :math:`\\ln C` rises linearly with :math:`\\ln \\epsilon`, with a slope equal to the
+    time-delay-embedded points closer than :math:`\\epsilon` (in the max norm, as ``d2``
+    measures distances), by the Grassberger-Procaccia algorithm [1]_, using TISEAN's ``d2``. For a low-dimensional
+    attractor, :math:`\\ln C` rises linearly with :math:`\\ln \\epsilon`, with a slope equal to the
     correlation dimension. The outputs summarize the range of :math:`\\ln \\epsilon`
     and :math:`\\ln C(\\epsilon)`, and an iteratively re-weighted least squares (robust)
     linear fit to the log-log plot.
@@ -1422,11 +1565,17 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
     y : array-like
         Input time series.
     nref : int or float, optional
-        Number of (randomly chosen) reference points: ``-1`` uses all points, a
-        value in (0, 1) is a fraction of the time-series length. Default is 500.
+        Maximum number of pairs of points counted at each length scale (TISEAN's
+        ``d2 -N``, ``maxfound``), not a number of reference points: a length scale that
+        has this many pairs (at the largest embedding dimension) is no longer updated.
+        ``-1`` counts all pairs, a value in (0, 1) is a fraction of the time-series
+        length. Default is 500.
     r : float, optional
         Maximum search radius, in units of ``std(y) * sqrt(m)`` where ``m`` is the
-        embedding dimension. Default is 0.05.
+        embedding dimension. Default is 0.05. The factor ``sqrt(m)`` is a convention:
+        under the max norm the share of pairs within a fixed radius falls roughly
+        geometrically with ``m``, and the growing radius keeps the scanned range
+        populated with pairs.
     thwin : int, float, or ``['ac', k]``, optional
         The Theiler window of samples to exclude before and after each reference
         index (see :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k``
@@ -1439,7 +1588,7 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an
         integer, or ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
-        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.05 by default; at most ``floor(2 log10 N)``, see :func:`_embedding_params`). Default is ``['ac', 'fnn']``.
     do_two : int, optional
         Only 1 (corrsum-style log-spaced radii, the default) is supported; 2 has no
         TISEAN equivalent and raises ``ValueError``, as in hctsa.
@@ -1458,7 +1607,12 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
         errors of the intercept and slope; ``robfitresmeanabs``, ``robfitresmeansq``,
         ``robfitresac1``: mean absolute and mean squared residual, and lag-1
         autocorrelation of the residuals. The fit outputs are NaN when too few radii
-        have a finite :math:`\\ln C`. Returns NaN if the delay or Theiler window cannot
+        have a finite :math:`\\ln C`; ``robfit_sigrat`` is NaN when the robust estimate of
+        the residual standard deviation, and ``robfitresac1`` when the standard deviation of
+        the residuals, is at floating-point round-off (at most ``10 * N * eps`` times the
+        root-mean-square of the fitted :math:`\\ln C`, over ``N`` radii, as in
+        :func:`pyhctsa.robust.bf_residual_stats`), since a ratio of rounding noise carries
+        no information. Returns NaN if the delay or Theiler window cannot
         be set, the embedding is too short, or no correlation sum is obtained.
     """
     y = np.asarray(y, dtype=float).ravel()
@@ -1491,8 +1645,14 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
                        'to do a correlation sum')
         return np.nan
 
-    # TISEAN's d2: -N0 uses all pairs; the radius is in standard deviations of y, scaled by
-    # sqrt(m) since a pairwise distance in an m-dimensional embedding scales as std(y)*sqrt(m)
+    # TISEAN's d2: -N0 uses all pairs. The maximum radius is r standard deviations of y times
+    # sqrt(m). d2 uses the max norm, under which the share of pairs within a fixed radius falls
+    # roughly geometrically with m (as (r/sqrt(pi))^m for a noise-like series); sqrt(m) is a
+    # convention, not derived from the norm, that lets the radius grow with m so that the
+    # scanned range stays populated (with r = 0.5 the fraction of pairs within the top radius
+    # stays between about 0.04 and 0.4 for typical series at their 'fnn' dimensions, whereas a
+    # fixed radius of 0.1 standard deviations leaves many noise-like series with too few radii
+    # holding pairs to fit).
     max_eps = float(r * np.std(y, ddof=1) * np.sqrt(m))
     try:
         tables = _tisean.d2(y, delay=tau, embed=m, theiler=thwin, howoften=nbins,
@@ -1534,13 +1694,18 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
         res = lncr - (a[1] * lnr + a[0])
         out['robfit_a1'] = a[0]
         out['robfit_a2'] = a[1]
-        out['robfit_sigrat'] = stats['ols_s'] / stats['robust_s']
+        # residuals at floating-point round-off (a standard deviation of at most 10*N*eps times
+        # the rms of the fitted ln C) give NaN rather than ratios of rounding noise
+        round_off = 10 * lncr.size * np.finfo(float).eps * np.sqrt(np.mean(lncr ** 2))
+        out['robfit_sigrat'] = (np.nan if stats['robust_s'] <= round_off
+                                else stats['ols_s'] / stats['robust_s'])
         out['robfit_s'] = stats['s']
         out['robfit_sea1'] = stats['se'][0]
         out['robfit_sea2'] = stats['se'][1]
         out['robfitresmeanabs'] = np.mean(np.abs(res))
         out['robfitresmeansq'] = np.mean(res ** 2)
-        out['robfitresac1'] = autocorr(res, 1, 'Fourier')
+        out['robfitresac1'] = (np.nan if np.std(res, ddof=1) <= round_off
+                               else autocorr(res, 1, 'Fourier'))
     else:
         for k in ('robfit_a1', 'robfit_a2', 'robfit_sigrat', 'robfit_s', 'robfit_sea1',
                   'robfit_sea2', 'robfitresmeanabs', 'robfitresmeansq', 'robfitresac1'):
@@ -1551,26 +1716,101 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
 
 
 
-def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
+
+
+@_njit(cache=True)
+def _takens_pairs_below(emb, i_refs, past, tol, r_max, out):
+    """Max-norm distances below ``r_max`` between the delay vectors ``i`` in ``i_refs`` and
+    ``j > i + past``: those above ``tol`` are written to ``out`` (as far as it reaches); returns
+    their number and the number of pairs within ``tol`` (repeated points)."""
+    n_emb, m = emb.shape
+    cap = out.shape[0]
+    cnt = 0
+    rep = 0
+    for i in i_refs:
+        for j in range(i + past + 1, n_emb):
+            d = 0.0
+            far = False
+            for k in range(m):
+                v = abs(emb[i, k] - emb[j, k])
+                if v > d:
+                    d = v
+                    if d >= r_max:
+                        far = True
+                        break
+            if far:
+                continue
+            if d <= tol:
+                rep += 1
+            else:
+                if cnt < cap:
+                    out[cnt] = d
+                cnt += 1
+    return cnt, rep
+
+
+def takens_estimator(y: ArrayLike, nref: int = -1, c0: float = 0.01,
                      past: Union[int, float, list, tuple] = ('ac', 1),
                      embed_params: Union[list, tuple] = ('ac', 'fnn')) -> float:
     """
-    Takens' estimator for the correlation dimension.
+    Takens' estimator of the correlation dimension, at the length scale enclosing a fixed
+    fraction of pairs.
 
-    Takens' maximum-likelihood estimator [1]_ of the correlation dimension at an
-    upper length scale ``eup = rad * std(y)``:
+    Estimates the correlation dimension, :math:`D`, of a time-delay embedding of ``y`` with
+    Takens' estimator [1]_, at an upper length scale :math:`\\epsilon_{up}` set by the data: the
+    ``c0`` quantile of the max-norm distances between pairs of delay vectors (pairs closer in
+    time than the Theiler window, and repeated points, are excluded). With :math:`r_{ij}` the
+    :math:`n` pair distances below :math:`\\epsilon_{up}`,
 
     .. math::
-        D_T = 1 / \\langle \\ln(\\epsilon_{up} / r_{ij}) \\rangle,
+        D = (n - 1) / \\sum \\ln(\\epsilon_{up} / r_{ij}).
 
-    the mean taken over all pairs ``(i, j)`` of delay vectors with max-norm distance
-    :math:`r_{ij} < \\epsilon_{up}`, excluding pairs closer in time than the Theiler
-    window and exact duplicate vectors. It is computed natively (a KD-tree range search
-    at the one radius needed), exactly at ``eup`` from the pair distances themselves,
-    rather than from the logarithmically binned correlation sum of TISEAN's ``d2``
-    followed by ``c2t`` as in earlier versions of hctsa. Kantz and Schreiber's
-    recommendation of half a standard deviation for the length scale is used the same
-    way in :func:`tisean_d2`.
+    Under the estimator's model, :math:`C(r) \\propto r^D` below :math:`\\epsilon_{up}`, the
+    :math:`\\ln(\\epsilon_{up} / r_{ij})` are independent exponential variables with rate
+    :math:`D` given :math:`\\epsilon_{up}` ([1]_; with :math:`\\epsilon_{up}` an order statistic of
+    the distances, [2]_), so their sum is Gamma(:math:`n`, :math:`D`) and :math:`(n - 1)/\\sum` is
+    the unbiased estimate of :math:`D` (the maximum-likelihood form :math:`n/\\sum` is biased
+    upward by :math:`n/(n - 1)` [3]_).
+
+    Setting the length scale by a fraction of pairs, rather than as a fixed radius, keeps it at
+    a small scale that always holds the same share of pairs, whatever the embedding dimension and
+    the spread of the embedded points, and its target (the scale below which a fraction ``c0``
+    of pairs lie) does not depend on the length of the series. (At a fixed radius, noise-like
+    series embedded in several dimensions have no pairs at all at small scales.) Takens'
+    estimator is a reasonable dimension estimate when evaluated at the upper end of the scaling
+    range [4]_, which for a low-dimensional attractor lies at small scales.
+
+    Details:
+
+    - Pairs of delay vectors closer than ``tol = 1e-12 * (max(y) - min(y))`` are repeated
+      points: they carry no length-scale information, and a positive fraction of them makes the
+      estimator inconsistent [3]_, so they are left out.
+    - Distances closer than ``tol`` are equal. If the values of ``y`` lie on a lattice, i.e., all
+      differences between distinct values are within 1% of integer multiples of a common step
+      :math:`q` (the smallest difference divided by the smallest :math:`k = 1, ..., 100` that
+      fits, well above ``tol``, with :math:`q` fitted to the differences by least squares;
+      quantized data, also when stored with rounding), distances closer than :math:`q/2` are
+      equal, since finer differences are not resolved by the data. Equal distances are merged
+      into levels after sorting (not snapped to a grid), each level taking its smallest value;
+      pairs at the level of :math:`\\epsilon_{up}` lie at :math:`\\epsilon_{up}`. The
+      tolerances are relative to the data, so shifting, rescaling or reflecting ``y`` leaves the
+      output unchanged, apart from distances within round-off of ``tol``.
+    - The output is NaN if fewer than 3 distinct distances lie below :math:`\\epsilon_{up}`:
+      the data then do not resolve the length scale (:math:`\\epsilon_{up}` lies within two
+      resolution steps of the smallest distance), and the estimate is set by the lattice of
+      the values rather than by the dynamics.
+    - The output is NaN if the estimate exceeds :math:`2m` for an :math:`m`-dimensional
+      embedding: a set with a scaling region below :math:`\\epsilon_{up}` has a dimension of
+      at most :math:`m`, and finite-sample and finite-scale effects keep estimates for sets
+      with a scaling region well below :math:`2m`. Larger values arise when the correlation
+      sum rises much faster than :math:`r^m` below :math:`\\epsilon_{up}`, as when the pairs
+      outside the Theiler window are all far apart (a Theiler window that is a large fraction
+      of a nonstationary series), so there is no scaling region at that scale.
+    - The output is NaN if ``c0`` times the number of pairs that are not repeated points is
+      below 33, the smallest number of pairs for which the 95% sampling interval of the
+      estimate (for independent pairs) spans less than a factor of two.
+    - The pairs are ``(i, j)`` with ``i`` among the first ``nref`` delay vectors and
+      ``j > i + past``.
 
     References
     ----------
@@ -1578,6 +1818,13 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
         in B.L.J. Braaksma, H.W. Broer and F. Takens (eds.), Dynamical Systems and
         Bifurcations (Groningen, 1984), Lecture Notes in Mathematics 1125, 99-106,
         Springer, Berlin (1985). DOI: 10.1007/BFb0075637
+    .. [2] B.M. Hill, "A simple general approach to inference about the tail of a
+        distribution", Ann. Statist. 3(5), 1163-1174 (1975). DOI: 10.1214/aos/1176343247
+    .. [3] S. Borovkova, R. Burton and H. Dehling, "Consistency of the Takens estimator for
+        the correlation dimension", Ann. Appl. Probab. 9(2), 376-390 (1999).
+        DOI: 10.1214/aoap/1029962747
+    .. [4] R. Hegger, H. Kantz and T. Schreiber, "Practical implementation of nonlinear time
+        series methods: The TISEAN package", Chaos 9(2), 413-435 (1999). DOI: 10.1063/1.166424
 
     Parameters
     ----------
@@ -1586,9 +1833,10 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
     nref : int, optional
         The number of reference points (the first ``nref`` delay vectors); ``-1`` uses
         all points. Default is -1.
-    rad : float, optional
-        The upper length scale at which to read off the dimension estimate, in standard
-        deviations of ``y``. Default is 0.05.
+    c0 : float, optional
+        The fraction of pairs (other than repeated points) that lie below the upper length
+        scale.
+        Default is 0.01.
     past : int, float, or ``['ac', k]``, optional
         The Theiler window (see :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for
         ``k`` times the first zero-crossing of the autocorrelation function, or a number
@@ -1597,24 +1845,28 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an
         integer, or ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
-        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.05 by default; at most ``floor(2 log10 N)``, see :func:`_embedding_params`). Default is ``['ac', 'fnn']``.
 
     Returns
     -------
     float
-        Takens' estimator of the correlation dimension. NaN if the delay or Theiler
-        window cannot be set, the series cannot be embedded, it is constant, or no pair
-        of delay vectors lies within the length scale (or all such pairs are exact
-        duplicates, e.g. heavily quantized data). For high embedding dimensions of
-        noise-like series no pair may fall within the length scale at all.
+        The estimate of the correlation dimension. NaN if the delay or Theiler window cannot
+        be set, the series cannot be embedded or is constant, ``c0`` times the number of pairs
+        that are not repeated points is below 33, fewer than 3 distinct distances lie below
+        the upper length scale, or the estimate exceeds twice the embedding dimension (see
+        Details).
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size
+    if not 0 < c0 < 1:
+        raise ValueError('c0, the fraction of pairs below the upper length scale, must be in (0, 1)')
+    min_pairs = 33  # fewest pairs below the upper length scale for an estimate
 
     past = theiler_window(y, past, n)
     if np.isnan(past):  # the autocorrelation function never crosses zero
         logger.warning('No autocorrelation zero-crossing to set the Theiler window')
         return np.nan
+    past = int(past)
 
     tau, m = _embed_tau_m(y, embed_params)
     if np.isnan(tau):
@@ -1626,36 +1878,73 @@ def takens_estimator(y: ArrayLike, nref: int = -1, rad: float = 0.05,
         logger.warning(str(exc))
         return np.nan
     n_emb = emb.shape[0]
-
-    # Reference points: the first nref delay vectors, or all
     n_ref = n_emb if (nref == -1 or nref >= n_emb) else int(nref)
 
-    eup = rad * np.std(y, ddof=1)  # upper length scale, in data units
-    if not eup > 0:
+    # Pairs closer than tol = 1e-12 of the range of y are repeated points, left out
+    span = np.max(y) - np.min(y)  # no max-norm distance exceeds the range of y
+    if not span > 0:
         return np.nan  # constant series
+    tol = 1e-12 * span
+    # Quantized values: if the differences between distinct values are all within 1% of integer
+    # multiples of a common step q (the smallest difference divided by the smallest k = 1, ...,
+    # 100 that fits, well above tol), distances closer than q/2 are not resolved by the data
+    gaps = np.diff(np.unique(y))
+    gaps = gaps[gaps > tol]
+    if gaps.size == 0:
+        return np.nan  # constant to within tol
+    q = 0.0
+    for k in range(1, 101):
+        step = np.min(gaps) / k
+        if step <= 1000 * tol:
+            break
+        mult = np.floor(gaps / step + 0.5)
+        if np.all(np.abs(gaps - step * mult) <= 0.01 * step):
+            q = np.sum(gaps * mult) / np.sum(mult ** 2)
+            break
+    merge = max(tol, q / 2)  # distances closer than this are equal
 
-    # Sum ln(eup / r_ij) over pairs with r_ij <= eup (max norm) outside the Theiler window,
-    # over reference points in chunks (a low-dimensional attractor can have O(N^2) pairs
-    # within eup, so they are never all held at once)
-    tree = cKDTree(emb)
-    sum_log, num_pairs = 0.0, 0
-    chunk = 500
-    for c in range(0, n_ref, chunk):
-        refs = np.arange(c, min(c + chunk, n_ref))
-        pairs = cKDTree(emb[refs]).sparse_distance_matrix(
-            tree, eup, p=np.inf, output_type='ndarray')
-        keep = np.abs(pairs['j'] - refs[pairs['i']]) > past  # outside the Theiler window
-        d = pairs['v'][keep]
-        d = d[d > 0]  # exact duplicates carry no length-scale information (ln -> Inf)
-        sum_log += np.sum(np.log(eup / d))
-        num_pairs += d.size
+    # The pairs: i among the first n_ref delay vectors, j > i + past
+    emb = np.ascontiguousarray(emb, dtype=float)
+    first_j = np.arange(n_ref) + past + 1
+    num_pairs = int(np.sum(np.maximum(0, n_emb - first_j)))
+    refs = np.arange(n_ref, dtype=np.int64)
 
-    if num_pairs == 0:
-        logger.warning(f'No pairs within {rad:g} standard deviations of each other to '
-                       'estimate a correlation dimension from')
+    # A first guess at the radius holding the c0 quantile, from the pairs of a subset of reference
+    # points; the count below is exact whatever the guess (it is enlarged until it suffices)
+    sub = refs[np.unique(np.linspace(0, n_ref - 1, min(n_ref, 200)).astype(np.int64))]
+    buf = np.empty(int(np.sum(np.maximum(0, n_emb - sub - past - 1))) + 1)
+    c, _ = _takens_pairs_below(emb, sub, past, tol, np.inf, buf)
+    r_max = np.quantile(buf[:c], min(1.0, 3 * c0)) * (1 + 1e-9) if c > 0 else span
+    while True:
+        buf = np.empty(max(1, int(4 * c0 * num_pairs)))
+        cnt, rep = _takens_pairs_below(emb, refs, past, tol, r_max, buf)
+        if cnt > buf.size:  # the guess at the count was short: collect again with room for all
+            buf = np.empty(cnt)
+            cnt, rep = _takens_pairs_below(emb, refs, past, tol, r_max, buf)
+        K = int(np.ceil(c0 * (num_pairs - rep)))  # the c0 quantile is the K-th smallest distance
+        if K < min_pairs:
+            logger.warning(f'Too few pairs ({K} below the {c0:g} quantile) to estimate a dimension')
+            return np.nan
+        if cnt >= K or r_max > 2 * span:
+            break
+        r_max *= 2
+    p = np.sort(buf[:cnt])
+
+    # Merge distances closer than `merge` into levels (each takes its smallest value); eup is the
+    # level of the K-th distance
+    level = np.concatenate([[0], np.cumsum(np.diff(p) > merge)])
+    value = p[np.flatnonzero(np.concatenate([[True], np.diff(level) > 0]))]
+    k = int(level[K - 1])
+    if k < 3:  # too few distinct distances below eup: the data do not resolve this scale
+        logger.warning('Fewer than 3 distinct pair distances below the upper length scale')
         return np.nan
-
-    return num_pairs / sum_log  # Takens' estimator: 1 / mean(ln(eup/r))
+    eup = value[k]
+    r = value[level[level < k]]  # the pairs below eup, at the values of their levels
+    D = (r.size - 1) / np.sum(np.log(eup / r))
+    if D > 2 * m:  # far above m: no scaling region at this scale
+        logger.warning(f'Dimension estimate {D:.3g} exceeds twice the embedding dimension {m}')
+        return np.nan
+    return D
 
 
 
@@ -1736,9 +2025,18 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     :math:`\\exp(\\psi(k)/D)` as :math:`\\gamma \\to 0`), up to an overall scale factor that is
     fitted separately. :math:`D(\\gamma)` is the value that best matches the measured moments
     :math:`M(k_{min}..k_{max})` under a robust :math:`\\log(1 + e^2/2)` error, found by nested
-    bounded one-dimensional minimizations. Finally :math:`q(\\gamma) = 1 - \\gamma / D(\\gamma)`.
+    bounded one-dimensional minimizations. The error has a fixed width (1) in the units of
+    the moments, so :math:`D(\\gamma)` depends on the scale of the series. Finally
+    :math:`q(\\gamma) = 1 - \\gamma / D(\\gamma)`.
     The outputs summarize :math:`D` and :math:`q` across the moments, and a straight-line
     fit of :math:`D` against :math:`q`.
+
+    :math:`D(\\gamma)` is identified only where the error has a minimum inside the search
+    interval for :math:`D`, and the moments are not zero: a minimum at either end of the interval
+    (for instance at the upper end when the moments do not grow with k, as on a periodic orbit) is
+    no estimate, nor is a fit to moments that are zero (to within 1e-12 of the range of ``y``;
+    every kth neighbor coincides with its reference point, so the error is flat in :math:`D`),
+    and the outputs are then NaN.
 
     Method as implemented in the TSTOOL package for nonlinear time-series analysis (C.
     Merkwirth, U. Parlitz, I. Wedekind, D. Engster and W. Lauterborn; GNU GPL), here
@@ -1758,8 +2056,9 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     kmax : int, optional
         Maximum number of neighbors for each reference point. Default is 10.
     nref : int or float, optional
-        Number of randomly chosen reference points: ``-1`` uses all points, a value in
-        (0, 1) is a proportion of the embedded points. Default is 0.2.
+        Number of reference points, spread evenly over the embedded series (a deterministic
+        subset): ``-1`` uses all points, a value in (0, 1) is a proportion of the embedded
+        points. Default is 0.2.
     gstart, gend : float, optional
         Starting and ending values of the moment order. Defaults are 1 and 10.
     past : int, float, or ``['ac', k]``, optional
@@ -1773,7 +2072,7 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer,
         or ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
-        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.05 by default; at most ``floor(2 log10 N)``, see :func:`_embedding_params`). Default is ``['ac', 'fnn']``.
     random_seed : int, str or None, optional
         Not used: the reference points (when ``nref != -1``) are the first of a fixed, evenly
         spread ordering (:func:`~pyhctsa.robust.bf_spread_perm`), as in hctsa.
@@ -1786,8 +2085,8 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
         ``linfit_a``, ``linfit_b``: slope and intercept of a linear fit of :math:`D` against
         :math:`q`; ``linfit_rmsqres``: root-mean-square residual of that fit. Returns NaN
         if the Theiler window or delay cannot be set, the embedding fails, ``kmax`` is not
-        smaller than the number of embedded points, or too few neighbors lie outside the
-        Theiler window.
+        smaller than the number of embedded points, too few neighbors lie outside the Theiler
+        window, or :math:`D` is not identified at every moment order.
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size
@@ -1828,6 +2127,7 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     k_fetch = min(n_emb - 1, kmax + 2 * past + 5)
     dist, idx = cKDTree(emb).query(emb[ref_idx], k=k_fetch + 1)
     valid = np.abs(idx - ref_idx[:, None]) > past
+    tol = 1e-12 * np.ptp(y)  # distances below this are zero up to rounding
     dist = np.sort(np.where(valid, dist, np.inf), axis=1)[:, :kmax]
     for ii in np.flatnonzero(valid.sum(axis=1) < kmax):  # fall back to a full search
         all_dists = np.linalg.norm(emb - emb[ref_idx[ii]], axis=1)
@@ -1850,10 +2150,15 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
                 mom = np.exp(np.mean(np.log(dist), axis=0))
             else:
                 mom = np.mean(dist ** g, axis=0) ** (1 / g)
+            if np.any(mom[kmin - 1:kmax] <= tol):
+                return np.nan  # zero moments: the error is flat in D
+            d_min, d_max = max(0.05, -g / kmin), 128
             dq[gi] = minimize_scalar(
                 lambda d: _fractal_dim_error(d, g, kmin, kmax, mom),
-                bounds=(max(0.05, -g / kmin), 128), method='bounded',
+                bounds=(d_min, d_max), method='bounded',
                 options={'xatol': 1e-4}).x
+            if min(dq[gi] - d_min, d_max - dq[gi]) <= 10 * 1e-4:
+                return np.nan  # the minimum lies at an end of the search interval: D is not identified
             q[gi] = 1 - g / dq[gi]
 
     out = {}
@@ -1875,6 +2180,51 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
 
 
 
+@_njit(cache=True, fastmath={'reassoc', 'contract', 'nsz'})
+def _line_fit_badness(x, y, starts, ends, gamma):
+    # For every window x[s-1:e], y[s-1:e] (s in ``starts``, e in ``ends``, 1-based inclusive) the
+    # mean absolute residual of the least-squares straight line, less ``gamma`` per point: the
+    # (len(starts), len(ends)) matrix. The line's sums are accumulated as the window grows (on
+    # data centered on their overall means), so each window costs one pass, for the residuals.
+    n = x.size
+    xm = 0.0
+    ym = 0.0
+    for i in range(n):
+        xm += x[i]
+        ym += y[i]
+    xm /= n
+    ym /= n
+    xc = x - xm
+    yc = y - ym
+    out = np.empty((starts.size, ends.size))
+    for a in range(starts.size):
+        s = starts[a] - 1
+        sx = 0.0
+        sy = 0.0
+        sxx = 0.0
+        sxy = 0.0
+        b = 0
+        for e in range(s, ends[ends.size - 1]):
+            sx += xc[e]
+            sy += yc[e]
+            sxx += xc[e] * xc[e]
+            sxy += xc[e] * yc[e]
+            if e + 1 == ends[b]:
+                cnt = e + 1 - s
+                mx = sx / cnt
+                my = sy / cnt
+                slope = (sxy - cnt * mx * my) / (sxx - cnt * mx * mx)
+                icpt = my - slope * mx
+                acc = 0.0
+                for i in range(s, e + 1):
+                    acc += abs(slope * xc[i] + icpt - yc[i])
+                out[a, b] = acc / cnt - gamma * cnt
+                b += 1
+                if b == ends.size:
+                    break
+    return out
+
+
 def _dimensions_scaling_range(logr: np.ndarray, log_n: np.ndarray, gamma: float = 0.02) -> tuple:
     # The scaling range of ln N(eps) against ln eps (start in the first half, end in the second
     # half) that minimizes the mean absolute residual of a straight-line fit less gamma per point
@@ -1882,12 +2232,9 @@ def _dimensions_scaling_range(logr: np.ndarray, log_n: np.ndarray, gamma: float 
     stptr, endptr = _scaling_range_endpoints(logr.size)
     if stptr.size == 0 or endptr.size == 0:
         raise _D2DataError('too few length scales to find a scaling range')
-    mybad = np.empty((stptr.size, endptr.size))
-    for i, s in enumerate(stptr):
-        for j, e in enumerate(endptr):
-            xs, ys = logr[s - 1:e], log_n[s - 1:e]
-            p = np.polyfit(xs, ys, 1)
-            mybad[i, j] = np.mean(np.abs(p[0] * xs + p[1] - ys)) - gamma * xs.size
+    mybad = _line_fit_badness(np.ascontiguousarray(logr, dtype=float),
+                              np.ascontiguousarray(log_n, dtype=float),
+                              stptr.astype(np.int64), endptr.astype(np.int64), float(gamma))
     a, b, _ = _argmin_first_colmajor(mybad)
     s, e = int(stptr[a]), int(endptr[b])  # 1-based, inclusive
     xs, ys = logr[s - 1:e], log_n[s - 1:e]
@@ -1946,7 +2293,8 @@ def _dimensions_best_m(logr: np.ndarray, log_nn: np.ndarray, prefix: str, out: d
 
 @dict_output
 def dimensions(y: ArrayLike, num_bins: int = 50,
-               embed_params: Union[list, tuple] = ('ac', 'fnn')) -> Union[dict, float]:
+               embed_params: Union[list, tuple] = ('ac', 'fnn'),
+               thwin: Union[int, float, list, tuple] = ('ac', 1)) -> Union[dict, float]:
     """
     Box-counting and correlation-sum estimates of the dimension of the delay embedding, and
     how they change with the embedding dimension.
@@ -1961,8 +2309,7 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
     minimizing the mean absolute error of a linear fit less 0.02 per point spanned) for
     ``m`` = 1, 2, 3 and the embedding dimension ``m``, and the embedding dimension with the best
     scaling fit. Unlike hctsa, which shells out to installed TISEAN binaries, this runs the
-    vendored ``d2`` and an in-process port of ``boxcount`` (hctsa's TSTOOL-based version of
-    this operation is no longer used).
+    vendored ``d2`` and an in-process port of ``boxcount``.
 
     Parameters
     ----------
@@ -1975,7 +2322,15 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer, or
         ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
-        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.05 by default; at most ``floor(2 log10 N)``, see :func:`_embedding_params`). Default is ``['ac', 'fnn']``.
+    thwin : int, float, or ``['ac', k]``, optional
+        Theiler window of the correlation sum: pairs of embedded points at most ``thwin``
+        samples apart (``|i - j| <= thwin``) are not counted, since they are close only because
+        successive values are correlated (Theiler, Phys. Rev. A 34, 2427, 1986). A number of
+        samples, or ``['ac', k]`` for ``k`` times the first zero crossing of the autocorrelation
+        function (see :func:`pyhctsa.utils.theiler_window`); NaN is returned if the ACF never
+        crosses zero. Does not affect the box-counting (``bc``) outputs. Default is
+        ``['ac', 1]``; use 0 for the old behavior.
 
     Returns
     -------
@@ -1992,6 +2347,11 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
     """
     y = np.asarray(y, dtype=float).ravel()
 
+    thwin = theiler_window(y, thwin)
+    if np.isnan(thwin):  # the ACF never crosses zero
+        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+        return np.nan
+
     tau, mopt = _embed_tau_m(y, embed_params)
     if np.isnan(tau):
         logger.warning('Could not determine embedding parameters for this time series')
@@ -2006,7 +2366,7 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
         # Correlation sum, over the same number of scales: epsilon from max_eps/10 to max_eps
         max_eps = float(np.std(y, ddof=1) * np.sqrt(big_m))
         min_eps = max_eps / 10
-        tables = _tisean.d2(y, delay=tau, embed=big_m, theiler=0, howoften=num_bins,
+        tables = _tisean.d2(y, delay=tau, embed=big_m, theiler=int(thwin), howoften=num_bins,
                             maxfound=0, epsmax=max_eps, epsmin=min_eps)
         if any(b.shape[0] != num_bins for b in tables['c2']):
             raise _D2DataError("TISEAN d2 returned an unexpected number of length scales")
@@ -2056,11 +2416,21 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
     Unlike hctsa, which shells out to installed TISEAN binaries, this runs an in-process port
     of ``lyap_r``.
 
+    Distances are compared with a tolerance of 1e-12 (of the range of the data), so that the
+    result depends neither on rounding nor on the order in which neighbors are searched: a point
+    closer than that to the reference point is the same state visited again, not a neighbor;
+    when several points are equally near (within the tolerance), each contributes its
+    log-distance curve with weight one over their number (the expected curve for a random choice
+    among them); and a pair that merges (comes within the tolerance) within the ``maxtstep``
+    steps is left out at every step, so that every step averages over the same pairs. With a
+    unique nearest neighbor and no merging, as for continuously distributed data, this is the
+    published method.
+
     References
     ----------
     .. [1] M. T. Rosenstein, J. J. Collins, and C. J. De Luca, "A practical method for
         calculating largest Lyapunov exponents from small data sets", Physica D 65(1-2),
-        117-134 (1993).
+        117-134 (1993). DOI: 10.1016/0167-2789(93)90009-P
 
     Parameters
     ----------
@@ -2084,7 +2454,7 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer, or
         ``'fnn'`` (or ``['fnn', threshold]``) for the dimension from
-        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.4 by default). Default is ``['ac', 'fnn']``.
+        TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.05 by default; at most ``floor(2 log10 N)``, see :func:`_embedding_params`). Default is ``['ac', 'fnn']``.
 
     Returns
     -------
@@ -2096,7 +2466,7 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
         of the maximum; ``vse_*`` and ``ve_*`` (``meanabsres``, ``rmsres``, ``gradient``,
         ``intercept``, ``minbad``, and ``gradient_pertau``, the gradient per autocorrelation
         time): the straight-line fits (NaN if the rise to 95% of the maximum takes at most three
-        steps); ``expfit_a``, ``expfit_b``, ``expfit_r2``, ``expfit_adjr2``, ``expfit_rmse``: the
+        steps, or :math:`p` never rises above its value at :math:`t = 0`); ``expfit_a``, ``expfit_b``, ``expfit_r2``, ``expfit_adjr2``, ``expfit_rmse``: the
         least-squares fit of a saturating exponential, ``a*(1 - exp(b*t))`` (the global optimum
         over rates 1e-5 <= ``|b|`` <= 5 per time step; see ``_saturating_exp_fit``). Returns NaN
         if the delay, horizon, or Theiler window cannot be set, the series is too short for the
@@ -2182,10 +2552,9 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
         out[f'to{lab}max'] = np.nan if i is None else i - 1
 
     imax = time_to(0.95)
-    if imax is None:
-        return np.nan  # cannot be (a flat curve at its maximum of zero)
-    if imax <= 3:
-        # not a suitable range for finding scaling
+    if imax is None or imax <= 3:
+        # not a suitable range for finding scaling (or, if p never rises above its value at
+        # t = 0, as for neighbors that converge, no rise to fit)
         for pre in ('vse', 've'):
             for lab in ('meanabsres', 'rmsres', 'gradient', 'intercept', 'minbad'):
                 out[f'{pre}_{lab}'] = np.nan
@@ -2203,10 +2572,9 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
         # Vary just the end time, which is at least at the 50% mark of the maximum
         imin = time_to(0.5)
         endptr = np.arange(imin, imax + 1)
-        bad = np.empty(endptr.size)
-        for i, e in enumerate(endptr):
-            pf = np.polyfit(t_scal[:e], p_scal[:e], 1)
-            bad[i] = np.mean(np.abs(pf[0] * t_scal[:e] + pf[1] - p_scal[:e])) - 0.006 * e
+        bad = _line_fit_badness(np.ascontiguousarray(t_scal, dtype=float),
+                                np.ascontiguousarray(p_scal, dtype=float),
+                                np.array([1], dtype=np.int64), endptr.astype(np.int64), 0.006)[0]
         e = int(endptr[int(np.argmin(bad))])
         pp = np.polyfit(t_scal[:e], p_scal[:e], 1)
         res = pp[0] * t_scal[:e] + pp[1] - p_scal[:e]
@@ -2311,13 +2679,13 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
         ntv: Union[int, None] = None, num_surr: int = 10, random_seed: Union[int, None] = 0,
         tau: Union[int, str] = 1) -> Union[dict, float]:
     """
-    How well nearby delay vectors predict the next value, compared with surrogates.
+    How well nearby delay vectors predict their target value, compared with surrogates.
 
     The delay vector variance (DVV) method [1]_ for detecting determinism and nonlinearity. A
     delay vector is a run of ``m`` values (spaced ``tau`` apart) and its target is the value
-    that follows. For each of ``num_dvs`` randomly chosen reference vectors, the variance of the
-    targets of all delay vectors within a distance ``rd`` of the reference is found (only if at
-    least 30 vectors lie within ``rd``). The mean of these variances over the references, divided
+    ``tau`` samples after the last of them. For each of ``num_dvs`` randomly chosen reference
+    vectors, the variance of the targets of all delay vectors within a distance ``rd`` of the
+    reference is found (only if at least 30 vectors lie within ``rd``). The mean of these variances over the references, divided
     by the variance of the series, is the target variance; it is computed at ``ntv`` values of
     ``rd`` that span the mean distance between delay vectors plus or minus ``nd`` standard
     deviations. The same curve is found for ``num_surr`` iterated amplitude-adjusted Fourier
@@ -2329,6 +2697,9 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
     .. [1] T. Gautama, D.P. Mandic and M.M. Van Hulle, "The delay vector variance method for
         detecting determinism and nonlinearity in time series", Physica D 190(3-4), 167-176
         (2004). DOI: 10.1016/j.physd.2003.11.001
+    .. [2] T.F. Chan, G.H. Golub and R.J. LeVeque, "Algorithms for computing the sample
+        variance: analysis and recommendations", Am. Stat. 37(3), 242-247 (1983) (the two-pass
+        variance). DOI: 10.1080/00031305.1983.10483115
 
     Notes
     -----
@@ -2379,9 +2750,14 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
         ``numZeroCrossings`` (sign changes of the difference), ``trendSurr``,
         ``meanDiffTrendSurr`` (``trendSurr`` minus ``trend``) and ``meanNormCDF`` (the mean over
         distances of the Gaussian cumulative probability of the data value given the mean and
-        standard deviation across surrogates). Returns NaN if no delay can be set, the series is
-        too short to draw ``num_dvs`` reference vectors, or the data curve is defined at fewer
-        than two distances.
+        standard deviation across surrogates, over the distances at which the surrogate values
+        differ; NaN if they never do). ``dataSurrCorr`` and ``trendDataSurr`` are NaN if the data
+        curve is constant. Returns NaN if no delay can be set, the series is too short to draw
+        ``num_dvs`` reference vectors, or the data curve is defined at fewer than two distances.
+
+        The target variance of a set is computed in two passes (mean, then mean squared
+        deviation) [2]_, so it is never negative; a variance below the square of 1e-12 of the range of
+        the series comes from targets that are equal up to rounding, and is 0.
     """
     x = np.asarray(y, dtype=float).ravel()
     n = x.size
@@ -2431,15 +2807,21 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
     t_b, v_b, s_b = dvv_data[both, 0], dvv_data[both, 1], mean_surr[both]
     out['rmsDiffSurr'] = np.sqrt(np.mean((v_b - s_b) ** 2))
     out['meanDiffSurr'] = np.mean(v_b - s_b)
-    out['dataSurrCorr'] = np.corrcoef(v_b, s_b)[0, 1]
-    out['trendDataSurr'] = np.polyfit(v_b, s_b, 1)[0]
+    # target variances are 0 below the square of 1e-12 of the range of x (see _dvv_curve), which
+    # on the normalized scale of the curves is tol_v; with no spread in a regressor or across the
+    # surrogates, a slope or a Gaussian probability is undefined
+    tol_v = (1e-12 * np.ptp(x)) ** 2 / np.var(x, ddof=1)
+    flat = np.ptp(v_b) <= tol_v
+    with np.errstate(invalid='ignore', divide='ignore'):
+        out['dataSurrCorr'] = np.nan if flat else np.corrcoef(v_b, s_b)[0, 1]
+    out['trendDataSurr'] = np.nan if flat else np.polyfit(v_b, s_b, 1)[0]
     out['numZeroCrossings'] = np.sum((v_b - s_b)[1:] * (v_b - s_b)[:-1] < 0)
     out['trendSurr'] = np.polyfit(t_b, s_b, 1)[0]
     out['meanDiffTrendSurr'] = out['trendSurr'] - out['trend']
-    with np.errstate(invalid='ignore', divide='ignore'):
-        probs = _norm.cdf(v_b, loc=np.mean(dvv_surr[both], axis=1),
-                          scale=np.std(dvv_surr[both], axis=1, ddof=1))
-    out['meanNormCDF'] = np.mean(probs)
+    sd_surr = np.std(dvv_surr[both], axis=1, ddof=1)
+    spread = sd_surr > tol_v
+    probs = _norm.cdf(v_b[spread], loc=np.mean(dvv_surr[both][spread], axis=1), scale=sd_surr[spread])
+    out['meanNormCDF'] = np.mean(probs) if probs.size else np.nan  # (NaN if the surrogates never spread)
     return out
 
 
@@ -2478,8 +2860,11 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
     cloud, and summarizes the lifetimes (death minus birth, as a proportion of the filtration
     threshold, the maximum distance between 300 evenly spaced embedded points) of its
     one-dimensional holes (loops, H1; a periodic series gives a long-lived loop) and its
-    connected components (H0). Uses ripser [1]_ (the ``ripser`` Python package, an optional
-    dependency; hctsa runs the ripser executable).
+    connected components (H0). The filtration stops at the threshold, so a class still alive
+    there is counted as dying at the threshold (lifetime ``(threshold - birth)/threshold``),
+    except for the single essential H0 class (the connected component that never dies), which
+    is dropped. Uses ripser [1]_ (the ``ripser`` Python package, an optional dependency; hctsa
+    runs the ripser executable).
 
     References
     ----------
@@ -2513,7 +2898,7 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
         ``maxPersistenceH1``, ``totalPersistenceH1``, ``persistenceEntropyH1``: the maximum and
         sum of the (normalized) lifetimes of the H1 classes and the entropy of their distribution
         (all 0 if there are none); ``totalPersistenceH0``: the sum of the lifetimes of the H0
-        classes. Returns NaN if the delay cannot be set, the embedding fails, there are fewer than 20
+        classes other than the essential one. Returns NaN if the delay cannot be set, the embedding fails, there are fewer than 20
         embedded points, or the point cloud is degenerate (e.g. a constant series).
 
     Raises
@@ -2560,9 +2945,14 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
     dgms = ripser(squareform(pdist(x)),
                   maxdim=int(max_dim), thresh=threshold, distance_matrix=True)['dgms']
 
-    def lifetimes(d):  # finite lifetimes as a proportion of the threshold (essential classes dropped)
-        p = (d[:, 1] - d[:, 0]) if d.size else np.empty(0)
-        return p[np.isfinite(p)] / threshold
+    def lifetimes(d):  # lifetimes as a proportion of the threshold; a class alive there dies there
+        d = np.asarray(d, dtype=float).reshape(-1, 2)
+        return (np.minimum(d[:, 1], threshold) - d[:, 0]) / threshold
+
+    def drop_essential(d):  # drop the single essential H0 class (the component that never dies)
+        d = np.asarray(d, dtype=float).reshape(-1, 2)
+        inf = np.flatnonzero(~np.isfinite(d[:, 1]))
+        return np.delete(d, inf[:1], axis=0)
 
     out = {}
     pers1 = lifetimes(dgms[1]) if len(dgms) > 1 else np.empty(0)
@@ -2577,7 +2967,7 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
         pos = pers1[pers1 > 0]
         p = pos / np.sum(pos)
         out['persistenceEntropyH1'] = -np.sum(p * np.log(p)) if p.size else 0.0
-    out['totalPersistenceH0'] = np.sum(lifetimes(dgms[0]))
+    out['totalPersistenceH0'] = np.sum(lifetimes(drop_essential(dgms[0])))
     return out
 
 
@@ -2622,10 +3012,8 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         "from below", ``-C0``) and ``'min'`` those heading toward a local
         minimum (descending, ``-C1``). Default is ``'max'``.
 
-        hctsa's operation previously used TSTOOL's ``poincare``, which cut a
-        hyperplane orthogonal to the local tangent vector at a chosen reference
-        point -- a construction TISEAN has no equivalent for -- and ``ref`` was
-        repurposed to pick the crossing direction when it moved to TISEAN.
+        The name ``ref`` follows hctsa's signature; it selects the crossing
+        direction, not a reference point.
     tau : int or str, optional
         The time-delay of the embedding: an integer, or a rule understood by
         :func:`pyhctsa.utils.get_tau`. ``'ac'`` is the first zero-crossing of the
@@ -2782,7 +3170,7 @@ def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
     y : array-like
         The input time series.
     L : int, optional
-        The window length (default: floor(N/4)). Must satisfy
+        The window length (default: min(floor(N/4), 200)). Must satisfy
         ``4 <= L <= floor(N/2)``.
 
     Returns
@@ -2938,15 +3326,19 @@ def _line_lengths(group: np.ndarray, pos: np.ndarray, min_len: int) -> np.ndarra
     Lengths (at least `min_len`) of the runs of consecutive `pos` values within each `group`
     (e.g. diagonal offset or column of a recurrence plot).
     """
-    order = np.lexsort((pos, group))
-    group, pos = group[order], pos[order]
-    new_run = np.ones(group.size, dtype=bool)
-    new_run[1:] = (group[1:] != group[:-1]) | (pos[1:] - pos[:-1] != 1)
-    run_len = np.diff(np.append(np.flatnonzero(new_run), group.size))
+    # one sort of a combined key, ``group * span + pos`` (``span`` leaves a gap between groups, so
+    # that runs cannot join across them), is much faster than a two-key lexsort
+    if group.size == 0:
+        return np.empty(0, dtype=np.int64)
+    key = group.astype(np.int64) * (int(pos.max()) + 2) + pos
+    key.sort()
+    new_run = np.ones(key.size, dtype=bool)
+    new_run[1:] = np.diff(key) != 1
+    run_len = np.diff(np.append(np.flatnonzero(new_run), key.size))
     return run_len[run_len >= min_len]
 
 
-def _recurrence_time_stats(Y: np.ndarray, radius: float, theiler: int) -> tuple:
+def _recurrence_time_stats(Y: np.ndarray, radius: float, theiler: int, pairs: tuple = None) -> tuple:
     """
     Mean recurrence time and modal probability mass of the white vertical line lengths of
     the recurrence plot of `Y` (hctsa's ``SUB_recurrenceTimeStats``).
@@ -2954,24 +3346,27 @@ def _recurrence_time_stats(Y: np.ndarray, radius: float, theiler: int) -> tuple:
     For each point, the number of non-recurrent points between successive recurrent points
     (neighbors within `radius`, outside the Theiler window; the edges of the Theiler band
     count as recurrent, and the neighbors before and after the point are differenced
-    separately) are pooled over all points.
+    separately) are pooled over all points. `pairs` is the ``(src, dst)`` of all pairs within
+    `radius` if already known (see :func:`_recurrent_pairs`).
     """
     n = Y.shape[0]
-    src, dst = _recurrent_pairs(Y, radius)
+    src, dst = _recurrent_pairs(Y, radius) if pairs is None else pairs
     keep = np.abs(dst - src) > theiler  # excludes the Theiler window (and the point itself)
     src, dst = src[keep], dst[keep]
     j = np.arange(n)
     # the band edges act as recurrent points, so that lines start at the edge of the band
     left, right = j[j - theiler >= 0], j[j + theiler <= n - 1]
-    before = np.concatenate([np.column_stack((src[dst < src], dst[dst < src])),
-                             np.column_stack((left, left - theiler))])
-    after = np.concatenate([np.column_stack((src[dst > src], dst[dst > src])),
-                            np.column_stack((right, right + theiler))])
+    lt, gt = dst < src, dst > src
+    before = (np.concatenate([src[lt], left]).astype(np.int64) * n
+              + np.concatenate([dst[lt], left - theiler]))
+    after = (np.concatenate([src[gt], right]).astype(np.int64) * n
+             + np.concatenate([dst[gt], right + theiler]))
     w = []
-    for pairs in (before, after):
-        pairs = pairs[np.lexsort((pairs[:, 1], pairs[:, 0]))]
-        same = pairs[1:, 0] == pairs[:-1, 0]
-        w.append(np.diff(pairs[:, 1])[same] - 1)
+    for key in (before, after):
+        key.sort()  # by point, then by neighbor (all neighbors lie in 0..n-1)
+        row = key // n
+        same = row[1:] == row[:-1]
+        w.append(np.diff(key)[same] - 1)
     w = np.concatenate(w)
     w = w[w >= 1]  # (drops the zero-length "lines" between consecutive recurrent points)
     if w.size == 0:
@@ -2998,7 +3393,7 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
     set of recurrence times.
 
     The neighborhood radius is set once, from the full embedded series, to the `rr`-quantile
-    of a random subsample of pairwise distances; the same radius is then reused for every
+    of a subsample of pairwise distances; the same radius is then reused for every
     segment, so that segment-to-segment differences reflect the dynamics rather than a
     re-calibrated threshold. The Theiler band around each point counts as recurrent, so
     that no white line spans the excluded band.
@@ -3006,8 +3401,8 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
     References
     ----------
     .. [1] Ngamga, E.J., Nandi, A., Ramaswamy, R., Romano, M.C., Thiel, M. and Kurths, J.
-        "Recurrence-time distributions in strange nonchaotic systems", Phys. Rev. E
-        75, 036222 (2007).
+        "Recurrence analysis of strange nonchaotic dynamics", Phys. Rev. E
+        75, 036222 (2007), doi: 10.1103/PhysRevE.75.036222.
 
     Parameters
     ----------
@@ -3017,8 +3412,10 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
         The time delay for the embedding: an integer, or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'`` or ``'mi'``). Default is 1.
     m : int, str or tuple, optional
-        The embedding dimension: an integer, or ``'fnn'`` to choose it by false nearest
-        neighbors (TISEAN's ``false_nearest``, as hctsa's ``BF_Embed``). Default is 3.
+        The embedding dimension: an integer, or ``'fnn'`` or ``['fnn', threshold]`` to choose it
+        by false nearest neighbors (TISEAN's ``false_nearest``, threshold 0.05 by default, at
+        most ``floor(2 log10 N)`` for the ``N`` samples analyzed; as hctsa's ``BF_Embed``, see
+        :func:`_embedding_params`). Default is 3.
     theiler_win : int, float or ``['ac', k]``, optional
         The Theiler window excluding temporally-correlated neighbors (see
         :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k`` times the first
@@ -3077,7 +3474,8 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
         return np.nan
 
     out = {}
-    out['T_MRT'], out['N_MPRT'] = _recurrence_time_stats(Y, radius, theiler)
+    all_pairs = _recurrent_pairs(Y, radius)
+    out['T_MRT'], out['N_MPRT'] = _recurrence_time_stats(Y, radius, theiler, all_pairs)
     out['T_MRT_var'] = out['N_MPRT_var'] = np.nan
     if np.isnan(out['T_MRT']):
         logger.warning('No recurrence-time samples found outside the Theiler window -- radius too small?')
@@ -3089,8 +3487,15 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
     if seg_len < 50:  # too short for a meaningful within-segment estimate
         return out
     theiler_seg = min(theiler, seg_len // 5)
-    stats = np.array([_recurrence_time_stats(Y[s * seg_len:(s + 1) * seg_len], radius, theiler_seg)
-                      for s in range(num_segments)])
+    # (the pairs within a segment are those of the whole series with both points in the segment)
+    src_all, dst_all = all_pairs
+    stats = []
+    for s in range(num_segments):
+        lo, hi = s * seg_len, (s + 1) * seg_len
+        inside = (src_all >= lo) & (src_all < hi) & (dst_all >= lo) & (dst_all < hi)
+        stats.append(_recurrence_time_stats(Y[lo:hi], radius, theiler_seg,
+                                            (src_all[inside] - lo, dst_all[inside] - lo)))
+    stats = np.array(stats)
     if not np.any(np.isnan(stats[:, 0])):
         out['T_MRT_var'] = float(np.var(stats[:, 0], ddof=1))
         out['N_MPRT_var'] = float(np.var(stats[:, 1], ddof=1))
@@ -3130,8 +3535,10 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
         The time delay for the embedding: an integer, or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'`` or ``'mi'``). Default is 1.
     m : int, str or tuple, optional
-        The embedding dimension: an integer, or ``'fnn'`` to choose it by false nearest
-        neighbors (TISEAN's ``false_nearest``, as hctsa's ``BF_Embed``). Default is 3.
+        The embedding dimension: an integer, or ``'fnn'`` or ``['fnn', threshold]`` to choose it
+        by false nearest neighbors (TISEAN's ``false_nearest``, threshold 0.05 by default, at
+        most ``floor(2 log10 N)`` for the ``N`` samples analyzed; as hctsa's ``BF_Embed``, see
+        :func:`_embedding_params`). Default is 3.
     theiler_win : int, float or ``['ac', k]``, optional
         The Theiler window excluding temporally-correlated neighbors from the main diagonal
         (see :func:`pyhctsa.utils.theiler_window`): ``['ac', k]`` for ``k`` times the first
@@ -3139,7 +3546,7 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
         ``['ac', 1]``.
     rr : float, optional
         The target recurrence rate used to set the neighborhood radius: the radius is the
-        ``rr``-quantile of a random subsample of pairwise distances in the embedded space
+        ``rr``-quantile of a subsample of pairwise distances in the embedded space
         (standard RQA practice, to fix the recurrence rate for comparability across
         series). Default is 0.1.
     lmin : int, optional
@@ -3262,16 +3669,23 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     (excluding a Theiler window of ``past`` samples either side), and the time offset ``T`` of
     each neighbor from the reference point is recorded. The histogram of these offsets over
     the ``num_lags`` lags beyond the Theiler window, ``T = past + 1, ..., past + num_lags``
-    (the "return-time profile"), is analyzed. This follows TSTOOL's ``return_time``
-    (which hctsa previously called), with one change: each lag's count is divided by its
-    expected count if neighbors were placed at random among the valid (Theiler-excluded)
-    candidates, rather than by TSTOOL's ``2 * nnr * (N - T)``, so that the profile is about 1
+    (the "return-time profile"), is analyzed. This follows TSTOOL's ``return_time``, with
+    one change: each lag's count is divided by its expected count if neighbors were placed
+    at random among the valid (Theiler-excluded) candidates, rather than by TSTOOL's
+    ``2 * nnr * (N - T)``, so that the profile is about 1
     at every lag for an uncorrelated process at any series length (TSTOOL's normalization
     scaled as 1/N). Values above 1 mark lags at which the trajectory preferentially returns
     to its neighborhood. The profile is closely related to the tau-recurrence rate of
     recurrence quantification analysis, with neighborhoods holding a fixed proportion of
     points rather than having a fixed radius. (For the distribution of *first* return times to
     a neighborhood, see :func:`recurrence_times`.)
+
+    The neighborhood of a reference point is the ball out to its ``nnr``-th nearest neighbor,
+    boundary included, with distances that differ by at most 1e-12 of the range of ``y`` treated
+    as equal: so the neighborhood, and the profile, do not depend on rounding or on the order in
+    which neighbors are found. With exactly repeated delay vectors (quantized data, periodic
+    orbits) a neighborhood can hold more than ``nnr`` points, and the expected count uses the
+    number it holds.
 
     Method as implemented in the TSTOOL package for nonlinear time-series analysis (C.
     Merkwirth, U. Parlitz, I. Wedekind, D. Engster and W. Lauterborn; GNU GPL), here
@@ -3321,11 +3735,16 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
         - ``pzeros``: the proportion of lags with no neighbors
         - ``pg05``: the proportion of lags at which the profile exceeds half its maximum
         - ``meanpeaksep``, ``maxpeaksep``, ``minpeaksep``, ``rangepeaksep``, ``stdpeaksep``:
-          statistics of the spacings between successive crossings of half the maximum, as a
-          proportion of the number of lags (``stdpeaksep`` is divided by the square root of the
-          number of lags instead); all are NaN with fewer than 3 crossings
-        - ``statrtys``, ``statrtym``: the ratio of the standard deviation (``statrtys``) or mean
-          (``statrtym``) of the profile over the first half of the lags to that over the second
+          statistics of the intervals between successive crossings of half the maximum (which
+          are alternately the widths of peaks and the gaps between them, those shorter than
+          0.4 of the longest interval being dropped), as a proportion of the number of lags
+          (``stdpeaksep`` is divided by the square root of the number of lags instead); all
+          are NaN with fewer than 3 crossings
+        - ``fracsdrt``, ``fracmeanrt``: the share of the first half of the lags in the standard
+          deviation (``fracsdrt``) or mean (``fracmeanrt``) of the profile, ``a / (a + b)`` with
+          ``a`` and ``b`` the statistic over the first and second halves. This lies in [0, 1]:
+          0.5 when the halves match and 1 when all the variation (or mass) is at short lags;
+          NaN if both halves are constant (or empty)
         - ``hhist``: the entropy of the profile as a distribution over lags
         - ``hcgdist``, ``rangecgdist``, ``pzeroscgdist``: the entropy, range and proportion of
           zeros of the profile after summing it into 20 equal bins of lags (as a distribution
@@ -3366,6 +3785,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     # at most 2*past + 1 points (the reference point itself included) fall within the Theiler
     # window, so nnr + 2*past + 1 neighbors always hold nnr valid ones
     k = min(n_emb, nnr + 2 * past + 1)
+    tol = 1e-12 * np.ptp(y)  # distances closer than this are equal
     tree = KDTree(Y)
     r2 = np.full(n_emb, np.nan)
     chunk = max(1, int(2e6 // k))
@@ -3374,7 +3794,22 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
         dist, idx = tree.query(Y[the_refs], k=k)
         is_valid = np.abs(idx - the_refs[:, None]) > past
         which_col = np.argmax(np.cumsum(is_valid, axis=1) >= nnr, axis=1)
-        r2[the_refs] = dist[np.arange(the_refs.size), which_col] ** 2 * (1 + 1e-9)
+        # (the boundary is included, with the tolerance, so that every point at the nnr-th
+        # neighbor's distance is in, whatever the arithmetic path to it)
+        r2[the_refs] = (dist[np.arange(the_refs.size), which_col] + tol) ** 2
+
+    # The number of valid (Theiler-excluded) points in each neighborhood: nnr, or more where
+    # points tie with the nnr-th neighbor
+    n_near = np.zeros(n_emb)
+    chunk = max(1, int(2e6 // n_emb))
+    pos = np.arange(n_emb)
+    for c in range(0, refs.size, chunk):
+        the_refs = refs[c:c + chunk]
+        d2 = np.zeros((n_emb, the_refs.size))
+        for j in range(Y.shape[1]):
+            d2 += (Y[:, j][:, None] - Y[the_refs, j][None, :]) ** 2
+        in_ball = (d2 <= r2[the_refs][None, :]) & (np.abs(pos[:, None] - the_refs[None, :]) > past)
+        n_near[the_refs] = in_ball.sum(axis=0)
 
     # Count the neighbors at each lag, relative to the count expected by chance
     lags = np.arange(past + 1, max_t + 1)
@@ -3384,12 +3819,12 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
         bwd = refs[refs - lag >= 0]  # references with a partner `lag` behind
         counts[i] = (np.sum(np.sum((Y[fwd + lag] - Y[fwd]) ** 2, axis=1) <= r2[fwd])
                      + np.sum(np.sum((Y[bwd - lag] - Y[bwd]) ** 2, axis=1) <= r2[bwd]))
-    # By chance, a given valid candidate is one of reference i's nnr neighbors with probability
-    # nnr/V_i, where V_i is the number of points outside i's Theiler window
+    # By chance, a given valid candidate is one of the n_i points in reference i's neighborhood
+    # with probability n_i/V_i, where V_i is the number of points outside i's Theiler window
     i = np.arange(n_emb)
     v = n_emb - (np.minimum(i, past) + np.minimum(n_emb - 1 - i, past) + 1)
     w = np.zeros(n_emb)
-    w[refs] = nnr / v[refs]
+    w[refs] = n_near[refs] / v[refs]
     cw = np.cumsum(w)
     expected = cw[n_emb - lags - 1] + (cw[-1] - cw[lags - 1])  # forward + backward partners
     trett = counts / expected
@@ -3418,10 +3853,16 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
         for name in ('meanpeaksep', 'maxpeaksep', 'minpeaksep', 'rangepeaksep', 'stdpeaksep'):
             out[name] = np.nan
 
-    # Short lags compared to long lags
+    # Short lags compared to long lags, as the first half's share of each statistic (bounded, and
+    # defined unless both halves are constant, or empty)
     half = nn // 2
-    out['statrtys'] = np.std(trett[:half], ddof=1) / np.std(trett[half:], ddof=1)
-    out['statrtym'] = np.mean(trett[:half]) / np.mean(trett[half:])
+    tol_trett = 1e-12 * max_trett
+    sd_short, sd_long = np.std(trett[:half], ddof=1), np.std(trett[half:], ddof=1)
+    mean_short, mean_long = np.mean(trett[:half]), np.mean(trett[half:])
+    out['fracsdrt'] = (sd_short / (sd_short + sd_long)
+                       if sd_short + sd_long > tol_trett else np.nan)
+    out['fracmeanrt'] = (mean_short / (mean_short + mean_long)
+                         if mean_short + mean_long > tol_trett else np.nan)
 
     # Entropy of the histogram, as a distribution over lags
     p_trett = trett / np.sum(trett)
@@ -3775,16 +4216,14 @@ def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
     absolute terms (its RBF feature space is far higher-dimensional than the embedding
     itself), so the kernel-to-linear ratios (``top2_ratio``, ``nto80_ratio``,
     ``nto50_ratio``) are below 1 (``top2_ratio``) or at least 1 (``nto*_ratio``) for every
-    series. In simulations (N = 1000), the ratios are nearer 1 for series on a curved
-    low-dimensional manifold than for the linear (Gaussian) process with the same power
-    spectrum: for the logistic and Henon maps, ``top2_ratio`` is 0.77 and 0.73 against 0.52
-    and 0.50 for their phase-randomized surrogates (``tau = 'ac'``, ``m = 3``). The signal is
-    weaker for the Lorenz system and absent for a Roessler oscillator, which is close to
-    linear at this sampling. The ratios are not a stand-alone nonlinearity test, however: they
-    also rise with linear autocorrelation (``top2_ratio`` is about 0.52 for white noise and AR(1)
-    with phi = 0.5, but 0.61-0.71 for AR(1) with phi = 0.99), so a smooth linear process can look
-    more 'nonlinear' than a chaotic map. Compare against surrogates to isolate nonlinearity.
-    ``std_ratio`` did not separate nonlinear from linear series consistently.
+    series. The ratios tend to be nearer 1 for series on a curved low-dimensional manifold
+    (such as the logistic and Henon maps) than for the linear (Gaussian) process with the same
+    power spectrum; the difference is weaker for flows such as the Lorenz system, and can be
+    absent for a near-linear oscillator. The ratios are not a stand-alone nonlinearity test,
+    however: they also rise with linear autocorrelation (strongly autocorrelated AR(1)
+    processes have higher ratios than white noise), so a smooth linear process can look more
+    'nonlinear' than a chaotic map. Compare against surrogates to isolate nonlinearity.
+    ``std_ratio`` does not separate nonlinear from linear series consistently.
 
     References
     ----------
@@ -3810,7 +4249,7 @@ def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
         eigendecomposition costs O(N^3). Longer embeddings are reduced to their first ``max_n``
         points (a memory/time cap, not a convergence point: the spectrum estimate keeps
         sharpening with more points); ``'full'`` disables this, with a warning above 5000
-        points, where the eigendecomposition takes several seconds. Default is 2000.
+        points, where the eigendecomposition becomes slow. Default is 2000.
 
     Returns
     -------
@@ -3919,9 +4358,8 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
     dimension.
 
     Time-delay embeds the series in ``d = 1, ..., m`` dimensions and partitions the space into
-    boxes of side ``epsilon``, using TISEAN's ``boxcount`` (this operation previously used
-    TSTOOL's ``corrdim``). With ``p_i`` the fraction of embedded points in box ``i``,
-    ``boxcount`` gives the order-2 Renyi (collision) entropy
+    boxes of side ``epsilon``, using TISEAN's ``boxcount``. With ``p_i`` the fraction of
+    embedded points in box ``i``, ``boxcount`` gives the order-2 Renyi (collision) entropy
     ``H(epsilon, d) = -log(sum_i p_i^2)`` for a sweep of ``num_bins`` box sizes, from the full
     range of the series downward, and the increment over the ``(d-1)``-dimensional embedding,
     ``I(epsilon, d) = H(epsilon, d) - H(epsilon, d-1)`` (defined for ``d = 2, ..., m``; at
@@ -3932,13 +4370,14 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
 
     The increment ``I`` approaches the entropy rate of the process (the K2 entropy, per delay
     step) rather than a slope against ``log(epsilon)``, so these features are entropy-rate-like,
-    not correlation dimensions. (This function was previously named NL_BoxCorrDim in hctsa,
-    after the TSTOOL correlation-dimension code it replaced.) hctsa registers ``meanr``,
-    ``medianr``, ``minr`` and ``meanchr`` at ``r`` = 2, 3, 4, 6, 8, 11, 14, 17, 20, 24, 28, 32,
-    36 of ``num_bins = 50`` (2 to 429 boxes per axis): coarse scales change quickly with ``r``
-    and are sampled densely; neighboring finer scales are nearly redundant; for flows (long
-    delays) the informative scales lie beyond ``r = 18``; and beyond ``r = 36`` the
-    5-dimensional embedding saturates (``I = 0``) for series of a few thousand points.
+    not correlation dimensions (despite hctsa's former name for this operation,
+    NL_BoxCorrDim). hctsa registers ``meanr``, ``medianr``, ``minr`` and ``meanchr`` at
+    ``r`` = 2, 3, 4, 6, 8, 11, 14, 17, 20, 24, 28, 32, 36 of ``num_bins = 50``
+    (2 to 429 boxes per axis). Testing indicated that coarse scales change quickly with ``r``
+    (so they are sampled densely), that neighboring finer scales are nearly redundant, that
+    for flows (long delays) the informative scales lie beyond ``r = 18``, and that beyond
+    ``r = 36`` the 5-dimensional embedding saturates (``I = 0``) for series of a few thousand
+    points.
 
     Parameters
     ----------
@@ -3973,8 +4412,8 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
         - ``medianstretch``, ``iqrstretch``: median and interquartile range of ``I`` over all
           length scales and embedding dimensions ``2, ..., m``
 
-        (The minima over all length scales, formerly ``mind<d>`` and ``minstretch``, were removed:
-        the coarsest scale is a single box, where ``I = 0``, so they were always 0.)
+        (The minima over all length scales are not returned: the coarsest scale is a single box,
+        where ``I = 0``, so they are always 0.)
     """
     y = np.asarray(y, dtype=float).ravel()
     if num_bins < 2:
@@ -4016,6 +4455,17 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
     return out
 
 
+def _merge_ties(d: np.ndarray, tol: float) -> np.ndarray:
+    # Values within tol of their neighbor in sorted order are equal: each run of them takes its
+    # smallest value (merging, unlike rounding to a grid, never separates two values closer than tol)
+    ix = np.argsort(d, kind='stable')
+    ds = d[ix]
+    run_start = np.concatenate(([True], np.diff(ds) > tol))
+    out = np.empty_like(d)
+    out[ix] = ds[np.flatnonzero(run_start)[np.cumsum(run_start) - 1]]
+    return out
+
+
 @dict_output
 def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: float = 0.98,
                   theiler_win: Union[int, float, list, tuple] = ('ac', 1), n_poles: int = 200,
@@ -4051,6 +4501,12 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
     and persistence separately at each of several poles and reports how they are distributed
     (and covary) across the attractor, capturing multifractal-style local heterogeneity that a
     single global exponent cannot.
+
+    Both estimates assume that the distances to a pole are continuously distributed. Distances
+    within 1e-12 of the range of ``y`` of each other are therefore equal (they are merged, so the
+    exceedances do not depend on rounding), an embedded point within that distance of the pole is
+    the same state visited again rather than a close return, and a pole whose exceedances take
+    fewer than 15 distinct distances (quantized data, finite orbits) has no estimate.
 
     References
     ----------
@@ -4112,7 +4568,8 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
         too short for the exceedances required. Otherwise:
 
         - ``propValidPoles``: the proportion of poles that gave a valid local dimension (at least
-          15 exceedances; such a pole also has a valid persistence, as long as ``m_order`` is
+          15 exceedances, at 15 or more distinct distances; such a pole also has a valid
+          persistence, as long as ``m_order`` is
           smaller than the number of returns used): a diagnostic of whether ``q``, ``n_poles`` and
           the series length were adequate, not a property of the dynamics
         - ``meanLocalDim``, ``stdLocalDim``: mean and standard deviation of the local dimension
@@ -4140,6 +4597,7 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
     theiler = int(theiler)
 
     min_exceed = 15  # the minimum number of exceedances for a pole's estimate to be trusted
+    tol = 1e-12 * np.ptp(y)  # distances closer than this are equal
     min_n_emb = int(np.ceil(min_exceed / (1 - q))) + 2 * theiler + m_order + 1
     if n_emb < max(min_n_emb, 100):
         return np.nan
@@ -4156,16 +4614,16 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
         # original chronological order
         keep = np.abs(idx - j) > theiler
         dist_j = np.sqrt(np.sum((Y[keep] - Y[j]) ** 2, axis=1))
-        dist_j = dist_j[dist_j > 0]  # excludes exact duplicate embedded points
+        dist_j = dist_j[dist_j > tol]  # excludes repeats of the pole (the same state again)
         if dist_j.size < min_exceed / (1 - q):
             continue
-        g = -np.log(dist_j)  # (chronological order preserved)
+        g = -np.log(_merge_ties(dist_j, tol))  # (chronological order preserved)
 
         u = np.quantile(g, q, method='hazen')
         exceed = g > u  # exceedance indicator, in chronological order
         n_u = int(exceed.sum())
-        if n_u < min_exceed:
-            continue
+        if n_u < min_exceed or np.unique(g[exceed]).size < min_exceed:
+            continue  # too few exceedances, or too few distinct ones for a continuous tail
 
         # Local dimension: the reciprocal of the mean exceedance (the exponential, or
         # shape-0 generalized Pareto, scale maximum-likelihood estimate)
@@ -4246,7 +4704,12 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
     when the number of embedded points is a power of two); those cases are fixed here. The stock
     code also divides the sum of the log distances by ``nref - (m - 1) * tau`` instead of the
     number of reference points used, which biases the dimension estimates low; the mean is taken
-    over the reference points used.
+    over the reference points used. A reference point that coincides with its k-th neighbor (to
+    within 1e-12 of the range of the data; the routine works in single precision, so in practice
+    to single precision) is a repeated point: at least that mass of the points sits on it, and
+    its log distance is minus infinity. The mean log distance at that mass is then not finite, so
+    the mass is skipped (with no masses left, there is no scaling range and the output is NaN, as
+    for a periodic orbit).
 
     Parameters
     ----------
@@ -4262,7 +4725,7 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
         of the series length if between 0 and 1 (exclusive). Default is 0.02.
     nref : int or float, optional
         The number of reference points: a number of samples, or a proportion of the series
-        length if at most 1. At most 2500 and, if the series is longer than 500 points, at least
+        length if at most 1. At most 1000 (for time) and, if the series is longer than 500 points, at least
         500 (fewer make the best-scaling-range outputs depend on which points are the reference
         points). Default is 0.5.
 
@@ -4299,7 +4762,7 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
         tsep = _round_half_away(tsep * n)
     if 0 < nref <= 1:
         nref = int(np.ceil(nref * n))
-    nref = min(int(nref), 2500)
+    nref = min(int(nref), 1000)
     if nref < 500 and n > 500:
         nref = 500
 

@@ -50,8 +50,7 @@ TOL = {'d2a': 1e-6, 'tpa_c': 1e-5, 'tpa_def': 1e-5, 'fd1': 1e-6, 'fd2': 1e-6, 'f
 # output fields to leave out (MATLAB's optimizer vs ours: the exponential-fit parameters of randomize)
 SKIP_FIELDS = {'rand_dyndist': ('fexp',), 'rand_permute': ('fexp',), 'rand_statdist': ('fexp',), 'rand_s5': ('fexp',)}
 # (call, series) pairs that are degenerate at rounding level or differ by a known upstream effect
-KNOWN_DIFF = {('evt1', 'quant_ar'), ('evt2', 'quant_ar'), ('e2d_tau', 'quant_ar'), ('rect', 'lattice300'),
-              ('evt1', 'lattice300'), ('evt2', 'lattice300'),
+KNOWN_DIFF = {('e2d_tau', 'quant_ar'), ('rect', 'lattice300'),
               # pairs at exactly the recurrence radius are counted (d <= r exactly), and the series are
               # no longer rounded to 7 significant digits: neighbor ties of quantized/lattice data move
               ('rqa2', 'lattice300'), ('lyap', 'quant_ar'), ('lyap7', 'quant_ar')}

@@ -333,7 +333,10 @@ class TestSpectralScalingMedical:
 
     def test_sinusoid_fit_too_short(self):
         assert _all_nan(SP.sinusoid_fit(SERIES['s3'][:9], 'sin3'))
-        for n, ml in _series('C_sf_sin3_ten', ZS):
+        # (s20 is left out: its first 10 points are a trend, for which the three frequencies crowd
+        # at the lower bound 1/N; with 9 parameters on 10 points the fit is then ill-determined,
+        # and the two implementations stop at different points of a flat minimum)
+        for n, ml in _series('C_sf_sin3_ten', [s for s in ZS if s != 's20']):
             _check(SP.sinusoid_fit(SERIES[n][:10], 'sin3'), ml, f'sin3 N=10 {n}', rtol=1e-4, atol=1e-5)
 
     def test_sinusoid_fit_recovers_a_sinusoid(self):

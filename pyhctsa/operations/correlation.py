@@ -459,7 +459,8 @@ def falling_sticks(y: ArrayLike) -> dict:
     intervening short one) that the purely local (i, i+1) comparison cannot
     see.
 
-    Adapted from a Python implementation ('FALLstick') by Eugene Chon, who wrote the original
+    Adapted from a Python implementation ('FALLstick') by Eugene Chon
+    (`@EugeneChon04 <https://github.com/EugeneChon04>`_), who wrote the original
     Python version for hctsa; this is a port of hctsa's ``CO_FallingSticks``.
 
     Parameters
@@ -534,9 +535,8 @@ def falling_sticks(y: ArrayLike) -> dict:
     out['propCase2_all'] = _fall_prop_case2(case_pos + case_neg)
 
     # Distribution shape
-    # (The 90th percentile is omitted: across two independent redundancy-check
-    # datasets it landed exactly on the pi/2 flat-fall spike every time, since
-    # most series have >=10% flat falls -- it carries no information.)
+    # (The 90th percentile is omitted: it typically lands exactly on the pi/2
+    # flat-fall spike, since flat falls are common, so it carries no information.)
     if len(all_angles) >= 2 and not _fall_is_constant(all_angles):
         out['skewness_all'] = skew(all_angles)
         out['kurtosis_all'] = kurtosis(all_angles, fisher=False)
@@ -641,13 +641,14 @@ def _fall_branch(ix: ArrayLike, y: ArrayLike) -> tuple:
 
 @dict_output
 def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
-              extra_param: Union[int, None] = None, random_seed = None) -> dict:
+              extra_param: Union[int, None] = None, random_seed = None,
+              num_draws: int = 10) -> dict:
     """
     Changes in the automutual information with the addition of noise.
 
     Adds independent Gaussian noise of standard deviation eta to the (z-scored) time series,
     for 50 noise levels evenly spaced from eta = 0 to eta = 3, and measures the automutual
-    information (AMI) at lag ``tau`` at each level, averaged over 10 independent noise draws
+    information (AMI) at lag ``tau`` at each level, averaged over ``num_draws`` independent noise draws
     per level (so that the curve reflects the series rather than one particular noise
     realization). Can be measured using histograms with ``extra_param`` bins, or Kraskov
     estimators with k = ``extra_param``.
@@ -656,8 +657,8 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     decreases with the added white noise. This algorithm is quite different, but was based
     on the idea in [1].
 
-    The noise comes from :func:`~pyhctsa.robust.bf_random` (seed ``random_seed + i`` at noise
-    level ``i``), so it is the same as in hctsa's ``CO_AddNoise``, in every release and
+    The noise comes from :func:`~pyhctsa.robust.bf_random` (seed ``random_seed + i + 1`` at noise
+    level ``i``, counting from 0), so it is the same as in hctsa's ``CO_AddNoise``, in every release and
     platform, and leaves NumPy's global random state untouched.
 
     The exponential ``a * exp(b * eta)`` is fitted in closed form: least squares of
@@ -715,8 +716,13 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
     random_seed : int or None, optional
         Seed of the noise (a number, passed to :func:`~pyhctsa.robust.bf_random`; at noise level
-        ``i`` the seed is ``random_seed + i``). ``None`` (or a string such as ``'default'``)
+        ``i``, counting from 0, the seed is ``random_seed + i + 1``). ``None`` (or a string such as ``'default'``)
         is ``0``.
+
+    num_draws : int, optional
+        Number of independent noise vectors averaged at each noise level (default 10). The
+        draws at a level are consecutive blocks of ``len(y)`` values of one stream, so fewer
+        draws are cheaper but make the curve noisier. hctsa's Kraskov settings use 5.
 
     Returns
     -------
@@ -735,7 +741,9 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
 
     # Set up noise range
     num_levels = 50
-    num_draws = 10  # independent noise vectors to average over at each level
+    num_draws = int(num_draws)  # independent noise vectors to average over at each level
+    if num_draws < 1:
+        raise ValueError("num_draws must be a positive integer")
     noise_range = np.linspace(0, 3, num_levels)  # compare properties across this noise range
 
     if ami_method in ('std1', 'std2', 'quantiles', 'even'):
@@ -942,66 +950,78 @@ def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
 @dict_output
 def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
     """
-    Angle autocorrelation in a 2-dimensional embedding space.
+    Angle autocorrelation in a 2-dimensional delay embedding, over delays.
 
-    Investigates how the autocorrelation of angles between successive points in
-    the two-dimensional time-series embedding change as tau varies from
-    tau = 1, 2, ..., max_tau.
+    Investigates how the autocorrelation of the angles between successive points in the
+    two-dimensional delay embedding ``(y[t], y[t + tau])`` changes as tau varies from 1, 2,
+    ..., ``max_tau``. For each tau the angle of each step is measured from the horizontal, as
+    in :func:`embed2`, and its autocorrelation is taken at lags 1, 2 and 3. A step between two
+    coincident points (a repeated pair of values) has no direction (0/0), so its angle is
+    undefined and is removed from the sequence of angles before the autocorrelations are
+    computed. The outputs summarize the three resulting curves as a function of tau.
 
     Parameters
     ----------
     y : array-like
         The input time series.
     max_tau : int
-        The maximum time lag to consider.
+        The maximum time delay to consider.
 
     Returns
     -------
     dict
-        Dictionary containing statistics of the autocorrelation of angles for each tau,
-        including mean, max, min, and autocorrelation at different lags.
+        - ``ac1_thetaac1``, ``ac1_thetaac2``, ``ac1_thetaac3``: the lag-1 autocorrelation
+          (across tau) of the lag-1, lag-2 and lag-3 angle autocorrelations
+        - ``mean_thetaac1``, ``mean_thetaac2``, ``mean_thetaac3``: their means across tau
+        - ``max_thetaac1``, ... and ``min_thetaac1``, ...: their maxima and minima
+        - ``meanrat_thetaac12``: the ratio ``mean_thetaac1 / mean_thetaac2``
+        - ``diff_thetaac12``: the sum across tau of the absolute difference between the
+          lag-2 and lag-1 angle autocorrelations
+
+        All are NaN if an angle autocorrelation is undefined at any tau (e.g., when no step
+        at that tau has a defined angle, or all of its angles are equal). A scalar NaN is
+        returned if the series is too short to embed.
     """
     tau_range = np.arange(1, max_tau + 1)
     num_tau = len(tau_range)
-
-    # Ensure y is a column vector
-    y = np.atleast_2d(y)
-    if y.shape[0] < y.shape[1]:
-        y = y.T
+    y = np.asarray(y, dtype=float).ravel()
 
     stats_store = np.zeros((3, num_tau))
 
     for i, tau in enumerate(tau_range):
-        m = np.column_stack((y[:-tau], y[tau:]))
-        diff_x = np.diff(m[:, 0])
-        diff_y = np.diff(m[:, 1])
-        # Handle division by zero
+        diff_x = np.diff(y[:-tau])
+        diff_y = np.diff(y[tau:])
         with np.errstate(divide='ignore', invalid='ignore'):
-            theta = diff_y / diff_x
-        theta = np.arctan(theta)
+            theta = np.arctan(diff_y / diff_x)  # measured as deviation from the horizontal
 
         if len(theta) == 0:
-            logger.warning(f'Time series (N={len(y)}) too short for embedding')
+            logger.warning(f'Time series (N={len(y)}) too short for embedding at tau = {tau}')
             return np.nan
+
+        # remove undefined angles (0/0, from steps between coincident points)
+        theta = theta[~np.isnan(theta)]
+        if len(theta) == 0:
+            stats_store[:, i] = np.nan
+            continue
 
         stats_store[0, i] = autocorr(theta, 1, 'Fourier')
         stats_store[1, i] = autocorr(theta, 2, 'Fourier')
         stats_store[2, i] = autocorr(theta, 3, 'Fourier')
-    # Compute output statistics (max and min ignore NaNs: a NaN occurs when a
-    # run of equal values gives 0/0 angles)
+
+    # (an undefined autocorrelation at any tau gives NaN for every statistic of its curve)
     out = {
         'ac1_thetaac1': autocorr(stats_store[0, :], 1, 'Fourier'),
         'ac1_thetaac2': autocorr(stats_store[1, :], 1, 'Fourier'),
         'ac1_thetaac3': autocorr(stats_store[2, :], 1, 'Fourier'),
         'mean_thetaac1': np.mean(stats_store[0, :]),
-        'max_thetaac1': np.nanmax(stats_store[0, :]),
-        'min_thetaac1': np.nanmin(stats_store[0, :]),
+        'max_thetaac1': np.max(stats_store[0, :]),
+        'min_thetaac1': np.min(stats_store[0, :]),
         'mean_thetaac2': np.mean(stats_store[1, :]),
-        'max_thetaac2': np.nanmax(stats_store[1, :]),
-        'min_thetaac2': np.nanmin(stats_store[1, :]),
+        'max_thetaac2': np.max(stats_store[1, :]),
+        'min_thetaac2': np.min(stats_store[1, :]),
         'mean_thetaac3': np.mean(stats_store[2, :]),
-        'max_thetaac3': np.nanmax(stats_store[2, :]),
-        'min_thetaac3': np.nanmin(stats_store[2, :]),
+        'max_thetaac3': np.max(stats_store[2, :]),
+        'min_thetaac3': np.min(stats_store[2, :]),
     }
 
     out['meanrat_thetaac12'] = out['mean_thetaac1'] / out['mean_thetaac2']
@@ -1191,6 +1211,9 @@ def compare_min_ami(y: ArrayLike, bin_method: str = 'std1',
     information function for a time series using various histogram 
     binning strategies and numbers of bins. It summarizes how the location
     of the first minimum varies across these different coarse-grainings.
+    The first minimum is taken to be the lag at the first change in the sign of the slope of
+    the AMI, so it is a local maximum if the AMI first rises. If the slope never changes
+    sign, the maximum lag considered is used.
 
     Parameters
     ----------
@@ -1208,9 +1231,7 @@ def compare_min_ami(y: ArrayLike, bin_method: str = 'std1',
         of the automutual information function. ``nprompeaks`` is the number of prominent
         peaks (local maxima) of the first-minimum lag as a function of the number of bins: peaks
         that rise at least 5% of the range of the lags above the higher of the valleys on
-        either side of them, so a small fluctuation does not add a peak (it replaces the earlier
-        ``nlocmax``, a count of every local maximum more than one standard deviation above the
-        mean).
+        either side of them, so a small fluctuation does not add a peak.
     """
     y = np.asarray(y)
     n = len(y)
@@ -1436,27 +1457,44 @@ def histogram_ami(
 
 def stick_angles(y: ArrayLike) -> dict:
     """
-    Analysis of the line-of-sight angles between time series data points. 
+    Analysis of the angles between successive same-sign time-series values.
 
-    Line-of-sight angles between time-series pts. treat each time-series value as a stick 
-    protruding from an opaque baseline level. Statistics are returned on the raw time series, 
-    where sticks protrude from the zero-level, and the z-scored time series, where sticks
-    protrude from the mean level of the time series.
+    Treats each time-series value as a stick protruding from a baseline at zero. Sticks above
+    the baseline form a positive set and those below it a negative set. Within each set, the
+    angle between successive sticks is the arctangent of the slope from one stick's tip to the
+    next: the difference in height divided by the number of samples between them.
+    Statistics are returned on the positive angles (``_p``), the negative angles (``_n``) and
+    all of them (``_all``, and the outputs with no suffix). The ``tau``, ``ac1``, quantile and
+    ``statav`` outputs use the angle sequences standardized to zero mean and unit variance.
+    The set of all angles is the positive set's sequence followed by the negative set's: its
+    distributional statistics (``std``, ``mean``, ``median``, quantiles, skewness, kurtosis)
+    do not depend on that order, but its ``statav`` outputs do, and compare the positive with
+    the negative set (and, for more than two parts, parts within each set) rather than
+    segments in time.
 
     Parameters
     -----------
     y : array-like
-        The input time series.
+        The input time series (assumed z-scored, so that the sign split is about the mean).
 
     Returns
     --------
     dict
-        A dictionary containing are returned on the obtained sequence of angles, theta, reflecting the
-        maximum deviation a stick can rotate before hitting a stick representing
-        another time point. Statistics include the mean and spread of theta,
-        the different between positive and negative angles, measures of symmetry of
-        the angles, stationarity, autocorrelation, and measures of the distribution of
-        these stick angles.
+        - ``mean_p``, ``median_p``, ``mean_n``, ``median_n``, ``mean``, ``median``, ``std``:
+          the mean, median and standard deviation of the angles (positive set, negative set,
+          or all angles)
+        - ``statav{2,3,4,5}_{p,n}_{m,s}``, ``statav{2,3,4,5}_all_m``, ``statav5_all_s``: the
+          standard deviation across 2, 3, 4 or 5 equal parts of the sequence of the mean
+          (``_m``) or the standard deviation (``_s``) of the angles, divided by their overall
+          standard deviation (for ``_all``, parts of the positive-then-negative sequence)
+        - ``tau_p``, ``tau_n``: the first zero-crossing of the autocorrelation function of
+          the positive or negative set's angle sequence (interpolated); ``ac1_p``, ``ac1_n``:
+          their lag-1 autocorrelations
+        - ``q1_*``, ``q10_*``, ``q90_*``, ``q99_*`` (``_p``, ``_n``, ``_all``): quantiles of the
+          standardized angles; ``skewness_*``, ``kurtosis_*``: skewness and kurtosis of the
+          angles
+        - ``ratmean_p``, ``ratmean_n``: the mean of the positive angles divided by the mean of
+          the negative angles within the positive or negative set
 
         ``pnsumabsdiff`` is the summed absolute difference between the histograms (the proportion
         of angles in each of 20 bins spanning -pi/2 to pi/2) of the positive and negative angles
@@ -1679,7 +1717,7 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
         Whether to apply an absolute value before the final mean.
 
         - If ``True``, takes the absolute value before averaging (often useful when
-            the product has an even number of terms).
+            the product has an odd number of factors, i.e. when ``len(taus)`` is even).
         - If ``None``, sets ``absval=True`` when ``len(taus)`` is even and
             ``absval=False`` when ``len(taus)`` is odd.
 
@@ -1833,6 +1871,8 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
         A dictionary containing various statistics of the embedding including the 
         autocorrelation of distances, the mean distance, the spread of distances, 
         and statistics from an exponential fit to the distribution of distances.
+        ``d_cv`` is the mean of the distances divided by their standard deviation (the
+        reciprocal of the coefficient of variation).
         ``d_expfit_meandiff`` is the mean absolute difference between the histogram of distances
         (equal-width bins, their number the larger of the Sturges and Freedman-Diaconis
         rules, normalized as a probability density) and the fitted exponential density at the
@@ -1872,7 +1912,7 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     out['d_iqr'] = iqr_val # Interquartile range of distances
     out['d_max'] = np.max(d) # Maximum distance
     out['d_min'] = np.min(d) # Minimum distance
-    out['d_cv'] = np.mean(d) / np.std(d, ddof=1) # Coefficient of variation of distances
+    out['d_cv'] = np.mean(d) / np.std(d, ddof=1) # Mean over standard deviation of distances (reciprocal of the coefficient of variation)
 
     # Empirical distances distribution often fits Exponential distribution quite well
     # Fit to all values (often some extreme outliers, but oh well)
@@ -1899,7 +1939,8 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     Point-density statistics in a two-dimensional delay embedding.
 
     Computes a set of point-density statistics in the embedding space formed by
-    :math:`(y_i, y_{i-\\tau})`. The method quantifies how points cluster around
+    :math:`(y_i, y_{i+\\tau})`, with :math:`y_i` on the horizontal axis and
+    :math:`y_{i+\\tau}` on the vertical axis. The method quantifies how points cluster around
     specific geometric structures in this plane, including diagonals,
     parabolas, rings, and circles.
 
@@ -1913,7 +1954,7 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
 
     tau : int or str, optional
         Time delay used to construct the embedding
-        :math:`(y_i, y_{i-\\tau})`: an integer number of samples, or a rule that sets it from
+        :math:`(y_i, y_{i+\\tau})`: an integer number of samples, or a rule that sets it from
         the series: ``'tau'`` (or ``'ac'``; the first zero crossing of the autocorrelation
         function), ``'ac1e'`` (the floor of its first 1/e crossing) or ``'mi'`` (the smaller of
         the first minimum of the Kraskov automutual information and the ``'ac1e'`` delay); see
@@ -2037,7 +2078,9 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
         A dictionary containing various statistics of the constructed time series
         (``ac1``, ``ac2``, ``ac3``, ``tau``, ``std``, ``median``, ``mean``, ``iqr``,
         ``iqronrange``, ``mode_val``, ``mode``, ``hist_ent``, ``statav5_m``, ``statav5_s``).
-        As in hctsa, the maximum (``max``) is no longer returned. If no point has any neighbor
+        ``hist_ent`` is ``sum(p * log(p))`` over the bins of a histogram of the local densities
+        (minus the Shannon entropy).
+        As in hctsa, the maximum (``max``) is not returned. If no point has any neighbor
         within ``r``, a fixed set of values is returned (``std``, ``median``, ``mean``, ``iqr``,
         ``hist_ent`` = 0; ``mode_val`` = 1; ``mode`` = 0; the rest NaN).
     """
@@ -2119,7 +2162,7 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     bin_centres = (bin_edges[:-1] + bin_edges[1:]) / 2
     out['mode_val'] = np.max(bin_counts_norm)
     out['mode'] = bin_centres[np.argmax(bin_counts_norm)]
-    # histogram entropy
+    # sum(p * log(p)) over histogram bins (minus the Shannon entropy)
     out['hist_ent'] = np.sum(bin_counts_norm[bin_counts_norm > 0] *
                              np.log(bin_counts_norm[bin_counts_norm > 0]))
 
@@ -2158,13 +2201,17 @@ def fzcglscf(y: ArrayLike, alpha: Union[float, int], beta: Union[float, int],
     beta : float
         The parameter beta for GLSCF calculation. Must be non-zero.
     max_tau : int, optional
-        Maximum time delay to search up to. If None, uses the time-series length.
+        Maximum time delay to search up to. If None, uses the time-series length N.
+        At lags of N - 1 and N the GLSCF is NaN (a single point or an empty segment
+        remains), and a NaN does not count as a sign change.
         Default is ``None``.
 
     Returns
     -------
     float
-        The time lag τ of the first zero-crossing of the GLSCF.
+        The time lag τ of the first zero-crossing of the GLSCF, linearly interpolated between
+        the two lags either side of the sign change. If the GLSCF never changes sign,
+        ``max_tau`` (N by default).
 
     """
     y = np.asarray(y)
@@ -2794,10 +2841,23 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
         The criterion for the maximum lag to measure the ACF up to.
         Default is ``'pos_drown'``.
 
+        - ``'pos_drown'``: the initial positive stretch, up to the first value below
+          the threshold ``2/sqrt(N)`` (or just before the ACF turns negative).
+        - ``'drown'``: up to the first lag at which the ACF is within ``2/sqrt(N)`` of zero.
+        - ``'double_drown'``: up to lag ``2*m``, where ``m`` is the most recent lag at which
+          the ACF is within ``2/sqrt(N)`` of zero (``m`` is updated at every such lag, so
+          the ACF is cut at the first lag equal to twice the most recent such lag).
+          All lags are used if that point is not reached.
+        - an ``int``: the maximum lag.
+
     Returns
     --------
     dict
         A dictionary containing various metrics about the autocorrelation function.
+        ``Nac`` is the number of points of the initial positive stretch for ``'pos_drown'``
+        (0 if the ACF never drops below the threshold). For ``'drown'`` it is the first lag
+        within the threshold band of zero, for ``'double_drown'`` the most recent such lag,
+        and for an ``int`` that value.
     """
     y = np.asarray(y)
     N = len(y)
@@ -2855,7 +2915,8 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
                 # ACF never entered the significance band across available lags
                 n_drown = N - 1
         elif stop_when == 'double_drown':
-            # Stop at 2*tau, where tau is the lag where ACF ~ 0 (within 1/sqrt(N) threshold)
+            # Stop at lag 2*m, where m is the most recent lag with ACF ~ 0 (within the
+            # 2/sqrt(N) threshold); m is updated at every such lag
             for i in range(1, N+1):
                 acf_val = acf_full[i-1]
                 if n_drown > 0 and i == 2 * n_drown + 1:
@@ -3330,11 +3391,11 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
         (see :func:`~pyhctsa.utils.theiler_window`). Default ``('ac', 1)``.
     max_n : int or 'full', optional
         The maximum number of embedded points used for the skewness statistic (default 10000;
-        ``'full'`` to disable). A legacy cap, from when the skewness double sum was evaluated
-        through an N x N Gram matrix (O(N^2)); it is now evaluated exactly through the
-        third-moment tensor in O(N d^3), so the cap is kept only so that values are unchanged
-        from earlier computations. The mean, covariance, kurtosis and KS statistic always use the
-        full embedded series.
+        ``'full'`` to disable). Only the first ``max_n`` embedded points enter the skewness, as
+        in hctsa (where the cap bounds an N x N Gram matrix). Here the skewness double sum is
+        evaluated exactly through the third-moment tensor in O(N d^3), so the cap does not save
+        time; it keeps values consistent with hctsa. The mean, covariance, kurtosis and KS
+        statistic always use the full embedded series.
 
     Returns
     -------
@@ -3354,9 +3415,9 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     Only raw statistics are returned, not p-values. Mardia's classical asymptotic null
     distributions assume the N embedded points are iid draws, but consecutive embedded vectors
     overlap in m-1 coordinates and are strongly autocorrelated, which inflates the naive test
-    statistics (empirically up to about 30% false positives at a nominal 5% level on a
-    linear-Gaussian AR(1) process, worse at higher m). For significance testing, compare to the
-    distribution over surrogates.
+    statistics (giving far more false positives than the nominal level even for a
+    linear-Gaussian AR(1) process, and more so at higher m). For significance testing, compare
+    to the distribution over surrogates.
 
     The KS statistic is computed against the exact chi^2_m CDF; hctsa evaluates it on a table of
     the CDF at values rounded to 1e-6, so the two agree to about 1e-6.
@@ -3421,7 +3482,7 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     # O(N d^3), and the pairs inside the band |i - j| <= w (which the mean excludes) are
     # subtracted in O(N w).
     if max_n != 'full' and n_emb > max_n:
-        X_skew = X[:, :int(max_n)]  # legacy cap, kept so values are unchanged
+        X_skew = X[:, :int(max_n)]  # hctsa's cap, kept so values match hctsa
     else:
         X_skew = X
     n_skew = X_skew.shape[1]

@@ -26,16 +26,17 @@ PARAMS = [(c, s) for c in CALLS for s in REF[c]]
 
 @pytest.mark.parametrize('call,name', PARAMS)
 def test_spreadgap_matches_hctsa(call, name):
-    # the GP fits run the minimize optimizer for 50 evaluations: agreement is to optimizer noise
-    # (as in test_p2_c; the noise hyperparameter, often at its floor, is the loosest), and
-    # tighter for the new tail summaries
+    # the local predictions stop after a fixed number of optimizer evaluations, so they agree with
+    # hctsa to optimizer noise (as in test_p2_c; the noise hyperparameter, often at its floor, is the
+    # loosest), and tighter for the tail summaries. The hyperparameter fits run to convergence, so
+    # they agree to rounding
     out = CALLS[call](SERIES[name])
     tight = {'q90abs_run', 'q10abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml', 'oosmedabserr'}
     for key, exp in REF[call][name].items():
         if exp is None:  # hctsa gives NaN
             assert np.isnan(out[key]), f'{call} {name} {key}'
             continue
-        tol = 1e-3 if key in tight else 1e-2
+        tol = 1e-5 if call.startswith('gph') else 1e-3 if key in tight else 1e-2
         assert out[key] == pytest.approx(exp, rel=tol, abs=tol), f'{call} {name} {key}'
 
 

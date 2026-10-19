@@ -49,6 +49,8 @@ Additional information is available at:
 // r: similarity threshold
 // n: length of y
 // result: output array of length M (must be allocated by caller)
+// countA, countB: optional (may be NULL) output arrays of length M for the
+//   template-match counts, SampEn(m) = -log(countA[m]/countB[m])
 #include <Python.h>
 #include <numpy/arrayobject.h>
 #include <math.h>
@@ -66,12 +68,13 @@ static double ieee_value(uint64_t bits)
     return d;
 }
 
-/* Core sampen calculation function - unchanged from original */
-static void sampen_core(double *y, int M, double r, int n, double *sampEnt)
+/* Core sampen calculation function */
+static void sampen_core(double *y, int M, double r, int n, double *sampEnt,
+                        double *countA, double *countB)
 {
     double *p = NULL;
-    long *run = NULL, *lastrun = NULL, N;
-    double *A = NULL, *B = NULL;
+    long *run = NULL, *lastrun = NULL;
+    double *A = NULL, *B = NULL, nA, nB;
     int M1, j, nj, jj, m;
     int i;
     double y1;
@@ -131,21 +134,24 @@ static void sampen_core(double *y, int M, double r, int n, double *sampEnt)
             lastrun[j] = run[j];
     }
     
-    /* Calculate sample entropy */
-    /* As hctsa's sampen_mex.c: p = A/B is 0/0 = NaN when no template of the
-       shorter length matched (SampEn is then NaN), and a zero count of matches
-       at this length gives 0 (for m >= 1) rather than Inf. */
-    N = (long) (n * (n - 1) / 2);
-    if (N > 0) {
-        p[0] = A[0] / N;
-        sampEnt[0] = (p[0] > 0) ? -log(p[0]) : ieee_value(0x7ff0000000000000ULL); /* Inf */
-        for (m = 1; m < M-1; m++) {
-            if (B[m - 1] > 0) {
-                p[m] = A[m] / B[m - 1];
-                sampEnt[m] = (p[m] > 0) ? -log(p[m]) : 0;
-            } else {
-                sampEnt[m] = ieee_value(0x7ff8000000000000ULL); /* NaN */
-            }
+    /* Calculate sample entropy, as hctsa's sampen_mex.c: SampEn(m) = -log(A/B),
+       from the count B of pairs of templates of length m that match (all
+       n(n-1)/2 pairs for m = 0) and the count A of those that still match at
+       length m+1. It is NaN when B = 0 (no matches to form the ratio of) and
+       when A = 0, B > 0: the estimate is then infinite, i.e., the data cannot
+       support it at this m, r and n. */
+    for (m = 0; m < M-1; m++) {
+        nA = A[m];
+        nB = (m == 0) ? (double) n * (n - 1) / 2 : B[m - 1];
+        if (countA != NULL) {
+            countA[m] = nA;
+            countB[m] = nB;
+        }
+        if ((nA > 0) && (nB > 0)) {
+            p[m] = nA / nB;
+            sampEnt[m] = -log(p[m]);
+        } else {
+            sampEnt[m] = ieee_value(0x7ff8000000000000ULL); /* NaN */
         }
     }
     
@@ -161,12 +167,15 @@ static void sampen_core(double *y, int M, double r, int n, double *sampEnt)
 static PyObject *sampen_calculate(PyObject *self, PyObject *args)
 {
     PyArrayObject *input_array, *output_array;
+    PyArrayObject *count_a = NULL, *count_b = NULL;
     double *data, *result;
     int M, n;
     double r;
+    int return_counts = 0;
     
-    /* Parse arguments: (array, M, r) */
-    if (!PyArg_ParseTuple(args, "O!id", &PyArray_Type, &input_array, &M, &r)) {
+    /* Parse arguments: (array, M, r[, return_counts]) */
+    if (!PyArg_ParseTuple(args, "O!id|p", &PyArray_Type, &input_array, &M, &r,
+                          &return_counts)) {
         return NULL;
     }
     
@@ -178,6 +187,11 @@ static PyObject *sampen_calculate(PyObject *self, PyObject *args)
     
     if (PyArray_TYPE(input_array) != NPY_DOUBLE) {
         PyErr_SetString(PyExc_TypeError, "Input array must be of type float64");
+        return NULL;
+    }
+
+    if (!PyArray_IS_C_CONTIGUOUS(input_array)) {
+        PyErr_SetString(PyExc_ValueError, "Input array must be C-contiguous");
         return NULL;
     }
     
@@ -208,14 +222,37 @@ static PyObject *sampen_calculate(PyObject *self, PyObject *args)
     }
     
     result = (double*)PyArray_DATA(output_array);
+
+    /* Template-match counts (orders 0..M-1), if requested */
+    if (return_counts) {
+        npy_intp cdims[1] = {M};
+        count_a = (PyArrayObject*)PyArray_ZEROS(1, cdims, NPY_DOUBLE, 0);
+        count_b = (PyArrayObject*)PyArray_ZEROS(1, cdims, NPY_DOUBLE, 0);
+        if (count_a == NULL || count_b == NULL) {
+            Py_XDECREF(count_a);
+            Py_XDECREF(count_b);
+            Py_DECREF(output_array);
+            return NULL;
+        }
+    }
     
     /* Call core function */
-    sampen_core(data, M, r, n, result);
+    sampen_core(data, M, r, n, result,
+                return_counts ? (double*)PyArray_DATA(count_a) : NULL,
+                return_counts ? (double*)PyArray_DATA(count_b) : NULL);
     
     /* Check for errors */
     if (PyErr_Occurred()) {
         Py_DECREF(output_array);
+        Py_XDECREF(count_a);
+        Py_XDECREF(count_b);
         return NULL;
+    }
+
+    if (return_counts) {
+        /* Steal the references */
+        return Py_BuildValue("NNN", (PyObject*)output_array, (PyObject*)count_a,
+                             (PyObject*)count_b);
     }
     
     return (PyObject*)output_array;
@@ -224,7 +261,9 @@ static PyObject *sampen_calculate(PyObject *self, PyObject *args)
 /* Method definitions */
 static PyMethodDef SampenMethods[] = {
     {"calculate", sampen_calculate, METH_VARARGS,
-     "Calculate sample entropy for given data, M, and r parameters"},
+     "calculate(y, M, r[, return_counts]): sample entropy SampEn(m) for m = 0..M-1 "
+     "(in the first M entries of a length-(M+1) array); with return_counts, also the "
+     "template-match counts A and B (length M), SampEn(m) = -log(A[m]/B[m])"},
     {NULL, NULL, 0, NULL}
 };
 

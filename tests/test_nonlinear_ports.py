@@ -23,11 +23,14 @@ def test_fnn_embedding_dimension():
     # BF_Embed(x, tau, 'fnn', true)
     # (the MATLAB 'mi' delay of this series is 3; the pyhctsa 'mi' rule -- smoothed Kraskov AMI of
     # tie-aware ranks -- gives 4 here, so the MATLAB values are checked with the delay passed as 3)
-    assert nl._embedding_params(_x(), 3, 'fnn') == (3, 3)
-    assert nl._embedding_params(_x(), 'mi', 'fnn') == (4, 2)  # = ac1e's
-    assert nl._embedding_params(_x(), 'ac1e', 'fnn') == (4, 2)
+    # (threshold 0.05 by default, with the minimum number of points behind a fraction)
+    assert nl._embedding_params(_x(), 3, 'fnn') == (3, 5)
+    assert nl._embedding_params(_x(), 'mi', 'fnn') == (4, 5)  # = ac1e's
+    assert nl._embedding_params(_x(), 'ac1e', 'fnn') == (4, 5)
     assert nl._embedding_params(_x(), 'ac1e', ['fnn', 0.05]) == (4, 5)
-    assert nl._embed_tau_m(_x(), [3, 'fnn']) == (3, 3)
+    assert nl._embedding_params(_x(), 'ac1e', ['fnn', 0.4]) == (4, 2)
+    assert nl._embedding_params(_x(), 3, ['fnn', 0.4]) == (3, 3)
+    assert nl._embed_tau_m(_x(), [3, 'fnn']) == (3, 5)
     assert nl._embed_tau_m(_x(), ['mi', 'fnn'])[0] == 4
     assert nl._embedding_params(_x(), 2, 6) == (2, 6)
     assert nl._embedding_params(np.ones(100), 'ac1e', 'fnn') is None
@@ -37,13 +40,15 @@ def test_fnn_embedding_dimension():
 
 def test_fnn_users():
     x = _x()
-    assert abs(nl.nlpe(x, 'fnn', 3, 5000, ('ac', 1))['msqerr'] - 0.207584162764) < 1e-9
+    assert abs(nl.nlpe(x, 'fnn', 3, 5000, ('ac', 1))['msqerr'] - 0.236829945826) < 1e-9
     d = nl.local_density(x, 5, ('ac', 1), 'ac1e', 'fnn')
-    assert abs(d['meanden'] + 2.37340122116) < 1e-9 and abs(d['stdden'] - 0.723311553717) < 1e-9
+    assert abs(d['meanden'] + 3.94632951994) < 1e-9 and abs(d['stdden'] - 1.21148304) < 1e-8
     d = nl.gp_corr_sum(x, -1, 0.1, ('ac', 1), 20, ('ac', 'fnn'))
-    # (1e-6: the series is no longer rounded to the 7 significant digits of hctsa's text-file interface)
-    assert abs(d['robfit_a2'] - 3.66955087508) < 1e-6 and abs(d['meanlnCr'] + 8.32376735638) < 1e-6
-    assert abs(nl.takens_estimator(x, -1, 0.05, ('ac', 1), (3, 'fnn')) - 2.14107670491) < 1e-9
+    # (5e-6: the robust fit is an iterative search, run in MATLAB and in Python)
+    assert abs(d['robfit_a2'] - 3.34830651338) < 5e-6 and abs(d['meanlnCr'] + 9.35558688873) < 1e-6
+    assert abs(nl.takens_estimator(x, -1, 0.01, ('ac', 1), (3, 3)) - 2.86282933331) < 1e-9
+    # at the length scale enclosing 1% of the pairs, five dimensions still give an estimate
+    assert abs(nl.takens_estimator(x, -1, 0.01, ('ac', 1), (3, 'fnn')) - 3.75193225272) < 1e-9
     assert _all_nan(nl.nlpe(np.ones(100), 'fnn'))
 
 
@@ -53,10 +58,11 @@ def test_fnn():
     assert abs(d['nHood2_4'] - 0.1496798) < 1e-6 and abs(d['meannHood2'] - 0.131032955) < 1e-6
     assert abs(d['stdpfnn'] - 0.331280804587) < 1e-6 and abs(d['max1stepchange'] - 0.4061888) < 1e-6
     assert abs(d['mdrop'] + 0.108831911111) < 1e-6
-    assert (d['firstunder09'], d['firstunder05'], d['firstunder02'], d['firstunder005']) == (2, 3, 4, 5)
+    assert (d['dim09'], d['dim05'], d['dim02'], d['dim005']) == (2, 3, 4, 5)
     assert d['pdrop'] == pytest.approx(2 / 3)
     assert nl.fnn(_x(), 1, 10, ('ac', 1), True, 0.4, 5) == 3
-    assert nl.fnn(_x(), 'ac', escape_factor=5, just_best=True, bestp=0.05) == 6
+    assert nl.fnn(_x(), 'ac', escape_factor=5, just_best=True, bestp=0.05) == 5
+    assert nl.fnn(_x(), 1, 10, ('ac', 1), True, 0.05, 5) == nl.fnn(_x(), 1, 10, ('ac', 1), True, escape_factor=5)
     assert np.isnan(nl.fnn(_x()[:8])) and np.isnan(nl.fnn(np.ones(100)))
 
 
@@ -217,3 +223,80 @@ def test_gp_corr_sum_m1():
     assert len(c2) == 1 and c2[0].shape == (20, 2)
     with pytest.raises(ValueError):
         _tisean.d2(_x(600), embed=0)
+
+
+def test_takens_estimator_fraction_of_pairs():
+    # Takens' estimator at the 1% quantile of the pair distances (MATLAB values from NL_TakensEstimator)
+    x = _x()
+    assert abs(nl.takens_estimator(x, 200, 0.01, ('ac', 1), (3, 3)) - 2.90343923633) < 1e-9
+    assert abs(nl.takens_estimator(x, -1, 0.05, ('ac', 1), (3, 3)) - 2.71397436245) < 1e-9
+    # quantized values on a lattice of step 0.25 (before z-scoring): fewer than 3 distinct
+    # distances below the length scale, too discrete for an estimate
+    q = np.round(x / 0.25) * 0.25
+    q = (q - q.mean()) / q.std(ddof=1)
+    assert np.isnan(nl.takens_estimator(q, -1, 0.01, ('ac', 1), (3, 3)))
+    # many coinciding delay vectors (a zero-inflated series): coinciding pairs are left out
+    z = np.maximum(x - 0.5, 0)
+    z = (z - z.mean()) / z.std(ddof=1)
+    assert abs(nl.takens_estimator(z, -1, 0.01, ('ac', 1), (2, 3)) - 1.10192541585) < 1e-9
+    # NaN: too few pairs (1% of them below 33), fewer than three distinct distances, a constant series
+    assert np.isnan(nl.takens_estimator(x[:60], -1, 0.01, ('ac', 1), (3, 3)))
+    assert np.isnan(nl.takens_estimator(np.sign(x), -1, 0.01, ('ac', 1), (1, 2)))
+    assert np.isnan(nl.takens_estimator(np.ones(100), -1, 0.01, 2, (1, 2)))
+    with pytest.raises(ValueError):
+        nl.takens_estimator(x, -1, 1.5, ('ac', 1), (3, 3))
+    # a dimension estimate: about m for noise, about 1 for the logistic map
+    rng = np.random.default_rng(3)
+    w = rng.standard_normal(2000)
+    assert abs(nl.takens_estimator(w, -1, 0.01, 0, (1, 3)) - 3) < 0.3
+    lg = np.empty(2000)
+    lg[0] = 0.3
+    for i in range(1, 2000):
+        lg[i] = 4 * lg[i - 1] * (1 - lg[i - 1])
+    assert abs(nl.takens_estimator(lg, -1, 0.01, 0, (1, 3)) - 1) < 0.2
+
+
+def _maps():
+    lg = np.empty(1500)
+    lg[0] = 0.3
+    for k in range(1, 1500):
+        lg[k] = 3.84 * lg[k - 1] * (1 - lg[k - 1])  # a transient converging to a period-3 orbit
+    ch = np.empty(1500)
+    ch[0] = 0.3141
+    for k in range(1, 1500):
+        ch[k] = 3.9 * ch[k - 1] * (1 - ch[k - 1])
+    return lg, np.round(4095 * ch)  # the orbit, and a chaotic series quantized to 12 bits
+
+
+def test_takens_estimator_shift_scale_reflection():
+    # the tolerances are relative to the data: y, 3.7*y - 12 and -y give the same output
+    # (MATLAB values from NL_TakensEstimator)
+    from pyhctsa.utils import z_score
+    lg, int12 = _maps()
+    for f in (lambda v: v, lambda v: 3.7 * v - 12, lambda v: -v):
+        assert abs(nl.takens_estimator(z_score(f(int12)), -1, 0.01, ('ac', 1), (1, 3)) - 1.002896002752) < 1e-9
+        assert abs(nl.takens_estimator(z_score(f(int12)), -1, 0.01, ('ac', 1), (1, 2)) - 1.019092095706) < 1e-9
+        # a period-3 orbit: too few distinct distances below the length scale
+        assert np.isnan(nl.takens_estimator(z_score(f(lg)), -1, 0.01, ('ac', 1), (1, 3)))
+
+
+def test_takens_estimator_above_m():
+    # a random walk (with chaotic increments) whose 'ac' delay and Theiler window are about a third
+    # of the series: the estimate at m = 3 would be 9.4, so NaN; tau = 1 gives an estimate
+    from pyhctsa.utils import z_score
+    x = np.empty(2000)
+    x[0] = 0.3141
+    for k in range(1, 2000):
+        x[k] = 4 * x[k - 1] * (1 - x[k - 1])
+    y = z_score(np.cumsum(x - 0.5))
+    assert np.isnan(nl.takens_estimator(y, -1, 0.01, ('ac', 1), ('ac', 3)))
+    assert abs(nl.takens_estimator(y, -1, 0.01, ('ac', 1), (1, 3)) - 1.93575005343) < 1e-9
+
+
+def test_gp_corr_sum_roundoff_ratios():
+    # an exactly periodic series: residuals at round-off give NaN, not a ratio of rounding noise
+    from pyhctsa.utils import z_score
+    tab = np.sin(2 * np.pi * np.arange(7) / 7 + 0.3)
+    y = z_score(tab[np.arange(1000) % 7])
+    d = nl.gp_corr_sum(y, -1, 0.5, ('ac', 1), 20, ['ac', ['fnn', 0.05]])
+    assert np.isnan(d['robfit_sigrat']) and np.isnan(d['robfitresac1'])

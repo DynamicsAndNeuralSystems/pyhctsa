@@ -658,7 +658,7 @@ def _modwt(x: ArrayLike, w_name: str, level: int) -> np.ndarray:
 
 def _modwt_var(w: np.ndarray, w_name: str) -> np.ndarray:
     """
-    Unbiased wavelet variance by level from MODWT coefficients.
+    Variance by level from MODWT coefficients, using the boundary-unaffected coefficients.
 
     Parameters
     ----------
@@ -673,17 +673,19 @@ def _modwt_var(w: np.ndarray, w_name: str) -> np.ndarray:
         For levels j = 1..J' (J' = largest j <= J with M_j = N - L_j + 1 >= 1, where
         L_j = (2^j - 1)(L - 1) + 1) the mean square ``sum(W_j**2) / M_j`` of the M_j
         boundary-unaffected wavelet coefficients (the last M_j columns). The scaling-level
-        value is appended only if all J levels are retained: the variance (about the mean,
-        divisor M_J) of the M_J boundary-unaffected scaling coefficients. Empty if M_1 < 1.
+        value is appended when all J levels are retained (always so for the levels used by
+        :func:`modwt_var`): the variance (about the mean, divisor M_J) of the M_J
+        boundary-unaffected scaling coefficients. Empty if M_1 < 1.
 
     Notes
     -----
-    Percival & Walden (2000), "Wavelet Methods for Time Series Analysis", ch. 8: the unbiased
-    estimator of the wavelet variance at scale ``2^(j-1)`` uses only the coefficients
-    unaffected by the periodic boundary. Wavelet coefficients have zero mean, so they are not
-    centred; the scaling coefficients carry the mean of the series, which is not variance, so
-    for the scaling band the mean is removed. Levels with no boundary-unaffected coefficient
-    (M_j < 1) are dropped.
+    The unbiased estimator of the wavelet variance at scale ``2^(j-1)`` of Percival & Walden
+    (2000), "Wavelet Methods for Time Series Analysis", DOI 10.1017/CBO9780511841040, is the
+    mean square of the coefficients unaffected by the periodic boundary. Wavelet filters sum
+    to zero, so the mean of the wavelet coefficients is zero and they are not centered;
+    centering would only subtract sampling noise. The scaling coefficients carry the mean of
+    the series, which is not variance, so for the scaling band the mean is removed. Levels with
+    no boundary-unaffected coefficient (M_j < 1) are dropped.
     """
     w = np.atleast_2d(np.asarray(w, dtype=float))
     L = int(pywt.Wavelet(w_name).dec_len)
@@ -715,9 +717,10 @@ def modwt_var(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 5) -> 
     overlap discrete wavelet transform (MODWT) and computes summary statistics
     on how variance is distributed across scales. Unlike the standard
     (decimated) DWT used elsewhere in this codebase, the MODWT is shift-invariant
-    and its associated variance estimator is unbiased and accounts
-    for boundary-affected coefficients at each level -- the standard approach
-    for a scale-wise variance decomposition (Percival & Walden).
+    and its associated variance estimator uses only the coefficients unaffected by
+    the boundary at each level: the mean square of the unaffected coefficients of each
+    detail level, and the variance about the mean of those of the scaling band
+    (Percival & Walden, 2000, DOI 10.1017/CBO9780511841040).
 
     Parameters
     ----------
@@ -727,7 +730,10 @@ def modwt_var(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 5) -> 
         The mother wavelet, e.g., ``'db3'``, ``'sym2'``. Default is ``'db3'``.
     level : int or 'max', optional
         The level of wavelet decomposition (can be set to 'max' for the maximum
-        level supported by the series length, ``floor(log2(N))``). Default is 5.
+        level supported by the series length and wavelet, ``floor(log2((N - 1)/(L - 1) + 1))``
+        with L the filter length). A level that is too large is reduced to the maximum,
+        so that every level, and the scaling band, has at least one coefficient unaffected
+        by the boundary. Default is 5.
 
     Returns
     -------
@@ -746,7 +752,11 @@ def modwt_var(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 5) -> 
     y = np.asarray(y, dtype=float).ravel()
     N = len(y) # length of the time series
 
-    maxLevelAllowed = int(np.floor(np.log2(N)))
+    # Deepest level whose scale has at least one boundary-unaffected coefficient, so that
+    # every retained level (and the scaling band) has an unbiased variance estimate:
+    # (2^j - 1)(L - 1) + 1 <= N, with L the wavelet filter length
+    filt_len = int(pywt.Wavelet(w_name).dec_len)
+    maxLevelAllowed = int(np.floor(np.log2((N - 1) / (filt_len - 1) + 1)))
     if level == 'max':
         level = maxLevelAllowed
     if maxLevelAllowed < level:

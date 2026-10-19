@@ -169,7 +169,7 @@ def test_recovers_simulated_hmm_parameters(mu_true, sigma, P_true, seed):
     np.testing.assert_allclose(P[np.ix_(order, order)], P_true, atol=0.04)
     np.testing.assert_allclose(P.sum(axis=1), 1.0, atol=1e-12)
     # the fit is at least as good as the true parameters
-    assert LL[-1] >= mf._gaussian_hmm_loglik(x, mu_true, sigma ** 2, P_true, np.ones(K) / K) - 5.0
+    assert LL >= mf._gaussian_hmm_loglik(x, mu_true, sigma ** 2, P_true, np.ones(K) / K) - 5.0
 
 
 def test_fit_is_deterministic():

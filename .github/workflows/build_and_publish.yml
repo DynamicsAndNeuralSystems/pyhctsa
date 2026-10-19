@@ -27,10 +27,10 @@ jobs:
           fetch-depth: 0
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.21.3
+        uses: pypa/cibuildwheel@v4.2.1
         env:
           CIBW_ARCHS: "auto64"
-          CIBW_SKIP: "pp*"
+          CIBW_SKIP: "cp3??t-* cp315-*"   # (no free-threaded builds; no 3.15 until CI tests it)
           CIBW_BUILD_VERBOSITY: "1"
           CIBW_MANYLINUX_X86_64_IMAGE: "manylinux_2_28"
           CIBW_MANYLINUX_AARCH64_IMAGE: "manylinux_2_28"
@@ -103,6 +103,7 @@ jobs:
         with:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: dist
+          skip-existing: true   # (a dry run can be repeated for the same version)
 
       - name: Publish to PyPI
         if: inputs.target == 'pypi'

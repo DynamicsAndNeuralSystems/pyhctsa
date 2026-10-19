@@ -71,7 +71,7 @@ These components are used with credit. No unlicensed third-party source is inclu
 
 | Component | Credit |
 |---|---|
-| `falling_sticks` (CO_FallingSticks) | Adapted from the Python FALLstick implementation written by Eugene Chon, a student of B. D. Fulcher, for *hctsa*. |
+| `falling_sticks` (CO_FallingSticks) | Adapted from the Python FALLstick implementation written by Eugene Chon ([@EugeneChon04](https://github.com/EugeneChon04)), a student of B. D. Fulcher, for *hctsa*. |
 | `MD_*` heart-rate-variability measures | (C) 2016 Max A. Little and Ben D. Fulcher. |
 | Permutation entropy variant (`permEnLE`) | Bruce Land and Damian Elias, Cornell University (https://people.ece.cornell.edu/land/PROJECTS/Complexity/). The variant is a one-line formula. |
 | Visibility-graph measures | Lacasa et al., *PNAS* 105, 4972 (2008); Luque et al., *Phys. Rev. E* 80, 046103 (2009). The degree algorithms in *pyhctsa* are original. |
@@ -112,7 +112,7 @@ No code from these is copied; they are called through their public interfaces an
 | [statsmodels](https://www.statsmodels.org) | time-series models, including exponential smoothing (the design of *hctsa*'s `MF_ExpSmoothing` is credited to S. Arora above) | BSD-3-Clause |
 | [numba](https://numba.pydata.org) | compiled inner loops | BSD-2-Clause |
 | [scikit-learn](https://scikit-learn.org) | PCA, Gaussian mixtures, neighbor searches and silhouette scores | BSD-3-Clause |
-| [arch](https://github.com/bashtage/arch) | GARCH models, Phillips-Perron and variance-ratio tests | NCSA (University of Illinois/NCSA Open Source License) |
+| [arch](https://github.com/bashtage/arch) | Phillips-Perron and variance-ratio tests | NCSA (University of Illinois/NCSA Open Source License) |
 | [PyWavelets](https://pywavelets.readthedocs.io) | discrete wavelet transforms (a cut-down `cwt` is also bundled, section 2) | MIT |
 | [rich](https://github.com/Textualize/rich) | progress bars | MIT |
 | [pathos](https://github.com/uqfoundation/pathos) | process-based parallel computation | BSD-3-Clause |

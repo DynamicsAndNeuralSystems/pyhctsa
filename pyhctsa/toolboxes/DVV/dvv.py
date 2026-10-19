@@ -11,7 +11,8 @@ with pyhctsa under GPL-3.0-or-later (permitted by the "or later" clause).
 Modified for pyhctsa: ported from MATLAB to Python (NumPy). The routines follow the toolbox
 (including its choice of target index in ``DVV_dvv.m`` and, for the surrogate, the real-valued
 branch of ``DVV_surrogate.m`` as modified in hctsa by B. D. Fulcher), vectorized, with the
-reference delay vectors and starting permutations supplied by the caller.
+reference delay vectors and starting permutations supplied by the caller, and with the target
+variances computed in two passes (never negative, and 0 for targets equal up to rounding).
 
 Reference: T. Gautama, D. P. Mandic and M. M. Van Hulle, "The delay vector variance method for
 detecting determinism and nonlinearity in time series", Physica D 190(3-4), 167-176 (2004).
@@ -39,28 +40,26 @@ def _dvv_curve(x: np.ndarray, m: int, nsub: int, nd: float, ntv: int, tau: int,
     sd = np.sqrt((np.sum((d - avg) ** 2) - nsub * avg ** 2) / (count - 1))
     rd = avg - nd * sd + (2 * nd * sd * np.arange(ntv)) / (ntv - 1)
 
-    # For each reference, the variance of the targets of the delay vectors within each rd (from
-    # cumulative sums of the targets sorted by distance); only sets of at least 30 count
+    # For each reference, the variance of the targets of the delay vectors within each rd (the set
+    # within rd is a leading run of the targets sorted by distance, whatever the order among equal
+    # distances; the reference vector itself is excluded); only sets of at least 30 count. Each
+    # variance is computed in two passes, the mean and then the mean squared deviation from it
+    # (Chan, Golub and LeVeque, Am. Stat. 37, 242 (1983)), so it is never negative and is exactly 0
+    # for equal targets; one below tol^2, with tol = 1e-12 of the range of x, is that of targets
+    # equal up to rounding, and is 0.
+    tol = 1e-12 * (np.max(x) - np.min(x))
     tot = np.zeros(ntv)
     num = np.zeros(ntv)
     for k in range(nsub):
         order = np.argsort(d[:, k], kind='stable')
+        order = order[order != ref[k]]  # (the reference vector itself)
         ds = d[order, k]
         xs = x[order + m * tau]
-        s1 = np.cumsum(xs)
-        s2 = np.cumsum(xs ** 2)
         c = np.searchsorted(ds, rd, side='right')  # number of vectors within each rd
-        t1 = np.where(c > 0, s1[np.maximum(c, 1) - 1], 0.0)
-        t2 = np.where(c > 0, s2[np.maximum(c, 1) - 1], 0.0)
-        # the set around a reference excludes the reference vector itself (distance 0)
-        self_target = x[ref[k] + m * tau]
-        inside = rd >= 0
-        c = c - inside
-        t1 = t1 - inside * self_target
-        t2 = t2 - inside * self_target ** 2
-        ok = (c >= 30) & (rd > 0)
-        tot[ok] += (t2[ok] - t1[ok] ** 2 / c[ok]) / (c[ok] - 1)
-        num[ok] += 1
+        for j in np.flatnonzero((c >= 30) & (rd > 0)):
+            v = np.var(xs[:c[j]], ddof=1)
+            tot[j] += 0.0 if v <= tol ** 2 else v
+            num[j] += 1
     y = np.full(ntv, np.nan)
     has = num > 0
     y[has] = tot[has] / (num[has] * np.var(x, ddof=1))

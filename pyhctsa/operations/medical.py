@@ -10,7 +10,7 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
 
     This function computes the triangular histogram indices and Poincaré plot measures commonly used 
     in HRV analysis. It is specifically designed for time series consisting of consecutive 
-    RR intervals measured in milliseconds. It is not suitable for other types of time series.
+    RR intervals measured in seconds. It is not suitable for other types of time series.
 
     The computed features are widely used in clinical and physiological studies of autonomic nervous 
     system activity. The Poincaré plot measures (SD1 and SD2) are standard metrics for short- and 
@@ -32,12 +32,13 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
     Parameters
     ----------
     x : array-like
-        Time series of RR intervals in milliseconds.
+        Time series of RR intervals in seconds.
 
     Returns
     -------
     out : dict
-        Dictionary containing the following HRV features   
+        Dictionary containing the following HRV features (SD1 and SD2 are in milliseconds,
+        the series being multiplied by 1000 to convert from seconds)
 
         - 'tri10'   : Triangular histogram index using 10 bins.
         - 'tri20'   : Triangular histogram index using 20 bins.
@@ -94,12 +95,16 @@ def hrv_classic(y: ArrayLike) -> dict:
     ``sigD = median(|d - median(d)|)/0.6745`` with ``d = diff(y)`` [1]. If ``sigD`` is
     at rounding-error level (``<= 1e-10*std(y)``, i.e. more than half the increments are
     equal) the mean absolute deviation about the median times ``sqrt(pi/2)`` is used
-    instead; if that is also negligible (all increments equal) all five are NaN. These
-    replace the earlier fixed-threshold pnn5, pnn10, pnn20, pnn30 and pnn40, which were
-    almost always ~1 for a z-scored series.
+    instead; if that is also negligible (all increments equal) all five are NaN. Thresholds
+    relative to the spread of the increments are used because fixed thresholds (such as
+    pNN5 to pNN40, in the units of the series) give proportions close to 1 for almost every
+    z-scored series.
 
     2. **Frequency-domain measures**
-    Power spectral density ratios computed over standard frequency bands (e.g., LF, HF) [2].
+    The ratio of low- to high-frequency power (lfhf) and the percentages of total power in the
+    very-low-, low- and high-frequency bands (vlf, lf, hf) of a Hann-windowed periodogram [2].
+    The periodogram is computed with ``fs = 2*pi``, so the bands (VLF below 0.04, LF 0.04 to
+    0.15, HF 0.15 to 0.4) are in radians per sample, not in hertz.
 
     3. **Triangular histogram index**
     A geometric measure of HRV based on the shape of the RR interval histogram.
@@ -283,8 +288,9 @@ def pnn(x: ArrayLike) -> dict:
     Compute pNNx measures of heart rate variability (HRV).
 
     The pNNx metrics quantify the proportion of successive RR intervals that 
-    differ by more than x milliseconds. This function assumes the input `x` is 
-    a time series of consecutive RR intervals in milliseconds.
+    differ by more than x milliseconds, for x = 5, 10, 20, 30, ..., 100. This function 
+    assumes the input `x` is a time series of consecutive RR intervals in seconds: the 
+    differences are multiplied by 1000 to convert them to milliseconds.
 
     This measure is commonly used in clinical HRV analysis. It is not appropriate 
     to apply this method to z-scored or otherwise normalized time series, as 
@@ -304,15 +310,15 @@ def pnn(x: ArrayLike) -> dict:
     Parameters
     ----------
     x : array-like
-        Time series of RR intervals in milliseconds (ms).
+        Time series of RR intervals in seconds.
 
     Returns
     -------
     dict
         Dictionary containing pNNx values, such as:
 
-        - 'pNN20': Percentage of successive differences > 20 ms
-        - 'pNN50': Percentage of successive differences > 50 ms
+        - 'pnn20': Proportion of successive differences > 20 ms
+        - 'pnn50': Proportion of successive differences > 50 ms
 
     """
     x = np.asarray(x)
@@ -320,7 +326,7 @@ def pnn(x: ArrayLike) -> dict:
     N = len(x)
 
     # Calculate pNNx percentage
-    Dx = np.abs(diff_x) * 1000 # assume milliseconds as for RR intervals
+    Dx = np.abs(diff_x) * 1000 # seconds to milliseconds
     pnns = np.array([5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
 
     dx_sorted = np.sort(Dx)

@@ -219,7 +219,9 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
           degree; the rmse is in units of probability density of the degrees divided by
           their standard deviation, so it does not depend on the number of nodes). Each is
           NaN if the degrees take no more distinct values than the fit has parameters
-          (3 for the Gaussian, 2 for the others), or if the fit is exact
+          (3 for the Gaussian, 2 for the others); the three residual statistics are also NaN
+          if the residuals have no variation beyond floating-point round-off, as for an
+          exact fit (:func:`pyhctsa.robust.bf_residual_stats`)
         - ``gaussnlogL``, ``expnlogL``: mean negative log-likelihood per node of a
           Gaussian and of an exponential distribution fitted to the degrees
         - ``evparam1``, ``evparam2``, ``evnlogL``: location and scale of an extreme-value
@@ -299,7 +301,7 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
                 r2 = 1 - sse / sstot
                 adjr2 = 1 - (1 - r2) * (len(k_vals) - 1) / dfe
             rmse = np.sqrt(sse / dfe) * stdk  # in density units of the standardized degrees
-            res_ac1, res_ac2, res_runsz = bf_residual_stats(res, sstot)
+            res_ac1, res_ac2, res_runsz = bf_residual_stats(res, k_prob)
         out[f'{prefix}_r2'] = r2
         out[f'{prefix}_adjr2'] = adjr2
         out[f'{prefix}_rmse'] = rmse

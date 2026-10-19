@@ -26,14 +26,15 @@ CASES = {
     'loopm': (lambda y: mf.loop_local_simple(y, 'mean'), REAL, 1e-6, 1e-7),
     'arfit18': (lambda y: mf.ar_fit(y, 1, 8, 'sbc'), list(SERIES), 1e-6, 1e-8),
     # (ar_cov, compare_ar and fit_subsegments 'ar' are checked against hctsa in tests/test_mf_hctsa_parity.py)
-    # the GP fits run the minimize optimizer for 50 evaluations: agreement is to optimizer noise
-    # random subsamples and starts now come from BF_Random: the same draws as hctsa
+    # random subsamples and starts come from BF_Random: the same draws as hctsa. The GP fits run to
+    # convergence, so they agree with hctsa to rounding; the local predictions still stop after a
+    # fixed number of optimizer evaluations, so they agree to optimizer noise
     'fs_ar': (lambda y: mf.fit_subsegments(y, 'arsbc', None, 'rand', [25, 0.1], 'default'), REAL, 1e-8, 1e-9),
-    'gh_ri2': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'random_i', 4), REAL, 1e-2, 1e-2),
-    'gh_rb': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'random_both', 2), REAL, 1e-2, 1e-2),
+    'gh_ri2': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'random_i', 4), REAL, 1e-5, 1e-7),
+    'gh_rb': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'random_both', 2), REAL, 1e-5, 1e-7),
     'gl_rg': (lambda y: mf.gp_local_prediction(y, COV, 10, 3, 20, 'randomgap', 'default'), REAL, 1e-2, 1e-2),
-    'gpfa': (lambda y: mf.gp_fit_across(y, COV, 20), REAL, 1e-2, 1e-2),
-    'gphp_first': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'first'), REAL, 1e-2, 1e-2),
+    'gpfa': (lambda y: mf.gp_fit_across(y, COV, 20), REAL, 1e-5, 1e-7),
+    'gphp_first': (lambda y: mf.gp_hyperparameters(y, COV, 1, 200, 'first'), REAL, 1e-5, 1e-7),
     'gplp_fb': (lambda y: mf.gp_local_prediction(y, COV, 10, 3, 20, 'frombefore'), REAL, 1e-2, 1e-2),
 }
 
@@ -84,9 +85,11 @@ def test_hmm_fit_keeps_the_best_start():
                   y.mean() + y.std(ddof=1) * np.linspace(-1, 1, 3)):
         for rho in (0.9, 0.5, 0.99):
             p0 = 0.5 * (1 - rho) * np.ones((3, 3)) + (rho - 0.5 * (1 - rho)) * np.eye(3)
-            ll_start = mf._gaussian_hmm_em(y, means, np.var(y, ddof=1), p0, np.ones(3) / 3, 30, 1e-4,
-                                     0.01 * np.var(y, ddof=1))[4]
-            assert ll[-1] >= ll_start[-1] - 1e-9
+            fit = mf._gaussian_hmm_em(y, means, np.var(y, ddof=1), p0, np.ones(3) / 3, 30, 1e-4,
+                                      0.01 * np.var(y, ddof=1))
+            # each start is scored by the log-likelihood of its returned parameters
+            ll_start = mf._gaussian_hmm_loglik(y, *fit[:4])
+            assert ll >= ll_start - 1e-9
 
 
 def test_hmm_flat_likelihood_series_matches_hctsa_log_likelihood():

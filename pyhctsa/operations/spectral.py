@@ -86,8 +86,10 @@ def specparam(y: ArrayLike, aperiodic_mode: str = 'fixed', max_n_peaks: int = 4,
         ``apKnee``); the number of peaks found above threshold (``numPeaks``) and the
         centre frequency, height and bandwidth of the largest (``maxPeakFreq``,
         ``maxPeakPower``, ``maxPeakBW``); the total power in the periodic component
-        (``totalPeakPower``) and the fraction of spectral power it accounts for
-        (``periodicFraction``); and the quality of the combined fit (``modelR2`` and
+        (``totalPeakPower``) and ``periodicFraction``, the sum of squares of the fitted
+        periodic component divided by the sum of squared deviations of the log10 spectrum
+        from its mean (a ratio that is not bounded above by 1, not a fraction of spectral
+        power); and the quality of the combined fit (``modelR2`` and
         ``modelMAE``).
     """
     y = np.asarray(y, dtype=float).ravel()
@@ -207,8 +209,8 @@ def specparam(y: ArrayLike, aperiodic_mode: str = 'fixed', max_n_peaks: int = 4,
         out['maxPeakBW'] = peak_list[i_max]['width']
         out['totalPeakPower'] = np.sum(heights)
 
-    # Share of the (log-)spectrum's variation accounted for by the periodic
-    # component, rather than by the aperiodic background:
+    # Squared size of the periodic component relative to the variation of the
+    # log-spectrum about its mean (can exceed 1):
     total_var = np.sum((log_s - np.mean(log_s)) ** 2)
     if total_var > 0:
         out['periodicFraction'] = np.sum(peak_sum ** 2) / total_var
@@ -774,9 +776,9 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
 
     # Count crossings of the log spectrum with a horizontal line set a fraction of the way from
     # min(log S) to max(log S). On the linear spectrum a threshold at a fixed fraction of max(S) sits far
-    # above the noise floor whenever there is one dominant peak (and the old ncross_f* fields were also
-    # mislabelled: ncross_f05 was assigned twice); differences in log S are power ratios (dB), so a
-    # fraction of the log range is a genuinely relative 'how far up from the noise floor' level.
+    # above the noise floor whenever there is one dominant peak; differences in log S are power
+    # ratios (dB), so a fraction of the log range is a genuinely relative 'how far up from the
+    # noise floor' level.
     log_range = np.max(log_s) - np.min(log_s)
     ncrossfn_rel_log = lambda frac: np.sum(sign_change(log_s - (np.min(log_s) + frac * log_range)))
     out['ncross_log_f05'] = ncrossfn_rel_log(0.05)
@@ -1025,7 +1027,8 @@ def spectral_summaries_phase(y: ArrayLike) -> dict:
     signature of determinism, nonlinearity, or transient/localized structure that the
     magnitude spectrum alone cannot see.
 
-    Phases are weighted by their bin's magnitude throughout (a standard approach in
+    Phases are weighted by their bin's magnitude throughout, except in ``magPhaseCorr``,
+    an unweighted correlation across bins (weighting is a standard approach in
     circular statistics for data of uneven reliability): a single pure tone
     concentrates essentially all energy in 1-2 bins, and every other bin's magnitude
     is set by numerical noise, so its "phase" is meaningless and must not be allowed
@@ -1095,7 +1098,7 @@ def spectral_summaries_phase(y: ArrayLike) -> dict:
     resid = ph_unwrap - X @ beta
     out['phaseLinearity'] = np.sqrt(np.sum(wgt * resid ** 2)) / np.sqrt(len(ww))
 
-    # Magnitude-phase correlation
+    # Magnitude-phase correlation (unweighted)
     out['magPhaseCorr'] = np.corrcoef(mag, ph)[0, 1]
 
     # Weighted lag-1 autocorrelation of unwrapped-phase increments across frequency
@@ -1348,13 +1351,17 @@ def sinusoid_fit(y: ArrayLike, model: str = 'sin1') -> Union[dict, float]:
     The fitted models are:
 
     - ``'sinK'``: a sum of K sinusoids, ``sum_i a_i*sin(2*pi*f_i*t + c_i)``, with free
-      amplitudes, phases, and frequencies ``f_i`` in ``[1/(2N), 1/2 - 1/(2N)]`` cycles
+      amplitudes, phases, and frequencies ``f_i`` in ``[1/N, 1/2 - 1/(2N)]`` cycles
       per sample. The amplitudes and phases are linear parameters, found by least squares
       for given frequencies, and the frequencies are searched deterministically (no
-      random starts, no iterative optimizer): :func:`pyhctsa.robust.bf_fit_sinusoids`.
-      The frequencies are bounded below by ``1/(2N)`` because a sinusoid of lower
-      frequency cannot be told apart from a constant plus a linear trend, so that its
-      amplitude and phase are not determined.
+      random starts: a grid search refined by Gauss-Newton iterations):
+      :func:`pyhctsa.robust.bf_fit_sinusoids`.
+      The frequencies are bounded below by ``1/N``, so that each sinusoid completes at
+      least one full cycle within the series: these models measure how well the series is
+      described by oscillations, and a component with less than one cycle in the window is
+      a trend (its period is not observed), which would let a sinusoid fit a trending
+      series as if it were periodic (and below ``1/(2N)`` its amplitude and phase are not
+      determined: it cannot be told apart from a constant plus a linear trend).
     - ``'fourierK'``: a K-term Fourier series,
       ``a0 + sum_i (a_i*cos(i*w*t) + b_i*sin(i*w*t))``, with a single fitted
       fundamental frequency ``w``, so that the terms are harmonically related.
@@ -1374,7 +1381,8 @@ def sinusoid_fit(y: ArrayLike, model: str = 'sin1') -> Union[dict, float]:
     Returns
     -------
     dict or float
-        - ``r2``: the R^2 of the fit.
+        - ``r2``: the R^2 of the fit, relative to the mean of the series. The ``'sinK'``
+          models have no intercept (constant) term, so ``r2`` can be negative for them.
         - ``adjr2``: the degrees-of-freedom-adjusted R^2.
         - ``rmse``: the root mean square error of the fit (the residual sum of squares
           divided by the degrees of freedom of the error).
@@ -1385,8 +1393,9 @@ def sinusoid_fit(y: ArrayLike, model: str = 'sin1') -> Union[dict, float]:
           runs about their median than expected for a random order (slowly varying
           residuals).
 
-        The three residual outputs are NaN if the fit is exact (nothing but rounding
-        error is left). NaN is returned instead of a dict if the model cannot be fitted
+        The three residual outputs are NaN if the residuals have no variation beyond
+        floating-point round-off, as for an exact fit
+        (:func:`pyhctsa.robust.bf_residual_stats`). NaN is returned instead of a dict if the model cannot be fitted
         (or, for K sinusoids, if there are fewer than ``3K + 1`` samples).
 
     Notes
@@ -1450,7 +1459,7 @@ def sinusoid_fit(y: ArrayLike, model: str = 'sin1') -> Union[dict, float]:
         rmse = np.sqrt(sse / dfe) if dfe > 0 else np.nan
     out = {'r2': float(r2), 'adjr2': float(adjr2), 'rmse': float(rmse)}
     # Remaining structure in the residuals
-    out['resAC1'], out['resAC2'], out['resrunsz'] = bf_residual_stats(res, sstot)
+    out['resAC1'], out['resAC2'], out['resrunsz'] = bf_residual_stats(res, y)
     return out
 
 
@@ -2302,8 +2311,8 @@ def rhythmicity(y: ArrayLike, m: float = 5, tau: float = 1.5, n_freq: int = 40,
     Karvat, G., et al. (2026). Universal rhythmic architecture uncovers two modes of neural
     dynamics. Nature Communications, 17.
 
-    Fransen, J. W., et al. (2015). Studying the dynamics of oscillatory bursts with lagged
-    coherence. NeuroImage, 111, 158.
+    Fransen, J. W., van Ede, F., & Maris, E. (2015). Identifying neuronal oscillations using
+    rhythmicity. NeuroImage, 118, 256-267. doi:10.1016/j.neuroimage.2015.06.003
     """
     y = np.asarray(y, dtype=float).ravel()
     smooth_win = max(1, int(np.floor(smooth_win + 0.5)))
