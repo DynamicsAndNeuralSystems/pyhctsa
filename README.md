@@ -32,7 +32,7 @@
 ---
 
 The **PY**thon toolkit for **H**ighly **C**omparative **T**ime-**S**eries **A**nalysis (_pyhctsa_) is a living library of
-time-series analysis methods. It computes **over 6700 interpretable time-series features** (6747 in the default feature set, matching `hctsa`) from a single univariate
+time-series analysis methods. It computes **over 6300 interpretable time-series features** (6392 in the default feature set, matching `hctsa`) from a single univariate
 series — spanning distributional shape, autocorrelation, entropy and information theory, scaling, stationarity,
 nonlinear dynamics, spectral and wavelet properties, model fits, and more — making it the most comprehensive feature
 set available in native Python.
@@ -49,7 +49,7 @@ _pyhctsa_ requires Python 3.10 or newer:
 pip install pyhctsa
 ```
 
-This gives 6739 of the 6747 features of the _hctsa_ v3.0.0 feature set.
+This gives 6384 of the 6392 features of the _hctsa_ v3.0.0 feature set.
 The other 8, the persistent-homology features (`NL_PersistentHomology`), need the optional `ripser` package; without it the calculator skips them and warns.
 For the full feature set, install with the `tda` extra:
 

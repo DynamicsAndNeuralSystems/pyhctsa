@@ -42,7 +42,7 @@
    :target: https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/LICENSE
    
 The **PY**\ thon toolkit for **H**\ ighly **C**\ omparative **T**\ ime-**S**\ eries **A**\ nalysis (``pyhctsa``) is a living library of time-series analysis methods.
-With over 6700 time-series features derived from interpretable theory, ``pyhctsa`` is the most comprehensive feature set in native Python.
+With over 6300 time-series features derived from interpretable theory, ``pyhctsa`` is the most comprehensive feature set in native Python.
 
 
 Installation
