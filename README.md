@@ -101,7 +101,8 @@ instances and *F* is the number of time-series features.
 ## Version 2 and this repository's history
 
 _pyhctsa_ 2.0 was published in October 2026 in a re-created repository with a fresh history. Every function
-from Matlab was implemented clean-room from published methods and public documentation. Third-party code is now
+that depended on MATLAB code was implemented clean-room from published methods and public documentation.
+Third-party code is now
 bundled only under GPL-compatible licenses (see [Licenses](#licenses)). Earlier releases (1.x) have been yanked;
 please upgrade.
 
