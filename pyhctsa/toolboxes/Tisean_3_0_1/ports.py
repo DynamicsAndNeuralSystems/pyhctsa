@@ -97,6 +97,92 @@ def _tisean_boxcount(y: np.ndarray, delay: int, maxembed: int, epscount: int, q:
     return eps, h, dh
 
 
+@njit(cache=True)
+def _lyap_r_neighbors(emb, n_refs, n_cand, mindist, tol2):
+    # For each reference vector (the first ``n_refs`` rows of ``emb``) the candidate neighbors
+    # (the first ``n_cand`` rows) outside its Theiler window and not repeats of it, that are within
+    # 1e-12 of the nearest one's distance (only a neighbor closer than 1 is accepted). Returns the
+    # pairs (reference, neighbor) in reference order and the number of neighbors of each
+    # reference, or None if a reference has no neighbor.
+    dim = emb.shape[1]
+    d2 = np.empty(n_cand)
+    cap = 4 * n_refs
+    pr = np.empty(cap, dtype=np.int64)
+    pn = np.empty(cap, dtype=np.int64)
+    n_near = np.zeros(n_refs)
+    tot = 0
+    for r in range(n_refs):
+        dmin = np.inf
+        for j in range(n_cand):
+            acc = 0.0
+            for k in range(dim):
+                dd = emb[r, k] - emb[j, k]
+                acc += dd * dd
+            if abs(r - j) <= mindist or acc <= tol2:
+                acc = np.inf
+            d2[j] = acc
+            if acc < 1.0 and acc < dmin:
+                dmin = acc
+        if np.isinf(dmin):
+            return None
+        root = np.sqrt(dmin) + 1e-12
+        lim = root * root
+        for j in range(n_cand):
+            if d2[j] <= lim:
+                if tot == cap:
+                    cap *= 2
+                    pr2 = np.empty(cap, dtype=np.int64)
+                    pn2 = np.empty(cap, dtype=np.int64)
+                    pr2[:tot] = pr[:tot]
+                    pn2[:tot] = pn[:tot]
+                    pr = pr2
+                    pn = pn2
+                pr[tot] = r
+                pn[tot] = j
+                tot += 1
+                n_near[r] += 1.0
+    return pr[:tot].copy(), pn[:tot].copy(), n_near
+
+
+@njit(cache=True)
+def _lyap_r_divergence(emb, pair_ref, pair_nb, weight, steps, tol2, chunk):
+    # The weighted sum over the pairs that never merge (distance within tol of zero at some step
+    # after the first) of the log squared distance at each step, and which pairs those are. The
+    # pairs are summed in order within chunks of ``chunk`` pairs, and the chunk sums added in
+    # order, so that the result does not depend on how the work is done.
+    dim = emb.shape[1]
+    lyap = np.zeros(steps + 1)
+    csum = np.zeros(steps + 1)
+    kept = np.zeros(pair_ref.size, dtype=np.bool_)
+    for c in range(0, pair_ref.size, chunk):
+        csum[:] = 0.0
+        for p in range(c, min(c + chunk, pair_ref.size)):
+            a = pair_ref[p]
+            b = pair_nb[p]
+            merged = False
+            for t in range(1, steps + 1):
+                acc = 0.0
+                for k in range(dim):
+                    dd = emb[a + t, k] - emb[b + t, k]
+                    acc += dd * dd
+                if acc <= tol2:
+                    merged = True
+                    break
+            if merged:
+                continue
+            kept[p] = True
+            w = weight[p]
+            for t in range(steps + 1):
+                acc = 0.0
+                for k in range(dim):
+                    dd = emb[a + t, k] - emb[b + t, k]
+                    acc += dd * dd
+                csum[t] += w * np.log(acc)
+        for t in range(steps + 1):
+            lyap[t] += csum[t]
+    return lyap, kept
+
+
 def _tisean_lyap_r(y: np.ndarray, delay: int, dim: int, mindist: int, steps: int) -> Union[tuple, None]:
     # TISEAN's ``lyap_r -d<delay> -m<dim> -t<mindist> -s<steps>`` (Rosenstein et al.; source_c/lyap_r.c
     # as modified in hctsa), in process. For every reference vector, the nearest neighbors (outside
@@ -125,44 +211,20 @@ def _tisean_lyap_r(y: np.ndarray, delay: int, dim: int, mindist: int, steps: int
     refs = np.arange(maxlength + 1)
     tol2 = 1e-12 ** 2  # (squared) distances closer than 1e-12 are equal; DIST_TOL in lyap_r.c
 
-    # Nearest neighbors, in chunks of reference points
-    pair_ref, pair_nb, n_near = [], [], np.zeros(refs.size)
-    cand = np.arange(n_cand)
-    chunk = max(1, int(2e6 // (n_cand * dim)))
-    for c in range(0, refs.size, chunk):
-        r = refs[c:c + chunk]
-        d2 = np.zeros((r.size, n_cand))
-        for k in range(dim):
-            d2 += np.square(emb[r, k][:, None] - emb[:n_cand, k][None, :])
-        d2[(np.abs(r[:, None] - cand[None, :]) <= mindist) | (d2 <= tol2)] = np.inf
-        dmin = np.where(d2 < 1.0, d2, np.inf).min(axis=1)  # only a neighbor within 1 is accepted
-        if np.any(np.isinf(dmin)):
-            return None  # some reference point never gets a neighbor
-        lim = np.square(np.sqrt(dmin) + 1e-12)
-        ri, ci = np.nonzero(d2 <= lim[:, None])
-        pair_ref.append(r[ri])
-        pair_nb.append(ci)
-        n_near[c:c + chunk] = np.bincount(ri, minlength=r.size)
-    pair_ref = np.concatenate(pair_ref)
-    pair_nb = np.concatenate(pair_nb)
+    # Nearest neighbors, then the divergence of each neighbor pair over time
+    nbrs = _lyap_r_neighbors(emb, refs.size, n_cand, mindist, tol2)
+    if nbrs is None:
+        return None  # some reference point never gets a neighbor
+    pair_ref, pair_nb, n_near = nbrs
     weight = 1.0 / n_near[pair_ref]
-
-    # Divergence of the neighbor pairs over time
-    found = 0.0
-    lyap = np.zeros(steps + 1)
     chunk = max(1, int(2e6 // ((steps + 1) * dim)))
-    steps_idx = np.arange(steps + 1)
+    lyap, kept = _lyap_r_divergence(emb, pair_ref, pair_nb, weight, steps, tol2, chunk)
+    found = 0.0
     for c in range(0, pair_ref.size, chunk):
-        a = pair_ref[c:c + chunk, None] + steps_idx[None, :]
-        b = pair_nb[c:c + chunk, None] + steps_idx[None, :]
-        dx = np.sum(np.square(emb[a] - emb[b]), axis=2)
-        kept = ~np.any(dx[:, 1:] <= tol2, axis=1)  # pairs that never merge
-        w = weight[c:c + chunk][kept]
-        found += np.sum(w)
-        lyap += np.sum(w[:, None] * np.log(dx[kept]), axis=0)
+        found += np.sum(weight[c:c + chunk][kept[c:c + chunk]])
     if found == 0:
         return np.empty((0, 2))
-    return np.column_stack([steps_idx, lyap / found / 2.0])
+    return np.column_stack([np.arange(steps + 1), lyap / found / 2.0])
 
 
 # ------------------------------------------------------------------------------
@@ -250,6 +312,74 @@ def _c1_kth_distance(ye, off, refs, delay, m, ncomp, nmin, k):
 
 
 @njit(cache=True)
+def _c1_kth_distances(ye, refs, delay, m, nmin, ncomps, ks):
+    """
+    :func:`_c1_kth_distance` for several ``(ncomp, k)`` at once: ``ncomps`` (G,) are distinct
+    numbers of candidate points and ``ks`` (G, K) the neighbor ranks asked for at each (0 pads).
+    Returns an array of shape (G, K, refs.size). The distances from a reference point to all the
+    candidates are computed once; the Theiler window around it, cyclic over the ``ncomp``
+    candidates, is a single cyclic interval of ``2 * nmin + 1`` of them, and the ranks asked for
+    at one ``ncomp`` are read off one partial sort.
+    """
+    lo = (m - 1) * delay + 1
+    G = ncomps.size
+    K = ks.shape[1]
+    ncmax = 0
+    for g in range(G):
+        if ncomps[g] > ncmax:
+            ncmax = ncomps[g]
+    out = np.full((G, K, refs.size), np.nan, dtype=np.float32)
+    dfull = np.empty(ncmax, dtype=np.float32)
+    buf = np.empty(ncmax, dtype=np.float32)
+    for r in range(refs.size):
+        n = refs[r]
+        for idx in range(ncmax):
+            q = lo + idx
+            dis = np.float32(0.0)
+            for i in range(m):
+                dx = abs(ye[n - i * delay] - ye[q - i * delay])
+                if dx > dis:
+                    dis = dx
+            dfull[idx] = dis
+        for g in range(G):
+            nc = ncomps[g]
+            if 2 * nmin + 1 >= nc:
+                continue  # every candidate is in the Theiler window
+            cidx = (n - lo) % nc
+            a = cidx - nmin
+            b = cidx + nmin
+            cnt = 0
+            if a >= 0 and b < nc:
+                for idx in range(0, a):
+                    buf[cnt] = dfull[idx]
+                    cnt += 1
+                for idx in range(b + 1, nc):
+                    buf[cnt] = dfull[idx]
+                    cnt += 1
+            elif a < 0:
+                for idx in range(b + 1, a + nc):
+                    buf[cnt] = dfull[idx]
+                    cnt += 1
+            else:
+                for idx in range(b - nc + 1, a):
+                    buf[cnt] = dfull[idx]
+                    cnt += 1
+            kmx = 0
+            for j in range(K):
+                if ks[g, j] > kmx:
+                    kmx = ks[g, j]
+            if kmx < 1 or cnt < 1:
+                continue
+            mm = min(kmx, cnt)
+            srt = np.sort(np.partition(buf[:cnt], mm - 1)[:mm])
+            for j in range(K):
+                k = ks[g, j]
+                if k >= 1 and k <= cnt:
+                    out[g, j, r] = srt[k - 1]
+    return out
+
+
+@njit(cache=True)
 def _f32_cumsum_last(v):
     s = np.float32(0.0)
     for i in range(v.size):
@@ -291,10 +421,34 @@ def _c1_curves(y: np.ndarray, delay: int, m_from: int, m_to: int, nmin: int, n_r
             curves.append(np.empty((0, 2), dtype=np.float32))
             continue
         pl = _logf(F32(F32(1.0) / F32(nvalid)))
+        trips = int(F32(F32(0.0) - pl) / resl) + 1
+        # the (ncomp, k) of every mass step, so that the k-th neighbor distances of all of them
+        # come from one pass over the candidates of each reference point
+        _c1_centers(nmax, m, delay, ju)
+        refs = ju[:min(n_ref, nvalid)].copy()  # at most as many centers as embedded points
+        wanted = {}
+        pl_d = pl
+        for _ in range(trips):
+            n_eff_d = nvalid - 2 * nmin - 1
+            if n_eff_d >= 1:
+                k_d = min(int(F32(_expf(pl_d) * F32(n_eff_d))) + 1, n_eff_d)
+                nc_d = nvalid
+                if k_d > kmax:
+                    nc_d = int(F32(F32(F32(n_eff_d) * F32(kmax)) / F32(k_d)) + F32(2 * nmin + 1))
+                    k_d = kmax
+                wanted.setdefault(nc_d, set()).add(k_d)
+            pl_d = F32(pl_d + resl)
+        nc_arr = np.array(sorted(wanted), dtype=np.int64)
+        k_cols = max((len(v) for v in wanted.values()), default=1)
+        k_arr = np.zeros((nc_arr.size, k_cols), dtype=np.int64)
+        for g, nc_g in enumerate(nc_arr):
+            for j, k_g in enumerate(sorted(wanted[int(nc_g)])):
+                k_arr[g, j] = k_g
+        e_all = _c1_kth_distances(ye, refs, delay, m, nmin, nc_arr, k_arr) if nc_arr.size else None
         # (a Fortran DO loop over a real: the trip count int((0 - pl) / resl) + 1 is fixed first, the
         # variable then accumulates; the last mass can be 1 or a hair above, for instance when
         # nvalid is a power of two)
-        for _ in range(int(F32(F32(0.0) - pl) / resl) + 1):
+        for _ in range(trips):
             ncomp = nvalid
             n_eff = ncomp - 2 * nmin - 1  # neighbors a point can have outside its Theiler window
             if n_eff < 1:  # every point lies in every other's Theiler window: no mass to compute
@@ -308,9 +462,9 @@ def _c1_curves(y: np.ndarray, delay: int, m_from: int, m_to: int, nmin: int, n_r
             psi = _C1_PSI[k] if k <= 20 else F32(_logf(F32(k)) - F32(F32(1.0) / F32(2.0 * k)))
             pln = F32(psi - _logf(F32(ncomp - 2 * nmin - 1)))
             if k != kpr:
-                _c1_centers(nmax, m, delay, ju)
-                refs = ju[:min(n_ref, nvalid)].copy()  # at most as many centers as embedded points
-                e = _c1_kth_distance(ye, off, refs, delay, m, ncomp, nmin, k)
+                g = int(np.searchsorted(nc_arr, ncomp))
+                j = int(np.flatnonzero(k_arr[g] == k)[0])
+                e = e_all[g, j]
                 # TISEAN sweeps the reference points with a neighborhood size that grows by
                 # sqrt(2) until each has k neighbors; the sum of logs is in that order
                 eps = F32(_expf(F32(pln / F32(m))) * sd)
@@ -752,7 +906,7 @@ def _nstat_z_error(ser, base1, base2, clength, m, tau, minn, step, causal, cente
         if cnt < minn:
             return np.nan
         # the first eps in the sequence eps0, eps0*epsf, ... with at least minn neighbors
-        dmin = np.sort(dists[:cnt])[minn - 1]
+        dmin = np.partition(dists[:cnt], minn - 1)[minn - 1]
         eps = eps0 / epsf
         while True:
             eps *= epsf

@@ -1533,6 +1533,29 @@ def randomize_ordinal(y: ArrayLike, tau: Union[int, str] = 1) -> Union[dict, flo
     return out
 
 
+@njit(cache=True)
+def _fuzzy_similarity_sum(Zt, width, n):
+    # The sum over ordered pairs of distinct runs (columns of ``Zt``, shape (m, Nv)) of the fuzzy
+    # similarity ``exp(-(d/width)**n)``, d the Chebyshev distance: twice the sum over the pairs
+    # i < j (the distance is symmetric). A similarity below 1e-324 is zero.
+    m, nv = Zt.shape
+    total = 0.0
+    for i in range(nv - 1):
+        acc = 0.0
+        for j in range(i + 1, nv):
+            d = abs(Zt[0, i] - Zt[0, j])
+            for k in range(1, m):
+                dk = abs(Zt[k, i] - Zt[k, j])
+                if dk > d:
+                    d = dk
+            x = d / width
+            x = x * x if n == 2.0 else x ** n
+            if x < 745.0:
+                acc += np.exp(-x)
+        total += acc
+    return 2.0 * total
+
+
 @dict_output
 def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str] = 1,
                        mapping_how: str = 'ncdf') -> Union[dict, float]:
@@ -1688,7 +1711,7 @@ def fuzzy_entropy(y: ArrayLike, M: int = 2, r: float = 0.2, n: float = 2) -> dic
 
     All runs of length 1, ..., M+1 are taken from the same ``N - M`` starting points, so
     that successive dimensions are compared on the same footing. The distances are
-    computed in blocks, so memory use does not grow with the square of the series length
+    computed pair by pair, so memory use does not grow with the square of the series length
     (the run time does: it is O(N^2 M)). Port of hctsa's ``EN_FuzzyEn``.
 
     The similarity is written here as ``exp(-(d/r)**n)``, so that ``r`` is a distance (in
@@ -1743,17 +1766,10 @@ def fuzzy_entropy(y: ArrayLike, M: int = 2, r: float = 0.2, n: float = 2) -> dic
     width = r * sd
 
     phi = np.zeros(M + 1)
-    block_size = max(1, int(2e6 // Nv))  # cap the size of the distance block
     for m in range(1, M + 2):
         Z = y[np.arange(Nv)[:, None] + np.arange(m)[None, :]]
         Z = Z - Z.mean(axis=1, keepdims=True)  # remove each run's own mean (local baseline)
-        total = 0.0
-        for i0 in range(0, Nv, block_size):
-            Zi = Z[i0:i0 + block_size]
-            D = np.abs(Zi[:, 0][:, None] - Z[:, 0][None, :])
-            for k in range(1, m):
-                np.maximum(D, np.abs(Zi[:, k][:, None] - Z[:, k][None, :]), out=D)  # Chebyshev
-            total += np.exp(-(D / width) ** n).sum() - Zi.shape[0]  # drop self-similarity (=1)
+        total = _fuzzy_similarity_sum(np.ascontiguousarray(Z.T), float(width), float(n))
         phi[m - 1] = total / (Nv * (Nv - 1))
 
     if np.any(phi <= 0):

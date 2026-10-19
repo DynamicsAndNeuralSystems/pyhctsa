@@ -1,8 +1,10 @@
+import hashlib
 import logging
 import warnings
 from typing import Union
 
 import numpy as np
+from numba import njit as _njit
 from numpy.typing import ArrayLike
 from scipy.optimize import minimize_scalar
 from scipy.signal import correlate, find_peaks, welch as _welch
@@ -192,6 +194,10 @@ def _max_embedding_dim(n: int) -> int:
     return max(1, int(np.floor(2 * np.log10(n))))
 
 
+_FNN_DIM_CACHE: list = []  # ((digest, N, tau, threshold), m); small FIFO cache
+_FNN_DIM_CACHE_SIZE = 8
+
+
 def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.05) -> float:
     """
     Embedding dimension chosen by false nearest neighbors for another algorithm, as hctsa's
@@ -205,10 +211,20 @@ def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.05) -> floa
     computed); unless the fraction fell below the threshold it is a lower bound. NaN when it
     cannot be determined.
     """
+    # many operations embed the same series with the same delay and threshold: the last few
+    # results are kept (keyed on the series' values), as for the delays of :func:`get_tau`
+    y = np.ascontiguousarray(np.asarray(y, dtype=float).ravel())
+    digest = hashlib.blake2b(y.tobytes(), digest_size=16).digest()
+    key = (digest, y.size, int(tau), float(threshold))
+    for c_key, c_m in _FNN_DIM_CACHE:
+        if c_key == key:
+            return c_m
     m = fnn(y, tau, 10, ('ac', 1), True, threshold, 5)
-    if np.isnan(m):
-        return m
-    return float(min(m, _max_embedding_dim(np.asarray(y).size)))
+    if not np.isnan(m):
+        m = float(min(m, _max_embedding_dim(y.size)))
+    _FNN_DIM_CACHE.append((key, m))
+    del _FNN_DIM_CACHE[:-_FNN_DIM_CACHE_SIZE]
+    return m
 
 
 def _embedding_params(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
@@ -1700,7 +1716,6 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
 
 
 
-from numba import njit as _njit  # noqa: E402 (used by the Takens' estimator kernel below)
 
 
 @_njit(cache=True)
@@ -2165,6 +2180,51 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
 
 
 
+@_njit(cache=True, fastmath={'reassoc', 'contract', 'nsz'})
+def _line_fit_badness(x, y, starts, ends, gamma):
+    # For every window x[s-1:e], y[s-1:e] (s in ``starts``, e in ``ends``, 1-based inclusive) the
+    # mean absolute residual of the least-squares straight line, less ``gamma`` per point: the
+    # (len(starts), len(ends)) matrix. The line's sums are accumulated as the window grows (on
+    # data centered on their overall means), so each window costs one pass, for the residuals.
+    n = x.size
+    xm = 0.0
+    ym = 0.0
+    for i in range(n):
+        xm += x[i]
+        ym += y[i]
+    xm /= n
+    ym /= n
+    xc = x - xm
+    yc = y - ym
+    out = np.empty((starts.size, ends.size))
+    for a in range(starts.size):
+        s = starts[a] - 1
+        sx = 0.0
+        sy = 0.0
+        sxx = 0.0
+        sxy = 0.0
+        b = 0
+        for e in range(s, ends[ends.size - 1]):
+            sx += xc[e]
+            sy += yc[e]
+            sxx += xc[e] * xc[e]
+            sxy += xc[e] * yc[e]
+            if e + 1 == ends[b]:
+                cnt = e + 1 - s
+                mx = sx / cnt
+                my = sy / cnt
+                slope = (sxy - cnt * mx * my) / (sxx - cnt * mx * mx)
+                icpt = my - slope * mx
+                acc = 0.0
+                for i in range(s, e + 1):
+                    acc += abs(slope * xc[i] + icpt - yc[i])
+                out[a, b] = acc / cnt - gamma * cnt
+                b += 1
+                if b == ends.size:
+                    break
+    return out
+
+
 def _dimensions_scaling_range(logr: np.ndarray, log_n: np.ndarray, gamma: float = 0.02) -> tuple:
     # The scaling range of ln N(eps) against ln eps (start in the first half, end in the second
     # half) that minimizes the mean absolute residual of a straight-line fit less gamma per point
@@ -2172,12 +2232,9 @@ def _dimensions_scaling_range(logr: np.ndarray, log_n: np.ndarray, gamma: float 
     stptr, endptr = _scaling_range_endpoints(logr.size)
     if stptr.size == 0 or endptr.size == 0:
         raise _D2DataError('too few length scales to find a scaling range')
-    mybad = np.empty((stptr.size, endptr.size))
-    for i, s in enumerate(stptr):
-        for j, e in enumerate(endptr):
-            xs, ys = logr[s - 1:e], log_n[s - 1:e]
-            p = np.polyfit(xs, ys, 1)
-            mybad[i, j] = np.mean(np.abs(p[0] * xs + p[1] - ys)) - gamma * xs.size
+    mybad = _line_fit_badness(np.ascontiguousarray(logr, dtype=float),
+                              np.ascontiguousarray(log_n, dtype=float),
+                              stptr.astype(np.int64), endptr.astype(np.int64), float(gamma))
     a, b, _ = _argmin_first_colmajor(mybad)
     s, e = int(stptr[a]), int(endptr[b])  # 1-based, inclusive
     xs, ys = logr[s - 1:e], log_n[s - 1:e]
@@ -2515,10 +2572,9 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
         # Vary just the end time, which is at least at the 50% mark of the maximum
         imin = time_to(0.5)
         endptr = np.arange(imin, imax + 1)
-        bad = np.empty(endptr.size)
-        for i, e in enumerate(endptr):
-            pf = np.polyfit(t_scal[:e], p_scal[:e], 1)
-            bad[i] = np.mean(np.abs(pf[0] * t_scal[:e] + pf[1] - p_scal[:e])) - 0.006 * e
+        bad = _line_fit_badness(np.ascontiguousarray(t_scal, dtype=float),
+                                np.ascontiguousarray(p_scal, dtype=float),
+                                np.array([1], dtype=np.int64), endptr.astype(np.int64), 0.006)[0]
         e = int(endptr[int(np.argmin(bad))])
         pp = np.polyfit(t_scal[:e], p_scal[:e], 1)
         res = pp[0] * t_scal[:e] + pp[1] - p_scal[:e]
@@ -3270,15 +3326,19 @@ def _line_lengths(group: np.ndarray, pos: np.ndarray, min_len: int) -> np.ndarra
     Lengths (at least `min_len`) of the runs of consecutive `pos` values within each `group`
     (e.g. diagonal offset or column of a recurrence plot).
     """
-    order = np.lexsort((pos, group))
-    group, pos = group[order], pos[order]
-    new_run = np.ones(group.size, dtype=bool)
-    new_run[1:] = (group[1:] != group[:-1]) | (pos[1:] - pos[:-1] != 1)
-    run_len = np.diff(np.append(np.flatnonzero(new_run), group.size))
+    # one sort of a combined key, ``group * span + pos`` (``span`` leaves a gap between groups, so
+    # that runs cannot join across them), is much faster than a two-key lexsort
+    if group.size == 0:
+        return np.empty(0, dtype=np.int64)
+    key = group.astype(np.int64) * (int(pos.max()) + 2) + pos
+    key.sort()
+    new_run = np.ones(key.size, dtype=bool)
+    new_run[1:] = np.diff(key) != 1
+    run_len = np.diff(np.append(np.flatnonzero(new_run), key.size))
     return run_len[run_len >= min_len]
 
 
-def _recurrence_time_stats(Y: np.ndarray, radius: float, theiler: int) -> tuple:
+def _recurrence_time_stats(Y: np.ndarray, radius: float, theiler: int, pairs: tuple = None) -> tuple:
     """
     Mean recurrence time and modal probability mass of the white vertical line lengths of
     the recurrence plot of `Y` (hctsa's ``SUB_recurrenceTimeStats``).
@@ -3286,24 +3346,27 @@ def _recurrence_time_stats(Y: np.ndarray, radius: float, theiler: int) -> tuple:
     For each point, the number of non-recurrent points between successive recurrent points
     (neighbors within `radius`, outside the Theiler window; the edges of the Theiler band
     count as recurrent, and the neighbors before and after the point are differenced
-    separately) are pooled over all points.
+    separately) are pooled over all points. `pairs` is the ``(src, dst)`` of all pairs within
+    `radius` if already known (see :func:`_recurrent_pairs`).
     """
     n = Y.shape[0]
-    src, dst = _recurrent_pairs(Y, radius)
+    src, dst = _recurrent_pairs(Y, radius) if pairs is None else pairs
     keep = np.abs(dst - src) > theiler  # excludes the Theiler window (and the point itself)
     src, dst = src[keep], dst[keep]
     j = np.arange(n)
     # the band edges act as recurrent points, so that lines start at the edge of the band
     left, right = j[j - theiler >= 0], j[j + theiler <= n - 1]
-    before = np.concatenate([np.column_stack((src[dst < src], dst[dst < src])),
-                             np.column_stack((left, left - theiler))])
-    after = np.concatenate([np.column_stack((src[dst > src], dst[dst > src])),
-                            np.column_stack((right, right + theiler))])
+    lt, gt = dst < src, dst > src
+    before = (np.concatenate([src[lt], left]).astype(np.int64) * n
+              + np.concatenate([dst[lt], left - theiler]))
+    after = (np.concatenate([src[gt], right]).astype(np.int64) * n
+             + np.concatenate([dst[gt], right + theiler]))
     w = []
-    for pairs in (before, after):
-        pairs = pairs[np.lexsort((pairs[:, 1], pairs[:, 0]))]
-        same = pairs[1:, 0] == pairs[:-1, 0]
-        w.append(np.diff(pairs[:, 1])[same] - 1)
+    for key in (before, after):
+        key.sort()  # by point, then by neighbor (all neighbors lie in 0..n-1)
+        row = key // n
+        same = row[1:] == row[:-1]
+        w.append(np.diff(key)[same] - 1)
     w = np.concatenate(w)
     w = w[w >= 1]  # (drops the zero-length "lines" between consecutive recurrent points)
     if w.size == 0:
@@ -3411,7 +3474,8 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
         return np.nan
 
     out = {}
-    out['T_MRT'], out['N_MPRT'] = _recurrence_time_stats(Y, radius, theiler)
+    all_pairs = _recurrent_pairs(Y, radius)
+    out['T_MRT'], out['N_MPRT'] = _recurrence_time_stats(Y, radius, theiler, all_pairs)
     out['T_MRT_var'] = out['N_MPRT_var'] = np.nan
     if np.isnan(out['T_MRT']):
         logger.warning('No recurrence-time samples found outside the Theiler window -- radius too small?')
@@ -3423,8 +3487,15 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
     if seg_len < 50:  # too short for a meaningful within-segment estimate
         return out
     theiler_seg = min(theiler, seg_len // 5)
-    stats = np.array([_recurrence_time_stats(Y[s * seg_len:(s + 1) * seg_len], radius, theiler_seg)
-                      for s in range(num_segments)])
+    # (the pairs within a segment are those of the whole series with both points in the segment)
+    src_all, dst_all = all_pairs
+    stats = []
+    for s in range(num_segments):
+        lo, hi = s * seg_len, (s + 1) * seg_len
+        inside = (src_all >= lo) & (src_all < hi) & (dst_all >= lo) & (dst_all < hi)
+        stats.append(_recurrence_time_stats(Y[lo:hi], radius, theiler_seg,
+                                            (src_all[inside] - lo, dst_all[inside] - lo)))
+    stats = np.array(stats)
     if not np.any(np.isnan(stats[:, 0])):
         out['T_MRT_var'] = float(np.var(stats[:, 0], ddof=1))
         out['N_MPRT_var'] = float(np.var(stats[:, 1], ddof=1))

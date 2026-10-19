@@ -57,6 +57,9 @@ typedef struct {
     double *hs;                /* scratch delay vector, EMBED * DIM          */
     double **found;            /* EMBED*DIM rows of HOWOFTEN counters        */
     double *found_flat;
+    double *hist_flat;         /* pair counts per exact length-scale index (hist mode)  */
+    double **hist;
+    int use_hist;              /* no cap on the pair count: count into hist, accumulate at the end */
     double *norm;
     double *epsm;
 } d2_ctx;
@@ -72,6 +75,8 @@ static void ctx_free(d2_ctx *c)
     free(c->hs);
     free(c->found);
     free(c->found_flat);
+    free(c->hist_flat);
+    free(c->hist);
     free(c->norm);
     free(c->epsm);
     memset(c, 0, sizeof(*c));
@@ -197,9 +202,15 @@ static void make_c2_dim(d2_ctx *c, int64_t n)
                                     else
                                         maxi = (int64_t)((c->lneps - log(max)) / c->lnfac);
                                 }
-                                if (count > 0)
-                                    for (k = c->imin; k <= maxi; k++)
-                                        c->found[count][k] += 1.0;
+                                if (count > 0) {
+                                    if (c->use_hist) {
+                                        if (maxi >= 0)
+                                            c->hist[count][maxi < c->howoften1 ? maxi : c->howoften1] += 1.0;
+                                    }
+                                    else
+                                        for (k = c->imin; k <= maxi; k++)
+                                            c->found[count][k] += 1.0;
+                                }
                             } else {
                                 small = 1;
                                 break;
@@ -240,8 +251,13 @@ static void make_c2_1(d2_ctx *c, int64_t n)
                         maxi = c->howoften1;
                     else
                         maxi = (int)((c->lneps - log(max)) / c->lnfac);
-                    for (i = c->imin; i <= maxi; i++)
-                        c->found[0][i] += 1.0;
+                    if (c->use_hist) {
+                        if (maxi >= 0)
+                            c->hist[0][maxi < c->howoften1 ? maxi : c->howoften1] += 1.0;
+                    }
+                    else
+                        for (i = c->imin; i <= maxi; i++)
+                            c->found[0][i] += 1.0;
                 }
             }
             element = c->listc1[element];
@@ -343,6 +359,19 @@ static int d2_run(d2_ctx *c)
            already final at this point, so we simply stop accumulating. */
         if (c->imin > c->howoften1)
             break;
+    }
+
+    if (c->use_hist) {
+        /* found[row][k] counts the pairs whose scale index is at least k: a suffix sum of the
+           per-index counts (all counts are integers below 2^53, so the sums are exact) */
+        int64_t row;
+        for (row = 0; row < (int64_t)(c->DIM * c->EMBED); row++) {
+            double acc = 0.0;
+            for (i = c->howoften1; i >= 0; i--) {
+                acc += c->hist[row][i];
+                c->found[row][i] += acc;
+            }
+        }
     }
 
     return 0;
@@ -494,16 +523,21 @@ static PyObject *py_correlation_sums(PyObject *self, PyObject *args)
         c.hs = (double *)malloc(sizeof(double) * (size_t)nrows);
         c.found = (double **)malloc(sizeof(double *) * (size_t)nrows);
         c.found_flat = (double *)calloc((size_t)(nrows * howoften), sizeof(double));
+        c.hist_flat = (double *)calloc((size_t)(nrows * howoften), sizeof(double));
+        c.hist = (double **)malloc(sizeof(double *) * (size_t)nrows);
         c.norm = (double *)calloc((size_t)howoften, sizeof(double));
         c.epsm = (double *)malloc(sizeof(double) * (size_t)howoften);
 
         if (!c.list || !c.listc1 || !c.scr || !c.oscr || !c.box || !c.boxc1 ||
-            !c.hs || !c.found || !c.found_flat || !c.norm || !c.epsm) {
+            !c.hs || !c.found || !c.found_flat || !c.hist_flat || !c.hist || !c.norm || !c.epsm) {
             PyErr_NoMemory();
             goto fail;
         }
         for (i = 0; i < nrows; i++)
             c.found[i] = c.found_flat + i * howoften;
+        for (i = 0; i < nrows; i++)
+            c.hist[i] = c.hist_flat + i * howoften;
+        c.use_hist = (maxfound == 0);
     }
 
     c.epsm[0] = c.EPSMAX;
