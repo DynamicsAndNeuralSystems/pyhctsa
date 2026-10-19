@@ -100,14 +100,10 @@ instances and *F* is the number of time-series features.
 
 ## Version 2 and this repository's history
 
-_pyhctsa_ 2.0 was published in October 2026 in a re-created repository with a fresh history. An audit found that
-parts of earlier versions were derived from code we did not have the right to distribute. Every affected function
-was re-implemented clean-room from the published methods and public documentation, and third-party code is now
-bundled only under GPL-compatible licenses (see [Licenses](#licenses)). Earlier releases (1.x) have been withdrawn;
+_pyhctsa_ 2.0 was published in October 2026 in a re-created repository with a fresh history. Every function
+from Matlab was implemented clean-room from published methods and public documentation. Third-party code is now
+bundled only under GPL-compatible licenses (see [Licenses](#licenses)). Earlier releases (1.x) have been yanked;
 please upgrade.
-
-Feature values from 2.0 agree closely with _hctsa_ but can differ from those of 1.x, and some features were renamed,
-redefined or removed to match _hctsa_ v3.0. See the release notes for details.
 
 ## Citation
 
