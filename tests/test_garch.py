@@ -67,6 +67,38 @@ def test_gradient(P, Q, gjr, t):
         assert g[i] == pytest.approx(num, abs=1e-7)
 
 
+@pytest.mark.parametrize('P, Q, gjr, t', [(1, 1, False, False), (3, 2, False, False), (0, 2, False, False),
+                                          (2, 1, True, False), (1, 1, False, True), (2, 2, True, True),
+                                          (0, 0, False, True)])
+def test_hessian(P, Q, gjr, t):
+    # the analytic Hessian against central differences of the analytic gradient, extrapolated
+    # (Richardson) to remove their O(step^2) error
+    y = _simulate(600, 0.1, 0.1, 0.8, seed=2)
+    D = G.Data(y)
+    S = G.Spec(P, Q, gjr, t)
+    th = np.zeros(S.k)
+    th[0] = 0.1
+    th[S.ib] = 0.5 / max(P, 1)
+    th[S.ia] = 0.2 / max(Q, 1)
+    if gjr:
+        th[S.ig] = 0.05
+    if t:
+        th[S.ik] = 0.15
+
+    def central(step):
+        H = np.empty((S.k, S.k))
+        for i in range(S.k):
+            e = np.zeros(S.k)
+            e[i] = step
+            H[:, i] = (G._nll(th + e, D, S)[1] - G._nll(th - e, D, S)[1]) / (2 * step)
+        return H
+
+    num = (4 * central(5e-4) - central(1e-3)) / 3
+    H = G._hessian(th, D, S)
+    assert np.array_equal(H, H.T)
+    assert np.max(np.abs(H - num)) <= 1e-7 * np.max(np.abs(H))
+
+
 def test_global_optimum_of_a_two_mode_likelihood():
     # a deterministic chaotic map (Spence-like) has an ARCH(1) mode with a much higher likelihood
     # than the GARCH mode the best grid point leads to; all grid points are run, so the better is found

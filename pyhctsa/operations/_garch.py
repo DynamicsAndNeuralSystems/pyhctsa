@@ -29,7 +29,7 @@ Estimation.  A deterministic grid of starting points (total persistence, share o
 ARCH terms, and for t the tail weight) is scored by the likelihood; the best 12 grid points are taken
 through a coarse sequence of log-barrier Newton problems (barrier weights 1e-3 to 1e-5); the
 two best are then taken to barrier weight 1e-10 (the Newton polish) and the better is the fit.
-Newton steps use the analytic gradient, a central-difference Hessian of it, and flip the sign
+Newton steps use the analytic gradient and the analytic Hessian (see :func:`_nll`), and flip the sign
 of negative curvature.  Nothing is random.
 
 References
@@ -42,11 +42,9 @@ References
 .. [3] T. Bollerslev, "A conditionally heteroskedastic time series model for speculative prices
        and rates of return", Rev. Econ. Stat. 69, 542-547 (1987). DOI: 10.2307/1925546
 """
-from collections import OrderedDict
-
 import numpy as np
 from scipy.signal import lfilter
-from scipy.special import digamma, gammaln
+from scipy.special import digamma, gammaln, polygamma
 
 W_LO, W_HI = 1e-6, 10.0
 RHO_MAX = 0.9999
@@ -115,7 +113,6 @@ class Data:
         self.B = float(np.mean(self.y2))
         self.y2g = self.y2 * (y < 0)
         self._lag = {}
-        self._filtered = OrderedDict()
 
     def lags(self, Q):
         """Lagged squares (N x Q; presample B) and lagged squares of negative values (presample B/2)."""
@@ -130,29 +127,6 @@ class Data:
                 Lg[i:, i - 1] = self.y2g[:N - i]
             self._lag[Q] = (L, Lg)
         return self._lag[Q]
-
-    def filtered_inputs(self, A, Q, gjr):
-        """The constant and lagged-square columns of the variance derivatives (ones, the lagged
-        squares and, for GJR, the lagged squares of negative values), filtered by ``1/A``.
-
-        They depend on theta only through the GARCH coefficients in ``A``, which are unchanged
-        by a step in the constant or the ARCH coefficients (as in most of the coordinate steps
-        of the finite-difference Hessian), so the most recent few are kept, keyed on the exact
-        coefficients. (Each column is filtered on its own, which gives the same values as
-        filtering it with the others.)
-        """
-        key = (A.tobytes(), int(Q), bool(gjr))
-        if key in self._filtered:
-            self._filtered.move_to_end(key)
-            return self._filtered[key]
-        L, Lg = self.lags(Q)
-        M = np.column_stack([np.ones(self.N)] + [L[:, i] for i in range(Q)]
-                            + ([Lg[:, i] for i in range(Q)] if gjr else []))
-        out = lfilter([1.0], A, M, axis=0)
-        self._filtered[key] = out
-        while len(self._filtered) > 8:
-            self._filtered.popitem(last=False)
-        return out
 
 
 def _variance(theta, D, S, want_grad=False):
@@ -176,38 +150,97 @@ def _variance(theta, D, S, want_grad=False):
         return h
     # columns: ones, the lagged variances (P), the lagged squares (Q) and, for GJR, the lagged
     # squares of negative values (Q), each filtered by 1/A (the recursion of h); then kappa (zero)
-    n_in = 1 + Q + (Q if S.gjr else 0)
-    dh = np.zeros((N, 1 + P + Q + (Q if S.gjr else 0) + (1 if S.t else 0)))
-    if not P:
-        dh[:, 0] = 1.0
-        dh[:, 1:n_in] = np.column_stack([L] + ([Lg] if S.gjr else []))
-        return h, dh
-    hl = np.empty((N, P))
+    cols = [np.ones(N)]
     for j in range(1, P + 1):
-        hl[:j, j - 1] = B
-        hl[j:, j - 1] = h[:N - j]
-    const = D.filtered_inputs(A, Q, S.gjr)
-    dh[:, 0] = const[:, 0]
-    dh[:, 1:1 + P] = lfilter([1.0], A, hl, axis=0)
-    dh[:, 1 + P:P + n_in] = const[:, 1:]
-    return h, dh
+        hl = np.empty(N)
+        hl[:j] = B
+        hl[j:] = h[:N - j]
+        cols.append(hl)
+    cols += [L[:, i] for i in range(Q)]
+    if S.gjr:
+        cols += [Lg[:, i] for i in range(Q)]
+    if S.t:
+        cols.append(np.zeros(N))
+    M = np.column_stack(cols)
+    if P:
+        M[:, :S.k - (1 if S.t else 0)] = lfilter([1.0], A, M[:, :S.k - (1 if S.t else 0)], axis=0)
+    return h, M
 
 
-def _nll(theta, D, S, want_grad=True, want_scores=False):
-    """Negative log-likelihood per observation, with its gradient (and per-observation scores)."""
+def _curvature_of_h(theta, dh, w1, S):
+    """``sum_t w1_t d2h_t / N``: the part of the Hessian from the second derivatives of the variances.
+
+    Differentiating ``dh_t/dtheta_l = x_{t,l} + sum_j b_j dh_{t-j}/dtheta_l`` (``x_{t,l}`` is 1,
+    ``h_{t-j}``, ``y_{t-i}^2`` or ``y_{t-i}^2 1[y_{t-i} < 0]``) once more gives the same recursion
+    for ``d2h_t/dtheta_k dtheta_l``, driven by ``dh_{t-j}/dtheta_l`` when ``k = b_j`` plus
+    ``dh_{t-m}/dtheta_k`` when ``l = b_m``: the inputs ``x`` are linear in theta except the lagged
+    variances. So ``d2h`` is nonzero only for pairs with a GARCH coefficient, and each such pair is
+    one more filter by ``1/A`` (zero presample: the presample variance B does not depend on theta).
+    """
+    P = S.P
+    if not P:
+        return np.zeros((S.k, S.k))
+    N = dh.shape[0]
+    kv = S.k - (1 if S.t else 0)  # (the variances do not depend on kappa)
+    pairs, src = [], []
+    for j in range(1, P + 1):
+        bj = S.ib[j - 1]
+        for l in range(kv):
+            if l in S.ib and S.ib.index(l) < j - 1:
+                continue  # (the pair is listed under the other GARCH coefficient)
+            col = np.zeros(N)
+            col[j:] = dh[:N - j, l]
+            if l in S.ib:
+                m = S.ib.index(l) + 1
+                col[m:] += dh[:N - m, bj]
+            pairs.append((bj, l))
+            src.append(col)
+    A = np.concatenate(([1.0], -theta[S.ib]))
+    v = (w1 @ lfilter([1.0], A, np.column_stack(src), axis=0)) / N
+    C = np.zeros((S.k, S.k))
+    for (a, b), val in zip(pairs, v):
+        C[a, b] += val
+        if a != b:
+            C[b, a] += val
+    return C
+
+
+def _nll(theta, D, S, want_grad=True, want_scores=False, want_hess=False):
+    """Negative log-likelihood per observation, with its gradient (and per-observation scores, or
+    the Hessian).
+
+    With ``l_t`` the negative log-likelihood of observation t as a function of ``h_t`` (and, for t
+    innovations, of ``nu``), the chain rule gives the gradient ``mean(l_h dh)`` and the Hessian
+    ``mean(l_hh dh dh^T + l_h d2h)`` (see :func:`_curvature_of_h` for ``d2h``). Gaussian:
+    ``l = (log(2 pi) + log h + y^2/h)/2``, ``l_h = (1/h - y^2/h^2)/2``,
+    ``l_hh = (2 y^2/h - 1)/(2 h^2)``. Student-t, with ``w = y^2/(h(nu - 2))`` and
+    ``q = w/(1 + w)``: ``l = -c(nu) + log(h)/2 + (nu + 1) log(1 + w)/2``, ``l_h = (1 - (nu + 1) q)/(2h)``,
+    ``l_hh = (-1 + (nu + 1) w (2 + w)/(1 + w)^2)/(2 h^2)``, ``l_hnu = -(q - (nu + 1) w/((nu - 2)(1 + w)^2))/(2h)``,
+    ``l_nu = -c'(nu) + log(1 + w)/2 - (nu + 1) q/(2(nu - 2))`` and
+    ``l_nunu = -c''(nu) - q/(2(nu - 2)) + 3q/(2(nu - 2)^2) + (nu + 1) w/(2(nu - 2)^2 (1 + w)^2)``,
+    with ``c'(nu) = (psi((nu+1)/2) - psi(nu/2))/2 - 1/(2(nu - 2))`` and
+    ``c''(nu) = (psi'((nu+1)/2) - psi'(nu/2))/4 + 1/(2(nu - 2)^2)``; the parameter is
+    ``kappa = 1/nu`` (``dnu/dkappa = -nu^2``, ``d2nu/dkappa2 = 2 nu^3``).
+    """
     y2, N = D.y2, D.N
-    if want_grad:
+    if want_grad or want_hess:
         h, dh = _variance(theta, D, S, True)
     else:
         h = _variance(theta, D, S, False)
     if np.any(h <= 0) or not np.all(np.isfinite(h)):
+        if want_hess:
+            return np.inf, None, None
         return (np.inf, None, None) if want_scores else ((np.inf, None) if want_grad else np.inf)
     if not S.t:
         f = 0.5 * (np.log(2 * np.pi) + np.mean(np.log(h) + y2 / h))
-        if not want_grad:
+        if not (want_grad or want_hess):
             return f
         w1 = 0.5 * (1 / h - y2 / h ** 2)
         g = (w1 @ dh) / N
+        if want_hess:
+            w2 = 0.5 * (2 * y2 / h - 1) / h ** 2
+            H = ((dh * w2[:, None]).T @ dh) / N + _curvature_of_h(theta, dh, w1, S)
+            return f, g, 0.5 * (H + H.T)
         if want_scores:
             return f, g, w1[:, None] * dh
         return f, g
@@ -217,13 +250,26 @@ def _nll(theta, D, S, want_grad=True, want_scores=False):
     lw = np.log1p(w)
     c = gammaln((nu + 1) / 2) - gammaln(nu / 2) - 0.5 * np.log(np.pi * (nu - 2))
     f = -c + 0.5 * np.mean(np.log(h)) + 0.5 * (nu + 1) * np.mean(lw)
-    if not want_grad:
+    if not (want_grad or want_hess):
         return f
     w1 = 0.5 / h * (1 - (nu + 1) * w / (1 + w))
     g = (w1 @ dh) / N
     cnu = 0.5 * digamma((nu + 1) / 2) - 0.5 * digamma(nu / 2) - 0.5 / (nu - 2)
     dnu_obs = -cnu + 0.5 * lw - 0.5 * (nu + 1) * w / ((nu - 2) * (1 + w))
     g[S.ik] = np.mean(dnu_obs) * (-nu ** 2)
+    if want_hess:
+        q = w / (1 + w)
+        w2 = 0.5 * (-1 + (nu + 1) * w * (2 + w) / (1 + w) ** 2) / h ** 2
+        H = ((dh * w2[:, None]).T @ dh) / N + _curvature_of_h(theta, dh, w1, S)
+        l_hnu = -0.5 / h * (q - (nu + 1) * w / ((nu - 2) * (1 + w) ** 2))
+        cnu2 = 0.25 * polygamma(1, (nu + 1) / 2) - 0.25 * polygamma(1, nu / 2) + 0.5 / (nu - 2) ** 2
+        l_nunu = (-cnu2 - 0.5 * q / (nu - 2) + 1.5 * q / (nu - 2) ** 2
+                  + 0.5 * (nu + 1) * w / ((nu - 2) ** 2 * (1 + w) ** 2))
+        hk = (l_hnu @ dh) / N * (-nu ** 2)
+        hk[S.ik] = np.mean(l_nunu) * nu ** 4 + 2 * nu ** 3 * np.mean(dnu_obs)
+        H[S.ik, :] = hk
+        H[:, S.ik] = hk
+        return f, g, 0.5 * (H + H.T)
     if want_scores:
         sc = w1[:, None] * dh
         sc[:, S.ik] = dnu_obs * (-nu ** 2)
@@ -231,38 +277,14 @@ def _nll(theta, D, S, want_grad=True, want_scores=False):
     return f, g
 
 
-def _slack_steps(theta, S):
-    """The largest step in each coordinate that keeps every constraint satisfied."""
-    s = S.c - S.A @ theta
-    out = np.full(len(theta), np.inf)
-    for r, si in zip(S.A, s):
-        for i in np.nonzero(r)[0]:
-            out[i] = min(out[i], si / abs(r[i]))
-    return out
-
-
 def _hessian(theta, D, S):
-    k = len(theta)
-    room = _slack_steps(theta, S)
-    H = np.empty((k, k))
-    g0 = None
-    for i in range(k):
-        step = max(min(1e-5 * max(1.0, abs(theta[i])), 0.4 * room[i]), 1e-13)
-        e = np.zeros(k)
-        e[i] = step
-        gp = _nll(theta + e, D, S)[1]
-        gm = _nll(theta - e, D, S)[1]
-        if gp is None or gm is None:
-            if g0 is None:
-                g0 = _nll(theta, D, S)[1]
-            gp = g0 if gp is None else gp
-            gm = g0 if gm is None else gm
-        H[:, i] = (gp - gm) / (2 * step)
-    return 0.5 * (H + H.T)
+    """The Hessian of the negative log-likelihood per observation (analytic, see :func:`_nll`)."""
+    return _nll(theta, D, S, want_hess=True)[2]
 
 
-def _barrier(theta, D, S, mu, want_grad=True):
-    """The log-barrier objective (with its gradient and the constraint slacks if ``want_grad``).
+def _barrier(theta, D, S, mu, want_grad=True, want_hess=False):
+    """The log-barrier objective (with its gradient and the constraint slacks if ``want_grad``, and
+    the Hessian of the negative log-likelihood if ``want_hess``).
 
     The value is the same whether or not the gradient is computed (the conditional variances
     are the same filter of the same inputs), so a line search, which compares values only,
@@ -270,9 +292,16 @@ def _barrier(theta, D, S, mu, want_grad=True):
     """
     s = S.c - S.A @ theta
     if np.any(s <= 0):
+        if want_hess:
+            return np.inf, None, None, None
         return (np.inf, None, None) if want_grad else np.inf
     if not want_grad:
         return _nll(theta, D, S, want_grad=False) - mu * np.sum(np.log(s))
+    if want_hess:
+        f, g, H = _nll(theta, D, S, want_hess=True)
+        if g is None:
+            return np.inf, None, None, None
+        return f - mu * np.sum(np.log(s)), g + mu * (S.A.T @ (1 / s)), s, H
     f, g = _nll(theta, D, S)
     if g is None:
         return np.inf, None, None
@@ -285,8 +314,8 @@ def _newton(theta, D, S, mus, max_it=60, tol=1e-13):
     dec = np.inf
     for mu in mus:
         for _ in range(max_it):
-            phi, g, s = _barrier(theta, D, S, mu)
-            H = _hessian(theta, D, S) + mu * (S.A.T * (1 / s ** 2)) @ S.A
+            phi, g, s, H = _barrier(theta, D, S, mu, want_hess=True)
+            H = H + mu * (S.A.T * (1 / s ** 2)) @ S.A
             ev, V = np.linalg.eigh(H)
             ev = np.maximum(np.abs(ev), 1e-9 * max(1.0, np.abs(ev).max()))
             step = -V @ ((V.T @ g) / ev)
