@@ -1,5 +1,6 @@
 import math
 import itertools
+import threading
 import warnings
 from typing import Union
 
@@ -1132,7 +1133,50 @@ def _n4_fpe(loss: float, n_order: int, n_obs: int) -> float:
     return float(loss * (1 + ratio) / (1 - ratio))
 
 
-_AIC_AR_ORDER_CACHE = [None, None]  # the last series and its AIC-selected AR order
+class _SeriesCache:
+    """
+    Results computed from a time series, kept for the few series used most recently.
+
+    A value is stored under the exact bytes of the series and a key, so it is returned only for a
+    bitwise-identical series; at most ``max_series`` series are kept (least recently used first
+    out). A ``ValueError`` or ``LinAlgError`` raised by the computation is remembered too, and a
+    new exception of the same type and message is raised at every later request.
+    """
+
+    def __init__(self, max_series: int):
+        self.max_series = max(int(max_series), 1)
+        self.entries = []   # [(series bytes, {key: value}), ...], most recently used last
+        self.lock = threading.Lock()
+
+    def _slot(self, y: np.ndarray) -> dict:
+        b = np.ascontiguousarray(y, dtype=float).tobytes()
+        with self.lock:
+            for i, (yb, d) in enumerate(self.entries):
+                if yb == b:
+                    self.entries.append(self.entries.pop(i))
+                    return d
+            d = {}
+            self.entries.append((b, d))
+            del self.entries[:-self.max_series]
+            return d
+
+    def get(self, y: np.ndarray, key, compute):
+        slot = self._slot(y)
+        if key not in slot:
+            try:
+                slot[key] = (True, compute())
+            except (ValueError, np.linalg.LinAlgError) as exc:
+                slot[key] = (False, (type(exc), exc.args))
+        ok, value = slot[key]
+        if not ok:
+            raise value[0](*value[1])
+        return value
+
+
+# Subspace-identification results for the last few series: the order-independent subspace step
+# (:func:`_n4_subspace`) and the fitted models (:func:`_n4_core`), which the state-space operations
+# (state_space_n4sid, state_space_comp_order, compare_test_sets, steps_ahead) share for a series.
+_N4_CACHE = _SeriesCache(3)
 
 
 def _pinv(m: np.ndarray, rel_tol: float = 1e-10) -> np.ndarray:
@@ -1185,9 +1229,10 @@ def _n4_arx_order(y: np.ndarray) -> int:
     Moor, *Subspace Identification for Linear Systems*, Kluwer, 1996.
     """
     y = np.asarray(y, dtype=float).ravel()
-    cached_y, cached_p = _AIC_AR_ORDER_CACHE
-    if cached_y is not None and np.array_equal(cached_y, y):
-        return cached_p
+    return _N4_CACHE.get(y, ('arx_order',), lambda: _n4_arx_order_compute(y))
+
+
+def _n4_arx_order_compute(y: np.ndarray) -> int:
     n_obs = len(y)
     lmax = max(min(20, n_obs // 10), 1)
     if n_obs - lmax < lmax + 2:
@@ -1205,9 +1250,7 @@ def _n4_arx_order(y: np.ndarray) -> int:
                 x = lags[:, :k]
                 res = target - x @ (_pinv(x) @ target)
             aic[k] = np.log(max(np.mean(res ** 2), floor_s2)) + 2.0 * k / n
-    p = int(np.argmin(aic))
-    _AIC_AR_ORDER_CACHE[0], _AIC_AR_ORDER_CACHE[1] = y.copy(), p
-    return p
+    return int(np.argmin(aic))
 
 
 def _n4_horizons(y: np.ndarray, order: int) -> tuple:
@@ -1716,13 +1759,29 @@ def _filter_riccati(a: np.ndarray, c: np.ndarray, q: np.ndarray, r: np.ndarray,
     raise np.linalg.LinAlgError("Riccati equation has no stabilizing solution")
 
 
-def _n4_core(y: np.ndarray, n: int, r: int, s: int, return_sv: bool = False) -> dict:
-    """Subspace identification of an order-``n`` innovations model with future/past horizons ``r``/``s``."""
+def _n4_subspace(y: np.ndarray, r: int, s: int) -> dict:
+    """
+    The order-independent part of the subspace identification (:func:`_n4_core`).
+
+    The block-Hankel data matrices with future/past horizons ``r``/``s``, the orthogonal
+    projections of the future outputs on the past, the canonical-variate weighting, and the
+    singular value decomposition of the weighted projection. None of these depends on the model
+    order, so models of every order with the same horizons share them (the results are kept for
+    the last few series, :class:`_SeriesCache`, read-only).
+
+    Only the left singular vectors and the singular values of the weighted projection
+    ``W O`` (``r`` by ``j``, ``j = N - r - s + 1`` columns) are used, so its thin SVD is computed:
+    the right singular vectors of the full SVD would be a ``j`` by ``j`` orthogonal matrix, whose
+    cost grows as ``N^2`` in memory and faster than ``N^2`` in time, while the left singular vectors
+    and singular values are the same.
+    """
     y = np.asarray(y, dtype=float).ravel()
+    return _N4_CACHE.get(y, ('subspace', int(r), int(s)), lambda: _n4_subspace_compute(y, int(r), int(s)))
+
+
+def _n4_subspace_compute(y: np.ndarray, r: int, s: int) -> dict:
     n_obs = len(y)
     j = n_obs - r - s + 1
-    if n < 1 or s < n or r < n + 1 or j < r + s + 1:
-        raise ValueError("The series is too short for the requested order and horizons")
     t = s + np.arange(j)
     y_past = y[t[None, :] - 1 - np.arange(s)[:, None]]      # (s, j)
     y_fut = y[t[None, :] + np.arange(r)[:, None]]           # (r, j)
@@ -1745,8 +1804,40 @@ def _n4_core(y: np.ndarray, n: int, r: int, s: int, return_sv: bool = False) -> 
         raise ValueError("The series has no variation")
     root = np.sqrt(evals + 1e-3 * np.mean(evals))
     w_mat = (evecs / root) @ evecs.T
-    u, sv, _ = np.linalg.svd(w_mat @ o_mat)
-    gamma = ((evecs * root) @ evecs.T) @ u[:, :n]           # extended observability matrix (r, n)
+    u, sv, _ = np.linalg.svd(w_mat @ o_mat, full_matrices=False)   # thin SVD: u (r, r), sv (r,)
+    sub = {'y_fut': y_fut, 'o_mat': o_mat, 'o_minus': o_minus,
+           'w_inv': (evecs * root) @ evecs.T, 'u': u, 'sv': sv}
+    for v in sub.values():
+        if isinstance(v, np.ndarray):
+            v.flags.writeable = False
+    return sub
+
+
+def _n4_core(y: np.ndarray, n: int, r: int, s: int, return_sv: bool = False) -> dict:
+    """
+    Subspace identification of an order-``n`` innovations model with future/past horizons ``r``/``s``.
+
+    The fit is a deterministic function of the series, ``n``, ``r`` and ``s``; it is kept for the
+    last few series (:class:`_SeriesCache`), so that the operations fitting the same model to the
+    same series share it. Each call returns its own copy.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n, r, s = int(n), int(r), int(s)
+    fit = _N4_CACHE.get(y, ('core', n, r, s), lambda: _n4_core_compute(y, n, r, s))
+    out = {key: (v.copy() if isinstance(v, np.ndarray) else v) for key, v in fit.items()}
+    if not return_sv:
+        del out['sv']
+    return out
+
+
+def _n4_core_compute(y: np.ndarray, n: int, r: int, s: int) -> dict:
+    n_obs = len(y)
+    j = n_obs - r - s + 1
+    if n < 1 or s < n or r < n + 1 or j < r + s + 1:
+        raise ValueError("The series is too short for the requested order and horizons")
+    sub = _n4_subspace(y, r, s)
+    y_fut, o_mat, o_minus, u, sv = sub['y_fut'], sub['o_mat'], sub['o_minus'], sub['u'], sub['sv']
+    gamma = sub['w_inv'] @ u[:, :n]                         # extended observability matrix (r, n)
 
     g_up = gamma[:-1, :]
     g_pinv = _pinv(g_up)
@@ -1777,10 +1868,8 @@ def _n4_core(y: np.ndarray, n: int, r: int, s: int, return_sv: bool = False) -> 
     c_mat = c_mat * sign[None, :]
 
     err = _defined_errors(_prediction_errors((a_mat, k_mat[:, 0], c_mat[0]), y, 1))
-    out = {'A': a_mat, 'K': k_mat, 'C': c_mat, 'loss': float(np.mean(err ** 2)), 'order': int(n)}
-    if return_sv:
-        out['sv'] = sv
-    return out
+    return {'A': a_mat, 'K': k_mat, 'C': c_mat, 'loss': float(np.mean(err ** 2)), 'order': int(n),
+            'sv': sv}
 
 
 def _n4_state_space(y: np.ndarray, order: Union[int, str]) -> dict:
