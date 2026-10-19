@@ -42,6 +42,8 @@ References
 .. [3] T. Bollerslev, "A conditionally heteroskedastic time series model for speculative prices
        and rates of return", Rev. Econ. Stat. 69, 542-547 (1987). DOI: 10.2307/1925546
 """
+from collections import OrderedDict
+
 import numpy as np
 from scipy.signal import lfilter
 from scipy.special import digamma, gammaln
@@ -113,6 +115,7 @@ class Data:
         self.B = float(np.mean(self.y2))
         self.y2g = self.y2 * (y < 0)
         self._lag = {}
+        self._filtered = OrderedDict()
 
     def lags(self, Q):
         """Lagged squares (N x Q; presample B) and lagged squares of negative values (presample B/2)."""
@@ -127,6 +130,29 @@ class Data:
                 Lg[i:, i - 1] = self.y2g[:N - i]
             self._lag[Q] = (L, Lg)
         return self._lag[Q]
+
+    def filtered_inputs(self, A, Q, gjr):
+        """The constant and lagged-square columns of the variance derivatives (ones, the lagged
+        squares and, for GJR, the lagged squares of negative values), filtered by ``1/A``.
+
+        They depend on theta only through the GARCH coefficients in ``A``, which are unchanged
+        by a step in the constant or the ARCH coefficients (as in most of the coordinate steps
+        of the finite-difference Hessian), so the most recent few are kept, keyed on the exact
+        coefficients. (Each column is filtered on its own, which gives the same values as
+        filtering it with the others.)
+        """
+        key = (A.tobytes(), int(Q), bool(gjr))
+        if key in self._filtered:
+            self._filtered.move_to_end(key)
+            return self._filtered[key]
+        L, Lg = self.lags(Q)
+        M = np.column_stack([np.ones(self.N)] + [L[:, i] for i in range(Q)]
+                            + ([Lg[:, i] for i in range(Q)] if gjr else []))
+        out = lfilter([1.0], A, M, axis=0)
+        self._filtered[key] = out
+        while len(self._filtered) > 8:
+            self._filtered.popitem(last=False)
+        return out
 
 
 def _variance(theta, D, S, want_grad=False):
@@ -148,21 +174,22 @@ def _variance(theta, D, S, want_grad=False):
         h = d
     if not want_grad:
         return h
-    cols = [np.ones(N)]
+    # columns: ones, the lagged variances (P), the lagged squares (Q) and, for GJR, the lagged
+    # squares of negative values (Q), each filtered by 1/A (the recursion of h); then kappa (zero)
+    n_in = 1 + Q + (Q if S.gjr else 0)
+    dh = np.zeros((N, 1 + P + Q + (Q if S.gjr else 0) + (1 if S.t else 0)))
+    if not P:
+        dh[:, 0] = 1.0
+        dh[:, 1:n_in] = np.column_stack([L] + ([Lg] if S.gjr else []))
+        return h, dh
+    hl = np.empty((N, P))
     for j in range(1, P + 1):
-        hl = np.empty(N)
-        hl[:j] = B
-        hl[j:] = h[:N - j]
-        cols.append(hl)
-    for i in range(Q):
-        cols.append(L[:, i])
-    if S.gjr:
-        for i in range(Q):
-            cols.append(Lg[:, i])
-    M = np.column_stack(cols)
-    dh = lfilter([1.0], A, M, axis=0) if P else M
-    if S.t:
-        dh = np.column_stack((dh, np.zeros(N)))
+        hl[:j, j - 1] = B
+        hl[j:, j - 1] = h[:N - j]
+    const = D.filtered_inputs(A, Q, S.gjr)
+    dh[:, 0] = const[:, 0]
+    dh[:, 1:1 + P] = lfilter([1.0], A, hl, axis=0)
+    dh[:, 1 + P:P + n_in] = const[:, 1:]
     return h, dh
 
 
@@ -234,10 +261,18 @@ def _hessian(theta, D, S):
     return 0.5 * (H + H.T)
 
 
-def _barrier(theta, D, S, mu):
+def _barrier(theta, D, S, mu, want_grad=True):
+    """The log-barrier objective (with its gradient and the constraint slacks if ``want_grad``).
+
+    The value is the same whether or not the gradient is computed (the conditional variances
+    are the same filter of the same inputs), so a line search, which compares values only,
+    asks for the value alone.
+    """
     s = S.c - S.A @ theta
     if np.any(s <= 0):
-        return np.inf, None, None
+        return (np.inf, None, None) if want_grad else np.inf
+    if not want_grad:
+        return _nll(theta, D, S, want_grad=False) - mu * np.sum(np.log(s))
     f, g = _nll(theta, D, S)
     if g is None:
         return np.inf, None, None
@@ -263,7 +298,7 @@ def _newton(theta, D, S, mus, max_it=60, tol=1e-13):
             a = 1.0 if not pos.any() else min(1.0, 0.995 * np.min(s[pos] / Ad[pos]))
             ok = False
             for _ in range(60):
-                if _barrier(theta + a * step, D, S, mu)[0] <= phi - 1e-4 * a * dec:
+                if _barrier(theta + a * step, D, S, mu, want_grad=False) <= phi - 1e-4 * a * dec:
                     ok = True
                     break
                 a *= 0.5
@@ -335,7 +370,7 @@ def mle(D, P=1, Q=1, gjr=False, t=False, extra_starts=(), grid=True, npolish=2):
     runs = []
     for st in starts:
         th, _ = _newton(_interior(st, S), D, S, MU_COARSE)
-        runs.append((_barrier(th, D, S, MU_COARSE[-1])[0], th))
+        runs.append((_barrier(th, D, S, MU_COARSE[-1], want_grad=False), th))
     order = np.argsort([r[0] for r in runs], kind='stable')
     best = None
     for i in order[:npolish]:

@@ -17,9 +17,11 @@ arrays; hctsa functions that return several outputs return a tuple, and ``BF_Exp
 returns a dict with the same field names as the hctsa structure. Permutations from
 :func:`bf_random` are 1-based, as in hctsa (subtract one to index an array).
 """
+from collections import OrderedDict
 from typing import Optional, Tuple, Union
 
 import numpy as np
+import scipy.fft
 from numba import njit
 from numpy.typing import ArrayLike
 
@@ -663,6 +665,93 @@ def _sin_rss(y: np.ndarray, q: np.ndarray, fc: np.ndarray, t: np.ndarray) -> np.
     return rss
 
 
+def _czt_rational(x: np.ndarray, a0: int, p: int, d: int, g: int) -> np.ndarray:
+    """Discrete-time Fourier transform of the rows of ``x`` on an equispaced grid of rational
+    frequencies, by the chirp z-transform (Bluestein's algorithm).
+
+    Returns ``X[..., m] = sum_t x[..., t] exp(-2 pi i (a0 + m p) t / d)`` for ``m = 0..g-1``, i.e.,
+    at the frequencies ``(a0 + m p) / d`` cycles per sample, in ``O((T + g) log(T + g))`` per row
+    (``T`` the length of a row) instead of ``O(T g)``. Writing ``m t = (m^2 + t^2 - (m - t)^2) / 2``
+    turns the sum into a convolution with the chirp ``exp(-i pi p k^2 / d)``, done by FFTs. The
+    integer frequency numerators keep every phase exact: ``p k^2`` and ``a0 t`` are reduced modulo
+    ``2d`` and ``d`` in integer arithmetic before the exponential is taken, so that no phase
+    loses precision for large ``t`` or ``m``.
+    """
+    n = x.shape[-1]
+    big = 2 * d
+    k = np.arange(max(n, g), dtype=np.int64)
+    if big * max(p, 1) < 2 ** 62 and big < 2 ** 31:
+        ph = (((k * k) % big) * p) % big
+    else:  # (Python integers, which do not overflow)
+        ph = np.array([(int(j) * int(j) * p) % big for j in k], dtype=np.int64)
+    chirp = np.exp(-1j * np.pi * (ph / d))
+    t = np.arange(n, dtype=np.int64)
+    pre = np.exp(-2j * np.pi * (((a0 % d) * t) % d / d)) * chirp[:n]
+    length = scipy.fft.next_fast_len(n + g - 1)
+    v = np.zeros(length, dtype=complex)  # conj(chirp) at lags -(n-1)..g-1 (negative lags wrapped)
+    v[:g] = np.conj(chirp[:g])
+    if n > 1:
+        v[length - n + 1:] = np.conj(chirp[1:n][::-1])
+    conv = scipy.fft.ifft(scipy.fft.fft(x * pre, n=length, axis=-1) * scipy.fft.fft(v), axis=-1)
+    return conv[..., :g] * chirp[:g]
+
+
+def _sin_rss_grid(y: np.ndarray, q: np.ndarray, t: np.ndarray, f_grid: np.ndarray) -> np.ndarray:
+    """:func:`_sin_rss` on the search grid ``f_grid = linspace(1/N, (N-1)/(2N), 2N)``, the same
+    values (to the last bit at the minimum) by the chirp z-transform.
+
+    Every quantity in :func:`_sin_rss` at a frequency ``f`` is a Fourier sum: with
+    ``F_x(f) = sum_t x_t exp(-2 pi i f t)``, ``x . cos = Re F_x`` and ``x . sin = -Im F_x``, so the
+    residual's correlations with the sine and cosine and the projections of the sine and cosine on
+    the columns of ``q`` are the Fourier transforms of ``r`` and of those columns, and
+    ``sum sin^2``, ``sum cos^2`` and ``sum sin*cos`` are ``(N - Re E)/2``, ``(N + Re E)/2`` and
+    ``-Im E/2`` with ``E = F_1(2f)`` (from ``sin^2 = (1 - cos 2a)/2`` etc.). The grid frequencies
+    are the rationals ``(2(2N-1) + m(N-3)) / (2N(2N-1))``, ``m = 0..2N-1``, so all of these come
+    from a few chirp z-transforms (:func:`_czt_rational`): ``O(N log N)`` per column instead of
+    ``O(N^2)``.
+
+    The subtraction form (``sum sin^2`` minus the squared projections, etc.) loses relative
+    accuracy where a candidate is close to the span of ``q`` (next to a chosen frequency), so those
+    candidates, and every candidate within a round-off margin of the smallest value (``1e-10`` of
+    the residual sum of squares: about 10^4 times the largest difference from the direct sums seen
+    on real series), are recomputed by the direct sums of :func:`_sin_rss`. The minimizing grid
+    index is then the one the direct sums give everywhere.
+    """
+    n = t.size
+    g = f_grid.size
+    a0, p, d = 2 * (2 * n - 1), n - 3, 2 * n * (2 * n - 1)
+    r = y - q @ (q.T @ y)
+    rr = r @ r
+    ft = _czt_rational(np.vstack([r, q.T]), a0, p, d, g)
+    e2 = _czt_rational(np.ones(n), 2 * a0, 2 * p, d, g)
+    rc, rs = ft[0].real, -ft[0].imag
+    cq, sq = ft[1:].real, -ft[1:].imag
+    ss = (n - e2.real) / 2 - np.sum(sq ** 2, axis=0)
+    cc = (n + e2.real) / 2 - np.sum(cq ** 2, axis=0)
+    sc = -e2.imag / 2 - np.sum(sq * cq, axis=0)
+    dt = ss * cc - sc ** 2
+    with np.errstate(all='ignore'):
+        gain = (rs ** 2 * cc - 2 * rs * rc * sc + rc ** 2 * ss) / dt
+    rss = rr - gain
+    # far from the span of q (margins well beyond the thresholds of _sin_rss)
+    safe = (ss > 1e-2 * n) & (cc > 1e-2 * n) & (dt > 1e-4 * ss * cc) & np.isfinite(rss)
+    redo = np.flatnonzero(~safe)
+    if redo.size > 0:
+        rss[redo] = _sin_rss(y, q, f_grid[redo], t)
+    near = np.flatnonzero(rss <= np.min(rss) + 1e-10 * rr)
+    near = near[safe[near]]
+    if near.size > 0:
+        rss[near] = _sin_rss(y, q, f_grid[near], t)
+    return rss
+
+
+# Frequencies after each stage of bf_fit_sinusoids for the most recent inputs: the fit of k
+# sinusoids passes through the fits of 1..k-1 (the stages are deterministic), so sin1, sin2 and
+# sin3 fitted to the same series share their first stages. Keyed on the exact input values.
+_SIN_STAGE_CACHE: 'OrderedDict' = OrderedDict()
+_SIN_STAGE_CACHE_SIZE = 4
+
+
 def bf_fit_sinusoids(y: ArrayLike, k: int, constant: bool = False) -> Tuple[np.ndarray, np.ndarray]:
     """Least-squares fit of a sum of ``k`` sinusoids to a time series (hctsa ``BF_FitSinusoids``).
 
@@ -713,10 +802,19 @@ def bf_fit_sinusoids(y: ArrayLike, k: int, constant: bool = False) -> Tuple[np.n
     # next (so that each is added to the least-squares fit of the others, not to the leakage
     # left by their grid resolution)
     h0 = f_grid[1] - f_grid[0]
-    f = np.zeros(0)
-    for _ in range(k):
+    key = (bool(constant), y.tobytes())
+    stages = _SIN_STAGE_CACHE.pop(key, [])  # stages[j]: the frequencies after stage j + 1
+    _SIN_STAGE_CACHE[key] = stages
+    while len(_SIN_STAGE_CACHE) > _SIN_STAGE_CACHE_SIZE:
+        _SIN_STAGE_CACHE.popitem(last=False)
+    f = stages[min(k, len(stages)) - 1].copy() if k > 0 and stages else np.zeros(0)
+    for _ in range(f.size, k):
         q = _sin_basis(f, t, constant)
-        f = np.append(f, f_grid[int(np.argmin(_sin_rss(y, q, f_grid, t)))])
+        if n >= 64:  # (chirp z-transform: the same minimizing grid index, in O(N log N))
+            rss = _sin_rss_grid(y, q, t, f_grid)
+        else:
+            rss = _sin_rss(y, q, f_grid, t)
+        f = np.append(f, f_grid[int(np.argmin(rss))])
 
         # Refine each frequency in turn (the others held fixed) by zooming local grids
         for _pass in range(2):
@@ -732,6 +830,7 @@ def bf_fit_sinusoids(y: ArrayLike, k: int, constant: bool = False) -> Tuple[np.n
         # cycles per sample, which would leave a residual of relative amplitude ~1e-6 for an
         # exact sum of sinusoids)
         f = _sin_refine(y, f, t, f_lims, constant)
+        stages.append(f.copy())
     freqs = np.sort(f)
 
     # Amplitudes and phases by least squares at the final frequencies

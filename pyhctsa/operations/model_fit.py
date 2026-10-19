@@ -2,6 +2,7 @@ import math
 import itertools
 import threading
 import warnings
+from collections import OrderedDict
 from typing import Union
 
 import numba
@@ -681,10 +682,92 @@ def _lbq_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
         return np.asarray(acorr_ljungbox(x, lags=max_lag, return_df=True)['lb_pvalue'], dtype=float)
 
 
+# Work shared by garch_fit and garch_compare on the same series: the whitening, and for the
+# whitened, z-scored series its maximum-likelihood fits and pre-estimation tests. Everything is
+# keyed on the exact input values (and every argument that the result depends on), and the
+# estimator is deterministic, so a cached result is the one that would be computed. The
+# whitening is not cached when its random draws are unseeded (random_seed='none'), where every
+# call draws a new seed. The most recent few series are kept.
+_GARCH_CACHE_SIZE = 2
+_garch_whiten_cache = OrderedDict()
+_garch_series_cache = OrderedDict()
+
+
+def _cache_get(cache: OrderedDict, key, make):
+    if key in cache:
+        cache.move_to_end(key)
+        return cache[key]
+    value = make()
+    cache[key] = value
+    while len(cache) > _GARCH_CACHE_SIZE:
+        cache.popitem(last=False)
+    return value
+
+
+def _garch_whiten(y: np.ndarray, pre_proc: str, random_seed) -> np.ndarray:
+    """The whitened, z-scored series (``z_score(_whiten(y, pre_proc, random_seed))``), shared
+    between calls on the same series with a seeded (reproducible) whitening."""
+    if isinstance(random_seed, str) and random_seed == 'none':
+        return z_score(_whiten(y, pre_proc, random_seed))
+    key = (y.tobytes(), pre_proc, bf_random_seed(random_seed))
+    return _cache_get(_garch_whiten_cache, key,
+                      lambda: z_score(_whiten(y, pre_proc, random_seed))).copy()
+
+
+class _GarchSeries:
+    """A whitened series with its maximum-likelihood fits and pre-estimation tests, each computed once."""
+
+    def __init__(self, y: np.ndarray):
+        self.D = _garch.Data(y)
+        self._fits = {}
+        self._tests = None
+        self._res_tests = {}
+
+    def mle(self, P, Q, gjr=False, t=False, extra_starts=(), grid=True, npolish=2) -> dict:
+        starts = tuple(np.asarray(st, dtype=float).tobytes() for st in extra_starts)
+        key = (int(P), int(Q), bool(gjr), bool(t), starts, bool(grid), int(npolish))
+        if key not in self._fits:
+            self._fits[key] = _garch.mle(self.D, P, Q, gjr, t, extra_starts=extra_starts,
+                                         grid=grid, npolish=npolish)
+        fit = self._fits[key]
+        return dict(fit, theta=fit['theta'].copy(), h=fit['h'].copy())
+
+    def null_fit(self, t=False) -> dict:
+        if t:
+            return self.mle(0, 0, False, True)
+        return _garch.null_fit(self.D, False)  # (closed form)
+
+    def tests(self):
+        """Engle's ARCH test p-values of the series and Ljung-Box p-values of its squares."""
+        if self._tests is None:
+            y = self.D.y
+            self._tests = (_arch_test_pvalues(y), _lbq_test_pvalues(y ** 2))
+        return self._tests[0].copy(), self._tests[1].copy()
+
+    def residual_tests(self, h: np.ndarray):
+        """The same tests of the standardized residuals ``y / sqrt(h)`` for the variance path ``h``.
+
+        Both tests depend on the residuals only through their squares (Engle's test regresses the
+        squared series on its lags), so they are the same for ``-y / sqrt(h)``. Fits that report
+        the same variance path (e.g., the constant-variance model reported in place of every
+        model of a series without structure) share them.
+        """
+        key = h.tobytes()
+        if key not in self._res_tests:
+            stde = self.D.y / np.sqrt(h)
+            self._res_tests[key] = (_arch_test_pvalues(stde), _lbq_test_pvalues(stde ** 2))
+        engle, lbq = self._res_tests[key]
+        return engle.copy(), lbq.copy()
+
+
+def _garch_series(y: np.ndarray) -> _GarchSeries:
+    return _cache_get(_garch_series_cache, y.tobytes(), lambda: _GarchSeries(y.copy()))
+
+
 _FLOOR_KEEP = ('hasStructure', 'offset', 'leverage', 'distDoF', 'persistence', 'summaryexitflag')
 
 
-def _garch_models(D: _garch.Data, P: int, Q: int, gjr: bool, tdist: bool) -> dict:
+def _garch_models(G: _GarchSeries, P: int, Q: int, gjr: bool, tdist: bool) -> dict:
     """
     Fit the requested model and decide whether the series has any conditional heteroskedasticity.
 
@@ -693,12 +776,13 @@ def _garch_models(D: _garch.Data, P: int, Q: int, gjr: bool, tdist: bool) -> dic
     fit), the maximum-likelihood fit itself (``ml``), ``has_structure``, ``lr`` (the scaled likelihood-ratio statistic), the Gaussian fit
     (``gauss``) and, for t innovations, the degrees of freedom (``dof``).
     """
-    gauss = _garch.mle(D, P, Q, gjr, False)
-    null_g = _garch.null_fit(D, False)
+    D = G.D
+    gauss = G.mle(P, Q, gjr, False)
+    null_g = G.null_fit(False)
     if tdist:
         S_t = _garch.Spec(P, Q, gjr, True)
-        alt = _garch.mle(D, P, Q, gjr, True, extra_starts=_garch.tail_starts(gauss, S_t))
-        null = _garch.null_fit(D, True)
+        alt = G.mle(P, Q, gjr, True, extra_starts=_garch.tail_starts(gauss, S_t))
+        null = G.null_fit(True)
     else:
         alt, null = gauss, null_g
     if not (np.isfinite(alt['llf']) and np.all(np.isfinite(alt['theta']))):
@@ -837,18 +921,17 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     out = {}
 
     # (1) Whiten and z-score
-    y = _whiten(y, preproc, random_seed)
-    y = z_score(y)
+    y = _garch_whiten(y, preproc, random_seed)
     n = len(y)
+    G = _garch_series(y)
 
     # (2) Pre-estimation tests on the (whitened) series
-    engle_y = _arch_test_pvalues(y)
-    lbq_y2 = _lbq_test_pvalues(y ** 2)
+    engle_y, lbq_y2 = G.tests()
 
     # (3) Fit the model
-    D = _garch.Data(y)
+    D = G.D
     try:
-        res = _garch_models(D, P, Q, gjr, tdist)
+        res = _garch_models(G, P, Q, gjr, tdist)
     except (ValueError, np.linalg.LinAlgError, FloatingPointError) as err:
         raise ValueError('GARCH fit failed (data does not allow a valid GARCH model '
                          f'to be estimated): {err}') from err
@@ -904,8 +987,7 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     # Check the standardized residuals: residuals (mean process minus data)
     stde = (0.0 - y) / np.sqrt(sigmas)
     stde2 = stde ** 2
-    engle_stde = _arch_test_pvalues(stde)
-    lbq_stde2 = _lbq_test_pvalues(stde2)
+    engle_stde, lbq_stde2 = G.residual_tests(sigmas)
 
     out['engle_mean_diff_p'] = np.mean(engle_stde - engle_y)
     out['engle_max_diff_p'] = np.max(engle_stde - engle_y)
@@ -1006,10 +1088,11 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
     pr = sorted(int(v) for v in np.atleast_1d(pr))
     qr = sorted(int(v) for v in np.atleast_1d(qr))
 
-    y = z_score(_whiten(y, pre_proc, random_seed))
+    y = _garch_whiten(y, pre_proc, random_seed)
     n = len(y)
-    D = _garch.Data(y)
-    null = _garch.null_fit(D, False)
+    G = _garch_series(y)
+    D = G.D
+    null = G.null_fit(False)
 
     shape = (len(pr), len(qr))
     fits = {}
@@ -1020,8 +1103,8 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
                     for key in ((p, qr[j - 1]) if j else None, (pr[i - 1], q) if i else None)
                     if key is not None and key in fits]
             try:
-                fits[(p, q)] = _garch.mle(D, p, q, False, False, extra_starts=warm,
-                                          grid=(i == 0 and j == 0), npolish=2)
+                fits[(p, q)] = G.mle(p, q, False, False, extra_starts=warm,
+                                     grid=(i == 0 and j == 0), npolish=2)
             except (ValueError, np.linalg.LinAlgError, FloatingPointError):
                 logger.warning(f'Bad fit at p = {p}, q = {q}')
     first = fits.get((pr[0], qr[0]))
@@ -1045,9 +1128,7 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
             aics[i, j] = -2 * ml['llf'] + 2 * ml['k']
             bics[i, j] = -2 * ml['llf'] + ml['k'] * np.log(n)
             ks[i, j] = fit['theta'][0]
-            stde = y / np.sqrt(fit['h'])
-            engle = _arch_test_pvalues(stde)
-            lbq = _lbq_test_pvalues(stde ** 2)
+            engle, lbq = G.residual_tests(fit['h'])
             mean_arch[i, j], max_arch[i, j] = np.mean(engle), np.max(engle)
             mean_lbq[i, j], max_lbq[i, j] = np.mean(lbq), np.max(lbq)
     # (the constant and the residual statistics come from the variance model only if it is reported)
