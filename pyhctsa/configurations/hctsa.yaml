@@ -2064,7 +2064,7 @@ surrogates:
     base_name: surrogate_test
     dependencies:
     configs:
-      - {the_test_stat: [['amikraskov1', 'o3', 'tc3']], zscore: True, exclude: ['tc3_mediqr']}   # SD_SurrogateTest(x_z,'RP',99,[],{'amikraskov1','o3','tc3'},'default')
+      - {the_test_stat: [['amikraskov1', 'amikraskovmi', 'o3', 'tc3']], zscore: True, exclude: ['tc3_mediqr']}   # SD_SurrogateTest(x_z,'RP',99,[],{'amikraskov1','amikraskovmi','o3','tc3'},'default')
     legacy_name: SD_SurrogateTest
     ordered_args: ['surr_meth', 'num_surrs', 'the_test_stat']
 

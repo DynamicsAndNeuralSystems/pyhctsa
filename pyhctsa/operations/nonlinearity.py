@@ -4654,7 +4654,7 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
         of the series length if between 0 and 1 (exclusive). Default is 0.02.
     nref : int or float, optional
         The number of reference points: a number of samples, or a proportion of the series
-        length if at most 1. At most 2500 and, if the series is longer than 500 points, at least
+        length if at most 1. At most 1000 (for time) and, if the series is longer than 500 points, at least
         500 (fewer make the best-scaling-range outputs depend on which points are the reference
         points). Default is 0.5.
 
@@ -4691,7 +4691,7 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
         tsep = _round_half_away(tsep * n)
     if 0 < nref <= 1:
         nref = int(np.ceil(nref * n))
-    nref = min(int(nref), 2500)
+    nref = min(int(nref), 1000)
     if nref < 500 and n > 500:
         nref = 500
 

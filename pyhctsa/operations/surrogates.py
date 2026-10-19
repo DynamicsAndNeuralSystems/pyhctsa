@@ -267,6 +267,12 @@ def surrogate_test(
         - 'amikraskov1': the automutual information at lag 1, estimated with the Kraskov
             nearest-neighbor estimator (``automutual_info(y, 1, 'kraskov1', 4)``); tested
             one-sided (surrogates should have lower values), cf. [2].
+        - 'amikraskovmi': as 'amikraskov1', but at the delay ``get_tau(x, 'mi')`` of the
+            original series, used for the series and every surrogate; it also detects
+            nonlinear dependence that builds up over several steps (e.g., in oversampled
+            flows). That delay is at most the autocorrelation's 1/e time, which the
+            surrogates share, so choosing it does not favor the series (a lag at the
+            series' own first AMI minimum would). One-sided.
         - 'fmmikraskov': the first minimum of the Kraskov automutual information function
             (``first_min(y, 'mi-kraskov1')``); tested one-sided.
         - 'o3': a third-order statistic used in [3] (the mean cubed increment at lag 1);
@@ -290,7 +296,7 @@ def surrogate_test(
             tested one-sided.
 
         Default is ``'amikraskov1'``. Outputs for each statistic ``s``
-        (``amikraskov``, ``fmmikraskov``, ``amigaussian``, ``fmmigaussian``, ``o3``, ``tc3``,
+        (``amikraskov``, ``amikraskovmi``, ``fmmikraskov``, ``amigaussian``, ``fmmigaussian``, ``o3``, ``tc3``,
         ``nlpe``, ``fnn``) are ``s_zscore`` (the z-statistic of the series' value against the
         Gaussian fitted to the surrogates' values; NaN if all surrogates have the same value),
         ``s_mediqr`` (distance from the surrogates' median in interquartile ranges;
@@ -352,6 +358,22 @@ def surrogate_test(
         # surrogates should have lower AMI than the original signal
         if not _compare('amikraskov', ami_x, ami_surr, 'right'):
             return np.nan
+
+    if 'amikraskovmi' in the_test_stat:
+        # as above, at a delay set from the original series (the same for every surrogate)
+        tau_mi = get_tau(x, 'mi')
+        if np.isnan(tau_mi):
+            for k in ('zscore', 'mediqr', 'prank'):
+                out[f'amikraskovmi_{k}'] = np.nan
+        else:
+            if tau_mi == 1 and 'amikraskov1' in the_test_stat:
+                ami_x_mi, ami_surr_mi = ami_x, ami_surr  # already computed
+            else:
+                ami_x_mi = automutual_info(x, int(tau_mi), 'kraskov1', 4)
+                ami_surr_mi = np.array([automutual_info(z[:, i], int(tau_mi), 'kraskov1', 4)
+                                        for i in range(num_surrs)])
+            if not _compare('amikraskovmi', ami_x_mi, ami_surr_mi, 'right'):
+                return np.nan
 
     if 'fmmikraskov' in the_test_stat:
         # first minimum of the Kraskov automutual information of the surrogates compared to
