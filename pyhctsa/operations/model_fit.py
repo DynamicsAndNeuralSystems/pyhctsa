@@ -3378,6 +3378,19 @@ def is_seasonal(y: ArrayLike) -> int:
     
     return out
 
+def _gp_roundoff_constant(yt: np.ndarray, n: int) -> bool:
+    """True when the values to be fitted are constant to within round-off.
+
+    A Gaussian process has nothing to describe in a constant series, and its fit has no scale to
+    work with (the noise floor is set relative to the standard deviation), so the operations
+    return NaN. The bound is the rounding error accumulated over sums of up to ``n`` terms (the
+    length of the series acted on), relative to the root-mean-square of the values:
+    ``std <= 10 * n * eps * rms``, as in :func:`pyhctsa.operations.pre_process.preproc_compare`.
+    """
+    yt = np.asarray(yt, dtype=float)
+    return bool(np.std(yt, ddof=1) <= 10 * n * np.finfo(float).eps * np.sqrt(np.mean(yt ** 2)))
+
+
 def _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos=(), len_lo=-np.inf, len_hi=np.inf, amp_pos=()):
     """
     The objective of the GP hyperparameter fit, with its clamp: returns ``(clamp, nlz)`` where
@@ -3845,7 +3858,8 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         - ``h_lonN``: the fitted length scale divided by the series length (only for
           ``'covSEiso_covNoise'``).
 
-        All values are NaN if the fit fails. If the training points show no correlation structure (the
+        All values are NaN if the fit fails, or if the training values are constant to within
+        round-off (see :func:`_gp_roundoff_constant`). If the training points show no correlation structure (the
         fitted model must beat its white-noise special case in a likelihood-ratio test, see
         :func:`_gp_beats_white_noise`), the length scale (``logh1``, ``h_lonN``) is not identified, and
         is reported as the spacing of the training points, the bound the data allow; the other
@@ -3866,6 +3880,8 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
     tt = _even_split_points(0, N - 1, npoints, 'floor').astype(float)   # times 0..N-1
     yt = y[tt.astype(int)]
+    if _gp_roundoff_constant(yt, N):
+        return nan_out
 
     theta, nlz_fit = _gp_fit_converged(tt, yt, cov, components, noise_pos)
     if theta is None:
@@ -5007,7 +5023,8 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     series, chosen by (i) resampling the time series down to this many points, (ii) taking
     the first ``max_n`` samples, or (iii) taking random samples. Times are the sample indices
     (``squish_or_squash = 1``), so length scales and periods are in samples of the cut
-    series. The output is NaN if the fit fails.
+    series. The output is NaN if the fit fails, or if the values fitted are constant to within
+    round-off (see :func:`_gp_roundoff_constant`).
 
     Parameters
     ----------
@@ -5080,6 +5097,7 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
 
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
+    n_in = N  # length of the input series (N changes when the series is cut below)
     cov, components = parse_cov(cov_func)
     num_hps = cov.n_hyp
 
@@ -5151,6 +5169,9 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
             raise ValueError(f"Invalid sampling method '{resample_how}'.")
     else:
         t = set_time_index(N)
+
+    if _gp_roundoff_constant(y, n_in):
+        return np.nan
 
     # Learn the hyperparameters (mean-zero process, Gaussian likelihood, exact inference)
     noise_pos = _gp_noise_pos(components)
