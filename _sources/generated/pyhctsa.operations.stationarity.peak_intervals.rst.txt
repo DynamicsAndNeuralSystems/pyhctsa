@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.peak\_intervals
+===============================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: peak_intervals

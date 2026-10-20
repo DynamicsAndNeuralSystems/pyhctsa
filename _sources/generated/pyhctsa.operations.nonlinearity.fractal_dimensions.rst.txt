@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.nonlinearity.fractal\_dimensions
+===================================================
+
+.. currentmodule:: pyhctsa.operations.nonlinearity
+
+.. autofunction:: fractal_dimensions

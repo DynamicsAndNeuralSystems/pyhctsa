@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.remove\_points
+=============================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: remove_points

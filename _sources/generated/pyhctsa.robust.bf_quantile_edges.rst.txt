@@ -1,0 +1,6 @@
+﻿pyhctsa.robust.bf\_quantile\_edges
+==================================
+
+.. currentmodule:: pyhctsa.robust
+
+.. autofunction:: bf_quantile_edges

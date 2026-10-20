@@ -1,0 +1,6 @@
+﻿pyhctsa.utils.get\_dataset
+==========================
+
+.. currentmodule:: pyhctsa.utils
+
+.. autofunction:: get_dataset

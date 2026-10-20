@@ -1,0 +1,6 @@
+﻿pyhctsa.utils.nan\_outputs
+==========================
+
+.. currentmodule:: pyhctsa.utils
+
+.. autofunction:: nan_outputs

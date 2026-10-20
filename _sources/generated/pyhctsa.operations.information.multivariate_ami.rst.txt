@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.information.multivariate\_ami
+================================================
+
+.. currentmodule:: pyhctsa.operations.information
+
+.. autofunction:: multivariate_ami

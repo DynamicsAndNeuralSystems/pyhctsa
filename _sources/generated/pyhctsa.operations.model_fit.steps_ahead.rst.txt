@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.steps\_ahead
+==========================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: steps_ahead

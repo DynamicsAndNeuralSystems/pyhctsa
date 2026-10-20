@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.changepoint.stepdetect
+=========================================
+
+.. currentmodule:: pyhctsa.operations.changepoint
+
+.. autofunction:: stepdetect

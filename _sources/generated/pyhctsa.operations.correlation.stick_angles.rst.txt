@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.stick\_angles
+============================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: stick_angles
