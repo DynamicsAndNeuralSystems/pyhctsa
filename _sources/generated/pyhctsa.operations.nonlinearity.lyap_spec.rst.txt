@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.nonlinearity.lyap\_spec
+==========================================
+
+.. currentmodule:: pyhctsa.operations.nonlinearity
+
+.. autofunction:: lyap_spec

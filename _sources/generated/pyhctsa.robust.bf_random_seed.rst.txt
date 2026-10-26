@@ -1,0 +1,6 @@
+﻿pyhctsa.robust.bf\_random\_seed
+===============================
+
+.. currentmodule:: pyhctsa.robust
+
+.. autofunction:: bf_random_seed

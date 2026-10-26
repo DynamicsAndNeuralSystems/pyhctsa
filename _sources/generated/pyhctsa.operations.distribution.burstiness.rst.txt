@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.burstiness
+==========================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: burstiness

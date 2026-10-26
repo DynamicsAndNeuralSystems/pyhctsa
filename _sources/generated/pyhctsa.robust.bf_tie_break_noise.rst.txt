@@ -1,0 +1,6 @@
+﻿pyhctsa.robust.bf\_tie\_break\_noise
+====================================
+
+.. currentmodule:: pyhctsa.robust
+
+.. autofunction:: bf_tie_break_noise

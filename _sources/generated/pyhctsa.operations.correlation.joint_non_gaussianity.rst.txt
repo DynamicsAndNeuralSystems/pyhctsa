@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.joint\_non\_gaussianity
+======================================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: joint_non_gaussianity

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.add\_noise
+=========================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: add_noise

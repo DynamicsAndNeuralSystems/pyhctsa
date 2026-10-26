@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.spread\_random\_local
+=====================================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: spread_random_local

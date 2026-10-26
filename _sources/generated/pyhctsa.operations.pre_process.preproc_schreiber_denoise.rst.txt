@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.pre\_process.preproc\_schreiber\_denoise
+===========================================================
+
+.. currentmodule:: pyhctsa.operations.pre_process
+
+.. autofunction:: preproc_schreiber_denoise

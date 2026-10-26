@@ -1,0 +1,6 @@
+﻿pyhctsa.robust.bf\_exp\_fit
+===========================
+
+.. currentmodule:: pyhctsa.robust
+
+.. autofunction:: bf_exp_fit
