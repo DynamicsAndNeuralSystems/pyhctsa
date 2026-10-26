@@ -52,6 +52,13 @@ def setup(app):
 html_theme = "sphinx_immaterial"
 html_logo = "_static/apps_113dp_FFFFFF.svg"
 html_css_files = ["custom.css"]
+# GoatCounter: cookie-free page counts (https://pyhctsa.goatcounter.com)
+html_js_files = [
+    ("https://gc.zgo.at/count.js", {
+        "async": "async",
+        "data-goatcounter": "https://pyhctsa.goatcounter.com/count",
+    }),
+]
 pygments_style = "friendly"
 html_theme_options = {
     "features": [
