@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import Union
+import logging
 import multiprocessing as mp
 import numpy as np
 from functools import partial
+from rich import get_console
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, MofNCompleteColumn
 from pathos.helpers import mp as pathos_mp
 
@@ -28,6 +30,37 @@ def _extract_features_single_series(ts, feature_funcs):
 
 def _compute_features_for_chunk(chunk, feature_funcs):
     return [_extract_features_single_series(ts, feature_funcs) for ts in chunk]
+
+# the configuration this worker process last built feature functions from, and those functions
+_worker_config = None
+_worker_funcs = None
+
+def _feature_funcs_from_config(config):
+    """The feature functions a configuration builds, built once per worker process."""
+    global _worker_config, _worker_funcs
+    if _worker_funcs is None or config != _worker_config:
+        import copy
+        from .calculator import FeatureCalculator
+        logger = logging.getLogger('pyhctsa')
+        level = logger.level
+        logger.setLevel(logging.ERROR)  # the calling process has already reported skipped features
+        try:
+            # a copy: building consumes the config's meta params, and config is the cache key
+            _worker_funcs = FeatureCalculator._from_config(copy.deepcopy(config)).feature_funcs
+        finally:
+            logger.setLevel(level)
+        _worker_config = config
+    return _worker_funcs
+
+def _compute_config_features_for_chunk(chunk, config, labels=None):
+    """
+    Worker task that builds its feature functions from ``config`` (all of them, or those named in
+    ``labels``, in that order) instead of receiving them pickled.
+    """
+    funcs = _feature_funcs_from_config(config)
+    if labels is not None:
+        funcs = {label: funcs[label] for label in labels}
+    return _compute_features_for_chunk(chunk, funcs)
 
 class BaseDistributor(ABC):
     """
@@ -74,15 +107,17 @@ class LocalDistributor(BaseDistributor):
         c_size = self.calculate_chunk_size(len(data), self.n_workers)
         data_chunks = [data[i:i + c_size] for i in range(0, len(data), c_size)]
         
-        worker_task = partial(_compute_features_for_chunk, **kwargs)
+        worker_task = partial(func, **kwargs)
         iterator = self.pool.imap(worker_task, data_chunks)
         
+        # a console that can't encode '•' (e.g. ASCII stdout) gets a plain separator
+        separator = "-" if get_console().options.ascii_only else "•"
         with Progress(
             TextColumn("[bold cyan]{task.description}"),
             BarColumn(bar_width=None),
             MofNCompleteColumn(),
             TaskProgressColumn(),
-            TextColumn("•"),
+            TextColumn(separator),
             TimeRemainingColumn(),
             expand=True
         ) as progress:
