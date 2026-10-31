@@ -37,6 +37,9 @@ bundled with pyhctsa: the first call downloads it (33 MB) to ``~/.cache/pyhctsa`
 Note that each time-series instances does not have to be the same length to compute a vector of features. The results of the extraction will be returned in a pandas dataframe of shape 
 N×F, where N is the number of time-series instances and F is the number of time-series features.
 
+Many features are sensitive to how finely a series is sampled relative to its own dynamics.
+Before extracting features from an oversampled dataset, see :doc:`sampling_rate` for how to check the sampling rate and resample all series with one factor.
+
 🤖 Calling Individual Operations
 --------------------------------
 If you would like to run individual operations on your data, you can access the corresponding functions from their respective modules directly. 

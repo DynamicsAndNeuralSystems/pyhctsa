@@ -95,6 +95,8 @@ instances and *F* is the number of time-series features.
   parallel computing with `LocalDistributor`.
 - [Advanced usage](https://dynamicsandneuralsystems.github.io/pyhctsa/usage/advanced_usage.html): custom feature sets from your own `.yaml` configuration,
   and feature filtering.
+- [Sampling rate](https://dynamicsandneuralsystems.github.io/pyhctsa/usage/sampling_rate.html): why the sampling rate matters, and how to check
+  and set one rate for a whole dataset (`sampling_report`, `resample_dataset`) before extraction.
 - [Method list](https://dynamicsandneuralsystems.github.io/pyhctsa/methods/index.html) and [API reference](https://dynamicsandneuralsystems.github.io/pyhctsa/api.html): every operation and its outputs.
 - [Tutorials](https://github.com/DynamicsAndNeuralSystems/pyhctsa/tree/main/tutorials): step-by-step notebooks.
 
