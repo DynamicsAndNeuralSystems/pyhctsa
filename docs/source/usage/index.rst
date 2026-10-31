@@ -24,6 +24,12 @@ Welcome to the `pyhctsa` usage guide. Select from the following:
 
       Tutorial for pyhctsa power users and developers.
 
+   .. grid-item-card:: :material-regular:`speed;3em` Sampling rate
+      :link: sampling_rate
+      :link-type: doc
+
+      Choosing a sampling rate for your dataset before extracting features.
+
 .. toctree::
    :maxdepth: 1
    :hidden:
@@ -31,3 +37,4 @@ Welcome to the `pyhctsa` usage guide. Select from the following:
    getting_started
    tutorial_bon_eeg
    advanced_usage
+   sampling_rate
