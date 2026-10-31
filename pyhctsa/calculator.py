@@ -73,8 +73,8 @@ def _transform_input(x, zscore: bool = False, absval: bool = False,
                      preprocess: Union[str, None] = None):
     """The series a feature function is called on: z-score, then ``preprocess``, then abs.
 
-    Returns a scalar ``nan`` when ``decimate_ac1e`` cannot determine its delay (the feature is
-    then undefined, as in hctsa).
+    Returns a scalar ``nan`` when ``decimate_ac1e`` cannot determine its delay or would leave
+    fewer than 50 samples (the feature is then undefined, as in hctsa).
     """
     if zscore:
         x = z_score(x)
@@ -102,7 +102,8 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False,
 
     - ``'decimate_ac1e'``: one sample per floored 1/e autocorrelation time, then z-scored again
       if ``zscore`` (see :func:`pyhctsa.utils.decimate_ac1e`); if the delay cannot be
-      determined the function is not called and its outputs are all NaN (:func:`~pyhctsa.utils.nan_outputs`);
+      determined, or fewer than 50 samples would remain, the function is not called and its
+      outputs are all NaN (:func:`~pyhctsa.utils.nan_outputs`);
     - ``'diff1'``: incremental differences, ``diff(x_z)`` (not re-z-scored);
     - ``'zscore_abs'`` / ``'zscore_sign'``: ``zscore(abs(x_z))`` / ``zscore(sign(x_z))``.
     """
@@ -326,8 +327,9 @@ class FeatureCalculator:
 
       * ``decimate_ac1e`` (suffix ``_dec``): ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``.
         The z-scored series is decimated to one sample per floored 1/e autocorrelation time and
-        z-scored again. If that time cannot be determined (e.g. the ACF never falls to 1/e) the
-        feature is NaN. See :func:`pyhctsa.utils.decimate_ac1e`;
+        z-scored again. If that time cannot be determined (e.g. the ACF never falls to 1/e), or
+        fewer than 50 samples would remain, the feature is NaN. See
+        :func:`pyhctsa.utils.decimate_ac1e`;
       * ``diff1`` (``_diff1``): ``diff(x_z)``;
       * ``zscore_abs`` (``_mag``): ``zscore(abs(x_z))``; ``zscore_sign`` (``_sign``):
         ``zscore(sign(x_z))``. (``abs: True`` alone is ``abs(x_z)``.)
