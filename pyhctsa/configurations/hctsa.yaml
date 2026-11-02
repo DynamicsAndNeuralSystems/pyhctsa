@@ -3,9 +3,11 @@
 # min_length (optional, per master operation): the shortest series on which the feature is defined,
 # as an int or a Python expression in the operation's parameters (configured values, else the
 # function's defaults). Below it every output of the feature is NaN (hctsa's 'not appropriate').
-# These are bounds from the definition of the computation (lags, embeddings, windows, model orders),
-# set conservatively: a feature without one is computed at any length N >= 3. They apply to the series
-# the function receives, i.e. after zscore/preprocess (decimate_ac1e shortens the series).
+# These are the shortest lengths at which the computation is defined and its output can take more
+# than two values (lags, embeddings, windows, model orders), set conservatively. They apply to the
+# series the function receives, i.e. after zscore/preprocess (decimate_ac1e shortens the series).
+# An operation whose own code already returns NaN below its bound has no min_length here (one
+# bound per operation); one with neither is computed at any length N >= 3.
 # Helpers available in expressions: num(x, d) (x if numeric, else d), isnum, fnn(x) (an ['fnn', p]
 # dimension rule), dec_len(w_name) (wavelet filter length), floor, ceil, sqrt, round (half away
 # from zero), max, min, int, range. See FeatureCalculator.
@@ -91,7 +93,6 @@ extreme_events:
 criticality:
   rad:
     base_name: rad
-    min_length: "num(tau, 1) + 4"
     dependencies:
     configs:
       - {tau: 1, zscore: True}
@@ -121,7 +122,6 @@ correlation:
 
   autocorr:
     base_name: ac
-    min_length: "tau + 1"
     dependencies:
     configs:
       - {tau: !range [1, 40], zscore: True}
@@ -253,7 +253,6 @@ correlation:
 
   embed2_shapes:
     base_name: embed2_shapes
-    min_length: 5
     dependencies:
     configs:
       - {tau: 'ac1e', r: 0.1, zscore: True}   # CO_Embed2_Shapes(x_z,'ac1e','circle',0.1,{'ac',1})
@@ -282,7 +281,6 @@ correlation:
 
   embed2_angle_tau:
     base_name: embed2_angle_tau
-    min_length: "max_tau + 2"
     dependencies:
     configs:
       - {max_tau: 50, zscore: True}
@@ -300,7 +298,6 @@ correlation:
 
   nonlinear_autocorr:
     base_name: ac_nl
-    min_length: "max(taus) + 1"
     dependencies:
     configs:
       - {taus: [[1, 2]], absval: True, zscore: True}
@@ -488,7 +485,6 @@ correlation:
   
   trev:
     base_name: trev
-    min_length: "num(tau, 1) + 1"
     dependencies:
     configs:
       - {tau: 1, zscore: True}
@@ -503,7 +499,6 @@ correlation:
 
   tc3:
     base_name: tc3
-    min_length: "2 * num(tau, 1) + 1"
     dependencies:
     configs:
       - {tau: 1, zscore: True}
@@ -516,7 +511,6 @@ correlation:
   
   time_rev_kaplan:
     base_name: time_rev_kaplan
-    min_length: "2 * time_lag + 1"
     dependencies:
     configs:
       - {time_lag: 1, zscore: True}
@@ -640,7 +634,6 @@ information:
   
   multivariate_ami:
     base_name: multivariate_ami
-    min_length: "2 * num(tau_method, 1) + (4 if est_method == 'gaussian' else 6)"
     dependencies:
     configs:
       - {tau_method: 'ac', est_method: 'gaussian', zscore: True, select: ['multiAMI', 'synergy']}   # IN_MultivariateAMI(x_z,'ac','gaussian')
@@ -683,7 +676,6 @@ entropy:
   
   permutation_entropy:
     base_name: permutation_entropy
-    min_length: "(m - 1) * num(tau, 1) + 3"
     configs:
       - {m: 2, tau: 1, zscore: True, select: ['normPermEn']}
       - {m: 3, tau: 1, zscore: True, select: ['normPermEn']}
@@ -754,7 +746,6 @@ entropy:
 
   rpde:
     base_name: rpde
-    min_length: "(m - 1) * num(tau, 1) + 4"
     dependencies:
     configs:
       - {m: 3, tau: 1, zscore: True, exclude: ['meanNonZero']}
@@ -780,7 +771,6 @@ entropy:
 
   multi_scale_entropy:
     base_name: multi_scale_entropy
-    min_length: "None if what_entropy == 'dispen' else m + 2 + (pre_process_how == 'diff1')"
     dependencies:
     configs:
       - {scale_range: [!range [1, 10]], m: 2, r: 0.15, pre_process_how: 'diff1', zscore: True, exclude: ['maxSampEn', 'meanch']}
@@ -805,7 +795,6 @@ entropy:
   
   bubble_entropy:
     base_name: bubble_entropy
-    min_length: "m * num(tau, 1) + 3"
     dependencies:
     configs:
       - {m: 5, tau: 1, zscore: True}   # EN_BubbleEn(x_z,5,1)
@@ -817,7 +806,6 @@ entropy:
 
   dispersion_entropy:
     base_name: dispersion_entropy
-    min_length: "(m - 1) * num(tau, 1) + 3"
     dependencies:
     configs:
       - {m: 2, c: 6, tau: 'ac', zscore: True, exclude: ['dispEn', 'fDispEn']}   # EN_DispEn(x_z,2,6,'ac')
@@ -833,7 +821,6 @@ entropy:
 
   fuzzy_entropy:
     base_name: fuzzy_entropy
-    min_length: "M + 2"
     dependencies:
     configs:
       - {M: 3, zscore: True, preprocess: diff1, exclude: ['fuzzyEn3']}   # EN_FuzzyEn(diff(x_z),3,0.2,2)
@@ -842,7 +829,6 @@ entropy:
 
   permutation_entropy_complexity:
     base_name: permutation_entropy_complexity
-    min_length: "(m - 1) * num(tau, 1) + 3"
     dependencies:
     configs:
       - {m: 4, tau: 1, zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,4,1)
@@ -863,7 +849,6 @@ entropy:
 
   wavelet_entropy:
     base_name: wavelet_entropy
-    min_length: "2 ** level"
     dependencies:
     configs:
       - {zscore: True}   # EN_wentropy(x_z,'sym4',5)
@@ -872,7 +857,6 @@ entropy:
 stationarity:
   stat_av:
     base_name: stat_av
-    min_length: "2 * extra_param"
     dependencies:
     configs:
       - {what_type: 'len', extra_param: 50, zscore: True}
@@ -961,7 +945,6 @@ stationarity:
   
   local_global:
     base_name: local_global
-    min_length: "ceil(0.5 / n) if subset_how == 'p' else None"
     dependencies:
     configs:
       - {subset_how: 'l', n: 10, zscore: True}
@@ -1022,7 +1005,6 @@ stationarity:
 
   local_extrema:
     base_name: local_extrema
-    min_length: "n if how_to_window == 'l' else 2 * n"
     dependencies:
     configs:
       - {how_to_window: 'l', n: 50, zscore: True}
@@ -1044,7 +1026,6 @@ stationarity:
   
   moment_corr:
     base_name: moment_corr
-    min_length: "floor(1 / window_length) + 1"
     dependencies:
     configs:
       - {window_length: 0.02, w_overlap: 0.2, mom_1: 'mean', mom_2: 'std', what_transform: 'none', zscore: True}
@@ -1076,7 +1057,6 @@ stationarity:
   
   ramping_windows:
     base_name: ramping_windows
-    min_length: "30 if isinstance(asym_tau, str) else num_seg"
     dependencies:
     configs:
       - {num_seg: 10, zscore: True, exclude: ['ac1_p', 'ac1_pearson_p', 'asymac1_p', 'asymac1_pearson_p', 'kurt_p', 'kurt_pearson_p', 'mean_p', 'mean_pearson_p', 'skew_p', 'skew_pearson_p', 'var_p', 'var_pearson_p']}
@@ -1086,7 +1066,6 @@ stationarity:
   
   slow_feature_analysis:
     base_name: slow_feature_analysis
-    min_length: "2 * num_windows"
     dependencies:
     configs:
       - {num_windows: 20, zscore: True}
@@ -1105,7 +1084,6 @@ stationarity:
 
   drifting_auto_corr:
     base_name: drifting_auto_corr
-    min_length: "tau + 3"
     dependencies:
     configs:
       - {tau: 1, zscore: True}   # SY_DriftingAutoCorr(x_z,1)
@@ -1124,7 +1102,6 @@ stationarity:
 
   spread_random_local:
     base_name: spread_random_local
-    min_length: "(2 if l == 'ac2' else 5 if l == 'ac5' else l) + 1"
     dependencies:
     configs:
       - {l: 100, zscore: True}   # SY_SpreadRandomLocal(x_z,100,100,'default')
@@ -1135,7 +1112,6 @@ stationarity:
 
   std_nth_deriv_change:
     base_name: std_nth_deriv_change
-    min_length: 11
     dependencies:
     configs:
       - {zscore: True, exclude: ['minOrderInterp']}   # SY_StdNthDerChange(x_z)
@@ -1143,7 +1119,6 @@ stationarity:
 
   nstat_z:
     base_name: nstat_z
-    min_length: "36 * num_seg + 2"
     dependencies:
     configs:
       - {num_seg: 4, zscore: True, exclude: ['maxeig', 'maximageig', 'rangeeig', 'rangemean', 'rangemedian', 'rangerange', 'rangestd']}   # SY_nstat_z(x_z,4,{1,3})
@@ -1423,7 +1398,6 @@ distribution:
 
   simple_fit:
     base_name: simple_fit
-    min_length: "min(n for n in range(1, 1000) if ceil(sqrt(n)) > {'exp1': 2, 'power1': 2, 'gauss1': 3, 'gauss2': 6}[dmodel]) if num_bins == 'sqrt' else None"
     dependencies:
     configs:
       - {dmodel: 'exp1', num_bins: 'sqrt', zscore: True, exclude: ['adjr2']}   # DN_SimpleFit(x_z,'exp1','sqrt')
@@ -1448,7 +1422,6 @@ distribution:
 scaling:
   fluctuation_analysis:
     base_name: fluctuation_analysis
-    min_length: "11 * num(lag, 1) + 1"
     dependencies:
     configs:
       - {q: 2.0, wtf: 'endptdiff', tau_step: 50,  log_inc: True, zscore: True, exclude: ['se1', 'se2']}
@@ -1472,7 +1445,6 @@ scaling:
 
   mma:
     base_name: mma
-    min_length: 100
     dependencies:
     configs:
       - {do_overlap: False, scale_range: null, q_range: [[-5, 5]], zscore: True}
@@ -1490,7 +1462,6 @@ scaling:
 
   mfdfa:
     base_name: mfdfa
-    min_length: 68
     dependencies:
     configs:
       - {q_range: [[-5, 5]], zscore: True, exclude: ['fAlphaMax']}   # SC_MFDFA(x_z,[],[-5,5],1)
@@ -1628,7 +1599,6 @@ symbolic:
 wavelet:
   wl_coeffs:
     base_name: wl_coeffs
-    min_length: "(dec_len(w_name) - 1) * 2 ** num(level, 1)"
     dependencies:
       - PyWavelets
     configs:
@@ -1663,7 +1633,6 @@ wavelet:
   
   dwt_coeff:
     base_name: dwt_coeff
-    min_length: "2 * (dec_len(w_name) - 1)"
     dependencies:
       - PyWavelets
     configs:
@@ -1684,7 +1653,6 @@ wavelet:
   
   wfbm:
     base_name: wfbm
-    min_length: 5
     dependencies:
       - PyWavelets
     configs:
@@ -1704,7 +1672,6 @@ wavelet:
   
   wpd_best_tree:
     base_name: wpd_best_tree
-    min_length: "2 * (dec_len(w_name) - 1)"
     dependencies:
     configs:
       - {zscore: True}   # WL_wpdBestTree(x_z,'db3',5)
@@ -1781,7 +1748,6 @@ spectral:
 
   phase_amp_coupling:
     base_name: phase_amp_coupling
-    min_length: "4 * n_bands + 1"
     dependencies:
     configs:
       - {n_bands: 5, max_n: 'full', n_phase_bins: 18, zscore: True}
@@ -1810,7 +1776,6 @@ spectral:
   
   specparam:
     base_name: specparam
-    min_length: 32
     dependencies:
     configs:
       - {aperiodic_mode: 'fixed', max_n_peaks: 4, peak_threshold: 1, zscore: True, exclude: ['modelMAE', 'modelR2', 'totalPeakPower']}   # SP_Specparam(x_z,'fixed',4,1,[0.02,0.5],[],Inf)
@@ -1819,7 +1784,6 @@ spectral:
   
   cepstrum:
     base_name: cepstrum
-    min_length: 9
     dependencies:
     configs:
       - {max_period: 100, min_period: 4, zscore: True, exclude: ['peak', 'stdCeps']}
@@ -1828,7 +1792,6 @@ spectral:
 
   bicoherence:
     base_name: bicoherence
-    min_length: "seg_length + seg_length // 2"
     dependencies:
     configs:
       - {zscore: True}   # SP_Bicoherence(x_z,64,'full',100)
@@ -1850,7 +1813,6 @@ spectral:
 
   sinusoid_fit:
     base_name: sinusoid_fit
-    min_length: "3 * int(model[-1]) + 1"
     dependencies:
     configs:
       - {model: 'sin1', zscore: True, exclude: ['adjr2', 'r2']}   # SP_SinusoidFit(x_z,'sin1')
@@ -1861,7 +1823,6 @@ spectral:
 
   spectral_time_freq:
     base_name: spectral_time_freq
-    min_length: 12
     dependencies:
     configs:
       - {zscore: True}   # SP_SpectralTimeFreq(x_z,20)
@@ -1892,7 +1853,6 @@ model_fit:
 
   exp_smoothing:
     base_name: exp_smoothing
-    min_length: 101
     dependencies:
     configs:
       - {n_train: 0.5, alpha: 'best', zscore: True}
@@ -1901,7 +1861,6 @@ model_fit:
   
   ar_fit:
     base_name: ar_fit
-    min_length: "2 * p_max + 1"
     dependencies:
     configs:
       - {p_min: 1, p_max: 8, selector: 'sbc', zscore: True, exclude: ['A1', 'aroundmin_sbc', 'C', 'fpe_1', 'fpe_2', 'fpe_3', 'fpe_4', 'fpe_5', 'fpe_6', 'fpe_7', 'fpe_8', 'meanabs', 'minfpe', 'minsbc', 'popt_sbc', 'sbc_1', 'sbc_2', 'sbc_3', 'sbc_4', 'sbc_5', 'sbc_6', 'sbc_7', 'sbc_8', 'stde']}
@@ -1910,7 +1869,6 @@ model_fit:
 
   local_simple:
     base_name: local_simple
-    min_length: "num(train_length, 2 if forecast_meth == 'lfit' else 1) + 1"
     dependencies:
     configs:
       - {forecast_meth: 'mean', train_length: 1,    zscore: True}
@@ -1934,7 +1892,6 @@ model_fit:
   
   loop_local_simple:
     base_name: loop_local_simple
-    min_length: 12
     dependencies:
     configs:
       - {forecast_meth: 'mean', zscore: True, exclude: ['stde_peaksize', 'sws_fexp_r2']}
@@ -1974,7 +1931,6 @@ model_fit:
 
   compare_ar:
     base_name: compare_ar
-    min_length: "2 * max(orders) + 1 if test_how == 'all' else ceil((2 * max(orders) + 1) / test_how)"
     dependencies:
     configs:
       - {orders: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], test_how: 0.5, zscore: True, exclude: ['bestaic', 'maxdiff', 'medianv']}   # MF_CompareAR(x_z,1:10,0.5)
@@ -2037,7 +1993,6 @@ model_fit:
 
   state_space_n4sid:
     base_name: state_space_n4sid
-    min_length: "8 * (ord + 1)"
     dependencies:
     configs:
       - {ord: 1, zscore: True, exclude: ['Ts', 'lossfn', 'noisevar', 'np']}   # MF_StateSpace_n4sid(x_z,1,0.5,1)
@@ -2048,7 +2003,6 @@ model_fit:
 
   armax:
     base_name: armax
-    min_length: "ceil((2 * (orders[0] + orders[1]) + max(orders) + 2) / p_train)"
     dependencies:
     configs:
       - {orders: [[1, 1]], p_train: 0.5, zscore: True, exclude: ['lossfn', 'noisevar']}   # MF_armax(x_z,[1,1],0.5,1)
@@ -2059,7 +2013,6 @@ model_fit:
 
   hmm_compare_n_states:
     base_name: hmm_compare_n_states
-    min_length: 4
     dependencies:
     configs:
       - {zscore: True}   # MF_hmm_CompareNStates(x_z,0.6,2:4,'default')
@@ -2090,7 +2043,6 @@ graph:
 
   ordinal_partition_network:
     base_name: ordinal_partition_network
-    min_length: "(d - 1) * num(tau, 1) + 2"
     dependencies:
     configs:
       - {d: 4, tau: 1, zscore: True}   # NW_OrdinalPartitionNetwork(x_z,4,1)
@@ -2133,7 +2085,6 @@ physics:
 
   kramers_moyal:
     base_name: kramers_moyal
-    min_length: "num_bins + 1"
     dependencies:
     configs:
       - {zscore: True, exclude: ['driftLin']}   # PH_KramersMoyal(x_z,1,15)
@@ -2142,7 +2093,6 @@ physics:
 pre_process:
   preproc_compare:
     base_name: preproc_compare
-    min_length: "{'sin1': 5, 'spline24': 6}.get(detrend_meth)"
     dependencies:
     configs:
       - {detrend_meth: 'poly1', zscore: False, exclude: ['gauss1_kd_resrunsz']}
@@ -2213,7 +2163,6 @@ surrogates:
 nonlinearity:
   nsamdf:
     base_name: nsamdf
-    min_length: 20
     dependencies:
     configs:
       - {tau_mult: 2, win_len_rel: 10, shift_len_rel: 0.5, degree: 7, zscore: True}
@@ -2222,7 +2171,6 @@ nonlinearity:
 
   nlpe:
     base_name: nlpe
-    min_length: "13 if fnn(de) else (de - 1) * num(tau, 1) + 4"
     dependencies:
     configs:
       - {de: 2, tau: 'mi', zscore: True, exclude: ['msqerr']}
@@ -2233,7 +2181,6 @@ nonlinearity:
   
   embed_pca:
     base_name: embed_pca
-    min_length: "(m - 1) * num(tau, 1) + 3"
     dependencies:
     configs:
       - {tau: 'mi', m: 10, zscore: True, exclude: ['max', 'perc_1', 'perc_10', 'perc_6', 'perc_7', 'perc_8', 'perc_9']}
@@ -2244,7 +2191,6 @@ nonlinearity:
   
   ssa:
     base_name: ssa
-    min_length: "L + 1"
     dependencies:
     configs:
       - {L: 10, zscore: True, exclude: ['gap1', 'trend_r2']}
@@ -2255,7 +2201,6 @@ nonlinearity:
   
   zero_one_test:
     base_name: zero_one_test
-    min_length: 20
     dependencies:
     configs:
       - {num_c: 20, max_n: 'full', zscore: True}
@@ -2264,7 +2209,6 @@ nonlinearity:
 
   local_density:
     base_name: local_density
-    min_length: "max(13, nnr + 3) if fnn(m) else (m - 1) * num(tau, 1) + nnr + 3"
     dependencies:
     configs:
       - {nnr: 5, tau: 1, m: 3, zscore: True}   # NL_LocalDensity(x_z,5,{'ac',1},{1,3})
@@ -2284,7 +2228,6 @@ nonlinearity:
     
   poincare_section:
     base_name: poincare_section
-    min_length: "2 * num(tau, 1) + 3"
     dependencies:
     configs:
       - {ref: 'max', tau: 'mi', zscore: True, exclude: ['meanpbox10', 'meanpbox5', 'rangepbox10', 'rangepbox5']}
@@ -2295,7 +2238,6 @@ nonlinearity:
   
   delay_time:
     base_name: delay_time
-    min_length: 21
     dependencies:
     configs:
       - {zscore: True, exclude: ['mintau']}   # NL_DelayTime(x_z,{'ac',10},{'ac',1},'default')
@@ -2304,7 +2246,6 @@ nonlinearity:
 
   box_count_entropy_rate:
     base_name: box_count_entropy_rate
-    min_length: "(embed_params[1] - 1) * num(embed_params[0], 1) + 2"
     dependencies:
     configs:
       - {num_bins: 50, embed_params: [['ac1e', 5]], zscore: True, select: ['iqrstretch', 'meanchr11', 'meanchr14', 'meanchr17', 'meanchr2', 'meanchr20', 'meanchr24', 'meanchr28', 'meanchr3', 'meanchr32', 'meanchr36', 'meanchr4', 'meanchr6', 'meanchr8', 'meand2', 'meand3', 'meand4', 'meand5', 'meanr11', 'meanr14', 'meanr17', 'meanr2', 'meanr20', 'meanr24', 'meanr28', 'meanr3', 'meanr32', 'meanr36', 'meanr4', 'meanr6', 'meanr8', 'mediand2', 'mediand3', 'mediand4', 'mediand5', 'medianr11', 'medianr14', 'medianr17', 'medianr20', 'medianr24', 'medianr28', 'medianr3', 'medianr32', 'medianr36', 'medianr4', 'medianr6', 'medianr8', 'medianstretch', 'minr11', 'minr14', 'minr17', 'minr2', 'minr20', 'minr24', 'minr28', 'minr3', 'minr32', 'minr36', 'minr4', 'minr6', 'minr8', 'stdmean', 'stdmedian']}   # NL_BoxCountEntropyRate(x_z,50,{'ac1e',5})
@@ -2313,7 +2254,6 @@ nonlinearity:
 
   dvv:
     base_name: dvv
-    min_length: "3 * num(tau, 1) + 100"
     dependencies:
     configs:
       - {ntv: 50, zscore: True, exclude: ['dataSurrCorr', 'trendDataSurr', 'numZeroCrossings', 'stdDiff']}   # NL_DVV(x_z,3,100,2,50,10,'default')
@@ -2323,7 +2263,6 @@ nonlinearity:
 
   dimensions:
     base_name: dimensions
-    min_length: 13
     dependencies:
     configs:
       - {embed_params: [['ac1e', ['fnn', 0.05]]], thwin: [['ac', 1]], zscore: True, exclude: ['bc_lfitmeansqdev1', 'bc_mindiff', 'bc_minm1', 'bc_minm2', 'bc_minm3', 'bc_minmmax', 'bc_range1', 'bc_range2', 'bc_range3', 'bc_rangemmax', 'co_lfitb1', 'co_lfitb2', 'co_lfitb3', 'co_lfitm1', 'co_lfitm2', 'co_lfitm3', 'co_lfitmeansqdev1', 'co_lfitmeansqdev2', 'co_lfitmeansqdev3', 'co_lfitmmax', 'co_minscalingexp', 'co_range1', 'co_range2', 'co_range3', 'co_rangemmax', 'scr_bc_m1_meanabsres', 'scr_bc_m2_meanabsres', 'scr_bc_m3_meanabsres', 'scr_bc_mopt_meanabsres', 'scr_co_m1_logrmax', 'scr_co_m1_logrmin', 'scr_co_m1_logrrange', 'scr_co_m1_meanabsres', 'scr_co_m1_minbad', 'scr_co_m1_pgone', 'scr_co_m2_logrmin', 'scr_co_m2_meanabsres', 'scr_co_m2_minbad', 'scr_co_m2_pgone', 'scr_co_m3_logrmax', 'scr_co_m3_meanabsres', 'scr_co_m3_minbad', 'scr_co_m3_pgone', 'scr_co_mopt_meanabsres', 'scr_co_mopt_scaling_exp']}   # NL_Dimensions(x_z,50,{'ac1e',{'fnn',0.05}},{'ac',1})
@@ -2351,7 +2290,6 @@ nonlinearity:
 
   embed_kernel_pca:
     base_name: embed_kernel_pca
-    min_length: "(m - 1) * num(tau, 1) + 3"
     dependencies:
     configs:
       - {tau: 1, m: 10, zscore: True, exclude: ['fb05', 'max', 'min', 'nto70', 'nto80_diff', 'nto90', 'perc_10', 'perc_6', 'perc_7', 'perc_8', 'perc_9', 'range']}   # NL_EmbedKernelPCA(x_z,1,10,2000)
@@ -2362,7 +2300,6 @@ nonlinearity:
 
   fnn:
     base_name: fnn
-    min_length: "10 * num(tau, 1) + 3"
     dependencies:
     configs:
       - {tau: 1, just_best: 0, escape_factor: 5, zscore: True}   # NL_FNN(x_z,1,10,{'ac',1},0,[],5)
@@ -2373,7 +2310,6 @@ nonlinearity:
 
   fractal_dimensions:
     base_name: fractal_dimensions
-    min_length: "max(13, kmax + 2) if fnn(embed_params[1]) else (embed_params[1] - 1) * num(embed_params[0], 1) + kmax + 2"
     dependencies:
     configs:
       - {kmin: 2, kmax: 10, nref: -1, gend: 5, embed_params: [[1, 5]], zscore: True, exclude: ['meanDq']}   # NL_FractalDimensions(x_z,2,10,-1,1,5,{'ac',1},32,{1,5},'default')
@@ -2386,7 +2322,6 @@ nonlinearity:
 
   gp_corr_sum:
     base_name: gp_corr_sum
-    min_length: 13
     dependencies:
     configs:
       - {nref: -1, r: 0.1, nbins: 40, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['maxlnr', 'robfit_sea1', 'robfitresmeansq', 'minlnr']}   # NL_GPCorrSum(x_z,-1,0.1,{'ac',1},40,{'ac',{'fnn',0.05}},1)
@@ -2396,7 +2331,6 @@ nonlinearity:
 
   largest_lyap:
     base_name: largest_lyap
-    min_length: 24
     dependencies:
     configs:
       - {embed_params: [[1, 4]], zscore: True, exclude: ['expfit_adjr2', 'p1']}   # NL_LargestLyap(x_z,-1,{'ac1e',30},{'ac1e',1},3,{1,4})
@@ -2406,7 +2340,6 @@ nonlinearity:
 
   lyap_spec:
     base_name: lyap_spec
-    min_length: 35
     dependencies:
     configs:
       - {max_n: 'full', zscore: True}   # NL_LyapSpec(x_z,1,3,30,'full',{'ac',1})
@@ -2415,7 +2348,6 @@ nonlinearity:
 
   persistent_homology:
     base_name: persistent_homology
-    min_length: "(m - 1) * num(tau, 1) + 3"
     dependencies:
       - ripser
     configs:
@@ -2426,7 +2358,6 @@ nonlinearity:
 
   rqa:
     base_name: rqa
-    min_length: 13
     dependencies:
     configs:
       - {tau: 'mi', m: [['fnn', 0.05]], max_n: 'full', zscore: True, exclude: ['DIV']}   # NL_RQA(x_z,'mi',{'fnn',0.05},{'ac',1},0.1,2,2,'full','default')
@@ -2435,7 +2366,6 @@ nonlinearity:
 
   recurrence_times:
     base_name: recurrence_times
-    min_length: 13
     dependencies:
     configs:
       - {tau: 'mi', m: [['fnn', 0.05]], max_n: 'full', zscore: True}   # NL_RecurrenceTimes(x_z,'mi',{'fnn',0.05},{'ac',1},0.1,4,'full','default')
@@ -2444,7 +2374,6 @@ nonlinearity:
 
   return_time:
     base_name: return_time
-    min_length: "(embed_params[1] - 1) * num(embed_params[0], 1) + 3"
     dependencies:
     configs:
       - {nnr: 0.05, nref: 500, embed_params: [[1, 3]], zscore: True, exclude: ['max', 'maxhisthist', 'maxpeaksep', 'minpeaksep', 'rangecgdist', 'stdpeaksep']}   # NL_ReturnTime(x_z,0.05,100,{'ac',1},500,{1,3})
@@ -2455,7 +2384,6 @@ nonlinearity:
 
   takens_estimator:
     base_name: takens_estimator
-    min_length: "16 if fnn(embed_params[1]) else (embed_params[1] - 1) * num(embed_params[0], 1) + 16"
     dependencies:
     configs:
       - {c0: 0.01, embed_params: [[1, 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{1,3})
@@ -2468,7 +2396,6 @@ nonlinearity:
 
   tisean_c1:
     base_name: tisean_c1
-    min_length: "(mmm[0] - 1) + (tsep if tsep >= 1 else 0) + 2"
     dependencies:
     configs:
       - {mmm: [[1, 7]], tsep: 0.02, nref: 0.5, zscore: True, exclude: ['maxd']}   # NL_c1(x_z,1,[1,7],0.02,0.5)
@@ -2496,7 +2423,6 @@ changepoint:
 
   wavelet_var_chg:
     base_name: wavelet_var_chg
-    min_length: "(dec_len(w_name) - 1) * 2 ** num(level, 1)"
     dependencies:
       - PyWavelets
     configs:

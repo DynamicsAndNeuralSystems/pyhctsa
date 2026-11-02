@@ -74,13 +74,15 @@ def test_min_lengths_cover_every_feature():
 
 def test_min_length_examples():
     ml = FC.min_lengths
-    assert ml["ac_1"] == 2 and ml["ac_40"] == 41  # tau + 1
-    assert ml["glscf_1_1_3"] == 6  # tau + 3
-    assert ml["withinp_2_mean"] == 6  # (N - 1)/sqrt(N) > 2
+    assert ml["glscf_1_1_3"] == 6  # tau + 3 (3 pairs: 2 pairs only give +-1)
+    assert ml["withinp_2_mean"] == 10  # two points beyond 2 sd need N - 1 > 2 p^2
     assert ml["variance_ratio_test_4_0"] == 9  # N > 2q
-    assert ml["permutation_entropy_3_2"] == 6  # (m - 1) tau + 2
-    assert ml["ac_nl_1_3_5_7"] == 8  # max(taus) + 1
-    assert ml["permutation_entropy_3_ac1e"] == 4  # data-dependent tau: bound at tau = 1
+    assert ml["pol_var_1_6"] == 13  # two runs of D = 6 symbols: 2D + 1
+    assert ml["surprise_dist_20_2_diff_500"] == 23  # memory + 1 (+1 'dist' prior, +1 'diff')
+    assert ml["compare_test_sets_ss_2_uniform"] == 260  # 25 segments at most 50% overlapping
+    assert ml["add_noise_1_kraskov1_4"] == 7  # KSG (k = 4) needs k + 2 = 6 pairs at lag 1
+    # one bound per operation: where the code's own guard is at least as strict, no YAML bound
+    assert ml["ac_40"] is None and ml["permutation_entropy_3_2"] is None
 
 
 def test_eval_min_length():
@@ -136,7 +138,7 @@ def test_runs_at_min_length(label):
 
 
 def test_below_min_length_keeps_the_output_fields():
-    lab = "permutation_entropy_complexity_5_2"  # dict-valued, min_length (m - 1) tau + 2 = 10
+    lab = "motif_three_quantile"  # dict-valued, min_length 5
     ml = FC.min_lengths[lab]
     short = FC.feature_funcs[lab](_series("noise", ml - 1))
     long_ = FC.feature_funcs[lab](_series("noise", 200))
@@ -170,3 +172,26 @@ def test_short_series_keep_the_column_set_and_raise_nothing():
             assert list(df.columns) == cols, n
             assert FC.errors.empty, (n, FC.errors.feature.tolist())
             assert not (FC.quality.to_numpy() == Quality.ERROR).any(), n
+
+
+def test_short_series_fixes_return_nan_not_errors():
+    from pyhctsa.operations.symbolic import motif_three
+    from pyhctsa.operations.model_fit import loop_local_simple, _arch_test_pvalues, _lbq_test_pvalues
+    from pyhctsa.toolboxes.RAD.rad import rad_core
+    x = _series("noise", 3)
+    out = motif_three(x, 'quantile')  # 3 symbols: no word of length 4
+    assert np.isnan(out["hhhh"]) and np.isfinite(out["hh"])
+    out = loop_local_simple(_series("noise", 8))  # training windows up to 10 > N
+    assert np.isnan(out["stde_peakpos"])
+    assert np.isnan(rad_core(np.array([0.0, 0.0, 1.0, 2.0, 3.0, 0.5]), 1))  # tied sub-median pair
+    assert np.isnan(_arch_test_pvalues(_series("noise", 10))).all()
+    assert np.isnan(_lbq_test_pvalues(_series("noise", 10))).all()
+
+
+def test_local_extrema_keeps_a_full_last_window_ending_in_zero():
+    from pyhctsa.operations.stationarity import local_extrema
+    x = _series("noise", 100)
+    x[-1] = 0.0  # 100 = 2 full windows of 50: nothing is padded
+    y = x.copy(); y[-1] = 1e-9
+    a, b = local_extrema(x, 'l', 50), local_extrema(y, 'l', 50)
+    assert a["meanmax"] == pytest.approx(b["meanmax"], rel=1e-6)  # both use 2 windows
