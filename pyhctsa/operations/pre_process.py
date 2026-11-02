@@ -639,11 +639,15 @@ def preproc_model_fit(y: ArrayLike, model: str = 'ar', order: int = 2,
         'nothing': y,
         'd1': np.diff(y, 1),
         'd2': np.diff(y, 2),
-        'p1_20': _piecewise_poly_detrend(y, 1, 20),
-        'p2_5': _piecewise_poly_detrend(y, 2, 5),
+        # (None when the series is too short to cut into that many non-empty pieces)
+        'p1_20': _piecewise_poly_residual(y, 1, 20) if len(y) >= 20 else None,
+        'p2_5': _piecewise_poly_residual(y, 2, 5) if len(y) >= 5 else None,
         'rmgd': _rank_map_gaussian(y, random_seed),
     }
-    rms = {k: _ar_rms_error(z_score(v), order) for k, v in versions.items()}
+    # A piecewise fit to pieces of at most order + 1 points is exact: its residual is zero up to
+    # round-off, with no structure to model (z-scoring it would raise, or amplify round-off).
+    rms = {k: np.nan if v is None or (k in ('p1_20', 'p2_5') and _is_roundoff(v, y))
+           else _ar_rms_error(z_score(v), order) for k, v in versions.items()}
     return {f'stderat_{k}': rms[k] / rms['nothing'] for k in ('d1', 'd2', 'p1_20', 'p2_5', 'rmgd')}
 
 

@@ -1175,6 +1175,7 @@ def _cumsum_bridge_stats(p: ArrayLike) -> Union[dict, float]:
 
     return out
 
+@dict_output
 def drifting_mean_cusum(y: ArrayLike) -> dict:
     """
     Drift in the mean, via a cumulative-sum (CUSUM) test.

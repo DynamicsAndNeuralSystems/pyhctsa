@@ -1081,7 +1081,10 @@ def outlier_include(y: ArrayLike, threshold_how: str = 'abs', inc: float = 0.01,
     })
 
     # Cross-correlation between mean and error
-    _, cross_corr = x_corr(statistics[:, 0], statistics[:, 1], max_lags=1)
+    if statistics.shape[0] >= 2:
+        _, cross_corr = x_corr(statistics[:, 0], statistics[:, 1], max_lags=1)
+    else:  # a single threshold: no lag-1 cross-correlation (x_corr would raise)
+        cross_corr = [np.nan, np.nan]
     results.update({
         'xcmerr1': cross_corr[-1],
         'xcmerrn1': cross_corr[0]

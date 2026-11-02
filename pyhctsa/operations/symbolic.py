@@ -1252,7 +1252,7 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str]) -> np.nda
             tau = num_groups
 
         if tau > N/25:
-            tau = N // 25
+            tau = max(1, N // 25)  # (hctsa's N // 25 is a degenerate delay of 0 for N < 25)
         tau = int(tau)
 
         m1 = y[:N - tau]

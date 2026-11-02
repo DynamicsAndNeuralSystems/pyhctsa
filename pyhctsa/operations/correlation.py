@@ -33,7 +33,8 @@ def _resolve_delay(y: ArrayLike, tau: Union[int, float, str, None], cap: bool = 
     Parameters
     ----------
     cap : bool
-        Cap a delay set by a rule at ``floor(N/10)`` (hctsa's ``CO_Embed2*`` do this).
+        Cap a delay set by a rule at ``floor(N/10)`` (hctsa's ``CO_Embed2*`` do this), but never
+        below 1: for ``N < 10``, hctsa's cap gives a delay of 0, a degenerate (diagonal) embedding.
 
     Returns
     -------
@@ -48,7 +49,7 @@ def _resolve_delay(y: ArrayLike, tau: Union[int, float, str, None], cap: bool = 
         if np.isnan(tau):
             return np.nan
         if cap and tau > y.size / 10:
-            tau = y.size // 10
+            tau = max(1, y.size // 10)
     return tau
 
 def _theiler_kth(idx: np.ndarray, dist: np.ndarray, k: int, theiler_win: int,
@@ -2308,6 +2309,8 @@ def glscf(y: ArrayLike, alpha: float, beta: float, tau: Union[int, str] = 'tau')
     if np.isnan(tau):  # undefined ACF (e.g. constant series), or no delay by the rule
         return np.nan
     tau = int(tau)
+    if tau >= len(y):  # no lag-tau pair (and y[:len(y) - tau] would wrap round)
+        return np.nan
 
     # Take magnitudes of time-delayed versions of the time series
     y1 = np.abs(y[:len(y) - tau])
@@ -3062,6 +3065,8 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
         logger.warning("No valid setting for time delay. (Is the time series too short?)")
         return np.nan
     tau = int(tau)
+    if tau >= len(y):  # no lag-tau difference (and y[:len(y) - tau] would wrap round)
+        return np.nan
 
     # Compute trev quantities
     yn = y[:len(y) - tau]

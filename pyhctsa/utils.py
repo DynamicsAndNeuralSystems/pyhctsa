@@ -80,10 +80,24 @@ def dict_output(func: Callable) -> Callable:
         return out
     return wrapper
 
+# The shortest series any feature is computed on. A z-scored series of length 2 is always
+# +-(1, -1)/sqrt(2) (one bit of information), so nothing below 3 samples is meaningful.
+# Each master operation has its own, usually larger, ``min_length`` (hctsa.yaml) below which
+# its outputs are NaN: see FeatureCalculator.
+MIN_SERIES_LENGTH = 3
+# Below this length most features are noisy estimates; extract() warns (but still computes).
+SHORT_SERIES_WARNING_LENGTH = 20
+
+
 def _input_problem(ts: np.ndarray) -> Union[str, None]:
-    """Why a time series cannot be used as input (``None`` if it can)."""
-    if len(ts) < 100:
-        return f"too short (N = {len(ts)} < 100)"
+    """Why a time series cannot be used as input (``None`` if it can).
+
+    Rejects series shorter than :data:`MIN_SERIES_LENGTH` (3) samples, constant series, and
+    series containing NaN or Inf. Longer short series are accepted: features that cannot be
+    computed at that length return NaN (their ``min_length`` in hctsa.yaml, or their own checks).
+    """
+    if len(ts) < MIN_SERIES_LENGTH:
+        return f"too short (N = {len(ts)} < {MIN_SERIES_LENGTH})"
     if np.all(ts == ts[0]):
         return "constant"
     if np.any(np.isnan(ts)):

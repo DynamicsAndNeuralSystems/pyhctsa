@@ -4651,18 +4651,24 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
             mf_ac1[j] = autocorr(mres, 1, 'Fourier')
 
         # (2) *** Sliding mean 1 ***: predicts with the value i steps before it
-        mres = y[i:] - y[:N - i]
-        sm1_rms[j] = np.sqrt(np.mean(mres ** 2))
-        sm1_abs[j] = np.mean(np.abs(mres))
+        if N - i >= 1:
+            mres = y[i:] - y[:N - i]
+            sm1_rms[j] = np.sqrt(np.mean(mres ** 2))
+            sm1_abs[j] = np.mean(np.abs(mres))
+        else:  # no value i steps before another (y[:N - i] would wrap round)
+            sm1_rms[j] = sm1_abs[j] = np.nan
 
         # (3) *** Sliding mean 2 ***: closed-form solution of the order-2 linear recurrence
         # p(n) = (p(n-1) + p(n-2)) / 2 that iterating the average of the last two values
         # i steps ahead converges to
-        weights = np.array([1 + (-1) ** (i + 1) / 2 ** i, 2 + (-1) ** i / 2 ** i]) / 3
-        sm2p = np.column_stack([y[:N - i - 1], y[1:N - i]]) @ weights
-        mres = y[i + 1:] - sm2p
-        sm2_rms[j] = np.sqrt(np.mean(mres ** 2))
-        sm2_abs[j] = np.mean(np.abs(mres))
+        if N - i - 1 >= 1:
+            weights = np.array([1 + (-1) ** (i + 1) / 2 ** i, 2 + (-1) ** i / 2 ** i]) / 3
+            sm2p = np.column_stack([y[:N - i - 1], y[1:N - i]]) @ weights
+            mres = y[i + 1:] - sm2p
+            sm2_rms[j] = np.sqrt(np.mean(mres ** 2))
+            sm2_abs[j] = np.mean(np.abs(mres))
+        else:  # no pair of values i + 1 steps before another (y[:N - i - 1] would wrap round)
+            sm2_rms[j] = sm2_abs[j] = np.nan
 
     # (global) sample mean predictor
     sminf_res = y - np.mean(y)
