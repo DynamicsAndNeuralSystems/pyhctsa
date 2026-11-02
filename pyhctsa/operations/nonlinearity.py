@@ -1640,7 +1640,7 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
         logger.warning('Could not determine embedding parameters for this time series')
         return np.nan
 
-    if (n - (m - 1) * tau) < thwin:
+    if (n - (m - 1) * tau) < thwin + 2:  # no pair of embedded points beyond the Theiler window
         logger.warning(f'Embedded time series (N = {n}, m = {m}, tau = {tau}) too short '
                        'to do a correlation sum')
         return np.nan
@@ -4423,6 +4423,10 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
         logger.warning('Could not determine embedding parameters for this time series')
         return np.nan
     tau, m_max = params
+    if len(y) - (m_max - 1) * tau < 2:
+        # fewer than two delay vectors in the largest dimension: no box-count to compare
+        logger.warning('Time series too short to embed for box counting')
+        return np.nan
 
     # (the order-2 Renyi entropy of the partition into boxes, as a function of the box size and the
     # embedding dimension d, and its increment with d; the increments are analyzed)

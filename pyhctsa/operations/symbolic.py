@@ -511,13 +511,13 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile', tau: Union[int, str] = 1
     r2 = [[r1[i][yt[r1[i] + 1] == j + 1] for j in range(3)] for i in range(3)]
     for i in range(3):
         for j in range(3):
-            out2[i, j] = len(r2[i][j]) / (N - 1)
+            out2[i, j] = len(r2[i][j]) / (N - 1) if N > 1 else np.nan  # (no word: NaN, as hctsa)
 
     out.update({
         'aa': out2[0, 0], 'ab': out2[0, 1], 'ac': out2[0, 2],
         'ba': out2[1, 0], 'bb': out2[1, 1], 'bc': out2[1, 2],
         'ca': out2[2, 0], 'cb': out2[2, 1], 'cc': out2[2, 2],
-        'hh': _f_entropy(out2, N - 1, 2, 3, True)
+        'hh': _f_entropy(out2, N - 1, 2, 3, True) if N > 1 else np.nan
     })
 
     # ------------------------------------------------------------------------------
@@ -530,11 +530,11 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile', tau: Union[int, str] = 1
     for i in range(3):
         for j in range(3):
             for k in range(3):
-                out3[i, j, k] = len(r3[i][j][k]) / (N - 2)
+                out3[i, j, k] = len(r3[i][j][k]) / (N - 2) if N > 2 else np.nan
 
     out.update({f'{chr(97+i)}{chr(97+j)}{chr(97+k)}': out3[i, j, k] 
                 for i in range(3) for j in range(3) for k in range(3)})
-    out['hhh'] = _f_entropy(out3, N - 2, 3, 3, True)
+    out['hhh'] = _f_entropy(out3, N - 2, 3, 3, True) if N > 2 else np.nan
 
     # ------------------------------------------------------------------------------
     # Words of length 4
@@ -547,11 +547,11 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile', tau: Union[int, str] = 1
         for j in range(3):
             for k in range(3):
                 for l in range(3):
-                    out4[i, j, k, l] = len(r4[i][j][k][l]) / (N - 3)
+                    out4[i, j, k, l] = len(r4[i][j][k][l]) / (N - 3) if N > 3 else np.nan
 
     out.update({f'{chr(97+i)}{chr(97+j)}{chr(97+k)}{chr(97+l)}': out4[i, j, k, l] 
                 for i in range(3) for j in range(3) for k in range(3) for l in range(3)})
-    out['hhhh'] = _f_entropy(out4, N - 3, 4, 3, True)
+    out['hhhh'] = _f_entropy(out4, N - 3, 4, 3, True) if N > 3 else np.nan
 
     return out
 

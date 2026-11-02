@@ -49,6 +49,11 @@ def rad_core(x, tau: int) -> float:
     sub_median_sd = np.std(x[sub_medians], ddof=1)
 
     # Properties of the auto-density
+    if not (super_median_sd > 0 and sub_median_sd > 0):
+        # a half with no spread (e.g. at short lengths the sub-median half can be just the two
+        # middle values of an even-length series, which tie once centred at the median): its
+        # density is not defined (RAD.m gives Inf)
+        return np.nan
     sigma_dx = np.std(y - x, ddof=1)
     density_difference = (1/super_median_sd) - (1/sub_median_sd)
 
