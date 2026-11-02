@@ -154,3 +154,9 @@ def test_save_rejects_unknown_suffix(tmp_path):
     df = calc.extract(np.random.default_rng(4).standard_normal(200))
     with pytest.raises(ValueError, match="Unsupported suffix"):
         calc.save(tmp_path / "x.csv", df)
+
+
+def test_quality_from_values_object_array():
+    x, q = quality_from_values(np.array([1.0, None, 2 + 1j, "x", np.inf], dtype=object))
+    assert q.tolist() == [Quality.GOOD, Quality.EMPTY, Quality.COMPLEX, Quality.NON_SCALAR, Quality.INF]
+    assert x[0] == 1.0 and np.isnan(x[1:]).all()
