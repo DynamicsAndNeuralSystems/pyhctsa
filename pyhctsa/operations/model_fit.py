@@ -618,12 +618,8 @@ def _arch_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
     Returns
     -------
     np.ndarray
-        The p-values for lags 1..max_lag (all NaN for a constant or non-finite series).
-
-    Raises
-    ------
-    ValueError
-        If fewer than two samples remain after the lags of the largest model.
+        The p-values for lags 1..max_lag (all NaN for a constant or non-finite series, or when
+        fewer than two samples remain after the lags of the largest model).
 
     Notes
     -----
@@ -633,9 +629,9 @@ def _arch_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
     from statsmodels.stats.diagnostic import het_arch
     x = np.asarray(x, dtype=float).ravel()
     max_lag = int(max_lag)
-    if len(x) - max_lag < 2:
-        raise ValueError("The series is too short for the requested number of ARCH lags")
     out = np.full(max_lag, np.nan)
+    if len(x) - max_lag < 2:
+        return out  # too short for the regression on max_lag lags: every p-value undefined
     if not np.all(np.isfinite(x)) or np.ptp(x ** 2) == 0:
         return out
     with warnings.catch_warnings():
@@ -664,12 +660,8 @@ def _lbq_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
     Returns
     -------
     np.ndarray
-        The p-values for lags 1..max_lag (all NaN for a constant or non-finite series).
-
-    Raises
-    ------
-    ValueError
-        If ``max_lag`` is not smaller than the series length.
+        The p-values for lags 1..max_lag (all NaN for a constant or non-finite series, or one
+        not longer than ``max_lag``).
 
     Notes
     -----
@@ -679,10 +671,8 @@ def _lbq_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
     from statsmodels.stats.diagnostic import acorr_ljungbox
     x = np.asarray(x, dtype=float).ravel()
     max_lag = int(max_lag)
-    if max_lag > len(x) - 1:
-        raise ValueError("Number of lags must be less than the sample size")
-    if not np.all(np.isfinite(x)) or np.ptp(x) == 0:
-        return np.full(max_lag, np.nan)
+    if max_lag > len(x) - 1 or not np.all(np.isfinite(x)) or np.ptp(x) == 0:
+        return np.full(max_lag, np.nan)  # too short for max_lag lags, constant, or non-finite
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         return np.asarray(acorr_ljungbox(x, lags=max_lag, return_df=True)['lb_pvalue'], dtype=float)

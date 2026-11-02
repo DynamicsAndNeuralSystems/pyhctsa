@@ -27,7 +27,7 @@ medical:
 
   pol_var:
     base_name: pol_var
-    min_length: "D + 1"
+    min_length: "2 * D + 1"
     dependencies:
     configs:
       - {d: 1.0, D: 3, zscore: True}
@@ -57,6 +57,7 @@ medical:
   
   porta:
     base_name: porta
+    min_length: 4
     dependencies:
     configs:
       - {num_levels: 6, zscore: True}
@@ -79,7 +80,7 @@ extreme_events:
 
   extreme_event_order:
     base_name: extreme_event_order
-    min_length: "min(n for n in range(2, 1000) if n * (1 - extreme_thresh) + 0.5 < n)"
+    min_length: "min(n for n in range(2, 1000) if n * (1 - extreme_thresh) + 0.5 < n - 1)"
     dependencies:
     configs:
       - {extreme_thresh: 0.1, zscore: True, exclude: ['alternationRate', 'meanInterval', 'meanIntervalNeg', 'meanIntervalPos', 'propNP', 'propPosEvents']}   # EX_ExtremeEventOrder(x_z,0.1)
@@ -147,7 +148,7 @@ correlation:
   
   add_noise:
     base_name: add_noise
-    min_length: "num(tau, 1) + {'gaussian': 3, 'kraskov1': 5, 'kraskov2': 5}.get(ami_method, 2)"
+    min_length: "max(extra_param + 1, num(tau, 1) + 2) if ami_method == 'quantiles' else num(tau, 1) + {'gaussian': 3, 'kraskov1': 6, 'kraskov2': 6}.get(ami_method, 2)"
     dependencies:
     configs:
       - {tau: 1,   ami_method: 'quantiles', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'quantiles',10,'default',10)
@@ -413,6 +414,7 @@ correlation:
   
   falling_sticks:
     base_name: falling_sticks
+    min_length: 4
     dependencies:
     configs:
       - {zscore: True, exclude: ['kurtosis_all', 'median_all', 'median_n', 'median_p']}
@@ -443,6 +445,7 @@ correlation:
   
   autocorr_shape:
     base_name: autocorr_shape
+    min_length: "4 if stop_when == 'pos_drown' else None"
     configs:
       - {stop_when: 'drown', zscore: True, exclude: ['decayTimescale', 'fexpacf_r2', 'fexpacf_stdres', 'nextrema', 'nmaxima']}
       - {stop_when: 'pos_drown', zscore: True, exclude: ['actau', 'nextrema', 'nmaxima']}   # CO_AutoCorrShape(x_z,'posDrown')
@@ -451,6 +454,7 @@ correlation:
   
   histogram_ami:
     base_name: histogram_ami
+    min_length: 4
     dependencies:
     configs:
       - {tau: [[1, 2, 3, 4, 5]], meth: 'std1', num_bins: 2, zscore: True, select: ['ami1']}
@@ -463,6 +467,7 @@ correlation:
 
   compare_min_ami:
     base_name: compare_min_ami
+    min_length: "5 if bin_method == 'quantiles' else None"
     dependencies:
     configs:
       - {bin_method: 'std1', num_bins: [!range [2, 80]], zscore: True, exclude: ['max', 'median', 'mode']}
@@ -474,6 +479,7 @@ correlation:
 
   periodicity_wang:
     base_name: periodicity_wang
+    min_length: 13
     dependencies:
     configs:
       - {zscore: True}
@@ -563,7 +569,7 @@ correlation:
 
   quantilogram:
     base_name: quantilogram
-    min_length: "2 * num(lag, 1) + 1"
+    min_length: "max(30, 2 * lag + 1) if isnum(lag) else 9"
     dependencies:
     configs:
       - {lag: 1, zscore: True, select: ['q05', 'q95']}   # CO_Quantilogram(x_z,1)
@@ -594,7 +600,7 @@ correlation:
 information:
   automutual_info_stats:
     base_name: automutual_info_stats
-    min_length: "4 if est_method == 'gaussian' else 6"
+    min_length: "{('gaussian', 20): 6, ('kraskov1', 20): 7, ('gaussian', 40): 9, ('kraskov1', 40): 7}[(est_method, max_tau)]"
     dependencies:
     configs:
       - {max_tau: 40, est_method: 'gaussian', zscore: True, select: ['fmmi']}
@@ -606,7 +612,7 @@ information:
 
   first_min:
     base_name: first_min
-    min_length: "{'ac': 3, 'mi-gaussian': 5, 'mi-hist': 4}.get(min_what, 7)"
+    min_length: "{'ac': 4, 'mi-gaussian': 5, 'mi-hist': 6}.get(min_what, 9)"
     dependencies:
     configs:
       - {min_what: 'ac', zscore: True}
@@ -620,7 +626,7 @@ information:
   
   first_max:
     base_name: first_max
-    min_length: "{'ac': 4, 'mi-gaussian': 6, 'mi-hist': 5}.get(max_what, 8)"
+    min_length: "{'ac': 5, 'mi-gaussian': 6, 'mi-hist': 7}.get(max_what, 10)"
     dependencies:
     configs:
       - {max_what: 'ac', zscore: True}
@@ -634,7 +640,7 @@ information:
   
   multivariate_ami:
     base_name: multivariate_ami
-    min_length: "2 * num(tau_method, 1) + (4 if est_method == 'gaussian' else 5)"
+    min_length: "2 * num(tau_method, 1) + (4 if est_method == 'gaussian' else 6)"
     dependencies:
     configs:
       - {tau_method: 'ac', est_method: 'gaussian', zscore: True, select: ['multiAMI', 'synergy']}   # IN_MultivariateAMI(x_z,'ac','gaussian')
@@ -677,7 +683,7 @@ entropy:
   
   permutation_entropy:
     base_name: permutation_entropy
-    min_length: "(m - 1) * num(tau, 1) + 2"
+    min_length: "(m - 1) * num(tau, 1) + 3"
     configs:
       - {m: 2, tau: 1, zscore: True, select: ['normPermEn']}
       - {m: 3, tau: 1, zscore: True, select: ['normPermEn']}
@@ -699,7 +705,7 @@ entropy:
 
   lempel_ziv_complexity:
     base_name: lempel_ziv_complexity
-    min_length: "n_bits + 1 + (pre_proc == 'diff')"
+    min_length: "n_bits + (5 if n_bits <= 3 else 3) + (pre_proc == 'diff')"
     dependencies:
     configs:
       - {n_bits: 2, zscore: True}
@@ -735,7 +741,7 @@ entropy:
   
   approximate_entropy:
     base_name: approximate_entropy
-    min_length: "mnom * num(tau, 1) + 2"
+    min_length: "mnom * num(tau, 1) + 3"
     dependencies:
     configs:
       - {mnom: 1, rth: 0.1, zscore: True}
@@ -758,6 +764,7 @@ entropy:
   
   sample_entropy:
     base_name: sample_entropy
+    min_length: 4
     dependencies:
     configs:
       - {m: 5, r: 0.05, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen3', 'sampen4', 'sampen5', 'meanchsampen']}
@@ -785,7 +792,7 @@ entropy:
   
   shannon_entropy:
     base_name: shannon_entropy
-    min_length: "depth + 2"
+    min_length: "{2: 5, 3: 7, 5: 9}[depth] if isnum(num_bins) else depth + 3"
     dependencies:
     configs:
       - {num_bins: 2, depth: 2, zscore: True}
@@ -798,7 +805,7 @@ entropy:
   
   bubble_entropy:
     base_name: bubble_entropy
-    min_length: "m * num(tau, 1) + 2"
+    min_length: "m * num(tau, 1) + 3"
     dependencies:
     configs:
       - {m: 5, tau: 1, zscore: True}   # EN_BubbleEn(x_z,5,1)
@@ -810,7 +817,7 @@ entropy:
 
   dispersion_entropy:
     base_name: dispersion_entropy
-    min_length: "(m - 1) * num(tau, 1) + 2"
+    min_length: "(m - 1) * num(tau, 1) + 3"
     dependencies:
     configs:
       - {m: 2, c: 6, tau: 'ac', zscore: True, exclude: ['dispEn', 'fDispEn']}   # EN_DispEn(x_z,2,6,'ac')
@@ -835,7 +842,7 @@ entropy:
 
   permutation_entropy_complexity:
     base_name: permutation_entropy_complexity
-    min_length: "(m - 1) * num(tau, 1) + 2"
+    min_length: "(m - 1) * num(tau, 1) + 3"
     dependencies:
     configs:
       - {m: 4, tau: 1, zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,4,1)
@@ -1028,6 +1035,7 @@ stationarity:
   
   simple_stats:
     base_name: simple_stats
+    min_length: 4
     dependencies:
     configs:
       - {what_stat: 'pmcross', zscore: True}
@@ -1055,7 +1063,7 @@ stationarity:
   
   local_distributions:
     base_name: local_distributions
-    min_length: "max(num_segs, 11)"
+    min_length: "max(num_segs, 12)"
     dependencies:
     configs:
       - {num_segs: 3, each_or_par: 'par', zscore: True}
@@ -1147,7 +1155,7 @@ distribution:
 
   withinp:
     base_name: withinp
-    min_length: "min(n for n in range(2, 1000) if (n - 1) / sqrt(n) > p) if mean_or_median == 'mean' else (3 if p < 1.8 else 4 if p < 2.7 else 5)"
+    min_length: "(4 if p <= 1 else floor(2 * p ** 2) + 2) if mean_or_median == 'mean' else (4 if p <= 1 else 5 if p <= 2.5 else 6)"
     dependencies:
     configs:
       - {p: 0.5, mean_or_median: 'mean', zscore: True}
@@ -1367,6 +1375,7 @@ distribution:
 
   remove_points:
     base_name: remove_points
+    min_length: "min(n for n in range(2, 1000) if n - round(n * (1 - p)) >= 1) if remove_or_saturate == 'saturate' else None"
     dependencies:
     configs:
       - {remove_how: 'absclose', p: 0.1, remove_or_saturate: 'remove', zscore: True, select: ['kurtosisrat', 'mean', 'median', 'skewnessdiff', 'std']}
@@ -1491,6 +1500,7 @@ scaling:
 symbolic:
   transition_matrix:
     base_name: transition_matrix
+    min_length: "5 if how_to_cg == 'quantile' and num_groups == 2 else 4 if how_to_cg == 'updown' else None"
     dependencies:
     configs:
       - {how_to_cg: 'quantile', num_groups: 3, tau: 1, zscore: True, select: ['lam2mod', 'maximeig', 'mineig', 'ondiag', 'secondeig', 'stddiag', 'stdeig', 'sumdiagcov', 'symdiff', 'symsumdiff', 'transEntropy', 'transKLdiv']}
@@ -1517,6 +1527,7 @@ symbolic:
 
   binary_stats:
     base_name: binary_stats
+    min_length: "4 if binary_method == 'iqr' else None"
     dependencies:
     configs:
       - {binary_method: 'mean', zscore: True, exclude: ['longstretch0norm', 'longstretch1norm', 'meanstretch0norm', 'meanstretch1norm', 'stdstretch0norm', 'stdstretch1norm']}
@@ -1528,7 +1539,7 @@ symbolic:
   
   motif_three:
     base_name: motif_three
-    min_length: "4 + (cg_how == 'diffquant')"
+    min_length: "5 + (cg_how == 'diffquant')"
     dependencies:
     configs:
       - {cg_how: 'quantile', zscore: True, exclude: ['a', 'b', 'c', 'h']}
@@ -1553,7 +1564,7 @@ symbolic:
   
   binary_stretch:
     base_name: binary_stretch
-    min_length: 5
+    min_length: 7
     dependencies:
     configs:
       - {stretch_what: 'gaps1', zscore: True}
@@ -1563,7 +1574,7 @@ symbolic:
   
   surprise:
     base_name: surprise
-    min_length: "memory + 1 + (coarse_grain_method == 'diff')"
+    min_length: "memory + 1 + (coarse_grain_method == 'diff') + (what_prior == 'dist')"
     dependencies:
     configs:
       - {what_prior: 'dist', memory: 5, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True, exclude: ['median', 'propUnseen', 'sum', 'tstat']}
@@ -1606,6 +1617,7 @@ symbolic:
     
   binary_stats_ar1:
     base_name: binary_stats_ar1
+    min_length: "4 if binary_method == 'diff' else None"
     dependencies:
     configs:
       - {binary_method: 'diff', zscore: True, select: ['meanstretch0_ar1rat', 'meanstretch1_ar1rat', 'pstretch1_ar1rat']}   # SB_BinaryStats_AR1(x_z,'diff')
@@ -1662,7 +1674,7 @@ wavelet:
   
   scal_2_freq:
     base_name: scal_2_freq
-    min_length: "4 * (dec_len(w_name) - 1)"
+    min_length: "8 * (dec_len(w_name) - 1)"
     dependencies:
       - PyWavelets
     configs:
@@ -1746,6 +1758,7 @@ hypothesis_tests:
 
   independence_tests:
     base_name: independence_tests
+    min_length: "4 if the_test == 'runsz' else None"
     dependencies:
     configs:
       - {the_test: 'lbq', zscore: True}   # HT_IndependenceTests(x_z,'lbq')
@@ -1755,7 +1768,7 @@ hypothesis_tests:
 
   marginal_tests:
     base_name: marginal_tests
-    min_length: "4 if the_test in ('signtest', 'signrank') else None"
+    min_length: "{'signtest': 6, 'signrank': 5}.get(the_test)"
     dependencies:
     configs:
       - {the_test: 'logjb', zscore: False}   # HT_MarginalTests(x,'logjb')
@@ -1971,7 +1984,7 @@ model_fit:
 
   compare_test_sets:
     base_name: compare_test_sets
-    min_length: "{('ar', 4): 10, ('ar', 'best'): 21, ('ss', 2): 12, ('ss', 'best'): 44}[(the_model, ord)]"
+    min_length: "481 if subset_how == 'spread' else 260"
     dependencies:
     configs:
       - {the_model: 'ar', ord: 4, subset_how: 'spread', sample_p: [[25, 0.1]], steps: 1, zscore: True}   # MF_CompareTestSets(x_z,'ar',4,'spread',[25,0.1],1)
@@ -1983,7 +1996,7 @@ model_fit:
 
   garch_compare:
     base_name: garch_compare
-    min_length: 40
+    min_length: 6
     dependencies:
     configs:
       - {pre_proc: 'ar', zscore: True, exclude: ['hasStructure', 'Ks_vary_p', 'Ks_vary_q', 'max_maxarchps', 'max_maxlbqps', 'max_meanlbqps', 'maxAIC', 'maxBIC', 'maxK', 'mean_maxarchps', 'mean_maxlbqps', 'mean_meanarchps', 'mean_meanlbqps', 'meanAIC', 'meanBIC', 'meanK', 'meanLLF', 'min_maxarchps', 'min_maxlbqps', 'min_meanarchps', 'min_meanlbqps', 'minAIC', 'minBIC', 'minK', 'minLLF']}   # MF_GARCHcompare(x_z,'ar',1:3,1:3)
@@ -1992,7 +2005,7 @@ model_fit:
 
   garch_fit:
     base_name: garch_fit
-    min_length: 40
+    min_length: 6
     dependencies:
     configs:
       - {zscore: True, exclude: ['ac1_stde2', 'aic', 'ARCHerr_1', 'bic', 'constant', 'constanterr', 'distDoF', 'engle_pval_stde_1', 'engle_pval_stde_10', 'GARCHerr_1', 'hasStructure', 'lbq_max_diff_p', 'lbq_mean_diff_p', 'lbq_pval_stde_1', 'lbq_pval_stde_10', 'lbq_pval_stde_5', 'leverage', 'leverageerr', 'maxenglepval_stde', 'maxlbqpval_stde2', 'meansigma', 'minenglepval_stde', 'minlbqpval_stde2', 'offset', 'rangesigma', 'stdsigma', 'summaryexitflag', 'uncondVar', 'zres_ac1', 'zres_ac2', 'zres_ac3', 'zres_ftbth', 'zres_meane', 'zres_minsbc', 'zres_popt', 'zres_propbth', 'zres_stde', 'zres_swm', 'zres_taurat']}   # MF_GARCHfit(x_z,'ar',1,1)
@@ -2067,6 +2080,7 @@ model_fit:
 graph:
   visibility_graph:
     base_name: visibility_graph
+    min_length: 4
     dependencies:
     configs:
       - {meth: 'norm', zscore: True, exclude: ['dexpk_adjr2', 'dgaussk_adjr2', 'dpowerk_adjr2', 'expnlogL', 'gaussnlogL', 'rangek']}
@@ -2172,7 +2186,7 @@ pre_process:
 surrogates:
   surrogate_test:
     base_name: surrogate_test
-    min_length: 6
+    min_length: 7
     dependencies:
     configs:
       - {the_test_stat: [['amikraskov1', 'amikraskovmi', 'o3', 'tc3']], zscore: True, exclude: ['tc3_mediqr']}   # SD_SurrogateTest(x_z,'RP',99,[],{'amikraskov1','amikraskovmi','o3','tc3'},'default')
