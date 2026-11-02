@@ -2,6 +2,7 @@ import copy
 import importlib
 import inspect
 import math
+import re
 import time
 from functools import partial, wraps
 from itertools import product
@@ -102,7 +103,8 @@ def _transform_input(x, zscore: bool = False, absval: bool = False,
 
 def _preprocess_decorator(zscore: bool = False, absval: bool = False,
                           preprocess: Union[str, None] = None,
-                          min_length: Union[int, None] = None) -> Callable:
+                          min_length: Union[int, None] = None,
+                          field_min_lengths: Union["_FieldMinLengths", None] = None) -> Callable:
     """
     Decorator that gives a feature function the input its config asks for.
 
@@ -119,7 +121,8 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False,
     ``min_length`` is the shortest series (after these transforms, so for ``decimate_ac1e`` the
     decimated series) on which the feature is defined: for a shorter one the function is not
     called and its outputs are all NaN (:func:`~pyhctsa.utils.nan_outputs`), hctsa's "not
-    appropriate" outcome.
+    appropriate" outcome. ``field_min_lengths`` does the same for single fields of a dict output:
+    a field whose own minimum exceeds the length is set to NaN after the function has run.
     """
     if preprocess is not None and preprocess not in _PREPROCESS_LABELS:
         raise ValueError(f"Unknown preprocess setting '{preprocess}'; "
@@ -133,7 +136,10 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False,
                 return nan_outputs(func, *args, **kwargs)
             if min_length is not None and len(x) < min_length:  # too short to be defined
                 return nan_outputs(func, *args, **kwargs)
-            return func(x, *args, **kwargs)
+            out = func(x, *args, **kwargs)
+            if field_min_lengths is not None and isinstance(out, dict):
+                out = field_min_lengths.apply(out, len(x))
+            return out
         return wrapper
     return decorator
 
@@ -400,6 +406,49 @@ def _eval_min_length(spec, op_func: Callable, params: dict, label: str) -> Union
     return int(value)
 
 
+
+class _FieldMinLengths:
+    """The ``field_min_length`` of one master operation: the shortest series on which particular
+    fields of its dict output are defined (fields not listed need only the operation's own
+    ``min_length``).
+
+    The YAML gives ``{field: int or expression}``. A field name may contain ``{k}``, which matches
+    any integer (e.g. ``ami{k}`` matches ``ami1``, ``ami2``, ...); the expression may then use ``k``.
+    """
+    def __init__(self, spec: dict, op_func: Callable, params: dict, label: str):
+        if not isinstance(spec, dict):
+            raise ValueError(f"field_min_length of '{label}' must be a mapping, not {spec!r}")
+        self._op_func, self._params, self._label = op_func, params, label
+        self._exact, self._templates, self._cache = {}, [], {}
+        for field, fspec in spec.items():
+            if '{k}' in field:
+                pattern = re.compile(re.escape(field).replace(re.escape('{k}'), r'(\d+)'))
+                self._templates.append((pattern, fspec))
+            else:
+                self._exact[field] = _eval_min_length(fspec, op_func, params, f"{label}.{field}")
+        for _, fspec in self._templates:  # check the expressions now, at k = 1
+            _eval_min_length(fspec, op_func, {**params, 'k': 1}, label)
+
+    def bound(self, field: str) -> Union[int, None]:
+        """The minimum length of one field (None: no field-specific minimum)."""
+        if field in self._exact:
+            return self._exact[field]
+        if field not in self._cache:
+            b = None
+            for pattern, fspec in self._templates:
+                m = pattern.fullmatch(field)
+                if m:
+                    b = _eval_min_length(fspec, self._op_func, {**self._params, 'k': int(m.group(1))},
+                                         f"{self._label}.{field}")
+                    break
+            self._cache[field] = b
+        return self._cache[field]
+
+    def apply(self, out: dict, n: int) -> dict:
+        """``out`` with every field whose minimum length exceeds ``n`` set to NaN."""
+        return {k: (np.nan if (b := self.bound(k)) is not None and n < b else v) for k, v in out.items()}
+
+
 class FeatureCalculator:
     """
     A configuration-driven feature extraction calculator for time series data.
@@ -442,7 +491,9 @@ class FeatureCalculator:
     ``_MIN_LENGTH_NAMESPACE`` for the helpers it may use). It applies to the series the function
     receives (after ``zscore``/``preprocess``); for a shorter series every output of that feature is
     NaN, so the set of feature columns never depends on the length. The minima are listed in
-    :attr:`min_lengths`.
+    :attr:`min_lengths`. ``field_min_length`` (a mapping ``{field: int or expression}``; a field
+    name may contain ``{k}``, an integer the expression can use) gives single fields of a dict
+    output a larger minimum: below it that field alone is NaN (:attr:`field_min_lengths`).
 
     Examples
     --------
@@ -508,6 +559,7 @@ class FeatureCalculator:
     def _build_feature_funcs(self):
         feature_funcs = {}
         self.min_lengths = {}  # label -> minimum series length (None: no minimum beyond the global one)
+        self.field_min_lengths = {}  # label -> _FieldMinLengths of its fields with their own minimum
         self._skipped_functions = []
         for module_key in self.config.keys():
 
@@ -527,6 +579,7 @@ class FeatureCalculator:
                 base_name = feature_config.get("base_name", feature_name)
                 ordered_args = feature_config.get("ordered_args", [])
                 min_length_spec = feature_config.get("min_length", None)
+                field_min_length_spec = feature_config.get("field_min_length", None)
                 
                 for config_item in feature_config.get("configs", [{}]):
                     # extract and clean meta params
@@ -548,8 +601,12 @@ class FeatureCalculator:
                         label = _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval, preprocess)
                         min_length = _eval_min_length(min_length_spec, op_func, combo_dict, label)
                         self.min_lengths[label] = min_length
-                        master_func = _preprocess_decorator(do_zscore, do_absval, preprocess,
-                                                            min_length)(op_func)
+                        field_min_lengths = (None if field_min_length_spec is None else
+                                             _FieldMinLengths(field_min_length_spec, op_func, combo_dict, label))
+                        if field_min_lengths is not None:
+                            self.field_min_lengths[label] = field_min_lengths
+                        master_func = _preprocess_decorator(do_zscore, do_absval, preprocess, min_length,
+                                                            field_min_lengths)(op_func)
 
                         final_func = partial(master_func, **combo_dict)
                         # filter out certain features if specified by the user with the select/include keys

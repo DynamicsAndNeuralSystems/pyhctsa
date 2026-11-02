@@ -105,6 +105,9 @@ correlation:
 
   oversampling:
     base_name: oversampling
+    field_min_length:
+      # 0 halvings below N = 200 and at most 1 below 399 (each needs >= 100 samples left)
+      numHalvings: 399
     dependencies:
     configs:
       - {zscore: True}
@@ -452,6 +455,9 @@ correlation:
   histogram_ami:
     base_name: histogram_ami
     min_length: 4
+    field_min_length:
+      # the bias-corrected AMI at lag k takes only two values with k + 2 points
+      "ami{k}": "k + 3"
     dependencies:
     configs:
       - {tau: [[1, 2, 3, 4, 5]], meth: 'std1', num_bins: 2, zscore: True, select: ['ami1']}
@@ -485,6 +491,10 @@ correlation:
   
   trev:
     base_name: trev
+    field_min_length:
+      # one lag-tau difference: raw is its sign (+-1) and abs is 1
+      raw: "num(tau, 1) + 2"
+      abs: "num(tau, 1) + 2"
     dependencies:
     configs:
       - {tau: 1, zscore: True}
@@ -945,6 +955,14 @@ stationarity:
   
   local_global:
     base_name: local_global
+    field_min_length:
+      # subset 'l' with n >= N is the whole (z-scored) series: these are then 0 or 1
+      absmean: "n + 1 if subset_how == 'l' else None"
+      std: "n + 1 if subset_how == 'l' else None"
+      iqr: "n + 1 if subset_how == 'l' else None"
+      skewness: "n + 1 if subset_how == 'l' else None"
+      kurtosis: "n + 1 if subset_how == 'l' else None"
+      ac1: "n + 1 if subset_how == 'l' else None"
     dependencies:
     configs:
       - {subset_how: 'l', n: 10, zscore: True}
@@ -977,6 +995,14 @@ stationarity:
   
   range_evolve:
     base_name: range_evolve
+    field_min_length:
+      # p<x>: range of the first ceil(x N) samples over the whole range: 0 when that is one sample
+      p1: 101
+      p10: 11
+      p20: 6
+      # nuql<n>, l<n>: identically 1 when n = N
+      "nuql{k}": "k + 1"
+      "l{k}": "k + 1"
     dependencies:
     configs:
       - {zscore: True}
@@ -1901,6 +1927,13 @@ model_fit:
   fit_subsegments:
     base_name: fit_subsegments
     min_length: "{'ar': 30, 'arcrosspred': 15, 'arsbc': 210, 'ss': 120}[model]"
+    field_min_length:
+      # 'ar' on segments of 0.1 N points: an order-2 fit to 3 points is exact (fpe 0, a_2 -1)
+      fpe_mean: "34 if model == 'ar' else None"
+      fpe_std: "34 if model == 'ar' else None"
+      fpe_max: "34 if model == 'ar' else None"
+      fpe_min: "40 if model == 'ar' else None"
+      a_2_max: "40 if model == 'ar' else None"
     dependencies:
       - statsmodels
     configs:
@@ -2021,6 +2054,16 @@ model_fit:
   steps_ahead:
     base_name: steps_ahead
     min_length: "4 if order == 2 else 13 if model == 'arma' else 21 if model == 'ar' else 44"
+    field_min_length:
+      # horizon k (k = 1..6): errors and their lag-1 ACF need enough predictions
+      "stde_h{k}": "max(4, k + 2)"
+      "meanabs_h{k}": "max(4, k + 2)"
+      "ac1_h{k}": "k + 4"
+      stde_ndown: 5
+      stde_meanabs_diff: 8
+      stde_meandiff: 8
+      stde_maxdiff: 8
+      stde_stddiff: 8
     dependencies:
     configs:
       - {model: 'ar', order: 2, zscore: True}   # MF_steps_ahead(x_z,'ar',2,6)

@@ -195,3 +195,44 @@ def test_local_extrema_keeps_a_full_last_window_ending_in_zero():
     y = x.copy(); y[-1] = 1e-9
     a, b = local_extrema(x, 'l', 50), local_extrema(y, 'l', 50)
     assert a["meanmax"] == pytest.approx(b["meanmax"], rel=1e-6)  # both use 2 windows
+
+
+# ---- per-field minimum lengths (field_min_length) ----
+
+def test_field_min_length_blocks_single_fields():
+    f = FC.feature_funcs["range_evolve"]
+    out = f(_series("noise", 100))  # p1 is the range of 1 sample (always 0) until N = 101
+    assert np.isnan(out["p1"]) and np.isfinite(out["p10"]) and np.isnan(out["l100"]) and np.isfinite(out["l50"])
+    out = f(_series("noise", 101))
+    assert np.isfinite(out["p1"]) and np.isfinite(out["l100"])
+    out = FC.feature_funcs["histogram_ami_1_to_5_even_2"](_series("noise", 7))  # ami{k}: k + 3
+    assert np.isfinite(out["ami4"]) and np.isnan(out["ami5"])
+    out = FC.feature_funcs["local_global_l_500"](_series("noise", 300))  # the whole series: 0s and 1s
+    assert np.isfinite(out["median"]) and np.isnan(out["std"]) and np.isnan(out["absmean"])
+    assert FC.field_min_lengths["local_global_p_0p1"].bound("std") is None
+
+
+def test_field_min_length_in_extract_is_coded_nan():
+    sub = FeatureCalculator.__new__(FeatureCalculator)
+    sub.feature_funcs = {"range_evolve": FC.feature_funcs["range_evolve"]}
+    sub.extract(_series("noise", 100))
+    assert sub.quality["range_evolve.p1"].iloc[0] == Quality.NAN
+    assert sub.quality["range_evolve.p10"].iloc[0] == Quality.GOOD
+
+
+def test_custom_config_field_min_length(tmp_path):
+    cfg = {"correlation": {"histogram_ami": {
+        "base_name": "hami", "field_min_length": {"ami{k}": "k + 1 + extra", "ami1": 50},
+        "configs": [{"tau": [[1, 2, 3]], "meth": "even", "num_bins": 2, "zscore": True}]}}}
+    p = tmp_path / "c.yaml"
+    p.write_text(yaml.safe_dump(cfg))
+    with pytest.raises(ValueError):  # 'extra' is not a parameter
+        FeatureCalculator(str(p))
+    cfg["correlation"]["histogram_ami"]["field_min_length"] = {"ami{k}": "k + 5", "ami1": 50}
+    p.write_text(yaml.safe_dump(cfg))
+    fc = FeatureCalculator(str(p))
+    lab = next(iter(fc.feature_funcs))
+    b = fc.field_min_lengths[lab]
+    assert b.bound("ami1") == 50 and b.bound("ami3") == 8 and b.bound("other") is None
+    out = fc.feature_funcs[lab](_series("noise", 7))
+    assert np.isnan(out["ami1"]) and np.isfinite(out["ami2"]) and np.isnan(out["ami3"])

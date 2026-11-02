@@ -201,7 +201,8 @@ class TestFeatureFiltering:
     
 
 class TestConfigFiles:
-    ALLOWED_KEYS = {"base_name", "dependencies", "configs", "legacy_name", "ordered_args", "min_length"}
+    ALLOWED_KEYS = {"base_name", "dependencies", "configs", "legacy_name", "ordered_args", "min_length",
+                    "field_min_length"}
 
     def test_config_keys_are_known(self):
         # misspelled keys (e.g. 'depedencies') are silently ignored by the calculator
