@@ -16,7 +16,7 @@ import yaml
 from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
-from .utils import _check_optional_deps, _input_problem, _validate_data, _zscore_or_zeros, decimate_ac1e, nan_outputs, z_score
+from .utils import _check_optional_deps, _input_problem, _zscore_or_zeros, decimate_ac1e, nan_outputs, z_score
 from .quality import Quality, classify, quality_summary
 from .results import ERROR_COLUMNS, save_results
 from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk,
@@ -302,19 +302,9 @@ def _assemble(records: list, problems: list, index: pd.Index):
     order of first appearance; a computed series missing one of them has ``Quality.LINK_ERROR``
     there, and a rejected series has ``Quality.REJECTED`` everywhere.
     """
-    columns, seen = [], set()
-    funcs, seen_f = [], set()
-    for r in records:
-        if r is None:
-            continue
-        for c in r["values"]:
-            if c not in seen:
-                seen.add(c)
-                columns.append(c)
-        for f in r["times"]:
-            if f not in seen_f:
-                seen_f.add(f)
-                funcs.append(f)
+    computed = [r for r in records if r is not None]
+    columns = list(dict.fromkeys(c for r in computed for c in r["values"]))
+    funcs = list(dict.fromkeys(f for r in computed for f in r["times"]))
     n, p = len(records), len(columns)
     values = np.full((n, p), np.nan)
     quality = np.full((n, p), int(Quality.LINK_ERROR), dtype=np.uint8)
@@ -537,6 +527,8 @@ class FeatureCalculator:
             computed, and its row is coded ``Quality.REJECTED``. If every series fails it, a
             ``ValueError`` is raised.
         """
+        # forget the previous extraction, so save() cannot pair new values with old labels
+        self.quality = self.errors = self.calc_time = None
         series_list = _standardise_inputs(data)
         # check each time series: an invalid one is not computed and its row is coded
         # Quality.REJECTED; only if every series is invalid is there nothing to return
@@ -597,8 +589,10 @@ class FeatureCalculator:
         if verbose:
             print(f"Feature extraction completed in {elapsed:.3f} seconds.")
         index = pd.Index(labels_list, name="instance")
-        records = iter(rows)
-        records = [None if p is not None else next(records) for p in problems]
+        if len(rows) != len(problems) - len(invalid):
+            raise RuntimeError(f"Expected results for {len(problems) - len(invalid)} series, got {len(rows)}")
+        it = iter(rows)
+        records = [None if p is not None else next(it) for p in problems]
         df, self.quality, self.errors, self.calc_time = _assemble(records, problems, index)
         self._last_elapsed = elapsed
         if verbose:

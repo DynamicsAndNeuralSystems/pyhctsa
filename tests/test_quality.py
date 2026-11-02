@@ -160,3 +160,76 @@ def test_quality_from_values_object_array():
     x, q = quality_from_values(np.array([1.0, None, 2 + 1j, "x", np.inf], dtype=object))
     assert q.tolist() == [Quality.GOOD, Quality.EMPTY, Quality.COMPLEX, Quality.NON_SCALAR, Quality.INF]
     assert x[0] == 1.0 and np.isnan(x[1:]).all()
+
+
+def test_classify_edge_cases():
+    assert classify(complex(np.nan, np.nan))[1] == Quality.NAN
+    assert classify(10 ** 400) == (classify(10 ** 400)[0], Quality.INF)
+    assert classify(-(10 ** 400))[1] == Quality.NEG_INF
+    assert classify(np.array([None], dtype=object))[1] == Quality.EMPTY
+    _, q = quality_from_values(np.array([1 + 0j, complex(np.nan, np.nan), 1 + 2j]))
+    assert q.tolist() == [Quality.GOOD, Quality.NAN, Quality.COMPLEX]
+
+
+def _array_or_raise(y):
+    if np.mean(y) < 0:
+        raise ValueError("negative mean")
+    return np.array([1.0, 2.0, 3.0])
+
+
+def test_raising_array_feature_keeps_columns():
+    calc = _toy_calculator({"arr": _array_or_raise})
+    rng = np.random.default_rng(5)
+    df = calc.extract([rng.standard_normal(200) + 5, rng.standard_normal(200) - 5], labels=["pos", "neg"])
+    assert list(df.columns) == ["arr_0", "arr_1", "arr_2"]
+    assert (calc.quality.loc["neg"] == Quality.ERROR).all()
+    assert (calc.quality.loc["pos"] == Quality.GOOD).all()
+
+
+def test_failed_feature_leaves_global_rng_alone():
+    from pyhctsa.distribute import _FAILED_COLUMNS, _extract_features_single_series
+
+    def uses_rng(y):
+        np.random.rand()
+        raise ValueError("always")
+
+    _FAILED_COLUMNS.clear()
+    np.random.seed(0)
+    _extract_features_single_series(np.arange(10.0), {"f": uses_rng})
+    after = np.random.rand()
+    np.random.seed(0)
+    np.random.rand()  # the one draw the feature itself made
+    assert after == np.random.rand()
+
+
+def test_error_labels_keep_their_type(tmp_path):
+    calc = _toy_calculator({"ok": _two_outputs})
+    rng = np.random.default_rng(6)
+    with pytest.warns(UserWarning):
+        df = calc.extract([rng.standard_normal(200), np.ones(200)], labels=["001", "002"])
+    r = load_results(calc.save(tmp_path / "r.npz", df))
+    assert r.errors["instance"].tolist() == ["002"]
+    assert list(r.values.index) == ["001", "002"]
+
+
+def test_parquet_int_labels_meta_and_stale_calc_time(tmp_path):
+    pytest.importorskip("pyarrow")
+    from pyhctsa import save_results
+    calc = _toy_calculator({"ok": _two_outputs})
+    rng = np.random.default_rng(7)
+    with pytest.warns(UserWarning):
+        df = calc.extract([rng.standard_normal(200), np.ones(200)], labels=[0, 1])
+    path = calc.save(tmp_path / "r.parquet", df, meta={"note": "x"})
+    r = load_results(path)
+    assert r.errors["instance"].tolist() == [1]
+    assert r.meta["note"] == "x" and r.calc_time is not None
+    save_results(path, df, calc.quality, calc.errors, calc_time=None)
+    assert load_results(path).calc_time is None
+
+
+def test_extract_forgets_previous_results():
+    calc = _toy_calculator({"ok": _two_outputs})
+    calc.extract(np.random.default_rng(8).standard_normal(200))
+    with pytest.raises(ValueError):
+        calc.extract([np.ones(200)])
+    assert calc.quality is None and calc.errors is None and calc.calc_time is None

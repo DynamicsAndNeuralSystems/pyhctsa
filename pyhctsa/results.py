@@ -22,6 +22,7 @@ __all__ = ["Results", "save_results", "load_results"]
 
 NPZ_SCHEMA = "pyhctsa.results/1"
 ERROR_COLUMNS = ["instance", "feature", "error_type", "message"]
+PARQUET_META_KEY = b"pyhctsa"
 
 
 class Results(NamedTuple):
@@ -81,10 +82,10 @@ def save_results(path, values: pd.DataFrame, quality: pd.DataFrame,
             quality=quality.to_numpy(dtype=np.uint8),
             # JSON keeps the index labels' types (str or int); dtype 'U' arrays load without
             # allow_pickle, which object arrays would need
-            instances=np.array(json.dumps(list(values.index), default=str)),
+            instances=np.array(json.dumps(list(values.index), default=_json_default)),
             features=np.array(list(values.columns), dtype="U"),
-            errors=np.array(errors.to_json(orient="records")),
-            meta=np.array(json.dumps(info, default=str)),
+            errors=np.array(json.dumps(errors[ERROR_COLUMNS].to_dict("records"), default=_json_default)),
+            meta=np.array(json.dumps(info, default=_json_default)),
         )
         if calc_time is not None:
             arrays["calc_time"] = calc_time.to_numpy(dtype=np.float64)
@@ -92,15 +93,28 @@ def save_results(path, values: pd.DataFrame, quality: pd.DataFrame,
         np.savez_compressed(path, **arrays)
     elif path.suffix == ".parquet":
         _require_pyarrow()
+        import pyarrow as pa
+        import pyarrow.parquet as pq
         stem = path.with_suffix("")
         v = values.copy()
         v.attrs = {}
-        v.attrs["pyhctsa"] = json.dumps(info, default=str)
-        v.to_parquet(path)
+        table = pa.Table.from_pandas(v)
+        # the metadata goes in the file's own key-value metadata, which any reader (and any
+        # pandas version) keeps
+        table = table.replace_schema_metadata(
+            {**(table.schema.metadata or {}), PARQUET_META_KEY: json.dumps(info, default=_json_default)})
+        pq.write_table(table, path)
         quality.astype(np.uint8).to_parquet(f"{stem}.quality.parquet")
-        errors.astype({"instance": str}).to_parquet(f"{stem}.errors.parquet", index=False)
+        e = errors[ERROR_COLUMNS].copy()
+        # a parquet column holds one type: keep the instance labels' own type when they share one
+        if pd.api.types.infer_dtype(e["instance"], skipna=True) not in ("integer", "string", "empty"):
+            e["instance"] = e["instance"].astype(str)
+        e.to_parquet(f"{stem}.errors.parquet", index=False)
+        ct = Path(f"{stem}.calc_time.parquet")
         if calc_time is not None:
-            calc_time.to_parquet(f"{stem}.calc_time.parquet")
+            calc_time.to_parquet(ct)
+        elif ct.exists():  # do not leave an earlier save's timings beside these values
+            ct.unlink()
     else:
         raise ValueError(f"Unsupported suffix '{path.suffix}'. Use '.npz' or '.parquet'.")
     return path
@@ -123,7 +137,7 @@ def load_results(path) -> Results:
             columns = [str(c) for c in f["features"]]
             values = pd.DataFrame(f["values"], index=index, columns=columns)
             quality = pd.DataFrame(f["quality"], index=index, columns=columns)
-            errors = pd.read_json(_io(str(f["errors"])), orient="records")
+            errors = pd.DataFrame(json.loads(str(f["errors"])), columns=ERROR_COLUMNS)
             calc_time = None
             if "calc_time" in f.files:
                 calc_time = pd.DataFrame(f["calc_time"], index=index,
@@ -131,9 +145,11 @@ def load_results(path) -> Results:
             meta = json.loads(str(f["meta"]))
     elif path.suffix == ".parquet":
         _require_pyarrow()
+        import pyarrow.parquet as pq
         stem = path.with_suffix("")
         values = pd.read_parquet(path)
-        meta = json.loads(values.attrs.get("pyhctsa", "{}"))
+        stored = pq.read_schema(path).metadata or {}
+        meta = json.loads(stored.get(PARQUET_META_KEY, b"{}"))
         quality = pd.read_parquet(f"{stem}.quality.parquet")
         errors = pd.read_parquet(f"{stem}.errors.parquet")
         ct = Path(f"{stem}.calc_time.parquet")
@@ -146,9 +162,11 @@ def load_results(path) -> Results:
     return Results(values, quality, errors, calc_time, meta)
 
 
-def _io(text: str):
-    from io import StringIO
-    return StringIO(text)
+def _json_default(o):
+    """numpy scalars as the Python numbers they hold (so integer labels stay integers)."""
+    if isinstance(o, np.generic):
+        return o.item()
+    return str(o)
 
 
 def _require_pyarrow():

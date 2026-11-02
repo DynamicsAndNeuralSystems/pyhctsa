@@ -277,7 +277,8 @@ Code  Label               Meaning
 
 .. code-block:: python
 
-    from pyhctsa import FeatureCalculator, Quality, quality_summary, load_results
+    from pyhctsa import Quality, quality_summary, load_results
+    from pyhctsa.calculator import FeatureCalculator
 
     calc = FeatureCalculator()
     df = calc.extract(series_list)            # values: float64, NaN unless good
