@@ -565,7 +565,7 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     """
     from scipy.signal import detrend
     # (imported here: pre_process imports nonlinearity, which imports this module)
-    from .pre_process import _ar_rms_error, _piecewise_poly_residual, _rank_map_gaussian
+    from .pre_process import _ar_rms_error, _is_roundoff, _piecewise_poly_residual, _rank_map_gaussian
     y = np.asarray(y, dtype=float).ravel()
     if pre_proc in ('nothing', 'none'):
         return y
@@ -578,8 +578,14 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     candidates = {'nothing': y, 'd1': np.diff(y, 1), 'd2': np.diff(y, 2), 'd3': np.diff(y, 3)}
     for order in (1, 2):
         for num_bits in (5, 10, 20, 40):
-            # (a constant series becomes zeros)
-            candidates[f'p{order}_{num_bits}'] = _zscore_or_zeros(_piecewise_poly_residual(y, order, num_bits))
+            if len(y) < num_bits:
+                continue  # too short to cut into num_bits non-empty pieces
+            resid = _piecewise_poly_residual(y, order, num_bits)
+            if _is_roundoff(resid, y):
+                # pieces of at most order + 1 points are fitted exactly: the residual is round-off,
+                # which z-scoring would amplify into spurious structure, so it is not a candidate
+                continue
+            candidates[f'p{order}_{num_bits}'] = _zscore_or_zeros(resid)
     # rank-map onto a Gaussian (stochastic, from the portable generator)
     candidates['rmgd'] = _rank_map_gaussian(
         y, draws=bf_random(len(y), bf_random_seed(random_seed), 'normal'))

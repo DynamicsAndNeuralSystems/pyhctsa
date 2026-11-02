@@ -573,8 +573,10 @@ def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = 
     # Buffer the time series
     y_buff = frame_signal(y, int(window_length)) # no overlap
     # each column is a window of samples
-    if y_buff[-1, -1] == 0:
-        y_buff = y_buff[:, :-1]  # remove last window if zero-padded
+    if N % int(window_length) != 0:
+        # remove the last window, which frame_signal zero-pads (hctsa tests for a final value of
+        # exactly 0, which also drops a genuine full window that happens to end in 0)
+        y_buff = y_buff[:, :-1]
     
     num_windows = np.size(y_buff, 1) # number of windows
     # Find local extrema
