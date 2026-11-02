@@ -80,24 +80,24 @@ def dict_output(func: Callable) -> Callable:
         return out
     return wrapper
 
+def _input_problem(ts: np.ndarray) -> Union[str, None]:
+    """Why a time series cannot be used as input (``None`` if it can)."""
+    if len(ts) < 100:
+        return f"too short (N = {len(ts)} < 100)"
+    if np.all(ts == ts[0]):
+        return "constant"
+    if np.any(np.isnan(ts)):
+        return "contains NaN"
+    if np.any(np.isinf(ts)):
+        return "contains Inf"
+    return None
+
 def _validate_data(ts: np.ndarray) -> bool:
     """validate a time series before computing features"""
-    if len(ts) < 100:
-        logger.warning("Time series is too short!")
+    problem = _input_problem(ts)
+    if problem is not None:
+        logger.warning(f"Time series is invalid: {problem}.")
         return False
-    if np.all(ts == ts[0]):
-        # constant time series
-        # maybe do a tolerance instead?
-        logger.warning("Time series is constant.")
-        return False
-    if np.any(np.isnan(ts)):
-        # data contains nans
-        logger.warning("Time series contains NaNs.")
-        return False
-    if np.any(np.isinf(ts)):
-        logger.warning("Time series contains Inf.")
-        return False
-
     return True
 
 def _even_split_points(a, b, n: int, rounding: str = 'round') -> np.ndarray:

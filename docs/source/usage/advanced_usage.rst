@@ -254,4 +254,43 @@ To keep/discard multiple features, we can specify each in a list of strings as f
             - {binary_method: 'mean', zscore: True, select: ['pupstat2', 'pstretch1', 'meanstretchdiff']}
         # same as before
 
+🏷️ (3) Quality labels: why a value is NaN
+-----------------------------------------
+Every value :meth:`~pyhctsa.calculator.FeatureCalculator.extract` returns is a float: a real, finite number, or NaN.
+The same call sets :attr:`FeatureCalculator.quality`, a ``uint8`` DataFrame of the same shape that says what each value is, as hctsa's ``TS_Quality`` does.
+The codes are those of :class:`~pyhctsa.quality.Quality`; 0-7 are hctsa's, and pyspi uses the same ones.
+
+====  ==================  ======================================================================================
+Code  Label               Meaning
+====  ==================  ======================================================================================
+0     ``good``            A real, finite number (the only values that are not NaN)
+1     ``error``           The feature function raised an exception (see ``errors``)
+2     ``NaN``             The feature returned NaN: it is undefined or not appropriate for this series
+3     ``Inf``             The feature returned +Inf
+4     ``-Inf``            The feature returned -Inf
+5     ``complex``         The feature returned a complex number (a bug)
+6     ``empty``           The feature returned nothing
+7     ``link error``      An output expected from the feature was missing
+8     ``non-scalar``      The feature returned something other than one number (a bug)
+9     ``rejected input``  The series failed the input check (e.g. too short, constant, or containing NaN or Inf)
+====  ==================  ======================================================================================
+
+.. code-block:: python
+
+    from pyhctsa import FeatureCalculator, Quality, quality_summary, load_results
+
+    calc = FeatureCalculator()
+    df = calc.extract(series_list)            # values: float64, NaN unless good
+    quality_summary(calc.quality)             # e.g. {'good': ..., 'NaN': ..., 'error': ...}
+    calc.errors                               # one row per feature function that raised
+    calc.calc_time                            # seconds per series and feature function
+
+    # features that never errored on these series
+    ok = (calc.quality != Quality.ERROR).all()
+
+    calc.save("results.npz", df)              # or "results.parquet" (needs pyarrow)
+    values, quality, errors, calc_time, meta = load_results("results.npz")
+
+A feature function that raises gives NaN with code 1 in every one of its outputs, so the columns are the same whichever functions fail.
+A series that fails the input check is not computed and its row is coded 9; only if every series fails is a ``ValueError`` raised.
 

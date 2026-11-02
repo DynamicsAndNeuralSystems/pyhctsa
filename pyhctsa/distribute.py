@@ -2,31 +2,53 @@ from abc import ABC, abstractmethod
 from typing import Union
 import logging
 import multiprocessing as mp
+import time
 import numpy as np
 from functools import partial
 from rich import get_console
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, MofNCompleteColumn
 from pathos.helpers import mp as pathos_mp
 
+from .quality import Quality, classify
+from .utils import nan_outputs
+
+def _output_items(name, val):
+    """The ``(column, raw value)`` pairs of one feature function's output."""
+    if isinstance(val, dict):
+        return [(f"{name}.{k}", v) for k, v in val.items()]
+    if isinstance(val, np.ndarray) and val.ndim == 1 and val.size <= 16:
+        return [(f"{name}_{i}", v) for i, v in enumerate(val)]
+    return [(name, val)]
+
+
 def _extract_features_single_series(ts, feature_funcs):
     """
-    Worker task.
+    Worker task: every feature function on one series.
+
+    Returns a dict with ``values`` (column -> float; NaN unless the output is a real, finite
+    number), ``quality`` (column -> :class:`~pyhctsa.quality.Quality` code), ``times`` (feature
+    function -> seconds) and ``errors`` (a list of ``(feature function, exception type, message)``).
+    A function that raises gives every one of its output fields (from
+    :func:`~pyhctsa.utils.nan_outputs`) the code ``Quality.ERROR``, so the columns do not depend
+    on which functions failed.
     """
-    row = {}
+    values, quality, times, errors = {}, {}, {}, []
     for name, func in feature_funcs.items():
+        t0 = time.perf_counter()
+        failed = None
         try:
             val = func(ts)
-            if isinstance(val, dict):
-                for k, v in val.items():
-                    row[f"{name}.{k}"] = v
-            elif isinstance(val, np.ndarray) and val.ndim == 1 and val.size <= 16:
-                for i, v in enumerate(val):
-                    row[f"{name}_{i}"] = v
-            else:
-                row[name] = val
         except Exception as e:
-            row[name] = f"Error: {e}"
-    return row
+            failed = e
+            val = nan_outputs(func)
+        times[name] = time.perf_counter() - t0
+        for col, raw in _output_items(name, val):
+            v, q = classify(raw)
+            values[col] = v
+            quality[col] = int(Quality.ERROR if failed is not None else q)
+        if failed is not None:
+            errors.append((name, type(failed).__name__, str(failed)))
+    return {"values": values, "quality": quality, "times": times, "errors": errors}
 
 def _compute_features_for_chunk(chunk, feature_funcs):
     return [_extract_features_single_series(ts, feature_funcs) for ts in chunk]
