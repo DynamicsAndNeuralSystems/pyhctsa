@@ -170,10 +170,9 @@ def test_arch_lbq_degenerate_input():
     assert np.all(np.isnan(_arch_test_pvalues(const))) and np.all(np.isnan(_lbq_test_pvalues(const)))
     bad = np.r_[np.ones(10), np.nan, np.zeros(10)]
     assert np.all(np.isnan(_arch_test_pvalues(bad, 3))) and np.all(np.isnan(_lbq_test_pvalues(bad, 3)))
-    with pytest.raises(ValueError):
-        _arch_test_pvalues(np.arange(21.0))
-    with pytest.raises(ValueError):
-        _lbq_test_pvalues(np.arange(10.0), 10)
+    # too short for the lags: every p-value undefined (NaN), not an error
+    assert np.all(np.isnan(_arch_test_pvalues(np.arange(21.0))))
+    assert np.all(np.isnan(_lbq_test_pvalues(np.arange(10.0), 10)))
 
 
 # ------------------------------------------------------------------ stabilization (A29)
