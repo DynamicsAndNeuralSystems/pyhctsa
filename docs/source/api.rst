@@ -22,6 +22,17 @@ Utilities
    pyhctsa.utils.dict_output
    pyhctsa.utils.nan_outputs
 
+Sampling rate
+-------------
+
+Diagnose oversampling and resample a dataset before extraction (see :doc:`usage/sampling_rate`).
+
+.. autosummary::
+   :toctree: generated/
+
+   pyhctsa.sampling.sampling_report
+   pyhctsa.sampling.resample_dataset
+
 Shared hctsa helpers
 --------------------
 
