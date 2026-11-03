@@ -1,7 +1,8 @@
 """Tests for the guards on the sampling-rate normalisation (shared with hctsa's BF_PreProcess
 and BF_GetTau):
 
-- ``pre_process(y, 'decimate_ac1e')`` gives NaN if fewer than 50 points would remain;
+- ``pre_process(y, 'decimate_ac1e')`` gives NaN if fewer than 3 points (the global minimum
+  length) would remain (hctsa: 50);
 - ``pre_process(y, 'rescale_tau')`` (used by ``multi_scale_entropy``) coarse-grains at the
   'ac1e' delay, not at the first zero crossing of the ACF;
 - ``get_tau(y, 'mi')`` takes the first minimum of the smoothed AMI only if it is deeper than
@@ -38,7 +39,8 @@ def _ar1(phi, seed=0, n=1000):
 # A. Decimation length floor
 # ------------------------------------------------------------------------------------------
 def test_decimation_floor_constant():
-    assert _DECIMATE_MIN_POINTS == 50
+    # the global minimum series length, not hctsa's 50
+    assert _DECIMATE_MIN_POINTS == utils.MIN_SERIES_LENGTH == 3
 
 
 def test_decimation_plain_subsample_when_long_enough():
@@ -49,20 +51,20 @@ def test_decimation_plain_subsample_when_long_enough():
     np.testing.assert_allclose(decimate_ac1e(y), _zscore_or_zeros(y[::tau]))
 
 
-def test_decimation_nan_below_floor():
-    # sine of period 200: ac1e = 38, so 1000 samples decimate to 27 points
+def test_decimation_short_result_kept():
+    # sine of period 200: ac1e = 38, so 1000 samples decimate to 27 points, which are kept
+    # (hctsa's 50-point floor made this NaN)
     y = z_score(np.sin(2 * np.pi * T / 200))
     assert get_tau(y, 'ac1e') == 38
-    assert np.isnan(pre_process(y, 'decimate_ac1e'))
-    assert np.isnan(decimate_ac1e(y))
-    assert np.isnan(decimate_ac1e(y, rezscore=False))
+    np.testing.assert_array_equal(pre_process(y, 'decimate_ac1e'), y[::38])
+    assert decimate_ac1e(y).size == 27
 
 
-@pytest.mark.parametrize('n, n_dec', [(245, 49), (246, 50), (250, 50), (251, 51)])
-def test_decimation_floor_exact_boundary(n, n_dec):
-    # sine of period 30: ac1e = 5 at these lengths, so ceil(n / 5) points remain
-    y = z_score(np.sin(2 * np.pi * T[:n] / 30))
-    assert get_tau(y, 'ac1e') == 5
+@pytest.mark.parametrize('n, n_dec', [(10, 2), (11, 3), (15, 3), (16, 4)])
+def test_decimation_floor_exact_boundary(n, n_dec, monkeypatch):
+    # a delay of 5 (stubbed) leaves ceil(n / 5) points; fewer than 3 gives NaN
+    monkeypatch.setattr(utils, 'get_tau', lambda y, how: 5)
+    y = z_score(np.random.default_rng(2).standard_normal(n))
     d = pre_process(y, 'decimate_ac1e')
     if n_dec < _DECIMATE_MIN_POINTS:
         assert np.isscalar(d) and np.isnan(d)
@@ -71,16 +73,12 @@ def test_decimation_floor_exact_boundary(n, n_dec):
         assert d.size == n_dec
 
 
-@pytest.mark.parametrize('n', [49, 50])
-def test_decimation_floor_iterated_map(n):
-    # tau = 1 (white noise): the series is returned unchanged if it has at least 50 points
+@pytest.mark.parametrize('n', [20, 50])
+def test_decimation_iterated_map(n):
+    # tau = 1 (white noise): the series is returned unchanged
     y = z_score(np.random.default_rng(1).standard_normal(n))
     assert get_tau(y, 'ac1e') == 1
-    d = pre_process(y, 'decimate_ac1e')
-    if n < _DECIMATE_MIN_POINTS:
-        assert np.isnan(d)
-    else:
-        np.testing.assert_array_equal(d, y)
+    np.testing.assert_array_equal(pre_process(y, 'decimate_ac1e'), y)
 
 
 # ------------------------------------------------------------------------------------------

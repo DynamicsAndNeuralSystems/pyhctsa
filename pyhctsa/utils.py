@@ -1060,11 +1060,13 @@ def theiler_window(y: Union[ArrayLike, None], spec: Union[int, float, list, tupl
     raise ValueError("Unrecognized Theiler window specification")
 
 
-# pre_process(y, 'decimate_ac1e') gives NaN when the decimated series would have fewer than
-# this many points (one per 1/e autocorrelation time): the *_dec feature of a series that spans
-# only a handful of correlation times is finite but meaningless (realisation noise of *_dec
-# features rises steeply below about 50 decimated points). As hctsa's BF_PreProcess.
-_DECIMATE_MIN_POINTS = 50
+# pre_process(y, 'decimate_ac1e') gives NaN when the decimated series would be shorter than
+# the global minimum series length (a decimated series is a series). Each *_dec feature's own
+# minimum length (hctsa.yaml) is then checked on the decimated series. hctsa's BF_PreProcess
+# uses a floor of 50 points, a reliability cut: a 2026 scan found every *_dec feature tested
+# carries signal of its target from 4-15 decimated points (realisation noise is large there,
+# but the values are not noise).
+_DECIMATE_MIN_POINTS = MIN_SERIES_LENGTH
 
 
 def pre_process(y: ArrayLike, how: Union[str, None]) -> Union[np.ndarray, float]:
@@ -1085,9 +1087,10 @@ def pre_process(y: ArrayLike, how: Union[str, None]) -> Union[np.ndarray, float]
         - ``'decimate_ac1e'``: keep one sample per (floored) 1/e autocorrelation time
           (``y[::get_tau(y, 'ac1e')]``), so features of the result do not change trivially with
           the sampling rate. Iterated maps (ACF below 1/e at lag 1) are unchanged. If the
-          decimated series has fewer than 50 points (``_DECIMATE_MIN_POINTS``), i.e. the series
-          spans fewer than 50 correlation times, the result is ``nan``: features of so few
-          points are dominated by realisation noise. In hctsa it is used as
+          decimated series would have fewer than 3 points (``_DECIMATE_MIN_POINTS``, the global
+          minimum length), the result is ``nan``; each ``*_dec`` feature's own minimum length is
+          then checked on the decimated series. (hctsa requires 50 points; features of a series
+          spanning few correlation times are noisy, but not uninformative.) In hctsa it is used as
           ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``, see :func:`decimate_ac1e`.
         - ``None`` or ``''``: no change.
 
@@ -1095,8 +1098,8 @@ def pre_process(y: ArrayLike, how: Union[str, None]) -> Union[np.ndarray, float]
     -------
     numpy.ndarray or float
         The processed series, or ``nan`` (scalar) when the required time delay cannot be set
-        or, for ``'decimate_ac1e'``, when fewer than 50 points would remain (as hctsa, which
-        returns the scalar NaN).
+        or, for ``'decimate_ac1e'``, when fewer than 3 points would remain (as hctsa, which
+        returns the scalar NaN, below 50 points).
     """
     y = np.asarray(y, dtype=float).ravel()
     if how is None or how == '':
@@ -1155,7 +1158,7 @@ def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, fl
     ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``: decimate by the 1/e autocorrelation time.
 
     Keeps every ``tau``-th sample, ``tau = get_tau(x_z, 'ac1e')``, then z-scores the result
-    (N-1 standard deviation; a constant result becomes zeros). If fewer than 50 samples
+    (N-1 standard deviation; a constant result becomes zeros). If fewer than 3 samples
     (``_DECIMATE_MIN_POINTS``) would remain, the result is ``nan``. hctsa uses this for the
     ``*_dec`` variants of rate-dependent features. A config requests it with
     ``preprocess: decimate_ac1e`` (see :class:`~pyhctsa.calculator.FeatureCalculator`).
@@ -1171,8 +1174,7 @@ def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, fl
     -------
     numpy.ndarray or float
         The decimated series, or scalar ``nan`` if the delay cannot be set or the decimated
-        series would have fewer than 50 points (hctsa's behavior: the operation then returns
-        NaN).
+        series would have fewer than 3 points (the operation then returns NaN, as in hctsa).
     """
     y = pre_process(x_z, 'decimate_ac1e')
     if not isinstance(y, np.ndarray):
