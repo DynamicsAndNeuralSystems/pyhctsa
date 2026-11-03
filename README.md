@@ -100,19 +100,15 @@ instances and *F* is the number of time-series features.
 - [Method list](https://dynamicsandneuralsystems.github.io/pyhctsa/methods/index.html) and [API reference](https://dynamicsandneuralsystems.github.io/pyhctsa/api.html): every operation and its outputs.
 - [Tutorials](https://github.com/DynamicsAndNeuralSystems/pyhctsa/tree/main/tutorials): step-by-step notebooks.
 
-## Version 2 and this repository's history
-
-_pyhctsa_ 2.0 was published in October 2026 in a re-created repository with a fresh history. Every function
-that depended on MATLAB code was implemented clean-room from published methods and public documentation.
-Third-party code is now bundled only under GPL-compatible licenses (see [Licenses](#licenses)). Earlier releases
-(1.x) have been yanked; please upgrade.
-
 ## Citation
 
 If you use _pyhctsa_ in your work, please cite the accompanying JOSS paper:
 
 > Moore, J. B., & Fulcher, B. D. (2026). _pyhctsa_: A Python package for highly comparative time-series analysis.
 > _Journal of Open Source Software_, 11(123), 10581. https://doi.org/10.21105/joss.10581
+
+<details>
+<summary>BibTeX</summary>
 
 ```bibtex
 @article{Moore2026pyhctsa,
@@ -127,6 +123,8 @@ If you use _pyhctsa_ in your work, please cite the accompanying JOSS paper:
 }
 ```
 
+</details>
+
 Machine-readable metadata is provided in [`CITATION.cff`](https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/CITATION.cff).
 
 ## Licenses
@@ -137,8 +135,11 @@ the feature library of [_hctsa_](https://github.com/benfulcher/hctsa). Some feat
 [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)); others are clean-room re-implementations of published methods.
 Full credits are on the [Acknowledgements](https://dynamicsandneuralsystems.github.io/pyhctsa/acknowledgements.html) page of the documentation.
 
-## AI usage disclosure
+## Notes
 
-Much of _pyhctsa_ 2.0, including the clean-room re-implementations, tests and documentation, was written with AI coding
-assistants (Anthropic's Claude) under the direction of the maintainers. Not every AI-generated contribution has been
-reviewed line by line by a human; each is instead verified against the outputs of _hctsa_ or by appropriate tests.
+- **Version 2 and this repository's history.** _pyhctsa_ 2.0 (October 2026) lives in a re-created repository with a fresh history.
+  Every function that depended on MATLAB code was re-implemented clean-room from published methods, and bundled third-party code is GPL-compatible (see [Licenses](#licenses)).
+  Earlier releases (1.x) have been yanked; please upgrade.
+- **AI use.** Much of _pyhctsa_ 2.0, including the clean-room re-implementations, tests and documentation, was written with AI coding assistants (Anthropic's Claude) under the direction of the maintainers.
+  Not every contribution has been reviewed line by line by a human.
+  Instead, each has been verified against the outputs of existing implementations (e.g., _hctsa_) where appropriate, or else by appropriately formulated direct tests of behavior.
