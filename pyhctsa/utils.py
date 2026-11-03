@@ -1326,6 +1326,9 @@ def make_function_name_mappings(
     yaml_file: Union[str, None] = None, csv_out_fpath: Union[None, str] = None) -> pd.DataFrame:
     """
     Map pyhctsa function names to their legacy counterparts in the MATLAB HCTSA.
+
+    pyhctsa-only variants (entries with ``variant_of`` and no ``legacy_name``) have no hctsa
+    counterpart and are left out.
     """
     # only the names are needed, so parse with a private loader that ignores
     # !range rather than overriding the constructor on the shared SafeLoader
@@ -1345,10 +1348,12 @@ def make_function_name_mappings(
         ml_funcs = []
 
         for pyfunc in corr_mod:
+            meta = corr_mod[pyfunc] or {}
+            if not meta.get("legacy_name") and meta.get("variant_of"):
+                continue   # a pyhctsa-only variant: nothing in hctsa to map to
             python_funcs.append(pyfunc)
 
             # If legacy_name missing, use NaN
-            meta = corr_mod[pyfunc] or {}
             ml_funcs.append(meta.get("legacy_name", np.nan))
 
         df = pd.DataFrame(

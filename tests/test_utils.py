@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import yaml
 
 from pyhctsa.utils import get_dataset, z_score, _check_optional_deps, _validate_data, sign_change
 import pyhctsa.calculator
@@ -228,6 +229,14 @@ class TestRegressions:
         # too-short input should return NaN, not raise
         from pyhctsa.operations.stationarity import std_nth_deriv
         assert np.isnan(std_nth_deriv(np.arange(2.0), ndr=3))
+
+    def test_name_mappings_leave_out_pyhctsa_only_variants(self, tmp_path):
+        cfg = {"entropy": {"sample_entropy": {"legacy_name": "EN_SampEn", "configs": []},
+                           "sample_entropy_v": {"variant_of": "sample_entropy", "configs": []}}}
+        p = tmp_path / "c.yaml"
+        p.write_text(yaml.safe_dump(cfg))
+        df = pyhctsa.utils.make_function_name_mappings(str(p))
+        assert list(df["pyhctsa name"]) == ["sample_entropy"]
 
     def test_name_mappings_do_not_clobber_range(self, tmp_path, module_config):
         # building the mappings must not change how !range is parsed elsewhere
