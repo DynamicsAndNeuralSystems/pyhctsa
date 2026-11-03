@@ -716,11 +716,16 @@ def modwt_var(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 5) -> 
     Decomposes the time series into octave-scale bands using the maximal
     overlap discrete wavelet transform (MODWT) and computes summary statistics
     on how variance is distributed across scales. Unlike the standard
-    (decimated) DWT used elsewhere in this codebase, the MODWT is shift-invariant
-    and its associated variance estimator uses only the coefficients unaffected by
-    the boundary at each level: the mean square of the unaffected coefficients of each
-    detail level, and the variance about the mean of those of the scaling band
-    (Percival & Walden, 2000, DOI 10.1017/CBO9780511841040).
+    (decimated) DWT used elsewhere in this codebase, the MODWT is shift-invariant.
+    With its periodic boundary it splits the energy of the (mean-removed) series exactly
+    across the bands (Percival & Walden, 2000, DOI 10.1017/CBO9780511841040, ch. 5), and
+    the statistics use these energy shares, computed from all N coefficients of each band.
+
+    (Up to pyhctsa 2.0, as in hctsa, the band variances used only the coefficients
+    unaffected by the boundary. At the scaling band that leaves ``N - (2^J - 1)(L - 1)``
+    strongly overlapping coefficients (N - 155 for db3 at level 5), so ``scalingFrac`` was
+    biased towards 0 for N up to about 300, exactly 0 at some lengths, and jumped where the
+    level had to be reduced. The energy shares agree with the old values on long series.)
 
     Parameters
     ----------
@@ -729,34 +734,26 @@ def modwt_var(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 5) -> 
     w_name : str, optional
         The mother wavelet, e.g., ``'db3'``, ``'sym2'``. Default is ``'db3'``.
     level : int or 'max', optional
-        The level of wavelet decomposition (can be set to 'max' for the maximum
-        level supported by the series length and wavelet, ``floor(log2((N - 1)/(L - 1) + 1))``
-        with L the filter length). A level that is too large is reduced to the maximum,
-        so that every level, and the scaling band, has at least one coefficient unaffected
-        by the boundary. Default is 5.
+        The level of wavelet decomposition; 'max' (or a level that is too large) gives the
+        largest level the periodic MODWT supports, ``floor(log2(N))``. Default is 5.
 
     Returns
     -------
     dict
         Dictionary containing:
 
-        - 'scalingFrac': the fraction of variance in the lowest-frequency
+        - 'scalingFrac': the fraction of the variance in the lowest-frequency
           (scaling/trend) band -- the part of the signal not resolved by any detail level.
         - 'domlevel': the level (1 = highest frequency, ..., level+1 = scaling/trend
           band) that carries the most variance.
-        - 'decaySlope': the slope of log2(variance) vs. level across the detail bands --
-          a wavelet-based scaling exponent, analogous to a Hurst estimate but using the
-          MODWT's unbiased, boundary-corrected variance rather than an ad hoc regression
-          on raw coefficients.
+        - 'decaySlope': the slope of log2(band variance) vs. level across the detail
+          bands -- a wavelet-based scaling exponent, analogous to a Hurst estimate.
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y) # length of the time series
 
-    # Deepest level whose scale has at least one boundary-unaffected coefficient, so that
-    # every retained level (and the scaling band) has an unbiased variance estimate:
-    # (2^j - 1)(L - 1) + 1 <= N, with L the wavelet filter length
-    filt_len = int(pywt.Wavelet(w_name).dec_len)
-    maxLevelAllowed = int(np.floor(np.log2((N - 1) / (filt_len - 1) + 1)))
+    # Deepest level the periodic MODWT supports
+    maxLevelAllowed = int(np.floor(np.log2(N))) if N >= 2 else 0
     if level == 'max':
         level = maxLevelAllowed
     if maxLevelAllowed < level:
@@ -767,13 +764,14 @@ def modwt_var(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 5) -> 
         logger.warning("Time series too short for a MODWT decomposition")
         return np.nan
 
-    #%% MODWT and its unbiased multiscale variance decomposition
-    w = _modwt(y, w_name, level)
-    wvar = _modwt_var(w, w_name) # nominally length level+1: levels 1..level (detail), then scaling/trend
-    if wvar.size == 0:
-        logger.warning("No boundary-unaffected coefficients for an unbiased MODWT variance estimate")
+    #%% MODWT energy decomposition (periodic boundary): sum over bands of ||W_j||^2 and
+    # ||V_J||^2 is exactly ||y - mean(y)||^2, so each band's share is a share of the variance
+    w = _modwt(y - np.mean(y), w_name, level)
+    wvar = np.sum(w ** 2, axis=1) / N # levels 1..level (detail), then scaling/trend
+    if not np.sum(wvar) > 0:
+        logger.warning("Constant series: no variance to decompose")
         return np.nan
-    numLevelsReturned = wvar.size - 1 # number of detail levels actually returned
+    numLevelsReturned = wvar.size - 1 # number of detail levels
 
     #%% Return statistics
     out = {}
