@@ -3119,8 +3119,8 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
     For example, a reversible lognormal process (the exponential of a Gaussian AR(1) process)
     has a larger ``abs`` than a Gaussian AR(1) process with the same lag-1 autocorrelation in
     most realizations (AUC above 0.9 at N = 1000 and 5000, increasing with N), while ``raw``
-    hardly separates them (AUC near 0.5). Use ``raw`` for a signed statistic that is centered on zero for any
-    reversible process.
+    hardly separates them (AUC near 0.5). Use ``raw`` for a signed statistic that is centered on
+    zero for any reversible process.
 
     ``denom`` is :math:`\\langle d^2 \\rangle^{3/2}`, which for a z-scored series is close to
     :math:`(2(1 - r_\\tau))^{3/2}`, with :math:`r_\\tau` the lag-:math:`\\tau` autocorrelation.
