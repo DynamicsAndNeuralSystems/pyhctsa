@@ -254,3 +254,14 @@ def test_zero_one_test_short_series():
         x[i] = 4 * x[i - 1] * (1 - x[i - 1])  # chaotic logistic map
     per2 = np.tile([0.2, 0.8], 30) + 0.01 * rng.standard_normal(60)
     assert f(x)["K"] > f(per2)["K"]
+
+
+def test_histogram_ami_lag_without_pairs_is_nan():
+    # a lag >= N leaves no delay pairs; the bias correction divided by zero (a
+    # ZeroDivisionError with numpy < 2.3, whose count_nonzero returns a Python int)
+    from pyhctsa.operations.correlation import _ami_from_binning, histogram_ami
+    idx, valid = np.array([0, 1, 1, 0]), np.ones(4, bool)
+    assert np.isnan(_ami_from_binning(idx, valid, 2, 4))
+    assert np.isnan(_ami_from_binning(idx, valid, 2, 5))
+    out = histogram_ami(np.array([0.3, -1.2, 0.8, 0.1]), tau=[1, 2, 3, 4, 5], meth='even', num_bins=2)
+    assert np.isfinite(out['ami1']) and np.isnan(out['ami4']) and np.isnan(out['ami5'])

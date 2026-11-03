@@ -1351,6 +1351,8 @@ def _ami_from_binning(idx: np.ndarray, valid: np.ndarray, num_bins: int, t: int)
     delay pair is one ``bincount`` of paired indices instead of re-running histogram2d.
     Includes the Miller-Madow bias correction.
     """
+    if t >= len(idx):
+        return np.nan  # no delay pairs at this lag
     if t == 0:
         # for tau = 0, y1 and y2 are identical to y
         bi = bj = idx
