@@ -468,7 +468,8 @@ def automutual_info_stats(
         est_method=est_method,
         extra_param=extra_param
     )
-    ami = np.array(list(ami.values()))
+    # (a single delay, max_tau = 1, gives a scalar rather than a dict)
+    ami = np.array(list(ami.values())) if isinstance(ami, dict) else np.atleast_1d(ami)
 
     out = {}  # create dict for storing results
 

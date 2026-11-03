@@ -312,6 +312,11 @@ def zero_one_test(y, num_c=20, max_n=10000):
     K ~ 0 indicates bounded/regular dynamics, whereas K ~ 1 indicates
     unbounded dynamics. Unbounded dynamics may be deterministic chaos
     or stochastic noise; the 0-1 test alone does not distinguish them.
+
+    The statistics use lags 1..N//10, so the test needs N >= 20, and K (a correlation over the
+    lags) N >= 30. On short series K is not on its 0-1 scale: regular dynamics whose
+    frequencies fall in the range of c (e.g. a period-3 orbit, or quasi-periodic signals) give
+    K close to 1 up to N ~ 100-300, although K still ranks regular below irregular dynamics.
     """
 
     y = np.asarray(y, dtype=float).reshape(-1)
@@ -341,10 +346,13 @@ def zero_one_test(y, num_c=20, max_n=10000):
             y = y[:max_n]
             n = max_n
 
-    if n < 200:
+    # The test regresses on lags 1..N//10, so it needs N >= 20 (2 lags). K, a correlation over
+    # those lags, needs 3 (N >= 30; with 2 it is +-1, in practice always 1): that is a per-field
+    # bound in hctsa.yaml. (hctsa required N >= 200; a 2026 scan found K separates regular from
+    # irregular dynamics from N = 30, though K only reads on its 0-1 scale from N ~ 200-300.)
+    if n < 20:
         logger.warning(
-            f"Time series (N={n}) too short for a meaningful "
-            "0-1 test (need >= 200)."
+            f"Time series (N={n}) too short for the 0-1 test (need >= 20)."
         )
 
         return {
@@ -1640,7 +1648,7 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
         logger.warning('Could not determine embedding parameters for this time series')
         return np.nan
 
-    if (n - (m - 1) * tau) < thwin:
+    if (n - (m - 1) * tau) < thwin + 2:  # no pair of embedded points beyond the Theiler window
         logger.warning(f'Embedded time series (N = {n}, m = {m}, tau = {tau}) too short '
                        'to do a correlation sum')
         return np.nan
@@ -4423,6 +4431,10 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
         logger.warning('Could not determine embedding parameters for this time series')
         return np.nan
     tau, m_max = params
+    if len(y) - (m_max - 1) * tau < 2:
+        # fewer than two delay vectors in the largest dimension: no box-count to compare
+        logger.warning('Time series too short to embed for box counting')
+        return np.nan
 
     # (the order-2 Renyi entropy of the partition into boxes, as a function of the box size and the
     # embedding dimension d, and its increment with d; the increments are analyzed)

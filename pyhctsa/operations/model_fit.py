@@ -565,7 +565,7 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     """
     from scipy.signal import detrend
     # (imported here: pre_process imports nonlinearity, which imports this module)
-    from .pre_process import _ar_rms_error, _piecewise_poly_residual, _rank_map_gaussian
+    from .pre_process import _ar_rms_error, _is_roundoff, _piecewise_poly_residual, _rank_map_gaussian
     y = np.asarray(y, dtype=float).ravel()
     if pre_proc in ('nothing', 'none'):
         return y
@@ -578,8 +578,14 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     candidates = {'nothing': y, 'd1': np.diff(y, 1), 'd2': np.diff(y, 2), 'd3': np.diff(y, 3)}
     for order in (1, 2):
         for num_bits in (5, 10, 20, 40):
-            # (a constant series becomes zeros)
-            candidates[f'p{order}_{num_bits}'] = _zscore_or_zeros(_piecewise_poly_residual(y, order, num_bits))
+            if len(y) < num_bits:
+                continue  # too short to cut into num_bits non-empty pieces
+            resid = _piecewise_poly_residual(y, order, num_bits)
+            if _is_roundoff(resid, y):
+                # pieces of at most order + 1 points are fitted exactly: the residual is round-off,
+                # which z-scoring would amplify into spurious structure, so it is not a candidate
+                continue
+            candidates[f'p{order}_{num_bits}'] = _zscore_or_zeros(resid)
     # rank-map onto a Gaussian (stochastic, from the portable generator)
     candidates['rmgd'] = _rank_map_gaussian(
         y, draws=bf_random(len(y), bf_random_seed(random_seed), 'normal'))
@@ -612,12 +618,8 @@ def _arch_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
     Returns
     -------
     np.ndarray
-        The p-values for lags 1..max_lag (all NaN for a constant or non-finite series).
-
-    Raises
-    ------
-    ValueError
-        If fewer than two samples remain after the lags of the largest model.
+        The p-values for lags 1..max_lag (all NaN for a constant or non-finite series, or when
+        fewer than two samples remain after the lags of the largest model).
 
     Notes
     -----
@@ -627,9 +629,9 @@ def _arch_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
     from statsmodels.stats.diagnostic import het_arch
     x = np.asarray(x, dtype=float).ravel()
     max_lag = int(max_lag)
-    if len(x) - max_lag < 2:
-        raise ValueError("The series is too short for the requested number of ARCH lags")
     out = np.full(max_lag, np.nan)
+    if len(x) - max_lag < 2:
+        return out  # too short for the regression on max_lag lags: every p-value undefined
     if not np.all(np.isfinite(x)) or np.ptp(x ** 2) == 0:
         return out
     with warnings.catch_warnings():
@@ -658,12 +660,8 @@ def _lbq_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
     Returns
     -------
     np.ndarray
-        The p-values for lags 1..max_lag (all NaN for a constant or non-finite series).
-
-    Raises
-    ------
-    ValueError
-        If ``max_lag`` is not smaller than the series length.
+        The p-values for lags 1..max_lag (all NaN for a constant or non-finite series, or one
+        not longer than ``max_lag``).
 
     Notes
     -----
@@ -673,10 +671,8 @@ def _lbq_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
     from statsmodels.stats.diagnostic import acorr_ljungbox
     x = np.asarray(x, dtype=float).ravel()
     max_lag = int(max_lag)
-    if max_lag > len(x) - 1:
-        raise ValueError("Number of lags must be less than the sample size")
-    if not np.all(np.isfinite(x)) or np.ptp(x) == 0:
-        return np.full(max_lag, np.nan)
+    if max_lag > len(x) - 1 or not np.all(np.isfinite(x)) or np.ptp(x) == 0:
+        return np.full(max_lag, np.nan)  # too short for max_lag lags, constant, or non-finite
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         return np.asarray(acorr_ljungbox(x, lags=max_lag, return_df=True)['lb_pvalue'], dtype=float)
@@ -2617,7 +2613,11 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     out['stde_chn'] = std_err_chnn
     out['stde_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:, 0])))
     # (ii) Is there a peak?
-    if std_err_chnn < 0: # on the whole decreasing, as expected: look for a maximum
+    if np.any(np.isnan(stats_st[:, 0])):
+        # an error curve with a gap (a training length the series is too short for, or an
+        # undefined error) has no well-defined extremum
+        wigv, wig = np.nan, np.nan
+    elif std_err_chnn < 0: # on the whole decreasing, as expected: look for a maximum
         wigv = np.max(stats_st[:, 0])
         wig = np.where(stats_st[:, 0] == wigv)[0][0]  # find first occurrence
         if wig != 0 and stats_st[wig - 1, 0] > wigv:
@@ -4651,18 +4651,24 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
             mf_ac1[j] = autocorr(mres, 1, 'Fourier')
 
         # (2) *** Sliding mean 1 ***: predicts with the value i steps before it
-        mres = y[i:] - y[:N - i]
-        sm1_rms[j] = np.sqrt(np.mean(mres ** 2))
-        sm1_abs[j] = np.mean(np.abs(mres))
+        if N - i >= 1:
+            mres = y[i:] - y[:N - i]
+            sm1_rms[j] = np.sqrt(np.mean(mres ** 2))
+            sm1_abs[j] = np.mean(np.abs(mres))
+        else:  # no value i steps before another (y[:N - i] would wrap round)
+            sm1_rms[j] = sm1_abs[j] = np.nan
 
         # (3) *** Sliding mean 2 ***: closed-form solution of the order-2 linear recurrence
         # p(n) = (p(n-1) + p(n-2)) / 2 that iterating the average of the last two values
         # i steps ahead converges to
-        weights = np.array([1 + (-1) ** (i + 1) / 2 ** i, 2 + (-1) ** i / 2 ** i]) / 3
-        sm2p = np.column_stack([y[:N - i - 1], y[1:N - i]]) @ weights
-        mres = y[i + 1:] - sm2p
-        sm2_rms[j] = np.sqrt(np.mean(mres ** 2))
-        sm2_abs[j] = np.mean(np.abs(mres))
+        if N - i - 1 >= 1:
+            weights = np.array([1 + (-1) ** (i + 1) / 2 ** i, 2 + (-1) ** i / 2 ** i]) / 3
+            sm2p = np.column_stack([y[:N - i - 1], y[1:N - i]]) @ weights
+            mres = y[i + 1:] - sm2p
+            sm2_rms[j] = np.sqrt(np.mean(mres ** 2))
+            sm2_abs[j] = np.mean(np.abs(mres))
+        else:  # no pair of values i + 1 steps before another (y[:N - i - 1] would wrap round)
+            sm2_rms[j] = sm2_abs[j] = np.nan
 
     # (global) sample mean predictor
     sminf_res = y - np.mean(y)

@@ -33,15 +33,29 @@ def test_moment_corr_unchanged_when_last_window_already_dropped():
 
 
 @pytest.mark.parametrize('N', [40, 100, 155, 156, 400])
-def test_modwt_var_always_has_a_scaling_band(N):
+def test_modwt_var_energy_shares(N):
+    # scalingFrac is the share of the (mean-removed) energy in the scaling band, from all N
+    # periodic-MODWT coefficients; the bands' energies add up exactly to the total
     y = np.random.default_rng(3).standard_normal(N)
-    L = 6  # db3 filter length
-    level = min(5, int(np.floor(np.log2((N - 1) / (L - 1) + 1))))
-    w = wl._modwt(y, 'db3', level)
-    wvar = wl._modwt_var(w, 'db3')
-    assert wvar.size == level + 1
+    level = min(5, int(np.floor(np.log2(N))))
+    w = wl._modwt(y - y.mean(), 'db3', level)
+    e = np.sum(w ** 2, axis=1)
+    assert e.sum() == pytest.approx(np.sum((y - y.mean()) ** 2))
     out = wl.modwt_var(y, 'db3', 5)
-    assert out['scalingFrac'] == pytest.approx(wvar[-1] / wvar.sum())
+    assert out['scalingFrac'] == pytest.approx(e[-1] / e.sum())
+    assert out['domlevel'] == int(np.argmax(e)) + 1
+
+
+def test_modwt_var_scaling_frac_continuous_in_length():
+    # the old boundary-free estimator dropped to 0 at N = 156 (one usable scaling coefficient)
+    rng = np.random.default_rng(4)
+    e = rng.standard_normal(2200)
+    x = np.zeros_like(e)
+    for t in range(1, x.size):
+        x[t] = 0.9 * x[t - 1] + e[t]
+    x = x[200:]
+    vals = [wl.modwt_var(x[:n], 'db3', 5)['scalingFrac'] for n in (150, 155, 156, 157, 170, 200, 300)]
+    assert min(vals) > 0.1 and max(vals) - min(vals) < 0.4
 
 
 def test_sample_entropy_nan_when_none_at_next_length():

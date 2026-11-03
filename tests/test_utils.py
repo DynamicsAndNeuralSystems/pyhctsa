@@ -110,8 +110,9 @@ class TestOptionalDepChecks:
 # 4. Validate data checks
 class TestValidateData:
     def test_data_too_short(self):
-        dat = np.random.randn(10)
-        assert _validate_data(dat) is False, "Expected False to be returned"
+        # only N < 3 is rejected globally; longer short series get per-feature min_length checks
+        assert _validate_data(np.random.randn(2)) is False, "Expected False to be returned"
+        assert _validate_data(np.random.randn(3)) is True
     def test_data_constant(self):
         dat = np.ones(1000)
         assert _validate_data(dat) is False, "Expected False to be returned"

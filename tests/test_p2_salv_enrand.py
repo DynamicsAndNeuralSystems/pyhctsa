@@ -55,4 +55,5 @@ def test_deterministic_ordinal_and_edge_cases():
     assert en.randomize_ordinal(np.exp(2 * y) + 5)['halftime'] == pytest.approx(a['halftime'], abs=1e-12)
     assert a['normPermEn0'] == pytest.approx(en.permutation_entropy(y, 3, 1)['normPermEn'], abs=1e-12)
     assert np.isnan(en.randomize_ordinal(np.ones(50))['halftime'])
-    assert np.isnan(en.randomize_ordinal(np.arange(6.)))
+    short = en.randomize_ordinal(np.arange(6.))  # too short: every output NaN, the field names kept
+    assert isinstance(short, dict) and set(short) == set(a) and all(np.isnan(v) for v in short.values())

@@ -761,7 +761,7 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
         return np.nan
     m, tau = int(m), int(tau)
     n = len(y) - (m - 1) * tau
-    if n < 2:
+    if n < 4:  # with 3 or fewer embedded points the only possible return time is 2
         return np.nan
     v = np.column_stack([y[k * tau:k * tau + n] for k in range(m)])
     hist = _close_returns_hist(np.ascontiguousarray(v), float(epsilon))
@@ -1475,6 +1475,7 @@ def _ro_norm_entropy(P: np.ndarray) -> np.ndarray:
     return -np.sum(P * np.log2(Pl), axis=1) / np.log2(6)
 
 
+@dict_output
 def randomize_ordinal(y: ArrayLike, tau: Union[int, str] = 1) -> Union[dict, float]:
     """
     How quickly ordinal-pattern structure is lost as a series is randomized.

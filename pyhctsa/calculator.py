@@ -1,5 +1,8 @@
 import copy
 import importlib
+import inspect
+import math
+import re
 import time
 from functools import partial, wraps
 from itertools import product
@@ -16,7 +19,8 @@ import yaml
 from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
-from .utils import _check_optional_deps, _input_problem, _zscore_or_zeros, decimate_ac1e, nan_outputs, z_score
+from .utils import (_check_optional_deps, _input_problem, _zscore_or_zeros, decimate_ac1e, nan_outputs,
+                    z_score, SHORT_SERIES_WARNING_LENGTH, _round_half_away)
 from .quality import Quality, classify, quality_summary
 from .results import ERROR_COLUMNS, save_results
 from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk,
@@ -79,7 +83,7 @@ def _transform_input(x, zscore: bool = False, absval: bool = False,
     """The series a feature function is called on: z-score, then ``preprocess``, then abs.
 
     Returns a scalar ``nan`` when ``decimate_ac1e`` cannot determine its delay or would leave
-    fewer than 50 samples (the feature is then undefined, as in hctsa).
+    fewer than 3 samples (the feature is then undefined, as in hctsa).
     """
     if zscore:
         x = z_score(x)
@@ -98,7 +102,9 @@ def _transform_input(x, zscore: bool = False, absval: bool = False,
     return x
 
 def _preprocess_decorator(zscore: bool = False, absval: bool = False,
-                          preprocess: Union[str, None] = None) -> Callable:
+                          preprocess: Union[str, None] = None,
+                          min_length: Union[int, None] = None,
+                          field_min_lengths: Union["_FieldMinLengths", None] = None) -> Callable:
     """
     Decorator that gives a feature function the input its config asks for.
 
@@ -107,10 +113,17 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False,
 
     - ``'decimate_ac1e'``: one sample per floored 1/e autocorrelation time, then z-scored again
       if ``zscore`` (see :func:`pyhctsa.utils.decimate_ac1e`); if the delay cannot be
-      determined, or fewer than 50 samples would remain, the function is not called and its
-      outputs are all NaN (:func:`~pyhctsa.utils.nan_outputs`);
+      determined, or fewer than 3 samples would remain, the function is not called and its
+      outputs are all NaN (:func:`~pyhctsa.utils.nan_outputs`); the operation's own
+      ``min_length`` is checked on the decimated series;
     - ``'diff1'``: incremental differences, ``diff(x_z)`` (not re-z-scored);
     - ``'zscore_abs'`` / ``'zscore_sign'``: ``zscore(abs(x_z))`` / ``zscore(sign(x_z))``.
+
+    ``min_length`` is the shortest series (after these transforms, so for ``decimate_ac1e`` the
+    decimated series) on which the feature is defined: for a shorter one the function is not
+    called and its outputs are all NaN (:func:`~pyhctsa.utils.nan_outputs`), hctsa's "not
+    appropriate" outcome. ``field_min_lengths`` does the same for single fields of a dict output:
+    a field whose own minimum exceeds the length is set to NaN after the function has run.
     """
     if preprocess is not None and preprocess not in _PREPROCESS_LABELS:
         raise ValueError(f"Unknown preprocess setting '{preprocess}'; "
@@ -122,7 +135,12 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False,
             x = _transform_input(x, zscore, absval, preprocess)
             if np.ndim(x) == 0:  # no 1/e time: every output undefined, like hctsa's NaN
                 return nan_outputs(func, *args, **kwargs)
-            return func(x, *args, **kwargs)
+            if min_length is not None and len(x) < min_length:  # too short to be defined
+                return nan_outputs(func, *args, **kwargs)
+            out = func(x, *args, **kwargs)
+            if field_min_lengths is not None and isinstance(out, dict):
+                out = field_min_lengths.apply(out, len(x))
+            return out
         return wrapper
     return decorator
 
@@ -329,6 +347,109 @@ def _assemble(records: list, problems: list, index: pd.Index):
             pd.DataFrame(errors, columns=ERROR_COLUMNS),
             pd.DataFrame(times, index=index, columns=funcs))
 
+
+def _is_numeric(x) -> bool:
+    return isinstance(x, (int, float, np.integer, np.floating)) and not isinstance(x, bool)
+
+
+def _num(x, default):
+    """``x`` if it is a number, else ``default`` (for parameters that may be a rule such as 'ac1e')."""
+    return x if _is_numeric(x) else default
+
+
+def _is_fnn(x) -> bool:
+    """Whether an embedding-dimension parameter is a false-nearest-neighbour rule, ['fnn', p]."""
+    return isinstance(x, (list, tuple)) and len(x) > 0 and x[0] == 'fnn'
+
+
+def _dec_len(w_name: str) -> int:
+    """The length of a wavelet's decomposition filter (db3: 6, sym2: 4)."""
+    import pywt
+    return pywt.Wavelet(w_name).dec_len
+
+
+# Names a ``min_length`` expression in hctsa.yaml may use, besides the operation's parameters.
+_MIN_LENGTH_NAMESPACE = {
+    'num': _num, 'isnum': _is_numeric, 'fnn': _is_fnn, 'dec_len': _dec_len,
+    'floor': math.floor, 'ceil': math.ceil, 'sqrt': math.sqrt, 'round': _round_half_away,
+    'max': max, 'min': min, 'int': int, 'len': len, 'abs': abs, 'range': range,
+    'isinstance': isinstance, 'list': list, 'str': str,
+}
+
+
+def _eval_min_length(spec, op_func: Callable, params: dict, label: str) -> Union[int, None]:
+    """The minimum series length of one master operation, from the ``min_length`` of its hctsa.yaml
+    entry: an int, or a Python expression in the operation's parameters (the configured values,
+    and the function's defaults for those not configured). ``None``/absent: no minimum."""
+    if spec is None:
+        return None
+    if isinstance(spec, bool):
+        raise ValueError(f"min_length of '{label}' must be an int or an expression, not {spec!r}")
+    if isinstance(spec, (int, np.integer)):
+        value = spec
+    elif isinstance(spec, str):
+        names = {}
+        for name, par in list(inspect.signature(op_func).parameters.items())[1:]:
+            if par.default is not inspect.Parameter.empty:
+                names[name] = par.default
+        names.update(params)
+        try:
+            # (one namespace, so that names are visible inside comprehensions too)
+            value = eval(spec, {'__builtins__': {}, **_MIN_LENGTH_NAMESPACE, **names})
+        except Exception as e:
+            raise ValueError(f"Could not evaluate min_length '{spec}' for '{label}': {e}") from e
+    else:
+        raise ValueError(f"min_length of '{label}' must be an int or an expression, not {spec!r}")
+    if value is None:
+        return None
+    if not _is_numeric(value) or value != int(value) or value < 0:
+        raise ValueError(f"min_length of '{label}' must be a non-negative integer, got {value!r}")
+    return int(value)
+
+
+
+class _FieldMinLengths:
+    """The ``field_min_length`` of one master operation: the shortest series on which particular
+    fields of its dict output are defined (fields not listed need only the operation's own
+    ``min_length``).
+
+    The YAML gives ``{field: int or expression}``. A field name may contain ``{k}``, which matches
+    any integer (e.g. ``ami{k}`` matches ``ami1``, ``ami2``, ...); the expression may then use ``k``.
+    """
+    def __init__(self, spec: dict, op_func: Callable, params: dict, label: str):
+        if not isinstance(spec, dict):
+            raise ValueError(f"field_min_length of '{label}' must be a mapping, not {spec!r}")
+        self._op_func, self._params, self._label = op_func, params, label
+        self._exact, self._templates, self._cache = {}, [], {}
+        for field, fspec in spec.items():
+            if '{k}' in field:
+                pattern = re.compile(re.escape(field).replace(re.escape('{k}'), r'(\d+)'))
+                self._templates.append((pattern, fspec))
+            else:
+                self._exact[field] = _eval_min_length(fspec, op_func, params, f"{label}.{field}")
+        for _, fspec in self._templates:  # check the expressions now, at k = 1
+            _eval_min_length(fspec, op_func, {**params, 'k': 1}, label)
+
+    def bound(self, field: str) -> Union[int, None]:
+        """The minimum length of one field (None: no field-specific minimum)."""
+        if field in self._exact:
+            return self._exact[field]
+        if field not in self._cache:
+            b = None
+            for pattern, fspec in self._templates:
+                m = pattern.fullmatch(field)
+                if m:
+                    b = _eval_min_length(fspec, self._op_func, {**self._params, 'k': int(m.group(1))},
+                                         f"{self._label}.{field}")
+                    break
+            self._cache[field] = b
+        return self._cache[field]
+
+    def apply(self, out: dict, n: int) -> dict:
+        """``out`` with every field whose minimum length exceeds ``n`` set to NaN."""
+        return {k: (np.nan if (b := self.bound(k)) is not None and n < b else v) for k, v in out.items()}
+
+
 class FeatureCalculator:
     """
     A configuration-driven feature extraction calculator for time series data.
@@ -359,12 +480,22 @@ class FeatureCalculator:
       * ``decimate_ac1e`` (suffix ``_dec``): ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``.
         The z-scored series is decimated to one sample per floored 1/e autocorrelation time and
         z-scored again. If that time cannot be determined (e.g. the ACF never falls to 1/e), or
-        fewer than 50 samples would remain, the feature is NaN. See
+        fewer than 3 samples would remain (or fewer than the operation's ``min_length``), the
+        feature is NaN. See
         :func:`pyhctsa.utils.decimate_ac1e`;
       * ``diff1`` (``_diff1``): ``diff(x_z)``;
       * ``zscore_abs`` (``_mag``): ``zscore(abs(x_z))``; ``zscore_sign`` (``_sign``):
         ``zscore(sign(x_z))``. (``abs: True`` alone is ``abs(x_z)``.)
     - ``select`` / ``exclude``: keep or drop keys of a dict-valued output.
+
+    A feature's entry (alongside ``configs``) may also give ``min_length``: the shortest series on
+    which it is defined (an int, or an expression in its parameters such as ``"tau + 1"``; see
+    ``_MIN_LENGTH_NAMESPACE`` for the helpers it may use). It applies to the series the function
+    receives (after ``zscore``/``preprocess``); for a shorter series every output of that feature is
+    NaN, so the set of feature columns never depends on the length. The minima are listed in
+    :attr:`min_lengths`. ``field_min_length`` (a mapping ``{field: int or expression}``; a field
+    name may contain ``{k}``, an integer the expression can use) gives single fields of a dict
+    output a larger minimum: below it that field alone is NaN (:attr:`field_min_lengths`).
 
     Examples
     --------
@@ -429,7 +560,9 @@ class FeatureCalculator:
     
     def _build_feature_funcs(self):
         feature_funcs = {}
-        self._skipped_functions = []      
+        self.min_lengths = {}  # label -> minimum series length (None: no minimum beyond the global one)
+        self.field_min_lengths = {}  # label -> _FieldMinLengths of its fields with their own minimum
+        self._skipped_functions = []
         for module_key in self.config.keys():
 
             try:
@@ -447,6 +580,8 @@ class FeatureCalculator:
                 op_func = getattr(module, feature_name)
                 base_name = feature_config.get("base_name", feature_name)
                 ordered_args = feature_config.get("ordered_args", [])
+                min_length_spec = feature_config.get("min_length", None)
+                field_min_length_spec = feature_config.get("field_min_length", None)
                 
                 for config_item in feature_config.get("configs", [{}]):
                     # extract and clean meta params
@@ -455,9 +590,7 @@ class FeatureCalculator:
                     preprocess = config_item.pop('preprocess', None)
                     select_features = config_item.pop('select', None)
                     exclude_features = config_item.pop('exclude', None)
-                    # setup base function
-                    master_func = _preprocess_decorator(do_zscore, do_absval, preprocess)(op_func)
-                    
+                    _preprocess_decorator(do_zscore, do_absval, preprocess)  # validates preprocess
                     # standardise config_item into a list of combinations
                     # if config_item is empty, product(*) returns [()], allowing us to loop once
                     keys = list(config_item.keys())
@@ -468,7 +601,15 @@ class FeatureCalculator:
                         
                         # generate label and apply wrappers
                         label = _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval, preprocess)
-                        
+                        min_length = _eval_min_length(min_length_spec, op_func, combo_dict, label)
+                        self.min_lengths[label] = min_length
+                        field_min_lengths = (None if field_min_length_spec is None else
+                                             _FieldMinLengths(field_min_length_spec, op_func, combo_dict, label))
+                        if field_min_lengths is not None:
+                            self.field_min_lengths[label] = field_min_lengths
+                        master_func = _preprocess_decorator(do_zscore, do_absval, preprocess, min_length,
+                                                            field_min_lengths)(op_func)
+
                         final_func = partial(master_func, **combo_dict)
                         # filter out certain features if specified by the user with the select/include keys
                         if select_features:
@@ -540,6 +681,11 @@ class FeatureCalculator:
             details = "; ".join(f"{i}: {problems[i]}" for i in invalid[:10])
             raise ValueError(f"One or more time series instances are invalid: {np.array(invalid)} "
                              f"({details})")
+        n_min = min((len(t) for t, p in zip(series_list, problems) if p is None), default=None)
+        if n_min is not None and n_min < SHORT_SERIES_WARNING_LENGTH:
+            warnings.warn(f"Time series as short as N = {n_min} samples: features that cannot be computed "
+                          f"at a length return NaN, and most others are very noisy estimates below "
+                          f"N = {SHORT_SERIES_WARNING_LENGTH}.", stacklevel=2)
         # check labels if provided
         if labels is not None:
             # allow single label for single series, otherwise require one label per series
