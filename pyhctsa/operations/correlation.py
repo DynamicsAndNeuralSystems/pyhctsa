@@ -897,6 +897,27 @@ def crinkle_statistic(y: ArrayLike) -> float:
     float
         The crinkle statistic (NaN if the series is constant or has fewer than three
         samples, where it is undefined).
+
+    Notes
+    -----
+    With :math:`\\Delta^2 \\tilde{x}_t = \\tilde{x}_{t-1} - 2\\tilde{x}_t + \\tilde{x}_{t+1}`,
+    C factors exactly as the kurtosis of :math:`\\Delta^2 \\tilde{x}` times
+    :math:`(\\langle (\\Delta^2 \\tilde{x})^2 \\rangle / \\langle \\tilde{x}^2 \\rangle)^2`.
+    For a stationary process the ratio tends to :math:`6 - 8\\rho_1 + 2\\rho_2`, with
+    :math:`\\rho_k` the lag-k autocorrelation, so C responds to the lag-1 and lag-2
+    autocorrelation and to the value distribution, not only to spikes in the curvature.
+
+    No published definition of the statistic is known. Theiler et al. [1]_ define the companion
+    skewed-difference statistic :func:`theiler_q` and name higher moments as a class of
+    discriminating statistic for surrogate-data tests, but not this one. A plausible origin is
+    as a check for the spurious high-frequency "crinkliness" of Fourier surrogates of data whose
+    end points do not match [2]_, which a fourth moment of the second difference detects.
+
+    References
+    ----------
+    .. [1] J. Theiler, S. Eubank, A. Longtin, B. Galdrikian and J. D. Farmer, "Testing for
+       nonlinearity in time series: the method of surrogate data", Physica D 58, 77-94 (1992).
+    .. [2] T. Schreiber and A. Schmitz, "Surrogate time series", Physica D 142, 346-382 (2000).
     """
     x = np.asarray(y, dtype=float).ravel()
     if x.size < 3:
@@ -1730,6 +1751,14 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
     -------
     float
         The computed nonlinear autocorrelation (NaN if the series is not longer than the largest lag).
+
+    Notes
+    -----
+    A nonzero value does not by itself indicate nonlinear dependence. For a Gaussian (linear)
+    process, the mean of a product of an even number of factors is a sum of products of the
+    autocorrelations at the lags involved (Isserlis' theorem); only the difference from that
+    value is nonlinear. With ``absval=True`` and iid data, the value is a moment of the value
+    distribution alone.
     """
     y = np.asarray(y)
     taus = np.asarray(taus)
@@ -3057,6 +3086,13 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
             - 'num': The numerator.
             - 'absnum': The magnitude of the numerator.
             - 'denom': The denominator.
+
+    Notes
+    -----
+    ``raw`` and ``num`` are zero in expectation for any time-reversible process. ``abs`` and
+    ``absnum`` are their magnitudes, so on reversible data they measure estimation noise, which
+    is larger for heavy-tailed or skewed values. ``denom`` depends on the lag-:math:`\\tau`
+    autocorrelation, not on irreversibility.
     """
     y = np.asarray(y, dtype=float).ravel()
     # Can set the time lag, tau, to be 'ac' (first zero crossing of the autocorrelation function),

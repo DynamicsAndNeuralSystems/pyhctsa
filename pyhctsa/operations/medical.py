@@ -267,6 +267,12 @@ def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
     -------
     float
         The probability of obtaining a sequence of D consecutive ones or zeros.
+
+    Notes
+    -----
+    The value depends on the fraction of changes that reach the threshold, which is set by the
+    lag-1 autocorrelation and the distribution of the increments, as well as on the clustering
+    of large and small changes.
     """
     x = np.asarray(x)
     dx = np.abs(np.diff(x)) # abs diff in consecutive values of the time series

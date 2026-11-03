@@ -149,6 +149,11 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
 
         NaN if there are too few timescales; the two-line outputs are NaN if the
         timescales are too few to support two lines.
+
+    Notes
+    -----
+    The single line is fitted over all timescales from tau = 5 to N/2, so ``alpha`` also
+    responds to short-range correlation, which pulls it away from the long-range exponent.
     """
     # Compute integrated sequence (the profile)
     x = np.asarray(x, dtype=float)
