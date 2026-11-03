@@ -1,3 +1,4 @@
+import inspect
 import logging
 logger = logging.getLogger('pyhctsa')
 import warnings
@@ -619,6 +620,34 @@ def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = 
 
     return out
 
+def _kpss_stat_pvalue(y: ArrayLike, nlags: int, regression: str = 'ct') -> tuple:
+    """
+    The KPSS statistic and p-value, for any statsmodels version.
+
+    statsmodels 0.15 added ``result_object`` to ``kpss``: without it, ``kpss`` returns the
+    old tuple and raises a FutureWarning, and from statsmodels 0.16 (or after July 2027) it
+    will return a ``KPSSResult`` that unpacks to only two values. Asking for the result
+    object explicitly avoids both; versions before 0.15 don't accept the argument and still
+    return the tuple. ``InterpolationWarning`` (statistic outside the p-value table) is
+    silenced, as before.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=InterpolationWarning)
+        if _accepts_result_object(kpss):
+            res = kpss(y, regression=regression, nlags=nlags, result_object=True)
+            return res.statistic, res.pvalue
+        res = kpss(y, regression=regression, nlags=nlags)
+        return res[0], res[1]
+
+
+def _accepts_result_object(func) -> bool:
+    """Whether a statsmodels function takes the ``result_object`` argument (statsmodels >= 0.15)."""
+    try:
+        return "result_object" in inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def kpss_test(y: ArrayLike, lags: Union[int, list] = 0) -> dict:
     """
     Performs the KPSS (Kwiatkowski-Phillips-Schmidt-Shin) stationarity test.
@@ -662,9 +691,7 @@ def kpss_test(y: ArrayLike, lags: Union[int, list] = 0) -> dict:
         p_value = np.zeros(len(lags))
         stat = np.zeros(len(lags))
         for (i, l) in enumerate(lags):
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", category=InterpolationWarning)
-                s, pv, _, _ = kpss(y, nlags=l, regression='ct')
+            s, pv = _kpss_stat_pvalue(y, nlags=l)
             p_value[i] = pv
             stat[i] = s
         out = {}
@@ -678,9 +705,7 @@ def kpss_test(y: ArrayLike, lags: Union[int, list] = 0) -> dict:
     else:
         if isinstance(lags, (int, float)):
             lags = int(lags)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", category=InterpolationWarning)
-                stat, p_value, _, _ = kpss(y, nlags=lags, regression='ct')
+            stat, p_value = _kpss_stat_pvalue(y, nlags=lags)
             # return the statistic and pvalue
             out = {'stat': stat, 'pValue': p_value}
         else:
