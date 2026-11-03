@@ -8,7 +8,7 @@ from numpy.typing import ArrayLike
 from scipy import fft as sp_fft
 from scipy.linalg import solve_triangular
 from scipy.optimize import curve_fit
-from scipy.stats import chi2, expon, kstest, kurtosis, skew
+from scipy.stats import chi2, expon, kstest, kurtosis, norm, skew
 from scipy.stats import mode as smode
 from scipy.spatial import cKDTree
 from statsmodels.tsa.stattools import pacf
@@ -16,8 +16,8 @@ from statsmodels.tsa.stattools import pacf
 from ..operations.information import automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..robust import bf_hist_edges, bf_quantile_edges, bf_random, bf_remove_points
-from ..utils import (dict_output, _round_half_away, _zscore_or_zeros, get_tau, frame_signal,
-                     point_of_crossing, sign_change, theiler_window,
+from ..utils import (dict_output, _round_half_away, _tie_aware_ranks, _zscore_or_zeros, get_tau,
+                     frame_signal, point_of_crossing, sign_change, theiler_window,
                      time_delay_embed, z_score)
 
 
@@ -908,6 +908,109 @@ def crinkle_statistic(y: ArrayLike) -> float:
     num = np.mean(np.diff(x, n=2) ** 4)
     return float(num / den)
 
+def _gaussian_ranks(y: ArrayLike) -> Union[np.ndarray, None]:
+    """The series mapped monotonically onto a standard-normal marginal, then z-scored.
+
+    Each value is replaced by ``Phi^{-1}((r - 1/2) / N)``, with ``r`` its tie-aware average rank
+    (:func:`~pyhctsa.utils._tie_aware_ranks`, so repeated values stay tied) and ``Phi`` the
+    standard-normal CDF, and the result is z-scored (N - 1 standard deviation). The output
+    depends on the data only through their ranks (the copula), so it is unchanged by strictly
+    increasing transformations of the data (exactly, unless they move values into or out of the
+    tie tolerance of the ranks). Returns None for fewer than two samples or a series whose values
+    are all tied.
+    """
+    x = np.asarray(y, dtype=float).ravel()
+    n = x.size
+    if n < 2 or not np.all(np.isfinite(x)):
+        return None
+    g = norm.ppf((_tie_aware_ranks(x) - 0.5) / n)
+    sd = np.std(g, ddof=1)
+    if not sd > 0:
+        return None
+    return (g - np.mean(g)) / sd
+
+
+def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> float:
+    """
+    Excess kurtosis of the second difference: the spikiness of a series' curvature.
+
+    A variant of :func:`crinkle_statistic` that keeps only the part of the crinkle statistic
+    that measures spikiness, i.e. the shape of the distribution of the second difference
+    :math:`\\Delta^2 x_t = x_{t-1} - 2 x_t + x_{t+1}`, and (by default) computes it on Gaussian
+    ranks so that the marginal distribution of the data does not contribute.
+
+    The crinkle statistic factorises as
+
+    .. math::
+
+        C = \\frac{\\langle (\\Delta^2 x)^4 \\rangle}{\\langle x^2 \\rangle^2}
+          = \\underbrace{\\frac{\\langle (\\Delta^2 x)^4 \\rangle}{\\langle (\\Delta^2 x)^2 \\rangle^2}}_{\\mathrm{kurt}(\\Delta^2 x)}
+            \\times \\left(\\frac{\\langle (\\Delta^2 x)^2 \\rangle}{\\langle x^2 \\rangle}\\right)^2,
+
+    and the second factor is a second-order (linear) quantity: for any stationary process with
+    unit variance and autocorrelations :math:`\\rho_k`,
+    :math:`\\langle (\\Delta^2 x)^2 \\rangle = 6 - 8\\rho_1 + 2\\rho_2`, so for a Gaussian process
+    :math:`C = 3 (6 - 8\\rho_1 + 2\\rho_2)^2`, a function of the autocorrelation alone. The
+    crinkle statistic therefore separates processes that differ only in :math:`\\rho_1, \\rho_2`
+    (e.g. an AR(1) and an MA(1) with the same :math:`\\rho_1`) as well as processes with spiky
+    curvature. This feature drops the second factor, and returns
+
+    .. math::
+
+        K = \\frac{\\langle (\\Delta^2 g - \\overline{\\Delta^2 g})^4 \\rangle}
+                 {\\langle (\\Delta^2 g - \\overline{\\Delta^2 g})^2 \\rangle^2} - 3,
+
+    where :math:`g` is the series mapped onto Gaussian ranks (each value replaced by
+    :math:`\\Phi^{-1}((r - 1/2)/N)`, :math:`r` its rank, then z-scored), or the input series
+    itself if ``gaussian_rank=False``. For a Gaussian process :math:`\\Delta^2 g` is Gaussian, so
+    :math:`K \\to 0` for any autocorrelation; positive values mean that the curvature has heavier
+    tails (rare sharp kinks) than a Gaussian process with the same spectrum. Without the rank
+    transform, for iid data with excess kurtosis :math:`\\kappa`, :math:`K = \\kappa / 2`: a
+    property of the marginal distribution alone, which the rank transform removes.
+
+    The change from the crinkle statistic is deliberate and changes its values, so this is a new
+    feature rather than a correction of :func:`crinkle_statistic` (which reproduces the published
+    construction, D. Kaplan's ``DK_crinkle``, credited there to J. Theiler).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    gaussian_rank : bool, optional
+        Compute the statistic on the Gaussian ranks of the series (default True), so that it
+        depends on the data only through their ranks (unchanged by strictly increasing
+        transformations). If False, the input is
+        used as given (mean-removed), and the value also reflects the marginal distribution.
+
+    Returns
+    -------
+    float
+        The excess kurtosis of the second difference (NaN for fewer than five samples, where the
+        kurtosis of the two or fewer second differences takes a single value, and for a constant
+        series or one whose second difference is constant).
+
+    References
+    ----------
+    .. [1] D. Kaplan, MATLAB code for the crinkle statistic (1996), as ``DK_crinkle`` in hctsa:
+       B. D. Fulcher, M. A. Little and N. S. Jones, "Highly comparative time-series analysis: the
+       empirical structure of time series and their methods", J. R. Soc. Interface 10, 20130048
+       (2013).
+    """
+    x = np.asarray(y, dtype=float).ravel()
+    if x.size < 5:
+        return np.nan
+    if gaussian_rank:
+        x = _gaussian_ranks(x)
+        if x is None:
+            return np.nan
+    x = x - np.mean(x)
+    d2 = np.diff(x, n=2)
+    d2 = d2 - np.mean(d2)
+    m2 = np.mean(d2 ** 2)
+    if not m2 > 1e-20 * np.mean(x ** 2):   # constant series, or a constant second difference
+        return np.nan
+    return float(np.mean(d2 ** 4) / m2 ** 2 - 3.0)
+
 def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
     """
     Time-reversal asymmetry statistic (D. Kaplan).
@@ -1756,6 +1859,211 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
         out = np.mean(nlac)
 
     return float(out)
+
+def _lag_product(x: np.ndarray, taus: np.ndarray) -> np.ndarray:
+    """The products x_t * prod_k x_{t - taus[k]} over t = max(taus), ..., N - 1 (as nonlinear_autocorr)."""
+    n = x.size
+    tmax = int(np.max(taus))
+    p = x[tmax:n].copy()
+    for t in taus:
+        p *= x[tmax - t:n - t]
+    return p
+
+
+def _isserlis_moment(lags: tuple, acov) -> float:
+    """Gaussian (Isserlis) value of E[prod_i x_{t - lags[i]}]: the sum over all pairings of the
+    factors of the products of the autocovariances acov(|lag_i - lag_j|) of the pairs (0 for an
+    odd number of factors)."""
+    if len(lags) % 2:
+        return 0.0
+    if not lags:
+        return 1.0
+    first, rest = lags[0], lags[1:]
+    return sum(acov(abs(rest[j] - first)) * _isserlis_moment(rest[:j] + rest[j + 1:], acov)
+               for j in range(len(rest)))
+
+
+def _check_taus(taus: ArrayLike) -> np.ndarray:
+    taus = np.atleast_1d(np.asarray(taus))
+    if taus.size == 0 or not np.all(taus == np.round(taus)) or np.any(taus < 0):
+        raise ValueError(f"taus must be a non-empty list of non-negative integer lags, not {taus!r}")
+    return taus.astype(int)
+
+
+def nonlinear_autocorr_excess(y: ArrayLike, taus: ArrayLike, gaussian_rank: bool = True) -> float:
+    """
+    Nonlinear autocorrelation in excess of its Gaussian value.
+
+    A variant of :func:`nonlinear_autocorr` (with ``absval=False``) that subtracts the value the
+    same product would have for a Gaussian process with the series' own autocorrelation, and
+    (by default) computes it on Gaussian ranks, so that it responds to nonlinear (non-Gaussian)
+    temporal dependence rather than to the linear autocorrelation or the marginal distribution.
+
+    :func:`nonlinear_autocorr` averages a product of lagged values,
+    :math:`M = \\langle x_t \\prod_{k=1}^{m} x_{t-\\tau_k} \\rangle`. For a Gaussian process with an
+    even number of factors this moment is not zero but a sum of products of autocorrelations
+    (Isserlis' theorem); e.g. for ``taus = [1, 2, 3]``,
+    :math:`M = \\rho_1^2 + \\rho_2^2 + \\rho_1\\rho_3`, and for ``taus = [0, 1, 1]``,
+    :math:`M = 1 + 2\\rho_1^2`. So the original feature mostly measures linear autocorrelation.
+    With an odd number of factors the Gaussian value is zero, but the moment then picks up the
+    skewness of the marginal distribution (e.g. a static nonlinear transform of a linear
+    Gaussian process). This feature returns
+
+    .. math::
+
+        E = \\left\\langle g_t \\prod_{k=1}^{m} g_{t-\\tau_k} \\right\\rangle
+            - \\sum_{\\text{pairings } P} \\prod_{(i, j) \\in P} \\hat{c}(|\\tau_i - \\tau_j|),
+
+    with :math:`\\tau_0 = 0`, the sum running over all ways of splitting the :math:`m + 1`
+    factors into pairs (zero for an odd number of factors), and
+    :math:`\\hat{c}(k) = \\frac{1}{N} \\sum_t g_t g_{t-k}` the sample autocovariance of
+    :math:`g`. Here :math:`g` is the series mapped onto Gaussian ranks (each value replaced by
+    :math:`\\Phi^{-1}((r - 1/2)/N)`, :math:`r` its rank, then z-scored), or the (z-scored) input
+    itself if ``gaussian_rank=False``. For three or four factors :math:`E` is the joint cumulant
+    of the factors, e.g. for ``taus = [1, 1, 2]``,
+    :math:`E = \\langle g_t g_{t-1}^2 g_{t-2} \\rangle - (2 \\hat{c}(1)^2 + \\hat{c}(0)\\hat{c}(2))`;
+    for more factors it is the moment minus its Gaussian value (the analogue of excess kurtosis).
+    Its expectation tends to zero for any Gaussian process, whatever its autocorrelation, and,
+    with the rank transform, for any process that is a strictly increasing transform of one. For
+    three or four factors the estimate was unbiased to within its noise at N = 500 to 5000 on
+    linear Gaussian processes; with six or more factors it is much noisier, and on short, strongly
+    autocorrelated series it has a small negative bias that grows with the autocorrelation (e.g.
+    about -0.2, against a standard deviation of 0.4, for ``taus = [1, 2, 3, 4, 5]`` on a Gaussian
+    AR(1) with :math:`\\phi = 0.7` and N = 1000).
+
+    The change makes this a new feature rather than a correction of :func:`nonlinear_autocorr`
+    (which reproduces hctsa's ``CO_NonlinearAutocorr``).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series (z-scored, as for :func:`nonlinear_autocorr`, when
+        ``gaussian_rank=False``).
+    taus : array-like of int
+        The non-negative lags :math:`\\tau_1, ..., \\tau_m` of the factors other than
+        :math:`x_t`, as in :func:`nonlinear_autocorr` (repeats allowed: ``[1, 1, 2]`` is
+        :math:`\\langle x_t x_{t-1}^2 x_{t-2} \\rangle`). With a single lag the excess is zero by
+        construction.
+    gaussian_rank : bool, optional
+        Compute the statistic on the Gaussian ranks of the series (default True), so that it
+        depends on the data only through their ranks (unchanged by strictly increasing
+        transformations).
+
+    Returns
+    -------
+    float
+        The excess nonlinear autocorrelation (NaN if the series is not longer than the largest
+        lag, or, with ``gaussian_rank``, if all its values are tied).
+
+    References
+    ----------
+    .. [1] L. Isserlis, "On a formula for the product-moment coefficient of any order of a normal
+       frequency distribution in any number of variables", Biometrika 12, 134-139 (1918).
+    .. [2] B. D. Fulcher, M. A. Little and N. S. Jones, "Highly comparative time-series analysis:
+       the empirical structure of time series and their methods", J. R. Soc. Interface 10,
+       20130048 (2013) (``CO_NonlinearAutocorr``).
+    """
+    taus = _check_taus(taus)
+    x = np.asarray(y, dtype=float).ravel()
+    n = x.size
+    if n <= np.max(taus):  # no product to average
+        return np.nan
+    if gaussian_rank:
+        x = _gaussian_ranks(x)
+        if x is None:
+            return np.nan
+    moment = np.mean(_lag_product(x, taus))
+    acov_cache = {}
+
+    def acov(k):
+        if k not in acov_cache:
+            acov_cache[k] = float(np.mean(x[k:] * x[:n - k]))
+        return acov_cache[k]
+
+    gauss = _isserlis_moment(tuple(sorted([0, *taus.tolist()])), acov)
+    return float(moment - gauss)
+
+
+def nonlinear_autocorr_abs_surrogate_ratio(y: ArrayLike, taus: ArrayLike, num_surrs: int = 10,
+                                           random_seed: int = 0) -> float:
+    """
+    Absolute nonlinear autocorrelation relative to its value for linear Gaussian surrogates.
+
+    A variant of :func:`nonlinear_autocorr` with ``absval=True`` that removes its dependence on
+    the marginal distribution and on the linear autocorrelation, so that it responds to
+    nonlinear dependence between the magnitudes of the values (e.g. volatility clustering).
+
+    With ``absval=True``, :func:`nonlinear_autocorr` averages
+    :math:`|x_t \\prod_k x_{t-\\tau_k}|`. For iid data this is
+    :math:`(\\langle |x| \\rangle)^{m+1}`, a moment of the marginal distribution, and for a
+    Gaussian process it is a (non-closed-form) function of the autocorrelations, so the original
+    feature mostly measures the shape of the distribution. This feature computes the same average
+    on the Gaussian ranks :math:`g` of the series (each value replaced by
+    :math:`\\Phi^{-1}((r - 1/2)/N)`, :math:`r` its rank, then z-scored) and divides it by its
+    mean over phase-randomised (Fourier) surrogates of :math:`g`, which are Gaussian linear
+    processes with the same periodogram:
+
+    .. math::
+
+        R = \\frac{\\langle |g_t \\prod_{k=1}^{m} g_{t-\\tau_k}| \\rangle}
+                 {\\frac{1}{S} \\sum_{s=1}^{S} \\langle |g^{(s)}_t \\prod_{k=1}^{m} g^{(s)}_{t-\\tau_k}| \\rangle},
+
+    where each surrogate :math:`g^{(s)}` is z-scored. :math:`R \\approx 1` for any process that
+    is a strictly increasing transform of a linear Gaussian process; :math:`R > 1` means that
+    large magnitudes cluster in time more than the linear correlation implies. The surrogates
+    come from the portable generator :func:`~pyhctsa.robust.bf_random` with a fixed seed, so the
+    result is deterministic.
+
+    The change makes this a new feature rather than a correction of :func:`nonlinear_autocorr`
+    (which reproduces hctsa's ``CO_NonlinearAutocorr``).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    taus : array-like of int
+        The non-negative lags of the factors other than :math:`x_t`, as in
+        :func:`nonlinear_autocorr`.
+    num_surrs : int, optional
+        The number of phase-randomised surrogates :math:`S` (default 10).
+    random_seed : int, optional
+        The seed of the surrogates' random phases (default 0).
+
+    Returns
+    -------
+    float
+        The ratio :math:`R` (NaN if the series is not longer than the largest lag, has fewer than
+        four samples, or all its values are tied).
+
+    References
+    ----------
+    .. [1] J. Theiler, S. Eubank, A. Longtin, B. Galdrikian and J. D. Farmer, "Testing for
+       nonlinearity in time series: the method of surrogate data", Physica D 58, 77-94 (1992).
+    .. [2] B. D. Fulcher, M. A. Little and N. S. Jones, "Highly comparative time-series analysis:
+       the empirical structure of time series and their methods", J. R. Soc. Interface 10,
+       20130048 (2013) (``CO_NonlinearAutocorr``).
+    """
+    from .surrogates import _make_surrogates  # (surrogates imports this module)
+    taus = _check_taus(taus)
+    x = np.asarray(y, dtype=float).ravel()
+    if x.size <= max(np.max(taus), 3):
+        return np.nan
+    g = _gaussian_ranks(x)
+    if g is None:
+        return np.nan
+    value = np.mean(np.abs(_lag_product(g, taus)))
+    surrs = _make_surrogates(g, 'RP', int(num_surrs), random_seed)
+    vals = []
+    for s in range(surrs.shape[1]):
+        gs = surrs[:, s]
+        sd = np.std(gs, ddof=1)
+        if not sd > 0:
+            continue
+        vals.append(np.mean(np.abs(_lag_product((gs - np.mean(gs)) / sd, taus))))
+    den = np.mean(vals) if vals else np.nan
+    if not den > 0:
+        return np.nan
+    return float(value / den)
 
 def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'burg') -> dict:
     """
@@ -3091,6 +3399,105 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
     out['denom'] = (np.mean((yn1-yn)**2))**(3/2)
 
     return out
+
+def trev_studentized(y: ArrayLike, tau: Union[int, str] = 'ac') -> float:
+    """
+    Studentised time-reversal asymmetry: the trev numerator divided by its HAC standard error.
+
+    A variant of :func:`trev` whose size is a signal-to-noise ratio, so that it no longer
+    reflects how noisy the estimator is for the series' marginal distribution and
+    autocorrelation.
+
+    :func:`trev` is built on :math:`\\langle d_t^3 \\rangle`, the mean cube of the lag-:math:`\\tau`
+    increments :math:`d_t = x_{t+\\tau} - x_t`, whose expectation is zero for any time-reversible
+    process. Its ``abs`` and ``absnum`` outputs are then magnitudes of a zero-mean estimator on
+    reversible data, whose typical size is set by the estimator's standard deviation; that depends
+    on the higher moments of the increments and on their autocorrelation, so a heavy-tailed but
+    reversible process (e.g. a static nonlinear transform of a Gaussian AR process) gives large
+    values without any irreversibility. This feature divides the (signed) mean by a
+    heteroscedasticity- and autocorrelation-consistent (HAC) estimate of its standard error:
+
+    .. math::
+
+        T = \\frac{\\bar{s}}{\\sqrt{\\hat{\\sigma}^2_{\\mathrm{LR}} / n}}, \\qquad
+        \\hat{\\sigma}^2_{\\mathrm{LR}} = \\hat{\\gamma}_0 + 2 \\sum_{k=1}^{2M}
+            w(k/M)\\, \\hat{\\gamma}_k, \\qquad w(u) = \\min(1, \\max(0, 2 - u)),
+
+    where :math:`s_t = d_t^3` (:math:`n` values), :math:`\\bar{s}` is their mean and
+    :math:`\\hat{\\gamma}_k = \\frac{1}{n}\\sum_t (s_t - \\bar{s})(s_{t+k} - \\bar{s})` their sample
+    autocovariances. The weights are the flat-top (trapezoidal) kernel of Politis and Romano,
+    which keeps the autocovariances at lags up to :math:`M` unshrunk (a Bartlett / Newey-West
+    kernel shrinks them, which makes the statistic undersized by a factor that depends on the
+    autocorrelation of :math:`s_t`, and so on the process). The bandwidth is
+    :math:`M = \\max(\\tau, \\lfloor L_{NW}/2 \\rfloor + 1, 2\\tau_{1/e})`, with
+    :math:`L_{NW} = \\lfloor 4 (n/100)^{2/9} \\rfloor` the usual Newey-West rule and
+    :math:`\\tau_{1/e}` the series' 'ac1e' delay (:func:`~pyhctsa.utils.get_tau`): at least
+    :math:`\\tau`, since overlapping increments are correlated up to lag :math:`\\tau - 1` even for
+    white noise, and at least twice the correlation time, over which the cubed increments of a
+    persistent series stay correlated. :math:`M` is capped at :math:`(n - 1)/2`. The flat-top
+    estimate is not guaranteed to be positive, and a near-zero value would give a huge
+    :math:`|T|`, so it is floored at 0.05 times the (always non-negative) Bartlett estimate with
+    the same number of lags, :math:`2M`.
+
+    For a reversible process, :math:`T` is approximately standard normal whatever the marginal
+    distribution and autocorrelation: over iid Gaussian and Student-t(3), Gaussian AR(1)
+    (:math:`\\phi = 0.4, 0.9`) and exponentiated AR(1) series, its standard deviation was
+    0.85-1.05 at N = 5000 for :math:`\\tau = 1, 3` (0.73-1.42 over N = 500-5000 and
+    :math:`\\tau = 1, 3, 10`), against 0.3-1.0 with a Newey-West (Bartlett) standard error. Its sign is that of the
+    asymmetry, as in :func:`trev` (positive when increases are sharper than decreases). :math:`T`
+    is invariant to the scale of the data and changes sign when the series is reversed in time.
+
+    This is a new feature rather than a correction of :func:`trev` (which reproduces hctsa's
+    ``CO_trev`` / TSTOOL's ``trev``).
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    tau : int or str, optional
+        Time lag, as in :func:`trev`: an int, ``'ac'`` (first zero-crossing of the
+        autocorrelation function), ``'ac1e'`` (floor of its first 1/e crossing) or ``'mi'`` (see
+        :func:`~pyhctsa.utils.get_tau`). Default is ``'ac'``.
+
+    Returns
+    -------
+    float
+        The studentised statistic :math:`T` (NaN if the delay cannot be set, if there are fewer
+        than three lag-tau increments, or if the cubed increments are constant).
+
+    References
+    ----------
+    .. [1] T. Schreiber and A. Schmitz, "Surrogate time series", Physica D 142, 346-382 (2000).
+    .. [2] D. N. Politis and J. P. Romano, "Bias-corrected nonparametric spectral estimation",
+       J. Time Ser. Anal. 16, 67-103 (1995).
+    .. [3] W. K. Newey and K. D. West, "A simple, positive semi-definite, heteroskedasticity and
+       autocorrelation consistent covariance matrix", Econometrica 55, 703-708 (1987).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    tau = _resolve_delay(y, tau, default='ac')
+    if np.isnan(tau):
+        logger.warning("No valid setting for time delay. (Is the time series too short?)")
+        return np.nan
+    tau = int(tau)
+    n = y.size - tau
+    if n < 3:
+        return np.nan
+    s = (y[tau:] - y[:n]) ** 3
+    s_mean = np.mean(s)
+    sc = s - s_mean
+    tau_corr = get_tau(y, 'ac1e')
+    tau_corr = 0 if np.isnan(tau_corr) else int(tau_corr)
+    m = max(tau, int(np.floor(4 * (n / 100) ** (2 / 9))) // 2 + 1, 2 * tau_corr)
+    m = max(1, min(m, (n - 1) // 2))
+    lag_max = min(2 * m, n - 1)
+    acov = np.array([np.dot(sc[k:], sc[:n - k]) / n for k in range(lag_max + 1)])
+    k = np.arange(1, lag_max + 1)
+    lrv = acov[0] + 2 * np.sum(np.clip(2 - k / m, 0, 1) * acov[1:])
+    lrv_bartlett = acov[0] + 2 * np.sum((1 - k / (lag_max + 1)) * acov[1:])
+    lrv = max(lrv, 0.05 * lrv_bartlett)   # the flat-top estimate can be ~0 or negative
+    if not lrv > 1e-20 * max(np.mean(s * s), 1e-300):
+        return np.nan
+    return float(s_mean / np.sqrt(lrv / n))
 
 @dict_output
 def tc3(y: list, tau: Union[int, str, None] = 'ac1e') -> dict:
