@@ -187,6 +187,7 @@ Entropy
    pyhctsa.operations.entropy.distribution_entropy
    pyhctsa.operations.entropy.multi_scale_entropy
    pyhctsa.operations.entropy.sample_entropy
+   pyhctsa.operations.entropy.sample_entropy_ranked
    pyhctsa.operations.entropy.permutation_entropy
    pyhctsa.operations.entropy.rpde
    pyhctsa.operations.entropy.approximate_entropy

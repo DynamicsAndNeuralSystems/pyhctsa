@@ -909,6 +909,24 @@ entropy:
     legacy_name: EN_SampEn
     ordered_args: ['m', 'r', 'pre_process_how']
 
+  # pyhctsa-only variant of sample_entropy: SampEn of the ranks, invariant to the value distribution.
+  # Mirrors sample_entropy's configs; sampen0 (a function of N and r alone for ranks) is not returned.
+  sample_entropy_ranked:
+    base_name: sample_entropy_ranked
+    min_length: 4
+    dependencies:
+    configs:
+      - {m: 5, r: 0.05, zscore: True, select: ['sampen1', 'sampen2']}
+      - {m: 5, r: 0.1, zscore: True, select: ['sampen1', 'sampen2']}
+      - {m: 5, r: 0.15, zscore: True, select: ['sampen1', 'sampen2', 'sampen3']}
+      - {m: 5, r: 0.2, zscore: True, select: ['sampen1', 'sampen2', 'sampen3']}
+      - {m: 5, r: 0.3, zscore: True}
+      - {m: 5, r: 0.1, pre_process_how: 'diff1', zscore: True, select: ['sampen1', 'sampen2']}
+      - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True, select: ['sampen1', 'sampen2', 'sampen3']}
+      - {m: 5, r: 0.2, zscore: True, preprocess: decimate_ac1e}
+    variant_of: sample_entropy
+    ordered_args: ['m', 'r', 'pre_process_how']
+
   multi_scale_entropy:
     base_name: multi_scale_entropy
     dependencies:
