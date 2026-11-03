@@ -13,7 +13,7 @@ logger = logging.getLogger('pyhctsa')
 from pyhctsa.operations.correlation import autocorr, first_crossing
 from pyhctsa.robust import bf_fit_density_curve, bf_residual_stats
 from pyhctsa.utils import dict_output, get_tau, time_delay_embed
-from pyhctsa.operations.entropy import _ordinal_pattern_rank, distribution_entropy
+from pyhctsa.operations.entropy import _break_ties, _ordinal_pattern_rank, distribution_entropy
 from pyhctsa.toolboxes.distribution_fits.distfits import evfit
 
 
@@ -408,7 +408,7 @@ def ordinal_partition_network(y: ArrayLike, d: int = 3, tau: Union[int, str] = 1
         logger.warning('Embedding failed (could not set the time delay)')
         return np.nan
     try:
-        X = time_delay_embed(y, d, int(tau))
+        X = time_delay_embed(_break_ties(y), d, int(tau))  # ties broken at random (fixed seed)
     except ValueError:
         logger.warning('Embedding failed')
         return np.nan

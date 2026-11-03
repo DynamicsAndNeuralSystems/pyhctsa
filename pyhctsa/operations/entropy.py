@@ -482,6 +482,15 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
         but none of length ``k + 1`` do (for ``sampen0``, when no two values are within
         ``r``): the estimate is then infinite, so the data cannot support it at this ``k``,
         ``r`` and length. It is also NaN when no templates of length ``k`` match.
+
+    Notes
+    -----
+    SampEn estimates an entropy rate at the resolution ``r``, so it depends on the shape of
+    the value distribution as well as on the dynamics. Two equally unpredictable iid
+    processes can differ: discrete or heavy-tailed values put more pairs within ``r`` than
+    Gaussian values do, so iid binary or Student-t noise gives a lower SampEn (reads as more
+    regular) than iid Gaussian noise at the same ``r``. This follows from the definition, not
+    from the estimator; compare SampEn across series with similar value distributions.
     """
     m = int(m)
     y = np.ascontiguousarray(y, dtype=np.float64)
@@ -501,12 +510,37 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
 
     return out
 
+_ORDINAL_TIE_SEED = 0  # fixed bf_random seed of the tie-breaking key in _break_ties (deterministic)
+
+def _break_ties(y: np.ndarray) -> np.ndarray:
+    """``y`` for ordinal-pattern analysis, with equal values put in a fixed pseudo-random order.
+
+    Ordinal patterns are only defined for distinct values. Breaking ties by position (as a stable
+    sort does) reads every run of equal values as increasing, so discrete or quantised data look
+    spuriously ordered: iid Poisson counts get a much lower permutation entropy than iid
+    Gaussian noise, although both are equally unpredictable. Here equal values are ordered by a
+    fixed-seed :func:`~pyhctsa.robust.bf_random` key instead, so that among tied values every
+    order is equally likely. The same order is used in every window containing a given pair of
+    samples, and the result is deterministic. Without ties, ``y`` is returned unchanged.
+
+    Returns the ranks 0..N-1 of ``y`` (ties broken by the key) when ``y`` has ties, else ``y``.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    if np.unique(y).size == y.size:
+        return y
+    key = bf_random(y.size, _ORDINAL_TIE_SEED)
+    order = np.lexsort((key, y))
+    r = np.empty(y.size)
+    r[order] = np.arange(y.size)
+    return r
+
 def _ordinal_pattern_rank(x: np.ndarray) -> np.ndarray:
     """
     Index in 0..m!-1 of the ordinal pattern (the argsort permutation) of each row of `x`.
 
     The permutation is encoded by its Lehmer code, as hctsa's BF_OrdinalPatternRank
-    does (ties are broken by position, with a stable sort).
+    does. Ties within a row are broken by position (a stable sort); feature functions pass
+    embeddings of :func:`_break_ties` output, which has no ties.
     """
     m = x.shape[1]
     ix = np.argsort(x, axis=1, kind='stable')
@@ -589,7 +623,9 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
         return nan_out
 
     num_perms = factorial(m)
-    perm_idx = _ordinal_pattern_rank(embedded)
+    # ordinal patterns of the series with ties broken at random (fixed seed), not by position
+    ranked = time_delay_embed(_break_ties(y), m, tau)
+    perm_idx = _ordinal_pattern_rank(ranked)
     count_perms = np.bincount(perm_idx, minlength=num_perms)
     p = count_perms / nx
     pe = -np.sum(xlogy(p, p)) / np.log(2)  # bits
@@ -610,7 +646,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
         norm_wpe = np.nan
 
     # Time-reversal asymmetry of the ordinal patterns
-    count_perms_rev = np.bincount(_ordinal_pattern_rank(embedded[:, ::-1]), minlength=num_perms)
+    count_perms_rev = np.bincount(_ordinal_pattern_rank(ranked[:, ::-1]), minlength=num_perms)
     ord_asym = 0.5 * np.sum(np.abs(count_perms - count_perms_rev)) / nx
 
     return {"permEn": pe, "normPermEn": pe_norm, "permEnLE": pe_le,
@@ -965,7 +1001,7 @@ def permutation_entropy_complexity(y: ArrayLike, m: int = 2, tau: Union[int, str
     if y.size - (m - 1) * tau < 5:  # need at least 5 embedding vectors
         logger.warning("Time series too short to embed")
         return nan_out
-    x = time_delay_embed(y, m, tau)
+    x = time_delay_embed(_break_ties(y), m, tau)  # ties broken at random (fixed seed)
     nx = x.shape[0]
 
     num_perms = factorial(m)
