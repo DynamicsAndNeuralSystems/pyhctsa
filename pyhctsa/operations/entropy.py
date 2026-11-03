@@ -482,6 +482,15 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
         but none of length ``k + 1`` do (for ``sampen0``, when no two values are within
         ``r``): the estimate is then infinite, so the data cannot support it at this ``k``,
         ``r`` and length. It is also NaN when no templates of length ``k`` match.
+
+    Notes
+    -----
+    SampEn estimates an entropy rate at the resolution ``r``, so it depends on the shape of
+    the value distribution as well as on the dynamics. Two equally unpredictable iid
+    processes can differ: discrete or heavy-tailed values put more pairs within ``r`` than
+    Gaussian values do, so iid binary or Student-t noise gives a lower SampEn (reads as more
+    regular) than iid Gaussian noise at the same ``r``. This follows from the definition, not
+    from the estimator; compare SampEn across series with similar value distributions.
     """
     m = int(m)
     y = np.ascontiguousarray(y, dtype=np.float64)
@@ -501,12 +510,40 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
 
     return out
 
+_ORDINAL_TIE_SEED = 0  # fixed bf_random seed of the tie-breaking key in _break_ties (deterministic)
+
+def _break_ties(y: np.ndarray) -> np.ndarray:
+    """``y`` for ordinal-pattern analysis, with equal values put in a fixed pseudo-random order.
+
+    Ordinal patterns are only defined for distinct values. Breaking ties by position (as a stable
+    sort does) reads every run of equal values as increasing, so discrete or quantised data look
+    spuriously ordered: iid Poisson counts get a much lower permutation entropy than iid
+    Gaussian noise, although both are equally unpredictable. Here equal values are ordered by a
+    fixed-seed :func:`~pyhctsa.robust.bf_random` key instead, so that among tied values every
+    order is equally likely. The same order is used in every window containing a given pair of
+    samples, and the result is deterministic. Without ties, ``y`` is returned unchanged.
+
+    Returns the ranks 0..N-1 of ``y`` (ties broken by the key) when ``y`` has ties, else ``y``.
+    A constant series (all values tied) is returned unchanged: it has no order to break, and
+    callers treat it as undefined.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n_distinct = np.unique(y).size
+    if n_distinct == y.size or n_distinct <= 1:
+        return y
+    key = bf_random(y.size, _ORDINAL_TIE_SEED)
+    order = np.lexsort((key, y))
+    r = np.empty(y.size)
+    r[order] = np.arange(y.size)
+    return r
+
 def _ordinal_pattern_rank(x: np.ndarray) -> np.ndarray:
     """
     Index in 0..m!-1 of the ordinal pattern (the argsort permutation) of each row of `x`.
 
     The permutation is encoded by its Lehmer code, as hctsa's BF_OrdinalPatternRank
-    does (ties are broken by position, with a stable sort).
+    does. Ties within a row are broken by position (a stable sort); feature functions pass
+    embeddings of :func:`_break_ties` output, which has no ties.
     """
     m = x.shape[1]
     ix = np.argsort(x, axis=1, kind='stable')
@@ -589,7 +626,9 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
         return nan_out
 
     num_perms = factorial(m)
-    perm_idx = _ordinal_pattern_rank(embedded)
+    # ordinal patterns of the series with ties broken at random (fixed seed), not by position
+    ranked = time_delay_embed(_break_ties(y), m, tau)
+    perm_idx = _ordinal_pattern_rank(ranked)
     count_perms = np.bincount(perm_idx, minlength=num_perms)
     p = count_perms / nx
     pe = -np.sum(xlogy(p, p)) / np.log(2)  # bits
@@ -610,7 +649,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
         norm_wpe = np.nan
 
     # Time-reversal asymmetry of the ordinal patterns
-    count_perms_rev = np.bincount(_ordinal_pattern_rank(embedded[:, ::-1]), minlength=num_perms)
+    count_perms_rev = np.bincount(_ordinal_pattern_rank(ranked[:, ::-1]), minlength=num_perms)
     ord_asym = 0.5 * np.sum(np.abs(count_perms - count_perms_rev)) / nx
 
     return {"permEn": pe, "normPermEn": pe_norm, "permEnLE": pe_le,
@@ -831,8 +870,10 @@ def bubble_entropy(y: ArrayLike, m: int = 10, tau: Union[int, str] = 1) -> Union
     for ``m = 10`` (rising slowly toward 0.75 as ``m`` grows). Port of hctsa's
     ``EN_BubbleEn``.
 
-    A swap is counted only when an earlier value is strictly greater than a later one, so
-    tied values are never swapped (as in a standard bubble sort). The estimate is a small
+    A swap is counted when an earlier value is greater than a later one. Tied values are first
+    put in a fixed pseudo-random order (as in :func:`permutation_entropy`); hctsa never swaps
+    them, which reads every run of equal values as sorted and makes discrete data look more
+    regular than it is. The estimate is a small
     difference between two entropies, so it is noisy when the series is short relative to
     the number of possible swap counts: for series of about 1000 samples, embedding
     dimensions much above 10 give poorly reproducible values.
@@ -880,14 +921,17 @@ def bubble_entropy(y: ArrayLike, m: int = 10, tau: Union[int, str] = 1) -> Union
         return out
     tau = int(tau)
 
-    # Renyi-2 entropy of the swap-count distribution at m and m + 1
+    # Renyi-2 entropy of the swap-count distribution at m and m + 1, on the series with ties
+    # broken at random (fixed seed): counting only strict inversions would read every run of
+    # equal values as sorted, so discrete data would look spuriously regular
+    yb = _break_ties(y)
     H = np.zeros(2)
     for j in range(2):
         mm = m + j
         n_vec = y.size - (mm - 1) * tau
         if n_vec < 10:
             return out
-        x = time_delay_embed(y, mm, tau)
+        x = time_delay_embed(yb, mm, tau)
         num_swaps = np.zeros(n_vec, dtype=np.int64)
         for a in range(mm - 1):
             for b in range(a + 1, mm):
@@ -965,7 +1009,7 @@ def permutation_entropy_complexity(y: ArrayLike, m: int = 2, tau: Union[int, str
     if y.size - (m - 1) * tau < 5:  # need at least 5 embedding vectors
         logger.warning("Time series too short to embed")
         return nan_out
-    x = time_delay_embed(y, m, tau)
+    x = time_delay_embed(_break_ties(y), m, tau)  # ties broken at random (fixed seed)
     nx = x.shape[0]
 
     num_perms = factorial(m)
@@ -1449,8 +1493,8 @@ def randomize_ordinal(y: ArrayLike, tau: Union[int, str] = 1) -> Union[dict, flo
     ``k`` of them has never been overwritten is
     ``w_k(t) = sum_{j=0}^{3-k} C(3-k, j) (-1)^j (1 - (k+j)/N)^t``. Given the subset, the
     pattern probabilities follow from the kept values and the empirical distribution function
-    of the series (ties are treated as in :func:`permutation_entropy`: equal values are
-    ordered by their position). The expected pattern distribution after ``t`` steps is
+    of the series. As in :func:`permutation_entropy`, ties are first broken in a fixed
+    pseudo-random order (:func:`_break_ties`), so equal values are not read as increasing. The expected pattern distribution after ``t`` steps is
     therefore a fixed combination of eight series-specific pattern distributions (one per
     subset), weighted by ``w_k(t)``.
 
@@ -1482,7 +1526,7 @@ def randomize_ordinal(y: ArrayLike, tau: Union[int, str] = 1) -> Union[dict, flo
           distribution when one sample of each window (chosen at random) is replaced by an
           independent draw from the series,
         - 'normPermEnInf': the normalized permutation entropy of the fully randomized series
-          (close to 1 for a series without repeated values).
+          (close to 1, less a bias of order ``1/N`` from drawing the same sample twice).
 
         NaN (instead of a dict) if the series is too short (fewer than 5 windows) or the
         delay cannot be determined.
@@ -1505,7 +1549,7 @@ def randomize_ordinal(y: ArrayLike, tau: Union[int, str] = 1) -> Union[dict, flo
         logger.warning('Time series too short to embed')
         return np.nan
 
-    S = _ro_pattern_dists(y, tau)
+    S = _ro_pattern_dists(_break_ties(y), tau)  # ties broken at random (fixed seed)
     out = {'normPermEn0': _ro_norm_entropy(S[7])[0],
            'normPermEnRep1': _ro_norm_entropy(S[4:7].mean(axis=0))[0],
            'normPermEnInf': _ro_norm_entropy(S[0])[0]}
