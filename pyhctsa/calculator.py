@@ -1,3 +1,4 @@
+import copy
 import importlib
 import time
 from functools import partial, wraps
@@ -15,7 +16,8 @@ from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
 from .utils import _check_optional_deps, _validate_data, _zscore_or_zeros, decimate_ac1e, nan_outputs, z_score
-from .distribute import _compute_features_for_chunk, _extract_features_single_series
+from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk,
+                         _extract_features_single_series)
 
 class RangeList(list):
     """A list produced by the ``!range`` YAML constructor.
@@ -354,9 +356,27 @@ class FeatureCalculator:
             config_path = ROOT_DIR / "configurations" / "hctsa.yaml"
         self.config_path = config_path
         with open(config_path, encoding='utf-8') as f:
-            self.config = yaml.safe_load(f)
+            config = yaml.safe_load(f)
+        self._load_config(config)
+
+    @classmethod
+    def _from_config(cls, config: dict) -> "FeatureCalculator":
+        """A calculator built from an already-parsed configuration (used by parallel workers)."""
+        calc = cls.__new__(cls)
+        calc.config_path = None
+        calc._load_config(config)
+        return calc
+
+    def _load_config(self, config: dict):
+        # building consumes the meta params (zscore, abs, ...) of self.config, so keep the
+        # parsed configuration for parallel workers to rebuild the features from
+        self._parsed_config = copy.deepcopy(config)
+        self.config = config
         self._operations_package = "pyhctsa.operations" # abs path
         self.feature_funcs = self._build_feature_funcs()
+        # the functions as built from self.config, so extract() can tell whether
+        # feature_funcs has since been changed (see _parallel_task)
+        self._config_funcs = dict(self.feature_funcs)
         logger.info(f"Loaded {len(self.feature_funcs)} master operations.")
     
     def _check_deps(self, module_key, feature_name, config):
@@ -485,11 +505,8 @@ class FeatureCalculator:
         start_time = time.perf_counter()
         if distributor:
             # parallel execution
-            rows = distributor.map(
-                _compute_features_for_chunk,
-                series_list,
-                feature_funcs=self.feature_funcs
-            )
+            task, task_kwargs = self._parallel_task()
+            rows = distributor.map(task, series_list, **task_kwargs)
         else:
             # sequential fallback
             if verbose:
@@ -519,3 +536,20 @@ class FeatureCalculator:
         self._errors = df.map(classify_output)
 
         return df
+
+    def _parallel_task(self) -> tuple[Callable, dict]:
+        """The chunk function, and its keyword arguments, to hand to a distributor.
+
+        Workers rebuild the feature functions from the parsed configuration rather than receiving
+        them pickled: they are closures over their operations modules, which ``dill`` must pickle
+        by value, globals and all, and that fails when Python is embedded (e.g. in R through
+        reticulate) because the standard library then no longer looks importable to ``dill``. Only
+        if ``feature_funcs`` has been changed to hold functions the configuration does not build
+        are the functions themselves sent.
+        """
+        funcs = self.feature_funcs
+        if all(self._config_funcs.get(label) is func for label, func in funcs.items()):
+            # None: all of them, in configuration order
+            labels = None if list(funcs) == list(self._config_funcs) else list(funcs)
+            return _compute_config_features_for_chunk, {"config": self._parsed_config, "labels": labels}
+        return _compute_features_for_chunk, {"feature_funcs": funcs}
