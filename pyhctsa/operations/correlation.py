@@ -906,6 +906,18 @@ def crinkle_statistic(y: ArrayLike) -> float:
     For a stationary process the ratio tends to :math:`6 - 8\\rho_1 + 2\\rho_2`, with
     :math:`\\rho_k` the lag-k autocorrelation, so C responds to the lag-1 and lag-2
     autocorrelation and to the value distribution, not only to spikes in the curvature.
+
+    No published definition of the statistic is known. Theiler et al. [1]_ define the companion
+    skewed-difference statistic :func:`theiler_q` and name higher moments as a class of
+    discriminating statistic for surrogate-data tests, but not this one. A plausible origin is
+    as a check for the spurious high-frequency "crinkliness" of Fourier surrogates of data whose
+    end points do not match [2]_, which a fourth moment of the second difference detects.
+
+    References
+    ----------
+    .. [1] J. Theiler, S. Eubank, A. Longtin, B. Galdrikian and J. D. Farmer, "Testing for
+       nonlinearity in time series: the method of surrogate data", Physica D 58, 77-94 (1992).
+    .. [2] T. Schreiber and A. Schmitz, "Surrogate time series", Physica D 142, 346-382 (2000).
     """
     x = np.asarray(y, dtype=float).ravel()
     if x.size < 3:

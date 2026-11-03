@@ -70,7 +70,8 @@ Keep it short, and leave out:
     - narratives of tests or experiments run during development (simulation settings, AUCs, correlations on
       particular datasets), unless they are published and cited (a brief general reason, such as "tests showed
       these were redundant", is fine);
-    - speculation about a method's origin, and extended discussion of what else a feature responds to.
+    - extended discussion of what else a feature responds to, and speculation about a method's origin (a short
+      provenance note is fine where the origin is itself notable, e.g. a statistic with no published source).
 
 Where a feature is known to respond to something besides its target property, one plain sentence in Notes is
 enough (and a pointer to a more specific variant, if there is one).
