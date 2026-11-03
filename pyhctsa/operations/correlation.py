@@ -1881,8 +1881,8 @@ def nonlinear_autocorr_excess(y: ArrayLike, taus: ArrayLike, gaussian_rank: bool
     """
     Nonlinear autocorrelation in excess of its Gaussian value.
 
-    A variant of :func:`nonlinear_autocorr` (with ``absval=False``) that subtracts the value the
-    same product would have for a Gaussian process with the series' own autocovariance, and (by
+    A variant of :func:`nonlinear_autocorr` [2]_ (with ``absval=False``) that subtracts the value
+    the same product would have for a Gaussian process with the series' own autocovariance, and (by
     default) works on Gaussian ranks. It then responds to nonlinear temporal dependence rather
     than to the linear autocorrelation, which sets the original's value for Gaussian data through
     Isserlis' theorem [1]_, or to the marginal distribution. It returns
@@ -1929,6 +1929,9 @@ def nonlinear_autocorr_excess(y: ArrayLike, taus: ArrayLike, gaussian_rank: bool
     ----------
     .. [1] L. Isserlis, "On a formula for the product-moment coefficient of any order of a normal
        frequency distribution in any number of variables", Biometrika 12, 134-139 (1918).
+    .. [2] B. D. Fulcher, M. A. Little and N. S. Jones, "Highly comparative time-series analysis:
+       the empirical structure of time series and their methods", J. R. Soc. Interface 10,
+       20130048 (2013).
     """
     taus = _check_taus(taus)
     x = np.asarray(y, dtype=float).ravel()
@@ -1956,8 +1959,8 @@ def nonlinear_autocorr_abs_surrogate_ratio(y: ArrayLike, taus: ArrayLike, num_su
     """
     Absolute nonlinear autocorrelation relative to its value for linear Gaussian surrogates.
 
-    A variant of :func:`nonlinear_autocorr` with ``absval=True`` that removes its dependence on
-    the marginal distribution and the linear autocorrelation, so that it responds to nonlinear
+    A variant of :func:`nonlinear_autocorr` [2]_ with ``absval=True`` that removes its dependence
+    on the marginal distribution and the linear autocorrelation, so that it responds to nonlinear
     dependence between the magnitudes of the values (e.g. volatility clustering). It computes
     the same average on the Gaussian ranks :math:`g` of the series (each value replaced by
     :math:`\\Phi^{-1}((r - 1/2)/N)`, :math:`r` its rank, then z-scored) and divides it by its
@@ -1997,6 +2000,9 @@ def nonlinear_autocorr_abs_surrogate_ratio(y: ArrayLike, taus: ArrayLike, num_su
     ----------
     .. [1] J. Theiler, S. Eubank, A. Longtin, B. Galdrikian and J. D. Farmer, "Testing for
        nonlinearity in time series: the method of surrogate data", Physica D 58, 77-94 (1992).
+    .. [2] B. D. Fulcher, M. A. Little and N. S. Jones, "Highly comparative time-series analysis:
+       the empirical structure of time series and their methods", J. R. Soc. Interface 10,
+       20130048 (2013).
     """
     from .surrogates import _make_surrogates  # (surrogates imports this module)
     taus = _check_taus(taus)
