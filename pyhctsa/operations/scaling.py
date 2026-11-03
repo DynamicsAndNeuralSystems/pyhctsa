@@ -149,6 +149,20 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
 
         NaN if there are too few timescales; the two-line outputs are NaN if the
         timescales are too few to support two lines.
+
+    Notes
+    -----
+    The single line is fitted over all timescales from tau = 5 to N/2, so its slope ``alpha``
+    responds to short-range correlation as well as to long-range scaling. At the smaller
+    timescales F(tau) still reflects the correlation time of the series, which pulls the
+    fitted slope away from its long-range value (up for positive and down for negative
+    short-range correlation), and the effect fades only slowly with N. For example, for DFA
+    (``wtf='dfa'``, ``k=1``, ``tau_step=50``), an AR(1) process with coefficient 0.5, which has
+    no long-range correlation, gives a mean ``alpha`` of about 0.62, 0.58 and 0.56 at N = 1000,
+    5000 and 20000, against 0.50 for white noise, and is separated from white noise in nearly
+    every realization (AUC 0.97 or more) at each of these lengths. Read ``alpha`` as a
+    long-range scaling exponent only when the correlation time of the series is short compared
+    with most of the fitted timescales.
     """
     # Compute integrated sequence (the profile)
     x = np.asarray(x, dtype=float)

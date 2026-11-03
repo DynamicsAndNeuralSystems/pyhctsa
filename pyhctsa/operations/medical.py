@@ -267,6 +267,21 @@ def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
     -------
     float
         The probability of obtaining a sequence of D consecutive ones or zeros.
+
+    Notes
+    -----
+    The value is set largely by how often a change reaches the threshold,
+    :math:`q = P(|\\Delta x| \\geq d)`, and not only by the clustering of large and small changes.
+    Even for independent symbols it depends on q: it is smallest near q = 1/2 and grows as q
+    moves away from 1/2 (for ``D=3``, about 0.14 at q = 0.5 and 0.24 at q = 0.15). In turn, q
+    depends on the lag-1 autocorrelation :math:`\\rho_1` and on the distribution of the
+    increments. For a z-scored Gaussian process, :math:`\\Delta x \\sim N(0, 2(1 - \\rho_1))`, so
+    :math:`q = 2[1 - \\Phi(d / \\sqrt{2(1 - \\rho_1)})]` (0.48 for white noise and 0.36 for
+    :math:`\\rho_1 = 0.4`, at ``d=1``), and heavy-tailed increments change q further (at ``d=1``
+    they make changes above d rarer). As a result, a Gaussian AR(1) process is separated almost
+    perfectly from the same process driven by Student-t innovations (3 degrees of freedom),
+    which has no clustering of large changes either (``d=1``, ``D=3``, N = 1000). Compare values
+    across series with similar lag-1 autocorrelation and increment distributions.
     """
     x = np.asarray(x)
     dx = np.abs(np.diff(x)) # abs diff in consecutive values of the time series

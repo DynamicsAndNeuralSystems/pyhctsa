@@ -897,6 +897,30 @@ def crinkle_statistic(y: ArrayLike) -> float:
     float
         The crinkle statistic (NaN if the series is constant or has fewer than three
         samples, where it is undefined).
+
+    Notes
+    -----
+    C is not only a measure of spikes in the curvature. With
+    :math:`\\Delta^2 \\tilde{x}_t = \\tilde{x}_{t-1} - 2\\tilde{x}_t + \\tilde{x}_{t+1}`, it
+    factors exactly as
+
+    .. math::
+
+        C = \\kappa \\left( \\frac{\\langle (\\Delta^2 \\tilde{x})^2 \\rangle}
+                               {\\langle \\tilde{x}^2 \\rangle} \\right)^{2},
+        \\qquad
+        \\kappa = \\frac{\\langle (\\Delta^2 \\tilde{x})^4 \\rangle}
+                        {\\langle (\\Delta^2 \\tilde{x})^2 \\rangle^{2}},
+
+    the kurtosis :math:`\\kappa` of the second difference (its spikiness) times the squared
+    ratio of its mean square to that of the series. For a stationary process the ratio tends to
+    :math:`6 - 8\\rho_1 + 2\\rho_2`, with :math:`\\rho_k` the lag-k autocorrelation, and for a
+    Gaussian process :math:`\\kappa = 3`, so :math:`C \\to 3(6 - 8\\rho_1 + 2\\rho_2)^2` (108
+    for white noise). C therefore responds to the lag-1 and lag-2 autocorrelation as well as to
+    the shape of the value distribution: Gaussian AR(1) and MA(1) processes with the same lag-1
+    autocorrelation (0.4) give C of about 29.2 and 23.5, and are separated in nearly every
+    realization at N = 5000. Of the two factors, only :math:`\\kappa` is free of the
+    autocorrelation in the Gaussian case.
     """
     x = np.asarray(y, dtype=float).ravel()
     if x.size < 3:
@@ -1730,6 +1754,30 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
     -------
     float
         The computed nonlinear autocorrelation (NaN if the series is not longer than the largest lag).
+
+    Notes
+    -----
+    A nonzero value does not by itself indicate nonlinear dependence. The product has
+    ``len(taus) + 1`` factors, and for a Gaussian (linear) process with autocorrelation
+    :math:`\\rho_k`, Isserlis' theorem gives the mean of a product of an even number of factors
+    as a sum of products of autocorrelations. For example,
+
+    - ``taus=[1, 1, 2]``: :math:`\\langle x_i\\, x_{i-1}^2\\, x_{i-2} \\rangle \\to 2\\rho_1^2 + \\rho_2`;
+    - ``taus=[0, 3, 6]``: :math:`\\langle x_i^2\\, x_{i-3}\\, x_{i-6} \\rangle \\to \\rho_3 + 2\\rho_3\\rho_6`.
+
+    Such values track the linear autocorrelation at the lags involved (0.75 and 0.13 for a
+    Gaussian AR(1) process with coefficient 0.5), and also the shape of the value distribution.
+    The nonlinear part is the difference from the Gaussian value (a joint cumulant). The mean of a
+    product of an odd number of factors is zero for any Gaussian process, so with ``absval=False``
+    it measures departures from Gaussianity, of the joint distribution or of the values alone
+    (e.g. ``taus=[0, 0]`` gives :math:`\\langle x_i^3 \\rangle`, the skewness).
+
+    With ``absval=True`` the value is dominated by the value distribution. For iid data and
+    distinct lags (counting the unlagged :math:`x_i`) it equals
+    :math:`(E|x|)^{\\mathrm{len(taus)} + 1}`, a moment of the marginal distribution alone: for
+    ``taus=[1, 2, 3, 4]``, :math:`(2/\\pi)^{5/2} \\approx 0.32` for Gaussian noise and
+    :math:`(2/\\pi)^5 \\approx 0.10` for (unit-variance) Student-t noise with 3 degrees of freedom,
+    neither of which has any temporal dependence.
     """
     y = np.asarray(y)
     taus = np.asarray(taus)
@@ -3057,6 +3105,26 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
             - 'num': The numerator.
             - 'absnum': The magnitude of the numerator.
             - 'denom': The denominator.
+
+    Notes
+    -----
+    With :math:`d_t = y_{t+\\tau} - y_t`, ``raw`` is
+    :math:`\\langle d^3 \\rangle / \\langle d^2 \\rangle^{3/2}`. For a time-reversible process
+    the increments are symmetrically distributed, so ``raw`` and ``num`` are zero in expectation,
+    and their sign and size measure irreversibility.
+
+    ``abs`` and ``absnum`` are the magnitudes of these zero-mean estimators, so on reversible
+    data they report the size of the estimation noise, which depends on N and on the value
+    distribution: heavy-tailed or skewed values give larger noise and read as more irreversible.
+    For example, a reversible lognormal process (the exponential of a Gaussian AR(1) process)
+    has a larger ``abs`` than a Gaussian AR(1) process with the same lag-1 autocorrelation in
+    most realizations (AUC above 0.9 at N = 1000 and 5000, increasing with N), while ``raw``
+    hardly separates them (AUC near 0.5). Use ``raw`` for a signed statistic that is centered on zero for any
+    reversible process.
+
+    ``denom`` is :math:`\\langle d^2 \\rangle^{3/2}`, which for a z-scored series is close to
+    :math:`(2(1 - r_\\tau))^{3/2}`, with :math:`r_\\tau` the lag-:math:`\\tau` autocorrelation.
+    It is an autocorrelation feature, not a measure of irreversibility.
     """
     y = np.asarray(y, dtype=float).ravel()
     # Can set the time lag, tau, to be 'ac' (first zero crossing of the autocorrelation function),
