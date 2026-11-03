@@ -934,12 +934,8 @@ def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> floa
     """
     Excess kurtosis of the second difference: the spikiness of a series' curvature.
 
-    A variant of :func:`crinkle_statistic` that keeps only the part of the crinkle statistic
-    that measures spikiness, i.e. the shape of the distribution of the second difference
-    :math:`\\Delta^2 x_t = x_{t-1} - 2 x_t + x_{t+1}`, and (by default) computes it on Gaussian
-    ranks so that the marginal distribution of the data does not contribute.
-
-    The crinkle statistic factorises as
+    A variant of :func:`crinkle_statistic` that keeps only its kurtosis factor. With
+    :math:`\\Delta^2 x_t = x_{t-1} - 2 x_t + x_{t+1}`, the crinkle statistic factorises as
 
     .. math::
 
@@ -947,13 +943,8 @@ def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> floa
           = \\underbrace{\\frac{\\langle (\\Delta^2 x)^4 \\rangle}{\\langle (\\Delta^2 x)^2 \\rangle^2}}_{\\mathrm{kurt}(\\Delta^2 x)}
             \\times \\left(\\frac{\\langle (\\Delta^2 x)^2 \\rangle}{\\langle x^2 \\rangle}\\right)^2,
 
-    and the second factor is a second-order (linear) quantity: for any stationary process with
-    unit variance and autocorrelations :math:`\\rho_k`,
-    :math:`\\langle (\\Delta^2 x)^2 \\rangle = 6 - 8\\rho_1 + 2\\rho_2`, so for a Gaussian process
-    :math:`C = 3 (6 - 8\\rho_1 + 2\\rho_2)^2`, a function of the autocorrelation alone. The
-    crinkle statistic therefore separates processes that differ only in :math:`\\rho_1, \\rho_2`
-    (e.g. an AR(1) and an MA(1) with the same :math:`\\rho_1`) as well as processes with spiky
-    curvature. This feature drops the second factor, and returns
+    where the second factor tends to :math:`(6 - 8\\rho_1 + 2\\rho_2)^2` for a stationary process
+    with autocorrelations :math:`\\rho_k`, a linear quantity. This feature drops it and returns
 
     .. math::
 
@@ -962,15 +953,11 @@ def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> floa
 
     where :math:`g` is the series mapped onto Gaussian ranks (each value replaced by
     :math:`\\Phi^{-1}((r - 1/2)/N)`, :math:`r` its rank, then z-scored), or the input series
-    itself if ``gaussian_rank=False``. For a Gaussian process :math:`\\Delta^2 g` is Gaussian, so
-    :math:`K \\to 0` for any autocorrelation; positive values mean that the curvature has heavier
-    tails (rare sharp kinks) than a Gaussian process with the same spectrum. Without the rank
-    transform, for iid data with excess kurtosis :math:`\\kappa`, :math:`K = \\kappa / 2`: a
-    property of the marginal distribution alone, which the rank transform removes.
-
-    The change from the crinkle statistic is deliberate and changes its values, so this is a new
-    feature rather than a correction of :func:`crinkle_statistic` (which reproduces the original
-    construction, D. Kaplan's ``DK_crinkle``, credited there to J. Theiler).
+    itself if ``gaussian_rank=False``. For a Gaussian process :math:`K \\to 0` whatever its
+    autocorrelation; positive values mean that the curvature has heavier tails (rare sharp kinks)
+    than a Gaussian process with the same spectrum. The rank transform removes the contribution
+    of the marginal distribution (without it, iid data with excess kurtosis :math:`\\kappa` give
+    :math:`K = \\kappa / 2`).
 
     Parameters
     ----------
@@ -1895,19 +1882,10 @@ def nonlinear_autocorr_excess(y: ArrayLike, taus: ArrayLike, gaussian_rank: bool
     Nonlinear autocorrelation in excess of its Gaussian value.
 
     A variant of :func:`nonlinear_autocorr` (with ``absval=False``) that subtracts the value the
-    same product would have for a Gaussian process with the series' own autocorrelation, and
-    (by default) computes it on Gaussian ranks, so that it responds to nonlinear (non-Gaussian)
-    temporal dependence rather than to the linear autocorrelation or the marginal distribution.
-
-    :func:`nonlinear_autocorr` averages a product of lagged values,
-    :math:`M = \\langle x_t \\prod_{k=1}^{m} x_{t-\\tau_k} \\rangle`. For a Gaussian process with an
-    even number of factors this moment is not zero but a sum of products of autocorrelations
-    (Isserlis' theorem); e.g. for ``taus = [1, 2, 3]``,
-    :math:`M = \\rho_1^2 + \\rho_2^2 + \\rho_1\\rho_3`, and for ``taus = [0, 1, 1]``,
-    :math:`M = 1 + 2\\rho_1^2`. So the original feature mostly measures linear autocorrelation.
-    With an odd number of factors the Gaussian value is zero, but the moment then picks up the
-    skewness of the marginal distribution (e.g. a static nonlinear transform of a linear
-    Gaussian process). This feature returns
+    same product would have for a Gaussian process with the series' own autocovariance, and (by
+    default) works on Gaussian ranks. It then responds to nonlinear temporal dependence rather
+    than to the linear autocorrelation, which sets the original's value for Gaussian data through
+    Isserlis' theorem [1]_, or to the marginal distribution. It returns
 
     .. math::
 
@@ -1922,17 +1900,9 @@ def nonlinear_autocorr_excess(y: ArrayLike, taus: ArrayLike, gaussian_rank: bool
     itself if ``gaussian_rank=False``. For three or four factors :math:`E` is the joint cumulant
     of the factors, e.g. for ``taus = [1, 1, 2]``,
     :math:`E = \\langle g_t g_{t-1}^2 g_{t-2} \\rangle - (2 \\hat{c}(1)^2 + \\hat{c}(0)\\hat{c}(2))`;
-    for more factors it is the moment minus its Gaussian value (the analogue of excess kurtosis).
-    Its expectation tends to zero for any Gaussian process, whatever its autocorrelation, and,
-    with the rank transform, for any process that is a strictly increasing transform of one. For
-    three or four factors the estimate was unbiased to within its noise at N = 500 to 5000 on
-    linear Gaussian processes; with six or more factors it is much noisier, and on short, strongly
-    autocorrelated series it has a small negative bias that grows with the autocorrelation (e.g.
-    about -0.2, against a standard deviation of 0.4, for ``taus = [1, 2, 3, 4, 5]`` on a Gaussian
-    AR(1) with :math:`\\phi = 0.7` and N = 1000).
-
-    The change makes this a new feature rather than a correction of :func:`nonlinear_autocorr`
-    (which reproduces hctsa's ``CO_NonlinearAutocorr``).
+    for more factors it is the moment minus its Gaussian value. Its expectation is zero for any
+    Gaussian process and, with the rank transform, for any strictly increasing transform of one.
+    Estimates with many factors are noisy.
 
     Parameters
     ----------
@@ -1959,9 +1929,6 @@ def nonlinear_autocorr_excess(y: ArrayLike, taus: ArrayLike, gaussian_rank: bool
     ----------
     .. [1] L. Isserlis, "On a formula for the product-moment coefficient of any order of a normal
        frequency distribution in any number of variables", Biometrika 12, 134-139 (1918).
-    .. [2] B. D. Fulcher, M. A. Little and N. S. Jones, "Highly comparative time-series analysis:
-       the empirical structure of time series and their methods", J. R. Soc. Interface 10,
-       20130048 (2013) (``CO_NonlinearAutocorr``).
     """
     taus = _check_taus(taus)
     x = np.asarray(y, dtype=float).ravel()
@@ -1990,17 +1957,11 @@ def nonlinear_autocorr_abs_surrogate_ratio(y: ArrayLike, taus: ArrayLike, num_su
     Absolute nonlinear autocorrelation relative to its value for linear Gaussian surrogates.
 
     A variant of :func:`nonlinear_autocorr` with ``absval=True`` that removes its dependence on
-    the marginal distribution and on the linear autocorrelation, so that it responds to
-    nonlinear dependence between the magnitudes of the values (e.g. volatility clustering).
-
-    With ``absval=True``, :func:`nonlinear_autocorr` averages
-    :math:`|x_t \\prod_k x_{t-\\tau_k}|`. For iid data this is
-    :math:`(\\langle |x| \\rangle)^{m+1}`, a moment of the marginal distribution, and for a
-    Gaussian process it is a (non-closed-form) function of the autocorrelations, so the original
-    feature mostly measures the shape of the distribution. This feature computes the same average
-    on the Gaussian ranks :math:`g` of the series (each value replaced by
+    the marginal distribution and the linear autocorrelation, so that it responds to nonlinear
+    dependence between the magnitudes of the values (e.g. volatility clustering). It computes
+    the same average on the Gaussian ranks :math:`g` of the series (each value replaced by
     :math:`\\Phi^{-1}((r - 1/2)/N)`, :math:`r` its rank, then z-scored) and divides it by its
-    mean over phase-randomised (Fourier) surrogates of :math:`g`, which are Gaussian linear
+    mean over phase-randomised (Fourier) surrogates of :math:`g` [1]_, which are Gaussian linear
     processes with the same periodogram:
 
     .. math::
@@ -2008,14 +1969,11 @@ def nonlinear_autocorr_abs_surrogate_ratio(y: ArrayLike, taus: ArrayLike, num_su
         R = \\frac{\\langle |g_t \\prod_{k=1}^{m} g_{t-\\tau_k}| \\rangle}
                  {\\frac{1}{S} \\sum_{s=1}^{S} \\langle |g^{(s)}_t \\prod_{k=1}^{m} g^{(s)}_{t-\\tau_k}| \\rangle},
 
-    where each surrogate :math:`g^{(s)}` is z-scored. :math:`R \\approx 1` for any process that
-    is a strictly increasing transform of a linear Gaussian process; :math:`R > 1` means that
-    large magnitudes cluster in time more than the linear correlation implies. The surrogates
-    come from the portable generator :func:`~pyhctsa.robust.bf_random` with a fixed seed, so the
-    result is deterministic.
-
-    The change makes this a new feature rather than a correction of :func:`nonlinear_autocorr`
-    (which reproduces hctsa's ``CO_NonlinearAutocorr``).
+    where each surrogate :math:`g^{(s)}` is z-scored. :math:`R \\approx 1` for any strictly
+    increasing transform of a linear Gaussian process; :math:`R > 1` means that large magnitudes
+    cluster in time more than the linear correlation implies. The surrogates come from the
+    portable generator :func:`~pyhctsa.robust.bf_random` with a fixed seed, so the result is
+    deterministic.
 
     Parameters
     ----------
@@ -2039,9 +1997,6 @@ def nonlinear_autocorr_abs_surrogate_ratio(y: ArrayLike, taus: ArrayLike, num_su
     ----------
     .. [1] J. Theiler, S. Eubank, A. Longtin, B. Galdrikian and J. D. Farmer, "Testing for
        nonlinearity in time series: the method of surrogate data", Physica D 58, 77-94 (1992).
-    .. [2] B. D. Fulcher, M. A. Little and N. S. Jones, "Highly comparative time-series analysis:
-       the empirical structure of time series and their methods", J. R. Soc. Interface 10,
-       20130048 (2013) (``CO_NonlinearAutocorr``).
     """
     from .surrogates import _make_surrogates  # (surrogates imports this module)
     taus = _check_taus(taus)
@@ -3404,18 +3359,10 @@ def trev_studentized(y: ArrayLike, tau: Union[int, str] = 'ac') -> float:
     """
     Studentised time-reversal asymmetry: the trev numerator divided by its HAC standard error.
 
-    A variant of :func:`trev` whose size is a signal-to-noise ratio, so that it no longer
-    reflects how noisy the estimator is for the series' marginal distribution and
-    autocorrelation.
-
-    :func:`trev` is built on :math:`\\langle d_t^3 \\rangle`, the mean cube of the lag-:math:`\\tau`
-    increments :math:`d_t = x_{t+\\tau} - x_t`, whose expectation is zero for any time-reversible
-    process. Its ``abs`` and ``absnum`` outputs are then magnitudes of a zero-mean estimator on
-    reversible data, whose typical size is set by the estimator's standard deviation; that depends
-    on the higher moments of the increments and on their autocorrelation, so a heavy-tailed but
-    reversible process (e.g. a static nonlinear transform of a Gaussian AR process) gives large
-    values without any irreversibility. This feature divides the (signed) mean by a
-    heteroscedasticity- and autocorrelation-consistent (HAC) estimate of its standard error:
+    A variant of :func:`trev` [1]_ whose value is a signal-to-noise ratio. On reversible data the
+    magnitude outputs of :func:`trev` measure the noise of a zero-mean estimator, which depends on
+    the marginal distribution and the autocorrelation; dividing by a heteroscedasticity- and
+    autocorrelation-consistent (HAC) standard error [3]_ removes that dependence:
 
     .. math::
 
@@ -3423,32 +3370,25 @@ def trev_studentized(y: ArrayLike, tau: Union[int, str] = 'ac') -> float:
         \\hat{\\sigma}^2_{\\mathrm{LR}} = \\hat{\\gamma}_0 + 2 \\sum_{k=1}^{2M}
             w(k/M)\\, \\hat{\\gamma}_k, \\qquad w(u) = \\min(1, \\max(0, 2 - u)),
 
-    where :math:`s_t = d_t^3` (:math:`n` values), :math:`\\bar{s}` is their mean and
+    where :math:`s_t = d_t^3` with :math:`d_t = x_{t+\\tau} - x_t` (:math:`n` values),
+    :math:`\\bar{s}` is their mean and
     :math:`\\hat{\\gamma}_k = \\frac{1}{n}\\sum_t (s_t - \\bar{s})(s_{t+k} - \\bar{s})` their sample
-    autocovariances. The weights are the flat-top (trapezoidal) kernel of Politis and Romano,
-    which keeps the autocovariances at lags up to :math:`M` unshrunk (a Bartlett / Newey-West
-    kernel shrinks them, which makes the statistic undersized by a factor that depends on the
-    autocorrelation of :math:`s_t`, and so on the process). The bandwidth is
+    autocovariances. The weights are the flat-top (trapezoidal) kernel of Politis and Romano [2]_,
+    which keeps the autocovariances at lags up to :math:`M` unshrunk (a Bartlett kernel leaves the
+    statistic undersized by a factor that depends on the process). The bandwidth is
     :math:`M = \\max(\\tau, \\lfloor L_{NW}/2 \\rfloor + 1, 2\\tau_{1/e})`, with
     :math:`L_{NW} = \\lfloor 4 (n/100)^{2/9} \\rfloor` the usual Newey-West rule and
-    :math:`\\tau_{1/e}` the series' 'ac1e' delay (:func:`~pyhctsa.utils.get_tau`): at least
-    :math:`\\tau`, since overlapping increments are correlated up to lag :math:`\\tau - 1` even for
-    white noise, and at least twice the correlation time, over which the cubed increments of a
-    persistent series stay correlated. :math:`M` is capped at :math:`(n - 1)/2`. The flat-top
-    estimate is not guaranteed to be positive, and a near-zero value would give a huge
-    :math:`|T|`, so it is floored at 0.05 times the (always non-negative) Bartlett estimate with
-    the same number of lags, :math:`2M`.
+    :math:`\\tau_{1/e}` the series' 'ac1e' delay (:func:`~pyhctsa.utils.get_tau`), since
+    overlapping increments are correlated up to lag :math:`\\tau - 1` and the cubed increments of
+    a persistent series stay correlated over about twice its correlation time. :math:`M` is
+    capped at :math:`(n - 1)/2`, and the long-run variance is floored at 0.05 times the (always
+    non-negative) Bartlett estimate with :math:`2M` lags, since the flat-top estimate can be near
+    zero or negative.
 
-    For a reversible process, :math:`T` is approximately standard normal whatever the marginal
-    distribution and autocorrelation: over iid Gaussian and Student-t(3), Gaussian AR(1)
-    (:math:`\\phi = 0.4, 0.9`) and exponentiated AR(1) series, its standard deviation was
-    0.85-1.05 at N = 5000 for :math:`\\tau = 1, 3` (0.73-1.42 over N = 500-5000 and
-    :math:`\\tau = 1, 3, 10`), against 0.3-1.0 with a Newey-West (Bartlett) standard error. Its sign is that of the
-    asymmetry, as in :func:`trev` (positive when increases are sharper than decreases). :math:`T`
-    is invariant to the scale of the data and changes sign when the series is reversed in time.
-
-    This is a new feature rather than a correction of :func:`trev` (which reproduces hctsa's
-    ``CO_trev`` / TSTOOL's ``trev``).
+    For a reversible process :math:`T` is approximately standard normal. Its sign is that of the
+    asymmetry, as in :func:`trev` (positive when increases are sharper than decreases).
+    :math:`T` is invariant to the scale of the data and changes sign when the series is reversed
+    in time.
 
     Parameters
     ----------

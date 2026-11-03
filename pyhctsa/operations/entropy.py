@@ -543,21 +543,11 @@ def sample_entropy_ranked(y: ArrayLike, m: int = 2, r: float = 0.1,
     Sample entropy of the ranks of a time series: a SampEn that ignores the value distribution.
 
     Computes :func:`sample_entropy` (SampEn; Richman & Moorman [1]_, PhysioNet code [2]_) on the
-    z-scored ranks of the series instead of on its values. The ranks have the same (uniform)
-    distribution for every series of a given length, so the result depends only on the temporal
-    order of the values, not on their distribution: it is unchanged by any strictly increasing
-    transformation of the data (e.g. ``exp``, a change of units, a monotone sensor
-    nonlinearity), and every iid series gives the same value up to sampling noise, whatever its
-    marginal distribution (Gaussian, heavy-tailed, skewed or discrete). Temporal regularity
-    (autocorrelation, periodicity, deterministic dynamics) still lowers it.
-
-    This is a pyhctsa-specific variant, not the SampEn of Richman & Moorman [1]_ (hctsa's
-    ``EN_SampEn``, :func:`sample_entropy`), which compares the values themselves within a
-    tolerance ``r`` set in units of their standard deviation. For an iid series that SampEn is
-    ``-log P(|X - X'| < r)``, a function of the marginal distribution only, so it separates, say,
-    iid Student-t from iid Gaussian noise completely (AUC 1 at N = 1000) although both are equally
-    unpredictable. Use this variant to compare regularity across series whose value
-    distributions differ.
+    z-scored ranks of the series instead of on its values. The result depends only on the
+    temporal order of the values: it is unchanged by any strictly increasing transformation of
+    the data, and every iid series gives the same value up to sampling noise, whatever its
+    marginal distribution, whereas the SampEn of the values depends on that distribution.
+    Temporal regularity (autocorrelation, periodicity, deterministic dynamics) still lowers it.
 
     Parameters
     ----------
@@ -594,38 +584,16 @@ def sample_entropy_ranked(y: ArrayLike, m: int = 2, r: float = 0.1,
 
     .. math:: u_t = \\frac{R_t - (N + 1)/2}{\\sqrt{N (N + 1) / 12}},
 
-    which has mean 0 and standard deviation 1 (``ddof=1``). For templates
-    ``u_i^{(k)} = (u_i, ..., u_{i+k-1})``, let ``B_k`` be the number of pairs ``i < j`` with
-    ``max_l |u_{i+l} - u_{j+l}| < r`` (Chebyshev distance), among the templates that can be
-    extended by one value (``i, j <= N - k``), and ``A_k`` the number of those pairs that still
-    match at length ``k + 1``. Then
+    which has mean 0 and standard deviation 1 (``ddof=1``), and the output is
+    ``sample_entropy(u, m, r)['sampen{k}']``. For an iid continuous series, every ``sampen{k}``
+    estimates ``-log(2d - d^2)`` with ``d = r / sqrt(12)`` (2.19 for ``r = 0.2``), whatever the
+    distribution.
 
-    .. math:: \\mathrm{sampen}_k = -\\log (A_k / B_k),
-
-    exactly as ``sample_entropy(u, m, r)['sampen{k}']``, which computes it. For an iid
-    continuous series, ``A_k / B_k`` estimates ``p = P(|U - U'| < d) = 2d - d^2`` with ``U, U'``
-    independent uniform on (0, 1) and ``d = r / sqrt(12)``, so every iid series gives
-    ``-log(2d - d^2)`` (2.19 for ``r = 0.2``) whatever its distribution.
-
-    Uniform (plain) ranks are used rather than Gaussian scores of the ranks
-    (``Phi^{-1}((R_t - 1/2) / N)``): both make the value invariant under monotone
-    transformations and give almost the same iid value at a given ``r`` (``P(|Z - Z'| < r) =
-    2 Phi(r / sqrt 2) - 1``, 0.1125 against 0.112 for ``r = 0.2``), but uniform ranks give
-    every value (nearly) the same expected number of neighbours, whereas Gaussian scores leave
-    few neighbours in the tails, where autocorrelated processes depart most from independence.
-    In simulations
-    (m = 5, N = 2000, 100 series each) uniform ranks separated iid Gaussian noise from AR(1) with
-    phi = 0.2 at AUC 0.87 against 0.69 for Gaussian scores (r = 0.2, ``sampen2``), and from a
-    noisy sine at 0.96 against 0.77 (r = 0.1). Dividing by the mean SampEn of shuffled
-    surrogates was not adopted: the ranks of every series of length ``N`` are the same set of
-    values, so the shuffled mean depends on ``N`` alone, and the ratio only adds Monte Carlo noise
-    and cost.
-
-    Exactly equal values are ranked in a pseudo-random order (a fixed function of the data;
-    see ``_ranks_random_ties``), so that quantized or count-valued iid data behave like
-    continuous iid data. Average ranks would instead make tied values match each other, giving
-    iid binary data a far lower value. Values that differ only by floating-point noise are ranked
-    by those differences.
+    Uniform (plain) ranks are used rather than Gaussian scores of the ranks because they give
+    every value nearly the same expected number of neighbours, whereas Gaussian scores leave few
+    neighbours in the tails. Exactly equal values are ranked in a pseudo-random order (a fixed
+    function of the data; see ``_ranks_random_ties``), so that quantized or count-valued iid data
+    behave like continuous iid data (average ranks would make tied values match each other).
 
     References
     ----------

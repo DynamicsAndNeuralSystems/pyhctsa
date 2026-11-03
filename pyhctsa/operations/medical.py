@@ -287,62 +287,27 @@ def pol_var_resid(x: ArrayLike, D: int = 3, ar_order: int = 2) -> float:
     """
     Clustering of large and small innovations: POLVAR on AR residuals with a median threshold.
 
-    A pyhctsa-only variant of :func:`pol_var` (the hctsa ``MD_PolVar`` port, which is unchanged).
-    It keeps the idea of :func:`pol_var`: code each step as large (1) or small (0) and count runs
-    of D equal symbols, so that a series whose large and small changes come in bursts scores
-    high. It changes what is coded and where the threshold is, so that the run count measures
-    that clustering (volatility clustering, conditional heteroscedasticity) and not the
-    distribution or the linear autocorrelation of the series.
+    A variant of :func:`pol_var` that codes the residuals ``e_t`` of a least-squares
+    AR(``ar_order``) fit (with intercept) as large (1) or small (0) against the median of
+    ``|e_t|``, and counts runs of D equal symbols. Coding residuals rather than increments, at a
+    threshold that fixes ``q = P(1) = 1/2``, removes the dependence of :func:`pol_var` on the
+    lag-1 autocorrelation and the increment distribution, so the statistic measures the
+    clustering of large and small innovations (volatility clustering, conditional
+    heteroscedasticity [4]_). It is invariant to the location and scale of ``x``.
 
-    Why it differs from :func:`pol_var`. There, the symbol is ``|x_{t+1} - x_t| >= d`` (d in
-    standard deviations of the z-scored series), so the rate ``q = P(symbol = 1)`` is set by the
-    distribution of the increments, i.e. by the marginal distribution and the lag-1
-    autocorrelation (``Var(dx) = 2(1 - rho_1)``). Even for symbols that are independent, the
-    expected run count depends strongly on ``q``, so :func:`pol_var` mostly measures ``q``: it
-    separates iid Gaussian from iid Student-t(3) noise (AUC 1.00 at N = 5000) and AR(1) with
-    Gaussian from AR(1) with t(3) innovations (AUC 1.00), neither of which has any clustering
-    of large changes. Here:
-
-    1. the linear correlation is removed first, by coding the residuals ``e_t`` of a
-       least-squares AR(``ar_order``) fit (with intercept) instead of the increments;
-    2. the threshold is the median of ``|e_t|``, so that ``q = 1/2`` whatever the marginal
-       distribution (the statistic is invariant to the location and scale of ``x``).
-
-    With these, for any linear process with iid innovations (of any distribution) the symbols
-    are close to iid Bernoulli(1/2), and the statistic is close to its null value
-    ``1 / (2**D - 1)`` (1/7 for D = 3; 1/63 for D = 6). It exceeds that value when large and
-    small innovations cluster in time, as in ARCH/GARCH and stochastic-volatility processes.
-
-    Formula: with ``e_t`` (t = 1, ..., n = N - ``ar_order``) the AR residuals and
-    ``s_t = 1{|e_t| >= median|e|}``, split ``s`` into maximal runs of equal symbols with
-    lengths ``L_1, L_2, ...``; then
+    With ``s_t = 1{|e_t| >= median|e|}`` (t = 1, ..., n = N - ``ar_order``) split into maximal
+    runs of equal symbols with lengths ``L_1, L_2, ...``,
 
     ``pol_var_resid = (1/n) * sum_j floor(L_j / D)``,
 
-    the number of non-overlapping words of D equal symbols (all 0 or all 1) found by scanning
-    from the start, divided by the number of symbols (the counting rule of hctsa's
-    ``MD_PolVar``).
+    the number of non-overlapping words of D equal symbols per symbol. For a linear process with
+    iid innovations the symbols are close to iid Bernoulli(1/2) and the statistic is close to
+    ``1 / (2**D - 1)``; larger values mean that large and small innovations cluster in time.
+    Static nonlinear transforms of a linear process also give clustered residual magnitudes.
 
-    Evidence (AUC between 200 + 200 series, D = 3, N = 500 / 1000 / 5000; 0.5 = no
-    separation). Nuisances: iid Gaussian vs iid t(3) 0.51 / 0.46 / 0.50 (:func:`pol_var` with
-    d = 1, D = 3: 0.94 / 0.99 / 1.00); AR(1) (phi = 0.4) with Gaussian vs t(3) innovations
-    0.48 / 0.50 / 0.46 (:func:`pol_var`: 0.98 / 1.00 / 1.00); AR(1) vs MA(1) with the same lag-1
-    autocorrelation 0.50 / 0.54 / 0.49. Targets: AR(1) vs ARCH(1)-AR(1) 1.00 at all three
-    lengths; AR(1) vs stochastic-volatility AR(1) 0.98 / 1.00 / 1.00.
-
-    Notes
-    -----
-    - Linear structure beyond order ``ar_order`` is left in the residuals; it enters ``|e_t|``
-      only at second order (for Gaussian innovations ``corr(|e_t|, |e_s|)`` is about
-      ``0.88 rho^2`` for a residual correlation rho), so its effect is small.
-    - A static nonlinear transform of a linear process (e.g. ``exp`` of a Gaussian AR(1)) does
-      give residual magnitudes that cluster (large values come in runs, and so do their
-      residuals), so it raises the statistic.
-    - The published POLVAR_d of Wessel et al. [1] (as defined in [2, 3]) codes the raw RR
-      interval differences against a fixed threshold of d ms and is the probability of the word
-      ``000000`` only (low variability). hctsa's ``MD_PolVar`` and :func:`pol_var` count words
-      of zeros or ones, with d in standard deviations of the z-scored series. This variant also
-      counts both kinds of word, which with ``q = 1/2`` are symmetric.
+    As in :func:`pol_var`, words of D zeros and of D ones are both counted. The published
+    POLVAR statistic [1]_ [2]_ [3]_ codes raw beat-to-beat differences against a fixed threshold
+    in ms and counts only the word of D zeros.
 
     References
     ----------

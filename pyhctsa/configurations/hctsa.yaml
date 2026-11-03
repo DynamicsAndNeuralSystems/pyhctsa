@@ -614,7 +614,7 @@ correlation:
     legacy_name: CO_trev
     ordered_args: ['tau']
 
-  trev_studentized:   # pyhctsa-only: the trev numerator divided by its Newey-West standard error
+  trev_studentized:   # pyhctsa-only: the trev numerator divided by its HAC (flat-top kernel) standard error
     base_name: trev_studentized
     dependencies:
     configs:

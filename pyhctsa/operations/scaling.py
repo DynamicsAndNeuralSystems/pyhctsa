@@ -331,51 +331,24 @@ def dfa_largescale(x: ArrayLike, k: int = 1, n_tau: int = 25) -> float:
     """
     Large-scale DFA exponent: the DFA scaling exponent fitted over large timescales only.
 
-    A pyhctsa-only variant of detrended fluctuation analysis, :func:`fluctuation_analysis` with
-    ``wtf='dfa'`` (the hctsa ``SC_FluctAnal`` port, which is unchanged). It estimates the
-    exponent that DFA is meant to measure, the asymptotic scaling ``F(tau) ~ tau**alpha`` of
-    the fluctuation function at large tau (alpha = H for fractional Gaussian noise with Hurst
-    exponent H, 0.5 for any short-range correlated stationary process, 1 + H for its
-    cumulative sum), using a range of timescales whose lower end grows with the length N.
-    It is not the classical DFA alpha, nor the alpha_1 (4-16 beats) or alpha_2 (16-64 beats)
-    of heart-rate variability, which fit fixed ranges of timescales; hence the distinct name.
+    A variant of detrended fluctuation analysis [1]_ [2]_ (:func:`fluctuation_analysis` with
+    ``wtf='dfa'``) that estimates the asymptotic scaling ``F(tau) ~ tau**alpha`` of the
+    fluctuation function at large tau (alpha = H for fractional Gaussian noise with Hurst
+    exponent H, 0.5 for any short-range correlated stationary process). The fit uses
+    ``tau in [max(10, sqrt(N)), N/4]``: a lower end that grows with N makes the bias from
+    short-range correlation, which a fit from tau = 5 carries at every N, shrink as N grows, and
+    the upper end keeps at least four windows at the largest timescale. It is not the classical
+    DFA alpha, nor the alpha_1 or alpha_2 of heart-rate variability [4]_, which fit fixed ranges
+    of timescales.
 
-    Why it differs from classical DFA. :func:`fluctuation_analysis` fits log F against log tau
-    for tau from 5 to N/2. With a fixed lower end, short-range correlation biases the exponent
-    at every N: for an AR(1) process the local slope of log F is about
-    ``0.5 + c * tau_c / tau`` (tau_c its correlation time), so the fit over [5, N/2] is pulled
-    above 0.5 at any length (AUC 0.97-0.99 between white noise and AR(1) with phi = 0.5, both
-    with no long-range correlation, at N = 500 to 20 000). Here the fit uses
-    ``tau in [max(10, sqrt(N)), N/4]``:
-
-    - the lower end ``sqrt(N)`` grows with N, so the short-range bias, of order
-      ``tau_c / sqrt(N)``, vanishes as N grows (white vs AR(1) phi = 0.5: AUC 0.77 / 0.79 /
-      0.58 / 0.54 at N = 500 / 1000 / 5000 / 20 000, between 200 + 200 series);
-    - the log-width of the range, ``log(sqrt(N) / 4)``, also grows, so the variance falls with
-      N (SD of the exponent for white noise 0.087 / 0.064 / 0.046 / 0.036), and power on the
-      scaling target grows with N (AR(1) vs fGn H = 0.6 with the same lag-1 autocorrelation:
-      AUC 0.65 / 0.78 / 0.91 / 0.98; AR(1) vs fGn H = 0.75: 0.88 / 0.96 / 1.00 / 1.00). A lower
-      end that is a fixed fraction of N (e.g. N/50) also removes the bias, but its range has a
-      fixed log-width, so its SD stays near 0.056 at every N and its power stops growing (0.86
-      at N = 5000 and at 20 000 in the H = 0.6 contrast);
-    - the upper end N/4 keeps at least 4 windows at the largest timescale (N/2 has 2).
-
-    Other differences from :func:`fluctuation_analysis`: ``n_tau`` log-spaced timescales
-    (rounded to integers, duplicates dropped) instead of 50, and only the single-line
-    exponent is returned (no two-line fit, whose split point is not meaningful on a range
-    chosen to contain a single scaling regime). The line is fitted by the same Theil-Sen
-    method (:func:`pyhctsa.robust.bf_theil_sen`).
-
-    Formula: with the profile ``y_i = sum_{j <= i} (x_j - mean(x))``, cut into
-    ``floor(N/tau)`` non-overlapping windows of length tau from the start, ``F(tau)`` is the
-    root-mean-square residual after removing a least-squares polynomial of order k in each
-    window; the output is the Theil-Sen slope of ``log F(tau)`` against ``log tau`` over the
-    timescales ``tau = round(exp(linspace(log(tau_min), log(tau_max), n_tau)))``, with
-    ``tau_min = max(10, sqrt(N))`` and ``tau_max = N/4``.
-
-    The power of this variant to tell a scaling exponent from short-range correlation still
-    needs long series: for strong short-range correlation (AR(1) with phi = 0.866, tau_c about
-    7) the bias at N = 5000 is still about 0.1.
+    With the profile ``y_i = sum_{j <= i} (x_j - mean(x))``, cut into ``floor(N/tau)``
+    non-overlapping windows of length tau from the start, ``F(tau)`` is the root-mean-square
+    residual after removing a least-squares polynomial of order k in each window [3]_. The output
+    is the Theil-Sen slope (:func:`pyhctsa.robust.bf_theil_sen`) of ``log F(tau)`` against
+    ``log tau`` over ``tau = round(exp(linspace(log(tau_min), log(tau_max), n_tau)))``
+    (duplicates dropped), with ``tau_min = max(10, sqrt(N))`` and ``tau_max = N/4``. Only the
+    single-line exponent is returned. Telling a scaling exponent from strong short-range
+    correlation still needs long series.
 
     References
     ----------
