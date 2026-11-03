@@ -283,7 +283,7 @@ def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
     which has no clustering of large changes either (``d=1``, ``D=3``, N = 1000). Compare values
     across series with similar lag-1 autocorrelation and increment distributions.
 
-    This follows hctsa's ``MD_polvar``, which generalizes the published POLVAR statistic of
+    This follows hctsa's ``MD_PolVar``, which generalizes the published POLVAR statistic of
     heart-rate variability (Wessel et al., Phys. Rev. E 61, 733, 2000). There, symbols come from
     a fixed threshold in milliseconds on the raw beat-to-beat differences, and the statistic is
     the probability of the single word of ``D`` zeros (a run of low variability). Here the
