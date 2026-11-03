@@ -524,9 +524,12 @@ def _break_ties(y: np.ndarray) -> np.ndarray:
     samples, and the result is deterministic. Without ties, ``y`` is returned unchanged.
 
     Returns the ranks 0..N-1 of ``y`` (ties broken by the key) when ``y`` has ties, else ``y``.
+    A constant series (all values tied) is returned unchanged: it has no order to break, and
+    callers treat it as undefined.
     """
     y = np.asarray(y, dtype=float).ravel()
-    if np.unique(y).size == y.size:
+    n_distinct = np.unique(y).size
+    if n_distinct == y.size or n_distinct <= 1:
         return y
     key = bf_random(y.size, _ORDINAL_TIE_SEED)
     order = np.lexsort((key, y))
@@ -867,8 +870,10 @@ def bubble_entropy(y: ArrayLike, m: int = 10, tau: Union[int, str] = 1) -> Union
     for ``m = 10`` (rising slowly toward 0.75 as ``m`` grows). Port of hctsa's
     ``EN_BubbleEn``.
 
-    A swap is counted only when an earlier value is strictly greater than a later one, so
-    tied values are never swapped (as in a standard bubble sort). The estimate is a small
+    A swap is counted when an earlier value is greater than a later one. Tied values are first
+    put in a fixed pseudo-random order (as in :func:`permutation_entropy`); hctsa never swaps
+    them, which reads every run of equal values as sorted and makes discrete data look more
+    regular than it is. The estimate is a small
     difference between two entropies, so it is noisy when the series is short relative to
     the number of possible swap counts: for series of about 1000 samples, embedding
     dimensions much above 10 give poorly reproducible values.
@@ -916,14 +921,17 @@ def bubble_entropy(y: ArrayLike, m: int = 10, tau: Union[int, str] = 1) -> Union
         return out
     tau = int(tau)
 
-    # Renyi-2 entropy of the swap-count distribution at m and m + 1
+    # Renyi-2 entropy of the swap-count distribution at m and m + 1, on the series with ties
+    # broken at random (fixed seed): counting only strict inversions would read every run of
+    # equal values as sorted, so discrete data would look spuriously regular
+    yb = _break_ties(y)
     H = np.zeros(2)
     for j in range(2):
         mm = m + j
         n_vec = y.size - (mm - 1) * tau
         if n_vec < 10:
             return out
-        x = time_delay_embed(y, mm, tau)
+        x = time_delay_embed(yb, mm, tau)
         num_swaps = np.zeros(n_vec, dtype=np.int64)
         for a in range(mm - 1):
             for b in range(a + 1, mm):
@@ -1485,8 +1493,8 @@ def randomize_ordinal(y: ArrayLike, tau: Union[int, str] = 1) -> Union[dict, flo
     ``k`` of them has never been overwritten is
     ``w_k(t) = sum_{j=0}^{3-k} C(3-k, j) (-1)^j (1 - (k+j)/N)^t``. Given the subset, the
     pattern probabilities follow from the kept values and the empirical distribution function
-    of the series (ties are treated as in :func:`permutation_entropy`: equal values are
-    ordered by their position). The expected pattern distribution after ``t`` steps is
+    of the series. As in :func:`permutation_entropy`, ties are first broken in a fixed
+    pseudo-random order (:func:`_break_ties`), so equal values are not read as increasing. The expected pattern distribution after ``t`` steps is
     therefore a fixed combination of eight series-specific pattern distributions (one per
     subset), weighted by ``w_k(t)``.
 
@@ -1518,7 +1526,7 @@ def randomize_ordinal(y: ArrayLike, tau: Union[int, str] = 1) -> Union[dict, flo
           distribution when one sample of each window (chosen at random) is replaced by an
           independent draw from the series,
         - 'normPermEnInf': the normalized permutation entropy of the fully randomized series
-          (close to 1 for a series without repeated values).
+          (close to 1, less a bias of order ``1/N`` from drawing the same sample twice).
 
         NaN (instead of a dict) if the series is too short (fewer than 5 windows) or the
         delay cannot be determined.
@@ -1541,7 +1549,7 @@ def randomize_ordinal(y: ArrayLike, tau: Union[int, str] = 1) -> Union[dict, flo
         logger.warning('Time series too short to embed')
         return np.nan
 
-    S = _ro_pattern_dists(y, tau)
+    S = _ro_pattern_dists(_break_ties(y), tau)  # ties broken at random (fixed seed)
     out = {'normPermEn0': _ro_norm_entropy(S[7])[0],
            'normPermEnRep1': _ro_norm_entropy(S[4:7].mean(axis=0))[0],
            'normPermEnInf': _ro_norm_entropy(S[0])[0]}

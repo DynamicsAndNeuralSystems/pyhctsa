@@ -45,3 +45,18 @@ def test_iid_discrete_reads_as_unpredictable(draw):
     assert abs(pe - pe_gauss) < 0.01
     h = np.mean([permutation_entropy_complexity(draw(rng, 400), m=3)["hNorm"] for _ in range(50)])
     assert h > 0.98
+
+
+def test_bubble_and_randomize_ordinal_ties():
+    from pyhctsa.operations.entropy import bubble_entropy, randomize_ordinal
+    rng = np.random.default_rng(3)
+    y = rng.standard_normal(500)
+    # no ties: unchanged by _break_ties, so bubble entropy is that of the raw series
+    assert bubble_entropy(y, m=5) == bubble_entropy(_break_ties(y), m=5)
+    # iid discrete series read like iid Gaussian noise, not as more regular
+    b_bin = np.mean([bubble_entropy(rng.integers(0, 2, 500).astype(float), m=5)["bubbleEn"]
+                     for _ in range(40)])
+    b_gau = np.mean([bubble_entropy(rng.standard_normal(500), m=5)["bubbleEn"] for _ in range(40)])
+    assert abs(b_bin - b_gau) < 0.05
+    r = randomize_ordinal(rng.integers(0, 3, 500).astype(float))
+    assert r["normPermEnInf"] > 0.99 and abs(r["normPermEn0"] - r["normPermEnInf"]) < 0.02
