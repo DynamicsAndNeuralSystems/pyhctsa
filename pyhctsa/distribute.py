@@ -2,31 +2,98 @@ from abc import ABC, abstractmethod
 from typing import Union
 import logging
 import multiprocessing as mp
-import numpy as np
+import time
 from functools import partial
+import numpy as np
 from rich import get_console
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, MofNCompleteColumn
 from pathos.helpers import mp as pathos_mp
 
+import warnings
+from .quality import Quality, classify
+from .utils import _reference_series
+
+# (feature name, function identity) -> the output columns of a function that raised
+_FAILED_COLUMNS: dict = {}
+
+def _function_key(func, depth=0):
+    """A key for a feature function that is the same for an unpickled or rebuilt copy of it: its
+    module and name, and (for a ``partial`` or a decorator's closure) what it wraps and with what."""
+    if depth > 8:
+        return repr(func)
+    if isinstance(func, partial):
+        return (_function_key(func.func, depth + 1), repr(func.args),
+                repr(sorted(func.keywords.items())))
+    cells = []
+    for cell in getattr(func, "__closure__", None) or ():
+        try:
+            c = cell.cell_contents
+        except ValueError:  # an empty cell
+            continue
+        cells.append(_function_key(c, depth + 1) if callable(c) else repr(c))
+    return getattr(func, "__module__", None), getattr(func, "__qualname__", repr(func)), tuple(cells)
+
+def _failed_columns(name, func):
+    """The columns of feature function ``name``, for a series on which it raised.
+
+    They are learnt from its output on well-behaved reference series (once per function), so that
+    they match its columns on the series where it works, including array outputs (``name_0``, ...).
+    The global numpy random state is restored afterwards, so that later features are unaffected.
+    """
+    key = (name, _function_key(func))
+    if key not in _FAILED_COLUMNS:
+        columns = [name]
+        state = np.random.get_state()
+        try:
+            for ref in _reference_series():
+                try:
+                    with np.errstate(all="ignore"), warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        out = func(ref)
+                except Exception:
+                    continue
+                columns = [c for c, _ in _output_items(name, out)]
+                break
+        finally:
+            np.random.set_state(state)
+        _FAILED_COLUMNS[key] = columns
+    return _FAILED_COLUMNS[key]
+
+def _output_items(name, val):
+    """The ``(column, raw value)`` pairs of one feature function's output."""
+    if isinstance(val, dict):
+        return [(f"{name}.{k}", v) for k, v in val.items()]
+    if isinstance(val, np.ndarray) and val.ndim == 1 and val.size <= 16:
+        return [(f"{name}_{i}", v) for i, v in enumerate(val)]
+    return [(name, val)]
+
+
 def _extract_features_single_series(ts, feature_funcs):
     """
-    Worker task.
+    Worker task: every feature function on one series.
+
+    Returns a dict with ``values`` (column -> float; NaN unless the output is a real, finite
+    number), ``quality`` (column -> :class:`~pyhctsa.quality.Quality` code), ``times`` (feature
+    function -> seconds) and ``errors`` (a list of ``(feature function, exception type, message)``).
+    A function that raises gives every one of its output columns (from :func:`_failed_columns`)
+    the code ``Quality.ERROR``, so the columns do not depend on which functions failed.
     """
-    row = {}
+    values, quality, times, errors = {}, {}, {}, []
     for name, func in feature_funcs.items():
+        t0 = time.perf_counter()
         try:
             val = func(ts)
-            if isinstance(val, dict):
-                for k, v in val.items():
-                    row[f"{name}.{k}"] = v
-            elif isinstance(val, np.ndarray) and val.ndim == 1 and val.size <= 16:
-                for i, v in enumerate(val):
-                    row[f"{name}_{i}"] = v
-            else:
-                row[name] = val
         except Exception as e:
-            row[name] = f"Error: {e}"
-    return row
+            times[name] = time.perf_counter() - t0
+            for col in _failed_columns(name, func):
+                values[col], quality[col] = np.nan, int(Quality.ERROR)
+            errors.append((name, type(e).__name__, str(e)))
+            continue
+        times[name] = time.perf_counter() - t0
+        for col, raw in _output_items(name, val):
+            values[col], q = classify(raw)
+            quality[col] = int(q)
+    return {"values": values, "quality": quality, "times": times, "errors": errors}
 
 def _compute_features_for_chunk(chunk, feature_funcs):
     return [_extract_features_single_series(ts, feature_funcs) for ts in chunk]
