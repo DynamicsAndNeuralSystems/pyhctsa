@@ -794,12 +794,58 @@ def _smooth3(a: np.ndarray) -> np.ndarray:
     return out
 
 
-def _tau_mi(y: np.ndarray) -> float:
-    """min(first minimum of the smoothed Kraskov AMI of tie-aware ranks, 'ac1e' delay), at least 1.
+def _ami_first_min(ami: np.ndarray) -> float:
+    """First noise-gated local minimum of the 3-point-smoothed AMI curve (1-based lag), or NaN.
 
-    See :func:`get_tau` (rule ``'mi'``) for the definition. Deterministic: the jitter that breaks
-    exact ties among the (tie-aware) ranks is always applied, with normal draws from
-    ``bf_random`` at a fixed seed (``_TAU_MI_JITTER_SEED``), as in hctsa's ``BF_GetTau``.
+    ``ami`` holds the raw (Kraskov) AMI at lags ``1..L``. The curve is smoothed with
+    ``_smooth3``, and the estimator noise of the raw curve is estimated robustly from its
+    second differences (for independent noise of standard deviation ``sigma`` a second
+    difference has standard deviation ``sqrt(6)*sigma``)::
+
+        d2 = diff(ami, 2);  sigma = 1.4826 * median(|d2 - median(d2)|) / sqrt(6)
+
+    with ``delta = 2*sigma`` (``delta = 0`` if ``L < 4``). The result is the first lag ``l``
+    in ``2..L-1`` at which the smoothed curve ``sm`` has a strict local minimum
+    (``sm(l-1) > sm(l) < sm(l+1)``) that lies more than ``delta`` below both the largest
+    smoothed AMI at the lags before it and the largest at the lags after it. A minimum must
+    therefore be deeper than twice the estimator noise, so that noise on a flat or
+    monotonically decaying AMI curve cannot create a spurious minimum at lag 1 (which can
+    never qualify) or at an early lag.
+
+    Parameters
+    ----------
+    ami : numpy.ndarray
+        Raw AMI at lags 1, 2, ..., L (no NaNs).
+
+    Returns
+    -------
+    int or float
+        The lag of the first qualifying minimum, or ``nan`` if there is none.
+    """
+    ami = np.asarray(ami, dtype=float)
+    sm = _smooth3(ami)
+    if ami.size >= 4:
+        d2 = np.diff(ami, 2)
+        sigma = 1.4826 * np.median(np.abs(d2 - np.median(d2))) / np.sqrt(6.0)
+        delta = 2.0 * sigma
+    else:
+        delta = 0.0
+    for l in range(2, sm.size):  # 1-based lag l; sm[l-1] is the smoothed AMI at lag l
+        if sm[l] > sm[l - 1] and sm[l - 2] > sm[l - 1]:
+            fall = np.max(sm[:l - 1]) - sm[l - 1]  # depth below the highest AMI at shorter lags
+            rise = np.max(sm[l:]) - sm[l - 1]      # ... and below the highest at longer lags
+            if fall > delta and rise > delta:
+                return l
+    return np.nan
+
+
+def _tau_mi(y: np.ndarray) -> float:
+    """min(first noise-gated minimum of the smoothed Kraskov AMI of tie-aware ranks, 'ac1e' delay), at least 1.
+
+    See :func:`get_tau` (rule ``'mi'``) for the definition, and ``_ami_first_min`` for the
+    minimum search. Deterministic: the jitter that breaks exact ties among the (tie-aware) ranks
+    is always applied, with normal draws from ``bf_random`` at a fixed seed
+    (``_TAU_MI_JITTER_SEED``), as in hctsa's ``BF_GetTau``.
     """
     from .ksg import ksg_mi
     n = y.size
@@ -832,13 +878,9 @@ def _tau_mi(y: np.ndarray) -> float:
     if valid.size < 2:
         return tau_ac
 
-    # first local minimum of the 3-point-smoothed AMI (at lag 1 if it already rises from lag 1 to 2)
-    sm = _smooth3(valid)
-    tau_min = np.nan
-    for l in range(1, sm.size):  # 1-based lag l; sm[l-1] is the smoothed AMI at lag l
-        if sm[l] > sm[l - 1] and (l == 1 or sm[l - 2] > sm[l - 1]):
-            tau_min = l
-            break
+    # first local minimum of the 3-point-smoothed AMI that is deeper than twice the estimator
+    # noise (never at lag 1), so that noise on a flat AMI curve cannot create an early minimum
+    tau_min = _ami_first_min(valid)
 
     if not np.isnan(tau_min):
         return min(tau_min, tau_ac) if not np.isnan(tau_ac) else tau_min
@@ -871,22 +913,29 @@ def get_tau(y: ArrayLike, rule: Union[int, str] = 'ac1e') -> Union[int, float]:
         - an integer: returned unchanged (so a fixed delay and a rule can share an argument);
         - ``'ac1e'``: the largest integer lag at which the ACF is still at least 1/e (the
           floor of the linearly interpolated first 1/e crossing), and at least 1;
-        - ``'mi'``: ``max(1, min(tau_mi, ac1e))``, where ``tau_mi`` is the first minimum of the
-          3-point-smoothed Kraskov AMI of tie-aware ranks. Precisely: the series is replaced by
-          its ranks (average ranks, in which repeated values, even when blurred by float noise
-          below about ``1e-5`` of the standard deviation, are ties; see ``_tie_aware_ranks``) and
-          z-scored; fixed-seed Gaussian jitter of ``1e-10`` sd is always added (so the result is
-          deterministic and does not depend on a random stream); the Kraskov (k=4, algorithm 1)
-          AMI is computed at lags ``1..ac1e+2``; it is smoothed with a centred 3-point moving
-          average; and ``tau_mi`` is the lag of the first local minimum of the smoothed curve
-          (lag 1 if it already rises from lag 1 to 2). The ranks make the delay invariant under
-          monotone transformations of the data and robust to tiny perturbations; the smoothing
-          suppresses minima that are only estimator noise. If the ACF never falls to 1/e, the
-          AMI is searched up to ``N // 10`` lags for its first local minimum, or else its first
-          drop below ``-0.5 * log(1 - exp(-2))`` (the Gaussian AMI at a correlation of 1/e).
+        - ``'mi'``: ``max(1, min(tau_mi, ac1e))``, where ``tau_mi`` is the first noise-gated
+          minimum of the 3-point-smoothed Kraskov AMI of tie-aware ranks. Precisely: the series
+          is replaced by its ranks (average ranks, in which repeated values, even when blurred by
+          float noise below about ``1e-5`` of the standard deviation, are ties; see
+          ``_tie_aware_ranks``) and z-scored; fixed-seed Gaussian jitter of ``1e-10`` sd is
+          always added (so the result is deterministic and does not depend on a random stream);
+          the Kraskov (k=4, algorithm 1) AMI is computed at lags ``1..ac1e+2``; it is smoothed
+          with a centred 3-point moving average; and ``tau_mi`` is the first lag ``l >= 2`` at
+          which the smoothed curve has a strict local minimum lying more than ``2*sigma`` below
+          both the highest smoothed AMI at shorter lags and the highest at longer lags. Here
+          ``sigma`` is the AMI estimator noise, estimated robustly from the second differences of
+          the raw AMI curve, ``sigma = 1.4826 * MAD(diff(ami, 2)) / sqrt(6)`` (MAD the median
+          absolute deviation from the median; ``sigma = 0`` if fewer than 4 lags are available);
+          see ``_ami_first_min``. The ranks make the delay invariant under monotone
+          transformations of the data and robust to tiny perturbations. The smoothing and the
+          noise gate (the minimum must be deeper than twice the estimator noise) stop estimator
+          noise on a flat or monotonically decaying AMI curve from creating a spurious minimum at
+          lag 1 or at an early lag, far below the correlation time. If the ACF never falls to
+          1/e, the AMI is searched up to ``N // 10`` lags for its first such minimum, or else its
+          first drop below ``-0.5 * log(1 - exp(-2))`` (the Gaussian AMI at a correlation of 1/e).
         - ``'mi-gaussian'``: the first local minimum of the Gaussian AMI (the rule 'mi' meant
-          in earlier versions of hctsa; a monotonic function of |ACF|, so not a nonlinear
-          timescale);
+          in earlier versions of hctsa; a monotonic function of the absolute ACF, so not a
+          nonlinear timescale);
         - ``'ac'``: the first zero crossing of the ACF (a series whose ACF is defined but
           never crosses zero gives ``N - 1``, as in hctsa).
 
@@ -897,16 +946,16 @@ def get_tau(y: ArrayLike, rule: Union[int, str] = 'ac1e') -> Union[int, float]:
         ACF that never falls to 1/e for 'ac1e', series too short, ...). Callers should
         propagate a NaN delay to a NaN feature value.
 
+    Raises
+    ------
+    ValueError
+        For an unknown rule, or a non-integral numeric ``rule``.
+
     Notes
     -----
     The last few results are cached (keyed on the rule and the series' values), since
     many operations resolve the same delay for the same series and the Kraskov AMI behind
     ``'mi'`` is the expensive part.
-
-    Raises
-    ------
-    ValueError
-        For an unknown rule, or a non-integral numeric ``rule``.
     """
     if not isinstance(rule, str):
         if rule is None or not np.isfinite(rule) or float(rule) != int(rule):
@@ -997,6 +1046,13 @@ def theiler_window(y: Union[ArrayLike, None], spec: Union[int, float, list, tupl
     raise ValueError("Unrecognized Theiler window specification")
 
 
+# pre_process(y, 'decimate_ac1e') gives NaN when the decimated series would have fewer than
+# this many points (one per 1/e autocorrelation time): the *_dec feature of a series that spans
+# only a handful of correlation times is finite but meaningless (realisation noise of *_dec
+# features rises steeply below about 50 decimated points). As hctsa's BF_PreProcess.
+_DECIMATE_MIN_POINTS = 50
+
+
 def pre_process(y: ArrayLike, how: Union[str, None]) -> Union[np.ndarray, float]:
     """
     Pre-process a time series (hctsa's ``BF_PreProcess``).
@@ -1008,18 +1064,25 @@ def pre_process(y: ArrayLike, how: Union[str, None]) -> Union[np.ndarray, float]
     how : {'diff1', 'rescale_tau', 'decimate_ac1e'} or None
         - ``'diff1'``: incremental differences;
         - ``'rescale_tau'``: coarse-grain by averaging non-overlapping windows whose length is the
-          first zero crossing of the ACF;
+          ``'ac1e'`` delay, ``get_tau(y, 'ac1e')`` (the floor of the first 1/e crossing of the
+          ACF). pyhctsa 2.0.0 used the first zero crossing of the ACF instead, which for a
+          monotonically decaying ACF is set by noise, depends on the series length and is
+          several times the correlation time;
         - ``'decimate_ac1e'``: keep one sample per (floored) 1/e autocorrelation time
           (``y[::get_tau(y, 'ac1e')]``), so features of the result do not change trivially with
-          the sampling rate. Iterated maps (ACF below 1/e at lag 1) are unchanged. In hctsa it is
-          used as ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``, see :func:`decimate_ac1e`.
+          the sampling rate. Iterated maps (ACF below 1/e at lag 1) are unchanged. If the
+          decimated series has fewer than 50 points (``_DECIMATE_MIN_POINTS``), i.e. the series
+          spans fewer than 50 correlation times, the result is ``nan``: features of so few
+          points are dominated by realisation noise. In hctsa it is used as
+          ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``, see :func:`decimate_ac1e`.
         - ``None`` or ``''``: no change.
 
     Returns
     -------
     numpy.ndarray or float
         The processed series, or ``nan`` (scalar) when the required time delay cannot be set
-        (as hctsa, which returns the scalar NaN).
+        or, for ``'decimate_ac1e'``, when fewer than 50 points would remain (as hctsa, which
+        returns the scalar NaN).
     """
     y = np.asarray(y, dtype=float).ravel()
     if how is None or how == '':
@@ -1027,7 +1090,7 @@ def pre_process(y: ArrayLike, how: Union[str, None]) -> Union[np.ndarray, float]
     if how == 'diff1':
         return np.diff(y)
     if how == 'rescale_tau':
-        tau = get_tau(y, 'ac')
+        tau = get_tau(y, 'ac1e')
         if np.isnan(tau) or tau < 1 or tau > y.size:
             return np.nan
         return np.mean(make_buffer(y, int(tau)), axis=1)
@@ -1035,7 +1098,10 @@ def pre_process(y: ArrayLike, how: Union[str, None]) -> Union[np.ndarray, float]
         tau = get_tau(y, 'ac1e')
         if np.isnan(tau):
             return np.nan
-        return y[::int(tau)]
+        y_dec = y[::int(tau)]
+        if y_dec.size < _DECIMATE_MIN_POINTS:
+            return np.nan  # too few correlation times for a meaningful feature
+        return y_dec
     raise ValueError(f"Unknown preprocessing setting: '{how}'")
 
 
@@ -1075,7 +1141,8 @@ def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, fl
     ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``: decimate by the 1/e autocorrelation time.
 
     Keeps every ``tau``-th sample, ``tau = get_tau(x_z, 'ac1e')``, then z-scores the result
-    (N-1 standard deviation; a constant result becomes zeros). hctsa uses this for the
+    (N-1 standard deviation; a constant result becomes zeros). If fewer than 50 samples
+    (``_DECIMATE_MIN_POINTS``) would remain, the result is ``nan``. hctsa uses this for the
     ``*_dec`` variants of rate-dependent features. A config requests it with
     ``preprocess: decimate_ac1e`` (see :class:`~pyhctsa.calculator.FeatureCalculator`).
 
@@ -1089,8 +1156,9 @@ def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, fl
     Returns
     -------
     numpy.ndarray or float
-        The decimated series, or scalar ``nan`` if the delay cannot be set (hctsa's behavior:
-        the operation then returns NaN).
+        The decimated series, or scalar ``nan`` if the delay cannot be set or the decimated
+        series would have fewer than 50 points (hctsa's behavior: the operation then returns
+        NaN).
     """
     y = pre_process(x_z, 'decimate_ac1e')
     if not isinstance(y, np.ndarray):

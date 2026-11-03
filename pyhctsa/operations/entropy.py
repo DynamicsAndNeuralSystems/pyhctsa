@@ -304,7 +304,9 @@ def multi_scale_entropy(
         Pre-processing applied (and the result z-scored) before coarse-graining:
 
         - 'diff1': incremental differences;
-        - 'rescale_tau': first coarse-grain at the first zero-crossing of the autocorrelation function;
+        - 'rescale_tau': first coarse-grain (average non-overlapping windows) at the 'ac1e'
+          delay, the floor of the first 1/e crossing of the autocorrelation function (see
+          :func:`pyhctsa.utils.pre_process`); NaN if that delay is undefined;
         - `None`: none.
 
         Default is `None`.
