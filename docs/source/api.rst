@@ -11,6 +11,21 @@ Core
    pyhctsa.calculator.FeatureCalculator
    pyhctsa.distribute.LocalDistributor
 
+Quality labels and saved results
+--------------------------------
+
+.. autosummary::
+   :toctree: generated/
+
+   pyhctsa.quality.Quality
+   pyhctsa.quality.classify
+   pyhctsa.quality.quality_from_values
+   pyhctsa.quality.quality_labels
+   pyhctsa.quality.quality_summary
+   pyhctsa.results.Results
+   pyhctsa.results.save_results
+   pyhctsa.results.load_results
+
 Utilities
 ---------
 

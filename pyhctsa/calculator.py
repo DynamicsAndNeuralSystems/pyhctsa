@@ -6,6 +6,7 @@ from itertools import product
 from pathlib import Path
 from typing import Union, Any, Callable
 import logging
+import warnings
 
 logger = logging.getLogger('pyhctsa')
 
@@ -15,7 +16,9 @@ import yaml
 from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
-from .utils import _check_optional_deps, _validate_data, _zscore_or_zeros, decimate_ac1e, nan_outputs, z_score
+from .utils import _check_optional_deps, _input_problem, _zscore_or_zeros, decimate_ac1e, nan_outputs, z_score
+from .quality import Quality, classify, quality_summary
+from .results import ERROR_COLUMNS, save_results
 from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk,
                          _extract_features_single_series)
 
@@ -124,22 +127,14 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False,
     return decorator
 
 def classify_output(res) -> int:
-    """classify the type of output"""
-    out = 0
+    """The :class:`~pyhctsa.quality.Quality` code of one raw output, as an int.
+
+    Kept for compatibility; :func:`pyhctsa.quality.classify` also returns the stored value.
+    A string starting with ``"Error:"`` (the old way of recording an exception) is ``ERROR``.
+    """
     if isinstance(res, str) and res.startswith("Error:"):
-        out = 1
-    elif res is None:
-        out = 6
-    elif np.iscomplexobj(res):
-        # non-zero imaginary component
-        out = 5
-    elif np.isnan(res):
-        out = 2
-    elif np.isposinf(res):
-        out = 3
-    elif np.isneginf(res):
-        out = 4
-    return out
+        return int(Quality.ERROR)
+    return int(classify(res)[1])
 
 def _apply_selection_wrapper(func: Callable, filter_keys: Union[str, list[str]],
                              keep: bool = True) -> Callable:
@@ -300,6 +295,40 @@ def _import_failure_message(module_key: str, exc: ImportError) -> str:
             f"This is a required module, so no features can be loaded without it.")
 
 
+def _assemble(records: list, problems: list, index: pd.Index):
+    """Build the values, quality, errors and calc_time tables of one extraction.
+
+    ``records`` holds one worker record per series (``None`` for a series rejected by the input
+    check, whose reason is in ``problems``). Columns are the union of the computed outputs, in
+    order of first appearance; a computed series missing one of them has ``Quality.LINK_ERROR``
+    there, and a rejected series has ``Quality.REJECTED`` everywhere.
+    """
+    computed = [r for r in records if r is not None]
+    columns = list(dict.fromkeys(c for r in computed for c in r["values"]))
+    funcs = list(dict.fromkeys(f for r in computed for f in r["times"]))
+    n, p = len(records), len(columns)
+    values = np.full((n, p), np.nan)
+    quality = np.full((n, p), int(Quality.LINK_ERROR), dtype=np.uint8)
+    times = np.full((n, len(funcs)), np.nan)
+    col_idx = {c: j for j, c in enumerate(columns)}
+    f_idx = {f: j for j, f in enumerate(funcs)}
+    errors = []
+    for i, (r, problem) in enumerate(zip(records, problems)):
+        if r is None:
+            quality[i] = int(Quality.REJECTED)
+            errors.append((index[i], None, "InvalidInput", problem))
+            continue
+        for c, v in r["values"].items():
+            values[i, col_idx[c]] = v
+            quality[i, col_idx[c]] = r["quality"][c]
+        for f, t in r["times"].items():
+            times[i, f_idx[f]] = t
+        errors.extend((index[i], f, etype, msg) for f, etype, msg in r["errors"])
+    return (pd.DataFrame(values, index=index, columns=columns),
+            pd.DataFrame(quality, index=index, columns=columns),
+            pd.DataFrame(errors, columns=ERROR_COLUMNS),
+            pd.DataFrame(times, index=index, columns=funcs))
+
 class FeatureCalculator:
     """
     A configuration-driven feature extraction calculator for time series data.
@@ -379,6 +408,10 @@ class FeatureCalculator:
         # the functions as built from self.config, so extract() can tell whether
         # feature_funcs has since been changed (see _parallel_task)
         self._config_funcs = dict(self.feature_funcs)
+        # results of the last extract(): see extract() and save()
+        self.quality = None
+        self.errors = None
+        self.calc_time = None
         logger.info(f"Loaded {len(self.feature_funcs)} master operations.")
     
     def _check_deps(self, module_key, feature_name, config):
@@ -478,14 +511,35 @@ class FeatureCalculator:
         Returns
         -------
         pd.DataFrame
-            A DataFrame with one row per input series and one column per feature
+            A DataFrame with one row per input series and one column per feature. Every value is
+            a float: a real, finite number, or NaN. Why a value is NaN is in
+            :attr:`quality`, which this call also sets, with :attr:`errors` and
+            :attr:`calc_time`:
+
+            * ``quality``: a ``uint8`` DataFrame of the same shape, one
+              :class:`~pyhctsa.quality.Quality` code per value (0 good, 1 error, 2 NaN, 3 Inf,
+              4 -Inf, 5 complex, 6 empty, 7 link error, 8 non-scalar, 9 rejected input; codes 0-7
+              are hctsa's ``TS_Quality``).
+            * ``errors``: one row per feature function that raised (``instance``, ``feature``,
+              ``error_type``, ``message``), and one per series rejected by the input check
+              (``feature`` is ``None``).
+            * ``calc_time``: seconds per series and feature function.
+
+            A series that fails the input check (too short, constant, or containing NaN or Inf) is not
+            computed, and its row is coded ``Quality.REJECTED``. If every series fails it, a
+            ``ValueError`` is raised.
         """
+        # forget the previous extraction, so save() cannot pair new values with old labels
+        self.quality = self.errors = self.calc_time = None
         series_list = _standardise_inputs(data)
-        # check each time series to see if valid...
-        is_valid = np.array([_validate_data(t) for t in series_list])
-        invalid = np.argwhere(~is_valid)
-        if invalid.size > 0:
-            raise ValueError(f"One or more time series instances are invalid: {invalid.flatten()}")
+        # check each time series: an invalid one is not computed and its row is coded
+        # Quality.REJECTED; only if every series is invalid is there nothing to return
+        problems = [_input_problem(t) for t in series_list]
+        invalid = [i for i, p in enumerate(problems) if p is not None]
+        if len(invalid) == len(series_list):
+            details = "; ".join(f"{i}: {problems[i]}" for i in invalid[:10])
+            raise ValueError(f"One or more time series instances are invalid: {np.array(invalid)} "
+                             f"({details})")
         # check labels if provided
         if labels is not None:
             # allow single label for single series, otherwise require one label per series
@@ -502,13 +556,19 @@ class FeatureCalculator:
             n = len(series_list)
             labels_list = [f"ts_{i}" for i in range(1, n + 1)]
 
+        if invalid:
+            warnings.warn(f"{len(invalid)} of {len(series_list)} time series are invalid and were not "
+                          f"computed (their rows have quality Quality.REJECTED; reasons in "
+                          f"FeatureCalculator.errors).", stacklevel=2)
+        valid_series = [t for t, p in zip(series_list, problems) if p is None]
+
         if verbose:
             print(f"Evaluating {len(self.feature_funcs)} partialed functions. Strap in!...")
         start_time = time.perf_counter()
         if distributor:
             # parallel execution
             task, task_kwargs = self._parallel_task()
-            rows = distributor.map(task, series_list, **task_kwargs)
+            rows = distributor.map(task, valid_series, **task_kwargs)
         else:
             # sequential fallback
             if verbose:
@@ -518,26 +578,44 @@ class FeatureCalculator:
                     TaskProgressColumn(),
                     TimeElapsedColumn(),
                 ) as progress:
-                    task = progress.add_task("Sequential Extraction", total=len(series_list))
+                    task = progress.add_task("Sequential Extraction", total=len(valid_series))
                     rows = []
-                    for ts in series_list:
+                    for ts in valid_series:
                         rows.append(_extract_features_single_series(ts, self.feature_funcs))
                         progress.advance(task)
             else:
-                rows = [_extract_features_single_series(ts, self.feature_funcs) 
-                        for ts in series_list]
+                rows = [_extract_features_single_series(ts, self.feature_funcs)
+                        for ts in valid_series]
 
         elapsed = time.perf_counter() - start_time
         if verbose:
             print(f"Feature extraction completed in {elapsed:.3f} seconds.")
-        df = pd.json_normalize(rows)
-        # assign row names
-        df.index = pd.Index(labels_list, name="instance")
-        # metadata
+        index = pd.Index(labels_list, name="instance")
+        if len(rows) != len(problems) - len(invalid):
+            raise RuntimeError(f"Expected results for {len(problems) - len(invalid)} series, got {len(rows)}")
+        it = iter(rows)
+        records = [None if p is not None else next(it) for p in problems]
+        df, self.quality, self.errors, self.calc_time = _assemble(records, problems, index)
         self._last_elapsed = elapsed
-        self._errors = df.map(classify_output)
-
+        if verbose:
+            print(f"Quality of the {df.size} values: {quality_summary(self.quality.to_numpy())}")
         return df
+
+    def save(self, path, values: pd.DataFrame, meta: Union[dict, None] = None) -> Path:
+        """Write ``values`` (the DataFrame the last :meth:`extract` returned) together with its
+        :attr:`quality`, :attr:`errors` and :attr:`calc_time` to ``path``.
+
+        The format follows the suffix: ``.npz`` (no extra dependency) or ``.parquet`` (needs
+        pyarrow). Read it back with :func:`pyhctsa.load_results`.
+        """
+        if self.quality is None:
+            raise RuntimeError("Nothing to save: call extract() first.")
+        if not values.index.equals(self.quality.index) or not values.columns.equals(self.quality.columns):
+            raise ValueError("values must be the DataFrame returned by the last extract()")
+        info = {"n_feature_functions": len(self.feature_funcs),
+                "config_path": None if self.config_path is None else str(self.config_path)}
+        info.update(meta or {})
+        return save_results(path, values, self.quality, self.errors, self.calc_time, info)
 
     def _parallel_task(self) -> tuple[Callable, dict]:
         """The chunk function, and its keyword arguments, to hand to a distributor.

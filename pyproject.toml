@@ -53,6 +53,7 @@ classifiers = [
 
 [project.optional-dependencies]
 tda = ["ripser"]  # persistent_homology (NL_PersistentHomology); skipped by the calculator without it
+parquet = ["pyarrow"]  # FeatureCalculator.save / save_results to .parquet
 test = ["pytest>=6.0", "pytest-cov", "pytest-mock", "ripser"]
 
 [project.urls]
