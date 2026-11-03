@@ -50,6 +50,16 @@ medical:
     legacy_name: MD_PolVar
     ordered_args: ['d', 'D']
 
+  pol_var_resid:   # pyhctsa-only: pol_var on |AR(2) residuals| with a median threshold (no hctsa counterpart)
+    base_name: pol_var_resid
+    min_length: "2 * D + ar_order"
+    dependencies:
+    configs:
+      - {D: 3, zscore: True}
+      - {D: 6, zscore: True}
+    variant_of: pol_var
+    ordered_args: ['D']
+
   raw_hrv_meas:
     base_name: hrv_meas
     dependencies:
@@ -1468,6 +1478,14 @@ scaling:
       - {wtf: 'dfa', tau_step: 50, k: 2, zscore: True, exclude: ['se1', 'se2'], preprocess: zscore_sign}   # SC_FluctAnal(zscore(sign(x_z)),2,'dfa',50,2,[],true)
     legacy_name: SC_FluctAnal
     ordered_args: ['q', 'wtf', 'tau_step', 'k', 'lag', 'log_inc']
+
+  dfa_largescale:   # pyhctsa-only: DFA exponent over tau in [max(10, sqrt(N)), N/4] (no hctsa counterpart)
+    base_name: dfa_largescale
+    dependencies:
+    configs:
+      - {k: 1, zscore: True}
+    variant_of: fluctuation_analysis
+    ordered_args: ['k']
 
   mma:
     base_name: mma

@@ -251,6 +251,7 @@ Medical
    pyhctsa.operations.medical.raw_hrv_meas
    pyhctsa.operations.medical.hrv_classic
    pyhctsa.operations.medical.pol_var
+   pyhctsa.operations.medical.pol_var_resid
    pyhctsa.operations.medical.pnn
    pyhctsa.operations.medical.porta
 
@@ -348,6 +349,7 @@ Scaling
    :toctree: generated/
 
    pyhctsa.operations.scaling.fluctuation_analysis
+   pyhctsa.operations.scaling.dfa_largescale
    pyhctsa.operations.scaling.mma
    pyhctsa.operations.scaling.higuchi_fd
    pyhctsa.operations.scaling.mfdfa
