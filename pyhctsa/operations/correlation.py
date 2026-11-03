@@ -969,7 +969,7 @@ def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> floa
     property of the marginal distribution alone, which the rank transform removes.
 
     The change from the crinkle statistic is deliberate and changes its values, so this is a new
-    feature rather than a correction of :func:`crinkle_statistic` (which reproduces the published
+    feature rather than a correction of :func:`crinkle_statistic` (which reproduces the original
     construction, D. Kaplan's ``DK_crinkle``, credited there to J. Theiler).
 
     Parameters
