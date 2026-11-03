@@ -289,11 +289,11 @@ def pol_var_resid(x: ArrayLike, D: int = 3, ar_order: int = 2) -> float:
 
     A variant of :func:`pol_var` that codes the residuals ``e_t`` of a least-squares
     AR(``ar_order``) fit (with intercept) as large (1) or small (0) against the median of
-    ``|e_t|``, and counts runs of D equal symbols. Coding residuals rather than increments, at a
-    threshold that fixes ``q = P(1) = 1/2``, removes the dependence of :func:`pol_var` on the
-    lag-1 autocorrelation and the increment distribution, so the statistic measures the
-    clustering of large and small innovations (volatility clustering, conditional
-    heteroscedasticity [4]_). It is invariant to the location and scale of ``x``.
+    ``|e_t|``, and counts runs of D equal symbols (cf. the runs test [5]_). Coding residuals
+    rather than increments, at a threshold that fixes ``q = P(1) = 1/2``, removes the dependence
+    of :func:`pol_var` on the lag-1 autocorrelation and the increment distribution, so the
+    statistic measures the clustering of large and small innovations (volatility clustering,
+    conditional heteroscedasticity [4]_). It is invariant to the location and scale of ``x``.
 
     With ``s_t = 1{|e_t| >= median|e|}`` (t = 1, ..., n = N - ``ar_order``) split into maximal
     runs of equal symbols with lengths ``L_1, L_2, ...``,
@@ -322,6 +322,8 @@ def pol_var_resid(x: ArrayLike, D: int = 3, ar_order: int = 2) -> float:
            Cardiovasc. Res. 31(3), 419 (1996).
     .. [4] R. F. Engle, "Autoregressive conditional heteroscedasticity with estimates of the
            variance of United Kingdom inflation", Econometrica 50(4), 987 (1982).
+    .. [5] A. Wald and J. Wolfowitz, "On a test whether two samples are from the same
+           population", Ann. Math. Stat. 11(2), 147 (1940).
 
     Parameters
     ----------

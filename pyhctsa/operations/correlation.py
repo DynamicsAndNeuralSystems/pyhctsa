@@ -934,7 +934,7 @@ def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> floa
     """
     Excess kurtosis of the second difference: the spikiness of a series' curvature.
 
-    A variant of :func:`crinkle_statistic` that keeps only its kurtosis factor. With
+    A variant of :func:`crinkle_statistic` [1]_ that keeps only its kurtosis factor. With
     :math:`\\Delta^2 x_t = x_{t-1} - 2 x_t + x_{t+1}`, the crinkle statistic factorises as
 
     .. math::
@@ -957,7 +957,8 @@ def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> floa
     autocorrelation; positive values mean that the curvature has heavier tails (rare sharp kinks)
     than a Gaussian process with the same spectrum. The rank transform removes the contribution
     of the marginal distribution (without it, iid data with excess kurtosis :math:`\\kappa` give
-    :math:`K = \\kappa / 2`).
+    :math:`K = \\kappa / 2`). The kurtosis (flatness) of second differences is used as an
+    intermittency measure in turbulence [2]_.
 
     Parameters
     ----------
@@ -982,6 +983,8 @@ def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> floa
        B. D. Fulcher, M. A. Little and N. S. Jones, "Highly comparative time-series analysis: the
        empirical structure of time series and their methods", J. R. Soc. Interface 10, 20130048
        (2013).
+    .. [2] E. Falcon, S. Fauve and C. Laroche, "Observation of intermittency in wave turbulence",
+       Phys. Rev. Lett. 98, 154501 (2007).
     """
     x = np.asarray(y, dtype=float).ravel()
     if x.size < 5:
