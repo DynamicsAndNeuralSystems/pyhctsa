@@ -236,3 +236,21 @@ def test_custom_config_field_min_length(tmp_path):
     assert b.bound("ami1") == 50 and b.bound("ami3") == 8 and b.bound("other") is None
     out = fc.feature_funcs[lab](_series("noise", 7))
     assert np.isnan(out["ami1"]) and np.isfinite(out["ami2"]) and np.isnan(out["ami3"])
+
+
+def test_zero_one_test_short_series():
+    # needs 2 lags (N >= 20) overall and 3 (N >= 30) for K and Kstd; was N >= 200
+    from pyhctsa.calculator import FeatureCalculator
+    f = FeatureCalculator().feature_funcs["zero_one_test_20_full"]
+    rng = np.random.default_rng(0)
+    out19 = f(rng.standard_normal(19))
+    assert all(np.isnan(v) for v in out19.values())
+    out25 = f(rng.standard_normal(25))
+    assert np.isnan(out25["K"]) and np.isnan(out25["Kstd"]) and np.isfinite(out25["D"])
+    out30 = f(rng.standard_normal(30))
+    assert all(np.isfinite(v) for v in out30.values())
+    x = np.empty(60); x[0] = 0.3
+    for i in range(1, 60):
+        x[i] = 4 * x[i - 1] * (1 - x[i - 1])  # chaotic logistic map
+    per2 = np.tile([0.2, 0.8], 30) + 0.01 * rng.standard_normal(60)
+    assert f(x)["K"] > f(per2)["K"]

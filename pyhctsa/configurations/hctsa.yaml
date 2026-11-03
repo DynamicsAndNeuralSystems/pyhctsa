@@ -2244,6 +2244,10 @@ nonlinearity:
   
   zero_one_test:
     base_name: zero_one_test
+    field_min_length:
+      # K is a correlation over lags 1..N//10: with 2 lags (N < 30) it is +-1 (in practice 1)
+      K: 30
+      Kstd: 30
     dependencies:
     configs:
       - {num_c: 20, max_n: 'full', zscore: True}
