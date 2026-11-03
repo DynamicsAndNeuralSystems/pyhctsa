@@ -101,6 +101,18 @@ def test_compare_reports_deregistered_function_and_duplicate_labels(tiny_hctsa, 
     assert [d[0] for d in res["duplicate_labels"]] == ["autocorr_1"]   # the second config replaces the first
 
 
+def test_compare_leaves_out_pyhctsa_only_variants(tiny_hctsa, tmp_path):
+    cfg = {"correlation": {"autocorr": {"base_name": "autocorr", "ordered_args": ["tau"], "legacy_name": "CO_AutoCorr",
+                                        "configs": [{"tau": [1, 2], "zscore": True},
+                                                    {"tau": 10, "zscore": True, "abs": True}]},
+                           "autocorr_v": {"base_name": "autocorr_v", "ordered_args": ["tau"], "variant_of": "autocorr",
+                                          "configs": [{"tau": 3, "zscore": True}]}}}
+    res = chk.compare(tiny_hctsa, _write_yaml(tmp_path, cfg), log=lambda *a: None)
+    assert not res["extra"] and not res["deregistered"] and not res.get("duplicate_labels")
+    assert [v[:3] for v in res["variants"]] == [("correlation", "autocorr_v", "autocorr")]
+    assert res["counts"]["variant_configs"] == 1
+
+
 def test_suggest_writes_matching_configs(tiny_hctsa, tmp_path):
     cfg = {"correlation": {"autocorr": {"base_name": "autocorr", "ordered_args": ["tau"], "legacy_name": "CO_AutoCorr",
                                         "configs": [{"tau": 1, "zscore": True}]}}}
@@ -129,9 +141,17 @@ def test_labels_are_unique():
 
 
 def test_every_function_names_its_hctsa_function_and_known_preprocess():
-    for module, fns in _load().items():
+    # every entry names its hctsa function (legacy_name) or, for a pyhctsa-only variant, the entry it varies
+    cfg = _load()
+    entries = {name for fns in cfg.values() for name in fns}
+    for module, fns in cfg.items():
         for name, meta in fns.items():
-            assert meta.get("legacy_name"), f"{module}.{name} has no legacy_name"
+            if meta.get("legacy_name"):
+                assert not meta.get("variant_of"), f"{module}.{name} has both legacy_name and variant_of"
+            else:
+                assert meta.get("variant_of"), f"{module}.{name} has neither legacy_name nor variant_of"
+                assert meta["variant_of"] in entries and meta["variant_of"] != name, \
+                    f"{module}.{name}: variant_of {meta['variant_of']!r} is not another yaml entry"
             for item in meta["configs"]:
                 assert item.get("preprocess") in (None, *_PREPROCESS_LABELS), f"{module}.{name}: {item}"
                 assert not ("select" in item and "exclude" in item), f"{module}.{name}: both select and exclude"
