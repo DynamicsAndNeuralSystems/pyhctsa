@@ -489,11 +489,7 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
     the value distribution as well as on the dynamics. Two equally unpredictable iid
     processes can differ: discrete or heavy-tailed values put more pairs within ``r`` than
     Gaussian values do, so iid binary or Student-t noise gives a lower SampEn (reads as more
-    regular) than iid Gaussian noise at the same ``r``. For iid data every ``sampen{k}``
-    estimates :math:`-\\log P(|X - X'| < r)` for two independent draws :math:`X, X'` from the
-    value distribution, a function of that distribution alone (about 2.88 for Gaussian noise at
-    the default ``r`` of 0.1 SD, against about 2.55 for Student-t noise with 3 degrees of
-    freedom and 2.36 for exponential noise). This follows from the definition, not
+    regular) than iid Gaussian noise at the same ``r``. This follows from the definition, not
     from the estimator; compare SampEn across series with similar value distributions.
     """
     m = int(m)
