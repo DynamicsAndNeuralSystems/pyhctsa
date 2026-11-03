@@ -921,6 +921,22 @@ def crinkle_statistic(y: ArrayLike) -> float:
     autocorrelation (0.4) give C of about 29.2 and 23.5, and are separated in nearly every
     realization at N = 5000. Of the two factors, only :math:`\\kappa` is free of the
     autocorrelation in the Gaussian case.
+
+    Provenance: we found no published definition. Kaplan's code (1996) credits it to Theiler,
+    but Theiler et al. (1992) [1]_ define only the companion skewed-difference statistic Q
+    (hctsa ``DK_theilerQ``, also from Kaplan's code), while naming higher moments as a class of
+    discriminating statistic for surrogate-data tests. Our inference is that C began as an
+    informal check in that surrogate-data setting. Phase-randomized surrogates of data whose
+    end points do not match acquire spurious high-frequency "crinkliness" [2]_, which a
+    fourth moment of the second difference is built to detect.
+
+    References
+    ----------
+    .. [1] J. Theiler, S. Eubank, A. Longtin, B. Galdrikian and J. D. Farmer, "Testing for
+       nonlinearity in time series: the method of surrogate data", Physica D 58, 77-94 (1992),
+       §2.3.4.
+    .. [2] T. Schreiber and A. Schmitz, "Surrogate time series", Physica D 142, 346-382 (2000),
+       Fig. 6.
     """
     x = np.asarray(y, dtype=float).ravel()
     if x.size < 3:
