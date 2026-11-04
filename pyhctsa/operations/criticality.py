@@ -31,7 +31,7 @@ from ..operations.correlation import first_crossing
 from ..toolboxes.RAD.rad import rad_centre, rad_core
 from ..utils import get_tau
 
-def rad(x: ArrayLike, tau: Union[int, str] = 1, centre: bool = True) -> float:
+def rad(x: ArrayLike, tau: Union[int, str] = 1, do_centre: bool = True) -> float:
     """
     Compute the Rescaled Auto-Density (RAD) feature of a time series.
 
@@ -55,7 +55,7 @@ def rad(x: ArrayLike, tau: Union[int, str] = 1, centre: bool = True) -> float:
         The input time series (1D array).
     tau : int or str, optional
         The embedding and differencing delay, in units of the time step. A string sets it
-        from the series (after any `centre` transformation); NaN is returned if the delay
+        from the series (after any `do_centre` transformation); NaN is returned if the delay
         is undefined:
 
         - ``'tau'``: the first zero crossing of the autocorrelation function;
@@ -64,7 +64,7 @@ def rad(x: ArrayLike, tau: Union[int, str] = 1, centre: bool = True) -> float:
           and the ``'ac1e'`` delay (see :func:`pyhctsa.utils.get_tau`).
 
         Default is 1.
-    centre : bool, optional
+    do_centre : bool, optional
         Whether to center the time series at its median and take absolute values before 
         analysis. Default is `True`.
 
@@ -78,7 +78,7 @@ def rad(x: ArrayLike, tau: Union[int, str] = 1, centre: bool = True) -> float:
     x = np.asarray(x)
     
     # if specified: centre the time series at its median and take the absolute value
-    if centre:
+    if do_centre:
         x = rad_centre(x)
     
     # if specified, make tau the first crossing of the AC function
