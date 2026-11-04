@@ -64,14 +64,16 @@ Below is an example of the docstring convention for feature-computing functions 
 
 A docstring explains the method and its implementation: what the function computes, the choices it makes (estimators,
 preprocessing, normalizations, departures from the published method), and the literature it comes from.
-Keep it short, and leave out:
+Give detailed references for where a statistic comes from: for a statistic new to pyhctsa, explain where the approach
+comes from and cite prior and similar work, even at some length.
+Otherwise keep it short, and leave out:
 
     - history: how the feature reached its current form ("formerly", "an earlier version", "changed to");
     - narratives of tests or experiments run during development (simulation settings, AUCs, correlations on
       particular datasets), unless they are published and cited (a brief general reason, such as "tests showed
       these were redundant", is fine);
-    - extended discussion of what else a feature responds to, and speculation about a method's origin (a short
-      provenance note is fine where the origin is itself notable, e.g. a statistic with no published source).
+    - extended discussion of what else a feature responds to, and speculation about a method's origin beyond a
+      short, clearly marked note.
 
 Where a feature is known to respond to something besides its target property, one plain sentence in Notes is
 enough (and a pointer to a more specific variant, if there is one).
