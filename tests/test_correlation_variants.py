@@ -337,5 +337,5 @@ def test_new_variants_in_default_feature_set():
         assert np.isfinite(calc.feature_funcs[lab](y))
     assert calc.feature_funcs['ac_nl_excess_1_to_3'](y) == co.nonlinear_autocorr_excess(_z(y), [1, 2, 3])
     assert len([k for k in calc.feature_funcs if k.startswith('ac_nl_excess_')]) == 61
-    assert len([k for k in calc.feature_funcs if k.startswith('ac_nl_abs_surr_ratio_')]) == 22
+    assert len([k for k in calc.feature_funcs if k.startswith('ac_nl_abs_surr_ratio_')]) == 19
     assert len([k for k in calc.feature_funcs if k.startswith('trev_studentized_')]) == 7

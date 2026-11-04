@@ -289,7 +289,7 @@ def pol_var_resid(x: ArrayLike, D: int = 3, ar_order: int = 2) -> float:
 
     A variant of :func:`pol_var` that codes the residuals ``e_t`` of a least-squares
     AR(``ar_order``) fit (with intercept) as large (1) or small (0) against the median of
-    ``|e_t|``, and counts runs of D equal symbols (cf. the runs test [5]_). Coding residuals
+    ``|e_t|``, and counts runs of D equal symbols. Coding residuals
     rather than increments, at a threshold that fixes ``q = P(1) = 1/2``, removes the dependence
     of :func:`pol_var` on the lag-1 autocorrelation and the increment distribution, so the
     statistic measures the clustering of large and small innovations (volatility clustering,
@@ -308,6 +308,12 @@ def pol_var_resid(x: ArrayLike, D: int = 3, ar_order: int = 2) -> float:
     As in :func:`pol_var`, words of D zeros and of D ones are both counted. The published
     POLVAR statistic [1]_ [2]_ [3]_ codes raw beat-to-beat differences against a fixed threshold
     in ms and counts only the word of D zeros.
+
+    The statistic combines standard parts: the run counting of POLVAR, introduced for heart-rate
+    variability [3]_ [1]_; coding against the median, as in the runs test of Wald and Wolfowitz
+    [5]_; and reading volatility clustering from the magnitudes of model residuals, as in tests
+    for ARCH effects [4]_. In effect it is a runs test for the clustering of large innovations.
+    No published statistic of this form is known.
 
     References
     ----------

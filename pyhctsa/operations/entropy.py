@@ -549,6 +549,11 @@ def sample_entropy_ranked(y: ArrayLike, m: int = 2, r: float = 0.1,
     marginal distribution, whereas the SampEn of the values depends on that distribution.
     Temporal regularity (autocorrelation, periodicity, deterministic dynamics) still lowers it.
 
+    Ranking the values is, up to scale, the probability integral transform with the empirical
+    distribution function; Bajić et al. [4]_ study how this transform changes approximate and
+    sample entropy. Other rank-based entropies rank the distances between templates rather than
+    the values [5]_, or count ordinal patterns, as permutation entropy does [6]_.
+
     Parameters
     ----------
     y : array-like
@@ -604,6 +609,12 @@ def sample_entropy_ranked(y: ArrayLike, m: int = 2, r: float = 0.1,
         https://physionet.org/content/sampen/1.0.0/c/sampen-1.1.c
     .. [3] "Control Entropy: A complexity measure for nonstationary signals"
         E. M. Bollt and J. Skufca, Math. Biosci. Eng., 6(1) 1 (2009).
+    .. [4] D. Bajić, N. Mišić, T. Škorić, N. Japundžić-Žigon and M. Milovanović, "On entropy of
+        probability integral transformed time series", Entropy 22, 1146 (2020).
+    .. [5] L. Citi, G. Guffanti and L. Mainardi, "Rank-based multi-scale entropy analysis of heart
+        rate variability", Computing in Cardiology 41 (2014).
+    .. [6] C. Bandt and B. Pompe, "Permutation entropy: a natural complexity measure for time
+        series", Phys. Rev. Lett. 88, 174102 (2002).
 
     Examples
     --------

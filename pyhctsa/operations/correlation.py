@@ -957,8 +957,18 @@ def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> floa
     autocorrelation; positive values mean that the curvature has heavier tails (rare sharp kinks)
     than a Gaussian process with the same spectrum. The rank transform removes the contribution
     of the marginal distribution (without it, iid data with excess kurtosis :math:`\\kappa` give
-    :math:`K = \\kappa / 2`). The kurtosis (flatness) of second differences is used as an
-    intermittency measure in turbulence [2]_.
+    :math:`K = \\kappa / 2`). The value also varies with the timescale of the series;
+    computing it on the series decimated by its correlation time reduces this.
+
+    The crinkle statistic comes from D. Kaplan's code for nonlinear time-series analysis [1]_,
+    where it is credited to J. Theiler; no published definition is known. Theiler et al. [3]_
+    define the companion statistic :func:`theiler_q` from the same code and name higher moments
+    as discriminating statistics for surrogate-data tests. Independently, the kurtosis (flatness)
+    of second differences is used in turbulence as a measure of intermittency, computed as a
+    function of lag, where second rather than first differences are needed for a smooth signal
+    [2]_. This variant takes that quantity at lag 1 on Gaussian ranks, so that its expectation is
+    zero for any Gaussian process and any strictly increasing transform of one, which makes it a
+    statistic of nonlinear structure in the curvature.
 
     Parameters
     ----------
@@ -985,6 +995,8 @@ def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> floa
        (2013).
     .. [2] E. Falcon, S. Fauve and C. Laroche, "Observation of intermittency in wave turbulence",
        Phys. Rev. Lett. 98, 154501 (2007).
+    .. [3] J. Theiler, S. Eubank, A. Longtin, B. Galdrikian and J. D. Farmer, "Testing for
+       nonlinearity in time series: the method of surrogate data", Physica D 58, 77-94 (1992).
     """
     x = np.asarray(y, dtype=float).ravel()
     if x.size < 5:
@@ -1905,7 +1917,12 @@ def nonlinear_autocorr_excess(y: ArrayLike, taus: ArrayLike, gaussian_rank: bool
     :math:`E = \\langle g_t g_{t-1}^2 g_{t-2} \\rangle - (2 \\hat{c}(1)^2 + \\hat{c}(0)\\hat{c}(2))`;
     for more factors it is the moment minus its Gaussian value. Its expectation is zero for any
     Gaussian process and, with the rank transform, for any strictly increasing transform of one.
-    Estimates with many factors are noisy.
+    Joint cumulants, which vanish for Gaussian processes, are the basis of higher-order spectral
+    analysis and of tests of Gaussianity and linearity [3]_ [4]_. With an odd number of factors
+    the Gaussian value is zero and :math:`E` measures asymmetry in time, as :func:`trev` does.
+    Estimates with many factors need long series and, on non-stationary data, vary along the
+    series. Configurations with an even number of factors also vary with the timescale of the
+    series.
 
     Parameters
     ----------
@@ -1935,6 +1952,10 @@ def nonlinear_autocorr_excess(y: ArrayLike, taus: ArrayLike, gaussian_rank: bool
     .. [2] B. D. Fulcher, M. A. Little and N. S. Jones, "Highly comparative time-series analysis:
        the empirical structure of time series and their methods", J. R. Soc. Interface 10,
        20130048 (2013).
+    .. [3] D. R. Brillinger, "An introduction to polyspectra", Ann. Math. Stat. 36, 1351-1374
+       (1965).
+    .. [4] M. J. Hinich, "Testing for Gaussianity and linearity of a stationary time series",
+       J. Time Ser. Anal. 3, 169-176 (1982).
     """
     taus = _check_taus(taus)
     x = np.asarray(y, dtype=float).ravel()
@@ -1977,9 +1998,10 @@ def nonlinear_autocorr_abs_surrogate_ratio(y: ArrayLike, taus: ArrayLike, num_su
 
     where each surrogate :math:`g^{(s)}` is z-scored. :math:`R \\approx 1` for any strictly
     increasing transform of a linear Gaussian process; :math:`R > 1` means that large magnitudes
-    cluster in time more than the linear correlation implies. The surrogates come from the
-    portable generator :func:`~pyhctsa.robust.bf_random` with a fixed seed, so the result is
-    deterministic.
+    cluster in time more than the linear correlation implies. Slow changes in the variance of the
+    series also raise :math:`R`. Normalising a statistic by its values on surrogates follows the
+    surrogate-data method [1]_. The surrogates come from the portable generator
+    :func:`~pyhctsa.robust.bf_random` with a fixed seed, so the result is deterministic.
 
     Parameters
     ----------
@@ -3399,6 +3421,11 @@ def trev_studentized(y: ArrayLike, tau: Union[int, str] = 'ac') -> float:
     :math:`T` is invariant to the scale of the data and changes sign when the series is reversed
     in time.
 
+    For a stationary series the numerator of :func:`trev` is three times the difference of
+    bicovariances :math:`\\langle x_t^2 x_{t+\\tau} \\rangle - \\langle x_t x_{t+\\tau}^2 \\rangle`,
+    which Ramsey and Rothman [4]_ standardise into a test of time reversibility; this variant
+    standardises the cubed-increment form with a HAC standard error.
+
     Parameters
     ----------
     y : array-like
@@ -3421,6 +3448,8 @@ def trev_studentized(y: ArrayLike, tau: Union[int, str] = 'ac') -> float:
        J. Time Ser. Anal. 16, 67-103 (1995).
     .. [3] W. K. Newey and K. D. West, "A simple, positive semi-definite, heteroskedasticity and
        autocorrelation consistent covariance matrix", Econometrica 55, 703-708 (1987).
+    .. [4] J. B. Ramsey and P. Rothman, "Time irreversibility and business cycle asymmetry",
+       J. Money Credit Bank. 28, 1-21 (1996).
     """
     y = np.asarray(y, dtype=float).ravel()
     tau = _resolve_delay(y, tau, default='ac')
