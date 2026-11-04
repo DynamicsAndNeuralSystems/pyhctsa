@@ -313,6 +313,10 @@ def zero_one_test(y, num_c=20, max_n=10000):
     unbounded dynamics. Unbounded dynamics may be deterministic chaos
     or stochastic noise; the 0-1 test alone does not distinguish them.
 
+    K tends to 1 for any input whose power spectrum is continuous at the frequencies c, noise
+    included, so K separates regular from irregular dynamics and indicates chaos only when the
+    input is known to be deterministic.
+
     The statistics use lags 1..N//10, so the test needs N >= 20, and K (a correlation over the
     lags) N >= 30. On short series K is not on its 0-1 scale: regular dynamics whose
     frequencies fall in the range of c (e.g. a period-3 orbit, or quasi-periodic signals) give

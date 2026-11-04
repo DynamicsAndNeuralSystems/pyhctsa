@@ -87,7 +87,6 @@ EXTRA_IMPL = {
 ARGMAP: dict[str, dict] = {
     "CO_FirstMin": {"min_what": "minWhat", "max_what": "minWhat"},
     "CO_NonlinearAutocorr": {"absval": "doAbs"},
-    "CR_RAD": {"centre": "doAbs"},
     "DN_TrimmedMean": {"p_exclude": "n"},
     "EN_LZComplexity": {"n_bits": "n"},
     "MF_hmm_CompareNStates": {"n_states": "nstater"},

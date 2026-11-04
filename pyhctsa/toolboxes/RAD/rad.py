@@ -31,7 +31,7 @@ import numpy as np
 
 
 def rad_centre(x):
-    """The series centered at its median, in absolute value (RAD's ``centre`` option)."""
+    """The series centered at its median, in absolute value (RAD's ``do_centre`` option)."""
     x = np.asarray(x)
     x = x - np.median(x)
     return np.abs(x)

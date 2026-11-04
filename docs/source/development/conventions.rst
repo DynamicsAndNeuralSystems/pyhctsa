@@ -61,6 +61,25 @@ Below is an example of the docstring convention for feature-computing functions 
         x += 0.1
         out = np.mean(x)
         return out
+
+A docstring explains the method and its implementation: what the function computes, the choices it makes (estimators,
+preprocessing, normalizations, departures from the published method), and the literature it comes from.
+Keep it short, and leave out:
+
+    - history: how the feature reached its current form ("formerly", "an earlier version", "changed to");
+    - narratives of tests or experiments run during development (simulation settings, AUCs, correlations on
+      particular datasets), unless they are published and cited (a brief general reason, such as "tests showed
+      these were redundant", is fine);
+    - extended discussion of what else a feature responds to, and speculation about a method's origin (a short
+      provenance note is fine where the origin is itself notable, e.g. a statistic with no published source).
+
+Where a feature is known to respond to something besides its target property, one plain sentence in Notes is
+enough (and a pointer to a more specific variant, if there is one).
+Longer notes of this kind, worked examples and evidence belong on the function pages of the pyhctsa Interactive
+website (in preparation), not in the docstring.
+Mathematics in ``:math:`` roles renders on the documentation site (MathJax), but appears as raw text in ``help()``,
+so use it sparingly.
+
 Output Conventions
 ------------------
 The calculator turns the output of a feature function into feature columns, so the shape of the output decides
