@@ -354,7 +354,6 @@ Scaling
    :toctree: generated/
 
    pyhctsa.operations.scaling.fluctuation_analysis
-   pyhctsa.operations.scaling.dfa_largescale
    pyhctsa.operations.scaling.mma
    pyhctsa.operations.scaling.higuchi_fd
    pyhctsa.operations.scaling.mfdfa

@@ -1385,32 +1385,6 @@ functions:
       - {detrend_meth: 'resample_1_2', zscore: False}
       - {detrend_meth: 'resample_2_1', zscore: False}
   
-  fluctuation_analysis:
-    python_func: fluctuation_analysis
-    python_module: scaling
-    matlab_func: SC_FluctAnal
-    arg_map:
-      q: q
-      wtf: wtf
-      tau_step: tauStep
-      k: k
-      lag: lag
-      log_inc: logInc
-    matlab_signature: ['y', 'q', 'wtf', 'tauStep', 'k', 'lag', 'logInc']
-    test_cases:
-      - {q: 2.0, wtf: 'nothing', tau_step: 50, log_inc: True, zscore: True}
-      - {q: 2.0, wtf: 'endptdiff', tau_step: 50,  log_inc: True, zscore: True}
-      - {q: 2.0, wtf: 'range', tau_step: 50,  log_inc: True, zscore: True}
-
-      - {q: 2.0, wtf: 'rsrange', tau_step: 50,  log_inc: True, zscore: True}
-      - {q: 2.0, wtf: 'rsrangefit', tau_step: 50,  log_inc: True, zscore: True}
-
-      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 0, log_inc: True, zscore: True}
-      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 1, log_inc: True, zscore: True}
-      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 2, log_inc: True, zscore: True}
-      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 3, log_inc: True, zscore: True}
-      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 2, log_inc: True, zscore: True, abs: True}
-
   spectral_summaries:
     python_func: spectral_summaries
     python_module: spectral

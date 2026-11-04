@@ -1,13 +1,12 @@
 from numpy.typing import ArrayLike
 import numpy as np
-from scipy.interpolate import interp1d
 import logging
 logger = logging.getLogger('pyhctsa')
 
 from ..toolboxes.physionet.mma import mma_hurst
 from ..robust import bf_theil_sen
 from ..fitting import polyfit, robust_linear_fit
-from ..utils import _arange_inclusive, dict_output, frame_signal, _round_half_away_array, _sample_std
+from ..utils import _arange_inclusive, dict_output, get_tau, _round_half_away_array, _sample_std
 from ..operations.correlation import autocorr
 
 def _detrend_windows(y_buff: np.ndarray, k: int) -> np.ndarray:
@@ -48,364 +47,267 @@ def _dfa_fluctuation(resid: np.ndarray, q: float) -> float:
     return float(np.mean(var ** (q / 2)) ** (1 / q))
 
 
-@dict_output
-def fluctuation_analysis(x: np.ndarray, q: float | int = 2,
-                         wtf: str = 'rsrange', tau_step: int = 1, k: int = 1,
-                         lag: int | None = None, log_inc: bool = True) -> dict:
+def _fluctuations(y: np.ndarray, taus: np.ndarray, wtf: str, q: float, k: int) -> np.ndarray:
     """
-    Implements fluctuation analysis by a variety of methods.
- 
-    Much of our implementation is based on the well-explained discussion of scaling
-    methods [1].
- 
-    The main difference between algorithms for estimating scaling exponents amount
-    to differences in how fluctuations, F, are quantified in time-series segments.
-    Many alternatives are implemented in this function.
- 
+    The fluctuation function F(tau) of the profile ``y`` at each window length in ``taus``.
+
+    At each tau the profile is cut into ``N // tau`` non-overlapping windows from the start and
+    again from the end (one set when tau divides N), and F is the q-th order average over all
+    windows of the per-window fluctuation set by ``wtf``.
+    """
+    N = len(y)
+    F = np.empty(len(taus))
+    for i, tau in enumerate(taus):
+        tau = int(tau)
+        n_win = N // tau
+        windows = y[:n_win * tau].reshape(n_win, tau).T
+        if N % tau:
+            windows = np.hstack([windows, y[N - n_win * tau:].reshape(n_win, tau).T])
+        if wtf == 'dfa':
+            # remove a polynomial of order k in every window, then the (MF-)DFA fluctuation function
+            F[i] = _dfa_fluctuation(_detrend_windows(windows, k), q)
+            continue
+        if wtf == 'endptdiff':
+            f = windows[-1, :] - windows[0, :]
+        elif wtf == 'range':
+            f = np.ptp(windows, axis=0)
+        elif wtf == 'std':
+            # sample standard deviation (N-1 normalization) in each window
+            f = np.std(windows, axis=0, ddof=1)
+        elif wtf == 'iqr':
+            # interquartile range in each window, with Hazen's quantile definition
+            # (piecewise-linear through the (i-0.5)/n points)
+            q75, q25 = np.percentile(windows, [75, 25], axis=0, method='hazen')
+            f = q75 - q25
+        elif wtf == 'rsrange':
+            # range after removing the straight line through the window's end points
+            line = np.linspace(0, 1, tau)[:, None] * (windows[-1, :] - windows[0, :]) + windows[0, :]
+            f = np.ptp(windows - line, axis=0)
+        elif wtf == 'rsrangefit':
+            # range after removing a least-squares polynomial of order k in each window
+            f = np.ptp(_detrend_windows(windows, k), axis=0)
+        else:
+            raise ValueError(f"Unknown fluctuation analysis method: {wtf}")
+        F[i] = np.mean(np.abs(f) ** q) ** (1 / q)
+    return F
+
+
+def _log_tau_grid(tau_min: float, tau_max: float, n_tau: int) -> np.ndarray:
+    """``n_tau`` log-spaced window lengths from tau_min to tau_max, rounded, duplicates dropped."""
+    return np.unique(_round_half_away_array(
+        np.exp(np.linspace(np.log(tau_min), np.log(tau_max), int(n_tau))))).astype(int)
+
+
+def _broken_line_fit(log_tau: np.ndarray, log_f: np.ndarray, min_decades: float = 0.3,
+                     min_points: int = 6) -> dict:
+    """
+    Least-squares continuous broken line (two slopes meeting at a breakpoint) through
+    (log_tau, log_f).
+
+    Candidate breakpoints are the grid points that leave at least ``min_decades`` decades of tau and
+    ``min_points`` points on each side (the breakpoint counts on both sides). At each candidate s the
+    model ``log_f = c + a1 * min(u - s, 0) + a2 * max(u - s, 0)`` (u = log tau) is fitted by least
+    squares, and the candidate with the smallest residual sum of squares is kept. If that is the
+    first or last candidate, no change of slope is resolved within the range and all outputs are NaN.
+    """
+    out = dict.fromkeys(['r1_alpha', 'r2_alpha', 'alphadiff', 'r1_ssr', 'r2_ssr'], np.nan)
+    n = len(log_tau)
+    decades = (log_tau - log_tau[0]) / np.log(10)
+    span = decades[-1]
+    cand = [i for i in range(n) if decades[i] >= min_decades and span - decades[i] >= min_decades
+            and i + 1 >= min_points and n - i >= min_points]
+    if len(cand) < 3:
+        return out
+    best = None
+    for j, i in enumerate(cand):
+        s = log_tau[i]
+        design = np.column_stack([np.minimum(log_tau - s, 0), np.maximum(log_tau - s, 0), np.ones(n)])
+        coef, *_ = np.linalg.lstsq(design, log_f, rcond=None)
+        resid = log_f - design @ coef
+        sse = np.sum(resid ** 2)
+        if best is None or sse < best[0]:
+            best = (sse, j, i, coef, resid)
+    _, j, i, coef, resid = best
+    if j == 0 or j == len(cand) - 1:
+        return out
+    out['r1_alpha'], out['r2_alpha'] = coef[0], coef[1]
+    out['alphadiff'] = coef[0] - coef[1]
+    out['r1_ssr'] = np.mean(resid[:i + 1] ** 2)
+    out['r2_ssr'] = np.mean(resid[i:] ** 2)
+    return out
+
+
+@dict_output
+def fluctuation_analysis(x: np.ndarray, q: float | int = 2, wtf: str = 'rsrange', n_tau: int = 50,
+                         k: int = 1, lag: int | None = None) -> dict:
+    """
+    Scaling exponents of a fluctuation function, from a single line and from a broken line.
+
+    Fluctuation analysis measures how the fluctuations F(tau) of the profile (the cumulative sum
+    of the series) grow with the window length tau. For a scaling process ``F(tau) ~ tau**alpha``,
+    with alpha = H for fractional Gaussian noise with Hurst exponent H and alpha = 0.5 for any
+    short-range correlated stationary process. The methods differ in how fluctuations are
+    quantified in each window [1]_. Much of the implementation follows the discussion of
+    scaling methods in [1]_; rescaled-range analysis goes back to Hurst [2]_, and DFA to
+    Peng et al. [3]_ [4]_.
+
+    The profile is cut into non-overlapping windows of length tau, from the start and again from
+    the end of the series, so that every sample is used [5]_. With f the fluctuation in a window
+    (set by ``wtf``), ``F(tau) = mean(|f|**q)**(1/q)`` over the windows; for DFA, F is the q-th
+    order fluctuation function of multifractal DFA [5]_. Timescales are ``n_tau`` log-spaced
+    values of tau, rounded to integers, with duplicates dropped. No window is shorter than
+    ``tau_0 = max(5, 3p)``, where p is the number of parameters removed in each window (k + 1
+    for 'dfa' and 'rsrangefit', 2 for 'rsrange', 0 otherwise): a window only a few times longer
+    than the detrending fit leaves little fluctuation, which biases F low at small tau [6]_.
+
+    Two fits are made to log F against log tau, each over its own range of timescales:
+
+    - A single line from ``max(tau_0, 8 tau_c)`` to N/2, where tau_c is the 1/e decorrelation
+      time of the analysed series (:func:`pyhctsa.utils.get_tau`, rule 'ac1e'). Short-range
+      correlation bends F(tau) over timescales up to several correlation times, so a slope
+      fitted from small tau mixes the short-range correlation into the long-range exponent and
+      can suggest long memory where there is none [7]_ [8]_. Starting the fit beyond the
+      correlation time reduces this; the remaining bias falls as the start of the range moves
+      further beyond the correlation time, at the cost of a shorter, noisier fit [6]_. The slope
+      is the Theil-Sen slope (:func:`pyhctsa.robust.bf_theil_sen`).
+    - A continuous broken line (two slopes that meet at a breakpoint) from tau_0 to N/2, which
+      describes series whose scaling changes across timescales, such as the short- and long-range
+      exponents of heart-rate variability [9]_, or crossovers produced by trends [10]_ [11]_. It is
+      fitted by least squares at each candidate breakpoint, keeping the one with the smallest
+      residual sum of squares. Candidates leave at least 0.3 decades of tau and 6 timescales on
+      each side. If the best breakpoint is the first or last candidate, the range shows no change
+      of slope that it can resolve, and the broken-line outputs are NaN.
+
     References
     ----------
-    .. [1] "Power spectrum and detrended fluctuation analysis: Application to daily
-        temperatures" P. Talkner and R. O. Weber, Phys. Rev. E 62(1) 150 (2000)
-    .. [2] D. C. Caccia et al., "Analyzing exact fractal time series: evaluating dispersional
-        analysis and rescaled range methods", Physica A 246(3-4) 609 (1997)
-    .. [3] J. Alvarez-Ramirez et al., "Using detrended fluctuation analysis for lagged
-        correlation analysis of nonstationary signals", Phys. Rev. E 79(5) 057202 (2009)
-    .. [4] J. W. Kantelhardt et al., "Multifractal detrended fluctuation analysis of
-        nonstationary time series", Physica A 316, 87 (2002)
-    .. [5] C.-K. Peng et al., "Mosaic organization of DNA nucleotides", Phys. Rev. E 49,
-        1685 (1994)
+    .. [1] P. Talkner and R. O. Weber, "Power spectrum and detrended fluctuation analysis:
+        Application to daily temperatures", Phys. Rev. E 62, 150 (2000).
+    .. [2] H. E. Hurst, "Long-term storage capacity of reservoirs", Trans. Am. Soc. Civ. Eng.
+        116, 770 (1951); D. C. Caccia et al., "Analyzing exact fractal time series: evaluating
+        dispersional analysis and rescaled range methods", Physica A 246, 609 (1997).
+    .. [3] C.-K. Peng et al., "Long-range correlations in nucleotide sequences", Nature 356,
+        168 (1992).
+    .. [4] C.-K. Peng et al., "Mosaic organization of DNA nucleotides", Phys. Rev. E 49, 1685
+        (1994).
+    .. [5] J. W. Kantelhardt et al., "Multifractal detrended fluctuation analysis of
+        nonstationary time series", Physica A 316, 87 (2002).
     .. [6] J. W. Kantelhardt et al., "Detecting long-range correlations with detrended
-        fluctuation analysis", Physica A 295, 441 (2001)
- 
+        fluctuation analysis", Physica A 295, 441 (2001).
+    .. [7] D. Maraun, H. W. Rust and J. Timmer, "Tempting long-memory - on the interpretation of
+        DFA results", Nonlin. Processes Geophys. 11, 495 (2004).
+    .. [8] M. Höll and H. Kantz, "The relationship between the detrendend fluctuation analysis
+        and the autocorrelation function of a signal", Eur. Phys. J. B 88 (2015),
+        doi:10.1140/epjb/e2015-60721-1.
+    .. [9] C.-K. Peng, S. Havlin, H. E. Stanley and A. L. Goldberger, "Quantification of scaling
+        exponents and crossover phenomena in nonstationary heartbeat time series", Chaos 5, 82
+        (1995).
+    .. [10] K. Hu, P. Ch. Ivanov, Z. Chen, P. Carpena and H. E. Stanley, "Effect of trends on
+        detrended fluctuation analysis", Phys. Rev. E 64, 011114 (2001).
+    .. [11] R. M. Bryce and K. B. Sprague, "Revisiting detrended fluctuation analysis", Sci. Rep.
+        2, 315 (2012).
+    .. [12] J. Alvarez-Ramirez et al., "Using detrended fluctuation analysis for lagged
+        correlation analysis of nonstationary signals", Phys. Rev. E 79, 057202 (2009).
+
     Parameters
     ----------
     x : array-like
         The input time series.
-    q : Union[float, int], optional
+    q : float or int, optional
         The order of the fluctuation function. The default is q = 2, which gives RMS
         fluctuations (standard DFA for ``wtf='dfa'``). For ``wtf='dfa'`` any real q (including
         negative and non-integer values, and q = 0) gives the q-th order fluctuation function of
-        multifractal DFA (MF-DFA) [4]: with F^2(v) the variance of the detrended profile in
-        window v, ``F_q(s) = ( mean_v F^2(v)^(q/2) )^(1/q)``, and for q = 0 the logarithmic
-        average ``F_0(s) = exp( mean_v ln F^2(v) / 2 )``. The scaling exponent returned is then
-        the generalized Hurst exponent h(q); for q < 0 it is NaN if some window has zero
-        variance. For the other ``wtf`` options, ``F = mean(f ** q) ** (1/q)`` is taken
-        over the per-window quantity f (q must then be nonzero).
+        MF-DFA [5]_: with F^2(v) the variance of the detrended profile in window v,
+        ``F_q = ( mean_v F^2(v)^(q/2) )^(1/q)``, and for q = 0 the logarithmic average
+        ``F_0 = exp( mean_v ln F^2(v) / 2 )``; the exponent is then the generalized Hurst
+        exponent h(q), NaN for q < 0 if some window has zero variance. For the other methods q
+        must be nonzero.
     wtf : str, optional
         What to fluctuate. Options are:
- 
-        - 'endptdiff': Calculates the differences in end points in each segment
-        - 'range': Calculates the range in each segment
-        - 'std': Takes the standard deviation in each segment [1]
-        - 'iqr': Takes the interquartile range in each segment
-        - 'dfa': Detrended fluctuation analysis [5, 6]: the mean of the series is removed, the
-          profile (cumulative sum) is formed, and a polynomial trend of order k is removed
-          in each segment
-        - 'rsrange': Returns the range after removing a straight line fit [2]
-        - 'rsrangefit': Fits a polynomial of order k and returns the range [2]
- 
+
+        - 'dfa': detrended fluctuation analysis [3]_ [4]_ [6]_: the mean of the series is
+          removed before the profile is formed, and F is the RMS residual after removing a
+          least-squares polynomial of order k in each window
+        - 'rsrange': the range after removing the straight line through the window's end
+          points [2]_
+        - 'rsrangefit': the range after removing a least-squares polynomial of order k [2]_
+        - 'std': the standard deviation in each window [1]_
+        - 'iqr': the interquartile range in each window
+        - 'range': the range in each window
+        - 'endptdiff': the difference between the end points of each window
+
         Default is ``'rsrange'``.
- 
-        For 'rsrangefit', an optional timelag can be applied for computing the
-        cumulative sum (integrated profile) [3].
-    tau_step : int, optional
-        Number of tau (locInc true), or increments in tau for linear range. Default is 1.
+    n_tau : int, optional
+        Number of log-spaced timescales in each range, before rounding. Default is 50.
     k : int, optional
-        Polynomial order of detrending (for 'dfa' & 'rsrangefit'). Default is 1 (DFA1).
-        Note that k = 0 (only the segment mean of the profile is removed, no trend) is not
-        DFA proper: its exponent saturates near alpha = 1 for strongly persistent series and
-        is biased low (by about 0.05-0.1 at N of a few hundred) for weakly persistent ones.
+        Order of the polynomial removed in each window, for 'dfa' and 'rsrangefit'. Default is 1
+        (DFA1). k = 0 (only the window mean of the profile is removed) is not DFA proper.
     lag : int or None, optional
-        Optional time-lag, as in Alvarez-Ramirez [3]. Default is `None`.
-    log_inc : bool, optional
-        Whether to use logarithmic increments in tau (it should be logarithmic). Default is `True`.
- 
+        If given, the series is decimated by this factor before the profile is formed, which
+        analyses correlation at that lag [12]_. Default is ``None``.
+
     Returns
     -------
     dict
-        Statistics of fitting a linear function to a plot of log(F) as
-        a function of log(tau), and for fitting two straight lines to the same data,
-        choosing the split point at tau = tau_{split} as that which minimizes the
-        combined fitting errors of two least-squares lines. The lines reported are then
-        fitted by the Theil-Sen method (the median of the slopes between all pairs of
-        points, a robust estimator with a closed form: :func:`pyhctsa.robust.bf_theil_sen`).
+        - ``alpha``, ``ssr``: the slope (the scaling exponent) and the mean squared residual
+          of the single line.
+        - ``r1_alpha``, ``r2_alpha``, ``r1_ssr``, ``r2_ssr``: the slopes of the broken line
+          over shorter (r1) and longer (r2) timescales, and the mean squared residual on each
+          side of the breakpoint.
+        - ``alphadiff``: the change of slope, ``r1_alpha - r2_alpha``.
 
-        - ``linfitint``, ``alpha``, ``se1``, ``se2``, ``ssr``, ``resac1``: the intercept,
-          slope (the scaling exponent alpha), standard errors of the intercept and the
-          slope (the usual least-squares formulas applied to the residuals of the robust
-          fit), mean squared residual, and lag-1 autocorrelation of the residuals, of the
-          single line fitted over all timescales; ``r1_*`` and ``r2_*``: the same for the
-          first (shorter-timescale) and the second line of the two-line fit.
-        - ``logtausplit``, ``prop_r1``: the value of log(tau) at the split between the two
-          lines, and the proportion of the timescales covered by the first line.
-        - ``splitgain``: the proportional reduction in mean squared error from fitting two
-          least-squares lines rather than one over the whole range, one minus the ratio of the
-          minimum two-line error to the one-line error (between 0 and 1; NaN if the one-line
-          fit is exact).
-        - ``meanssr``, ``stdssr``: the mean and the standard deviation of the two-line
-          fitting error across the candidate split points.
-        - ``alphadiff``: the difference ``r1_alpha - r2_alpha`` between the scaling
-          exponents of the two lines.
-
-        NaN if there are too few timescales; the two-line outputs are NaN if the
-        timescales are too few to support two lines.
+        ``alpha`` and ``ssr`` are NaN if tau_c is undefined, if the single-line range spans less
+        than a factor of 1.5 (``N/2 < 1.5 * max(tau_0, 8 tau_c)``), or if it holds fewer than 8
+        distinct timescales. The broken-line outputs are NaN for fewer than 12 distinct
+        timescales, or when no interior breakpoint is resolved. Either set is NaN if F is zero at
+        some timescale of its range.
 
     Notes
     -----
-    The single line is fitted over all timescales from tau = 5 to N/2, so ``alpha`` also
-    responds to short-range correlation, which pulls it away from the long-range exponent.
+    ``alpha`` is NaN for series that decorrelate slowly relative to their length, including
+    strongly persistent ones, for which a long-range exponent cannot be told apart from
+    short-range correlation. Short-range correlation still raises ``alpha`` a little, more for
+    short series. For k >= 2, F(tau) approaches its asymptotic scaling more slowly,
+    and ``alpha`` keeps some dependence on the short-range correlation. The methods that remove
+    no trend in each window ('std', 'iqr', 'range', 'endptdiff', and 'dfa' with k = 0) mostly
+    reflect the short-range correlation. Trends and changes in variance also change F(tau) [10]_
+    [11]_. The location of the breakpoint is not returned: at typical series lengths the curve
+    bends gradually and the breakpoint is poorly determined.
     """
-    # Compute integrated sequence (the profile)
+    out = dict.fromkeys(['alpha', 'ssr', 'r1_alpha', 'r2_alpha', 'alphadiff', 'r1_ssr', 'r2_ssr'], np.nan)
     x = np.asarray(x, dtype=float)
-    if (lag is None) | (lag == 1):
-        x_prof = x
-    else:
-        # if a lag is specified, do a decimation...
-        x_prof = x[::lag]
+    x_prof = x if lag is None or lag == 1 else x[::int(lag)]
+    if len(x_prof) < 4 or not np.all(np.isfinite(x_prof)):
+        return np.nan
+    tau_c = get_tau(x_prof, 'ac1e')  # decorrelation time of the analysed series
     if wtf == 'dfa':
         # DFA integrates the series after removing its mean, so that the profile does not
         # depend on the input having been z-scored (or otherwise centered) beforehand
         x_prof = x_prof - np.mean(x_prof)
     y = np.cumsum(x_prof)
-    N = len(y)  # length of the integrated series (shorter than x if a lag is used)
- 
-    # perform scaling over a range of tau, up to half the time-series length
-    if log_inc:
-        taur = np.unique(_round_half_away_array(np.exp(np.linspace(np.log(5), np.log(np.floor(N / 2)), int(tau_step)))))
-    else:
-        taur = np.arange(5, np.floor(N / 2) + 1, int(tau_step))  # maybe increased??
-    ntau = len(taur)  # analyze the time series across this many timescales
-    if ntau < 8:  # fewer than 8 points
-        logger.warning(f'This time series (N = {N}) is too short to analyze using this fluctuation analysis.')
-        out = np.nan
-        return out
- 
-    F = np.zeros(ntau)
-    # % 2) Compute the fluctuation function, F
-    for i in range(ntau):
-        tau = int(taur[i])  # time scale on which to compute fluctuations
-        y_buff = frame_signal(y, tau)
-        if y_buff.shape[1] > (N // tau):  # zero-padded, remove trailing set of points...
-            y_buff = y_buff[:, :-1]
-        nn = y_buff.shape[1] * tau
- 
-        if wtf == 'nothing':
-            y_dt = y_buff.reshape(nn, 1, order='F')  # column-major: segment by segment
-        elif wtf == 'endptdiff':
-            y_dt = y_buff[-1, :] - y_buff[0, :]
-        elif wtf == "range":
-            y_dt = np.max(y_buff, axis=0) - np.min(y_buff, axis=0)
-        elif wtf == 'std':
-            # sample standard deviation (N-1 normalization) in each segment
-            y_dt = np.std(y_buff, axis=0, ddof=1)
-        elif wtf == 'iqr':
-            # interquartile range in each segment, with Hazen's quantile definition
-            # (piecewise-linear through the (i-0.5)/n points)
-            q75, q25 = np.percentile(y_buff, [75, 25], axis=0, method='hazen')
-            y_dt = q75 - q25
-        elif wtf == 'dfa':
-            # remove a polynomial of order k in every window, then the (MF-)DFA fluctuation function
-            F[i] = _dfa_fluctuation(_detrend_windows(y_buff, k), q)
-            continue
-        elif wtf == 'rsrange':
-            b = y_buff[0, :]
-            m = y_buff[-1, :] - b
-            y_buff = y_buff - (np.linspace(0, 1, tau).reshape(-1, 1) * m + np.ones((tau, 1)) * b)
-            y_dt = np.ptp(y_buff, axis=0)
-        elif wtf == 'rsrangefit':
-            # fit and remove a polynomial of order k in each subsegment
-            y_dt = np.ptp(_detrend_windows(y_buff, k), axis=0)
-        else:
-            raise ValueError(f"Unknown fluctuation analysis method: {wtf}")
-        F[i] = np.mean(y_dt ** q) ** (1 / q)
-    # % Smooth unevenly-distributed points in log space:
-    if log_inc:
-        logtt = np.log(taur)
-        logFF = np.log(F)
-        num_timescales = ntau
-    else:  # need to smooth the unevenly-distributed points (using a spline)
-        logtaur = np.log(taur)
-        logF = np.log(F)
-        num_timescales = 50
-        logtt = np.linspace(np.min(logtaur), np.max(logtaur), num_timescales)
-        logFF = interp1d(logtaur, logF, kind='cubic')(logtt)
-    # % Linear fit the log-log plot: full range
-    out = _robust_linear_fit(logtt, logFF, np.arange(0, num_timescales), '')
- 
-    # minPoints scales with the number of timescales rather than being a fixed constant: a
-    # small fixed minPoints lets the search reach breakpoints right at the edge of the
-    # domain, where a segment of a handful of points trivially achieves near-zero fit
-    # error. The floor of 8 matches _robust_linear_fit's minimum length.
-    sserr = np.full(num_timescales, np.nan)  # don't choose the end points
-    min_points = max(8, int(_round_half_away_array(0.25 * num_timescales)))
-    if num_timescales >= 2 * min_points:
-        # Single straight line over the whole range (least squares), for comparison
-        p0 = np.polyfit(logtt, logFF, 1)
-        ssr1 = np.sum((np.polyval(p0, logtt) - logFF) ** 2) / num_timescales
-        for i in range(min_points - 1, num_timescales - min_points):
-            r1 = slice(0, i + 1)  # first segment: points 0..i  (i+1 points)
-            p1 = np.polyfit(logtt[r1], logFF[r1], 1)
+    N = len(y)
+    n_par = {'dfa': int(k) + 1, 'rsrangefit': int(k) + 1, 'rsrange': 2}.get(wtf, 0)
+    tau_0 = max(5, 3 * n_par)
+    tau_max = np.floor(N / 2)
 
-            r2 = slice(i, num_timescales)  # second segment: points i..end
-            p2 = np.polyfit(logtt[r2], logFF[r2], 1)
+    # Single line, from beyond the correlation time
+    if np.isfinite(tau_c) and tau_max >= 1.5 * max(tau_0, 8 * tau_c):
+        taus = _log_tau_grid(max(tau_0, 8 * tau_c), tau_max, n_tau)
+        if len(taus) >= 8:
+            F = _fluctuations(y, taus, wtf, q, int(k))
+            if np.all(F > 0):
+                log_tau, log_f = np.log(taus), np.log(F)
+                slope, intercept = bf_theil_sen(log_tau, log_f)
+                out['alpha'] = slope
+                out['ssr'] = np.mean((log_f - (slope * log_tau + intercept)) ** 2)
 
-            # Mean squared error pooled across both segments, normalized by the total
-            # number of points sampled (num_timescales), so that it is comparable to ssr1:
-            e1 = np.polyval(p1, logtt[r1]) - logFF[r1]
-            e2 = np.polyval(p2, logtt[r2]) - logFF[r2]
-            sserr[i] = (np.sum(e1 ** 2) + np.sum(e2 ** 2)) / num_timescales
-
-    if np.all(np.isnan(sserr)):
-        # Too few timescales to fit two distinct linear regimes meaningfully
-        r1 = r2 = np.array([], dtype=int)
-        out['prop_r1'] = np.nan
-        out['logtausplit'] = np.nan
-        out['splitgain'] = np.nan
-        out['meanssr'] = np.nan
-        out['stdssr'] = np.nan
-    else:
-        # The error curve can be flat, so take the first split whose error is within a tiny
-        # relative tolerance of the minimum, rather than testing for exact equality (which
-        # rounding errors can decide)
-        min_err = np.nanmin(sserr)
-        break_pt = np.where(sserr <= min_err * (1 + 1e-9))[0][0]
-        r1 = np.arange(0, break_pt + 1)
-        r2 = np.arange(break_pt, num_timescales)
-
-        out['prop_r1'] = len(r1) / num_timescales
-        out['logtausplit'] = logtt[break_pt]
-        # The proportional reduction in squared error from using two lines rather than one
-        # (NaN if the single line is exact to rounding error, when the ratio is meaningless)
-        if ssr1 > 1e-24:
-            out['splitgain'] = max(0.0, 1 - min_err / ssr1)
-        else:
-            out['splitgain'] = np.nan
-
-        out['meanssr'] = np.nanmean(sserr)
-        valid_sserr = sserr[~np.isnan(sserr)]
-        # std of the valid errors, normalised by N-1, and 0 for a single value (pyhctsa convention)
-        out['stdssr'] = np.std(valid_sserr, ddof=1) if valid_sserr.size > 1 else 0.0
-
-    out2 = _robust_linear_fit(logtt, logFF, r1, 'r1_')
-    out3 = _robust_linear_fit(logtt, logFF, r2, 'r2_')
- 
-    out_final = out | out2 | out3
- 
-    # Change in scaling exponent between the two regimes:
-    out_final['alphadiff'] = out_final['r1_alpha'] - out_final['r2_alpha']
- 
-    return out_final
- 
- 
-def _robust_linear_fit(log_tt: np.ndarray, log_ff: np.ndarray, the_range, field_name):
-    """
-    Robust (Theil-Sen) linear fit statistics on a scaling range.
-
-    The line is the Theil-Sen fit (:func:`pyhctsa.robust.bf_theil_sen`); the standard errors
-    are the usual least-squares formulas applied to its residuals. All outputs are NaN for
-    fewer than 8 points or an all-NaN segment.
-    """
-    seg = log_ff[the_range]
-    if np.size(the_range) < 8 or np.all(np.isnan(seg)):
-        return {
-            f'{field_name}linfitint': np.nan,
-            f'{field_name}alpha': np.nan,
-            f'{field_name}se1': np.nan,
-            f'{field_name}se2': np.nan,
-            f'{field_name}ssr': np.nan,
-            f'{field_name}resac1': np.nan,
-        }
-
-    xx = log_tt[the_range]
-    slope, intercept = bf_theil_sen(xx, seg)
-    resid = seg - (slope * xx + intercept)
-    n = len(xx)
-    sxx = np.sum((xx - np.mean(xx)) ** 2)
-    s2 = np.sum(resid ** 2) / (n - 2)
-    out = {}
-    out[f'{field_name}linfitint'] = intercept  # linear fit intercept
-    out[f'{field_name}alpha'] = slope  # linear fit gradient
-    out[f'{field_name}se1'] = np.sqrt(s2 * (1 / n + np.mean(xx) ** 2 / sxx))  # standard error in intercept
-    out[f'{field_name}se2'] = np.sqrt(s2 / sxx)  # standard error in gradient
-    out[f'{field_name}ssr'] = np.mean(resid ** 2)  # mean squares residual
-    out[f'{field_name}resac1'] = autocorr(resid, 1, 'Fourier')  # autocorr at lag 1
+    # Broken line, over all timescales from tau_0
+    if tau_max > tau_0:
+        taus = _log_tau_grid(tau_0, tau_max, n_tau)
+        if len(taus) >= 12:
+            F = _fluctuations(y, taus, wtf, q, int(k))
+            if np.all(F > 0):
+                out |= _broken_line_fit(np.log(taus), np.log(F))
     return out
-
-
-def dfa_largescale(x: ArrayLike, k: int = 1, n_tau: int = 25) -> float:
-    """
-    Large-scale DFA exponent: the DFA scaling exponent fitted over large timescales only.
-
-    A variant of detrended fluctuation analysis [1]_ [2]_ (:func:`fluctuation_analysis` with
-    ``wtf='dfa'``) that estimates the asymptotic scaling ``F(tau) ~ tau**alpha`` of the
-    fluctuation function at large tau (alpha = H for fractional Gaussian noise with Hurst
-    exponent H, 0.5 for any short-range correlated stationary process). The fit uses
-    ``tau in [max(10, sqrt(N)), N/4]``: a lower end that grows with N makes the bias from
-    short-range correlation, which a fit from tau = 5 carries at every N, shrink as N grows, and
-    the upper end keeps at least four windows at the largest timescale. It is not the classical
-    DFA alpha, nor the alpha_1 or alpha_2 of heart-rate variability [4]_, which fit fixed ranges
-    of timescales.
-
-    With the profile ``y_i = sum_{j <= i} (x_j - mean(x))``, cut into ``floor(N/tau)``
-    non-overlapping windows of length tau from the start, ``F(tau)`` is the root-mean-square
-    residual after removing a least-squares polynomial of order k in each window [3]_. The output
-    is the Theil-Sen slope (:func:`pyhctsa.robust.bf_theil_sen`) of ``log F(tau)`` against
-    ``log tau`` over ``tau = round(exp(linspace(log(tau_min), log(tau_max), n_tau)))``
-    (duplicates dropped), with ``tau_min = max(10, sqrt(N))`` and ``tau_max = N/4``. Only the
-    single-line exponent is returned. Telling a scaling exponent from strong short-range
-    correlation still needs long series.
-
-    References
-    ----------
-    .. [1] C.-K. Peng et al., "Mosaic organization of DNA nucleotides", Phys. Rev. E 49, 1685
-           (1994).
-    .. [2] J. W. Kantelhardt et al., "Detecting long-range correlations with detrended
-           fluctuation analysis", Physica A 295, 441 (2001).
-    .. [3] K. Hu, P. Ch. Ivanov, Z. Chen, P. Carpena and H. E. Stanley, "Effect of trends on
-           detrended fluctuation analysis", Phys. Rev. E 64, 011114 (2001).
-    .. [4] C.-K. Peng, S. Havlin, H. E. Stanley and A. L. Goldberger, "Quantification of
-           scaling exponents and crossover phenomena in nonstationary heartbeat time series",
-           Chaos 5, 82 (1995).
-
-    Parameters
-    ----------
-    x : array-like
-        The input time series.
-    k : int, optional
-        Order of the polynomial removed in each window (k = 1: DFA1). Default is 1.
-    n_tau : int, optional
-        Number of log-spaced timescales before rounding to integers. Default is 25.
-
-    Returns
-    -------
-    float
-        The scaling exponent. NaN if the range of timescales spans less than a factor of 2
-        (``N/4 < 2 * max(10, sqrt(N))``, i.e. N < 80), if there are fewer than 8 distinct
-        timescales, or if the series is constant.
-    """
-    x = np.asarray(x, dtype=float)
-    N = len(x)
-    if N < 2 or not np.all(np.isfinite(x)) or np.ptp(x) == 0:
-        return np.nan
-    tau_min = max(10.0, np.sqrt(N))
-    tau_max = N / 4
-    if tau_max < 2 * tau_min or int(k) + 1 >= tau_min:
-        return np.nan
-    taur = np.unique(_round_half_away_array(
-        np.exp(np.linspace(np.log(tau_min), np.log(tau_max), int(n_tau))))).astype(int)
-    if len(taur) < 8:
-        return np.nan
-
-    y = np.cumsum(x - np.mean(x))  # the profile
-    F = np.empty(len(taur))
-    for i, tau in enumerate(taur):
-        n_win = N // tau  # non-overlapping windows from the start; a partial last one is dropped
-        windows = y[:n_win * tau].reshape(n_win, tau).T
-        F[i] = _dfa_fluctuation(_detrend_windows(windows, int(k)), 2)
-    if not np.all(F > 0):  # zero fluctuations at some scale: log F undefined
-        return np.nan
-    slope, _ = bf_theil_sen(np.log(taur), np.log(F))
-    return float(slope)
 
 
 @dict_output

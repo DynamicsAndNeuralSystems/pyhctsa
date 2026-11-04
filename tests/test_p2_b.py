@@ -18,7 +18,6 @@ from pyhctsa.operations import hypothesis_tests as H
 from pyhctsa.operations import medical as MD
 from pyhctsa.operations import physics as PH
 from pyhctsa.operations import pre_process as PP
-from pyhctsa.operations import scaling as SC
 from pyhctsa.operations import spectral as SP
 from pyhctsa.operations import stationarity as ST
 
@@ -353,15 +352,6 @@ class TestSpectralScalingMedical:
             # by a few percent on these short series
             _check(SP.spectral_summaries(SERIES[n], 'fft'), ml, f'SP fft {n}', rtol=1e-3, atol=1e-3,
                    skip=('linfitloglog_mf_a2',))
-
-    @pytest.mark.parametrize('j,wtf,k', [(4, 'rsrange', 1), (5, 'rsrangefit', 1), (7, 'iqr', 1), (10, 'dfa', 2), (11, 'dfa', 3)])
-    def test_fluctuation_analysis(self, j, wtf, k):
-        for n, ml in _series(f'C_fa{j}', ZS):
-            py = SC.fluctuation_analysis(SERIES[n], 2, wtf, 50, k, None, True)
-            _check(py, ml, f'fa {wtf} {n}', rtol=1e-7, atol=1e-9)
-            if isinstance(py, dict):
-                assert 'alphadiff' in py and 'splitgain' in py and 'alpharat' not in py
-                assert np.isnan(py['splitgain']) or 0 <= py['splitgain'] <= 1
 
     def test_wavelet_cwt_zero_guard(self):
         from pyhctsa.operations import wavelet as WL
