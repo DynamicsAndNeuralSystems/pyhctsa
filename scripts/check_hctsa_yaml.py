@@ -9,9 +9,9 @@ calls (parameter settings) as hctsa's ``FeatureSets/INP_mops_hctsa.txt`` (master
     with a ``legacy_name`` in the yaml, plus unregistered public functions of ``pyhctsa/operations`` whose name matches
     an hctsa function, or is listed in ``EXTRA_IMPL``);
 (b) pyhctsa configs that match no hctsa call (a function deregistered in hctsa, or a differing setting);
-(c) output-name mismatches: a call's hctsa fields (``master.field`` of INP_ops) against the keys pyhctsa returns, found
-    by running each matched config on test series (``--run``); pyhctsa-only keys are left out of the feature set with
-    the config's ``exclude:`` (or ``select:``);
+(c) output-name differences: a call's hctsa fields (``master.field`` of INP_ops) against the keys pyhctsa returns, found
+    by running each matched config on test series (``--run``); pyhctsa need not return hctsa's fields, so differing
+    field sets are listed for information, and only a scalar/dict mismatch or a failed run counts as a problem;
 (d) hctsa functions pyhctsa does not implement; python arguments with no hctsa counterpart; calls matched only by
     ignoring explicitly set hctsa arguments that pyhctsa lacks;
 (e) feature labels two configs share (the calculator keeps only the later one).
@@ -19,6 +19,8 @@ calls (parameter settings) as hctsa's ``FeatureSets/INP_mops_hctsa.txt`` (master
 Entries with ``variant_of: <yaml entry>`` and no ``legacy_name`` are pyhctsa-only variants of a ported function (a
 reformulation under a new name; the original stays unchanged). They have no hctsa call to pair with, so they are left
 out of the comparison and only listed, under "pyhctsa-only variants"; their labels still count towards (e).
+An entry's ``dropped_hctsa_calls: [<hctsa master operation label>, ...]`` lists hctsa calls of its function that
+pyhctsa deliberately does not compute; they are listed separately rather than under (a).
 
 A pyhctsa config matches an hctsa call when the input agrees (see ``INPUTS``) and every argument they share has the same
 value. An argument a call leaves out takes hctsa's default (read from the ``if nargin < k`` blocks of the .m file; if
@@ -35,8 +37,9 @@ Usage (from a pyhctsa checkout; the pyhctsa package must be importable)::
     python scripts/check_hctsa_yaml.py /path/to/hctsa --suggest --run  # ... and the exclude: lists for (c)
     python scripts/check_hctsa_yaml.py /path/to/hctsa --json out.json  # everything, machine-readable
 
-Exit status is 1 if anything is reported under (a), (b), (c) or (e), else 0. When hctsa changes its registrations,
-re-run it: new calls of ported functions show up under (a) (``--suggest`` writes the configs), removed ones under (b);
+Exit status is 1 if anything is reported under (a), (b) or (e), or a scalar/dict mismatch or failed run under (c),
+else 0. When hctsa changes its registrations, re-run it: new calls of ported functions show up under (a)
+(``--suggest`` writes the configs), removed ones under (b);
 a function whose arguments or option values do not pair up by name needs an entry in ``ARGMAP`` / ``VALUES``.
 """
 from __future__ import annotations
@@ -530,6 +533,7 @@ def compare(hctsa: Path, yaml_path: Path, log=print, run=False, series=None) -> 
     deregistered = []   # yaml entries whose legacy function is no longer in hctsa's master operations
     no_legacy = []
     variants = []   # pyhctsa-only variants (variant_of, no legacy_name): left out of the comparison
+    dropped = set()   # hctsa call labels pyhctsa deliberately does not compute (dropped_hctsa_calls)
     for module, fns in cfg.items():
         for name, meta in fns.items():
             leg = (meta.get("legacy_name") or "").strip()
@@ -546,6 +550,7 @@ def compare(hctsa: Path, yaml_path: Path, log=print, run=False, series=None) -> 
                     continue
                 leg = hit
             impl.setdefault(leg, []).append((module, name, meta))
+            dropped.update(meta.get("dropped_hctsa_calls") or [])
     registered_py = {(m, n) for v in impl.values() for m, n, _ in v} | {(m, n) for m, n, *_ in deregistered} | set(no_legacy) \
         | {(m, n) for m, n, *_ in variants}
     unregistered = {}   # hctsa function -> (module, python name): implemented, with no yaml entry
@@ -565,7 +570,7 @@ def compare(hctsa: Path, yaml_path: Path, log=print, run=False, series=None) -> 
 
     res = {"missing": defaultdict(list), "extra": [], "extras_ignored": [], "multi": [], "fields": [],
            "unregistered": {f: list(v) for f, v in unregistered.items()}, "not_implemented": not_implemented,
-           "deregistered": [], "variants": variants, "counts": {}}
+           "deregistered": [], "variants": variants, "dropped": defaultdict(list), "counts": {}}
     matched_calls, matched_cfg = set(), set()
     pair_for_label = {}   # yaml label -> hctsa call labels it matches
     all_labels = {}
@@ -605,7 +610,7 @@ def compare(hctsa: Path, yaml_path: Path, log=print, run=False, series=None) -> 
         # calls with no config
         for c in calls:
             if c.label not in matched_calls:
-                res["missing"][f].append(c)
+                res["dropped" if c.label in dropped else "missing"][f].append(c)
     for module, name, leg, meta in deregistered:
         labs = [lab for lab, *_ in expand(meta)]
         res["deregistered"].append((module, name, leg, labs))
@@ -645,7 +650,9 @@ def compare(hctsa: Path, yaml_path: Path, log=print, run=False, series=None) -> 
         "missing_calls": sum(len(v) for v in res["missing"].values()), "extra_configs": len(res["extra"]) +
         sum(len(v[3]) for v in res["deregistered"]),
         "variant_configs": sum(len(v[3]) for v in variants),
+        "dropped_calls": sum(len(v) for v in res["dropped"].values()),
     }
+    res["stale_dropped"] = sorted(dropped - {c.label for c in mops} - matched_calls) + sorted(dropped & matched_calls)
     res["matched_labels"] = sorted(matched_cfg)
     res["pairs"] = pair_for_label
     res["_ops"], res["_calls_of"], res["_impl"] = ops, calls_of, impl
@@ -765,6 +772,13 @@ def report(res: dict, verbose: bool, log=print) -> int:
         log(f"  pyhctsa-only variants (variant_of, not compared with hctsa): {cn['variant_configs']} configs")
         for module, name, orig, labs in res["variants"]:
             log(f"      {module}.{name} (variant of {orig}): {len(labs)} configs")
+    if res.get("dropped"):
+        log(f"  hctsa calls deliberately not computed (dropped_hctsa_calls): {cn['dropped_calls']}")
+        for f, calls in sorted(res["dropped"].items()):
+            log(f"      {f}: " + ", ".join(c.label for c in calls))
+    if res.get("stale_dropped"):
+        log(f"  dropped_hctsa_calls that are not unmatched hctsa calls: {res['stale_dropped']}")
+        n_bad += len(res["stale_dropped"])
     log("\n(a) hctsa calls of implemented functions with no matching config")
     for f, calls in sorted(res["missing"].items()):
         if f in res["unregistered"] or f in res["_impl"]:
@@ -789,10 +803,10 @@ def report(res: dict, verbose: bool, log=print) -> int:
             log(f"      ... {len(items) - 6} more")
         n_bad += len(items)
     if res["fields"]:
-        log("\n(c) output-name mismatches (hctsa fields against the keys pyhctsa returns)")
+        log("\n(c) output-name differences (hctsa fields against the keys pyhctsa returns)")
         for label, cl, kind, detail in res["fields"]:
             log(f"  {label} <-> {cl}: {kind}: {detail}")
-        n_bad += len(res["fields"])
+        n_bad += sum(kind != "fields" for _, _, kind, _ in res["fields"])
     log("\n(d) hctsa functions with no pyhctsa implementation")
     for f in res["not_implemented"]:
         log(f"  {f}: {len(res['_calls_of'][f])} calls")

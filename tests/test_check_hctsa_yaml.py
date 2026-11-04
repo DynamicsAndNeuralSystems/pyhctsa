@@ -163,6 +163,7 @@ def test_default_feature_set_matches_hctsa():
     assert not any(res["missing"].values()), {f: [c.label for c in v] for f, v in res["missing"].items() if v}
     assert not res["extra"] and not res["deregistered"]
     assert not res.get("duplicate_labels")
+    assert not res["stale_dropped"]
 
 
 def test_default_calculator_builds_every_config():
