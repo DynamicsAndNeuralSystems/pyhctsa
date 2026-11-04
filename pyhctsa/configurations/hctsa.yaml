@@ -485,13 +485,15 @@ correlation:
   nonlinear_autocorr_abs_surrogate_ratio:   # pyhctsa-only: absval nonlinear_autocorr on Gaussian ranks / phase-randomised surrogates
     base_name: ac_nl_abs_surr_ratio
     dependencies:
-    configs:   # absval=True configs of nonlinear_autocorr
+    configs:   # the absval=True configs of nonlinear_autocorr
       - {taus: [[1, 2]], zscore: True}
       - {taus: [[1, 2, 3, 4]], zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6]], zscore: True}
       - {taus: [[1, 2, 3, 4, 5, 6, 7, 8]], zscore: True}
       - {taus: [[1, 3]], zscore: True}
       - {taus: [[2, 4]], zscore: True}
       - {taus: [[1, 3, 5, 7]], zscore: True}
+      - {taus: [[2, 4, 6, 8]], zscore: True}
       - {taus: [[1, 4]], zscore: True}
       - {taus: [[1, 1]], zscore: True}
       - {taus: [[2, 2]], zscore: True}
@@ -503,6 +505,7 @@ correlation:
       - {taus: [[0, 2]], zscore: True}
       - {taus: [[0, 3]], zscore: True}
       - {taus: [[0, 4]], zscore: True}
+      - {taus: [[0, 5]], zscore: True}
       - {taus: [[0, 6]], zscore: True}
       - {taus: [[1, 2, 3, 4]], zscore: True, preprocess: decimate_ac1e}
     variant_of: nonlinear_autocorr
@@ -913,9 +916,8 @@ entropy:
     min_length: 4
     dependencies:
     configs:
-      - {m: 5, r: 0.05, zscore: True, select: ['sampen2']}
-      - {m: 5, r: 0.3, zscore: True, select: ['sampen1', 'sampen2', 'sampen5']}
-      - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True, select: ['sampen1', 'sampen2']}
+      - {m: 5, r: 0.2, zscore: True, select: ['sampen1', 'sampen2', 'sampen3']}
+      - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True, select: ['sampen1', 'sampen2', 'sampen3']}
       - {m: 5, r: 0.2, zscore: True, preprocess: decimate_ac1e}
     variant_of: sample_entropy
     ordered_args: ['m', 'r', 'pre_process_how']
