@@ -376,7 +376,10 @@ def ordinal_partition_network(y: ArrayLike, d: int = 3, tau: Union[int, str] = 1
         autocorrelation function; ``'ac1e'``, the floor of its first 1/e crossing;
         or ``'mi'``, the smaller of the first minimum of the Kraskov automutual
         information and the ``'ac1e'`` delay), as in the time-lagged networks of
-        McCullough et al. Default is 1, as used throughout Kulp et al.
+        McCullough et al. The rank-based rules ``'ac-rank'``, ``'ac1e-rank'`` and
+        ``'mi-rank'`` compute these from the ranks of the series, so that the network is
+        unchanged by a strictly increasing transformation of the series. Default is 1, as
+        used throughout Kulp et al.
 
     Returns
     -------

@@ -113,6 +113,11 @@ VALUES: dict[tuple, dict] = {
     ("CO_AutoCorrShape", "stopWhen"): {"pos_drown": "posDrown"},      # pyhctsa still spells these in snake_case
     ("CO_AutoCorrX2Shape", "maxLag"): {"double_drown": "doubleDrown"},
 }
+# pyhctsa sets the delay of these order-based features from the ranks of the series (get_tau's rank-based rules), so
+# that they are invariant to strictly increasing transformations; each stands for hctsa's rule of the same base name
+VALUES.update({(f, "tau"): {"ac-rank": "ac", "ac1e-rank": "ac1e", "mi-rank": "mi"}
+               for f in ("EN_PermEn", "EN_PermEnComplexity", "EN_BubbleEn", "NW_OrdinalPartitionNetwork",
+                         "SB_MotifTwo", "SB_MotifThree", "SB_TransitionMatrix", "SB_TransitionPAlphabet")})
 # arguments that only steer the random-number generator or plotting: left out of the comparison
 IGNORE = {"randomseed", "seed", "doplot", "beverbose", "randomstate", "rng"}
 

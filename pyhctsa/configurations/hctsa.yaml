@@ -827,11 +827,11 @@ entropy:
       - {m: 4, tau: 2, zscore: True, select: ['normPermEn', 'ordAsym']}
       - {m: 5, tau: 2, zscore: True, exclude: ['permEn', 'permEnLE']}
 
-      - {m: 2, tau: 'ac1e', zscore: True, select: ['normPermEn']}   # EN_PermEn(x_z,2,'ac1e')
-      - {m: 3, tau: 'ac1e', zscore: True, select: ['normPermEn']}   # EN_PermEn(x_z,3,'ac1e')
+      - {m: 2, tau: 'ac1e-rank', zscore: True, select: ['normPermEn']}   # EN_PermEn(x_z,2,'ac1e')
+      - {m: 3, tau: 'ac1e-rank', zscore: True, select: ['normPermEn']}   # EN_PermEn(x_z,3,'ac1e')
       - {m: 3, tau: 10, zscore: True, select: ['normPermEn']}   # EN_PermEn(x_z,3,10)
-      - {m: 4, tau: 'ac1e', zscore: True, select: ['normPermEn', 'ordAsym']}   # EN_PermEn(x_z,4,'ac1e')
-      - {m: 5, tau: 'ac1e', zscore: True, exclude: ['permEn', 'permEnLE']}   # EN_PermEn(x_z,5,'ac1e')
+      - {m: 4, tau: 'ac1e-rank', zscore: True, select: ['normPermEn', 'ordAsym']}   # EN_PermEn(x_z,4,'ac1e')
+      - {m: 5, tau: 'ac1e-rank', zscore: True, exclude: ['permEn', 'permEnLE']}   # EN_PermEn(x_z,5,'ac1e')
     legacy_name: EN_PermEn
     ordered_args: ['m', 'tau']
 
@@ -952,7 +952,7 @@ entropy:
     configs:
       - {m: 5, tau: 1, zscore: True}   # EN_BubbleEn(x_z,5,1)
       - {m: 10, tau: 1, zscore: True}   # EN_BubbleEn(x_z,10,1)
-      - {m: 10, tau: 'mi', zscore: True}   # EN_BubbleEn(x_z,10,'mi')
+      - {m: 10, tau: 'mi-rank', zscore: True}   # EN_BubbleEn(x_z,10,'mi')
       - {m: 10, tau: 1, zscore: True, preprocess: diff1}   # EN_BubbleEn(diff(x_z),10,1)
     legacy_name: EN_BubbleEn
     ordered_args: ['m', 'tau']
@@ -986,10 +986,10 @@ entropy:
     configs:
       - {m: 4, tau: 1, zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,4,1)
       - {m: 4, tau: 2, zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,4,2)
-      - {m: 4, tau: 'ac1e', zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,4,'ac1e')
+      - {m: 4, tau: 'ac1e-rank', zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,4,'ac1e')
       - {m: 5, tau: 1, zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,5,1)
       - {m: 5, tau: 2, zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,5,2)
-      - {m: 5, tau: 'ac1e', zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,5,'ac1e')
+      - {m: 5, tau: 'ac1e-rank', zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,5,'ac1e')
     legacy_name: EN_PermEnComplexity
     ordered_args: ['m', 'tau']
 
@@ -1642,11 +1642,11 @@ symbolic:
       - {how_to_cg: 'quantile', num_groups: 4, tau: 1, zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}
       - {how_to_cg: 'quantile', num_groups: 5, tau: 1, zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}
 
-      - {how_to_cg: 'quantile', num_groups: 2, tau: 'mi', zscore: True, select: ['T1', 'sumdiagcov']}   # SB_TransitionMatrix(x_z,'quantile',2,'mi')
-      - {how_to_cg: 'quantile', num_groups: 3, tau: 'mi', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap', 'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9']}   # SB_TransitionMatrix(x_z,'quantile',3,'mi')
-      - {how_to_cg: 'quantile', num_groups: 4, tau: 'mi', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}   # SB_TransitionMatrix(x_z,'quantile',4,'mi')
-      - {how_to_cg: 'quantile', num_groups: 5, tau: 'mi', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}   # SB_TransitionMatrix(x_z,'quantile',5,'mi')
-      - {how_to_cg: 'updown', num_groups: 2, tau: 'ac', zscore: True, select: ['lam2mod', 'stddiag', 'sumdiagcov']}   # SB_TransitionMatrix(x_z,'updown',2,'ac')
+      - {how_to_cg: 'quantile', num_groups: 2, tau: 'mi-rank', zscore: True, select: ['T1', 'sumdiagcov']}   # SB_TransitionMatrix(x_z,'quantile',2,'mi')
+      - {how_to_cg: 'quantile', num_groups: 3, tau: 'mi-rank', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap', 'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9']}   # SB_TransitionMatrix(x_z,'quantile',3,'mi')
+      - {how_to_cg: 'quantile', num_groups: 4, tau: 'mi-rank', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}   # SB_TransitionMatrix(x_z,'quantile',4,'mi')
+      - {how_to_cg: 'quantile', num_groups: 5, tau: 'mi-rank', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}   # SB_TransitionMatrix(x_z,'quantile',5,'mi')
+      - {how_to_cg: 'updown', num_groups: 2, tau: 'ac-rank', zscore: True, select: ['lam2mod', 'stddiag', 'sumdiagcov']}   # SB_TransitionMatrix(x_z,'updown',2,'ac')
       - {how_to_cg: 'updown', num_groups: 2, tau: 1, zscore: True, select: ['lam2mod', 'stddiag', 'sumdiagcov']}   # SB_TransitionMatrix(x_z,'updown',2,1)
     legacy_name: SB_TransitionMatrix
     ordered_args: ['how_to_cg', 'num_groups', 'tau']
@@ -1656,7 +1656,7 @@ symbolic:
     dependencies:
     configs:
       - {num_groups: [!range [2, 40]], tau: 1, zscore: True, exclude: ['maxdiagfexp_adjr2', 'meandiagfexp_adjr2', 'stdeigfexp_adjr2', 'trcovfexp_adjr2', 'trfexp_adjr2']}
-      - {num_groups: [[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]], tau: 'ac1e', zscore: True, exclude: ['maxdiagfexp_adjr2', 'meandiagfexp_adjr2', 'stdeigfexp_adjr2', 'trcovfexp_adjr2', 'trfexp_adjr2']}   # SB_TransitionPAlphabet(x_z,2:20,'ac1e')
+      - {num_groups: [[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]], tau: 'ac1e-rank', zscore: True, exclude: ['maxdiagfexp_adjr2', 'meandiagfexp_adjr2', 'stdeigfexp_adjr2', 'trcovfexp_adjr2', 'trfexp_adjr2']}   # SB_TransitionPAlphabet(x_z,2:20,'ac1e')
     legacy_name: SB_TransitionPAlphabet
     ordered_args: ['num_groups', 'tau']
 
@@ -1680,7 +1680,7 @@ symbolic:
       - {cg_how: 'quantile', zscore: True, exclude: ['a', 'b', 'c', 'h']}
       - {cg_how: 'diffquant', zscore: True, exclude: ['a', 'b', 'c', 'h']}
       - {cg_how: 'diffquant', tau: 'ac1e', zscore: True, exclude: ['a', 'b', 'c', 'h']}   # SB_MotifThree(x_z,'diffquant','ac1e')
-      - {cg_how: 'quantile', tau: 'ac1e', zscore: True, exclude: ['a', 'b', 'c', 'h']}   # SB_MotifThree(x_z,'quantile','ac1e')
+      - {cg_how: 'quantile', tau: 'ac1e-rank', zscore: True, exclude: ['a', 'b', 'c', 'h']}   # SB_MotifThree(x_z,'quantile','ac1e')
     legacy_name: SB_MotifThree
     ordered_args: ['cg_how', 'tau']
 
@@ -1691,9 +1691,9 @@ symbolic:
       - {binarize_how: 'diff', zscore: True, exclude: ['d', 'ud', 'udd', 'uddd', 'uud', 'uuud']}
       - {binarize_how: 'mean', zscore: True, exclude: ['d', 'ud', 'udd', 'uddd', 'uud', 'uuud']}
       - {binarize_how: 'median', zscore: True, exclude: ['d', 'h', 'u', 'ud', 'udd', 'uddd', 'uud', 'uuud']}
-      - {binarize_how: 'diff', tau: 'ac1e', zscore: True, exclude: ['d', 'ud', 'udd', 'uddd', 'uud', 'uuud']}   # SB_MotifTwo(x_z,'diff','ac1e')
-      - {binarize_how: 'mean', tau: 'ac1e', zscore: True, exclude: ['d', 'ud', 'udd', 'uddd', 'uud', 'uuud']}   # SB_MotifTwo(x_z,'mean','ac1e')
-      - {binarize_how: 'median', tau: 'ac1e', zscore: True, exclude: ['d', 'h', 'u', 'ud', 'udd', 'uddd', 'uud', 'uuud']}   # SB_MotifTwo(x_z,'median','ac1e')
+      - {binarize_how: 'diff', tau: 'ac1e-rank', zscore: True, exclude: ['d', 'ud', 'udd', 'uddd', 'uud', 'uuud']}   # SB_MotifTwo(x_z,'diff','ac1e')
+      - {binarize_how: 'mean', tau: 'ac1e', zscore: True, exclude: ['d', 'h', 'u', 'ud', 'udd', 'uddd', 'uud', 'uuud']}   # SB_MotifTwo(x_z,'mean','ac1e')
+      - {binarize_how: 'median', tau: 'ac1e-rank', zscore: True, exclude: ['d', 'h', 'u', 'ud', 'udd', 'uddd', 'uud', 'uuud']}   # SB_MotifTwo(x_z,'median','ac1e')
     legacy_name: SB_MotifTwo
     ordered_args: ['binarize_how', 'tau']
   
@@ -2227,7 +2227,7 @@ graph:
     dependencies:
     configs:
       - {d: 4, tau: 1, zscore: True}   # NW_OrdinalPartitionNetwork(x_z,4,1)
-      - {d: 4, tau: 'ac1e', zscore: True, exclude: ['maxEdgeWeight', 'maxInDegree', 'maxOutDegree']}   # NW_OrdinalPartitionNetwork(x_z,4,'ac1e')
+      - {d: 4, tau: 'ac1e-rank', zscore: True, exclude: ['maxEdgeWeight', 'maxInDegree', 'maxOutDegree']}   # NW_OrdinalPartitionNetwork(x_z,4,'ac1e')
     legacy_name: NW_OrdinalPartitionNetwork
     ordered_args: ['tau']
 

@@ -1,3 +1,5 @@
+from itertools import product
+
 import numpy as np
 from typing import Optional, Union
 from numpy.typing import ArrayLike
@@ -5,11 +7,10 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 from scipy.stats import mstats
-from scipy.signal import resample_poly
 
 from ..operations.correlation import autocorr
 from ..robust import bf_exp_fit
-from ..utils import dict_output, _sample_std, binarize, sign_change, get_tau
+from ..utils import dict_output, _sample_std, binarize, sign_change, get_tau, time_delay_embed
 
 def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_groups: int = 3,
              coarse_grain_method: str = 'quantile', num_iters: int = 500,
@@ -212,46 +213,49 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
 
     return out
 
+_SYMBOLIC_TAU_RULES = ('ac', 'ac1e', 'mi', 'ac-rank', 'ac1e-rank', 'mi-rank')
+
+
 def _resolve_tau(y: np.ndarray, tau: Union[int, float, str]) -> Union[int, float]:
     """
-    Resolve a time delay as hctsa's SB_MotifTwo/Three, SB_TransitionMatrix and
-    SB_TransitionPAlphabet do.
+    Resolve the lag of hctsa's SB_MotifTwo/Three, SB_TransitionMatrix and SB_TransitionPAlphabet.
 
-    `tau` is a number of samples, or a string that sets it from the series: ``'ac'`` (first
-    zero crossing of the autocorrelation function), ``'ac1e'`` (floor of its first 1/e
-    crossing) or ``'mi'`` (the smaller of the first minimum of the Kraskov automutual
-    information and the 'ac1e' delay), see :func:`pyhctsa.utils.get_tau`. A delay set from the
-    series is capped at floor(N/50), so that the downsampled series stays long enough to count
-    words/transitions. Returns NaN if the delay cannot be determined (e.g., an undefined ACF
-    of a constant series, or an ACF that never falls to 1/e for 'ac1e').
+    `tau` is a number of samples (at least 1), or a string that sets it from the series:
+    ``'ac'`` (first zero crossing of the autocorrelation function), ``'ac1e'`` (floor of its
+    first 1/e crossing) or ``'mi'`` (the smaller of the first minimum of the Kraskov automutual
+    information and the 'ac1e' delay), or one of these computed from the ranks of the series
+    (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``); see :func:`pyhctsa.utils.get_tau`. Returns
+    NaN if the delay cannot be determined (e.g., an undefined ACF of a constant series, or an ACF
+    that never falls to 1/e for 'ac1e').
     """
     if isinstance(tau, str):
-        if tau not in ('ac', 'ac1e', 'mi'):
-            raise ValueError(f"Unknown tau '{tau}': use an integer, 'ac', 'ac1e' or 'mi'")
+        if tau not in _SYMBOLIC_TAU_RULES:
+            raise ValueError(f"Unknown tau '{tau}': use an integer or one of {_SYMBOLIC_TAU_RULES}")
         tau = get_tau(y, tau)
-        if np.isnan(tau):
-            return np.nan
-        if tau > len(y) / 50:  # cap at 2% of the series length
-            tau = int(np.floor(len(y) / 50))
     if np.isnan(tau):
         return np.nan
+    if tau < 1:
+        raise ValueError(f"The lag tau must be at least 1, got {tau}")
     return int(tau)
 
 
-def _downsample_by_tau(y: np.ndarray, tau: Union[int, str]) -> Optional[np.ndarray]:
+def _lagged_word_probs(s: np.ndarray, length: int, tau: int, alphabet_size: int) -> tuple:
     """
-    Downsample `y` by a time delay before symbolizing it (as hctsa's SB_MotifTwo/Three).
+    Probabilities of the lagged words of a symbol sequence, and the number of words.
 
-    `tau` is an integer or a rule that sets it from the series ('ac', 'ac1e', 'mi'; see
-    :func:`_resolve_tau`). The series is downsampled at rate 1:tau (polyphase anti-alias filter,
-    :func:`scipy.signal.resample_poly`) if tau > 1. Returns None if tau cannot be determined.
+    The words of `length` symbols at lag `tau` are ``(s[t], s[t + tau], ..., s[t + (length-1)*tau])``
+    for every ``t = 0, ..., n - 1 - (length-1)*tau`` (the rows of
+    :func:`~pyhctsa.utils.time_delay_embed`), for symbols ``s`` in ``0, ..., alphabet_size - 1``.
+    Returns an array of shape ``(alphabet_size,) * length`` whose element ``[i, j, ...]`` is the
+    fraction of words ``(i, j, ...)`` (all NaN if there is no word), and the number of words.
     """
-    tau = _resolve_tau(y, tau)
-    if np.isnan(tau):
-        return None
-    if tau > 1:  # symbolize words at this lag by downsampling first
-        y = resample_poly(y, 1, tau)
-    return y
+    shape = (alphabet_size,) * length
+    n_words = len(s) - (length - 1) * tau
+    if n_words <= 0:
+        return np.full(shape, np.nan), 0
+    words = time_delay_embed(s, length, tau).astype(np.int64)
+    code = words @ alphabet_size ** np.arange(length - 1, -1, -1)  # first symbol most significant
+    return np.bincount(code, minlength=alphabet_size ** length).reshape(shape) / n_words, n_words
 
 
 @dict_output
@@ -278,164 +282,53 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff', tau: Union[int, str] = 1
         Default is ``'diff'``.
 
     tau : int or str, optional
-        The time series is first downsampled by this factor (polyphase anti-alias filter,
-        :func:`scipy.signal.resample_poly`), so that the words are formed at this lag: an integer, or a
-        rule that sets it from the series: ``'ac'`` (the first zero-crossing of the
-        autocorrelation function), ``'ac1e'`` (the floor of its first 1/e crossing) or
-        ``'mi'`` (the smaller of the first minimum of the Kraskov automutual information and
-        the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`). A delay set by a rule is capped
-        at floor(N/50). Default is 1 (no downsampling). NaN is returned if tau cannot be
-        determined.
+        The lag of the words. The whole series is binarized to symbols ``s``, and the words of
+        length ``L`` are ``(s[t], s[t + tau], ..., s[t + (L-1)*tau])`` for every ``t``, as in a
+        time-delay embedding; for 'diff' the symbols are the signs of the increments at lag
+        tau, ``y[t + tau] - y[t]``. An integer, or a rule that sets it from the series:
+        ``'ac'`` (the first zero-crossing of the autocorrelation function), ``'ac1e'`` (the
+        floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first minimum of the
+        Kraskov automutual information and the 'ac1e' delay), or one of these computed from the
+        ranks of the series (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``); see
+        :func:`pyhctsa.utils.get_tau`.
+        With the order-based symbols ('diff', 'median') and a rank-based rule, the result is
+        unchanged by a strictly increasing transformation of the series. Default is 1. NaN is
+        returned if tau cannot be determined, or leaves fewer than two words of length 4.
 
     Returns
     -------
     dict
-        A dictionary containing:
-
-        - 'prob_len_1', 'prob_len_2', ..., 'prob_len_4': 
-            Lists of probabilities for each binary word of lengths 1 to 4.
-        - 'entropy_len_1', 'entropy_len_2', ..., 'entropy_len_4': 
-            Entropy values associated with the word distributions of lengths 1 to 4.
+        The probability of each binary word of length 1 to 4, keyed by the word in the letters
+        'u' (1) and 'd' (0) ('u', 'd', 'dd', 'du', ..., 'uuuu'), and the Miller-Madow-corrected
+        entropy of the words of each length ('h', 'hh', 'hhh', 'hhhh'). NaN if the series is
+        too short for two words of length 4.
 
     """
-    # Downsample at lag tau, if requested
-    y = _downsample_by_tau(np.asarray(y), tau)
-    if y is None:
+    tau = _resolve_tau(np.asarray(y), tau)
+    if np.isnan(tau):
         return np.nan
 
-    # Generate a binarized version of the input time series
-    y_bin = binarize(y, binarize_how)
+    # Binarize the whole series (for 'diff', the increments at lag tau)
+    y_bin = binarize(y, binarize_how, lag=tau).astype(int)
 
     # A median split fixes the marginal symbol frequencies (used for the
     # Miller-Madow degrees of freedom in _f_entropy)
     fixed_marginals = (binarize_how == 'median')
 
-    # Define the length of the new, symbolized sequence, N
-    N = len(y_bin)
-
-    if N < 5:
+    if len(y_bin) - 3 * tau < 2:  # fewer than two words of length 4
         logger.warning("Time series too short!")
         return np.nan
-    # Binary sequences of length 1
-    r1 = (y_bin == 1) # 1
-    r0 = (y_bin == 0) # 0
 
-    # ------ Record these -------
-    # (Will be dependent outputs since signal is binary, sum to 1)
+    # Probabilities of the words of 1 to 4 symbols at lag tau, and their Miller-Madow-corrected
+    # entropies
     out = {}
-    out['u'] = np.mean(r1) # proportion 1 (corresponds to a movement up for 'diff')
-    out['d'] = np.mean(r0) # proportion 0 (corresponds to a movement down for 'diff')
-    pp = np.array([out['d'], out['u']])
-    out['h'] = _f_entropy(pp, N, 1, 2, fixed_marginals) # Miller-Madow
-
-    # Binary sequences of length 2:
-    r1 = r1[:-1]
-    r0 = r0[:-1]
-
-    r00 = np.logical_and(r0, y_bin[1:] == 0)
-    r01 = np.logical_and(r0, y_bin[1:] == 1)
-    r10 = np.logical_and(r1, y_bin[1:] == 0)
-    r11 = np.logical_and(r1, y_bin[1:] == 1)
-
-    out['dd'] = np.mean(r00)  # down, down
-    out['du'] = np.mean(r01)  # down, up
-    out['ud'] = np.mean(r10)  # up, down
-    out['uu'] = np.mean(r11)  # up, up
-
-    pp = np.array([out['dd'], out['du'], out['ud'], out['uu']])
-    out['hh'] = _f_entropy(pp, N - 1, 2, 2, fixed_marginals)
-
-    # -----------------------------
-    # Binary sequences of length 3:
-    # -----------------------------
-    # Make sure ranges are valid for looking at the next one
-    r00 = r00[:-1]
-    r01 = r01[:-1]
-    r10 = r10[:-1]
-    r11 = r11[:-1]
-
-    # 000
-    r000 = np.logical_and(r00, y_bin[2:] == 0)
-    # 001 
-    r001 = np.logical_and(r00, y_bin[2:] == 1)
-    r010 = np.logical_and(r01, y_bin[2:] == 0)
-    r011 = np.logical_and(r01, y_bin[2:] == 1)
-    r100 = np.logical_and(r10, y_bin[2:] == 0)
-    r101 = np.logical_and(r10, y_bin[2:] == 1)
-    r110 = np.logical_and(r11, y_bin[2:] == 0)
-    r111 = np.logical_and(r11, y_bin[2:] == 1)
-
-    # ----- Record these -----
-    out['ddd'] = np.mean(r000)
-    out['ddu'] = np.mean(r001)
-    out['dud'] = np.mean(r010)
-    out['duu'] = np.mean(r011)
-    out['udd'] = np.mean(r100)
-    out['udu'] = np.mean(r101)
-    out['uud'] = np.mean(r110)
-    out['uuu'] = np.mean(r111)
-
-    ppp = np.array([out['ddd'], out['ddu'], out['dud'], 
-                    out['duu'], out['udd'], out['udu'], 
-                    out['uud'], out['uuu']])
-    out['hhh'] = _f_entropy(ppp, N - 2, 3, 2, fixed_marginals)
-
-    # -------------------
-    # 4
-    # -------------------
-    # Make sure ranges are valid for looking at the next one
-
-    r000 = r000[:-1]
-    r001 = r001[:-1]
-    r010 = r010[:-1]
-    r011 = r011[:-1]
-    r100 = r100[:-1]
-    r101 = r101[:-1]
-    r110 = r110[:-1]
-    r111 = r111[:-1]
-
-    r0000 = np.logical_and(r000, y_bin[3:] == 0)
-    r0001 = np.logical_and(r000, y_bin[3:] == 1)
-    r0010 = np.logical_and(r001, y_bin[3:] == 0)
-    r0011 = np.logical_and(r001, y_bin[3:] == 1)
-    r0100 = np.logical_and(r010, y_bin[3:] == 0)
-    r0101 = np.logical_and(r010, y_bin[3:] == 1)
-    r0110 = np.logical_and(r011, y_bin[3:] == 0)
-    r0111 = np.logical_and(r011, y_bin[3:] == 1)
-    r1000 = np.logical_and(r100, y_bin[3:] == 0)
-    r1001 = np.logical_and(r100, y_bin[3:] == 1)
-    r1010 = np.logical_and(r101, y_bin[3:] == 0)
-    r1011 = np.logical_and(r101, y_bin[3:] == 1)
-    r1100 = np.logical_and(r110, y_bin[3:] == 0)
-    r1101 = np.logical_and(r110, y_bin[3:] == 1)
-    r1110 = np.logical_and(r111, y_bin[3:] == 0)
-    r1111 = np.logical_and(r111, y_bin[3:] == 1)
-
-    # ----- Record these -----
-    out['dddd'] = np.mean(r0000)
-    out['dddu'] = np.mean(r0001)
-    out['ddud'] = np.mean(r0010)
-    out['dduu'] = np.mean(r0011)
-    out['dudd'] = np.mean(r0100)
-    out['dudu'] = np.mean(r0101)
-    out['duud'] = np.mean(r0110)
-    out['duuu'] = np.mean(r0111)
-    out['uddd'] = np.mean(r1000)
-    out['uddu'] = np.mean(r1001)
-    out['udud'] = np.mean(r1010)
-    out['uduu'] = np.mean(r1011)
-    out['uudd'] = np.mean(r1100)
-    out['uudu'] = np.mean(r1101)
-    out['uuud'] = np.mean(r1110)
-    out['uuuu'] = np.mean(r1111)
-
-    pppp = np.array([out['dddd'], out['dddu'], out['ddud'], 
-                     out['dduu'], out['dudd'], out['dudu'], 
-                     out['duud'], out['duuu'], out['uddd'], 
-                     out['uddu'], out['udud'], out['uduu'], 
-                     out['uudd'], out['uudu'], out['uuud'], 
-                     out['uuuu']])
-    out['hhhh'] = _f_entropy(pppp, N - 3, 4, 2, fixed_marginals)
+    for length in range(1, 5):
+        p, n_words = _lagged_word_probs(y_bin, length, tau, 2)
+        if length == 1:
+            out['u'], out['d'] = p[1], p[0]  # 'u': an increase for 'diff'
+        else:
+            out.update(zip(map(''.join, product('du', repeat=length)), p.ravel()))
+        out['h' * length] = _f_entropy(p, n_words, length, 2, fixed_marginals)
 
     return out
 
@@ -457,14 +350,18 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile', tau: Union[int, str] = 1
         Default is ``'quantile'``.
 
     tau : int or str, optional
-        The time series is first downsampled by this factor (polyphase anti-alias filter,
-        :func:`scipy.signal.resample_poly`), so that the words are formed at this lag: an integer, or a
-        rule that sets it from the series: ``'ac'`` (the first zero-crossing of the
-        autocorrelation function), ``'ac1e'`` (the floor of its first 1/e crossing) or
-        ``'mi'`` (the smaller of the first minimum of the Kraskov automutual information and
-        the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`). A delay set by a rule is capped
-        at floor(N/50). Default is 1 (no downsampling). NaN is returned if tau cannot be
-        determined.
+        The lag of the words. The whole series is coarse-grained to letters ``s``, and the words
+        of length ``L`` are ``(s[t], s[t + tau], ..., s[t + (L-1)*tau])`` for every ``t``, as in
+        a time-delay embedding; for 'diffquant' the letters code the increments at lag tau,
+        ``y[t + tau] - y[t]``. An integer, or a rule that sets it from the series:
+        ``'ac'`` (the first zero-crossing of the autocorrelation function), ``'ac1e'`` (the
+        floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first minimum of the
+        Kraskov automutual information and the 'ac1e' delay), or one of these computed from the
+        ranks of the series (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``); see
+        :func:`pyhctsa.utils.get_tau`.
+        With 'quantile' and a rank-based rule, the result is unchanged by a strictly increasing
+        transformation of the series. Default is 1. NaN is returned if tau cannot be
+        determined or leaves no symbol, and each output is NaN for a word length with no word.
 
     Returns
     -------
@@ -472,86 +369,29 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile', tau: Union[int, str] = 1
         Statistics on words of length 1, 2, 3, and 4.
     """
 
-    # Downsample at lag tau, if requested
-    y = _downsample_by_tau(np.asarray(y), tau)
-    if y is None:
+    y = np.asarray(y)
+    tau = _resolve_tau(y, tau)
+    if np.isnan(tau):
         return np.nan
 
-    # Coarse-grain the data y -> yt
-    num_letters = 3
+    if cg_how == 'diffquant' and tau >= len(y):  # no increment at this lag
+        return np.nan
+
+    # Coarse-grain the whole series (for 'diffquant', its increments at lag tau) to {1, 2, 3}
     if cg_how == 'quantile':
-        yt = coarse_grain(y, 'quantile', num_letters)
+        yt = coarse_grain(y, 'quantile', 3)
     elif cg_how == 'diffquant':
-        yt = coarse_grain(np.diff(y), 'quantile', num_letters)
+        yt = coarse_grain(y, 'diff', 3, lag=tau)
     else:
         raise ValueError(f"Unknown coarse-graining method {cg_how}")
 
-    # So we have a vectory yt with entries in {1, 2, 3}
-    N = len(yt) # length of the symbolized sequence derived from the time series
-
-    # ------------------------------------------------------------------------------
-    # Words of length 1
-    # ------------------------------------------------------------------------------
-    out1 = np.zeros(3)
-    r1 = [np.where(yt == i + 1)[0] for i in range(3)]
-    for i in range(3):
-        out1[i] = len(r1[i]) / N
-
-    out = {
-        'a': out1[0], 'b': out1[1], 'c': out1[2],
-        'h': _f_entropy(out1, N, 1, 3, True)
-    }
-
-    # ------------------------------------------------------------------------------
-    # Words of length 2
-    # ------------------------------------------------------------------------------
-
-    r1 = [r[:-1] if len(r) > 0 and r[-1] == N - 1 else r for r in r1]
-    out2 = np.zeros((3, 3))
-    r2 = [[r1[i][yt[r1[i] + 1] == j + 1] for j in range(3)] for i in range(3)]
-    for i in range(3):
-        for j in range(3):
-            out2[i, j] = len(r2[i][j]) / (N - 1) if N > 1 else np.nan  # (no word: NaN, as hctsa)
-
-    out.update({
-        'aa': out2[0, 0], 'ab': out2[0, 1], 'ac': out2[0, 2],
-        'ba': out2[1, 0], 'bb': out2[1, 1], 'bc': out2[1, 2],
-        'ca': out2[2, 0], 'cb': out2[2, 1], 'cc': out2[2, 2],
-        'hh': _f_entropy(out2, N - 1, 2, 3, True) if N > 1 else np.nan
-    })
-
-    # ------------------------------------------------------------------------------
-    # Words of length 3
-    # ------------------------------------------------------------------------------
-
-    r2 = [[r[:-1] if len(r) > 0 and r[-1] == N - 2 else r for r in row] for row in r2]
-    out3 = np.zeros((3, 3, 3))
-    r3 = [[[r2[i][j][yt[r2[i][j] + 2] == k + 1] for k in range(3)] for j in range(3)] for i in range(3)]
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                out3[i, j, k] = len(r3[i][j][k]) / (N - 2) if N > 2 else np.nan
-
-    out.update({f'{chr(97+i)}{chr(97+j)}{chr(97+k)}': out3[i, j, k] 
-                for i in range(3) for j in range(3) for k in range(3)})
-    out['hhh'] = _f_entropy(out3, N - 2, 3, 3, True) if N > 2 else np.nan
-
-    # ------------------------------------------------------------------------------
-    # Words of length 4
-    # ------------------------------------------------------------------------------
-
-    r3 = [[[r[:-1] if len(r) > 0 and r[-1] == N - 3 else r for r in plane] for plane in cube] for cube in r3]
-    out4 = np.zeros((3, 3, 3, 3))
-    r4 = [[[[r3[i][j][k][yt[r3[i][j][k] + 3] == l + 1] for l in range(3)] for k in range(3)] for j in range(3)] for i in range(3)]
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                for l in range(3):
-                    out4[i, j, k, l] = len(r4[i][j][k][l]) / (N - 3) if N > 3 else np.nan
-
-    out.update({f'{chr(97+i)}{chr(97+j)}{chr(97+k)}{chr(97+l)}': out4[i, j, k, l] 
-                for i in range(3) for j in range(3) for k in range(3) for l in range(3)})
-    out['hhhh'] = _f_entropy(out4, N - 3, 4, 3, True) if N > 3 else np.nan
+    # Probabilities of the words of 1 to 4 letters at lag tau, and their Miller-Madow-corrected
+    # entropies (NaN if there is no word)
+    out = {}
+    for length in range(1, 5):
+        p, n_words = _lagged_word_probs(yt - 1, length, tau, 3)
+        out.update(zip(map(''.join, product('abc', repeat=length)), p.ravel()))
+        out['h' * length] = _f_entropy(p, n_words, length, 3, True) if n_words > 0 else np.nan
 
     return out
 
@@ -854,15 +694,18 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     num_groups : int, optional
         number of groups in the course-graining. Default is 2.
     tau : int or str, optional
-        analyze transition matrices corresponding to this lag. We
-        could either downsample the time series at this lag and then do the
-        discretization as normal, or do the discretization and then just
-        look at this dicrete lag. Here we do the former. Can also set tau to a string
-        that sets it from the series: ``'ac'`` (the first zero-crossing of the
-        autocorrelation function), ``'ac1e'`` (the floor of its first 1/e crossing) or
-        ``'mi'`` (the smaller of the first minimum of the Kraskov automutual information
-        and the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`). All three are capped at
-        floor(N/50). Default is 1.
+        The lag of the transitions. The whole series is discretized to states ``s``, and the
+        transitions are the pairs ``(s[t], s[t + tau])`` for every ``t``; for 'diff' and
+        'updown' the states code the increments at lag tau, ``y[t + tau] - y[t]``. An integer,
+        or a rule that sets it from the series:
+        ``'ac'`` (the first zero-crossing of the autocorrelation function), ``'ac1e'`` (the
+        floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first minimum of the
+        Kraskov automutual information and the 'ac1e' delay), or one of these computed from the
+        ranks of the series (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``); see
+        :func:`pyhctsa.utils.get_tau`.
+        With 'quantile' or 'updown' and a rank-based rule, the result is unchanged by a strictly
+        increasing transformation of the series. Default is 1. NaN is returned if tau cannot be
+        determined or leaves no transition.
 
     Returns
     -------
@@ -873,7 +716,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
         eigenvalues of the transition matrix (including ``secondeig``, ``specgap`` and
         ``lam2mod``, the modulus of the second-largest-modulus eigenvalue of the
         row-normalized matrix), and the Miller-Madow-corrected conditional entropy of the
-        next state ``transEntropy``. NaN is returned if tau cannot be determined.
+        next state ``transEntropy``. NaN is returned if tau cannot be determined or leaves no
+        transition.
         Note that the matrix is normalized by the number of transitions, so it holds joint
         (not row-normalized) probabilities.
     """
@@ -884,16 +728,15 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     tau = _resolve_tau(y, tau)
     if np.isnan(tau):  # undefined delay (e.g., constant series, or an ACF that never falls to 1/e)
         return np.nan
+    if len(y) - tau * (2 if how_to_cg in ('diff', 'updown') else 1) < 1:  # no transition at this lag
+        return np.nan
 
-    if tau > 1:  # calculate the transition matrix at a non-unit lag
-        y = resample_poly(y, 1, tau)  # downsample at rate 1:tau
-
-    # (((1))) Discretize the time series to a symbolic string, containing
-    # integers from 1 to num_groups
-    yth = coarse_grain(y, how_to_cg, num_groups)
+    # (((1))) Discretize the whole time series (for 'diff' and 'updown', its increments at lag
+    # tau) to a symbolic string, containing integers from 1 to num_groups
+    yth = coarse_grain(y, how_to_cg, num_groups, lag=tau)
 
     # (((2))) Compute the tau-step transition matrix (Markov for tau = 1)
-    T = _transition_matrix(yth, num_groups)
+    T = _transition_matrix(yth, num_groups, tau)
 
     # (((3))) Output measures from the transition matrix
     out = {}
@@ -956,7 +799,7 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     h_joint = -np.sum(p_joint * np.log(p_joint))
     h_marginal = -np.sum(p_marg * np.log(p_marg))
     out['transEntropy'] = (h_joint - h_marginal
-                           + (p_joint.size - p_marg.size) / (2 * (len(yth) - 1)))
+                           + (p_joint.size - p_marg.size) / (2 * (len(yth) - tau)))
 
     # (v) Measures from the covariance matrix:
     cov_t = np.cov(T, rowvar=False)
@@ -981,28 +824,17 @@ def _linear_adjr2(x: np.ndarray, y: np.ndarray) -> float:
     return 1 - (1 - rsq) * (n - 1) / (n - 2)
 
 
-def _transition_matrix(yth: np.ndarray, num_groups: int) -> np.ndarray:
+def _transition_matrix(yth: np.ndarray, num_groups: int, tau: int = 1) -> np.ndarray:
     """
-    The one-time transition matrix of a symbolized time series: the probability of a
-    transition from state i to state j, for states 1 to `num_groups`.
+    The tau-step transition matrix of a symbolized time series: the fraction of the pairs
+    ``(yth[t], yth[t + tau])`` that go from state i to state j, for states 1 to `num_groups`.
     """
-    N = len(yth)
-    T = np.zeros((num_groups, num_groups))
-    for i in range(num_groups):
-        ri = (yth == i + 1)  # indices where the time series is in state i
-        if not np.any(ri):
-            T[i, :] = 0  # never in state i, so all transition probabilities are zero
-        else:
-            # indices of the states immediately following a state i
-            ri_next = np.r_[False, ri[:-1]]
-            for j in range(num_groups):
-                T[i, j] = np.sum(yth[ri_next] == j + 1)  # the next element is of this class
-    return T / (N - 1)  # N-1 is appropriate because it's a 1-time transition matrix
+    return _lagged_word_probs(np.asarray(yth) - 1, 2, tau, num_groups)[0]
 
 
-def _transition_measures(yth: np.ndarray, num_groups: int) -> np.ndarray:
-    """A set of metrics on the one-time transition matrix of a symbolized time series."""
-    T = _transition_matrix(yth, num_groups)
+def _transition_measures(yth: np.ndarray, num_groups: int, tau: int = 1) -> np.ndarray:
+    """A set of metrics on the tau-step transition matrix of a symbolized time series."""
+    T = _transition_matrix(yth, num_groups, tau)
 
     out = np.zeros(6)
     #   (i) diagonal elements
@@ -1031,7 +863,7 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
     How transition probabilities change with alphabet size.
 
     The time series is discretized by quantile separation into alphabets of a range
-    of sizes, and the one-time transition matrix is computed for each. Statistics of
+    of sizes, and the tau-step transition matrix is computed for each. Statistics of
     those transition matrices are then tracked as a function of the alphabet size.
     The exponential fits are global least-squares fits (:func:`~pyhctsa.robust.bf_exp_fit`,
     with no offset), so R^2 lies between 0 and 1; the linear fits are ordinary least squares.
@@ -1044,13 +876,16 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
         The range of alphabet sizes to compare across. Must contain more than one
         value, each at least 2. Default is ``range(2, 11)``.
     tau : int or str, optional
-        The time-delay. The time series is downsampled at this lag before being
-        discretized. Can also be set to a string that sets it from the series:
-        ``'ac'`` (the first zero-crossing of the autocorrelation function), ``'ac1e'``
-        (the floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first
-        minimum of the Kraskov automutual information and the 'ac1e' delay; see
-        :func:`pyhctsa.utils.get_tau`). All three are capped at floor(N/50); NaN is
-        returned if the delay is undefined. Default is 1.
+        The lag of the transitions: the pairs ``(s[t], s[t + tau])`` of the discretized series,
+        for every ``t``. An integer, or a rule that sets it from the series:
+        ``'ac'`` (the first zero-crossing of the autocorrelation function), ``'ac1e'`` (the
+        floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first minimum of the
+        Kraskov automutual information and the 'ac1e' delay), or one of these computed from the
+        ranks of the series (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``); see
+        :func:`pyhctsa.utils.get_tau`.
+        With a rank-based rule, the result is unchanged by a strictly increasing transformation
+        of the series. NaN is returned if the delay is undefined or leaves no transition.
+        Default is 1.
 
     Returns
     -------
@@ -1070,21 +905,19 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
         raise NotImplementedError('Only a scalar tau with a range of alphabet sizes is '
                                   'supported.')
     tau = _resolve_tau(y, tau if isinstance(tau, str) else np.ravel(tau)[0])
-    if np.isnan(tau):  # undefined delay (e.g., constant series)
+    if np.isnan(tau) or tau >= len(y):  # undefined delay (e.g., constant series), or no transition
         return np.nan
 
     if np.min(num_groups) < 2:
         raise ValueError('Need more than 2 groups')
 
     num_groups_range = num_groups
-    if tau > 1:
-        y = resample_poly(y, 1, tau)  # resample
 
     nfeat = 6  # the number of features calculated at each point
     store = np.zeros((len(num_groups_range), nfeat))
     for i, ng in enumerate(num_groups_range):
         yth = coarse_grain(y, 'quantile', int(ng))  # thresholded data: yth
-        store[i, :] = _transition_measures(yth, int(ng))
+        store[i, :] = _transition_measures(yth, int(ng), tau)
 
     x = num_groups_range.astype(float)
     n = len(x)
@@ -1170,7 +1003,7 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
     return out
 
 
-def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str]) -> np.ndarray:
+def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str], lag: int = 1) -> np.ndarray:
     """
     Coarse-grains a continuous time series to a discrete alphabet.
 
@@ -1201,6 +1034,8 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str]) -> np.nda
         automutual information and the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`), or
         ``'tau'`` (the first zero-crossing of the autocorrelation function, kept for
         backward compatibility). A delay is capped at floor(N/25).
+    lag : int, optional
+        For 'diff' and 'updown', the lag of the increments, ``y[t + lag] - y[t]``. Default is 1.
 
     Returns
     --------
@@ -1224,14 +1059,14 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str]) -> np.nda
     # Some coarse-graining/symbolization methods require initial processing:
     yth = None  # Ensure yth is always defined
     if how_to_cg == 'diff':
-        y = np.diff(y)
-        N = N - 1 # the time series is one value shorter than the input because of differencing
+        y = y[lag:] - y[:-lag]
+        N = N - lag  # the increments are lag values fewer than the input
         how_to_cg = 'quantile' # successive differences and then quantiles
 
     elif how_to_cg == 'updown':
         # True binary up/down split: 2 if the increment is positive, 1 otherwise
-        y = np.diff(y)
-        N = N - 1
+        y = y[lag:] - y[:-lag]
+        N = N - lag
         yth = 1 + (y > 0).astype(int)
 
     elif how_to_cg in ['embed2quadrants', 'embed2octants']:
