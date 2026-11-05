@@ -224,18 +224,14 @@ def _resolve_tau(y: np.ndarray, tau: Union[int, float, str]) -> Union[int, float
     ``'ac'`` (first zero crossing of the autocorrelation function), ``'ac1e'`` (floor of its
     first 1/e crossing) or ``'mi'`` (the smaller of the first minimum of the Kraskov automutual
     information and the 'ac1e' delay), or one of these computed from the ranks of the series
-    (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``); see :func:`pyhctsa.utils.get_tau`. A lag set
-    from the series is capped at floor(N/50) (and is at least 1), so that a word of four symbols
-    spans at most about a tenth of the series. Returns NaN if the delay cannot be determined
-    (e.g., an undefined ACF of a constant series, or an ACF that never falls to 1/e for 'ac1e').
+    (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``); see :func:`pyhctsa.utils.get_tau`. Returns
+    NaN if the delay cannot be determined (e.g., an undefined ACF of a constant series, or an ACF
+    that never falls to 1/e for 'ac1e').
     """
     if isinstance(tau, str):
         if tau not in _SYMBOLIC_TAU_RULES:
             raise ValueError(f"Unknown tau '{tau}': use an integer or one of {_SYMBOLIC_TAU_RULES}")
         tau = get_tau(y, tau)
-        if np.isnan(tau):
-            return np.nan
-        tau = max(1, min(tau, int(np.floor(len(y) / 50))))  # cap at 2% of the series length
     if np.isnan(tau):
         return np.nan
     if tau < 1:
@@ -294,10 +290,10 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff', tau: Union[int, str] = 1
         floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first minimum of the
         Kraskov automutual information and the 'ac1e' delay), or one of these computed from the
         ranks of the series (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``); see
-        :func:`pyhctsa.utils.get_tau`. A lag set by a rule is capped at floor(N/50).
+        :func:`pyhctsa.utils.get_tau`.
         With the order-based symbols ('diff', 'median') and a rank-based rule, the result is
         unchanged by a strictly increasing transformation of the series. Default is 1. NaN is
-        returned if tau cannot be determined.
+        returned if tau cannot be determined, or leaves fewer than two words of length 4.
 
     Returns
     -------
@@ -362,10 +358,10 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile', tau: Union[int, str] = 1
         floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first minimum of the
         Kraskov automutual information and the 'ac1e' delay), or one of these computed from the
         ranks of the series (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``); see
-        :func:`pyhctsa.utils.get_tau`. A lag set by a rule is capped at floor(N/50).
+        :func:`pyhctsa.utils.get_tau`.
         With 'quantile' and a rank-based rule, the result is unchanged by a strictly increasing
         transformation of the series. Default is 1. NaN is returned if tau cannot be
-        determined.
+        determined or leaves no symbol, and each output is NaN for a word length with no word.
 
     Returns
     -------
@@ -376,6 +372,9 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile', tau: Union[int, str] = 1
     y = np.asarray(y)
     tau = _resolve_tau(y, tau)
     if np.isnan(tau):
+        return np.nan
+
+    if cg_how == 'diffquant' and tau >= len(y):  # no increment at this lag
         return np.nan
 
     # Coarse-grain the whole series (for 'diffquant', its increments at lag tau) to {1, 2, 3}
@@ -703,9 +702,10 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
         floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first minimum of the
         Kraskov automutual information and the 'ac1e' delay), or one of these computed from the
         ranks of the series (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``); see
-        :func:`pyhctsa.utils.get_tau`. A lag set by a rule is capped at floor(N/50).
+        :func:`pyhctsa.utils.get_tau`.
         With 'quantile' or 'updown' and a rank-based rule, the result is unchanged by a strictly
-        increasing transformation of the series. Default is 1.
+        increasing transformation of the series. Default is 1. NaN is returned if tau cannot be
+        determined or leaves no transition.
 
     Returns
     -------
@@ -716,7 +716,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
         eigenvalues of the transition matrix (including ``secondeig``, ``specgap`` and
         ``lam2mod``, the modulus of the second-largest-modulus eigenvalue of the
         row-normalized matrix), and the Miller-Madow-corrected conditional entropy of the
-        next state ``transEntropy``. NaN is returned if tau cannot be determined.
+        next state ``transEntropy``. NaN is returned if tau cannot be determined or leaves no
+        transition.
         Note that the matrix is normalized by the number of transitions, so it holds joint
         (not row-normalized) probabilities.
     """
@@ -726,6 +727,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
         raise ValueError('Too few groups for coarse-graining')
     tau = _resolve_tau(y, tau)
     if np.isnan(tau):  # undefined delay (e.g., constant series, or an ACF that never falls to 1/e)
+        return np.nan
+    if len(y) - tau * (2 if how_to_cg in ('diff', 'updown') else 1) < 1:  # no transition at this lag
         return np.nan
 
     # (((1))) Discretize the whole time series (for 'diff' and 'updown', its increments at lag
@@ -879,9 +882,10 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
         floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first minimum of the
         Kraskov automutual information and the 'ac1e' delay), or one of these computed from the
         ranks of the series (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``); see
-        :func:`pyhctsa.utils.get_tau`. A lag set by a rule is capped at floor(N/50).
+        :func:`pyhctsa.utils.get_tau`.
         With a rank-based rule, the result is unchanged by a strictly increasing transformation
-        of the series. NaN is returned if the delay is undefined. Default is 1.
+        of the series. NaN is returned if the delay is undefined or leaves no transition.
+        Default is 1.
 
     Returns
     -------
@@ -901,7 +905,7 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
         raise NotImplementedError('Only a scalar tau with a range of alphabet sizes is '
                                   'supported.')
     tau = _resolve_tau(y, tau if isinstance(tau, str) else np.ravel(tau)[0])
-    if np.isnan(tau):  # undefined delay (e.g., constant series)
+    if np.isnan(tau) or tau >= len(y):  # undefined delay (e.g., constant series), or no transition
         return np.nan
 
     if np.min(num_groups) < 2:
