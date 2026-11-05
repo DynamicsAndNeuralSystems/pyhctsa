@@ -2375,6 +2375,29 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
     indication of model suitability. Inherits strongly from :func:`compare_test_sets`
     (hctsa's ``MF_FitSubsegments``).
 
+    For a stationary series the estimates still differ between segments by sampling error,
+    which shrinks as the segments (a fixed fraction of the series) grow. For ``'ar'`` and
+    ``'ss'`` the spread is therefore reported relative to its expectation for a stationary
+    series: the SD across segments divided by the square root of the expected sample variance
+    of the segments' estimates if they differed by sampling error alone (``*_stdratio``). It is
+    about 1 for a stationary series at any length, and grows with the change in the dynamics
+    relative to the sampling error.
+
+    - AR coefficients: the least-squares estimate from a segment with ``n`` residuals has
+      large-sample variance ``sigma^2 [Gamma^-1]_kk / n``, with ``Gamma`` the covariance matrix of
+      ``p`` consecutive values. ``Gamma`` is the pooled ``X'X / n`` of the segments' regressions
+      and ``sigma^2`` their pooled residual sum of squares over ``n - p`` degrees of freedom each,
+      so differences between segments do not enter.
+    - Log FPE: the log residual mean square of a segment with ``nu`` residual degrees of freedom
+      (residuals minus parameters) has variance ``psi'(nu / 2) (kappa - 1) / 2``: exact for
+      Gaussian residuals (a log chi-square variable, ``psi'`` the trigamma function) and
+      ``(kappa - 1) / n`` for large ``n`` with residuals of kurtosis ``kappa``, estimated from all
+      the residuals pooled. Volatility clustering (residual variance that is autocorrelated, as
+      in a GARCH process) also raises this ratio.
+    - Overlapping segments: each estimate is to first order an average over the samples of its
+      segment, so two estimates whose ``n_i`` and ``n_j`` samples share ``o_ij`` are correlated by
+      ``o_ij / sqrt(n_i n_j)``, which lowers the expected sample variance by the mean correlation.
+
     Parameters
     ----------
     y : array-like
@@ -2388,7 +2411,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
             The ``order`` input is not used.
         - 'ar': fits an AR model of a specified order by forward-backward least
             squares. Outputs are how Akaike's
-            final prediction error (``fpe_*``) and the fitted AR parameters
+            final prediction error (``fpe_*``, ``logfpe_stdratio``) and the fitted AR parameters
             (``a_k_*``, as in the polynomial 1 + a_1 z^-1 + ..., the negative of the
             usual coefficients) vary across segments.
         - 'arcrosspred': splits the series into ``sample_p`` non-overlapping segments
@@ -2401,7 +2424,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
             ``5 * (order + 1)`` or an AR fit fails.
         - 'ss': fits a state-space model of the given order by subspace identification
             (``n4sid``; the order can be ``'best'``). Outputs are how Akaike's final
-            prediction error (``fpe_*``) varies across segments.
+            prediction error (``fpe_*``, ``logfpe_stdratio``) varies across segments.
         - 'arma': fits an ARMA model by prediction-error minimization (``armax``; ``order``
             is ``[p, q]``). Outputs are how the FPE (``fpe_*``) and the fitted AR (``p_k_*``)
             and MA (``q_k_*``) coefficients vary across segments. (Deregistered in hctsa,
@@ -2438,11 +2461,15 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
     Returns
     -------
     dict
-        Dictionary of statistics on the spread and mean of fitted model parameters 
-        and goodness of fit across segments. For ``'ar'``, ``'ss'`` and ``'arma'``,
-        ``fpe_std``, ``fpe_mean``, ``fpe_max``, ``fpe_min``, ``fpe_range`` (of the final
-        prediction error); for ``'ar'`` ``a_k_std``, ``a_k_mean``, ``a_k_max``, ``a_k_min`` for each
-        lag ``k``, and for ``'arma'`` the same for ``p_k_*`` and ``q_k_*``. For ``'arcrosspred'``: ``std``, ``range``,
+        Dictionary of statistics on the spread and mean of fitted model parameters
+        and goodness of fit across segments. For ``'ar'`` and ``'ss'``, ``logfpe_stdratio`` (the
+        SD of the log final prediction error over its stationary expectation; NaN if a segment
+        has no residual degree of freedom or the fits are exact to rounding), ``fpe_mean``,
+        ``fpe_max``, ``fpe_min`` and ``fpe_range``; for ``'ar'`` also ``a_k_stdratio`` (the SD of the
+        coefficient over its stationary expectation, NaN in the same cases), ``a_k_mean``,
+        ``a_k_max`` and ``a_k_min`` for each lag ``k``. For ``'arma'``, ``fpe_std``, ``fpe_mean``,
+        ``fpe_max``, ``fpe_min``, ``fpe_range`` and ``p_k_std``, ``p_k_mean``, ``p_k_max``,
+        ``p_k_min`` (and the same for ``q_k_*``) of the AR (p) and MA (q) coefficients. For ``'arcrosspred'``: ``std``, ``range``,
         ``iqr`` (over all entries of the cross-prediction error matrix), ``stdoffdiag``,
         ``rangeoffdiag``, ``iqroffdiag`` (over the positive off-diagonal entries),
         ``stdmean``, ``rangemean``, ``stdmedian``, ``rangemedian`` (across predicted

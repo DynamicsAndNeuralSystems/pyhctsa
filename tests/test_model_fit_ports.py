@@ -59,7 +59,7 @@ def test_fit_subsegments_rand_draws():
     f = 40 / 38
     _check(mf.fit_subsegments(y, 'ar', 2, 'rand', [10, 0.1], 'default'),
            {'fpe_mean': 0.39482533738942843 * f, 'fpe_range': 0.16510385440096348 * f,
-            'a_1_mean': -0.88754626825997, 'a_2_std': 0.038102305197980246})
+            'a_1_mean': -0.88754626825997})
     _check(mf.fit_subsegments(y, 'arsbc', None, 'rand', [10, 0.1], 'default'),
            {'orders_mean': 8.7, 'sbcs_std': 0.2789350693032891, 'sbcs_min': -2.12873710590734})
 
