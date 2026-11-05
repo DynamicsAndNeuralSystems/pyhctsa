@@ -2296,36 +2296,42 @@ def _fb_lsq(y: np.ndarray, p: int) -> tuple:
     resid = t_fwd - x_fwd @ phi
     return phi, float(resid @ resid)
 
-def _fpe_stats(fpes: np.ndarray, with_std: bool = True) -> dict:
+def _fpe_stats(fpes: np.ndarray) -> dict:
     """Spread statistics of the final prediction errors across segments (``fpe_*`` outputs)."""
-    out = {'fpe_std': np.std(fpes, ddof=1)} if with_std else {}
-    out.update({'fpe_mean': np.mean(fpes), 'fpe_max': np.max(fpes), 'fpe_min': np.min(fpes),
-                'fpe_range': np.ptp(fpes)})
-    return out
+    return {'fpe_std': np.std(fpes, ddof=1), 'fpe_mean': np.mean(fpes), 'fpe_max': np.max(fpes),
+            'fpe_min': np.min(fpes), 'fpe_range': np.ptp(fpes)}
 
 
 _RESID_ROUNDOFF = 1e-12  # residual mean square, relative to the data's, below which a fit is exact
 
 
-def _stationary_sample_var(w: np.ndarray, spans: np.ndarray) -> float:
+def _stationary_cov(w: np.ndarray, spans: np.ndarray) -> np.ndarray:
     """
-    Expected sample variance, across segments, of estimates from a stationary series.
+    Covariance matrix of segment estimates from a stationary series.
 
     Each segment's estimate is taken to be, to first order, an average of terms over the samples in
     its span (``spans[i]`` = first and last sample, inclusive), with variance ``w[i]``. Two estimates
     from spans of ``n_i`` and ``n_j`` samples that share ``o_ij`` samples then have covariance
-    ``C_ij = sqrt(w_i w_j) o_ij / sqrt(n_i n_j)``, and the sample variance (``ddof=1``) of the ``m``
-    estimates has expectation ``(sum_i w_i - sum_ij C_ij / m) / (m - 1)``: ``w`` for disjoint spans
-    of equal variance, less when spans overlap, and 0 when every span is the same.
+    ``C_ij = sqrt(w_i w_j) o_ij / sqrt(n_i n_j)``.
     """
     w = np.asarray(w, dtype=float)
     first, last = spans[:, 0], spans[:, 1]
     n = last - first + 1
     shared = np.clip(np.minimum(last[:, None], last[None, :]) - np.maximum(first[:, None], first[None, :]) + 1,
                      0, None)
-    cov = np.sqrt(np.outer(w, w)) * shared / np.sqrt(np.outer(n, n))
-    m = len(w)
-    return float((np.sum(w) - np.sum(cov) / m) / (m - 1))
+    return np.sqrt(np.outer(w, w)) * shared / np.sqrt(np.outer(n, n))
+
+
+def _stationary_sample_var(w: np.ndarray, spans: np.ndarray) -> float:
+    """
+    Expected sample variance (``ddof=1``), across segments, of estimates from a stationary series:
+    ``(sum_i C_ii - sum_ij C_ij / m) / (m - 1)`` for the ``m`` estimates with covariance ``C``
+    (:func:`_stationary_cov`). It is ``w`` for disjoint spans of equal variance, less when spans
+    overlap, and 0 when every span is the same.
+    """
+    cov = _stationary_cov(w, spans)
+    m = len(cov)
+    return float((np.trace(cov) - np.sum(cov) / m) / (m - 1))
 
 
 def _spread_ratio(values: np.ndarray, w: np.ndarray, spans: np.ndarray) -> float:
@@ -2337,9 +2343,28 @@ def _spread_ratio(values: np.ndarray, w: np.ndarray, spans: np.ndarray) -> float
     return float(np.std(values, ddof=1) / np.sqrt(null))
 
 
-def _logfpe_stdratio(fpes: np.ndarray, resids: list, n_par: np.ndarray, spans: np.ndarray) -> float:
+def _max_deviation(values: np.ndarray, w: np.ndarray, spans: np.ndarray) -> float:
     """
-    SD of the log final prediction error across segments over its expectation for a stationary series.
+    Largest standardized deviation of a segment's estimate from the mean over segments.
+
+    With ``C`` the covariance of the estimates for a stationary series (:func:`_stationary_cov`)
+    and ``H = I - 1 1' / m`` the centering matrix, the deviations ``d = H values`` have covariance
+    ``H C H``; the output is ``max_i |d_i| / sqrt((H C H)_ii)``. NaN if a deviation has no
+    variance (every span the same).
+    """
+    cov = _stationary_cov(w, spans)
+    m = len(cov)
+    h = np.eye(m) - 1.0 / m
+    var_d = np.diag(h @ cov @ h)
+    if not np.all(np.isfinite(var_d)) or np.any(var_d <= 0):
+        return np.nan
+    d = np.asarray(values, dtype=float) - np.mean(values)
+    return float(np.max(np.abs(d) / np.sqrt(var_d)))
+
+
+def _logfpe_null_var(fpes: np.ndarray, resids: list, n_par: np.ndarray) -> Union[np.ndarray, None]:
+    """
+    Variance of each segment's log final prediction error for a stationary series.
 
     The log FPE of a segment is the log of its residual mean square plus a constant. For ``n``
     independent Gaussian residuals and ``q`` fitted parameters, the residual mean square is
@@ -2348,19 +2373,87 @@ def _logfpe_stdratio(fpes: np.ndarray, resids: list, n_par: np.ndarray, spans: n
     residuals of kurtosis ``kappa`` the large-sample variance is ``(kappa - 1) / n``, so the
     variance is taken as ``psi'(nu / 2) (kappa - 1) / 2``, with ``kappa`` the kurtosis of all the
     segments' residuals pooled (each segment's residuals from its own fit, scaled by the pooled
-    root mean square). NaN if a segment has ``nu < 1`` or the residuals are at the level of rounding.
+    root mean square). None if a segment has ``nu < 1`` or an FPE is not positive.
     """
-    n_res = np.array([len(e) for e in resids])
-    nu = n_res - n_par
-    if np.any(nu < 1) or np.any(fpes <= 0):
-        return np.nan
+    nu = np.array([len(e) for e in resids]) - n_par
+    if np.any(nu < 1) or not np.all(fpes > 0):
+        return None
     e = np.concatenate(resids)
     ms = np.mean(e ** 2)
     if not ms > 0:
-        return np.nan
+        return None
     kappa = np.mean(e ** 4) / ms ** 2
-    w = polygamma(1, nu / 2) * (kappa - 1) / 2
-    return _spread_ratio(np.log(fpes), w, spans)
+    return polygamma(1, nu / 2) * (kappa - 1) / 2
+
+
+def _ar_pooled_moments(segs: list, coefs: list, p: int) -> dict:
+    """
+    Pooled within-segment moments of AR fits, for their sampling variances.
+
+    For each segment, the forward regression of every sample on its ``p`` predecessors with the
+    segment's own coefficients ``coefs[i]`` (as in ``1 + a_1 z^-1 + ...``) gives residuals ``e_t``
+    and regressors ``x_t``. Pooled over segments: ``gamma = sum x x' / n`` (``n`` residuals in all),
+    ``omega = sum e^2 x x' / (n - m p)`` and ``sigma2 = sum e^2 / (n - m p)`` (``m`` segments, ``p``
+    coefficients each), with ``m p`` degrees of freedom removed as in the HC1 heteroskedasticity-
+    consistent covariance. Also the residuals, and whether the fits are exact to rounding.
+    """
+    resids, gram, omega, ms_data = [], np.zeros((p, p)), np.zeros((p, p)), 0.0
+    for seg, a in zip(segs, coefs):
+        win = sliding_window_view(seg, p + 1)
+        x_fwd = win[:, :p][:, ::-1]
+        e = win[:, p] + x_fwd @ a
+        resids.append(e)
+        gram += x_fwd.T @ x_fwd
+        omega += (x_fwd * e[:, None] ** 2).T @ x_fwd
+        ms_data += win[:, p] @ win[:, p]
+    n_res = np.array([len(e) for e in resids])
+    sse = sum(e @ e for e in resids)
+    dof = np.sum(n_res) - len(segs) * p
+    out = {'resids': resids, 'n_res': n_res, 'exact': not sse > _RESID_ROUNDOFF * ms_data or dof < 1}
+    out['gamma'] = gram / np.sum(n_res)
+    out['omega'] = omega / max(dof, 1)
+    out['sigma2'] = sse / max(dof, 1)
+    return out
+
+
+def _ar_coef_var(mom: dict) -> np.ndarray:
+    """Sampling variance per residual, ``[Gamma^-1 Omega Gamma^-1]_kk``, of each AR coefficient
+    (:func:`_ar_pooled_moments`; divide by a segment's residual count); NaN if not defined."""
+    p = len(mom['gamma'])
+    if mom['exact'] or not np.linalg.cond(mom['gamma']) < 1 / np.finfo(float).eps:
+        return np.full(p, np.nan)
+    g_inv = np.linalg.inv(mom['gamma'])
+    return np.diag(g_inv @ mom['omega'] @ g_inv)
+
+
+def _crosspred_excess_ratio(mse: np.ndarray, mom: dict) -> float:
+    """
+    Mean excess error of cross-prediction between segments over its expectation for a stationary series.
+
+    ``mse[i, j]`` is the mean squared one-step error of segment ``i``'s AR model on segment ``j``. The
+    relative excess of another segment's model over the segment's own (in-sample) model is
+    ``mse[i, j] / mse[j, j] - 1``. For a stationary series both models estimate the same
+    coefficients, the excess comes from their sampling errors, and its expectation is
+    ``c (1 / n_i + 1 / n_j)`` for segments with ``n_i`` and ``n_j`` predicted samples, where
+    ``c = tr(Gamma^-1 Omega) / sigma^2`` (:func:`_ar_pooled_moments`; ``c = p`` for an AR(p) process
+    with independent innovations): the out-of-sample error of a model exceeds the innovation
+    variance by ``c sigma^2 / n_i`` and the in-sample error falls short of it by ``c sigma^2 / n_j``.
+    The output is the mean relative excess over the ordered pairs ``i != j`` divided by the mean of
+    its expectation: about 1 for a stationary series at any length, larger when the dynamics differ
+    between segments. NaN if the fits are exact to rounding.
+    """
+    p = len(mom['gamma'])
+    if mom['exact'] or not np.linalg.cond(mom['gamma']) < 1 / np.finfo(float).eps:
+        return np.nan
+    c = np.trace(np.linalg.solve(mom['gamma'], mom['omega'])) / mom['sigma2']
+    m = len(mse)
+    off = ~np.eye(m, dtype=bool)
+    rel = mse / np.diag(mse)[None, :] - 1
+    inv_n = 1.0 / mom['n_res']
+    expected = c * (inv_n[:, None] + inv_n[None, :])
+    if not np.mean(expected[off]) > 0:
+        return np.nan
+    return float(np.mean(rel[off]) / np.mean(expected[off]))
 
 
 @dict_output
@@ -2523,12 +2616,14 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
     # Fit the model to each training set (r holds 1-based, inclusive sample ranges)
     out = {}
     if model == 'arsbc':
-        # AR model of the best order (1-10) by SBC, zero mean
+        # AR model of the best order by SBC, zero mean: orders 1 to 10, and at most a fifth of the
+        # segment length, so that every candidate has at least four equations per coefficient
         orders = np.zeros(num_pred)
         sbcs = np.zeros(num_pred)
         for i in range(num_pred):
+            seg = y[r[i, 0] - 1:r[i, 1]]
             try:
-                _, A_est, _, sbc, _, _ = _arfit(y[r[i, 0] - 1:r[i, 1]], 1, 10, 'sbc', zero=True)
+                _, A_est, _, sbc, _, _ = _arfit(seg, 1, min(10, max(1, len(seg) // 5)), 'sbc', zero=True)
             except ValueError as err:
                 logger.warning(f'Time series segment is too short for ARFIT: {err}')
                 return np.nan
@@ -2551,37 +2646,28 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         p = int(order)
         fpes = np.zeros(num_pred)
         avals = np.zeros((num_pred, p))
-        resids, gram, ms_data = [], np.zeros((p, p)), 0.0
-        for i in range(num_pred):
-            seg = y[r[i, 0] - 1:r[i, 1]]
+        segs = [y[r[i, 0] - 1:r[i, 1]] for i in range(num_pred)]
+        for i, seg in enumerate(segs):
             avals[i, :], fpes[i] = _ar_fb(seg, p)
-            # forward regression of each sample on its p predecessors, and its residuals
-            win = sliding_window_view(seg, p + 1)
-            x_fwd = win[:, :p][:, ::-1]
-            resids.append(win[:, p] + x_fwd @ avals[i, :])
-            gram += x_fwd.T @ x_fwd
-            ms_data += win[:, p] @ win[:, p]
-        n_res = np.array([len(e) for e in resids])
-        spans = np.column_stack([r[:, 0] + p, r[:, 1]])  # the samples whose residuals each fit averages
-        sse = sum(e @ e for e in resids)
-        exact = not sse > _RESID_ROUNDOFF * ms_data
-        # statistics on the FPE
-        out['logfpe_stdratio'] = np.nan if exact else _logfpe_stdratio(fpes, resids, np.full(num_pred, p), spans)
-        out.update(_fpe_stats(fpes, with_std=False))
-        # sampling variances of the coefficients for a stationary series: sigma^2 [Gamma^-1]_kk / (n - p)
-        coef_var = np.full(p, np.nan)
-        if not exact and np.all(n_res - p >= 1):
-            sigma2 = sse / np.sum(n_res - p)
-            gamma = gram / np.sum(n_res)
-            if np.linalg.cond(gamma) < 1 / np.finfo(float).eps:
-                coef_var = sigma2 * np.diag(np.linalg.inv(gamma))
+        out.update(_fpe_stats(fpes))
+        # spread relative to sampling error: each segment's estimates average over the samples
+        # that have a full set of p predecessors
+        mom = _ar_pooled_moments(segs, list(avals), p)
+        spans = np.column_stack([r[:, 0] + p, r[:, 1]])
+        w_fpe = None if mom['exact'] else _logfpe_null_var(fpes, mom['resids'], np.full(num_pred, p))
+        out['logfpe_stdratio'] = np.nan if w_fpe is None else _spread_ratio(np.log(fpes), w_fpe, spans)
+        out['logfpe_maxdev'] = np.nan if w_fpe is None else _max_deviation(np.log(fpes), w_fpe, spans)
+        coef_var = _ar_coef_var(mom) if np.all(mom['n_res'] - p >= 1) else np.full(p, np.nan)
         # statistics on the fitted AR parameters, as in the polynomial 1 + a_1 z^-1 + ...
         for i in range(p):
-            out[f'a_{i+1}_stdratio'] = (_spread_ratio(avals[:, i], coef_var[i] / n_res, spans)
-                                        if np.isfinite(coef_var[i]) else np.nan)
+            out[f'a_{i+1}_std'] = np.std(avals[:, i], ddof=1)
             out[f'a_{i+1}_mean'] = np.mean(avals[:, i])
             out[f'a_{i+1}_max'] = np.max(avals[:, i])
             out[f'a_{i+1}_min'] = np.min(avals[:, i])
+            ok = np.isfinite(coef_var[i])
+            w = coef_var[i] / mom['n_res']
+            out[f'a_{i+1}_stdratio'] = _spread_ratio(avals[:, i], w, spans) if ok else np.nan
+            out[f'a_{i+1}_maxdev'] = _max_deviation(avals[:, i], w, spans) if ok else np.nan
     elif model == 'arcrosspred':
         # AR model for each of num_pred non-overlapping segments; every model then
         # predicts, one step ahead, every segment (including its own)
@@ -2628,6 +2714,8 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         out['rangestd'] = np.ptp(col_std)
         out['stdstd'] = np.std(col_std, ddof=1)
         out['mineig'] = np.min(np.linalg.eigvals(xperr).real)
+        # error of the other segments' models in excess of each segment's own, relative to sampling error
+        out['excess_ratio'] = _crosspred_excess_ratio(xperr ** 2, _ar_pooled_moments(segs, coefs, int(order)))
     elif model == 'ss':
         # state-space models of the specified order: statistics on goodness of fit
         fpes = np.zeros(num_pred)
@@ -2648,9 +2736,11 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
             ms_data += seg[-len(e):] @ seg[-len(e):]
         sse = sum(e @ e for e in resids)
         exact = not sse > _RESID_ROUNDOFF * ms_data
-        out['logfpe_stdratio'] = (np.nan if exact or not np.all(np.isfinite(fpes))
-                                  else _logfpe_stdratio(fpes, resids, n_par, spans))
-        out.update(_fpe_stats(fpes, with_std=False))
+        out.update(_fpe_stats(fpes))
+        w_fpe = (None if exact or not np.all(np.isfinite(fpes))
+                 else _logfpe_null_var(fpes, resids, n_par))
+        out['logfpe_stdratio'] = np.nan if w_fpe is None else _spread_ratio(np.log(fpes), w_fpe, spans)
+        out['logfpe_maxdev'] = np.nan if w_fpe is None else _max_deviation(np.log(fpes), w_fpe, spans)
     elif model == 'arma':
         # ARMA models of the specified orders: goodness of fit, and the AR (p) and MA (q) coefficients
         p_ord, q_ord = int(order[0]), int(order[1])
