@@ -177,7 +177,9 @@ def test_order_based_symbols_are_rank_invariant_at_a_fixed_lag(name, call):
 
 def test_tau1_values_pinned():
     # tau = 1 values of origin/main (bcb14a8), from tests/data/symbolic_tau1/build_fixture.py;
-    # a rounding-level tolerance allows for platform differences in linear algebra (eigenvalues)
+    # a rounding-level tolerance allows for platform differences in linear algebra (eigenvalues);
+    # fitted exponential-decay outputs (*fexp*) come from a minimizer, which a comparison of
+    # sums of squares locates only to about sqrt(eps), so they get a looser tolerance
     spec = importlib.util.spec_from_file_location("symbolic_tau1_fixture", DATA / "symbolic_tau1" / "build_fixture.py")
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)
@@ -190,5 +192,6 @@ def test_tau1_values_pinned():
                 continue
             assert list(out) == list(want), (label, name)
             for k, v in out.items():
+                rtol = 1e-6 if 'fexp' in k else 1e-10
                 assert (np.isnan(v) if want[k] is None
-                        else np.isclose(float(v), want[k], rtol=1e-10, atol=1e-12)), (label, name, k)
+                        else np.isclose(float(v), want[k], rtol=rtol, atol=1e-12)), (label, name, k)
