@@ -722,8 +722,11 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
         :func:`~pyhctsa.utils.get_tau`: ``'ac'`` (first zero-crossing of the
         autocorrelation function), ``'ac1e'`` (floor of its first 1/e crossing) or ``'mi'``
         (the smaller of the first minimum of the Kraskov automutual information and the
-        ``'ac1e'`` delay). All outputs are NaN if the delay cannot be determined (e.g., a
-        constant series). Default is 1.
+        ``'ac1e'`` delay), or one of these computed from the ranks of the series
+        (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``), with which every output but ``normWPE``
+        (weighted by amplitude) is unchanged by a strictly increasing transformation of the
+        series. All outputs are NaN if the delay cannot be determined (e.g., a constant
+        series). Default is 1.
 
     Returns
     -------
@@ -1034,7 +1037,9 @@ def bubble_entropy(y: ArrayLike, m: int = 10, tau: Union[int, str] = 1) -> Union
         The embedding dimension, at least 2. Default is 10.
     tau : int or str, optional
         The time delay for the embedding: an integer, or a rule understood by
-        :func:`~pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``). Default is 1.
+        :func:`~pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``, or the rank-based
+        ``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``, with which the result is unchanged by a
+        strictly increasing transformation of the series). Default is 1.
 
     Returns
     -------
@@ -1119,7 +1124,9 @@ def permutation_entropy_complexity(y: ArrayLike, m: int = 2, tau: Union[int, str
         The embedding dimension (order of the ordinal patterns). Default is 2.
     tau : int or str, optional
         The time delay for the embedding: an integer, or a rule understood by
-        :func:`~pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``). Default is 1.
+        :func:`~pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``, or the rank-based
+        ``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``, with which the result is unchanged by a
+        strictly increasing transformation of the series). Default is 1.
 
     Returns
     -------

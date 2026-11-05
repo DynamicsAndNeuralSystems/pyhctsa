@@ -9,7 +9,8 @@ from scipy.signal import resample_poly
 
 from ..operations.correlation import autocorr
 from ..robust import bf_exp_fit
-from ..utils import dict_output, _sample_std, binarize, sign_change, get_tau
+from ..utils import (dict_output, _sample_std, binarize, sign_change, get_tau, _average_ranks,
+                     _is_rank_rule)
 
 def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_groups: int = 3,
              coarse_grain_method: str = 'quantile', num_iters: int = 500,
@@ -212,6 +213,9 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
 
     return out
 
+_SYMBOLIC_TAU_RULES = ('ac', 'ac1e', 'mi', 'ac-rank', 'ac1e-rank', 'mi-rank')
+
+
 def _resolve_tau(y: np.ndarray, tau: Union[int, float, str]) -> Union[int, float]:
     """
     Resolve a time delay as hctsa's SB_MotifTwo/Three, SB_TransitionMatrix and
@@ -220,14 +224,15 @@ def _resolve_tau(y: np.ndarray, tau: Union[int, float, str]) -> Union[int, float
     `tau` is a number of samples, or a string that sets it from the series: ``'ac'`` (first
     zero crossing of the autocorrelation function), ``'ac1e'`` (floor of its first 1/e
     crossing) or ``'mi'`` (the smaller of the first minimum of the Kraskov automutual
-    information and the 'ac1e' delay), see :func:`pyhctsa.utils.get_tau`. A delay set from the
-    series is capped at floor(N/50), so that the downsampled series stays long enough to count
-    words/transitions. Returns NaN if the delay cannot be determined (e.g., an undefined ACF
-    of a constant series, or an ACF that never falls to 1/e for 'ac1e').
+    information and the 'ac1e' delay), or one of these computed from the ranks of the series
+    (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``); see :func:`pyhctsa.utils.get_tau`. A delay
+    set from the series is capped at floor(N/50), so that the downsampled series stays long
+    enough to count words/transitions. Returns NaN if the delay cannot be determined (e.g., an
+    undefined ACF of a constant series, or an ACF that never falls to 1/e for 'ac1e').
     """
     if isinstance(tau, str):
-        if tau not in ('ac', 'ac1e', 'mi'):
-            raise ValueError(f"Unknown tau '{tau}': use an integer, 'ac', 'ac1e' or 'mi'")
+        if tau not in _SYMBOLIC_TAU_RULES:
+            raise ValueError(f"Unknown tau '{tau}': use an integer or one of {_SYMBOLIC_TAU_RULES}")
         tau = get_tau(y, tau)
         if np.isnan(tau):
             return np.nan
@@ -242,10 +247,17 @@ def _downsample_by_tau(y: np.ndarray, tau: Union[int, str]) -> Optional[np.ndarr
     """
     Downsample `y` by a time delay before symbolizing it (as hctsa's SB_MotifTwo/Three).
 
-    `tau` is an integer or a rule that sets it from the series ('ac', 'ac1e', 'mi'; see
-    :func:`_resolve_tau`). The series is downsampled at rate 1:tau (polyphase anti-alias filter,
-    :func:`scipy.signal.resample_poly`) if tau > 1. Returns None if tau cannot be determined.
+    `tau` is an integer or a rule that sets it from the series ('ac', 'ac1e', 'mi', or a
+    rank-based rule such as 'ac1e-rank'; see :func:`_resolve_tau`). The series is downsampled
+    at rate 1:tau (polyphase anti-alias filter, :func:`scipy.signal.resample_poly`) if tau > 1.
+    With a rank-based rule the series is first replaced by its ranks (average ranks of exactly
+    equal values), so the delay and the downsampled series, and hence symbols that depend only
+    on the order of the values, are unchanged by a strictly increasing transformation of the
+    series (the filter, a weighted average, would not preserve the order of transformed values).
+    Returns None if tau cannot be determined.
     """
+    if _is_rank_rule(tau):
+        y = _average_ranks(y)
     tau = _resolve_tau(y, tau)
     if np.isnan(tau):
         return None
@@ -283,9 +295,12 @@ def motif_two(y: ArrayLike, binarize_how: str = 'diff', tau: Union[int, str] = 1
         rule that sets it from the series: ``'ac'`` (the first zero-crossing of the
         autocorrelation function), ``'ac1e'`` (the floor of its first 1/e crossing) or
         ``'mi'`` (the smaller of the first minimum of the Kraskov automutual information and
-        the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`). A delay set by a rule is capped
-        at floor(N/50). Default is 1 (no downsampling). NaN is returned if tau cannot be
-        determined.
+        the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`). With a rank-based
+        rule (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``: the same rules computed from the
+        ranks of the series), the ranks are downsampled in place of the values, so the result
+        depends only on the order of the values when the symbols do.
+        A delay set by a rule is capped at floor(N/50). Default is 1 (no downsampling). NaN is
+        returned if tau cannot be determined.
 
     Returns
     -------
@@ -462,9 +477,12 @@ def motif_three(y: ArrayLike, cg_how: str = 'quantile', tau: Union[int, str] = 1
         rule that sets it from the series: ``'ac'`` (the first zero-crossing of the
         autocorrelation function), ``'ac1e'`` (the floor of its first 1/e crossing) or
         ``'mi'`` (the smaller of the first minimum of the Kraskov automutual information and
-        the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`). A delay set by a rule is capped
-        at floor(N/50). Default is 1 (no downsampling). NaN is returned if tau cannot be
-        determined.
+        the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`). With a rank-based
+        rule (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``: the same rules computed from the
+        ranks of the series), the ranks are downsampled in place of the values, so the result
+        depends only on the order of the values when the symbols do.
+        A delay set by a rule is capped at floor(N/50). Default is 1 (no downsampling). NaN is
+        returned if tau cannot be determined.
 
     Returns
     -------
@@ -861,8 +879,11 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
         that sets it from the series: ``'ac'`` (the first zero-crossing of the
         autocorrelation function), ``'ac1e'`` (the floor of its first 1/e crossing) or
         ``'mi'`` (the smaller of the first minimum of the Kraskov automutual information
-        and the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`). All three are capped at
-        floor(N/50). Default is 1.
+        and the 'ac1e' delay; see :func:`pyhctsa.utils.get_tau`). With a rank-based
+        rule (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``: the same rules computed from the
+        ranks of the series), the ranks are downsampled in place of the values, so the result
+        depends only on the order of the values when the symbols do.
+        A delay set by a rule is capped at floor(N/50). Default is 1.
 
     Returns
     -------
@@ -881,12 +902,10 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     y = np.asarray(y, dtype=float)
     if num_groups < 2:
         raise ValueError('Too few groups for coarse-graining')
-    tau = _resolve_tau(y, tau)
-    if np.isnan(tau):  # undefined delay (e.g., constant series, or an ACF that never falls to 1/e)
+    # calculate the transition matrix at a non-unit lag by downsampling at rate 1:tau
+    y = _downsample_by_tau(y, tau)
+    if y is None:  # undefined delay (e.g., constant series, or an ACF that never falls to 1/e)
         return np.nan
-
-    if tau > 1:  # calculate the transition matrix at a non-unit lag
-        y = resample_poly(y, 1, tau)  # downsample at rate 1:tau
 
     # (((1))) Discretize the time series to a symbolic string, containing
     # integers from 1 to num_groups
@@ -1049,8 +1068,12 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
         ``'ac'`` (the first zero-crossing of the autocorrelation function), ``'ac1e'``
         (the floor of its first 1/e crossing) or ``'mi'`` (the smaller of the first
         minimum of the Kraskov automutual information and the 'ac1e' delay; see
-        :func:`pyhctsa.utils.get_tau`). All three are capped at floor(N/50); NaN is
-        returned if the delay is undefined. Default is 1.
+        :func:`pyhctsa.utils.get_tau`). With a rank-based
+        rule (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``: the same rules computed from the
+        ranks of the series), the ranks are downsampled in place of the values, so the result
+        depends only on the order of the values when the symbols do.
+        A delay set by a rule is capped at floor(N/50); NaN is returned if the delay is
+        undefined. Default is 1.
 
     Returns
     -------
@@ -1069,16 +1092,14 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
         # (hctsa does not support varying tau either: "This setting kind of doesn't work yet")
         raise NotImplementedError('Only a scalar tau with a range of alphabet sizes is '
                                   'supported.')
-    tau = _resolve_tau(y, tau if isinstance(tau, str) else np.ravel(tau)[0])
-    if np.isnan(tau):  # undefined delay (e.g., constant series)
+    y = _downsample_by_tau(y, tau if isinstance(tau, str) else np.ravel(tau)[0])
+    if y is None:  # undefined delay (e.g., constant series)
         return np.nan
 
     if np.min(num_groups) < 2:
         raise ValueError('Need more than 2 groups')
 
     num_groups_range = num_groups
-    if tau > 1:
-        y = resample_poly(y, 1, tau)  # resample
 
     nfeat = 6  # the number of features calculated at each point
     store = np.zeros((len(num_groups_range), nfeat))

@@ -16,7 +16,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 import pandas as pd
 from scipy.signal import correlate
-from scipy.stats import chi2
+from scipy.stats import chi2, rankdata
 
 
 def _check_optional_deps(dep: str) -> bool:
@@ -582,7 +582,8 @@ def frame_signal(x: ArrayLike, n: int, p: int = 0) -> np.ndarray:
 # Adaptive time delays, Theiler windows and decimation (hctsa BF_GetTau,
 # BF_TheilerWindow, BF_PreProcess)
 # ------------------------------------------------------------------------------
-_TAU_RULES = ('ac', 'ac1e', 'mi', 'mi-gaussian')
+_TAU_RULES = ('ac', 'ac1e', 'mi', 'mi-gaussian', 'ac-rank', 'ac1e-rank', 'mi-rank')
+_RANK_SUFFIX = '-rank'  # a rule with this suffix is its base rule applied to the ranks of the series
 _TAU_CACHE: list = []  # (rule, N, digest, tau); small FIFO cache, like hctsa's persistent cache
 _TAU_CACHE_SIZE = 4
 
@@ -796,6 +797,26 @@ def _tie_aware_ranks(y: ArrayLike, tol: float = _TIE_TOL, iso: float = _TIE_ISO)
     return ranks
 
 
+def _average_ranks(y: ArrayLike) -> np.ndarray:
+    """Ranks 1..N of ``y``, in which exactly equal values are ties sharing the mean of their ranks.
+
+    The series the rank-based delay rules (``'ac-rank'``, ``'ac1e-rank'``, ``'mi-rank'``) are
+    computed from. Ties are exactly equal values, as for the ordinal patterns of
+    :mod:`pyhctsa.operations.entropy`, so the ranks are a function of the order relation of the
+    values alone, and any strictly increasing transformation of the series leaves them unchanged.
+    (``_tie_aware_ranks`` also ties values closer than a fraction of the standard deviation, which
+    a strictly increasing transformation can bring together or move apart.) Tied values share
+    their mean rank rather than being put in a random order, so that no order is imposed among
+    them and no tie-breaking noise lowers the autocorrelation from which a delay is set.
+    """
+    return rankdata(np.asarray(y, dtype=float).ravel(), method='average')
+
+
+def _is_rank_rule(rule) -> bool:
+    """Whether ``rule`` is a rank-based time-delay rule of :func:`get_tau` ('ac1e-rank', ...)."""
+    return isinstance(rule, str) and rule in _TAU_RULES and rule.endswith(_RANK_SUFFIX)
+
+
 def _smooth3(a: np.ndarray) -> np.ndarray:
     """Centred 3-point moving average; the two end points average the two values available."""
     out = np.empty_like(a)
@@ -853,13 +874,15 @@ def _ami_first_min(ami: np.ndarray) -> float:
     return np.nan
 
 
-def _tau_mi(y: np.ndarray) -> float:
+def _tau_mi(y: np.ndarray, ranks: Union[np.ndarray, None] = None) -> float:
     """min(first noise-gated minimum of the smoothed Kraskov AMI of tie-aware ranks, 'ac1e' delay), at least 1.
 
     See :func:`get_tau` (rule ``'mi'``) for the definition, and ``_ami_first_min`` for the
     minimum search. Deterministic: the jitter that breaks exact ties among the (tie-aware) ranks
     is always applied, with normal draws from ``bf_random`` at a fixed seed
-    (``_TAU_MI_JITTER_SEED``), as in hctsa's ``BF_GetTau``.
+    (``_TAU_MI_JITTER_SEED``), as in hctsa's ``BF_GetTau``. ``ranks``, if given, replaces the
+    tie-aware ranks of ``y`` in the AMI (rule ``'mi-rank'`` passes the exact average ranks, which
+    are also ``y``).
     """
     from .ksg import ksg_mi
     n = y.size
@@ -876,7 +899,7 @@ def _tau_mi(y: np.ndarray) -> float:
 
     # Kraskov (k=4, algorithm 1) AMI of the z-scored tie-aware ranks; the same fixed-seed
     # jitter (1e-10 sd) is always added to break the exact ties
-    r = _tie_aware_ranks(y)
+    r = _tie_aware_ranks(y) if ranks is None else np.asarray(ranks, dtype=float)
     sd = np.std(r, ddof=1)
     if not sd > 0:
         return np.nan  # constant series
@@ -921,7 +944,7 @@ def get_tau(y: ArrayLike, rule: Union[int, str] = 'ac1e') -> Union[int, float]:
     ----------
     y : array-like
         The input time series.
-    rule : int or {'ac1e', 'mi', 'mi-gaussian', 'ac'}
+    rule : int or {'ac1e', 'mi', 'mi-gaussian', 'ac', 'ac1e-rank', 'mi-rank', 'ac-rank'}
         How to set the delay:
 
         - an integer: returned unchanged (so a fixed delay and a rule can share an argument);
@@ -940,8 +963,9 @@ def get_tau(y: ArrayLike, rule: Union[int, str] = 'ac1e') -> Union[int, float]:
           ``sigma`` is the AMI estimator noise, estimated robustly from the second differences of
           the raw AMI curve, ``sigma = 1.4826 * MAD(diff(ami, 2)) / sqrt(6)`` (MAD the median
           absolute deviation from the median; ``sigma = 0`` if fewer than 4 lags are available);
-          see ``_ami_first_min``. The ranks make the delay invariant under monotone
-          transformations of the data and robust to tiny perturbations. The smoothing and the
+          see ``_ami_first_min``. The ranks make the AMI robust to tiny perturbations and
+          nearly invariant under monotone transformations of the data (the ``'ac1e'`` cap is
+          not; ``'mi-rank'`` is exactly invariant). The smoothing and the
           noise gate (the minimum must be deeper than twice the estimator noise) stop estimator
           noise on a flat or monotonically decaying AMI curve from creating a spurious minimum at
           lag 1 or at an early lag, far below the correlation time. If the ACF never falls to
@@ -951,7 +975,17 @@ def get_tau(y: ArrayLike, rule: Union[int, str] = 'ac1e') -> Union[int, float]:
           in earlier versions of hctsa; a monotonic function of the absolute ACF, so not a
           nonlinear timescale);
         - ``'ac'``: the first zero crossing of the ACF (a series whose ACF is defined but
-          never crosses zero gives ``N - 1``, as in hctsa).
+          never crosses zero gives ``N - 1``, as in hctsa);
+        - ``'ac1e-rank'``, ``'mi-rank'``, ``'ac-rank'``: the rule without the suffix, applied to
+          the ranks of the series (average ranks, in which only exactly equal values are tied;
+          see ``_average_ranks``) in place of its values. ``'ac1e-rank'`` and ``'ac-rank'`` are
+          the first 1/e and zero crossings of the rank (Spearman) ACF; ``'mi-rank'`` is
+          ``max(1, min(tau_mi, ac1e-rank))``, with ``tau_mi`` found as for ``'mi'`` from the
+          Kraskov AMI of these exact ranks. A strictly increasing transformation of the series
+          leaves its ranks unchanged, and so these delays. They suit features whose symbols
+          depend only on the order of the values (ordinal patterns, quantile or up/down
+          symbols), which are then invariant to such a transformation as a whole, delay
+          included.
 
     Returns
     -------
@@ -984,14 +1018,17 @@ def get_tau(y: ArrayLike, rule: Union[int, str] = 'ac1e') -> Union[int, float]:
         if c_rule == rule and c_n == y.size and c_digest == digest:
             return c_tau
 
-    if rule == 'ac1e':
-        tau = _tau_ac1e(y)
-    elif rule == 'mi':
-        tau = _tau_mi(y)
-    elif rule == 'mi-gaussian':
-        tau = _tau_mi_gaussian(y)
+    rank = _is_rank_rule(rule)
+    base = rule[:-len(_RANK_SUFFIX)] if rank else rule
+    x = _average_ranks(y) if rank else y  # a rank rule is its base rule applied to the ranks
+    if base == 'ac1e':
+        tau = _tau_ac1e(x)
+    elif base == 'mi':
+        tau = _tau_mi(x, ranks=x if rank else None)
+    elif base == 'mi-gaussian':
+        tau = _tau_mi_gaussian(x)
     else:  # 'ac'
-        tau = _tau_ac(y)
+        tau = _tau_ac(x)
     if not isinstance(tau, (int, np.integer)):
         tau = np.nan if np.isnan(tau) else int(tau)
 

@@ -206,4 +206,4 @@ def test_mi_unchanged_early_returns():
     assert get_tau(y, 'ac1e') == 1 and get_tau(y, 'mi') == 1
     # a constant series has no delay
     assert np.isnan(get_tau(np.ones(300), 'mi'))
-    assert utils._TAU_RULES == ('ac', 'ac1e', 'mi', 'mi-gaussian')
+    assert utils._TAU_RULES == ('ac', 'ac1e', 'mi', 'mi-gaussian', 'ac-rank', 'ac1e-rank', 'mi-rank')
