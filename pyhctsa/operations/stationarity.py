@@ -7,6 +7,7 @@ from typing import Union
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.signal import detrend, find_peaks
+from scipy.special import gammaln
 from scipy.stats import kendalltau, kurtosis, kstest, skew, pearsonr, norm
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 from statsmodels.tsa.stattools import kpss
@@ -155,10 +156,59 @@ def pp_test(y: ArrayLike, lags: Union[int, list] = None, model: str = 'ar',
             'minBIC': reg['BIC'] / n_obs}
 
 
+_HG_TAIL = 1e-14  # bound on the hypergeometric mass left out of each sum (both tails)
+
+
+def _hg_counts(N: int, K: int, n: int) -> np.ndarray:
+    """Counts ``x`` that hold all but at most ``_HG_TAIL`` of the mass of HG(N, K, n).
+
+    HG(N, K, n) is the number of values in a bin among ``n`` drawn without replacement
+    from ``N`` values, ``K`` of which are in the bin. Its moment generating function is
+    bounded by that of the binomial B(n, K/N), so Bernstein's inequality,
+    ``P(|x - nK/N| >= t) <= 2 exp(-t^2 / (2 (n p (1 - p) + t / 3)))``, bounds its tails.
+    """
+    p = K / N
+    L = np.log(2 / _HG_TAIL)
+    t = L / 3 + np.sqrt(L ** 2 / 9 + 2 * L * n * p * (1 - p))
+    lo = max(0, n - (N - K), int(np.floor(n * p - t)))
+    hi = min(n, K, int(np.ceil(n * p + t)))
+    return np.arange(lo, hi + 1)
+
+
+def _random_order_tv(counts: np.ndarray, N: int, n: int, each_or_par: str) -> np.ndarray:
+    """Expected total variation distance of :func:`local_distributions` for values in random order.
+
+    Returns the contribution of each bin (they sum to the expected distance), from the full
+    series' bin counts ``counts`` (summing to ``N``) and the segment length ``n``.
+    """
+    log_fact = gammaln(np.arange(N + 1) + 1.0)
+
+    def log_choose(a, b):
+        return log_fact[a] - log_fact[b] - log_fact[a - b]
+
+    terms = np.zeros(len(counts))
+    for i, K in enumerate(int(k) for k in counts):
+        if K == 0 or K == N:  # every segment has the parent's proportion in this bin
+            continue
+        x = _hg_counts(N, K, n)
+        p_x = np.exp(log_choose(K, x) + log_choose(N - K, n - x) - log_choose(N, n))
+        if each_or_par == 'par':
+            terms[i] = 0.5 * np.sum(p_x * np.abs(x / n - K / N))
+        else:
+            # count y in a second, disjoint segment, given x in the first: HG(N - n, K - x, n)
+            X, Y = x[:, None], x[None, :]
+            ok = (Y <= K - X) & (n - Y <= N - n - (K - X))
+            Kr, Yr = np.where(ok, K - X, 0), np.where(ok, Y, 0)
+            p_y = np.exp(log_choose(Kr, Yr) + log_choose(N - n - Kr, np.where(ok, n - Y, 0))
+                         - log_choose(N - n, n))
+            terms[i] = 0.5 * np.sum(p_x[:, None] * np.where(ok, p_y, 0.0) * np.abs(X - Y)) / n
+    return terms
+
+
 def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par',
                         num_bins: int = 10) -> dict:
     """
-    Compares the distribution in consecutive time-series segments.
+    Compares the distribution in consecutive time-series segments, in excess of chance.
 
     Breaks the time series into ``num_segs`` consecutive segments of equal length and
     measures how different the distributions of values in two segments are as the total
@@ -169,6 +219,30 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     :func:`pyhctsa.robust.bf_quantile_edges`), so the measure has no smoothing parameter
     and does not depend on the scale of the data. Either each segment is compared to the
     parent (full time series) distribution, or each to all other segments.
+
+    A histogram of ``n`` values differs from the distribution it samples by about
+    ``1/sqrt(n)`` by chance, so the raw mean distance falls with the length of the series.
+    The mean distance is therefore reported in excess of its exact expectation for the same
+    values in random order. In random order, the number of a segment's ``n`` values that
+    fall in bin ``i`` is hypergeometric: ``n`` draws without replacement from the ``N``
+    values of the series, ``K_i`` of which are in the bin. Comparing to the parent, the
+    expected distance is half the sum, over bins and over the possible counts ``x``, of
+    the probability of ``x`` times ``|x/n - K_i/N|``. Between two disjoint segments, the
+    count ``y`` in the second, given ``x`` in the first, is hypergeometric with ``n`` draws
+    from the remaining ``N - n`` values, ``K_i - x`` of them in the bin, and the expected
+    distance is half the sum over bins of the expectation of ``|x - y|/n``. These are exact
+    for any bin counts (including fewer, unequal bins from tied values), and the samples
+    left over after the last full segment count only towards the parent. Every segment, or
+    pair of segments, has the same expectation, so it is also the expected mean distance.
+    The sums leave out the tails of each hypergeometric distribution, with a total mass
+    below ``1e-14`` (bounded by Bernstein's inequality), which changes the expectation by
+    at most ``1e-14`` per bin.
+
+    The excess is near 0 for a stationary series without autocorrelation at any length,
+    can be slightly negative, and approaches the distance between the segments' underlying
+    distributions as the series grows. Autocorrelation reduces the effective number of
+    independent values in a segment, so a correlated stationary series has a positive
+    excess that depends on its timescale.
 
     Parameters
     ----------
@@ -190,50 +264,60 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     Returns
     -------
     dict
-        Mean (`meandiv`) and standard deviation (`stddiv`) of the total variation distances
-        between distributions across the different pairwise comparisons. (For 'each' with
-        two segments, the single distance is returned as a float.)
+        - ``ex_meandiv``: the mean total variation distance across the comparisons, minus
+          its expectation for the values in random order.
+        - ``stddiv``: the standard deviation of the distances across the comparisons.
+
+        For 'each' with two segments, the single distance minus its expectation is returned
+        as a float. NaN if the segments are empty (fewer values than segments).
     """
     # preliminaries
     y = np.asarray(y, dtype=float)
     N = len(y)
     num_segs = int(num_segs)
     lseg = int(np.floor(N / num_segs))
+    if each_or_par == 'parent':
+        each_or_par = 'par'
+    if each_or_par not in ('par', 'each'):
+        raise ValueError(f"Unknown method: {each_or_par}. Should be 'each' or 'par'. ")
+    if lseg < 1:
+        return np.nan if (each_or_par == 'each' and num_segs == 2) else {'ex_meandiv': np.nan, 'stddiv': np.nan}
     bin_edges = bf_quantile_edges(y, int(num_bins))  # bins common to all segments, equiprobable for the full series
+    counts, _ = np.histogram(y, bins=bin_edges)  # bin counts of the full series
 
     def proportions(v):
-        counts, _ = np.histogram(v, bins=bin_edges)
-        return counts / np.sum(counts)
+        c, _ = np.histogram(v, bins=bin_edges)
+        return c / np.sum(c)
 
     # Compute the distribution (proportion in each bin) in all num_segs segments of the time series
     dns = np.zeros((len(bin_edges) - 1, num_segs))
     for i in range(num_segs):
         dns[:, i] = proportions(y[i * lseg:(i + 1) * lseg])
+    # expected distance for the values in random order
+    null_div = np.sum(_random_order_tv(counts, N, lseg, each_or_par))
     # Compare the local distributions
-    if each_or_par in ['par', 'parent']:
+    if each_or_par == 'par':
         #Compares each subdistribtuion to the parent (full signal) distribution
-        pardn = proportions(y)
+        pardn = counts / N
         divs = np.zeros(num_segs)
         for i in range(num_segs):
             divs[i] = 0.5 * np.sum(np.abs(dns[:, i] - pardn)) # each is just divergence to parent
-    elif each_or_par == 'each':
+    else:
         # Compares each subdistribution to every other subdistribution
         if num_segs == 2:
-            return float(0.5 * np.sum(np.abs(dns[:, 0] - dns[:, 1])))
+            return float(0.5 * np.sum(np.abs(dns[:, 0] - dns[:, 1])) - null_div)
         # num_segs > 2
-        diffmat = np.nan * np.ones((num_segs, num_segs)) 
+        diffmat = np.nan * np.ones((num_segs, num_segs))
         for i in range(num_segs):
             for j in range(num_segs):
                 if j > i:
                     diffmat[i, j] = 0.5 * np.sum(np.abs(dns[:, i] - dns[:, j])) # total variation distance
         divs = diffmat[~np.isnan(diffmat)] # % (the upper triangle of diffmat)
-    else:
-        raise ValueError(f"Unknown method: {each_or_par}. Should be 'each' or 'par'. ")
 
     # Return basic statistics on differences in distributions in different
     # segments of the time series
     out = {}
-    out['meandiv'] = np.mean(divs)
+    out['ex_meandiv'] = np.mean(divs) - null_div
     out['stddiv'] = np.std(divs, ddof=1)
 
     return out

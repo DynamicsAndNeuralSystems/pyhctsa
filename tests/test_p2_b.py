@@ -20,6 +20,7 @@ from pyhctsa.operations import physics as PH
 from pyhctsa.operations import pre_process as PP
 from pyhctsa.operations import spectral as SP
 from pyhctsa.operations import stationarity as ST
+from pyhctsa.robust import bf_quantile_edges
 
 with open(os.path.join(os.path.dirname(__file__), 'data', 'p2_b.json')) as fh:
     _FIX = json.load(fh)
@@ -224,13 +225,24 @@ _SW = [('AC1', 'ent', 10, 1), ('AC1', 'std', 2, 1), ('AC1', 'std', 10, 1), ('AC1
 class TestStationarity:
     @pytest.mark.parametrize('segs,mode', [(3, 'each'), (3, 'par'), (5, 'each'), (5, 'par')])
     def test_local_distributions(self, segs, mode):
+        # hctsa's meandiv is the raw mean distance: pyhctsa's excess plus its random-order expectation
         for n, ml in _series(f'B_ld{segs}{mode}'):
-            _check(ST.local_distributions(SERIES[n], segs, mode), ml, f'ld {n}', rtol=1e-9, atol=1e-12)
+            py = ST.local_distributions(SERIES[n], segs, mode)
+            _check(py, ml, f'ld {n}', rtol=1e-9, atol=1e-12, skip=('meandiv',))
+            if isinstance(ml, dict):
+                y = SERIES[n]
+                counts, _ = np.histogram(y, bins=bf_quantile_edges(y, 10))
+                null = np.sum(ST._random_order_tv(counts, len(y), len(y) // segs, mode))
+                np.testing.assert_allclose(py['ex_meandiv'] + null, ml['meandiv'], rtol=1e-9, atol=1e-12)
 
     def test_local_distributions_bounds(self):
-        out = ST.local_distributions(SERIES['s3'], 4, 'par', 8)
-        assert 0 <= out['meandiv'] <= 1
-        assert 0 <= ST.local_distributions(SERIES['s3'], 2, 'each') <= 1
+        y = SERIES['s3']
+        counts, _ = np.histogram(y, bins=bf_quantile_edges(y, 8))
+        null = np.sum(ST._random_order_tv(counts, len(y), len(y) // 4, 'par'))
+        assert -null <= ST.local_distributions(y, 4, 'par', 8)['ex_meandiv'] <= 1 - null
+        counts, _ = np.histogram(y, bins=bf_quantile_edges(y, 10))
+        null = np.sum(ST._random_order_tv(counts, len(y), len(y) // 2, 'each'))
+        assert -null <= ST.local_distributions(y, 2, 'each') <= 1 - null
 
     def test_drifting_mean(self):
         for key, nn in (('B_dm50', 50), ('B_dm100', 100)):
