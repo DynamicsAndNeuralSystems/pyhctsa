@@ -1274,7 +1274,7 @@ def time_delay_embed(y: ArrayLike, m: int, tau: Union[int, str] = 1,
 
     return embedded[:, ::-1] if reverse else embedded
 
-def binarize(y: ArrayLike, binarize_how: str = 'diff') -> ArrayLike:
+def binarize(y: ArrayLike, binarize_how: str = 'diff', lag: int = 1) -> ArrayLike:
     """
     Converts an input vector into a binarized version.
 
@@ -1284,6 +1284,9 @@ def binarize(y: ArrayLike, binarize_how: str = 'diff') -> ArrayLike:
         The input time series
     binarize_how : str, optional
         Method to binarize the time series: 'diff', 'mean', 'median', 'iqr'.
+    lag : int, optional
+        For 'diff', the lag of the increments, ``y[t + lag] - y[t]`` (``N - lag`` symbols).
+        Default is 1.
     
     Returns
     --------
@@ -1292,7 +1295,8 @@ def binarize(y: ArrayLike, binarize_how: str = 'diff') -> ArrayLike:
     """
     if binarize_how == 'diff':
         # Binary signal: 1 for stepwise increases, 0 for stepwise decreases
-        y_bin = _step_binary(np.diff(y))
+        y = np.asarray(y)
+        y_bin = _step_binary(y[lag:] - y[:-lag])
     
     elif binarize_how == 'mean':
         # Binary signal: 1 for above mean, 0 for below mean

@@ -1,13 +1,22 @@
-"""Rank-based delay rules ('ac-rank', 'ac1e-rank', 'mi-rank'): the delay, and the order-based features
-registered with these rules, are unchanged by strictly increasing transformations of the series."""
+"""Rank-based delay rules ('ac-rank', 'ac1e-rank', 'mi-rank') and lagged symbol words: the delay, and the
+order-based features registered with these rules, are unchanged by strictly increasing transformations of
+the series."""
+import importlib.util
+import json
+from pathlib import Path
+
 import numpy as np
 import pytest
 import yaml
 from scipy.stats import rankdata
 
 from pyhctsa.calculator import FeatureCalculator
+from pyhctsa.operations.symbolic import (_lagged_word_probs, _transition_matrix, motif_three, motif_two,
+                                         transition_matrix, transition_p_alphabet)
 from pyhctsa.utils import _average_ranks, _is_rank_rule, _tau_mi, get_tau, z_score
 from conftest import HCTSA_YAML
+
+DATA = Path(__file__).resolve().parent / "data"
 
 RANK_CALLS = {
     'permutation_entropy_2_ac1e-rank', 'permutation_entropy_3_ac1e-rank',
@@ -124,3 +133,60 @@ def test_registered_calls_are_rank_invariant(rank_calculator, name):
         v = df[cols].iloc[i].to_numpy()
         same = (np.isnan(ref) & np.isnan(v)) | (np.abs(v - ref) <= 1e-12)
         assert same.all(), [c for c, s in zip(cols, same) if not s]
+
+
+def test_lagged_words_follow_the_definition():
+    s = np.random.default_rng(4).integers(0, 3, 200)
+    for tau in (1, 2, 7):
+        for length in (1, 2, 3):
+            p, n_words = _lagged_word_probs(s, length, tau, 3)
+            assert n_words == s.size - (length - 1) * tau and np.isclose(p.sum(), 1)
+            words = [tuple(s[t + k * tau] for k in range(length)) for t in range(n_words)]
+            for w in [(0,) * length, (2, 1, 0)[:length]]:
+                assert p[w] == words.count(w) / n_words
+    p, n_words = _lagged_word_probs(s[:5], 3, 3, 3)
+    assert n_words == 0 and np.isnan(p).all()
+    # a transition matrix holds the joint probabilities of the pairs (s[t], s[t + tau])
+    T = _transition_matrix(s + 1, 3, 4)
+    assert T[1, 2] == np.mean((s[:-4] == 1) & (s[4:] == 2)) and np.isclose(T.sum(), 1)
+
+
+def test_increment_symbols_use_the_lag():
+    y = SERIES['ar1']
+    for tau in (1, 3, 8):
+        assert motif_two(y, 'diff', tau)['u'] == np.mean(y[tau:] > y[:-tau])
+        assert transition_matrix(y, 'updown', 2, tau)['T4'] == np.mean((y[tau:-tau] > y[:-2 * tau])
+                                                                        & (y[2 * tau:] > y[tau:-tau]))
+
+
+@pytest.mark.parametrize("name", SERIES)
+@pytest.mark.parametrize("call", [
+    (motif_two, dict(binarize_how='diff')), (motif_two, dict(binarize_how='median')),
+    (motif_three, dict(cg_how='quantile')),
+    (transition_matrix, dict(how_to_cg='quantile', num_groups=3)),
+    (transition_matrix, dict(how_to_cg='updown', num_groups=2)),
+    (transition_p_alphabet, dict(num_groups=list(range(2, 12)))),
+])
+def test_order_based_symbols_are_rank_invariant_at_a_fixed_lag(name, call):
+    fn, kw = call
+    ref = fn(SERIES[name], tau=5, **kw)
+    for v in _versions(SERIES[name])[1:]:
+        out = fn(v, tau=5, **kw)
+        assert all(np.isclose(out[k], ref[k], rtol=0, atol=1e-12, equal_nan=True) for k in ref), fn.__name__
+
+
+def test_tau1_values_pinned():
+    # tau = 1 values of origin/main (bcb14a8), from tests/data/symbolic_tau1/build_fixture.py
+    spec = importlib.util.spec_from_file_location("symbolic_tau1_fixture", DATA / "symbolic_tau1" / "build_fixture.py")
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
+    ref = json.loads((DATA / "symbolic_tau1.json").read_text())
+    for label, (fn, kw) in builder.CALLS.items():
+        for name, y in ref['series'].items():
+            out, want = fn(np.array(y), **kw), ref['values'][label][name]
+            if not isinstance(out, dict):
+                assert want is None and np.isnan(out), (label, name)
+                continue
+            assert list(out) == list(want), (label, name)
+            for k, v in out.items():
+                assert (np.isnan(v) if want[k] is None else float(v) == want[k]), (label, name, k)
