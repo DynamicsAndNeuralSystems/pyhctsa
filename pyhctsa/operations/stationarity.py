@@ -12,7 +12,7 @@ from scipy.stats import kendalltau, kurtosis, kstest, skew, pearsonr, norm
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 from statsmodels.tsa.stattools import kpss
 
-from ..operations.correlation import autocorr, first_crossing
+from ..operations.correlation import _acf_fft, autocorr, first_crossing
 from ..operations.distribution import fit_kernel_smooth, moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
 from ..toolboxes.Tisean_3_0_1.ports import _nstat_z_error, _nstat_z_std
@@ -205,6 +205,39 @@ def _random_order_tv(counts: np.ndarray, N: int, n: int, each_or_par: str) -> np
     return terms
 
 
+_ESS_WINDOW = 5  # the autocorrelation sum stops at the first lag M >= _ESS_WINDOW * (the sum to M)
+
+
+def _segment_acf(z: np.ndarray, num_segs: int, n: int) -> np.ndarray:
+    """Autocorrelation function at lags 0..n-1 pooled over the ``num_segs`` segments of length ``n``.
+
+    Each segment has its own mean removed; the autocovariances of the segments are summed
+    before dividing by the summed variances. All NaN if every segment is constant.
+    """
+    Z = z[:num_segs * n].reshape(num_segs, n)
+    Z = Z - Z.mean(axis=1, keepdims=True)
+    nfft = 1 << int(np.ceil(np.log2(2 * n)))  # zero-padding to >= 2n - 1: linear autocovariance
+    acov = np.fft.irfft(np.abs(np.fft.rfft(Z, nfft, axis=1)) ** 2, nfft, axis=1)[:, :n].sum(axis=0)
+    return acov / acov[0] if acov[0] > 0 else np.full(n, np.nan)
+
+
+def _variance_inflation(r: np.ndarray, n: int, n_acf: int) -> float:
+    """Variance inflation of a sum of ``n`` consecutive values from their autocorrelation.
+
+    ``g = 1 + 2 sum_{k=1}^{M} (1 - k/n) r(k)``, from the sample autocorrelation ``r`` of
+    ``n_acf`` values, each lag shifted by its exact expectation for values in random order,
+    ``-(n_acf - k) / (n_acf (n_acf - 1))``, so that ``g`` is about 1 in random order. The sum
+    stops at the first lag ``M`` with ``M >= _ESS_WINDOW * g(M)``, a window that grows with
+    the correlation time it estimates. 1 if the autocorrelation is undefined.
+    """
+    if n < 2 or n_acf < 2 or np.isnan(r[0]):
+        return 1.0
+    k = np.arange(1, min(n, len(r)))
+    g = 1 + 2 * np.cumsum((1 - k / n) * (r[k] + (n_acf - k) / (n_acf * (n_acf - 1))))
+    stop = np.nonzero(k >= _ESS_WINDOW * g)[0]
+    return float(g[stop[0]] if stop.size else g[-1])
+
+
 def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par',
                         num_bins: int = 10) -> dict:
     """
@@ -244,6 +277,21 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     independent values in a segment, so a correlated stationary series has a positive
     excess that depends on its timescale.
 
+    Three further outputs instead subtract an expectation that allows for autocorrelation
+    through an effective sample size. A bin's count in a segment of ``n`` values has its
+    random-order variance multiplied by ``g = 1 + 2 sum_k (1 - k/n) rho(k)``, where ``rho``
+    is the autocorrelation function of the indicator of a value being in the bin, so each
+    bin's term in the expected distance is multiplied by ``sqrt(g)``. ``g`` is estimated
+    from the sample autocorrelation (shifted by its exact expectation in random order, so
+    that ``g`` is about 1 in random order), summed up to the first lag ``M`` with
+    ``M >= 5 g(M)``. The autocorrelation is that of each bin's indicator over the full
+    series (``essbin``), of each bin's indicator within the segments, each about its own
+    segment mean and pooled over segments (``essseg``), or of the values over the full
+    series, one ``g`` for all bins (``essval``). A change in distribution between segments
+    makes the full-series autocorrelations look persistent, which enlarges ``g`` and
+    removes part of the change itself; the within-segment estimate is not affected by
+    differences between segments but cannot see correlations longer than a segment.
+
     Parameters
     ----------
     y : array-like
@@ -266,6 +314,10 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     dict
         - ``ex_meandiv``: the mean total variation distance across the comparisons, minus
           its expectation for the values in random order.
+        - ``ex_meandiv_essbin``, ``ex_meandiv_essseg``, ``ex_meandiv_essval``: the mean
+          distance minus its expectation allowing for autocorrelation, with the bins'
+          variance inflation from the full-series indicator, within-segment indicator, or
+          value autocorrelation.
         - ``stddiv``: the standard deviation of the distances across the comparisons.
 
         For 'each' with two segments, the single distance minus its expectation is returned
@@ -281,7 +333,9 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     if each_or_par not in ('par', 'each'):
         raise ValueError(f"Unknown method: {each_or_par}. Should be 'each' or 'par'. ")
     if lseg < 1:
-        return np.nan if (each_or_par == 'each' and num_segs == 2) else {'ex_meandiv': np.nan, 'stddiv': np.nan}
+        if each_or_par == 'each' and num_segs == 2:
+            return np.nan
+        return {k: np.nan for k in ('ex_meandiv', 'ex_meandiv_essbin', 'ex_meandiv_essseg', 'ex_meandiv_essval', 'stddiv')}
     bin_edges = bf_quantile_edges(y, int(num_bins))  # bins common to all segments, equiprobable for the full series
     counts, _ = np.histogram(y, bins=bin_edges)  # bin counts of the full series
 
@@ -293,8 +347,9 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     dns = np.zeros((len(bin_edges) - 1, num_segs))
     for i in range(num_segs):
         dns[:, i] = proportions(y[i * lseg:(i + 1) * lseg])
-    # expected distance for the values in random order
-    null_div = np.sum(_random_order_tv(counts, N, lseg, each_or_par))
+    # expected distance for the values in random order (per bin)
+    null_terms = _random_order_tv(counts, N, lseg, each_or_par)
+    null_div = np.sum(null_terms)
     # Compare the local distributions
     if each_or_par == 'par':
         #Compares each subdistribtuion to the parent (full signal) distribution
@@ -318,6 +373,19 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     # segments of the time series
     out = {}
     out['ex_meandiv'] = np.mean(divs) - null_div
+
+    # Effective-sample-size variants: each bin's expected distance scaled by sqrt(g), the
+    # variance inflation of its count from autocorrelation
+    which_bin = np.clip(np.searchsorted(bin_edges, y, side='right') - 1, 0, len(counts) - 1)
+    g_bin, g_seg = np.ones(len(counts)), np.ones(len(counts))
+    for i in np.nonzero((counts > 0) & (counts < N))[0]:
+        z = (which_bin == i).astype(float)
+        g_bin[i] = _variance_inflation(_acf_fft(z), lseg, N)
+        g_seg[i] = _variance_inflation(_segment_acf(z, num_segs, lseg), lseg, lseg)
+    g_val = _variance_inflation(_acf_fft(y), lseg, N)
+    out['ex_meandiv_essbin'] = np.mean(divs) - np.sum(null_terms * np.sqrt(np.maximum(g_bin, 0)))
+    out['ex_meandiv_essseg'] = np.mean(divs) - np.sum(null_terms * np.sqrt(np.maximum(g_seg, 0)))
+    out['ex_meandiv_essval'] = np.mean(divs) - null_div * np.sqrt(max(g_val, 0))
     out['stddiv'] = np.std(divs, ddof=1)
 
     return out

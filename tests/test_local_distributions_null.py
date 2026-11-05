@@ -1,11 +1,14 @@
 """The random-order expectation that local_distributions subtracts from its mean distance: exact
 against a Monte Carlo of random permutations and against the untruncated hypergeometric sums, an
-excess that averages 0 over permutations, and the edge cases."""
+excess that averages 0 over permutations, and the edge cases; and the effective-sample-size
+variants."""
 import numpy as np
 import pytest
+from scipy.signal import lfilter
 from scipy.stats import hypergeom
 
 from pyhctsa.operations import stationarity as ST
+from pyhctsa.operations.correlation import _acf_fft
 from pyhctsa.robust import bf_quantile_edges
 
 
@@ -121,3 +124,41 @@ def test_edge_cases():
     assert ST.local_distributions(y, 3, 'parent') == ST.local_distributions(y, 3, 'par')
     with pytest.raises(ValueError):
         ST.local_distributions(y, 3, 'both')
+
+
+# ------------------------------------------------------------------------------
+# effective-sample-size variants
+# ------------------------------------------------------------------------------
+@pytest.mark.parametrize('pooled', [False, True])
+def test_shifted_acf_is_zero_in_random_order(pooled):
+    # the sample autocorrelation plus (n - k) / (n (n - 1)) averages 0 over random permutations
+    z = (np.random.default_rng(40).random(300) < 0.3).astype(float)
+    rng = np.random.default_rng(41)
+    n, lags = (60, np.array([1, 2, 5, 20])) if pooled else (300, np.array([1, 2, 5, 50]))
+    r = np.array([(ST._segment_acf(rng.permutation(z), 5, 60) if pooled else _acf_fft(rng.permutation(z)))[lags]
+                  for _ in range(4000)]) + (n - lags) / (n * (n - 1))
+    assert np.all(np.abs(r.mean(axis=0)) < 4 * r.std(axis=0, ddof=1) / np.sqrt(len(r)))
+
+
+def test_variance_inflation_ar1():
+    # AR(1) with phi = 0.5: sum of (1 - k/n) rho(k) approaches 1 + 2 phi / (1 - phi) = 3 for long segments
+    y = lfilter([1], [1, -0.5], np.random.default_rng(42).standard_normal(200000))
+    assert ST._variance_inflation(_acf_fft(y), 40000, len(y)) == pytest.approx(3, rel=0.05)
+    assert ST._variance_inflation(np.full(10, np.nan), 10, 10) == 1.0
+
+
+def test_ess_variants():
+    rng = np.random.default_rng(43)
+    ar = lfilter([1], [1, -0.9], rng.standard_normal(9000))[3000:]
+    out = ST.local_distributions(ar, 5, 'par')
+    assert out['ex_meandiv'] > 0.015  # correlated but stationary
+    for k in ('ex_meandiv_essbin', 'ex_meandiv_essseg'):
+        assert abs(out[k]) < 0.01
+    y = rng.standard_normal(6000) + 1.0 * (np.arange(6000) >= 3000)
+    out = ST.local_distributions(y, 5, 'each')
+    assert out['ex_meandiv_essseg'] == pytest.approx(out['ex_meandiv'], abs=0.01)  # a mean shift is kept
+    assert out['ex_meandiv_essbin'] < out['ex_meandiv']
+    for mode in ('par', 'each'):
+        out = ST.local_distributions(np.ones(50), 3, mode)
+        assert all(out[k] == 0 for k in ('ex_meandiv_essbin', 'ex_meandiv_essseg', 'ex_meandiv_essval'))
+    assert all(np.isnan(v) for v in ST.local_distributions(np.arange(4.0), 5, 'par').values())
