@@ -149,4 +149,4 @@ def test_edge_cases():
     # every segment the same: no spread is expected
     out = mf.fit_subsegments(z_score(_ar([0.5], 200, 8)), 'ar', 2, 'uniform', [5, 200])
     assert np.isnan(out['a_1_stdratio']) and np.isnan(out['logfpe_stdratio'])
-    assert np.isnan(out['a_1_maxdev']) and out['a_1_std'] == 0
+    assert np.isnan(out['a_1_maxdev']) and abs(out['a_1_std']) < 1e-12

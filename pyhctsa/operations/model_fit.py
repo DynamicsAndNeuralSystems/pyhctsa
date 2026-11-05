@@ -2303,6 +2303,7 @@ def _fpe_stats(fpes: np.ndarray) -> dict:
 
 
 _RESID_ROUNDOFF = 1e-12  # residual mean square, relative to the data's, below which a fit is exact
+_NULL_ROUNDOFF = 1e-12   # stationary variance, relative to a segment's, below which it is zero
 
 
 def _stationary_cov(w: np.ndarray, spans: np.ndarray) -> np.ndarray:
@@ -2336,9 +2337,10 @@ def _stationary_sample_var(w: np.ndarray, spans: np.ndarray) -> float:
 
 def _spread_ratio(values: np.ndarray, w: np.ndarray, spans: np.ndarray) -> float:
     """SD of ``values`` across segments over its expectation for a stationary series
-    (:func:`_stationary_sample_var`); NaN if that expectation is not positive."""
+    (:func:`_stationary_sample_var`); NaN if that expectation is zero to rounding (relative to the
+    segments' own variances)."""
     null = _stationary_sample_var(w, spans)
-    if not np.isfinite(null) or null <= 0:
+    if not np.isfinite(null) or null <= _NULL_ROUNDOFF * np.max(w):
         return np.nan
     return float(np.std(values, ddof=1) / np.sqrt(null))
 
@@ -2350,13 +2352,13 @@ def _max_deviation(values: np.ndarray, w: np.ndarray, spans: np.ndarray) -> floa
     With ``C`` the covariance of the estimates for a stationary series (:func:`_stationary_cov`)
     and ``H = I - 1 1' / m`` the centering matrix, the deviations ``d = H values`` have covariance
     ``H C H``; the output is ``max_i |d_i| / sqrt((H C H)_ii)``. NaN if a deviation has no
-    variance (every span the same).
+    variance, to rounding (every span the same).
     """
     cov = _stationary_cov(w, spans)
     m = len(cov)
     h = np.eye(m) - 1.0 / m
     var_d = np.diag(h @ cov @ h)
-    if not np.all(np.isfinite(var_d)) or np.any(var_d <= 0):
+    if not np.all(np.isfinite(var_d)) or np.any(var_d <= _NULL_ROUNDOFF * np.max(w)):
         return np.nan
     d = np.asarray(values, dtype=float) - np.mean(values)
     return float(np.max(np.abs(d) / np.sqrt(var_d)))
