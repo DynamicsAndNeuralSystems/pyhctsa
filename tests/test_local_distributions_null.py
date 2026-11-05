@@ -1,14 +1,13 @@
 """The random-order expectation that local_distributions subtracts from its mean distance: exact
 against a Monte Carlo of random permutations and against the untruncated hypergeometric sums, an
 excess that averages 0 over permutations, and the edge cases; and the effective-sample-size
-variants."""
+output."""
 import numpy as np
 import pytest
 from scipy.signal import lfilter
 from scipy.stats import hypergeom
 
 from pyhctsa.operations import stationarity as ST
-from pyhctsa.operations.correlation import _acf_fft
 from pyhctsa.robust import bf_quantile_edges
 
 
@@ -127,38 +126,43 @@ def test_edge_cases():
 
 
 # ------------------------------------------------------------------------------
-# effective-sample-size variants
+# effective sample size
 # ------------------------------------------------------------------------------
-@pytest.mark.parametrize('pooled', [False, True])
-def test_shifted_acf_is_zero_in_random_order(pooled):
-    # the sample autocorrelation plus (n - k) / (n (n - 1)) averages 0 over random permutations
+def test_shifted_segment_acf_is_zero_in_random_order():
+    # the pooled within-segment autocorrelation plus (n - k) / (n (n - 1)) averages 0 over random permutations
     z = (np.random.default_rng(40).random(300) < 0.3).astype(float)
     rng = np.random.default_rng(41)
-    n, lags = (60, np.array([1, 2, 5, 20])) if pooled else (300, np.array([1, 2, 5, 50]))
-    r = np.array([(ST._segment_acf(rng.permutation(z), 5, 60) if pooled else _acf_fft(rng.permutation(z)))[lags]
-                  for _ in range(4000)]) + (n - lags) / (n * (n - 1))
+    n, lags = 60, np.array([1, 2, 5, 20])
+    r = np.array([ST._segment_acf(rng.permutation(z), 5, n)[lags] for _ in range(4000)]) + (n - lags) / (n * (n - 1))
     assert np.all(np.abs(r.mean(axis=0)) < 4 * r.std(axis=0, ddof=1) / np.sqrt(len(r)))
 
 
 def test_variance_inflation_ar1():
-    # AR(1) with phi = 0.5: sum of (1 - k/n) rho(k) approaches 1 + 2 phi / (1 - phi) = 3 for long segments
+    # AR(1) with phi = 0.5: 1 + 2 sum of (1 - k/n) rho(k) approaches (1 + phi) / (1 - phi) = 3 for long segments
     y = lfilter([1], [1, -0.5], np.random.default_rng(42).standard_normal(200000))
-    assert ST._variance_inflation(_acf_fft(y), 40000, len(y)) == pytest.approx(3, rel=0.05)
-    assert ST._variance_inflation(np.full(10, np.nan), 10, 10) == 1.0
+    assert ST._variance_inflation(ST._segment_acf(y, 5, 40000), 40000) == pytest.approx(3, rel=0.05)
+    assert ST._variance_inflation(np.full(10, np.nan), 10) == 1.0
+    assert np.all(np.isnan(ST._segment_acf(np.ones(30), 3, 10)))
 
 
-def test_ess_variants():
+def test_ess_near_zero_in_random_order():
+    y = np.random.default_rng(44).standard_normal(1000)
+    rng = np.random.default_rng(45)
+    ex = np.array([ST.local_distributions(rng.permutation(y), 5, 'par')['ex_meandiv_ess'] for _ in range(300)])
+    assert abs(ex.mean()) < 0.002
+
+
+def test_ess():
     rng = np.random.default_rng(43)
-    ar = lfilter([1], [1, -0.9], rng.standard_normal(9000))[3000:]
-    out = ST.local_distributions(ar, 5, 'par')
-    assert out['ex_meandiv'] > 0.015  # correlated but stationary
-    for k in ('ex_meandiv_essbin', 'ex_meandiv_essseg'):
-        assert abs(out[k]) < 0.01
+    ars = [lfilter([1], [1, -0.9], rng.standard_normal(9000))[3000:] for _ in range(20)]
+    for mode in ('par', 'each'):
+        outs = [ST.local_distributions(ar, 5, mode) for ar in ars]
+        assert np.median([o['ex_meandiv'] for o in outs]) > 0.02  # correlated but stationary
+        assert abs(np.median([o['ex_meandiv_ess'] for o in outs])) < 0.005
     y = rng.standard_normal(6000) + 1.0 * (np.arange(6000) >= 3000)
     out = ST.local_distributions(y, 5, 'each')
-    assert out['ex_meandiv_essseg'] == pytest.approx(out['ex_meandiv'], abs=0.01)  # a mean shift is kept
-    assert out['ex_meandiv_essbin'] < out['ex_meandiv']
+    assert out['ex_meandiv_ess'] == pytest.approx(out['ex_meandiv'], abs=0.01)  # a mean shift is kept
     for mode in ('par', 'each'):
         out = ST.local_distributions(np.ones(50), 3, mode)
-        assert all(out[k] == 0 for k in ('ex_meandiv_essbin', 'ex_meandiv_essseg', 'ex_meandiv_essval'))
+        assert out['ex_meandiv_ess'] == 0
     assert all(np.isnan(v) for v in ST.local_distributions(np.arange(4.0), 5, 'par').values())
