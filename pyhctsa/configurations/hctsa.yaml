@@ -1692,7 +1692,7 @@ symbolic:
       - {binarize_how: 'mean', zscore: True, exclude: ['d', 'ud', 'udd', 'uddd', 'uud', 'uuud']}
       - {binarize_how: 'median', zscore: True, exclude: ['d', 'h', 'u', 'ud', 'udd', 'uddd', 'uud', 'uuud']}
       - {binarize_how: 'diff', tau: 'ac1e-rank', zscore: True, exclude: ['d', 'ud', 'udd', 'uddd', 'uud', 'uuud']}   # SB_MotifTwo(x_z,'diff','ac1e')
-      - {binarize_how: 'mean', tau: 'ac1e', zscore: True, exclude: ['d', 'ud', 'udd', 'uddd', 'uud', 'uuud']}   # SB_MotifTwo(x_z,'mean','ac1e')
+      - {binarize_how: 'mean', tau: 'ac1e', zscore: True, exclude: ['d', 'h', 'u', 'ud', 'udd', 'uddd', 'uud', 'uuud']}   # SB_MotifTwo(x_z,'mean','ac1e')
       - {binarize_how: 'median', tau: 'ac1e-rank', zscore: True, exclude: ['d', 'h', 'u', 'ud', 'udd', 'uddd', 'uud', 'uuud']}   # SB_MotifTwo(x_z,'median','ac1e')
     legacy_name: SB_MotifTwo
     ordered_args: ['binarize_how', 'tau']
