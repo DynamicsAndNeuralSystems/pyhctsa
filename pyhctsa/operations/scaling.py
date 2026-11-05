@@ -162,14 +162,19 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2, wtf: str = 'rsrange'
 
     Two fits are made to log F against log tau, each over its own range of timescales:
 
-    - A single line from ``max(tau_0, 8 tau_c)`` to N/2, where tau_c is the 1/e decorrelation
-      time of the analysed series (:func:`pyhctsa.utils.get_tau`, rule 'ac1e'). Short-range
-      correlation bends F(tau) over timescales up to several correlation times, so a slope
-      fitted from small tau mixes the short-range correlation into the long-range exponent and
-      can suggest long memory where there is none [7]_ [8]_. Starting the fit beyond the
+    - A single line from ``max(tau_0, 4 max(2, p) tau_c, N/50)`` to N/2, where tau_c is the 1/e
+      decorrelation time of the analysed series (:func:`pyhctsa.utils.get_tau`, rule 'ac1e').
+      Short-range correlation bends F(tau) over timescales up to several correlation times, so a
+      slope fitted from small tau mixes the short-range correlation into the long-range exponent
+      and can suggest long memory where there is none [7]_ [8]_. Starting the fit beyond the
       correlation time reduces this; the remaining bias falls as the start of the range moves
-      further beyond the correlation time, at the cost of a shorter, noisier fit [6]_. The slope
-      is the Theil-Sen slope (:func:`pyhctsa.robust.bf_theil_sen`).
+      further beyond the correlation time, at the cost of a shorter, noisier fit [6]_. The start
+      grows with p (8 tau_c for DFA1, 12 tau_c for DFA2, 16 tau_c for DFA3) because the
+      deviations from scaling at small tau are stronger for higher-order detrending [6]_. The
+      1/e time does not register correlation spread thinly over many lags, as in
+      anti-persistent series (for which tau_c = 1), so the start is also at least N/50, which
+      keeps the fit to the largest timescales, where the long-range exponent dominates [7]_.
+      The slope is the Theil-Sen slope (:func:`pyhctsa.robust.bf_theil_sen`).
     - A continuous broken line (two slopes that meet at a breakpoint) from tau_0 to N/2, which
       describes series whose scaling changes across timescales, such as the short- and long-range
       exponents of heart-rate variability [9]_, or crossovers produced by trends [10]_ [11]_. It is
@@ -207,6 +212,10 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2, wtf: str = 'rsrange'
         2, 315 (2012).
     .. [12] J. Alvarez-Ramirez et al., "Using detrended fluctuation analysis for lagged
         correlation analysis of nonstationary signals", Phys. Rev. E 79, 057202 (2009).
+    .. [13] A. A. Anis and E. H. Lloyd, "The expected value of the adjusted rescaled Hurst range
+        of independent normal summands", Biometrika 63, 111 (1976).
+    .. [14] R. Weron, "Estimating long-range dependence: finite sample properties and confidence
+        intervals", Physica A 312, 285 (2002).
 
     Parameters
     ----------
@@ -256,7 +265,7 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2, wtf: str = 'rsrange'
         - ``alphadiff``: the change of slope, ``r1_alpha - r2_alpha``.
 
         ``alpha`` and ``ssr`` are NaN if tau_c is undefined, if the single-line range spans less
-        than a factor of 1.5 (``N/2 < 1.5 * max(tau_0, 8 tau_c)``), or if it holds fewer than 8
+        than a factor of 1.5 (N/2 less than 1.5 times its start), or if it holds fewer than 8
         distinct timescales. The broken-line outputs are NaN for fewer than 12 distinct
         timescales, or when no interior breakpoint is resolved. Either set is NaN if F is zero at
         some timescale of its range.
@@ -266,10 +275,11 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2, wtf: str = 'rsrange'
     ``alpha`` is NaN for series that decorrelate slowly relative to their length, including
     strongly persistent ones, for which a long-range exponent cannot be told apart from
     short-range correlation. Short-range correlation still raises ``alpha`` a little, more for
-    short series. For k >= 2, F(tau) approaches its asymptotic scaling more slowly,
-    and ``alpha`` keeps some dependence on the short-range correlation. The methods that remove
-    no trend in each window ('std', 'iqr', 'range', 'endptdiff', and 'dfa' with k = 0) mostly
-    reflect the short-range correlation. Trends and changes in variance also change F(tau) [10]_
+    short series. The range-based exponents ('rsrange', 'rsrangefit') are biased upward, because
+    in short windows the expected range grows faster than tau**0.5; the bias falls slowly with
+    the window length, so these exponents decrease with series length [13]_ [14]_. The methods
+    that remove no trend in each window ('std', 'iqr', 'range', 'endptdiff', and 'dfa' with
+    k = 0) mostly reflect the short-range correlation. Trends and changes in variance also change F(tau) [10]_
     [11]_. The location of the breakpoint is not returned: at typical series lengths the curve
     bends gradually and the breakpoint is poorly determined.
     """
@@ -289,9 +299,11 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2, wtf: str = 'rsrange'
     tau_0 = max(5, 3 * n_par)
     tau_max = np.floor(N / 2)
 
-    # Single line, from beyond the correlation time
-    if np.isfinite(tau_c) and tau_max >= 1.5 * max(tau_0, 8 * tau_c):
-        taus = _log_tau_grid(max(tau_0, 8 * tau_c), tau_max, n_tau)
+    # Single line, from beyond the correlation time (further for higher-order detrending) and
+    # over no more than the largest 1.4 decades of timescales
+    tau_start = max(tau_0, 4 * max(2, n_par) * tau_c, N / 50)
+    if np.isfinite(tau_c) and tau_max >= 1.5 * tau_start:
+        taus = _log_tau_grid(tau_start, tau_max, n_tau)
         if len(taus) >= 8:
             F = _fluctuations(y, taus, wtf, q, int(k))
             if np.all(F > 0):

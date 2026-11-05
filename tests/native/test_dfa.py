@@ -51,7 +51,7 @@ def auc(a, b):
 
 def reference(x, k=1, n_tau=50):
     """Loop-based DFA-k with windows from both ends, numpy.polyfit detrending, scipy's Theil-Sen slope
-    over tau in [max(3(k+1), 5, 8 tau_c), N/2], and a brute-force broken line over [max(3(k+1), 5), N/2]."""
+    over tau in [max(3(k+1), 5, 4 max(2, k+1) tau_c, N/50), N/2], and a brute-force broken line over [max(3(k+1), 5), N/2]."""
     y = np.cumsum(x - np.mean(x))
     n = len(y)
 
@@ -67,7 +67,7 @@ def reference(x, k=1, n_tau=50):
 
     tau_0 = max(5, 3 * (k + 1))
     tau_c = get_tau(x, 'ac1e')
-    taus = grid(max(tau_0, 8 * tau_c), n // 2)
+    taus = grid(max(tau_0, 4 * max(2, k + 1) * tau_c, n / 50), n // 2)
     a = stats.theilslopes(np.log([F(t) for t in taus]), np.log(taus))[0]
     taus = np.array(grid(tau_0, n // 2))
     u, v = np.log(taus), np.log([F(t) for t in taus])
@@ -86,10 +86,10 @@ def reference(x, k=1, n_tau=50):
 FIELDS = {'alpha', 'ssr', 'r1_alpha', 'r2_alpha', 'alphadiff', 'r1_ssr', 'r2_ssr'}
 
 
-@pytest.mark.parametrize("n,k,seed", [(400, 1, 0), (1000, 1, 1), (1000, 2, 2), (3001, 3, 3)])
-def test_matches_a_loop_reference(n, k, seed):
+@pytest.mark.parametrize("n,k,seed,walk", [(400, 1, 0, 0.05), (1000, 1, 1, 0.05), (1000, 2, 2, 0.05), (3001, 3, 3, 0.02)])
+def test_matches_a_loop_reference(n, k, seed, walk):
     rng = np.random.default_rng(seed)
-    x = 0.05 * rng.standard_normal(n).cumsum() + ar1(0.6, n, rng)
+    x = walk * rng.standard_normal(n).cumsum() + ar1(0.6, n, rng)
     out = fluctuation_analysis(x, wtf='dfa', k=k)
     a, r1, r2, edge = reference(x, k)
     assert set(out) == FIELDS
@@ -114,7 +114,7 @@ def test_white_noise_exponent_is_half():
 
 
 def test_alpha_is_nan_when_the_series_decorrelates_too_slowly():
-    # a random walk: its sample ACF stays above 1/e for a large fraction of N, so the range from 8 tau_c
+    # a random walk: its sample ACF stays above 1/e for a large fraction of N, so the range from 12 tau_c
     # to N/2 is too short for a scaling exponent; the broken line still describes the curve
     out = fluctuation_analysis(np.cumsum(fgn(2000, 0.5, 1)), wtf='dfa', k=2)
     assert np.isnan(out['alpha']) and np.isnan(out['ssr'])

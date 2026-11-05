@@ -1600,8 +1600,8 @@ scaling:
       - {wtf: 'dfa', k: 3, zscore: True}
       - {wtf: 'dfa', k: 1, lag: 2, zscore: True}
       - {wtf: 'dfa', k: 1, lag: 3, zscore: True}
-      - {wtf: 'dfa', k: 2, zscore: True, preprocess: zscore_abs}
-      - {wtf: 'dfa', k: 2, zscore: True, preprocess: zscore_sign}
+      - {wtf: 'dfa', k: 1, zscore: True, preprocess: zscore_abs}
+      - {wtf: 'dfa', k: 1, zscore: True, preprocess: zscore_sign}
     legacy_name: SC_FluctAnal
     ordered_args: ['wtf', 'k', 'lag']
     dropped_hctsa_calls: ['SC_FluctAnal_2_endptdiff_50_logi', 'SC_FluctAnal_2_range_50_logi', 'SC_FluctAnal_2_std_50_logi',
