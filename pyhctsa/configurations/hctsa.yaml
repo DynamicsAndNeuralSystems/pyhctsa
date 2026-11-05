@@ -2070,16 +2070,15 @@ model_fit:
       fpe_mean: "34 if model == 'ar' else None"
       # the spread statistics need segments of at least 2 order + 1 points (a residual degree of freedom)
       logfpe_stdratio: "50 if model == 'ar' else None"
-      logfpe_maxdev: "50 if model == 'ar' else None"
       a_{k}_stdratio: "50 if model == 'ar' else None"
       a_{k}_maxdev: "50 if model == 'ar' else None"
     dependencies:
       - statsmodels
     configs:
-      - {model: 'ar', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True, select: ['fpe_mean', 'logfpe_stdratio', 'logfpe_maxdev', 'a_1_stdratio', 'a_1_maxdev', 'a_2_mean', 'a_2_stdratio', 'a_2_maxdev']}   # MF_FitSubsegments(x_z,'ar',2,'uniform',[25,0.1])
+      - {model: 'ar', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True, select: ['fpe_mean', 'logfpe_stdratio', 'a_1_stdratio', 'a_1_maxdev', 'a_2_mean', 'a_2_stdratio', 'a_2_maxdev']}   # MF_FitSubsegments(x_z,'ar',2,'uniform',[25,0.1])
       - {model: 'arcrosspred', order: 2, subset_how: 'uniform', sample_p: 5, zscore: True, select: ['excess_ratio']}   # MF_FitSubsegments(x_z,'arcrosspred',2,'uniform',5)
       - {model: 'arsbc', subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True, select: ['orders_mode', 'orders_mean']}   # MF_FitSubsegments(x_z,'arsbc',[],'uniform',[25,0.1])
-      - {model: 'ss', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True, select: ['logfpe_stdratio', 'logfpe_maxdev']}   # MF_FitSubsegments(x_z,'ss',2,'uniform',[25,0.1])
+      - {model: 'ss', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True, select: ['logfpe_stdratio']}   # MF_FitSubsegments(x_z,'ss',2,'uniform',[25,0.1])
     legacy_name: MF_FitSubsegments
     # the 'spread' arsbc config duplicates the 'uniform' one (the same statistics of 25 segments)
     dropped_hctsa_calls: ['MF_FitSubsegments_arsbc_spread_25_01']

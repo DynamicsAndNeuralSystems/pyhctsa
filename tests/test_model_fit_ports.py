@@ -59,9 +59,11 @@ def test_fit_subsegments_rand_draws():
     f = 40 / 38
     _check(mf.fit_subsegments(y, 'ar', 2, 'rand', [10, 0.1], 'default'),
            {'fpe_mean': 0.39482533738942843 * f, 'fpe_range': 0.16510385440096348 * f,
-            'a_1_mean': -0.88754626825997})
-    _check(mf.fit_subsegments(y, 'arsbc', None, 'rand', [10, 0.1], 'default'),
-           {'orders_mean': 8.7, 'sbcs_std': 0.2789350693032891, 'sbcs_min': -2.12873710590734})
+            'a_1_mean': -0.88754626825997, 'a_2_std': 0.038102305197980246})
+    # (segments of 40 samples: the candidate orders stop at 40 // 5 = 8, where hctsa's go to 10, so its
+    # values are compared on longer segments in test_p2_c.py)
+    out = mf.fit_subsegments(y, 'arsbc', None, 'rand', [10, 0.1], 'default')
+    assert out['orders_max'] <= 8 and np.isfinite(out['sbcs_std'])
 
 
 def test_fit_subsegments_ss():

@@ -2392,67 +2392,57 @@ def _ar_pooled_moments(segs: list, coefs: list, p: int) -> dict:
 
     For each segment, the forward regression of every sample on its ``p`` predecessors with the
     segment's own coefficients ``coefs[i]`` (as in ``1 + a_1 z^-1 + ...``) gives residuals ``e_t``
-    and regressors ``x_t``. Pooled over segments: ``gamma = sum x x' / n`` (``n`` residuals in all),
-    ``omega = sum e^2 x x' / (n - m p)`` and ``sigma2 = sum e^2 / (n - m p)`` (``m`` segments, ``p``
-    coefficients each), with ``m p`` degrees of freedom removed as in the HC1 heteroskedasticity-
-    consistent covariance. Also the residuals, and whether the fits are exact to rounding.
+    and regressors ``x_t``. Pooled over segments: ``gamma = sum x x' / n`` (``n`` residuals in all)
+    and ``sigma2 = sum e^2 / (n - m p)`` (``m`` segments, ``p`` coefficients each). Also the
+    residuals, their count per segment, and whether the fits are exact to rounding.
     """
-    resids, gram, omega, ms_data = [], np.zeros((p, p)), np.zeros((p, p)), 0.0
+    resids, gram, ms_data = [], np.zeros((p, p)), 0.0
     for seg, a in zip(segs, coefs):
         win = sliding_window_view(seg, p + 1)
         x_fwd = win[:, :p][:, ::-1]
         e = win[:, p] + x_fwd @ a
         resids.append(e)
         gram += x_fwd.T @ x_fwd
-        omega += (x_fwd * e[:, None] ** 2).T @ x_fwd
         ms_data += win[:, p] @ win[:, p]
     n_res = np.array([len(e) for e in resids])
     sse = sum(e @ e for e in resids)
     dof = np.sum(n_res) - len(segs) * p
-    out = {'resids': resids, 'n_res': n_res, 'exact': not sse > _RESID_ROUNDOFF * ms_data or dof < 1}
-    out['gamma'] = gram / np.sum(n_res)
-    out['omega'] = omega / max(dof, 1)
-    out['sigma2'] = sse / max(dof, 1)
-    return out
+    return {'resids': resids, 'n_res': n_res, 'gamma': gram / np.sum(n_res), 'sigma2': sse / max(dof, 1),
+            'exact': not sse > _RESID_ROUNDOFF * ms_data or dof < 1}
 
 
 def _ar_coef_var(mom: dict) -> np.ndarray:
-    """Sampling variance per residual, ``[Gamma^-1 Omega Gamma^-1]_kk``, of each AR coefficient
+    """Sampling variance per residual, ``sigma^2 [Gamma^-1]_kk``, of each AR coefficient
     (:func:`_ar_pooled_moments`; divide by a segment's residual count); NaN if not defined."""
     p = len(mom['gamma'])
     if mom['exact'] or not np.linalg.cond(mom['gamma']) < 1 / np.finfo(float).eps:
         return np.full(p, np.nan)
-    g_inv = np.linalg.inv(mom['gamma'])
-    return np.diag(g_inv @ mom['omega'] @ g_inv)
+    return mom['sigma2'] * np.diag(np.linalg.inv(mom['gamma']))
 
 
 def _crosspred_excess_ratio(mse: np.ndarray, mom: dict) -> float:
     """
     Mean excess error of cross-prediction between segments over its expectation for a stationary series.
 
-    ``mse[i, j]`` is the mean squared one-step error of segment ``i``'s AR model on segment ``j``. The
-    relative excess of another segment's model over the segment's own (in-sample) model is
+    ``mse[i, j]`` is the mean squared one-step error of segment ``i``'s AR(p) model on segment ``j``.
+    The relative excess of another segment's model over the segment's own (in-sample) model is
     ``mse[i, j] / mse[j, j] - 1``. For a stationary series both models estimate the same
-    coefficients, the excess comes from their sampling errors, and its expectation is
-    ``c (1 / n_i + 1 / n_j)`` for segments with ``n_i`` and ``n_j`` predicted samples, where
-    ``c = tr(Gamma^-1 Omega) / sigma^2`` (:func:`_ar_pooled_moments`; ``c = p`` for an AR(p) process
-    with independent innovations): the out-of-sample error of a model exceeds the innovation
-    variance by ``c sigma^2 / n_i`` and the in-sample error falls short of it by ``c sigma^2 / n_j``.
-    The output is the mean relative excess over the ordered pairs ``i != j`` divided by the mean of
-    its expectation: about 1 for a stationary series at any length, larger when the dynamics differ
+    coefficients and the excess comes from their sampling errors: to first order, a model fitted
+    to ``n_i`` samples predicts a new segment with mean squared error ``sigma^2 (1 + p / n_i)`` and
+    its own segment of ``n_j`` samples with ``sigma^2 (1 - p / n_j)``, so the relative excess has
+    expectation ``p (1 / n_i + 1 / n_j)`` (``n`` the predicted samples of a segment). The output
+    is the mean relative excess over the ordered pairs ``i != j`` divided by the mean of its
+    expectation: about 1 for a stationary series at any length, larger when the dynamics differ
     between segments. NaN if the fits are exact to rounding.
     """
     p = len(mom['gamma'])
-    if mom['exact'] or not np.linalg.cond(mom['gamma']) < 1 / np.finfo(float).eps:
+    if mom['exact']:
         return np.nan
-    c = np.trace(np.linalg.solve(mom['gamma'], mom['omega'])) / mom['sigma2']
     m = len(mse)
     off = ~np.eye(m, dtype=bool)
     rel = mse / np.diag(mse)[None, :] - 1
     inv_n = 1.0 / mom['n_res']
-    expected = c * (inv_n[:, None] + inv_n[None, :])
-    if not np.mean(expected[off]) > 0:
-        return np.nan
+    expected = p * (inv_n[:, None] + inv_n[None, :])
     return float(np.mean(rel[off]) / np.mean(expected[off]))
 
 
@@ -2469,27 +2459,44 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
     (hctsa's ``MF_FitSubsegments``).
 
     For a stationary series the estimates still differ between segments by sampling error,
-    which shrinks as the segments (a fixed fraction of the series) grow. For ``'ar'`` and
-    ``'ss'`` the spread is therefore reported relative to its expectation for a stationary
-    series: the SD across segments divided by the square root of the expected sample variance
-    of the segments' estimates if they differed by sampling error alone (``*_stdratio``). It is
-    about 1 for a stationary series at any length, and grows with the change in the dynamics
-    relative to the sampling error.
+    which shrinks as the segments (a fixed fraction of the series) grow. The spread across
+    segments is therefore also reported relative to its expectation for a stationary series,
+    which is about the same at any length and grows with the change in the dynamics relative to
+    the sampling error:
+
+    - ``*_stdratio`` (``'ar'``, ``'ss'``): the SD of an estimate across segments divided by the
+      square root of its expected sample variance if the segments differed by sampling error
+      alone; about 1 for a stationary series.
+    - ``a_k_maxdev`` (``'ar'``): the largest deviation of a segment's AR coefficient from the mean
+      over segments, divided by the SD of that deviation for a stationary series (the most
+      deviant segment). It responds more than the SD to a change confined to a few segments.
+    - ``excess_ratio`` (``'arcrosspred'``): the error of each segment's model in predicting the
+      other segments, in excess of their own models' error, relative to its expectation for a
+      stationary series; about 1 for a stationary series.
+
+    The sampling variances come from the segments' own fits, pooled over segments, so that
+    differences between segments do not enter:
 
     - AR coefficients: the least-squares estimate from a segment with ``n`` residuals has
       large-sample variance ``sigma^2 [Gamma^-1]_kk / n``, with ``Gamma`` the covariance matrix of
       ``p`` consecutive values. ``Gamma`` is the pooled ``X'X / n`` of the segments' regressions
-      and ``sigma^2`` their pooled residual sum of squares over ``n - p`` degrees of freedom each,
-      so differences between segments do not enter.
+      and ``sigma^2`` their pooled residual sum of squares over ``n - p`` degrees of freedom each.
+      Conditionally heteroskedastic innovations (as in a GARCH process) make the true variance
+      larger, which raises the AR statistics too.
     - Log FPE: the log residual mean square of a segment with ``nu`` residual degrees of freedom
       (residuals minus parameters) has variance ``psi'(nu / 2) (kappa - 1) / 2``: exact for
       Gaussian residuals (a log chi-square variable, ``psi'`` the trigamma function) and
       ``(kappa - 1) / n`` for large ``n`` with residuals of kurtosis ``kappa``, estimated from all
       the residuals pooled. Volatility clustering (residual variance that is autocorrelated, as
-      in a GARCH process) also raises this ratio.
+      in a GARCH process) also raises the log-FPE statistics.
     - Overlapping segments: each estimate is to first order an average over the samples of its
       segment, so two estimates whose ``n_i`` and ``n_j`` samples share ``o_ij`` are correlated by
-      ``o_ij / sqrt(n_i n_j)``, which lowers the expected sample variance by the mean correlation.
+      ``o_ij / sqrt(n_i n_j)``; this sets the expected sample variance and the variance of each
+      segment's deviation from the mean.
+    - Cross-prediction: for a stationary series, an AR(p) model fitted to ``n_i`` samples predicts
+      a new segment with mean squared error ``sigma^2 (1 + p / n_i)`` and its own segment of
+      ``n_j`` samples with ``sigma^2 (1 - p / n_j)``, to first order. The relative excess
+      ``mse_ij / mse_jj - 1`` therefore has expectation ``p (1 / n_i + 1 / n_j)``.
 
     Parameters
     ----------
@@ -2498,9 +2505,11 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
     model : str, optional
         The model to fit in each segment of the time series:
 
-        - 'arsbc': fits an AR model of the best order (1 to 10) by the Schwarz
-            Bayesian criterion (ARFIT algorithm, zero mean). Outputs are how the
-            optimal order and the SBC vary across segments (``orders_*``, ``sbcs_*``).
+        - 'arsbc': fits an AR model of the best order by the Schwarz Bayesian criterion
+            (ARFIT algorithm, zero mean), from orders 1 to 10 and at most a fifth of the
+            segment length (so that every candidate has at least four equations per
+            coefficient; with fewer, the criterion often picks the largest order). Outputs are
+            how the optimal order and the SBC vary across segments (``orders_*``, ``sbcs_*``).
             The ``order`` input is not used.
         - 'ar': fits an AR model of a specified order by forward-backward least
             squares. Outputs are how Akaike's
@@ -2512,8 +2521,8 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
             count), fits an AR model of the given order to each, and uses every
             segment's model to predict, one step ahead, every segment (including itself).
             The result is a matrix of cross-prediction root-mean-square errors (row:
-            predicting model, column: predicted segment), of which the spread and
-            off-diagonal statistics are returned. NaN if any segment is shorter than
+            predicting model, column: predicted segment), of which the spread,
+            off-diagonal and excess statistics are returned. NaN if any segment is shorter than
             ``5 * (order + 1)`` or an AR fit fails.
         - 'ss': fits a state-space model of the given order by subspace identification
             (``n4sid``; the order can be ``'best'``). Outputs are how Akaike's final
@@ -2555,21 +2564,23 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
     -------
     dict
         Dictionary of statistics on the spread and mean of fitted model parameters
-        and goodness of fit across segments. For ``'ar'`` and ``'ss'``, ``logfpe_stdratio`` (the
-        SD of the log final prediction error over its stationary expectation; NaN if a segment
-        has no residual degree of freedom or the fits are exact to rounding), ``fpe_mean``,
-        ``fpe_max``, ``fpe_min`` and ``fpe_range``; for ``'ar'`` also ``a_k_stdratio`` (the SD of the
-        coefficient over its stationary expectation, NaN in the same cases), ``a_k_mean``,
-        ``a_k_max`` and ``a_k_min`` for each lag ``k``. For ``'arma'``, ``fpe_std``, ``fpe_mean``,
-        ``fpe_max``, ``fpe_min``, ``fpe_range`` and ``p_k_std``, ``p_k_mean``, ``p_k_max``,
-        ``p_k_min`` (and the same for ``q_k_*``) of the AR (p) and MA (q) coefficients. For ``'arcrosspred'``: ``std``, ``range``,
+        and goodness of fit across segments. For ``'ar'``, ``'ss'`` and ``'arma'``,
+        ``fpe_std``, ``fpe_mean``, ``fpe_max``, ``fpe_min``, ``fpe_range`` (of the final
+        prediction error); for ``'ar'`` and ``'ss'`` also ``logfpe_stdratio`` (of the log FPE; NaN if
+        a segment has no residual degree of freedom or the fits are exact to rounding). For ``'ar'``, for each lag ``k``: ``a_k_std``,
+        ``a_k_mean``, ``a_k_max``, ``a_k_min``, ``a_k_stdratio`` and ``a_k_maxdev`` (NaN in the same
+        cases); for ``'arma'`` ``p_k_std``, ``p_k_mean``, ``p_k_max``, ``p_k_min`` and the same for
+        ``q_k_*``. For ``'arsbc'``: ``orders_mode``, ``orders_mean``, ``orders_std``, ``orders_max``,
+        ``orders_min``, ``orders_range`` (of the selected order) and ``sbcs_mean``, ``sbcs_std``,
+        ``sbcs_range``, ``sbcs_min``, ``sbcs_max`` (of the minimum SBC, the log residual variance
+        plus the penalty ``k log(n) / n``). For ``'arcrosspred'``: ``std``, ``range``,
         ``iqr`` (over all entries of the cross-prediction error matrix), ``stdoffdiag``,
         ``rangeoffdiag``, ``iqroffdiag`` (over the positive off-diagonal entries),
         ``stdmean``, ``rangemean``, ``stdmedian``, ``rangemedian`` (across predicted
         segments, of the mean and of the median error), ``rangerange``, ``stdrange``,
         ``rangestd``, ``stdstd`` (across predicted segments, of the range or standard
-        deviation of the errors) and ``mineig`` (smallest real part of the eigenvalues
-        of the matrix).
+        deviation of the errors), ``mineig`` (smallest real part of the eigenvalues
+        of the matrix) and ``excess_ratio`` (NaN if the fits are exact to rounding).
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
@@ -2656,7 +2667,6 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         spans = np.column_stack([r[:, 0] + p, r[:, 1]])
         w_fpe = None if mom['exact'] else _logfpe_null_var(fpes, mom['resids'], np.full(num_pred, p))
         out['logfpe_stdratio'] = np.nan if w_fpe is None else _spread_ratio(np.log(fpes), w_fpe, spans)
-        out['logfpe_maxdev'] = np.nan if w_fpe is None else _max_deviation(np.log(fpes), w_fpe, spans)
         coef_var = _ar_coef_var(mom) if np.all(mom['n_res'] - p >= 1) else np.full(p, np.nan)
         # statistics on the fitted AR parameters, as in the polynomial 1 + a_1 z^-1 + ...
         for i in range(p):
@@ -2740,7 +2750,6 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         w_fpe = (None if exact or not np.all(np.isfinite(fpes))
                  else _logfpe_null_var(fpes, resids, n_par))
         out['logfpe_stdratio'] = np.nan if w_fpe is None else _spread_ratio(np.log(fpes), w_fpe, spans)
-        out['logfpe_maxdev'] = np.nan if w_fpe is None else _max_deviation(np.log(fpes), w_fpe, spans)
     elif model == 'arma':
         # ARMA models of the specified orders: goodness of fit, and the AR (p) and MA (q) coefficients
         p_ord, q_ord = int(order[0]), int(order[1])

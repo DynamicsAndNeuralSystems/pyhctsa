@@ -1,6 +1,7 @@
-"""The spread ratios of fit_subsegments ('ar' and 'ss'): the expected sample variance of estimates from
-overlapping segments (exact for segment means of independent values), ratios near 1 at every length for
-stationary series, a clear response to drifting dynamics and innovation variance, and the edge cases."""
+"""The standardized spreads of fit_subsegments: the expected sample variance and deviations of estimates
+from overlapping segments (exact for segment means of independent values); stdratio, maxdev and the
+cross-prediction excess_ratio near their stationary values at every length, and their response to changing
+dynamics and innovation variance; the order cap of 'arsbc'; and the edge cases."""
 import numpy as np
 import pytest
 from scipy.signal import lfilter
@@ -29,7 +30,7 @@ def test_stationary_sample_var_limits():
     assert np.isnan(mf._spread_ratio(np.arange(4.0), w, np.array([[1, 10]] * 4)))
 
 
-@pytest.mark.parametrize('spans', [_uniform_spans(400, 25, 40),               # the configured geometry
+@pytest.mark.parametrize('spans', [_uniform_spans(400, 25, 40),  # (stdratio and maxdev)               # the configured geometry
                                    np.array([[1, 30], [11, 60], [41, 70], [61, 120], [100, 140]])])  # unequal
 def test_stationary_sample_var_segment_means(spans):
     # for means of independent values the covariance o_ij / (n_i n_j) is exact
@@ -39,13 +40,18 @@ def test_stationary_sample_var_segment_means(spans):
     observed = np.var(means, axis=1, ddof=1).mean()
     expected = mf._stationary_sample_var(1.0 / (spans[:, 1] - spans[:, 0] + 1), spans)
     assert observed == pytest.approx(expected, rel=0.02)
+    # each segment's deviation from the mean, standardized as in _max_deviation, has unit variance
+    w = 1.0 / (spans[:, 1] - spans[:, 0] + 1)
+    cov = mf._stationary_cov(w, spans)
+    h = np.eye(len(spans)) - 1.0 / len(spans)
+    z = (means - means.mean(axis=1, keepdims=True)) / np.sqrt(np.diag(h @ cov @ h))
+    np.testing.assert_allclose(z.var(axis=0), 1.0, rtol=0.05)
 
 
 # ------------------------------------------------------------------------------
 # stationary series: ratios about 1 at any length
 # ------------------------------------------------------------------------------
-def _median_ratios(coefs, N, reps, seed):
-    keys = ('a_1_stdratio', 'a_2_stdratio', 'logfpe_stdratio')
+def _median_ratios(coefs, N, reps, seed, keys=('a_1_stdratio', 'a_2_stdratio', 'logfpe_stdratio')):
     vals = np.array([[mf.fit_subsegments(z_score(_ar(coefs, N, seed + i)), 'ar', 2, 'uniform', [25, 0.1])[k]
                       for k in keys] for i in range(reps)])
     return dict(zip(keys, np.median(vals, axis=0)))
@@ -58,6 +64,21 @@ def test_ratios_near_one_at_every_length(coefs):
     for k in short:
         assert 0.8 < short[k] < 1.15 and 0.85 < long[k] < 1.15, (k, short[k], long[k])
         assert abs(long[k] - short[k]) < 0.15, k
+
+
+def test_maxdev_same_at_every_length():
+    keys = ('a_1_maxdev', 'a_2_maxdev')
+    short = _median_ratios([0.6], 200, 60, 400, keys)
+    long = _median_ratios([0.6], 2000, 60, 500, keys)
+    for k in keys:
+        assert 1.6 < short[k] < 2.8 and abs(long[k] - short[k]) < 0.3, (k, short[k], long[k])
+
+
+@pytest.mark.parametrize('N', [150, 1500])
+def test_excess_ratio_near_one(N):
+    vals = [mf.fit_subsegments(z_score(_ar([0.6], N, 600 + i)), 'arcrosspred', 2, 'uniform', 5)['excess_ratio']
+            for i in range(200)]
+    assert 0.85 < np.mean(vals) < 1.25
 
 
 def test_ss_ratio_near_one():
@@ -80,6 +101,31 @@ def test_drifting_ar_coefficient():
     assert out['a_1_stdratio'] > 2
 
 
+def test_change_between_segments():
+    # the AR(1) coefficient switches from 0.2 to 0.7 halfway (unit variance throughout)
+    N = 1000
+    phi = np.where(np.arange(N) < N // 2, 0.2, 0.7)
+    e = np.random.default_rng(9).standard_normal(N)
+    x = np.zeros(N)
+    for t in range(1, N):
+        x[t] = phi[t] * x[t - 1] + np.sqrt(1 - phi[t] ** 2) * e[t]
+    assert mf.fit_subsegments(z_score(x), 'arcrosspred', 2, 'uniform', 5)['excess_ratio'] > 3
+    # a change confined to one segment's worth of samples: the most deviant segment stands out
+    phi = np.where((np.arange(N) >= 450) & (np.arange(N) < 550), 0.8, 0.2)
+    x = np.zeros(N)
+    for t in range(1, N):
+        x[t] = phi[t] * x[t - 1] + np.sqrt(1 - phi[t] ** 2) * e[t]
+    assert mf.fit_subsegments(z_score(x), 'ar', 2, 'uniform', [25, 0.1])['a_1_maxdev'] > 3.5
+
+
+def test_arsbc_order_cap():
+    # white noise in segments of 25 samples: without enough equations per coefficient the criterion
+    # often picks the largest order
+    vals = [mf.fit_subsegments(np.random.default_rng(700 + i).standard_normal(250), 'arsbc', None, 'uniform',
+                               [25, 0.1])['orders_mean'] for i in range(10)]
+    assert np.median(vals) < 1.5
+
+
 def test_drifting_innovation_variance():
     N = 2000
     e = np.random.default_rng(6).standard_normal(N) * np.linspace(0.5, 2.0, N)
@@ -96,11 +142,11 @@ def test_edge_cases():
     # an exact fit (a sinusoid is an exact AR(2)): no sampling error to compare with
     out = mf.fit_subsegments(np.sin(np.arange(500) * 0.3), 'ar', 2, 'uniform', [25, 0.1])
     assert np.isnan(out['a_1_stdratio']) and np.isnan(out['logfpe_stdratio']) and np.isfinite(out['a_1_mean'])
+    assert np.isnan(mf.fit_subsegments(np.sin(np.arange(500) * 0.3), 'arcrosspred', 2, 'uniform', 5)['excess_ratio'])
     # segments of 4 points: no residual degree of freedom for an AR(2) fit
     out = mf.fit_subsegments(z_score(_ar([0.5], 40, 7)), 'ar', 2, 'uniform', [25, 0.1])
     assert np.isnan(out['a_2_stdratio']) and np.isnan(out['logfpe_stdratio']) and np.isfinite(out['fpe_mean'])
     # every segment the same: no spread is expected
     out = mf.fit_subsegments(z_score(_ar([0.5], 200, 8)), 'ar', 2, 'uniform', [5, 200])
     assert np.isnan(out['a_1_stdratio']) and np.isnan(out['logfpe_stdratio'])
-    # the raw spreads are no longer reported for 'ar' and 'ss'
-    assert 'a_1_std' not in out and 'fpe_std' not in out
+    assert np.isnan(out['a_1_maxdev']) and out['a_1_std'] == 0
