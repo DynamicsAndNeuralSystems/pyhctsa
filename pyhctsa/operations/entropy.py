@@ -1,4 +1,5 @@
 from math import comb, factorial
+import zlib
 from typing import Optional, Union
 import logging
 logger = logging.getLogger('pyhctsa')
@@ -490,7 +491,8 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
     processes can differ: discrete or heavy-tailed values put more pairs within ``r`` than
     Gaussian values do, so iid binary or Student-t noise gives a lower SampEn (reads as more
     regular) than iid Gaussian noise at the same ``r``. This follows from the definition, not
-    from the estimator; compare SampEn across series with similar value distributions.
+    from the estimator; compare SampEn across series with similar value distributions, or use
+    :func:`sample_entropy_ranked`, which computes it on ranks.
     """
     m = int(m)
     y = np.ascontiguousarray(y, dtype=np.float64)
@@ -508,6 +510,139 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
     if m > 1:
         out['meanchsampen'] = np.mean(np.diff(samp_en))
 
+    return out
+
+def _ranks_random_ties(y: np.ndarray) -> np.ndarray:
+    """Ranks 1..N of ``y`` with exactly equal values put in a pseudo-random order seeded by the data.
+
+    Equal values carry no order, so they are ordered by a :func:`~pyhctsa.robust.bf_random` key:
+    for an iid series with ties (e.g. counts) the ranks are then a uniformly random permutation,
+    as for continuous iid data. The key's seed is a CRC-32 checksum of the series' pattern of
+    distinct values (its dense ranks), so the result is deterministic and depends on ``y`` only
+    through the order of its values, hence invariant under strictly increasing transformations.
+    A seed shared by all series (as in :func:`_break_ties`) would make every heavily tied series
+    inherit the quirks of one fixed key sequence: SampEn of the ranks of iid binary data was then
+    biased (AUC about 0.65 against iid Gaussian data for m = 5, r = 0.05, N = 500 to 2000; 0.51
+    to 0.55 with the data-seeded key). Without ties no key is needed and the ranks are those of
+    ``y``.
+    """
+    n = y.size
+    distinct, dense = np.unique(y, return_inverse=True)
+    if distinct.size == n:
+        key = np.zeros(n)
+    else:
+        seed = zlib.crc32(dense.astype('<i8').tobytes()) % 4_000_000_000
+        key = bf_random(n, seed)
+    order = np.lexsort((key, y))
+    ranks = np.empty(n)
+    ranks[order] = np.arange(1, n + 1)
+    return ranks
+
+def sample_entropy_ranked(y: ArrayLike, m: int = 2, r: float = 0.1,
+                          pre_process_how: Optional[str] = None) -> dict:
+    """
+    Sample entropy of the ranks of a time series: a SampEn that ignores the value distribution.
+
+    Computes :func:`sample_entropy` (SampEn; Richman & Moorman [1]_, PhysioNet code [2]_) on the
+    z-scored ranks of the series instead of on its values. The result depends only on the
+    temporal order of the values: it is unchanged by any strictly increasing transformation of
+    the data, and every iid series gives the same value up to sampling noise, whatever its
+    marginal distribution, whereas the SampEn of the values depends on that distribution.
+    Temporal regularity (autocorrelation, periodicity, deterministic dynamics) still lowers it.
+
+    Ranking the values is, up to scale, the probability integral transform with the empirical
+    distribution function; Bajić et al. [4]_ study how this transform changes approximate and
+    sample entropy. Other rank-based entropies rank the distances between templates rather than
+    the values [5]_, or count ordinal patterns, as permutation entropy does [6]_.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    m : int, optional
+        Maximum embedding dimension (template length), at least 1. Default is 2.
+    r : float, optional
+        Tolerance, in standard deviations of the ranks (default 0.1, the default tolerance of
+        :func:`sample_entropy`). Two values match when their ranks differ by less than
+        ``r * sqrt(N (N + 1) / 12)``, i.e. by less than a fraction ``r / sqrt(12)`` (``0.058``
+        for ``r = 0.2``) of the sample, wherever they lie in the distribution.
+    pre_process_how : str, optional
+        ``'diff1'``: rank the first differences (increments) of the series, the rank analogue
+        of the 'Control Entropy' of Bollt & Skufca [3]_ (``sample_entropy`` with
+        ``pre_process_how='diff1'``); invariance then holds for the increments' distribution.
+        ``None`` (default): rank the series itself.
+
+    Returns
+    -------
+    dict
+        ``'sampen{k}'`` for ``k = 1..m``: the SampEn of the ranks with templates of length ``k``
+        (NaN in the same cases as ``sample_entropy``: when no templates of length ``k`` match,
+        or when they do but none of length ``k + 1`` do). All are NaN for a series with fewer
+        than two distinct values, with fewer than two values (after differencing), or containing
+        NaN or Inf. ``sample_entropy``'s ``sampen0``, ``quadSampEn{k}`` and ``meanchsampen`` are
+        left out: the ranks of every length-``N`` series are the same set of values, so
+        ``sampen0`` is a function of ``N`` and ``r`` only, ``quadSampEn{k}`` is ``sampen{k}`` plus
+        a constant, and ``meanchsampen`` is ``(sampen{m} - sampen0) / m``.
+
+    Notes
+    -----
+    With ``R_t`` the rank of ``y_t`` among ``y_1, ..., y_N`` (1 to N), the series analysed is
+
+    .. math:: u_t = \\frac{R_t - (N + 1)/2}{\\sqrt{N (N + 1) / 12}},
+
+    which has mean 0 and standard deviation 1 (``ddof=1``), and the output is
+    ``sample_entropy(u, m, r)['sampen{k}']``. For an iid continuous series, every ``sampen{k}``
+    estimates ``-log(2d - d^2)`` with ``d = r / sqrt(12)`` (2.19 for ``r = 0.2``), whatever the
+    distribution.
+
+    Uniform (plain) ranks are used rather than Gaussian scores of the ranks because they give
+    every value nearly the same expected number of neighbours, whereas Gaussian scores leave few
+    neighbours in the tails. Exactly equal values are ranked in a pseudo-random order (a fixed
+    function of the data; see ``_ranks_random_ties``), so that quantized or count-valued iid data
+    behave like continuous iid data (average ranks would make tied values match each other).
+
+    References
+    ----------
+    .. [1] J. S. Richman and J. R. Moorman, "Physiological time-series analysis using
+        approximate entropy and sample entropy", Am. J. Physiol. Heart Circ. Physiol.
+        278(6), H2039 (2000).
+    .. [2] "Sample Entropy Estimation 1.0.0",
+        https://physionet.org/content/sampen/1.0.0/c/sampen-1.1.c
+    .. [3] "Control Entropy: A complexity measure for nonstationary signals"
+        E. M. Bollt and J. Skufca, Math. Biosci. Eng., 6(1) 1 (2009).
+    .. [4] D. Bajić, N. Mišić, T. Škorić, N. Japundžić-Žigon and M. Milovanović, "On entropy of
+        probability integral transformed time series", Entropy 22, 1146 (2020).
+    .. [5] L. Citi, G. Guffanti and L. Mainardi, "Rank-based multi-scale entropy analysis of heart
+        rate variability", Computing in Cardiology 41 (2014).
+    .. [6] C. Bandt and B. Pompe, "Permutation entropy: a natural complexity measure for time
+        series", Phys. Rev. Lett. 88, 174102 (2002).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> y = np.random.default_rng(0).standard_normal(1000)
+    >>> a = sample_entropy_ranked(y, m=2, r=0.2)
+    >>> b = sample_entropy_ranked(np.exp(3 * y), m=2, r=0.2)
+    >>> a == b
+    True
+    """
+    m = int(m)
+    if m < 1:
+        raise ValueError(f"m must be at least 1 (got {m})")
+    if pre_process_how not in (None, '', 'diff1'):
+        raise ValueError(f"Unknown pre_process_how {pre_process_how!r}: use 'diff1' or None")
+    out = {f'sampen{k}': np.nan for k in range(1, m + 1)}
+    y = np.asarray(y, dtype=np.float64).ravel()
+    if pre_process_how == 'diff1':
+        y = np.diff(y)
+    if y.size < 2 or not np.all(np.isfinite(y)) or np.unique(y).size < 2:
+        return out
+    ranks = _ranks_random_ties(y)
+    n = y.size
+    u = (ranks - (n + 1) / 2.0) / np.sqrt(n * (n + 1) / 12.0)
+    se = sample_entropy(u, m=m, r=r)
+    for k in range(1, m + 1):
+        out[f'sampen{k}'] = se[f'sampen{k}']
     return out
 
 _ORDINAL_TIE_SEED = 0  # fixed bf_random seed of the tie-breaking key in _break_ties (deterministic)

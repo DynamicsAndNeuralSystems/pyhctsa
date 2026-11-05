@@ -272,7 +272,8 @@ def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
     -----
     The value depends on the fraction of changes that reach the threshold, which is set by the
     lag-1 autocorrelation and the distribution of the increments, as well as on the clustering
-    of large and small changes.
+    of large and small changes. :func:`pol_var_resid` sets the threshold from AR(2) residuals,
+    which removes the first two dependences.
     """
     x = np.asarray(x)
     dx = np.abs(np.diff(x)) # abs diff in consecutive values of the time series
@@ -288,6 +289,94 @@ def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
     p = pc / N
 
     return p
+
+def pol_var_resid(x: ArrayLike, D: int = 3, ar_order: int = 2) -> float:
+    """
+    Clustering of large and small innovations: POLVAR on AR residuals with a median threshold.
+
+    A variant of :func:`pol_var` that codes the residuals ``e_t`` of a least-squares
+    AR(``ar_order``) fit (with intercept) as large (1) or small (0) against the median of
+    ``|e_t|``, and counts runs of D equal symbols. Coding residuals
+    rather than increments, at a threshold that fixes ``q = P(1) = 1/2``, removes the dependence
+    of :func:`pol_var` on the lag-1 autocorrelation and the increment distribution, so the
+    statistic measures the clustering of large and small innovations (volatility clustering,
+    conditional heteroscedasticity [4]_). It is invariant to the location and scale of ``x``.
+
+    With ``s_t = 1{|e_t| >= median|e|}`` (t = 1, ..., n = N - ``ar_order``) split into maximal
+    runs of equal symbols with lengths ``L_1, L_2, ...``,
+
+    ``pol_var_resid = (1/n) * sum_j floor(L_j / D)``,
+
+    the number of non-overlapping words of D equal symbols per symbol. For a linear process with
+    iid innovations the symbols are close to iid Bernoulli(1/2) and the statistic is close to
+    ``1 / (2**D - 1)``; larger values mean that large and small innovations cluster in time.
+    Static nonlinear transforms of a linear process also give clustered residual magnitudes.
+
+    As in :func:`pol_var`, words of D zeros and of D ones are both counted. The published
+    POLVAR statistic [1]_ [2]_ [3]_ codes raw beat-to-beat differences against a fixed threshold
+    in ms and counts only the word of D zeros.
+
+    The statistic combines standard parts: the run counting of POLVAR, introduced for heart-rate
+    variability [3]_ [1]_; coding against the median, as in the runs test of Wald and Wolfowitz
+    [5]_; and reading volatility clustering from the magnitudes of model residuals, as in tests
+    for ARCH effects [4]_. In effect it is a runs test for the clustering of large innovations.
+    No published statistic of this form is known.
+
+    References
+    ----------
+    .. [1] N. Wessel, C. Ziehmann, J. Kurths, U. Meyerfeldt, A. Schirdewan and A. Voss,
+           "Short-term forecasting of life-threatening cardiac arrhythmias based on symbolic
+           dynamics and finite-time growth rates", Phys. Rev. E 61(1), 733 (2000).
+    .. [2] U. Parlitz, S. Berg, S. Luther, A. Schirdewan, J. Kurths and N. Wessel, "Classifying
+           cardiac biosignals using ordinal pattern statistics and symbolic dynamics", Comput.
+           Biol. Med. 42(3), 319 (2012).
+    .. [3] A. Voss et al., "The application of methods of non-linear dynamics for the improved
+           and predictive recognition of patients threatened by sudden cardiac death",
+           Cardiovasc. Res. 31(3), 419 (1996).
+    .. [4] R. F. Engle, "Autoregressive conditional heteroscedasticity with estimates of the
+           variance of United Kingdom inflation", Econometrica 50(4), 987 (1982).
+    .. [5] A. Wald and J. Wolfowitz, "On a test whether two samples are from the same
+           population", Ann. Math. Stat. 11(2), 147 (1940).
+
+    Parameters
+    ----------
+    x : array-like
+        The input time series.
+    D : int
+        Word length: the number of consecutive equal symbols counted as one word. Default is 3.
+    ar_order : int
+        Order of the autoregressive model whose residuals are coded. Default is 2.
+
+    Returns
+    -------
+    float
+        The number of non-overlapping words of D equal symbols per residual. NaN if there are
+        fewer than ``2 * D`` residuals, if the series is constant, or if the AR model fits it
+        exactly (e.g. a pure sinusoid, which is an exact AR(2) process), when there are no
+        innovations to code.
+    """
+    x = np.asarray(x, dtype=float)
+    D, p = int(D), int(ar_order)
+    n = len(x) - p  # number of residuals
+    if D < 1 or p < 0 or n < max(2 * D, p + 2) or not np.all(np.isfinite(x)):
+        return np.nan
+    scale = np.std(x)
+    if scale == 0:
+        return np.nan
+
+    # least-squares AR(p) fit with an intercept: x_t ~ c + a_1 x_{t-1} + ... + a_p x_{t-p}
+    design = np.column_stack([x[p - j:len(x) - j] for j in range(1, p + 1)] + [np.ones(n)])
+    coef, *_ = np.linalg.lstsq(design, x[p:], rcond=None)
+    abs_resid = np.abs(x[p:] - design @ coef)
+
+    threshold = np.median(abs_resid)
+    if not threshold > 1e-10 * scale:  # (near-)exact fit: the symbols would code rounding error
+        return np.nan
+    x_sym = abs_resid >= threshold
+
+    change = np.flatnonzero(x_sym[1:] != x_sym[:-1]) + 1
+    run_lengths = np.diff(np.concatenate(([0], change, [n])))
+    return float(np.sum(run_lengths // D) / n)
 
 def pnn(x: ArrayLike) -> dict:
     """

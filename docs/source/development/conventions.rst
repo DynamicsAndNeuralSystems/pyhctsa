@@ -64,14 +64,16 @@ Below is an example of the docstring convention for feature-computing functions 
 
 A docstring explains the method and its implementation: what the function computes, the choices it makes (estimators,
 preprocessing, normalizations, departures from the published method), and the literature it comes from.
-Keep it short, and leave out:
+Give detailed references for where a statistic comes from: for a statistic new to pyhctsa, explain where the approach
+comes from and cite prior and similar work, even at some length.
+Otherwise keep it short, and leave out:
 
     - history: how the feature reached its current form ("formerly", "an earlier version", "changed to");
     - narratives of tests or experiments run during development (simulation settings, AUCs, correlations on
       particular datasets), unless they are published and cited (a brief general reason, such as "tests showed
       these were redundant", is fine);
-    - extended discussion of what else a feature responds to, and speculation about a method's origin (a short
-      provenance note is fine where the origin is itself notable, e.g. a statistic with no published source).
+    - extended discussion of what else a feature responds to, and speculation about a method's origin beyond a
+      short, clearly marked note.
 
 Where a feature is known to respond to something besides its target property, one plain sentence in Notes is
 enough (and a pointer to a more specific variant, if there is one).
@@ -83,18 +85,18 @@ so use it sparingly.
 Output Conventions
 ------------------
 The calculator turns the output of a feature function into feature columns, so the shape of the output decides
-the column names, and it should match hctsa's:
+the column names:
 
     - a function that returns one number (even for a single lag, as ``autocorr(y, 1)``) returns a ``float``
-      (column ``label``); a function that returns several outputs returns a ``dict`` (columns ``label.field``,
-      with hctsa's field names, which are case-sensitive);
-    - a function that cannot compute anything for the input it was given (hctsa: ``out = NaN``) returns ``nan``
-      in the scalar case, and a ``dict`` with every field NaN in the dict case: decorate dict-returning functions
+      (column ``label``); a function that returns several outputs returns a ``dict`` (columns ``label.field``;
+      field names are case-sensitive);
+    - a function that cannot compute anything for the input it was given returns ``nan`` in the scalar case,
+      and a ``dict`` with every field NaN in the dict case: decorate dict-returning functions
       with :func:`~pyhctsa.utils.dict_output` and return ``np.nan`` at the failure, and the decorator fills in the
       field names (see :func:`~pyhctsa.utils.nan_outputs`);
     - NaN means 'not appropriate for this input' (a constant series, too few samples, a fit that does not exist);
       do not raise for these;
-    - return only the fields hctsa's function returns, with its names; hctsa registers a subset of them, which
-      the ``select:`` and ``exclude:`` keys of ``hctsa.yaml`` express;
-    - random draws come from :func:`~pyhctsa.robust.bf_random` through :func:`~pyhctsa.robust.bf_random_seed`
-      (as hctsa's ``BF_Random``), never from NumPy's global stream.
+    - return the fields the method defines, and no fields that have no meaning for it; the ``select:`` and
+      ``exclude:`` keys of ``hctsa.yaml`` choose which fields of a function are registered as features;
+    - random draws come from :func:`~pyhctsa.robust.bf_random` through :func:`~pyhctsa.robust.bf_random_seed`,
+      never from NumPy's global stream.

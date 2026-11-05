@@ -104,6 +104,7 @@ Correlation
    pyhctsa.operations.correlation.add_noise
    pyhctsa.operations.correlation.theiler_q
    pyhctsa.operations.correlation.crinkle_statistic
+   pyhctsa.operations.correlation.crinkle_statistic_kurtosis
    pyhctsa.operations.correlation.time_rev_kaplan
    pyhctsa.operations.correlation.pos_neg_asymmetry
    pyhctsa.operations.correlation.embed2_angle_tau
@@ -114,6 +115,8 @@ Correlation
    pyhctsa.operations.correlation.stick_angles
    pyhctsa.operations.correlation.falling_sticks
    pyhctsa.operations.correlation.nonlinear_autocorr
+   pyhctsa.operations.correlation.nonlinear_autocorr_excess
+   pyhctsa.operations.correlation.nonlinear_autocorr_abs_surrogate_ratio
    pyhctsa.operations.correlation.partial_autocorr
    pyhctsa.operations.correlation.embed2_dist
    pyhctsa.operations.correlation.embed2_basic
@@ -124,6 +127,7 @@ Correlation
    pyhctsa.operations.correlation.translate_shape
    pyhctsa.operations.correlation.autocorr_shape
    pyhctsa.operations.correlation.trev
+   pyhctsa.operations.correlation.trev_studentized
    pyhctsa.operations.correlation.tc3
    pyhctsa.operations.correlation.joint_non_gaussianity
    pyhctsa.operations.correlation.matrix_profile
@@ -183,6 +187,7 @@ Entropy
    pyhctsa.operations.entropy.distribution_entropy
    pyhctsa.operations.entropy.multi_scale_entropy
    pyhctsa.operations.entropy.sample_entropy
+   pyhctsa.operations.entropy.sample_entropy_ranked
    pyhctsa.operations.entropy.permutation_entropy
    pyhctsa.operations.entropy.rpde
    pyhctsa.operations.entropy.approximate_entropy
@@ -251,6 +256,7 @@ Medical
    pyhctsa.operations.medical.raw_hrv_meas
    pyhctsa.operations.medical.hrv_classic
    pyhctsa.operations.medical.pol_var
+   pyhctsa.operations.medical.pol_var_resid
    pyhctsa.operations.medical.pnn
    pyhctsa.operations.medical.porta
 

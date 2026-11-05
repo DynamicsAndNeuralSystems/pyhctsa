@@ -50,6 +50,16 @@ medical:
     legacy_name: MD_PolVar
     ordered_args: ['d', 'D']
 
+  pol_var_resid:   # pyhctsa-only: pol_var on |AR(2) residuals| with a median threshold (no hctsa counterpart)
+    base_name: pol_var_resid
+    min_length: "2 * D + ar_order"
+    dependencies:
+    configs:
+      - {D: 3, zscore: True}
+      - {D: 6, zscore: True}
+    variant_of: pol_var
+    ordered_args: ['D']
+
   raw_hrv_meas:
     base_name: hrv_meas
     dependencies:
@@ -403,6 +413,103 @@ correlation:
       - {taus: [[1, 2, 3, 4]], absval: True, zscore: True, preprocess: decimate_ac1e}   # CO_NonlinearAutocorr(zscore(BF_PreProcess(x_z,'decimate_ac1e')),[1,2,3,4],true)
     legacy_name: CO_NonlinearAutocorr
     ordered_args: ['taus', 'absval']
+
+  nonlinear_autocorr_excess:   # pyhctsa-only: nonlinear_autocorr minus its Gaussian (Isserlis) value, on Gaussian ranks
+    base_name: ac_nl_excess
+    dependencies:
+    configs:   # the absval=False configs of nonlinear_autocorr
+      - {taus: [[1, 2, 3]], zscore: True}
+      - {taus: [[1, 2, 3, 4]], zscore: True}
+      - {taus: [[1, 2, 3, 4, 5]], zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6]], zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6, 7]], zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6, 7, 8]], zscore: True}
+      - {taus: [[1, 3]], zscore: True}
+      - {taus: [[1, 3, 5]], zscore: True}
+      - {taus: [[2, 4, 6]], zscore: True}
+      - {taus: [[1, 3, 5, 7]], zscore: True}
+      - {taus: [[2, 4, 6, 8]], zscore: True}
+      - {taus: [[1, 2, 4]], zscore: True}
+      - {taus: [[1, 3, 4]], zscore: True}
+      - {taus: [[1, 4]], zscore: True}
+      - {taus: [[1, 1]], zscore: True}
+      - {taus: [[2, 2]], zscore: True}
+      - {taus: [[3, 3]], zscore: True}
+      - {taus: [[4, 4]], zscore: True}
+      - {taus: [[5, 5]], zscore: True}
+      - {taus: [[6, 6]], zscore: True}
+      - {taus: [[0, 1, 1]], zscore: True}
+      - {taus: [[0, 2, 2]], zscore: True}
+      - {taus: [[0, 3, 3]], zscore: True}
+      - {taus: [[0, 4, 4]], zscore: True}
+      - {taus: [[0, 5, 5]], zscore: True}
+      - {taus: [[0, 6, 6]], zscore: True}
+      - {taus: [[0, 0, 1]], zscore: True}
+      - {taus: [[0, 0, 2]], zscore: True}
+      - {taus: [[0, 0, 3]], zscore: True}
+      - {taus: [[0, 0, 4]], zscore: True}
+      - {taus: [[0, 0, 5]], zscore: True}
+      - {taus: [[0, 0, 6]], zscore: True}
+      - {taus: [[0, 1, 2]], zscore: True}
+      - {taus: [[0, 1, 3]], zscore: True}
+      - {taus: [[0, 2, 3]], zscore: True}
+      - {taus: [[0, 1, 4]], zscore: True}
+      - {taus: [[0, 2, 4]], zscore: True}
+      - {taus: [[0, 3, 4]], zscore: True}
+      - {taus: [[0, 1, 5]], zscore: True}
+      - {taus: [[0, 2, 5]], zscore: True}
+      - {taus: [[0, 3, 5]], zscore: True}
+      - {taus: [[0, 4, 5]], zscore: True}
+      - {taus: [[0, 1, 6]], zscore: True}
+      - {taus: [[0, 2, 6]], zscore: True}
+      - {taus: [[0, 3, 6]], zscore: True}
+      - {taus: [[0, 4, 6]], zscore: True}
+      - {taus: [[0, 5, 6]], zscore: True}
+      - {taus: [[1, 1, 2]], zscore: True}
+      - {taus: [[1, 1, 3]], zscore: True}
+      - {taus: [[1, 2, 2]], zscore: True}
+      - {taus: [[1, 3, 3]], zscore: True}
+      - {taus: [[2, 2, 3]], zscore: True}
+      - {taus: [[2, 3, 3]], zscore: True}
+      - {taus: [[0, 1]], zscore: True}
+      - {taus: [[0, 2]], zscore: True}
+      - {taus: [[0, 3]], zscore: True}
+      - {taus: [[0, 4]], zscore: True}
+      - {taus: [[0, 5]], zscore: True}
+      - {taus: [[0, 6]], zscore: True}
+      - {taus: [[0, 3, 6]], zscore: True, preprocess: decimate_ac1e}
+      - {taus: [[1, 1, 2]], zscore: True, preprocess: decimate_ac1e}
+    variant_of: nonlinear_autocorr
+    ordered_args: ['taus']
+
+  nonlinear_autocorr_abs_surrogate_ratio:   # pyhctsa-only: absval nonlinear_autocorr on Gaussian ranks / phase-randomised surrogates
+    base_name: ac_nl_abs_surr_ratio
+    dependencies:
+    configs:   # the absval=True configs of nonlinear_autocorr
+      - {taus: [[1, 2]], zscore: True}
+      - {taus: [[1, 2, 3, 4]], zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6]], zscore: True}
+      - {taus: [[1, 2, 3, 4, 5, 6, 7, 8]], zscore: True}
+      - {taus: [[1, 3]], zscore: True}
+      - {taus: [[2, 4]], zscore: True}
+      - {taus: [[1, 3, 5, 7]], zscore: True}
+      - {taus: [[2, 4, 6, 8]], zscore: True}
+      - {taus: [[1, 4]], zscore: True}
+      - {taus: [[1, 1]], zscore: True}
+      - {taus: [[2, 2]], zscore: True}
+      - {taus: [[3, 3]], zscore: True}
+      - {taus: [[4, 4]], zscore: True}
+      - {taus: [[5, 5]], zscore: True}
+      - {taus: [[6, 6]], zscore: True}
+      - {taus: [[0, 1]], zscore: True}
+      - {taus: [[0, 2]], zscore: True}
+      - {taus: [[0, 3]], zscore: True}
+      - {taus: [[0, 4]], zscore: True}
+      - {taus: [[0, 5]], zscore: True}
+      - {taus: [[0, 6]], zscore: True}
+      - {taus: [[1, 2, 3, 4]], zscore: True, preprocess: decimate_ac1e}
+    variant_of: nonlinear_autocorr
+    ordered_args: ['taus']
   
   stick_angles:
     base_name: stick_angles
@@ -507,6 +614,20 @@ correlation:
     legacy_name: CO_trev
     ordered_args: ['tau']
 
+  trev_studentized:   # pyhctsa-only: the trev numerator divided by its HAC (flat-top kernel) standard error
+    base_name: trev_studentized
+    dependencies:
+    configs:
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 3, zscore: True}
+      - {tau: 'ac', zscore: True}
+      - {tau: 'mi', zscore: True}
+      - {tau: 5, zscore: True}
+      - {tau: 10, zscore: True}
+    variant_of: trev
+    ordered_args: ['tau']
+
   tc3:
     base_name: tc3
     dependencies:
@@ -545,6 +666,15 @@ correlation:
       - {zscore: True}
       - {zscore: True, preprocess: decimate_ac1e}   # DK_crinkle(zscore(BF_PreProcess(x_z,'decimate_ac1e')))
     legacy_name: DK_crinkle
+    ordered_args:
+
+  crinkle_statistic_kurtosis:   # pyhctsa-only: excess kurtosis of the second difference, on Gaussian ranks
+    base_name: crinkle_statistic_kurtosis
+    dependencies:
+    configs:
+      - {zscore: True}
+      - {zscore: True, preprocess: decimate_ac1e}
+    variant_of: crinkle_statistic
     ordered_args:
   
   theiler_q:
@@ -777,6 +907,19 @@ entropy:
       - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen4', 'sampen5', 'meanchsampen']}
       - {m: 5, r: 0.2, zscore: True, preprocess: decimate_ac1e, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}   # EN_SampEn(zscore(BF_PreProcess(x_z,'decimate_ac1e')),5,0.2)
     legacy_name: EN_SampEn
+    ordered_args: ['m', 'r', 'pre_process_how']
+
+  # pyhctsa-only variant of sample_entropy: SampEn of the ranks, invariant to the value distribution.
+  # Mirrors sample_entropy's configs; sampen0 (a function of N and r alone for ranks) is not returned.
+  sample_entropy_ranked:
+    base_name: sample_entropy_ranked
+    min_length: 4
+    dependencies:
+    configs:
+      - {m: 5, r: 0.2, zscore: True, select: ['sampen1', 'sampen2', 'sampen3']}
+      - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True, select: ['sampen1', 'sampen2', 'sampen3']}
+      - {m: 5, r: 0.2, zscore: True, preprocess: decimate_ac1e}
+    variant_of: sample_entropy
     ordered_args: ['m', 'r', 'pre_process_how']
 
   multi_scale_entropy:
@@ -1450,24 +1593,19 @@ scaling:
     base_name: fluctuation_analysis
     dependencies:
     configs:
-      - {q: 2.0, wtf: 'endptdiff', tau_step: 50,  log_inc: True, zscore: True, exclude: ['se1', 'se2']}
-      - {q: 2.0, wtf: 'range', tau_step: 50,  log_inc: True, zscore: True, exclude: ['se1', 'se2']}
-
-      - {q: 2.0, wtf: 'rsrange', tau_step: 50,  log_inc: True, zscore: True, exclude: ['se1', 'se2']}
-      - {q: 2.0, wtf: 'rsrangefit', tau_step: 50,  log_inc: True, zscore: True, exclude: ['se1', 'se2']}
-
-      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 0, log_inc: True, zscore: True, exclude: ['se1', 'se2']}
-      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 1, log_inc: True, zscore: True, exclude: ['se1', 'se2']}
-      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 2, log_inc: True, zscore: True, exclude: ['se1', 'se2']}
-      - {q: 2.0, wtf: 'dfa', tau_step: 50,  k: 3, log_inc: True, zscore: True, exclude: ['se1', 'se2']}
-      - {wtf: 'dfa', tau_step: 50, k: 1, lag: 2, zscore: True, exclude: ['se1', 'se2']}   # SC_FluctAnal(x_z,2,'dfa',50,1,2,true)
-      - {wtf: 'dfa', tau_step: 50, k: 1, lag: 3, zscore: True, exclude: ['se1', 'se2']}   # SC_FluctAnal(x_z,2,'dfa',50,1,3,true)
-      - {wtf: 'iqr', tau_step: 50, zscore: True, exclude: ['se1', 'se2']}   # SC_FluctAnal(x_z,2,'iqr',50,[],[],true)
-      - {wtf: 'std', tau_step: 50, zscore: True, exclude: ['se1', 'se2']}   # SC_FluctAnal(x_z,2,'std',50,[],[],true)
-      - {wtf: 'dfa', tau_step: 50, k: 2, zscore: True, exclude: ['se1', 'se2'], preprocess: zscore_abs}   # SC_FluctAnal(zscore(abs(x_z)),2,'dfa',50,2,[],true)
-      - {wtf: 'dfa', tau_step: 50, k: 2, zscore: True, exclude: ['se1', 'se2'], preprocess: zscore_sign}   # SC_FluctAnal(zscore(sign(x_z)),2,'dfa',50,2,[],true)
+      - {wtf: 'rsrange', zscore: True}
+      - {wtf: 'rsrangefit', k: 1, zscore: True}
+      - {wtf: 'dfa', k: 1, zscore: True}
+      - {wtf: 'dfa', k: 2, zscore: True}
+      - {wtf: 'dfa', k: 3, zscore: True}
+      - {wtf: 'dfa', k: 1, lag: 2, zscore: True}
+      - {wtf: 'dfa', k: 1, lag: 3, zscore: True}
+      - {wtf: 'dfa', k: 1, zscore: True, preprocess: zscore_abs}
+      - {wtf: 'dfa', k: 1, zscore: True, preprocess: zscore_sign}
     legacy_name: SC_FluctAnal
-    ordered_args: ['q', 'wtf', 'tau_step', 'k', 'lag', 'log_inc']
+    ordered_args: ['wtf', 'k', 'lag']
+    dropped_hctsa_calls: ['SC_FluctAnal_2_endptdiff_50_logi', 'SC_FluctAnal_2_range_50_logi', 'SC_FluctAnal_2_std_50_logi',
+                          'SC_FluctAnal_2_iqr_50_logi', 'SC_FluctAnal_2_dfa_50_0_logi']
 
   mma:
     base_name: mma
