@@ -2068,10 +2068,12 @@ model_fit:
     field_min_length:
       # 'ar' on segments of 0.1 N points: an order-2 fit to 3 points is exact (fpe 0, a_2 -1)
       fpe_mean: "34 if model == 'ar' else None"
-      fpe_std: "34 if model == 'ar' else None"
       fpe_max: "34 if model == 'ar' else None"
       fpe_min: "40 if model == 'ar' else None"
       a_2_max: "40 if model == 'ar' else None"
+      # the spread ratios need segments of at least 2 order + 1 points (a residual degree of freedom)
+      logfpe_stdratio: "50 if model == 'ar' else None"
+      a_{k}_stdratio: "50 if model == 'ar' else None"
     dependencies:
       - statsmodels
     configs:
