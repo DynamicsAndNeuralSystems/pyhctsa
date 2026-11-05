@@ -272,7 +272,8 @@ def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
     -----
     The value depends on the fraction of changes that reach the threshold, which is set by the
     lag-1 autocorrelation and the distribution of the increments, as well as on the clustering
-    of large and small changes.
+    of large and small changes. :func:`pol_var_resid` sets the threshold from AR(2) residuals,
+    which removes the first two dependences.
     """
     x = np.asarray(x)
     dx = np.abs(np.diff(x)) # abs diff in consecutive values of the time series

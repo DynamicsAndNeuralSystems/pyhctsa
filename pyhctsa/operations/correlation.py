@@ -906,6 +906,7 @@ def crinkle_statistic(y: ArrayLike) -> float:
     For a stationary process the ratio tends to :math:`6 - 8\\rho_1 + 2\\rho_2`, with
     :math:`\\rho_k` the lag-k autocorrelation, so C responds to the lag-1 and lag-2
     autocorrelation and to the value distribution, not only to spikes in the curvature.
+    :func:`crinkle_statistic_kurtosis` is a variant without these dependences.
 
     No published definition of the statistic is known. Theiler et al. [1]_ define the companion
     skewed-difference statistic :func:`theiler_q` and name higher moments as a class of
@@ -1863,7 +1864,9 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
     process, the mean of a product of an even number of factors is a sum of products of the
     autocorrelations at the lags involved (Isserlis' theorem); only the difference from that
     value is nonlinear. With ``absval=True`` and iid data, the value is a moment of the value
-    distribution alone.
+    distribution alone. The variants :func:`nonlinear_autocorr_excess` (the difference from the
+    Gaussian value) and :func:`nonlinear_autocorr_abs_surrogate_ratio` (``absval=True``, relative
+    to phase-randomised surrogates) target the nonlinear part.
     """
     y = np.asarray(y)
     taus = np.asarray(taus)
@@ -3386,7 +3389,8 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
     ``raw`` and ``num`` are zero in expectation for any time-reversible process. ``abs`` and
     ``absnum`` are their magnitudes, so on reversible data they measure estimation noise, which
     is larger for heavy-tailed or skewed values. ``denom`` depends on the lag-:math:`\\tau`
-    autocorrelation, not on irreversibility.
+    autocorrelation, not on irreversibility. :func:`trev_studentized` divides ``raw`` by its
+    standard error, so that its magnitude does not grow with the estimation noise.
     """
     y = np.asarray(y, dtype=float).ravel()
     # Can set the time lag, tau, to be 'ac' (first zero crossing of the autocorrelation function),

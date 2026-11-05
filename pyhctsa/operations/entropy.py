@@ -491,7 +491,8 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
     processes can differ: discrete or heavy-tailed values put more pairs within ``r`` than
     Gaussian values do, so iid binary or Student-t noise gives a lower SampEn (reads as more
     regular) than iid Gaussian noise at the same ``r``. This follows from the definition, not
-    from the estimator; compare SampEn across series with similar value distributions.
+    from the estimator; compare SampEn across series with similar value distributions, or use
+    :func:`sample_entropy_ranked`, which computes it on ranks.
     """
     m = int(m)
     y = np.ascontiguousarray(y, dtype=np.float64)
