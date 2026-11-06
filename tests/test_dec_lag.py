@@ -128,18 +128,42 @@ def test_crinkle_lag():
     assert np.isfinite(crinkle_statistic_kurtosis(y, tau=TAU))
 
 
+def _porta_levels(y, L=6):
+    q25, med, q75 = np.percentile(y, [25, 50, 75])
+    w = (q75 - q25) / 1.349 * 6 / L
+    return np.array([int(np.sum(v >= med + w * (np.arange(1, L) - L / 2))) for v in y])
+
+
 def test_porta_lag_counts_words_over_all_t():
     y = _smooth(400, 15, 6)
     out = porta(y, 6, tau=TAU)
     base = porta(y, 6)
-    # levels from the whole series, as in the tau = 1 call; words (s_t, s_{t+tau}, s_{t+2tau})
-    from pyhctsa.robust import bf_hist_edges
-    edges = bf_hist_edges(y, 6)
-    sym = np.clip(np.searchsorted(edges, y, side='right'), 1, len(edges) - 1)
+    sym = _porta_levels(y)
     n0 = sum(sym[t] == sym[t + TAU] == sym[t + 2 * TAU] for t in range(y.size - 2 * TAU))
     np.testing.assert_allclose(out['pV0'], 100 * n0 / (y.size - 2 * TAU))
     np.testing.assert_allclose(sum(out.values()), 100)
     assert out['pV0'] < base['pV0']  # steps tau apart are rarely flat
+
+
+def test_porta_robust_levels():
+    rng = np.random.default_rng(16)
+    y = np.zeros(1000)
+    for t in range(1, y.size):
+        y[t] = 0.8 * y[t - 1] + rng.standard_normal()
+    y = z_score(y)
+    sym = _porta_levels(y)
+    a = porta(y, 6)
+    n2UV = sum((sym[t + 1] - sym[t]) * (sym[t + 2] - sym[t + 1]) < 0 for t in range(y.size - 2))
+    np.testing.assert_allclose(a['pV2UV'], 100 * n2UV / (y.size - 2))
+    # one 10-SD spike barely moves the word types (range levels moved them by 25-40 points)
+    ys = y.copy()
+    ys[500] += 10
+    b = porta(ys, 6)
+    assert sum(abs(a[k] - b[k]) for k in a) / 2 < 1
+    # location-scale invariant
+    c = porta(3 * y + 5, 6)
+    for k in a:
+        np.testing.assert_allclose(a[k], c[k], atol=1e-9)
 
 
 def test_pol_var_lag_counts_runs_along_chains():

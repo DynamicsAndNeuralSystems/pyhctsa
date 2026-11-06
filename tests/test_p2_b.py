@@ -375,6 +375,5 @@ class TestSpectralScalingMedical:
             _check(MD.raw_hrv_meas(SERIES[n] * 30 + 800), ml, f'raw hrv {n}', rtol=1e-9, atol=1e-9)
         for n, ml in _series('G_hrv', ZS):
             _check(MD.hrv_classic(SERIES[n] * 30 + 800), ml, f'hrv {n}', rtol=1e-7, atol=1e-8)
-        for key, lv in (('G_porta6', 6), ('G_porta4', 4)):
-            for n, ml in _series(key, ZS):
-                _check(MD.porta(SERIES[n], lv), ml, f'porta {n}', rtol=0, atol=1e-12)
+        # porta is not compared: pyhctsa's levels are robust (median +/- 3 robust SDs), not hctsa's
+        # equal-width levels over the range (see test_dec_lag.py)

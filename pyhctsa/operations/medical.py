@@ -462,6 +462,16 @@ def porta(x: ArrayLike, num_levels: int = 6, tau: int | str = 1) -> dict:
     Originally developed for heart-rate-variability analysis, quantifying the
     complexity/regularity of the symbolic dynamics of RR interval sequences.
 
+    The levels are equal-width bins one robust standard deviation wide (for six levels),
+    ``s = IQR / 1.349``, centred on the median: the span ``median +/- 3 s`` is divided into
+    ``num_levels`` bins and values beyond it fall in the end bins. Porta et al. divide the full
+    range ``[min, max]`` into equal bins [2]_, after replacing ectopic beats, artifacts and jumps
+    of more than 30% in the RR series. Without that cleaning one outlier widens every range
+    bin: a single 10-SD spike in 1000 samples moves the word-type percentages by 25-55 points,
+    and the percentages then also track the shape of the value distribution. The robust span
+    is the analogue of the original for uncleaned data: unchanged by a few outliers, and
+    (for Gaussian data) about as wide as the range bins of a series of about 1000 samples.
+
     References
     ----------
     .. [1] A. Porta et al., "Entropy, entropy rate, and pattern classification as tools to typify
@@ -476,7 +486,8 @@ def porta(x: ArrayLike, num_levels: int = 6, tau: int | str = 1) -> dict:
     x : array-like
         The input time series.
     num_levels : int, optional
-        The number of quantization levels. Default is 6, as in the original papers.
+        The number of quantization levels spanning ``median +/- 3 s``. Default is 6, as in the
+        original papers.
     tau : int or str, optional
         The step between the symbols of a word, in samples: an integer, or a rule for
         :func:`~pyhctsa.utils.get_tau` (e.g. ``'ac1e'``). The words are
@@ -505,10 +516,14 @@ def porta(x: ArrayLike, num_levels: int = 6, tau: int | str = 1) -> dict:
         # Constant series: quantization is undefined
         return {'pV0': np.nan, 'pV1': np.nan, 'pV2LV': np.nan, 'pV2UV': np.nan}
 
-    # quantize into 1:num_levels
-    edges = bf_hist_edges(x, int(num_levels))  # equal-width levels spanning the data, explicit edges
-    sym = np.searchsorted(edges, x, side='right')
-    np.clip(sym, 1, len(edges) - 1, out=sym)
+    # quantize into 0:num_levels-1: equal bins over median +/- 3 robust SDs, open end bins
+    num_levels = int(num_levels)
+    q25, med, q75 = np.percentile(x, [25, 50, 75])
+    scale = (q75 - q25) / 1.349  # robust standard deviation
+    if scale <= 1e-12 * np.max(np.abs(x)):  # more than half the values tied
+        scale = 1.2533 * np.mean(np.abs(x - med))  # mean absolute deviation (Gaussian-consistent)
+    inner = med + (6 * scale / num_levels) * (np.arange(1, num_levels) - num_levels / 2)
+    sym = np.searchsorted(inner, x, side='right')
 
     # transitions between symbols tau apart
     s = np.sign(sym[tau:] - sym[:-tau])
