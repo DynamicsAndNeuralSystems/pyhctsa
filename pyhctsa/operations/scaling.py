@@ -435,7 +435,7 @@ _HIGUCHI_ROUNDING_REL = 1e-9
 
 
 @dict_output
-def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
+def higuchi_fd(y: ArrayLike, kmax: int | None = None, tau: int | str = 1) -> dict:
     """
     Higuchi's fractal dimension of a time series.
 
@@ -465,6 +465,14 @@ def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
         The maximum interleaving scale to include in the fit (default: a
         small, fixed value -- see Notes above for why a large kmax is
         actively harmful, not just unnecessary).
+    tau : int or str, optional
+        The unit of scale, in samples: an integer, or a rule for
+        :func:`~pyhctsa.utils.get_tau` (e.g. ``'ac1e'``). The scales are ``k = j * tau`` for
+        ``j = 1, ..., kmax``, and each curve length is normalized as for a series sampled every
+        ``tau`` samples, so the fit is against ``log(1/j)``. At every scale all ``k`` starting
+        offsets are used, so this pools the curve lengths of the ``tau`` phases of the series
+        decimated by ``tau`` (rather than using one phase). Default 1 (Higuchi's method). All
+        outputs are NaN when a rule cannot set the delay.
 
     Returns
     -------
@@ -474,9 +482,13 @@ def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
     """
     y = np.asarray(y, dtype=float).ravel()
     N = y.size
+    tau = get_tau(y, tau)
+    if np.isnan(tau):  # the delay could not be set
+        return {"HFD": np.nan, "intercept": np.nan, "se_HFD": np.nan, "ssr": np.nan, "resac1": np.nan}
+    tau = int(tau)
 
     if kmax is None:
-        kmax = min(8, max(5, N // 10))
+        kmax = min(8, max(5, (N // tau) // 10))
     kmax = int(kmax)
 
     # --------------------------------------------------------------------------
@@ -486,22 +498,24 @@ def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
     log_invk = np.full(kmax, np.nan)
     # the rounding level of a k-step increment: ROUNDING_REL of the scale of the series
     scale = max(np.std(y), np.mean(np.abs(y))) if N > 0 else 0.0
-    for k in range(1, kmax + 1):
+    for j in range(1, kmax + 1):
+        k = j * tau  # the scale in samples; j in units of tau
         lk = np.full(k, np.nan)
         for m in range(1, k + 1):
             n_max = (N - m) // k
             if n_max < 1:
                 continue
             idx = np.arange(m - 1, m + n_max * k, k)
-            lk[m - 1] = np.sum(np.abs(np.diff(y[idx]))) * (N - 1) / (n_max * k) / k
+            # Higuchi's normalized length, for the series sampled every tau samples
+            lk[m - 1] = np.sum(np.abs(np.diff(y[idx]))) * ((N - 1) / tau) / (n_max * j) / j
         if np.all(np.isnan(lk)):
             continue
         l_bar = np.nanmean(lk)
-        # L(k) = (N - 1) / k^2 times the mean absolute k-step increment: zero length if that
+        # L = ((N - 1) / tau) / j^2 times the mean absolute k-step increment: zero length if that
         # increment is at the rounding level
-        if not np.isnan(l_bar) and l_bar > _HIGUCHI_ROUNDING_REL * scale * (N - 1) / (k * k):
-            log_l[k - 1] = np.log(l_bar)
-            log_invk[k - 1] = np.log(1 / k)
+        if not np.isnan(l_bar) and l_bar > _HIGUCHI_ROUNDING_REL * scale * ((N - 1) / tau) / (j * j):
+            log_l[j - 1] = np.log(l_bar)
+            log_invk[j - 1] = np.log(1 / j)
 
     good_k = ~np.isnan(log_l)
     if np.sum(good_k) < 5:

@@ -872,7 +872,7 @@ def theiler_q(y: ArrayLike) -> float:
         return np.nan
     return float(num / den)
 
-def crinkle_statistic(y: ArrayLike) -> float:
+def crinkle_statistic(y: ArrayLike, tau: Union[int, str] = 1) -> float:
     """
     Crinkle statistic: normalized fourth moment of the second difference.
 
@@ -891,11 +891,17 @@ def crinkle_statistic(y: ArrayLike) -> float:
     ----------
     y : array-like
         The input time series.
+    tau : int or str, optional
+        The step of the second difference, in samples: an integer, or a rule for
+        :func:`~pyhctsa.utils.get_tau` (e.g. ``'ac1e'``). The numerator then averages
+        :math:`(\tilde{x}_{t-\tau} - 2\tilde{x}_t + \tilde{x}_{t+\tau})^4` over every
+        interior point, which pools the ``tau`` phases of the series sampled every ``tau``
+        samples. Default 1. NaN when a rule cannot set the delay.
 
     Returns
     -------
     float
-        The crinkle statistic (NaN if the series is constant or has fewer than three
+        The crinkle statistic (NaN if the series is constant or has fewer than ``2 tau + 1``
         samples, where it is undefined).
 
     Notes
@@ -921,14 +927,21 @@ def crinkle_statistic(y: ArrayLike) -> float:
     .. [2] T. Schreiber and A. Schmitz, "Surrogate time series", Physica D 142, 346-382 (2000).
     """
     x = np.asarray(y, dtype=float).ravel()
-    if x.size < 3:
+    tau = get_tau(x, tau) if x.size else np.nan
+    if np.isnan(tau) or x.size < 2 * int(tau) + 1:
         return np.nan
     x = x - np.mean(x)
     den = np.mean(x ** 2) ** 2
     if den == 0:
         return np.nan
-    num = np.mean(np.diff(x, n=2) ** 4)
+    num = np.mean(_second_difference(x, int(tau)) ** 4)
     return float(num / den)
+
+def _second_difference(x: np.ndarray, tau: int = 1) -> np.ndarray:
+    """x_{t-tau} - 2 x_t + x_{t+tau} for every interior t (np.diff(x, n=2) for tau = 1)."""
+    if tau == 1:
+        return np.diff(x, n=2)
+    return x[:-2 * tau] - 2 * x[tau:-tau] + x[2 * tau:]
 
 def _gaussian_ranks(y: ArrayLike) -> Union[np.ndarray, None]:
     """The series mapped monotonically onto a standard-normal marginal, then z-scored.
@@ -952,7 +965,8 @@ def _gaussian_ranks(y: ArrayLike) -> Union[np.ndarray, None]:
     return (g - np.mean(g)) / sd
 
 
-def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> float:
+def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True,
+                               tau: Union[int, str] = 1) -> float:
     """
     Excess kurtosis of the second difference: the spikiness of a series' curvature.
 
@@ -979,8 +993,8 @@ def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> floa
     autocorrelation; positive values mean that the curvature has heavier tails (rare sharp kinks)
     than a Gaussian process with the same spectrum. The rank transform removes the contribution
     of the marginal distribution (without it, iid data with excess kurtosis :math:`\\kappa` give
-    :math:`K = \\kappa / 2`). The value also varies with the timescale of the series;
-    computing it on the series decimated by its correlation time reduces this.
+    :math:`K = \\kappa / 2`). The value also varies with the timescale of the series; a second
+    difference at the series' own correlation time (``tau = 'ac1e'``) reduces this.
 
     The crinkle statistic comes from D. Kaplan's code for nonlinear time-series analysis [1]_,
     where it is credited to J. Theiler; no published definition is known. Theiler et al. [3]_
@@ -1001,6 +1015,11 @@ def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> floa
         depends on the data only through their ranks (unchanged by strictly increasing
         transformations). If False, the input is
         used as given (mean-removed), and the value also reflects the marginal distribution.
+    tau : int or str, optional
+        The step of the second difference, :math:`g_{t-\\tau} - 2 g_t + g_{t+\\tau}` over every
+        interior point: an integer, or a rule for :func:`~pyhctsa.utils.get_tau` (e.g.
+        ``'ac1e'``) applied to the analysed series (the Gaussian ranks, with ``gaussian_rank``),
+        so that the result stays rank-invariant. Default 1. NaN when a rule cannot set the delay.
 
     Returns
     -------
@@ -1027,8 +1046,11 @@ def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True) -> floa
         x = _gaussian_ranks(x)
         if x is None:
             return np.nan
+    tau = get_tau(x, tau)
+    if np.isnan(tau) or x.size < 2 * int(tau) + 3:  # at least three second differences
+        return np.nan
     x = x - np.mean(x)
-    d2 = np.diff(x, n=2)
+    d2 = _second_difference(x, int(tau))
     d2 = d2 - np.mean(d2)
     m2 = np.mean(d2 ** 2)
     if not m2 > 1e-20 * np.mean(x ** 2):   # constant series, or a constant second difference
@@ -1809,7 +1831,8 @@ def _sub_statav(x: ArrayLike, n: int) -> tuple:
 
     return statavmean, statavstd
 
-def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] = None) -> float:
+def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] = None,
+                       tau: Union[int, str] = 1) -> float:
     """
     Compute a custom nonlinear autocorrelation of a time series.
 
@@ -1852,6 +1875,11 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
             ``absval=False`` when ``len(taus)`` is odd.
 
         Default is ``None``.
+    tau : int or str, optional
+        The unit of the lags, in samples: an integer, or a rule for
+        :func:`~pyhctsa.utils.get_tau` (e.g. ``'ac1e'``). The product is taken at lags
+        ``tau * taus`` over every time point, which is the average over all ``tau`` phases of the
+        series sampled every ``tau`` samples. Default 1. NaN when a rule cannot set the delay.
 
     Returns
     -------
@@ -1875,6 +1903,10 @@ def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] 
             absval = False
         else:
             absval = True
+    tau = get_tau(y, tau)
+    if np.isnan(tau):  # the delay could not be set
+        return np.nan
+    taus = taus * int(tau)
 
     n = len(y)
     tmax = np.max(taus)
@@ -1924,7 +1956,8 @@ def _check_taus(taus: ArrayLike) -> np.ndarray:
     return taus.astype(int)
 
 
-def nonlinear_autocorr_excess(y: ArrayLike, taus: ArrayLike, gaussian_rank: bool = True) -> float:
+def nonlinear_autocorr_excess(y: ArrayLike, taus: ArrayLike, gaussian_rank: bool = True,
+                              tau: Union[int, str] = 1) -> float:
     """
     Nonlinear autocorrelation in excess of its Gaussian value.
 
@@ -1970,6 +2003,12 @@ def nonlinear_autocorr_excess(y: ArrayLike, taus: ArrayLike, gaussian_rank: bool
         Compute the statistic on the Gaussian ranks of the series (default True), so that it
         depends on the data only through their ranks (unchanged by strictly increasing
         transformations).
+    tau : int or str, optional
+        The unit of the lags, in samples: an integer, or a rule for
+        :func:`~pyhctsa.utils.get_tau` (e.g. ``'ac1e'``) applied to the analysed series (the Gaussian ranks, with ``gaussian_rank``),
+        so that the result stays rank-invariant. The lags are ``tau * taus``, over every time
+        point (all ``tau`` phases of the series sampled every ``tau`` samples). Default 1. NaN
+        when a rule cannot set the delay.
 
     Returns
     -------
@@ -1998,6 +2037,12 @@ def nonlinear_autocorr_excess(y: ArrayLike, taus: ArrayLike, gaussian_rank: bool
         x = _gaussian_ranks(x)
         if x is None:
             return np.nan
+    tau = get_tau(x, tau)
+    if np.isnan(tau):  # the delay could not be set
+        return np.nan
+    taus = taus * int(tau)
+    if n <= np.max(taus):
+        return np.nan
     moment = np.mean(_lag_product(x, taus))
     acov_cache = {}
 
@@ -2011,7 +2056,7 @@ def nonlinear_autocorr_excess(y: ArrayLike, taus: ArrayLike, gaussian_rank: bool
 
 
 def nonlinear_autocorr_abs_surrogate_ratio(y: ArrayLike, taus: ArrayLike, num_surrs: int = 10,
-                                           random_seed: int = 0) -> float:
+                                           random_seed: int = 0, tau: Union[int, str] = 1) -> float:
     """
     Absolute nonlinear autocorrelation relative to its value for linear Gaussian surrogates.
 
@@ -2047,6 +2092,13 @@ def nonlinear_autocorr_abs_surrogate_ratio(y: ArrayLike, taus: ArrayLike, num_su
     random_seed : int, optional
         The seed of the surrogates' random phases (default 0).
 
+    tau : int or str, optional
+        The unit of the lags, in samples: an integer, or a rule for
+        :func:`~pyhctsa.utils.get_tau` (e.g. ``'ac1e'``) applied to the analysed series (the Gaussian ranks),
+        so that the result stays rank-invariant. The lags are ``tau * taus``, over every time
+        point (all ``tau`` phases of the series sampled every ``tau`` samples). Default 1. NaN
+        when a rule cannot set the delay.
+
     Returns
     -------
     float
@@ -2068,6 +2120,12 @@ def nonlinear_autocorr_abs_surrogate_ratio(y: ArrayLike, taus: ArrayLike, num_su
         return np.nan
     g = _gaussian_ranks(x)
     if g is None:
+        return np.nan
+    tau = get_tau(g, tau)
+    if np.isnan(tau):  # the delay could not be set
+        return np.nan
+    taus = taus * int(tau)
+    if x.size <= np.max(taus):
         return np.nan
     value = np.mean(np.abs(_lag_product(g, taus)))
     surrs = _make_surrogates(g, 'RP', int(num_surrs), random_seed)
@@ -3262,7 +3320,7 @@ def first_crossing(y: ArrayLike, corr_fun: str = 'ac', threshold: float = 0.0,
     return out
 
 def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
-                    how_to_move: str = 'pts') -> dict:
+                    how_to_move: str = 'pts', tau: Union[int, str] = 1) -> dict:
     """
     Statistics on datapoints inside geometric shapes across the time series.
 
@@ -3287,6 +3345,12 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
     how_to_move : str, optional
         Method for moving the shape. Currently, only ``'pts'`` is supported, which places 
         the shape on each point in the time series. Default is ``'pts'``.
+    tau : int or str, optional
+        The unit of time, in samples: an integer, or a rule for :func:`~pyhctsa.utils.get_tau`
+        (e.g. ``'ac1e'``). The shape is placed on every point ``t`` and covers the points
+        ``t + j tau`` (``|j| <= floor(d)``), with ``j`` as their time coordinate, which pools
+        the ``tau`` phases of the series sampled every ``tau`` samples. Default 1. All outputs
+        are NaN when a rule cannot set the delay or the series is too short for one placement.
 
     Returns
     -------
@@ -3297,51 +3361,35 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
 
     """
     y = np.array(y, dtype=float)
+    if y.ndim > 1:
+        y = y.T if y.shape[1] > y.shape[0] else y
+        y = y[:, 0]
     N = len(y)
+    tau = get_tau(y, tau)
+    if np.isnan(tau):  # the delay could not be set
+        return np.nan
+    tau = int(tau)
 
-    if y.ndim == 1:
-        y = y.reshape(-1, 1)
-    elif y.shape[1] > y.shape[0]:
-        y = y.T
-
-    # add a time index
-    # has increasing integers as time in the first column
-    ty = np.column_stack((np.arange(N), y[:, 0]))
-    if how_to_move == 'pts':
-
-        if shape == 'circle':
-
-            r = d # set radius
-            w = int(np.floor(r))
-            rnge = np.arange(1 + w, N - w + 1)
-            NN = len(rnge) # number of admissible points
-            np_counts = np.zeros(NN, dtype=int)
-
-            for i in range(NN):
-                idx = rnge[i]
-                start = idx - w - 1
-                end = idx + w
-                win = ty[start:end, :]
-                difwin = win - ty[idx - 1, :]
-                squared_dists = np.sum(difwin**2, axis=1)
-                np_counts[i] = np.sum(squared_dists <= r**2)
-
-        elif shape == 'rectangle':
-
-            w = int(d)
-            rnge = np.arange(1 + w, N - w + 1)
-            NN = len(rnge)
-            np_counts = np.zeros(NN, dtype=int)
-
-            for i in range(NN):
-                idx = rnge[i]
-                start = (idx - w) - 1
-                end = (idx + w)
-                np_counts[i] = np.sum(np.abs(y[start:end, 0]) <= np.abs(y[idx-1, 0]))
-        else:
-            raise ValueError(f"Unknown shape {shape}. Choose either 'circle' or 'rectangle'")
-    else:
+    if how_to_move != 'pts':
         raise ValueError(f"Unknown setting for 'howToMove' input: '{how_to_move}'. Only option is currently 'pts'.")
+    if shape == 'circle':
+        r = d  # radius, in units of (tau samples, standard deviations)
+        w = int(np.floor(r))
+    elif shape == 'rectangle':
+        w = int(d)  # half-width, in units of tau samples
+    else:
+        raise ValueError(f"Unknown shape {shape}. Choose either 'circle' or 'rectangle'")
+    js = np.arange(-w, w + 1)
+    centres = np.arange(w * tau, N - w * tau)  # placements with the whole shape inside the series
+    NN = len(centres)  # number of admissible points
+    if NN < 1:
+        return np.nan
+    window = y[centres[:, None] + tau * js[None, :]]  # the points t + j tau under the shape
+    if shape == 'circle':
+        squared_dists = js[None, :] ** 2 + (window - y[centres][:, None]) ** 2
+        np_counts = np.sum(squared_dists <= r ** 2, axis=1)
+    else:
+        np_counts = np.sum(np.abs(window) <= np.abs(y[centres])[:, None], axis=1)
 
     # compute stats on number of hits inside the shape
     out = {}

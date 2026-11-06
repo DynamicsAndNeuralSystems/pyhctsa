@@ -2880,7 +2880,7 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
 
 @dict_output
 def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
-                 train_length: Union[int, str] = 3) -> dict:
+                 train_length: Union[int, str] = 3, tau: Union[int, str] = 1) -> dict:
     """
     Simple local time-series forecasting.
     
@@ -2912,6 +2912,13 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
         :func:`pyhctsa.utils.get_tau`. For 'lfit' with 'ac', 'ac1e' or 'mi', the
         window is at least 2 (a straight line needs two points).
         Default is 3.
+    tau : int or str, optional
+        The step, in samples: an integer, or a rule for :func:`~pyhctsa.utils.get_tau` (e.g.
+        ``'ac1e'``). The value at ``t`` is predicted from the ``train_length`` values at
+        ``t - tau, t - 2 tau, ...``, for every ``t``, and the residuals' serial-correlation
+        statistics are taken at multiples of ``tau`` (``residual_analysis(..., lag_unit=tau)``).
+        This is the forecast on the series sampled every ``tau`` samples, using all ``tau``
+        phases rather than one. Default 1. All outputs are NaN when a rule cannot set the delay.
 
     Returns
     -------
@@ -2925,6 +2932,11 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     """
     y = np.asarray(y)
     N = len(y)
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        logger.warning("Could not set the forecasting step from the series")
+        return np.nan
+    tau = int(tau)
     # % Do the local prediction
     if isinstance(train_length, str) and train_length in ('ac1e', 'mi'):
         # adaptive window (hctsa BF_GetTau): NaN if it cannot be set
@@ -2945,26 +2957,26 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
         # the length of the subsegment preceding to use to predict the subsequent value
         train_length = int(train_length)
         lp = train_length
-    evalr = np.arange(lp, N) #range over which to evaluate the forecast
+    evalr = np.arange(lp * tau, N) #range over which to evaluate the forecast
     if np.size(evalr) == 0:
         logger.warning("This time series is too short for forecasting")
         return np.nan
     if forecast_meth in ('mean', 'median'):
-        # all length-lp windows at once
-        W = sliding_window_view(y, lp)[:len(evalr)]
+        # all windows of lp values, tau apart, at once
+        W = sliding_window_view(y, (lp - 1) * tau + 1)[:len(evalr), ::tau]
         pred = W.mean(axis=1) if forecast_meth == 'mean' else np.median(W, axis=1)
         res = pred - y[evalr]  # prediction - value
     elif forecast_meth == 'lfit':
         res = np.zeros(len(evalr))
         for i in range(len(evalr)):
             # Fit linear
-            p = np.polyfit(np.arange(lp), y[evalr[i]-lp:evalr[i]], 1)   # times 0..lp-1
+            p = np.polyfit(np.arange(lp), y[evalr[i]-lp*tau:evalr[i]:tau], 1)   # times 0..lp-1
             res[i] = np.polyval(p, lp) - y[evalr[i]]  # prediction - value
     else:
         raise ValueError(f"Unknown forecasting method: {forecast_meth}")
 
     # Output statistics on the residuals, res, through the shared contract ('core' level)
-    out = residual_analysis(res, y, 'core')
+    out = residual_analysis(res, y, 'core', lag_unit=tau)
     # Normality of residuals: r-squared of a Gaussian fit to their kernel-smoothed distribution
     fit = simple_fit(res, 'gauss1', 0)
     out['normr2'] = fit['r2'] if isinstance(fit, dict) else np.nan
@@ -3165,7 +3177,7 @@ def _is_rounding_level(e: np.ndarray, scale_y: float = 0.0) -> bool:
 
 
 def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
-                      level: str = 'full') -> dict:
+                      level: str = 'full', lag_unit: int = 1) -> dict:
     """
     Canonical summary of the residuals from a model fit.
 
@@ -3185,6 +3197,12 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
         ``taurat`` is NaN if ``y`` is not supplied. Default is ``None``.
     level : {'full', 'core'}, optional
         The summary level. Default is ``'full'``.
+    lag_unit : int, optional
+        The sampling step, in samples, that the residuals' serial-correlation statistics refer
+        to: ``ac1``, ``ac2``, ``ac3`` (and the 25 lags of ``propbth`` and ``ftbth``) are taken
+        at lags ``lag_unit``, ``2 * lag_unit``, ..., and the significance band is
+        ``2.6/sqrt(N / lag_unit)``, as for the residuals subsampled every ``lag_unit`` samples
+        but using all of them. For residuals of a forecast ``lag_unit`` samples ahead. Default 1.
 
     Returns
     -------
@@ -3256,10 +3274,11 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
     # z-score the residuals for everything that follows (all of it is scale-free)
     e_z = _zscore_or_zeros(e)
 
-    # Serial correlation
+    # Serial correlation (at multiples of lag_unit; NaN at lags beyond the series)
     max_lag = 25
-    acf = np.asarray(autocorr(e_z, list(range(1, max_lag + 1)), 'Fourier'))
-    sqrt_n = np.sqrt(N)
+    lag_unit = int(lag_unit)
+    acf = np.asarray(autocorr(e_z, [lag_unit * k for k in range(1, max_lag + 1)], 'Fourier'))
+    sqrt_n = np.sqrt(N / lag_unit)
     out['ac1'] = acf[0]
     out['ac2'] = acf[1]
     out['ac3'] = acf[2]
