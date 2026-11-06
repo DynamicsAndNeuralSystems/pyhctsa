@@ -3426,6 +3426,31 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
 
     return out
 
+def _flat_top_tstat(s: np.ndarray, min_bandwidth: int, tau_corr: int) -> float:
+    """Mean of ``s`` divided by its flat-top HAC standard error, as described in :func:`trev_studentized`.
+
+    The bandwidth is ``M = max(min_bandwidth, floor(L_NW / 2) + 1, 2 tau_corr)``, capped at
+    ``(n - 1) / 2``; the long-run variance is floored at 0.05 times the Bartlett estimate with
+    ``2M`` lags. NaN for fewer than three values or a (near-)constant ``s``.
+    """
+    n = s.size
+    if n < 3:
+        return np.nan
+    s_mean = np.mean(s)
+    sc = s - s_mean
+    m = max(min_bandwidth, int(np.floor(4 * (n / 100) ** (2 / 9))) // 2 + 1, 2 * tau_corr)
+    m = max(1, min(m, (n - 1) // 2))
+    lag_max = min(2 * m, n - 1)
+    acov = np.array([np.dot(sc[k:], sc[:n - k]) / n for k in range(lag_max + 1)])
+    k = np.arange(1, lag_max + 1)
+    lrv = acov[0] + 2 * np.sum(np.clip(2 - k / m, 0, 1) * acov[1:])
+    lrv_bartlett = acov[0] + 2 * np.sum((1 - k / (lag_max + 1)) * acov[1:])
+    lrv = max(lrv, 0.05 * lrv_bartlett)   # the flat-top estimate can be ~0 or negative
+    if not lrv > 1e-20 * max(np.mean(s * s), 1e-300):
+        return np.nan
+    return float(s_mean / np.sqrt(lrv / n))
+
+
 def trev_studentized(y: ArrayLike, tau: Union[int, str] = 'ac') -> float:
     """
     Studentised time-reversal asymmetry: the trev numerator divided by its HAC standard error.
@@ -3501,21 +3526,97 @@ def trev_studentized(y: ArrayLike, tau: Union[int, str] = 'ac') -> float:
     if n < 3:
         return np.nan
     s = (y[tau:] - y[:n]) ** 3
-    s_mean = np.mean(s)
-    sc = s - s_mean
     tau_corr = get_tau(y, 'ac1e')
     tau_corr = 0 if np.isnan(tau_corr) else int(tau_corr)
-    m = max(tau, int(np.floor(4 * (n / 100) ** (2 / 9))) // 2 + 1, 2 * tau_corr)
-    m = max(1, min(m, (n - 1) // 2))
-    lag_max = min(2 * m, n - 1)
-    acov = np.array([np.dot(sc[k:], sc[:n - k]) / n for k in range(lag_max + 1)])
-    k = np.arange(1, lag_max + 1)
-    lrv = acov[0] + 2 * np.sum(np.clip(2 - k / m, 0, 1) * acov[1:])
-    lrv_bartlett = acov[0] + 2 * np.sum((1 - k / (lag_max + 1)) * acov[1:])
-    lrv = max(lrv, 0.05 * lrv_bartlett)   # the flat-top estimate can be ~0 or negative
-    if not lrv > 1e-20 * max(np.mean(s * s), 1e-300):
+    return _flat_top_tstat(s, tau, tau_corr)
+
+
+@dict_output
+def reversibility_scan(y: ArrayLike, i: int = 2, j: int = 1, max_lag: int = 20) -> dict:
+    """
+    Time-reversal asymmetry of a generalised lagged moment, scanned over lags.
+
+    For a time-reversible process the joint law of :math:`(x_t, x_{t-k})` is symmetric under
+    exchange of its two arguments, so every symmetric bicovariance difference
+
+    .. math::
+
+        \\gamma_{i,j}(k) = E[x_t^i\\, x_{t-k}^j] - E[x_t^j\\, x_{t-k}^i]
+
+    is zero. Ramsey and Rothman [1]_ define :math:`\\gamma_{i,j}` for general :math:`(i, j)` and
+    base a test of time reversibility on :math:`(i, j) = (2, 1)`; for a stationary series
+    :math:`-3\\gamma_{2,1}(k)` is the numerator of :func:`trev` at lag :math:`k`. Higher orders
+    detect asymmetries that are invisible at third order: :math:`(3, 1)` responds to a
+    lag-:math:`k` joint law whose moments up to third order are all symmetric. Chen, Chou and
+    Kuan [2]_ give a related test based on the characteristic function.
+
+    The statistic is computed on the Gaussian ranks of the series (each value replaced by the
+    standard-normal quantile of its rank; see :func:`crinkle_statistic_kurtosis`), so that it
+    does not depend on the marginal distribution and the higher moments are not dominated by the
+    tails. At each lag :math:`k = 1, ..., K`, with :math:`K = \\min(` ``max_lag``
+    :math:`, \\lfloor N/4 \\rfloor)`, the sample mean of
+    :math:`s_t = g_t^i g_{t-k}^j - g_t^j g_{t-k}^i` is divided by its heteroscedasticity- and
+    autocorrelation-consistent standard error (the flat-top estimator of
+    :func:`trev_studentized`, with bandwidth at least :math:`k`) [3]_, [4]_, giving a statistic
+    :math:`T_k` that is approximately standard normal for a reversible process. The outputs
+    summarise :math:`T_k` over the lags.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    i, j : int, optional
+        The powers of the two factors, positive and distinct. Default is (2, 1).
+    max_lag : int, optional
+        Largest lag scanned, further limited to a quarter of the series length. Default is 20.
+
+    Returns
+    -------
+    dict
+        - 'max_abs_z': the largest :math:`|T_k|`.
+        - 'peak_z': :math:`T_k` at that lag, signed: it changes sign when the series is reversed
+          in time; for (2, 1) it has the opposite sign to :func:`trev` (negative when increases
+          are sharper than decreases).
+        - 'peak_lag': the lag at which it occurs.
+        - 'sumsq_z': :math:`(\\sum_k T_k^2 - K)/\\sqrt{2K}`, an approximate z-score of the
+          asymmetry over all lags (approximate because the :math:`T_k` at nearby lags are
+          correlated).
+
+        All NaN if the series has fewer than four samples or all its values are tied.
+
+    References
+    ----------
+    .. [1] J. B. Ramsey and P. Rothman, "Time irreversibility and business cycle asymmetry",
+       J. Money Credit Bank. 28, 1-21 (1996).
+    .. [2] Y.-T. Chen, R. Y. Chou and C.-M. Kuan, "Testing time reversibility without moment
+       restrictions", J. Econometrics 95, 199-218 (2000).
+    .. [3] D. N. Politis and J. P. Romano, "Bias-corrected nonparametric spectral estimation",
+       J. Time Ser. Anal. 16, 67-103 (1995).
+    .. [4] W. K. Newey and K. D. West, "A simple, positive semi-definite, heteroskedasticity and
+       autocorrelation consistent covariance matrix", Econometrica 55, 703-708 (1987).
+    """
+    if int(i) != i or int(j) != j or i < 1 or j < 1 or i == j:
+        raise ValueError(f"i and j must be distinct positive integers, not ({i}, {j})")
+    g = _gaussian_ranks(y)
+    if g is None:
         return np.nan
-    return float(s_mean / np.sqrt(lrv / n))
+    K = min(int(max_lag), g.size // 4)
+    if K < 1:
+        return np.nan
+    tau_corr = get_tau(g, 'ac1e')
+    tau_corr = 0 if np.isnan(tau_corr) else int(tau_corr)
+    t = np.full(K, np.nan)
+    for k in range(1, K + 1):
+        a, b = g[k:], g[:-k]
+        t[k - 1] = _flat_top_tstat(a ** i * b ** j - a ** j * b ** i, k, tau_corr)
+    ok = np.isfinite(t)
+    if not ok.any():
+        return np.nan
+    k_best = int(np.nanargmax(np.abs(t)))
+    n_ok = int(ok.sum())
+    return {"max_abs_z": float(abs(t[k_best])), "peak_z": float(t[k_best]), "peak_lag": k_best + 1,
+            "sumsq_z": float((np.sum(t[ok] ** 2) - n_ok) / np.sqrt(2 * n_ok))}
+
 
 @dict_output
 def tc3(y: list, tau: Union[int, str, None] = 'ac1e') -> dict:

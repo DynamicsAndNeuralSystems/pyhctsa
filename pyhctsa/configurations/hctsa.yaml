@@ -640,6 +640,15 @@ correlation:
     variant_of: trev
     ordered_args: ['tau']
 
+  reversibility_scan:   # pyhctsa-only: studentised Ramsey-Rothman reversal asymmetry gamma_{i,j}(k) on Gaussian ranks, scanned over lags 1-20
+    base_name: rev_scan
+    dependencies:
+    configs:
+      - {i: 2, j: 1, zscore: True}
+      - {i: 3, j: 1, zscore: True}
+    variant_of: trev
+    ordered_args: ['i', 'j']
+
   tc3:
     base_name: tc3
     dependencies:
