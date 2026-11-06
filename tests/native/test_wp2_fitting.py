@@ -175,6 +175,7 @@ def test_robustfit_leverage_one_point_is_handled():
 def test_robustfit_iteration_limit_warns(monkeypatch):
     from pyhctsa.fitting import robust_regression
     monkeypatch.setattr(robust_regression, "MAX_ITER", 1)
+    monkeypatch.setattr(robust_regression, "FALLBACK_MAX_ITER", 1)
     rng = np.random.default_rng(4)
     x = rng.standard_normal(30)
     y = x + rng.standard_normal(30)
