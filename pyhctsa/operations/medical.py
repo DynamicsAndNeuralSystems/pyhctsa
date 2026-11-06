@@ -464,9 +464,12 @@ def porta(x: ArrayLike, num_levels: int = 6, tau: int | str = 1) -> dict:
 
     References
     ----------
-    .. [1] A. Porta et al., "Quantifying the strength of the linear and
-           nonlinear relationships between heart period and arterial pressure",
-           IEEE Trans. Biomed. Eng. 45(8) 1017 (1998).
+    .. [1] A. Porta et al., "Entropy, entropy rate, and pattern classification as tools to typify
+           complexity in short heart period variability series", IEEE Trans. Biomed. Eng.
+           48(11) 1282 (2001).
+    .. [2] A. Porta et al., "Symbolic analysis of 24h Holter heart period variability series:
+           comparison between normal and heart failure patients", Computers in Cardiology 2005,
+           575-578: uniform quantization of the full range into 6 levels, words of 3 symbols.
 
     Parameters
     ----------
