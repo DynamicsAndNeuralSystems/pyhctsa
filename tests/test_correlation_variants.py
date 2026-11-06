@@ -188,7 +188,7 @@ def test_excess_gaussian_null_and_rank_invariance():
 
 def test_excess_mirror_fourth_order_lag():
     # [k, k, k] = <x_t x_{t-k}^3> is the time mirror of [0, 0, k] = <x_t^3 x_{t-k}>. On a Gaussian AR(1) both
-    # are 3 rho^k (Isserlis) and their excess is zero. A quartic echo x_t = e_t + a g(e_{t-k}), with g odd,
+    # are 3 rho^k (Isserlis) and their excess is zero. A fourth-order echo x_t = e_t + a g(e_{t-k}), with g odd,
     # g^2 = 1 and E[e g(e)] = 0, is white with white squares and no third-order lag moment; its lowest lag
     # moment is <x_t x_{t-k}^3> = a E[e^3 g(e)], seen by [k, k, k] at its own lag and by nothing else here
     rng = np.random.default_rng(14)
