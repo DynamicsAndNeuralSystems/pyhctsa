@@ -2,7 +2,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from ._symbolic_complexity import _normalized_lz_complexity
-from ..utils import _sample_std
+from ..utils import _sample_std, dict_output
 
 try:
     from numba import njit
@@ -244,3 +244,84 @@ def extreme_event_order(y: ArrayLike, extreme_thresh: float = 0.05) -> dict:
     else:
         out['lzComplexity'] = np.nan
     return out
+
+
+@dict_output
+def extremogram(y: ArrayLike, quantile: float = 0.95, max_lag: int = 100) -> dict:
+    """
+    Serial dependence of extremes: the largest value of the extremogram over a range of lags.
+
+    The extremogram of Davis and Mikosch [1]_ is the analogue of the autocorrelation function for
+    extreme events: for the event that :math:`|x_t|` exceeds a high threshold :math:`u`, it is
+    the conditional probability that the event recurs :math:`k` samples later,
+
+    .. math::
+
+        \\chi(k) = P(|x_{t+k}| > u \\mid |x_t| > u),
+
+    estimated by the fraction of exceedances that are followed by another at lag :math:`k`. With
+    :math:`u` the ``quantile`` of :math:`|x_t - \\bar{x}|`, :math:`\\chi(k)` is the empirical
+    lag-:math:`k` tail-dependence coefficient at that level (Ledford and Tawn [2]_ give
+    diagnostics of extremal dependence of this kind). Under independence of the extremes it is
+    the exceedance rate :math:`\\hat{p} \\approx 1 -` ``quantile`` at every lag, whatever the
+    dependence of the bulk of the distribution, and it detects extremes that recur in time even
+    when the autocorrelation of :math:`|x|` is zero.
+
+    The function scans :math:`k = 1, ..., K`, with :math:`K = \\min(` ``max_lag``
+    :math:`, \\lfloor N/10 \\rfloor)`. At each lag, with :math:`n_k` exceedances that have a sample
+    :math:`k` steps later and :math:`c_k` of them followed by another exceedance, the count's
+    excess over its expectation under independence is expressed as a Poisson z-score,
+    :math:`z_k = (c_k - n_k \\hat{p})/\\sqrt{n_k \\hat{p}}`. Davis, Mikosch and Cribben [3]_
+    study the sampling variability of the extremogram and give bootstrap confidence bands for it.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    quantile : float, optional
+        Quantile of :math:`|x_t - \\bar{x}|` that sets the threshold, in (0, 1). Default is 0.95.
+    max_lag : int, optional
+        Largest lag scanned, further limited to a tenth of the series length. Default is 100.
+
+    Returns
+    -------
+    dict
+        - 'max_chi': the largest :math:`\\chi(k)`.
+        - 'max_z': the largest :math:`z_k`.
+        - 'peak_lag': the lag at which :math:`z_k` is largest.
+
+        All NaN if the series is shorter than 10 samples or has fewer than two exceedances.
+
+    References
+    ----------
+    .. [1] R. A. Davis and T. Mikosch, "The extremogram: a correlogram for extreme events",
+       Bernoulli 15, 977-1009 (2009).
+    .. [2] A. W. Ledford and J. A. Tawn, "Diagnostics for dependence within time series
+       extremes", J. R. Stat. Soc. B 65, 521-543 (2003).
+    .. [3] R. A. Davis, T. Mikosch and I. Cribben, "Towards estimating extremal serial
+       dependence via the bootstrapped extremogram", J. Econometrics 170, 142-152 (2012).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    if not 0 < quantile < 1:
+        raise ValueError(f"quantile must be in (0, 1), not {quantile}")
+    K = min(int(max_lag), n // 10)
+    if K < 1 or not np.all(np.isfinite(y)):
+        return np.nan
+    a = np.abs(y - y.mean())
+    ex = a > np.quantile(a, quantile)
+    n_ex = int(ex.sum())
+    if n_ex < 2:
+        return np.nan
+    p_hat = n_ex / n
+    idx = np.flatnonzero(ex)
+    lags = np.arange(1, K + 1)
+    n_k = np.array([np.count_nonzero(idx < n - k) for k in lags])
+    c_k = np.array([np.count_nonzero(ex[idx[idx < n - k] + k]) for k in lags])
+    with np.errstate(invalid='ignore', divide='ignore'):
+        chi = c_k / n_k
+        z = (c_k - n_k * p_hat) / np.sqrt(n_k * p_hat)
+    if not np.any(np.isfinite(z)):
+        return np.nan
+    k_best = int(np.nanargmax(z))
+    return {"max_chi": float(np.nanmax(chi)), "max_z": float(z[k_best]), "peak_lag": k_best + 1}
