@@ -115,10 +115,15 @@ def test_time_delay_embed_accepts_rule():
 
 def test_decorator_decimation():
     y = z_score(np.sin(2 * np.pi * T / 50) + 0.1 * np.cos(T))
-    seen = {}
-    f = _preprocess_decorator(True, False, 'decimate_ac1e')(lambda x: seen.setdefault('x', x) is x and len(x))
-    assert f(y) == len(decimate_ac1e(y)) < len(y)
-    np.testing.assert_allclose(seen['x'], decimate_ac1e(z_score(y)))
+    seen = []
+    f = _preprocess_decorator(True, False, 'decimate_ac1e')(lambda x: seen.append(x) or float(len(x)))
+    tau = int(get_tau(z_score(y), 'ac1e'))
+    # the operation runs on every decimation phase, and its outputs are averaged
+    assert f(y) == np.mean([len(z_score(y)[p::tau]) for p in range(tau)]) < len(y)
+    assert len(seen) == tau
+    np.testing.assert_allclose(seen[0], decimate_ac1e(z_score(y)))
+    for p, x in enumerate(seen):
+        np.testing.assert_allclose(x, z_score(z_score(y)[p::tau]))
     # an undefined delay gives NaN instead of calling the operation
     h = _preprocess_decorator(False, False, 'decimate_ac1e')(lambda x: 1.0)
     assert np.isnan(h(np.ones(300)))

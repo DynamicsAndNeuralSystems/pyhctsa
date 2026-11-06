@@ -1219,6 +1219,45 @@ def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, fl
     return _zscore_or_zeros(y) if rezscore else y
 
 
+def decimation_phases(x_z: ArrayLike, rule: str = 'ac1e',
+                      rezscore: bool = True) -> Union[list, float]:
+    """
+    The series decimated by its 1/e autocorrelation time, from every starting phase.
+
+    With ``tau = get_tau(x_z, rule)``, returns the ``tau`` subseries ``x_z[p::tau]``
+    (``p = 0, ..., tau - 1``), each z-scored if ``rezscore`` (N-1 standard deviation; a constant
+    subseries becomes zeros). Subseries with fewer than 3 points (``_DECIMATE_MIN_POINTS``) are
+    left out. ``*_dec`` features are computed on every subseries and their values averaged (see
+    :class:`~pyhctsa.calculator.FeatureCalculator`), so they use all the data rather than
+    depending on which sample the decimation starts from; :func:`decimate_ac1e` is the
+    subseries ``p = 0`` alone.
+
+    Parameters
+    ----------
+    x_z : array-like
+        The (already z-scored) time series.
+    rule : str, optional
+        The delay rule of :func:`get_tau`: ``'ac1e'`` (default) or, for features that depend on
+        the data only through their order, ``'ac1e-rank'``.
+    rezscore : bool, optional
+        Z-score each subseries (default True).
+
+    Returns
+    -------
+    list of numpy.ndarray or float
+        The subseries, or scalar ``nan`` if the delay cannot be set or no subseries has 3 points.
+    """
+    y = np.asarray(x_z, dtype=float).ravel()
+    tau = get_tau(y, rule)
+    if np.isnan(tau):
+        return np.nan
+    tau = int(tau)
+    phases = [y[p::tau] for p in range(min(tau, y.size))]
+    phases = [_zscore_or_zeros(yp) if rezscore else yp for yp in phases
+              if yp.size >= _DECIMATE_MIN_POINTS]
+    return phases if phases else np.nan
+
+
 def time_delay_embed(y: ArrayLike, m: int, tau: Union[int, str] = 1,
                      reverse: bool = False) -> np.ndarray:
     """
