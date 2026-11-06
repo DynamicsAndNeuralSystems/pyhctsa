@@ -2169,6 +2169,131 @@ def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'burg')
 
     return out
 
+
+def _ar_prewhiten(y: np.ndarray, max_order: int = 10) -> tuple:
+    """Residuals of the autoregressive model, of order chosen by AIC, fitted to ``y``.
+
+    The AR(p) coefficients for p = 0..max_order are the Yule-Walker estimates from the sample
+    autocorrelation function, by the Levinson-Durbin recursion [1]_, and p minimises
+    ``AIC(p) = n log(v_p) + 2p`` [2]_, with ``v_p`` the relative innovation variance of order p.
+    Returns ``(e, p)``: the ``n - p`` residuals of the mean-removed series and the order (``e``
+    is the mean-removed series itself when p = 0). Returns ``(None, nan)`` for a constant or
+    non-finite series.
+
+    .. [1] J. Durbin, "The fitting of time-series models", Rev. Inst. Int. Stat. 28, 233-244 (1960).
+    .. [2] H. Akaike, "A new look at the statistical model identification", IEEE Trans. Autom.
+       Control 19, 716-723 (1974).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    r = _acf_fft(y)
+    if n < 2 or np.isnan(r[0]):
+        return None, np.nan
+    z = y - y.mean()
+    phi = np.zeros(0)
+    v = 1.0
+    best_aic, best_phi = 0.0, phi
+    for k in range(1, min(max_order, n - 1) + 1):
+        refl = (r[k] - phi @ r[k - 1:0:-1]) / v
+        if not abs(refl) < 1:
+            break
+        phi = np.r_[phi - refl * phi[::-1], refl]
+        v *= 1 - refl ** 2
+        aic = n * np.log(v) + 2 * k
+        if aic < best_aic:
+            best_aic, best_phi = aic, phi
+    p = best_phi.size
+    if p == 0:
+        return z, 0
+    e = z[p:] - sum(best_phi[j] * z[p - 1 - j:n - 1 - j] for j in range(p))
+    return e, p
+
+
+@dict_output
+def residual_autocorr_scan(y: ArrayLike, max_lag: int = 300, max_ar_order: int = 10) -> dict:
+    """
+    Long-lag dependence: the largest autocorrelation of the AR residuals over a wide range of lags.
+
+    A dependence at a single long lag (a seasonal or delayed-feedback term, say) is invisible to
+    the autocorrelation at short lags and is diluted in summaries of the whole autocorrelation
+    function. This function removes the short-range linear structure first and then scans the
+    residual autocorrelation function for its largest value, following the residual portmanteau
+    tests of Box and Pierce [1]_ and Ljung and Box [2]_, and of McLeod and Li [3]_ for the
+    squared residuals.
+
+    The series is prewhitened by an autoregressive model whose order p (at most
+    ``max_ar_order``) is chosen by AIC [4]_, with Yule-Walker coefficients from the
+    Levinson-Durbin recursion [5]_. Let :math:`r_k` be the sample autocorrelation of the
+    :math:`m = N - p` residuals at lag :math:`k`, for :math:`k = 1, ..., K`, with
+    :math:`K = \\min(` ``max_lag`` :math:`, \\lfloor m/4 \\rfloor)`. Each is standardised by its
+    standard error under whiteness, :math:`z_k = r_k \\sqrt{m(m+2)/(m-k)}`, and the outputs are
+    the largest :math:`|z_k|` and its lag, and the Ljung-Box statistic
+    :math:`Q = \\sum_k z_k^2` as an approximate standard normal score,
+    :math:`(Q - d)/\\sqrt{2d}`, with :math:`d = K - p` degrees of freedom (at least 1). The same
+    statistics of the squared residuals (with :math:`d = K`) respond to dependence in amplitude
+    (volatility clustering, or a lagged dependence of the size of fluctuations) rather than in
+    sign.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    max_lag : int, optional
+        Largest lag scanned, further limited to a quarter of the number of residuals.
+        Default is 300.
+    max_ar_order : int, optional
+        Largest order of the prewhitening autoregression. Default is 10.
+
+    Returns
+    -------
+    dict
+        - 'max_z': the largest :math:`|z_k|` of the residuals.
+        - 'peak_lag': the lag :math:`k` at which it occurs.
+        - 'lb_z': the Ljung-Box statistic of the residuals as a z-score.
+        - 'sq_max_z': the largest :math:`|z_k|` of the squared residuals.
+        - 'sq_lb_z': the McLeod-Li statistic (Ljung-Box of the squared residuals) as a z-score.
+
+        All NaN if the series is constant or has fewer than 8 residuals; the squared-residual
+        fields are NaN if the squared residuals are constant.
+
+    References
+    ----------
+    .. [1] G. E. P. Box and D. A. Pierce, "Distribution of residual autocorrelations in
+       autoregressive-integrated moving average time series models", J. Am. Stat. Assoc. 65,
+       1509-1526 (1970).
+    .. [2] G. M. Ljung and G. E. P. Box, "On a measure of lack of fit in time series models",
+       Biometrika 65, 297-303 (1978).
+    .. [3] A. I. McLeod and W. K. Li, "Diagnostic checking ARMA time series models using
+       squared-residual autocorrelations", J. Time Ser. Anal. 4, 269-273 (1983).
+    .. [4] H. Akaike, "A new look at the statistical model identification", IEEE Trans. Autom.
+       Control 19, 716-723 (1974).
+    .. [5] J. Durbin, "The fitting of time-series models", Rev. Inst. Int. Stat. 28, 233-244 (1960).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    e, p = _ar_prewhiten(y, max_ar_order)
+    if e is None or e.size < 8:
+        return np.nan
+    m = e.size
+    K = min(int(max_lag), m // 4)
+    lags = np.arange(1, K + 1)
+    w = m * (m + 2) / (m - lags)
+    out = {}
+    for tag, s, d in (("", e, K - p), ("sq_", e ** 2, K)):
+        r = _acf_fft(s)[1:K + 1]
+        if np.isnan(r).any():
+            out.update({f"{tag}max_z": np.nan, f"{tag}lb_z": np.nan})
+            if not tag:
+                out["peak_lag"] = np.nan
+            continue
+        z = np.abs(r) * np.sqrt(w)
+        d = max(d, 1)
+        out[f"{tag}max_z"] = float(z.max())
+        if not tag:
+            out["peak_lag"] = int(np.argmax(z)) + 1
+        out[f"{tag}lb_z"] = float((np.sum(z ** 2) - d) / np.sqrt(2 * d))
+    return out
+
+
 @dict_output
 def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     """

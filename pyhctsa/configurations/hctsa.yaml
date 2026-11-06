@@ -148,6 +148,13 @@ correlation:
       - {tau: 80, zscore: True, abs: True}   # CO_AutoCorr(abs(x_z),80,'Fourier')
     legacy_name: CO_AutoCorr
     ordered_args: ['tau']
+
+  residual_autocorr_scan:   # pyhctsa-only: the largest residual autocorrelation (and of squared residuals) over lags up to 300, after AR prewhitening
+    base_name: resid_ac_scan
+    dependencies:
+    configs:
+      - {zscore: True, exclude: ['peak_lag']}   # peak_lag: the scanned range grows with N
+    variant_of: autocorr
   
   autocorr_x2_shape:
     base_name: acx2_shape
