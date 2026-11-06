@@ -3,7 +3,9 @@
 The estimator is the M-estimator of Holland & Welsch (1977) with the bisquare (biweight) score
 function, with the leverage adjustment of the residuals and the final scale and covariance
 estimates of DuMouchel & O'Brien (1989) and Street, Carroll & Ruppert (1988); see also
-Huber (1981), *Robust Statistics*.
+Huber (1981), *Robust Statistics*. The averaged iteration used when the plain one does not
+converge is that of W. R. Mann, "Mean value methods in iteration", Proc. Amer. Math. Soc. 4,
+506-510 (1953).
 
 Notation:
 
@@ -18,8 +20,18 @@ Algorithm. Start from the ordinary least-squares fit. Repeat: compute the scale 
 median absolute leverage-adjusted residual (after discarding the ``p - 1`` smallest) divided by
 0.6745, set the weights ``w(u_i)``, and solve the weighted least-squares problem, until the
 coefficients change by at most ``1e-10 (1 + max|b|)`` in the maximum norm (at most 200
-iterations). Afterwards the residual scale is estimated by the Huber/Street-Carroll-Ruppert
-formula (``robust_s``) and combined with the least-squares scale into the final ``s``; the
+iterations). The estimate is a fixed point of this map ``b -> T(b)``. Because the scale is
+re-estimated from the residuals at every step, ``T`` is not a descent step of one fixed objective,
+and at some fixed points its Jacobian has an eigenvalue below -1 (the iteration overshoots and
+wanders about the fixed point, chaotically, so the coefficients at the iteration limit depend on
+the rounding of the input) or just below +1 (it creeps towards the fixed point). When the plain
+iteration has not converged, it is restarted from the least-squares fit with the averaged step
+``b -> b + (T(b) - b) / 2`` (Mann 1953), at most 5000 iterations. It has the same fixed points,
+and maps each eigenvalue ``lambda`` of the Jacobian to ``(1 + lambda) / 2``, so a fixed point with
+real eigenvalues in (-3, 1) attracts it. Where the plain iteration converges, the result is
+unchanged. (A redescending M-estimator can have several fixed points; the one reached is the one
+the iteration from least squares reaches.) Afterwards the residual scale is estimated by the
+Huber/Street-Carroll-Ruppert formula (``robust_s``) and combined with the least-squares scale into the final ``s``; the
 coefficient covariance is ``s^2 (X'X)^{-1}`` using the unweighted design.
 
 Numerical guards (not part of the published estimator): a row whose leverage is 1 up to rounding
@@ -41,6 +53,8 @@ MAD_TO_SIGMA = 0.6745          # MAD / 0.6745 estimates sigma for Gaussian data 
 LEVERAGE_TOL = 1e-10           # rows with 1 - h_i below this are treated as exactly fitted (h_i = 1)
 CONVERGENCE_TOL = 1e-10        # stop when max|db| <= CONVERGENCE_TOL * (1 + max|b|)
 MAX_ITER = 200                 # iteration limit
+FALLBACK_STEP = 0.5            # step of the averaged iteration used when the plain one fails
+FALLBACK_MAX_ITER = 5000       # iteration limit of the averaged iteration
 
 
 def bisquare_weights(u):
@@ -156,21 +170,38 @@ class BisquareIRLS:
         return ra / (self.tune * sigma)
 
     # ------------------------------------------------------------------ fit
+    def _iterate(self, b, step, max_iter):
+        """Iterate ``b <- b + step * (T(b) - b)`` from ``b``, where ``T(b)`` is the weighted
+        least-squares fit with the bisquare weights of the residuals of ``b``.
+
+        Returns ``(b, w, converged)``, with ``w`` the weights of the last step.
+        """
+        w = None
+        for _ in range(max_iter):
+            w = bisquare_weights(self._scaled_residuals(b))     # weights that produce b_new
+            b_new = self._solve(w)
+            if step != 1.0:
+                b_new = b + step * (b_new - b)
+            self.n_iter += 1
+            converged = bool(np.max(np.abs(b_new - b)) <= CONVERGENCE_TOL * (1.0 + np.max(np.abs(b_new))))
+            b = b_new
+            if converged:
+                return b, w, True
+        return b, w, False
+
     def fit(self):
         """Run the iteration and compute all summary statistics; returns ``(b, stats)``."""
         b_ols = self._solve()
         r_ols = self.y - self.X @ b_ols
         ols_s = np.sqrt(np.sum(r_ols ** 2) / (self.n - self.rank))
 
-        b = b_ols
-        converged = False
-        for _ in range(MAX_ITER):
-            w = bisquare_weights(self._scaled_residuals(b))     # weights that produce b_new
-            b_new = self._solve(w)
-            converged = bool(np.max(np.abs(b_new - b)) <= CONVERGENCE_TOL * (1.0 + np.max(np.abs(b_new))))
-            b = b_new
-            if converged:
-                break
+        self.n_iter = 0
+        b, w, converged = self._iterate(b_ols, 1.0, MAX_ITER)
+        self.fallback = not converged
+        if self.fallback:
+            # The plain iteration overshoots or creeps: restart from least squares, averaged.
+            b, w, converged = self._iterate(b_ols, FALLBACK_STEP, FALLBACK_MAX_ITER)
+        self.converged = converged
         if not converged:
             warnings.warn("Iteration limit reached.", RuntimeWarning, stacklevel=3)
         if self.rank_deficient:
