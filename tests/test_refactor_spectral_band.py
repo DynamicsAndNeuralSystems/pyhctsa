@@ -65,6 +65,10 @@ CALLS = {
 # PR body); every other value is as before.
 #   nlpe|ar1.swm
 #   nlpe|sin_odd.swm
+# Re-pinned on this branch (bicoherence-null): the bicoherence summaries are now relative to their
+# Gaussian null and skewBic and threshRatio are dropped, so these change on purpose (see its PR body);
+# every other value is as before.
+#   bicoherence|ar1, bicoherence|sin_odd (meanBic, maxBic, meanBicDiag)
 PINNED = {
     'phase_amp_coupling': {
         'ar1': {
@@ -118,18 +122,14 @@ PINNED = {
     },
     'bicoherence': {
         'ar1': {
-            'meanBic': 0.045186423892335216,
-            'maxBic': 0.23967121389081927,
-            'skewBic': 1.5876372238264476,
-            'meanBicDiag': 0.031573921076840955,
-            'threshRatio': 0.995615912796739,
+            'meanBic': 0.0027191507791564516,
+            'maxBic': 0.0031954516017123785,
+            'meanBicDiag': -0.011498795747324932,
         },
         'sin_odd': {
-            'meanBic': 0.04296040859262361,
-            'maxBic': 0.4086824169286797,
-            'skewBic': 2.83244350528225,
-            'meanBicDiag': 0.023280156353465347,
-            'threshRatio': 0.9909822547782275,
+            'meanBic': 0.0003941289277446325,
+            'maxBic': 0.22477214183926159,
+            'meanBicDiag': -0.020161442502185524,
         },
     },
     'spectral_summaries_welch': {

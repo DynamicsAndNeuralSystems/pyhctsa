@@ -2043,7 +2043,7 @@ spectral:
     base_name: bicoherence
     dependencies:
     configs:
-      - {zscore: True}   # SP_Bicoherence(x_z,64,'full',100)
+      - {zscore: True}   # SP_Bicoherence(x_z,64,'full',100); outputs relative to the Gaussian null, analytic threshold in place of surrogates
     legacy_name: SP_Bicoherence
 
   envelope_stats:

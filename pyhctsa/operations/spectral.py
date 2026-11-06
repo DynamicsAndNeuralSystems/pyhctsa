@@ -1922,9 +1922,22 @@ def _bicoherence_grid(y: np.ndarray, step: int, num_seg: int, seg_length: int, h
     return np.abs(b_num) ** 2 / (p12 * p3 + np.finfo(float).eps)  # bounded in [0, 1]
 
 
+def _bicoherence_k_eff(win: np.ndarray, step: int, num_seg: int) -> float:
+    # Effective number of independent segments of the overlapping segment average
+    # (see the Notes of ``bicoherence``): K / (1 + 2 sum_m (1 - m/K) r_m^3), r_m the
+    # correlation of the Fourier coefficients of segments m steps apart, which for a
+    # white input is the overlap correlation of the window.
+    seg_length = len(win)
+    power = np.sum(win ** 2)
+    corr = 0.0
+    for m in range(1, min(num_seg, -(-seg_length // step))):
+        r_m = np.sum(win[:seg_length - m * step] * win[m * step:]) / power
+        corr += (1 - m / num_seg) * r_m ** 3
+    return num_seg / (1 + 2 * corr)
+
+
 @dict_output
-def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'full',
-                num_surr: int = 100) -> Union[dict, float]:
+def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'full') -> Union[dict, float]:
     """
     Quadratic phase coupling between frequencies, from the squared bicoherence.
 
@@ -1933,8 +1946,9 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
     segment is demeaned, Hamming-windowed and Fourier transformed, and the
     per-segment Fourier coefficients are combined into the bispectrum estimate
     ``B(f1,f2) = <X(f1) X(f2) X*(f1+f2)>``, averaged over segments. The squared
-    bicoherence is ``bic2(f1,f2) = |B(f1,f2)|^2 / (<|X(f1)X(f2)|^2> <|X(f1+f2)|^2>)``,
-    bounded in [0, 1] by the Cauchy-Schwarz inequality.
+    bicoherence is ``bic2(f1,f2) = |B(f1,f2)|^2 / (<|X(f1)X(f2)|^2> <|X(f1+f2)|^2>)``
+    (the normalization of Kim and Powers, 1979), bounded in [0, 1] by the
+    Cauchy-Schwarz inequality.
 
     Time-domain nonlinearity statistics (e.g., ``tc3``, the ramping-window asymmetry
     of ``ramping_windows``) collapse all frequency structure into a single number
@@ -1943,6 +1957,12 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
     per frequency pair, directly detecting whether energy at f1 and f2 is
     phase-coupled to energy at f1+f2 (the frequency-domain signature of a quadratic
     nonlinearity).
+
+    The squared bicoherence of a finite segment average is biased upward by an amount
+    set by the number of segments, which grows with the series length. The outputs
+    below are therefore expressed relative to the Gaussian null (see Notes), so that
+    they are near 0 for a linear Gaussian process at any length and approach 1 for
+    perfect coupling.
 
     Parameters
     ----------
@@ -1957,43 +1977,59 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
         The maximum number of samples to consider: longer series are cropped to
         their first ``max_n`` points. ``'full'`` disables cropping. Default is
         ``'full'``.
-    num_surr : int, optional
-        The number of random-phase surrogates (which preserve the power spectrum but
-        destroy phase coupling) used to calibrate the significance threshold
-        empirically, in place of its asymptotic approximation. The threshold is the
-        95% quantile of squared bicoherence values pooled across all frequency pairs
-        and all surrogates (the threshold of a few tens of surrogates depends on which were drawn). Default is 100.
 
     Returns
     -------
     dict or float
-        - ``meanBic``, ``maxBic``, ``stdBic``, ``skewBic``: mean, maximum, standard
-          deviation and skewness of the squared bicoherence over the non-redundant
-          principal domain of frequency pairs (``0 < f1 <= f2``, ``f1 + f2 <=
-          Nyquist``).
-        - ``entropy``: the Shannon entropy of the bicoherence surface, normalized
-          to [0, 1] by the uniform-distribution entropy: whether coupling is
-          concentrated in a few frequency pairs or diffuse across many.
-        - ``meanBicDiag``: the mean squared bicoherence on the self-coupling
-          diagonal ``f1 = f2`` (quadratic harmonic distortion).
-        - ``propSig``: the proportion of frequency pairs exceeding the
-          surrogate-calibrated 95% significance threshold.
-        - ``threshRatio``: the ratio of that empirical threshold to the standard
-          analytic large-K approximation (``K * bic2 ~ Exp(1)`` under the null of a
-          linear, ~Gaussian process, giving threshold ``-log(0.05)/K``). A ratio far
-          from 1 flags that the asymptotic approximation is untrustworthy for this
-          series (e.g., because of non-stationarity).
+        - ``meanBic``: the mean over the non-redundant principal domain of frequency
+          pairs (``0 < f1 <= f2``, ``f1 + f2 <= Nyquist``) of the null-corrected
+          squared bicoherence ``(K_eff * bic2 - 1) / (K_eff - 1)``.
+        - ``meanBicDiag``: the same mean over the self-coupling diagonal ``f1 = f2``
+          (quadratic harmonic distortion).
+        - ``maxBic``: the maximum of ``bic2`` over the domain, rescaled as
+          ``(max - m0) / (1 - m0)``, with ``m0`` the expected maximum under the null.
+        - ``propSig``: the proportion of frequency pairs whose ``bic2`` exceeds the
+          95% quantile of the null distribution.
+        - ``entropy``: the Shannon entropy of the (uncorrected) bicoherence surface,
+          normalized to [0, 1] by the uniform-distribution entropy: whether coupling
+          is concentrated in a few frequency pairs or diffuse across many.
 
+        ``meanBic``, ``meanBicDiag`` and ``maxBic`` are 0 in expectation for a linear
+        Gaussian process and 1 for perfect coupling; sampling fluctuation makes
+        individual values slightly negative, and they are not clipped.
         NaN is returned if the series is too short for 8 segments.
 
     Notes
     -----
-    The random-phase surrogates are generated with hctsa's portable generator
-    (:func:`pyhctsa.robust.bf_random`) at seed 0, as in hctsa's ``SD_MakeSurrogates``
-    (``'RP'``), so the output is reproducible.
-    """
-    from .surrogates import _make_surrogates  # local import: surrogates imports other operations
+    Null distribution. For a Gaussian process the Fourier coefficient X3 = X(f1+f2)
+    is independent of the product a = X(f1) X(f2) across segments, and is circularly
+    symmetric. ``bic2`` is then the squared cosine between the K-vectors a and X3,
+    which for K independent segments follows a Beta(1, K - 1) distribution
+    whatever a is, with mean 1/K. The uncorrected mean therefore falls like 1/K,
+    that is, like 1/N.
 
+    Effective segment count. With 50% overlap, neighboring segments are correlated;
+    for white input the Fourier coefficients of segments m steps apart have
+    correlation ``r_m = sum_n w[n] w[n + m*step] / sum_n w[n]^2`` for the window w.
+    The products a then have correlation ``r_m^2``, and the bin phase factors cancel
+    in the triple product, so the null mean of ``bic2`` is 1/K_eff with
+    ``K_eff = K / (1 + 2 sum_m (1 - m/K) r_m^3)`` (about K / 1.023 for the Hamming
+    window at 50% overlap), and the null distribution is taken as
+    Beta(1, K_eff - 1).
+
+    Corrected forms. Each bifrequency is corrected to
+    ``bc = (K_eff * bic2 - 1) / (K_eff - 1)``, which has null mean 0 and equals 1 at
+    perfect coupling. For a summary with null expectation T0 the reported value is
+    ``(T - T0) / (1 - T0)``: for ``maxBic`` the maximum of the M non-redundant
+    bifrequencies, with ``T0 = 1 - B(1 / a, M + 1) / a``, ``a = K_eff - 1`` and B
+    the beta function (the expected maximum of M independent Beta(1, a) variables);
+    for the means this is the mean of ``bc``. The threshold of ``propSig`` is the
+    exact quantile ``1 - 0.05**(1 / (K_eff - 1))`` of Beta(1, K_eff - 1).
+    The corrections are first-order: they ignore the small excess of the null mean
+    in the bin next to DC and the O(1/K) bias at strong coupling, and for narrowband
+    (line-spectrum) series, whose Fourier coefficients do not decorrelate between
+    segments, the null level is higher than assumed.
+    """
     y = np.asarray(y, dtype=float).ravel()
     min_seg_length = 16
     if seg_length < min_seg_length:
@@ -2002,8 +2038,7 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
     y = _crop_max_n(y, max_n)
     N = len(y)
 
-    # Segment geometry (50% overlap, as many segments as fit), shared by the real
-    # series and every surrogate:
+    # Segment geometry (50% overlap, as many segments as fit):
     step = seg_length // 2
     min_num_seg = 8  # need enough segments for a meaningful bicoherence estimate
     num_seg = (N - seg_length) // step + 1
@@ -2021,16 +2056,21 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
     pi, pj = ii[mask], jj[mask]
     diag = pi == pj  # self-coupling diagonal (f1 = f2)
 
-    # Bicoherence of the real series
     bic = _bicoherence_grid(y, step, num_seg, seg_length, half_n, win, pi, pj)
     if bic.size == 0 or not np.any(np.isfinite(bic)):
         return np.nan
 
+    # Gaussian null: bic2 ~ Beta(1, a) with a = K_eff - 1
+    k_eff = _bicoherence_k_eff(win, step, num_seg)
+    a = k_eff - 1
+    bc = (k_eff * bic - 1) / a  # null mean 0, 1 at perfect coupling
+    m0 = 1 - scipy.special.beta(1 / a, bic.size + 1) / a  # expected maximum of bic.size null values
+    alpha = 0.05
+    null_thresh = 1 - alpha ** (1 / a)  # 95% quantile of Beta(1, a)
+
     out = {}
-    out['meanBic'] = np.mean(bic)
-    out['maxBic'] = np.max(bic)
-    out['stdBic'] = _sample_std(bic)
-    out['skewBic'] = scipy.stats.skew(bic)
+    out['meanBic'] = np.mean(bc)
+    out['maxBic'] = (np.max(bic) - m0) / (1 - m0)
 
     # Normalized Shannon entropy of the bicoherence surface (0 = all coupling
     # concentrated in one frequency pair, 1 = uniformly diffuse):
@@ -2038,24 +2078,8 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
     p = p / np.sum(p)
     out['entropy'] = _shannon_entropy(p) / np.log(len(bic))
 
-    out['meanBicDiag'] = np.mean(bic[diag])
-
-    # Surrogate-calibrated significance threshold. Random-phase surrogates preserve
-    # the power spectrum (linear structure) but destroy quadratic phase coupling,
-    # exactly the null hypothesis a bicoherence significance test needs; the 95%
-    # quantile of their pooled bic2 values is the empirical threshold.
-    alpha = 0.05
-    surrogates = _make_surrogates(y, 'RP', num_surr, random_seed=0)  # hctsa: SD_MakeSurrogates(y,'RP',numSurr,[],'default'), BF_Random seed 0
-    null_vals = np.concatenate([
-        _bicoherence_grid(surrogates[:, s], step, num_seg, seg_length, half_n, win, pi, pj)
-        for s in range(num_surr)])
-    null_vals = null_vals[np.isfinite(null_vals)]
-    surr_thresh = float(_quantile(null_vals, 1 - alpha))
-    out['propSig'] = np.mean(bic > surr_thresh)
-
-    # How far the standard asymptotic threshold is from the empirical one:
-    analytic_thresh = -np.log(alpha) / num_seg
-    out['threshRatio'] = surr_thresh / analytic_thresh
+    out['meanBicDiag'] = np.mean(bc[diag])
+    out['propSig'] = np.mean(bic > null_thresh)
     return out
 
 
