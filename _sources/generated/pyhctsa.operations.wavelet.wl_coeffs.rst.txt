@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.wavelet.wl\_coeffs
+=====================================
+
+.. currentmodule:: pyhctsa.operations.wavelet
+
+.. autofunction:: wl_coeffs

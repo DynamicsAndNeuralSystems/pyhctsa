@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.residual\_analysis
+================================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: residual_analysis

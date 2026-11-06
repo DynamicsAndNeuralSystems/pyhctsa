@@ -1,0 +1,6 @@
+﻿pyhctsa.robust.bf\_theil\_sen
+=============================
+
+.. currentmodule:: pyhctsa.robust
+
+.. autofunction:: bf_theil_sen

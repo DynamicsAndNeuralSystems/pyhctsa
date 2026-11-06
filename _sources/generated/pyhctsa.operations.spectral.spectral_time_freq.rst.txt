@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.spectral.spectral\_time\_freq
+================================================
+
+.. currentmodule:: pyhctsa.operations.spectral
+
+.. autofunction:: spectral_time_freq

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.moments
+=======================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: moments

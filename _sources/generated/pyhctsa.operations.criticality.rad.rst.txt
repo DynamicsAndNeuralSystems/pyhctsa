@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.criticality.rad
+==================================
+
+.. currentmodule:: pyhctsa.operations.criticality
+
+.. autofunction:: rad

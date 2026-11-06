@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.nonlinear\_autocorr\_excess
+==========================================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: nonlinear_autocorr_excess

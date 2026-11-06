@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.spectral.phase\_amp\_coupling
+================================================
+
+.. currentmodule:: pyhctsa.operations.spectral
+
+.. autofunction:: phase_amp_coupling

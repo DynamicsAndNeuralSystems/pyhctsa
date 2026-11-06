@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.randomize
+====================================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: randomize

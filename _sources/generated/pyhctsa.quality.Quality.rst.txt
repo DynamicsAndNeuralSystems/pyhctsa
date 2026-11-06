@@ -1,0 +1,48 @@
+﻿pyhctsa.quality.Quality
+=======================
+
+.. currentmodule:: pyhctsa.quality
+
+.. autoclass:: Quality
+
+   
+   .. automethod:: __init__
+
+   
+   .. rubric:: Methods
+
+   .. autosummary::
+   
+      ~Quality.conjugate
+      ~Quality.bit_length
+      ~Quality.bit_count
+      ~Quality.to_bytes
+      ~Quality.from_bytes
+      ~Quality.as_integer_ratio
+      ~Quality.__init__
+   
+   
+
+   
+   
+   .. rubric:: Attributes
+
+   .. autosummary::
+   
+      ~Quality.real
+      ~Quality.imag
+      ~Quality.numerator
+      ~Quality.denominator
+      ~Quality.GOOD
+      ~Quality.ERROR
+      ~Quality.NAN
+      ~Quality.INF
+      ~Quality.NEG_INF
+      ~Quality.COMPLEX
+      ~Quality.EMPTY
+      ~Quality.LINK_ERROR
+      ~Quality.NON_SCALAR
+      ~Quality.REJECTED
+      ~Quality.NOT_COMPUTED
+   
+   

@@ -1,0 +1,6 @@
+﻿pyhctsa.quality.classify
+========================
+
+.. currentmodule:: pyhctsa.quality
+
+.. autofunction:: classify

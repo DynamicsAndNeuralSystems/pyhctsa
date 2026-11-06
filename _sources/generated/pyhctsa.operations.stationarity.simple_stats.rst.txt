@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.simple\_stats
+=============================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: simple_stats

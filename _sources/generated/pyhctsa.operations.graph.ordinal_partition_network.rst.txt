@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.graph.ordinal\_partition\_network
+====================================================
+
+.. currentmodule:: pyhctsa.operations.graph
+
+.. autofunction:: ordinal_partition_network

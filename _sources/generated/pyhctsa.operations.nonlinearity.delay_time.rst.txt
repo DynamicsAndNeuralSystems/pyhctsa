@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.nonlinearity.delay\_time
+===========================================
+
+.. currentmodule:: pyhctsa.operations.nonlinearity
+
+.. autofunction:: delay_time

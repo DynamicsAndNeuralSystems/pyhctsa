@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.exp\_smoothing
+============================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: exp_smoothing

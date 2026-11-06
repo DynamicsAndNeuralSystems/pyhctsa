@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.pp\_test
+========================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: pp_test

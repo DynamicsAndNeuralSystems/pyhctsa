@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.nonlinear\_autocorr\_abs\_surrogate\_ratio
+=========================================================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: nonlinear_autocorr_abs_surrogate_ratio

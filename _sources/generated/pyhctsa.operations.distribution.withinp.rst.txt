@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.withinp
+=======================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: withinp

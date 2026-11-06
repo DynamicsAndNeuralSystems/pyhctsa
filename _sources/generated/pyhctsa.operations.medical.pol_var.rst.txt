@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.medical.pol\_var
+===================================
+
+.. currentmodule:: pyhctsa.operations.medical
+
+.. autofunction:: pol_var

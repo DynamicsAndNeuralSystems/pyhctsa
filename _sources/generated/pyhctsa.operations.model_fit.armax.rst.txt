@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.armax
+===================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: armax

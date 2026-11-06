@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.symbolic.motif\_two
+======================================
+
+.. currentmodule:: pyhctsa.operations.symbolic
+
+.. autofunction:: motif_two
