@@ -147,7 +147,7 @@ def _pairings(items):
             yield [(a, rest[j])] + p
 
 
-@pytest.mark.parametrize("taus", [[1, 2, 3], [0, 1, 1], [1, 1, 2], [0, 0, 3], [1, 3, 5, 7, 8], [1, 2, 3, 4, 5]])
+@pytest.mark.parametrize("taus", [[1, 2, 3], [0, 1, 1], [1, 1, 2], [0, 0, 3], [3, 3, 3], [1, 3, 5, 7, 8], [1, 2, 3, 4, 5]])
 def test_excess_equals_moment_minus_isserlis(taus):
     rng = np.random.default_rng(4)
     x = _z(_ar1(400, 0.5, rng))
@@ -184,6 +184,25 @@ def test_excess_gaussian_null_and_rank_invariance():
             assert co.nonlinear_autocorr_excess(y, taus) == co.nonlinear_autocorr_excess(r, taus)
     # the original is dominated by the Gaussian part, e.g. <x_t x_{t-1}^2 x_{t-2}> ~ 2 rho1^2 + rho2
     assert co.nonlinear_autocorr(x, [1, 1, 2], absval=False) == pytest.approx(3 * 0.49, abs=0.05)
+
+
+def test_excess_mirror_fourth_order_lag():
+    # [k, k, k] = <x_t x_{t-k}^3> is the time mirror of [0, 0, k] = <x_t^3 x_{t-k}>. On a Gaussian AR(1) both
+    # are 3 rho^k (Isserlis) and their excess is zero. A quartic echo x_t = e_t + a g(e_{t-k}), with g odd,
+    # g^2 = 1 and E[e g(e)] = 0, is white with white squares and no third-order lag moment; its lowest lag
+    # moment is <x_t x_{t-k}^3> = a E[e^3 g(e)], seen by [k, k, k] at its own lag and by nothing else here
+    rng = np.random.default_rng(14)
+    x = _z(_ar1(100_000, 0.6, rng))
+    for k in (1, 2):
+        assert co.nonlinear_autocorr(x, [k, k, k], absval=False) == pytest.approx(3 * 0.6 ** k, abs=0.06)
+        assert abs(co.nonlinear_autocorr_excess(x, [k, k, k])) < 0.03
+    theta = np.sqrt(2 * np.log(2))   # |e|-weighted median of |e| for a Gaussian, so E[e g(e)] = 0
+    e = rng.standard_normal(50_000)
+    y = e.copy()
+    y[3:] += 0.8 * np.sign(e[:-3]) * np.where(np.abs(e[:-3]) < theta, 1.0, -1.0)
+    assert co.nonlinear_autocorr_excess(y, [3, 3, 3]) < -0.25
+    for taus in ([0, 0, 3], [2, 2, 2], [4, 4, 4], [3]):
+        assert abs(co.nonlinear_autocorr_excess(y, taus)) < 0.05
 
 
 def test_excess_degenerate():
@@ -336,6 +355,6 @@ def test_new_variants_in_default_feature_set():
         assert lab in calc.feature_funcs
         assert np.isfinite(calc.feature_funcs[lab](y))
     assert calc.feature_funcs['ac_nl_excess_1_to_3'](y) == co.nonlinear_autocorr_excess(_z(y), [1, 2, 3])
-    assert len([k for k in calc.feature_funcs if k.startswith('ac_nl_excess_')]) == 61
+    assert len([k for k in calc.feature_funcs if k.startswith('ac_nl_excess_')]) == 67
     assert len([k for k in calc.feature_funcs if k.startswith('ac_nl_abs_surr_ratio_')]) == 22
     assert len([k for k in calc.feature_funcs if k.startswith('trev_studentized_')]) == 7
