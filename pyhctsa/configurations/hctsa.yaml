@@ -46,9 +46,10 @@ medical:
       - {d: 0.1, D: 4, zscore: True}
       - {d: 0.1, D: 5, zscore: True}
       - {d: 0.1, D: 6, zscore: True}
-      - {D: 3, zscore: True, preprocess: decimate_ac1e}   # MD_PolVar(zscore(BF_PreProcess(x_z,'decimate_ac1e')),1,3)
+      - {D: 3, tau: 'ac1e', zscore: True}   # lag form of MD_PolVar(zscore(BF_PreProcess(x_z,'decimate_ac1e')),1,3): all tau phases
     legacy_name: MD_PolVar
-    ordered_args: ['d', 'D']
+    ordered_args: ['d', 'D', 'tau']
+    dropped_hctsa_calls: ['MD_PolVar_1_3_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
 
   pol_var_resid:   # pyhctsa-only: pol_var on |AR(2) residuals| with a median threshold (no hctsa counterpart)
     base_name: pol_var_resid
@@ -72,13 +73,16 @@ medical:
     min_length: 4
     dependencies:
     configs:
-      - {num_levels: 6, zscore: True}
-      - {zscore: True, preprocess: decimate_ac1e}   # MD_Porta(zscore(BF_PreProcess(x_z,'decimate_ac1e')),6)
+      - {zscore: True}   # MD_Porta(x_z,6) (num_levels 6, the default); robust levels
+      - {tau: 'ac1e', zscore: True}   # lag form of MD_Porta(zscore(BF_PreProcess(x_z,'decimate_ac1e')),6): all tau phases
     legacy_name: MD_Porta
-    
+    ordered_args: ['num_levels', 'tau']   # num_levels is left at its default, so the labels are porta and porta_ac1e
+    dropped_hctsa_calls: ['MD_Porta_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
+
 extreme_events:
   moving_threshold:
     base_name: moving_threshold
+    min_length: "ceil(1 / b)"   # the barrier's memory: a shorter series (or decimated phase) never leaves its start-up
     dependencies:
     configs:
       - {a: 0.1, b: 0.1, zscore: True, exclude: ['meankicksize']}
@@ -86,7 +90,7 @@ extreme_events:
       - {a: 1.0, b: 0.1, zscore: True, exclude: ['meankicksize']}
       - {a: 1.0, b: 0.02, zscore: True, exclude: ['meankicksize']}
       - {a: 0.1, b: 0.1, zscore: True, preprocess: decimate_ac1e, exclude: ['meankicksize']}   # EX_MovingThreshold(zscore(BF_PreProcess(x_z,'decimate_ac1e')),0.1,0.1)
-      - {a: 1, b: 0.02, zscore: True, preprocess: decimate_ac1e, exclude: ['meankicksize']}   # EX_MovingThreshold(zscore(BF_PreProcess(x_z,'decimate_ac1e')),1,0.02)
+      - {a: 1, b: 0.02, zscore: True, preprocess: decimate_ac1e, exclude: ['meankicksize', 'pkick', 'meankickf', 'mediankickf', 'stdkickf']}   # EX_MovingThreshold(zscore(BF_PreProcess(x_z,'decimate_ac1e')),1,0.02)
     legacy_name: EX_MovingThreshold
     ordered_args: ['a', 'b']
 
@@ -430,11 +434,12 @@ correlation:
       - {taus: [[0, 5]], absval: True, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,5],true)
       - {taus: [[0, 6]], absval: False, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,6],false)
       - {taus: [[0, 6]], absval: True, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,6],true)
-      - {taus: [[0, 3, 6]], absval: False, zscore: True, preprocess: decimate_ac1e}   # CO_NonlinearAutocorr(zscore(BF_PreProcess(x_z,'decimate_ac1e')),[0,3,6],false)
-      - {taus: [[1, 1, 2]], absval: False, zscore: True, preprocess: decimate_ac1e}   # CO_NonlinearAutocorr(zscore(BF_PreProcess(x_z,'decimate_ac1e')),[1,1,2],false)
-      - {taus: [[1, 2, 3, 4]], absval: True, zscore: True, preprocess: decimate_ac1e}   # CO_NonlinearAutocorr(zscore(BF_PreProcess(x_z,'decimate_ac1e')),[1,2,3,4],true)
+      - {taus: [[0, 3, 6]], absval: False, tau: 'ac1e', zscore: True}   # lag form of CO_NonlinearAutocorr(zscore(BF_PreProcess(x_z,'decimate_ac1e')),[0,3,6],false)
+      - {taus: [[1, 1, 2]], absval: False, tau: 'ac1e', zscore: True}   # lag form of CO_NonlinearAutocorr(zscore(BF_PreProcess(x_z,'decimate_ac1e')),[1,1,2],false)
+      - {taus: [[1, 2, 3, 4]], absval: True, tau: 'ac', zscore: True}   # lag form of CO_NonlinearAutocorr(zscore(BF_PreProcess(x_z,'decimate_ac1e')),[1,2,3,4],true); delay 'ac' chosen by test
     legacy_name: CO_NonlinearAutocorr
-    ordered_args: ['taus', 'absval']
+    ordered_args: ['taus', 'absval', 'tau']
+    dropped_hctsa_calls: ['AC_nl_036_dec', 'AC_nl_112_dec', 'AC_nl_1234_abs_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
 
   nonlinear_autocorr_excess:   # pyhctsa-only: nonlinear_autocorr minus its Gaussian (Isserlis) value, on Gaussian ranks
     base_name: ac_nl_excess
@@ -505,10 +510,10 @@ correlation:
       - {taus: [[0, 4]], zscore: True}
       - {taus: [[0, 5]], zscore: True}
       - {taus: [[0, 6]], zscore: True}
-      - {taus: [[0, 3, 6]], zscore: True, preprocess: decimate_ac1e}
-      - {taus: [[1, 1, 2]], zscore: True, preprocess: decimate_ac1e}
+      - {taus: [[0, 3, 6]], tau: 'ac1e', zscore: True}   # delay from the Gaussian ranks
+      - {taus: [[1, 1, 2]], tau: 'ac1e', zscore: True}   # delay from the Gaussian ranks
     variant_of: nonlinear_autocorr
-    ordered_args: ['taus']
+    ordered_args: ['taus', 'tau']
 
   bicorrelation:   # pyhctsa-only: Hinich's bicorrelation plane (0 < r < s <= L) of AR residuals: portmanteau, largest cell, largest reversal-asymmetric cell
     base_name: bicorr
@@ -542,9 +547,9 @@ correlation:
       - {taus: [[0, 4]], zscore: True}
       - {taus: [[0, 5]], zscore: True}
       - {taus: [[0, 6]], zscore: True}
-      - {taus: [[1, 2, 3, 4]], zscore: True, preprocess: decimate_ac1e}
+      - {taus: [[1, 2, 3, 4]], tau: 'ac', zscore: True}   # delay 'ac' as nonlinear_autocorr's, from the Gaussian ranks
     variant_of: nonlinear_autocorr
-    ordered_args: ['taus']
+    ordered_args: ['taus', 'tau']
   
   stick_angles:
     base_name: stick_angles
@@ -581,10 +586,11 @@ correlation:
       - {shape: 'circle', d: 2.5, how_to_move: 'pts', zscore: True, exclude: ['max']}
       - {shape: 'circle', d: 3.5, how_to_move: 'pts', zscore: True, exclude: ['max', 'sevens']}
       - {shape: 'rectangle', d: 2, how_to_move: 'pts', zscore: True, exclude: ['max']}
-      - {d: 2.5, zscore: True, preprocess: decimate_ac1e, exclude: ['max']}   # CO_TranslateShape(zscore(BF_PreProcess(x_z,'decimate_ac1e')),'circle',2.5,'pts')
+      - {d: 2.5, tau: 'ac1e', zscore: True, exclude: ['max']}   # lag form of CO_TranslateShape(zscore(BF_PreProcess(x_z,'decimate_ac1e')),'circle',2.5,'pts'): all tau phases
     legacy_name: CO_TranslateShape
-    ordered_args: ['shape', 'd', 'how_to_move']
-  
+    ordered_args: ['shape', 'd', 'how_to_move', 'tau']
+    dropped_hctsa_calls: ['CO_TranslateShape_circle_25_pts_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
+
   autocorr_shape:
     base_name: autocorr_shape
     min_length: "4 if stop_when == 'pos_drown' else None"
@@ -708,18 +714,19 @@ correlation:
     dependencies:
     configs:
       - {zscore: True}
-      - {zscore: True, preprocess: decimate_ac1e}   # DK_crinkle(zscore(BF_PreProcess(x_z,'decimate_ac1e')))
+      - {tau: 'ac1e', zscore: True}   # lag form of DK_crinkle(zscore(BF_PreProcess(x_z,'decimate_ac1e'))): all tau phases
     legacy_name: DK_crinkle
-    ordered_args:
+    ordered_args: ['tau']
+    dropped_hctsa_calls: ['DK_crinkle_statistic_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
 
   crinkle_statistic_kurtosis:   # pyhctsa-only: excess kurtosis of the second difference, on Gaussian ranks
     base_name: crinkle_statistic_kurtosis
     dependencies:
     configs:
       - {zscore: True}
-      - {zscore: True, preprocess: decimate_ac1e}
+      - {tau: 'ac1e', zscore: True}   # delay from the Gaussian ranks (rank-invariant)
     variant_of: crinkle_statistic
-    ordered_args:
+    ordered_args: ['tau']
   
   theiler_q:
     base_name: theiler_q
@@ -903,11 +910,10 @@ entropy:
       - {n_bits: 8, pre_proc: 'diff', zscore: True}
       - {n_bits: 9, pre_proc: 'diff', zscore: True}
       - {n_bits: 10, pre_proc: 'diff',  zscore: True}
-      - {n_bits: 2, zscore: True, preprocess: decimate_ac1e}   # EN_LZComplexity(zscore(BF_PreProcess(x_z,'decimate_ac1e')),2,[])
-      - {n_bits: 5, zscore: True, preprocess: decimate_ac1e}   # EN_LZComplexity(zscore(BF_PreProcess(x_z,'decimate_ac1e')),5,[])
     legacy_name: EN_LZComplexity
     ordered_args: ['n_bits', 'pre_proc']
-  
+    dropped_hctsa_calls: ['EN_LZComplexity_2_dec', 'EN_LZComplexity_5_dec']   # the decimated calls are dropped: at a fixed length they mostly measure the decimated length
+
   complexity_invariant_distance:
     base_name: complexity_invariant_distance
     dependencies:
@@ -949,12 +955,14 @@ entropy:
       - {m: 5, r: 0.3, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
       - {m: 5, r: 0.1, pre_process_how: 'diff1', zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen3', 'sampen4', 'sampen5', 'meanchsampen']}
       - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen4', 'sampen5', 'meanchsampen']}
-      - {m: 5, r: 0.2, zscore: True, preprocess: decimate_ac1e, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}   # EN_SampEn(zscore(BF_PreProcess(x_z,'decimate_ac1e')),5,0.2)
+      - {m: 5, r: 0.2, tau: 'ac1e', theiler_win: [['ac1e', 1]], zscore: True, select: ['sampen1', 'sampen2', 'sampen3', 'sampen4']}   # delayed SampEn with a Theiler window (replaces EN_SampEn(zscore(BF_PreProcess(x_z,'decimate_ac1e')),5,0.2))
     legacy_name: EN_SampEn
-    ordered_args: ['m', 'r', 'pre_process_how']
+    ordered_args: ['m', 'r', 'pre_process_how', 'tau']
 
   # pyhctsa-only variant of sample_entropy: SampEn of the ranks, invariant to the value distribution.
   # Mirrors sample_entropy's configs; sampen0 (a function of N and r alone for ranks) is not returned.
+    dropped_hctsa_calls: ['EN_SampEn_5_02_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
+
   sample_entropy_ranked:
     base_name: sample_entropy_ranked
     min_length: 4
@@ -962,9 +970,9 @@ entropy:
     configs:
       - {m: 5, r: 0.2, zscore: True, select: ['sampen1', 'sampen2', 'sampen3']}
       - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True, select: ['sampen1', 'sampen2', 'sampen3']}
-      - {m: 5, r: 0.2, zscore: True, preprocess: decimate_ac1e}
+      - {m: 5, r: 0.2, tau: 'ac1e', theiler_win: [['ac1e', 1]], zscore: True, select: ['sampen1', 'sampen2', 'sampen3', 'sampen4']}   # delay and window from the ranks
     variant_of: sample_entropy
-    ordered_args: ['m', 'r', 'pre_process_how']
+    ordered_args: ['m', 'r', 'pre_process_how', 'tau']
 
   multi_scale_entropy:
     base_name: multi_scale_entropy
@@ -1664,9 +1672,10 @@ scaling:
     dependencies:
     configs:
       - {kmax: 8, zscore: True}
-      - {kmax: 8, zscore: True, preprocess: decimate_ac1e}   # SC_HiguchiFD(zscore(BF_PreProcess(x_z,'decimate_ac1e')),8)
+      - {kmax: 8, tau: 'ac1e', zscore: True}   # lag form of SC_HiguchiFD(zscore(BF_PreProcess(x_z,'decimate_ac1e')),8): all tau phases
     legacy_name: SC_HiguchiFD
-    ordered_args: ['kmax']
+    ordered_args: ['kmax', 'tau']
+    dropped_hctsa_calls: ['SC_HiguchiFD_8_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
 
   mfdfa:
     base_name: mfdfa
@@ -1711,11 +1720,12 @@ symbolic:
     configs:
       - {binary_method: 'mean', zscore: True, exclude: ['longstretch0norm', 'longstretch1norm', 'meanstretch0norm', 'meanstretch1norm', 'stdstretch0norm', 'stdstretch1norm']}
       - {binary_method: 'diff', zscore: True, exclude: ['longstretch0norm', 'longstretch1norm', 'meanstretch0norm', 'meanstretch1norm', 'stdstretch0norm', 'stdstretch1norm']}
-      - {binary_method: 'diff', zscore: True, preprocess: decimate_ac1e, exclude: ['longstretch0norm', 'longstretch1norm', 'meanstretch0norm', 'meanstretch1norm', 'stdstretch0norm', 'stdstretch1norm']}   # SB_BinaryStats(zscore(BF_PreProcess(x_z,'decimate_ac1e')),'diff')
+      - {binary_method: 'diff', zscore: True, preprocess: decimate_ac1e-rank, exclude: ['longstretch0norm', 'longstretch1norm', 'meanstretch0norm', 'meanstretch1norm', 'stdstretch0norm', 'stdstretch1norm']}   # SB_BinaryStats(zscore(BF_PreProcess(x_z,'decimate_ac1e')),'diff')
       - {binary_method: 'iqr', zscore: True, exclude: ['longstretch0norm', 'longstretch1norm', 'meanstretch0norm', 'meanstretch1norm', 'stdstretch0norm', 'stdstretch1norm']}   # SB_BinaryStats(x_z,'iqr')
     legacy_name: SB_BinaryStats
     ordered_args: ['binary_method']
-  
+    dropped_hctsa_calls: ['SB_BinaryStats_diff_dec']   # the decimated call is replaced by its average over all decimation phases, with the rank delay (_dec-rank)
+
   motif_three:
     base_name: motif_three
     min_length: "5 + (cg_how == 'diffquant')"
@@ -2094,10 +2104,11 @@ model_fit:
       - {forecast_meth: 'lfit', train_length: 4, zscore: True}
       - {forecast_meth: 'lfit', train_length: 5, zscore: True}
       - {forecast_meth: 'lfit', train_length: 'ac1e', zscore: True}   # FC_LocalSimple(x_z,'lfit','ac1e')
-      - {forecast_meth: 'mean', train_length: 1, zscore: True, preprocess: decimate_ac1e}   # FC_LocalSimple(zscore(BF_PreProcess(x_z,'decimate_ac1e')),'mean',1)
+      - {forecast_meth: 'mean', train_length: 1, tau: 'ac1e', zscore: True}   # lag form of FC_LocalSimple(zscore(BF_PreProcess(x_z,'decimate_ac1e')),'mean',1): all tau phases
     legacy_name: FC_LocalSimple
-    ordered_args: ['forecast_meth', 'train_length']
-  
+    ordered_args: ['forecast_meth', 'train_length', 'tau']
+    dropped_hctsa_calls: ['FC_LocalSimple_mean1_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
+
   loop_local_simple:
     base_name: loop_local_simple
     dependencies:

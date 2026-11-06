@@ -3,6 +3,7 @@ from numpy.typing import ArrayLike
 from scipy import signal
 
 from ..robust import bf_hist_edges
+from ..utils import get_tau
 
 def raw_hrv_meas(x: ArrayLike) -> dict:
     """
@@ -227,7 +228,7 @@ def hrv_classic(y: ArrayLike) -> dict:
 
     return out
 
-def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
+def pol_var(x: ArrayLike, d: float = 1, D: int = 6, tau: int | str = 1) -> float:
     """
     Compute the POLVARd measure of a time series.
 
@@ -262,6 +263,12 @@ def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
         Symbolic coding threshold in units of standard deviation. Default is 1.
     D : int
         Word length for detecting consecutive sequences. Default is 6.
+    tau : int or str, optional
+        The step, in samples: an integer, or a rule for :func:`~pyhctsa.utils.get_tau` (e.g.
+        ``'ac1e'``). The symbols code the changes ``|x_{t+tau} - x_t|`` at every ``t``; runs are
+        counted along each chain ``t = p, p + tau, ...`` (the series sampled every ``tau``
+        samples, from each of the ``tau`` phases), and the pooled count of D-runs is divided by
+        the number of symbols. Default 1. NaN when a rule cannot set the delay.
 
     Returns
     -------
@@ -276,15 +283,22 @@ def pol_var(x: ArrayLike, d: float = 1, D: int = 6) -> float:
     which removes the first two dependences.
     """
     x = np.asarray(x)
-    dx = np.abs(np.diff(x)) # abs diff in consecutive values of the time series
-    N = len(dx) # number of diffs in the input time series
+    tau = get_tau(x, tau) if x.size > 1 else 1
+    if np.isnan(tau):  # the delay could not be set
+        return np.nan
+    tau = int(tau)
+    dx = np.abs(x[tau:] - x[:-tau]) # abs changes over tau samples
+    N = len(dx) # number of changes (symbols)
 
-    # binary representation of time series based on consecutive changes being greater than d/1000...
-    x_sym = dx >= d # consec. diffs exceed some threshold, d
+    # binary representation of time series based on changes being greater than d
+    x_sym = dx >= d # changes exceed some threshold, d
 
-    change = np.flatnonzero(x_sym[1:] != x_sym[:-1]) + 1
-    run_lengths = np.diff(np.concatenate(([0], change, [N])))
-    pc = int(np.sum(run_lengths // D))
+    pc = 0
+    for ph in range(min(tau, N)):  # runs along each lag-tau chain
+        chain = x_sym[ph::tau]
+        change = np.flatnonzero(chain[1:] != chain[:-1]) + 1
+        run_lengths = np.diff(np.concatenate(([0], change, [chain.size])))
+        pc += int(np.sum(run_lengths // D))
 
     p = pc / N
 
@@ -433,7 +447,7 @@ def pnn(x: ArrayLike) -> dict:
 
     return out
 
-def porta(x: ArrayLike, num_levels: int = 6) -> dict:
+def porta(x: ArrayLike, num_levels: int = 6, tau: int | str = 1) -> dict:
     """
     Compute Porta's symbolic-dynamics word-type indices.
 
@@ -448,18 +462,38 @@ def porta(x: ArrayLike, num_levels: int = 6) -> dict:
     Originally developed for heart-rate-variability analysis, quantifying the
     complexity/regularity of the symbolic dynamics of RR interval sequences.
 
+    The levels are equal-width bins one robust standard deviation wide (for six levels),
+    ``s = IQR / 1.349``, centred on the median: the span ``median +/- 3 s`` is divided into
+    ``num_levels`` bins and values beyond it fall in the end bins. Porta et al. divide the full
+    range ``[min, max]`` into equal bins [2]_, after replacing ectopic beats, artifacts and jumps
+    of more than 30% in the RR series. Without that cleaning one outlier widens every range
+    bin: a single 10-SD spike in 1000 samples moves the word-type percentages by 25-55 points,
+    and the percentages then also track the shape of the value distribution. The robust span
+    is the analogue of the original for uncleaned data: unchanged by a few outliers, and
+    (for Gaussian data) about as wide as the range bins of a series of about 1000 samples.
+
     References
     ----------
-    .. [1] A. Porta et al., "Quantifying the strength of the linear and
-           nonlinear relationships between heart period and arterial pressure",
-           IEEE Trans. Biomed. Eng. 45(8) 1017 (1998).
+    .. [1] A. Porta et al., "Entropy, entropy rate, and pattern classification as tools to typify
+           complexity in short heart period variability series", IEEE Trans. Biomed. Eng.
+           48(11) 1282 (2001).
+    .. [2] A. Porta et al., "Symbolic analysis of 24h Holter heart period variability series:
+           comparison between normal and heart failure patients", Computers in Cardiology 2005,
+           575-578: uniform quantization of the full range into 6 levels, words of 3 symbols.
 
     Parameters
     ----------
     x : array-like
         The input time series.
     num_levels : int, optional
-        The number of quantization levels. Default is 6, as in the original papers.
+        The number of quantization levels spanning ``median +/- 3 s``. Default is 6, as in the
+        original papers.
+    tau : int or str, optional
+        The step between the symbols of a word, in samples: an integer, or a rule for
+        :func:`~pyhctsa.utils.get_tau` (e.g. ``'ac1e'``). The words are
+        ``(s_t, s_{t+tau}, s_{t+2 tau})`` at every ``t``, with the levels set from the whole
+        series, which pools the ``tau`` phases of the series sampled every ``tau`` samples.
+        Default 1. All outputs are NaN when a rule cannot set the delay.
 
     Returns
     -------
@@ -472,21 +506,29 @@ def porta(x: ArrayLike, num_levels: int = 6) -> dict:
         - 'pV2UV' : percentage of 2UV words
     """
     x = np.asarray(x, dtype=float)
-    num_words = x.size - 2
+    tau = get_tau(x, tau) if x.size > 1 and np.std(x) > 0 else 1
+    if np.isnan(tau):  # the delay could not be set
+        return {'pV0': np.nan, 'pV1': np.nan, 'pV2LV': np.nan, 'pV2UV': np.nan}
+    tau = int(tau)
+    num_words = x.size - 2 * tau
 
     if num_words < 1 or np.std(x) == 0:
         # Constant series: quantization is undefined
         return {'pV0': np.nan, 'pV1': np.nan, 'pV2LV': np.nan, 'pV2UV': np.nan}
 
-    # quantize into 1:num_levels
-    edges = bf_hist_edges(x, int(num_levels))  # equal-width levels spanning the data, explicit edges
-    sym = np.searchsorted(edges, x, side='right')
-    np.clip(sym, 1, len(edges) - 1, out=sym)
+    # quantize into 0:num_levels-1: equal bins over median +/- 3 robust SDs, open end bins
+    num_levels = int(num_levels)
+    q25, med, q75 = np.percentile(x, [25, 50, 75])
+    scale = (q75 - q25) / 1.349  # robust standard deviation
+    if scale <= 1e-12 * np.max(np.abs(x)):  # more than half the values tied
+        scale = 1.2533 * np.mean(np.abs(x - med))  # mean absolute deviation (Gaussian-consistent)
+    inner = med + (6 * scale / num_levels) * (np.arange(1, num_levels) - num_levels / 2)
+    sym = np.searchsorted(inner, x, side='right')
 
-    # transitions between consecutive symbols
-    s = np.sign(np.diff(sym))
+    # transitions between symbols tau apart
+    s = np.sign(sym[tau:] - sym[:-tau])
 
-    codes = np.bincount((s[:-1] + 1) * 3 + (s[1:] + 1), minlength=9)
+    codes = np.bincount((s[:-tau] + 1) * 3 + (s[tau:] + 1), minlength=9)
 
     n0V = codes[4]
     n1V = codes[1] + codes[3] + codes[5] + codes[7]

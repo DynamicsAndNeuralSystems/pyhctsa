@@ -19,7 +19,7 @@ import yaml
 from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
-from .utils import (_check_optional_deps, _input_problem, _zscore_or_zeros, decimate_ac1e, nan_outputs,
+from .utils import (_check_optional_deps, _input_problem, _zscore_or_zeros, decimate_ac1e, decimation_phases, nan_outputs,
                     z_score, SHORT_SERIES_WARNING_LENGTH, _round_half_away)
 from .quality import Quality, classify, quality_summary
 from .results import ERROR_COLUMNS, save_results
@@ -72,7 +72,8 @@ yaml.SafeLoader.add_constructor("!range", range_constructor)
 # ``abs:``), the hctsa input each one reproduces, and the suffix it adds to the feature label.
 # ``x_z`` is the z-scored series (``zscore: True``); the label suffix is hctsa's.
 _PREPROCESS_LABELS = {
-    'decimate_ac1e': '_dec',     # zscore(BF_PreProcess(x_z, 'decimate_ac1e'))
+    'decimate_ac1e': '_dec',     # mean over phases p of f(zscore(x_z[p::tau])), tau = get_tau(x_z, 'ac1e')
+    'decimate_ac1e-rank': '_dec-rank',  # the same with tau = get_tau(x_z, 'ac1e-rank')
     'diff1': '_diff1',           # diff(x_z)
     'zscore_abs': '_mag',        # zscore(abs(x_z)): the magnitudes, re-z-scored
     'zscore_sign': '_sign',      # zscore(sign(x_z)): the signs, re-z-scored
@@ -101,6 +102,28 @@ def _transform_input(x, zscore: bool = False, absval: bool = False,
         x = np.abs(x)
     return x
 
+# The phase-averaged decimations and the delay rule of each
+_DECIMATE_RULES = {'decimate_ac1e': 'ac1e', 'decimate_ac1e-rank': 'ac1e-rank'}
+
+
+def _average_outputs(outs: list):
+    """The mean over decimation phases of a feature's outputs: field by field for dict outputs,
+    ignoring phases where a field is NaN (NaN if it is NaN in every phase). Phases whose output
+    is a bare NaN (nothing computable) are ignored."""
+    dicts = [o for o in outs if isinstance(o, dict)]
+    if dicts:
+        keys = list(dicts[0])
+        for d in dicts[1:]:
+            keys += [k for k in d if k not in keys]
+        res = {}
+        for k in keys:
+            vals = np.array([float(d.get(k, np.nan)) for d in dicts])
+            res[k] = float(np.mean(vals[~np.isnan(vals)])) if np.any(~np.isnan(vals)) else np.nan
+        return res
+    vals = np.array([float(o) for o in outs])
+    return float(np.mean(vals[~np.isnan(vals)])) if np.any(~np.isnan(vals)) else np.nan
+
+
 def _preprocess_decorator(zscore: bool = False, absval: bool = False,
                           preprocess: Union[str, None] = None,
                           min_length: Union[int, None] = None,
@@ -111,11 +134,14 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False,
     The order is: z-score (``zscore``), then the named ``preprocess`` step, then the absolute
     value (``absval``). ``preprocess`` is one of the keys of ``_PREPROCESS_LABELS``:
 
-    - ``'decimate_ac1e'``: one sample per floored 1/e autocorrelation time, then z-scored again
-      if ``zscore`` (see :func:`pyhctsa.utils.decimate_ac1e`); if the delay cannot be
-      determined, or fewer than 3 samples would remain, the function is not called and its
-      outputs are all NaN (:func:`~pyhctsa.utils.nan_outputs`); the operation's own
-      ``min_length`` is checked on the decimated series;
+    - ``'decimate_ac1e'``: the series decimated to one sample per floored 1/e autocorrelation
+      time ``tau``, from each of the ``tau`` starting phases, each z-scored again if ``zscore``
+      (see :func:`pyhctsa.utils.decimation_phases`); the function is computed on every
+      subseries of at least 3 samples (and of at least the operation's own ``min_length``) and
+      its outputs are averaged over them (NaN phases ignored). If the delay cannot be set or no
+      subseries qualifies, the outputs are all NaN (:func:`~pyhctsa.utils.nan_outputs`);
+    - ``'decimate_ac1e-rank'``: the same, with the delay set from the ranks (``'ac1e-rank'``),
+      for features that depend on the data only through their order;
     - ``'diff1'``: incremental differences, ``diff(x_z)`` (not re-z-scored);
     - ``'zscore_abs'`` / ``'zscore_sign'``: ``zscore(abs(x_z))`` / ``zscore(sign(x_z))``.
 
@@ -132,6 +158,24 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False,
     def decorator(func):
         @wraps(func)
         def wrapper(x, *args, **kwargs):
+            if preprocess in _DECIMATE_RULES:  # average over the decimation phases
+                x = z_score(x) if zscore else x
+                phases = decimation_phases(x, _DECIMATE_RULES[preprocess], rezscore=zscore)
+                if not isinstance(phases, list):
+                    return nan_outputs(func, *args, **kwargs)
+                outs = []
+                for xp in phases:
+                    if absval:
+                        xp = np.abs(xp)
+                    if min_length is not None and len(xp) < min_length:
+                        continue
+                    out = func(xp, *args, **kwargs)
+                    if field_min_lengths is not None and isinstance(out, dict):
+                        out = field_min_lengths.apply(out, len(xp))
+                    outs.append(out)
+                if not outs:
+                    return nan_outputs(func, *args, **kwargs)
+                return _average_outputs(outs)
             x = _transform_input(x, zscore, absval, preprocess)
             if np.ndim(x) == 0:  # no 1/e time: every output undefined, like hctsa's NaN
                 return nan_outputs(func, *args, **kwargs)

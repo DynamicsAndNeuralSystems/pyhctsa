@@ -31,6 +31,13 @@ Revision history:
 					avoid divide by zero); changed code to
 					use double precision, to avoid loss of
 					precision for small m and large N
+  pyhctsa (2026, modified)		Delay templates (lag tau) and a minimum
+					separation w between the start times of
+					compared templates (a Theiler window of
+					w - 1); the original counts are tau = 1,
+					w = 1. Matches are accumulated along each
+					lag-tau chain of each diagonal, so no
+					length-n work arrays are needed.
 
 Compile this program using any standard C compiler, linking with the standard C
 math library.  For example, if your compiler is gcc, use:
@@ -68,99 +75,76 @@ static double ieee_value(uint64_t bits)
     return d;
 }
 
-/* Core sampen calculation function */
-static void sampen_core(double *y, int M, double r, int n, double *sampEnt,
-                        double *countA, double *countB)
+/* Core sampen calculation function.
+   Templates are (y[i], y[i+tau], ..., y[i+(m-1)tau]); pairs of templates whose start times
+   i < j differ by d = j - i >= w are compared (w = 1: every pair, as in the original code).
+   For each separation d and each phase p of a lag-tau chain i = p, p+tau, ..., the run of
+   consecutive matches |y[j] - y[i]| < r along the chain gives the longest template match
+   ending at (i, j): it adds one to A[k] for every length k+1 <= run (up to M), and to B[k]
+   as well when the match can still be extended (j + tau < n). B(0) counts the point pairs
+   with d >= w. At tau = 1, w = 1 these are the counts of Lake's code, in a different order
+   (sums of integers, so the same doubles). */
+static void sampen_core(double *y, int M, double r, int n, int tau, int w,
+                        double *sampEnt, double *countA, double *countB)
 {
-    double *p = NULL;
-    long *run = NULL, *lastrun = NULL;
-    double *A = NULL, *B = NULL, nA, nB;
-    int M1, j, nj, jj, m;
+    double *A = NULL, *B = NULL, nA, nB, npairs;
+    int M1, j, m, d, ph;
     int i;
-    double y1;
-    
-    /* Allocate memory */
+    long run;
+
     M++;
-    if ((run = (long *) calloc(n, sizeof(long))) == NULL) {
-        PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for run array");
-        return;
-    }
-    if ((lastrun = (long *) calloc(n, sizeof(long))) == NULL) {
-        free(run);
-        PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for lastrun array");
-        return;
-    }
     if ((A = (double *) calloc(M, sizeof(double))) == NULL) {
-        free(run);
-        free(lastrun);
         PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for A array");
         return;
     }
     if ((B = (double *) calloc(M, sizeof(double))) == NULL) {
-        free(run);
-        free(lastrun);
         free(A);
         PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for B array");
         return;
     }
-    if ((p = (double *) calloc(M, sizeof(double))) == NULL) {
-        free(run);
-        free(lastrun);
-        free(A);
-        free(B);
-        PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for p array");
-        return;
-    }
-    
-    /* Main calculation loop */
-    for (i = 0; i < n - 1; i++) {
-        nj = n - i - 1;
-        y1 = y[i];
-        for (jj = 0; jj < nj; jj++) {
-            j = jj + i + 1;
-            if (((y[j] - y1) < r) && ((y1 - y[j]) < r)) {
-                run[jj] = lastrun[jj] + 1;
-                M1 = M < run[jj] ? M : run[jj];
-                for (m = 0; m < M1; m++) {
-                    A[m]++;
-                    if (j < n - 1)
-                        B[m]++;
+
+    for (d = w; d < n; d++) {
+        for (ph = 0; ph < tau && ph + d < n; ph++) {
+            run = 0;
+            for (i = ph; i + d < n; i += tau) {
+                j = i + d;
+                if (((y[j] - y[i]) < r) && ((y[i] - y[j]) < r)) {
+                    run++;
+                    M1 = M < run ? M : (int) run;
+                    for (m = 0; m < M1; m++) {
+                        A[m]++;
+                        if (j + tau < n)
+                            B[m]++;
+                    }
                 }
+                else
+                    run = 0;
             }
-            else
-                run[jj] = 0;
         }
-        for (j = 0; j < nj; j++)
-            lastrun[j] = run[j];
     }
-    
-    /* Calculate sample entropy, as hctsa's sampen_mex.c: SampEn(m) = -log(A/B),
-       from the count B of pairs of templates of length m that match (all
-       n(n-1)/2 pairs for m = 0) and the count A of those that still match at
-       length m+1. It is NaN when B = 0 (no matches to form the ratio of) and
-       when A = 0, B > 0: the estimate is then infinite, i.e., the data cannot
+
+    /* SampEn(m) = -log(A/B), as hctsa's sampen_mex.c, from the count B of pairs of templates
+       of length m that match (for m = 0, all point pairs at separation >= w) and the count A
+       of those that still match at length m+1. It is NaN when B = 0 (no matches to form the
+       ratio of) and when A = 0, B > 0: the estimate is then infinite, i.e., the data cannot
        support it at this m, r and n. */
+    npairs = (n > w) ? (double) (n - w) * (n - w + 1) / 2 : 0;
     for (m = 0; m < M-1; m++) {
         nA = A[m];
-        nB = (m == 0) ? (double) n * (n - 1) / 2 : B[m - 1];
+        nB = (m == 0) ? npairs : B[m - 1];
         if (countA != NULL) {
             countA[m] = nA;
             countB[m] = nB;
         }
         if ((nA > 0) && (nB > 0)) {
-            p[m] = nA / nB;
-            sampEnt[m] = -log(p[m]);
+            sampEnt[m] = -log(nA / nB);
         } else {
             sampEnt[m] = ieee_value(0x7ff8000000000000ULL); /* NaN */
         }
     }
-    
-    /* Clean up */
+
     free(A);
     free(B);
-    free(p);
-    free(run);
-    free(lastrun);
 }
 
 /* Python wrapper function */
@@ -172,10 +156,19 @@ static PyObject *sampen_calculate(PyObject *self, PyObject *args)
     int M, n;
     double r;
     int return_counts = 0;
-    
-    /* Parse arguments: (array, M, r[, return_counts]) */
-    if (!PyArg_ParseTuple(args, "O!id|p", &PyArray_Type, &input_array, &M, &r,
-                          &return_counts)) {
+    int tau = 1, w = 1;
+
+    /* Parse arguments: (array, M, r[, return_counts[, tau[, w]]]) */
+    if (!PyArg_ParseTuple(args, "O!id|pii", &PyArray_Type, &input_array, &M, &r,
+                          &return_counts, &tau, &w)) {
+        return NULL;
+    }
+    if (tau < 1) {
+        PyErr_SetString(PyExc_ValueError, "tau must be at least 1");
+        return NULL;
+    }
+    if (w < 1) {
+        PyErr_SetString(PyExc_ValueError, "w (minimum separation) must be at least 1");
         return NULL;
     }
     
@@ -237,7 +230,7 @@ static PyObject *sampen_calculate(PyObject *self, PyObject *args)
     }
     
     /* Call core function */
-    sampen_core(data, M, r, n, result,
+    sampen_core(data, M, r, n, tau, w, result,
                 return_counts ? (double*)PyArray_DATA(count_a) : NULL,
                 return_counts ? (double*)PyArray_DATA(count_b) : NULL);
     
@@ -261,9 +254,11 @@ static PyObject *sampen_calculate(PyObject *self, PyObject *args)
 /* Method definitions */
 static PyMethodDef SampenMethods[] = {
     {"calculate", sampen_calculate, METH_VARARGS,
-     "calculate(y, M, r[, return_counts]): sample entropy SampEn(m) for m = 0..M-1 "
-     "(in the first M entries of a length-(M+1) array); with return_counts, also the "
-     "template-match counts A and B (length M), SampEn(m) = -log(A[m]/B[m])"},
+     "calculate(y, M, r[, return_counts[, tau[, w]]]): sample entropy SampEn(m) for "
+     "m = 0..M-1 (in the first M entries of a length-(M+1) array), with delay-tau templates "
+     "compared only when their start times are at least w apart (default tau = 1, w = 1: "
+     "standard SampEn); with return_counts, also the template-match counts A and B "
+     "(length M), SampEn(m) = -log(A[m]/B[m])"},
     {NULL, NULL, 0, NULL}
 };
 

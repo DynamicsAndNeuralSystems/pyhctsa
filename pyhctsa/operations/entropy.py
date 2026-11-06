@@ -17,7 +17,7 @@ from ..toolboxes.physionet import sampen as _sampen_c
 from ..robust import bf_hist_edges, bf_ks_density, bf_random, bf_random_seed
 from ._symbolic_complexity import (_equiprobable_symbols, _normalized_lz_complexity,
                                   _shannon_block_entropy)
-from ..utils import (dict_output, _zscore_or_zeros, get_tau, make_buffer, pre_process,
+from ..utils import (dict_output, _zscore_or_zeros, get_tau, make_buffer, pre_process, theiler_window,
                      time_delay_embed, z_score)
 
 
@@ -439,14 +439,29 @@ def multi_scale_entropy(
     return out
 
 def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
-                    pre_process_how: Optional[str] = None) -> dict:
+                    pre_process_how: Optional[str] = None, tau: Union[int, str] = 1,
+                    theiler_win: Union[int, float, list, tuple] = 0) -> dict:
     """
     Compute Sample Entropy (SampEn) of a time series.
 
     This function calculates SampEn for embedding dimensions from 0 to m. The implementation
-    uses the PhysioNet C code (sampen.c by Doug Lake) [1] for efficiency and accuracy.
+    uses the PhysioNet C code (sampen.c by Doug Lake) [1] for efficiency and accuracy, extended
+    to delay templates and a Theiler window.
     Can specify to first apply an incremental differencing of the time series
     thus yielding the 'Control Entropy' [2].
+
+    With the defaults (``tau = 1``, ``theiler_win = 0``) this is standard SampEn: templates of
+    ``m`` consecutive values, and every pair of distinct templates compared. A delay ``tau``
+    uses templates ``(y_t, y_{t+tau}, ..., y_{t+(m-1)tau})`` at every start time ``t``, which
+    measures regularity over a span set by the series' own timescale rather than the sampling
+    interval (time-delayed SampEn; Kaffashi et al. [3]). A Theiler window ``W`` [4] leaves out the
+    pairs of templates whose start times differ by ``W`` samples or fewer. With a delay, those
+    pairs are near-copies of each other on an oversampled series (each coordinate has barely
+    moved), so they match whatever the dynamics, and their share of the matches grows with the
+    template length; this biases SampEn downwards, more so at finer sampling. Excluding pairs
+    closer than the delay (``theiler_win = ['ac1e', 1]`` with ``tau = 'ac1e'``) removes the bias.
+    This exclusion is not part of published SampEn or time-delayed SampEn; it follows the
+    practice for correlation sums [4], of which SampEn's match counts are an instance.
 
     References
     ----------
@@ -454,6 +469,10 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
         https://physionet.org/content/sampen/1.0.0/c/sampen-1.1.c
     .. [2] "Control Entropy: A complexity measure for nonstationary signals"
         E. M. Bollt and J. Skufca, Math. Biosci. Eng., 6(1) 1 (2009).
+    .. [3] F. Kaffashi, R. Foglyano, C. G. Wilson and K. A. Loparo, "The effect of time delay on
+        Approximate & Sample Entropy calculations", Physica D 237(23), 3069 (2008).
+    .. [4] J. Theiler, "Spurious dimension from correlation algorithms applied to limited
+        time-series data", Phys. Rev. A 34(3), 2427 (1986).
 
     Parameters
     ----------
@@ -470,6 +489,17 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
             - `None`: No pre-processing.
         
         Default is `None`.
+    tau : int or str, optional
+        The template delay: an integer number of samples, or a rule for
+        :func:`~pyhctsa.utils.get_tau` (e.g. ``'ac1e'``), applied to the analysed series (after
+        any differencing). Default 1 (consecutive values). All outputs are NaN when a rule cannot
+        set the delay.
+    theiler_win : int, float or [str, number], optional
+        The Theiler window ``W``: pairs of templates whose start times differ by ``W`` or fewer
+        samples are not compared. Any specification :func:`~pyhctsa.utils.theiler_window`
+        accepts, resolved on the analysed series, e.g. ``['ac1e', 1]`` (``W`` = the 1/e
+        autocorrelation time). Default 0 (only a template's comparison with itself is left out,
+        as in standard SampEn). All outputs are NaN when the window cannot be set.
 
     Returns
     -------
@@ -499,9 +529,19 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
     if r is None:
         r = 0.1 * np.std(y, ddof=1)
     if pre_process_how == 'diff1':
-        y = np.diff(y)
+        y = np.ascontiguousarray(np.diff(y))
 
-    samp_en = _sampen_c.calculate(y, m+1, r)
+    tau = get_tau(y, tau)
+    W = theiler_window(y, theiler_win)
+    if np.isnan(tau) or np.isnan(W):  # the delay or window could not be set
+        nan_out = {}
+        for mi in range(m + 1):
+            nan_out[f'sampen{mi}'] = np.nan
+            nan_out[f'quadSampEn{mi}'] = np.nan
+        if m > 1:
+            nan_out['meanchsampen'] = np.nan
+        return nan_out
+    samp_en = _sampen_c.calculate(y, m+1, r, False, int(tau), int(W) + 1)
     samp_en = samp_en[:-1] # always that extra one for the M = 0
     out = {}
     for mi in range(m + 1):
@@ -539,7 +579,8 @@ def _ranks_random_ties(y: np.ndarray) -> np.ndarray:
     return ranks
 
 def sample_entropy_ranked(y: ArrayLike, m: int = 2, r: float = 0.1,
-                          pre_process_how: Optional[str] = None) -> dict:
+                          pre_process_how: Optional[str] = None, tau: Union[int, str] = 1,
+                          theiler_win: Union[int, float, list, tuple] = 0) -> dict:
     """
     Sample entropy of the ranks of a time series: a SampEn that ignores the value distribution.
 
@@ -571,6 +612,12 @@ def sample_entropy_ranked(y: ArrayLike, m: int = 2, r: float = 0.1,
         of the 'Control Entropy' of Bollt & Skufca [3]_ (``sample_entropy`` with
         ``pre_process_how='diff1'``); invariance then holds for the increments' distribution.
         ``None`` (default): rank the series itself.
+    tau : int or str, optional
+        The template delay, as in :func:`sample_entropy`. A rule is applied to the ranks, so
+        ``'ac1e'`` here is the rank-based delay (``'ac1e-rank'`` of the series), and the whole
+        statistic stays invariant to strictly increasing transformations. Default 1.
+    theiler_win : int, float or [str, number], optional
+        The Theiler window, as in :func:`sample_entropy`, resolved on the ranks. Default 0.
 
     Returns
     -------
@@ -640,7 +687,7 @@ def sample_entropy_ranked(y: ArrayLike, m: int = 2, r: float = 0.1,
     ranks = _ranks_random_ties(y)
     n = y.size
     u = (ranks - (n + 1) / 2.0) / np.sqrt(n * (n + 1) / 12.0)
-    se = sample_entropy(u, m=m, r=r)
+    se = sample_entropy(u, m=m, r=r, tau=tau, theiler_win=theiler_win)
     for k in range(1, m + 1):
         out[f'sampen{k}'] = se[f'sampen{k}']
     return out

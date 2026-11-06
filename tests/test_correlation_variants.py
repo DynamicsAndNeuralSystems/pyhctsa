@@ -348,8 +348,8 @@ def test_new_variants_in_default_feature_set():
     rng = np.random.default_rng(13)
     y = _ar1(300, 0.5, rng)
     calc = FeatureCalculator()
-    labels = ['crinkle_statistic_kurtosis', 'crinkle_statistic_kurtosis_dec', 'ac_nl_excess_1_to_3',
-              'ac_nl_excess_1_1_2_dec', 'ac_nl_abs_surr_ratio_1_to_2', 'ac_nl_abs_surr_ratio_1_to_4_dec',
+    labels = ['crinkle_statistic_kurtosis', 'crinkle_statistic_kurtosis_ac1e', 'ac_nl_excess_1_to_3',
+              'ac_nl_excess_1_1_2_ac1e', 'ac_nl_abs_surr_ratio_1_to_2', 'ac_nl_abs_surr_ratio_1_to_4_ac',
               'trev_studentized_1', 'trev_studentized_ac', 'trev_studentized_mi']
     for lab in labels:
         assert lab in calc.feature_funcs

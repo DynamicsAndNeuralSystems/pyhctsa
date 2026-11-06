@@ -181,4 +181,4 @@ def test_temporal_structure_still_registers():
 def test_registered_in_the_default_feature_set():
     labels = [k for k in FeatureCalculator().feature_funcs if k.startswith("sample_entropy_ranked")]
     assert labels == ["sample_entropy_ranked_5_0p2", "sample_entropy_ranked_5_0p2_diff1",
-                      "sample_entropy_ranked_5_0p2_dec"]
+                      "sample_entropy_ranked_5_0p2_ac1e"]
