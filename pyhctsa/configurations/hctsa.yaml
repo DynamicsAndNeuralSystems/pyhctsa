@@ -1018,11 +1018,11 @@ entropy:
       - {num_bins: 2, depth: 2, zscore: True}
       - {num_bins: 2, depth: 3, zscore: True}
       - {num_bins: [[2, 3, 4, 5, 6, 7, 8, 9, 10]], depth: 2, zscore: True, exclude: ['medent', 'minent']}
-      - {num_bins: [[2, 3, 4, 5, 6, 7, 8, 9, 10]], depth: 3, zscore: True, exclude: ['medent', 'minent']}
       - {num_bins: 2, depth: 5, zscore: True}   # EN_Shannon(x_z,2,5)
     legacy_name: EN_Shannon
     ordered_args: ['num_bins', 'depth']
-  
+    dropped_hctsa_calls: ['EN_Shannon_2t10_3']   # at fixed N it is redundant with the depth-2 config (|Spearman| 0.97-1.00), and no first-order correction can estimate a distribution over up to 1000 words from 100-1000 words
+
   bubble_entropy:
     base_name: bubble_entropy
     dependencies:

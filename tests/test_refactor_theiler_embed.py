@@ -63,13 +63,23 @@ CALLS = {
 }
 
 # (operation, series) -> a scalar output, or the first (up to) four scalar outputs of a dict
+# Re-pinned on this branch (jackknife-entropy): these plug-in entropies of pattern counts are now
+# delete-one jackknife estimates, so they change on purpose (see its PR body); every other value is as before.
+#   dispersion_entropy|ar1.dispEn
+#   dispersion_entropy|ar1.fDispEn
+#   dispersion_entropy|ar1.normDispEn
+#   dispersion_entropy|ar1.normFDispEn
+#   dispersion_entropy|sine.dispEn
+#   dispersion_entropy|sine.fDispEn
+#   dispersion_entropy|sine.normDispEn
+#   dispersion_entropy|sine.normFDispEn
 EXPECTED = {
     ('approximate_entropy', 'ar1'): 0.9370175098654396,
     ('approximate_entropy', 'sine'): 0.9864007338153522,
     ('delay_time', 'ar1'): {'difftau12': 2.039235704929139, 'tau1': 0.050010132388752813, 'tau2': 2.089245837317892, 'tau3': 2.6790884677039517},
     ('delay_time', 'sine'): {'difftau12': 0.9861014589964531, 'tau1': 0.015166348296189354, 'tau2': 1.0012678072926424, 'tau3': 1.2002370335724786},
-    ('dispersion_entropy', 'ar1'): {'dispEn': 3.5415193080485783, 'fDispEn': 2.2730817322391137, 'normDispEn': 0.9882797799791658, 'normFDispEn': 0.9479487106984459},
-    ('dispersion_entropy', 'sine'): {'dispEn': 3.395493256727497, 'fDispEn': 2.3187573086705795, 'normDispEn': 0.9475304344813592, 'normFDispEn': 0.9669969055673411},
+    ('dispersion_entropy', 'ar1'): {'dispEn': 3.578195656535172, 'fDispEn': 2.283392092011809, 'normDispEn': 0.9985145098958982, 'normFDispEn': 0.9522484646908973},
+    ('dispersion_entropy', 'sine'): {'dispEn': 3.4318319851156502, 'fDispEn': 2.328993102044251, 'normDispEn': 0.9576709497157532, 'normFDispEn': 0.9712655629560877},
     ('embed2_shapes', 'ar1'): {'ac1': 0.5203403697743306, 'ac2': 0.32393509508503426, 'ac3': 0.2475065132483697, 'tau': 13.195694348902435},
     ('embed2_shapes', 'sine'): {'ac1': 0.05478835959974354, 'ac2': -0.01634471325594193, 'ac3': 0.04763173758261821, 'tau': 1.7702234333514308},
     ('embed_kernel_pca', 'ar1'): {'perc_1': 0.1902741061168778, 'perc_2': 0.1799070888296769, 'perc_3': 0.16902756202740368, 'std': 0.010624302225091238},

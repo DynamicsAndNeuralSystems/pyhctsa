@@ -32,12 +32,14 @@ def test_bubble_entropy():
 
 def test_permutation_entropy_complexity():
     d = permutation_entropy_complexity(_x(), 4, 1)
-    assert abs(d['hNorm'] - 0.882883144624) < 1e-9
-    assert abs(d['jsComplexity'] - 0.14018802479) < 1e-9
+    # jackknife estimates; deliberately differ from hctsa's plug-in values (hNorm 0.882883144624 and
+    # jsComplexity 0.14018802479 at m = 4; 0.620720444885 and 0.402123257975 at m = 5, tau = 'ac1e')
+    assert abs(d['hNorm'] - 0.8968598557850186) < 1e-9
+    assert abs(d['jsComplexity'] - 0.12190107501459124) < 1e-9
     d = permutation_entropy_complexity(_x(), 5, 'ac1e')
-    assert abs(d['hNorm'] - 0.620720444885) < 1e-9
-    assert abs(d['jsComplexity'] - 0.402123257975) < 1e-9
-    assert abs(permutation_entropy(_x(), 4, 1)['normPermEn'] - 0.882883144624) < 1e-9
+    assert abs(d['hNorm'] - 0.632400887544184) < 1e-9
+    assert abs(d['jsComplexity'] - 0.39958538137777566) < 1e-9
+    assert abs(permutation_entropy(_x(), 4, 1)['normPermEn'] - 0.8968598557850186) < 1e-9
     d = permutation_entropy_complexity(np.ones(100), 4, 'ac1e')
     assert np.isnan(d['hNorm']) and np.isnan(d['jsComplexity'])
     assert all(np.isnan(v) for v in permutation_entropy(np.ones(100), 3, 'ac1e').values())
@@ -57,7 +59,7 @@ def test_randomize():
     assert abs(d['xc1diff'] - 0.7438524870197) < 1e-9
     # statdist resamples with replacement, so the randomized series has ties; pyhctsa breaks ties in
     # ordinal patterns at random (fixed seed) rather than by position as hctsa does (MATLAB: 0.0168573921147)
-    assert abs(d['permen3_1diff'] - 0.0167402963436) < 1e-9 and d['statav5hp'] == 9
+    assert abs(d['permen3_1diff'] - 0.016738108470342) < 1e-9 and d['statav5hp'] == 9
     # d1fexpc is a nonlinear-least-squares parameter: the clean-room exponential fit stops at a slightly
     # different point from MATLAB's optimizer (agreement ~1e-4 relative; test_p2_a skips the fexp fields)
     assert abs(d['d1fexpc'] - 0.0735217644) < 2e-5

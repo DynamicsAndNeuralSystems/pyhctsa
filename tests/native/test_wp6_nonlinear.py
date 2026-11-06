@@ -4,6 +4,7 @@ invariants; no agreement with any other implementation is assumed)."""
 import math
 
 import numpy as np
+from pyhctsa.utils import _jackknife_counts
 import pytest
 from scipy.spatial.distance import pdist, squareform
 
@@ -136,18 +137,23 @@ def test_acf_fft_matches_direct_sums(n):
 
 
 # ------------------------------------------------------------------ entropy
+def _plugin_entropy(p):
+    p = p[p > 0]
+    return -np.sum(p * np.log(p))
+
+
 def test_dispersion_entropy_class_boundaries():
     # linear mapping onto [0, 1]; c = 4 classes with boundaries 0.25, 0.5, 0.75 (class = floor(4 y) + 1,
     # and the top of the range belongs to the last class)
     y = np.array([0.0, 0.2, 0.3, 0.6, 0.8, 1.0])
     out = entropy.dispersion_entropy(y, m=1, c=4, tau=1, mapping_how='linear')
-    p = np.array([2, 1, 1, 2]) / 6  # classes [1, 1, 2, 3, 4, 4]
-    assert out['dispEn'] == pytest.approx(-np.sum(p * np.log(p)), abs=1e-14)
+    # classes [1, 1, 2, 3, 4, 4]; dispEn is the jackknife estimate of the entropy of these counts
+    assert out['dispEn'] == pytest.approx(_jackknife_counts([2, 1, 1, 2], _plugin_entropy), abs=1e-12)
     # a point exactly on a boundary goes to the upper class: 0.25 -> class 2
     y2 = np.array([0.0, 0.25, 0.5, 0.75, 1.0, 0.1])
     out2 = entropy.dispersion_entropy(y2, m=1, c=4, tau=1, mapping_how='linear')
-    p2 = np.array([2, 1, 1, 2]) / 6  # classes [1, 2, 3, 4, 4, 1]
-    assert out2['dispEn'] == pytest.approx(-np.sum(p2 * np.log(p2)), abs=1e-14)
+    # classes [1, 2, 3, 4, 4, 1]
+    assert out2['dispEn'] == pytest.approx(_jackknife_counts([2, 1, 1, 2], _plugin_entropy), abs=1e-12)
 
 
 def test_wavelet_band_energies_conserve_energy_and_white_noise_entropy():

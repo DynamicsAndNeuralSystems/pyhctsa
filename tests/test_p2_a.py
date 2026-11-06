@@ -101,9 +101,11 @@ def test_matches_matlab(key, series):
     got = _flat(got) if not (isinstance(got, float) and np.isnan(got)) else {'': np.nan}
     tol = TOL.get(key, 1e-8)
     skip = SKIP_FIELDS.get(key, ())
-    if key.startswith('rand_') and (key != 'rand_permute' or np.unique(y).size < y.size):
-        # randomized series with tied values (resampling with replacement, or a tied input): pyhctsa
-        # breaks ties in ordinal patterns at random (fixed seed), hctsa by position, so permen differs
+    if key.startswith('rand_'):
+        # permen (the difference of normPermEn(3,1) before and after randomizing) is a jackknife estimate;
+        # deliberately differs from hctsa's plug-in. (With tied values, from resampling with replacement
+        # or a tied input, pyhctsa also breaks ties in ordinal patterns at random (fixed seed), hctsa by
+        # position.)
         skip = skip + ('permen',)
     for name, e in exp.items():
         if any(s in name for s in skip):
