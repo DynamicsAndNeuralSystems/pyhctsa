@@ -17,7 +17,7 @@ def _ar1(n, phi, rng, innov=None, burn=300):
     return lfilter([1.0], [1.0, -phi], e)[burn:]
 
 
-def _quartic_echo(n, k, a, rng):
+def _fourth_order_echo(n, k, a, rng):
     # x_t = e_t + a g(e_{t-k}), g odd with g^2 = 1 and E[e g(e)] = 0: white, white squares, no third-order lag
     # moment; the lowest asymmetric lag moment is <x_t x_{t-k}^3> (and <x_t^3 x_{t-k}> = 0)
     theta = np.sqrt(2 * np.log(2))
@@ -58,7 +58,7 @@ def test_reversible_null(ij):
 def test_fourth_order_asymmetry_at_its_lag():
     rng = np.random.default_rng(2)
     for k in (3, 9):
-        y = _quartic_echo(8000, k, 0.8, rng)
+        y = _fourth_order_echo(8000, k, 0.8, rng)
         o31 = co.reversibility_scan(y, 3, 1)
         o21 = co.reversibility_scan(y, 2, 1)
         assert o31["max_abs_z"] > 5 and o31["peak_lag"] == k
