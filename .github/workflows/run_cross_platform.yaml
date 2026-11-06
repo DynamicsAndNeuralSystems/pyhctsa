@@ -2,6 +2,14 @@ name: Cross-platform consistency
 
 on:
   push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# a new push to a branch (or PR) cancels its run still in progress
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   run-per-os:
@@ -9,9 +17,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # main: every OS x every Python; pull requests: every OS on one Python
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12"]' || '["3.10", "3.11", "3.12", "3.13", "3.14"]') }}
 
     steps:
       - uses: actions/checkout@v4
