@@ -268,10 +268,11 @@ def test_registered_labels(calc):
     labels = set(calc.feature_funcs)
     for new in ['sample_entropy_5_0p2_ac1e', 'higuchi_fd_8_ac1e', 'local_simple_mean_1_ac1e',
                 'ac_nl_0_3_6_ac1e', 'ac_nl_1_1_2_ac1e', 'ac_nl_1_to_4_absval_ac',
-                'translate_shape_2p5_ac1e', 'crinkle_statistic_ac1e', 'pol_var_3_ac1e',
+                'translate_shape_2p5_ac1e', 'crinkle_statistic_ac1e', 'pol_var_3_ac1e', 'porta', 'porta_ac1e',
                 'moving_threshold_0p1_0p1_dec', 'moving_threshold_1_0p02_dec',
                 'binary_stats_diff_dec-rank']:
         assert new in labels, new
     for gone in ['lempel_ziv_complexity_2_dec', 'lempel_ziv_complexity_5_dec',
-                 'sample_entropy_5_0p2_dec', 'higuchi_fd_8_dec', 'binary_stats_diff_dec']:
+                 'sample_entropy_5_0p2_dec', 'higuchi_fd_8_dec', 'binary_stats_diff_dec',
+                 'porta_dec', 'porta_num_levels6']:
         assert gone not in labels, gone

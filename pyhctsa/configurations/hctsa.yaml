@@ -73,9 +73,10 @@ medical:
     min_length: 4
     dependencies:
     configs:
-      - {num_levels: 6, zscore: True}
-      - {num_levels: 6, tau: 'ac1e', zscore: True}   # lag form of MD_Porta(zscore(BF_PreProcess(x_z,'decimate_ac1e')),6): all tau phases
+      - {zscore: True}   # MD_Porta(x_z,6) (num_levels 6, the default); robust levels
+      - {tau: 'ac1e', zscore: True}   # lag form of MD_Porta(zscore(BF_PreProcess(x_z,'decimate_ac1e')),6): all tau phases
     legacy_name: MD_Porta
+    ordered_args: ['num_levels', 'tau']   # num_levels is left at its default, so the labels are porta and porta_ac1e
     dropped_hctsa_calls: ['MD_Porta_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
 
 extreme_events:
