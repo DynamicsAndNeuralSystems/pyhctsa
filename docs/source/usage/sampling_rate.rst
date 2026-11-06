@@ -14,7 +14,11 @@ What pyhctsa does internally
 ----------------------------
 
 Most adaptive features set their delay with :func:`~pyhctsa.utils.get_tau` using the ``'ac1e'`` rule, the 1/e autocorrelation time, so that they look at structure relative to each series' own timescale.
-The ``*_dec`` features are computed on the series decimated to one sample per 1/e time (:func:`~pyhctsa.utils.decimate_ac1e`), which makes them nearly invariant to oversampling.
+hctsa made a set of features rate-robust by computing them on the series decimated to one sample per 1/e time, which keeps only one of the possible starting samples and discards the rest.
+pyhctsa replaces these with forms that use the whole series.
+Where a feature averages over time (a moment, a match count, a word frequency), it is computed directly at lag ``tau`` over every time point (features named ``*_ac1e``, e.g. ``sample_entropy_5_0p2_ac1e``, ``higuchi_fd_8_ac1e``, ``ac_nl_0_3_6_ac1e``), which pools all ``tau`` decimation phases.
+Where it describes runs, maxima or a recursion, which pooling would distort, it is computed on the series decimated from each of the ``tau`` starting samples and the results are averaged (features named ``*_dec``, :func:`~pyhctsa.utils.decimation_phases`).
+Both make the features nearly invariant to oversampling, and less noisy than a single decimated series.
 The :func:`~pyhctsa.operations.correlation.oversampling` operation measures oversampling directly (Toker et al., 2020).
 
 This per-series normalisation has limits.
