@@ -2295,6 +2295,94 @@ def residual_autocorr_scan(y: ArrayLike, max_lag: int = 300, max_ar_order: int =
 
 
 @dict_output
+def bicorrelation(y: ArrayLike, max_lag: Union[int, str] = 'hinich', max_ar_order: int = 10) -> dict:
+    """
+    Third-order dependence over a plane of lag pairs: Hinich's bicorrelations.
+
+    The bicorrelation at the lag pair :math:`(r, s)` is the normalised third-order moment
+    :math:`E[z_t z_{t+r} z_{t+s}]` of the standardised series. Hinich [1]_ proposed testing the
+    residuals of a fitted linear model for third-order dependence through the bicorrelations over
+    the triangle :math:`0 < r < s \\le L`, combined into a portmanteau
+    statistic, with :math:`L = N^c` for some :math:`0 < c < 0.5`; Hinich and Patterson [2]_ and
+    Brooks and Hinich [3]_ apply it to financial series.
+    Every cell is zero for a linear Gaussian process and for any series with i.i.d. innovations,
+    and a single nonzero cell at an arbitrary lag pair (a bilinear coupling
+    :math:`x_t = e_t + c\\, e_{t-P} e_{t-Q}`, say) is invisible to the autocorrelation and to
+    third-order statistics at fixed short lags.
+
+    The series is first prewhitened by an autoregressive model of order chosen by AIC (as in
+    :func:`residual_autocorr_scan`), and the residuals are z-scored. Each cell is the mean of the
+    products :math:`z_t z_{t+r} z_{t+s}` divided by its standard error, estimated from the sample
+    standard deviation of the products (a self-normalised form of Hinich's
+    :math:`G(r, s)`, which is robust to heavy tails), so each cell is approximately standard
+    normal under the null. Reversing time maps the cell :math:`(r, s)` to :math:`(s - r, s)`, so
+    the difference of these two cells measures time-reversal asymmetry in the lag plane, a
+    time-domain counterpart of the bispectral reversibility test of Hinich and Rothman [4]_.
+
+    Parameters
+    ----------
+    y : array-like
+        Input time series.
+    max_lag : int or 'hinich', optional
+        Largest lag :math:`L`. ``'hinich'`` (default) uses :math:`\\lfloor m^{0.4} \\rfloor`
+        (c = 0.4, the usual choice in applications of the test) capped at 20, with :math:`m` the
+        number of residuals.
+    max_ar_order : int, optional
+        Largest order of the prewhitening autoregression. Default is 10.
+
+    Returns
+    -------
+    dict
+        - 'H_z': Hinich's portmanteau statistic :math:`H = \\sum G(r, s)^2` over the
+          :math:`M = L(L-1)/2` cells, as the approximate z-score :math:`(H - M)/\\sqrt{2M}`.
+        - 'max_abs': the largest :math:`|G(r, s)|`.
+        - 'asym_max_abs': the largest :math:`|G(r, s) - G(s - r, s)|/\\sqrt{2}` over the cells
+          with :math:`r < s - r`.
+
+        All NaN if :math:`L < 3` or the residuals are constant.
+
+    References
+    ----------
+    .. [1] M. J. Hinich, "Testing for dependence in the input to a linear time series model",
+       J. Nonparametr. Stat. 6, 205-221 (1996).
+    .. [2] M. J. Hinich and D. M. Patterson, "Evidence of nonlinearity in daily stock returns",
+       J. Bus. Econ. Stat. 3, 69-77 (1985).
+    .. [3] C. Brooks and M. J. Hinich, "Bicorrelations and cross-bicorrelations as non-linearity
+       tests and tools for exchange rate forecasting", J. Forecast. 20, 181-196 (2001).
+    .. [4] M. J. Hinich and P. Rothman, "Frequency-domain test of time reversibility",
+       Macroecon. Dyn. 2, 72-88 (1998).
+    """
+    e, _ = _ar_prewhiten(np.asarray(y, dtype=float).ravel(), max_ar_order)
+    if e is None:
+        return np.nan
+    m = e.size
+    if max_lag == 'hinich':
+        L = min(20, int(np.floor(m ** 0.4)))
+    else:
+        L = int(max_lag)
+    L = min(L, m // 4)
+    sd = e.std()
+    if L < 3 or not sd > 0:
+        return np.nan
+    z = (e - e.mean()) / sd
+    G = np.full((L + 1, L + 1), np.nan)
+    for s in range(2, L + 1):
+        for r in range(1, s):
+            prod = z[:m - s] * z[r:m - s + r] * z[s:]
+            se = prod.std() / np.sqrt(prod.size)
+            if se > 0:
+                G[r, s] = prod.mean() / se
+    cells = G[np.isfinite(G)]
+    if cells.size == 0:
+        return np.nan
+    asym = np.array([G[r, s] - G[s - r, s] for s in range(3, L + 1) for r in range(1, s) if r < s - r]) / np.sqrt(2)
+    M = cells.size
+    return {"H_z": float((np.sum(cells ** 2) - M) / np.sqrt(2 * M)),
+            "max_abs": float(np.max(np.abs(cells))),
+            "asym_max_abs": float(np.nanmax(np.abs(asym))) if np.any(np.isfinite(asym)) else np.nan}
+
+
+@dict_output
 def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     """
     Analyzes distances in a 2-dimensional embedding space of a time series.
