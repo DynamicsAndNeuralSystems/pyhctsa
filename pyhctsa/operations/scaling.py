@@ -429,6 +429,11 @@ def mma(y: np.ndarray, do_overlap: bool = False, scale_range: None | list = None
 
     return out
 
+# A mean absolute k-step increment at most this fraction of the series' scale is zero up to
+# rounding (cf. ``_is_rounding_level`` in model_fit.py, which uses the same 1e-9).
+_HIGUCHI_ROUNDING_REL = 1e-9
+
+
 @dict_output
 def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
     """
@@ -440,6 +445,12 @@ def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
     normalized curve length is measured, and the k lengths are averaged to
     give L(k). The fractal dimension is (minus) the slope of log(L(k)) against
     log(1/k).
+
+    A scale k at which the curve has no length is left out of the fit: one whose mean absolute
+    k-step increment is at most 1e-9 of the scale of the series (the larger of its standard
+    deviation and mean absolute value), i.e. zero up to rounding, as when the series is periodic
+    with a period that divides k. (The logarithm of a length at the rounding level would be set
+    by rounding noise alone.) Fewer than five remaining scales give NaN.
 
     References
     ----------
@@ -473,6 +484,8 @@ def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
     # --------------------------------------------------------------------------
     log_l = np.full(kmax, np.nan)
     log_invk = np.full(kmax, np.nan)
+    # the rounding level of a k-step increment: ROUNDING_REL of the scale of the series
+    scale = max(np.std(y), np.mean(np.abs(y))) if N > 0 else 0.0
     for k in range(1, kmax + 1):
         lk = np.full(k, np.nan)
         for m in range(1, k + 1):
@@ -484,7 +497,9 @@ def higuchi_fd(y: ArrayLike, kmax: int | None = None) -> dict:
         if np.all(np.isnan(lk)):
             continue
         l_bar = np.nanmean(lk)
-        if not np.isnan(l_bar) and l_bar > 0:
+        # L(k) = (N - 1) / k^2 times the mean absolute k-step increment: zero length if that
+        # increment is at the rounding level
+        if not np.isnan(l_bar) and l_bar > _HIGUCHI_ROUNDING_REL * scale * (N - 1) / (k * k):
             log_l[k - 1] = np.log(l_bar)
             log_invk[k - 1] = np.log(1 / k)
 
