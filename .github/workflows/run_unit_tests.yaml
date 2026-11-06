@@ -2,6 +2,14 @@ name: Unit Testing Pipeline
 
 on:
   push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# a new push to a branch (or PR) cancels its run still in progress
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 # REQUIRED so the coverage job can push to coverage-badge branch
 permissions:
@@ -11,9 +19,17 @@ jobs:
   test:
     strategy:
       fail-fast: false
+      # main: every OS x every Python. Pull requests: Ubuntu on the oldest and newest Python, and
+      # macOS and Windows on one (the include entries add those two jobs to the PR matrix; on main
+      # they coincide with existing jobs, so add none)
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest", "windows-latest", "macos-latest"]') }}
+        python-version: ${{ fromJSON(github.event_name == 'pull_request' && '["3.10", "3.14"]' || '["3.10", "3.11", "3.12", "3.13", "3.14"]') }}
+        include:
+          - os: macos-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
     runs-on: ${{ matrix.os }}
 
     steps:
