@@ -65,7 +65,7 @@ def test_detects_one_cell():
 
 def test_reversal_asymmetry():
     # a bilinear source is irreversible; (u + u')/sqrt2 keeps the asymmetric cell and
-    # (u + reversed u')/sqrt2 balances it with its mirror (the irrev-symmetrised construction)
+    # (u + reversed u')/sqrt2 balances it with its mirror
     rng = np.random.default_rng(4)
     fwd, sym = [], []
     for _ in range(10):
