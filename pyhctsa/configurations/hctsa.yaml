@@ -510,6 +510,13 @@ correlation:
     variant_of: nonlinear_autocorr
     ordered_args: ['taus']
 
+  bicorrelation:   # pyhctsa-only: Hinich's bicorrelation plane (0 < r < s <= L) of AR residuals: portmanteau, largest cell, largest reversal-asymmetric cell
+    base_name: bicorr
+    dependencies:
+    configs:
+      - {zscore: True}
+    variant_of: nonlinear_autocorr
+
   nonlinear_autocorr_abs_surrogate_ratio:   # pyhctsa-only: absval nonlinear_autocorr on Gaussian ranks / phase-randomised surrogates
     base_name: ac_nl_abs_surr_ratio
     dependencies:
