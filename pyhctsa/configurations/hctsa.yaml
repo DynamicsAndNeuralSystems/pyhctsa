@@ -100,6 +100,15 @@ extreme_events:
     legacy_name: EX_ExtremeEventOrder
     ordered_args: ['extreme_thresh']
 
+  extremogram:   # pyhctsa-only: the largest extremogram value (recurrence of extremes of |x|) over lags 1-100
+    base_name: extremogram
+    dependencies:
+    configs:
+      - {quantile: 0.95, zscore: True}
+      - {quantile: 0.98, zscore: True}
+    variant_of: extreme_event_order
+    ordered_args: ['quantile']
+
 criticality:
   rad:
     base_name: rad
