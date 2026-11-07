@@ -1964,13 +1964,13 @@ hypothesis_tests:
 
 spectral:
 
-  phase_amp_coupling:
-    base_name: phase_amp_coupling
+  cross_frequency_coupling:   # phase-amplitude coupling (modulation index) and lagged amplitude envelope correlation between frequency bands
+    base_name: cfc
     dependencies:
     configs:
-      - {n_bands: 5, max_n: 'full', n_phase_bins: 18, zscore: True}
+      - {n_bands: 5, zscore: True}
     legacy_name: SP_PhaseAmpCoupling
-    ordered_args: ['n_bands', 'max_n', 'n_phase_bins']
+    ordered_args: ['n_bands']
 
   spectral_summaries:
     base_name: spectral_summaries
