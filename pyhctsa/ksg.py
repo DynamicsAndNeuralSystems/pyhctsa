@@ -1,11 +1,10 @@
 """
-Nonparametric and Gaussian mutual-information estimators.
+Nonparametric (KSG) mutual-information estimator.
 
 :func:`ksg_mi` is the k-nearest-neighbor estimator of Kraskov, Stoegbauer and Grassberger
-(KSG), algorithms 1 and 2 [1]_. :func:`gaussian_mi` is the closed-form estimator for jointly
-Gaussian variables.
+(KSG), algorithms 1 and 2 [1]_.
 
-Both are written directly from the published definitions; the Java Information Dynamics
+It is written directly from the published definitions; the Java Information Dynamics
 Toolkit (JIDT; Lizier, 2014 [2]_), which hctsa uses for these estimators, served only as a
 reference for the method conventions (which neighbors are counted, how the marginals are
 scaled), not as a source of code.
@@ -175,40 +174,3 @@ def ksg_mi(x, y, k=4, algorithm=1, theiler=0):
         n_y = _count_within(y, _max_separation(y, neighbors), theiler, False)
         mi = digamma(k) - 1.0 / k + digamma(n) - np.mean(digamma(n_x) + digamma(n_y))
     return float(mi)
-
-
-def gaussian_mi(x, y):
-    """Mutual information I(x; y) in nats under a joint Gaussian model.
-
-    ``I = (ln det C_x + ln det C_y - ln det C_xy) / 2``, with ``C`` the sample covariance
-    matrices of ``x``, ``y`` and of the stacked ``(x, y)``. For scalars this reduces to
-    ``-ln(1 - r**2) / 2`` for the Pearson correlation ``r``. Only linear dependence
-    contributes.
-
-    Parameters
-    ----------
-    x, y : array-like, shape (n_samples,) or (n_samples, n_dims)
-
-    Returns
-    -------
-    float
-        The mutual information, in nats. It is unbounded as ``x`` and ``y`` approach exact linear
-        dependence (a very large, rounding-limited value, or ``inf`` if the joint covariance
-        is numerically singular), and ``nan`` if ``x`` or ``y`` alone has linearly dependent
-        columns (e.g. is constant).
-    """
-    x = _as_columns(x, "x")
-    y = _as_columns(y, "y")
-    if x.shape[0] != y.shape[0]:
-        raise ValueError("x and y must have the same number of samples")
-
-    def logdet(a):
-        sign, value = np.linalg.slogdet(np.atleast_2d(np.cov(a, rowvar=False)))
-        return value if sign > 0 else None
-
-    ld_x, ld_y, ld_xy = logdet(x), logdet(y), logdet(np.hstack([x, y]))
-    if ld_x is None or ld_y is None:
-        return float("nan")
-    if ld_xy is None:
-        return float("inf")
-    return float(0.5 * (ld_x + ld_y - ld_xy))
