@@ -890,45 +890,244 @@ def _give_me_robust_stats(x_data: ArrayLike, y_data: ArrayLike, field_name: str,
             out[f'{field_name}_{key}'] = np.nan
     return out
 
-@dict_output
-def phase_amp_coupling(y: ArrayLike, n_bands: int = 5, max_n: Union[int, str] = 'full',
-                       n_phase_bins: int = 18) -> dict:
+def _band_analytic_signals(y: np.ndarray, n_bands: int) -> Union[list, None]:
+    """Analytic signals of ``y`` in ``n_bands`` equal-width frequency bands.
+
+    The one-sided FFT bins, DC and Nyquist excluded (neither carries meaningful oscillatory phase, as in
+    :func:`spectral_summaries_phase`), are split into ``n_bands`` contiguous bands of equal width. Each band's
+    analytic signal is the inverse FFT of twice its bins (the FFT-domain Hilbert transform, band-limited in one
+    step). Returns ``None`` if there are fewer than 2 usable bins per band (needed for a non-degenerate analytic
+    signal).
     """
-    Cross-frequency phase-amplitude coupling.
+    n = len(y)
+    half_n = n // 2 + 1 # one-sided bins: DC (0) up to Nyquist (half_n - 1, if n even)
+    if n % 2 == 0:
+        usable_bins = np.arange(1, half_n - 1)
+    else:
+        usable_bins = np.arange(1, half_n)
+
+    min_bins_per_band = 2
+    if len(usable_bins) < n_bands * min_bins_per_band:
+        return None
+
+    edges = _even_split_points(0, len(usable_bins), n_bands + 1)
+    y_fft = scipy.fft.fft(y)
+    analytic = []
+    for b in range(n_bands):
+        bins = usable_bins[edges[b]:edges[b + 1]]
+        yb = np.zeros(n, dtype=complex)
+        yb[bins] = 2 * y_fft[bins]
+        analytic.append(scipy.fft.ifft(yb))
+    return analytic
+
+def _xcorr_lags(a: np.ndarray, b: np.ndarray, max_lag: int) -> np.ndarray:
+    """mean_t a(t) b(t + k) for k = -max_lag..max_lag (biased: divided by len(a); zero-padded FFT)."""
+    m = len(a)
+    nf = 1 << int(np.ceil(np.log2(2 * m)))
+    cc = np.fft.irfft(np.conj(np.fft.rfft(a, nf)) * np.fft.rfft(b, nf), nf) / m
+    return cc[np.arange(-max_lag, max_lag + 1) % nf]
+
+
+def _acf_to_first_zero(a: np.ndarray, max_lag: int) -> np.ndarray:
+    """Autocorrelation of a zero-mean series at lags 0..max_lag, truncated before its first non-positive value."""
+    rho = _xcorr_lags(a, a, max_lag)[max_lag:]
+    rho = rho / rho[0]
+    nonpos = np.flatnonzero(rho[1:] <= 0)
+    return rho[:nonpos[0] + 1] if nonpos.size else rho
+
+
+def _max_normal_score(z: float, n: float) -> float:
+    """Standard-normal score of z as the maximum of n independent N(0, 1) values (Sidak): Phi^-1(Phi(z)^n).
+
+    Computed on the log scale, from whichever tail keeps precision, and from the Gaussian tail approximation
+    Q(z') = n Q(z) when z is so large that Phi(z) rounds to 1.
+    """
+    if z > 30:
+        return float(np.sqrt(max(z * z - 2 * np.log(n), 0.0)))
+    log_cdf = n * scipy.special.log_ndtr(z)
+    if log_cdf < np.log(0.5):
+        return float(scipy.special.ndtri(np.exp(log_cdf)))
+    return float(-scipy.special.ndtri(-np.expm1(log_cdf)))
+
+
+def _phase_amp_mi(analytic: list, n_phase_bins: int) -> dict:
+    """maxMI and entropyMI: Tort et al.'s modulation index for every phase(i)-amplitude(j) band pair, i < j."""
+    n_bands = len(analytic)
+    phase_band = [np.angle(zb) for zb in analytic]
+    amp_band = [np.abs(zb) for zb in analytic]
+    phase_edges = np.linspace(-np.pi, np.pi, n_phase_bins + 1)
+    h_max = np.log(n_phase_bins)
+    mi = []
+    for i in range(n_bands - 1):
+        for j in range(i + 1, n_bands):
+            bin_idx = np.digitize(phase_band[i], phase_edges) - 1
+            bin_idx[bin_idx == n_phase_bins] = n_phase_bins - 1 # phi == pi edge case
+            counts = np.bincount(bin_idx, minlength=n_phase_bins)
+            sums = np.bincount(bin_idx, weights=amp_band[j], minlength=n_phase_bins)
+            mean_amp = np.divide(sums, counts, out=np.zeros(n_phase_bins), where=counts > 0)
+            p = mean_amp / np.sum(mean_amp)
+            p = p[p > 0]
+            h = -np.sum(p * np.log(p))
+            mi.append((h_max - h) / h_max)
+    mi = np.asarray(mi)
+    if not np.any(np.isfinite(mi)):
+        return {'maxMI': np.nan, 'entropyMI': np.nan}
+
+    # Normalized Shannon entropy of the MI values across pairs (0 = coupling concentrated in one pair,
+    # 1 = uniformly diffuse)
+    p = mi[mi > 0]
+    if p.size == 0:
+        entropy_mi = np.nan
+    else:
+        p = p / np.sum(p)
+        entropy_mi = -np.sum(p * np.log(p)) / np.log(len(mi))
+    return {'maxMI': np.max(mi), 'entropyMI': entropy_mi}
+
+
+def _amp_amp_aec(analytic: list, max_lag_frac: float) -> dict:
+    """maxAEC0, maxAEC and zAEC: lagged amplitude envelope correlation over band pairs, with its null score."""
+    n_bands = len(analytic)
+    nan_out = {'maxAEC0': np.nan, 'maxAEC': np.nan, 'zAEC': np.nan}
+    n = len(analytic[0])
+
+    # Envelopes, trimmed at both ends (the FFT band filter is circular) and z-scored
+    n_trim = max(1, int(round(0.05 * n)))
+    envelopes = []
+    for zb in analytic:
+        a = np.abs(zb)[n_trim:n - n_trim]
+        a = a - np.mean(a)
+        a_sd = np.sqrt(np.mean(a * a))
+        if not a_sd > 0:
+            return nan_out
+        envelopes.append(a / a_sd)
+    m = len(envelopes[0])
+    max_lag = max(1, min(int(max_lag_frac * n), m // 4))
+
+    # Each envelope's autocorrelation, to its first non-positive value (for the Bartlett variance)
+    acf_lag = min(m - 1, max(max_lag, 10))
+    rhos = [_acf_to_first_zero(a, acf_lag) for a in envelopes]
+
+    r0_max, r_max, z_max = 0.0, -np.inf, -np.inf
+    num_pairs = 0
+    for i in range(n_bands - 1):
+        for j in range(i + 1, n_bands):
+            num_pairs += 1
+            r = _xcorr_lags(envelopes[i], envelopes[j], max_lag)
+            r0_max = max(r0_max, abs(r[max_lag]))
+            r_peak = np.max(r)
+            r_max = max(r_max, r_peak)
+            # Bartlett variance of r(k) for independent envelopes, and the effective number of lags scanned
+            L = min(len(rhos[i]), len(rhos[j]))
+            bartlett = 1.0 + 2.0 * np.sum(rhos[i][1:L] * rhos[j][1:L])
+            t_i, t_j = 1.0 + 2.0 * np.sum(rhos[i][1:]), 1.0 + 2.0 * np.sum(rhos[j][1:])
+            n_eff = max(1.0, (2 * max_lag + 1) / max(1.0, t_i * t_j / bartlett))
+            z_max = max(z_max, _max_normal_score(r_peak / np.sqrt(bartlett / m), n_eff))
+
+    return {'maxAEC0': r0_max, 'maxAEC': r_max, 'zAEC': _max_normal_score(z_max, num_pairs)}
+
+
+@dict_output
+def cross_frequency_coupling(y: ArrayLike, n_bands: int = 5, max_n: Union[int, str] = 'full',
+                             n_phase_bins: int = 18, max_lag_frac: float = 0.1) -> dict:
+    """
+    Cross-frequency coupling between equal-width frequency bands: phase-amplitude and amplitude-amplitude.
+
+    Cross-frequency coupling is an interaction between the activity in two frequency bands [1]_, [2]_. This
+    operation measures its two most common kinds, from the same band decomposition:
+
+    - Phase-amplitude coupling: the amplitude of a faster band depends on the phase of a slower one. It is
+      measured by Tort et al.'s modulation index [3]_: the normalized divergence from uniform of the faster
+      band's mean amplitude across bins of the slower band's phase.
+    - Amplitude-amplitude coupling: co-modulation of the amplitude envelopes of two bands. Its standard
+      estimator is the amplitude envelope correlation (AEC) [4]_: the correlation between the two bands'
+      Hilbert envelopes. Envelopes can also be coupled with a delay, the slower band's loudness leading the
+      faster's, or vice versa, so the envelope cross-correlation is also read over a range of lags, taking its
+      peak [5]_, [6]_.
+
+    The spectrum is split into ``n_bands`` contiguous bands of equal width (DC and Nyquist excluded), and each
+    band's analytic signal is computed in one step by the FFT-domain Hilbert transform. Every pair of bands,
+    adjacent bands included, is scanned.
+
+    For amplitude-amplitude coupling, 5% of samples are trimmed from each end of the envelopes (the FFT band
+    filter is circular), each envelope is z-scored, and the envelope cross-correlation
+    r(k) = mean_t A_i(t) A_j(t+k) is computed at lags ``|k| <= K = max_lag_frac * N``. The peak of r(k) over
+    many lags and pairs grows with the number of lags scanned even with no coupling, so ``zAEC`` scores it
+    against a null of independent envelopes. Bartlett's formula [7]_ gives the variance of a cross-correlation
+    between two independent autocorrelated series, var r = (1/m) sum_j rho_i(j) rho_j(j) (each envelope's
+    autocorrelation rho truncated at its first non-positive value), and the number of effectively independent
+    lags in the scan is (2K + 1) / w, with w = T_i T_j / B the correlation length of r(k) over lags
+    (T = integrated autocorrelation time, B = Bartlett's sum). A Sidak correction for the maximum over these
+    effective lags, and then over band pairs, maps the peak z back to a standard-normal score.
+
+    For a stationary linear Gaussian process, the envelopes of disjoint bands are asymptotically independent,
+    so the amplitude-amplitude outputs measure a fourth-order nonlinearity. They respond to any co-modulation
+    of band envelopes, including broadband transients and static nonlinear transforms of a linear process, not
+    only to coupling between distinct rhythms [8]_.
+
+    References
+    ----------
+    .. [1] O. Jensen and L. L. Colgin, "Cross-frequency coupling between neuronal oscillations", Trends Cogn.
+       Sci. 11(7), 267-269 (2007).
+    .. [2] A. Hyafil, A.-L. Giraud, L. Fontolan and B. Gutkin, "Neural cross-frequency coupling: connecting
+       architectures, mechanisms, and functions", Trends Neurosci. 38(11), 725-740 (2015).
+    .. [3] A. B. L. Tort, R. Komorowski, H. Eichenbaum and N. Kopell, "Measuring phase-amplitude coupling
+       between neuronal oscillations of different frequencies", J. Neurophysiol. 104(2), 1195-1210 (2010).
+    .. [4] A. Bruns, R. Eckhorn, H. Jokeit and A. Ebner, "Amplitude envelope correlation detects coupling among
+       incoherent brain signals", NeuroReport 11(7), 1509-1514 (2000).
+    .. [5] A. Bruns and R. Eckhorn, "Task-related coupling from high- to low-frequency signals among visual
+       cortical areas in human subdural recordings", Int. J. Psychophysiol. 51(2), 97-116 (2004).
+    .. [6] A. Adhikari, T. Sigurdsson, M. A. Topiwala and J. A. Gordon, "Cross-correlation of instantaneous
+       amplitudes of field potential oscillations: a straightforward method to estimate the directionality
+       and lag between brain areas", J. Neurosci. Methods 191(2), 191-200 (2010).
+    .. [7] M. S. Bartlett, "Some aspects of the time-correlation problem in regard to tests of significance",
+       J. R. Stat. Soc. 98(3), 536-543 (1935).
+    .. [8] J. Aru et al., "Untangling cross-frequency coupling in neuroscience", Curr. Opin. Neurobiol. 31,
+       51-61 (2015).
 
     Parameters
     ----------
     y : array-like
         The input time series.
     n_bands : int, optional
-        The number of equal-width frequency bands to split the spectrum into
-        (default: 5, matching :func:`spectral_summaries`' 5-band split).
-        Phase-amplitude pairs are formed from every pair of bands i < j (phase
-        from the slower band, amplitude from the faster), giving
-        ``comb(n_bands, 2)`` pairs.
+        The number of equal-width frequency bands to split the spectrum into (default: 5, matching
+        :func:`spectral_summaries`' 5-band split). All ``comb(n_bands, 2)`` band pairs are scanned; for
+        phase-amplitude coupling, phase is taken from the slower band of each pair and amplitude from the
+        faster.
     max_n : int or str, optional
-        The maximum number of samples to consider; longer series are cropped to
-        their first ``max_n`` points. Can be ``'full'`` to disable cropping
-        (default).
+        The maximum number of samples to consider; longer series are cropped to their first ``max_n`` points.
+        Can be ``'full'`` to disable cropping (default).
     n_phase_bins : int, optional
-        The number of phase bins used to estimate each band pair's modulation
-        index (default: 18, i.e. 20-degree bins, the standard choice from Tort
-        et al. 2010).
+        The number of phase bins used to estimate each band pair's modulation index (default: 18, i.e.
+        20-degree bins, the standard choice from Tort et al. 2010).
+    max_lag_frac : float, optional
+        The largest envelope lag scanned for amplitude-amplitude coupling, as a fraction of the series length
+        (default: 0.1). It is capped at a quarter of the trimmed length.
 
     Returns
     -------
     dict
-        - ``maxMI``: the maximum modulation index across all band pairs -- the
-          comodulogram peak, i.e. whether *any* band pair shows real coupling.
-        - ``entropyMI``: the normalized Shannon entropy of the MI values across
-          pairs (0 = coupling concentrated in a single band pair, 1 = uniformly
-          diffuse across all pairs).
+        Phase-amplitude coupling:
 
-        Returns NaN if the time series is too short for the requested number of
-        bands.
+        - ``maxMI``: the maximum modulation index across all band pairs -- the comodulogram peak, i.e. whether
+          *any* band pair shows real coupling.
+        - ``entropyMI``: the normalized Shannon entropy of the MI values across pairs (0 = coupling
+          concentrated in a single band pair, 1 = uniformly diffuse across all pairs).
+
+        Amplitude-amplitude coupling:
+
+        - ``maxAEC0``: the largest absolute zero-lag envelope correlation over band pairs (the classical AEC).
+        - ``maxAEC``: the largest envelope cross-correlation over band pairs and lags (the effect size).
+        - ``zAEC``: the peak's standard-normal score against independent envelopes, corrected for the number
+          of effective lags and of band pairs (about 1-1.5 for a linear Gaussian process at any length).
+
+        Returns NaN if the time series is constant or too short for the requested number of bands.
     """
     y = np.asarray(y, dtype=float).ravel()
     n_bands, n_phase_bins = int(n_bands), int(n_phase_bins)
+    if not 0 < max_lag_frac < 1:
+        raise ValueError(f"max_lag_frac = {max_lag_frac} must lie in (0, 1)")
+    if n_bands < 2:
+        raise ValueError(f"n_bands = {n_bands}: need at least 2 bands to form a pair")
 
     n = len(y)
     if isinstance(max_n, str) and max_n == 'full':
@@ -939,78 +1138,16 @@ def phase_amp_coupling(y: ArrayLike, n_bands: int = 5, max_n: Union[int, str] = 
         y = y[:int(max_n)]
         n = int(max_n)
 
-    # ------------------------------------------------------------------------------
-    # Equal-width frequency bands (DC and Nyquist bins excluded, as in
-    # spectral_summaries_phase -- neither carries meaningful oscillatory phase)
-    # ------------------------------------------------------------------------------
-    half_n = n // 2 + 1 # one-sided bins: DC (0) up to Nyquist (half_n - 1, if n even)
-    is_nyquist_bin = (n % 2 == 0)
-    if is_nyquist_bin:
-        usable_bins = np.arange(1, half_n - 1)
-    else:
-        usable_bins = np.arange(1, half_n)
-
-    min_bins_per_band = 2 # need >=2 FFT bins per band for a non-degenerate analytic signal
-    if len(usable_bins) < n_bands * min_bins_per_band:
+    # z-score (all outputs are scale- and shift-invariant; this keeps the envelope arithmetic well scaled)
+    sd = np.std(y)
+    if not sd > 0:
+        return np.nan
+    analytic = _band_analytic_signals((y - np.mean(y)) / sd, n_bands)
+    if analytic is None:
         warnings.warn(f"Time series too short (N = {n}) for {n_bands} usable frequency bands")
         return np.nan
 
-    edges = _even_split_points(0, len(usable_bins), n_bands + 1)
-    band_bins = [usable_bins[edges[b]:edges[b + 1]] for b in range(n_bands)]
-
-    # ------------------------------------------------------------------------------
-    # Per-band analytic signal (FFT-domain Hilbert trick, band-limited in one step)
-    # ------------------------------------------------------------------------------
-    y_fft = scipy.fft.fft(y)
-    phase_band, amp_band = [], []
-    for b in range(n_bands):
-        yb = np.zeros(n, dtype=complex)
-        yb[band_bins[b]] = 2 * y_fft[band_bins[b]]
-        zb = scipy.fft.ifft(yb)
-        phase_band.append(np.angle(zb))
-        amp_band.append(np.abs(zb))
-
-    # ------------------------------------------------------------------------------
-    # Modulation index (Tort et al. 2010) for every phase(i)-amplitude(j) pair, i < j
-    # ------------------------------------------------------------------------------
-    phase_edges = np.linspace(-np.pi, np.pi, n_phase_bins + 1)
-    h_max = np.log(n_phase_bins)
-    mi = []
-    for i in range(n_bands - 1):
-        for j in range(i + 1, n_bands):
-            phi = phase_band[i]
-            amp = amp_band[j]
-            bin_idx = np.digitize(phi, phase_edges) - 1
-            bin_idx[bin_idx == n_phase_bins] = n_phase_bins - 1 # phi == pi edge case
-            counts = np.bincount(bin_idx, minlength=n_phase_bins)
-            sums = np.bincount(bin_idx, weights=amp, minlength=n_phase_bins)
-            mean_amp = np.divide(sums, counts, out=np.zeros(n_phase_bins), where=counts > 0)
-            p = mean_amp / np.sum(mean_amp)
-            p = p[p > 0]
-            h = -np.sum(p * np.log(p))
-            mi.append((h_max - h) / h_max)
-    mi = np.asarray(mi)
-    num_pairs = len(mi)
-
-    if not np.any(np.isfinite(mi)):
-        return np.nan
-
-    # ------------------------------------------------------------------------------
-    # Summary statistics across band pairs
-    # ------------------------------------------------------------------------------
-    out = {}
-    out['maxMI'] = np.max(mi)
-
-    # Normalized Shannon entropy of the MI values across pairs (0 = coupling
-    # concentrated in one pair, 1 = uniformly diffuse):
-    p = mi[mi > 0]
-    if p.size == 0:
-        out['entropyMI'] = np.nan
-    else:
-        p = p / np.sum(p)
-        out['entropyMI'] = -np.sum(p * np.log(p)) / np.log(num_pairs)
-
-    return out
+    return {**_phase_amp_mi(analytic, n_phase_bins), **_amp_amp_aec(analytic, max_lag_frac)}
 
 @dict_output
 def spectral_summaries_phase(y: ArrayLike) -> dict:
@@ -1590,7 +1727,7 @@ def envelope_stats(y: ArrayLike, power_frac: float = 0.5, trim_frac: float = 0.0
         return out
     y = y - np.mean(y)
 
-    # Frequency bins (DC and Nyquist excluded, as in phase_amp_coupling):
+    # Frequency bins (DC and Nyquist excluded, as in cross_frequency_coupling):
     half_n = N // 2 + 1
     usable = np.arange(1, half_n - 1 if N % 2 == 0 else half_n)
     Y = np.fft.fft(y)
@@ -1656,7 +1793,7 @@ def phase_fluctuation_scaling(y: ArrayLike, half_width_frac: float = 0.01,
     rising at long windows. The original method uses empirical mode decomposition
     to isolate the dominant intrinsic mode; this implementation instead bandpasses
     around the single dominant non-edge FFT peak (the band-limited analytic-signal
-    trick of ``phase_amp_coupling``), which is simpler and avoids EMD's mode-mixing
+    trick of ``cross_frequency_coupling``), which is simpler and avoids EMD's mode-mixing
     and boundary sensitivities, at the cost of not being a literal reimplementation.
 
     Parameters
