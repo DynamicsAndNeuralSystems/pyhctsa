@@ -13,7 +13,7 @@ from ..fitting import goodness_of_fit, robust_linear_fit
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
 from ..robust import bf_fit_sinusoids, bf_residual_stats
-from ..utils import _even_split_points, dict_output, sign_change
+from ..utils import MAD_TO_SIGMA, _even_split_points, dict_output, sign_change
 
 # Smallest FFT length of the zero-padded spectral estimates ('periodogram' and 'welch' in
 # spectral_summaries): the spectrum is evaluated on max(256, next power of two >= segment length)
@@ -161,7 +161,7 @@ def specparam(y: ArrayLike, aperiodic_mode: str = 'fixed', max_n_peaks: int = 4,
         # looking for, and those positive outliers inflate a plain std --
         # which would make the test *less* sensitive exactly when there is
         # real structure. A MAD-based sigma is not pulled about by them.
-        resid_sd = 1.4826 * np.median(np.abs(resid - np.median(resid)))
+        resid_sd = MAD_TO_SIGMA * np.median(np.abs(resid - np.median(resid)))
         if resid_sd <= 0:
             break
         i_pk = int(np.argmax(resid))
@@ -1631,7 +1631,7 @@ def envelope_stats(y: ArrayLike, power_frac: float = 0.5, trim_frac: float = 0.0
     # standard deviation for a Gaussian)
     phi = np.unwrap(np.angle(z_dom[keep]))
     inst_freq = np.diff(phi) / (2 * np.pi)
-    out['dom_ifspread'] = 1.4826 * np.median(np.abs(inst_freq - np.median(inst_freq)))
+    out['dom_ifspread'] = MAD_TO_SIGMA * np.median(np.abs(inst_freq - np.median(inst_freq)))
     return out
 
 
@@ -2379,7 +2379,7 @@ def rhythmicity(y: ArrayLike, m: float = 5, tau: float = 1.5, n_freq: int = 40,
 
     # The rhythmicity spectrum LAVI(f):
     med = np.median(S)
-    scaled_mad = 1.4826 * np.median(np.abs(S - med))
+    scaled_mad = MAD_TO_SIGMA * np.median(np.abs(S - med))
 
     out = {}
     out['lavi_mean'] = np.mean(S)
