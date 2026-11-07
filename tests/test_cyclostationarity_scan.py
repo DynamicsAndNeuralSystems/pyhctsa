@@ -24,9 +24,14 @@ def test_null_calibrated(kind):
     # peak much narrower than the smoothing window, since prewhitening removes it
     rng = np.random.default_rng(1)
     make = (lambda: rng.standard_normal(1000)) if kind == "white" else (lambda: _ar2_peak(1000, 0.99, 0.05, rng))
-    s = np.array([co.cyclostationarity_scan(make())["max_score"] for _ in range(60)])
+    outs = [co.cyclostationarity_scan(make()) for _ in range(60)]
+    s = np.array([o["max_score"] for o in outs])
     assert -0.2 < np.mean(s) < 1.4
     assert np.mean(s > 2.97) <= 0.15
+    # with no significant line there is no rhythm to locate: peak_alpha and peak_lag are NaN exactly when
+    # max_score is below the 5% threshold
+    for o in outs:
+        assert np.isnan(o["peak_alpha"]) == np.isnan(o["peak_lag"]) == (o["max_score"] <= 2.9702)
 
 
 def test_detects_amplitude_modulation():
@@ -38,7 +43,7 @@ def test_detects_amplitude_modulation():
         y = (1 + 0.5 * np.cos(2 * np.pi * np.arange(n) / 37.3 + rng.uniform(0, 2 * np.pi))) * rng.standard_normal(n)
         out = co.cyclostationarity_scan(y)
         assert out["max_score"] > 10 and out["lag0_score"] > 10
-        assert out["peak_alpha"] == pytest.approx(1 / 37.3, abs=2 / n)
+        assert out["peak_alpha"] == pytest.approx(1 / 37.3, abs=2 / n) and out["peak_lag"] == 0
 
 
 def test_detects_periodic_ar_coefficient():
@@ -61,7 +66,7 @@ def test_scale_and_shift_invariant():
     a, b = co.cyclostationarity_scan(y), co.cyclostationarity_scan(-2 * y + 5)
     assert set(a) == FIELDS
     for k in FIELDS:
-        assert a[k] == pytest.approx(b[k])
+        assert a[k] == pytest.approx(b[k], nan_ok=True)
 
 
 def test_degenerate_inputs():
@@ -70,6 +75,9 @@ def test_degenerate_inputs():
         assert set(out) == FIELDS and all(np.isnan(v) for v in out.values())
     with pytest.raises(ValueError):
         co.cyclostationarity_scan(np.random.default_rng(0).standard_normal(200), n_smooth=0)
+    for level in (0.0, 1.0):
+        with pytest.raises(ValueError):
+            co.cyclostationarity_scan(np.random.default_rng(0).standard_normal(200), peak_level=level)
 
 
 def test_in_default_feature_set():

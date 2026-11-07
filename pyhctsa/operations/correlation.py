@@ -2369,7 +2369,7 @@ def _neighbour_mean(spec: np.ndarray, half_width: int, guard: int = 1) -> np.nda
 
 @dict_output
 def cyclostationarity_scan(y: ArrayLike, max_lag: int = 20, n_smooth: int = 16, min_cycles: int = 4,
-                           max_ar_order: int = 10) -> dict:
+                           max_ar_order: int = 10, peak_level: float = 0.05) -> dict:
     """
     Scan for second-order cyclostationarity: periodic variation of the autocovariance.
 
@@ -2430,6 +2430,9 @@ def cyclostationarity_scan(y: ArrayLike, max_lag: int = 20, n_smooth: int = 16, 
         The lowest cyclic frequency scanned, in cycles per record (default: 4).
     max_ar_order : int, optional
         The largest order of the prewhitening AR model (default: 10).
+    peak_level : float, optional
+        The significance level at which the strongest line counts as a detected rhythm (default: 0.05). Below
+        it, ``peak_alpha`` and ``peak_lag`` are NaN.
 
     Returns
     -------
@@ -2441,12 +2444,20 @@ def cyclostationarity_scan(y: ArrayLike, max_lag: int = 20, n_smooth: int = 16, 
           1 / ``peak_alpha`` samples).
         - ``peak_lag``: the lag of the strongest line.
 
+        ``peak_alpha`` and ``peak_lag`` locate a rhythm only when there is one: they are NaN unless
+        ``max_score`` exceeds the Gumbel null's 1 - ``peak_level`` quantile, -ln(-ln(1 - ``peak_level``))
+        (2.97 at the default 0.05). Without a significant line, the strongest bin is just the largest noise
+        fluctuation, at a position uniform over the cells scanned, so its location means nothing. At the
+        default level about 5% of stationary series still get values.
+
         Returns NaN for a constant series or fewer than 64 residuals.
     """
     y = np.asarray(y, dtype=float).ravel()
     max_lag, n_smooth, min_cycles = int(max_lag), int(n_smooth), int(min_cycles)
     if max_lag < 0 or n_smooth < 1 or min_cycles < 1:
         raise ValueError("need max_lag >= 0, n_smooth >= 1 and min_cycles >= 1")
+    if not 0 < peak_level < 1:
+        raise ValueError(f"peak_level = {peak_level} must lie in (0, 1)")
 
     e, _ = _ar_prewhiten(y, int(max_ar_order))
     if e is None or e.size < 64:
@@ -2487,7 +2498,10 @@ def cyclostationarity_scan(y: ArrayLike, max_lag: int = 20, n_smooth: int = 16, 
     def _gumbel_score(p_min, num):
         return np.nan if num == 0 else float(-np.log(max(num * p_min, 1e-300)))
 
-    return {'max_score': _gumbel_score(p_best, num_cells), 'lag0_score': _gumbel_score(p0, num_cells0),
+    max_score = _gumbel_score(p_best, num_cells)
+    if not max_score > -np.log(-np.log1p(-peak_level)):   # no significant line: its location is noise
+        alpha_best, lag_best = np.nan, np.nan
+    return {'max_score': max_score, 'lag0_score': _gumbel_score(p0, num_cells0),
             'peak_alpha': float(alpha_best), 'peak_lag': float(lag_best)}
 
 
