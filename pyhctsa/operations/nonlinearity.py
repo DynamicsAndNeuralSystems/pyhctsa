@@ -29,6 +29,7 @@ from ..toolboxes.Tisean_3_0_1.ports import (  # noqa: F401 (_c1_centers is used 
 )
 from ..robust import bf_hist_edges, bf_random, bf_random_seed, bf_spread_perm
 from ..utils import _even_split_points, dict_output, _round_half_away, get_tau, theiler_window, time_delay_embed
+from ..utils import _padded_nfft
 
 logger = logging.getLogger('pyhctsa')
 
@@ -339,16 +340,9 @@ def zero_one_test(y, num_c=20, max_n=10000):
                 "maxN='full'; computation may be slow."
             )
 
-    else:
-        max_n = int(max_n)
-
-        if n > max_n:
-            logger.warning(
-                f"Time series ({n} samples) exceeds maxN={max_n}; "
-                f"analyzing the first {max_n} samples."
-            )
-            y = y[:max_n]
-            n = max_n
+    y = _check_max_n(y, max_n, message="Time series ({n} samples) exceeds maxN={k}; "
+                     "analyzing the first {k} samples.")
+    n = y.size
 
     # The test regresses on lags 1..N//10, so it needs N >= 20 (2 lags). K, a correlation over
     # those lags, needs 3 (N >= 30; with 2 it is +-1, in practice always 1): that is a per-field
@@ -674,14 +668,9 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
 
     #% nlpe can cause memory pains for long time series
     #% Let's do this dirty cheat
-    if isinstance(max_n, str):
-        if max_n != 'full':
-            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
-    elif n > max_n:
-        # crop the time series to the first max_n samples
-        y = y[:int(max_n)]
-        logger.info(f"Michael Small's nlpe code is only being evaluated on the first {max_n} (/{n}) samples.")
-        n = int(max_n)
+    y = _check_max_n(y, max_n, level=logging.INFO, message="Michael Small's nlpe code is only being "
+                     "evaluated on the first {max_n} (/{n}) samples.")
+    n = len(y)
 
     if n < 20: # short time series cause problems
         logger.warning(f'Time series (N = {len(y)}) is too short.')
@@ -2849,7 +2838,7 @@ def _period_normalized_tau(y: np.ndarray) -> Union[int, str]:
         return 'mi'
     win_length = int(np.floor(y.size / 4.5))  # Welch segments of N/4.5 samples (8 segments at 50% overlap)
     f, pxx = _welch(y - np.mean(y), fs=1, window=np.hamming(win_length), nperseg=win_length,
-                    noverlap=win_length // 2, nfft=max(256, 2 ** int(np.ceil(np.log2(win_length)))),
+                    noverlap=win_length // 2, nfft=_padded_nfft(win_length),
                     detrend=False, return_onesided=True, scaling='density')
     f, pxx = f[1:], pxx[1:]  # exclude the DC bin
     if pxx.size < 3:
@@ -3321,14 +3310,23 @@ def _recurrent_pairs(Y: np.ndarray, radius: float) -> tuple:
     return src, dst
 
 
-def _check_max_n(y: np.ndarray, max_n: Union[int, str], what: str) -> np.ndarray:
-    """Crop the series to its first `max_n` samples (``'full'`` for no cropping)."""
+def _check_max_n(y: np.ndarray, max_n: Union[int, str], what: str = '', *,
+                 message: Union[str, None] = None, level: int = logging.WARNING) -> np.ndarray:
+    """Crop `y` to its first `max_n` rows (``'full'`` for no cropping), logging when it is cropped.
+
+    `y` is a series or an array of embedded points (cropped along its first axis); ``len(y)`` is
+    compared with `max_n` as given, and the crop uses ``int(max_n)``. Any string other than
+    ``'full'`` raises a ValueError. The log record, at `level`, is `message` formatted with ``n``
+    (``len(y)`` before cropping), ``max_n`` (as given) and ``k`` (``int(max_n)``); by default it
+    says the series is too long for `what`.
+    """
     if isinstance(max_n, str):
         if max_n != 'full':
             raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
-    elif y.size > max_n:
-        logger.warning(f'Time series ({y.size} > {max_n}) is too long for {what}. '
-                       f'Analyzing the first {int(max_n)} samples')
+    elif len(y) > max_n:
+        if message is None:
+            message = 'Time series ({n} > {max_n}) is too long for ' + what + '. Analyzing the first {k} samples'
+        logger.log(level, message.format(n=len(y), max_n=max_n, k=int(max_n)))
         y = y[:int(max_n)]
     return y
 
@@ -4135,13 +4133,8 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     if np.all(np.ptp(y_embed, axis=0) < 1e-10):
         return np.nan
 
-    if isinstance(max_n, str):
-        if max_n != 'full':
-            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
-    elif n_embed > max_n:
-        logger.warning(f'Cropping to the first {int(max_n)} of {n_embed} embedded points '
-                       '(memory/time cap, not a convergence point)')
-        y_embed = y_embed[:int(max_n)]
+    y_embed = _check_max_n(y_embed, max_n, message='Cropping to the first {k} of {n} embedded points '
+                           '(memory/time cap, not a convergence point)')
 
     # Principal axes of the cloud, and the whitened cloud (zero mean, identity covariance)
     centered = y_embed - y_embed.mean(axis=0)
@@ -4302,16 +4295,11 @@ def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
 
     # Crop to max_n embedded points for the kernel matrix (memory/time cap)
     n_emb = y_embed.shape[0]
-    if isinstance(max_n, str):
-        if max_n != 'full':
-            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
-        if n_emb > 5000:
-            logger.warning(f"{n_emb} embedded points exceeds 5000 with max_n='full'; the kernel "
-                           'eigendecomposition may take several seconds')
-    elif n_emb > max_n:
-        logger.warning(f'Cropping to the first {int(max_n)} of {n_emb} embedded points for kernel PCA '
-                       '(memory/time cap, not a convergence point)')
-        y_embed = y_embed[:int(max_n)]
+    if isinstance(max_n, str) and max_n == 'full' and n_emb > 5000:
+        logger.warning(f"{n_emb} embedded points exceeds 5000 with max_n='full'; the kernel "
+                       'eigendecomposition may take several seconds')
+    y_embed = _check_max_n(y_embed, max_n, message='Cropping to the first {k} of {n} embedded points '
+                           'for kernel PCA (memory/time cap, not a convergence point)')
     n = y_embed.shape[0]
     if n - 1 < m:
         logger.warning(f'Not enough embedded points ({n}) after cropping for a rank-{m} kernel PCA')
