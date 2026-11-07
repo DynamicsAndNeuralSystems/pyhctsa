@@ -4,10 +4,19 @@
 ``correlation._acf_fft``), ``utils._acf_fourier``, ``changepoint._mean_square_inflation``
 (formerly ``changepoint._variance_inflation``) and ``stationarity._segment_acf``. The expected
 values below were generated from the main checkout before the refactor (commit 0fa9013), on
-seeded series, and are checked at rtol 1e-12.
+seeded series, on one machine (arm64 macOS).
+
+Two kinds of check:
+
+1. Same-runner reference (the equivalence check): verbatim copies of the three pre-refactor FFT
+   blocks, one per padding variant (``'fast'``, ``'2n'``, ``'pow2'``), are compared with the code
+   that now calls ``_autocov_fft`` at rtol 1e-12, atol 0, on whatever machine runs the test.
+2. Operation-level pins: the main-checkout values, with tolerances set by the kind of computation
+   (other BLAS/FFT builds reproduce them only to about 1e-12; see TOLERANCES).
 """
 import numpy as np
 import pytest
+from scipy import fft as sp_fft
 
 from pyhctsa import utils
 from pyhctsa.operations import changepoint as cp
@@ -134,6 +143,106 @@ EXPECTED = {'white': {'acf_fft': [0.03831410182037328,
                                  'stddiv': 0.22258581366395402}}}
 
 
+# ------------------------------------------------------------------------------
+# 1. Same-runner reference: verbatim copies of the pre-refactor FFT blocks
+# ------------------------------------------------------------------------------
+
+def _ref_acf_fft(y):
+    # pad 'fast': verbatim body of correlation._acf_fft, main 0fa9013, correlation.py lines
+    # 2948-2958 (scipy.fft, next_fast_len(2N - 1)).
+    y = np.asarray(y, dtype=float).ravel()
+    N = y.size
+    if N == 0:
+        return np.zeros(0)
+    if not np.all(np.isfinite(y)) or np.ptp(y) == 0:
+        return np.full(N, np.nan)
+    z = y - y.mean()
+    nfft = sp_fft.next_fast_len(2 * N - 1, real=True)
+    f = sp_fft.rfft(z, nfft)
+    a = sp_fft.irfft(f * np.conj(f), nfft)[:N]
+    return np.real(a / a[0])
+
+
+def _ref_variance_inflation(x, max_lag=200):
+    # pad '2n': verbatim body of changepoint._variance_inflation (now _mean_square_inflation),
+    # main 0fa9013, changepoint.py lines 290-303 (numpy.fft at exactly 2N).
+    x = np.asarray(x, dtype=float).ravel()
+    N = x.size
+    xc = x - np.mean(x)
+    v = np.mean(xc ** 2)
+    if N < 8 or not v > 0:
+        return 1.0
+    L = int(min(max_lag, N // 4))
+    f = np.fft.rfft(xc, 2 * N)
+    a = np.fft.irfft(f * np.conj(f))[:L + 1]
+    rho = a[1:] / a[0]
+    h = np.arange(1, L + 1)
+    tau = 1.0 + 2.0 * np.sum((1.0 - h / (L + 1.0)) * rho ** 2)
+    kurt = np.mean(xc ** 4) / v ** 2
+    return float(max(tau, 1.0) * max(1.0, (kurt - 1.0) / 2.0))
+
+
+def _ref_segment_acf(z, num_segs, n):
+    # pad 'pow2': verbatim body of stationarity._segment_acf, main 0fa9013, stationarity.py
+    # lines 217-221 (numpy.fft with abs(F)**2 at the power of two >= 2n).
+    Z = z[:num_segs * n].reshape(num_segs, n)
+    Z = Z - Z.mean(axis=1, keepdims=True)
+    nfft = 1 << int(np.ceil(np.log2(2 * n)))  # zero-padding to >= 2n - 1: linear autocovariance
+    acov = np.fft.irfft(np.abs(np.fft.rfft(Z, nfft, axis=1)) ** 2, nfft, axis=1)[:, :n].sum(axis=0)
+    return acov / acov[0] if acov[0] > 0 else np.full(n, np.nan)
+
+
+@pytest.mark.parametrize('name', list(EXPECTED))
+def test_pad_fast_matches_reference(name):
+    y = _series()[name]
+    # Same scipy.fft calls in the same order: identical, lag by lag.
+    np.testing.assert_allclose(utils._acf_fft(y), _ref_acf_fft(y), rtol=1e-12, atol=0)
+
+
+@pytest.mark.parametrize('name', list(EXPECTED))
+def test_pad_2n_matches_reference(name):
+    z = z_score(_series()[name])
+    for max_lag in (200, 20):
+        assert np.isclose(cp._mean_square_inflation(z, max_lag), _ref_variance_inflation(z, max_lag),
+                          rtol=1e-12, atol=0)
+
+
+@pytest.mark.parametrize('name', list(EXPECTED))
+def test_pad_pow2_matches_reference(name, monkeypatch):
+    z = z_score(_series()[name])
+    for num_segs in (3, 5):
+        n = z.size // num_segs
+        r_new, r_ref = st._segment_acf(z, num_segs, n), _ref_segment_acf(z, num_segs, n)
+        # The ACF vector itself: numpy.fft with abs(F)**2 (old) and scipy.fft with F * conj(F)
+        # (new) round differently, by up to ~6e-17 on near-zero lags, so lags are compared with
+        # atol = 1e-12 * r[0] (r[0] = 1, the scale of an autocorrelation).
+        np.testing.assert_allclose(r_new, r_ref, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(st._variance_inflation(r_new, n), st._variance_inflation(r_ref, n),
+                                   rtol=1e-12, atol=0)
+    # The feature that consumes it: local_distributions with the old block patched in.
+    new = st.local_distributions(z, 5, 'par')
+    monkeypatch.setattr(st, '_segment_acf', _ref_segment_acf)
+    ref = st.local_distributions(z, 5, 'par')
+    for key in new:
+        np.testing.assert_allclose(new[key], ref[key], rtol=1e-12, atol=0, err_msg=key)
+
+
+# ------------------------------------------------------------------------------
+# 2. Operation-level pins (main-checkout values) with per-output tolerances
+# ------------------------------------------------------------------------------
+
+# Every pinned output is closed-form arithmetic on FFT autocovariances (ACF values, sums of
+# squared ACF, kurtosis, Ljung-Box statistics, segment moments), so all use the closed-form tier,
+# rtol 1e-9: BLAS/FFT ordering moved them by at most 1.6e-12 across runners (local_dist_par).
+# tau_ac/tau_ac1e, peak_lag and wavelet_var_chg are integers (exact in practice). Outputs whose
+# value can be near zero (ACF at long lags, ex_meandiv_ess, lb_z) also get an absolute tolerance
+# of 1e-9 times the scale they are computed from: ACF values are bounded by r[0] = 1, and the
+# local_distributions and residual_autocorr_scan outputs are differences of O(1) quantities on a
+# z-scored series (scale 1), so ATOL = 1e-9 * 1.
+RTOL = 1e-9
+ATOL = 1e-9 * 1.0
+
+
 def _outputs(y):
     z = z_score(y)
     n = z.size // 5
@@ -161,7 +270,7 @@ def test_acf_fft_sites_pinned(name):
             assert set(g) == set(want), key
             g, want = [g[k] for k in want], list(want.values())
         np.testing.assert_allclose(np.asarray(g, dtype=float), np.asarray(want, dtype=float),
-                                   rtol=1e-12, atol=0, err_msg=f'{name} {key}')
+                                   rtol=RTOL, atol=ATOL, err_msg=f'{name} {key}')
 
 
 def test_autocov_fft_rows_and_padding():
