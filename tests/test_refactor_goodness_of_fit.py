@@ -1,9 +1,15 @@
-"""Pinned outputs of the operations whose R^2 / adjusted R^2 / RMSE now come from
-:func:`pyhctsa.fitting.goodness_of_fit` (duplication-audit theme 7).
+"""Equivalence and pinned outputs for the operations whose R^2 / adjusted R^2 / RMSE now come
+from :func:`pyhctsa.fitting.goodness_of_fit` (duplication-audit theme 7).
 
-The reference values were generated from the main checkout at 0fa9013, before the refactor, so
-these tests check that routing the inline goodness-of-fit code through the shared function left
-every output unchanged (including the -inf of a zero total sum of squares).
+Two kinds of check:
+
+- Same-runner reference (the equivalence check): verbatim copies of the inline goodness-of-fit
+  code that the refactor replaced (``_ref_*``, from main 0fa9013) are compared with the new code
+  on seeded inputs, including a constant y (SST = 0) and dof <= 0, at rtol 1e-12, atol 0, on
+  whatever machine runs the test.
+- Operation-level pins: values generated from the main checkout at 0fa9013, before the refactor,
+  with a tolerance per operation set by how reproducible that operation is across platforms
+  (BLAS / LAPACK summation order and optimizer paths differ between runners).
 """
 import logging
 import warnings
@@ -13,6 +19,167 @@ import pytest
 
 from pyhctsa.fitting import goodness_of_fit
 from pyhctsa.operations import distribution, graph, scaling, spectral, symbolic
+
+
+# --- Verbatim copies of the replaced inline code (main 0fa9013) --------------------------------
+
+def _ref_fit_lin_gof(x: np.ndarray, y: np.ndarray) -> tuple:
+    # pyhctsa/operations/distribution.py:865-875 (main 0fa9013), the whole function
+    n = len(y)
+    if n < 3 or not np.ptp(y) > 1e-12 * np.max(np.abs(y)):  # (constant to within rounding)
+        return (np.nan,) * 4
+    sst = np.sum((y - np.mean(y)) ** 2)
+    a, b = np.polyfit(x, y, 1)
+    sse = np.sum((y - (a * x + b)) ** 2)
+    return a, b, 1 - sse / sst, np.sqrt(sse / (n - 2))
+
+
+def _ref_polysat_fit(w: np.ndarray, y: np.ndarray) -> dict:
+    # pyhctsa/operations/spectral.py:325-362 (main 0fa9013), the whole function
+    w = np.asarray(w, dtype=float).ravel()
+    y = np.asarray(y, dtype=float).ravel()
+    n = y.size
+    if n < 3 or not np.all(np.isfinite(y)) or not np.ptp(y) > 1e-12 * np.max(np.abs(y)):
+        return dict(a=np.nan, b=np.nan, r2=np.nan, rmse=np.nan)
+    w2 = w ** 2
+    scale = np.max(w2)
+
+    def sse(lb):
+        g = w2[:, None] / (np.exp(np.atleast_1d(lb))[None, :] + w2[:, None])
+        return np.sum(y ** 2) - (g.T @ y) ** 2 / np.sum(g ** 2, axis=0)
+
+    u = np.linspace(np.log(1e-6 * scale), np.log(1e2 * scale), 200)
+    k = int(np.argmin(sse(u)))
+    lo, hi = u[max(k - 1, 0)], u[min(k + 1, u.size - 1)]
+    phi = (np.sqrt(5) - 1) / 2
+    for _ in range(40):  # golden-section search in log(b)
+        u1 = hi - phi * (hi - lo)
+        u2 = lo + phi * (hi - lo)
+        if sse(u1)[0] <= sse(u2)[0]:
+            hi = u2
+        else:
+            lo = u1
+    b = np.exp((lo + hi) / 2)
+    g = w2 / (b + w2)
+    a = np.dot(g, y) / np.dot(g, g)
+    s = np.sum((y - a * g) ** 2)
+    return dict(a=a, b=b, r2=1 - s / np.sum((y - np.mean(y)) ** 2), rmse=np.sqrt(s / (n - 2)))
+
+
+def _ref_linear_adjr2(x: np.ndarray, y: np.ndarray) -> float:
+    # pyhctsa/operations/symbolic.py:819-824 (main 0fa9013), the whole function
+    n = len(y)
+    p = np.polyfit(x, y, 1)
+    rsq = 1 - np.sum((y - np.polyval(p, x)) ** 2) / np.sum((y - np.mean(y)) ** 2)
+    return 1 - (1 - rsq) * (n - 1) / (n - 2)
+
+
+def _ref_simple_fit_gof(dny, dny_fit, num_params):
+    # pyhctsa/operations/distribution.py:1638, 1648-1654 (main 0fa9013); returns r2, adjr2 and
+    # rmse before the site's own * std(x) scaling, which the refactor kept at the site
+    dfe = len(dny) - num_params  # degrees of freedom of the error
+    res = dny - dny_fit
+    sse = np.sum(res ** 2)
+    sstot = np.sum((dny - np.mean(dny)) ** 2)
+    with np.errstate(all='ignore'):
+        r2 = 1 - sse / sstot
+        adjr2 = 1 - (1 - r2) * (len(dny) - 1) / dfe
+    rmse = np.sqrt(sse / dfe)
+    return float(r2), float(adjr2), float(rmse)
+
+
+def _ref_visibility_graph_gof(k_prob, k_fit, num_params):
+    # pyhctsa/operations/graph.py:296-303 (main 0fa9013), with len(k_vals) == len(k_prob); returns
+    # rmse before the site's own * stdk scaling, which the refactor kept at the site
+    res = k_prob - k_fit  # residuals, in order of increasing degree
+    sse = np.sum(res ** 2)
+    sstot = np.sum((k_prob - np.mean(k_prob)) ** 2)
+    dfe = len(k_prob) - num_params  # degrees of freedom of the error
+    with np.errstate(all='ignore'):
+        r2 = 1 - sse / sstot
+        adjr2 = 1 - (1 - r2) * (len(k_prob) - 1) / dfe
+    rmse = np.sqrt(sse / dfe)
+    return r2, adjr2, rmse
+
+
+def _ref_sinusoid_fit_gof(y, fitted, n_coeff):
+    # pyhctsa/operations/spectral.py:1452-1459 (main 0fa9013)
+    N = len(y)
+    res = y - fitted
+    sse = np.sum(res ** 2)
+    sstot = np.sum((y - np.mean(y)) ** 2)
+    dfe = N - n_coeff  # degrees of freedom of the error
+    with np.errstate(all='ignore'):
+        r2 = 1 - sse / sstot
+        adjr2 = 1 - (1 - r2) * (N - 1) / dfe if dfe > 0 else np.nan
+        rmse = np.sqrt(sse / dfe) if dfe > 0 else np.nan
+    return float(r2), float(adjr2), float(rmse)
+
+
+def _ref_mfdfa_r2(log_s, log_fq_q):
+    # pyhctsa/operations/scaling.py:648-654 (main 0fa9013), one q column
+    r2 = np.nan
+    p = np.polyfit(log_s, log_fq_q, 1)
+    fitted = np.polyval(p, log_s)
+    ss_res = np.sum((log_fq_q - fitted) ** 2)
+    ss_tot = np.sum((log_fq_q - np.mean(log_fq_q)) ** 2)
+    if ss_tot > 0:
+        r2 = 1 - ss_res / ss_tot
+    return r2
+
+
+def _ref_inputs():
+    """Seeded (x, y, y_fit) triples: noisy line, noise, near-exact fit, constant y with a
+    nonzero fit (SST = 0, SSE > 0), and constant y fitted exactly (SST = SSE = 0)."""
+    r = np.random.default_rng(11)
+    out = []
+    for n in (5, 12, 40, 300):
+        x = np.linspace(0.5, 3.0, n)
+        y = 0.7 * x - 0.2 + r.standard_normal(n)
+        out.append((x, y, y + 0.3 * r.standard_normal(n)))
+        out.append((x, np.abs(y) + 0.1, np.abs(y) + 0.1 + 1e-9 * r.standard_normal(n)))
+        c = np.full(n, 2.5)
+        out.append((x, c, c + 0.1 * r.standard_normal(n)))
+        out.append((x, c, c.copy()))
+    return out
+
+
+def _close(a, b):
+    np.testing.assert_allclose(np.asarray(a, dtype=float), np.asarray(b, dtype=float), rtol=1e-12, atol=0)
+
+
+def test_reference_whole_functions():
+    # _fit_lin_gof, _polysat_fit and _linear_adjr2: old and new function on the same inputs
+    with warnings.catch_warnings(), np.errstate(all='ignore'):
+        warnings.simplefilter('ignore')
+        for x, y, _ in _ref_inputs():
+            _close(distribution._fit_lin_gof(x, y), _ref_fit_lin_gof(x, y))
+            new, old = spectral._polysat_fit(x, y), _ref_polysat_fit(x, y)
+            _close([new[k] for k in ('a', 'b', 'r2', 'rmse')], [old[k] for k in ('a', 'b', 'r2', 'rmse')])
+            if len(y) >= 3:  # the caller of _linear_adjr2 requires more than 2 points
+                _close(symbolic._linear_adjr2(x, y), _ref_linear_adjr2(x, y))
+
+
+def test_reference_inline_blocks():
+    # The inline blocks of simple_fit, visibility_graph, sinusoid_fit and mfdfa against the
+    # goodness_of_fit call that replaced each, with the arguments the site now passes
+    with warnings.catch_warnings(), np.errstate(all='ignore'):
+        warnings.simplefilter('ignore')
+        for x, y, yf in _ref_inputs():
+            n = len(y)
+            for m in (2, 3, 5, 6):
+                if n - m >= 1:  # simple_fit (dfe < 1 returns early) and visibility_graph
+                    # (more distinct degrees than parameters) never reach dof <= 0
+                    g = goodness_of_fit(y, yf, m, guard_sst=False, adj_from_rsquare=True)
+                    new = (g['rsquare'], g['adjrsquare'], g['rmse'])
+                    _close(new, _ref_simple_fit_gof(y, yf, m))
+                    _close(new, _ref_visibility_graph_gof(y, yf, m))
+            for m in (2, 3, 4, 5, 6, 12, 13):  # sinusoid_fit, including dof = N - m <= 0
+                g = goodness_of_fit(y, yf, m, guard_sst=False, adj_from_rsquare=True)
+                _close((g['rsquare'], g['adjrsquare'], g['rmse']), _ref_sinusoid_fit_gof(y, yf, m))
+            if n >= 8:  # mfdfa fits at least 8 scales
+                p = np.polyfit(x, y, 1)
+                _close(goodness_of_fit(y, np.polyval(p, x), 2)['rsquare'], _ref_mfdfa_r2(x, y))
 
 
 def _series():
@@ -60,6 +227,36 @@ EXPECTED = {
 }
 
 
+# Tolerance per operation and output (main-checkout values above, compared across platforms).
+# Tier 2, rtol 1e-8: linear least squares (np.polyfit / lstsq), whose result depends on the
+# LAPACK build's summation order. Tier 3, rtol 1e-5: iterative optimizers, which stop at a
+# convergence tolerance and can take a different path on another platform (the golden-section
+# search of _polysat_fit, bf_fit_sinusoids' grid + Gauss-Newton refinement, scipy's
+# least_squares, and bf_fit_density_curve's Levenberg-Marquardt). R^2 and adjusted R^2 are
+# ratios of order 1 that can be near 0 for a poor fit (adjusted R^2 of -0.002), so they also get
+# atol = 1e-9 * 1 (the scale of R^2); RMSEs here are not near zero.
+_TIER2 = 1e-8
+_TIER3 = 1e-5
+RTOL = {
+    'spectral_summaries': {'fpolysat_r2': _TIER3, 'fpolysat_rmse': _TIER3,  # golden-section search
+                           'fpoly2_r2': _TIER2, 'fpoly2_rmse': _TIER2},      # quadratic lstsq
+    'sinusoid_fit_sin1': _TIER3,      # bf_fit_sinusoids
+    'sinusoid_fit_fourier1': _TIER3,  # scipy.optimize.least_squares
+    'simple_fit_gauss1': _TIER3,      # bf_fit_density_curve (Levenberg-Marquardt)
+    'simple_fit_exp1_ks': _TIER3,     # bf_fit_density_curve on a kernel density
+    'outlier_include': _TIER2,        # np.polyfit lines through closed-form statistics
+    'visibility_graph': _TIER3,       # bf_fit_density_curve on the degree distribution
+    'transition_p_alphabet': _TIER2,  # np.polyfit line (_linear_adjr2)
+    'mfdfa': _TIER2,                  # np.polyfit of the DFA fluctuation functions
+}
+
+
+def _tol(name, key):
+    rtol = RTOL[name][key] if isinstance(RTOL[name], dict) else RTOL[name]
+    atol = 1e-9 if 'r2' in key else 0.0  # R^2-type outputs: scale 1 (see above)
+    return rtol, atol
+
+
 @pytest.fixture(scope='module')
 def outputs():
     logging.disable(logging.CRITICAL)
@@ -75,7 +272,8 @@ def outputs():
 def test_pinned_outputs(outputs, case):
     out = outputs[case]
     for key, val in EXPECTED[case].items():
-        np.testing.assert_allclose(out[key], val, rtol=1e-12, atol=0, err_msg=f'{case} {key}')
+        rtol, atol = _tol(case[0], key)
+        np.testing.assert_allclose(out[key], val, rtol=rtol, atol=atol, err_msg=f'{case} {key}')
 
 
 def test_zero_total_sum_of_squares():
@@ -83,12 +281,18 @@ def test_zero_total_sum_of_squares():
     # result -inf, not the NaN of goodness_of_fit's default guard (values from main, 0fa9013).
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
-        o = distribution.simple_fit(np.arange(400.0), 'gauss2')
+        x = np.arange(400.0)
+        o = distribution.simple_fit(x, 'gauss2')
         assert o['r2'] == -np.inf and o['adjr2'] == -np.inf
-        np.testing.assert_allclose(o['rmse'], 2.440727683641595e-06, rtol=1e-12, atol=0)
+        # The RMSE of a near-exact fit is near zero (rounding error of the Levenberg-Marquardt
+        # fit), so it is pinned with an absolute tolerance: 1e-9 times its scale, the uniform
+        # density 1/ptp(x) times the std(x) the site multiplies by (about 0.29).
+        scale = np.std(x, ddof=1) / np.ptp(x)
+        np.testing.assert_allclose(o['rmse'], 2.440727683641595e-06, rtol=0, atol=1e-9 * scale)
         o = spectral.sinusoid_fit(np.ones(50), 'sin1')
         assert o['r2'] == -np.inf and o['adjr2'] == -np.inf
-        np.testing.assert_allclose(o['rmse'], 0.9831736241435396, rtol=1e-12, atol=0)
+        # bf_fit_sinusoids is an iterative optimizer: tier 3
+        np.testing.assert_allclose(o['rmse'], 0.9831736241435396, rtol=_TIER3, atol=0)
 
 
 def test_goodness_of_fit_conventions():
