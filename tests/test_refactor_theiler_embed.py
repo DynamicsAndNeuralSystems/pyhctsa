@@ -1,17 +1,27 @@
-"""Pinned outputs of the operations touched by the Theiler-window / delay-embedding refactor
-(duplication audit themes #2, #3 and #18): `utils._theiler_int`, `utils.time_delay_embed` in place
-of hand-written embeddings, and `_spectrum_stats` / `_enough_for_pca` / `_bf_embed_pair` in
-`nonlinearity`. The values were generated from the main checkout (0fa9013) before the refactor,
-so this checks that the refactor left every output unchanged (rtol 1e-12)."""
+"""Checks for the Theiler-window / delay-embedding refactor (duplication audit themes #2, #3
+and #18): `utils._theiler_int`, `utils.time_delay_embed` in place of hand-written embeddings, and
+`_spectrum_stats` / `_enough_for_pca` / `_bf_embed_pair` in `nonlinearity`.
+
+Two kinds of check:
+
+1. Same-runner reference checks (the ones that matter): verbatim copies of the code the refactor
+   replaced (`_ref_*`, copied from main 0fa9013, file and line given with each) against the new
+   helpers, at rtol 1e-12 (or exact equality), on whatever machine runs the test.
+2. Operation-level pins, generated on Ben's Mac (arm64) from the main checkout (0fa9013) before
+   the refactor, with a tolerance per operation (`TOL`) set by what the operation computes, since
+   other platforms reproduce them only to about 1e-12 to 1e-10 (BLAS and FFT summation order).
+"""
 import logging
 import warnings
 
 import numpy as np
 import pytest
+from sklearn.decomposition import PCA
 
 from pyhctsa.operations import correlation as CO
 from pyhctsa.operations import entropy as EN
 from pyhctsa.operations import nonlinearity as NL
+from pyhctsa.utils import _theiler_int, get_tau, theiler_window, time_delay_embed
 
 nan = float('nan')
 
@@ -103,6 +113,26 @@ EXPECTED = {
 }
 
 
+# Per-operation tolerances for the pins (the values above are unchanged main-checkout values).
+# Tier 1, rtol 1e-9: closed-form arithmetic (counts, sums, quantiles, entropies, ACF-based delays,
+#   neighbor-distance statistics); CI drift on these is at most about 1e-11.
+# Tier 2, rtol 1e-8: linear algebra and fitted slopes (PCA and kernel-PCA eigenvalues, covariance
+#   inverses, QR-based Lyapunov spectra, least-squares scaling slopes).
+T1, T2 = 1e-9, 1e-8
+TOL = {
+    'approximate_entropy': T1, 'delay_time': T1, 'dispersion_entropy': T1, 'fnn': T1,
+    'fuzzy_entropy': T1, 'largest_lyap': T1, 'local_density': T1, 'nlpe': T1,
+    'persistent_homology': T1, 'randomize_ordinal': T1, 'recurrence_times': T1,
+    'return_time': T1, 'rpde': T1, 'rqa': T1, 'takens_estimator': T1, 'time_rev_kld': T1,
+    'embed2_shapes': T1, 'evt_local_dim': T1,  # (all NaN on these series)
+    'embed_pca': T2, 'embed_kernel_pca': T2,  # eigen-decompositions
+    'joint_non_gaussianity': T2,  # Mahalanobis distances through a covariance inverse
+    'lyap_spec': T2,  # QR re-orthonormalization of local Jacobians fitted by least squares
+    'fractal_dimensions': T2,  # Dq are least-squares slopes over many neighbor distances
+                               # (ubuntu and windows drift 8e-12 on 'sine'; up to 1.2e-10 seen)
+}
+
+
 @pytest.mark.parametrize('op,sname', list(EXPECTED))
 def test_pinned_output(op, sname):
     if op == 'persistent_homology':
@@ -121,4 +151,192 @@ def test_pinned_output(op, sname):
         expected = list(expected.values())
     else:
         got = float(out)
-    np.testing.assert_allclose(got, expected, rtol=1e-12, atol=0, equal_nan=True)
+    np.testing.assert_allclose(got, expected, rtol=TOL[op], atol=0, equal_nan=True)
+
+
+# ---------------------------------------------------------------------------------------------
+# Same-runner reference checks: the replaced code, copied verbatim from main 0fa9013
+# ---------------------------------------------------------------------------------------------
+
+def _ref_series():
+    out = dict(_series())
+    out['short'] = np.random.default_rng(13).standard_normal(60)
+    out['rep'] = np.round(2 * np.random.default_rng(14).standard_normal(300)) / 2  # tied values
+    out['const'] = np.ones(100)  # no ACF zero crossing: the NaN path
+    return out
+
+
+def _ref_theiler(y, spec, N=None):
+    # The boilerplate repeated at the Theiler-window sites, e.g. main 0fa9013
+    # pyhctsa/operations/nonlinearity.py:2110-2114 (fractal_dimensions):
+    #     past = theiler_window(y, past)
+    #     if np.isnan(past):
+    #         logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    #         return np.nan
+    #     past = int(past)
+    # (some sites, e.g. nonlinearity.py:141 fnn, skipped the final int()). NaN stands for the
+    # early return.
+    w = theiler_window(y, spec, N)
+    if np.isnan(w):
+        return np.nan
+    return w
+
+
+@pytest.mark.parametrize('spec', [('ac', 1), ['ac', 2], ('ac', 0.5), ('ac1e', 1), ('ac1e', 2.5),
+                                  0, 1, 7, 7.0, 0.05, 0.3])
+def test_ref_theiler_int(spec):
+    for name, y in _ref_series().items():
+        for N in (None, 50, len(y)):
+            if N is None and y is None:
+                continue
+            old = _ref_theiler(y, spec, N)
+            new = _theiler_int(y, spec, N, warn=False)
+            if np.isnan(old):
+                assert new is None, (name, spec, N)
+            else:
+                # the old value (int or integer-valued) and the new int are the same number,
+                # so the sites that skipped int() see the same window too
+                assert isinstance(new, int) and new == old and int(old) == new, (name, spec, N)
+
+
+def _ref_embed_rpde(y, m, tau):
+    # main 0fa9013 pyhctsa/operations/entropy.py:948-951 (rpde)
+    n = len(y) - (m - 1) * tau
+    return np.column_stack([y[k * tau:k * tau + n] for k in range(m)])
+
+
+def _ref_embed_apen(x, length, tau):
+    # main 0fa9013 pyhctsa/operations/entropy.py:1035-1036 (_apen_phis)
+    n_vec = x.size - (length - 1) * tau
+    return np.column_stack([x[j * tau:j * tau + n_vec] for j in range(length)])
+
+
+def _ref_embed_ro(r, tau):
+    # main 0fa9013 pyhctsa/operations/entropy.py:1584 (_ro_pattern_dists), with n = len(r)
+    n = len(r)
+    return np.column_stack([r[:n - 2 * tau], r[tau:n - tau], r[2 * tau:]])
+
+
+def _ref_embed_disp(z, m, tau):
+    # main 0fa9013 pyhctsa/operations/entropy.py:1877 and 1904 (dispersion_entropy)
+    num_vectors = len(z) - (m - 1) * tau
+    return z[np.arange(num_vectors)[:, None] + np.arange(m) * tau]
+
+
+def _ref_embed_fuzzy(y, m, Nv):
+    # main 0fa9013 pyhctsa/operations/entropy.py:2006 (fuzzy_entropy)
+    return y[np.arange(Nv)[:, None] + np.arange(m)[None, :]]
+
+
+def _ref_embed_lyap_spec(y, m, tau):
+    # main 0fa9013 pyhctsa/operations/nonlinearity.py:4881 and 4886 (lyap_spec), with n = len(y)
+    n_emb = len(y) - (m - 1) * tau
+    return np.column_stack([y[j * tau:j * tau + n_emb] for j in range(m)])
+
+
+def test_ref_delay_embeddings():
+    for name, y in _ref_series().items():
+        for m in (1, 2, 3, 5):
+            for tau in (1, 2, 7):
+                if len(y) - (m - 1) * tau < 2:
+                    continue
+                new = time_delay_embed(y, m, tau)
+                for ref in (_ref_embed_rpde, _ref_embed_apen, _ref_embed_lyap_spec):
+                    np.testing.assert_array_equal(new, ref(y, m, tau), err_msg=f'{ref.__name__} {name}')
+                if m == 3:
+                    r = np.unique(y, return_inverse=True)[1].astype(float) + 1.0
+                    np.testing.assert_array_equal(time_delay_embed(r, 3, tau), _ref_embed_ro(r, tau))
+                z = np.clip(np.floor(6 * (y - y.min()) / max(np.ptp(y), 1)) + 1, 1, 6).astype(np.int64)
+                new_z = time_delay_embed(z, m, tau).astype(np.int64)
+                old_z = _ref_embed_disp(z, m, tau)
+                assert new_z.dtype == old_z.dtype
+                np.testing.assert_array_equal(new_z, old_z)
+        for M in (1, 2, 3):
+            Nv = len(y) - M
+            for m in range(1, M + 2):
+                np.testing.assert_array_equal(time_delay_embed(y, m, 1)[:Nv], _ref_embed_fuzzy(y, m, Nv))
+
+
+def _ref_embed_pca(y, tau='ac', m=3):
+    # main 0fa9013 pyhctsa/operations/nonlinearity.py:885-929 (embed_pca body; warnings dropped)
+    tau = get_tau(y, tau)
+    if np.isnan(tau):
+        return np.nan
+    try:
+        y_embed = time_delay_embed(y, m, int(tau))
+    except ValueError:
+        return np.nan
+    if y_embed.shape[0] - 1 < m or m < 2:
+        return np.nan
+    pca = PCA().fit(y_embed)
+    perc = pca.explained_variance_ / np.sum(pca.explained_variance_)
+    _first_fn = NL._first_fn
+    out = {}
+    for i in range(m):
+        out[f'perc_{i+1}'] = perc[i]
+    out['std'] = np.std(perc, ddof=1)
+    out['range'] = np.ptp(perc)
+    out['min'] = np.min(perc)
+    out['max'] = np.max(perc)
+    out['top2'] = np.sum(perc[:2])
+    csperc = np.cumsum(perc)
+    out['nto50'] = _first_fn(csperc, 0.5, 'over')
+    out['nto60'] = _first_fn(csperc, 0.6, 'over')
+    out['nto70'] = _first_fn(csperc, 0.7, 'over')
+    out['nto80'] = _first_fn(csperc, 0.8, 'over')
+    out['nto90'] = _first_fn(csperc, 0.9, 'over')
+    out['fb05'] = _first_fn(perc, 0.5, 'under')
+    out['fb02'] = _first_fn(perc, 0.2, 'under')
+    out['fb01'] = _first_fn(perc, 0.1, 'under')
+    out['fb001'] = _first_fn(perc, 0.01, 'under')
+    return out
+
+
+@pytest.mark.parametrize('tau,m', [('ac', 2), ('ac', 3), (1, 4), (3, 5), ('ac', 1), (1, 40)])
+def test_ref_embed_pca(tau, m):
+    for name, y in _ref_series().items():
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            logging.disable(logging.CRITICAL)
+            try:
+                old = _ref_embed_pca(y.copy(), tau, m)
+                new = NL.embed_pca(y.copy(), tau, m)
+            finally:
+                logging.disable(logging.NOTSET)
+        if not isinstance(old, dict):  # NaN (`dict_output` may expand it to a dict of NaNs)
+            vals = list(new.values()) if isinstance(new, dict) else [new]
+            assert np.all(np.isnan(np.asarray(vals, dtype=float))), (name, tau, m)
+            continue
+        assert list(new) == list(old), (name, tau, m)
+        np.testing.assert_allclose([float(new[k]) for k in old], [float(v) for v in old.values()],
+                                   rtol=1e-12, atol=0, err_msg=f'{name} tau={tau} m={m}')
+
+
+def _ref_embed_pair(y, embed_params):
+    # main 0fa9013 pyhctsa/operations/nonlinearity.py:262-265 (_embed_tau_m) and 1883-1891
+    # (takens_estimator; fractal_dimensions at 2117-2125 is the same up to its log message)
+    if not isinstance(embed_params, (list, tuple)) or len(embed_params) != 2:
+        raise ValueError('Embedding parameters are formatted incorrectly -- need [tau, m]')
+    params = NL._embedding_params(y, embed_params[0], embed_params[1])
+    tau, m = (np.nan, np.nan) if params is None else params
+    if np.isnan(tau):
+        return None
+    try:
+        return time_delay_embed(y, m, tau)
+    except ValueError:
+        return None
+
+
+@pytest.mark.parametrize('embed_params', [('ac', 3), [1, 2], (2, 5), ('ac', 'fnn'), (1, 200)])
+def test_ref_embed_pair(embed_params):
+    for name, y in _ref_series().items():
+        logging.disable(logging.CRITICAL)
+        try:
+            old = _ref_embed_pair(y, embed_params)
+            new = NL._bf_embed_pair(y, embed_params)
+        finally:
+            logging.disable(logging.NOTSET)
+        if old is None:
+            assert new is None, (name, embed_params)
+        else:
+            np.testing.assert_array_equal(new, old, err_msg=f'{name} {embed_params}')
