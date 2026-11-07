@@ -1,6 +1,7 @@
 from typing import Union
 
 import numpy as np
+from ..utils import _quantile
 from numpy.typing import ArrayLike
 import scipy
 from numba import njit
@@ -262,7 +263,7 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
     stdk = np.std(k, ddof=1)
     mediank = np.median(k)
     maxk = np.max(k)
-    q05, q25, q75, q95 = np.quantile(k, [0.05, 0.25, 0.75, 0.95], method='hazen')
+    q05, q25, q75, q95 = _quantile(k, [0.05, 0.25, 0.75, 0.95])
 
     out = {}
     # Degree distribution: basic statistics

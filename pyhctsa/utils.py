@@ -629,6 +629,38 @@ def _round_half_away_array(x: ArrayLike) -> np.ndarray:
     return np.asarray(out, dtype=float)
 
 
+def _quantile(x: ArrayLike, q, axis: Union[int, None] = None, method: str = 'hazen'):
+    """Quantile(s) of ``x`` with an explicit definition (Hazen's by default).
+
+    This is ``numpy.quantile(x, q, axis=axis, method=method)`` unchanged, so NaN propagates, an
+    empty input behaves as in NumPy, and the return type follows ``q`` (a scalar for scalar ``q``
+    with ``axis=None``, an array with ``q``'s shape leading otherwise). pyhctsa's convention is
+    ``method='hazen'`` (Hyndman & Fan 1996, definition 5: piecewise linear through the points
+    ``((i - 0.5)/n, x_(i))``); a site that needs another definition passes it by name.
+
+    Parameters
+    ----------
+    x : array_like
+        Data.
+    q : float or array_like
+        Probabilities in [0, 1] (not percentages).
+    axis : int or None
+        Axis to operate along; ``None`` flattens.
+    method : str
+        NumPy quantile method.
+    """
+    return np.quantile(x, q, axis=axis, method=method)
+
+
+def _iqr(x: ArrayLike, axis: Union[int, None] = None, method: str = 'hazen'):
+    """Interquartile range ``Q(0.75) - Q(0.25)`` of ``x``, via :func:`_quantile`.
+
+    NaN propagates; ``axis`` and ``method`` are as in :func:`_quantile` (Hazen by default).
+    """
+    q25, q75 = np.quantile(x, [0.25, 0.75], axis=axis, method=method)
+    return q75 - q25
+
+
 def _sample_std(x: ArrayLike, axis: Union[int, None] = None):
     """Sample standard deviation with the N-1 normalization; 0 for a single observation.
 
@@ -1348,7 +1380,7 @@ def binarize(y: ArrayLike, binarize_how: str = 'diff', lag: int = 1) -> ArrayLik
     elif binarize_how == 'iqr':
         # Binary signal: 1 if inside the interquartile range (above the 25th percentile
         # and up to the 75th), 0 otherwise
-        iqr = np.quantile(y,[.25,.75], method='hazen')
+        iqr = _quantile(y, [.25, .75])
         iniqr = np.logical_and(y > iqr[0], y <= iqr[1])
         y_bin = np.zeros(len(y))
         y_bin[iniqr] = 1

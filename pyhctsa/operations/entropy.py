@@ -5,6 +5,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 import numpy as np
+from ..utils import _quantile
 import pywt
 from numpy.typing import ArrayLike
 from numba import njit
@@ -158,8 +159,8 @@ def distribution_entropy(
     y = np.asarray(y, dtype=float)
     if olremp != 0:
         y_hat = y[
-            (y >= np.quantile(y, olremp, method='hazen')) &
-            (y <= np.quantile(y, 1 - olremp, method='hazen'))
+            (y >= _quantile(y, olremp)) &
+            (y <= _quantile(y, 1 - olremp))
         ]
         if y_hat.size == 0:
             return np.nan
@@ -192,7 +193,7 @@ def distribution_entropy(
         # log(bin width) term in the entropy sum, so the grid is anchored to extreme quantiles
         # instead (consistent estimators, so the interval converges as N grows).
         num_grid_pts = 200
-        lo, hi = np.quantile(y, [0.001, 0.999], method='hazen')
+        lo, hi = _quantile(y, [0.001, 0.999])
         if not hi > lo:  # degenerate (near-constant) input
             return np.nan
         pad = 0.1 * (hi - lo)  # a little headroom beyond the quantile range
