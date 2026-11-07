@@ -2,8 +2,13 @@
 `scaling._dfa_fluctuation` (the q-th order fluctuation function, with mfdfa's eps floor and
 log-domain evaluation as explicit arguments) and `scaling._log_tau_grid` (duplication-audit theme 15).
 
-The reference values were generated before the refactor, from origin/dup-goodness-of-fit at 4a495c2
-(output-identical to main at 0fa9013), so these tests check that every output is unchanged.
+Two kinds of check:
+
+- Same-runner reference (the equivalence check): verbatim copies of the code the refactor replaced
+  (``_ref_*``, from main 0fa9013) are compared with the shared helpers on seeded inputs, including
+  windows of exactly zero variance and q <= 0, at rtol 1e-12, atol 0, on whatever machine runs the test.
+- Operation-level pins: values generated before the refactor, from origin/dup-goodness-of-fit at
+  4a495c2 (output-identical to main at 0fa9013), with a per-operation tolerance (see `RTOL`).
 """
 import warnings
 
@@ -11,7 +16,89 @@ import numpy as np
 import pytest
 
 from pyhctsa.operations import scaling
-from pyhctsa.utils import z_score
+from pyhctsa.utils import _arange_inclusive, _round_half_away_array, z_score
+
+
+# --- Verbatim copies of the replaced code (main 0fa9013) ----------------------------------------
+
+def _ref_dfa_fluctuation(resid: np.ndarray, q: float) -> float:
+    # pyhctsa/operations/scaling.py:30-47 (main 0fa9013), the whole function (docstring dropped);
+    # used by the DFA path of fluctuation_analysis
+    var = np.mean(resid ** 2, axis=0)
+    if q == 2:
+        return float(np.sqrt(np.mean(var)))
+    if q <= 0 and np.any(var <= 0):
+        return np.nan
+    if q == 0:
+        return float(np.exp(0.5 * np.mean(np.log(var))))
+    return float(np.mean(var ** (q / 2)) ** (1 / q))
+
+
+def _ref_mfdfa_scales(min_scale, max_scale, num_scales):
+    # pyhctsa/operations/scaling.py:608 (main 0fa9013)
+    scales = np.unique(_round_half_away_array(np.exp(np.linspace(np.log(min_scale), np.log(max_scale), num_scales)))).astype(int)
+    return scales
+
+
+def _ref_mfdfa_log_fq_row(detrended_segs, q_true):
+    # pyhctsa/operations/scaling.py:613-616, 623, 632-638 (main 0fa9013): ln F_q(s) at one scale,
+    # from the detrended segments (segs @ resid_op.T, one segment per row)
+    q_list = q_true.copy()
+    q_zero = np.flatnonzero(q_true == 0)
+    q_list[q_list == 0] = 1e-4  # q = 0 handled separately via log-averaging below
+    q_zero_idx = q_zero[0] if q_zero.size else None
+    log_fq = np.full(q_list.size, np.nan)
+    eps = np.finfo(float).eps
+    F2 = np.mean((detrended_segs) ** 2, axis=1)
+    F2[F2 < eps] = eps  # floor to avoid log(0) / 0^(negative q)
+    for qi, q in enumerate(q_list):
+        log_fq[qi] = (1 / q) * np.log(np.mean(F2 ** (q / 2)))
+    if q_zero_idx is not None:
+        # q = 0 limit: F_0(s) = exp{ (1/(4Ns)) * sum( log F^2(s,v) ) }
+        log_fq[q_zero_idx] = np.mean(np.log(F2)) / 2
+    return log_fq
+
+
+def _ref_windows():
+    """Seeded detrended-window matrices (segments x window length), some with windows of exactly
+    zero variance and some with variances below machine epsilon."""
+    r = np.random.default_rng(150)
+    out = []
+    for nseg, s in ((4, 10), (16, 25), (60, 7)):
+        x = r.standard_normal((nseg, s))
+        out.append(x)
+        z = x.copy()
+        z[0] = 0.0
+        z[1] *= 1e-9  # variance about 1e-18, below eps
+        out.append(z)
+        out.append(np.zeros((nseg, s)))
+    return out
+
+
+def test_reference_dfa_fluctuation():
+    # fluctuation_analysis's DFA path: _dfa_fluctuation(resid, q) with its defaults (windows as
+    # columns), for orders including 2, 0 and negative q on windows of zero variance
+    with np.errstate(all='ignore'):
+        for w in _ref_windows():
+            for q in (-3, -0.5, 0, 0.5, 1, 2, 2.5, 4):
+                np.testing.assert_allclose(scaling._dfa_fluctuation(w.T, q), _ref_dfa_fluctuation(w.T, q),
+                                           rtol=1e-12, atol=0, err_msg=f'q={q}')
+
+
+def test_reference_mfdfa_log_fq():
+    # mfdfa's per-scale ln F_q(s), now _dfa_fluctuation(..., floor=eps, log=True), with and without q = 0
+    eps = np.finfo(float).eps
+    with np.errstate(all='ignore'):
+        for w in _ref_windows():
+            for q_min, q_max in ((-5, 5), (1, 4), (-2, -0.5)):
+                q_true = _arange_inclusive(q_min, 0.5, q_max)
+                np.testing.assert_allclose(scaling._dfa_fluctuation(w.T, q_true, floor=eps, log=True),
+                                           _ref_mfdfa_log_fq_row(w, q_true), rtol=1e-12, atol=0)
+
+
+def test_reference_scale_grid():
+    for lo, hi, n in ((10, 250, 20), (10, 40, 20), (4, 1000, 20), (6, 13, 20)):
+        np.testing.assert_array_equal(scaling._log_tau_grid(lo, hi, n), _ref_mfdfa_scales(lo, hi, n))
 
 
 def _series():
@@ -66,9 +153,17 @@ FA_DFA = {  # fluctuation_analysis(x, q=q, wtf='dfa', k=1): (q, series) -> outpu
 }
 
 
+# Tolerance of the pins, tier 2 (linear algebra and least squares), rtol 1e-8: every output here is
+# computed from DFA fluctuation functions whose detrending is a pinv (mfdfa) or QR (fluctuation_analysis)
+# projection, followed by np.polyfit / least-squares line and broken-line fits, so it depends on the
+# LAPACK build's summation order. None of the pinned values is near zero (mfdfa's plateau alphaMin,
+# rounding noise around 0, is already left out), so no atol is needed.
+RTOL = 1e-8
+
+
 def _check(out, expected):
     for key, val in expected.items():
-        np.testing.assert_allclose(out[key], val, rtol=1e-12, atol=0, err_msg=key)
+        np.testing.assert_allclose(out[key], val, rtol=RTOL, atol=0, err_msg=key)
 
 
 @pytest.mark.parametrize('name', sorted(MFDFA))
