@@ -8,7 +8,6 @@ from numba import njit as _njit
 from numpy.typing import ArrayLike
 from scipy.optimize import minimize_scalar
 from scipy.signal import correlate, find_peaks, welch as _welch
-from scipy.spatial import cKDTree
 from scipy.spatial.distance import pdist, squareform
 from scipy.special import digamma, gammaln
 from scipy.stats import norm as _norm, spearmanr
@@ -28,7 +27,7 @@ from ..toolboxes.Tisean_3_0_1.ports import (  # noqa: F401 (_c1_centers is used 
     _tisean_boxcount, _tisean_lyap_r,
 )
 from ..robust import bf_hist_edges, bf_random, bf_random_seed, bf_spread_perm
-from ..utils import _even_split_points, dict_output, _round_half_away, get_tau, theiler_window, _theiler_int, time_delay_embed
+from ..utils import _even_split_points, dict_output, _round_half_away, get_tau, theiler_window, _theiler_int, time_delay_embed, _knn_theiler
 
 logger = logging.getLogger('pyhctsa')
 
@@ -2090,19 +2089,11 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
         ref_idx = bf_spread_perm(n_emb)[:int(nref)]  # evenly spread subsample (deterministic)
 
     # For each reference point, the distances to its 1st..kmax-th nearest neighbors outside
-    # the Theiler window (a KD-tree, over-fetching neighbors to cover those excluded)
-    k_fetch = min(n_emb - 1, kmax + 2 * past + 5)
-    dist, idx = cKDTree(emb).query(emb[ref_idx], k=k_fetch + 1)
-    valid = np.abs(idx - ref_idx[:, None]) > past
+    # the Theiler window
+    dist = _knn_theiler(emb, kmax, past, query=ref_idx)[0]
+    if np.isinf(dist).any():
+        return np.nan  # not enough valid neighbors exist at all
     tol = 1e-12 * np.ptp(y)  # distances below this are zero up to rounding
-    dist = np.sort(np.where(valid, dist, np.inf), axis=1)[:, :kmax]
-    for ii in np.flatnonzero(valid.sum(axis=1) < kmax):  # fall back to a full search
-        all_dists = np.linalg.norm(emb - emb[ref_idx[ii]], axis=1)
-        all_dists[np.abs(np.arange(n_emb) - ref_idx[ii]) <= past] = np.inf
-        all_dists = np.sort(all_dists)
-        if np.sum(np.isfinite(all_dists)) < kmax:
-            return np.nan  # not enough valid neighbors exist at all
-        dist[ii] = all_dists[:kmax]
     # dist[i, k]: the i-th reference point's distance to its (k+1)-th nearest neighbor
 
     # Sweep the moment order and fit a dimension D(gamma) to each
@@ -3736,21 +3727,11 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
         refs = np.arange(n_emb)
     else:
         refs = np.unique(_even_split_points(1, n_emb, int(nref))) - 1  # nref evenly spread points
-    # at most 2*past + 1 points (the reference point itself included) fall within the Theiler
-    # window, so nnr + 2*past + 1 neighbors always hold nnr valid ones
-    k = min(n_emb, nnr + 2 * past + 1)
     tol = 1e-12 * np.ptp(y)  # distances closer than this are equal
-    tree = KDTree(Y)
     r2 = np.full(n_emb, np.nan)
-    chunk = max(1, int(2e6 // k))
-    for c in range(0, refs.size, chunk):
-        the_refs = refs[c:c + chunk]
-        dist, idx = tree.query(Y[the_refs], k=k)
-        is_valid = np.abs(idx - the_refs[:, None]) > past
-        which_col = np.argmax(np.cumsum(is_valid, axis=1) >= nnr, axis=1)
-        # (the boundary is included, with the tolerance, so that every point at the nnr-th
-        # neighbor's distance is in, whatever the arithmetic path to it)
-        r2[the_refs] = (dist[np.arange(the_refs.size), which_col] + tol) ** 2
+    # (the boundary is included, with the tolerance, so that every point at the nnr-th
+    # neighbor's distance is in, whatever the arithmetic path to it)
+    r2[refs] = (_knn_theiler(Y, nnr, past, query=refs, tree='sklearn')[0][:, nnr-1] + tol) ** 2
 
     # The number of valid (Theiler-excluded) points in each neighborhood: nnr, or more where
     # points tie with the nnr-th neighbor
