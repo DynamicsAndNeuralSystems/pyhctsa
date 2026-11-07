@@ -6,6 +6,7 @@ from collections import OrderedDict
 from typing import Union
 
 import numba
+from ..utils import _sample_var
 import numpy as np
 from numpy.typing import ArrayLike
 from numpy.lib.stride_tricks import sliding_window_view
@@ -153,10 +154,10 @@ def _gaussian_hmm_fit(y_train: np.ndarray, num_states: int, n_cycles: int = 30,
     x = np.ascontiguousarray(y_train, dtype=float).ravel()
     K = int(num_states)
     N = len(x)
-    v = np.var(x, ddof=1)
+    v = _sample_var(x)
     xs = np.sort(x)
     idx = np.ceil(N * (np.arange(1, K + 1) - 0.5) / K).astype(int) - 1
-    mean_sets = [xs[idx], np.mean(x) + np.std(x, ddof=1) * np.linspace(-1, 1, K)]
+    mean_sets = [xs[idx], np.mean(x) + _sample_std(x) * np.linspace(-1, 1, K)]
     pi0 = np.ones(K) / K
     best_ll = -np.inf
     best = (np.full(K, np.nan), np.nan, np.full((K, K), np.nan), np.full(K, np.nan), np.nan)
@@ -268,9 +269,9 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3) -> dict:
 
     # Transition matrix
     out['Pmeandiag'] = np.mean(np.diag(p_matrix))
-    out['stdmeanP'] = np.std(np.mean(p_matrix, axis=0), ddof=1)
+    out['stdmeanP'] = _sample_std(np.mean(p_matrix, axis=0))
     out['maxP'] = np.max(p_matrix)
-    out['stdP'] = np.std(p_matrix, ddof=1)
+    out['stdP'] = _sample_std(p_matrix)
 
     # Within-sample log-likelihood
     out['LLtrainpersample'] = ll_train / n_train
@@ -977,7 +978,7 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     out['maxsigma'] = np.max(sigmas)
     out['minsigma'] = np.min(sigmas)
     out['rangesigma'] = np.max(sigmas) - np.min(sigmas) if has else 0.0
-    out['stdsigma'] = np.std(sigmas, ddof=1) if has else 0.0   # (exactly 0 for constant variance)
+    out['stdsigma'] = _sample_std(sigmas) if has else 0.0   # (exactly 0 for constant variance)
     out['meansigma'] = np.mean(sigmas)
 
     # Check the standardized residuals: residuals (mean process minus data)
@@ -1168,7 +1169,7 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
 
     # How much the constant varies with each order
     def _std_omitnan(values):
-        # standard deviation of each column over its non-NaN entries (0 for a single entry)
+        # standard deviation of each column over its non-NaN entries (NaN for a single entry)
         return np.array([_sample_std(col[~np.isnan(col)]) for col in values.T])
 
     out['Ks_vary_p'] = np.nan if floor_var.any() else np.nanmean(_std_omitnan(ks))
@@ -2298,7 +2299,7 @@ def _fb_lsq(y: np.ndarray, p: int) -> tuple:
 
 def _fpe_stats(fpes: np.ndarray) -> dict:
     """Spread statistics of the final prediction errors across segments (``fpe_*`` outputs)."""
-    return {'fpe_std': np.std(fpes, ddof=1), 'fpe_mean': np.mean(fpes), 'fpe_max': np.max(fpes),
+    return {'fpe_std': _sample_std(fpes), 'fpe_mean': np.mean(fpes), 'fpe_max': np.max(fpes),
             'fpe_min': np.min(fpes), 'fpe_range': np.ptp(fpes)}
 
 
@@ -2342,7 +2343,7 @@ def _spread_ratio(values: np.ndarray, w: np.ndarray, spans: np.ndarray) -> float
     null = _stationary_sample_var(w, spans)
     if not np.isfinite(null) or null <= _NULL_ROUNDOFF * np.max(w):
         return np.nan
-    return float(np.std(values, ddof=1) / np.sqrt(null))
+    return float(_sample_std(values) / np.sqrt(null))
 
 
 def _max_deviation(values: np.ndarray, w: np.ndarray, spans: np.ndarray) -> float:
@@ -2645,12 +2646,12 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         vals, counts = np.unique(orders, return_counts=True)
         out['orders_mode'] = vals[np.argmax(counts)]  # the smallest value among ties
         out['orders_mean'] = np.mean(orders)
-        out['orders_std'] = np.std(orders, ddof=1)
+        out['orders_std'] = _sample_std(orders)
         out['orders_max'] = np.max(orders)
         out['orders_min'] = np.min(orders)
         out['orders_range'] = np.ptp(orders)
         out['sbcs_mean'] = np.mean(sbcs)
-        out['sbcs_std'] = np.std(sbcs, ddof=1)
+        out['sbcs_std'] = _sample_std(sbcs)
         out['sbcs_range'] = np.ptp(sbcs)
         out['sbcs_min'] = np.min(sbcs)
         out['sbcs_max'] = np.max(sbcs)
@@ -2672,7 +2673,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         coef_var = _ar_coef_var(mom) if np.all(mom['n_res'] - p >= 1) else np.full(p, np.nan)
         # statistics on the fitted AR parameters, as in the polynomial 1 + a_1 z^-1 + ...
         for i in range(p):
-            out[f'a_{i+1}_std'] = np.std(avals[:, i], ddof=1)
+            out[f'a_{i+1}_std'] = _sample_std(avals[:, i])
             out[f'a_{i+1}_mean'] = np.mean(avals[:, i])
             out[f'a_{i+1}_max'] = np.max(avals[:, i])
             out[f'a_{i+1}_min'] = np.min(avals[:, i])
@@ -2702,7 +2703,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         if not np.all(np.isfinite(xperr)):
             return np.nan
         iqr = lambda v: _nan_quantile(v, 0.75) - _nan_quantile(v, 0.25)
-        out['std'] = np.std(xperr.ravel(), ddof=1)
+        out['std'] = _sample_std(xperr.ravel())
         out['range'] = np.ptp(xperr)
         out['iqr'] = iqr(xperr.ravel())
         offdiag = np.concatenate([xperr[np.tril_indices(num_pred, -1)],
@@ -2712,19 +2713,19 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
             out['iqroffdiag'] = out['stdoffdiag'] = out['rangeoffdiag'] = np.nan
         else:
             out['iqroffdiag'] = iqr(offdiag)
-            out['stdoffdiag'] = np.std(offdiag, ddof=1) if offdiag.size > 1 else 0.0
+            out['stdoffdiag'] = _sample_std(offdiag)
             out['rangeoffdiag'] = np.ptp(offdiag)
         # how differently each segment's model behaves as a predictor vs as a target
         col_mean, col_med = np.mean(xperr, axis=0), np.median(xperr, axis=0)
-        col_range, col_std = np.ptp(xperr, axis=0), np.std(xperr, axis=0, ddof=1)
-        out['stdmean'] = np.std(col_mean, ddof=1)
+        col_range, col_std = np.ptp(xperr, axis=0), _sample_std(xperr, axis=0)
+        out['stdmean'] = _sample_std(col_mean)
         out['rangemean'] = np.ptp(col_mean)
-        out['stdmedian'] = np.std(col_med, ddof=1)
+        out['stdmedian'] = _sample_std(col_med)
         out['rangemedian'] = np.ptp(col_med)
         out['rangerange'] = np.ptp(col_range)
-        out['stdrange'] = np.std(col_range, ddof=1)
+        out['stdrange'] = _sample_std(col_range)
         out['rangestd'] = np.ptp(col_std)
-        out['stdstd'] = np.std(col_std, ddof=1)
+        out['stdstd'] = _sample_std(col_std)
         out['mineig'] = np.min(np.linalg.eigvals(xperr).real)
         # error of the other segments' models in excess of each segment's own, relative to sampling error
         out['excess_ratio'] = _crosspred_excess_ratio(xperr ** 2, _ar_pooled_moments(segs, coefs, int(order)))
@@ -2769,7 +2770,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         out.update(_fpe_stats(fpes))
         for letter, coefs in (('p', ps), ('q', qs)):
             for i in range(1, coefs.shape[1]):  # (the first column is 1)
-                out[f'{letter}_{i}_std'] = np.std(coefs[:, i], ddof=1)
+                out[f'{letter}_{i}_std'] = _sample_std(coefs[:, i])
                 out[f'{letter}_{i}_mean'] = np.mean(coefs[:, i])
                 out[f'{letter}_{i}_max'] = np.max(coefs[:, i])
                 out[f'{letter}_{i}_min'] = np.min(coefs[:, i])
@@ -2867,7 +2868,7 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         curve = stats_st[:, col]
         out[f'{name}_chn'] = np.mean(np.diff(curve)) / np.ptp(curve)
         out[f'{name}_meansgndiff'] = np.mean(np.sign(np.diff(curve)))
-        out[f'{name}_stdn'] = np.std(curve, ddof=1) / np.ptp(curve)
+        out[f'{name}_stdn'] = _sample_std(curve) / np.ptp(curve)
         if name == 'sws':
             # global least-squares exponential fit f(l) = a exp(b l) + c to the sws curve
             f_exp = bf_exp_fit(train_length_range.astype(float), curve, True)
@@ -3172,7 +3173,7 @@ def _is_rounding_level(e: np.ndarray, scale_y: float = 0.0) -> bool:
     rounding noise.
     """
     e = np.asarray(e, dtype=float).ravel()
-    sd = np.std(e, ddof=1) if e.size > 1 else 0.0
+    sd = _sample_std(e)
     return not (sd > 1e-9 * max(float(scale_y), float(np.mean(np.abs(e)))))
 
 
@@ -3259,9 +3260,9 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
     out = {}
     out['meane'] = np.mean(e)
     out['meanabs'] = np.mean(np.abs(e))
-    std_e = np.std(e, ddof=1)
+    std_e = _sample_std(e)
     out['stde'] = std_e
-    scale_y = 0.0 if y is None else float(np.std(np.asarray(y, dtype=float).ravel(), ddof=1))
+    scale_y = 0.0 if y is None else float(_sample_std(np.asarray(y, dtype=float).ravel()))
     if _is_rounding_level(e, scale_y):
         # every other field is a rounding-noise statistic: NaN
         shape = ['maxonstd', 'ac1', 'ac2', 'ac3', 'propbth', 'taurat', 'sws', 'swm']
@@ -3395,7 +3396,7 @@ def ar_cov(y: ArrayLike, p: int = 2) -> dict:
     y = np.asarray(y, dtype=float).ravel()
     p = int(p)
     phi, noise_var = _arcov(y, p)  # AR(p) coefficients and noise variance (covariance method)
-    var_y = np.var(y, ddof=1)
+    var_y = _sample_var(y)
     if noise_var < 1e-12 * var_y or not var_y > 0:
         return np.nan
     a = np.concatenate(([1], -phi))
@@ -3492,7 +3493,7 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
         return np.nan
     # An exactly predictable series has a singular design and a noise variance at the level
     # of rounding error: nothing to report
-    var_y = np.var(y, ddof=1)
+    var_y = _sample_var(y)
     if Cest < 1e-12 * var_y or not var_y > 0:
         return np.nan
     ps = np.arange(p_min, p_max + 1)
@@ -3510,7 +3511,7 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
     out['maxA'] = np.max(Aest)
     out['minA'] = np.min(Aest)
     out['meanA'] = np.mean(Aest)
-    out['stdA'] = np.std(Aest, ddof=1) if len(Aest) > 1 else 0.0
+    out['stdA'] = _sample_std(Aest, single=0.0)  # spread over the fitted model's own components: 0 for one (AR(1))
     out['sumA'] = np.sum(Aest)
     out['rmsA'] = np.sqrt(np.sum(Aest ** 2))
 
@@ -3556,7 +3557,7 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
     out['maxReLambda'] = np.max(lam.real)
     out['maxImLambda'] = np.max(lam.imag)
     out['maxabsLambda'] = np.max(np.abs(lam))
-    out['stdabsLambda'] = np.std(np.abs(lam), ddof=1) if len(lam) > 1 else 0.0
+    out['stdabsLambda'] = _sample_std(np.abs(lam), single=0.0)  # spread over the fitted model's own components: 0 for one (AR(1))
 
     per_special = ~np.isfinite(per[0])
     per_filtered = np.where(per_special, np.nan, per[0])
@@ -3564,20 +3565,19 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
         warnings.simplefilter('ignore', category=RuntimeWarning)
         out['hasInfper'] = int(np.sum(per_special))
         out['meanper'] = np.nanmean(per_filtered)
-        out['stdper'] = np.nanstd(per_filtered, ddof=1) if np.sum(~np.isnan(per_filtered)) > 1 else (
-            0.0 if np.sum(~np.isnan(per_filtered)) == 1 else np.nan)
+        out['stdper'] = _sample_std(per_filtered[~np.isnan(per_filtered)], single=0.0)  # spread over the fitted model's own components: 0 for one (AR(1))
         out['maxper'] = np.nanmax(per_filtered)
         out['minper'] = np.nanmin(per_filtered)
         out['meanpererr'] = np.nanmean(per[1])
     out['meantau'] = np.mean(tau[0])
     out['maxtau'] = np.max(tau[0])
     out['mintau'] = np.min(tau[0])
-    out['stdtau'] = np.std(tau[0], ddof=1) if len(tau[0]) > 1 else 0.0
+    out['stdtau'] = _sample_std(tau[0], single=0.0)  # spread over the fitted model's own components: 0 for one (AR(1))
     out['meantauerr'] = np.mean(tau[1])
     out['maxexctn'] = np.max(exctn)
     out['minexctn'] = np.min(exctn)
     out['meanexctn'] = np.mean(exctn)
-    out['stdexctn'] = np.std(exctn, ddof=1) if len(exctn) > 1 else 0.0
+    out['stdexctn'] = _sample_std(exctn, single=0.0)  # spread over the fitted model's own components: 0 for one (AR(1))
 
     return out
 
@@ -3630,7 +3630,7 @@ def _gp_roundoff_constant(yt: np.ndarray, n: int) -> bool:
     ``std <= 10 * n * eps * rms``, as in :func:`pyhctsa.operations.pre_process.preproc_compare`.
     """
     yt = np.asarray(yt, dtype=float)
-    return bool(np.std(yt, ddof=1) <= 10 * n * np.finfo(float).eps * np.sqrt(np.mean(yt ** 2)))
+    return bool(_sample_std(yt) <= 10 * n * np.finfo(float).eps * np.sqrt(np.mean(yt ** 2)))
 
 
 def _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos=(), len_lo=-np.inf, len_hi=np.inf, amp_pos=()):
@@ -3649,7 +3649,7 @@ def _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos=(), len_
     len_pos = np.asarray(len_pos, dtype=int)
     amp_pos = np.asarray(amp_pos, dtype=int)
     with np.errstate(divide='ignore'):
-        noise_floor = np.log(0.01 * np.std(yt, ddof=1))  # lower bound on the log noise standard deviations and amplitudes
+        noise_floor = np.log(0.01 * _sample_std(yt))  # lower bound on the log noise standard deviations and amplitudes
 
     def _clamp(theta):
         theta = np.array(theta, dtype=float)
@@ -3820,7 +3820,7 @@ def _gp_newton_polish(tt: np.ndarray, yt: np.ndarray, cov, theta: np.ndarray, no
     amp_pos = np.asarray(amp_pos, dtype=int)
     _, nlz = _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos, len_lo, len_hi, amp_pos)
     with np.errstate(divide='ignore'):
-        floor = np.log(0.01 * np.std(yt, ddof=1))
+        floor = np.log(0.01 * _sample_std(yt))
     free = np.ones(n_cov, dtype=bool)
     if x[k] <= floor + 1e-9:
         free[k] = False
@@ -3957,7 +3957,7 @@ def _gp_fit_converged(tt: np.ndarray, yt: np.ndarray, cov, components: list, noi
 
     theta0 = clamp(_gp_init_hyp(components, tt))
     if len(len_pos) and len_pos[0] == 0 and n_cov >= 2:
-        sd = np.std(yt, ddof=1)
+        sd = _sample_std(yt)
         best_v = np.inf
         with np.errstate(divide='ignore'):
             floor = np.log(0.01 * sd)
@@ -4159,9 +4159,9 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     # rms error from mean function, mu
     out['stde'] = np.sqrt(np.mean((y_ts - mu) ** 2))
     out['meanabs_std'] = np.mean(np.abs(y_ts - mu) / S)
-    out['stdmu'] = np.std(mu, ddof=1)
+    out['stdmu'] = _sample_std(mu)
     out['meanS'] = np.mean(S)
-    out['stdS'] = np.std(S, ddof=1)
+    out['stdS'] = _sample_std(S)
 
     # Negative log marginal likelihood per point (gpml's nlZ divided by the number of
     # points, so that it does not grow with the number of points, up to 2000)
@@ -4375,8 +4375,8 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
         # A window whose training data are constant (to rounding error, relative to the
         # series) cannot be standardized and carries no information about a GP: skip it
-        yt_mean, yt_std = np.mean(yt), np.std(yt, ddof=1)
-        if not yt_std > 1e-8 * np.std(y, ddof=1):
+        yt_mean, yt_std = np.mean(yt), _sample_std(yt)
+        if not yt_std > 1e-8 * _sample_std(y):
             continue
 
         # Process to normalize scales (the same transformation for both sets)
@@ -4684,7 +4684,7 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
     dv = np.diff(v)
     if len(dv) > 0:
         out['meandiff'] = np.mean(dv)
-        out['stddiff'] = np.std(dv, ddof=1) if len(dv) > 1 else 0.0
+        out['stddiff'] = _sample_std(dv)
         out['maxdiff'] = np.max(np.abs(dv))
         out['meddiff'] = np.median(dv)
     else:
@@ -4692,7 +4692,7 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
 
     # where does it steady off?
     nv = len(v)
-    stdfromi = np.array([(np.std(v[i:], ddof=1) if nv - i > 1 else 0.0) / np.sqrt(nv - i)
+    stdfromi = np.array([_sample_std(v[i:], single=0.0) / np.sqrt(nv - i)  # last point (one value): 0, keeps the curve's max defined
                          for i in range(nv)])
     pos = stdfromi[stdfromi > 0]
     out['minstdfromi'] = np.min(pos) if len(pos) > 0 else np.nan
@@ -4885,7 +4885,7 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
         mres = _defined_errors(model_residuals(i))
         mf_rms[j] = np.sqrt(np.mean(mres ** 2))
         mf_abs[j] = np.mean(np.abs(mres))
-        if _is_rounding_level(mres, np.std(y, ddof=1)):
+        if _is_rounding_level(mres, _sample_std(y)):
             # errors that do not vary beyond the level of rounding (e.g., an exactly predictable
             # series): their autocorrelation is not meaningful
             mf_ac1[j] = np.nan
@@ -4931,7 +4931,7 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
     d = np.diff(mf_rms)
     out['stde_meandiff'] = np.mean(d)
     out['stde_maxdiff'] = np.max(d)
-    out['stde_stddiff'] = np.std(d, ddof=1)
+    out['stde_stddiff'] = _sample_std(d)
     out['stde_ndown'] = int(np.sum(d < 0))
     return out
 
@@ -5010,7 +5010,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
-    sigma_y = np.std(y, ddof=1)  # used to flag degenerate (near-constant) test segments
+    sigma_y = _sample_std(y)  # used to flag degenerate (near-constant) test segments
     if ord is None:
         ord = 2
     sample_p = np.atleast_1d(np.asarray(sample_p, dtype=float))
@@ -5084,16 +5084,16 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
         # statistics on the output time series
         meandiffs[i] = abs(np.mean(yp) - np.mean(y_test))
         # near-constant test segments: the ratio of standard deviations is undefined, not just large
-        if np.std(y_test, ddof=1) < 1e-6 * sigma_y:
+        if _sample_std(y_test) < 1e-6 * sigma_y:
             stdrats[i] = np.nan
         else:
-            stdrats[i] = np.std(yp, ddof=1) / np.std(y_test, ddof=1)
+            stdrats[i] = _sample_std(yp) / _sample_std(y_test)
 
     def iqr(x):
         return _nan_quantile(x, 0.75) - _nan_quantile(x, 0.25) if len(x) > 0 else np.nan
 
     def std(x):
-        return np.std(x, ddof=1) if len(x) > 1 else (0.0 if len(x) == 1 else np.nan)
+        return _sample_std(x)
 
     def mean(x):
         return np.mean(x) if len(x) > 0 else np.nan
@@ -5456,8 +5456,8 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     out['stde'] = np.sqrt(np.mean((y - mu) ** 2))
     # better to look at the mean distance away in units of std
     out['meanabs_std'] = np.mean(np.abs((y - mu) / np.sqrt(S2)))
-    out['std_mu_data'] = np.std(mu, ddof=1)  # std of the mean function at the datapoints
-    out['std_S_data'] = np.std(np.sqrt(S2), ddof=1)  # should vary a fair bit
+    out['std_mu_data'] = _sample_std(mu)  # std of the mean function at the datapoints
+    out['std_S_data'] = _sample_std(np.sqrt(S2))  # should vary a fair bit
 
     # statistics on the predictive variance
     xstar = np.linspace(np.min(t), np.max(t), 1000)

@@ -4,6 +4,7 @@ from typing import Optional, Union
 import logging
 logger = logging.getLogger('pyhctsa')
 
+from ..utils import _sample_std
 import numpy as np
 import pywt
 from numpy.typing import ArrayLike
@@ -28,7 +29,7 @@ def _entropy_summary(ents: np.ndarray) -> dict:
         'minent': np.min(ents),
         'medent': np.median(ents),
         'meanent': np.mean(ents),
-        'stdent': np.std(ents, ddof=1),
+        'stdent': _sample_std(ents),
     }
 
 
@@ -415,7 +416,7 @@ def multi_scale_entropy(
     max_ind = int(np.argmax(samp_ens))
     min_ind = int(np.argmin(samp_ens))
     mean_val = np.mean(samp_ens)
-    std_val = np.std(samp_ens, ddof=1) if num_scales > 1 else 0.0
+    std_val = _sample_std(samp_ens)
     out[f'max{en_name}'] = samp_ens[max_ind]
     out['maxScale'] = scale_range[max_ind]
     out[f'min{en_name}'] = samp_ens[min_ind]
@@ -527,7 +528,7 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
     m = int(m)
     y = np.ascontiguousarray(y, dtype=np.float64)
     if r is None:
-        r = 0.1 * np.std(y, ddof=1)
+        r = 0.1 * _sample_std(y)
     if pre_process_how == 'diff1':
         y = np.ascontiguousarray(np.diff(y))
 
@@ -1012,7 +1013,7 @@ def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2,
     # number of delay vectors of length m and m + 1
     if len(x) - (mnom - 1) * tau < 2 or len(x) - mnom * tau < 2:
         return np.nan
-    r = rth * np.std(x, ddof=1) # threshold of similarity
+    r = rth * _sample_std(x) # threshold of similarity
     phi = _apen_phis(x, mnom, r, tau)
 
     return phi[0] - phi[1]
@@ -1101,7 +1102,7 @@ def bubble_entropy(y: ArrayLike, m: int = 10, tau: Union[int, str] = 1) -> Union
         raise ValueError(f"The embedding dimension must be at least 2 (m = {m} given)")
     out = {'bubbleEn': np.nan}
     y = np.asarray(y, dtype=float).ravel()
-    if not np.std(y, ddof=1) > 0:  # constant (or non-finite) series
+    if not _sample_std(y) > 0:  # constant (or non-finite) series
         return out
     tau = get_tau(y, tau)  # resolve a rule once, so both dimensions share one delay
     if np.isnan(tau):
@@ -1528,7 +1529,7 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
     n = y.size
     if randomize_how not in ('statdist', 'dyndist', 'permute'):
         raise ValueError(f"Unknown randomization method '{randomize_how}'.")
-    if not np.isclose(np.mean(y), 0, atol=1e-6) or not np.isclose(np.std(y, ddof=1), 1, atol=1e-6):
+    if not np.isclose(np.mean(y), 0, atol=1e-6) or not np.isclose(_sample_std(y), 1, atol=1e-6):
         logger.warning('The input time series should be z-scored for randomize.')
 
     # The random choices for every step, reproducible from the seed: two uniform draws per
@@ -1892,7 +1893,7 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
 
     # Map the series onto (0, 1), then onto the c amplitude classes
     if mapping_how == 'ncdf':
-        y_mapped = norm.cdf(y, loc=np.mean(y), scale=np.std(y, ddof=1))
+        y_mapped = norm.cdf(y, loc=np.mean(y), scale=_sample_std(y))
     else:
         y_mapped = (y - np.min(y)) / (np.max(y) - np.min(y))
 
@@ -1995,7 +1996,7 @@ def fuzzy_entropy(y: ArrayLike, M: int = 2, r: float = 0.2, n: float = 2) -> dic
     N = y.size
     out = {f'fuzzyEn{m}': np.nan for m in range(1, M + 1)}
 
-    sd = np.std(y, ddof=1) if N > 1 else np.nan
+    sd = _sample_std(y)
     Nv = N - M  # number of starting points shared by every embedding dimension
     if not np.isfinite(sd) or sd == 0 or Nv < 3:
         return out

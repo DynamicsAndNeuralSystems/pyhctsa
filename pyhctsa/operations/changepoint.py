@@ -1,4 +1,5 @@
 import numpy as np
+from ..utils import _sample_std
 
 from ..toolboxes.Max_Little.ML_l1pwc import l1pwc, l1pwc_lmax
 
@@ -78,7 +79,7 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
     out["nsegments"] = num_change_points / N  # will be 1 if there are no changes
 
     # How much reduces variance
-    out["rmsoff"] = np.std(y, ddof=1) - np.std(y - steppedy, ddof=1)
+    out["rmsoff"] = _sample_std(y) - _sample_std(y - steppedy)
 
     # Reduces variance per step
     out["rmsoffpstep"] = out["rmsoff"] / num_change_points
@@ -107,9 +108,9 @@ def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -
     long_ints = chints[chints > 3]
     out["meanstepintgt3"] = np.mean(long_ints) if long_ints.size else np.nan
 
-    # Coefficient of variation of the step intervals (a single interval has spread 0, by the
-    # pyhctsa convention for the standard deviation of one value):
-    sd_ints = np.std(chints, ddof=1) if chints.size > 1 else 0.0
+    # Coefficient of variation of the step intervals (NaN for a single interval, whose spread is
+    # undefined: see utils._sample_std):
+    sd_ints = _sample_std(chints)
     out["cvstepint"] = sd_ints / np.mean(chints)
 
     # Median step interval:

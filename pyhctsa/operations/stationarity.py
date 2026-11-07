@@ -4,6 +4,7 @@ logger = logging.getLogger('pyhctsa')
 import warnings
 from typing import Union
 
+from ..utils import _sample_var
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.signal import detrend, find_peaks
@@ -380,7 +381,7 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     for i in np.nonzero((counts > 0) & (counts < N))[0]:
         g[i] = _variance_inflation(_segment_acf((which_bin == i).astype(float), num_segs, lseg), lseg)
     out['ex_meandiv_ess'] = np.mean(divs) - np.sum(null_terms * np.sqrt(np.maximum(g, 0)))
-    out['stddiv'] = np.std(divs, ddof=1)
+    out['stddiv'] = _sample_std(divs)
 
     return out
 
@@ -431,7 +432,7 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
             tau_l = first_crossing(y_sub, 'ac', 0, 'discrete')
 
             qs[j, 0] = np.mean(y_sub)
-            qs[j, 1] = np.std(y_sub, ddof=1)
+            qs[j, 1] = _sample_std(y_sub)
             qs[j, 2] = skew(y_sub)
             qs[j, 3] = kurtosis(y_sub)
             sampen_out = sample_entropy(y_sub, 2, 0.15)
@@ -450,11 +451,11 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
             qs[j, 9] = _pick(tau_l)  # AC_loc_tau
             qs[j, 10] = tau_l
 
-        fs[i, :num_features] = np.std(qs, ddof=1, axis=0)
+        fs[i, :num_features] = _sample_std(qs, axis=0)
 
     # fs contains std of quantities at all different 'scales' (segment lengths)
     # how much does the 'std stationarity' vary over different scales?
-    fs = np.std(fs, ddof=1, axis=0)
+    fs = _sample_std(fs, axis=0)
 
     # Outputs
     out = {}
@@ -580,7 +581,7 @@ def _calc_me_moments(x_buff: ArrayLike, mom_type: str):
     if mom_type == 'mean':
         moms = np.mean(x_buff, axis=0)
     elif mom_type == 'std':
-        moms = np.std(x_buff, axis=0, ddof=1)
+        moms = _sample_std(x_buff, axis=0)
     elif mom_type == 'median':
         moms = np.median(x_buff, axis=0)
     elif mom_type == 'iqr':
@@ -1002,7 +1003,7 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
     
     # Calculate statistics
     segment_means = np.mean(segments, axis=1)
-    segment_vars = np.var(segments, axis=1, ddof=1)
+    segment_vars = _sample_var(segments, axis=1)
     mean_var = np.mean(segment_vars)
     
     # Prepare output statistics
@@ -1092,7 +1093,7 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     # Compare statistics of this subset to those obtained from the full time series
     out = {}
     out['absmean'] = np.abs(np.mean(y[r])) # Makes sense without normalization if y is z-scored
-    out['std'] = np.std(y[r], ddof=1) # Makes sense without normalization if y is z-scored
+    out['std'] = _sample_std(y[r]) # Makes sense without normalization if y is z-scored
     out['median'] = np.median(y[r]) # if median is very small then normalization could be very noisy
     raw_iqr_yr = np.percentile(y[r], 75, method='hazen') - np.percentile(y[r], 25, method='hazen')
     raw_iqr_y = np.percentile(y, 75, method='hazen') - np.percentile(y, 25, method='hazen')
@@ -1277,7 +1278,7 @@ def std_nth_deriv_change(y: ArrayLike, maxd: int = 10) -> dict:
 def _is_zscored(x: np.ndarray) -> bool:
     # hctsa's BF_iszscored
     tol = 100 * np.finfo(float).eps
-    return bool(abs(np.mean(x)) < tol and abs(np.std(x, ddof=1) - 1) < tol)
+    return bool(abs(np.mean(x)) < tol and abs(_sample_std(x) - 1) < tol)
 
 def _cumsum_bridge_stats(p: ArrayLike) -> Union[dict, float]:
     """
@@ -1318,10 +1319,10 @@ def _cumsum_bridge_stats(p: ArrayLike) -> Union[dict, float]:
 
     # CUSUM bridge relative to the endpoint-to-endpoint line (Inclan-Tiao-style)
     bridge = yC - (t / Np) * yC[-1]
-    scale_factor = np.std(p, ddof=1) * np.sqrt(Np)
+    scale_factor = _sample_std(p) * np.sqrt(Np)
     out['maxBridge'] = np.max(np.abs(bridge)) / scale_factor if scale_factor > 0 else np.nan
     out['posMaxBridge'] = (np.argmax(np.abs(bridge)) + 1) / Np # where the largest deviation from stationarity occurs
-    out['stdBridge'] = np.std(bridge, ddof=1)
+    out['stdBridge'] = _sample_std(bridge)
 
     # Robust vs. OLS regression: is the OLS trend outlier-driven or genuine drift?
     rob_coeffs, rob_stats = robust_linear_fit(t0, yC)
@@ -1329,14 +1330,14 @@ def _cumsum_bridge_stats(p: ArrayLike) -> Union[dict, float]:
     rob_resid = yC - (rob_coeffs[0] + rob_coeffs[1] * t0)
     se_grad = rob_stats['se'][1]
     out['gradientDiffSE'] = (out['gradient'] - robust_gradient) / se_grad if se_grad > 0 else np.nan
-    std_rob_resid = np.std(rob_resid, ddof=1)
-    out['residStdRatio'] = np.std(resid_ols, ddof=1) / std_rob_resid if std_rob_resid > 0 else np.nan
+    std_rob_resid = _sample_std(rob_resid)
+    out['residStdRatio'] = _sample_std(resid_ols) / std_rob_resid if std_rob_resid > 0 else np.nan
 
     # Variance-standardized residual trend: the bridge is not white even under a stationary
     # null -- it has the Brownian-bridge variance envelope Var(bridge(t)) = var(p).t.(Np-t)/Np
     # (an arch shape) -- so standardize by that, then ask whether the standardized squared
     # bridge trends with time (Kendall rank correlation)
-    var_p = np.var(p, ddof=1)
+    var_p = _sample_var(p)
     if var_p > 0 and Np > 21:
         t_int = t[:-1]
         null_var = var_p * t_int * (Np - t_int) / Np
@@ -1427,10 +1428,10 @@ def peak_intervals(y: ArrayLike, min_prom: float = 1) -> dict:
     out = {'meanProm': np.nan, 'cvInt': np.nan, 'acInt1': np.nan}
 
     N = len(y)
-    if N < 20 or not np.all(np.isfinite(y)) or np.std(y, ddof=1) == 0:
+    if N < 20 or not np.all(np.isfinite(y)) or _sample_std(y) == 0:
         return out
 
-    y = (y - np.mean(y)) / np.std(y, ddof=1) # prominence is in units of the series' standard deviation
+    y = (y - np.mean(y)) / _sample_std(y) # prominence is in units of the series' standard deviation
 
     locs, props = find_peaks(y, prominence=min_prom)
     proms = props['prominences']
@@ -1440,7 +1441,7 @@ def peak_intervals(y: ArrayLike, min_prom: float = 1) -> dict:
 
     ipi = np.diff(locs).astype(float) # inter-peak intervals (samples)
     if len(ipi) >= 3:
-        out['cvInt'] = np.std(ipi, ddof=1) / np.mean(ipi)
+        out['cvInt'] = _sample_std(ipi) / np.mean(ipi)
     if len(ipi) >= 5:
         if np.all(ipi == ipi[0]):
             out['acInt1'] = 0.0 # equal intervals (e.g., a periodic series): no serial correlation
@@ -1610,7 +1611,7 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             qs[j, 0] = np.mean(y_sub)
-            qs[j, 1] = np.std(y_sub, ddof=1)
+            qs[j, 1] = _sample_std(y_sub)
             qs[j, 2] = skew(y_sub)
             qs[j, 3] = kurtosis(y_sub, fisher=False)
             pe = permutation_entropy(y_sub, 3, 1) # normalized PermEn(3,1) -- cheaper and more
@@ -1624,7 +1625,7 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
     # not output: it re-estimates a global statistic.)
     def _nanstd(v):
         v = v[~np.isnan(v)]
-        return _sample_std(v) if v.size > 0 else np.nan
+        return _sample_std(v)
 
     names = ['stdmean', 'stdstd', 'stdskew', 'stdkurt', 'stdpermen', 'stdac1', 'stdac2', 'stdtaul']
     return {name: _nanstd(qs[:, k]) for k, name in enumerate(names)}
@@ -1828,7 +1829,7 @@ def trend(y: ArrayLike) -> dict:
     # ratio of std before and after linear detrending
     out = {}
     dt_y = detrend(y)
-    out['stdRatio'] = np.std(dt_y, ddof=1) / np.std(y, ddof=1)
+    out['stdRatio'] = _sample_std(dt_y) / _sample_std(y)
     
     # do a linear fit
     # time is indexed 0..N-1 (this fixes the definition of the intercept features)
@@ -1839,7 +1840,7 @@ def trend(y: ArrayLike) -> dict:
     # Stats on the cumulative sum
     yc = np.cumsum(y)
     out['meanYC'] = np.mean(yc)
-    out['stdYC'] = np.std(yc, ddof=1)
+    out['stdYC'] = _sample_std(yc)
     coeffs_yc = np.polyfit(np.arange(N), yc, 1)
     out['gradientYC'] = coeffs_yc[0]
     out['interceptYC'] = coeffs_yc[1]
@@ -1912,8 +1913,8 @@ def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float
     else:
         raise ValueError(f"Error evaluating stat_av of type '{what_type}', please select either 'seg' or 'len'")
 
-    s = np.std(y, ddof=1)  # should be 1 (for a z-scored time-series input)
-    sdav = np.std(M, ddof=1)
+    s = _sample_std(y)  # should be 1 (for a z-scored time-series input)
+    sdav = _sample_std(M)
     out = sdav / s
 
     return float(out)
@@ -2043,10 +2044,10 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
             w = y[_get_window(i, inc, win_length)]
             if len(w) < 4:
                 qs[i] = np.nan # lillietest needs at least 4 observations
-            elif np.std(w, ddof=1) == 0:
+            elif _sample_std(w) == 0:
                 qs[i] = 1.0 # a constant window: lillietest's kstat is 1
             else:
-                qs[i] = kstest(w, norm(loc=np.mean(w), scale=np.std(w, ddof=1)).cdf).statistic
+                qs[i] = kstest(w, norm(loc=np.mean(w), scale=_sample_std(w)).cdf).statistic
     elif window_stat == 'AC1':
         for i in range(num_steps):
             qs[i] = autocorr(y[_get_window(i, inc, win_length)], 1, 'Fourier')
@@ -2060,7 +2061,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
             tau = int(tau)
             for i in range(num_steps):
                 w = y[_get_window(i, inc, win_length)]
-                sd = np.std(w, ddof=1)
+                sd = _sample_std(w)
                 zw = (w - np.mean(w)) / (sd if sd > 0 else 1.0) # a constant window gives zeros
                 qs[i] = np.mean(zw[:-tau] * zw[tau:] * (zw[tau:] - zw[:-tau]))
     else:
@@ -2073,7 +2074,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
 
     if across_win_stat == 'std':
         #% normalized by std of full time series
-        out = _sample_std(qs)/np.std(y, ddof=1)
+        out = _sample_std(qs)/_sample_std(y)
     elif across_win_stat == 'permen':
         out = _perm_en_norm(qs)
     elif across_win_stat == 'apen':
@@ -2241,7 +2242,7 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] =
     # Within-segment statistics
     # ------------------------------------------------------------------------------
     seg_mean = np.mean(z, axis=1)
-    seg_var = np.var(z, axis=1, ddof=1)
+    seg_var = _sample_var(z, axis=1)
     # Standardized (not moments-style raw/std) skewness and kurtosis: keeps the
     # shape-trend signal from being conflated with the (separately tracked)
     # scale-trend signal in seg_var, since moments normalizes by std^1 regardless of
@@ -2254,7 +2255,7 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] =
         seg_ac1[i] = autocorr(z[i, :], 1, 'Fourier')
         if not np.isnan(tau) and tau < seg_length - 1: # need pairs to average over
             t = int(tau)
-            sd = np.std(z[i, :], ddof=1)
+            sd = _sample_std(z[i, :])
             zseg = (z[i, :] - np.mean(z[i, :])) / (sd if sd > 0 else 1.0) # z-scored *within* this segment (a constant segment gives zeros)
             seg_asym_ac1[i] = np.mean(zseg[:-t] * zseg[t:] * (zseg[t:] - zseg[:-t]))
 
@@ -2375,7 +2376,7 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     # trev (lag-1 time-reversal asymmetry, tau fixed to 1 rather than estimated per window)
     # ------------------------------------------------------------------------------
     win_mean = np.mean(z, axis=1)
-    win_var = np.var(z, axis=1, ddof=1)
+    win_var = _sample_var(z, axis=1)
     win_skew = skew(z, axis=1)
     win_ac1 = np.zeros(num_windows)
     win_trev = np.zeros(num_windows)
@@ -2431,7 +2432,7 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     out = {}
     out['eta1'] = etas[0]
     out['etaEnd'] = etas[-1]
-    out['etaStd'] = np.std(etas, ddof=1)
+    out['etaStd'] = _sample_std(etas)
 
     out['pc1VarFrac'] = pca_eigs[0] / np.sum(pca_eigs)
 
@@ -2440,7 +2441,7 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     s0 = slow_scores[:, 0]
 
     def _abs_corr(a, b):
-        if np.std(a, ddof=1) == 0 or np.std(b, ddof=1) == 0:
+        if _sample_std(a) == 0 or _sample_std(b) == 0:
             return np.nan
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")

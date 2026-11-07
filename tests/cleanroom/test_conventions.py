@@ -80,6 +80,9 @@ def test_std_fixture():
         if "M,0,1" in cmd or "R,0,1" in cmd:
             got = utils._sample_std(x, axis=0)
             assert got.shape == (x.shape[1],)
+            if x.shape[0] == 1:  # one value per column: pyhctsa gives NaN (MATLAB gives 0)
+                assert np.isnan(got).all()
+                continue
             np.testing.assert_allclose(got, y.ravel(), rtol=1e-14, atol=1e-15)
         elif "M,0,2" in cmd:
             got = utils._sample_std(x, axis=1)
@@ -87,6 +90,8 @@ def test_std_fixture():
         else:
             exp = float(y[0, 0])
             xf = x.ravel()
+            if xf.size == 1:  # one value: pyhctsa gives NaN (MATLAB gives 0)
+                exp = math.nan
             for got in (float(utils._sample_std(xf)), float(utils._sample_std(x))):
                 if math.isnan(exp) or exp == 0:
                     assert same(got, exp), cmd

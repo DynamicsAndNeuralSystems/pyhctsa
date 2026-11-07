@@ -36,7 +36,7 @@ def _reference_series() -> list:
     ar = np.zeros(1000)
     for i in range(1, 1000):
         ar[i] = 0.7 * ar[i - 1] + e[i]
-    z = lambda v: (v - v.mean()) / v.std(ddof=1)
+    z = lambda v: (v - v.mean()) / _sample_std(v)
     return [z(ar), np.exp(0.5 * z(ar)), z(np.sin(0.2 * np.arange(1000)) + 0.3 * rng.randn(1000)), z(np.cumsum(e))]
 
 _FIELD_CACHE: dict = {}
@@ -370,8 +370,8 @@ def z_score(x: ArrayLike) -> np.ndarray:
                          "Values appear to be constant.")
 
     # Z-score twice to reduce numerical error
-    zscored_data = np.divide((x - np.mean(x)), np.std(x, ddof=1))
-    zscored_data = np.divide((zscored_data - np.mean(zscored_data)), np.std(zscored_data, ddof=1))
+    zscored_data = np.divide((x - np.mean(x)), _sample_std(x))
+    zscored_data = np.divide((zscored_data - np.mean(zscored_data)), _sample_std(zscored_data))
 
     return zscored_data
 
@@ -629,13 +629,14 @@ def _round_half_away_array(x: ArrayLike) -> np.ndarray:
     return np.asarray(out, dtype=float)
 
 
-def _sample_std(x: ArrayLike, axis: Union[int, None] = None):
-    """Sample standard deviation with the N-1 normalization; 0 for a single observation.
+def _sample_var(x: ArrayLike, axis: Union[int, None] = None, single: float = np.nan):
+    """Sample variance with the N-1 (Bessel) normalization; NaN for fewer than two observations.
 
-    This is ``numpy.std(ddof=1)`` with one pyhctsa convention: a single finite observation gives
-    0 (not NaN), so that features built on a spread do not drop out for degenerate short
-    inputs. An empty input gives NaN without a warning. NaN or Inf in the data propagate to NaN. For complex data the result is real
-    (the absolute value is squared).
+    This is ``numpy.var(ddof=1)`` with the pyhctsa convention for degenerate sample sizes made
+    explicit and warning-free. The N-1 estimator is undefined for one observation (0/0): a single
+    value carries no information about spread, so the result is NaN, not 0 (which would read as
+    "no variability"). An empty input also gives NaN. NaN or Inf in the data propagate to NaN.
+    For complex data the result is real (the absolute value is squared).
 
     Parameters
     ----------
@@ -643,15 +644,22 @@ def _sample_std(x: ArrayLike, axis: Union[int, None] = None):
         Data.
     axis : int or None
         Axis to operate along; ``None`` flattens.
+    single : float
+        Value returned for a single finite observation (default NaN). Set it (to 0) only where
+        the values are not a sample but the complete set of components of one object (the
+        coefficients or modes of a fitted model, the leaves of a tree, the nodes of a network),
+        whose spread is exactly 0 when there is one component, or where the value is an internal
+        placeholder in a running computation; say why at the call site. A single non-finite
+        observation still gives NaN.
 
     Returns
     -------
     numpy.float64 or numpy.ndarray
-        Standard deviation(s); the input shape with ``axis`` removed.
+        Variance(s); the input shape with ``axis`` removed.
 
     Notes
     -----
-    S = sqrt( sum |A_i - mean(A)|^2 / (N-1) ).
+    S^2 = sum |A_i - mean(A)|^2 / (N-1), defined for N >= 2.
     """
     a = np.asarray(x)
     if a.dtype.kind not in 'fc':
@@ -667,14 +675,46 @@ def _sample_std(x: ArrayLike, axis: Union[int, None] = None):
     if n == 0:
         res = np.full(out_shape, np.nan)
     elif n == 1:
-        # one observation: 0, unless that value is itself NaN/Inf
-        res = np.where(np.isfinite(np.squeeze(a, axis=axis)), 0.0, np.nan)
+        # one observation: the N-1 estimator is 0/0; `single` (finite data only) or NaN
+        res = np.where(np.isfinite(np.squeeze(a, axis=axis)), single, np.nan)
     else:
         with np.errstate(all='ignore'):
-            res = np.std(a, axis=axis, ddof=1)
+            res = np.var(a, axis=axis, ddof=1)
     if scalar:
         return np.float64(res)
     return np.asarray(res, dtype=float)
+
+
+def _sample_std(x: ArrayLike, axis: Union[int, None] = None, single: float = np.nan):
+    """Sample standard deviation with the N-1 normalization; NaN for fewer than two observations.
+
+    The square root of :func:`_sample_var` (the same operation order as ``numpy.std(ddof=1)``,
+    so values agree bitwise for N >= 2), with the same convention: one observation gives NaN
+    (the spread is undefined, not zero) unless ``single`` is set, and an empty input gives NaN,
+    without a warning. NaN or Inf in the data propagate to NaN. For complex data the result is
+    real.
+
+    Parameters
+    ----------
+    x : array_like
+        Data.
+    axis : int or None
+        Axis to operate along; ``None`` flattens.
+    single : float
+        Value returned for a single finite observation (default NaN); see :func:`_sample_var`.
+
+    Returns
+    -------
+    numpy.float64 or numpy.ndarray
+        Standard deviation(s); the input shape with ``axis`` removed.
+
+    Notes
+    -----
+    S = sqrt( sum |A_i - mean(A)|^2 / (N-1) ), defined for N >= 2.
+    """
+    v = _sample_var(x, axis=axis, single=single)
+    with np.errstate(invalid='ignore'):
+        return np.sqrt(v)
 
 
 
@@ -777,7 +817,7 @@ def _tie_aware_ranks(y: ArrayLike, tol: float = _TIE_TOL, iso: float = _TIE_ISO)
     order = np.argsort(y, kind='stable')
     ys = y[order]
     gap = np.diff(ys)
-    t = tol * (np.std(y, ddof=1) if n > 1 else 0.0)
+    t = tol * _sample_std(y)
     run_start = np.r_[True, gap > t]                  # runs of gaps <= t
     run_id = np.cumsum(run_start) - 1
     size = np.bincount(run_id)
@@ -900,7 +940,7 @@ def _tau_mi(y: np.ndarray, ranks: Union[np.ndarray, None] = None) -> float:
     # Kraskov (k=4, algorithm 1) AMI of the z-scored tie-aware ranks; the same fixed-seed
     # jitter (1e-10 sd) is always added to break the exact ties
     r = _tie_aware_ranks(y) if ranks is None else np.asarray(ranks, dtype=float)
-    sd = np.std(r, ddof=1)
+    sd = _sample_std(r)
     if not sd > 0:
         return np.nan  # constant series
     r = (r - r.mean()) / sd
@@ -1183,7 +1223,7 @@ def _zscore_or_zeros(x: np.ndarray) -> np.ndarray:
     a = np.asarray(x, dtype=float)
     if a.size == 0:
         return a.copy()
-    sd = float(_sample_std(a))
+    sd = float(_sample_std(a, single=0.0))  # one value is a constant input: zeros
     if sd == 0:
         sd = 1.0
     with np.errstate(invalid='ignore'):

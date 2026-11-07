@@ -2,6 +2,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 from typing import Any, Dict, List, Optional, Union, Callable
 
+from ..utils import _sample_std
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy import stats
@@ -483,7 +484,7 @@ def automutual_info_stats(
     # Basic statistics
     lami = len(ami)
     out['mami'] = np.mean(ami)
-    out['stdami'] = np.std(ami, ddof=1)
+    out['stdami'] = _sample_std(ami)
 
     # First minimum of mutual information across range
     dami = np.diff(ami)
