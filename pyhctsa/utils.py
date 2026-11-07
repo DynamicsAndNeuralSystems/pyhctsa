@@ -1364,6 +1364,31 @@ def _step_binary(x : ArrayLike) -> ArrayLike:
 
     return y
 
+def _run_lengths(x: ArrayLike) -> tuple:
+    """
+    Maximal runs of equal consecutive values in a 1-D sequence (run-length encoding).
+
+    Parameters
+    ----------
+    x : array-like
+        The sequence (e.g. 0/1 or boolean symbols).
+
+    Returns
+    -------
+    values : numpy.ndarray
+        The value of each run, in order.
+    lengths : numpy.ndarray of int
+        The length of each run, in order; the first and last runs (touching the ends of the
+        sequence) are counted in full, and the lengths sum to ``len(x)``. Both arrays are empty
+        for an empty input.
+    """
+    x = np.asarray(x).ravel()
+    if x.size == 0:
+        return x[:0], np.zeros(0, dtype=np.intp)
+    starts = np.concatenate(([0], np.flatnonzero(x[1:] != x[:-1]) + 1))
+    lengths = np.diff(np.concatenate((starts, [x.size])))
+    return x[starts], lengths
+
 def x_corr(x: ArrayLike, y: ArrayLike, normed: bool = True, max_lags: int = 10) -> tuple:
     """
     Sliding inner product (cross-correlation) of two signals for a symmetric range of lags.
