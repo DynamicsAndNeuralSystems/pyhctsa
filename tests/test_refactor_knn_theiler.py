@@ -1,19 +1,33 @@
-"""Pinned outputs of the operations touched by the Theiler-windowed k-nearest-neighbor refactor
-(duplication audit theme #12): `utils._knn_theiler` in place of the hand-written searches in
-`nonlinearity.fractal_dimensions`, `nonlinearity.return_time` and `ksg.ksg_mi`. The values were
-generated from the base branch (dup-theiler-embed, f5aa8c1, output-identical to main) before the
-refactor, so this checks that the refactor left every output unchanged (rtol 1e-12). The 'rep'
-series (half-integer values) has many tied distances."""
+"""Checks for the Theiler-windowed k-nearest-neighbor refactor (duplication audit theme #12):
+`utils._knn_theiler` in place of the hand-written searches in `nonlinearity.fractal_dimensions`,
+`nonlinearity.return_time` and `ksg.ksg_mi`. The 'rep' series (half-integer values) has many
+exactly tied distances.
+
+Two kinds of check:
+
+1. Same-runner reference checks (the ones that matter): verbatim copies of the replaced searches
+   (`_ref_*`, copied from main 0fa9013, file and line given with each) against `_knn_theiler`
+   with the matching metric and tree, asserting identical distances and indices on all three
+   series, `rep` included: built on the same machine, the same tree breaks ties the same way
+   (except fractal_dimensions' indices on `rep`, which the old code did not use and which differ
+   under ties because it queried the tree for more rows; see the test).
+2. Operation-level pins, generated on Ben's Mac (arm64) from the base branch (dup-theiler-embed
+   f5aa8c1, output-identical to main) before the refactor, with a tolerance per operation (`TOL`)
+   set by what the operation computes, since other platforms reproduce them only approximately.
+"""
 import logging
 import warnings
 
 import numpy as np
 import pytest
+from scipy.spatial import cKDTree
+from sklearn.neighbors import KDTree
 
-from pyhctsa.ksg import ksg_mi
+from pyhctsa.ksg import _standardize, ksg_mi
 from pyhctsa.operations import information as IN
 from pyhctsa.operations import nonlinearity as NL
-from pyhctsa.utils import _knn_theiler
+from pyhctsa.robust import bf_spread_perm
+from pyhctsa.utils import _even_split_points, _knn_theiler, theiler_window, time_delay_embed
 
 
 def _series():
@@ -69,6 +83,30 @@ EXPECTED = {
     ('ksg_mi', 'rep', 2, 0): -1.3204804013957627,
     ('ksg_mi', 'rep', 2, 3): -1.2997212290306326,
 }
+# No operation pin for ksg_mi on 'rep': with exact ties in the joint max-norm distances, which
+# tied rows the k-d tree returns first differs between platforms (the ubuntu and windows runners
+# give -1.3213785 for algorithm 2, theiler 0: one marginal count flips), so no tight tolerance is
+# portable. The 'rep' case is covered by test_ref_ksg_joint_neighbors below, where the same tree
+# built on the same machine resolves the ties identically. (The values above are kept as
+# documentation of the main-checkout values.)
+KSG_PINNED_SERIES = ('ar1', 'sine')
+
+# Per-operation (rtol, atol) for the pins (the values above are unchanged main-checkout values).
+T1 = (1e-9, 0)  # tier 1, closed-form arithmetic: return-time histogram statistics
+T2 = (1e-8, 0)  # tier 2, fitted slopes: the Dq of fractal_dimensions are least-squares slopes over
+                # many neighbor distances (CI drift up to 1.2e-10 in rangeDq)
+T3 = (1e-5, 0)  # tier 3, kd-tree neighbor order under near-ties: ksg_mi
+TOL = {
+    'fractal_dimensions': T2,
+    'fractal_dimensions_ref': T2,
+    'return_time': T1,
+    'return_time_m8': T1,
+    # multivariate_ami: tier 1 (neighbor counts and digamma sums), with an atol because the MIs
+    # are near zero (5e-5): atol = 1e-9 * 10, the scale being the digamma terms (psi(600) ~ 6.4)
+    # whose difference they are
+    'multivariate_ami': (1e-9, 1e-8),
+    'ksg_mi': T3,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -80,26 +118,138 @@ def _quiet():
     logging.disable(logging.NOTSET)
 
 
-def _check(got, want):
+def _check(got, want, tol):
+    rtol, atol = tol
     if isinstance(want, dict):
         for k, v in want.items():
-            np.testing.assert_allclose(got[k], v, rtol=1e-12, atol=0)
+            np.testing.assert_allclose(got[k], v, rtol=rtol, atol=atol)
     else:
-        np.testing.assert_allclose(got, want, rtol=1e-12, atol=0)
+        np.testing.assert_allclose(got, want, rtol=rtol, atol=atol)
 
 
 @pytest.mark.parametrize('name', list(CALLS))
 def test_operations_unchanged(name):
     f, kw = CALLS[name]
     for sn, y in _series().items():
-        _check(f(y, **kw), EXPECTED[(name, sn)])
+        _check(f(y, **kw), EXPECTED[(name, sn)], TOL[name])
 
 
 def test_ksg_mi_unchanged():
     for sn, y in _series().items():
+        if sn not in KSG_PINNED_SERIES:
+            continue
         for alg in (1, 2):
             for th in (0, 3):
-                _check(ksg_mi(y[:-2], y[2:], 4, alg, th), EXPECTED[('ksg_mi', sn, alg, th)])
+                _check(ksg_mi(y[:-2], y[2:], 4, alg, th), EXPECTED[('ksg_mi', sn, alg, th)],
+                       TOL['ksg_mi'])
+
+
+# ---------------------------------------------------------------------------------------------
+# Same-runner reference checks: the replaced searches, copied verbatim from main 0fa9013
+# ---------------------------------------------------------------------------------------------
+
+def _ref_joint_neighbors(z, k, w):
+    # main 0fa9013 pyhctsa/ksg.py:41-53 (_joint_neighbors, used by ksg_mi at ksg.py:166)
+    n = z.shape[0]
+    dist, idx = cKDTree(z).query(z, k=k + 2 * w + 1, p=np.inf)
+    keep = np.abs(idx - np.arange(n)[:, None]) > w
+    keep &= np.cumsum(keep, axis=1) <= k
+    return dist[keep].reshape(n, k), idx[keep].reshape(n, k)
+
+
+def _ref_fractal_search(emb, kmax, past, ref_idx):
+    # main 0fa9013 pyhctsa/operations/nonlinearity.py:2139-2150 (fractal_dimensions). The old
+    # code kept only the sorted distances; the indices they belong to are recovered here with a
+    # stable argsort of the same masked array (`order`, an addition to the copied lines), which
+    # keeps the tree's order among ties. None stands for the old NaN return.
+    n_emb = emb.shape[0]
+    k_fetch = min(n_emb - 1, kmax + 2 * past + 5)
+    dist, idx = cKDTree(emb).query(emb[ref_idx], k=k_fetch + 1)
+    valid = np.abs(idx - ref_idx[:, None]) > past
+    masked = np.where(valid, dist, np.inf)
+    order = np.argsort(masked, axis=1, kind='stable')[:, :kmax]
+    idx = np.where(np.isfinite(np.take_along_axis(masked, order, axis=1)),
+                   np.take_along_axis(idx, order, axis=1), -1)
+    dist = np.sort(masked, axis=1)[:, :kmax]
+    for ii in np.flatnonzero(valid.sum(axis=1) < kmax):  # fall back to a full search
+        all_dists = np.linalg.norm(emb - emb[ref_idx[ii]], axis=1)
+        all_dists[np.abs(np.arange(n_emb) - ref_idx[ii]) <= past] = np.inf
+        idx[ii] = np.argsort(all_dists, kind='stable')[:kmax]  # (addition, as above)
+        all_dists = np.sort(all_dists)
+        if np.sum(np.isfinite(all_dists)) < kmax:
+            return None
+        dist[ii] = all_dists[:kmax]
+    return dist, idx
+
+
+def _ref_return_time_search(Y, nnr, past, refs):
+    # main 0fa9013 pyhctsa/operations/nonlinearity.py:3798-3811 (return_time): the distance to
+    # (and, an addition, the index of) each reference point's nnr-th neighbor outside the window
+    n_emb = Y.shape[0]
+    k = min(n_emb, nnr + 2 * past + 1)
+    tree = KDTree(Y)
+    d_nnr = np.full(refs.size, np.nan)
+    i_nnr = np.full(refs.size, -1)
+    chunk = max(1, int(2e6 // k))
+    for c in range(0, refs.size, chunk):
+        the_refs = refs[c:c + chunk]
+        dist, idx = tree.query(Y[the_refs], k=k)
+        is_valid = np.abs(idx - the_refs[:, None]) > past
+        which_col = np.argmax(np.cumsum(is_valid, axis=1) >= nnr, axis=1)
+        d_nnr[c:c + chunk] = dist[np.arange(the_refs.size), which_col]
+        i_nnr[c:c + chunk] = idx[np.arange(the_refs.size), which_col]
+    return d_nnr, i_nnr
+
+
+@pytest.mark.parametrize('k', [1, 4, 8])
+@pytest.mark.parametrize('w', [0, 3])
+def test_ref_ksg_joint_neighbors(k, w):
+    for sn, y in _series().items():
+        for lag in (1, 2, 5):
+            z = np.hstack([_standardize(y[:-lag, None]), _standardize(y[lag:, None])])
+            d_old, i_old = _ref_joint_neighbors(z, k, w)
+            d_new, i_new = _knn_theiler(z, k, w, metric='chebyshev')
+            np.testing.assert_array_equal(d_new, d_old, err_msg=f'{sn} lag {lag}')
+            np.testing.assert_array_equal(i_new, i_old, err_msg=f'{sn} lag {lag}')
+
+
+@pytest.mark.parametrize('embed,kmax', [((1, 5), 10), ((1, 3), 20), ((2, 2), 10)])
+def test_ref_fractal_dimensions_search(embed, kmax):
+    for sn, y in _series().items():
+        emb = time_delay_embed(y, embed[1], embed[0])
+        n_emb = emb.shape[0]
+        for past in (0, 2, int(theiler_window(y, ('ac', 1)))):
+            for ref_idx in (np.arange(n_emb), bf_spread_perm(n_emb)[:n_emb // 5]):
+                old = _ref_fractal_search(emb, kmax, past, ref_idx)
+                d_new, i_new = _knn_theiler(emb, kmax, past, query=ref_idx)
+                assert old is not None
+                # the distances, all the old code used, are identical on every series
+                np.testing.assert_array_equal(d_new, old[0], err_msg=f'{sn} past {past}')
+                if sn != 'rep':
+                    np.testing.assert_array_equal(i_new, old[1], err_msg=f'{sn} past {past}')
+                else:
+                    # Under exact ties the indices can differ even on one machine: the old code
+                    # asked cKDTree for kmax + 2*past + 6 rows and the helper asks for
+                    # kmax + 2*past + 1, and cKDTree's order among tied rows depends on k.
+                    # fractal_dimensions never used them; check they are valid neighbors at the
+                    # stated distances instead.
+                    true_d = np.linalg.norm(emb[i_new] - emb[ref_idx][:, None, :], axis=2)
+                    np.testing.assert_allclose(true_d, d_new, rtol=1e-12, atol=1e-12)
+                    assert np.all(np.abs(i_new - ref_idx[:, None]) > past)
+                    assert all(len(set(r)) == kmax for r in i_new)
+
+
+@pytest.mark.parametrize('embed,nnr', [((1, 3), 30), ((1, 8), 12), ((2, 2), 1)])
+def test_ref_return_time_search(embed, nnr):
+    for sn, y in _series().items():
+        Y = time_delay_embed(y, embed[1], embed[0])
+        n_emb = Y.shape[0]
+        for past in (0, 3, int(theiler_window(y, ('ac', 1)))):
+            for refs in (np.arange(n_emb), np.unique(_even_split_points(1, n_emb, 500)) - 1):
+                d_old, i_old = _ref_return_time_search(Y, nnr, past, refs)
+                d_new, i_new = _knn_theiler(Y, nnr, past, query=refs, tree='sklearn')
+                np.testing.assert_array_equal(d_new[:, nnr - 1], d_old, err_msg=f'{sn} past {past}')
+                np.testing.assert_array_equal(i_new[:, nnr - 1], i_old, err_msg=f'{sn} past {past}')
 
 
 @pytest.mark.parametrize('metric', ['euclidean', 'chebyshev'])
