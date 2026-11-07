@@ -10,7 +10,7 @@ from scipy.stats import mstats
 
 from ..operations.correlation import autocorr
 from ..robust import bf_exp_fit
-from ..utils import dict_output, _sample_std, binarize, sign_change, get_tau, time_delay_embed
+from ..utils import dict_output, _coarse_grain, _sample_std, binarize, sign_change, get_tau, time_delay_embed
 
 def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_groups: int = 3,
              coarse_grain_method: str = 'quantile', num_iters: int = 500,
@@ -1015,7 +1015,9 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str], lag: int 
         The method of coarse-graining.
         Options: 
 
-        - 'quantile': an equiprobable alphabet by the value of each point,
+        - 'quantile': an equiprobable alphabet by the value of each point (cuts at the Hazen
+          quantiles, bins closed on the left, tied values sharing the symbol of their mid-rank;
+          see :func:`pyhctsa.utils._coarse_grain`),
         - 'diff': as 'quantile', but applied to the increments ``diff(y)``: an equiprobable
           alphabet by the *value* of each increment (not a literal sign split; this was called
           'updown' before hctsa renamed it),
@@ -1104,12 +1106,8 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str], lag: int 
     
     # Do the coarse graining
     if how_to_cg == 'quantile':
-        th = np.quantile(y, np.linspace(0, 1, num_groups + 1), method='hazen') # thresholds for dividing the time-series values
-        th[0] = th[0] - 1 # this ensures the first point is included
-        yth = np.zeros(N, dtype=int)
-        # turn the time series into a set of numbers from 1:num_groups
-        for i in range(num_groups):
-            yth[(y > th[i]) & (y <= th[i+1])] = i + 1
+        # equiprobable symbols 1..num_groups (Hazen quantile cuts, ties by mid-rank)
+        yth = _coarse_grain(y, num_groups, 'quantile') + 1
 
     elif how_to_cg == 'embed2quadrants': # divides based on quadrants in a 2-D embedding space
         # create alphabet in quadrants -- {1,2,3,4}

@@ -15,8 +15,8 @@ from statsmodels.tsa.stattools import pacf
 
 from ..operations.information import automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
-from ..robust import bf_hist_edges, bf_quantile_edges, bf_random, bf_remove_points
-from ..utils import (dict_output, _round_half_away, _tie_aware_ranks, _zscore_or_zeros, get_tau,
+from ..robust import bf_hist_edges, bf_random, bf_remove_points
+from ..utils import (dict_output, _coarse_grain, _round_half_away, _tie_aware_ranks, _zscore_or_zeros, get_tau,
                      frame_signal, point_of_crossing, sign_change, theiler_window,
                      time_delay_embed, z_score)
 
@@ -1459,9 +1459,9 @@ def _ami_hist_binning(y: ArrayLike, meth: str, num_bins: int):
 
     The binning depends only on ``y``, ``meth`` and ``num_bins`` --- not on the time
     lag --- so callers that sweep lags (e.g. ``compare_min_ami``) can compute this once
-    and reuse it. The edges are explicit (:func:`~pyhctsa.robust.bf_hist_edges`,
-    :func:`~pyhctsa.robust.bf_quantile_edges`): they place a value exactly on an edge always
-    in the same bin. Returns ``(idx, valid, num_bins)`` where ``idx[k]`` is the 0-based bin
+    and reuse it. The edges are explicit (:func:`~pyhctsa.robust.bf_hist_edges`): they place
+    a value exactly on an edge always in the same bin. 'quantiles' uses the equiprobable
+    symbols of :func:`~pyhctsa.utils._coarse_grain`. Returns ``(idx, valid, num_bins)`` where ``idx[k]`` is the 0-based bin
     of ``y[k]`` and ``valid[k]`` is False if the point falls outside the bin range. The
     assignment reproduces ``np.histogram2d``'s bins exactly (last bin right-inclusive).
     """
@@ -1480,8 +1480,9 @@ def _ami_hist_binning(y: ArrayLike, meth: str, num_bins: int):
             b = np.concatenate(([np.min(y) - 0.1], b))
         if np.max(y) > b[-1]:
             b = np.concatenate((b, [np.max(y) + 0.1]))
-    elif meth == 'quantiles':  # use quantiles with ~equal number in each bin
-        b = bf_quantile_edges(y, num_bins)  # (fewer bins if values are tied at a quantile)
+    elif meth == 'quantiles':  # equiprobable bins (Hazen quantile cuts, tied values sharing a bin)
+        idx = _coarse_grain(y, num_bins, 'quantile')
+        return idx, np.ones(idx.size, dtype=bool), int(num_bins)
     else:
         raise ValueError(f"Unknown method '{meth}'")
 
@@ -1565,8 +1566,8 @@ def histogram_ami(
         - 'even': evenly-spaced bins through the range
         - 'std1': bins extending to ±1 standard deviation from mean
         - 'std2': bins extending to ±2 standard deviations from mean
-        - 'quantiles': equiprobable bins using quantiles (fewer bins if values are tied at a
-          quantile)
+        - 'quantiles': equiprobable bins cut at the Hazen quantiles (tied values share a bin,
+          by their mid-rank; see :func:`~pyhctsa.utils._coarse_grain`)
 
         The bin edges are explicit, so that a value exactly on an edge always falls in the same
         bin (see :func:`~pyhctsa.robust.bf_hist_edges`).
