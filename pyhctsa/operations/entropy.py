@@ -234,8 +234,6 @@ def distribution_entropy(
 
     return out
 
-_MAD_TO_SIGMA = 0.6745
-
 
 def _robust_linear_fit_se(x: np.ndarray, y: np.ndarray, tune: float = 4.685) -> tuple:
     """Robust (bisquare-weighted) linear fit; returns coefficients and their standard errors."""
