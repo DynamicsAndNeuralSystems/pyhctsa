@@ -30,28 +30,14 @@ References
 """
 import numpy as np
 from numba import njit
-from scipy.spatial import cKDTree
 from scipy.special import digamma
+
+from .utils import _knn_theiler
 
 
 # ----------------------------------------------------------------------------------------------
 # Neighbor search and counting
 # ----------------------------------------------------------------------------------------------
-
-def _joint_neighbors(z, k, w):
-    """Distances and indices of the k nearest max-norm neighbors of each row of ``z``.
-
-    Rows whose index differs by at most ``w`` from the query row (the row itself included) are
-    not candidates. Rather than searching with exclusions, this asks the k-d tree for the
-    ``k + 2w + 1`` nearest rows, of which at most ``2w + 1`` fall in the window, and keeps the
-    first k that do not.
-    """
-    n = z.shape[0]
-    dist, idx = cKDTree(z).query(z, k=k + 2 * w + 1, p=np.inf)
-    keep = np.abs(idx - np.arange(n)[:, None]) > w
-    keep &= np.cumsum(keep, axis=1) <= k
-    return dist[keep].reshape(n, k), idx[keep].reshape(n, k)
-
 
 def _max_separation(a, neighbors):
     """For each row i of ``a``: the largest max-norm separation from row i of its neighbors."""
@@ -163,7 +149,8 @@ def ksg_mi(x, y, k=4, algorithm=1, theiler=0):
 
     x = np.ascontiguousarray(_standardize(x))
     y = np.ascontiguousarray(_standardize(y))
-    dist, neighbors = _joint_neighbors(np.hstack([x, y]), k, theiler)
+    # the k nearest max-norm neighbors of each joint point outside the Theiler window
+    dist, neighbors = _knn_theiler(np.hstack([x, y]), k, theiler, metric='chebyshev')
 
     if algorithm == 1:
         eps = dist[:, -1]
