@@ -3,14 +3,23 @@
 The analytic signal, usable-bin selection, dominant-band selection and max_n cropping of
 spectral.py were factored into module-private helpers, _padded_nfft moved to utils (and is used
 by medical.hrv_classic and nonlinearity._period_normalized_tau), and nonlinearity's inline max_n
-crops now call _check_max_n. None of this may change an output: the values below were generated
-from the main checkout (0fa9013) before the refactor and are compared at rtol 1e-12.
+crops now call _check_max_n. None of this may change an output.
+
+Two kinds of check:
+
+1. Same-runner reference (the equivalence check): verbatim copies of the inline code the helpers
+   replaced (from main 0fa9013) are compared with the helpers at rtol 1e-12, atol 0, on whatever
+   machine runs the test, so the check carries no platform dependence.
+2. Operation-level pins: the values below were generated from the main checkout (0fa9013) before
+   the refactor, on one machine (arm64 macOS). Other BLAS/FFT builds reproduce them only to about
+   1e-12, so each operation has a tolerance set by the kind of computation (see TOLERANCES).
 """
 import logging
 import warnings
 
 import numpy as np
 import pytest
+import scipy.fft
 
 from pyhctsa.operations import medical as md
 from pyhctsa.operations import nonlinearity as nl
@@ -210,6 +219,195 @@ PINNED = {
 }
 
 
+# ------------------------------------------------------------------------------
+# 1. Same-runner reference: verbatim copies of the pre-refactor inline code
+# ------------------------------------------------------------------------------
+
+def _ref_envelope_stats(y, power_frac=0.5, trim_frac=0.05):
+    # Verbatim body of envelope_stats from main 0fa9013, pyhctsa/operations/spectral.py lines
+    # 1585-1635 (inline usable bins, analytic signal and dominant band).
+    _envelope_summary = sp._envelope_summary
+    y = np.asarray(y, dtype=float).ravel()
+    out = {f: np.nan for f in ('full_cv', 'full_kurt', 'full_tau', 'dom_cv', 'dom_skew',
+                               'dom_kurt', 'dom_tau', 'dom_ifspread')}
+    N = len(y)
+    if N < 50 or not np.all(np.isfinite(y)) or np.std(y, ddof=1) == 0:
+        return out
+    y = y - np.mean(y)
+
+    # Frequency bins (DC and Nyquist excluded, as in phase_amp_coupling):
+    half_n = N // 2 + 1
+    usable = np.arange(1, half_n - 1 if N % 2 == 0 else half_n)
+    Y = np.fft.fft(y)
+
+    # Samples dropped from each end of the (circularly computed) analytic signal:
+    n_trim = max(1, int(np.floor(trim_frac * N + 0.5)))
+    keep = slice(n_trim, N - n_trim)
+
+    # (a) Full band
+    Yfull = np.zeros(N, dtype=complex)
+    Yfull[usable] = 2 * Y[usable]
+    env_full = np.abs(np.fft.ifft(Yfull)[keep])
+    out['full_cv'], _, out['full_kurt'], out['full_tau'] = _envelope_summary(env_full)
+
+    # (b) Dominant band: the largest periodogram peak +/- the smallest half-width
+    # (at least 2 bins) holding power_frac of the power
+    pw = np.abs(Y[usable]) ** 2
+    n_bins = len(usable)
+    i_peak = int(np.argmax(pw))
+    cum_pow = np.concatenate(([0.0], np.cumsum(pw)))
+    hws = np.arange(2, n_bins + 1)
+    band_pow = (cum_pow[np.minimum(n_bins - 1, i_peak + hws) + 1]
+                - cum_pow[np.maximum(0, i_peak - hws)])
+    ok = np.flatnonzero(band_pow >= power_frac * cum_pow[-1])
+    half_width = int(hws[ok[0]]) if ok.size else n_bins
+    peak_bin = usable[i_peak]
+    band = np.arange(max(usable[0], peak_bin - half_width),
+                     min(usable[-1], peak_bin + half_width) + 1)
+
+    Ydom = np.zeros(N, dtype=complex)
+    Ydom[band] = 2 * Y[band]
+    z_dom = np.fft.ifft(Ydom)
+    env_dom = np.abs(z_dom[keep])
+    out['dom_cv'], out['dom_skew'], out['dom_kurt'], out['dom_tau'] = _envelope_summary(env_dom)
+
+    # Instantaneous frequency (cycles per sample): the unwrapped phase increments
+    # over the trimmed segment, summarized robustly (scaled MAD, which equals the
+    # standard deviation for a Gaussian)
+    phi = np.unwrap(np.angle(z_dom[keep]))
+    inst_freq = np.diff(phi) / (2 * np.pi)
+    out['dom_ifspread'] = 1.4826 * np.median(np.abs(inst_freq - np.median(inst_freq)))
+    return out
+
+
+def _ref_pac_band_signals(y, band_bins):
+    # Verbatim from phase_amp_coupling, main 0fa9013, spectral.py lines 966-971 (scipy.fft pair).
+    n = len(y)
+    y_fft = scipy.fft.fft(y)
+    phase_band, amp_band = [], []
+    for b in range(len(band_bins)):
+        yb = np.zeros(n, dtype=complex)
+        yb[band_bins[b]] = 2 * y_fft[band_bins[b]]
+        zb = scipy.fft.ifft(yb)
+        phase_band.append(np.angle(zb))
+        amp_band.append(np.abs(zb))
+    return np.array(phase_band), np.array(amp_band)
+
+
+def _ref_pac_usable_bins(n):
+    # Verbatim from phase_amp_coupling, main 0fa9013, spectral.py lines 946-951.
+    half_n = n // 2 + 1 # one-sided bins: DC (0) up to Nyquist (half_n - 1, if n even)
+    is_nyquist_bin = (n % 2 == 0)
+    if is_nyquist_bin:
+        usable_bins = np.arange(1, half_n - 1)
+    else:
+        usable_bins = np.arange(1, half_n)
+    return usable_bins
+
+
+def _ref_pfs_phase(y, half_width_bins):
+    # Verbatim from phase_fluctuation_scaling, main 0fa9013, spectral.py lines 1716-1732
+    # (dominant band and its unwrapped analytic phase; the length guard is left to the caller).
+    N = len(y)
+    half_n = N // 2 + 1
+    usable = np.arange(1, half_n - 1 if N % 2 == 0 else half_n)
+    Y = np.fft.fft(y)
+    power = np.abs(Y[usable]) ** 2
+    peak_bin = usable[int(np.argmax(power))]
+    band = np.arange(max(usable[0], peak_bin - half_width_bins),
+                     min(usable[-1], peak_bin + half_width_bins) + 1)
+    Yband = np.zeros(N, dtype=complex)
+    Yband[band] = 2 * Y[band]
+    phi = np.unwrap(np.angle(np.fft.ifft(Yband)))
+    return phi
+
+
+def _ref_padded_nfft(n):
+    # Verbatim from medical.hrv_classic, main 0fa9013, medical.py line 183.
+    return max(256, 2 ** int(np.ceil(np.log2((n)))))
+
+
+def _reference_corpus():
+    # Seeded series of even and odd length (the pinned SERIES plus white noise and a short sine).
+    rng = np.random.default_rng(11)
+    extra = {'wn_even': rng.standard_normal(1000),
+             'sine_short_odd': np.sin(np.arange(301) / 3.1) + 0.2 * rng.standard_normal(301)}
+    return {**SERIES, **extra}
+
+
+REF_SERIES = _reference_corpus()
+
+
+@pytest.mark.parametrize('name', list(REF_SERIES))
+def test_envelope_stats_matches_reference(name):
+    y = REF_SERIES[name]
+    out, ref = sp.envelope_stats(y), _ref_envelope_stats(y)
+    for key, expected in ref.items():
+        np.testing.assert_allclose(out[key], expected, rtol=1e-12, atol=0, err_msg=key)
+
+
+@pytest.mark.parametrize('name', list(REF_SERIES))
+def test_band_helpers_match_reference(name):
+    y = REF_SERIES[name]
+    n = len(y)
+    usable = sp._usable_bins(n)
+    np.testing.assert_array_equal(usable, _ref_pac_usable_bins(n))
+    # phase_amp_coupling's per-band analytic signals (scipy.fft pair), 5 equal-width bands:
+    edges = sp._even_split_points(0, len(usable), 6)
+    band_bins = [usable[edges[b]:edges[b + 1]] for b in range(5)]
+    y_fft = scipy.fft.fft(y)
+    z = [sp._analytic_signal_fft(y_fft, bb, ifft=scipy.fft.ifft) for bb in band_bins]
+    ref_phase, ref_amp = _ref_pac_band_signals(y, band_bins)
+    np.testing.assert_allclose(np.angle(z), ref_phase, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(np.abs(z), ref_amp, rtol=1e-12, atol=0)
+    # phase_fluctuation_scaling's dominant band and unwrapped phase (numpy FFT pair):
+    for hw in (2, 5):
+        Y = np.fft.fft(y)
+        band = sp._dominant_band(np.abs(Y[usable]) ** 2, usable, hw)
+        phi = np.unwrap(np.angle(sp._analytic_signal_fft(Y, band)))
+        np.testing.assert_allclose(phi, _ref_pfs_phase(y, hw), rtol=1e-12, atol=0)
+    assert sp._padded_nfft(n) == _ref_padded_nfft(n)
+
+
+# ------------------------------------------------------------------------------
+# 2. Operation-level pins (main-checkout values) with per-operation tolerances
+# ------------------------------------------------------------------------------
+
+# Tiers: closed-form arithmetic (FFT, sums, histograms, quantiles, entropies) rtol 1e-9, since
+# BLAS/FFT ordering moves these by at most ~1e-11 across runners (dom_ifspread drifted 3e-12 on
+# ubuntu); linear algebra and least squares rtol 1e-8; iterative optimizers rtol 1e-5. Counts
+# (ncross, nto80, fb001) are compared at the tier of their operation and are exact in practice.
+TIER_CLOSED, TIER_LINALG, TIER_ITER = 1e-9, 1e-8, 1e-5
+TOLERANCES = {
+    # FFT analytic signals and histogram-based modulation index:
+    'phase_amp_coupling': TIER_CLOSED,
+    'phase_amp_coupling_max_n': TIER_CLOSED,
+    # FFT envelope, moments, ACF timescale, MAD of instantaneous frequency:
+    'envelope_stats': TIER_CLOSED,
+    # meanFreq is FFT arithmetic; the slopes are lstsq fits in log-log space:
+    'phase_fluctuation_scaling': TIER_LINALG,
+    # segment FFT triple products and their averages:
+    'bicoherence': TIER_CLOSED,
+    # maxS/logstd are arithmetic on the Welch PSD; fpoly2_r2 and linfitsemilog are polynomial fits:
+    'spectral_summaries_welch': TIER_LINALG,
+    # periodogram band powers, relative-difference fractions and Poincare SD2:
+    'hrv_classic': TIER_CLOSED,
+    # cumulative sums, mean-square displacement and correlation coefficients:
+    'zero_one_test': TIER_CLOSED,
+    # nearest-neighbor prediction errors and residual autocorrelation:
+    'nlpe': TIER_CLOSED,
+    # eigh of the embedding covariance and projections (sep_mahal: see KEY_TOLERANCES):
+    'embed_cluster': TIER_LINALG,
+    # eigvalsh of the centered kernel matrix and linear PCA:
+    'embed_kernel_pca': TIER_LINALG,
+}
+# Outputs whose tier differs from their operation's:
+KEY_TOLERANCES = {
+    # means and pooled covariance of an EM 2-component Gaussian mixture fit (iterative optimizer):
+    ('embed_cluster', 'sep_mahal'): TIER_ITER,
+}
+
+
 @pytest.mark.parametrize('op', list(CALLS))
 @pytest.mark.parametrize('name', list(SERIES))
 def test_pinned_outputs(op, name):
@@ -218,7 +416,8 @@ def test_pinned_outputs(op, name):
         warnings.simplefilter('ignore')
         out = f(SERIES[name], **kwargs)
     for key, expected in PINNED[op][name].items():
-        np.testing.assert_allclose(out[key], expected, rtol=1e-12, atol=0, err_msg=f'{op}.{key}')
+        np.testing.assert_allclose(out[key], expected, rtol=KEY_TOLERANCES.get((op, key), TOLERANCES[op]), atol=0,
+                                   err_msg=f'{op}.{key}')
 
 
 @pytest.mark.parametrize('name', list(SERIES))
