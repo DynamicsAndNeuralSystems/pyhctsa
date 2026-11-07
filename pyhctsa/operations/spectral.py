@@ -744,35 +744,17 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     # Fit linear to semilog plot (across full range)
     out |= _give_me_robust_stats(w, np.log(s), 'linfitsemilog_all', ('a1', 'sigrat', 'sigma', 'sea1'))
 
-    # Power in specific frequency bands
-    # % 2 bands
-    split = _equal_bands(s, 2)
-    out['area_2_1'] = np.sum(split[:, 0]) * dw
-    out['logarea_2_1'] = np.sum(np.log(split[:, 0])) * dw
-    out['area_2_2'] = np.sum(split[:, 1]) * dw
-    out['logarea_2_2'] = np.sum(np.log(split[:, 1])) * dw
-    out['statav2_s'] = np.std(np.std(split, ddof=1, axis=0), axis=0, ddof=1) / np.std(s, ddof=1)
-    # The same on log(S): on the linear spectrum, whichever band contains the dominant peak swamps these
-    split_log = _equal_bands(log_s, 2)
-    out['logstatav2_m'] = np.std(np.mean(split_log, axis=0), ddof=1) / np.std(log_s, ddof=1)
-    out['logstatav2_s'] = np.std(np.std(split_log, ddof=1, axis=0), axis=0, ddof=1) / np.std(log_s, ddof=1)
-
-    # 5 bands
-    split = _equal_bands(s, 5)
-    out['area_5_1'] = np.sum(split[:, 0]) * dw
-    out['logarea_5_1'] = np.sum(np.log(split[:, 0])) * dw
-    out['area_5_2'] = np.sum(split[:, 1]) * dw
-    out['logarea_5_2'] = np.sum(np.log(split[:, 1])) * dw
-    out['area_5_3'] = np.sum(split[:, 2]) * dw
-    out['logarea_5_3'] = np.sum(np.log(split[:, 2])) * dw
-    out['area_5_4'] = np.sum(split[:, 3]) * dw
-    out['logarea_5_4'] = np.sum(np.log(split[:, 3])) * dw
-    out['area_5_5'] = np.sum(split[:, 4]) * dw
-    out['logarea_5_5'] = np.sum(np.log(split[:, 4])) * dw
-    out['statav5_s'] = np.std(np.std(split, ddof=1, axis=0), axis=0, ddof=1) / np.std(s, ddof=1)
-    split_log = _equal_bands(log_s, 5)
-    out['logstatav5_m'] = np.std(np.mean(split_log, axis=0), ddof=1) / np.std(log_s, ddof=1)
-    out['logstatav5_s'] = np.std(np.std(split_log, ddof=1, axis=0), axis=0, ddof=1) / np.std(log_s, ddof=1)
+    # Power in specific frequency bands: 2 and 5 equal bands
+    for n_bands in (2, 5):
+        split = _equal_bands(s, n_bands)
+        for b in range(n_bands):
+            out[f'area_{n_bands}_{b + 1}'] = np.sum(split[:, b]) * dw
+            out[f'logarea_{n_bands}_{b + 1}'] = np.sum(np.log(split[:, b])) * dw
+        out[f'statav{n_bands}_s'] = np.std(np.std(split, ddof=1, axis=0), axis=0, ddof=1) / np.std(s, ddof=1)
+        # The same on log(S): on the linear spectrum, whichever band contains the dominant peak swamps these
+        split_log = _equal_bands(log_s, n_bands)
+        out[f'logstatav{n_bands}_m'] = np.std(np.mean(split_log, axis=0), ddof=1) / np.std(log_s, ddof=1)
+        out[f'logstatav{n_bands}_s'] = np.std(np.std(split_log, ddof=1, axis=0), axis=0, ddof=1) / np.std(log_s, ddof=1)
 
     # Count crossings of the log spectrum with a horizontal line set a fraction of the way from
     # min(log S) to max(log S). On the linear spectrum a threshold at a fixed fraction of max(S) sits far
