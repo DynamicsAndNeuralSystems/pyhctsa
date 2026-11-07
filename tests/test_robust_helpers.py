@@ -226,6 +226,7 @@ class TestFitSinusoids:
 
 # ------------------------------------------------------------------------------
 class TestKSDensity:
+    @pytest.mark.usefixtures('reference_mad_constant')  # MATLAB's 1/0.6745, see tests/conftest.py
     def test_matches_matlab(self):
         f, xi, h = bf_ks_density(S['bimodal'])
         _eq(f, 'ks_bimodal', atol=1e-13); _eq(xi, 'ks_bimodal_xi', atol=1e-13); _eq(h, 'ks_bimodal_h', atol=1e-15)

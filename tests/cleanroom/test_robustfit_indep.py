@@ -48,6 +48,12 @@ FLOOR = _load("robustfit_se_floor.json")
 PROBES = _load("robustfit_probes.json")
 
 
+# The reference implementation scales the MAD by 1/0.6745, pyhctsa by the exact 1/Phi^{-1}(3/4)
+# (utils.MAD_TO_SIGMA, about 1e-5 apart); these cross-checks compare the algorithm, so they run
+# with the reference's constant (fixture in tests/conftest.py).
+pytestmark = pytest.mark.usefixtures("reference_mad_constant")
+
+
 def _fit(case, **opt):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

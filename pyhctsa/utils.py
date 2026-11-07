@@ -16,7 +16,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 import pandas as pd
 from scipy.signal import correlate
-from scipy.stats import chi2, rankdata
+from scipy.stats import chi2, norm, rankdata
 
 
 def _check_optional_deps(dep: str) -> bool:
@@ -837,7 +837,7 @@ def _ami_first_min(ami: np.ndarray) -> float:
     second differences (for independent noise of standard deviation ``sigma`` a second
     difference has standard deviation ``sqrt(6)*sigma``)::
 
-        d2 = diff(ami, 2);  sigma = 1.4826 * median(|d2 - median(d2)|) / sqrt(6)
+        d2 = diff(ami, 2);  sigma = MAD_TO_SIGMA * median(|d2 - median(d2)|) / sqrt(6)
 
     with ``delta = 2*sigma`` (``delta = 0`` if ``L < 4``). The result is the first lag ``l``
     in ``2..L-1`` at which the smoothed curve ``sm`` has a strict local minimum
@@ -961,7 +961,7 @@ def get_tau(y: ArrayLike, rule: Union[int, str] = 'ac1e') -> Union[int, float]:
           which the smoothed curve has a strict local minimum lying more than ``2*sigma`` below
           both the highest smoothed AMI at shorter lags and the highest at longer lags. Here
           ``sigma`` is the AMI estimator noise, estimated robustly from the second differences of
-          the raw AMI curve, ``sigma = 1.4826 * MAD(diff(ami, 2)) / sqrt(6)`` (MAD the median
+          the raw AMI curve, ``sigma = MAD_TO_SIGMA * MAD(diff(ami, 2)) / sqrt(6)`` (MAD the median
           absolute deviation from the median; ``sigma = 0`` if fewer than 4 lags are available);
           see ``_ami_first_min``. The ranks make the AMI robust to tiny perturbations and
           nearly invariant under monotone transformations of the data (the ``'ac1e'`` cap is
@@ -1458,12 +1458,14 @@ def make_function_name_mappings(
 # ------------------------------------------------------------------------------
 # Robust-scale constants and the round-off guard
 # ------------------------------------------------------------------------------
-# For Gaussian data the median absolute deviation (MAD) is sigma * Phi^{-1}(3/4) = 0.67449 sigma,
-# so sigma is estimated by MAD * 1.4826 or MAD / 0.6745. The two rounded forms differ by about 1e-5
-# (relative) from each other and from the exact Phi^{-1}(3/4), so each site keeps the form it uses;
-# changing one changes outputs in the fifth significant digit.
-MAD_TO_SIGMA = 1.4826   # sigma ~= MAD_TO_SIGMA * MAD (multiplied)
-MAD_DIVISOR = 0.6745    # sigma ~= MAD / MAD_DIVISOR (divided; Holland & Welsch's rounding)
+# Normal-consistency factors for the two robust scales. For Gaussian data of standard deviation
+# sigma the median absolute deviation from the median (MAD) tends to sigma * Phi^{-1}(3/4) and the
+# interquartile range (IQR) to 2 * sigma * Phi^{-1}(3/4), with Phi^{-1}(3/4) = 0.6744897501960817,
+# so sigma is estimated consistently by MAD_TO_SIGMA * MAD and IQR_TO_SIGMA * IQR (Hampel 1974,
+# JASA 69:383-393; Rousseeuw & Croux 1993, JASA 88:1273-1283). Every robust scale in pyhctsa uses
+# these exact factors, multiplied, rather than a rounded 1.4826, 1/0.6745, 1/1.349 or 1/1.35.
+MAD_TO_SIGMA = 1.0 / float(norm.ppf(0.75))   # 1 / Phi^{-1}(3/4) = 1.482602218505602
+IQR_TO_SIGMA = MAD_TO_SIGMA / 2.0            # 1 / (2 Phi^{-1}(3/4)) = 0.741301109252801
 
 
 def _is_roundoff(x: np.ndarray, ref: Union[np.ndarray, None] = None, n: Union[int, None] = None) -> bool:
