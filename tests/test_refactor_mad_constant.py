@@ -6,8 +6,16 @@ Every robust scale now uses the exact factors ``utils.MAD_TO_SIGMA = 1/Phi^{-1}(
 instead of ``scipy.stats.mstats.mquantiles(alphap=0.5, betap=0.5)``. These outputs changed by about
 1e-5 (relative) or less.
 
-The expected values below were generated from branch ``cons-mad-constant`` (this change), on two
-seeded series.
+Two kinds of check:
+
+1. Same-runner reference checks (``test_ref_*``): independent, explicit computations of the chosen
+   convention (the exact constants from ``scipy.stats.norm.ppf``, and the MAD and IQR scales built
+   with them) compared with the operations at ``rtol=1e-12, atol=0`` on whatever machine runs the
+   test.
+2. Operation-level pins (``test_pinned_outputs``): the expected values were generated from branch
+   ``cons-mad-constant`` (this change, on Ben's arm64 Mac), on two seeded series. Other platforms
+   reproduce them only to the accuracy of the operation's numerics, so each operation has a
+   tolerance set by what it computes (``TOL`` below).
 """
 import numpy as np
 import pytest
@@ -96,6 +104,31 @@ EXPECTED = {
 }
 
 
+# Tolerances of the operation-level pins, by what the operation computes:
+#   tier 1, closed-form arithmetic (counts, quantiles, histograms, FFT and wavelet transforms,
+#     kernel densities): rtol 1e-9 (CI drift from BLAS/FFT summation order is at most about 1e-11);
+#   tier 2, linear algebra and least squares: rtol 1e-8;
+#   tier 3, iterative optimizers: rtol 1e-5 (the optimizer's path depends on the platform's arithmetic).
+TIER1 = dict(rtol=1e-9, atol=0)
+TIER2 = dict(rtol=1e-8, atol=0)
+TIER3 = dict(rtol=1e-5, atol=0)
+TOL = {
+    'hrv_classic': TIER1,               # proportions of increments beyond multiples of a MAD scale
+    'porta': TIER1,                     # symbol counts on IQR-scaled levels
+    'withinp_median': TIER1,            # proportion within an IQR scale of the median
+    'scal_2_freq': TIER1,               # wavelet decomposition, MAD scales, argmax
+    'dwt_coeff': TIER1,                 # wavelet decomposition, MAD noise scales
+    'specparam': TIER3,                 # aperiodic fit by scipy.optimize.least_squares (trf)
+    'envelope_stats_ifspread': TIER1,   # Hilbert transform (FFT), scaled MAD
+    'rhythmicity': TIER1,               # wavelet (FFT) spectrum, scaled MAD, counts
+    'bf_ks_density': TIER1,             # kernel density estimate
+    'distribution_entropy_ks': TIER1,   # kernel density estimate and its entropy
+    'robust_linear_fit': TIER2,         # IRLS: weighted least squares, stopped at a 1e-10 step
+    'get_tau_mi': TIER1,                # histogram mutual information (an integer lag)
+    'surprise_quantiles': TIER1,        # seeded resampling, counts, hazen quantiles
+}
+
+
 @pytest.mark.parametrize('key', list(EXPECTED))
 def test_pinned_outputs(key):
     name, sname = key.split('|')
@@ -107,4 +140,55 @@ def test_pinned_outputs(key):
     else:
         got_v = np.ravel(np.asarray(got, dtype=float))[:len(want)]
         want_v = np.array(want)
-    np.testing.assert_allclose(got_v, want_v, rtol=1e-12, atol=0, equal_nan=True)
+    np.testing.assert_allclose(got_v, want_v, equal_nan=True, **TOL[name])
+
+
+# ---------------------------------------------------------------------------------------------
+# Same-runner reference checks: explicit computations of the chosen convention (not the old code)
+# ---------------------------------------------------------------------------------------------
+
+_Q3 = float(norm.ppf(0.75))   # Phi^{-1}(3/4): MAD of a unit Gaussian
+_IQR1 = float(norm.ppf(0.75) - norm.ppf(0.25))   # IQR of a unit Gaussian
+
+
+def _ref_mad_sigma(x):
+    return np.median(np.abs(x - np.median(x))) / _Q3
+
+
+def _ref_iqr_sigma(x):
+    return (np.percentile(x, 75, method='hazen') - np.percentile(x, 25, method='hazen')) / _IQR1
+
+
+def _ref_corpus():
+    r = np.random.default_rng(5)
+    return list(SERIES.values()) + [r.standard_normal(500), r.standard_t(3, 400)]
+
+
+def test_ref_bf_ks_density():
+    # Silverman bandwidth with the exact MAD scale, and the Gaussian KDE evaluated directly
+    for y in _ref_corpus():
+        n = y.size
+        h_ref = _ref_mad_sigma(y) * (4 / (3 * n)) ** (1 / 5)
+        f, xi, h = bf_ks_density(y)
+        np.testing.assert_allclose(h, h_ref, rtol=1e-12, atol=0)
+        np.testing.assert_allclose(xi, np.linspace(y.min() - 3 * h_ref, y.max() + 3 * h_ref, 100),
+                                   rtol=1e-12, atol=1e-12 * np.ptp(y))  # atol: xi crosses zero
+        f_ref = norm.pdf(xi[None, :], loc=y[:, None], scale=h_ref).mean(axis=0)
+        np.testing.assert_allclose(f, f_ref, rtol=1e-12, atol=0)
+
+
+def test_ref_withinp_median():
+    for y in _ref_corpus():
+        mu, sig = np.median(y), _ref_iqr_sigma(y)
+        for p in (0.5, 1.0, 2.0):
+            want = np.mean(np.abs(y - mu) <= p * sig)
+            np.testing.assert_allclose(di.withinp(y, p, 'median'), want, rtol=1e-12, atol=0)
+
+
+def test_ref_hrv_pnnrel():
+    for y in _ref_corpus():
+        d = np.diff(y)
+        sig = _ref_mad_sigma(d)
+        got = md.hrv_classic(y)
+        for key, c in (('pnnrel025', 0.25), ('pnnrel05', 0.5), ('pnnrel1', 1), ('pnnrel2', 2), ('pnnrel3', 3)):
+            np.testing.assert_allclose(got[key], np.mean(np.abs(d) > c * sig), rtol=1e-12, atol=0)
