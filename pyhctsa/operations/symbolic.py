@@ -740,6 +740,9 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
 
     # (((3))) Output measures from the transition matrix
     out = {}
+    # the trace, symdiff, trace of the covariance and std of the eigenvalues are shared with
+    # transition_p_alphabet (see _matrix_measures)
+    _, _, trace_t, symdiff_t, trcov_t, stdeig_t = _matrix_measures(T)
 
     # (i) Raw values of the transition matrix; only for num_groups = 2, 3 are all
     # elements returned (in column-major order, T1 = T[0, 0], T2 = T[1, 0], ...), otherwise just the diagonal
@@ -752,11 +755,11 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
 
     # (ii) Measures on the diagonal
     diag_t = np.diag(T)
-    out['ondiag'] = np.sum(diag_t)  # trace
+    out['ondiag'] = trace_t  # trace
     out['stddiag'] = _sample_std(diag_t)  # std of diagonal elements
 
     # (iii) Measures of symmetry:
-    out['symdiff'] = np.sum(np.abs(T - T.T))  # sum of differences of individual elements
+    out['symdiff'] = symdiff_t  # sum of differences of individual elements
     # difference in sums of upper and lower triangular parts of T
     out['symsumdiff'] = np.sum(np.tril(T, -1)) - np.sum(np.triu(T, 1))
 
@@ -769,7 +772,7 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
 
     # (iv) Measures from eigenvalues of T
     eig_t = np.linalg.eigvals(T)
-    out['stdeig'] = _sample_std(eig_t)  # std of eigenvalues
+    out['stdeig'] = stdeig_t  # std of eigenvalues
     out['maxeig'] = np.max(np.real(eig_t))  # maximum eigenvalue
     out['mineig'] = np.min(np.real(eig_t))  # minimum eigenvalue
     # mean eigenvalue is equivalent to the trace
@@ -803,7 +806,7 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
 
     # (v) Measures from the covariance matrix:
     cov_t = np.cov(T, rowvar=False)
-    out['sumdiagcov'] = np.trace(cov_t)  # trace of covariance matrix
+    out['sumdiagcov'] = trcov_t  # trace of covariance matrix
 
     # (vi) Eigenvalues of the covariance matrix. It is symmetric, so its
     # eigenvalues are real, as `eigvalsh` returns
@@ -833,9 +836,20 @@ def _transition_matrix(yth: np.ndarray, num_groups: int, tau: int = 1) -> np.nda
 
 
 def _transition_measures(yth: np.ndarray, num_groups: int, tau: int = 1) -> np.ndarray:
-    """A set of metrics on the tau-step transition matrix of a symbolized time series."""
-    T = _transition_matrix(yth, num_groups, tau)
+    """A set of metrics on the tau-step transition matrix of a symbolized time series
+    (see :func:`_matrix_measures`)."""
+    return _matrix_measures(_transition_matrix(yth, num_groups, tau))
 
+
+def _matrix_measures(T: np.ndarray) -> np.ndarray:
+    """Six measures of a transition matrix ``T``.
+
+    Returns the mean and the maximum of the diagonal, the trace, the sum of absolute
+    differences between ``T`` and its transpose, the trace of the covariance matrix of the
+    columns of ``T`` (``np.cov(T, rowvar=False)``, n - 1 normalization), and the sample
+    standard deviation of the eigenvalues of ``T`` (:func:`pyhctsa.utils._sample_std`, n - 1,
+    real for complex eigenvalues).
+    """
     out = np.zeros(6)
     #   (i) diagonal elements
     diag_t = np.diag(T)
