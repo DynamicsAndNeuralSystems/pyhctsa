@@ -27,21 +27,41 @@ def _detrend_windows(y_buff: np.ndarray, k: int) -> np.ndarray:
     return y_buff - qmat @ (qmat.T @ y_buff)
 
 
-def _dfa_fluctuation(resid: np.ndarray, q: float) -> float:
+def _dfa_fluctuation(resid: np.ndarray, q, floor: float | None = None, log: bool = False):
     """
     The q-th order fluctuation function of MF-DFA [Kantelhardt et al. 2002] from the
     detrended windows ``resid`` (window length x number of windows).
 
     With F^2(v) the variance (mean square of the residuals) of window v,
     ``F_q = ( mean_v F^2(v)^(q/2) )^(1/q)``, and for q = 0 the logarithmic average
-    ``F_0 = exp( mean_v ln F^2(v) / 2 )``. Any real q is allowed. For q <= 0 the result is NaN
-    if a window has exactly zero variance (the average is then undefined).
+    ``F_0 = exp( mean_v ln F^2(v) / 2 )``. Any real q is allowed; ``q`` may also be a 1-D array of
+    orders, which returns an array (the window variances are computed once).
+
+    ``floor`` sets how windows of (near) zero variance are handled. With ``floor=None`` they are
+    kept, and for q <= 0 the result is NaN if a window has exactly zero variance (the average is
+    then undefined). With a number, window variances below ``floor`` are raised to ``floor`` first
+    (`mfdfa` uses machine epsilon), so the result is finite for every q.
+    With ``log=True`` the result is ln F_q, evaluated in the log domain as
+    ``(1/q) ln mean_v F^2(v)^(q/2)`` and ``mean_v ln F^2(v) / 2`` at q = 0.
     """
     var = np.mean(resid ** 2, axis=0)
-    if q == 2:
-        return float(np.sqrt(np.mean(var)))
+    if floor is not None:
+        var[var < floor] = floor
+    if np.ndim(q):
+        return np.array([_dfa_fluctuation_from_var(var, qi, log) for qi in q])
+    return _dfa_fluctuation_from_var(var, q, log)
+
+
+def _dfa_fluctuation_from_var(var: np.ndarray, q: float, log: bool = False) -> float:
+    """F_q (or ln F_q) of `_dfa_fluctuation` from the window variances ``var``, for one order q."""
     if q <= 0 and np.any(var <= 0):
         return np.nan
+    if log:
+        if q == 0:
+            return float(np.mean(np.log(var)) / 2)
+        return float((1 / q) * np.log(np.mean(var ** (q / 2))))
+    if q == 2:
+        return float(np.sqrt(np.mean(var)))
     if q == 0:
         return float(np.exp(0.5 * np.mean(np.log(var))))
     return float(np.mean(var ** (q / 2)) ** (1 / q))
@@ -605,37 +625,32 @@ def mfdfa(y: ArrayLike, scale_range: list | None = None, q_range: list | None = 
     num_scales = 20
     if max_scale > N // 4 or (max_scale / min_scale) < 2 or N // (2 * min_scale) < 4:
         return np.nan
-    scales = np.unique(_round_half_away_array(np.exp(np.linspace(np.log(min_scale), np.log(max_scale), num_scales)))).astype(int)
+    scales = _log_tau_grid(min_scale, max_scale, num_scales)
     if scales.size < 8:
         return np.nan
 
     q_true = _arange_inclusive(q_min, 0.5, q_max)
-    q_list = q_true.copy()
-    q_zero = np.flatnonzero(q_true == 0)
-    q_list[q_list == 0] = 1e-4  # q = 0 handled separately via log-averaging below
-    q_zero_idx = q_zero[0] if q_zero.size else None
 
     # Profile (integrated, mean-subtracted series)
     profile = np.cumsum(y - np.mean(y))
 
-    n_q = q_list.size
+    n_q = q_true.size
     log_fq = np.full((scales.size, n_q), np.nan)
     eps = np.finfo(float).eps
     for si, s in enumerate(scales):
         Ns = N // s
-        # Detrending is a fixed linear projection for all segments of length s
+        # Detrending is a fixed linear projection for all segments of length s. (Kept apart from
+        # `_detrend_windows` and the windows of `_fluctuations`: their QR projection, end-segment order
+        # and de-duplication when s divides N change F^2 at about 1e-13, which h(q) and the spectrum
+        # outputs can amplify past 1e-12.)
         tt = np.arange(s, dtype=float)
         V = np.vander(tt / s, order + 1)  # (scaled for conditioning; the projection is unchanged)
         resid_op = np.eye(s) - V @ np.linalg.pinv(V)
         starts = np.concatenate([np.arange(Ns) * s, N - (np.arange(Ns) + 1) * s])
         segs = profile[starts[:, None] + np.arange(s)[None, :]]  # segments from the start, then from the end
-        F2 = np.mean((segs @ resid_op.T) ** 2, axis=1)
-        F2[F2 < eps] = eps  # floor to avoid log(0) / 0^(negative q)
-        for qi, q in enumerate(q_list):
-            log_fq[si, qi] = (1 / q) * np.log(np.mean(F2 ** (q / 2)))
-        if q_zero_idx is not None:
-            # q = 0 limit: F_0(s) = exp{ (1/(4Ns)) * sum( log F^2(s,v) ) }
-            log_fq[si, q_zero_idx] = np.mean(np.log(F2)) / 2
+        # ln F_q(s) for every q, with segment variances floored at eps (to avoid log(0) and
+        # 0^(negative q)) and the log-averaging limit at q = 0
+        log_fq[si] = _dfa_fluctuation((segs @ resid_op.T).T, q_true, floor=eps, log=True)
 
     # h(q): slope of log(F_q(s)) vs log(s), for each q
     log_s = np.log(scales.astype(float))
