@@ -197,7 +197,7 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     out['lq'] = lq[0] #convert array to int
     uq = mstats.mquantiles(store, 0.75, alphap=0.5, betap=0.5)
     out['uq'] = uq[0]
-    out['std'] = np.std(store, ddof=1)
+    out['std'] = _sample_std(store)
     out['propUnseen'] = prop_unseen
 
     # Standardized distance of the mean information gain from 1 (the length-stable form),

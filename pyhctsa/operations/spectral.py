@@ -1,4 +1,5 @@
 import warnings
+from ..utils import _sample_std
 import numpy as np
 from numpy.typing import ArrayLike
 from typing import Union
@@ -635,9 +636,9 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['logq75'] = q75_log
 
     # Moments (the standardized third moment, i.e. the skewness, of the power values)
-    out['std'] = np.std(s, ddof=1)
+    out['std'] = _sample_std(s)
     out['stdlog'] = np.log(out['std'])
-    out['logstd'] = np.std(log_s, ddof=1)
+    out['logstd'] = _sample_std(log_s)
     out['mom3'] = moments(s, 3, True)
     out['logmom3'] = moments(log_s, 3, True)
 
@@ -751,11 +752,11 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['logarea_2_1'] = np.sum(np.log(split[:, 0])) * dw
     out['area_2_2'] = np.sum(split[:, 1]) * dw
     out['logarea_2_2'] = np.sum(np.log(split[:, 1])) * dw
-    out['statav2_s'] = np.std(np.std(split, ddof=1, axis=0), axis=0, ddof=1) / np.std(s, ddof=1)
+    out['statav2_s'] = _sample_std(_sample_std(split, axis=0), axis=0) / _sample_std(s)
     # The same on log(S): on the linear spectrum, whichever band contains the dominant peak swamps these
     split_log = _equal_bands(log_s, 2)
-    out['logstatav2_m'] = np.std(np.mean(split_log, axis=0), ddof=1) / np.std(log_s, ddof=1)
-    out['logstatav2_s'] = np.std(np.std(split_log, ddof=1, axis=0), axis=0, ddof=1) / np.std(log_s, ddof=1)
+    out['logstatav2_m'] = _sample_std(np.mean(split_log, axis=0)) / _sample_std(log_s)
+    out['logstatav2_s'] = _sample_std(_sample_std(split_log, axis=0), axis=0) / _sample_std(log_s)
 
     # 5 bands
     split = _equal_bands(s, 5)
@@ -769,10 +770,10 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['logarea_5_4'] = np.sum(np.log(split[:, 3])) * dw
     out['area_5_5'] = np.sum(split[:, 4]) * dw
     out['logarea_5_5'] = np.sum(np.log(split[:, 4])) * dw
-    out['statav5_s'] = np.std(np.std(split, ddof=1, axis=0), axis=0, ddof=1) / np.std(s, ddof=1)
+    out['statav5_s'] = _sample_std(_sample_std(split, axis=0), axis=0) / _sample_std(s)
     split_log = _equal_bands(log_s, 5)
-    out['logstatav5_m'] = np.std(np.mean(split_log, axis=0), ddof=1) / np.std(log_s, ddof=1)
-    out['logstatav5_s'] = np.std(np.std(split_log, ddof=1, axis=0), axis=0, ddof=1) / np.std(log_s, ddof=1)
+    out['logstatav5_m'] = _sample_std(np.mean(split_log, axis=0)) / _sample_std(log_s)
+    out['logstatav5_s'] = _sample_std(_sample_std(split_log, axis=0), axis=0) / _sample_std(log_s)
 
     # Count crossings of the log spectrum with a horizontal line set a fraction of the way from
     # min(log S) to max(log S). On the linear spectrum a threshold at a fixed fraction of max(S) sits far
@@ -1218,7 +1219,7 @@ def cepstrum(y: ArrayLike, max_period: int = 100, min_period: int = 4) -> dict:
 
     # Basic distributional context over the search range:
     out['meanCeps'] = np.mean(cSearch)
-    out['stdCeps'] = np.std(cSearch, ddof=1)
+    out['stdCeps'] = _sample_std(cSearch)
 
     # Peak height in units of the cepstrum's own spread over the search range
     # (scale-free, unlike `peak` itself):
@@ -1586,7 +1587,7 @@ def envelope_stats(y: ArrayLike, power_frac: float = 0.5, trim_frac: float = 0.0
     out = {f: np.nan for f in ('full_cv', 'full_kurt', 'full_tau', 'dom_cv', 'dom_skew',
                                'dom_kurt', 'dom_tau', 'dom_ifspread')}
     N = len(y)
-    if N < 50 or not np.all(np.isfinite(y)) or np.std(y, ddof=1) == 0:
+    if N < 50 or not np.all(np.isfinite(y)) or _sample_std(y) == 0:
         return out
     y = y - np.mean(y)
 
@@ -1907,7 +1908,7 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
     out = {}
     out['meanBic'] = np.mean(bic)
     out['maxBic'] = np.max(bic)
-    out['stdBic'] = np.std(bic, ddof=1)
+    out['stdBic'] = _sample_std(bic)
     out['skewBic'] = scipy.stats.skew(bic)
 
     # Normalized Shannon entropy of the bicoherence surface (0 = all coupling
@@ -2122,13 +2123,13 @@ def spectral_time_freq(y: ArrayLike, num_windows: int = 20) -> Union[dict, float
 
     P, fout = _spectrogram_power(y, window, noverlap)  # one-sided power, (frequency bin, window)
     kurt, thresh = _spectral_kurtosis(P)  # spectral kurtosis per frequency bin, and its 95% threshold
-    spread = np.std(P, axis=1, ddof=1)
+    spread = _sample_std(P, axis=1)
     centroid = np.mean(P, axis=1)
 
     out = {}
     out['sk_max'] = np.max(kurt)
     out['sk_mean'] = np.mean(kurt)
-    out['sk_std'] = np.std(kurt, ddof=1)
+    out['sk_std'] = _sample_std(kurt)
     out['sk_range'] = np.max(kurt) - np.min(kurt)
     out['sk_fracAboveThresh'] = np.mean(kurt > thresh)
     out['sk_freqAtMax'] = 2 * np.pi * fout[int(np.argmax(kurt))]
@@ -2136,7 +2137,7 @@ def spectral_time_freq(y: ArrayLike, num_windows: int = 20) -> Union[dict, float
 
     se = _spectral_entropy(P)  # normalized spectral entropy of each window
     out['se_mean'] = np.mean(se)
-    out['se_std'] = np.std(se, ddof=1)
+    out['se_std'] = _sample_std(se)
     out['se_max'] = np.max(se)
     out['se_min'] = np.min(se)
     out['se_range'] = np.max(se) - np.min(se)
@@ -2384,7 +2385,7 @@ def rhythmicity(y: ArrayLike, m: float = 5, tau: float = 1.5, n_freq: int = 40,
     out = {}
     out['lavi_mean'] = np.mean(S)
     out['lavi_median'] = med
-    out['lavi_std'] = np.std(S, ddof=1)
+    out['lavi_std'] = _sample_std(S)
     q1, q3 = np.quantile(S, [0.25, 0.75], method='hazen')
     out['lavi_iqr'] = q3 - q1
     out['lavi_max'] = np.max(S)
@@ -2421,7 +2422,7 @@ def rhythmicity(y: ArrayLike, m: float = 5, tau: float = 1.5, n_freq: int = 40,
 
     # The excess over the spectral null:
     out['ex_mean'] = np.mean(ex)
-    out['ex_std'] = np.std(ex, ddof=1)
+    out['ex_std'] = _sample_std(ex)
     out['ex_max'] = np.max(ex)
     out['ex_min'] = np.min(ex)
     out['ex_freqAtMax'] = 2 * np.pi * f[int(np.argmax(ex))]

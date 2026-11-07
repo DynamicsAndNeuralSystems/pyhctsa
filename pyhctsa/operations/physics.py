@@ -1,5 +1,6 @@
 from typing import Union
 
+from ..utils import _sample_std
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.stats import ansari
@@ -151,8 +152,8 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
                 # w[i] is not yet computed, so the local std of the walker is
                 # built from its previous wl values plus the provisional w_mom.
                 # The series is read one step lagged: y[i-wl-1 : i] (wl+1 samples).
-                sy = np.std(y[i-wl-1:i], ddof=1)
-                sw = np.std(np.append(w[i-wl:i], w_mom), ddof=1)
+                sy = _sample_std(y[i-wl-1:i])
+                sw = _sample_std(np.append(w[i-wl:i], w_mom))
                 w[i] = w_mom * (sy / sw)
             else:
                 w[i] = w_mom
@@ -165,7 +166,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     # (i) The walk itself
     out['w_mean'] = np.mean(w)
     out['w_median'] = np.median(w)
-    out['w_std'] = np.std(w, ddof=1)
+    out['w_std'] = _sample_std(w)
     out['w_ac1'] = autocorr(w, 1, 'Fourier')
     out['w_ac2'] = autocorr(w, 2, 'Fourier')
     out['w_tau'] = first_crossing(w, 'ac', 0, 'continuous')
@@ -177,7 +178,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     out['sw_meanabsdiff'] = np.mean(np.abs(y - w))
     out['sw_taudiff'] = (first_crossing(y, 'ac', 0, 'continuous')
                          - first_crossing(w, 'ac', 0, 'continuous'))
-    out['sw_stdrat'] = np.std(w, ddof=1) / np.std(y, ddof=1)
+    out['sw_stdrat'] = _sample_std(w) / _sample_std(y)
     # a difference, not a ratio, which blows up when y has ac1 near 0
     out['sw_ac1diff'] = out['w_ac1'] - autocorr(y, 1, 'Fourier')
     out['sw_minrat'] = np.min(w) / np.min(y)
@@ -313,7 +314,7 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
     out = {}
     out['mean'] = np.mean(x) # mean position
     out['median'] = np.median(x) # median position
-    out['std'] = np.std(x, ddof=1) # std. dev.
+    out['std'] = _sample_std(x) # std. dev.
     out['range'] = np.ptp(x)
     out['proppos'] = np.sum(x >0)/N
     out['pcross'] = np.sum(x[:-1] * x[1:] < 0) / (N - 1)

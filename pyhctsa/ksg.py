@@ -29,6 +29,7 @@ References
    complex systems", Front. Robot. AI 1, 11 (2014).
 """
 import numpy as np
+from .utils import _sample_std
 from numba import njit
 from scipy.spatial import cKDTree
 from scipy.special import digamma
@@ -112,7 +113,7 @@ def _as_columns(a, name):
 
 def _standardize(a):
     """Zero mean and unit (sample) variance in each column; constant columns are only centered."""
-    sd = a.std(axis=0, ddof=1)
+    sd = _sample_std(a, axis=0)
     sd[sd == 0.0] = 1.0
     return (a - a.mean(axis=0)) / sd
 

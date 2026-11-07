@@ -1,5 +1,6 @@
 from typing import Union
 
+from ..utils import _sample_std
 import numpy as np
 from numpy.typing import ArrayLike
 import scipy
@@ -259,7 +260,7 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
 
     # statistics of k are reused throughout; compute each exactly once
     meank = np.mean(k)
-    stdk = np.std(k, ddof=1)
+    stdk = _sample_std(k)
     mediank = np.median(k)
     maxk = np.max(k)
     q05, q25, q75, q95 = np.quantile(k, [0.05, 0.25, 0.75, 0.95], method='hazen')
@@ -440,8 +441,8 @@ def ordinal_partition_network(y: ArrayLike, d: int = 3, tau: Union[int, str] = 1
     in_deg = np.bincount(to_nodes, minlength=n)
     out['maxOutDegree'] = float(out_deg.max())
     out['maxInDegree'] = float(in_deg.max())
-    out['stdOutDegree'] = float(np.std(out_deg, ddof=1)) if n > 1 else 0.0
-    out['stdInDegree'] = float(np.std(in_deg, ddof=1)) if n > 1 else 0.0
+    out['stdOutDegree'] = float(_sample_std(out_deg, single=0.0))  # all nodes: 0 for one node
+    out['stdInDegree'] = float(_sample_std(in_deg, single=0.0))
 
     # Reciprocity: fraction of edges (i,j) for which the reverse edge (j,i) also occurs
     reverse_code = to_nodes * n + from_nodes

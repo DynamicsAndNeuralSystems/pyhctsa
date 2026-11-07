@@ -336,7 +336,7 @@ def test_local_global_unicg_uses_evenly_spaced_rounded_half_up_indices():
 
 
 def test_std_nth_deriv_single_difference_convention():
-    assert S.std_nth_deriv(np.array([1.0, 3.0]), 1) == 0.0           # std of one value is 0
+    assert np.isnan(S.std_nth_deriv(np.array([1.0, 3.0]), 1))        # std of one value is undefined
     y = np.random.default_rng(16).standard_normal(50)
     assert S.std_nth_deriv(y, 3) == pytest.approx(np.std(np.diff(y, 3), ddof=1))
 
@@ -345,7 +345,7 @@ def test_sample_std_convention():
     x = np.random.default_rng(17).standard_normal((6, 4))
     assert _sample_std(x) == pytest.approx(np.std(x, ddof=1))
     assert _sample_std(x, axis=0) == pytest.approx(np.std(x, axis=0, ddof=1))
-    assert _sample_std([3.0]) == 0.0 and np.isnan(_sample_std([])) and np.isnan(_sample_std([np.nan]))
+    assert np.isnan(_sample_std([3.0])) and np.isnan(_sample_std([])) and np.isnan(_sample_std([np.nan]))
 
 
 def test_cross_prediction_iqr_is_hazen_quantile():
@@ -412,9 +412,9 @@ def test_compare_ks_fit_properties():
 
 
 # --------------------------------------------------------------------------- extreme events
-def test_interval_stats_single_interval_has_zero_cv():
+def test_interval_stats_single_interval_has_nan_cv():
     mean, cv = EE._interval_stats(np.array([2, 5]))
-    assert mean == 3.0 and cv == 0.0
+    assert mean == 3.0 and np.isnan(cv)
     assert all(np.isnan(v) for v in EE._interval_stats(np.array([4])))
 
 
