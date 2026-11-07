@@ -715,25 +715,21 @@ def _tau_mi_gaussian(y: np.ndarray) -> float:
     curve is not used: it loses precision at long lags of smooth series, where r is close to 1.)
     """
     n = y.size
-    prev2 = prev1 = np.nan  # AMI at lags i-2, i-1
-    # IN_AutoMutualInfo gives NaN for lags > N - 5, and CO_FirstMin gives up on a NaN
-    for i in range(1, n - 4):
-        y1, y2 = y[:-i], y[i:]
-        d1, d2 = y1 - y1.mean(), y2 - y2.mean()
-        den = np.sqrt(np.dot(d1, d1) * np.dot(d2, d2))
-        if not den > 0:
-            return np.nan
-        r = min(1.0, max(-1.0, np.dot(d1, d2) / den))
-        with np.errstate(divide='ignore'):
-            cur = -0.5 * np.log(1.0 - r * r)
-        if np.isnan(cur):
-            return np.nan
-        if i == 2 and cur > prev1:
-            return 1  # already increases at lag 2 from lag 1
-        if i > 2 and prev2 > prev1 < cur:
-            return i - 1
-        prev2, prev1 = prev1, cur
-    return np.nan
+
+    def ami_at_lags():
+        # IN_AutoMutualInfo gives NaN for lags > N - 5, and CO_FirstMin gives up on a NaN
+        for i in range(1, n - 4):
+            y1, y2 = y[:-i], y[i:]
+            d1, d2 = y1 - y1.mean(), y2 - y2.mean()
+            den = np.sqrt(np.dot(d1, d1) * np.dot(d2, d2))
+            if not den > 0:
+                yield np.nan  # a constant delay window
+                return
+            r = min(1.0, max(-1.0, np.dot(d1, d2) / den))
+            with np.errstate(divide='ignore'):
+                yield -0.5 * np.log(1.0 - r * r)
+
+    return _first_extremum(ami_at_lags(), 'min', not_found=np.nan)
 
 
 _TAU_MI_JITTER_SEED = 0   # fixed seed of the always-applied 1e-10 jitter in _tau_mi (deterministic)
@@ -1453,3 +1449,43 @@ def make_function_name_mappings(
             df_all_modules.to_csv(f, index=False)
 
     return df_all_modules
+
+
+def _first_extremum(values, kind: str = 'min', not_found: Union[int, float] = np.nan) -> Union[int, float]:
+    """Lag of the first strict local minimum (or maximum) of a lag curve, read lazily.
+
+    ``values`` is an iterable (typically a generator) of the curve at lags 1, 2, 3, ...; it is
+    consumed only up to the first extremum (or the first NaN), so an expensive per-lag quantity
+    (e.g. a Kraskov AMI) is computed no further than needed. With ``kind='min'`` the result is
+    1 if the curve increases from lag 1 to lag 2, and otherwise the first lag ``l`` with
+    ``c(l-1) > c(l) < c(l+1)``; with ``kind='max'`` it is the first lag with
+    ``c(l-1) < c(l) > c(l+1)`` (lag 1 never counts), as in hctsa's ``CO_FirstMin``.
+
+    Parameters
+    ----------
+    values : iterable of float
+        The curve at lags 1, 2, 3, ...
+    kind : {'min', 'max'}
+        Which extremum to find.
+    not_found : int or float
+        Returned when the values run out without an extremum (callers choose: the series
+        length in ``first_min``/``first_max``, NaN in ``get_tau``).
+
+    Returns
+    -------
+    int or float
+        The lag of the extremum, NaN if a NaN value comes first, else ``not_found``.
+    """
+    prev2 = prev1 = np.nan  # curve at lags l-2, l-1
+    for lag, cur in enumerate(values, start=1):
+        if np.isnan(cur):
+            return np.nan
+        if kind == 'min':
+            if lag == 2 and cur > prev1:
+                return 1  # already increases at lag 2 from lag 1
+            if lag > 2 and prev2 > prev1 < cur:
+                return lag - 1
+        elif lag > 2 and prev2 < prev1 > cur:
+            return lag - 1
+        prev2, prev1 = prev1, cur
+    return not_found

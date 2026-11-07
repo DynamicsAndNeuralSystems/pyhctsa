@@ -6,7 +6,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from scipy import stats
 
-from ..utils import dict_output, get_tau, sign_change, time_delay_embed
+from ..utils import _first_extremum, dict_output, get_tau, sign_change, time_delay_embed
 from ..robust import bf_hist_edges, bf_tie_break_noise
 from ..ksg import ksg_mi
 
@@ -174,15 +174,10 @@ def _first_min_from_curve(c: np.ndarray, n: int):
     NaN if the curve hits a NaN first; ``n`` (the series length) if the curve keeps
     decreasing, as in hctsa's ``CO_FirstMin``.
     """
-    for i in range(1, len(c) + 1):
-        if np.isnan(c[i - 1]):
-            logger.warning("No minimum: encountered NaN.")
-            return np.nan
-        if (i == 2) and (c[1] > c[0]):
-            return 1
-        elif (i > 2) and c[i - 3] > c[i - 2] < c[i - 1]:
-            return i - 1
-    return n
+    lag = _first_extremum(c, 'min', not_found=n)
+    if np.isnan(lag):
+        logger.warning("No minimum: encountered NaN.")
+    return lag
 
 
 def _first_max_from_curve(c: np.ndarray, n: int):
@@ -191,13 +186,10 @@ def _first_max_from_curve(c: np.ndarray, n: int):
     NaN if the curve hits a NaN first; ``n`` (the series length) if no maximum is found,
     as in hctsa's ``CO_FirstMin`` with ``minNotMax = false``.
     """
-    for i in range(1, len(c) + 1):
-        if np.isnan(c[i - 1]):
-            logger.warning("No maximum: encountered NaN.")
-            return np.nan
-        if (i > 2) and c[i - 3] < c[i - 2] > c[i - 1]:
-            return i - 1
-    return n
+    lag = _first_extremum(c, 'max', not_found=n)
+    if np.isnan(lag):
+        logger.warning("No maximum: encountered NaN.")
+    return lag
 
 def first_min(
     y: list,
@@ -251,23 +243,14 @@ def first_min(
     if min_what in _VECTORISED_CORR and n >= 3:     # vectorised drop-in, identical lag
         return _first_min_from_curve(_self_corr_curve(y, min_what), n)
     corrfn = _get_corr_fn(y, min_what, extra_param)
-    
-    auto_corr = np.zeros(n - 1)
-    for i in range(1, n):
-        auto_corr[i - 1] = corrfn(i)
-        
-        if np.isnan(auto_corr[i - 1]):
-            logger.warning(f"No minimum in {min_what}: encountered NaN.")
-            return np.nan
-        
-        # Check for minimum
-        if (i == 2) and (auto_corr[1] > auto_corr[0]):
-            return 1
-        elif (i > 2) and auto_corr[i - 3] > auto_corr[i - 2] < auto_corr[i - 1]:
-            return i - 1
-
-    # still decreasing: no minimum found anywhere in the series
-    return n
+    if n == 0:
+        raise ValueError("first_min needs a non-empty time series.")
+    # lazily, lag by lag: the (slow) estimator is evaluated only up to the first minimum;
+    # if the function keeps decreasing there is no minimum anywhere in the series (-> n)
+    lag = _first_extremum((corrfn(i) for i in range(1, n)), 'min', not_found=n)
+    if np.isnan(lag):
+        logger.warning(f"No minimum in {min_what}: encountered NaN.")
+    return lag
 
 def first_max(
     y: list,
@@ -315,21 +298,13 @@ def first_max(
     if max_what in _VECTORISED_CORR and n >= 3:     # vectorised drop-in, identical lag
         return _first_max_from_curve(_self_corr_curve(y, max_what), n)
     corrfn = _get_corr_fn(y, max_what, extra_param)
-    
-    auto_corr = np.zeros(n - 1)
-    for i in range(1, n):
-        auto_corr[i - 1] = corrfn(i)
-        
-        if np.isnan(auto_corr[i - 1]):
-            logger.warning(f"No maximum in {max_what}: encountered NaN.")
-            return np.nan
-
-        # Check for maximum
-        if i > 2 and auto_corr[i - 3] < auto_corr[i - 2] > auto_corr[i - 1]:
-            return i - 1
-
-    # no maximum found anywhere in the series
-    return n
+    if n == 0:
+        raise ValueError("first_max needs a non-empty time series.")
+    # lazily, lag by lag, up to the first maximum; no maximum anywhere in the series -> n
+    lag = _first_extremum((corrfn(i) for i in range(1, n)), 'max', not_found=n)
+    if np.isnan(lag):
+        logger.warning(f"No maximum in {max_what}: encountered NaN.")
+    return lag
 
 def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
             r2: Union[str, list] = 'range', num_bins: int = 10) -> float:
