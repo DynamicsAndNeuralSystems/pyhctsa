@@ -1,10 +1,17 @@
-"""Pinned outputs of every operation that calls the shared golden-section kernel.
+"""Equivalence and pinned outputs for the shared golden-section kernel.
 
 ``robust._golden_section_min`` is the golden-section search shared by ``robust.bf_exp_fit`` and
 ``operations.nonlinearity._saturating_exp_fit``; factoring it out must not change any output.
-The values below were generated from the main checkout before the refactor (main 0fa9013) and
-are compared at rtol 1e-12 (fit outputs only, i.e. the keys containing ``exp``, for the larger
-operations).
+
+Two checks:
+
+1. Same-runner reference (the equivalence check that matters): the two golden-section loops
+   that the kernel replaced are copied verbatim from main 0fa9013 below (``_ref_*``) and must
+   give the same minimizer as ``_golden_section_min`` at rtol 1e-12 on several objectives and
+   brackets, on whatever machine runs the test.
+2. Operation-level pins of every operation that calls the kernel. The values were generated from
+   the main checkout before the refactor (main 0fa9013, on Ben's Mac); the tolerance is set per
+   output (see ``_rtol``), since other platforms reproduce the fits only to about 1e-6.
 """
 import warnings
 
@@ -16,7 +23,51 @@ from pyhctsa.operations.model_fit import loop_local_simple
 from pyhctsa.operations.nonlinearity import _saturating_exp_fit, largest_lyap
 from pyhctsa.operations.stationarity import std_nth_deriv_change
 from pyhctsa.operations.symbolic import transition_p_alphabet
-from pyhctsa.robust import _golden_section_min, bf_exp_fit
+from pyhctsa.robust import _golden_section_min, _sse_of_rate, bf_exp_fit
+
+
+# --- verbatim copies of the replaced loops (main 0fa9013) -------------------------------------
+
+def _ref_bf_exp_fit_golden(x, y, with_offset, lo, hi):
+    # copied from pyhctsa/robust.py lines 390-398 (inside bf_exp_fit) on main 0fa9013
+    phi = (np.sqrt(5) - 1) / 2
+    for _ in range(40):  # golden-section search
+        b1 = hi - phi * (hi - lo)
+        b2 = lo + phi * (hi - lo)
+        if _sse_of_rate(np.array([b1]), x, y, with_offset)[0] <= _sse_of_rate(np.array([b2]), x, y, with_offset)[0]:
+            hi = b2
+        else:
+            lo = b1
+    b = (lo + hi) / 2
+    return b
+
+
+def _ref_saturating_golden(sse, sgn, lo, hi):
+    # copied from pyhctsa/operations/nonlinearity.py lines 2649-2657 (inside _saturating_exp_fit)
+    # on main 0fa9013; ``sse`` maps an array of rates to an array of objective values
+    phi = (np.sqrt(5) - 1) / 2
+    for _ in range(40):  # golden-section search in log|b|
+        u1 = hi - phi * (hi - lo)
+        u2 = lo + phi * (hi - lo)
+        if sse(sgn * np.exp(u1))[0] <= sse(sgn * np.exp(u2))[0]:
+            hi = u2
+        else:
+            lo = u1
+    b = sgn * np.exp((lo + hi) / 2)
+    return b
+
+
+def _saturating_sse(t, p):
+    # the objective of _saturating_exp_fit (nonlinearity.py, main 0fa9013, lines 2634-2641)
+    def sse(b):
+        b = np.atleast_1d(np.asarray(b, dtype=float))
+        with np.errstate(all='ignore'):
+            g = 1.0 - np.exp(np.outer(t, b))
+            den = np.sum(g ** 2, axis=0)
+            out = np.sum(p ** 2) - (g.T @ p) ** 2 / den
+        out[~(den > 0) | ~np.isfinite(out)] = np.inf
+        return out
+    return sse
 
 
 def _series(kind):
@@ -60,13 +111,74 @@ EXPECTED = {
 }
 
 
+def _rtol(op, key):
+    # Tier 3 (iterative optimizer): every output of an exponential fit (bf_exp_fit,
+    # _saturating_exp_fit, and the ``*fexp*``/``expfit_*`` keys of the larger operations) comes out
+    # of the golden-section search, which amplifies ulp-level platform differences in the SSE;
+    # CI drift was up to 2e-6 (ubuntu, bf_exp_fit with offset on ``sin``), so rtol 1e-5.
+    if op in ('bf_exp_fit_offset', 'bf_exp_fit_nooffset', 'saturating_exp_fit') or 'exp' in key:
+        return 1e-5
+    # Tier 1 (closed-form arithmetic): the remaining std_nth_deriv_change keys are ratios of
+    # standard deviations of differenced series and orders picked from them (CI drift <= 1e-11).
+    return 1e-9
+
+
 @pytest.mark.parametrize('kind, op', sorted(EXPECTED))
 def test_pinned_outputs(kind, op):
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         out = OPS[op](_series(kind))
     for key, want in EXPECTED[(kind, op)].items():
-        np.testing.assert_allclose(out[key], want, rtol=1e-12, atol=0, err_msg=f'{kind} {op} {key}')
+        np.testing.assert_allclose(out[key], want, rtol=_rtol(op, key), atol=0,
+                                   err_msg=f'{kind} {op} {key}')
+
+
+def _fit_data():
+    # (x, y) pairs for the bf_exp_fit objective: cumulative sums of the two series, a clean
+    # decaying exponential, a noisy growing exponential with offset, and a linear ramp
+    rng = np.random.default_rng(11)
+    x = np.arange(1, 41.)
+    out = [(x, np.abs(_series(k)[:40]).cumsum()) for k in ('ar1', 'sin')]
+    out.append((x, 3.0 * np.exp(-0.2 * x)))
+    out.append((x, 0.5 * np.exp(0.05 * x) + 2.0 + 0.1 * rng.standard_normal(40)))
+    out.append((x, 0.3 * x + 0.05 * rng.standard_normal(40)))
+    return out
+
+
+@pytest.mark.parametrize('with_offset', [True, False])
+def test_bf_exp_fit_loop_matches_reference(with_offset):
+    # the replaced loop of bf_exp_fit against the kernel, on several objectives, each on the
+    # bracket bf_exp_fit itself would use (around the grid minimum) and on wider/edge brackets
+    for x, y in _fit_data():
+        b_max = 20 / (x.max() - x.min())
+        b_grid = np.linspace(-b_max, b_max, 401)
+        k = int(np.argmin(_sse_of_rate(b_grid, x, y, with_offset)))
+        brackets = [(b_grid[max(k - 1, 0)], b_grid[min(k + 1, b_grid.size - 1)]),
+                    (-b_max, b_max), (b_grid[0], b_grid[2]), (0.0, 0.1)]
+        for lo, hi in brackets:
+            want = _ref_bf_exp_fit_golden(x, y, with_offset, lo, hi)
+            got = _golden_section_min(lambda b: _sse_of_rate(np.array([b]), x, y, with_offset)[0], lo, hi)
+            np.testing.assert_allclose(got, want, rtol=1e-12, atol=0, err_msg=f'{lo}, {hi}')
+
+
+def test_saturating_loop_matches_reference():
+    # the replaced loop of _saturating_exp_fit against the kernel, as _saturating_exp_fit calls
+    # it (in log|b|, with a sign), on its own objective and on generic vectorized objectives
+    t = np.arange(1, 61.)
+    objectives = [_saturating_sse(t, np.abs(_series(k)[:60]).cumsum()) for k in ('ar1', 'sin')]
+    objectives.append(_saturating_sse(t, 4.0 * (1 - np.exp(-0.1 * t))))
+    objectives += [lambda b: np.atleast_1d((np.log(np.abs(b)) + 2.0) ** 2),
+                   lambda b: np.atleast_1d(np.abs(b - 0.01)),
+                   lambda b: np.atleast_1d(np.cos(3 * b) + 0.1 * b ** 2),
+                   lambda b: np.atleast_1d(np.zeros_like(b, dtype=float))]  # all ties
+    u = np.linspace(np.log(1e-5), np.log(5.0), 200)
+    brackets = [(u[0], u[2]), (u[97], u[99]), (u[-3], u[-1]), (u[0], u[-1])]
+    for sse in objectives:
+        for sgn in (-1.0, 1.0):
+            for lo, hi in brackets:
+                want = _ref_saturating_golden(sse, sgn, lo, hi)
+                got = sgn * np.exp(_golden_section_min(lambda v: sse(sgn * np.exp(v))[0], lo, hi))
+                np.testing.assert_allclose(got, want, rtol=1e-12, atol=0)
 
 
 def test_golden_section_min():
