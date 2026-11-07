@@ -3,7 +3,7 @@ from numpy.typing import ArrayLike
 from scipy import signal
 
 from ..robust import bf_hist_edges
-from ..utils import get_tau
+from ..utils import _coarse_grain, get_tau
 
 def raw_hrv_meas(x: ArrayLike) -> dict:
     """
@@ -522,8 +522,7 @@ def porta(x: ArrayLike, num_levels: int = 6, tau: int | str = 1) -> dict:
     scale = (q75 - q25) / 1.349  # robust standard deviation
     if scale <= 1e-12 * np.max(np.abs(x)):  # more than half the values tied
         scale = 1.2533 * np.mean(np.abs(x - med))  # mean absolute deviation (Gaussian-consistent)
-    inner = med + (6 * scale / num_levels) * (np.arange(1, num_levels) - num_levels / 2)
-    sym = np.searchsorted(inner, x, side='right')
+    sym = _coarse_grain(x, num_levels, 'width', limits=(med - 3 * scale, med + 3 * scale))
 
     # transitions between symbols tau apart
     s = np.sign(sym[tau:] - sym[:-tau])

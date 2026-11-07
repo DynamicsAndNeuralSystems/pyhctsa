@@ -176,7 +176,8 @@ def test_order_based_symbols_are_rank_invariant_at_a_fixed_lag(name, call):
 
 
 def test_tau1_values_pinned():
-    # tau = 1 values of origin/main (bcb14a8), from tests/data/symbolic_tau1/build_fixture.py;
+    # tau = 1 values of origin/main (bcb14a8; coarse-graining features regenerated with the
+    # convention of utils._coarse_grain), from tests/data/symbolic_tau1/build_fixture.py;
     # a rounding-level tolerance allows for platform differences in linear algebra (eigenvalues);
     # fitted exponential-decay outputs (*fexp*) come from a minimizer, which a comparison of
     # sums of squares locates only to about sqrt(eps), so they get a looser tolerance

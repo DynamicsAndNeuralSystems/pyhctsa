@@ -20,7 +20,7 @@ from pyhctsa.operations import physics as PH
 from pyhctsa.operations import pre_process as PP
 from pyhctsa.operations import spectral as SP
 from pyhctsa.operations import stationarity as ST
-from pyhctsa.robust import bf_quantile_edges
+from pyhctsa.utils import _coarse_grain
 
 with open(os.path.join(os.path.dirname(__file__), 'data', 'p2_b.json')) as fh:
     _FIX = json.load(fh)
@@ -231,16 +231,16 @@ class TestStationarity:
             _check(py, ml, f'ld {n}', rtol=1e-9, atol=1e-12, skip=('meandiv',))
             if isinstance(ml, dict):
                 y = SERIES[n]
-                counts, _ = np.histogram(y, bins=bf_quantile_edges(y, 10))
+                counts = np.bincount(_coarse_grain(y, 10), minlength=10)
                 null = np.sum(ST._random_order_tv(counts, len(y), len(y) // segs, mode))
                 np.testing.assert_allclose(py['ex_meandiv'] + null, ml['meandiv'], rtol=1e-9, atol=1e-12)
 
     def test_local_distributions_bounds(self):
         y = SERIES['s3']
-        counts, _ = np.histogram(y, bins=bf_quantile_edges(y, 8))
+        counts = np.bincount(_coarse_grain(y, 8), minlength=8)
         null = np.sum(ST._random_order_tv(counts, len(y), len(y) // 4, 'par'))
         assert -null <= ST.local_distributions(y, 4, 'par', 8)['ex_meandiv'] <= 1 - null
-        counts, _ = np.histogram(y, bins=bf_quantile_edges(y, 10))
+        counts = np.bincount(_coarse_grain(y, 10), minlength=10)
         null = np.sum(ST._random_order_tv(counts, len(y), len(y) // 2, 'each'))
         assert -null <= ST.local_distributions(y, 2, 'each') <= 1 - null
 

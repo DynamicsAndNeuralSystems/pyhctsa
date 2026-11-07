@@ -17,7 +17,7 @@ from ..toolboxes.physionet import sampen as _sampen_c
 from ..robust import bf_hist_edges, bf_ks_density, bf_random, bf_random_seed
 from ._symbolic_complexity import (_equiprobable_symbols, _normalized_lz_complexity,
                                   _shannon_block_entropy)
-from ..utils import (dict_output, _zscore_or_zeros, get_tau, make_buffer, pre_process, theiler_window,
+from ..utils import (dict_output, _coarse_grain, _zscore_or_zeros, get_tau, make_buffer, pre_process, theiler_window,
                      time_delay_embed, z_score)
 
 
@@ -1890,15 +1890,14 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
         f = np.nan if m < 2 else 0.0
         return {'dispEn': 0.0, 'normDispEn': 0.0, 'fDispEn': f, 'normFDispEn': f}
 
-    # Map the series onto (0, 1), then onto the c amplitude classes
+    # Map the series onto (0, 1), then onto the c amplitude classes: classes 1..c as
+    # z = round(c*y + 0.5) (Rostaghi & Azami), i.e. floor(c*y) + 1 for y >= 0, clamped into
+    # 1..c (y = 1 would give c + 1): c equal-width bins of the mapped values
     if mapping_how == 'ncdf':
         y_mapped = norm.cdf(y, loc=np.mean(y), scale=np.std(y, ddof=1))
+        z = _coarse_grain(y_mapped, c, 'width', limits=(0, 1)) + 1
     else:
-        y_mapped = (y - np.min(y)) / (np.max(y) - np.min(y))
-
-    # Classes 1..c as z = round(c*y + 0.5) (Rostaghi & Azami), i.e. floor(c*y) + 1 for y >= 0,
-    # then clamp into 1..c (y = 1 would give c + 1)
-    z = np.clip(np.floor(c * y_mapped) + 1, 1, c).astype(np.int64)
+        z = _coarse_grain(y, c, 'width') + 1  # (a min-max rescaling onto [0, 1])
 
     # Z[i, k] = z[i + k*tau], one row per embedding vector
     emb = z[np.arange(num_vectors)[:, None] + np.arange(m) * tau]
