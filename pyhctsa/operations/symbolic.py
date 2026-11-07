@@ -6,8 +6,6 @@ from numpy.typing import ArrayLike
 import logging
 logger = logging.getLogger('pyhctsa')
 
-from scipy.stats import mstats
-
 from ..operations.correlation import autocorr
 from ..robust import bf_exp_fit
 from ..utils import dict_output, _sample_std, binarize, sign_change, get_tau, time_delay_embed
@@ -193,10 +191,8 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     out['mean'] = np.mean(store)
     out['sum'] = np.sum(store)
     out['median'] = np.median(store)
-    lq = mstats.mquantiles(store, 0.25, alphap=0.5, betap=0.5) # outputs an array of size one
-    out['lq'] = lq[0] #convert array to int
-    uq = mstats.mquantiles(store, 0.75, alphap=0.5, betap=0.5)
-    out['uq'] = uq[0]
+    out['lq'] = np.quantile(store, 0.25, method='hazen')
+    out['uq'] = np.quantile(store, 0.75, method='hazen')
     out['std'] = np.std(store, ddof=1)
     out['propUnseen'] = prop_unseen
 

@@ -9,6 +9,7 @@ import logging
 
 import numpy as np
 import pytest
+from scipy.stats import norm
 
 from pyhctsa.calculator import FeatureCalculator
 from pyhctsa.operations.correlation import (crinkle_statistic, crinkle_statistic_kurtosis,
@@ -130,7 +131,7 @@ def test_crinkle_lag():
 
 def _porta_levels(y, L=6):
     q25, med, q75 = np.percentile(y, [25, 50, 75])
-    w = (q75 - q25) / 1.349 * 6 / L
+    w = (q75 - q25) / (2 * norm.ppf(0.75)) * 6 / L
     return np.array([int(np.sum(v >= med + w * (np.arange(1, L) - L / 2))) for v in y])
 
 
