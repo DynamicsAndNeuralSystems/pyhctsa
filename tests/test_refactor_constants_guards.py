@@ -6,20 +6,30 @@ round-off guard (``utils._is_roundoff``) and ``_piecewise_poly_residual`` in ``u
 ``model_fit`` <-> ``pre_process`` import cycle), and removed the alias wrappers
 ``_armax_residuals`` and ``_kstep_residuals_ss``. None of this changes any output.
 
-The expected values below were generated from the main checkout before the refactor
-(pyhctsa main at 0fa9013), on two seeded series.
+Two kinds of check:
+
+1. Same-runner reference checks (``test_ref_*``): verbatim copies of the pre-refactor code
+   (``_ref_*`` below, copied from pyhctsa main at 0fa9013, file and line given with each) are
+   compared with the code that replaced them, at ``rtol=1e-12, atol=0``, on whatever machine runs
+   the test. These check the equivalence claim with no platform dependence.
+2. Operation-level pins (``test_pinned_outputs``): the expected values were generated from the
+   main checkout before the refactor (pyhctsa main at 0fa9013, on Ben's arm64 Mac), on two
+   seeded series. Other platforms reproduce them only to the accuracy of the operation's
+   numerics (BLAS summation order, FFT library, optimizer path), so each operation has a
+   tolerance set by what it computes (``TOL`` below).
 """
 import numpy as np
 import pytest
 
 from pyhctsa.fitting import robust_linear_fit
+from pyhctsa.fitting import robust_regression as rr
 from pyhctsa.operations import entropy as en
 from pyhctsa.operations import medical as md
 from pyhctsa.operations import model_fit as mf
 from pyhctsa.operations import pre_process as pp
 from pyhctsa.operations import spectral as sp
 from pyhctsa.robust import bf_ks_density, bf_residual_stats
-from pyhctsa.utils import _is_roundoff, get_tau, z_score
+from pyhctsa.utils import MAD_DIVISOR, MAD_TO_SIGMA, _is_roundoff, get_tau, z_score
 
 NAN = float('nan')
 
@@ -103,6 +113,43 @@ EXPECTED = {
 }
 
 
+# Tolerances of the operation-level pins, by what the operation computes:
+#   tier 1, closed-form arithmetic (sums, counts, quantiles, histograms, FFT spectra, ACF):
+#     rtol 1e-9 (CI drift from BLAS/FFT summation order is at most about 1e-11);
+#   tier 2, linear algebra and least squares: rtol 1e-8;
+#   tier 3, iterative optimizers (curve fits, Levenberg-Marquardt, GARCH and GP likelihood fits):
+#     rtol 1e-5 (the optimizer's path, and so where it stops, depends on the platform's arithmetic).
+# ``atol`` is added only where outputs can be near zero, as 1e-9 times the scale they come from.
+TIER1 = dict(rtol=1e-9, atol=0)
+TIER2 = dict(rtol=1e-8, atol=0)
+TIER3 = dict(rtol=1e-5, atol=0)
+TOL = {
+    'hrv_classic': TIER1,               # counts, histogram, periodogram band powers, Poincare SDs
+    'specparam': TIER3,                 # aperiodic fit by scipy.optimize.least_squares (trf)
+    'envelope_stats': TIER1,            # Hilbert envelope (FFT), moments, ACF, scaled MAD
+    'rhythmicity': TIER1,               # wavelet (FFT) spectrum, quantiles, scaled MAD
+    'sinusoid_fit': TIER3,              # nonlinear sinusoid fit by least_squares (trf)
+    'distribution_entropy_ks': TIER1,   # kernel density estimate and its entropy
+    'get_tau_mi': TIER1,                # histogram mutual information (an integer lag)
+    'robust_linear_fit': TIER2,         # IRLS: weighted least squares, stopped at a 1e-10 step
+    'bf_ks_density': TIER1,             # kernel density estimate
+    'bf_residual_stats': TIER1,         # ACF (FFT) and runs statistic
+    # gauss1 curve fits (simple_fit) and KS-fit comparisons; the outputs are differences between
+    # statistics of the processed and original z-scored series (scale 1), some near zero
+    'preproc_compare': dict(rtol=1e-5, atol=1e-9),
+    'preproc_iterate': TIER3,           # gauss1 curve fits (simple_fit) along the iterations
+    'preproc_model_fit': TIER2,         # forward-backward least-squares AR fits
+    'garch_fit': TIER3,                 # GARCH likelihood optimization
+    'armax': TIER3,                     # ARMA by Levenberg-Marquardt from a Hannan-Rissanen start
+    'steps_ahead_ss': TIER2,            # subspace (n4sid) state-space fit: SVD and least squares
+    'compare_test_sets_ss': TIER2,      # subspace (n4sid) state-space fits on test sets
+    'gp_hyperparameters': TIER3,        # GP marginal-likelihood fit (conjugate gradients)
+    # GP marginal-likelihood fit; stdS on the sine is about 3e-10 (the predictive variance is
+    # nearly flat), so atol = 1e-9 * meanS (about 1; the input is z-scored)
+    'gp_fit_across': dict(rtol=1e-5, atol=1e-9),
+}
+
+
 @pytest.mark.parametrize('key', list(EXPECTED))
 def test_pinned_outputs(key):
     name, sname = key.split('|')
@@ -114,7 +161,115 @@ def test_pinned_outputs(key):
     else:
         got_v = np.ravel(np.asarray(got, dtype=float))[:len(want)]
         want_v = np.array(want)
-    np.testing.assert_allclose(got_v, want_v, rtol=1e-12, atol=0, equal_nan=True)
+    np.testing.assert_allclose(got_v, want_v, equal_nan=True, **TOL[name])
+
+
+# ---------------------------------------------------------------------------------------------
+# Same-runner reference checks: the pre-refactor code, copied verbatim from main 0fa9013
+# ---------------------------------------------------------------------------------------------
+
+def _ref_mad_times(x):
+    # spectral.py:164, :1634, :2382 and utils.py:864 (the 1.4826 * MAD sites)
+    return 1.4826 * np.median(np.abs(x - np.median(x)))
+
+
+def _ref_mad_over(x):
+    # medical.py:159 and robust.py:944 (the MAD / 0.6745 sites)
+    return np.median(np.abs(x - np.median(x))) / 0.6745
+
+
+_REF_RR_MAD_TO_SIGMA = 0.6745  # fitting/robust_regression.py:52 (MAD_TO_SIGMA = 0.6745)
+
+
+def _ref_is_roundoff_pre_process(y_d, y_ref):
+    # pre_process.py:349 (_is_roundoff)
+    eps = np.finfo(float).eps
+    return bool(np.std(y_d, ddof=1) <= 10 * y_ref.size * eps * np.sqrt(np.mean(y_ref ** 2)))
+
+
+def _ref_gp_roundoff_constant(yt, n):
+    # model_fit.py:3623 (_gp_roundoff_constant)
+    yt = np.asarray(yt, dtype=float)
+    return bool(np.std(yt, ddof=1) <= 10 * n * np.finfo(float).eps * np.sqrt(np.mean(yt ** 2)))
+
+
+def _ref_residual_stats_guard(res, y):
+    # robust.py:292-294 (the inline guard of bf_residual_stats)
+    res = np.asarray(res, dtype=float).ravel()
+    y = np.asarray(y, dtype=float).ravel()
+    return bool(np.std(res, ddof=1) <= 10 * res.size * np.finfo(float).eps * np.sqrt(np.mean(y ** 2)))
+
+
+def _ref_kstep_residuals_ss(F, K, C, y, steps, init='diffuse'):
+    # model_fit.py:4717 (_kstep_residuals_ss, alias wrapper removed)
+    return mf._prediction_errors((F, K, C), y, int(steps), init)
+
+
+def _ref_armax_residuals(a, c, y, steps):
+    # model_fit.py:452 (_armax_residuals, alias wrapper removed); it called _kstep_residuals, which
+    # (model_fit.py:4748) called _kstep_residuals_ss
+    y = np.asarray(y, dtype=float).ravel()
+    f, gain, out = mf._poly_to_innovations(a, c)
+    if f.shape[0] == 0:
+        return -y
+    return _ref_kstep_residuals_ss(f, gain, out, y, steps)
+
+
+def _mad_corpus():
+    r = np.random.default_rng(5)
+    return list(SERIES.values()) + [r.standard_normal(500), r.standard_t(2, 400),
+                                    np.round(r.standard_normal(300), 1), np.diff(SERIES['sine'], 2)]
+
+
+def test_ref_mad_constants():
+    assert MAD_TO_SIGMA == 1.4826 and MAD_DIVISOR == 0.6745
+    assert rr.MAD_DIVISOR == _REF_RR_MAD_TO_SIGMA
+    for x in _mad_corpus():
+        mad = np.median(np.abs(x - np.median(x)))
+        np.testing.assert_allclose(MAD_TO_SIGMA * mad, _ref_mad_times(x), rtol=1e-12, atol=0)
+        np.testing.assert_allclose(mad / MAD_DIVISOR, _ref_mad_over(x), rtol=1e-12, atol=0)
+
+
+def _roundoff_cases():
+    """Pairs (x, ref) spanning the guard's threshold: std(x) from 1e-17 to 1e-10 of rms(ref)."""
+    r = np.random.default_rng(3)
+    cases = []
+    for n in (50, 300, 1000):
+        ref = 2.0 + r.standard_normal(n)
+        for scale in 10.0 ** np.linspace(-17, -10, 43):
+            cases.append((3.0 + scale * r.standard_normal(n), ref))
+            cases.append((scale * r.standard_normal(n), ref))
+    return cases
+
+
+def test_ref_roundoff_guard():
+    cases = _roundoff_cases()
+    seen = set()
+    for x, ref in cases:
+        n_series = 4 * x.size  # a longer original series, as in the GP operations
+        assert _is_roundoff(x, ref) == _ref_is_roundoff_pre_process(x, ref)
+        assert _is_roundoff(x, n=n_series) == _ref_gp_roundoff_constant(x, n_series)
+        assert _is_roundoff(x, n=x.size) == _ref_gp_roundoff_constant(x, x.size)
+        assert _is_roundoff(x, ref, n=x.size) == _ref_residual_stats_guard(x, ref)
+        seen.add(_is_roundoff(x, ref))
+    assert seen == {True, False}  # the sweep crosses the threshold
+
+
+def test_ref_alias_wrappers():
+    r = np.random.default_rng(7)
+    models = [(np.array([1.0, -0.8]), np.array([1.0, 0.3])),
+              (np.array([1.0, -1.1, 0.3]), np.array([1.0, -0.3, -0.01])),
+              (np.array([1.0]), np.array([1.0]))]
+    for y in list(SERIES.values()) + [r.standard_normal(120)]:
+        for a, c in models:
+            for k in (1, 2, 3):
+                want = _ref_armax_residuals(a, c, y, k)
+                np.testing.assert_allclose(mf._kstep_residuals(a, c, y, k), want, rtol=1e-12, atol=0)
+                f, gain, out = mf._poly_to_innovations(a, c)
+                if f.shape[0]:
+                    np.testing.assert_allclose(mf._prediction_errors((f, gain, out), y, int(k)),
+                                               _ref_kstep_residuals_ss(f, gain, out, y, k),
+                                               rtol=1e-12, atol=0)
 
 
 def test_roundoff_guard_edges():
