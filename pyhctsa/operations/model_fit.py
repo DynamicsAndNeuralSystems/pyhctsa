@@ -2448,6 +2448,47 @@ def _crosspred_excess_ratio(mse: np.ndarray, mom: dict) -> float:
     return float(np.mean(rel[off]) / np.mean(expected[off]))
 
 
+def _segment_ranges(N, sample_p, subset_how, random_seed=None, cap=None):
+    """1-based, inclusive sample ranges of segments of a length-``N`` series.
+
+    ``sample_p[0]`` is the number of segments. With ``subset_how='uniform'`` and a scalar
+    ``sample_p``, the segments are that many contiguous, non-overlapping portions; otherwise
+    ``sample_p[1]`` is the segment length, as a fraction of ``N`` if below 1 (floored, then
+    clipped to ``cap = (lo, hi)`` if given) or else as a number of samples. Starts are then
+    evenly spaced (``'uniform'``), from the golden-ratio (Weyl) sequence (``'spread'``), or
+    uniform random on 1..N-l+1 from the portable generator seeded by ``random_seed``
+    (``'rand'``). Returns an int array of shape (num_segments, 2) of (start, end).
+    """
+    num_pred = int(sample_p[0])
+    r = np.zeros((num_pred, 2), dtype=int)
+    if subset_how not in ('uniform', 'spread', 'rand'):
+        raise ValueError(f"Unknown subset method '{subset_how}'")
+    if subset_how == 'uniform' and len(sample_p) == 1:
+        # num_pred+1 boundaries = num_pred portions
+        spts = _even_split_points(0, N, num_pred + 1)
+        r[:, 0] = spts[:num_pred] + 1
+        r[:, 1] = spts[1:]
+        return r
+    if sample_p[1] < 1:  # a fraction of the time series
+        l = np.floor(N * sample_p[1])
+        if cap is not None:
+            l = max(min(cap[1], l), cap[0])
+        l = int(l)
+    else:  # an absolute interval
+        l = int(sample_p[1])
+    if subset_how == 'uniform':
+        spts = _even_split_points(1, N - l + 1, num_pred)
+    elif subset_how == 'spread':
+        # start points on 1..N-l+1 from frac(j*phi): deterministic, evenly spread
+        spts = 1 + np.floor((N - l + 1) * ((np.arange(1, num_pred + 1) * 0.6180339887498949) % 1.0)).astype(int)
+    else:
+        # num_pred random start points (uniform on 1..N-l+1), reproducible from the seed
+        spts = 1 + np.floor((N - l + 1) * bf_random(num_pred, bf_random_seed(random_seed))).astype(int)
+    r[:, 0] = spts
+    r[:, 1] = spts + l - 1
+    return r
+
+
 @dict_output
 def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, None] = 2,
                     subset_how: str = 'rand', sample_p: Union[list, tuple, int] = (20, 0.1),
@@ -2591,41 +2632,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
     if model == 'arcrosspred' and (subset_how != 'uniform' or len(sample_p) != 1):
         raise ValueError("'arcrosspred' requires subset_how = 'uniform' and a scalar sample_p "
                          "(a non-overlapping segment count)")
-    if subset_how == 'uniform':
-        if len(sample_p) == 1:  # size will depend on number of unique subsegments
-            # num_pred+1 boundaries = num_pred portions
-            spts = _even_split_points(0, N, num_pred + 1)
-            r = np.zeros((num_pred, 2), dtype=int)
-            r[:, 0] = spts[:num_pred] + 1  # +1 for 1-based indexing (if needed)
-            r[:, 1] = spts[1:]
-        else:
-            if sample_p[1] < 1:  # specified a fraction of time series
-                l = int(np.floor(N * sample_p[1]))
-            else:  # specified an absolute interval
-                l = int(sample_p[1])
-            # num_pred boundaries
-            spts = _even_split_points(1, N - l + 1, num_pred)
-            r = np.zeros((num_pred, 2), dtype=int)
-            r[:, 0] = spts
-            r[:, 1] = spts + l - 1
-    elif subset_how == 'spread':
-        if sample_p[1] < 1:  # specified a fraction of time series
-            l = int(np.floor(N * sample_p[1]))
-        else:  # specified an absolute interval
-            l = int(sample_p[1])
-        # start points on 1..N-l+1 from the golden-ratio (Weyl) sequence frac(j*phi): deterministic, evenly spread
-        spts = 1 + np.floor((N - l + 1) * ((np.arange(1, num_pred + 1) * 0.6180339887498949) % 1.0)).astype(int)
-        r = np.column_stack([spts, spts + l - 1])
-    elif subset_how == 'rand':
-        if sample_p[1] < 1:  # specified a fraction of time series
-            l = int(np.floor(N * sample_p[1]))
-        else:  # specified an absolute interval
-            l = int(sample_p[1])
-        # numPred random starting points (uniform on 1..N-l+1), reproducible from the seed
-        spts = 1 + np.floor((N - l + 1) * bf_random(num_pred, bf_random_seed(random_seed))).astype(int)
-        r = np.column_stack([spts, spts + l - 1])
-    else:
-        raise ValueError(f"Unknown subset method: {subset_how}")
+    r = _segment_ranges(N, sample_p, subset_how, random_seed)
     # Fit the model to each training set (r holds 1-based, inclusive sample ranges)
     out = {}
     if model == 'arsbc':
@@ -5023,33 +5030,8 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
         return np.nan
 
     # Set the ranges of the test segments (1-based, inclusive)
-    r = np.zeros((num_pred, 2), dtype=int)
-    if subset_how in ('rand', 'spread', 'uniform') and len(sample_p) > 1:
-        if sample_p[1] < 1:  # a fraction of the time series, capped to between 10 and 20
-            seg_len = int(max(min(20, np.floor(N * sample_p[1])), 10))
-        else:  # an absolute interval
-            seg_len = int(sample_p[1])
-    if subset_how == 'spread':
-        # start points on 1..N-seg_len+1 from the golden-ratio (Weyl) sequence frac(j*phi): deterministic, evenly spread
-        spts = 1 + np.floor((N - seg_len + 1) * ((np.arange(1, num_pred + 1) * 0.6180339887498949) % 1.0)).astype(int)
-        r[:, 0] = spts
-        r[:, 1] = spts + seg_len - 1
-    elif subset_how == 'rand':
-        # numPred random starting points (uniform on 1..N-seg_len+1), reproducible from the seed
-        spts = 1 + np.floor((N - seg_len + 1) * bf_random(num_pred, bf_random_seed(random_seed))).astype(int)
-        r[:, 0] = spts
-        r[:, 1] = spts + seg_len - 1
-    elif subset_how == 'uniform':
-        if len(sample_p) == 1:  # size will depend on number of unique subsegments
-            spts = _even_split_points(0, N, num_pred + 1)
-            r[:, 0] = spts[:num_pred] + 1
-            r[:, 1] = spts[1:]
-        else:
-            spts = _even_split_points(1, N - seg_len + 1, num_pred)
-            r[:, 0] = spts
-            r[:, 1] = spts + seg_len - 1
-    else:
-        raise ValueError(f"Unknown subset method '{subset_how}'")
+    # (a fractional segment length is capped to between 10 and 20 samples)
+    r = _segment_ranges(N, sample_p, subset_how, random_seed, cap=(10, 20))
 
     # Quickly check that ranges are valid
     if np.any(r[:, 0] >= r[:, 1]):
