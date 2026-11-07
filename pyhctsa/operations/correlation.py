@@ -19,6 +19,7 @@ from ..robust import bf_hist_edges, bf_quantile_edges, bf_random, bf_remove_poin
 from ..utils import (dict_output, _round_half_away, _tie_aware_ranks, _zscore_or_zeros, get_tau,
                      frame_signal, point_of_crossing, sign_change, theiler_window,
                      time_delay_embed, z_score)
+from ..utils import _shannon_entropy
 
 
 def _resolve_delay(y: ArrayLike, tau: Union[int, float, str, None], cap: bool = False,
@@ -2763,8 +2764,7 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     out['mode_val'] = np.max(bin_counts_norm)
     out['mode'] = bin_centres[np.argmax(bin_counts_norm)]
     # sum(p * log(p)) over histogram bins (minus the Shannon entropy)
-    out['hist_ent'] = np.sum(bin_counts_norm[bin_counts_norm > 0] *
-                             np.log(bin_counts_norm[bin_counts_norm > 0]))
+    out['hist_ent'] = -_shannon_entropy(bin_counts_norm)
 
     # Stationarity measure for fifths of the time series
     afifth = int(np.floor(N/5))
