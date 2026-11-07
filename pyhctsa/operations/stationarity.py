@@ -17,7 +17,7 @@ from ..operations.distribution import fit_kernel_smooth, moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
 from ..toolboxes.Tisean_3_0_1.ports import _nstat_z_error, _nstat_z_std
 from ..robust import bf_exp_fit, bf_quantile_edges, bf_random, bf_random_seed
-from ..utils import dict_output, _round_half_away, _sample_std, get_tau, frame_signal, sign_change, z_score
+from ..utils import dict_output, _autocov_fft, _round_half_away, _sample_std, get_tau, frame_signal, sign_change, z_score
 from ..fitting import polyfit, robust_linear_fit
 
 _PP_TREND = {'ar': 'n', 'ard': 'c', 'ts': 'ct'}
@@ -214,10 +214,7 @@ def _segment_acf(z: np.ndarray, num_segs: int, n: int) -> np.ndarray:
     Each segment has its own mean removed; the autocovariances of the segments are summed
     before dividing by the summed variances. All NaN if every segment is constant.
     """
-    Z = z[:num_segs * n].reshape(num_segs, n)
-    Z = Z - Z.mean(axis=1, keepdims=True)
-    nfft = 1 << int(np.ceil(np.log2(2 * n)))  # zero-padding to >= 2n - 1: linear autocovariance
-    acov = np.fft.irfft(np.abs(np.fft.rfft(Z, nfft, axis=1)) ** 2, nfft, axis=1)[:, :n].sum(axis=0)
+    acov = _autocov_fft(z[:num_segs * n].reshape(num_segs, n), pad='pow2').sum(axis=0)
     return acov / acov[0] if acov[0] > 0 else np.full(n, np.nan)
 
 
