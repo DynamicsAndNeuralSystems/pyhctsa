@@ -4,6 +4,7 @@ import warnings
 from typing import Union
 
 import numpy as np
+from ..utils import _iqr, _quantile
 from numba import njit as _njit
 from numpy.typing import ArrayLike
 from scipy.optimize import minimize_scalar
@@ -1036,8 +1037,7 @@ def local_density(y: ArrayLike, nnr: int = 3,
     out = {}
     out['minden'] = np.min(locden)
     out['maxden'] = np.max(locden)
-    out['iqrden'] = (np.percentile(locden, 75, method='hazen')
-                     - np.percentile(locden, 25, method='hazen'))
+    out['iqrden'] = _iqr(locden)
     out['rangeden'] = np.ptp(locden)
     out['stdden'] = np.std(locden, ddof=1)
     out['meanden'] = np.mean(locden)
@@ -1487,8 +1487,7 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
         out['takens05_max'] = np.max(takens05)
         out['takens05_min'] = np.min(takens05)
         out['takens05_std'] = np.std(takens05, ddof=1)
-        q75, q25 = np.percentile(takens05, [75, 25], method='hazen')
-        out['takens05_iqr'] = q75 - q25
+        out['takens05_iqr'] = _iqr(takens05)
 
         # Find outliers as a means of inferring m_min: look for the estimate
         # approaching a constant for m > m_min
@@ -2986,8 +2985,8 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
 def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
     """Counts of points per box, where the boxes are quantiles along each axis."""
     props = np.arange(nbox + 1) / nbox
-    xbox = np.quantile(x, props, method='hazen')
-    ybox = np.quantile(y, props, method='hazen')
+    xbox = _quantile(x, props)
+    ybox = _quantile(y, props)
     # Nudge the top edge so the largest point falls inside the last box.
     xbox[-1] += 1
     ybox[-1] += 1
@@ -3085,11 +3084,10 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     out['pcross'] = nn / n  # proportion of time series that crosses poincare surface
 
     for lab, u in (('x', x), ('y', yy)):
-        q25, q75 = np.quantile(u, [0.25, 0.75], method='hazen')
         out[f'max{lab}'] = np.max(u)
         out[f'min{lab}'] = np.min(u)
         out[f'std{lab}'] = np.std(u, ddof=1)
-        out[f'iqr{lab}'] = q75 - q25
+        out[f'iqr{lab}'] = _iqr(u)
         out[f'mean{lab}'] = np.mean(u)
         out[f'ac1{lab}'] = autocorr(u, 1, 'Fourier')
         out[f'ac2{lab}'] = autocorr(u, 2, 'Fourier')
@@ -3112,8 +3110,7 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     out['meands'] = np.mean(ds)
     out['maxds'] = np.max(ds)
     out['minds'] = np.min(ds)
-    q25, q75 = np.quantile(ds, [0.25, 0.75], method='hazen')
-    out['iqrds'] = q75 - q25
+    out['iqrds'] = _iqr(ds)
 
     # Now normalize both axes and look for structure in the cloud of points.
     # Don't normalize for standard deviation -- this probably reveals some
@@ -3123,11 +3120,10 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
 
     # Statistics on distance on Poincare surface from (mean,mean)
     d = np.sqrt(x**2 + yy**2)
-    q25, q75 = np.quantile(d, [0.25, 0.75], method='hazen')
     out['maxD'] = np.max(d)
     out['minD'] = np.min(d)
     out['stdD'] = np.std(d, ddof=1)
-    out['iqrD'] = q75 - q25
+    out['iqrD'] = _iqr(d)
     out['meanD'] = np.mean(d)
     out['ac1D'] = autocorr(d, 1, 'Fourier')
     out['ac2D'] = autocorr(d, 2, 'Fourier')
@@ -3309,7 +3305,7 @@ def _recurrence_radius(Y: np.ndarray, rr: float, random_seed: Union[int, str, No
     """
     n_emb = Y.shape[0]
     sub = _random_subset(n_emb, min(2000, n_emb), random_seed)
-    return float(np.quantile(pdist(Y[sub]), rr, method='hazen'))
+    return float(_quantile(pdist(Y[sub]), rr))
 
 
 def _recurrent_pairs(Y: np.ndarray, radius: float) -> tuple:
@@ -3848,8 +3844,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     out['std'] = np.std(trett, ddof=1)
     out['pzeros'] = np.sum(trett == 0) / nn
     out['pg05'] = np.sum(trett > max_trett * 0.5) / nn
-    q25, q75 = np.quantile(trett, [0.25, 0.75], method='hazen')
-    out['iqr'] = q75 - q25
+    out['iqr'] = _iqr(trett)
 
     # Recurrent peaks
     icross05 = np.flatnonzero((trett[:-1] - 0.5 * max_trett) * (trett[1:] - 0.5 * max_trett) < 0)
@@ -4466,8 +4461,7 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
     out['stdmedian'] = np.std(np.median(rs[:, 1:], axis=0), ddof=1) if m_max > 2 else 0.0
     stretch = rs[:, 1:].ravel()
     out['medianstretch'] = np.median(stretch)
-    q25, q75 = np.quantile(stretch, [0.25, 0.75], method='hazen')
-    out['iqrstretch'] = q75 - q25
+    out['iqrstretch'] = _iqr(stretch)
     return out
 
 
@@ -4635,7 +4629,7 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
             continue
         g = -np.log(_merge_ties(dist_j, tol))  # (chronological order preserved)
 
-        u = np.quantile(g, q, method='hazen')
+        u = _quantile(g, q)
         exceed = g > u  # exceedance indicator, in chronological order
         n_u = int(exceed.sum())
         if n_u < min_exceed or np.unique(g[exceed]).size < min_exceed:

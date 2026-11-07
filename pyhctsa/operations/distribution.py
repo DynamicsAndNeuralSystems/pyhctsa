@@ -3,6 +3,7 @@ import warnings
 from typing import Dict, Union
 
 import numpy as np
+from ..utils import _iqr, _quantile
 from numpy.typing import ArrayLike
 from scipy import stats
 from scipy.optimize import brentq
@@ -357,7 +358,7 @@ def withinp(x: ArrayLike, p: float = 1.0, mean_or_median: str = 'mean') -> float
         sig = np.std(x, ddof=1)
     elif mean_or_median == 'median':
         mu = np.median(x)
-        iqr_val = np.percentile(x, 75, method='hazen') - np.percentile(x, 25, method='hazen')
+        iqr_val = _iqr(x)
         sig = iqr_val / 1.35
     else:
         raise ValueError(f"Unknown setting: '{mean_or_median}'")
@@ -411,9 +412,7 @@ def spread(y: ArrayLike, spread_measure: str = 'std') -> float:
     if spread_measure == 'std':
         out = np.std(y, ddof=1)
     elif spread_measure == 'iqr':
-        q75 = np.quantile(y, 0.75, method='hazen')
-        q25 = np.quantile(y, 0.25, method='hazen')
-        out = q75 - q25
+        out = _iqr(y)
     elif spread_measure == 'mad':
         # mean absolute deviation
         out = np.mean(np.absolute(y - np.mean(y, None)), None)
@@ -445,7 +444,7 @@ def quantile(y: ArrayLike, p: float = 0.5) -> float:
     if not isinstance(p, (int, float)) or p < 0 or p > 1:
         raise ValueError("p must specify a proportion, in [0,1]")
     
-    return float(np.quantile(y, p, method = 'hazen'))
+    return float(_quantile(y, p))
 
 def proportion_values(x: ArrayLike, prop_what: str = 'positive') -> float:
     """
@@ -507,7 +506,7 @@ def pleft(y: ArrayLike, th: float = 0.1) -> float:
         the standard deviation.
     """
     y = np.asarray(y)
-    p = np.quantile(np.abs(y - np.mean(y)), 1-th, method='hazen')
+    p = _quantile(np.abs(y - np.mean(y)), 1-th)
     # A proportion, th, of the data lie further than p from the mean
     out = np.divide(p, np.std(y, ddof=1))
 
@@ -584,10 +583,10 @@ def mean(y: ArrayLike, mean_type: str = 'arithmetic') -> float:
     elif mean_type == 'rms':
         out = np.sqrt(np.mean(y**2))
     elif mean_type == 'iqm': # interquartile mean
-        p = np.percentile(y, [25, 75], method='hazen')
+        p = _quantile(y, [0.25, 0.75])
         out = np.mean(y[(y >= p[0]) & (y <= p[1])])
     elif mean_type == 'midhinge':  # average of 1st and third quartiles
-        p = np.percentile(y, [25, 75], method='hazen')
+        p = _quantile(y, [0.25, 0.75])
         out = np.mean(p)
     else:
         raise ValueError(f"Unknown mean type '{mean_type}'")
@@ -780,7 +779,7 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     elif what_skew in ('pearson', 'pearsonMedian'):
         out = (3 * (np.mean(y) - np.median(y)) / np.std(y, ddof=1))
     elif what_skew == 'bowley':
-        qs = np.quantile(y, [0.25, 0.5, 0.75], method='hazen')
+        qs = _quantile(y, [0.25, 0.5, 0.75])
         out = (qs[2]+qs[0] - 2 * qs[1]) / (qs[2] - qs[0]) 
     else:
         raise ValueError(f"Unknown skewness type '{what_skew}'.")
@@ -1133,7 +1132,7 @@ def outlier_test(y: ArrayLike, p: float = 2,
 
     # mean of the middle (100-2*p)% of the data
     y = np.array(y)
-    lower_bound, upper_bound = np.quantile(y, [p / 100, (100 - p) / 100], method='hazen')
+    lower_bound, upper_bound = _quantile(y, [p / 100, (100 - p) / 100])
     
     middle_portion = y[(y > lower_bound) & (y < upper_bound)]
     

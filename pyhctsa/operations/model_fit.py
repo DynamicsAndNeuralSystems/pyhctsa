@@ -7,6 +7,7 @@ from typing import Union
 
 import numba
 import numpy as np
+from ..utils import _quantile
 from numpy.typing import ArrayLike
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.linalg import solve_discrete_lyapunov
@@ -4474,7 +4475,7 @@ def _nan_quantile(x: np.ndarray, p: float) -> float:
     """
     x = np.asarray(x, dtype=float).ravel()
     x = x[~np.isnan(x)]
-    return float(np.quantile(x, p, method='hazen')) if x.size else float('nan')
+    return float(_quantile(x, p)) if x.size else float('nan')
 
 
 def _tail_mean(x: np.ndarray, which: str) -> float:
