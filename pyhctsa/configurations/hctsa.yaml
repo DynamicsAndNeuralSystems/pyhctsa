@@ -1685,6 +1685,13 @@ scaling:
     legacy_name: SC_MFDFA
     ordered_args: ['q_range']
 
+  long_memory_d:   # pyhctsa-only: local Whittle estimate of the memory parameter d below 1/128 and 1/32 cycles per sample
+    base_name: long_memory_d
+    dependencies:
+    configs:
+      - {zscore: True}
+    variant_of: fluctuation_analysis
+
 symbolic:
   transition_matrix:
     base_name: transition_matrix
