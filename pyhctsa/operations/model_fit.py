@@ -3778,21 +3778,33 @@ def _gp_latent(components: list, noise_pos, theta: np.ndarray, n_cov: int):
     return cov_lat, hyp, log_noise
 
 
-def _gp_alpha_pos(components: list) -> list:
-    """0-based positions of the log shape parameters of ``covRQiso`` among the covariance hyperparameters."""
-    pos = 0
-    alpha = []
-    for name, _ in components:
-        if name in ('covSEiso', 'covMaterniso'):
-            pos += 2
-        elif name == 'covPeriodic':
-            pos += 3
-        elif name == 'covRQiso':
-            alpha.append(pos + 2)
-            pos += 3
-        else:
-            pos += 1
-    return alpha
+# The role of each log hyperparameter of a covariance component, in gpml order: 'len' a length
+# scale, 'plen' the length scale of covPeriodic, 'period' its period, 'amp' a signal amplitude,
+# 'alpha' the shape of covRQiso, 'noise' a covNoise standard deviation.
+_GP_ROLES = {
+    'covSEiso': ('len', 'amp'),
+    'covMaterniso': ('len', 'amp'),
+    'covPeriodic': ('plen', 'period', 'amp'),
+    'covRQiso': ('len', 'amp', 'alpha'),
+    'covNoise': ('noise',),
+}
+
+
+def _gp_layout(components: list) -> dict:
+    """
+    The layout of the covariance hyperparameters of a ``covSum`` of ``components`` (a list of
+    ``(name, degree)`` from ``parse_cov``): ``'roles'`` lists the role of each hyperparameter
+    (see ``_GP_ROLES``; ``None`` for an unrecognized component, which takes one position), and
+    each role, plus ``'shape'`` (the length scales, period and ``covRQiso`` shape: those not
+    identified without correlation structure), maps to its 0-based positions, in order.
+    A degree-parameterized ``covMaterniso`` has two hyperparameters, as in ``MF_GP_LearnHyperp``.
+    """
+    roles = [r for name, _ in components for r in _GP_ROLES.get(name, (None,))]
+    layout = {k: [i for i, r in enumerate(roles) if r == k]
+              for k in ('len', 'plen', 'period', 'amp', 'alpha', 'noise')}
+    layout['shape'] = [i for i, r in enumerate(roles) if r in ('len', 'plen', 'period', 'alpha')]
+    layout['roles'] = roles
+    return layout
 
 
 def _gp_newton_polish(tt: np.ndarray, yt: np.ndarray, cov, theta: np.ndarray, noise_pos,
@@ -3871,58 +3883,17 @@ def _gp_newton_polish(tt: np.ndarray, yt: np.ndarray, cov, theta: np.ndarray, no
     return np.r_[x, x[k]]
 
 
-def _gp_amp_pos(components: list) -> list:
-    """0-based positions of the log signal amplitudes among the covariance hyperparameters."""
-    pos = 0
-    amps = []
-    for name, _ in components:
-        if name in ('covSEiso', 'covMaterniso', 'covRQiso'):
-            amps.append(pos + 1)
-        elif name == 'covPeriodic':
-            amps.append(pos + 2)
-        pos += {'covSEiso': 2, 'covMaterniso': 2, 'covPeriodic': 3, 'covRQiso': 3}.get(name, 1)
-    return amps
-
-
-def _gp_shape_pos(components: list) -> list:
-    """
-    0-based positions, among the covariance hyperparameters, of those that are not identified
-    without correlation structure: the length scales, the period of ``covPeriodic`` and the
-    shape of ``covRQiso``.
-    """
-    pos = 0
-    shape = []
-    for name, _ in components:
-        if name in ('covSEiso', 'covMaterniso'):
-            shape.append(pos)
-        elif name == 'covPeriodic':
-            shape += [pos, pos + 1]
-        elif name == 'covRQiso':
-            shape += [pos, pos + 2]
-        pos += {'covSEiso': 2, 'covMaterniso': 2, 'covPeriodic': 3, 'covRQiso': 3}.get(name, 1)
-    return shape
-
-
 def _gp_shape_bounds(components: list, tt: np.ndarray) -> dict:
     """
-    The values reported for the hyperparameters of :func:`_gp_shape_pos` when the series shows no
-    correlation structure, keyed by position: for a length scale, the sampling interval (a bound:
-    the data do not resolve a length scale above it); NaN for periods and shape parameters.
+    The values reported for the ``'shape'`` hyperparameters of :func:`_gp_layout` when the series
+    shows no correlation structure, keyed by position: for a length scale, the sampling interval (a
+    bound: the data do not resolve a length scale above it); NaN for the ``covPeriodic`` length
+    scale and period and for shape parameters.
     """
     dt = np.mean(np.diff(tt))
-    lens = set(_gp_len_pos(components))
-    return {p: (np.log(dt) if p in lens else np.nan) for p in _gp_shape_pos(components)}
-
-
-def _gp_len_pos(components: list) -> list:
-    """0-based positions of the log length scales among the covariance hyperparameters."""
-    pos = 0
-    lens = []
-    for name, _ in components:
-        if name in ('covSEiso', 'covMaterniso', 'covRQiso'):
-            lens.append(pos)
-        pos += {'covSEiso': 2, 'covMaterniso': 2, 'covPeriodic': 3, 'covRQiso': 3}.get(name, 1)
-    return lens
+    layout = _gp_layout(components)
+    lens = set(layout['len'])
+    return {p: (np.log(dt) if p in lens else np.nan) for p in layout['shape']}
 
 
 def _gp_fit_converged(tt: np.ndarray, yt: np.ndarray, cov, components: list, noise_pos,
@@ -3945,10 +3916,11 @@ def _gp_fit_converged(tt: np.ndarray, yt: np.ndarray, cov, components: list, noi
     fitted amplitude at this floor, rather than running to zero).
     """
     noise_pos = np.asarray(noise_pos, dtype=int)
-    alpha_pos = _gp_alpha_pos(components)
+    layout = _gp_layout(components)
+    alpha_pos = layout['alpha']
     alpha_cap = np.log(100.0)
-    len_pos = _gp_len_pos(components)
-    amp_pos = _gp_amp_pos(components)
+    len_pos = layout['len']
+    amp_pos = layout['amp']
     dt = np.mean(np.diff(tt))
     span = np.max(tt) - np.min(tt)
     len_lo, len_hi = np.log(dt), np.log(span)
@@ -4020,30 +3992,16 @@ def _gp_beats_white_noise(nlz: float, yt: np.ndarray, n_kernel_hyp: int) -> bool
 def _gp_noise_pos(components: list) -> list:
     """
     0-based positions of the ``covNoise`` standard deviations among the covariance
-    hyperparameters, found as ``MF_GP_LearnHyperp`` does (while it sets the initial values):
-    every component advances the position by its own number of hyperparameters (2 for a
-    degree-parameterized ``covMaterniso``).
+    hyperparameters (``_gp_layout(components)['noise']``).
     """
-    pos = 0
-    noise = []
-    for name, degree in components:
-        if name in ('covSEiso', 'covMaterniso'):
-            pos += 2
-        elif name in ('covPeriodic', 'covRQiso'):
-            pos += 3
-        elif name == 'covNoise':
-            noise.append(pos)
-            pos += 1
-        else:
-            pos += 1
-    return noise
+    return _gp_layout(components)['noise']
 
 
 def _gp_cov(cov_func) -> tuple:
     """
     The covariance function for ``cov_func``, a function giving the initial
     hyperparameters for a set of times, the 0-based positions of its noise standard deviations
-    (:func:`_gp_noise_pos`) and its components (a list of ``(name, degree)``). The default
+    (:func:`_gp_layout`) and its components (a list of ``(name, degree)``). The default
     ``'covSEiso_covNoise'`` is the closed-form :class:`CovSEisoNoise` (initialized by
     :func:`_gp_learn_hyperp`); others are built by ``parse_cov``, initialized by
     :func:`_gp_init_hyp`.
@@ -4052,7 +4010,7 @@ def _gp_cov(cov_func) -> tuple:
     if isinstance(cov_func, str) and cov_func == 'covSEiso_covNoise':
         return CovSEisoNoise, (lambda tt: None), [2], [('covSEiso', None), ('covNoise', None)]
     cov, components = parse_cov(cov_func)
-    return cov, (lambda tt: _gp_init_hyp(components, tt)), _gp_noise_pos(components), components
+    return cov, (lambda tt: _gp_init_hyp(components, tt)), _gp_layout(components)['noise'], components
 
 
 def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
@@ -5214,32 +5172,12 @@ def _gp_init_hyp(components: list, tt: np.ndarray) -> np.ndarray:
     ``covMaterniso`` is initialized like ``covSEiso`` (length scale at the typical time step,
     log-magnitude 0). ``components`` is the list of ``(name, degree)`` from ``parse_cov``.
     """
-    n_cov = int(sum({'covSEiso': 2, 'covPeriodic': 3, 'covRQiso': 3, 'covNoise': 1,
-                     'covMaterniso': 2}[name] for name, _ in components))
     typical_dt = np.mean(np.diff(tt))  # typical time step: a length-scale prior
     data_span = np.max(tt) - np.min(tt)
-    hyp = np.zeros(n_cov)
-    pos = 0
-    for name, degree in components:
-        if name in ('covSEiso', 'covMaterniso'):
-            hyp[pos] = np.log(typical_dt)       # length-scale
-            hyp[pos + 1] = 0.0                  # log-magnitude
-            pos += 2
-        elif name == 'covPeriodic':
-            hyp[pos] = np.log(typical_dt)       # length-scale
-            hyp[pos + 1] = np.log(data_span / 10)  # period (guess: ~10 cycles across the data)
-            hyp[pos + 2] = 0.0                  # log-magnitude
-            pos += 3
-        elif name == 'covRQiso':
-            hyp[pos] = np.log(typical_dt)       # length-scale
-            hyp[pos + 1] = 0.0                  # log-magnitude
-            hyp[pos + 2] = 0.0                  # log-alpha (shape)
-            pos += 3
-        elif name == 'covNoise':
-            hyp[pos] = np.log(0.1)              # noise magnitude
-            pos += 1
-        else:
-            pos += 1                            # unrecognized component: leave at zero
+    init = {'len': np.log(typical_dt), 'plen': np.log(typical_dt),
+            'period': np.log(data_span / 10),  # guess: ~10 cycles across the data
+            'amp': 0.0, 'alpha': 0.0, 'noise': np.log(0.1)}
+    hyp = np.array([init.get(r, 0.0) for r in _gp_layout(components)['roles']], dtype=float)
     return np.r_[hyp, np.log(0.1)]
 
 
@@ -5422,7 +5360,7 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         return np.nan
 
     # Learn the hyperparameters (mean-zero process, Gaussian likelihood, exact inference)
-    noise_pos = _gp_noise_pos(components)
+    noise_pos = _gp_layout(components)['noise']
     theta, nlz = _gp_fit_converged(t, y, cov, components, noise_pos)
     if theta is None:
         logger.warning('Lack of positive definite matrix for this time series')
