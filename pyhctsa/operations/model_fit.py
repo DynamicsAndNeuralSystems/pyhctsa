@@ -26,6 +26,7 @@ from ..toolboxes.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..robust import bf_exp_fit, bf_random, bf_random_seed, bf_spread_perm
 from ..toolboxes.gpml.optimizers import minimize
 from ..utils import _even_split_points, dict_output, _sample_std, _zscore_or_zeros, get_tau, z_score
+from ..utils import ljung_box
 
 
 def _nanmax_or_nan(a, axis=None):
@@ -647,8 +648,7 @@ def _lbq_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
 
     ``Q(L) = N (N + 2) sum_{k=1}^{L} rho_k^2 / (N - k)`` with ``rho_k`` the sample
     autocorrelation of the mean-removed series; the p-value is from a chi-squared
-    distribution with L degrees of freedom
-    (``statsmodels.stats.diagnostic.acorr_ljungbox``).
+    distribution with L degrees of freedom (:func:`pyhctsa.utils.ljung_box`).
 
     Parameters
     ----------
@@ -668,14 +668,11 @@ def _lbq_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
     G. M. Ljung and G. E. P. Box, "On a Measure of Lack of Fit in Time Series Models",
     Biometrika 65 (1978) 297-303.
     """
-    from statsmodels.stats.diagnostic import acorr_ljungbox
     x = np.asarray(x, dtype=float).ravel()
     max_lag = int(max_lag)
     if max_lag > len(x) - 1 or not np.all(np.isfinite(x)) or np.ptp(x) == 0:
         return np.full(max_lag, np.nan)  # too short for max_lag lags, constant, or non-finite
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore')
-        return np.asarray(acorr_ljungbox(x, lags=max_lag, return_df=True)['lb_pvalue'], dtype=float)
+    return ljung_box(x, max_lag, later_first=True)[1]  # statsmodels' operand order
 
 
 # Work shared by garch_fit and garch_compare on the same series: the whitening, and for the
