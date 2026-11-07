@@ -376,6 +376,7 @@ Spectral
    pyhctsa.operations.spectral.sinusoid_fit
    pyhctsa.operations.spectral.spectral_time_freq
    pyhctsa.operations.spectral.rhythmicity
+   pyhctsa.operations.spectral.doubled_phase_coherence
 
 .. _stationaritymeths:
 
