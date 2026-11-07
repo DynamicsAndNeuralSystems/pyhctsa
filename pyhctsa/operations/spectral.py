@@ -14,6 +14,7 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
 from ..robust import bf_fit_sinusoids, bf_residual_stats
 from ..utils import _even_split_points, dict_output, sign_change
+from ..utils import _shannon_entropy
 
 # Smallest FFT length of the zero-padded spectral estimates ('periodogram' and 'welch' in
 # spectral_summaries): the spectrum is evaluated on max(256, next power of two >= segment length)
@@ -985,9 +986,7 @@ def phase_amp_coupling(y: ArrayLike, n_bands: int = 5, max_n: Union[int, str] = 
             counts = np.bincount(bin_idx, minlength=n_phase_bins)
             sums = np.bincount(bin_idx, weights=amp, minlength=n_phase_bins)
             mean_amp = np.divide(sums, counts, out=np.zeros(n_phase_bins), where=counts > 0)
-            p = mean_amp / np.sum(mean_amp)
-            p = p[p > 0]
-            h = -np.sum(p * np.log(p))
+            h = _shannon_entropy(mean_amp, normalize=True)
             mi.append((h_max - h) / h_max)
     mi = np.asarray(mi)
     num_pairs = len(mi)
@@ -1008,7 +1007,7 @@ def phase_amp_coupling(y: ArrayLike, n_bands: int = 5, max_n: Union[int, str] = 
         out['entropyMI'] = np.nan
     else:
         p = p / np.sum(p)
-        out['entropyMI'] = -np.sum(p * np.log(p)) / np.log(num_pairs)
+        out['entropyMI'] = _shannon_entropy(p) / np.log(num_pairs)
 
     return out
 
@@ -1086,8 +1085,7 @@ def spectral_summaries_phase(y: ArrayLike) -> dict:
     bin_idx = np.digitize(ph, edges)
     bin_idx = np.clip(bin_idx, 1, n_bins)  # guard the (rare) ph == pi edge case
     p_bin = np.bincount(bin_idx - 1, weights=wgt, minlength=n_bins)
-    p_bin_nz = p_bin[p_bin > 0]
-    out['phEnt'] = -np.sum(p_bin_nz * np.log(p_bin_nz)) / np.log(n_bins)
+    out['phEnt'] = _shannon_entropy(p_bin) / np.log(n_bins)
 
     # Group delay: magnitude-weighted linear fit of unwrapped phase vs frequency
     ph_unwrap = np.unwrap(ph)
@@ -1914,7 +1912,7 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
     # concentrated in one frequency pair, 1 = uniformly diffuse):
     p = bic[bic > 0]
     p = p / np.sum(p)
-    out['entropy'] = -np.sum(p * np.log(p)) / np.log(len(bic))
+    out['entropy'] = _shannon_entropy(p) / np.log(len(bic))
 
     out['meanBicDiag'] = np.mean(bic[diag])
 
@@ -2044,8 +2042,7 @@ def _spectral_entropy(P: np.ndarray) -> np.ndarray:
     tot = P.sum(axis=0)
     with np.errstate(divide='ignore', invalid='ignore'):
         p = P / tot[None, :]
-        plogp = np.where(p > 0, p * np.log2(np.where(p > 0, p, 1.0)), 0.0)
-        se = -plogp.sum(axis=0) / np.log2(n_bins)
+        se = _shannon_entropy(p, base=2, axis=0) / np.log2(n_bins)
     se = np.where(tot > 0, se, np.nan)
     return se
 
