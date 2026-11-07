@@ -9,6 +9,7 @@ logger = logging.getLogger('pyhctsa')
 from scipy.stats import mstats
 
 from ..operations.correlation import autocorr
+from ..fitting import goodness_of_fit
 from ..robust import bf_exp_fit
 from ..utils import dict_output, _sample_std, binarize, sign_change, get_tau, time_delay_embed
 
@@ -818,10 +819,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
 
 def _linear_adjr2(x: np.ndarray, y: np.ndarray) -> float:
     """Adjusted R^2 of an ordinary least-squares line fitted to y against x."""
-    n = len(y)
     p = np.polyfit(x, y, 1)
-    rsq = 1 - np.sum((y - np.polyval(p, x)) ** 2) / np.sum((y - np.mean(y)) ** 2)
-    return 1 - (1 - rsq) * (n - 1) / (n - 2)
+    return goodness_of_fit(y, np.polyval(p, x), 2, guard_sst=False, adj_from_rsquare=True)['adjrsquare']
 
 
 def _transition_matrix(yth: np.ndarray, num_groups: int, tau: int = 1) -> np.ndarray:
