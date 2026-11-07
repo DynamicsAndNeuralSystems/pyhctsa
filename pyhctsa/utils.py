@@ -1190,6 +1190,28 @@ def _zscore_or_zeros(x: np.ndarray) -> np.ndarray:
         return (a - np.mean(a)) / sd
 
 
+def _zscore_or_none(x: np.ndarray) -> Union[np.ndarray, None]:
+    """z-score with the N-1 standard deviation, or None if that standard deviation is not positive.
+
+    Parameters
+    ----------
+    x : numpy.ndarray
+        Data (callers pass a 1-D series); all elements are standardized together.
+
+    Returns
+    -------
+    numpy.ndarray or None
+        ``(x - mean)/sd`` with ``sd = numpy.std(x, ddof=1)``; None when ``sd`` is not positive
+        (a constant input, or NaN from fewer than two values or non-finite data), for callers that
+        skip or reject a degenerate input rather than map it to zeros as
+        :func:`_zscore_or_zeros` does.
+    """
+    sd = np.std(x, ddof=1)
+    if not sd > 0:
+        return None
+    return (x - np.mean(x)) / sd
+
+
 def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, float]:
     """
     ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``: decimate by the 1/e autocorrelation time.

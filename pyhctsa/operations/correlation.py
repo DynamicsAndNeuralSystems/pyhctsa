@@ -19,6 +19,7 @@ from ..robust import bf_hist_edges, bf_quantile_edges, bf_random, bf_remove_poin
 from ..utils import (dict_output, _round_half_away, _tie_aware_ranks, _zscore_or_zeros, get_tau,
                      frame_signal, point_of_crossing, sign_change, theiler_window,
                      time_delay_embed, z_score)
+from ..utils import _zscore_or_none
 
 
 def _resolve_delay(y: ArrayLike, tau: Union[int, float, str, None], cap: bool = False,
@@ -958,11 +959,7 @@ def _gaussian_ranks(y: ArrayLike) -> Union[np.ndarray, None]:
     n = x.size
     if n < 2 or not np.all(np.isfinite(x)):
         return None
-    g = norm.ppf((_tie_aware_ranks(x) - 0.5) / n)
-    sd = np.std(g, ddof=1)
-    if not sd > 0:
-        return None
-    return (g - np.mean(g)) / sd
+    return _zscore_or_none(norm.ppf((_tie_aware_ranks(x) - 0.5) / n))
 
 
 def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True,
@@ -2131,11 +2128,10 @@ def nonlinear_autocorr_abs_surrogate_ratio(y: ArrayLike, taus: ArrayLike, num_su
     surrs = _make_surrogates(g, 'RP', int(num_surrs), random_seed)
     vals = []
     for s in range(surrs.shape[1]):
-        gs = surrs[:, s]
-        sd = np.std(gs, ddof=1)
-        if not sd > 0:
+        gs = _zscore_or_none(surrs[:, s])
+        if gs is None:  # a constant surrogate is skipped
             continue
-        vals.append(np.mean(np.abs(_lag_product((gs - np.mean(gs)) / sd, taus))))
+        vals.append(np.mean(np.abs(_lag_product(gs, taus))))
     den = np.mean(vals) if vals else np.nan
     if not den > 0:
         return np.nan
