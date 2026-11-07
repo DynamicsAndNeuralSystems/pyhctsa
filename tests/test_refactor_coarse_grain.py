@@ -112,7 +112,19 @@ def test_pinned_operation_outputs(name):
         'disp': EN.dispersion_entropy(y, 2, 6, 1)['normDispEn'],  # (equal-width; unchanged from main)
     }
     for k, v in PINNED[name].items():
-        assert got[k] == pytest.approx(v, rel=1e-12, abs=0), k
+        assert got[k] == pytest.approx(v, rel=_PIN_RTOL.get(k, 1e-9), abs=0), k
+
+
+# Per-operation tolerances for the pins (branch values, computed on Ben's Mac). Default is tier 1
+# (rtol 1e-9, closed-form arithmetic: counts, entropies, quantile cuts, histogram statistics; CI
+# drift on these is at most about 1e-11). The exceptions:
+_PIN_RTOL = {
+    # tier 3 (iterative optimizer): meandiagfexp_b is a golden-section exponential fit, which
+    # amplifies ulp-level platform differences (CI drift up to 2e-8)
+    'tpa': 1e-5,
+    # tier 2 (least squares): driftCubic is a coefficient of a count-weighted cubic fit
+    'km': 1e-8,
+}
 
 
 def test_coarse_grain_symbols_are_one_based():
