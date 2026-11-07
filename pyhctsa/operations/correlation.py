@@ -17,7 +17,7 @@ from ..operations.information import automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..robust import bf_hist_edges, bf_quantile_edges, bf_random, bf_remove_points
 from ..utils import (dict_output, _round_half_away, _tie_aware_ranks, _zscore_or_zeros, get_tau,
-                     frame_signal, point_of_crossing, sign_change, theiler_window,
+                     frame_signal, point_of_crossing, sign_change, _theiler_int,
                      time_delay_embed, z_score)
 
 
@@ -169,9 +169,8 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
     y = np.asarray(y, dtype=float).ravel()
 
     # The Theiler window (NaN if the autocorrelation function never crosses zero)
-    theiler_win = theiler_window(y, theiler_win)
-    if np.isnan(theiler_win):
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    theiler_win = _theiler_int(y, theiler_win)
+    if theiler_win is None:
         return np.nan
 
     # Embed the signal
@@ -2687,8 +2686,8 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     y = np.asarray(y, dtype=float).ravel()
     if theiler_win is None:
         theiler_win = ('ac', 1)
-    theiler_win = theiler_window(y, theiler_win)
-    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
+    theiler_win = _theiler_int(y, theiler_win, warn=False)
+    if theiler_win is None:  # the autocorrelation function never crosses zero
         return np.nan
 
     # Set tau from the series if it is a rule ('tau'/'ac', 'ac1e' or 'mi'), capped at N/10
@@ -4219,11 +4218,9 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     y = np.asarray(y, dtype=float).ravel()
     n = y.size
 
-    theiler_win = theiler_window(y, theiler_win, n)
-    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    theiler_win = _theiler_int(y, theiler_win, n)
+    if theiler_win is None:  # the autocorrelation function never crosses zero
         return np.nan
-    theiler_win = int(theiler_win)
 
     # Embed the signal
     if isinstance(m, str):
