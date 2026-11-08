@@ -40,6 +40,11 @@ CASES = {
 
 PARAMS = [(label, name) for label, (_, names, _, _) in CASES.items() for name in names]
 
+# Keys where pyhctsa departs from hctsa by design (pyhctsa#63): on a fit without correlation
+# structure the signal amplitude is NaN and the noise and nlml are those of the white-noise model
+# (hctsa reports the fitted point). They are tested in tests/test_gp_unidentified.py.
+DEPARTS = {label: {'logh2', 'logh3', 'nlml'} for label in ('gh_ri2', 'gh_rb', 'gpfa', 'gphp_first')}
+
 
 def _is_nan_output(out):
     return not isinstance(out, dict) or all(np.isnan(v) for v in out.values())
@@ -56,6 +61,8 @@ def test_matches_hctsa_robust(label, name):
     assert isinstance(out, dict), f'{label} on {name}: expected outputs, got {out}'
     for key, exp in expected.items():
         assert key in out, f'{label} on {name}: missing output {key}'
+        if key in DEPARTS.get(label, ()):
+            continue
         if exp is None:
             assert np.isnan(out[key]), f'{label}/{key} on {name}: hctsa gives NaN, got {out[key]}'
         else:

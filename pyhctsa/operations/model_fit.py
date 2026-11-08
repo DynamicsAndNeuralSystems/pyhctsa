@@ -4016,6 +4016,34 @@ def _gp_beats_white_noise(nlz: float, yt: np.ndarray, n_kernel_hyp: int) -> bool
     return (nlz_wn - nlz) >= 0.5 * chi2.ppf(0.95, n_kernel_hyp)
 
 
+def _gp_white_noise_report(log_hyper: np.ndarray, components: list, noise_pos, yt: np.ndarray) -> float:
+    """
+    The hyperparameters reported for a series without correlation structure (the fitted model does
+    not beat its white-noise special case, :func:`_gp_beats_white_noise`), set in place in
+    ``log_hyper`` (the log covariance hyperparameters). Only the total variance of the series is
+    then identified, not its split between the components: the signal amplitudes
+    (:func:`_gp_amp_pos`) are set to NaN, and the ``covNoise`` standard deviations (the total
+    observation noise, as :func:`_gp_latent` reports it) to that of the white-noise model, the
+    root-mean-square of ``yt`` (the maximum-likelihood standard deviation of a zero-mean Gaussian).
+    Returns that log standard deviation.
+    """
+    log_sd = 0.5 * np.log(np.mean(np.asarray(yt, dtype=float) ** 2))
+    log_hyper[_gp_amp_pos(components)] = np.nan
+    log_hyper[np.asarray(noise_pos, dtype=int)] = log_sd
+    return log_sd
+
+
+def _gp_white_noise_nlml(y: np.ndarray, log_sd: float) -> float:
+    """
+    The negative log marginal likelihood of zero-mean Gaussian white noise with log standard
+    deviation ``log_sd`` for the values ``y``, divided by their number (as the ``nlml`` outputs).
+    At ``log_sd`` from :func:`_gp_white_noise_report` on the same values this is the white-noise
+    optimum of :func:`_gp_beats_white_noise`, ``(log(2 pi mean(y^2)) + 1) / 2``.
+    """
+    y = np.asarray(y, dtype=float)
+    return float(0.5 * np.log(2 * np.pi) + log_sd + 0.5 * np.mean(y ** 2) * np.exp(-2 * log_sd))
+
+
 
 def _gp_noise_pos(components: list) -> list:
     """
@@ -4104,8 +4132,11 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         round-off (see :func:`_gp_roundoff_constant`). If the training points show no correlation structure (the
         fitted model must beat its white-noise special case in a likelihood-ratio test, see
         :func:`_gp_beats_white_noise`), the length scale (``logh1``, ``h_lonN``) is not identified, and
-        is reported as the spacing of the training points, the bound the data allow; the other
-        outputs approach those of white noise.
+        is reported as the spacing of the training points, the bound the data allow; nor is the split
+        of the variance between the signal and the noise, so the signal amplitude is NaN, the noise is
+        the root-mean-square of the training points (the standard deviation of the white-noise model)
+        and ``nlml`` is that of the white-noise model. The prediction outputs are those of the fitted
+        model, and approach those of white noise.
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
@@ -4129,8 +4160,8 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     if theta is None:
         logger.warning('Lack of positive definite matrix for this time series')
         return nan_out
-    # Without correlation structure (the white-noise model is not beaten) the length scale is
-    # not identified; the other outputs approach those of white noise
+    # Without correlation structure (the white-noise model is not beaten) the length scale and the
+    # signal amplitude are not identified; the prediction outputs approach those of white noise
     has_structure = _gp_beats_white_noise(nlz_fit, yt, nhps - len(noise_pos))
 
     loghyper = theta[:nhps].copy()
@@ -4169,6 +4200,13 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         out['nlml'] = gp_train(hyp, cov, ts, y_ts, want_dnlZ=False)[0] / len(ts)
     except Exception:
         out['nlml'] = np.nan
+
+    if not has_structure:
+        # Without correlation structure only the total variance is identified: the signal
+        # amplitudes are NaN, the noise is the white-noise standard deviation of the training points,
+        # and nlml is that of the white-noise model on the evaluated points
+        log_sd = _gp_white_noise_report(loghyper, components, noise_pos, yt)
+        out['nlml'] = _gp_white_noise_nlml(y_ts, log_sd)
 
     # Log-hyperparameters
     bounds = _gp_shape_bounds(components, tt)
@@ -5262,8 +5300,11 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     are reported only when the fitted model beats its white-noise special case in a
     likelihood-ratio test (:func:`_gp_beats_white_noise`), as otherwise they are not identified:
     they are then the sampling interval, the bound the data allow (periods and shape parameters
-    are then NaN). The other outputs are always reported, and approach those of white noise as the
-    structure vanishes. Goodness of fit is summarized by the per-point
+    are then NaN). Nor is the split of the variance between the components identified then: the
+    signal amplitudes are NaN, the noise standard deviation is that of the white-noise model (the
+    root-mean-square of the fitted values) and ``nlml`` is that of the white-noise model. The
+    prediction outputs are always those of the fitted model, and approach those of white noise as
+    the structure vanishes. Goodness of fit is summarized by the per-point
     negative log marginal likelihood, the error of the fitted mean, and the GP's predictive
     standard deviation.
 
@@ -5320,8 +5361,8 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
           log period, log amplitude]; covMaterniso(3): [log length scale, log amplitude];
           covRQiso: [log length scale, log amplitude, log shape parameter alpha]; covNoise:
           [log noise standard deviation],
-        - ``nlml``: the negative log marginal likelihood of the fitted model, divided by the
-          number of points it was fitted to,
+        - ``nlml``: the negative log marginal likelihood of the fitted model (of the white-noise
+          model without correlation structure), divided by the number of points it was fitted to,
         - ``stde``: root-mean-square error of the GP mean at the sampled times,
         - ``meanabs_std``: mean absolute error of the GP mean, in units of the GP's
           predictive standard deviation at each sampled time,
@@ -5370,7 +5411,9 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         valid = [d for d in draws if isinstance(d, dict) and not all(np.isnan(v) for v in d.values())]
         if len(valid) < num_draws / 2:
             return np.nan
-        return {k: float(np.nanmean([d[k] for d in valid])) for k in valid[0]}
+        with warnings.catch_warnings():  # (an output that is NaN in every draw, e.g., an amplitude without structure)
+            warnings.simplefilter('ignore', RuntimeWarning)
+            return {k: float(np.nanmean([d[k] for d in valid])) for k in valid[0]}
 
     if max_n == 0:
         t = set_time_index(N)  # no resampling requested
@@ -5430,8 +5473,10 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     # Is there any correlation structure to fit? If the white-noise model is not beaten, the
     # length scales (and periods and shape parameters) are not identified: a length scale below
     # the sampling interval, or a vanishing amplitude, fits as well. A length scale is then
-    # reported as the sampling interval, the bound the data allow. The other outputs are
-    # identified, and approach those of white noise.
+    # reported as the sampling interval, the bound the data allow. Nor is the split of the
+    # variance between the components (only the total is identified), so the signal amplitudes
+    # are NaN and the noise and nlml are those of the white-noise model. The prediction outputs
+    # are those of the fitted model, and approach those of white noise.
     has_structure = _gp_beats_white_noise(nlz, y, num_hps - len(noise_pos))
     bounds = _gp_shape_bounds(components, t)
     log_hyper = theta[:num_hps].copy()
@@ -5440,12 +5485,21 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     cov, hyp, log_noise = _gp_latent(components, noise_pos, theta, num_hps)
     log_hyper[noise_pos] = log_noise
 
+    if not has_structure:
+        # Only the total variance is identified: the signal amplitudes are NaN and the noise is the
+        # white-noise standard deviation (see _gp_white_noise_report)
+        log_sd = _gp_white_noise_report(log_hyper, components, noise_pos, y)
+
     out = {}
     for i in range(num_hps):
         out[f'logh{i + 1}'] = log_hyper[i] if (has_structure or i not in bounds) else bounds[i]
 
-    # negative log marginal likelihood using the optimized hyperparameters, per point
-    out['nlml'] = gp_train(hyp, cov, t, y, want_dnlZ=False)[0] / len(t)
+    if has_structure:
+        # negative log marginal likelihood using the optimized hyperparameters, per point
+        out['nlml'] = gp_train(hyp, cov, t, y, want_dnlZ=False)[0] / len(t)
+    else:
+        # that of the white-noise optimum, the model the data support (per point)
+        out['nlml'] = _gp_white_noise_nlml(y, log_sd)
 
     # mean error from the fit, evaluated at the data points
     try:
