@@ -12,6 +12,7 @@ from ..operations.correlation import tc3, trev
 from ..operations.information import automutual_info, first_min
 from ._nlpe import _nn_prediction_residuals
 from ..operations.nonlinearity import fnn, nlpe
+from ..operations.pre_process import _rank_map_gaussian
 from ..robust import bf_ks_density, bf_random, bf_random_seed
 from ..utils import dict_output, get_tau, theiler_window, _round_half_away
 
@@ -167,13 +168,11 @@ def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
         # sort and rank order the data
         ix = np.argsort(x, kind='stable')
         x_sorted = x[ix]
-        x_ro = np.argsort(ix, kind='stable')  # rank-ordered permutation
         noise = bf_random(N * num_surrs, seed, 'normal').reshape(N, num_surrs, order='F')
         phases = uniform_block(n_free, seed + 1)
         for s in range(num_surrs):
             # random-order white Gaussian-distributed noise, ranked as x
-            n_sort = np.sort(noise[:, s])
-            y = n_sort[x_ro]
+            y = _rank_map_gaussian(x, draws=noise[:, s])
             # random-phase surrogate of y (phase-randomized noise ranked as x)
             y_rp = _random_phase(y, phases[:, s])
             # rank order x with respect to y_rp
