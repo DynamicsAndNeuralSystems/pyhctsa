@@ -10,8 +10,11 @@ logger = logging.getLogger('pyhctsa')
 from scipy.stats import mstats
 
 from ..operations.correlation import autocorr
+from ..fitting import goodness_of_fit
 from ..robust import bf_exp_fit
+from ..utils import _run_lengths
 from ..utils import dict_output, _sample_std, binarize, sign_change, get_tau, time_delay_embed
+from ..utils import _shannon_entropy
 
 def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_groups: int = 3,
              coarse_grain_method: str = 'quantile', num_iters: int = 500,
@@ -407,7 +410,7 @@ def _f_entropy(p, num_samples=None, word_length=1, alphabet_size=2, fixed_margin
     """
     p = np.asarray(p, dtype=float).ravel()
     r = p > 0
-    h = -np.sum(p[r] * np.log(p[r]))
+    h = _shannon_entropy(p)
     if num_samples is not None and num_samples > 0:
         df = int(np.sum(r)) - 1
         if fixed_marginals:
@@ -473,6 +476,25 @@ def binary_stretch(x: ArrayLike, stretch_what: str = 'gaps1') -> float:
 
     return out if out is not None else 0
 
+def _binary_stretches(y_bin: np.ndarray) -> tuple:
+    """Lengths of the runs of 0s and of the runs of 1s in a 0/1 sequence, each in order (runs
+    touching either end counted in full; an empty array when a symbol does not occur)."""
+    values, lengths = _run_lengths(y_bin)
+    return lengths[values == 0], lengths[values == 1]
+
+def _stretch_summary(stretch: np.ndarray, N: int, suffix: str) -> dict:
+    """Longest, mean and standard deviation (N-1) of the run lengths ``stretch``, raw and divided
+    by the string length ``N``, keyed ``longstretch<suffix>`` etc.; with no runs the longest and
+    mean are 0 and the standard deviations NaN."""
+    if len(stretch) == 0:
+        return {f'longstretch{suffix}': 0, f'longstretch{suffix}norm': 0,
+                f'meanstretch{suffix}': 0, f'meanstretch{suffix}norm': 0,
+                f'stdstretch{suffix}': np.nan, f'stdstretch{suffix}norm': np.nan}
+    long, mean, std = np.max(stretch), np.mean(stretch), _sample_std(stretch)
+    return {f'longstretch{suffix}': long, f'longstretch{suffix}norm': long / N,
+            f'meanstretch{suffix}': mean, f'meanstretch{suffix}norm': mean / N,
+            f'stdstretch{suffix}': std, f'stdstretch{suffix}norm': std / N}
+
 def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     """
     Compute statistics on a binary symbolisation of the input time series.
@@ -516,45 +538,14 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     out['pupstat2'] = np.sum(y_bin[N//2:] == 1) / np.sum(y_bin[:N//2] == 1)
 
     # Consecutive strings of ones/zeros (normalized by length)
-    diff_y = np.diff(np.where(np.concatenate(([1], y_bin, [1])))[0])
-    stretch0 = diff_y[diff_y != 1] - 1
-
-    diff_y = np.diff(np.where(np.concatenate(([0], y_bin, [0])) == 0)[0])
-    stretch1 = diff_y[diff_y != 1] - 1
+    stretch0, stretch1 = _binary_stretches(y_bin)
 
     # pstretches
     # Number of different stretches as proportion of the time-series length
     out['pstretch1'] = len(stretch1) / N
 
-    if len(stretch0) == 0:
-        out['longstretch0'] = 0
-        out['longstretch0norm'] = 0
-        out['meanstretch0'] = 0
-        out['meanstretch0norm'] = 0
-        out['stdstretch0'] = np.nan
-        out['stdstretch0norm'] = np.nan
-    else:
-        out['longstretch0'] = np.max(stretch0)
-        out['longstretch0norm'] = np.max(stretch0) / N
-        out['meanstretch0'] = np.mean(stretch0)
-        out['meanstretch0norm'] = np.mean(stretch0) / N
-        out['stdstretch0'] = _sample_std(stretch0)
-        out['stdstretch0norm'] = _sample_std(stretch0) / N
-
-    if len(stretch1) == 0:
-        out['longstretch1'] = 0
-        out['longstretch1norm'] = 0
-        out['meanstretch1'] = 0
-        out['meanstretch1norm'] = 0
-        out['stdstretch1'] = np.nan
-        out['stdstretch1norm'] = np.nan
-    else:
-        out['longstretch1'] = np.max(stretch1)
-        out['longstretch1norm'] = np.max(stretch1) / N
-        out['meanstretch1'] = np.mean(stretch1)
-        out['meanstretch1norm'] = np.mean(stretch1) / N
-        out['stdstretch1'] = _sample_std(stretch1)
-        out['stdstretch1norm'] = _sample_std(stretch1) / N
+    out.update(_stretch_summary(stretch0, N, '0'))
+    out.update(_stretch_summary(stretch1, N, '1'))
     
     out['meanstretchdiff'] = (out['meanstretch1'] - out['meanstretch0']) / N
     out['stdstretchdiff'] = (out['stdstretch1'] - out['stdstretch0']) / N
@@ -623,10 +614,7 @@ def binary_stats_ar1(y: ArrayLike, binary_method: str = 'mean') -> dict:
     N = len(y_bin)  # note: N = len(y) - 1 for 'diff'
 
     # Empirical run-length statistics (cf. binary_stats)
-    diff_y = np.diff(np.where(np.concatenate(([1], y_bin, [1])))[0])
-    stretch0 = diff_y[diff_y != 1] - 1
-    diff_y = np.diff(np.where(np.concatenate(([0], y_bin, [0])) == 0)[0])
-    stretch1 = diff_y[diff_y != 1] - 1
+    stretch0, stretch1 = _binary_stretches(y_bin)
 
     out = {}
     out['pstretch1'] = len(stretch1) / N
@@ -797,8 +785,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     row_sums = src_prob
     p_joint = t_f[t_f > 0]
     p_marg = row_sums[row_sums > 0]
-    h_joint = -np.sum(p_joint * np.log(p_joint))
-    h_marginal = -np.sum(p_marg * np.log(p_marg))
+    h_joint = _shannon_entropy(p_joint)
+    h_marginal = _shannon_entropy(p_marg)
     out['transEntropy'] = (h_joint - h_marginal
                            + (p_joint.size - p_marg.size) / (2 * (len(yth) - tau)))
 
@@ -819,10 +807,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
 
 def _linear_adjr2(x: np.ndarray, y: np.ndarray) -> float:
     """Adjusted R^2 of an ordinary least-squares line fitted to y against x."""
-    n = len(y)
     p = np.polyfit(x, y, 1)
-    rsq = 1 - np.sum((y - np.polyval(p, x)) ** 2) / np.sum((y - np.mean(y)) ** 2)
-    return 1 - (1 - rsq) * (n - 1) / (n - 2)
+    return goodness_of_fit(y, np.polyval(p, x), 2, guard_sst=False, adj_from_rsquare=True)['adjrsquare']
 
 
 def _transition_matrix(yth: np.ndarray, num_groups: int, tau: int = 1) -> np.ndarray:

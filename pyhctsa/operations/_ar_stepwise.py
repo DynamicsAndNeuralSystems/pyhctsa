@@ -17,9 +17,10 @@ References
 from typing import Optional, Tuple
 
 import numpy as np
-from numpy.lib.stride_tricks import sliding_window_view
 from numpy.typing import ArrayLike
 from scipy.stats import chi2, t as t_dist
+
+from ..utils import _ar_design, _lagged_products
 
 
 def _n_params(p: int, zero: bool) -> int:
@@ -87,8 +88,8 @@ def _arfit(v: ArrayLike, pmin: int, pmax: int, selector: str = 'sbc',
                          f'to order {pmax} ({n_coef_max} parameters).')
 
     # Regression matrix with columns [intercept] [v_{t-1} ... v_{t-pmax}] [v_t], t = pmax..n_obs-1
-    windows = sliding_window_view(v, pmax + 1)[:, ::-1]  # row t: v_t, v_{t-1}, ..., v_{t-pmax}
-    blocks = [windows[:, 1:], windows[:, :1]]
+    lags, target = _ar_design(v, pmax)  # row t: v_{t-1}, ..., v_{t-pmax}; v_t
+    blocks = [lags, target[:, None]]
     if not zero:
         blocks.insert(0, np.ones((n_rows, 1)))
     design = np.hstack(blocks)
@@ -166,16 +167,16 @@ def _arfit_residuals(w: float, A: np.ndarray, v: np.ndarray, k: Optional[int] = 
     n = v.size - p
     if n < 1:
         raise ValueError('Time series too short for the model order.')
-    past = sliding_window_view(v, p + 1)  # row: v_{t-p}, ..., v_t
-    res = past[:, p] - w - past[:, :p][:, ::-1] @ A
+    past, target = _ar_design(v, p)  # row: v_{t-1}, ..., v_{t-p}; v_t
+    res = target - w - past @ A
     if k is None:
         k = min(20, n - 1)
     k = int(k)
     if k <= p or k >= n:
         raise ValueError(f'Number of lags k = {k} must satisfy p < k < n (p = {p}, n = {n}).')
     e = res - res.mean()
-    denom = e @ e
-    r = np.array([e[:-l] @ e[l:] for l in range(1, k + 1)]) / denom
+    c = _lagged_products(e, k)
+    r = c[1:] / c[0]
     Q = n * np.sum(r ** 2) + k * (k + 1) / (2 * n)
     siglev = float(chi2.sf(Q, k - p))
     return siglev, res
