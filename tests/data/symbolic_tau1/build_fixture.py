@@ -3,7 +3,9 @@ tau = 1 (motif_two, motif_three, transition_matrix, transition_p_alphabet), for
 tests/test_rank_tau.py::test_tau1_values_pinned.
 
 The values were computed with pyhctsa at commit bcb14a8, before words and transitions were
-formed from lagged symbols (at tau = 1 the two definitions coincide)::
+formed from lagged symbols (at tau = 1 the two definitions coincide), and regenerated on branch
+cons-coarse-grain, which fixed the equiprobable coarse-graining convention (utils._coarse_grain;
+the motif_two values are unchanged)::
 
     python tests/data/symbolic_tau1/build_fixture.py tests/data/symbolic_tau1.json
 """

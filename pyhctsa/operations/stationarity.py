@@ -4,11 +4,13 @@ logger = logging.getLogger('pyhctsa')
 import warnings
 from typing import Union
 
+from ..utils import _sample_var
 import numpy as np
+from ..utils import _iqr
 from numpy.typing import ArrayLike
 from scipy.signal import detrend, find_peaks
-from scipy.special import gammaln
-from scipy.stats import kendalltau, kurtosis, kstest, skew, pearsonr, norm
+from scipy.special import gammaln, ndtri
+from scipy.stats import kendalltau, kurtosis, kstest, skew, pearsonr, norm, rankdata
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 from statsmodels.tsa.stattools import kpss
 
@@ -16,9 +18,11 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import fit_kernel_smooth, moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
 from ..toolboxes.Tisean_3_0_1.ports import _nstat_z_error, _nstat_z_std
-from ..robust import bf_exp_fit, bf_quantile_edges, bf_random, bf_random_seed
-from ..utils import dict_output, _round_half_away, _sample_std, get_tau, frame_signal, sign_change, z_score
+from ..robust import bf_exp_fit, bf_random, bf_random_seed
+from ..utils import dict_output, _coarse_grain, _autocov_fft, _round_half_away, _sample_std, get_tau, frame_signal, sign_change, z_score
+from ..utils import _shannon_entropy
 from ..fitting import polyfit, robust_linear_fit
+from ..utils import _zscore_or_zeros, make_buffer
 
 _PP_TREND = {'ar': 'n', 'ard': 'c', 'ts': 'ct'}
 _PP_TEST_TYPE = {'t1': 'tau', 't2': 'rho'}
@@ -214,10 +218,7 @@ def _segment_acf(z: np.ndarray, num_segs: int, n: int) -> np.ndarray:
     Each segment has its own mean removed; the autocovariances of the segments are summed
     before dividing by the summed variances. All NaN if every segment is constant.
     """
-    Z = z[:num_segs * n].reshape(num_segs, n)
-    Z = Z - Z.mean(axis=1, keepdims=True)
-    nfft = 1 << int(np.ceil(np.log2(2 * n)))  # zero-padding to >= 2n - 1: linear autocovariance
-    acov = np.fft.irfft(np.abs(np.fft.rfft(Z, nfft, axis=1)) ** 2, nfft, axis=1)[:, :n].sum(axis=0)
+    acov = _autocov_fft(z[:num_segs * n].reshape(num_segs, n), pad='pow2').sum(axis=0)
     return acov / acov[0] if acov[0] > 0 else np.full(n, np.nan)
 
 
@@ -248,8 +249,8 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     variation distance between their histograms: half the sum of the absolute differences
     between the proportions of values in each bin (0 for identical distributions, 1 for
     distributions with no bin in common). The bins are common to all segments and
-    equiprobable for the full series (edges at its quantiles,
-    :func:`pyhctsa.robust.bf_quantile_edges`), so the measure has no smoothing parameter
+    equiprobable for the full series (cut at its Hazen quantiles, tied values sharing a bin;
+    :func:`pyhctsa.utils._coarse_grain`), so the measure has no smoothing parameter
     and does not depend on the scale of the data. Either each segment is compared to the
     parent (full time series) distribution, or each to all other segments.
 
@@ -335,17 +336,18 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
         if each_or_par == 'each' and num_segs == 2:
             return np.nan
         return {'ex_meandiv': np.nan, 'ex_meandiv_ess': np.nan, 'stddiv': np.nan}
-    bin_edges = bf_quantile_edges(y, int(num_bins))  # bins common to all segments, equiprobable for the full series
-    counts, _ = np.histogram(y, bins=bin_edges)  # bin counts of the full series
+    num_bins = int(num_bins)
+    which_bin = _coarse_grain(y, num_bins, 'quantile')  # bins common to all segments, equiprobable for the full series
+    counts = np.bincount(which_bin, minlength=num_bins)  # bin counts of the full series
 
-    def proportions(v):
-        c, _ = np.histogram(v, bins=bin_edges)
+    def proportions(b):
+        c = np.bincount(b, minlength=num_bins)
         return c / np.sum(c)
 
     # Compute the distribution (proportion in each bin) in all num_segs segments of the time series
-    dns = np.zeros((len(bin_edges) - 1, num_segs))
+    dns = np.zeros((num_bins, num_segs))
     for i in range(num_segs):
-        dns[:, i] = proportions(y[i * lseg:(i + 1) * lseg])
+        dns[:, i] = proportions(which_bin[i * lseg:(i + 1) * lseg])
     # expected distance for the values in random order (per bin)
     null_terms = _random_order_tv(counts, N, lseg, each_or_par)
     null_div = np.sum(null_terms)
@@ -375,12 +377,11 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
 
     # Effective sample size: each bin's expected distance scaled by sqrt(g), the variance
     # inflation of its count from autocorrelation within the segments
-    which_bin = np.clip(np.searchsorted(bin_edges, y, side='right') - 1, 0, len(counts) - 1)
     g = np.ones(len(counts))
     for i in np.nonzero((counts > 0) & (counts < N))[0]:
         g[i] = _variance_inflation(_segment_acf((which_bin == i).astype(float), num_segs, lseg), lseg)
     out['ex_meandiv_ess'] = np.mean(divs) - np.sum(null_terms * np.sqrt(np.maximum(g, 0)))
-    out['stddiv'] = np.std(divs, ddof=1)
+    out['stddiv'] = _sample_std(divs)
 
     return out
 
@@ -418,20 +419,15 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
 
     for i, nseg in enumerate(nsegr):
         wlen = int(np.floor(len(y) / nseg))  # window length
-        inc = int(np.floor(wlen / nmov))  # increment to move at each step
-        # if increment is rounded to zero, prop it up
-        if inc == 0:
-            inc = 1
+        starts = _window_starts(len(y), wlen, nmov)
+        qs = np.zeros((len(starts), num_features))
 
-        num_steps = int(np.floor((len(y) - wlen) / inc) + 1)
-        qs = np.zeros((num_steps, num_features))
-
-        for j in range(num_steps):
-            y_sub = y[j * inc:j * inc + wlen]
+        for j, start in enumerate(starts):
+            y_sub = y[start:start + wlen]
             tau_l = first_crossing(y_sub, 'ac', 0, 'discrete')
 
             qs[j, 0] = np.mean(y_sub)
-            qs[j, 1] = np.std(y_sub, ddof=1)
+            qs[j, 1] = _sample_std(y_sub)
             qs[j, 2] = skew(y_sub)
             qs[j, 3] = kurtosis(y_sub)
             sampen_out = sample_entropy(y_sub, 2, 0.15)
@@ -450,11 +446,11 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
             qs[j, 9] = _pick(tau_l)  # AC_loc_tau
             qs[j, 10] = tau_l
 
-        fs[i, :num_features] = np.std(qs, ddof=1, axis=0)
+        fs[i, :num_features] = _sample_std(qs, axis=0)
 
     # fs contains std of quantities at all different 'scales' (segment lengths)
     # how much does the 'std stationarity' vary over different scales?
-    fs = np.std(fs, ddof=1, axis=0)
+    fs = _sample_std(fs, axis=0)
 
     # Outputs
     out = {}
@@ -580,11 +576,11 @@ def _calc_me_moments(x_buff: ArrayLike, mom_type: str):
     if mom_type == 'mean':
         moms = np.mean(x_buff, axis=0)
     elif mom_type == 'std':
-        moms = np.std(x_buff, axis=0, ddof=1)
+        moms = _sample_std(x_buff, axis=0)
     elif mom_type == 'median':
         moms = np.median(x_buff, axis=0)
     elif mom_type == 'iqr':
-        moms = np.percentile(x_buff, 75, method='hazen', axis=0) - np.percentile(x_buff, 25, method='hazen', axis=0)
+        moms = _iqr(x_buff, axis=0)
     else:
         raise ValueError(f"Unknown statistic {mom_type}")
     
@@ -994,15 +990,12 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
             'meanabsmaxmin': np.nan
         }
     
-    # Calculate number of complete segments
-    num_segments = int(np.floor(N/segment_length))
-    
-    # More efficient segmentation using array operations
-    segments = y[:num_segments * segment_length].reshape(num_segments, segment_length)
+    # Non-overlapping segments (a trailing partial segment is discarded)
+    segments = make_buffer(y, segment_length)
     
     # Calculate statistics
     segment_means = np.mean(segments, axis=1)
-    segment_vars = np.var(segments, axis=1, ddof=1)
+    segment_vars = _sample_var(segments, axis=1)
     mean_var = np.mean(segment_vars)
     
     # Prepare output statistics
@@ -1092,10 +1085,10 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     # Compare statistics of this subset to those obtained from the full time series
     out = {}
     out['absmean'] = np.abs(np.mean(y[r])) # Makes sense without normalization if y is z-scored
-    out['std'] = np.std(y[r], ddof=1) # Makes sense without normalization if y is z-scored
+    out['std'] = _sample_std(y[r]) # Makes sense without normalization if y is z-scored
     out['median'] = np.median(y[r]) # if median is very small then normalization could be very noisy
-    raw_iqr_yr = np.percentile(y[r], 75, method='hazen') - np.percentile(y[r], 25, method='hazen')
-    raw_iqr_y = np.percentile(y, 75, method='hazen') - np.percentile(y, 25, method='hazen')
+    raw_iqr_yr = _iqr(y[r])
+    raw_iqr_y = _iqr(y)
     out['iqr'] = np.abs(1 - (raw_iqr_yr/raw_iqr_y)) if raw_iqr_y > 0 else np.nan
     # ratios are NaN when the global statistic is exactly zero
     global_skew = skew(y)
@@ -1277,7 +1270,7 @@ def std_nth_deriv_change(y: ArrayLike, maxd: int = 10) -> dict:
 def _is_zscored(x: np.ndarray) -> bool:
     # hctsa's BF_iszscored
     tol = 100 * np.finfo(float).eps
-    return bool(abs(np.mean(x)) < tol and abs(np.std(x, ddof=1) - 1) < tol)
+    return bool(abs(np.mean(x)) < tol and abs(_sample_std(x) - 1) < tol)
 
 def _cumsum_bridge_stats(p: ArrayLike) -> Union[dict, float]:
     """
@@ -1318,10 +1311,10 @@ def _cumsum_bridge_stats(p: ArrayLike) -> Union[dict, float]:
 
     # CUSUM bridge relative to the endpoint-to-endpoint line (Inclan-Tiao-style)
     bridge = yC - (t / Np) * yC[-1]
-    scale_factor = np.std(p, ddof=1) * np.sqrt(Np)
+    scale_factor = _sample_std(p) * np.sqrt(Np)
     out['maxBridge'] = np.max(np.abs(bridge)) / scale_factor if scale_factor > 0 else np.nan
     out['posMaxBridge'] = (np.argmax(np.abs(bridge)) + 1) / Np # where the largest deviation from stationarity occurs
-    out['stdBridge'] = np.std(bridge, ddof=1)
+    out['stdBridge'] = _sample_std(bridge)
 
     # Robust vs. OLS regression: is the OLS trend outlier-driven or genuine drift?
     rob_coeffs, rob_stats = robust_linear_fit(t0, yC)
@@ -1329,14 +1322,14 @@ def _cumsum_bridge_stats(p: ArrayLike) -> Union[dict, float]:
     rob_resid = yC - (rob_coeffs[0] + rob_coeffs[1] * t0)
     se_grad = rob_stats['se'][1]
     out['gradientDiffSE'] = (out['gradient'] - robust_gradient) / se_grad if se_grad > 0 else np.nan
-    std_rob_resid = np.std(rob_resid, ddof=1)
-    out['residStdRatio'] = np.std(resid_ols, ddof=1) / std_rob_resid if std_rob_resid > 0 else np.nan
+    std_rob_resid = _sample_std(rob_resid)
+    out['residStdRatio'] = _sample_std(resid_ols) / std_rob_resid if std_rob_resid > 0 else np.nan
 
     # Variance-standardized residual trend: the bridge is not white even under a stationary
     # null -- it has the Brownian-bridge variance envelope Var(bridge(t)) = var(p).t.(Np-t)/Np
     # (an arch shape) -- so standardize by that, then ask whether the standardized squared
     # bridge trends with time (Kendall rank correlation)
-    var_p = np.var(p, ddof=1)
+    var_p = _sample_var(p)
     if var_p > 0 and Np > 21:
         t_int = t[:-1]
         null_var = var_p * t_int * (Np - t_int) / Np
@@ -1427,10 +1420,10 @@ def peak_intervals(y: ArrayLike, min_prom: float = 1) -> dict:
     out = {'meanProm': np.nan, 'cvInt': np.nan, 'acInt1': np.nan}
 
     N = len(y)
-    if N < 20 or not np.all(np.isfinite(y)) or np.std(y, ddof=1) == 0:
+    if N < 20 or not np.all(np.isfinite(y)) or _sample_std(y) == 0:
         return out
 
-    y = (y - np.mean(y)) / np.std(y, ddof=1) # prominence is in units of the series' standard deviation
+    y = _zscore_or_zeros(y) # prominence is in units of the series' standard deviation
 
     locs, props = find_peaks(y, prominence=min_prom)
     proms = props['prominences']
@@ -1440,7 +1433,7 @@ def peak_intervals(y: ArrayLike, min_prom: float = 1) -> dict:
 
     ipi = np.diff(locs).astype(float) # inter-peak intervals (samples)
     if len(ipi) >= 3:
-        out['cvInt'] = np.std(ipi, ddof=1) / np.mean(ipi)
+        out['cvInt'] = _sample_std(ipi) / np.mean(ipi)
     if len(ipi) >= 5:
         if np.all(ipi == ipi[0]):
             out['acInt1'] = 0.0 # equal intervals (e.g., a periodic series): no serial correlation
@@ -1610,7 +1603,7 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             qs[j, 0] = np.mean(y_sub)
-            qs[j, 1] = np.std(y_sub, ddof=1)
+            qs[j, 1] = _sample_std(y_sub)
             qs[j, 2] = skew(y_sub)
             qs[j, 3] = kurtosis(y_sub, fisher=False)
             pe = permutation_entropy(y_sub, 3, 1) # normalized PermEn(3,1) -- cheaper and more
@@ -1624,7 +1617,7 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
     # not output: it re-estimates a global statistic.)
     def _nanstd(v):
         v = v[~np.isnan(v)]
-        return _sample_std(v) if v.size > 0 else np.nan
+        return _sample_std(v)
 
     names = ['stdmean', 'stdstd', 'stdskew', 'stdkurt', 'stdpermen', 'stdac1', 'stdac2', 'stdtaul']
     return {name: _nanstd(qs[:, k]) for k, name in enumerate(names)}
@@ -1741,9 +1734,6 @@ def _cross_prediction_stats(xperr: np.ndarray) -> dict:
     # Output statistics on the matrix of cross-prediction errors
     def _range(v):
         return np.max(v) - np.min(v)
-    def _iqr(v):
-        q = np.quantile(v, [0.25, 0.75], method='hazen')
-        return q[1] - q[0]
 
     out = {}
     # diagonal elements are using a segment to predict itself -- ought to be pretty good
@@ -1828,7 +1818,7 @@ def trend(y: ArrayLike) -> dict:
     # ratio of std before and after linear detrending
     out = {}
     dt_y = detrend(y)
-    out['stdRatio'] = np.std(dt_y, ddof=1) / np.std(y, ddof=1)
+    out['stdRatio'] = _sample_std(dt_y) / _sample_std(y)
     
     # do a linear fit
     # time is indexed 0..N-1 (this fixes the definition of the intercept features)
@@ -1839,7 +1829,7 @@ def trend(y: ArrayLike) -> dict:
     # Stats on the cumulative sum
     yc = np.cumsum(y)
     out['meanYC'] = np.mean(yc)
-    out['stdYC'] = np.std(yc, ddof=1)
+    out['stdYC'] = _sample_std(yc)
     coeffs_yc = np.polyfit(np.arange(N), yc, 1)
     out['gradientYC'] = coeffs_yc[0]
     out['interceptYC'] = coeffs_yc[1]
@@ -1912,8 +1902,8 @@ def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float
     else:
         raise ValueError(f"Error evaluating stat_av of type '{what_type}', please select either 'seg' or 'len'")
 
-    s = np.std(y, ddof=1)  # should be 1 (for a z-scored time-series input)
-    sdav = np.std(M, ddof=1)
+    s = _sample_std(y)  # should be 1 (for a z-scored time-series input)
+    sdav = _sample_std(M)
     out = sdav / s
 
     return float(out)
@@ -2002,54 +1992,50 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
     if win_length == 0:
         logger.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
         return np.nan
-    inc = np.floor(win_length/inc_move) # increment to move at each step
-    # if incrment rounded down to zero, prop it up
-    if inc == 0:
-        inc = 1
-
-    num_steps = int(np.floor((len(y)-win_length)/inc) + 1)
+    windows = [y[start:start + int(win_length)] for start in _window_starts(len(y), win_length, inc_move)]
+    num_steps = len(windows)
     qs = np.zeros(num_steps)
 
     if window_stat == 'mean':
         for i in range(num_steps):
-            qs[i] = np.mean(y[_get_window(i, inc, win_length)])
+            qs[i] = np.mean(windows[i])
     elif window_stat == 'std':
         for i in range(num_steps):
-            qs[i] = _sample_std(y[_get_window(i, inc, win_length)])
+            qs[i] = _sample_std(windows[i])
     elif window_stat == 'ent':
         for i in range(num_steps):
-            qs[i] = distribution_entropy(y[_get_window(i, inc, win_length)], 'ks','[]')
+            qs[i] = distribution_entropy(windows[i], 'ks','[]')
     elif window_stat == 'permen':
         for i in range(num_steps):
-            qs[i] = _perm_en_norm(y[_get_window(i, inc, win_length)])
+            qs[i] = _perm_en_norm(windows[i])
     elif window_stat == 'specen':
         for i in range(num_steps):
-            qs[i] = _spectral_entropy_norm(y[_get_window(i, inc, win_length)])
+            qs[i] = _spectral_entropy_norm(windows[i])
     elif window_stat == 'apen':
         for i in range(num_steps):
-            qs[i] = approximate_entropy(y[_get_window(i, inc, win_length)], 1, 0.2)
+            qs[i] = approximate_entropy(windows[i], 1, 0.2)
     elif window_stat == 'sampen':
         for i in range(num_steps):
-            sampen_dict = sample_entropy(y[_get_window(i, inc, win_length)], 1, 0.1)
+            sampen_dict = sample_entropy(windows[i], 1, 0.1)
             qs[i] = sampen_dict['sampen1']
     elif window_stat in ('mom3', 'mom4', 'mom5'):
         the_mom = int(window_stat[3:])
         for i in range(num_steps):
-            qs[i] = moments(y[_get_window(i, inc, win_length)], the_mom)
+            qs[i] = moments(windows[i], the_mom)
     elif window_stat == 'lillie':
         # Lilliefors statistic (as lillietest's kstat): KS distance between the empirical CDF
         # and a normal CDF with the window's own mean and std (N-1)
         for i in range(num_steps):
-            w = y[_get_window(i, inc, win_length)]
+            w = windows[i]
             if len(w) < 4:
                 qs[i] = np.nan # lillietest needs at least 4 observations
-            elif np.std(w, ddof=1) == 0:
+            elif _sample_std(w) == 0:
                 qs[i] = 1.0 # a constant window: lillietest's kstat is 1
             else:
-                qs[i] = kstest(w, norm(loc=np.mean(w), scale=np.std(w, ddof=1)).cdf).statistic
+                qs[i] = kstest(w, norm(loc=np.mean(w), scale=_sample_std(w)).cdf).statistic
     elif window_stat == 'AC1':
         for i in range(num_steps):
-            qs[i] = autocorr(y[_get_window(i, inc, win_length)], 1, 'Fourier')
+            qs[i] = autocorr(windows[i], 1, 'Fourier')
     elif window_stat == 'asymAC1':
         # an adaptive lag is set from the whole series, not per window
         tau = get_tau(y, asym_tau)
@@ -2059,9 +2045,8 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         if not np.isnan(tau) and tau < win_length - 1: # need pairs to average over
             tau = int(tau)
             for i in range(num_steps):
-                w = y[_get_window(i, inc, win_length)]
-                sd = np.std(w, ddof=1)
-                zw = (w - np.mean(w)) / (sd if sd > 0 else 1.0) # a constant window gives zeros
+                w = windows[i]
+                zw = _zscore_or_zeros(w) # a constant window gives zeros
                 qs[i] = np.mean(zw[:-tau] * zw[tau:] * (zw[tau:] - zw[:-tau]))
     else:
         raise ValueError(f"Unknown statistic '{window_stat}'")
@@ -2073,7 +2058,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
 
     if across_win_stat == 'std':
         #% normalized by std of full time series
-        out = _sample_std(qs)/np.std(y, ddof=1)
+        out = _sample_std(qs)/_sample_std(y)
     elif across_win_stat == 'permen':
         out = _perm_en_norm(qs)
     elif across_win_stat == 'apen':
@@ -2105,16 +2090,19 @@ def _spectral_entropy_norm(w: np.ndarray) -> float:
     Py = np.abs(Fy[1:len(w)//2 + 1])**2
     if len(Py) < 2 or np.sum(Py) == 0:
         return np.nan
-    Py = Py / np.sum(Py)
-    Py = Py[Py > 0] # 0*log(0) = 0
-    return -np.sum(Py * np.log2(Py)) / np.log2(len(w)//2)
+    return _shannon_entropy(Py, base=2, normalize=True) / np.log2(len(w)//2)  # 0*log(0) = 0
 
-def _get_window(step_ind, inc, win_length):
-    # helper function to convert a step index (stepInd) to a range of indices corresponding to that window
-    start_idx = (step_ind) * inc
-    end_idx = (step_ind) * inc + win_length
-    
-    return np.arange(start_idx, end_idx).astype(int)
+def _window_starts(n: int, wlen: float, inc_move: float) -> np.ndarray:
+    """Start indices of the windows of length ``wlen`` that slide along ``n`` samples.
+
+    The step is ``floor(wlen / inc_move)`` (raised to 1 if that rounds to 0), and every window
+    lies wholly inside the series: ``floor((n - wlen) / step) + 1`` windows, the first at 0.
+    """
+    inc = int(np.floor(wlen / inc_move))
+    if inc == 0:
+        inc = 1
+    num_steps = int(np.floor((n - wlen) / inc) + 1)
+    return np.arange(num_steps) * inc
 
 def _kendall(x: np.ndarray, y: np.ndarray) -> tuple:
     """
@@ -2241,7 +2229,7 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] =
     # Within-segment statistics
     # ------------------------------------------------------------------------------
     seg_mean = np.mean(z, axis=1)
-    seg_var = np.var(z, axis=1, ddof=1)
+    seg_var = _sample_var(z, axis=1)
     # Standardized (not moments-style raw/std) skewness and kurtosis: keeps the
     # shape-trend signal from being conflated with the (separately tracked)
     # scale-trend signal in seg_var, since moments normalizes by std^1 regardless of
@@ -2254,8 +2242,7 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] =
         seg_ac1[i] = autocorr(z[i, :], 1, 'Fourier')
         if not np.isnan(tau) and tau < seg_length - 1: # need pairs to average over
             t = int(tau)
-            sd = np.std(z[i, :], ddof=1)
-            zseg = (z[i, :] - np.mean(z[i, :])) / (sd if sd > 0 else 1.0) # z-scored *within* this segment (a constant segment gives zeros)
+            zseg = _zscore_or_zeros(z[i, :]) # z-scored *within* this segment (a constant segment gives zeros)
             seg_asym_ac1[i] = np.mean(zseg[:-t] * zseg[t:] * (zseg[t:] - zseg[:-t]))
 
     # ------------------------------------------------------------------------------
@@ -2280,25 +2267,141 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] =
 
     return out
 
+
+_SFA_STAT_NAMES = ('Mean', 'Var', 'Skew', 'AC1', 'Trev')
+_SFA_SING_TOL = 1e-10 # relative floor on the eigenvalues of the window-statistic covariance
+
+
+def _sfa_window_stats(y: np.ndarray, num_windows: int) -> np.ndarray:
+    """Per-window mean, variance, skewness, lag-1 autocorrelation and lag-1 trev
+    (``num_windows`` x 5) over non-overlapping windows, discarding any remainder. In a constant
+    window, skewness, AC1 and trev are undefined and set to 0 (no asymmetry, no correlation)."""
+    L = len(y) // num_windows
+    z = y[:L * num_windows].reshape(num_windows, L)
+    win_mean = np.mean(z, axis=1)
+    zc = z - win_mean[:, None]
+    ss = np.sum(zc**2, axis=1)
+    dz = np.diff(z, axis=1)
+    with warnings.catch_warnings(), np.errstate(invalid='ignore', divide='ignore'):
+        warnings.simplefilter("ignore") # skew() warns on (near-)constant windows
+        win_skew = skew(z, axis=1)
+        win_ac1 = np.sum(zc[:, 1:] * zc[:, :-1], axis=1) / ss
+        win_trev = np.mean(dz**3, axis=1) / np.mean(dz**2, axis=1)**1.5
+    shape = np.column_stack((win_skew, win_ac1, win_trev))
+    shape[np.isnan(shape)] = 0.0
+    return np.column_stack((win_mean, ss / (L - 1), shape))
+
+
+def _sfa_normal_scores(X: np.ndarray):
+    """Replace each column of X by the normal scores of its ranks across windows (ties averaged);
+    None if any statistic is not finite (an overflow) in some window."""
+    if not np.all(np.isfinite(X)):
+        return None
+    return ndtri((rankdata(X, axis=0) - 0.5) / X.shape[0])
+
+
+def _sfa_fit(S: np.ndarray):
+    """PCA and SFA of the (num_windows x 5) normal-score matrix S. Returns None when its covariance
+    is numerically singular (e.g. a statistic that takes the same value in every window)."""
+    Sc = S - np.mean(S, axis=0)
+    eig_vals, Vp = np.linalg.eigh(np.cov(Sc, rowvar=False))
+    ord_ = np.argsort(-eig_vals, kind='stable')
+    pca_eigs, Vp = eig_vals[ord_], Vp[:, ord_]
+    if not pca_eigs[-1] > _SFA_SING_TOL * pca_eigs[0]:
+        return None
+    Zw = Sc @ Vp / np.sqrt(pca_eigs) # PCA-whitened: unit covariance, all five directions kept
+    etas, Us = np.linalg.eigh(np.cov(np.diff(Zw, axis=0), rowvar=False)) # ascending: slowest first
+    return {'etas': etas, 'slow': Zw @ Us[:, 0], 'pca_eigs': pca_eigs, 'pc1': Sc @ Vp[:, 0]}
+
+
+def _sfa_log10_p(eta: float, num_windows: int) -> float:
+    """One-sided log10 p-value of eta1 (small = slow) against the tabulated null for num_windows."""
+    from ._sfa_null_table import PROBS, QUANTILES, W_NODES
+    q = QUANTILES[int(np.flatnonzero(W_NODES == num_windows)[0])]
+    lp = np.log10(PROBS)
+    if eta >= q[-1]:
+        return 0.0
+    if eta >= q[0]:
+        return float(np.interp(eta, q, lp))
+    # below the table (p < 1e-5): extend the lower tail as a power law, P(eta1 <= x) ~ x^s, with the
+    # exponent fitted between p = 1e-5 and 1e-4. The tail is lighter than a power law further out
+    # (s grows towards the origin), so this extrapolation overstates p, i.e. it is conservative.
+    k = int(np.argmin(np.abs(lp + 4)))
+    s = (lp[k] - lp[0]) / (np.log10(q[k]) - np.log10(q[0]))
+    return float(lp[0] + s * (np.log10(max(eta, 1e-300)) - np.log10(q[0])))
+
+
+def _sfa_adjacent_corr(phi: float, L: int) -> float:
+    """Correlation between the means of two adjacent length-L windows of an AR(1) process with
+    lag-1 coefficient phi (0 for phi <= 0)."""
+    if not phi > 0:
+        return 0.0
+    cross = phi * (1 - phi**L)**2 / (1 - phi)**2
+    within = L * (1 + phi) / (1 - phi) - 2 * phi * (1 - phi**L) / (1 - phi)**2
+    return cross / within
+
+
+def _sfa_slow_period(slow: np.ndarray, w: int) -> float:
+    """Period (samples) of the slowest SFA component, sampled once per window of w samples: the peak
+    of its periodogram (excluding frequency 0), refined by a parabola through the log power at the
+    peak and its neighbours. A peak at one cycle per record (a monotone drift) is not refined, so the
+    period is then the record length."""
+    s = slow - np.mean(slow)
+    power = np.abs(np.fft.rfft(s))**2
+    k = int(np.argmax(power[1:])) + 1
+    shift = 0.0
+    if 1 < k < len(power) - 1 and np.all(power[k - 1:k + 2] > 0):
+        a, b, c = np.log(power[k - 1:k + 2])
+        if a - 2 * b + c < 0:
+            shift = 0.5 * (a - c) / (a - 2 * b + c)
+    return len(s) * w / (k + shift)
+
+
 @dict_output
-def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
+def slow_feature_analysis(y: ArrayLike, min_window_length: int = 20) -> dict:
     """
-    Slow feature analysis of windowed statistics.
+    Multi-scale slow feature analysis of windowed statistics: a calibrated test for slow drift.
 
-    Splits the time series into ``num_windows`` non-overlapping segments (same
-    segmentation and per-segment statistics as :func:`ramping_windows`: mean,
-    variance, skewness, and lag-1 autocorrelation, plus lag-1 trev, a normalized
-    third-order cross-moment measuring time-reversal asymmetry, ``mean(dz^3) /
-    mean(dz^2)^(3/2)`` with ``dz = diff(window)``, forming a ``num_windows`` x 5
-    matrix), then applies Slow Feature Analysis (SFA) to find the linear combination
-    of these five statistics that varies as *slowly* as possible across the sequence
-    of windows -- i.e., minimizes the variance of its own increments, subject to unit
-    variance. The lag-1 autocorrelation is symmetric under time reversal, so trev is
-    included to let SFA pick up a slow drift in the *irreversibility* of the dynamics.
+    At each scale, the time series is split into ``W`` non-overlapping windows and five statistics are
+    computed in every window: mean, variance, skewness, lag-1 autocorrelation (AC1), and lag-1 trev, a
+    normalized third-order moment of the increments measuring time-reversal asymmetry,
+    ``mean(dz^3) / mean(dz^2)^(3/2)`` with ``dz = diff(window)`` (AC1 is symmetric under time reversal,
+    so trev lets a slow drift in the *irreversibility* of the dynamics show up). Each statistic is
+    replaced by the normal scores of its ranks across the ``W`` windows, and Slow Feature Analysis (SFA)
+    [1]_ finds the linear combination of the five that varies most *slowly* across the sequence of
+    windows: after PCA-whitening, the eigenvector of the covariance of the first differences with the
+    smallest eigenvalue, ``eta1`` (about 2 for windows in random order, near 0 for a smooth trend).
+    Non-overlapping windows are used because overlap would make adjacent window statistics correlated
+    and ``eta1`` spuriously small.
 
-    This operation is a compact variant of feature-based SFA (f-SFA) [2]_, which applies SFA
-    to sliding-window catch22/catch24 features; here five fixed window statistics are used,
-    to give a single hctsa feature.
+    The scales are ``W = 10, 20, 40, ..., 1280`` windows, using every ``W`` with at least
+    ``min_window_length`` samples per window, so the feature is defined from
+    ``N = 10 * min_window_length`` (200 by default). Few, long windows detect slow, smooth drift; many,
+    short windows are needed for a slow modulation with several cycles in the record (about eight
+    windows per cycle).
+
+    Each scale's ``eta1`` is converted to a one-sided p-value against a Monte Carlo null for ``W``
+    windows with exchangeable (iid) rows of statistics (``scripts/gen_sfa_null_table.py``). Because the
+    statistics enter as rank normal scores, this null does not depend on their marginal distributions,
+    so it holds for heavy-tailed series as well as Gaussian ones. Serial correlation in the series
+    correlates the statistics of adjacent windows (through samples near their shared boundary), which
+    would make ``eta1`` smaller than under the null for short windows. To stay calibrated, each
+    ``eta1`` is divided by ``1 - rho`` before the lookup, where ``rho`` is the correlation between the
+    means of adjacent windows of an AR(1) process with the series' lag-1 autocorrelation (estimated
+    within ten windows, so a slow drift does not inflate it, and bias-corrected). The window mean is
+    the statistic most affected, so this errs on the conservative side.
+
+    The scales are combined by the Sidak-corrected minimum p-value. In simulations (2,000 series of
+    each process and length; nominal levels 0.05 and 0.01), the false-positive rate stayed within
+    sampling error of the nominal level or below it for white noise, AR(1) with coefficient 0.8, 0.9
+    or 0.95, and Student-t noise with 2 or 3 degrees of freedom or Cauchy noise, at
+    N = 200, 400, 800, 1600 and 4000.
+
+    This operation is a compact variant of feature-based SFA (f-SFA) [2]_, which applies SFA to
+    sliding-window catch22/catch24 features; here five fixed window statistics are used.
+
+    Cost: about 0.7 ms at N = 200 (one scale), 4 ms at N = 4000 (five scales) and 13 ms at N = 20000
+    (eight scales).
 
     References
     ----------
@@ -2313,144 +2416,114 @@ def slow_feature_analysis(y: ArrayLike, num_windows: int = 20) -> dict:
     ----------
     y : array-like
         The input time series.
-    num_windows : int, optional
-        The number of non-overlapping segments to divide the time series into.
-        Non-overlapping segments are used for the same reason as
-        :func:`ramping_windows`: overlap would induce artificial serial correlation
-        between adjacent window statistics, which would make the derivative-based
-        slowness measure spuriously small regardless of any real slow structure in
-        the data. 20 was chosen (rather than :func:`ramping_windows`' default of 10)
-        because SFA needs enough windows to estimate the underlying 5x5 covariance
-        matrices (of the statistics, and of their increments) reasonably reliably --
-        at ``num_windows = 10`` the null-distribution spread of the slowness
-        eigenvalues is considerably wider, making individual values a noisier signal.
-        Default is 20.
+    min_window_length : int, optional
+        The fewest samples a window may have for its scale to be used (at least 10). Window skewness,
+        AC1 and trev are unreliable in very short windows. Default is 20.
 
     Returns
     -------
     dict
-        - ``eta1``: the smallest (slowest) SFA eigenvalue.
-        - ``etaEnd``: the largest (fastest/noisiest) SFA eigenvalue.
-        - ``etaStd``: the standard deviation of all SFA eigenvalues (spread of
-          the slowness spectrum).
-        - ``pc1VarFrac``: the fraction of total variance (across the five statistics)
-          explained by the leading PCA component.
-        - ``slowPCA1corr``: the absolute correlation between the slowest SFA
-          component's scores and the leading PCA component's scores -- near 1 means
-          the slow direction is simply the dominant (highest-variance) direction PCA
-          would already find; near 0 means SFA has isolated a genuinely separate,
-          low-variance slow mode.
-        - ``slowCorrMean``, ``slowCorrVar``, ``slowCorrSkew``, ``slowCorrAC1``,
-          ``slowCorrTrev``: the absolute correlation between each raw per-window statistic
-          (mean, variance, skewness, AC1, trev, before whitening) and the slowest SFA
-          component's scores, indicating which statistic drives the slow mode (NaN for a
-          constant statistic).
+        - ``driftScore``: ``-log10`` of the Sidak-corrected minimum p-value over scales: 0 to about 1.3
+          for a stationary series, above 2 (p < 0.01) for clear slow variation of the window
+          statistics.
+        - ``driftWinLength``: the window length (samples) at the reported scale: among the scales that
+          are significant on their own (Sidak p < 0.05), the one where ``eta1`` is smallest relative to
+          its null median (the strongest slow structure); else the scale with the smallest p-value.
+          Long windows for a smooth drift, about an eighth of the period or shorter for a modulation.
+        - ``slowPeriod``: the period (samples) of the slow component at that scale, from the peak of the
+          periodogram of the slowest SFA component across windows (refined between frequency bins).
+          A monotone drift gives the record length. NaN unless ``driftScore`` passes p < 0.05: the
+          period of nothing significant cannot be estimated.
 
-        Returns NaN if the time series is too short for the requested number of
-        windows, or if fewer than two directions survive the whitening threshold.
+        At the reported scale:
+
+        - ``etaEnd``: the largest (fastest) SFA eigenvalue.
+        - ``etaStd``: the standard deviation of the five SFA eigenvalues (spread of the slowness
+          spectrum).
+        - ``pc1VarFrac``: the fraction of the variance of the five (rank-scored) statistics on the
+          leading principal component.
+        - ``slowPCA1corr``: the absolute correlation between the slowest SFA component and the leading
+          principal component: near 1 when the slow direction is just the dominant (highest-variance)
+          direction, near 0 when SFA isolates a separate, low-variance slow mode.
+        - ``slowCorrMean``, ``slowCorrVar``, ``slowCorrSkew``, ``slowCorrAC1``, ``slowCorrTrev``: the
+          absolute correlation between each (rank-scored) window statistic and the slowest SFA
+          component, indicating which statistic drives the slow mode.
+
+        Returns NaN if the time series is shorter than ``10 * min_window_length``, or if no scale has
+        defined, non-degenerate window statistics (e.g. a constant series).
     """
+    from ._sfa_null_table import W_NODES
+
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
-    num_windows = int(num_windows)
+    min_window_length = int(min_window_length)
+    if min_window_length < 10:
+        raise ValueError(f"min_window_length = {min_window_length} is too short for meaningful window "
+                         "skewness, AC1 and trev (need >= 10)")
 
-    min_num_windows = 10 # need enough windows to estimate the 5x5 covariance matrices reliably
-    min_window_length = 20 # heuristic minimum for meaningful skewness/AC1/trev estimates
-
-    if num_windows < min_num_windows:
-        raise ValueError(f"num_windows = {num_windows} is too few for a reliable slow "
-                         f"feature analysis (need >= {min_num_windows})")
-
-    win_length = N // num_windows
-    if win_length < min_window_length:
-        logger.warning(f"Time series (N = {N}) too short for {num_windows} windows of a meaningful length")
+    scales = [int(W) for W in W_NODES if N // W >= min_window_length]
+    if not scales:
+        logger.warning(f"Time series (N = {N}) too short for 10 windows of at least "
+                       f"{min_window_length} samples")
         return np.nan
 
-    # ------------------------------------------------------------------------------
-    # Segment the time series (non-overlapping, discarding any remainder)
-    # ------------------------------------------------------------------------------
-    z = y[:win_length * num_windows].reshape(num_windows, win_length) # num_windows x win_length
+    # Lag-1 autocorrelation within ten windows (pooled, each window demeaned, so a slow drift in the
+    # mean does not inflate it), bias-corrected (Marriott & Pope 1954: E[r1] ~ phi - (1 + 3 phi) / L)
+    L0 = N // 10
+    z0 = y[:10 * L0].reshape(10, L0)
+    z0 = z0 - np.mean(z0, axis=1, keepdims=True)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        r1 = np.sum(z0[:, 1:] * z0[:, :-1]) / np.sum(z0**2)
+    phi = min((r1 * L0 + 1) / (L0 - 3), 0.99) if np.isfinite(r1) else 0.0
 
-    # ------------------------------------------------------------------------------
-    # Per-window statistics: mean, variance, skewness, AC1 (as in ramping_windows) and
-    # trev (lag-1 time-reversal asymmetry, tau fixed to 1 rather than estimated per window)
-    # ------------------------------------------------------------------------------
-    win_mean = np.mean(z, axis=1)
-    win_var = np.var(z, axis=1, ddof=1)
-    win_skew = skew(z, axis=1)
-    win_ac1 = np.zeros(num_windows)
-    win_trev = np.zeros(num_windows)
-    for i in range(num_windows):
-        win_ac1[i] = autocorr(z[i, :], 1, 'Fourier')
-        dz = np.diff(z[i, :])
-        with np.errstate(invalid='ignore', divide='ignore'):
-            win_trev[i] = np.mean(dz**3) / np.mean(dz**2)**1.5
-    X = np.column_stack((win_mean, win_var, win_skew, win_ac1, win_trev)) # num_windows x 5
+    from ._sfa_null_table import PROBS, QUANTILES
+    null_median = QUANTILES[:, int(np.argmin(np.abs(PROBS - 0.5)))]
 
-    # ------------------------------------------------------------------------------
-    # PCA (variance-maximizing directions) and SFA (slowness-minimizing directions)
-    # ------------------------------------------------------------------------------
-    Xc = X - np.mean(X, axis=0)
-    Cx = np.cov(Xc, rowvar=False) # 5 x 5
-    if not np.all(np.isfinite(Cx)):
-        # a degenerate (e.g. constant) window leaves its skewness/AC1 -- and hence
-        # the covariance -- undefined
+    per_scale = [] # (W, log10 p, effect size, fit, normal scores)
+    for W in scales:
+        S = _sfa_normal_scores(_sfa_window_stats(y, W))
+        fit = None if S is None else _sfa_fit(S)
+        if fit is None:
+            continue
+        eta = fit['etas'][0] / (1 - _sfa_adjacent_corr(phi, N // W))
+        # effect size: eta1 relative to its null median at this W (1 = no slow structure)
+        effect = eta / null_median[int(np.flatnonzero(W_NODES == W)[0])]
+        per_scale.append((W, _sfa_log10_p(eta, W), effect, fit, S))
+    if not per_scale:
         return np.nan
 
-    eig_vals, Vp = np.linalg.eigh(Cx)
-    ord_ = np.argsort(-eig_vals, kind='stable')
-    pca_eigs = eig_vals[ord_]
-    Vp = Vp[:, ord_]
-    pc_scores = Xc @ Vp # num_windows x 5, PC1 = pc_scores[:, 0]
+    # Sidak correction for the number of scales tested: p = 1 - (1 - p)^m
+    m = len(per_scale)
+    def _log10_sidak(lp):
+        if lp >= 0:
+            return 0.0
+        if lp > -12:
+            return np.log10(-np.expm1(m * np.log1p(-10**lp)))
+        return lp + np.log10(m) # (1 - p)^m ~ 1 - m p, without the round-off
+    log10_p_corr = _log10_sidak(min(r[1] for r in per_scale))
 
-    # Whitening (PCA whitening: the scores on the retained principal axes, each scaled
-    # to unit variance; any rotation of the whitened space gives the same slowness
-    # eigenvalues and slow components below). Directions with near-zero variance relative
-    # to the leading one (e.g. a per-window statistic that barely varies across windows) are dropped
-    # rather than whitened: full whitening would divide by their near-zero std and
-    # amplify what is essentially estimation noise into a spuriously enormous
-    # "fast" eigenvalue. pca_eigs[0] (the leading, largest eigenvalue) is never
-    # itself dropped by this relative threshold.
-    rel_floor = 1e-2
-    keep = pca_eigs > rel_floor * pca_eigs[0]
-    if np.sum(keep) < 2:
-        return np.nan
-    Vk = Vp[:, keep]
-    Zw = Xc @ Vk / np.sqrt(pca_eigs[keep]) # num_windows x sum(keep), approx unit covariance
-
-    dZ = np.diff(Zw, axis=0) # (num_windows-1) x sum(keep), the whitened derivative signal
-    Cd = np.cov(dZ, rowvar=False)
-    eta_vals, Us = np.linalg.eigh(Cd)
-    ord2 = np.argsort(eta_vals, kind='stable') # slowness eigenvalues, ascending = slowest first
-    etas = eta_vals[ord2]
-    Us = Us[:, ord2]
-    slow_scores = Zw @ Us # num_windows x sum(keep), slowest component = slow_scores[:, 0]
-
-    # ------------------------------------------------------------------------------
-    # Output statistics
-    # ------------------------------------------------------------------------------
-    out = {}
-    out['eta1'] = etas[0]
-    out['etaEnd'] = etas[-1]
-    out['etaStd'] = np.std(etas, ddof=1)
-
-    out['pc1VarFrac'] = pca_eigs[0] / np.sum(pca_eigs)
-
-    # Pearson's linear correlation (absolute) with the slowest SFA component's scores,
-    # NaN for a constant input (the correlation is undefined)
-    s0 = slow_scores[:, 0]
+    # The scale reported: the strongest effect among the scales significant on their own (Sidak
+    # p < 0.05), else the smallest p. Choosing by smallest p would always pick the most windows for a
+    # strong signal, as the null is narrowest there, so the window length would not be a timescale.
+    significant = [r for r in per_scale if _log10_sidak(r[1]) < np.log10(0.05)]
+    W, _, _, fit, S = (min(significant, key=lambda r: r[2]) if significant
+                       else min(per_scale, key=lambda r: r[1]))
 
     def _abs_corr(a, b):
-        if np.std(a, ddof=1) == 0 or np.std(b, ddof=1) == 0:
+        if np.std(a) == 0 or np.std(b) == 0:
             return np.nan
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            return abs(pearsonr(a, b)[0])
+        return abs(np.corrcoef(a, b)[0, 1])
 
-    out['slowPCA1corr'] = _abs_corr(s0, pc_scores[:, 0])
-    out['slowCorrMean'] = _abs_corr(win_mean, s0)
-    out['slowCorrVar'] = _abs_corr(win_var, s0)
-    out['slowCorrSkew'] = _abs_corr(win_skew, s0)
-    out['slowCorrAC1'] = _abs_corr(win_ac1, s0)
-    out['slowCorrTrev'] = _abs_corr(win_trev, s0)
-
+    etas = fit['etas']
+    out = {}
+    out['driftScore'] = max(-log10_p_corr, 0.0)
+    out['driftWinLength'] = N // W
+    out['slowPeriod'] = (_sfa_slow_period(fit['slow'], N // W) if out['driftScore'] >= -np.log10(0.05)
+                         else np.nan)
+    out['etaEnd'] = etas[-1]
+    out['etaStd'] = _sample_std(etas)
+    out['pc1VarFrac'] = fit['pca_eigs'][0] / np.sum(fit['pca_eigs'])
+    out['slowPCA1corr'] = _abs_corr(fit['slow'], fit['pc1'])
+    for j, name in enumerate(_SFA_STAT_NAMES):
+        out[f'slowCorr{name}'] = _abs_corr(S[:, j], fit['slow'])
     return out

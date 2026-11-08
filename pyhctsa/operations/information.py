@@ -2,11 +2,13 @@ import logging
 logger = logging.getLogger('pyhctsa')
 from typing import Any, Dict, List, Optional, Union, Callable
 
+from ..utils import _sample_std
 import numpy as np
+from ..utils import _quantile
 from numpy.typing import ArrayLike
 from scipy import stats
 
-from ..utils import dict_output, get_tau, sign_change, time_delay_embed
+from ..utils import _first_extremum, dict_output, _coarse_grain, get_tau, sign_change, time_delay_embed
 from ..robust import bf_hist_edges, bf_tie_break_noise
 from ..ksg import ksg_mi
 
@@ -174,15 +176,10 @@ def _first_min_from_curve(c: np.ndarray, n: int):
     NaN if the curve hits a NaN first; ``n`` (the series length) if the curve keeps
     decreasing, as in hctsa's ``CO_FirstMin``.
     """
-    for i in range(1, len(c) + 1):
-        if np.isnan(c[i - 1]):
-            logger.warning("No minimum: encountered NaN.")
-            return np.nan
-        if (i == 2) and (c[1] > c[0]):
-            return 1
-        elif (i > 2) and c[i - 3] > c[i - 2] < c[i - 1]:
-            return i - 1
-    return n
+    lag = _first_extremum(c, 'min', not_found=n)
+    if np.isnan(lag):
+        logger.warning("No minimum: encountered NaN.")
+    return lag
 
 
 def _first_max_from_curve(c: np.ndarray, n: int):
@@ -191,13 +188,10 @@ def _first_max_from_curve(c: np.ndarray, n: int):
     NaN if the curve hits a NaN first; ``n`` (the series length) if no maximum is found,
     as in hctsa's ``CO_FirstMin`` with ``minNotMax = false``.
     """
-    for i in range(1, len(c) + 1):
-        if np.isnan(c[i - 1]):
-            logger.warning("No maximum: encountered NaN.")
-            return np.nan
-        if (i > 2) and c[i - 3] < c[i - 2] > c[i - 1]:
-            return i - 1
-    return n
+    lag = _first_extremum(c, 'max', not_found=n)
+    if np.isnan(lag):
+        logger.warning("No maximum: encountered NaN.")
+    return lag
 
 def first_min(
     y: list,
@@ -251,23 +245,14 @@ def first_min(
     if min_what in _VECTORISED_CORR and n >= 3:     # vectorised drop-in, identical lag
         return _first_min_from_curve(_self_corr_curve(y, min_what), n)
     corrfn = _get_corr_fn(y, min_what, extra_param)
-    
-    auto_corr = np.zeros(n - 1)
-    for i in range(1, n):
-        auto_corr[i - 1] = corrfn(i)
-        
-        if np.isnan(auto_corr[i - 1]):
-            logger.warning(f"No minimum in {min_what}: encountered NaN.")
-            return np.nan
-        
-        # Check for minimum
-        if (i == 2) and (auto_corr[1] > auto_corr[0]):
-            return 1
-        elif (i > 2) and auto_corr[i - 3] > auto_corr[i - 2] < auto_corr[i - 1]:
-            return i - 1
-
-    # still decreasing: no minimum found anywhere in the series
-    return n
+    if n == 0:
+        raise ValueError("first_min needs a non-empty time series.")
+    # lazily, lag by lag: the (slow) estimator is evaluated only up to the first minimum;
+    # if the function keeps decreasing there is no minimum anywhere in the series (-> n)
+    lag = _first_extremum((corrfn(i) for i in range(1, n)), 'min', not_found=n)
+    if np.isnan(lag):
+        logger.warning(f"No minimum in {min_what}: encountered NaN.")
+    return lag
 
 def first_max(
     y: list,
@@ -315,21 +300,13 @@ def first_max(
     if max_what in _VECTORISED_CORR and n >= 3:     # vectorised drop-in, identical lag
         return _first_max_from_curve(_self_corr_curve(y, max_what), n)
     corrfn = _get_corr_fn(y, max_what, extra_param)
-    
-    auto_corr = np.zeros(n - 1)
-    for i in range(1, n):
-        auto_corr[i - 1] = corrfn(i)
-        
-        if np.isnan(auto_corr[i - 1]):
-            logger.warning(f"No maximum in {max_what}: encountered NaN.")
-            return np.nan
-
-        # Check for maximum
-        if i > 2 and auto_corr[i - 3] < auto_corr[i - 2] > auto_corr[i - 1]:
-            return i - 1
-
-    # no maximum found anywhere in the series
-    return n
+    if n == 0:
+        raise ValueError("first_max needs a non-empty time series.")
+    # lazily, lag by lag, up to the first maximum; no maximum anywhere in the series -> n
+    lag = _first_extremum((corrfn(i) for i in range(1, n)), 'max', not_found=n)
+    if np.isnan(lag):
+        logger.warning(f"No maximum in {max_what}: encountered NaN.")
+    return lag
 
 def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
             r2: Union[str, list] = 'range', num_bins: int = 10) -> float:
@@ -342,7 +319,8 @@ def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
         v2 (array-like): The second input vector
         r1 (str or list): The bin-partitioning method for v1: 'range' (equal-width bins spanning
             the data, with explicit edges; NaN is returned for a constant vector), 'quantile'
-            (equal numbers of values) or [min, max] (equal-width bins spanning that range)
+            (equiprobable bins: the symbols of :func:`pyhctsa.utils._coarse_grain`) or
+            [min, max] (equal-width bins spanning that range)
         r2 (str or list): The bin-partitioning method for v2 ('range', 'quantile', or [min, max])
         num_bins (int): The number of bins to partition each vector into (default : 10)
 
@@ -360,6 +338,12 @@ def _mi_bin(v1: ArrayLike, v2: ArrayLike, r1: Union[str, list] = 'range',
     if (isinstance(r1, str) and r1 == 'range' and np.ptp(v1) == 0) or \
             (isinstance(r2, str) and r2 == 'range' and np.ptp(v2) == 0):
         return np.nan  # a constant vector has no distribution to bin
+
+    # An equiprobable side is binned by its symbols 0..num_bins-1, one unit bin each
+    if isinstance(r1, str) and r1 == 'quantile':
+        v1, r1 = _coarse_grain(v1, num_bins, 'quantile').astype(float), [-0.5, num_bins - 0.5]
+    if isinstance(r2, str) and r2 == 'quantile':
+        v2, r2 = _coarse_grain(v2, num_bins, 'quantile').astype(float), [-0.5, num_bins - 0.5]
 
     # Create histograms
     edges_i = _give_me_edges(r1, v1, num_bins)
@@ -397,11 +381,6 @@ def _give_me_edges(r, v, n_bins):
         raise ValueError(f"nbins must be > 0, got {n_bins}")
     if isinstance(r, str) and r == 'range':
         return bf_hist_edges(v, n_bins)  # equal-width bins spanning the data (explicit edges)
-    elif isinstance(r, str) and r == 'quantile':  # bin edges based on quantiles
-        ee = 1E-6 * np.ptp(v)  # this small addition (relative to the data) gets lost in the last bin
-        edges = np.asarray(np.quantile(v, np.linspace(0, 1, n_bins + 1), method='hazen'), dtype=float)
-        edges[-1] += ee
-        return edges
     elif not isinstance(r, str) and len(r) == 2:  # a two-component vector
         return bf_hist_edges(v, n_bins, r)  # equal-width bins spanning the given range
     else:
@@ -483,7 +462,7 @@ def automutual_info_stats(
     # Basic statistics
     lami = len(ami)
     out['mami'] = np.mean(ami)
-    out['stdami'] = np.std(ami, ddof=1)
+    out['stdami'] = _sample_std(ami)
 
     # First minimum of mutual information across range
     dami = np.diff(ami)
@@ -525,8 +504,8 @@ def automutual_info_stats(
     # Number of crossings at mean/median level, percentiles
     out['pcrossmean'] = np.mean(np.diff(np.sign(ami - np.mean(ami))) != 0)
     out['pcrossmedian'] = np.mean(np.diff(np.sign(ami - np.median(ami))) != 0)
-    out['pcrossq10'] = np.mean(sign_change(ami - np.percentile(ami, 10, method='hazen')))
-    out['pcrossq90'] = np.mean(sign_change(ami - np.percentile(ami, 90, method='hazen')))
+    out['pcrossq10'] = np.mean(sign_change(ami - _quantile(ami, 0.1)))
+    out['pcrossq90'] = np.mean(sign_change(ami - _quantile(ami, 0.9)))
 
     # ac1
     out['amiac1'] = autocorr(ami, 1, 'Fourier')

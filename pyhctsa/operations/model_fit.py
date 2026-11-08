@@ -6,7 +6,9 @@ from collections import OrderedDict
 from typing import Union
 
 import numba
+from ..utils import _sample_var
 import numpy as np
+from ..utils import _quantile
 from numpy.typing import ArrayLike
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.linalg import solve_discrete_lyapunov
@@ -23,9 +25,11 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import simple_fit
 from ..operations.stationarity import sliding_window
 from ..toolboxes.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
-from ..robust import bf_exp_fit, bf_random, bf_random_seed, bf_spread_perm
+from ..robust import _rank_map_gaussian, bf_exp_fit, bf_random, bf_random_seed, bf_spread_perm
 from ..toolboxes.gpml.optimizers import minimize
-from ..utils import _even_split_points, dict_output, _sample_std, _zscore_or_zeros, get_tau, z_score
+from ..utils import (_ar_design, _even_split_points, _is_roundoff, _piecewise_poly_residual, dict_output, _sample_std,
+                     _zscore_or_zeros, get_tau, z_score)
+from ..utils import ljung_box
 
 
 def _nanmax_or_nan(a, axis=None):
@@ -153,10 +157,10 @@ def _gaussian_hmm_fit(y_train: np.ndarray, num_states: int, n_cycles: int = 30,
     x = np.ascontiguousarray(y_train, dtype=float).ravel()
     K = int(num_states)
     N = len(x)
-    v = np.var(x, ddof=1)
+    v = _sample_var(x)
     xs = np.sort(x)
     idx = np.ceil(N * (np.arange(1, K + 1) - 0.5) / K).astype(int) - 1
-    mean_sets = [xs[idx], np.mean(x) + np.std(x, ddof=1) * np.linspace(-1, 1, K)]
+    mean_sets = [xs[idx], np.mean(x) + _sample_std(x) * np.linspace(-1, 1, K)]
     pi0 = np.ones(K) / K
     best_ll = -np.inf
     best = (np.full(K, np.nan), np.nan, np.full((K, K), np.nan), np.full(K, np.nan), np.nan)
@@ -268,9 +272,9 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3) -> dict:
 
     # Transition matrix
     out['Pmeandiag'] = np.mean(np.diag(p_matrix))
-    out['stdmeanP'] = np.std(np.mean(p_matrix, axis=0), ddof=1)
+    out['stdmeanP'] = _sample_std(np.mean(p_matrix, axis=0))
     out['maxP'] = np.max(p_matrix)
-    out['stdP'] = np.std(p_matrix, ddof=1)
+    out['stdP'] = _sample_std(p_matrix)
 
     # Within-sample log-likelihood
     out['LLtrainpersample'] = ll_train / n_train
@@ -365,9 +369,7 @@ def _armax_fit(y: np.ndarray, p: int, q: int) -> tuple:
     # (1) Hannan-Rissanen start. Stage 1: innovations from a long AR model
     e = np.full(n_obs, np.nan)
     if m > 0:
-        win = sliding_window_view(y, m + 1)
-        x1 = win[:, :m][:, ::-1]
-        t1 = win[:, m]
+        x1, t1 = _ar_design(y, m)
         e[m:] = t1 - x1 @ (_pinv(x1) @ t1)
     # Stage 2: regression on lagged values and lagged innovations
     tt = np.arange(t0, n_obs)
@@ -447,15 +449,6 @@ def _armax_fit(y: np.ndarray, p: int, q: int) -> tuple:
         cov = np.zeros((0, 0))
     err = _defined_errors(_kstep_residuals(a, c, y, 1))
     return a, c, float(np.mean(err ** 2)), cov
-
-
-def _armax_residuals(a: np.ndarray, c: np.ndarray, y: np.ndarray, steps: int) -> np.ndarray:
-    """
-    k-step-ahead prediction errors of an ARMA model (alias of :func:`_kstep_residuals`).
-
-    Returns ``yhat - y``.
-    """
-    return _kstep_residuals(a, c, y, steps)
 
 
 @dict_output
@@ -542,7 +535,7 @@ def armax(y: ArrayLike, orders: Union[list, tuple] = (3, 3), p_train: float = 0.
         a_tr, c_tr, _, _ = _armax_fit(y_train, p, q)
     except ValueError:
         return np.nan
-    m_residuals = _defined_errors(_armax_residuals(a_tr, c_tr, y_test, int(num_steps)))
+    m_residuals = _defined_errors(_kstep_residuals(a_tr, c_tr, y_test, int(num_steps)))
     out.update(residual_analysis(m_residuals, y_test, 'full'))
     return out
 
@@ -564,8 +557,6 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     GPL-3.0-or-later for pyhctsa.
     """
     from scipy.signal import detrend
-    # (imported here: pre_process imports nonlinearity, which imports this module)
-    from .pre_process import _ar_rms_error, _is_roundoff, _piecewise_poly_residual, _rank_map_gaussian
     y = np.asarray(y, dtype=float).ravel()
     if pre_proc in ('nothing', 'none'):
         return y
@@ -647,8 +638,7 @@ def _lbq_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
 
     ``Q(L) = N (N + 2) sum_{k=1}^{L} rho_k^2 / (N - k)`` with ``rho_k`` the sample
     autocorrelation of the mean-removed series; the p-value is from a chi-squared
-    distribution with L degrees of freedom
-    (``statsmodels.stats.diagnostic.acorr_ljungbox``).
+    distribution with L degrees of freedom (:func:`pyhctsa.utils.ljung_box`).
 
     Parameters
     ----------
@@ -668,14 +658,11 @@ def _lbq_test_pvalues(x: np.ndarray, max_lag: int = 20) -> np.ndarray:
     G. M. Ljung and G. E. P. Box, "On a Measure of Lack of Fit in Time Series Models",
     Biometrika 65 (1978) 297-303.
     """
-    from statsmodels.stats.diagnostic import acorr_ljungbox
     x = np.asarray(x, dtype=float).ravel()
     max_lag = int(max_lag)
     if max_lag > len(x) - 1 or not np.all(np.isfinite(x)) or np.ptp(x) == 0:
         return np.full(max_lag, np.nan)  # too short for max_lag lags, constant, or non-finite
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore')
-        return np.asarray(acorr_ljungbox(x, lags=max_lag, return_df=True)['lb_pvalue'], dtype=float)
+    return ljung_box(x, max_lag, later_first=True)[1]  # statsmodels' operand order
 
 
 # Work shared by garch_fit and garch_compare on the same series: the whitening, and for the
@@ -977,7 +964,7 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     out['maxsigma'] = np.max(sigmas)
     out['minsigma'] = np.min(sigmas)
     out['rangesigma'] = np.max(sigmas) - np.min(sigmas) if has else 0.0
-    out['stdsigma'] = np.std(sigmas, ddof=1) if has else 0.0   # (exactly 0 for constant variance)
+    out['stdsigma'] = _sample_std(sigmas) if has else 0.0   # (exactly 0 for constant variance)
     out['meansigma'] = np.mean(sigmas)
 
     # Check the standardized residuals: residuals (mean process minus data)
@@ -1168,7 +1155,7 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
 
     # How much the constant varies with each order
     def _std_omitnan(values):
-        # standard deviation of each column over its non-NaN entries (0 for a single entry)
+        # standard deviation of each column over its non-NaN entries (NaN for a single entry)
         return np.array([_sample_std(col[~np.isnan(col)]) for col in values.T])
 
     out['Ks_vary_p'] = np.nan if floor_var.any() else np.nanmean(_std_omitnan(ks))
@@ -1316,7 +1303,7 @@ def _n4_arx_order_compute(y: np.ndarray) -> int:
         return 0
     target = y[lmax:]
     n = len(target)
-    lags = sliding_window_view(y, lmax + 1)[:, :lmax][:, ::-1]   # column k-1 = y[t-k]
+    lags = _ar_design(y, lmax)[0]   # column k-1 = y[t-k]
     floor_s2 = 1e-10 * np.mean(target ** 2)
     aic = np.empty(lmax + 1)
     with np.errstate(divide='ignore'):
@@ -2283,10 +2270,9 @@ def _fb_lsq(y: np.ndarray, p: int) -> tuple:
         raise ValueError("The series is too short for the requested AR order")
     if not np.all(np.isfinite(y)):
         return np.full(p, np.nan), np.nan
-    win = sliding_window_view(y, p + 1)  # row j = y[j:j+p+1]
     # forward: y[t] ~ sum_k phi_k y[t-k], t = p..N-1  (lags in reversed column order)
-    x_fwd = win[:, :p][:, ::-1]
-    t_fwd = win[:, p]
+    x_fwd, t_fwd = _ar_design(y, p)
+    win = sliding_window_view(y, p + 1)  # row j = y[j:j+p+1]
     # backward: y[t] ~ sum_k phi_k y[t+k], t = 0..N-1-p
     x_bwd = win[:, 1:]
     t_bwd = win[:, 0]
@@ -2296,9 +2282,40 @@ def _fb_lsq(y: np.ndarray, p: int) -> tuple:
     resid = t_fwd - x_fwd @ phi
     return phi, float(resid @ resid)
 
+
+def _ar_rms_error(data: np.ndarray, order: int) -> float:
+    """
+    Root-mean-square one-step prediction error of an AR model.
+
+    Fits an AR model of the given order by forward-backward least squares and returns the
+    root of the mean squared in-sample one-step errors, with the first ``order`` errors zero
+    (initial conditions estimated) and the forward residuals for the rest.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        The time series.
+    order : int
+        The AR order.
+
+    Returns
+    -------
+    float
+        The RMS prediction error (NaN for non-finite input).
+
+    Notes
+    -----
+    Forward-backward linear prediction: S. L. Marple Jr., *Digital Spectral Analysis with
+    Applications*, Prentice-Hall, 1987, ch. 8.
+    """
+    y = np.asarray(data, dtype=float).ravel()
+    _, sse = _fb_lsq(y, int(order))
+    return float(np.sqrt(sse / len(y)))
+
+
 def _fpe_stats(fpes: np.ndarray) -> dict:
     """Spread statistics of the final prediction errors across segments (``fpe_*`` outputs)."""
-    return {'fpe_std': np.std(fpes, ddof=1), 'fpe_mean': np.mean(fpes), 'fpe_max': np.max(fpes),
+    return {'fpe_std': _sample_std(fpes), 'fpe_mean': np.mean(fpes), 'fpe_max': np.max(fpes),
             'fpe_min': np.min(fpes), 'fpe_range': np.ptp(fpes)}
 
 
@@ -2342,7 +2359,7 @@ def _spread_ratio(values: np.ndarray, w: np.ndarray, spans: np.ndarray) -> float
     null = _stationary_sample_var(w, spans)
     if not np.isfinite(null) or null <= _NULL_ROUNDOFF * np.max(w):
         return np.nan
-    return float(np.std(values, ddof=1) / np.sqrt(null))
+    return float(_sample_std(values) / np.sqrt(null))
 
 
 def _max_deviation(values: np.ndarray, w: np.ndarray, spans: np.ndarray) -> float:
@@ -2400,12 +2417,11 @@ def _ar_pooled_moments(segs: list, coefs: list, p: int) -> dict:
     """
     resids, gram, ms_data = [], np.zeros((p, p)), 0.0
     for seg, a in zip(segs, coefs):
-        win = sliding_window_view(seg, p + 1)
-        x_fwd = win[:, :p][:, ::-1]
-        e = win[:, p] + x_fwd @ a
+        x_fwd, t_fwd = _ar_design(seg, p)
+        e = t_fwd + x_fwd @ a
         resids.append(e)
         gram += x_fwd.T @ x_fwd
-        ms_data += win[:, p] @ win[:, p]
+        ms_data += t_fwd @ t_fwd
     n_res = np.array([len(e) for e in resids])
     sse = sum(e @ e for e in resids)
     dof = np.sum(n_res) - len(segs) * p
@@ -2446,6 +2462,47 @@ def _crosspred_excess_ratio(mse: np.ndarray, mom: dict) -> float:
     inv_n = 1.0 / mom['n_res']
     expected = p * (inv_n[:, None] + inv_n[None, :])
     return float(np.mean(rel[off]) / np.mean(expected[off]))
+
+
+def _segment_ranges(N, sample_p, subset_how, random_seed=None, cap=None):
+    """1-based, inclusive sample ranges of segments of a length-``N`` series.
+
+    ``sample_p[0]`` is the number of segments. With ``subset_how='uniform'`` and a scalar
+    ``sample_p``, the segments are that many contiguous, non-overlapping portions; otherwise
+    ``sample_p[1]`` is the segment length, as a fraction of ``N`` if below 1 (floored, then
+    clipped to ``cap = (lo, hi)`` if given) or else as a number of samples. Starts are then
+    evenly spaced (``'uniform'``), from the golden-ratio (Weyl) sequence (``'spread'``), or
+    uniform random on 1..N-l+1 from the portable generator seeded by ``random_seed``
+    (``'rand'``). Returns an int array of shape (num_segments, 2) of (start, end).
+    """
+    num_pred = int(sample_p[0])
+    r = np.zeros((num_pred, 2), dtype=int)
+    if subset_how not in ('uniform', 'spread', 'rand'):
+        raise ValueError(f"Unknown subset method '{subset_how}'")
+    if subset_how == 'uniform' and len(sample_p) == 1:
+        # num_pred+1 boundaries = num_pred portions
+        spts = _even_split_points(0, N, num_pred + 1)
+        r[:, 0] = spts[:num_pred] + 1
+        r[:, 1] = spts[1:]
+        return r
+    if sample_p[1] < 1:  # a fraction of the time series
+        l = np.floor(N * sample_p[1])
+        if cap is not None:
+            l = max(min(cap[1], l), cap[0])
+        l = int(l)
+    else:  # an absolute interval
+        l = int(sample_p[1])
+    if subset_how == 'uniform':
+        spts = _even_split_points(1, N - l + 1, num_pred)
+    elif subset_how == 'spread':
+        # start points on 1..N-l+1 from frac(j*phi): deterministic, evenly spread
+        spts = 1 + np.floor((N - l + 1) * ((np.arange(1, num_pred + 1) * 0.6180339887498949) % 1.0)).astype(int)
+    else:
+        # num_pred random start points (uniform on 1..N-l+1), reproducible from the seed
+        spts = 1 + np.floor((N - l + 1) * bf_random(num_pred, bf_random_seed(random_seed))).astype(int)
+    r[:, 0] = spts
+    r[:, 1] = spts + l - 1
+    return r
 
 
 @dict_output
@@ -2591,41 +2648,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
     if model == 'arcrosspred' and (subset_how != 'uniform' or len(sample_p) != 1):
         raise ValueError("'arcrosspred' requires subset_how = 'uniform' and a scalar sample_p "
                          "(a non-overlapping segment count)")
-    if subset_how == 'uniform':
-        if len(sample_p) == 1:  # size will depend on number of unique subsegments
-            # num_pred+1 boundaries = num_pred portions
-            spts = _even_split_points(0, N, num_pred + 1)
-            r = np.zeros((num_pred, 2), dtype=int)
-            r[:, 0] = spts[:num_pred] + 1  # +1 for 1-based indexing (if needed)
-            r[:, 1] = spts[1:]
-        else:
-            if sample_p[1] < 1:  # specified a fraction of time series
-                l = int(np.floor(N * sample_p[1]))
-            else:  # specified an absolute interval
-                l = int(sample_p[1])
-            # num_pred boundaries
-            spts = _even_split_points(1, N - l + 1, num_pred)
-            r = np.zeros((num_pred, 2), dtype=int)
-            r[:, 0] = spts
-            r[:, 1] = spts + l - 1
-    elif subset_how == 'spread':
-        if sample_p[1] < 1:  # specified a fraction of time series
-            l = int(np.floor(N * sample_p[1]))
-        else:  # specified an absolute interval
-            l = int(sample_p[1])
-        # start points on 1..N-l+1 from the golden-ratio (Weyl) sequence frac(j*phi): deterministic, evenly spread
-        spts = 1 + np.floor((N - l + 1) * ((np.arange(1, num_pred + 1) * 0.6180339887498949) % 1.0)).astype(int)
-        r = np.column_stack([spts, spts + l - 1])
-    elif subset_how == 'rand':
-        if sample_p[1] < 1:  # specified a fraction of time series
-            l = int(np.floor(N * sample_p[1]))
-        else:  # specified an absolute interval
-            l = int(sample_p[1])
-        # numPred random starting points (uniform on 1..N-l+1), reproducible from the seed
-        spts = 1 + np.floor((N - l + 1) * bf_random(num_pred, bf_random_seed(random_seed))).astype(int)
-        r = np.column_stack([spts, spts + l - 1])
-    else:
-        raise ValueError(f"Unknown subset method: {subset_how}")
+    r = _segment_ranges(N, sample_p, subset_how, random_seed)
     # Fit the model to each training set (r holds 1-based, inclusive sample ranges)
     out = {}
     if model == 'arsbc':
@@ -2645,12 +2668,12 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         vals, counts = np.unique(orders, return_counts=True)
         out['orders_mode'] = vals[np.argmax(counts)]  # the smallest value among ties
         out['orders_mean'] = np.mean(orders)
-        out['orders_std'] = np.std(orders, ddof=1)
+        out['orders_std'] = _sample_std(orders)
         out['orders_max'] = np.max(orders)
         out['orders_min'] = np.min(orders)
         out['orders_range'] = np.ptp(orders)
         out['sbcs_mean'] = np.mean(sbcs)
-        out['sbcs_std'] = np.std(sbcs, ddof=1)
+        out['sbcs_std'] = _sample_std(sbcs)
         out['sbcs_range'] = np.ptp(sbcs)
         out['sbcs_min'] = np.min(sbcs)
         out['sbcs_max'] = np.max(sbcs)
@@ -2672,7 +2695,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         coef_var = _ar_coef_var(mom) if np.all(mom['n_res'] - p >= 1) else np.full(p, np.nan)
         # statistics on the fitted AR parameters, as in the polynomial 1 + a_1 z^-1 + ...
         for i in range(p):
-            out[f'a_{i+1}_std'] = np.std(avals[:, i], ddof=1)
+            out[f'a_{i+1}_std'] = _sample_std(avals[:, i])
             out[f'a_{i+1}_mean'] = np.mean(avals[:, i])
             out[f'a_{i+1}_max'] = np.max(avals[:, i])
             out[f'a_{i+1}_min'] = np.min(avals[:, i])
@@ -2702,7 +2725,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         if not np.all(np.isfinite(xperr)):
             return np.nan
         iqr = lambda v: _nan_quantile(v, 0.75) - _nan_quantile(v, 0.25)
-        out['std'] = np.std(xperr.ravel(), ddof=1)
+        out['std'] = _sample_std(xperr.ravel())
         out['range'] = np.ptp(xperr)
         out['iqr'] = iqr(xperr.ravel())
         offdiag = np.concatenate([xperr[np.tril_indices(num_pred, -1)],
@@ -2712,19 +2735,19 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
             out['iqroffdiag'] = out['stdoffdiag'] = out['rangeoffdiag'] = np.nan
         else:
             out['iqroffdiag'] = iqr(offdiag)
-            out['stdoffdiag'] = np.std(offdiag, ddof=1) if offdiag.size > 1 else 0.0
+            out['stdoffdiag'] = _sample_std(offdiag)
             out['rangeoffdiag'] = np.ptp(offdiag)
         # how differently each segment's model behaves as a predictor vs as a target
         col_mean, col_med = np.mean(xperr, axis=0), np.median(xperr, axis=0)
-        col_range, col_std = np.ptp(xperr, axis=0), np.std(xperr, axis=0, ddof=1)
-        out['stdmean'] = np.std(col_mean, ddof=1)
+        col_range, col_std = np.ptp(xperr, axis=0), _sample_std(xperr, axis=0)
+        out['stdmean'] = _sample_std(col_mean)
         out['rangemean'] = np.ptp(col_mean)
-        out['stdmedian'] = np.std(col_med, ddof=1)
+        out['stdmedian'] = _sample_std(col_med)
         out['rangemedian'] = np.ptp(col_med)
         out['rangerange'] = np.ptp(col_range)
-        out['stdrange'] = np.std(col_range, ddof=1)
+        out['stdrange'] = _sample_std(col_range)
         out['rangestd'] = np.ptp(col_std)
-        out['stdstd'] = np.std(col_std, ddof=1)
+        out['stdstd'] = _sample_std(col_std)
         out['mineig'] = np.min(np.linalg.eigvals(xperr).real)
         # error of the other segments' models in excess of each segment's own, relative to sampling error
         out['excess_ratio'] = _crosspred_excess_ratio(xperr ** 2, _ar_pooled_moments(segs, coefs, int(order)))
@@ -2769,7 +2792,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         out.update(_fpe_stats(fpes))
         for letter, coefs in (('p', ps), ('q', qs)):
             for i in range(1, coefs.shape[1]):  # (the first column is 1)
-                out[f'{letter}_{i}_std'] = np.std(coefs[:, i], ddof=1)
+                out[f'{letter}_{i}_std'] = _sample_std(coefs[:, i])
                 out[f'{letter}_{i}_mean'] = np.mean(coefs[:, i])
                 out[f'{letter}_{i}_max'] = np.max(coefs[:, i])
                 out[f'{letter}_{i}_min'] = np.min(coefs[:, i])
@@ -2867,7 +2890,7 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         curve = stats_st[:, col]
         out[f'{name}_chn'] = np.mean(np.diff(curve)) / np.ptp(curve)
         out[f'{name}_meansgndiff'] = np.mean(np.sign(np.diff(curve)))
-        out[f'{name}_stdn'] = np.std(curve, ddof=1) / np.ptp(curve)
+        out[f'{name}_stdn'] = _sample_std(curve) / np.ptp(curve)
         if name == 'sws':
             # global least-squares exponential fit f(l) = a exp(b l) + c to the sws curve
             f_exp = bf_exp_fit(train_length_range.astype(float), curve, True)
@@ -3172,7 +3195,7 @@ def _is_rounding_level(e: np.ndarray, scale_y: float = 0.0) -> bool:
     rounding noise.
     """
     e = np.asarray(e, dtype=float).ravel()
-    sd = np.std(e, ddof=1) if e.size > 1 else 0.0
+    sd = _sample_std(e)
     return not (sd > 1e-9 * max(float(scale_y), float(np.mean(np.abs(e)))))
 
 
@@ -3259,9 +3282,9 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
     out = {}
     out['meane'] = np.mean(e)
     out['meanabs'] = np.mean(np.abs(e))
-    std_e = np.std(e, ddof=1)
+    std_e = _sample_std(e)
     out['stde'] = std_e
-    scale_y = 0.0 if y is None else float(np.std(np.asarray(y, dtype=float).ravel(), ddof=1))
+    scale_y = 0.0 if y is None else float(_sample_std(np.asarray(y, dtype=float).ravel()))
     if _is_rounding_level(e, scale_y):
         # every other field is a rounding-noise statistic: NaN
         shape = ['maxonstd', 'ac1', 'ac2', 'ac3', 'propbth', 'taurat', 'sws', 'swm']
@@ -3354,9 +3377,7 @@ def _arcov(y: np.ndarray, p: int) -> tuple:
         raise ValueError("The series is too short for the requested AR order")
     if not np.all(np.isfinite(y)):
         return np.full(p, np.nan), np.nan
-    win = sliding_window_view(y, p + 1)
-    design = win[:, :p][:, ::-1]
-    target = win[:, p]
+    design, target = _ar_design(y, p)
     phi = np.linalg.lstsq(design, target, rcond=None)[0]
     resid = target - design @ phi
     return phi, float(resid @ resid) / (n_obs - p)
@@ -3395,7 +3416,7 @@ def ar_cov(y: ArrayLike, p: int = 2) -> dict:
     y = np.asarray(y, dtype=float).ravel()
     p = int(p)
     phi, noise_var = _arcov(y, p)  # AR(p) coefficients and noise variance (covariance method)
-    var_y = np.var(y, ddof=1)
+    var_y = _sample_var(y)
     if noise_var < 1e-12 * var_y or not var_y > 0:
         return np.nan
     a = np.concatenate(([1], -phi))
@@ -3405,7 +3426,7 @@ def ar_cov(y: ArrayLike, p: int = 2) -> dict:
         out[f'a{i+1}'] = a[i]
     # Residual analysis: one-step predictions from the p past values, for the samples that
     # have them (the samples the fit was made on); prediction minus data
-    past = sliding_window_view(y, p + 1)[:, :p][:, ::-1]  # y[t-1], ..., y[t-p] for t = p..N-1
+    past = _ar_design(y, p)[0]  # y[t-1], ..., y[t-p] for t = p..N-1
     err = past @ phi - y[p:]
     out.update(residual_analysis(err, y, 'core'))
 
@@ -3492,7 +3513,7 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
         return np.nan
     # An exactly predictable series has a singular design and a noise variance at the level
     # of rounding error: nothing to report
-    var_y = np.var(y, ddof=1)
+    var_y = _sample_var(y)
     if Cest < 1e-12 * var_y or not var_y > 0:
         return np.nan
     ps = np.arange(p_min, p_max + 1)
@@ -3510,7 +3531,7 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
     out['maxA'] = np.max(Aest)
     out['minA'] = np.min(Aest)
     out['meanA'] = np.mean(Aest)
-    out['stdA'] = np.std(Aest, ddof=1) if len(Aest) > 1 else 0.0
+    out['stdA'] = _sample_std(Aest, single=0.0)  # spread over the fitted model's own components: 0 for one (AR(1))
     out['sumA'] = np.sum(Aest)
     out['rmsA'] = np.sqrt(np.sum(Aest ** 2))
 
@@ -3556,7 +3577,7 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
     out['maxReLambda'] = np.max(lam.real)
     out['maxImLambda'] = np.max(lam.imag)
     out['maxabsLambda'] = np.max(np.abs(lam))
-    out['stdabsLambda'] = np.std(np.abs(lam), ddof=1) if len(lam) > 1 else 0.0
+    out['stdabsLambda'] = _sample_std(np.abs(lam), single=0.0)  # spread over the fitted model's own components: 0 for one (AR(1))
 
     per_special = ~np.isfinite(per[0])
     per_filtered = np.where(per_special, np.nan, per[0])
@@ -3564,20 +3585,19 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
         warnings.simplefilter('ignore', category=RuntimeWarning)
         out['hasInfper'] = int(np.sum(per_special))
         out['meanper'] = np.nanmean(per_filtered)
-        out['stdper'] = np.nanstd(per_filtered, ddof=1) if np.sum(~np.isnan(per_filtered)) > 1 else (
-            0.0 if np.sum(~np.isnan(per_filtered)) == 1 else np.nan)
+        out['stdper'] = _sample_std(per_filtered[~np.isnan(per_filtered)], single=0.0)  # spread over the fitted model's own components: 0 for one (AR(1))
         out['maxper'] = np.nanmax(per_filtered)
         out['minper'] = np.nanmin(per_filtered)
         out['meanpererr'] = np.nanmean(per[1])
     out['meantau'] = np.mean(tau[0])
     out['maxtau'] = np.max(tau[0])
     out['mintau'] = np.min(tau[0])
-    out['stdtau'] = np.std(tau[0], ddof=1) if len(tau[0]) > 1 else 0.0
+    out['stdtau'] = _sample_std(tau[0], single=0.0)  # spread over the fitted model's own components: 0 for one (AR(1))
     out['meantauerr'] = np.mean(tau[1])
     out['maxexctn'] = np.max(exctn)
     out['minexctn'] = np.min(exctn)
     out['meanexctn'] = np.mean(exctn)
-    out['stdexctn'] = np.std(exctn, ddof=1) if len(exctn) > 1 else 0.0
+    out['stdexctn'] = _sample_std(exctn, single=0.0)  # spread over the fitted model's own components: 0 for one (AR(1))
 
     return out
 
@@ -3620,19 +3640,6 @@ def is_seasonal(y: ArrayLike) -> int:
     
     return out
 
-def _gp_roundoff_constant(yt: np.ndarray, n: int) -> bool:
-    """True when the values to be fitted are constant to within round-off.
-
-    A Gaussian process has nothing to describe in a constant series, and its fit has no scale to
-    work with (the noise floor is set relative to the standard deviation), so the operations
-    return NaN. The bound is the rounding error accumulated over sums of up to ``n`` terms (the
-    length of the series acted on), relative to the root-mean-square of the values:
-    ``std <= 10 * n * eps * rms``, as in :func:`pyhctsa.operations.pre_process.preproc_compare`.
-    """
-    yt = np.asarray(yt, dtype=float)
-    return bool(np.std(yt, ddof=1) <= 10 * n * np.finfo(float).eps * np.sqrt(np.mean(yt ** 2)))
-
-
 def _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos=(), len_lo=-np.inf, len_hi=np.inf, amp_pos=()):
     """
     The objective of the GP hyperparameter fit, with its clamp: returns ``(clamp, nlz)`` where
@@ -3649,7 +3656,7 @@ def _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos=(), len_
     len_pos = np.asarray(len_pos, dtype=int)
     amp_pos = np.asarray(amp_pos, dtype=int)
     with np.errstate(divide='ignore'):
-        noise_floor = np.log(0.01 * np.std(yt, ddof=1))  # lower bound on the log noise standard deviations and amplitudes
+        noise_floor = np.log(0.01 * _sample_std(yt))  # lower bound on the log noise standard deviations and amplitudes
 
     def _clamp(theta):
         theta = np.array(theta, dtype=float)
@@ -3778,21 +3785,33 @@ def _gp_latent(components: list, noise_pos, theta: np.ndarray, n_cov: int):
     return cov_lat, hyp, log_noise
 
 
-def _gp_alpha_pos(components: list) -> list:
-    """0-based positions of the log shape parameters of ``covRQiso`` among the covariance hyperparameters."""
-    pos = 0
-    alpha = []
-    for name, _ in components:
-        if name in ('covSEiso', 'covMaterniso'):
-            pos += 2
-        elif name == 'covPeriodic':
-            pos += 3
-        elif name == 'covRQiso':
-            alpha.append(pos + 2)
-            pos += 3
-        else:
-            pos += 1
-    return alpha
+# The role of each log hyperparameter of a covariance component, in gpml order: 'len' a length
+# scale, 'plen' the length scale of covPeriodic, 'period' its period, 'amp' a signal amplitude,
+# 'alpha' the shape of covRQiso, 'noise' a covNoise standard deviation.
+_GP_ROLES = {
+    'covSEiso': ('len', 'amp'),
+    'covMaterniso': ('len', 'amp'),
+    'covPeriodic': ('plen', 'period', 'amp'),
+    'covRQiso': ('len', 'amp', 'alpha'),
+    'covNoise': ('noise',),
+}
+
+
+def _gp_layout(components: list) -> dict:
+    """
+    The layout of the covariance hyperparameters of a ``covSum`` of ``components`` (a list of
+    ``(name, degree)`` from ``parse_cov``): ``'roles'`` lists the role of each hyperparameter
+    (see ``_GP_ROLES``; ``None`` for an unrecognized component, which takes one position), and
+    each role, plus ``'shape'`` (the length scales, period and ``covRQiso`` shape: those not
+    identified without correlation structure), maps to its 0-based positions, in order.
+    A degree-parameterized ``covMaterniso`` has two hyperparameters, as in ``MF_GP_LearnHyperp``.
+    """
+    roles = [r for name, _ in components for r in _GP_ROLES.get(name, (None,))]
+    layout = {k: [i for i, r in enumerate(roles) if r == k]
+              for k in ('len', 'plen', 'period', 'amp', 'alpha', 'noise')}
+    layout['shape'] = [i for i, r in enumerate(roles) if r in ('len', 'plen', 'period', 'alpha')]
+    layout['roles'] = roles
+    return layout
 
 
 def _gp_newton_polish(tt: np.ndarray, yt: np.ndarray, cov, theta: np.ndarray, noise_pos,
@@ -3820,7 +3839,7 @@ def _gp_newton_polish(tt: np.ndarray, yt: np.ndarray, cov, theta: np.ndarray, no
     amp_pos = np.asarray(amp_pos, dtype=int)
     _, nlz = _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos, len_lo, len_hi, amp_pos)
     with np.errstate(divide='ignore'):
-        floor = np.log(0.01 * np.std(yt, ddof=1))
+        floor = np.log(0.01 * _sample_std(yt))
     free = np.ones(n_cov, dtype=bool)
     if x[k] <= floor + 1e-9:
         free[k] = False
@@ -3871,58 +3890,17 @@ def _gp_newton_polish(tt: np.ndarray, yt: np.ndarray, cov, theta: np.ndarray, no
     return np.r_[x, x[k]]
 
 
-def _gp_amp_pos(components: list) -> list:
-    """0-based positions of the log signal amplitudes among the covariance hyperparameters."""
-    pos = 0
-    amps = []
-    for name, _ in components:
-        if name in ('covSEiso', 'covMaterniso', 'covRQiso'):
-            amps.append(pos + 1)
-        elif name == 'covPeriodic':
-            amps.append(pos + 2)
-        pos += {'covSEiso': 2, 'covMaterniso': 2, 'covPeriodic': 3, 'covRQiso': 3}.get(name, 1)
-    return amps
-
-
-def _gp_shape_pos(components: list) -> list:
-    """
-    0-based positions, among the covariance hyperparameters, of those that are not identified
-    without correlation structure: the length scales, the period of ``covPeriodic`` and the
-    shape of ``covRQiso``.
-    """
-    pos = 0
-    shape = []
-    for name, _ in components:
-        if name in ('covSEiso', 'covMaterniso'):
-            shape.append(pos)
-        elif name == 'covPeriodic':
-            shape += [pos, pos + 1]
-        elif name == 'covRQiso':
-            shape += [pos, pos + 2]
-        pos += {'covSEiso': 2, 'covMaterniso': 2, 'covPeriodic': 3, 'covRQiso': 3}.get(name, 1)
-    return shape
-
-
 def _gp_shape_bounds(components: list, tt: np.ndarray) -> dict:
     """
-    The values reported for the hyperparameters of :func:`_gp_shape_pos` when the series shows no
-    correlation structure, keyed by position: for a length scale, the sampling interval (a bound:
-    the data do not resolve a length scale above it); NaN for periods and shape parameters.
+    The values reported for the ``'shape'`` hyperparameters of :func:`_gp_layout` when the series
+    shows no correlation structure, keyed by position: for a length scale, the sampling interval (a
+    bound: the data do not resolve a length scale above it); NaN for the ``covPeriodic`` length
+    scale and period and for shape parameters.
     """
     dt = np.mean(np.diff(tt))
-    lens = set(_gp_len_pos(components))
-    return {p: (np.log(dt) if p in lens else np.nan) for p in _gp_shape_pos(components)}
-
-
-def _gp_len_pos(components: list) -> list:
-    """0-based positions of the log length scales among the covariance hyperparameters."""
-    pos = 0
-    lens = []
-    for name, _ in components:
-        if name in ('covSEiso', 'covMaterniso', 'covRQiso'):
-            lens.append(pos)
-        pos += {'covSEiso': 2, 'covMaterniso': 2, 'covPeriodic': 3, 'covRQiso': 3}.get(name, 1)
-    return lens
+    layout = _gp_layout(components)
+    lens = set(layout['len'])
+    return {p: (np.log(dt) if p in lens else np.nan) for p in layout['shape']}
 
 
 def _gp_fit_converged(tt: np.ndarray, yt: np.ndarray, cov, components: list, noise_pos,
@@ -3945,10 +3923,11 @@ def _gp_fit_converged(tt: np.ndarray, yt: np.ndarray, cov, components: list, noi
     fitted amplitude at this floor, rather than running to zero).
     """
     noise_pos = np.asarray(noise_pos, dtype=int)
-    alpha_pos = _gp_alpha_pos(components)
+    layout = _gp_layout(components)
+    alpha_pos = layout['alpha']
     alpha_cap = np.log(100.0)
-    len_pos = _gp_len_pos(components)
-    amp_pos = _gp_amp_pos(components)
+    len_pos = layout['len']
+    amp_pos = layout['amp']
     dt = np.mean(np.diff(tt))
     span = np.max(tt) - np.min(tt)
     len_lo, len_hi = np.log(dt), np.log(span)
@@ -3957,7 +3936,7 @@ def _gp_fit_converged(tt: np.ndarray, yt: np.ndarray, cov, components: list, noi
 
     theta0 = clamp(_gp_init_hyp(components, tt))
     if len(len_pos) and len_pos[0] == 0 and n_cov >= 2:
-        sd = np.std(yt, ddof=1)
+        sd = _sample_std(yt)
         best_v = np.inf
         with np.errstate(divide='ignore'):
             floor = np.log(0.01 * sd)
@@ -4048,30 +4027,16 @@ def _gp_white_noise_nlml(y: np.ndarray, log_sd: float) -> float:
 def _gp_noise_pos(components: list) -> list:
     """
     0-based positions of the ``covNoise`` standard deviations among the covariance
-    hyperparameters, found as ``MF_GP_LearnHyperp`` does (while it sets the initial values):
-    every component advances the position by its own number of hyperparameters (2 for a
-    degree-parameterized ``covMaterniso``).
+    hyperparameters (``_gp_layout(components)['noise']``).
     """
-    pos = 0
-    noise = []
-    for name, degree in components:
-        if name in ('covSEiso', 'covMaterniso'):
-            pos += 2
-        elif name in ('covPeriodic', 'covRQiso'):
-            pos += 3
-        elif name == 'covNoise':
-            noise.append(pos)
-            pos += 1
-        else:
-            pos += 1
-    return noise
+    return _gp_layout(components)['noise']
 
 
 def _gp_cov(cov_func) -> tuple:
     """
     The covariance function for ``cov_func``, a function giving the initial
     hyperparameters for a set of times, the 0-based positions of its noise standard deviations
-    (:func:`_gp_noise_pos`) and its components (a list of ``(name, degree)``). The default
+    (:func:`_gp_layout`) and its components (a list of ``(name, degree)``). The default
     ``'covSEiso_covNoise'`` is the closed-form :class:`CovSEisoNoise` (initialized by
     :func:`_gp_learn_hyperp`); others are built by ``parse_cov``, initialized by
     :func:`_gp_init_hyp`.
@@ -4080,7 +4045,7 @@ def _gp_cov(cov_func) -> tuple:
     if isinstance(cov_func, str) and cov_func == 'covSEiso_covNoise':
         return CovSEisoNoise, (lambda tt: None), [2], [('covSEiso', None), ('covNoise', None)]
     cov, components = parse_cov(cov_func)
-    return cov, (lambda tt: _gp_init_hyp(components, tt)), _gp_noise_pos(components), components
+    return cov, (lambda tt: _gp_init_hyp(components, tt)), _gp_layout(components)['noise'], components
 
 
 def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
@@ -4129,7 +4094,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
           ``'covSEiso_covNoise'``).
 
         All values are NaN if the fit fails, or if the training values are constant to within
-        round-off (see :func:`_gp_roundoff_constant`). If the training points show no correlation structure (the
+        round-off (see :func:`pyhctsa.utils._is_roundoff`). If the training points show no correlation structure (the
         fitted model must beat its white-noise special case in a likelihood-ratio test, see
         :func:`_gp_beats_white_noise`), the length scale (``logh1``, ``h_lonN``) is not identified, and
         is reported as the spacing of the training points, the bound the data allow; nor is the split
@@ -4153,7 +4118,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
     tt = _even_split_points(0, N - 1, npoints, 'floor').astype(float)   # times 0..N-1
     yt = y[tt.astype(int)]
-    if _gp_roundoff_constant(yt, N):
+    if _is_roundoff(yt, n=N):  # constant to within round-off: nothing to describe, no scale
         return nan_out
 
     theta, nlz_fit = _gp_fit_converged(tt, yt, cov, components, noise_pos)
@@ -4190,9 +4155,9 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
     # rms error from mean function, mu
     out['stde'] = np.sqrt(np.mean((y_ts - mu) ** 2))
     out['meanabs_std'] = np.mean(np.abs(y_ts - mu) / S)
-    out['stdmu'] = np.std(mu, ddof=1)
+    out['stdmu'] = _sample_std(mu)
     out['meanS'] = np.mean(S)
-    out['stdS'] = np.std(S, ddof=1)
+    out['stdS'] = _sample_std(S)
 
     # Negative log marginal likelihood per point (gpml's nlZ divided by the number of
     # points, so that it does not grow with the number of points, up to 2000)
@@ -4413,8 +4378,8 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
         # A window whose training data are constant (to rounding error, relative to the
         # series) cannot be standardized and carries no information about a GP: skip it
-        yt_mean, yt_std = np.mean(yt), np.std(yt, ddof=1)
-        if not yt_std > 1e-8 * np.std(y, ddof=1):
+        yt_mean, yt_std = np.mean(yt), _sample_std(yt)
+        if not yt_std > 1e-8 * _sample_std(y):
             continue
 
         # Process to normalize scales (the same transformation for both sets)
@@ -4512,7 +4477,7 @@ def _nan_quantile(x: np.ndarray, p: float) -> float:
     """
     x = np.asarray(x, dtype=float).ravel()
     x = x[~np.isnan(x)]
-    return float(np.quantile(x, p, method='hazen')) if x.size else float('nan')
+    return float(_quantile(x, p)) if x.size else float('nan')
 
 
 def _tail_mean(x: np.ndarray, which: str) -> float:
@@ -4606,10 +4571,8 @@ def _arx_losses(y_train: np.ndarray, y_test: np.ndarray, orders) -> tuple:
 
 def _lag_matrix(y: np.ndarray, na: int, start: int) -> tuple:
     """Regressors (lags 1..na) and targets for the samples ``y[start:]``."""
-    n_obs = len(y)
-    idx = np.arange(start, n_obs)
-    x = np.column_stack([y[idx - k] for k in range(1, na + 1)])
-    return x, y[idx]
+    x, t = _ar_design(y, na, start)
+    return x.copy(), t.copy()  # fresh (aligned, C-ordered) arrays keep the solver's rounding
 
 
 def _lag_regression(y: np.ndarray, na: int, start: int) -> np.ndarray:
@@ -4722,7 +4685,7 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
     dv = np.diff(v)
     if len(dv) > 0:
         out['meandiff'] = np.mean(dv)
-        out['stddiff'] = np.std(dv, ddof=1) if len(dv) > 1 else 0.0
+        out['stddiff'] = _sample_std(dv)
         out['maxdiff'] = np.max(np.abs(dv))
         out['meddiff'] = np.median(dv)
     else:
@@ -4730,7 +4693,7 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
 
     # where does it steady off?
     nv = len(v)
-    stdfromi = np.array([(np.std(v[i:], ddof=1) if nv - i > 1 else 0.0) / np.sqrt(nv - i)
+    stdfromi = np.array([_sample_std(v[i:], single=0.0) / np.sqrt(nv - i)  # last point (one value): 0, keeps the curve's max defined
                          for i in range(nv)])
     pos = stdfromi[stdfromi > 0]
     out['minstdfromi'] = np.min(pos) if len(pos) > 0 else np.nan
@@ -4750,17 +4713,6 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
     out['bestaic'] = np.min(aic)
 
     return out
-
-
-def _kstep_residuals_ss(F: np.ndarray, K: np.ndarray, C: np.ndarray, y: np.ndarray,
-                        steps: int, init: str = 'diffuse') -> np.ndarray:
-    """
-    k-step-ahead prediction errors of a state-space model.
-
-    Returns ``yhat - y`` (prediction minus data) for the innovations-form model
-    ``(F, K, C)``; see :func:`_prediction_errors` for the initial state.
-    """
-    return _prediction_errors((F, K, C), y, int(steps), init)
 
 
 def _poly_to_innovations(a: np.ndarray, c: np.ndarray) -> tuple:
@@ -4800,7 +4752,7 @@ def _kstep_residuals(a: np.ndarray, c: np.ndarray, y: np.ndarray, steps: int) ->
     f, gain, out = _poly_to_innovations(a, c)
     if f.shape[0] == 0:
         return -y
-    return _kstep_residuals_ss(f, gain, out, y, steps)
+    return _prediction_errors((f, gain, out), y, int(steps))
 
 
 def _fit_predictor_model(y: np.ndarray, model: str, order):
@@ -4820,7 +4772,7 @@ def _fit_predictor_model(y: np.ndarray, model: str, order):
             fit = _n4_state_space(y, order if isinstance(order, str) else int(order))
         except (np.linalg.LinAlgError, ValueError):
             return None
-        return lambda y_seg, steps: _kstep_residuals_ss(fit['A'], fit['K'], fit['C'], y_seg, steps)
+        return lambda y_seg, steps: _prediction_errors((fit['A'], fit['K'], fit['C']), y_seg, int(steps))
     if model == 'ar':
         if isinstance(order, str) and order == 'best':
             try:
@@ -4923,7 +4875,7 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
         mres = _defined_errors(model_residuals(i))
         mf_rms[j] = np.sqrt(np.mean(mres ** 2))
         mf_abs[j] = np.mean(np.abs(mres))
-        if _is_rounding_level(mres, np.std(y, ddof=1)):
+        if _is_rounding_level(mres, _sample_std(y)):
             # errors that do not vary beyond the level of rounding (e.g., an exactly predictable
             # series): their autocorrelation is not meaningful
             mf_ac1[j] = np.nan
@@ -4969,7 +4921,7 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
     d = np.diff(mf_rms)
     out['stde_meandiff'] = np.mean(d)
     out['stde_maxdiff'] = np.max(d)
-    out['stde_stddiff'] = np.std(d, ddof=1)
+    out['stde_stddiff'] = _sample_std(d)
     out['stde_ndown'] = int(np.sum(d < 0))
     return out
 
@@ -5048,7 +5000,7 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
-    sigma_y = np.std(y, ddof=1)  # used to flag degenerate (near-constant) test segments
+    sigma_y = _sample_std(y)  # used to flag degenerate (near-constant) test segments
     if ord is None:
         ord = 2
     sample_p = np.atleast_1d(np.asarray(sample_p, dtype=float))
@@ -5061,33 +5013,8 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
         return np.nan
 
     # Set the ranges of the test segments (1-based, inclusive)
-    r = np.zeros((num_pred, 2), dtype=int)
-    if subset_how in ('rand', 'spread', 'uniform') and len(sample_p) > 1:
-        if sample_p[1] < 1:  # a fraction of the time series, capped to between 10 and 20
-            seg_len = int(max(min(20, np.floor(N * sample_p[1])), 10))
-        else:  # an absolute interval
-            seg_len = int(sample_p[1])
-    if subset_how == 'spread':
-        # start points on 1..N-seg_len+1 from the golden-ratio (Weyl) sequence frac(j*phi): deterministic, evenly spread
-        spts = 1 + np.floor((N - seg_len + 1) * ((np.arange(1, num_pred + 1) * 0.6180339887498949) % 1.0)).astype(int)
-        r[:, 0] = spts
-        r[:, 1] = spts + seg_len - 1
-    elif subset_how == 'rand':
-        # numPred random starting points (uniform on 1..N-seg_len+1), reproducible from the seed
-        spts = 1 + np.floor((N - seg_len + 1) * bf_random(num_pred, bf_random_seed(random_seed))).astype(int)
-        r[:, 0] = spts
-        r[:, 1] = spts + seg_len - 1
-    elif subset_how == 'uniform':
-        if len(sample_p) == 1:  # size will depend on number of unique subsegments
-            spts = _even_split_points(0, N, num_pred + 1)
-            r[:, 0] = spts[:num_pred] + 1
-            r[:, 1] = spts[1:]
-        else:
-            spts = _even_split_points(1, N - seg_len + 1, num_pred)
-            r[:, 0] = spts
-            r[:, 1] = spts + seg_len - 1
-    else:
-        raise ValueError(f"Unknown subset method '{subset_how}'")
+    # (a fractional segment length is capped to between 10 and 20 samples)
+    r = _segment_ranges(N, sample_p, subset_how, random_seed, cap=(10, 20))
 
     # Quickly check that ranges are valid
     if np.any(r[:, 0] >= r[:, 1]):
@@ -5122,16 +5049,16 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
         # statistics on the output time series
         meandiffs[i] = abs(np.mean(yp) - np.mean(y_test))
         # near-constant test segments: the ratio of standard deviations is undefined, not just large
-        if np.std(y_test, ddof=1) < 1e-6 * sigma_y:
+        if _sample_std(y_test) < 1e-6 * sigma_y:
             stdrats[i] = np.nan
         else:
-            stdrats[i] = np.std(yp, ddof=1) / np.std(y_test, ddof=1)
+            stdrats[i] = _sample_std(yp) / _sample_std(y_test)
 
     def iqr(x):
         return _nan_quantile(x, 0.75) - _nan_quantile(x, 0.25) if len(x) > 0 else np.nan
 
     def std(x):
-        return np.std(x, ddof=1) if len(x) > 1 else (0.0 if len(x) == 1 else np.nan)
+        return _sample_std(x)
 
     def mean(x):
         return np.mean(x) if len(x) > 0 else np.nan
@@ -5252,32 +5179,12 @@ def _gp_init_hyp(components: list, tt: np.ndarray) -> np.ndarray:
     ``covMaterniso`` is initialized like ``covSEiso`` (length scale at the typical time step,
     log-magnitude 0). ``components`` is the list of ``(name, degree)`` from ``parse_cov``.
     """
-    n_cov = int(sum({'covSEiso': 2, 'covPeriodic': 3, 'covRQiso': 3, 'covNoise': 1,
-                     'covMaterniso': 2}[name] for name, _ in components))
     typical_dt = np.mean(np.diff(tt))  # typical time step: a length-scale prior
     data_span = np.max(tt) - np.min(tt)
-    hyp = np.zeros(n_cov)
-    pos = 0
-    for name, degree in components:
-        if name in ('covSEiso', 'covMaterniso'):
-            hyp[pos] = np.log(typical_dt)       # length-scale
-            hyp[pos + 1] = 0.0                  # log-magnitude
-            pos += 2
-        elif name == 'covPeriodic':
-            hyp[pos] = np.log(typical_dt)       # length-scale
-            hyp[pos + 1] = np.log(data_span / 10)  # period (guess: ~10 cycles across the data)
-            hyp[pos + 2] = 0.0                  # log-magnitude
-            pos += 3
-        elif name == 'covRQiso':
-            hyp[pos] = np.log(typical_dt)       # length-scale
-            hyp[pos + 1] = 0.0                  # log-magnitude
-            hyp[pos + 2] = 0.0                  # log-alpha (shape)
-            pos += 3
-        elif name == 'covNoise':
-            hyp[pos] = np.log(0.1)              # noise magnitude
-            pos += 1
-        else:
-            pos += 1                            # unrecognized component: leave at zero
+    init = {'len': np.log(typical_dt), 'plen': np.log(typical_dt),
+            'period': np.log(data_span / 10),  # guess: ~10 cycles across the data
+            'amp': 0.0, 'alpha': 0.0, 'noise': np.log(0.1)}
+    hyp = np.array([init.get(r, 0.0) for r in _gp_layout(components)['roles']], dtype=float)
     return np.r_[hyp, np.log(0.1)]
 
 
@@ -5313,7 +5220,7 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     the first ``max_n`` samples, or (iii) taking random samples. Times are the sample indices
     (``squish_or_squash = 1``), so length scales and periods are in samples of the cut
     series. The output is NaN if the fit fails, or if the values fitted are constant to within
-    round-off (see :func:`_gp_roundoff_constant`).
+    round-off (see :func:`pyhctsa.utils._is_roundoff`).
 
     Parameters
     ----------
@@ -5461,11 +5368,11 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     else:
         t = set_time_index(N)
 
-    if _gp_roundoff_constant(y, n_in):
+    if _is_roundoff(y, n=n_in):  # constant to within round-off: nothing to describe, no scale
         return np.nan
 
     # Learn the hyperparameters (mean-zero process, Gaussian likelihood, exact inference)
-    noise_pos = _gp_noise_pos(components)
+    noise_pos = _gp_layout(components)['noise']
     theta, nlz = _gp_fit_converged(t, y, cov, components, noise_pos)
     if theta is None:
         logger.warning('Lack of positive definite matrix for this time series')
@@ -5510,8 +5417,8 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     out['stde'] = np.sqrt(np.mean((y - mu) ** 2))
     # better to look at the mean distance away in units of std
     out['meanabs_std'] = np.mean(np.abs((y - mu) / np.sqrt(S2)))
-    out['std_mu_data'] = np.std(mu, ddof=1)  # std of the mean function at the datapoints
-    out['std_S_data'] = np.std(np.sqrt(S2), ddof=1)  # should vary a fair bit
+    out['std_mu_data'] = _sample_std(mu)  # std of the mean function at the datapoints
+    out['std_S_data'] = _sample_std(np.sqrt(S2))  # should vary a fair bit
 
     # statistics on the predictive variance
     xstar = np.linspace(np.min(t), np.max(t), 1000)
