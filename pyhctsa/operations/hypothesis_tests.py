@@ -5,7 +5,7 @@ logger = logging.getLogger('pyhctsa')
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.special import gammaln, logsumexp
-from scipy.stats import binomtest, chi2, expon, gumbel_l, kstest, norm, wilcoxon
+from scipy.stats import binomtest, chi2, kstest, norm, wilcoxon
 
 from ..robust import bf_runs_z
 from ..utils import ljung_box_pvalue
@@ -66,19 +66,6 @@ def _fit_distribution_cdf(x: np.ndarray, the_distn: str) -> tuple:
     raise ValueError(f"Unknown distribution '{the_distn}'.")
 
 
-def _ev_mle(x: np.ndarray) -> tuple:
-    """Maximum-likelihood location and scale of the type-I extreme value (minimum) distribution.
-
-    Uses ``scipy.stats.gumbel_l.fit`` (root-finding on the profile likelihood equation for the
-    scale). NaN for constant or non-finite data, where the scale is not identified.
-    """
-    x = np.asarray(x, dtype=float).ravel()
-    if x.size < 2 or not np.all(np.isfinite(x)) or not np.ptp(x) > 0:
-        return np.nan, np.nan
-    mu, sigma = gumbel_l.fit(x)
-    return float(mu), float(sigma)
-
-
 def _lilliefors_statistic(x: np.ndarray, the_distn: str) -> float:
     """
     Lilliefors (KS) statistic against the distribution fitted to the data.
@@ -86,7 +73,8 @@ def _lilliefors_statistic(x: np.ndarray, the_distn: str) -> float:
     The two-sided Kolmogorov-Smirnov distance between the empirical CDF of ``x`` and the
     normal ('norm'; sample standard deviation with ``n - 1``), exponential ('exp'; mean
     equal to the sample mean) or type-I extreme value ('ev'; maximum likelihood) CDF whose
-    parameters are estimated from ``x``. NaN for fewer than 4 observations or a degenerate fit.
+    parameters are estimated from ``x`` by :func:`_fit_distribution_cdf`. NaN for fewer than
+    4 observations or a degenerate fit (a CDF that is not finite at the data).
 
     Notes
     -----
@@ -97,22 +85,8 @@ def _lilliefors_statistic(x: np.ndarray, the_distn: str) -> float:
         raise ValueError(f"Lilliefors statistic is not defined for distribution '{the_distn}'.")
     if len(x) < 4:
         return np.nan
-    if the_distn == 'norm':
-        mu, sd = np.mean(x), np.std(x, ddof=1)
-        if not sd > 0:
-            return np.nan
-        cdf = lambda z: norm.cdf(z, mu, sd)
-    elif the_distn == 'exp':
-        m = np.mean(x)
-        if not m > 0:
-            return np.nan
-        cdf = lambda z: expon.cdf(z, scale=m)
-    else:
-        mu, sd = _ev_mle(x)
-        if not np.isfinite(sd):
-            return np.nan
-        cdf = lambda z: gumbel_l.cdf(z, mu, sd)
-    return float(kstest(x, cdf).statistic)
+    cdf, _ = _fit_distribution_cdf(x, the_distn)
+    return _kstest_effect(x, cdf)
 
 
 def _chi2gof_bins(x: np.ndarray, cdf_func, num_bins: int, e_min: float = 5) -> tuple:

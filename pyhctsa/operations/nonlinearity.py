@@ -4,6 +4,7 @@ import warnings
 from typing import Union
 
 import numpy as np
+from ..utils import _iqr, _quantile
 from numba import njit as _njit
 from numpy.typing import ArrayLike
 from scipy.optimize import minimize_scalar
@@ -27,8 +28,10 @@ from ..toolboxes.Tisean_3_0_1.ports import (  # noqa: F401 (_c1_centers is used 
     TiseanDataError as _D2DataError, _c1_centers, _c1_curves, _c2d_slopes, _lyap_spec_sums,
     _tisean_boxcount, _tisean_lyap_r,
 )
-from ..robust import bf_hist_edges, bf_random, bf_random_seed, bf_spread_perm
-from ..utils import _even_split_points, dict_output, _round_half_away, get_tau, theiler_window, time_delay_embed
+from ..robust import _golden_section_min, bf_hist_edges, bf_random, bf_random_seed, bf_spread_perm
+from ..utils import _even_split_points, dict_output, _round_half_away, get_tau, theiler_window, _theiler_int, time_delay_embed
+from ..utils import _padded_nfft
+from ..utils import _shannon_entropy
 
 logger = logging.getLogger('pyhctsa')
 
@@ -138,9 +141,8 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     tau = get_tau(y, tau)
     if np.isnan(tau):
         return np.nan
-    theiler = theiler_window(y, theiler_win, n)
-    if np.isnan(theiler):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    theiler = _theiler_int(y, theiler_win, n)
+    if theiler is None:  # the autocorrelation function never crosses zero
         return np.nan
     maxm = int(maxm)
     escape = 2.0 if escape_factor is None else float(escape_factor)
@@ -259,10 +261,16 @@ def _embed_tau_m(y: np.ndarray, embed_params) -> tuple:
     ``BF_Embed(y, tau, m, true)``), without doing the embedding: see
     :func:`_embedding_params`. Returns ``(nan, nan)`` if they cannot be determined.
     """
+    params = _embedding_params(y, *_split_embed_params(embed_params))
+    return (np.nan, np.nan) if params is None else params
+
+
+def _split_embed_params(embed_params) -> tuple:
+    """The ``(tau, m)`` specifications of ``[tau, m]`` embedding parameters; ValueError if
+    `embed_params` is not a pair."""
     if not isinstance(embed_params, (list, tuple)) or len(embed_params) != 2:
         raise ValueError('Embedding parameters are formatted incorrectly -- need [tau, m]')
-    params = _embedding_params(y, embed_params[0], embed_params[1])
-    return (np.nan, np.nan) if params is None else params
+    return embed_params[0], embed_params[1]
 
 
 def _bf_embed(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
@@ -280,6 +288,11 @@ def _bf_embed(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tupl
     except ValueError as e:
         logger.warning(str(e))
         return None
+
+
+def _bf_embed_pair(y: np.ndarray, embed_params) -> Union[np.ndarray, None]:
+    """:func:`_bf_embed` for ``[tau, m]`` embedding parameters (ValueError if not a pair)."""
+    return _bf_embed(y, *_split_embed_params(embed_params))
 
 
 def zero_one_test(y, num_c=20, max_n=10000):
@@ -339,16 +352,9 @@ def zero_one_test(y, num_c=20, max_n=10000):
                 "maxN='full'; computation may be slow."
             )
 
-    else:
-        max_n = int(max_n)
-
-        if n > max_n:
-            logger.warning(
-                f"Time series ({n} samples) exceeds maxN={max_n}; "
-                f"analyzing the first {max_n} samples."
-            )
-            y = y[:max_n]
-            n = max_n
+    y = _check_max_n(y, max_n, message="Time series ({n} samples) exceeds maxN={k}; "
+                     "analyzing the first {k} samples.")
+    n = y.size
 
     # The test regresses on lags 1..N//10, so it needs N >= 20 (2 lags). K, a correlation over
     # those lags, needs 3 (N >= 30; with 2 it is +-1, in practice always 1): that is a per-field
@@ -674,14 +680,9 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
 
     #% nlpe can cause memory pains for long time series
     #% Let's do this dirty cheat
-    if isinstance(max_n, str):
-        if max_n != 'full':
-            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
-    elif n > max_n:
-        # crop the time series to the first max_n samples
-        y = y[:int(max_n)]
-        logger.info(f"Michael Small's nlpe code is only being evaluated on the first {max_n} (/{n}) samples.")
-        n = int(max_n)
+    y = _check_max_n(y, max_n, level=logging.INFO, message="Michael Small's nlpe code is only being "
+                     "evaluated on the first {max_n} (/{n}) samples.")
+    n = len(y)
 
     if n < 20: # short time series cause problems
         logger.warning(f'Time series (N = {len(y)}) is too short.')
@@ -705,9 +706,8 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
             return np.nan
     de = int(de)
 
-    theiler_win = theiler_window(y, theiler_win, n)
-    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    theiler_win = _theiler_int(y, theiler_win, n)
+    if theiler_win is None:  # the autocorrelation function never crosses zero
         return np.nan
 
     # run the nonlinear prediction error code
@@ -777,9 +777,8 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
     N = len(y)
 
     if isinstance(max_delay, (list, tuple)):  # a multiple of the autocorrelation time
-        max_delay = theiler_window(y, max_delay, N)
-        if np.isnan(max_delay):
-            logger.warning('No autocorrelation zero-crossing to set the maximum delay')
+        max_delay = _theiler_int(y, max_delay, N, what='the maximum delay')
+        if max_delay is None:
             return np.nan
     elif 0 < max_delay < 1:
         max_delay = int(theiler_window(None, max_delay, N))  # a proportion of the time-series length
@@ -795,9 +794,8 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
             logger.warning(f'Time series of length {N} too short for a maximum delay of 10')
             return np.nan
 
-    past = theiler_window(y, past, N)
-    if np.isnan(past):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    past = _theiler_int(y, past, N)
+    if past is None:  # the autocorrelation function never crosses zero
         return np.nan
 
     iterations = 256
@@ -882,47 +880,17 @@ def embed_pca(y: ArrayLike, tau: Union[str, int] = 'ac', m: int = 3) -> dict:
         Various statistics summarizing the obtained eigenvalue distribution.
 
     """
-    tau = get_tau(y, tau)
-    if np.isnan(tau):
-        logger.warning('Could not get time delay (time series too short?)')
+    y_embed = _bf_embed(y, tau, m)
+    if y_embed is None:  # no time delay, or the series is too short to embed
         return np.nan
-    try:
-        y_embed = time_delay_embed(y, m, int(tau))
-    except ValueError as e:  # embedding failed (time series too short)
-        logger.warning(str(e))
-        return np.nan
-    if y_embed.shape[0] - 1 < m or m < 2:
-        logger.warning(f'Not enough embedding vectors ({y_embed.shape[0]}) for a rank-{m} PCA')
+    m = y_embed.shape[1]
+    if not _enough_for_pca(y_embed, m):
         return np.nan
     # do the PCA
     pca = PCA().fit(y_embed)
     #proportion of variance explained
     perc = pca.explained_variance_/np.sum(pca.explained_variance_)
-    out = {}
-    for i in range(m):
-        out[f'perc_{i+1}'] = perc[i]
-    #%% Get statistics of the eigenvalue distribution
-    out['std'] = np.std(perc, ddof=1)
-    out['range'] = np.ptp(perc)
-    out['min'] = np.min(perc)
-    out['max'] = np.max(perc)
-    out['top2'] = np.sum(perc[:2]) # variance expl. in top two eigendirections
-
-    #% Number of eigenvalues you need to reconstruct X%
-    csperc = np.cumsum(perc)
-    out['nto50'] = _first_fn(csperc, 0.5, 'over')
-    out['nto60'] = _first_fn(csperc, 0.6, 'over')
-    out['nto70'] = _first_fn(csperc, 0.7, 'over')
-    out['nto80'] = _first_fn(csperc, 0.8, 'over')
-    out['nto90'] = _first_fn(csperc, 0.9, 'over')
-
-    #% When individual % variance explained goes below X for the first time:
-    out['fb05'] = _first_fn(perc, 0.5, 'under')
-    out['fb02'] = _first_fn(perc, 0.2, 'under')
-    out['fb01'] = _first_fn(perc, 0.1, 'under')
-    out['fb001'] = _first_fn(perc, 0.01, 'under')
-
-    return out
+    return _spectrum_stats(perc, m)
 
 @dict_output
 def local_density(y: ArrayLike, nnr: int = 3,
@@ -991,11 +959,9 @@ def local_density(y: ArrayLike, nnr: int = 3,
     """
     y = np.asarray(y, dtype=float).ravel()
 
-    past = theiler_window(y, past, len(y))
-    if np.isnan(past):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    past = _theiler_int(y, past, len(y))
+    if past is None:  # the autocorrelation function never crosses zero
         return np.nan
-    past = int(past)
 
     y_embed = _bf_embed(y, tau, m)
     if y_embed is None:  # the delay or dimension could not be set, or the series is too short
@@ -1036,8 +1002,7 @@ def local_density(y: ArrayLike, nnr: int = 3,
     out = {}
     out['minden'] = np.min(locden)
     out['maxden'] = np.max(locden)
-    out['iqrden'] = (np.percentile(locden, 75, method='hazen')
-                     - np.percentile(locden, 25, method='hazen'))
+    out['iqrden'] = _iqr(locden)
     out['rangeden'] = np.ptp(locden)
     out['stdden'] = np.std(locden, ddof=1)
     out['meanden'] = np.mean(locden)
@@ -1428,11 +1393,9 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     tau = int(tau)
 
     # Theiler window
-    theiler_win = theiler_window(y, theiler_win, n)
-    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    theiler_win = _theiler_int(y, theiler_win, n)
+    if theiler_win is None:  # the autocorrelation function never crosses zero
         return np.nan
-    theiler_win = int(theiler_win)
 
     # Data-dependent failures (no usable TISEAN output, no scaling range, ...) return
     # NaN, as in hctsa, rather than raising
@@ -1487,8 +1450,7 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
         out['takens05_max'] = np.max(takens05)
         out['takens05_min'] = np.min(takens05)
         out['takens05_std'] = np.std(takens05, ddof=1)
-        q75, q25 = np.percentile(takens05, [75, 25], method='hazen')
-        out['takens05_iqr'] = q75 - q25
+        out['takens05_iqr'] = _iqr(takens05)
 
         # Find outliers as a means of inferring m_min: look for the estimate
         # approaching a constant for m > m_min
@@ -1637,11 +1599,9 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
         nref = -1  # capped at the time-series length
 
     # Remove spurious correlations of adjacent points
-    thwin = theiler_window(y, thwin, n)
-    if np.isnan(thwin):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    thwin = _theiler_int(y, thwin, n)
+    if thwin is None:  # the autocorrelation function never crosses zero
         return np.nan
-    thwin = int(thwin)
 
     if do_two == 2:
         raise ValueError("gp_corr_sum: do_two = 2 (corrsum2's fixed-pairs-per-bin binning) "
@@ -1874,22 +1834,14 @@ def takens_estimator(y: ArrayLike, nref: int = -1, c0: float = 0.01,
         raise ValueError('c0, the fraction of pairs below the upper length scale, must be in (0, 1)')
     min_pairs = 33  # fewest pairs below the upper length scale for an estimate
 
-    past = theiler_window(y, past, n)
-    if np.isnan(past):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    past = _theiler_int(y, past, n)
+    if past is None:  # the autocorrelation function never crosses zero
         return np.nan
-    past = int(past)
 
-    tau, m = _embed_tau_m(y, embed_params)
-    if np.isnan(tau):
-        logger.warning('Could not embed this time series with these embedding parameters')
+    emb = _bf_embed_pair(y, embed_params)
+    if emb is None:  # no embedding parameters, or the series is too short to embed
         return np.nan
-    try:
-        emb = time_delay_embed(y, m, tau)
-    except ValueError as exc:  # too short to embed
-        logger.warning(str(exc))
-        return np.nan
-    n_emb = emb.shape[0]
+    n_emb, m = emb.shape
     n_ref = n_emb if (nref == -1 or nref >= n_emb) else int(nref)
 
     # Pairs closer than tol = 1e-12 of the range of y are repeated points, left out
@@ -2107,21 +2059,13 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
     if 0 < nref < 1:
         nref = int(_round_half_away(n * nref))  # a proportion of time-series length
 
-    past = theiler_window(y, past)
-    if np.isnan(past):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    past = _theiler_int(y, past)
+    if past is None:  # the autocorrelation function never crosses zero
         return np.nan
-    past = int(past)
 
     # Embed the signal
-    tau, m = _embed_tau_m(y, embed_params)
-    if np.isnan(tau):
-        logger.warning(f'Embedding of the {n}-sample time series failed')
-        return np.nan
-    try:
-        emb = time_delay_embed(y, m, tau)
-    except ValueError as exc:  # too short to embed
-        logger.warning(f'Embedding of the {n}-sample time series failed: {exc}')
+    emb = _bf_embed_pair(y, embed_params)
+    if emb is None:  # no embedding parameters, or the series is too short to embed
         return np.nan
     n_emb = emb.shape[0]
 
@@ -2359,9 +2303,8 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
     """
     y = np.asarray(y, dtype=float).ravel()
 
-    thwin = theiler_window(y, thwin)
-    if np.isnan(thwin):  # the ACF never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    thwin = _theiler_int(y, thwin)
+    if thwin is None:  # the ACF never crosses zero
         return np.nan
 
     tau, mopt = _embed_tau_m(y, embed_params)
@@ -2492,9 +2435,9 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
     cap_horizon = (isinstance(maxtstep, (list, tuple)) and len(maxtstep) == 2
                    and maxtstep[0] == 'ac1e')  # cap (rather than NaN) a horizon too long for the series
     if isinstance(maxtstep, (list, tuple)):  # a multiple of the autocorrelation time
-        maxtstep = theiler_window(y, maxtstep)
-        if np.isnan(maxtstep):
-            logger.warning('No autocorrelation time to set the prediction length')
+        maxtstep = _theiler_int(y, maxtstep, what='the prediction length',
+                                reason='No autocorrelation time')
+        if maxtstep is None:
             return np.nan
     if 0 < maxtstep < 1:
         maxtstep = int(_round_half_away(n * maxtstep))  # a proportion of the time-series length
@@ -2502,11 +2445,9 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
     maxtstep = min(maxtstep, n // 2)  # can't look further than half the time series length
 
     # Theiler window
-    past = theiler_window(y, past, n)
-    if np.isnan(past):  # no autocorrelation time (e.g. the ACF never decays to 1/e)
-        logger.warning('No autocorrelation time to set the Theiler window')
+    past = _theiler_int(y, past, n, reason='No autocorrelation time')
+    if past is None:  # no autocorrelation time (e.g. the ACF never decays to 1/e)
         return np.nan
-    past = int(past)
     if cap_horizon and maxtstep + 2 * past > n // 2:
         # cap an 'ac1e' horizon to fit, keeping at least a few correlation times
         maxtstep = n // 2 - 2 * past
@@ -2646,15 +2587,7 @@ def _saturating_exp_fit(t: np.ndarray, p: np.ndarray, max_rate: float = 5.0) -> 
     sgn = -1.0 if k < u.size else 1.0
     j = u.size - 1 - k if k < u.size else k - u.size  # index into u
     lo, hi = u[max(j - 1, 0)], u[min(j + 1, u.size - 1)]
-    phi = (np.sqrt(5) - 1) / 2
-    for _ in range(40):  # golden-section search in log|b|
-        u1 = hi - phi * (hi - lo)
-        u2 = lo + phi * (hi - lo)
-        if sse(sgn * np.exp(u1))[0] <= sse(sgn * np.exp(u2))[0]:
-            hi = u2
-        else:
-            lo = u1
-    b = sgn * np.exp((lo + hi) / 2)
+    b = sgn * np.exp(_golden_section_min(lambda v: sse(sgn * np.exp(v))[0], lo, hi))  # in log|b|
     g = 1.0 - np.exp(b * t)
     a = np.dot(g, p) / np.dot(g, g)
     s = np.sum((p - a * g) ** 2)
@@ -2849,7 +2782,7 @@ def _period_normalized_tau(y: np.ndarray) -> Union[int, str]:
         return 'mi'
     win_length = int(np.floor(y.size / 4.5))  # Welch segments of N/4.5 samples (8 segments at 50% overlap)
     f, pxx = _welch(y - np.mean(y), fs=1, window=np.hamming(win_length), nperseg=win_length,
-                    noverlap=win_length // 2, nfft=max(256, 2 ** int(np.ceil(np.log2(win_length)))),
+                    noverlap=win_length // 2, nfft=_padded_nfft(win_length),
                     detrend=False, return_onesided=True, scaling='density')
     f, pxx = f[1:], pxx[1:]  # exclude the DC bin
     if pxx.size < 3:
@@ -2928,13 +2861,8 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
 
     if isinstance(tau, str) and tau.lower() == 'periodwelch':
         tau = _period_normalized_tau(y)
-    tau = get_tau(y, tau)
-    if np.isnan(tau):
-        return np.nan
-    try:
-        x = time_delay_embed(y, m, int(tau))
-    except ValueError as exc:  # embedding failed
-        logger.warning(str(exc))
+    x = _bf_embed(y, tau, m)
+    if x is None:  # no time delay, or the series is too short to embed
         return np.nan
     n_emb = x.shape[0]
     if n_emb < 20:  # too few embedded points for a meaningful Rips filtration
@@ -2977,8 +2905,7 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
         out['totalPersistenceH1'] = np.sum(pers1)
         # zero-persistence pairs contribute nothing to the entropy (0 log 0 = 0)
         pos = pers1[pers1 > 0]
-        p = pos / np.sum(pos)
-        out['persistenceEntropyH1'] = -np.sum(p * np.log(p)) if p.size else 0.0
+        out['persistenceEntropyH1'] = _shannon_entropy(pos, normalize=True) if pos.size else 0.0
     out['totalPersistenceH0'] = np.sum(lifetimes(drop_essential(dgms[0])))
     return out
 
@@ -2986,8 +2913,8 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
 def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
     """Counts of points per box, where the boxes are quantiles along each axis."""
     props = np.arange(nbox + 1) / nbox
-    xbox = np.quantile(x, props, method='hazen')
-    ybox = np.quantile(y, props, method='hazen')
+    xbox = _quantile(x, props)
+    ybox = _quantile(y, props)
     # Nudge the top edge so the largest point falls inside the last box.
     xbox[-1] += 1
     ybox[-1] += 1
@@ -3085,11 +3012,10 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     out['pcross'] = nn / n  # proportion of time series that crosses poincare surface
 
     for lab, u in (('x', x), ('y', yy)):
-        q25, q75 = np.quantile(u, [0.25, 0.75], method='hazen')
         out[f'max{lab}'] = np.max(u)
         out[f'min{lab}'] = np.min(u)
         out[f'std{lab}'] = np.std(u, ddof=1)
-        out[f'iqr{lab}'] = q75 - q25
+        out[f'iqr{lab}'] = _iqr(u)
         out[f'mean{lab}'] = np.mean(u)
         out[f'ac1{lab}'] = autocorr(u, 1, 'Fourier')
         out[f'ac2{lab}'] = autocorr(u, 2, 'Fourier')
@@ -3112,8 +3038,7 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     out['meands'] = np.mean(ds)
     out['maxds'] = np.max(ds)
     out['minds'] = np.min(ds)
-    q25, q75 = np.quantile(ds, [0.25, 0.75], method='hazen')
-    out['iqrds'] = q75 - q25
+    out['iqrds'] = _iqr(ds)
 
     # Now normalize both axes and look for structure in the cloud of points.
     # Don't normalize for standard deviation -- this probably reveals some
@@ -3123,11 +3048,10 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
 
     # Statistics on distance on Poincare surface from (mean,mean)
     d = np.sqrt(x**2 + yy**2)
-    q25, q75 = np.quantile(d, [0.25, 0.75], method='hazen')
     out['maxD'] = np.max(d)
     out['minD'] = np.min(d)
     out['stdD'] = np.std(d, ddof=1)
-    out['iqrD'] = q75 - q25
+    out['iqrD'] = _iqr(d)
     out['meanD'] = np.mean(d)
     out['ac1D'] = autocorr(d, 1, 'Fourier')
     out['ac2D'] = autocorr(d, 2, 'Fourier')
@@ -3147,7 +3071,7 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         # -sum(p log p) is biased low by (M-1)/(2n) for M occupied boxes and n
         # points on the section, so the raw value tracks the series length.
         out[f'hboxcounts{num_partitions}'] = (
-            -np.sum(pos * np.log(pos)) + (pos.size - 1) / (2 * nn))
+            _shannon_entropy(pos) + (pos.size - 1) / (2 * nn))
         out[f'tracepbox{num_partitions}'] = np.sum(np.diag(pbox))  # trace
 
     return out
@@ -3309,7 +3233,7 @@ def _recurrence_radius(Y: np.ndarray, rr: float, random_seed: Union[int, str, No
     """
     n_emb = Y.shape[0]
     sub = _random_subset(n_emb, min(2000, n_emb), random_seed)
-    return float(np.quantile(pdist(Y[sub]), rr, method='hazen'))
+    return float(_quantile(pdist(Y[sub]), rr))
 
 
 def _recurrent_pairs(Y: np.ndarray, radius: float) -> tuple:
@@ -3321,14 +3245,23 @@ def _recurrent_pairs(Y: np.ndarray, radius: float) -> tuple:
     return src, dst
 
 
-def _check_max_n(y: np.ndarray, max_n: Union[int, str], what: str) -> np.ndarray:
-    """Crop the series to its first `max_n` samples (``'full'`` for no cropping)."""
+def _check_max_n(y: np.ndarray, max_n: Union[int, str], what: str = '', *,
+                 message: Union[str, None] = None, level: int = logging.WARNING) -> np.ndarray:
+    """Crop `y` to its first `max_n` rows (``'full'`` for no cropping), logging when it is cropped.
+
+    `y` is a series or an array of embedded points (cropped along its first axis); ``len(y)`` is
+    compared with `max_n` as given, and the crop uses ``int(max_n)``. Any string other than
+    ``'full'`` raises a ValueError. The log record, at `level`, is `message` formatted with ``n``
+    (``len(y)`` before cropping), ``max_n`` (as given) and ``k`` (``int(max_n)``); by default it
+    says the series is too long for `what`.
+    """
     if isinstance(max_n, str):
         if max_n != 'full':
             raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
-    elif y.size > max_n:
-        logger.warning(f'Time series ({y.size} > {max_n}) is too long for {what}. '
-                       f'Analyzing the first {int(max_n)} samples')
+    elif len(y) > max_n:
+        if message is None:
+            message = 'Time series ({n} > {max_n}) is too long for ' + what + '. Analyzing the first {k} samples'
+        logger.log(level, message.format(n=len(y), max_n=max_n, k=int(max_n)))
         y = y[:int(max_n)]
     return y
 
@@ -3470,9 +3403,8 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
         return np.nan
     n_emb = Y.shape[0]
 
-    theiler = theiler_window(y, theiler_win, n_emb)
-    if np.isnan(theiler):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    theiler = _theiler_int(y, theiler_win, n_emb)
+    if theiler is None:  # the autocorrelation function never crosses zero
         return np.nan
     theiler = min(int(theiler), n_emb // 5)  # narrowed for short series
     if n_emb < 50:
@@ -3612,11 +3544,9 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
         return np.nan
     n_emb = Y.shape[0]
 
-    theiler = theiler_window(y, theiler_win, n_emb)
-    if np.isnan(theiler):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    theiler = _theiler_int(y, theiler_win, n_emb)
+    if theiler is None:  # the autocorrelation function never crosses zero
         return np.nan
-    theiler = int(theiler)
     if n_emb < 50 or n_emb <= 4 * theiler:
         logger.warning(f'Time series too short for a meaningful RQA (Nemb = {n_emb}, theilerWin = {theiler})')
         return np.nan
@@ -3652,7 +3582,7 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
         out['DIV'] = 1 / out['L_max']
         counts = np.bincount(diag_lengths)
         p = counts[counts > 0] / diag_lengths.size
-        out['L_entr'] = -np.sum(p * np.log(p))
+        out['L_entr'] = _shannon_entropy(p)
 
     # Vertical line lengths, from the full band-excluded matrix, grouping recurrent points by column
     vert_lengths = _line_lengths(dst, src, vmin)
@@ -3768,11 +3698,9 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     if num_lags < 2:
         raise ValueError(f'num_lags ({num_lags}) must be at least 2')
 
-    past = theiler_window(y, past)
-    if np.isnan(past):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    past = _theiler_int(y, past)
+    if past is None:  # the autocorrelation function never crosses zero
         return np.nan
-    past = int(past)
     max_t = past + int(num_lags)  # the maximum return time (lag) to consider
 
     Y = _bf_embed(y, embed_params[0], embed_params[1])
@@ -3848,8 +3776,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     out['std'] = np.std(trett, ddof=1)
     out['pzeros'] = np.sum(trett == 0) / nn
     out['pg05'] = np.sum(trett > max_trett * 0.5) / nn
-    q25, q75 = np.quantile(trett, [0.25, 0.75], method='hazen')
-    out['iqr'] = q75 - q25
+    out['iqr'] = _iqr(trett)
 
     # Recurrent peaks
     icross05 = np.flatnonzero((trett[:-1] - 0.5 * max_trett) * (trett[1:] - 0.5 * max_trett) < 0)
@@ -3878,13 +3805,13 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
 
     # Entropy of the histogram, as a distribution over lags
     p_trett = trett / np.sum(trett)
-    out['hhist'] = -np.sum(p_trett[p_trett > 0] * np.log(p_trett[p_trett > 0]))
+    out['hhist'] = _shannon_entropy(p_trett)
 
     # Coarse-grain to 20 bins of lags
     num_bins = 20
     inds = _even_split_points(0, nn, num_bins + 1)  # bin boundaries, evenly spread over 0..nn
     cglav = np.array([np.sum(p_trett[inds[b]:inds[b + 1]]) for b in range(num_bins)])
-    out['hcgdist'] = -np.sum(cglav[cglav > 0] * np.log(cglav[cglav > 0]))
+    out['hcgdist'] = _shannon_entropy(cglav)
     out['rangecgdist'] = np.ptp(cglav)
     out['pzeroscgdist'] = np.sum(cglav == 0) / num_bins
 
@@ -3894,7 +3821,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     nhist = np.histogram(trett, bins=edges)[0] / nn
     out['maxhisthist'] = np.max(nhist)
     out['phisthistmin'] = nhist[0]  # probability in the first (lowest-value) bin
-    out['hhisthist'] = -np.sum(nhist[nhist > 0] * np.log(nhist[nhist > 0]))
+    out['hhisthist'] = _shannon_entropy(nhist)
 
     return out
 
@@ -4135,13 +4062,8 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     if np.all(np.ptp(y_embed, axis=0) < 1e-10):
         return np.nan
 
-    if isinstance(max_n, str):
-        if max_n != 'full':
-            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
-    elif n_embed > max_n:
-        logger.warning(f'Cropping to the first {int(max_n)} of {n_embed} embedded points '
-                       '(memory/time cap, not a convergence point)')
-        y_embed = y_embed[:int(max_n)]
+    y_embed = _check_max_n(y_embed, max_n, message='Cropping to the first {k} of {n} embedded points '
+                           '(memory/time cap, not a convergence point)')
 
     # Principal axes of the cloud, and the whitened cloud (zero mean, identity covariance)
     centered = y_embed - y_embed.mean(axis=0)
@@ -4187,6 +4109,17 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     out['valley'] = _valley_depth(pp_proj, thr[i_best])
     out['nongauss'] = _knn_negentropy(white)
     return out
+
+
+def _enough_for_pca(y_embed: np.ndarray, m: int) -> bool:
+    """
+    Whether an embedding supports a rank-`m` PCA spectrum: at least ``m + 1`` embedded points
+    (so the covariance has rank m) and ``m >= 2`` (for ``top2``). Logs a warning if not.
+    """
+    if y_embed.shape[0] - 1 < m or m < 2:
+        logger.warning(f'Not enough embedding vectors ({y_embed.shape[0]}) for a rank-{m} PCA')
+        return False
+    return True
 
 
 def _spectrum_stats(perc: np.ndarray, m: int) -> dict:
@@ -4296,22 +4229,16 @@ def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
         return np.nan
 
     # pca needs m components (and at least 2, for top2)
-    if y_embed.shape[0] - 1 < m or m < 2:
-        logger.warning(f'Not enough embedding vectors ({y_embed.shape[0]}) for a rank-{m} PCA')
+    if not _enough_for_pca(y_embed, m):
         return np.nan
 
     # Crop to max_n embedded points for the kernel matrix (memory/time cap)
     n_emb = y_embed.shape[0]
-    if isinstance(max_n, str):
-        if max_n != 'full':
-            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
-        if n_emb > 5000:
-            logger.warning(f"{n_emb} embedded points exceeds 5000 with max_n='full'; the kernel "
-                           'eigendecomposition may take several seconds')
-    elif n_emb > max_n:
-        logger.warning(f'Cropping to the first {int(max_n)} of {n_emb} embedded points for kernel PCA '
-                       '(memory/time cap, not a convergence point)')
-        y_embed = y_embed[:int(max_n)]
+    if isinstance(max_n, str) and max_n == 'full' and n_emb > 5000:
+        logger.warning(f"{n_emb} embedded points exceeds 5000 with max_n='full'; the kernel "
+                       'eigendecomposition may take several seconds')
+    y_embed = _check_max_n(y_embed, max_n, message='Cropping to the first {k} of {n} embedded points '
+                           'for kernel PCA (memory/time cap, not a convergence point)')
     n = y_embed.shape[0]
     if n - 1 < m:
         logger.warning(f'Not enough embedded points ({n}) after cropping for a rank-{m} kernel PCA')
@@ -4466,8 +4393,7 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
     out['stdmedian'] = np.std(np.median(rs[:, 1:], axis=0), ddof=1) if m_max > 2 else 0.0
     stretch = rs[:, 1:].ravel()
     out['medianstretch'] = np.median(stretch)
-    q25, q75 = np.quantile(stretch, [0.25, 0.75], method='hazen')
-    out['iqrstretch'] = q75 - q25
+    out['iqrstretch'] = _iqr(stretch)
     return out
 
 
@@ -4606,11 +4532,9 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
         return np.nan
     n_emb = Y.shape[0]
 
-    theiler = theiler_window(y, theiler_win, n_emb)
-    if np.isnan(theiler):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    theiler = _theiler_int(y, theiler_win, n_emb)
+    if theiler is None:  # the autocorrelation function never crosses zero
         return np.nan
-    theiler = int(theiler)
 
     min_exceed = 15  # the minimum number of exceedances for a pole's estimate to be trusted
     tol = 1e-12 * np.ptp(y)  # distances closer than this are equal
@@ -4635,7 +4559,7 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
             continue
         g = -np.log(_merge_ties(dist_j, tol))  # (chronological order preserved)
 
-        u = np.quantile(g, q, method='hazen')
+        u = _quantile(g, q)
         exceed = g > u  # exceedance indicator, in chronological order
         n_u = int(exceed.sum())
         if n_u < min_exceed or np.unique(g[exceed]).size < min_exceed:
@@ -4872,18 +4796,16 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
         logger.warning('Could not determine a suitable time delay for this time series')
         return np.nan
     tau, m = params
-    theiler = theiler_window(y, theiler_win, n)
-    if np.isnan(theiler):
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    theiler = _theiler_int(y, theiler_win, n)
+    if theiler is None:
         return np.nan
-    theiler = int(theiler)
 
     n_emb = n - (m - 1) * tau
     if n_emb < 10 * k_nn + 2 * theiler:
         logger.warning(f'Time series too short to estimate the Lyapunov spectrum (N = {n}, tau = {tau}, m = {m})')
         return np.nan
     # the delay embedding, each column rescaled below to the unit interval
-    emb = np.column_stack([y[j * tau:j * tau + n_emb] for j in range(m)])
+    emb = time_delay_embed(y, m, tau)
     span = emb.max(axis=0) - emb.min(axis=0)
     if np.any(span == 0):
         return np.nan
