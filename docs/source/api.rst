@@ -101,6 +101,7 @@ Correlation
    pyhctsa.operations.correlation.time_rev_kld
    pyhctsa.operations.correlation.autocorr
    pyhctsa.operations.correlation.autocorr_x2_shape
+   pyhctsa.operations.correlation.cyclostationarity_scan
    pyhctsa.operations.correlation.add_noise
    pyhctsa.operations.correlation.theiler_q
    pyhctsa.operations.correlation.crinkle_statistic
