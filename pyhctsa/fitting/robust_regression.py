@@ -46,10 +46,11 @@ import numpy as np
 import scipy.linalg as sla
 from scipy import stats as _sps
 
+from ..utils import MAD_DIVISOR
+
 _EPS = np.finfo(float).eps
 
 BISQUARE_TUNE = 4.685          # Holland & Welsch (1977) 95%-efficiency constant for the bisquare
-MAD_TO_SIGMA = 0.6745          # MAD / 0.6745 estimates sigma for Gaussian data (Holland & Welsch)
 LEVERAGE_TOL = 1e-10           # rows with 1 - h_i below this are treated as exactly fitted (h_i = 1)
 CONVERGENCE_TOL = 1e-10        # stop when max|db| <= CONVERGENCE_TOL * (1 + max|b|)
 MAX_ITER = 200                 # iteration limit
@@ -159,7 +160,7 @@ class BisquareIRLS:
         a = np.sort(np.abs(self.adjusted_residuals(b)[~self.exact]))
         k = max(self.rank - 1 - int(self.exact.sum()), 0)
         a = a[k:] if k < a.size else a
-        return float(np.median(a)) / MAD_TO_SIGMA if a.size else 0.0
+        return float(np.median(a)) / MAD_DIVISOR if a.size else 0.0
 
     def _scaled_residuals(self, b):
         """``u_i = r_i / (sqrt(1 - h_i) c sigma)``; with ``sigma = 0``: 0 for exact zeros, else inf."""

@@ -1,6 +1,7 @@
 from typing import Union
 
 import numpy as np
+from ..utils import _quantile
 from numpy.typing import ArrayLike
 from scipy.stats import ansari
 
@@ -399,7 +400,7 @@ def kramers_moyal(y: ArrayLike, tau: Union[int, str] = 1, num_bins: int = 15) ->
         return np.nan  # data-dependent: too few samples per bin
 
     # Conditional moments in equiprobable bins of x
-    edges = np.quantile(x, np.linspace(0, 1, num_bins + 1), method='hazen')
+    edges = _quantile(x, np.linspace(0, 1, num_bins + 1))
     edges[0], edges[-1] = -np.inf, np.inf
     bin_ = np.digitize(x, edges[1:-1])  # 0..num_bins-1; bin i is [edges[i], edges[i+1])
     n = np.bincount(bin_, minlength=num_bins).astype(np.float64)
