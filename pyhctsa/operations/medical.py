@@ -3,7 +3,7 @@ from numpy.typing import ArrayLike
 from scipy import signal
 
 from ..robust import bf_hist_edges
-from ..utils import get_tau
+from ..utils import _padded_nfft, get_tau
 
 def raw_hrv_meas(x: ArrayLike) -> dict:
     """
@@ -180,7 +180,7 @@ def hrv_classic(y: ArrayLike) -> dict:
     # Calculate PSD
     # ------------------------------------------------------------------------------
 
-    nfft = max(256, 2 ** int(np.ceil(np.log2((n)))))
+    nfft = _padded_nfft(n)
     f, pxx = signal.periodogram(
         y,
         window=np.hanning(len(y)),

@@ -446,6 +446,48 @@ def simple_binner(x_data: ArrayLike, num_bins: int) -> tuple:
 
     return N, bin_edges
 
+def _shannon_entropy(p: ArrayLike, base: Union[float, None] = None, normalize: bool = False,
+                     axis: Union[int, None] = None):
+    """
+    Shannon entropy ``-sum p log p`` of a probability vector (or of each slice along ``axis``).
+
+    Parameters
+    ----------
+    p : ArrayLike
+        Probabilities (or nonnegative weights, with ``normalize=True``).
+    base : float or None, optional
+        Logarithm base: None for the natural log (nats), 2 for bits (``np.log2``), 10 for
+        ``np.log10``; any other base divides the natural log by ``log(base)``.
+    normalize : bool, optional
+        Divide ``p`` by its sum (along ``axis``) first. Default False.
+    axis : int or None, optional
+        None (default) treats ``p`` as one flattened vector and returns a scalar; an integer
+        returns one entropy per slice along that axis.
+
+    Returns
+    -------
+    np.float64 or np.ndarray
+        The entropy. Terms with ``p <= 0`` or NaN contribute 0 (``0 log 0 = 0``): with
+        ``axis=None`` they are dropped before summing (so an empty or all-zero ``p`` gives -0.0),
+        with an integer ``axis`` they are set to 0 in place. No eps is added.
+    """
+    p = np.asarray(p, dtype=float)
+    if normalize:
+        p = p / np.sum(p, axis=axis, keepdims=axis is not None)
+    if base is None:
+        log = np.log
+    elif base == 2:
+        log = np.log2
+    elif base == 10:
+        log = np.log10
+    else:
+        log = lambda v: np.log(v) / np.log(base)
+    if axis is None:
+        p = p[p > 0]
+        return -np.sum(p * log(p))
+    pos = p > 0
+    return -np.sum(np.where(pos, p * log(np.where(pos, p, 1.0)), 0.0), axis=axis)
+
 def point_of_crossing(x: ArrayLike, threshold: float) -> tuple:
     """
     Linearly interpolate to the point of crossing a threshold
@@ -578,6 +620,23 @@ def frame_signal(x: ArrayLike, n: int, p: int = 0) -> np.ndarray:
         z = np.concatenate([z, np.zeros(need - z.size)])
     win = np.lib.stride_tricks.sliding_window_view(z, n)[::h][:ncols]
     return win.T.copy()
+
+
+# Smallest FFT length of the zero-padded spectral estimates (the 'periodogram' and 'welch' spectra
+# of spectral.spectral_summaries, medical.hrv_classic, nonlinearity._period_normalized_tau): the
+# spectrum is evaluated on max(256, next power of two >= segment length) frequencies, an
+# interpolated grid that is finer than the DFT grid of short segments. The peak-prominence
+# thresholds of spectral_summaries are calibrated on this grid (a pyhctsa choice).
+_MIN_NFFT = 256
+
+
+def _padded_nfft(length: int) -> int:
+    """FFT length of the zero-padded spectral estimates: ``max(256, 2**ceil(log2(length)))``.
+
+    The 256 floor (``_MIN_NFFT``) is part of the convention; FFT lengths without it are computed
+    inline by their callers.
+    """
+    return max(_MIN_NFFT, 2 ** int(np.ceil(np.log2(length))))
 
 # ------------------------------------------------------------------------------
 # Adaptive time delays, Theiler windows and decimation (hctsa BF_GetTau,
