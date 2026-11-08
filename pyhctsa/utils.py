@@ -15,7 +15,9 @@ logger = logging.getLogger('pyhctsa')
 import numpy as np
 from numpy.typing import ArrayLike
 import pandas as pd
+from scipy import fft as sp_fft
 from scipy.signal import correlate
+from scipy.spatial import cKDTree
 from scipy.stats import chi2, rankdata
 
 
@@ -375,16 +377,74 @@ def z_score(x: ArrayLike) -> np.ndarray:
 
     return zscored_data
 
+def _lagged_products(x: np.ndarray, max_lag: int, later_first: bool = False) -> np.ndarray:
+    """
+    Lagged inner products ``c_k = sum_t x_t x_{t+k}`` for ``k = 0, ..., max_lag``.
+
+    Each is one ``np.dot`` over the overlapping samples (O(N * max_lag)), with no
+    demeaning and no normalization; callers demean ``x`` and divide as their statistic
+    requires (``c_k / c_0`` is the biased sample autocorrelation).
+    ``later_first`` swaps the operands to ``np.dot(x[k:], x[:N-k])`` (statsmodels' ``acovf``
+    order). The sum is the same, but BLAS splits it by the alignment of the first operand,
+    so the two orders can differ in the last bit; each caller keeps the order it has always used.
+    """
+    n = x.shape[0]
+    if later_first:
+        return np.array([np.dot(x, x)] + [np.dot(x[k:], x[:n-k]) for k in range(1, max_lag+1)])
+    return np.array([np.dot(x[:n-k], x[k:]) for k in range(max_lag+1)])
+
+def ljung_box(x: ArrayLike, lags, model_df: int = 0, later_first: bool = False) -> tuple:
+    """
+    Ljung-Box Q statistics and p-values for autocorrelation, at one or several lags.
+
+    ``Q(L) = N (N + 2) sum_{k=1}^{L} r_k^2 / (N - k)``, with ``r_k = c_k / c_0`` the sample
+    autocorrelation of the mean-removed series (autocovariances normalized by ``N`` at
+    every lag), as in ``statsmodels.stats.diagnostic.acorr_ljungbox``. The p-value is the
+    chi-squared upper tail with ``L - model_df`` degrees of freedom, NaN where that is not
+    positive. All lags share one pass over the autocovariances up to the largest lag.
+
+    Parameters
+    ----------
+    x : array-like
+        Input series, e.g. model residuals (no NaN handling: a NaN gives NaN outputs).
+    lags : int or array-like of int
+        An integer ``L`` tests lags ``1, ..., L``; a sequence tests exactly those lags.
+    model_df : int, optional
+        Degrees of freedom consumed by a fitted model, subtracted from each lag. Default 0.
+    later_first : bool, optional
+        Operand order of the lagged dot products (see ``_lagged_products``); True reproduces
+        ``acorr_ljungbox`` bit for bit. Default False.
+
+    Returns
+    -------
+    q, pvalues : np.ndarray
+        The statistics and p-values, one per tested lag.
+
+    Notes
+    -----
+    G. M. Ljung and G. E. P. Box, "On a Measure of Lack of Fit in Time Series Models",
+    Biometrika 65 (1978) 297-303.
+    """
+    x = np.asarray(x, dtype=float)
+    nobs = x.shape[0]
+    lags = np.arange(1, int(lags) + 1) if np.ndim(lags) == 0 else np.asarray(lags, dtype=int)
+    max_lag = int(lags.max())
+    acov = _lagged_products(x - x.mean(), max_lag, later_first) / nobs
+    sacf = acov / acov[0]
+    sacf2 = sacf[1:max_lag+1]**2 / (nobs - np.arange(1, max_lag+1))
+    q = nobs * (nobs+2) * np.cumsum(sacf2)[lags-1]
+    df = lags - model_df
+    pvalues = np.full(q.shape, np.nan)
+    ok = df > 0
+    pvalues[ok] = chi2.sf(q[ok], df[ok])
+    return q, pvalues
+
 def ljung_box_pvalue(x: ArrayLike, n_lags: int = 20, model_df: int = 0) -> float:
     """
     P-value of the Ljung-Box Q-test for autocorrelation up to ``n_lags``.
 
-    Equivalent to ``statsmodels.stats.diagnostic.acorr_ljungbox(x,
-    lags=[n_lags], model_df=model_df)`` but O(N * n_lags) rather than O(N^2):
-    it forms only the ``n_lags + 1`` autocovariances actually needed instead of
-    statsmodels' full ``acf(fft=False)`` (which computes the entire N-lag
-    autocovariance via ``np.correlate(..., 'full')``). Agrees with statsmodels
-    to ~1e-15 (``np.dot`` (BLAS) rounds differently from numpy's full-array correlation).
+    The p-value of :func:`ljung_box` at the single lag ``n_lags``, which is first clipped to
+    one less than the number of non-NaN samples.
 
     Parameters
     ----------
@@ -405,13 +465,7 @@ def ljung_box_pvalue(x: ArrayLike, n_lags: int = 20, model_df: int = 0) -> float
     x = np.asarray(x)
     t = np.sum(~np.isnan(x)) # effective sample size
     n_lags = min(n_lags, t - 1)
-    nobs = x.shape[0]
-    xo = x - x.mean()
-    acov = np.array([np.dot(xo[:nobs-k], xo[k:]) for k in range(n_lags+1)]) / nobs
-    sacf = acov / acov[0]
-    sacf2 = sacf[1:n_lags+1]**2 / (nobs - np.arange(1, n_lags+1))
-    q = nobs * (nobs+2) * np.cumsum(sacf2)[n_lags-1]
-    return chi2.sf(q, n_lags - model_df)
+    return ljung_box(x, [n_lags], model_df)[1][0]
 
 def simple_binner(x_data: ArrayLike, num_bins: int) -> tuple:
     """
@@ -444,6 +498,48 @@ def simple_binner(x_data: ArrayLike, num_bins: int) -> tuple:
     N = np.bincount(idx, minlength=num_bins).astype(int)
 
     return N, bin_edges
+
+def _shannon_entropy(p: ArrayLike, base: Union[float, None] = None, normalize: bool = False,
+                     axis: Union[int, None] = None):
+    """
+    Shannon entropy ``-sum p log p`` of a probability vector (or of each slice along ``axis``).
+
+    Parameters
+    ----------
+    p : ArrayLike
+        Probabilities (or nonnegative weights, with ``normalize=True``).
+    base : float or None, optional
+        Logarithm base: None for the natural log (nats), 2 for bits (``np.log2``), 10 for
+        ``np.log10``; any other base divides the natural log by ``log(base)``.
+    normalize : bool, optional
+        Divide ``p`` by its sum (along ``axis``) first. Default False.
+    axis : int or None, optional
+        None (default) treats ``p`` as one flattened vector and returns a scalar; an integer
+        returns one entropy per slice along that axis.
+
+    Returns
+    -------
+    np.float64 or np.ndarray
+        The entropy. Terms with ``p <= 0`` or NaN contribute 0 (``0 log 0 = 0``): with
+        ``axis=None`` they are dropped before summing (so an empty or all-zero ``p`` gives -0.0),
+        with an integer ``axis`` they are set to 0 in place. No eps is added.
+    """
+    p = np.asarray(p, dtype=float)
+    if normalize:
+        p = p / np.sum(p, axis=axis, keepdims=axis is not None)
+    if base is None:
+        log = np.log
+    elif base == 2:
+        log = np.log2
+    elif base == 10:
+        log = np.log10
+    else:
+        log = lambda v: np.log(v) / np.log(base)
+    if axis is None:
+        p = p[p > 0]
+        return -np.sum(p * log(p))
+    pos = p > 0
+    return -np.sum(np.where(pos, p * log(np.where(pos, p, 1.0)), 0.0), axis=axis)
 
 def point_of_crossing(x: ArrayLike, threshold: float) -> tuple:
     """
@@ -578,6 +674,23 @@ def frame_signal(x: ArrayLike, n: int, p: int = 0) -> np.ndarray:
     win = np.lib.stride_tricks.sliding_window_view(z, n)[::h][:ncols]
     return win.T.copy()
 
+
+# Smallest FFT length of the zero-padded spectral estimates (the 'periodogram' and 'welch' spectra
+# of spectral.spectral_summaries, medical.hrv_classic, nonlinearity._period_normalized_tau): the
+# spectrum is evaluated on max(256, next power of two >= segment length) frequencies, an
+# interpolated grid that is finer than the DFT grid of short segments. The peak-prominence
+# thresholds of spectral_summaries are calibrated on this grid (a pyhctsa choice).
+_MIN_NFFT = 256
+
+
+def _padded_nfft(length: int) -> int:
+    """FFT length of the zero-padded spectral estimates: ``max(256, 2**ceil(log2(length)))``.
+
+    The 256 floor (``_MIN_NFFT``) is part of the convention; FFT lengths without it are computed
+    inline by their callers.
+    """
+    return max(_MIN_NFFT, 2 ** int(np.ceil(np.log2(length))))
+
 # ------------------------------------------------------------------------------
 # Adaptive time delays, Theiler windows and decimation (hctsa BF_GetTau,
 # BF_TheilerWindow, BF_PreProcess)
@@ -627,6 +740,38 @@ def _round_half_away_array(x: ArrayLike) -> np.ndarray:
         up = np.abs(a - whole) >= 0.5  # NaN/Inf compare False and fall through unchanged
         out = np.where(up, whole + np.sign(a), whole)
     return np.asarray(out, dtype=float)
+
+
+def _quantile(x: ArrayLike, q, axis: Union[int, None] = None, method: str = 'hazen'):
+    """Quantile(s) of ``x`` with an explicit definition (Hazen's by default).
+
+    This is ``numpy.quantile(x, q, axis=axis, method=method)`` unchanged, so NaN propagates, an
+    empty input behaves as in NumPy, and the return type follows ``q`` (a scalar for scalar ``q``
+    with ``axis=None``, an array with ``q``'s shape leading otherwise). pyhctsa's convention is
+    ``method='hazen'`` (Hyndman & Fan 1996, definition 5: piecewise linear through the points
+    ``((i - 0.5)/n, x_(i))``); a site that needs another definition passes it by name.
+
+    Parameters
+    ----------
+    x : array_like
+        Data.
+    q : float or array_like
+        Probabilities in [0, 1] (not percentages).
+    axis : int or None
+        Axis to operate along; ``None`` flattens.
+    method : str
+        NumPy quantile method.
+    """
+    return np.quantile(x, q, axis=axis, method=method)
+
+
+def _iqr(x: ArrayLike, axis: Union[int, None] = None, method: str = 'hazen'):
+    """Interquartile range ``Q(0.75) - Q(0.25)`` of ``x``, via :func:`_quantile`.
+
+    NaN propagates; ``axis`` and ``method`` are as in :func:`_quantile` (Hazen by default).
+    """
+    q25, q75 = np.quantile(x, [0.25, 0.75], axis=axis, method=method)
+    return q75 - q25
 
 
 def _sample_std(x: ArrayLike, axis: Union[int, None] = None):
@@ -679,11 +824,82 @@ def _sample_std(x: ArrayLike, axis: Union[int, None] = None):
 
 
 
+def _autocov_fft(x: ArrayLike, nlags: Union[int, None] = None, pad: str = 'fast') -> np.ndarray:
+    """Linear autocovariance sums of each mean-removed row of ``x``, computed by FFT.
+
+    ``c_k = sum_{t=0}^{n-1-k} (x_t - xbar)(x_{t+k} - xbar)`` for ``k = 0..nlags-1``, along the
+    last axis, each row with its own mean removed; unnormalized (no ``1/n``), so callers that
+    want the autocorrelation divide by ``c_0``. Evaluated through the Wiener-Khinchin relation:
+    the inverse real FFT of ``F * conj(F)``, with ``F`` the real FFT of the mean-removed row
+    zero-padded to ``nfft >= 2n - 1``, is the linear (not circular) autocovariance. Every such
+    ``nfft`` gives the same values up to rounding; ``pad`` fixes which one is used.
+
+    Parameters
+    ----------
+    x : array-like
+        1-D series, or 2-D array whose rows are series of equal length ``n``. Finite values
+        are assumed (no guard here).
+    nlags : int or None, optional
+        Number of lags returned (lags ``0..nlags-1``); ``None`` gives all ``n``.
+    pad : {'fast', '2n', 'pow2'}, optional
+        FFT length: ``'fast'`` the smallest fast real-FFT length ``>= 2n - 1``
+        (``scipy.fft.next_fast_len``), ``'2n'`` exactly ``2n``, ``'pow2'`` the smallest power
+        of two ``>= 2n``. Default ``'fast'``.
+
+    Returns
+    -------
+    numpy.ndarray
+        float64 array of the input shape with the last axis cut to ``nlags``.
+    """
+    x = np.asarray(x, dtype=float)
+    n = x.shape[-1]
+    if pad == 'fast':
+        nfft = sp_fft.next_fast_len(2 * n - 1, real=True)
+    elif pad == '2n':
+        nfft = 2 * n
+    elif pad == 'pow2':
+        nfft = 1 << int(np.ceil(np.log2(2 * n)))
+    else:
+        raise ValueError(f"Unknown pad {pad!r}; expected 'fast', '2n' or 'pow2'.")
+    z = x - x.mean(axis=-1, keepdims=True)
+    f = sp_fft.rfft(z, nfft, axis=-1)
+    return sp_fft.irfft(f * np.conj(f), nfft, axis=-1)[..., :n if nlags is None else nlags]
+
+
+def _acf_fft(y: ArrayLike) -> np.ndarray:
+    """Sample autocorrelation function at lags 0..N-1, computed by FFT.
+
+    Parameters
+    ----------
+    y : array-like
+        Time series of length N >= 1.
+
+    Returns
+    -------
+    numpy.ndarray
+        float64 array of length N with ``acf[0] == 1``; all NaN if ``y`` is constant (or
+        has length 1) or contains NaN or Inf.
+
+    Notes
+    -----
+    ``r_k = c_k / c_0`` with ``c_k = (1/N) sum_t (y_t - ybar)(y_{t+k} - ybar)`` (Box, Jenkins &
+    Reinsel 1994, *Time Series Analysis*, 3rd ed., eq. 2.1.12), with the autocovariance from
+    :func:`_autocov_fft` at a fast FFT length of at least 2N - 1.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = y.size
+    if N == 0:
+        return np.zeros(0)
+    if not np.all(np.isfinite(y)) or np.ptp(y) == 0:
+        return np.full(N, np.nan)
+    a = _autocov_fft(y, pad='fast')
+    return np.real(a / a[0])
+
+
 def _acf_fourier(y: np.ndarray) -> np.ndarray:
     """ACF at lags 0..N-1 (CO_AutoCorr(y, [], 'Fourier')); all-NaN for a constant series."""
-    from .operations.correlation import autocorr
     with np.errstate(all='ignore'):
-        return np.asarray(autocorr(y, [], 'Fourier'), dtype=float).ravel()
+        return _acf_fft(y)
 
 
 def _tau_ac(y: np.ndarray) -> float:
@@ -715,25 +931,21 @@ def _tau_mi_gaussian(y: np.ndarray) -> float:
     curve is not used: it loses precision at long lags of smooth series, where r is close to 1.)
     """
     n = y.size
-    prev2 = prev1 = np.nan  # AMI at lags i-2, i-1
-    # IN_AutoMutualInfo gives NaN for lags > N - 5, and CO_FirstMin gives up on a NaN
-    for i in range(1, n - 4):
-        y1, y2 = y[:-i], y[i:]
-        d1, d2 = y1 - y1.mean(), y2 - y2.mean()
-        den = np.sqrt(np.dot(d1, d1) * np.dot(d2, d2))
-        if not den > 0:
-            return np.nan
-        r = min(1.0, max(-1.0, np.dot(d1, d2) / den))
-        with np.errstate(divide='ignore'):
-            cur = -0.5 * np.log(1.0 - r * r)
-        if np.isnan(cur):
-            return np.nan
-        if i == 2 and cur > prev1:
-            return 1  # already increases at lag 2 from lag 1
-        if i > 2 and prev2 > prev1 < cur:
-            return i - 1
-        prev2, prev1 = prev1, cur
-    return np.nan
+
+    def ami_at_lags():
+        # IN_AutoMutualInfo gives NaN for lags > N - 5, and CO_FirstMin gives up on a NaN
+        for i in range(1, n - 4):
+            y1, y2 = y[:-i], y[i:]
+            d1, d2 = y1 - y1.mean(), y2 - y2.mean()
+            den = np.sqrt(np.dot(d1, d1) * np.dot(d2, d2))
+            if not den > 0:
+                yield np.nan  # a constant delay window
+                return
+            r = min(1.0, max(-1.0, np.dot(d1, d2) / den))
+            with np.errstate(divide='ignore'):
+                yield -0.5 * np.log(1.0 - r * r)
+
+    return _first_extremum(ami_at_lags(), 'min', not_found=np.nan)
 
 
 _TAU_MI_JITTER_SEED = 0   # fixed seed of the always-applied 1e-10 jitter in _tau_mi (deterministic)
@@ -861,7 +1073,7 @@ def _ami_first_min(ami: np.ndarray) -> float:
     sm = _smooth3(ami)
     if ami.size >= 4:
         d2 = np.diff(ami, 2)
-        sigma = 1.4826 * np.median(np.abs(d2 - np.median(d2))) / np.sqrt(6.0)
+        sigma = MAD_TO_SIGMA * np.median(np.abs(d2 - np.median(d2))) / np.sqrt(6.0)
         delta = 2.0 * sigma
     else:
         delta = 0.0
@@ -1097,6 +1309,73 @@ def theiler_window(y: Union[ArrayLike, None], spec: Union[int, float, list, tupl
     raise ValueError("Unrecognized Theiler window specification")
 
 
+def _theiler_int(y: Union[ArrayLike, None], spec: Union[int, float, list, tuple],
+                 N: Union[int, None] = None, what: str = 'the Theiler window',
+                 reason: str = 'No autocorrelation zero-crossing',
+                 warn: bool = True) -> Union[int, None]:
+    """
+    A Theiler window (or other autocorrelation-scaled length) as an int, or None if unset.
+
+    Resolves `spec` with :func:`theiler_window` (same `y`, `spec`, `N`). When that gives NaN
+    (no autocorrelation time), logs ``f'{reason} to set {what}'`` (unless `warn` is False)
+    and returns None, so a caller returns NaN; otherwise returns the window as an ``int``.
+    """
+    w = theiler_window(y, spec, N)
+    if np.isnan(w):
+        if warn:
+            logger.warning(f'{reason} to set {what}')
+        return None
+    return int(w)
+
+
+def _knn_theiler(X: np.ndarray, k: int, theiler: int, metric: str = 'euclidean',
+                 query: Union[ArrayLike, None] = None, tree: str = 'scipy',
+                 chunk: int = 2_000_000) -> tuple[np.ndarray, np.ndarray]:
+    """
+    The k nearest neighbors of points of `X` outside a Theiler window, from a k-d tree.
+
+    For each query row i (all rows of `X`, or the row indices `query`), the distances and row
+    indices of its k nearest rows j with ``|i - j| > theiler`` (so i itself is excluded too), in
+    ascending distance. Rather than searching with exclusions, this asks a k-d tree for the
+    ``k + 2*theiler + 1`` nearest rows (at most ``2*theiler + 1`` of which fall in the window)
+    and keeps the first k outside it, in the tree's order (so ties are broken as the tree breaks
+    them). `metric` is ``'euclidean'`` or ``'chebyshev'`` (max norm). `tree` is ``'scipy'``
+    (``scipy.spatial.cKDTree``) or ``'sklearn'`` (``sklearn.neighbors.KDTree``): the two agree
+    up to tie order, but their Euclidean distances can differ in the last bit in four or more
+    dimensions (they sum the squared differences in different orders), so a caller keeps the
+    library its outputs were defined with. Queries run in blocks of about `chunk` fetched
+    neighbors, to bound memory. Where fewer than k rows lie outside the window, the missing
+    entries are ``inf`` (distance) and -1 (index).
+    """
+    X = np.asarray(X, dtype=float)
+    n = X.shape[0]
+    q = np.arange(n) if query is None else np.asarray(query, dtype=np.intp)
+    k_fetch = min(n, k + 2 * theiler + 1)
+    if tree == 'scipy':
+        p = {'euclidean': 2, 'chebyshev': np.inf}[metric]
+        kdt = cKDTree(X)
+        search = lambda Q: kdt.query(Q, k=k_fetch, p=p)  # noqa: E731
+    elif tree == 'sklearn':
+        from sklearn.neighbors import KDTree
+        kdt = KDTree(X, metric=metric)
+        search = lambda Q: kdt.query(Q, k=k_fetch)  # noqa: E731
+    else:
+        raise ValueError(f"Unknown tree '{tree}'")
+    dist = np.full((q.size, k), np.inf)
+    idx = np.full((q.size, k), -1, dtype=np.intp)
+    step = max(1, chunk // k_fetch)
+    for c in range(0, q.size, step):
+        qc = q[c:c + step]
+        d, i = search(X[qc])
+        d, i = d.reshape(qc.size, k_fetch), i.reshape(qc.size, k_fetch)
+        outside = np.abs(i - qc[:, None]) > theiler
+        rank = np.cumsum(outside, axis=1)  # 1-based rank among the rows outside the window
+        rows, cols = np.nonzero(outside & (rank <= k))
+        dist[c + rows, rank[rows, cols] - 1] = d[rows, cols]
+        idx[c + rows, rank[rows, cols] - 1] = i[rows, cols]
+    return dist, idx
+
+
 # pre_process(y, 'decimate_ac1e') gives NaN when the decimated series would be shorter than
 # the global minimum series length (a decimated series is a series). Each *_dec feature's own
 # minimum length (hctsa.yaml) is then checked on the decimated series. hctsa's BF_PreProcess
@@ -1190,6 +1469,28 @@ def _zscore_or_zeros(x: np.ndarray) -> np.ndarray:
         return (a - np.mean(a)) / sd
 
 
+def _zscore_or_none(x: np.ndarray) -> Union[np.ndarray, None]:
+    """z-score with the N-1 standard deviation, or None if that standard deviation is not positive.
+
+    Parameters
+    ----------
+    x : numpy.ndarray
+        Data (callers pass a 1-D series); all elements are standardized together.
+
+    Returns
+    -------
+    numpy.ndarray or None
+        ``(x - mean)/sd`` with ``sd = numpy.std(x, ddof=1)``; None when ``sd`` is not positive
+        (a constant input, or NaN from fewer than two values or non-finite data), for callers that
+        skip or reject a degenerate input rather than map it to zeros as
+        :func:`_zscore_or_zeros` does.
+    """
+    sd = np.std(x, ddof=1)
+    if not sd > 0:
+        return None
+    return (x - np.mean(x)) / sd
+
+
 def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, float]:
     """
     ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``: decimate by the 1/e autocorrelation time.
@@ -1256,6 +1557,39 @@ def decimation_phases(x_z: ArrayLike, rule: str = 'ac1e',
     phases = [_zscore_or_zeros(yp) if rezscore else yp for yp in phases
               if yp.size >= _DECIMATE_MIN_POINTS]
     return phases if phases else np.nan
+
+
+def _ar_design(y: np.ndarray, p: int, start: int = None) -> tuple:
+    """
+    Lag design of a least-squares AR(p) fit: regressors and targets for one-step prediction.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        The series (1-D).
+    p : int
+        The AR order (number of lag columns).
+    start : int, optional
+        The first target sample, ``start >= p`` (default ``p``, every sample that has ``p``
+        predecessors). A larger ``start`` lets fits of several orders share the same targets.
+
+    Returns
+    -------
+    x : np.ndarray
+        Regressors, shape ``(N - start, p)``, lag 1 first: ``x[i, k-1] = y[t-k]`` for
+        ``t = start + i``.
+    target : np.ndarray
+        The targets ``y[start:]``.
+
+    Notes
+    -----
+    Both are read-only strided views of ``y`` (``x`` has a negative column stride); callers
+    copy them when they need a writable or contiguous array.
+    """
+    win = np.lib.stride_tricks.sliding_window_view(y, p + 1)  # row j = y[j:j+p+1]
+    if start is not None:
+        win = win[start - p:]
+    return win[:, :p][:, ::-1], win[:, p]
 
 
 def time_delay_embed(y: ArrayLike, m: int, tau: Union[int, str] = 1,
@@ -1348,7 +1682,7 @@ def binarize(y: ArrayLike, binarize_how: str = 'diff', lag: int = 1) -> ArrayLik
     elif binarize_how == 'iqr':
         # Binary signal: 1 if inside the interquartile range (above the 25th percentile
         # and up to the 75th), 0 otherwise
-        iqr = np.quantile(y,[.25,.75], method='hazen')
+        iqr = _quantile(y, [.25, .75])
         iniqr = np.logical_and(y > iqr[0], y <= iqr[1])
         y_bin = np.zeros(len(y))
         y_bin[iniqr] = 1
@@ -1363,6 +1697,31 @@ def _step_binary(x : ArrayLike) -> ArrayLike:
     y[x > 0] = 1
 
     return y
+
+def _run_lengths(x: ArrayLike) -> tuple:
+    """
+    Maximal runs of equal consecutive values in a 1-D sequence (run-length encoding).
+
+    Parameters
+    ----------
+    x : array-like
+        The sequence (e.g. 0/1 or boolean symbols).
+
+    Returns
+    -------
+    values : numpy.ndarray
+        The value of each run, in order.
+    lengths : numpy.ndarray of int
+        The length of each run, in order; the first and last runs (touching the ends of the
+        sequence) are counted in full, and the lengths sum to ``len(x)``. Both arrays are empty
+        for an empty input.
+    """
+    x = np.asarray(x).ravel()
+    if x.size == 0:
+        return x[:0], np.zeros(0, dtype=np.intp)
+    starts = np.concatenate(([0], np.flatnonzero(x[1:] != x[:-1]) + 1))
+    lengths = np.diff(np.concatenate((starts, [x.size])))
+    return x[starts], lengths
 
 def x_corr(x: ArrayLike, y: ArrayLike, normed: bool = True, max_lags: int = 10) -> tuple:
     """
@@ -1453,3 +1812,99 @@ def make_function_name_mappings(
             df_all_modules.to_csv(f, index=False)
 
     return df_all_modules
+
+
+def _first_extremum(values, kind: str = 'min', not_found: Union[int, float] = np.nan) -> Union[int, float]:
+    """Lag of the first strict local minimum (or maximum) of a lag curve, read lazily.
+
+    ``values`` is an iterable (typically a generator) of the curve at lags 1, 2, 3, ...; it is
+    consumed only up to the first extremum (or the first NaN), so an expensive per-lag quantity
+    (e.g. a Kraskov AMI) is computed no further than needed. With ``kind='min'`` the result is
+    1 if the curve increases from lag 1 to lag 2, and otherwise the first lag ``l`` with
+    ``c(l-1) > c(l) < c(l+1)``; with ``kind='max'`` it is the first lag with
+    ``c(l-1) < c(l) > c(l+1)`` (lag 1 never counts), as in hctsa's ``CO_FirstMin``.
+
+    Parameters
+    ----------
+    values : iterable of float
+        The curve at lags 1, 2, 3, ...
+    kind : {'min', 'max'}
+        Which extremum to find.
+    not_found : int or float
+        Returned when the values run out without an extremum (callers choose: the series
+        length in ``first_min``/``first_max``, NaN in ``get_tau``).
+
+    Returns
+    -------
+    int or float
+        The lag of the extremum, NaN if a NaN value comes first, else ``not_found``.
+    """
+    prev2 = prev1 = np.nan  # curve at lags l-2, l-1
+    for lag, cur in enumerate(values, start=1):
+        if np.isnan(cur):
+            return np.nan
+        if kind == 'min':
+            if lag == 2 and cur > prev1:
+                return 1  # already increases at lag 2 from lag 1
+            if lag > 2 and prev2 > prev1 < cur:
+                return lag - 1
+        elif lag > 2 and prev2 < prev1 > cur:
+            return lag - 1
+        prev2, prev1 = prev1, cur
+    return not_found
+
+
+# ------------------------------------------------------------------------------
+# Robust-scale constants and the round-off guard
+# ------------------------------------------------------------------------------
+# For Gaussian data the median absolute deviation (MAD) is sigma * Phi^{-1}(3/4) = 0.67449 sigma,
+# so sigma is estimated by MAD * 1.4826 or MAD / 0.6745. The two rounded forms differ by about 1e-5
+# (relative) from each other and from the exact Phi^{-1}(3/4), so each site keeps the form it uses;
+# changing one changes outputs in the fifth significant digit.
+MAD_TO_SIGMA = 1.4826   # sigma ~= MAD_TO_SIGMA * MAD (multiplied)
+MAD_DIVISOR = 0.6745    # sigma ~= MAD / MAD_DIVISOR (divided; Holland & Welsch's rounding)
+
+
+def _is_roundoff(x: np.ndarray, ref: Union[np.ndarray, None] = None, n: Union[int, None] = None) -> bool:
+    """True if ``x`` has no variation beyond floating-point round-off.
+
+    The criterion is ``std(x, ddof=1) <= 10 * n * eps * rms(ref)``: a bound on the rounding error
+    of a computation over ``n`` values, relative to the magnitude (root-mean-square) of the values
+    ``ref`` it acts on. A fitted or filtered value accumulates rounding over sums of up to ``n``
+    terms (at most about ``n * eps / 2``), and a sinusoid of frequency up to 1/2 evaluated at times
+    up to ``n`` has a rounding error in its phase of up to about ``1.5 * pi * n * eps`` (three
+    roundings of ``2 * pi * f * t``), in both the data and the fit. Averaged over the series (the
+    phase error grows with ``t``), these are below about ``8 * n * eps`` of the root-mean-square,
+    so ``10 * n * eps`` covers them.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        The values tested (a processed series, residuals, or the values to be fitted).
+    ref : np.ndarray, optional
+        The values whose root-mean-square sets the scale; ``x`` itself if omitted.
+    n : int, optional
+        The number of values the computation acts on; ``ref.size`` if omitted. Callers pass the
+        length of the original series when it differs.
+    """
+    x = np.asarray(x, dtype=float)
+    ref = x if ref is None else np.asarray(ref, dtype=float)
+    if n is None:
+        n = ref.size
+    return bool(np.std(x, ddof=1) <= 10 * n * np.finfo(float).eps * np.sqrt(np.mean(ref ** 2)))
+
+
+def _piecewise_poly_residual(y: np.ndarray, order: int, num_bits: int) -> np.ndarray:
+    """Remove a polynomial of the given order from each of ``num_bits`` equal pieces.
+
+    The pieces come from hctsa's ``PP_PreProcess`` (``SUB_rempt``): boundaries at
+    ``round(linspace(0, N, num_bits + 1))`` (exact rounding), with the fit made against the sample times 0, ..., length of piece - 1.
+    """
+    n = len(y)
+    bits = _even_split_points(0, n, num_bits + 1)
+    out = np.zeros(n)
+    for k in range(num_bits):
+        seg = y[bits[k]:bits[k + 1]]
+        x = np.arange(len(seg), dtype=float)
+        out[bits[k]:bits[k + 1]] = seg - np.polynomial.Polynomial.fit(x, seg, order)(x)
+    return out

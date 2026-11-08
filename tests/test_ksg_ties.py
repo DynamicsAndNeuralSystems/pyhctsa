@@ -11,6 +11,12 @@ import pytest
 
 import pyhctsa.ksg as ksg
 from pyhctsa.ksg import ksg_mi
+from pyhctsa.utils import _knn_theiler
+
+def _fetch_more(extra, z, k, w):
+    dist, idx = _knn_theiler(z, k + extra, w, metric='chebyshev')
+    return dist[:, :k], idx[:, :k]
+
 
 
 def _z(a):
@@ -61,10 +67,10 @@ def test_untied_values_unchanged(key):
 def test_tied_value_independent_of_tree_fetch_count(theiler, monkeypatch):
     """Asking the tree for more neighbors reorders the tied ones; the value must not move."""
     y = SERIES['rep']
-    original = ksg._joint_neighbors
     values = []
     for extra in (0, 3, 10):
-        monkeypatch.setattr(ksg, '_joint_neighbors', functools.partial(original, extra=extra))
+        # fetch `extra` more rows than needed (reordering tied ones) and keep the first k
+        monkeypatch.setattr(ksg, '_joint_neighbors', functools.partial(_fetch_more, extra))
         values.append(ksg_mi(y[:-2], y[2:], 4, 2, theiler))
     assert values[0] == values[1] == values[2]
     assert values[0] == pytest.approx(TIED_PINS[theiler], rel=1e-12)

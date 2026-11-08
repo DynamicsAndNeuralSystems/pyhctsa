@@ -1,11 +1,10 @@
 """
-Nonparametric and Gaussian mutual-information estimators.
+Nonparametric (KSG) mutual-information estimator.
 
 :func:`ksg_mi` is the k-nearest-neighbor estimator of Kraskov, Stoegbauer and Grassberger
-(KSG), algorithms 1 and 2 [1]_. :func:`gaussian_mi` is the closed-form estimator for jointly
-Gaussian variables.
+(KSG), algorithms 1 and 2 [1]_.
 
-Both are written directly from the published definitions; the Java Information Dynamics
+It is written directly from the published definitions; the Java Information Dynamics
 Toolkit (JIDT; Lizier, 2014 [2]_), which hctsa uses for these estimators, served only as a
 reference for the method conventions (which neighbors are counted, how the marginals are
 scaled), not as a source of code.
@@ -35,33 +34,19 @@ from numba import njit
 from scipy.spatial import cKDTree
 from scipy.special import digamma
 
+from .utils import _knn_theiler
+
 
 # ----------------------------------------------------------------------------------------------
 # Neighbor search and counting
 # ----------------------------------------------------------------------------------------------
 
-def _joint_neighbors(z, k, w, extra=0):
-    """Distances and indices of the k nearest max-norm neighbors of each row of ``z``.
-
-    Rows whose index differs by at most ``w`` from the query row (the row itself included) are
-    not candidates. Rather than searching with exclusions, this asks the k-d tree for the
-    ``k + 2w + 1`` nearest rows (``extra`` more, for testing), of which at most ``2w + 1`` fall
-    in the window, and keeps the first k that do not. Among rows tied in distance, which are
-    kept is the tree's choice. Where fewer than k rows lie outside the window, the missing
-    entries are ``inf`` (distance) and -1 (index).
+def _joint_neighbors(z, k, w):
+    """The k nearest max-norm neighbors of each row of ``z`` outside the Theiler window ``w``
+    (:func:`utils._knn_theiler`): distances and row indices, ``inf`` and -1 where fewer than k
+    rows lie outside the window. Among rows tied in distance, which are kept is the tree's choice.
     """
-    n = z.shape[0]
-    k_fetch = min(n, k + 2 * w + 1 + extra)
-    d, i = cKDTree(z).query(z, k=k_fetch, p=np.inf)
-    d, i = d.reshape(n, k_fetch), i.reshape(n, k_fetch)
-    outside = np.abs(i - np.arange(n)[:, None]) > w
-    rank = np.cumsum(outside, axis=1)  # 1-based rank among the rows outside the window
-    rows, cols = np.nonzero(outside & (rank <= k))
-    dist = np.full((n, k), np.inf)
-    idx = np.full((n, k), -1, dtype=np.intp)
-    dist[rows, rank[rows, cols] - 1] = d[rows, cols]
-    idx[rows, rank[rows, cols] - 1] = i[rows, cols]
-    return dist, idx
+    return _knn_theiler(z, k, w, metric='chebyshev')
 
 
 def _max_separation(a, neighbors):
@@ -233,40 +218,3 @@ def ksg_mi(x, y, k=4, algorithm=1, theiler=0):
         n_y = _count_within(y, eps_y, theiler, False)
         mi = digamma(k) - 1.0 / k + digamma(n) - np.mean(digamma(n_x) + digamma(n_y))
     return float(mi)
-
-
-def gaussian_mi(x, y):
-    """Mutual information I(x; y) in nats under a joint Gaussian model.
-
-    ``I = (ln det C_x + ln det C_y - ln det C_xy) / 2``, with ``C`` the sample covariance
-    matrices of ``x``, ``y`` and of the stacked ``(x, y)``. For scalars this reduces to
-    ``-ln(1 - r**2) / 2`` for the Pearson correlation ``r``. Only linear dependence
-    contributes.
-
-    Parameters
-    ----------
-    x, y : array-like, shape (n_samples,) or (n_samples, n_dims)
-
-    Returns
-    -------
-    float
-        The mutual information, in nats. It is unbounded as ``x`` and ``y`` approach exact linear
-        dependence (a very large, rounding-limited value, or ``inf`` if the joint covariance
-        is numerically singular), and ``nan`` if ``x`` or ``y`` alone has linearly dependent
-        columns (e.g. is constant).
-    """
-    x = _as_columns(x, "x")
-    y = _as_columns(y, "y")
-    if x.shape[0] != y.shape[0]:
-        raise ValueError("x and y must have the same number of samples")
-
-    def logdet(a):
-        sign, value = np.linalg.slogdet(np.atleast_2d(np.cov(a, rowvar=False)))
-        return value if sign > 0 else None
-
-    ld_x, ld_y, ld_xy = logdet(x), logdet(y), logdet(np.hstack([x, y]))
-    if ld_x is None or ld_y is None:
-        return float("nan")
-    if ld_xy is None:
-        return float("inf")
-    return float(0.5 * (ld_x + ld_y - ld_xy))

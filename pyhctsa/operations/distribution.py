@@ -3,6 +3,7 @@ import warnings
 from typing import Dict, Union
 
 import numpy as np
+from ..utils import _iqr, _quantile
 from numpy.typing import ArrayLike
 from scipy import stats
 from scipy.optimize import brentq
@@ -11,6 +12,7 @@ from scipy.stats import gamma as gamma_dist
 from scipy.stats import expon, gumbel_l, lognorm, norm, rayleigh, uniform, weibull_min, skew, kurtosis
 
 from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
+from ..fitting import goodness_of_fit
 from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_remove_points, bf_residual_stats
 from ..utils import dict_output, _round_half_away, _sample_std, sign_change, simple_binner, x_corr
 
@@ -357,7 +359,7 @@ def withinp(x: ArrayLike, p: float = 1.0, mean_or_median: str = 'mean') -> float
         sig = np.std(x, ddof=1)
     elif mean_or_median == 'median':
         mu = np.median(x)
-        iqr_val = np.percentile(x, 75, method='hazen') - np.percentile(x, 25, method='hazen')
+        iqr_val = _iqr(x)
         sig = iqr_val / 1.35
     else:
         raise ValueError(f"Unknown setting: '{mean_or_median}'")
@@ -411,9 +413,7 @@ def spread(y: ArrayLike, spread_measure: str = 'std') -> float:
     if spread_measure == 'std':
         out = np.std(y, ddof=1)
     elif spread_measure == 'iqr':
-        q75 = np.quantile(y, 0.75, method='hazen')
-        q25 = np.quantile(y, 0.25, method='hazen')
-        out = q75 - q25
+        out = _iqr(y)
     elif spread_measure == 'mad':
         # mean absolute deviation
         out = np.mean(np.absolute(y - np.mean(y, None)), None)
@@ -445,7 +445,7 @@ def quantile(y: ArrayLike, p: float = 0.5) -> float:
     if not isinstance(p, (int, float)) or p < 0 or p > 1:
         raise ValueError("p must specify a proportion, in [0,1]")
     
-    return float(np.quantile(y, p, method = 'hazen'))
+    return float(_quantile(y, p))
 
 def proportion_values(x: ArrayLike, prop_what: str = 'positive') -> float:
     """
@@ -507,7 +507,7 @@ def pleft(y: ArrayLike, th: float = 0.1) -> float:
         the standard deviation.
     """
     y = np.asarray(y)
-    p = np.quantile(np.abs(y - np.mean(y)), 1-th, method='hazen')
+    p = _quantile(np.abs(y - np.mean(y)), 1-th)
     # A proportion, th, of the data lie further than p from the mean
     out = np.divide(p, np.std(y, ddof=1))
 
@@ -584,10 +584,10 @@ def mean(y: ArrayLike, mean_type: str = 'arithmetic') -> float:
     elif mean_type == 'rms':
         out = np.sqrt(np.mean(y**2))
     elif mean_type == 'iqm': # interquartile mean
-        p = np.percentile(y, [25, 75], method='hazen')
+        p = _quantile(y, [0.25, 0.75])
         out = np.mean(y[(y >= p[0]) & (y <= p[1])])
     elif mean_type == 'midhinge':  # average of 1st and third quartiles
-        p = np.percentile(y, [25, 75], method='hazen')
+        p = _quantile(y, [0.25, 0.75])
         out = np.mean(p)
     else:
         raise ValueError(f"Unknown mean type '{mean_type}'")
@@ -780,7 +780,7 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     elif what_skew in ('pearson', 'pearsonMedian'):
         out = (3 * (np.mean(y) - np.median(y)) / np.std(y, ddof=1))
     elif what_skew == 'bowley':
-        qs = np.quantile(y, [0.25, 0.5, 0.75], method='hazen')
+        qs = _quantile(y, [0.25, 0.5, 0.75])
         out = (qs[2]+qs[0] - 2 * qs[1]) / (qs[2] - qs[0]) 
     else:
         raise ValueError(f"Unknown skewness type '{what_skew}'.")
@@ -869,10 +869,9 @@ def _fit_lin_gof(x: np.ndarray, y: np.ndarray) -> tuple:
     n = len(y)
     if n < 3 or not np.ptp(y) > 1e-12 * np.max(np.abs(y)):  # (constant to within rounding)
         return (np.nan,) * 4
-    sst = np.sum((y - np.mean(y)) ** 2)
     a, b = np.polyfit(x, y, 1)
-    sse = np.sum((y - (a * x + b)) ** 2)
-    return a, b, 1 - sse / sst, np.sqrt(sse / (n - 2))
+    gof = goodness_of_fit(y, a * x + b, 2, guard_sst=False)
+    return a, b, gof['rsquare'], gof['rmse']
 
 
 def _exp_fit_outputs(x: np.ndarray, y: np.ndarray) -> tuple:
@@ -1133,7 +1132,7 @@ def outlier_test(y: ArrayLike, p: float = 2,
 
     # mean of the middle (100-2*p)% of the data
     y = np.array(y)
-    lower_bound, upper_bound = np.quantile(y, [p / 100, (100 - p) / 100], method='hazen')
+    lower_bound, upper_bound = _quantile(y, [p / 100, (100 - p) / 100])
     
     middle_portion = y[(y > lower_bound) & (y < upper_bound)]
     
@@ -1646,19 +1645,14 @@ def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') ->
     # Toolbox: R^2, R^2 adjusted for the number of fitted parameters, and the root-mean-square
     # error from the residual sum of squares divided by the degrees of freedom of the error
     res = dny - dny_fit
-    sse = np.sum(res ** 2)
-    sstot = np.sum((dny - np.mean(dny)) ** 2)
-    with np.errstate(all='ignore'):
-        r2 = 1 - sse / sstot
-        adjr2 = 1 - (1 - r2) * (len(dny) - 1) / dfe
-    rmse = np.sqrt(sse / dfe)
+    gof = goodness_of_fit(dny, dny_fit, num_params, guard_sst=False, adj_from_rsquare=True)
 
     # Remaining structure in the residuals, in order of increasing value:
     res_ac1, res_ac2, res_runsz = bf_residual_stats(res, dny)
     return {
-        'r2': float(r2),
-        'adjr2': float(adjr2),
-        'rmse': float(rmse * np.std(x, ddof=1)),
+        'r2': gof['rsquare'],
+        'adjr2': gof['adjrsquare'],
+        'rmse': float(gof['rmse'] * np.std(x, ddof=1)),
         'resAC1': float(res_ac1),
         'resAC2': float(res_ac2),
         'resrunsz': float(res_runsz),
