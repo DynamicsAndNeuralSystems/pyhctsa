@@ -358,6 +358,7 @@ Scaling
    pyhctsa.operations.scaling.mma
    pyhctsa.operations.scaling.higuchi_fd
    pyhctsa.operations.scaling.mfdfa
+   pyhctsa.operations.scaling.long_memory_d
 
 .. _spectralmeths:
 
