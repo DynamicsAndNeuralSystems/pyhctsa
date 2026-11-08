@@ -15,6 +15,7 @@ logger = logging.getLogger('pyhctsa')
 import numpy as np
 from numpy.typing import ArrayLike
 import pandas as pd
+from scipy import fft as sp_fft
 from scipy.signal import correlate
 from scipy.stats import chi2, rankdata
 
@@ -738,11 +739,82 @@ def _sample_std(x: ArrayLike, axis: Union[int, None] = None):
 
 
 
+def _autocov_fft(x: ArrayLike, nlags: Union[int, None] = None, pad: str = 'fast') -> np.ndarray:
+    """Linear autocovariance sums of each mean-removed row of ``x``, computed by FFT.
+
+    ``c_k = sum_{t=0}^{n-1-k} (x_t - xbar)(x_{t+k} - xbar)`` for ``k = 0..nlags-1``, along the
+    last axis, each row with its own mean removed; unnormalized (no ``1/n``), so callers that
+    want the autocorrelation divide by ``c_0``. Evaluated through the Wiener-Khinchin relation:
+    the inverse real FFT of ``F * conj(F)``, with ``F`` the real FFT of the mean-removed row
+    zero-padded to ``nfft >= 2n - 1``, is the linear (not circular) autocovariance. Every such
+    ``nfft`` gives the same values up to rounding; ``pad`` fixes which one is used.
+
+    Parameters
+    ----------
+    x : array-like
+        1-D series, or 2-D array whose rows are series of equal length ``n``. Finite values
+        are assumed (no guard here).
+    nlags : int or None, optional
+        Number of lags returned (lags ``0..nlags-1``); ``None`` gives all ``n``.
+    pad : {'fast', '2n', 'pow2'}, optional
+        FFT length: ``'fast'`` the smallest fast real-FFT length ``>= 2n - 1``
+        (``scipy.fft.next_fast_len``), ``'2n'`` exactly ``2n``, ``'pow2'`` the smallest power
+        of two ``>= 2n``. Default ``'fast'``.
+
+    Returns
+    -------
+    numpy.ndarray
+        float64 array of the input shape with the last axis cut to ``nlags``.
+    """
+    x = np.asarray(x, dtype=float)
+    n = x.shape[-1]
+    if pad == 'fast':
+        nfft = sp_fft.next_fast_len(2 * n - 1, real=True)
+    elif pad == '2n':
+        nfft = 2 * n
+    elif pad == 'pow2':
+        nfft = 1 << int(np.ceil(np.log2(2 * n)))
+    else:
+        raise ValueError(f"Unknown pad {pad!r}; expected 'fast', '2n' or 'pow2'.")
+    z = x - x.mean(axis=-1, keepdims=True)
+    f = sp_fft.rfft(z, nfft, axis=-1)
+    return sp_fft.irfft(f * np.conj(f), nfft, axis=-1)[..., :n if nlags is None else nlags]
+
+
+def _acf_fft(y: ArrayLike) -> np.ndarray:
+    """Sample autocorrelation function at lags 0..N-1, computed by FFT.
+
+    Parameters
+    ----------
+    y : array-like
+        Time series of length N >= 1.
+
+    Returns
+    -------
+    numpy.ndarray
+        float64 array of length N with ``acf[0] == 1``; all NaN if ``y`` is constant (or
+        has length 1) or contains NaN or Inf.
+
+    Notes
+    -----
+    ``r_k = c_k / c_0`` with ``c_k = (1/N) sum_t (y_t - ybar)(y_{t+k} - ybar)`` (Box, Jenkins &
+    Reinsel 1994, *Time Series Analysis*, 3rd ed., eq. 2.1.12), with the autocovariance from
+    :func:`_autocov_fft` at a fast FFT length of at least 2N - 1.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = y.size
+    if N == 0:
+        return np.zeros(0)
+    if not np.all(np.isfinite(y)) or np.ptp(y) == 0:
+        return np.full(N, np.nan)
+    a = _autocov_fft(y, pad='fast')
+    return np.real(a / a[0])
+
+
 def _acf_fourier(y: np.ndarray) -> np.ndarray:
     """ACF at lags 0..N-1 (CO_AutoCorr(y, [], 'Fourier')); all-NaN for a constant series."""
-    from .operations.correlation import autocorr
     with np.errstate(all='ignore'):
-        return np.asarray(autocorr(y, [], 'Fourier'), dtype=float).ravel()
+        return _acf_fft(y)
 
 
 def _tau_ac(y: np.ndarray) -> float:

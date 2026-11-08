@@ -5,7 +5,6 @@ from typing import Union
 import numba
 import numpy as np
 from numpy.typing import ArrayLike
-from scipy import fft as sp_fft
 from scipy.linalg import solve_triangular
 from scipy.optimize import curve_fit
 from scipy.stats import chi2, expon, kstest, kurtosis, norm, skew
@@ -18,7 +17,7 @@ from ..operations.information import automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..robust import bf_hist_edges, bf_quantile_edges, bf_random, bf_remove_points
 from ..utils import (dict_output, _round_half_away, _tie_aware_ranks, _zscore_or_zeros, get_tau,
-                     frame_signal, point_of_crossing, sign_change, theiler_window,
+                     _acf_fft, frame_signal, point_of_crossing, sign_change, theiler_window,
                      time_delay_embed, z_score)
 from ..utils import _shannon_entropy
 
@@ -3074,41 +3073,6 @@ def glscf(y: ArrayLike, alpha: float, beta: float, tau: Union[int, str] = 'tau')
     p4 = np.sqrt(np.mean(y2 ** (2*beta)) - (np.mean(y2 ** beta))**2)
 
     return np.divide((p1-p2), (p3 * p4))
-
-
-def _acf_fft(y: np.ndarray) -> np.ndarray:
-    """Sample autocorrelation function at lags 0..N-1, computed by FFT.
-
-    Parameters
-    ----------
-    y : array-like
-        Time series of length N >= 1.
-
-    Returns
-    -------
-    numpy.ndarray
-        float64 array of length N with ``acf[0] == 1``; all NaN if ``y`` is constant (or
-        has length 1) or contains NaN or Inf.
-
-    Notes
-    -----
-    ``r_k = c_k / c_0`` with ``c_k = (1/N) sum_t (y_t - ybar)(y_{t+k} - ybar)`` (Box, Jenkins &
-    Reinsel 1994, *Time Series Analysis*, 3rd ed., eq. 2.1.12), evaluated through the
-    Wiener-Khinchin relation: the inverse DFT of the power spectrum of the mean-removed series,
-    zero-padded to a fast FFT length of at least 2N - 1, is its linear autocovariance sequence
-    (any padded length >= 2N - 1 gives the same, exact, linear autocovariance).
-    """
-    y = np.asarray(y, dtype=float).ravel()
-    N = y.size
-    if N == 0:
-        return np.zeros(0)
-    if not np.all(np.isfinite(y)) or np.ptp(y) == 0:
-        return np.full(N, np.nan)
-    z = y - y.mean()
-    nfft = sp_fft.next_fast_len(2 * N - 1, real=True)
-    f = sp_fft.rfft(z, nfft)
-    a = sp_fft.irfft(f * np.conj(f), nfft)[:N]
-    return np.real(a / a[0])
 
 
 def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
