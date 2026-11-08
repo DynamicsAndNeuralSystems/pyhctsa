@@ -49,6 +49,11 @@ _CALLS = [
 ]
 
 # (module, operation, series, output key or None for a scalar output) -> value on main
+# Re-pinned on this branch (cons-coarse-grain, #60): the following values change with the convention
+# this branch fixes (see its PR body); every other value is the main-checkout value.
+#   entropy.shannon_entropy|ar1.None
+#   entropy.shannon_entropy|sine.None
+#   entropy.shannon_entropy|wn.None
 _EXPECTED = {
     ('entropy', 'permutation_entropy', 'wn', 'permEnLE'): 0.8951686285063656,
     ('entropy', 'permutation_entropy', 'wn', 'normWPE'): 0.9989359783759333,
@@ -77,9 +82,9 @@ _EXPECTED = {
     ('entropy', 'dispersion_entropy', 'ar1', 'fDispEn'): 3.2306244420279695,
     ('entropy', 'dispersion_entropy', 'sine', 'dispEn'): 4.164579615543262,
     ('entropy', 'dispersion_entropy', 'sine', 'fDispEn'): 2.937993914120066,
-    ('entropy', 'shannon_entropy', 'wn', None): 1.0887235995590367,
-    ('entropy', 'shannon_entropy', 'ar1', None): 0.9345177371665226,
-    ('entropy', 'shannon_entropy', 'sine', None): 0.845140099878016,
+    ('entropy', 'shannon_entropy', 'wn', None): 1.088066797770798,
+    ('entropy', 'shannon_entropy', 'ar1', None): 0.9349343261626059,
+    ('entropy', 'shannon_entropy', 'sine', None): 0.8447257424865436,
     ('nonlinearity', 'persistent_homology', 'wn', 'persistenceEntropyH1'): 5.045602488533601,
     ('nonlinearity', 'persistent_homology', 'ar1', 'persistenceEntropyH1'): 4.975308596394514,
     ('nonlinearity', 'persistent_homology', 'sine', 'persistenceEntropyH1'): 4.8371356563554535,

@@ -91,9 +91,53 @@ OPS = {
     'saturating_exp_fit': lambda y: _saturating_exp_fit(np.arange(1, 61.), np.abs(y[:60]).cumsum()),
 }
 
+# Re-pinned on this branch (cons-coarse-grain, #60): the following values change with the convention
+# this branch fixes (see its PR body); every other value is the main-checkout value.
+#   ar1|transition_p_alphabet.meandiagfexp_a
+#   ar1|transition_p_alphabet.meandiagfexp_adjr2
+#   ar1|transition_p_alphabet.meandiagfexp_b
+#   ar1|transition_p_alphabet.meandiagfexp_r2
+#   ar1|transition_p_alphabet.meandiagfexp_rmse
+#   ar1|transition_p_alphabet.stdeigfexp_a
+#   ar1|transition_p_alphabet.stdeigfexp_adjr2
+#   ar1|transition_p_alphabet.stdeigfexp_b
+#   ar1|transition_p_alphabet.stdeigfexp_r2
+#   ar1|transition_p_alphabet.stdeigfexp_rmse
+#   ar1|transition_p_alphabet.trcovfexp_a
+#   ar1|transition_p_alphabet.trcovfexp_adjr2
+#   ar1|transition_p_alphabet.trcovfexp_b
+#   ar1|transition_p_alphabet.trcovfexp_r2
+#   ar1|transition_p_alphabet.trcovfexp_rmse
+#   ar1|transition_p_alphabet.trfexp_a
+#   ar1|transition_p_alphabet.trfexp_adjr2
+#   ar1|transition_p_alphabet.trfexp_b
+#   ar1|transition_p_alphabet.trfexp_r2
+#   ar1|transition_p_alphabet.trfexp_rmse
+#   sin|transition_p_alphabet.maxdiagfexp_a
+#   sin|transition_p_alphabet.maxdiagfexp_adjr2
+#   sin|transition_p_alphabet.maxdiagfexp_b
+#   sin|transition_p_alphabet.maxdiagfexp_r2
+#   sin|transition_p_alphabet.maxdiagfexp_rmse
+#   sin|transition_p_alphabet.meandiagfexp_a
+#   sin|transition_p_alphabet.meandiagfexp_adjr2
+#   sin|transition_p_alphabet.meandiagfexp_b
+#   sin|transition_p_alphabet.meandiagfexp_r2
+#   sin|transition_p_alphabet.meandiagfexp_rmse
+#   sin|transition_p_alphabet.stdeigfexp_a
+#   sin|transition_p_alphabet.stdeigfexp_adjr2
+#   sin|transition_p_alphabet.stdeigfexp_b
+#   sin|transition_p_alphabet.stdeigfexp_r2
+#   sin|transition_p_alphabet.stdeigfexp_rmse
+#   sin|transition_p_alphabet.trcovfexp_a
+#   sin|transition_p_alphabet.trcovfexp_rmse
+#   sin|transition_p_alphabet.trfexp_a
+#   sin|transition_p_alphabet.trfexp_adjr2
+#   sin|transition_p_alphabet.trfexp_b
+#   sin|transition_p_alphabet.trfexp_r2
+#   sin|transition_p_alphabet.trfexp_rmse
 EXPECTED = {
     ('ar1', 'outlier_include'): {'mfexpb': 2.1634567328140175, 'mfexpr2': 0.9911909611311535, 'mfexprmse': 0.7171442873618252, 'nfexpb': -1.0080706511701287, 'nfexpr2': 0.9984041450973923, 'nfexprmse': 1.146651044904612, 'stdrfexpb': 1.384716719678781, 'stdrfexpr2': 0.994622981966881, 'stdrfexprmse': 0.5699139149010414},
-    ('ar1', 'transition_p_alphabet'): {'meandiagfexp_a': 0.9518112045608399, 'meandiagfexp_b': -0.48341516403030604, 'meandiagfexp_r2': 0.9852357670383904, 'meandiagfexp_adjr2': 0.9822829204460686, 'meandiagfexp_rmse': 0.0159855777998404, 'maxdiagfexp_a': 0.6627644466935889, 'maxdiagfexp_b': -0.3149659921360167, 'maxdiagfexp_r2': 0.9671612239628987, 'maxdiagfexp_adjr2': 0.9605934687554785, 'maxdiagfexp_rmse': 0.02090393261517731, 'trfexp_a': 1.0082756055751136, 'trfexp_b': -0.16230343156568988, 'trfexp_r2': 0.984384226403196, 'trfexp_adjr2': 0.9812610716838353, 'trfexp_rmse': 0.02229656615014708, 'trcovfexp_a': 0.293030648430324, 'trcovfexp_b': -0.7949434129706214, 'trcovfexp_r2': 0.9954647302910079, 'trcovfexp_adjr2': 0.9945576763492094, 'trcovfexp_rmse': 0.001555052634436466, 'stdeigfexp_a': 0.2712747753002735, 'stdeigfexp_b': -0.2251375880682429, 'stdeigfexp_r2': 0.9803837195770687, 'stdeigfexp_adjr2': 0.9764604634924825, 'stdeigfexp_rmse': 0.007024392233588439},
+    ('ar1', 'transition_p_alphabet'): {'meandiagfexp_a': 0.9507177999879877, 'meandiagfexp_b': -0.48294688328814117, 'meandiagfexp_r2': 0.9849405097579514, 'meandiagfexp_adjr2': 0.9819286117095417, 'meandiagfexp_rmse': 0.01613078078207405, 'maxdiagfexp_a': 0.6627644466935889, 'maxdiagfexp_b': -0.3149659921360167, 'maxdiagfexp_r2': 0.9671612239628987, 'maxdiagfexp_adjr2': 0.9605934687554785, 'maxdiagfexp_rmse': 0.02090393261517731, 'trfexp_a': 1.0041621623405603, 'trfexp_b': -0.16097625390616888, 'trfexp_r2': 0.9835870693269559, 'trfexp_adjr2': 0.9803044831923471, 'trfexp_rmse': 0.022694617809869703, 'trcovfexp_a': 0.29298611321456297, 'trcovfexp_b': -0.7948744989529248, 'trcovfexp_r2': 0.9954281515685559, 'trcovfexp_adjr2': 0.9945137818822671, 'trcovfexp_rmse': 0.0015610553552370136, 'stdeigfexp_a': 0.271697520318342, 'stdeigfexp_b': -0.22567315596262943, 'stdeigfexp_r2': 0.9810657977833603, 'stdeigfexp_adjr2': 0.9772789573400325, 'stdeigfexp_rmse': 0.006913752966268968},
     ('ar1', 'largest_lyap'): {'expfit_a': 1.7490235932201303, 'expfit_b': -0.5837230780759545, 'expfit_r2': 0.9683657465320821, 'expfit_adjr2': 0.9680103054818807, 'expfit_rmse': 0.03996097856526671},
     ('ar1', 'std_nth_deriv_change'): {'fexp_a': 0.2118839880588739, 'fexp_b': 0.6646838923808013, 'fexp_r2': 0.9999845663288156, 'fexp_rmse': 0.21909040472072494, 'minOrder': 1.0, 'minRatio': 1.0, 'overDiffRatio': 240.71698570311383, 'isInterior': 0.0, 'minOrderInterp': 1.0},
     ('ar1', 'loop_local_simple'): {'sws_fexp_b': -0.2851744878047869, 'sws_fexp_r2': 0.9914136402641577, 'sws_fexp_adjr2': 0.9889603946253456, 'sws_fexp_rmse': 0.0038409517999407933},
@@ -101,7 +145,7 @@ EXPECTED = {
     ('ar1', 'bf_exp_fit_nooffset'): {'a': 3.0467869552190643, 'b': 0.05038927765029011, 'c': 0.0, 'r2': 0.965693695222583, 'adjr2': 0.9647908977284404, 'rmse': 1.132541772580041},
     ('ar1', 'saturating_exp_fit'): {'a': -41.18772072860475, 'b': 0.010020378065216487, 'r2': 0.9863792774182357, 'adjr2': 0.9861444373737226, 'rmse': 1.1567232948975534},
     ('sin', 'outlier_include'): {'mfexpb': 5.7603541055074325, 'mfexpr2': 0.9950454226778205, 'mfexprmse': 0.5503197200957725, 'nfexpb': -0.09295868693877789, 'nfexpr2': 0.9956318275427171, 'nfexprmse': 2.0614459552156226, 'stdrfexpb': 3.620341483420356, 'stdrfexpr2': 0.9939670331479992, 'stdrfexprmse': 0.7156118867230568},
-    ('sin', 'transition_p_alphabet'): {'meandiagfexp_a': 1.1078202637047667, 'meandiagfexp_b': -0.4899688805925899, 'meandiagfexp_r2': 0.9894895581243229, 'meandiagfexp_adjr2': 0.9873874697491876, 'meandiagfexp_rmse': 0.015580048827624322, 'maxdiagfexp_a': 0.8987668567096528, 'maxdiagfexp_b': -0.38717533407006843, 'maxdiagfexp_r2': 0.9858592401120183, 'maxdiagfexp_adjr2': 0.983031088134422, 'maxdiagfexp_rmse': 0.017123514234549653, 'trfexp_a': 1.1954721641468349, 'trfexp_b': -0.17444476661341268, 'trfexp_r2': 0.9899327517815025, 'trfexp_adjr2': 0.987919302137803, 'trfexp_rmse': 0.021563641600966403, 'trcovfexp_a': 0.9316047798137568, 'trcovfexp_b': -1.0120490439898053, 'trcovfexp_r2': 0.9965054899377485, 'trcovfexp_adjr2': 0.9958065879252982, 'trcovfexp_rmse': 0.0028489798883608976, 'stdeigfexp_a': 0.14448166873217663, 'stdeigfexp_b': -0.1153979721630088, 'stdeigfexp_r2': 0.8891459836998379, 'stdeigfexp_adjr2': 0.8669751804398055, 'stdeigfexp_rmse': 0.008223353693886128},
+    ('sin', 'transition_p_alphabet'): {'meandiagfexp_a': 1.1085370348423813, 'meandiagfexp_b': -0.4902336484672757, 'meandiagfexp_r2': 0.9896589193255364, 'meandiagfexp_adjr2': 0.9875907031906437, 'meandiagfexp_rmse': 0.015461512354675865, 'maxdiagfexp_a': 0.896267795057849, 'maxdiagfexp_b': -0.38609889480599613, 'maxdiagfexp_r2': 0.984850731578381, 'maxdiagfexp_adjr2': 0.9818208778940571, 'maxdiagfexp_rmse': 0.017685816742517988, 'trfexp_a': 1.1982994316313706, 'trfexp_b': -0.17522296830005896, 'trfexp_r2': 0.9909390966672093, 'trfexp_adjr2': 0.9891269160006511, 'trfexp_rmse': 0.02053135871380233, 'trcovfexp_a': 0.9315871484332647, 'trcovfexp_b': -1.0120490439898053, 'trcovfexp_r2': 0.9965054899377485, 'trcovfexp_adjr2': 0.9958065879252982, 'trcovfexp_rmse': 0.0028511652763407386, 'stdeigfexp_a': 0.14408305812333808, 'stdeigfexp_b': -0.11452168994534535, 'stdeigfexp_r2': 0.8904099547361898, 'stdeigfexp_adjr2': 0.8684919456834277, 'stdeigfexp_rmse': 0.008111960048081339},
     ('sin', 'largest_lyap'): {'expfit_a': 1.346059264741789, 'expfit_b': -0.6816755822723262, 'expfit_r2': 0.6082017074214228, 'expfit_adjr2': 0.6060128901444475, 'expfit_rmse': 0.09528677603961304},
     ('sin', 'std_nth_deriv_change'): {'fexp_a': 0.21721168024180207, 'fexp_b': 0.6664390290972432, 'fexp_r2': 0.9999934267452425, 'fexp_rmse': 0.14924117800118378, 'minOrder': 1.0, 'minRatio': 1.0, 'overDiffRatio': 295.5752990316364, 'isInterior': 0.0, 'minOrderInterp': 1.0},
     ('sin', 'loop_local_simple'): {'sws_fexp_b': -0.9670774658523957, 'sws_fexp_r2': 0.8511169394157636, 'sws_fexp_adjr2': 0.8085789221059818, 'sws_fexp_rmse': 0.005948922309670753},
