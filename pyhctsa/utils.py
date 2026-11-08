@@ -15,6 +15,7 @@ logger = logging.getLogger('pyhctsa')
 import numpy as np
 from numpy.typing import ArrayLike
 import pandas as pd
+from scipy import fft as sp_fft
 from scipy.signal import correlate
 from scipy.stats import chi2, rankdata
 
@@ -445,6 +446,48 @@ def simple_binner(x_data: ArrayLike, num_bins: int) -> tuple:
 
     return N, bin_edges
 
+def _shannon_entropy(p: ArrayLike, base: Union[float, None] = None, normalize: bool = False,
+                     axis: Union[int, None] = None):
+    """
+    Shannon entropy ``-sum p log p`` of a probability vector (or of each slice along ``axis``).
+
+    Parameters
+    ----------
+    p : ArrayLike
+        Probabilities (or nonnegative weights, with ``normalize=True``).
+    base : float or None, optional
+        Logarithm base: None for the natural log (nats), 2 for bits (``np.log2``), 10 for
+        ``np.log10``; any other base divides the natural log by ``log(base)``.
+    normalize : bool, optional
+        Divide ``p`` by its sum (along ``axis``) first. Default False.
+    axis : int or None, optional
+        None (default) treats ``p`` as one flattened vector and returns a scalar; an integer
+        returns one entropy per slice along that axis.
+
+    Returns
+    -------
+    np.float64 or np.ndarray
+        The entropy. Terms with ``p <= 0`` or NaN contribute 0 (``0 log 0 = 0``): with
+        ``axis=None`` they are dropped before summing (so an empty or all-zero ``p`` gives -0.0),
+        with an integer ``axis`` they are set to 0 in place. No eps is added.
+    """
+    p = np.asarray(p, dtype=float)
+    if normalize:
+        p = p / np.sum(p, axis=axis, keepdims=axis is not None)
+    if base is None:
+        log = np.log
+    elif base == 2:
+        log = np.log2
+    elif base == 10:
+        log = np.log10
+    else:
+        log = lambda v: np.log(v) / np.log(base)
+    if axis is None:
+        p = p[p > 0]
+        return -np.sum(p * log(p))
+    pos = p > 0
+    return -np.sum(np.where(pos, p * log(np.where(pos, p, 1.0)), 0.0), axis=axis)
+
 def point_of_crossing(x: ArrayLike, threshold: float) -> tuple:
     """
     Linearly interpolate to the point of crossing a threshold
@@ -578,6 +621,23 @@ def frame_signal(x: ArrayLike, n: int, p: int = 0) -> np.ndarray:
     win = np.lib.stride_tricks.sliding_window_view(z, n)[::h][:ncols]
     return win.T.copy()
 
+
+# Smallest FFT length of the zero-padded spectral estimates (the 'periodogram' and 'welch' spectra
+# of spectral.spectral_summaries, medical.hrv_classic, nonlinearity._period_normalized_tau): the
+# spectrum is evaluated on max(256, next power of two >= segment length) frequencies, an
+# interpolated grid that is finer than the DFT grid of short segments. The peak-prominence
+# thresholds of spectral_summaries are calibrated on this grid (a pyhctsa choice).
+_MIN_NFFT = 256
+
+
+def _padded_nfft(length: int) -> int:
+    """FFT length of the zero-padded spectral estimates: ``max(256, 2**ceil(log2(length)))``.
+
+    The 256 floor (``_MIN_NFFT``) is part of the convention; FFT lengths without it are computed
+    inline by their callers.
+    """
+    return max(_MIN_NFFT, 2 ** int(np.ceil(np.log2(length))))
+
 # ------------------------------------------------------------------------------
 # Adaptive time delays, Theiler windows and decimation (hctsa BF_GetTau,
 # BF_TheilerWindow, BF_PreProcess)
@@ -679,11 +739,82 @@ def _sample_std(x: ArrayLike, axis: Union[int, None] = None):
 
 
 
+def _autocov_fft(x: ArrayLike, nlags: Union[int, None] = None, pad: str = 'fast') -> np.ndarray:
+    """Linear autocovariance sums of each mean-removed row of ``x``, computed by FFT.
+
+    ``c_k = sum_{t=0}^{n-1-k} (x_t - xbar)(x_{t+k} - xbar)`` for ``k = 0..nlags-1``, along the
+    last axis, each row with its own mean removed; unnormalized (no ``1/n``), so callers that
+    want the autocorrelation divide by ``c_0``. Evaluated through the Wiener-Khinchin relation:
+    the inverse real FFT of ``F * conj(F)``, with ``F`` the real FFT of the mean-removed row
+    zero-padded to ``nfft >= 2n - 1``, is the linear (not circular) autocovariance. Every such
+    ``nfft`` gives the same values up to rounding; ``pad`` fixes which one is used.
+
+    Parameters
+    ----------
+    x : array-like
+        1-D series, or 2-D array whose rows are series of equal length ``n``. Finite values
+        are assumed (no guard here).
+    nlags : int or None, optional
+        Number of lags returned (lags ``0..nlags-1``); ``None`` gives all ``n``.
+    pad : {'fast', '2n', 'pow2'}, optional
+        FFT length: ``'fast'`` the smallest fast real-FFT length ``>= 2n - 1``
+        (``scipy.fft.next_fast_len``), ``'2n'`` exactly ``2n``, ``'pow2'`` the smallest power
+        of two ``>= 2n``. Default ``'fast'``.
+
+    Returns
+    -------
+    numpy.ndarray
+        float64 array of the input shape with the last axis cut to ``nlags``.
+    """
+    x = np.asarray(x, dtype=float)
+    n = x.shape[-1]
+    if pad == 'fast':
+        nfft = sp_fft.next_fast_len(2 * n - 1, real=True)
+    elif pad == '2n':
+        nfft = 2 * n
+    elif pad == 'pow2':
+        nfft = 1 << int(np.ceil(np.log2(2 * n)))
+    else:
+        raise ValueError(f"Unknown pad {pad!r}; expected 'fast', '2n' or 'pow2'.")
+    z = x - x.mean(axis=-1, keepdims=True)
+    f = sp_fft.rfft(z, nfft, axis=-1)
+    return sp_fft.irfft(f * np.conj(f), nfft, axis=-1)[..., :n if nlags is None else nlags]
+
+
+def _acf_fft(y: ArrayLike) -> np.ndarray:
+    """Sample autocorrelation function at lags 0..N-1, computed by FFT.
+
+    Parameters
+    ----------
+    y : array-like
+        Time series of length N >= 1.
+
+    Returns
+    -------
+    numpy.ndarray
+        float64 array of length N with ``acf[0] == 1``; all NaN if ``y`` is constant (or
+        has length 1) or contains NaN or Inf.
+
+    Notes
+    -----
+    ``r_k = c_k / c_0`` with ``c_k = (1/N) sum_t (y_t - ybar)(y_{t+k} - ybar)`` (Box, Jenkins &
+    Reinsel 1994, *Time Series Analysis*, 3rd ed., eq. 2.1.12), with the autocovariance from
+    :func:`_autocov_fft` at a fast FFT length of at least 2N - 1.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = y.size
+    if N == 0:
+        return np.zeros(0)
+    if not np.all(np.isfinite(y)) or np.ptp(y) == 0:
+        return np.full(N, np.nan)
+    a = _autocov_fft(y, pad='fast')
+    return np.real(a / a[0])
+
+
 def _acf_fourier(y: np.ndarray) -> np.ndarray:
     """ACF at lags 0..N-1 (CO_AutoCorr(y, [], 'Fourier')); all-NaN for a constant series."""
-    from .operations.correlation import autocorr
     with np.errstate(all='ignore'):
-        return np.asarray(autocorr(y, [], 'Fourier'), dtype=float).ravel()
+        return _acf_fft(y)
 
 
 def _tau_ac(y: np.ndarray) -> float:

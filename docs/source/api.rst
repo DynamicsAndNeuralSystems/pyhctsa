@@ -101,6 +101,7 @@ Correlation
    pyhctsa.operations.correlation.time_rev_kld
    pyhctsa.operations.correlation.autocorr
    pyhctsa.operations.correlation.autocorr_x2_shape
+   pyhctsa.operations.correlation.cyclostationarity_scan
    pyhctsa.operations.correlation.add_noise
    pyhctsa.operations.correlation.theiler_q
    pyhctsa.operations.correlation.crinkle_statistic
@@ -357,6 +358,7 @@ Scaling
    pyhctsa.operations.scaling.mma
    pyhctsa.operations.scaling.higuchi_fd
    pyhctsa.operations.scaling.mfdfa
+   pyhctsa.operations.scaling.long_memory_d
 
 .. _spectralmeths:
 
@@ -365,7 +367,7 @@ Spectral
 .. autosummary::
    :toctree: generated/
 
-   pyhctsa.operations.spectral.phase_amp_coupling
+   pyhctsa.operations.spectral.cross_frequency_coupling
    pyhctsa.operations.spectral.spectral_summaries
    pyhctsa.operations.spectral.spectral_summaries_phase
    pyhctsa.operations.spectral.specparam
@@ -376,6 +378,7 @@ Spectral
    pyhctsa.operations.spectral.sinusoid_fit
    pyhctsa.operations.spectral.spectral_time_freq
    pyhctsa.operations.spectral.rhythmicity
+   pyhctsa.operations.spectral.doubled_phase_coherence
 
 .. _stationaritymeths:
 
