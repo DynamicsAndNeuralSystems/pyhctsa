@@ -20,7 +20,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from scipy.stats import chi2, t as t_dist
 
-from ..utils import _ar_design
+from ..utils import _ar_design, _lagged_products
 
 
 def _n_params(p: int, zero: bool) -> int:
@@ -175,8 +175,8 @@ def _arfit_residuals(w: float, A: np.ndarray, v: np.ndarray, k: Optional[int] = 
     if k <= p or k >= n:
         raise ValueError(f'Number of lags k = {k} must satisfy p < k < n (p = {p}, n = {n}).')
     e = res - res.mean()
-    denom = e @ e
-    r = np.array([e[:-l] @ e[l:] for l in range(1, k + 1)]) / denom
+    c = _lagged_products(e, k)
+    r = c[1:] / c[0]
     Q = n * np.sum(r ** 2) + k * (k + 1) / (2 * n)
     siglev = float(chi2.sf(Q, k - p))
     return siglev, res
