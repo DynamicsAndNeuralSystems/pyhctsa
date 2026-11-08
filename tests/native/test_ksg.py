@@ -1,4 +1,4 @@
-"""Accuracy tests for the KSG and Gaussian mutual-information estimators (pyhctsa.ksg).
+"""Accuracy tests for the KSG mutual-information estimator (pyhctsa.ksg).
 
 References are analytic mutual informations of Gaussians and a brute-force O(N^2) implementation
 of the KSG definitions; none depends on JIDT or MATLAB.
@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from scipy.special import digamma
 
-from pyhctsa.ksg import gaussian_mi, ksg_mi
+from pyhctsa.ksg import ksg_mi
 
 
 def _reference_ksg(x, y, k, algorithm, w=0):
@@ -114,7 +114,7 @@ def test_ksg_captures_nonlinear_dependence():
     # y = x^2 is uncorrelated with x, so the Gaussian estimate is ~0 but KSG is clearly positive
     x = np.random.default_rng(5).standard_normal(2000)
     y = x**2 + 0.05 * np.random.default_rng(6).standard_normal(2000)
-    assert gaussian_mi(x, y) < 0.01
+    assert -0.5 * np.log(1 - np.corrcoef(x, y)[0, 1]**2) < 0.01
     assert ksg_mi(x, y) > 0.5
 
 
@@ -162,26 +162,3 @@ def test_ksg_smallest_admissible_sample():
     rng = np.random.default_rng(8)
     x, y = rng.standard_normal(9), rng.standard_normal(9)
     assert ksg_mi(x, y, 4, 1, 2) == pytest.approx(_reference_ksg(x, y, 4, 1, 2), abs=1e-12)
-
-
-# ------------------------------------------------------------------------------- Gaussian
-
-
-def test_gaussian_mi_scalar_is_minus_half_log_one_minus_r_squared():
-    x, y = _gaussian_pair(400, 0.6, np.random.default_rng(1))
-    r = np.corrcoef(x, y)[0, 1]
-    assert gaussian_mi(x, y) == pytest.approx(-0.5 * np.log(1 - r**2), rel=1e-10)
-
-
-def test_gaussian_mi_multivariate_matches_population_value():
-    cov = np.array([[1.0, 0.6, 0.5], [0.6, 1.0, 0.3], [0.5, 0.3, 1.0]])
-    z = np.random.default_rng(0).multivariate_normal(np.zeros(3), cov, size=200000)
-    exact = 0.5 * np.log(np.linalg.det(cov[:2, :2]) * cov[2, 2] / np.linalg.det(cov))
-    assert gaussian_mi(z[:, :2], z[:, 2]) == pytest.approx(exact, abs=5e-3)
-
-
-def test_gaussian_mi_degenerate_cases():
-    t = np.linspace(0, 1, 50)
-    assert gaussian_mi(t, 3 * t + 1) > 10              # exactly linearly dependent: unbounded
-    assert np.isnan(gaussian_mi(np.ones(50), t))        # constant variable
-    assert gaussian_mi(t, np.random.default_rng(0).standard_normal(50)) >= 0

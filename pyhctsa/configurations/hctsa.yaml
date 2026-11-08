@@ -168,6 +168,14 @@ correlation:
     configs:
       - {zscore: True, exclude: ['peak_lag']}   # peak_lag: the scanned range grows with N
     variant_of: autocorr
+
+  cyclostationarity_scan:   # pyhctsa-only: spectral lines in the lag products of AR residuals (second-order cyclostationarity), over all cyclic frequencies and lags 0-20
+    base_name: cyclo_scan
+    min_length: 128
+    dependencies:
+    configs:
+      - {zscore: True}
+    variant_of: autocorr
   
   autocorr_x2_shape:
     base_name: acx2_shape
@@ -1685,6 +1693,13 @@ scaling:
     legacy_name: SC_MFDFA
     ordered_args: ['q_range']
 
+  long_memory_d:   # pyhctsa-only: local Whittle estimate of the memory parameter d below 1/128 and 1/32 cycles per sample
+    base_name: long_memory_d
+    dependencies:
+    configs:
+      - {zscore: True}
+    variant_of: fluctuation_analysis
+
 symbolic:
   transition_matrix:
     base_name: transition_matrix
@@ -1964,13 +1979,13 @@ hypothesis_tests:
 
 spectral:
 
-  phase_amp_coupling:
-    base_name: phase_amp_coupling
+  cross_frequency_coupling:   # phase-amplitude coupling (modulation index) and lagged amplitude envelope correlation between frequency bands
+    base_name: cfc
     dependencies:
     configs:
-      - {n_bands: 5, max_n: 'full', n_phase_bins: 18, zscore: True}
+      - {n_bands: 5, zscore: True}
     legacy_name: SP_PhaseAmpCoupling
-    ordered_args: ['n_bands', 'max_n', 'n_phase_bins']
+    ordered_args: ['n_bands']
 
   spectral_summaries:
     base_name: spectral_summaries
@@ -2053,6 +2068,14 @@ spectral:
       - {m: 5, tau: 1.5, n_freq: 40, zscore: True}   # SP_Rhythmicity(x_z,5,1.5,40,0.02,0.4,5,40)
     legacy_name: SP_Rhythmicity
     ordered_args: ['m', 'tau', 'n_freq']
+
+  doubled_phase_coherence:   # pyhctsa-only: record-long coherence of the squared Morlet band signal (phase kept modulo pi), excess over a Gaussian spectral null
+    base_name: dpc
+    dependencies:
+    configs:
+      - {harmonic: 2, zscore: True, exclude: ['coh_max', 'coh_freqAtMax', 'coh_mean', 'coh_atPeakPower']}
+    variant_of: rhythmicity
+    ordered_args: ['harmonic']
 
 model_fit:
   ar_cov:
