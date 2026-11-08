@@ -16,7 +16,7 @@ from pyhctsa.operations.model_fit import ar_fit
 from pyhctsa.operations.stationarity import local_extrema
 from pyhctsa.operations.symbolic import binary_stats
 from pyhctsa.operations.wavelet import wpd_best_tree
-from pyhctsa.utils import _sample_std, _sample_var, _zscore_or_zeros, z_score
+from pyhctsa.utils import _sample_std, _sample_var, _zscore, z_score
 
 
 def test_helpers_equal_numpy_bitwise_for_two_or_more():
@@ -38,7 +38,7 @@ def test_one_and_zero_observations():
     assert _sample_std([2.5], single=0.0) == 0.0 and _sample_var([2.5], single=0.0) == 0.0
     assert math.isnan(_sample_std([np.inf], single=0.0))  # a non-finite value is still NaN
     assert _sample_std([4.0, 4.0]) == 0.0                 # constant data: a real zero spread
-    assert _zscore_or_zeros([5.0]).tolist() == [0.0]      # its contract: constant input -> zeros
+    assert _zscore([5.0]).tolist() == [0.0]      # its contract: constant input -> zeros
 
 
 def test_samples_of_one_are_nan():

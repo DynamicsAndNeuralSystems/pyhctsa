@@ -120,7 +120,7 @@ def test_zscore_fixture():
     for c in FIX["zscore"]:
         x = ins(c, "x")
         z = out(c, "z")
-        got = utils._zscore_or_zeros(x.ravel())
+        got = utils._zscore(x.ravel())
         assert got.shape == (z.size,)
         if z.size == 0:
             continue

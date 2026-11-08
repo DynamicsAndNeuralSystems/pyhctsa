@@ -16,8 +16,7 @@ from ..operations.nonlinearity import zero_one_test
 from ..operations.stationarity import sliding_window, stat_av
 from ..toolboxes.Tisean_3_0_1.ports import _nrlazy
 from ..robust import _rank_map_gaussian, bf_fit_sinusoids
-from ..utils import (_even_split_points, _is_roundoff, _piecewise_poly_residual, dict_output, _sample_std,
-                     _zscore_or_zeros, z_score)
+from ..utils import (_even_split_points, _is_roundoff, _piecewise_poly_residual, dict_output, _sample_std, _zscore, z_score)
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
     """Running median of window length ``k``, with the end values repeated beyond the ends.
@@ -419,7 +418,7 @@ def _profile_trend_jump(f: np.ndarray) -> tuple:
     """
     if not np.all(np.isfinite(f)):
         return np.nan, np.nan
-    f = _zscore_or_zeros(f)
+    f = _zscore(f)
     n = len(f)
     trend = float(np.sum(np.diff(f)))
 

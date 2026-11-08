@@ -27,8 +27,7 @@ from ..operations.stationarity import sliding_window
 from ..toolboxes.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..robust import _rank_map_gaussian, bf_exp_fit, bf_random, bf_random_seed, bf_spread_perm
 from ..toolboxes.gpml.optimizers import minimize
-from ..utils import (_ar_design, _even_split_points, _is_roundoff, _piecewise_poly_residual, dict_output, _sample_std,
-                     _zscore_or_zeros, get_tau, z_score)
+from ..utils import (_ar_design, _even_split_points, _is_roundoff, _piecewise_poly_residual, dict_output, _sample_std, _zscore, get_tau, z_score)
 from ..utils import ljung_box
 
 
@@ -576,7 +575,7 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
                 # pieces of at most order + 1 points are fitted exactly: the residual is round-off,
                 # which z-scoring would amplify into spurious structure, so it is not a candidate
                 continue
-            candidates[f'p{order}_{num_bits}'] = _zscore_or_zeros(resid)
+            candidates[f'p{order}_{num_bits}'] = _zscore(resid)
     # rank-map onto a Gaussian (stochastic, from the portable generator)
     candidates['rmgd'] = _rank_map_gaussian(
         y, draws=bf_random(len(y), bf_random_seed(random_seed), 'normal'))
@@ -584,7 +583,7 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     # which a detrended series never is)
 
     names = list(candidates)
-    rmse = np.array([_ar_rms_error(_zscore_or_zeros(candidates[k]), 2) for k in names])
+    rmse = np.array([_ar_rms_error(_zscore(candidates[k]), 2) for k in names])
     if np.any(rmse > rmse[0] * 1.05):
         return candidates[names[int(np.argmax(rmse))]]
     return candidates['nothing']
@@ -3295,7 +3294,7 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
     out['maxonstd'] = np.max(np.abs(e)) / std_e
 
     # z-score the residuals for everything that follows (all of it is scale-free)
-    e_z = _zscore_or_zeros(e)
+    e_z = _zscore(e)
 
     # Serial correlation (at multiples of lag_unit; NaN at lags beyond the series)
     max_lag = 25
@@ -3313,7 +3312,7 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
         out['taurat'] = np.nan
     else:
         y = np.asarray(y, dtype=float).ravel()
-        tau_y = first_crossing(_zscore_or_zeros(y), 'ac', 0, 'continuous')
+        tau_y = first_crossing(_zscore(y), 'ac', 0, 'continuous')
         tau_e = first_crossing(e_z, 'ac', 0, 'continuous')
         if tau_y == 0 or not np.isfinite(tau_y):
             out['taurat'] = np.nan
