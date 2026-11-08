@@ -1,3 +1,4 @@
+import math
 import warnings
 import numpy as np
 from numpy.typing import ArrayLike
@@ -890,45 +891,244 @@ def _give_me_robust_stats(x_data: ArrayLike, y_data: ArrayLike, field_name: str,
             out[f'{field_name}_{key}'] = np.nan
     return out
 
-@dict_output
-def phase_amp_coupling(y: ArrayLike, n_bands: int = 5, max_n: Union[int, str] = 'full',
-                       n_phase_bins: int = 18) -> dict:
+def _band_analytic_signals(y: np.ndarray, n_bands: int) -> Union[list, None]:
+    """Analytic signals of ``y`` in ``n_bands`` equal-width frequency bands.
+
+    The one-sided FFT bins, DC and Nyquist excluded (neither carries meaningful oscillatory phase, as in
+    :func:`spectral_summaries_phase`), are split into ``n_bands`` contiguous bands of equal width. Each band's
+    analytic signal is the inverse FFT of twice its bins (the FFT-domain Hilbert transform, band-limited in one
+    step). Returns ``None`` if there are fewer than 2 usable bins per band (needed for a non-degenerate analytic
+    signal).
     """
-    Cross-frequency phase-amplitude coupling.
+    n = len(y)
+    half_n = n // 2 + 1 # one-sided bins: DC (0) up to Nyquist (half_n - 1, if n even)
+    if n % 2 == 0:
+        usable_bins = np.arange(1, half_n - 1)
+    else:
+        usable_bins = np.arange(1, half_n)
+
+    min_bins_per_band = 2
+    if len(usable_bins) < n_bands * min_bins_per_band:
+        return None
+
+    edges = _even_split_points(0, len(usable_bins), n_bands + 1)
+    y_fft = scipy.fft.fft(y)
+    analytic = []
+    for b in range(n_bands):
+        bins = usable_bins[edges[b]:edges[b + 1]]
+        yb = np.zeros(n, dtype=complex)
+        yb[bins] = 2 * y_fft[bins]
+        analytic.append(scipy.fft.ifft(yb))
+    return analytic
+
+def _xcorr_lags(a: np.ndarray, b: np.ndarray, max_lag: int) -> np.ndarray:
+    """mean_t a(t) b(t + k) for k = -max_lag..max_lag (biased: divided by len(a); zero-padded FFT)."""
+    m = len(a)
+    nf = 1 << int(np.ceil(np.log2(2 * m)))
+    cc = np.fft.irfft(np.conj(np.fft.rfft(a, nf)) * np.fft.rfft(b, nf), nf) / m
+    return cc[np.arange(-max_lag, max_lag + 1) % nf]
+
+
+def _acf_to_first_zero(a: np.ndarray, max_lag: int) -> np.ndarray:
+    """Autocorrelation of a zero-mean series at lags 0..max_lag, truncated before its first non-positive value."""
+    rho = _xcorr_lags(a, a, max_lag)[max_lag:]
+    rho = rho / rho[0]
+    nonpos = np.flatnonzero(rho[1:] <= 0)
+    return rho[:nonpos[0] + 1] if nonpos.size else rho
+
+
+def _max_normal_score(z: float, n: float) -> float:
+    """Standard-normal score of z as the maximum of n independent N(0, 1) values (Sidak): Phi^-1(Phi(z)^n).
+
+    Computed on the log scale, from whichever tail keeps precision, and from the Gaussian tail approximation
+    Q(z') = n Q(z) when z is so large that Phi(z) rounds to 1.
+    """
+    if z > 30:
+        return float(np.sqrt(max(z * z - 2 * np.log(n), 0.0)))
+    log_cdf = n * scipy.special.log_ndtr(z)
+    if log_cdf < np.log(0.5):
+        return float(scipy.special.ndtri(np.exp(log_cdf)))
+    return float(-scipy.special.ndtri(-np.expm1(log_cdf)))
+
+
+def _phase_amp_mi(analytic: list, n_phase_bins: int) -> dict:
+    """maxMI and entropyMI: Tort et al.'s modulation index for every phase(i)-amplitude(j) band pair, i < j."""
+    n_bands = len(analytic)
+    phase_band = [np.angle(zb) for zb in analytic]
+    amp_band = [np.abs(zb) for zb in analytic]
+    phase_edges = np.linspace(-np.pi, np.pi, n_phase_bins + 1)
+    h_max = np.log(n_phase_bins)
+    mi = []
+    for i in range(n_bands - 1):
+        for j in range(i + 1, n_bands):
+            bin_idx = np.digitize(phase_band[i], phase_edges) - 1
+            bin_idx[bin_idx == n_phase_bins] = n_phase_bins - 1 # phi == pi edge case
+            counts = np.bincount(bin_idx, minlength=n_phase_bins)
+            sums = np.bincount(bin_idx, weights=amp_band[j], minlength=n_phase_bins)
+            mean_amp = np.divide(sums, counts, out=np.zeros(n_phase_bins), where=counts > 0)
+            p = mean_amp / np.sum(mean_amp)
+            p = p[p > 0]
+            h = -np.sum(p * np.log(p))
+            mi.append((h_max - h) / h_max)
+    mi = np.asarray(mi)
+    if not np.any(np.isfinite(mi)):
+        return {'maxMI': np.nan, 'entropyMI': np.nan}
+
+    # Normalized Shannon entropy of the MI values across pairs (0 = coupling concentrated in one pair,
+    # 1 = uniformly diffuse)
+    p = mi[mi > 0]
+    if p.size == 0:
+        entropy_mi = np.nan
+    else:
+        p = p / np.sum(p)
+        entropy_mi = -np.sum(p * np.log(p)) / np.log(len(mi))
+    return {'maxMI': np.max(mi), 'entropyMI': entropy_mi}
+
+
+def _amp_amp_aec(analytic: list, max_lag_frac: float) -> dict:
+    """maxAEC0, maxAEC and zAEC: lagged amplitude envelope correlation over band pairs, with its null score."""
+    n_bands = len(analytic)
+    nan_out = {'maxAEC0': np.nan, 'maxAEC': np.nan, 'zAEC': np.nan}
+    n = len(analytic[0])
+
+    # Envelopes, trimmed at both ends (the FFT band filter is circular) and z-scored
+    n_trim = max(1, int(round(0.05 * n)))
+    envelopes = []
+    for zb in analytic:
+        a = np.abs(zb)[n_trim:n - n_trim]
+        a = a - np.mean(a)
+        a_sd = np.sqrt(np.mean(a * a))
+        if not a_sd > 0:
+            return nan_out
+        envelopes.append(a / a_sd)
+    m = len(envelopes[0])
+    max_lag = max(1, min(int(max_lag_frac * n), m // 4))
+
+    # Each envelope's autocorrelation, to its first non-positive value (for the Bartlett variance)
+    acf_lag = min(m - 1, max(max_lag, 10))
+    rhos = [_acf_to_first_zero(a, acf_lag) for a in envelopes]
+
+    r0_max, r_max, z_max = 0.0, -np.inf, -np.inf
+    num_pairs = 0
+    for i in range(n_bands - 1):
+        for j in range(i + 1, n_bands):
+            num_pairs += 1
+            r = _xcorr_lags(envelopes[i], envelopes[j], max_lag)
+            r0_max = max(r0_max, abs(r[max_lag]))
+            r_peak = np.max(r)
+            r_max = max(r_max, r_peak)
+            # Bartlett variance of r(k) for independent envelopes, and the effective number of lags scanned
+            L = min(len(rhos[i]), len(rhos[j]))
+            bartlett = 1.0 + 2.0 * np.sum(rhos[i][1:L] * rhos[j][1:L])
+            t_i, t_j = 1.0 + 2.0 * np.sum(rhos[i][1:]), 1.0 + 2.0 * np.sum(rhos[j][1:])
+            n_eff = max(1.0, (2 * max_lag + 1) / max(1.0, t_i * t_j / bartlett))
+            z_max = max(z_max, _max_normal_score(r_peak / np.sqrt(bartlett / m), n_eff))
+
+    return {'maxAEC0': r0_max, 'maxAEC': r_max, 'zAEC': _max_normal_score(z_max, num_pairs)}
+
+
+@dict_output
+def cross_frequency_coupling(y: ArrayLike, n_bands: int = 5, max_n: Union[int, str] = 'full',
+                             n_phase_bins: int = 18, max_lag_frac: float = 0.1) -> dict:
+    """
+    Cross-frequency coupling between equal-width frequency bands: phase-amplitude and amplitude-amplitude.
+
+    Cross-frequency coupling is an interaction between the activity in two frequency bands [1]_, [2]_. This
+    operation measures its two most common kinds, from the same band decomposition:
+
+    - Phase-amplitude coupling: the amplitude of a faster band depends on the phase of a slower one. It is
+      measured by Tort et al.'s modulation index [3]_: the normalized divergence from uniform of the faster
+      band's mean amplitude across bins of the slower band's phase.
+    - Amplitude-amplitude coupling: co-modulation of the amplitude envelopes of two bands. Its standard
+      estimator is the amplitude envelope correlation (AEC) [4]_: the correlation between the two bands'
+      Hilbert envelopes. Envelopes can also be coupled with a delay, the slower band's loudness leading the
+      faster's, or vice versa, so the envelope cross-correlation is also read over a range of lags, taking its
+      peak [5]_, [6]_.
+
+    The spectrum is split into ``n_bands`` contiguous bands of equal width (DC and Nyquist excluded), and each
+    band's analytic signal is computed in one step by the FFT-domain Hilbert transform. Every pair of bands,
+    adjacent bands included, is scanned.
+
+    For amplitude-amplitude coupling, 5% of samples are trimmed from each end of the envelopes (the FFT band
+    filter is circular), each envelope is z-scored, and the envelope cross-correlation
+    r(k) = mean_t A_i(t) A_j(t+k) is computed at lags ``|k| <= K = max_lag_frac * N``. The peak of r(k) over
+    many lags and pairs grows with the number of lags scanned even with no coupling, so ``zAEC`` scores it
+    against a null of independent envelopes. Bartlett's formula [7]_ gives the variance of a cross-correlation
+    between two independent autocorrelated series, var r = (1/m) sum_j rho_i(j) rho_j(j) (each envelope's
+    autocorrelation rho truncated at its first non-positive value), and the number of effectively independent
+    lags in the scan is (2K + 1) / w, with w = T_i T_j / B the correlation length of r(k) over lags
+    (T = integrated autocorrelation time, B = Bartlett's sum). A Sidak correction for the maximum over these
+    effective lags, and then over band pairs, maps the peak z back to a standard-normal score.
+
+    For a stationary linear Gaussian process, the envelopes of disjoint bands are asymptotically independent,
+    so the amplitude-amplitude outputs measure a fourth-order nonlinearity. They respond to any co-modulation
+    of band envelopes, including broadband transients and static nonlinear transforms of a linear process, not
+    only to coupling between distinct rhythms [8]_.
+
+    References
+    ----------
+    .. [1] O. Jensen and L. L. Colgin, "Cross-frequency coupling between neuronal oscillations", Trends Cogn.
+       Sci. 11(7), 267-269 (2007).
+    .. [2] A. Hyafil, A.-L. Giraud, L. Fontolan and B. Gutkin, "Neural cross-frequency coupling: connecting
+       architectures, mechanisms, and functions", Trends Neurosci. 38(11), 725-740 (2015).
+    .. [3] A. B. L. Tort, R. Komorowski, H. Eichenbaum and N. Kopell, "Measuring phase-amplitude coupling
+       between neuronal oscillations of different frequencies", J. Neurophysiol. 104(2), 1195-1210 (2010).
+    .. [4] A. Bruns, R. Eckhorn, H. Jokeit and A. Ebner, "Amplitude envelope correlation detects coupling among
+       incoherent brain signals", NeuroReport 11(7), 1509-1514 (2000).
+    .. [5] A. Bruns and R. Eckhorn, "Task-related coupling from high- to low-frequency signals among visual
+       cortical areas in human subdural recordings", Int. J. Psychophysiol. 51(2), 97-116 (2004).
+    .. [6] A. Adhikari, T. Sigurdsson, M. A. Topiwala and J. A. Gordon, "Cross-correlation of instantaneous
+       amplitudes of field potential oscillations: a straightforward method to estimate the directionality
+       and lag between brain areas", J. Neurosci. Methods 191(2), 191-200 (2010).
+    .. [7] M. S. Bartlett, "Some aspects of the time-correlation problem in regard to tests of significance",
+       J. R. Stat. Soc. 98(3), 536-543 (1935).
+    .. [8] J. Aru et al., "Untangling cross-frequency coupling in neuroscience", Curr. Opin. Neurobiol. 31,
+       51-61 (2015).
 
     Parameters
     ----------
     y : array-like
         The input time series.
     n_bands : int, optional
-        The number of equal-width frequency bands to split the spectrum into
-        (default: 5, matching :func:`spectral_summaries`' 5-band split).
-        Phase-amplitude pairs are formed from every pair of bands i < j (phase
-        from the slower band, amplitude from the faster), giving
-        ``comb(n_bands, 2)`` pairs.
+        The number of equal-width frequency bands to split the spectrum into (default: 5, matching
+        :func:`spectral_summaries`' 5-band split). All ``comb(n_bands, 2)`` band pairs are scanned; for
+        phase-amplitude coupling, phase is taken from the slower band of each pair and amplitude from the
+        faster.
     max_n : int or str, optional
-        The maximum number of samples to consider; longer series are cropped to
-        their first ``max_n`` points. Can be ``'full'`` to disable cropping
-        (default).
+        The maximum number of samples to consider; longer series are cropped to their first ``max_n`` points.
+        Can be ``'full'`` to disable cropping (default).
     n_phase_bins : int, optional
-        The number of phase bins used to estimate each band pair's modulation
-        index (default: 18, i.e. 20-degree bins, the standard choice from Tort
-        et al. 2010).
+        The number of phase bins used to estimate each band pair's modulation index (default: 18, i.e.
+        20-degree bins, the standard choice from Tort et al. 2010).
+    max_lag_frac : float, optional
+        The largest envelope lag scanned for amplitude-amplitude coupling, as a fraction of the series length
+        (default: 0.1). It is capped at a quarter of the trimmed length.
 
     Returns
     -------
     dict
-        - ``maxMI``: the maximum modulation index across all band pairs -- the
-          comodulogram peak, i.e. whether *any* band pair shows real coupling.
-        - ``entropyMI``: the normalized Shannon entropy of the MI values across
-          pairs (0 = coupling concentrated in a single band pair, 1 = uniformly
-          diffuse across all pairs).
+        Phase-amplitude coupling:
 
-        Returns NaN if the time series is too short for the requested number of
-        bands.
+        - ``maxMI``: the maximum modulation index across all band pairs -- the comodulogram peak, i.e. whether
+          *any* band pair shows real coupling.
+        - ``entropyMI``: the normalized Shannon entropy of the MI values across pairs (0 = coupling
+          concentrated in a single band pair, 1 = uniformly diffuse across all pairs).
+
+        Amplitude-amplitude coupling:
+
+        - ``maxAEC0``: the largest absolute zero-lag envelope correlation over band pairs (the classical AEC).
+        - ``maxAEC``: the largest envelope cross-correlation over band pairs and lags (the effect size).
+        - ``zAEC``: the peak's standard-normal score against independent envelopes, corrected for the number
+          of effective lags and of band pairs (about 1-1.5 for a linear Gaussian process at any length).
+
+        Returns NaN if the time series is constant or too short for the requested number of bands.
     """
     y = np.asarray(y, dtype=float).ravel()
     n_bands, n_phase_bins = int(n_bands), int(n_phase_bins)
+    if not 0 < max_lag_frac < 1:
+        raise ValueError(f"max_lag_frac = {max_lag_frac} must lie in (0, 1)")
+    if n_bands < 2:
+        raise ValueError(f"n_bands = {n_bands}: need at least 2 bands to form a pair")
 
     n = len(y)
     if isinstance(max_n, str) and max_n == 'full':
@@ -939,78 +1139,16 @@ def phase_amp_coupling(y: ArrayLike, n_bands: int = 5, max_n: Union[int, str] = 
         y = y[:int(max_n)]
         n = int(max_n)
 
-    # ------------------------------------------------------------------------------
-    # Equal-width frequency bands (DC and Nyquist bins excluded, as in
-    # spectral_summaries_phase -- neither carries meaningful oscillatory phase)
-    # ------------------------------------------------------------------------------
-    half_n = n // 2 + 1 # one-sided bins: DC (0) up to Nyquist (half_n - 1, if n even)
-    is_nyquist_bin = (n % 2 == 0)
-    if is_nyquist_bin:
-        usable_bins = np.arange(1, half_n - 1)
-    else:
-        usable_bins = np.arange(1, half_n)
-
-    min_bins_per_band = 2 # need >=2 FFT bins per band for a non-degenerate analytic signal
-    if len(usable_bins) < n_bands * min_bins_per_band:
+    # z-score (all outputs are scale- and shift-invariant; this keeps the envelope arithmetic well scaled)
+    sd = np.std(y)
+    if not sd > 0:
+        return np.nan
+    analytic = _band_analytic_signals((y - np.mean(y)) / sd, n_bands)
+    if analytic is None:
         warnings.warn(f"Time series too short (N = {n}) for {n_bands} usable frequency bands")
         return np.nan
 
-    edges = _even_split_points(0, len(usable_bins), n_bands + 1)
-    band_bins = [usable_bins[edges[b]:edges[b + 1]] for b in range(n_bands)]
-
-    # ------------------------------------------------------------------------------
-    # Per-band analytic signal (FFT-domain Hilbert trick, band-limited in one step)
-    # ------------------------------------------------------------------------------
-    y_fft = scipy.fft.fft(y)
-    phase_band, amp_band = [], []
-    for b in range(n_bands):
-        yb = np.zeros(n, dtype=complex)
-        yb[band_bins[b]] = 2 * y_fft[band_bins[b]]
-        zb = scipy.fft.ifft(yb)
-        phase_band.append(np.angle(zb))
-        amp_band.append(np.abs(zb))
-
-    # ------------------------------------------------------------------------------
-    # Modulation index (Tort et al. 2010) for every phase(i)-amplitude(j) pair, i < j
-    # ------------------------------------------------------------------------------
-    phase_edges = np.linspace(-np.pi, np.pi, n_phase_bins + 1)
-    h_max = np.log(n_phase_bins)
-    mi = []
-    for i in range(n_bands - 1):
-        for j in range(i + 1, n_bands):
-            phi = phase_band[i]
-            amp = amp_band[j]
-            bin_idx = np.digitize(phi, phase_edges) - 1
-            bin_idx[bin_idx == n_phase_bins] = n_phase_bins - 1 # phi == pi edge case
-            counts = np.bincount(bin_idx, minlength=n_phase_bins)
-            sums = np.bincount(bin_idx, weights=amp, minlength=n_phase_bins)
-            mean_amp = np.divide(sums, counts, out=np.zeros(n_phase_bins), where=counts > 0)
-            p = mean_amp / np.sum(mean_amp)
-            p = p[p > 0]
-            h = -np.sum(p * np.log(p))
-            mi.append((h_max - h) / h_max)
-    mi = np.asarray(mi)
-    num_pairs = len(mi)
-
-    if not np.any(np.isfinite(mi)):
-        return np.nan
-
-    # ------------------------------------------------------------------------------
-    # Summary statistics across band pairs
-    # ------------------------------------------------------------------------------
-    out = {}
-    out['maxMI'] = np.max(mi)
-
-    # Normalized Shannon entropy of the MI values across pairs (0 = coupling
-    # concentrated in one pair, 1 = uniformly diffuse):
-    p = mi[mi > 0]
-    if p.size == 0:
-        out['entropyMI'] = np.nan
-    else:
-        p = p / np.sum(p)
-        out['entropyMI'] = -np.sum(p * np.log(p)) / np.log(num_pairs)
-
-    return out
+    return {**_phase_amp_mi(analytic, n_phase_bins), **_amp_amp_aec(analytic, max_lag_frac)}
 
 @dict_output
 def spectral_summaries_phase(y: ArrayLike) -> dict:
@@ -1584,7 +1722,7 @@ def envelope_stats(y: ArrayLike, power_frac: float = 0.5, trim_frac: float = 0.0
         return out
     y = y - np.mean(y)
 
-    # Frequency bins (DC and Nyquist excluded, as in phase_amp_coupling):
+    # Frequency bins (DC and Nyquist excluded, as in cross_frequency_coupling):
     half_n = N // 2 + 1
     usable = np.arange(1, half_n - 1 if N % 2 == 0 else half_n)
     Y = np.fft.fft(y)
@@ -1650,7 +1788,7 @@ def phase_fluctuation_scaling(y: ArrayLike, half_width_frac: float = 0.01,
     rising at long windows. The original method uses empirical mode decomposition
     to isolate the dominant intrinsic mode; this implementation instead bandpasses
     around the single dominant non-edge FFT peak (the band-limited analytic-signal
-    trick of ``phase_amp_coupling``), which is simpler and avoids EMD's mode-mixing
+    trick of ``cross_frequency_coupling``), which is simpler and avoids EMD's mode-mixing
     and boundary sensitivities, at the cost of not being a literal reimplementation.
 
     Parameters
@@ -2177,6 +2315,75 @@ def _moving_mean(x: np.ndarray, width: int) -> np.ndarray:
     return np.array([x[max(0, i - half):min(n, i + half + 1)].mean() for i in range(n)])
 
 
+def _morlet_halfwidth(f: float, m: float) -> int:
+    """Half-width, in samples, of the Morlet wavelet of ``m`` cycles at frequency ``f`` (cycles per
+    sample): its Gaussian envelope has standard deviation ``m / (2 pi f)`` and is cut at 3.5 of them."""
+    sigma_t = m / (2 * np.pi * f)  # Gaussian envelope s.d., in samples
+    return int(np.ceil(3.5 * sigma_t))  # wavelet support: +/- 3.5 s.d.
+
+
+def _morlet_transform(y: np.ndarray, f: float, m: float) -> tuple:
+    """
+    Complex Morlet wavelet transform of a zero-mean series at one frequency, by FFT convolution.
+
+    The wavelet is a Gaussian-windowed complex exponential at ``f`` cycles per sample, with
+    envelope standard deviation ``m / (2 pi f)`` samples, truncated at ``hw`` samples either side
+    (:func:`_morlet_halfwidth`), made zero-mean (admissibility) and normalized to unit energy. Used
+    by :func:`rhythmicity` and :func:`doubled_phase_coherence`.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        The (zero-mean) series, of length ``n``.
+    f : float
+        Analysis frequency, in cycles per sample.
+    m : float
+        Wavelet width, in cycles.
+
+    Returns
+    -------
+    X : np.ndarray
+        The band signal, the length-``n`` 'same' segment of the linear convolution (complex);
+        ``X[hw:n - hw]`` is free of edge effects.
+    hw : int
+        The wavelet half-width, in samples.
+    spec : np.ndarray
+        ``|Y|**2 |W|**2``, the power spectrum of the full linear convolution of the zero-padded
+        series with the wavelet (length ``n + 2 hw``): the periodogram of ``y`` seen through the
+        wavelet. Its inverse DFT gives the lag covariance of the band signal
+        (:func:`_band_lag_sums`).
+    """
+    n = len(y)
+    sigma_t = m / (2 * np.pi * f)
+    hw = _morlet_halfwidth(f, m)
+    t = np.arange(-hw, hw + 1)
+    psi = np.exp(2j * np.pi * f * t) * np.exp(-t ** 2 / (2 * sigma_t ** 2))
+    psi = psi - psi.mean()  # zero mean (wavelet admissibility)
+    psi = psi / np.sqrt(np.sum(np.abs(psi) ** 2))  # unit energy
+
+    # Linear convolution via FFT, then the length-n 'same' segment:
+    n_conv = n + psi.size - 1
+    Y = scipy.fft.fft(y, n_conv)
+    W = scipy.fft.fft(psi, n_conv)
+    X = scipy.fft.ifft(Y * W)[hw:hw + n]
+    spec = np.abs(Y) ** 2 * np.abs(W) ** 2
+    return X, hw, spec
+
+
+def _band_lag_sums(spec: np.ndarray) -> np.ndarray:
+    """
+    Lag sums ``r(k) = sum_t z(t + k) z*(t)`` of the full (zero-padded, so linear) convolution ``z``
+    of a series with a wavelet, from its power spectrum ``spec`` (:func:`_morlet_transform`).
+
+    ``r(k)`` sits at index ``k`` for ``k >= 0`` and ``r(-k) = conj(r(k))`` at index ``-k``; it is
+    zero beyond the convolution's support. ``r(k) / n`` estimates the lag covariance
+    ``E X(t + k) X*(t)`` of the band signal of a length-``n`` series, and ``|r(k)| / r(0)`` its lag
+    correlation: the values a Gaussian process with the series' own (zero-padded) periodogram has,
+    which is how :func:`rhythmicity` and :func:`doubled_phase_coherence` set their spectral nulls.
+    """
+    return scipy.fft.ifft(spec)
+
+
 @dict_output
 def rhythmicity(y: ArrayLike, m: float = 5, tau: float = 1.5, n_freq: int = 40,
                 f_low: float = 0.02, f_high: float = 0.4, smooth_win: int = 5,
@@ -2327,23 +2534,13 @@ def rhythmicity(y: ArrayLike, m: float = 5, tau: float = 1.5, n_freq: int = 40,
     rho = np.full(n_freq, np.nan)
     power = np.full(n_freq, np.nan)
     for i, f in enumerate(freqs):
-        sigma_t = m / (2 * np.pi * f)  # Gaussian envelope s.d., in samples
-        h = int(np.ceil(3.5 * sigma_t))  # wavelet support: +/- 3.5 s.d.
+        h = _morlet_halfwidth(f, m)
         lag = max(1, int(np.floor(tau / f + 0.5)))  # lag in samples
         n_use = n - 2 * h - lag  # samples free of edge effects, at t and t + lag
         if n_use * f < min_cycles:
             continue  # too few cycles for an unbiased estimate: leave this frequency NaN
 
-        t = np.arange(-h, h + 1)
-        psi = np.exp(2j * np.pi * f * t) * np.exp(-t ** 2 / (2 * sigma_t ** 2))
-        psi = psi - psi.mean()  # zero mean (wavelet admissibility)
-        psi = psi / np.sqrt(np.sum(np.abs(psi) ** 2))  # unit energy
-
-        # Linear convolution via FFT, then the length-n 'same' segment:
-        n_conv = n + psi.size - 1
-        Y = scipy.fft.fft(y, n_conv)
-        W = scipy.fft.fft(psi, n_conv)
-        X = scipy.fft.ifft(Y * W)[h:h + n]
+        X, _, spec = _morlet_transform(y, f, m)
 
         x1 = X[h:h + n_use]
         x2 = X[h + lag:h + lag + n_use]
@@ -2358,7 +2555,7 @@ def rhythmicity(y: ArrayLike, m: float = 5, tau: float = 1.5, n_freq: int = 40,
 
         # Spectral null: the lag-correlation of the wavelet output implied by the (zero-padded,
         # so linear) periodogram:
-        r = scipy.fft.ifft(np.abs(Y) ** 2 * np.abs(W) ** 2)
+        r = _band_lag_sums(spec)
         rho[i] = np.abs(r[lag]) / r[0].real
     lavi_null = _lavi_from_rho(rho)
 
@@ -2420,5 +2617,284 @@ def rhythmicity(y: ArrayLike, m: float = 5, tau: float = 1.5, n_freq: int = 40,
     out['ex_min'] = np.min(ex)
     out['ex_freqAtMax'] = 2 * np.pi * f[int(np.argmax(ex))]
     out['ex_freqAtMin'] = 2 * np.pi * f[int(np.argmin(ex))]
+    out['ex_atPeakPower'] = ex[i_pow]
+    return out
+
+
+def _expected_max_exponential(means: np.ndarray, n_grid: int = 200) -> float:
+    """
+    Expected maximum of independent exponential random variables with the given means.
+
+    ``E max_j E_j = int_0^inf (1 - prod_j (1 - exp(-x / s_j))) dx`` for independent exponentials
+    with means ``s_j``, evaluated by the trapezoid rule on ``n_grid`` points from 0 to
+    ``s_max (log J + 30)``, beyond which the integrand is below ``e**-30``. The relative error is
+    about 0.2% for a single variable and smaller for many (checked against ``s H_J``, ``H_J`` the
+    harmonic number, for ``J`` equal means).
+    """
+    s = np.asarray(means, dtype=float)
+    x = np.linspace(0, s.max() * (np.log(s.size) + 30), n_grid)
+    with np.errstate(divide='ignore'):
+        log_cdf = np.sum(np.log1p(-np.exp(-x[:, None] / s[None, :])), axis=1)  # log prod_j F_j(x)
+    return float(np.trapezoid(-np.expm1(log_cdf), x))
+
+
+def _isserlis_power_null(c: np.ndarray, h: int, n_e: int, n_fft: int) -> np.ndarray:
+    """
+    Expected periodogram of ``X**h`` for a circular complex Gaussian process ``X``.
+
+    For ``S(nu) = sum_{t < n_e} X_t**h exp(-2 pi i nu t)``, Isserlis' theorem for circular complex
+    Gaussians (``E[X_t**h conj(X_s)**h] = h! c(t - s)**h``, one term per pairing of the ``h``
+    factors of each side) gives
+    ``E|S(nu)|**2 = h! sum_k (n_e - |k|) c(k)**h exp(-2 pi i nu k)``, with ``c(-k) = conj(c(k))``.
+
+    Parameters
+    ----------
+    c : np.ndarray
+        Lag covariances ``c(k) = E X(t + k) X*(t)`` for ``k = 0, 1, ..., K`` (zero beyond).
+    h : int
+        The power.
+    n_e : int
+        The number of samples of ``X``.
+    n_fft : int
+        The number of DFT frequencies ``nu = j / n_fft`` at which to evaluate it.
+
+    Returns
+    -------
+    np.ndarray
+        ``E|S(j / n_fft)|**2`` for ``j = 0, ..., n_fft - 1``.
+    """
+    K = min(len(c) - 1, n_e - 1)
+    k = np.arange(-K, K + 1)
+    ck = np.where(k >= 0, c[np.abs(k)], np.conj(c[np.abs(k)]))
+    g = np.zeros(n_fft, dtype=complex)
+    np.add.at(g, k % n_fft, math.factorial(h) * (n_e - np.abs(k)) * ck ** h)
+    return np.real(scipy.fft.fft(g))
+
+
+@dict_output
+def doubled_phase_coherence(y: ArrayLike, harmonic: int = 2, m: float = 5, n_freq: int = 40,
+                            f_low: float = 0.02, f_high: float = 0.3, min_cycles: float = 40,
+                            pad: int = 4) -> Union[dict, float]:
+    """
+    Record-long coherence of the doubled phase of each frequency band.
+
+    Does an oscillation keep its timing across the whole record, up to a sign? Squaring a band
+    signal ``X(t) = A(t) exp(i phi(t))`` doubles its phase, which makes it blind to a sign flip
+    (``phi -> phi + pi``). An oscillation whose phase is kept only modulo ``pi`` (polarity
+    reversals, bursts of alternating or random sign on one underlying clock, a binary
+    phase-shift-keyed carrier) is incoherent as ``X`` but coherent as ``X**2``: ``X**2`` is then a
+    single phasor at twice the carrier frequency, running through the whole record. An oscillation
+    whose phase is re-drawn at random (bursts that reset) stays incoherent in both, and so does any
+    linear Gaussian process, whose band signal is circular (its phase is uniform and independent
+    of its amplitude). The power spectrum cannot see this: flipping the sign of each burst, or
+    re-drawing its phase, leaves the spectrum's expectation unchanged.
+
+    The method, at each of ``n_freq`` log-spaced frequencies ``f`` from ``f_low`` to ``f_high``:
+
+    1. A complex Morlet wavelet transform (``m`` cycles, as in :func:`rhythmicity`) gives the band
+       signal ``X(t, f)``; only its ``n_e`` edge-free samples are used, and ``f`` is used only if
+       they span at least ``min_cycles`` cycles.
+    2. The coherence of ``X**h`` (``h = harmonic``, 2 by default) is its amplitude-weighted
+       resultant length at the best demodulation frequency,
+       ``C(f) = max_nu |sum_t X(t)**h exp(-2 pi i nu t)| / sum_t |X(t)|**h``,
+       with ``nu`` searched on a DFT zero-padded to ``pad * n_e`` points, over the band where the
+       Gaussian null below gives ``X**h`` non-negligible power (at least 1% of its peak; around
+       ``h f``). ``C`` is in [0, 1]: 1 when ``X**h`` is a single steady phasor (a sinusoid, or a
+       sinusoid of randomly flipping sign at ``h = 2``), and about ``1/sqrt(K)`` for ``K``
+       bursts of independent phase.
+    3. The spectral null. Part of ``C`` is noise: for a finite record ``C`` is positive even for a
+       circular process, by an amount that falls as ``N**-1/2`` and depends on the spectrum. A
+       Gaussian process with the series' own (zero-padded) periodogram has ``E X**h = 0`` and, by
+       Isserlis' theorem for circular complex Gaussians (``E[X_t**h conj(X_s)**h] = h! c**h``),
+       ``E|S(nu)|**2 = h! sum_k (n_e - |k|) c(k)**h exp(-2 pi i nu k)``, with ``S`` the DFT of
+       ``X**h`` and ``c(k) = E X(t + k) X*(t)`` the lag covariance of the band signal, computed
+       exactly from the periodogram as in :func:`rhythmicity`. Treating the ``|S|**2`` at the
+       ``n_e``-point (unpadded) DFT frequencies in the band as independent exponentials with these
+       means, their expected maximum (one quadrature) gives ``E0[C(f)**2]``, including the upward
+       bias of maximizing over ``nu``. The excess ``C(f)**2 - E0[C(f)**2]`` is about zero for any
+       linear Gaussian process, whatever its spectrum or length, and positive when the ``h``-fold
+       phase stays coherent for longer than the wavelet resolves.
+
+    For ``h = 2``, ``C`` is the sample circularity quotient ``|E z**2| / E|z|**2`` (Ollila 2008)
+    of the band signal demodulated at ``nu / 2`` (``z = X exp(-i pi nu t)``), maximized over
+    ``nu``: 0 for a circular (proper) variable, 1 for one confined to a line through the origin. In
+    the language of cyclostationarity it is the normalized conjugate cyclic autocorrelation of the
+    band signal at lag 0 and cycle frequency ``nu`` (Gardner 1991; Gardner et al. 2006), the
+    feature by which squaring recovers the carrier of a binary phase-shift-keyed signal. Doubling
+    an angle to make it insensitive to ``theta -> theta + pi`` is the standard treatment of axial
+    data (Mardia & Jupp 2000). Expanding ``|sum_t X_t**2 e_t|**2`` over pairs of times shows that
+    ``C**2`` is also the amplitude-weighted lagged coherence of Fransen et al. (2015), applied to
+    ``X**2`` and pooled over every lag rather than taken at one. At ``h = 1`` the numerator is a
+    smoothed periodogram ordinate, so ``h = 1`` adds nothing to the power spectrum;
+    ``h >= 2`` is a statistic of order ``2h``, and only ``h = 2`` is in
+    the default feature set. The general-``h`` null is the ``h``-th power of the one at ``h = 1``:
+    for a circular Gaussian pair with lag correlation ``rho``, the Cauchy-Schwarz-normalized
+    coherence of ``(X_t**h, X_s**h)`` is ``rho**h``. The null and its expected-maximum correction
+    are this implementation's own derivation, in the spirit of the analytic LAVI null of
+    :func:`rhythmicity` (Karvat et al. 2026): they replace a surrogate distribution by its
+    expectation.
+
+    The series is treated as evenly sampled with unit spacing: frequencies are in cycles per
+    sample and reported angular frequencies are ``2*pi*f``, as in :func:`rhythmicity`.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    harmonic : int, optional
+        The power ``h`` to which the band signal is raised (the phase is multiplied by ``h``).
+        Default is 2 (coherence modulo ``pi``); 1 gives a spectral quantity, kept as a check.
+    m : float, optional
+        Width of the Morlet wavelet, in cycles. Default is 5, as in :func:`rhythmicity`.
+    n_freq : int, optional
+        Number of log-spaced analysis frequencies. Default is 40.
+    f_low : float, optional
+        Lowest analysis frequency, in cycles per sample. Default is 0.02.
+    f_high : float, optional
+        Highest analysis frequency, in cycles per sample. It must satisfy
+        ``f_high (1 + 3/m) <= 0.5``, so that the wavelet's passband (spectral standard deviation
+        ``f/m``) stays three standard deviations below the Nyquist frequency. Otherwise the
+        wavelet also passes the negative-frequency image of the real series, ``X`` is no longer
+        analytic, ``E X**2`` is no longer zero, and ``X**2`` carries a spurious line even for white
+        noise (at ``f = 0.4`` with ``m = 5`` the excess of white noise grows with N, to about 0.04
+        at N = 16384, instead of staying at 0). Default is 0.3, the largest round value allowed for ``m = 5`` (limit 0.3125),
+        rather than the 0.4 of :func:`rhythmicity`.
+    min_cycles : float, optional
+        A frequency is used only if the edge-free band signal spans at least this many of its
+        cycles. Default is 40, as in :func:`rhythmicity`.
+    pad : int, optional
+        Zero-padding factor of the DFT of ``X**h`` on which the demodulation frequency ``nu`` is
+        searched. Default is 4: the maximum of an unpadded DFT can miss a line between two bins
+        and lose up to 36% of ``C`` (a pure sinusoid can give 0.64 instead of 1); padding by 4
+        caps this scalloping loss at 2.6%.
+
+    Returns
+    -------
+    dict or float
+        Statistics over the frequencies that qualify. NaN if the input is constant or not finite,
+        or if fewer than 10 frequencies qualify (with the defaults, N below 286). For the
+        coherence spectrum ``C(f)``:
+
+        - ``coh_max``, ``coh_freqAtMax``: the largest coherence and its angular frequency
+          ``2*pi*f``.
+        - ``coh_mean``: the mean coherence over frequency.
+        - ``coh_atPeakPower``: the coherence at the frequency with the most wavelet power.
+
+        These raw values include the finite-record noise floor, which falls as ``N**-1/2`` (by a
+        factor of about 2 from N = 500 to 10000 on noise), so they are excluded from the default
+        feature set. For the excess over the spectral null, ``C(f)**2 - E0[C(f)**2]``:
+
+        - ``ex_max``: the largest excess, the most sign-invariant-coherent band. It keeps a mild
+          downward drift with N on noise (about 0.1 at N = 500 to 0.03 at N = 10000), being the
+          maximum of about 40 zero-mean estimates whose spread shrinks with N.
+        - ``ex_mean``: the mean excess over frequency.
+        - ``ex_atPeakPower``: the excess at the frequency with the most wavelet power: does the
+          dominant oscillation keep its timing (modulo ``pi`` at ``h = 2``) across the record?
+
+        Typical ``ex_atPeakPower`` at N = 4096: about 0 for linear Gaussian processes and the
+        Lorenz system; 0.7 for a sustained noisy sinusoid; 0.8 for bursts of random sign on one
+        clock; 0.3 for bursts with independent phases; 0.15 for Student-t (2 degrees of freedom)
+        noise.
+
+    Notes
+    -----
+    - The excess reads "the doubled phase is coherent for longer than the wavelet resolves". A
+      single long burst satisfies this within itself, so bursts with independent phases also give
+      positive values; they fall below bursts that keep a common clock only when the record holds
+      many bursts (the coherence of ``K`` independent bursts is about ``1/sqrt(K)``), and with
+      about 3 bursts or fewer per record the two are indistinguishable.
+    - Heavy tails give small positive values: each large isolated event makes a short,
+      self-coherent transient in ``X**2``.
+    - The null treats the in-band DFT ordinates of ``X**h`` as independent exponentials (the DFT
+      of a long stationary record is asymptotically complex Gaussian and independent across
+      frequencies). This is approximate when the band holds few ordinates (short series, low
+      ``f``), and it does not hold for strongly non-Gaussian amplitudes, by design: that departure
+      is part of what the excess reports.
+    - About N = 1000 samples or more are needed for reliable values; with the defaults the output
+      is defined from N = 286.
+    - The cost is about three times that of :func:`rhythmicity` (a 4-times padded FFT and the
+      expected-maximum quadrature at each frequency).
+
+    References
+    ----------
+    Ollila, E. (2008). On the circularity of a complex random variable. IEEE Signal Processing
+    Letters, 15, 841-844. doi:10.1109/LSP.2008.2005050
+
+    Gardner, W. A. (1991). Exploitation of spectral redundancy in cyclostationary signals. IEEE
+    Signal Processing Magazine, 8(2), 14-36. doi:10.1109/79.81007
+
+    Gardner, W. A., Napolitano, A., & Paura, L. (2006). Cyclostationarity: half a century of
+    research. Signal Processing, 86(4), 639-697. doi:10.1016/j.sigpro.2005.06.016
+
+    Mardia, K. V., & Jupp, P. E. (2000). Directional Statistics. Wiley.
+
+    Fransen, A. M. M., van Ede, F., & Maris, E. (2015). Identifying neuronal oscillations using
+    rhythmicity. NeuroImage, 118, 256-267. doi:10.1016/j.neuroimage.2015.06.003
+
+    Karvat, G., et al. (2026). Universal rhythmic architecture uncovers two modes of neural
+    dynamics. Nature Communications, 17.
+    """
+    if not float(harmonic).is_integer() or harmonic < 1:
+        raise ValueError(f"harmonic must be a positive integer, got {harmonic}")
+    if not float(pad).is_integer() or pad < 1:
+        raise ValueError(f"pad must be a positive integer, got {pad}")
+    if m <= 0:
+        raise ValueError(f"m must be positive, got {m}")
+    if f_low <= 0 or f_low >= f_high:
+        raise ValueError("Need 0 < f_low < f_high")
+    if f_high * (1 + 3 / m) > 0.5:
+        raise ValueError(f"f_high = {f_high} is too close to the Nyquist frequency for m = {m}: "
+                         f"need f_high (1 + 3/m) <= 0.5, i.e. f_high <= {0.5 / (1 + 3 / m):.4f}")
+    h, pad = int(harmonic), int(pad)
+    y = np.asarray(y, dtype=float).ravel()
+    if not np.all(np.isfinite(y)) or y.max() == y.min():
+        return np.nan  # no phase information (constant), or not a valid series
+    n = len(y)
+    y = y - y.mean()
+
+    freqs = np.logspace(np.log10(f_low), np.log10(f_high), n_freq)
+    coh = np.full(n_freq, np.nan)  # C(f)
+    coh2_null = np.full(n_freq, np.nan)  # E0[C(f)**2]
+    power = np.full(n_freq, np.nan)
+    for i, f in enumerate(freqs):
+        hw = _morlet_halfwidth(f, m)
+        n_e = n - 2 * hw  # edge-free samples
+        if n_e * f < min_cycles:
+            continue  # too few cycles: leave this frequency NaN
+        X_same, _, spec = _morlet_transform(y, f, m)
+        X = X_same[hw:n - hw]
+        den = np.sum(np.abs(X) ** h)
+        if not den > 0:
+            continue
+        n_fft = pad * n_e
+        P = np.abs(scipy.fft.fft(X ** h, n_fft)) ** 2  # |S(nu)|**2 on the padded grid
+
+        # Spectral null. The lag covariance c(k) of X vanishes beyond the convolution's support,
+        # |k| <= 2 hw:
+        c = _band_lag_sums(spec)[:2 * hw + 1] / n
+        E0 = _isserlis_power_null(c, h, n_e, n_fft)
+        band = E0 > 0.01 * E0.max()
+
+        coh[i] = np.sqrt(P[band].max()) / den
+        # The null maximum is over the n_e (unpadded, approximately independent) ordinates in the
+        # band, i.e. every pad-th one of the padded grid:
+        coh2_null[i] = _expected_max_exponential(E0[band][::pad]) / den ** 2
+        power[i] = np.mean(np.abs(X) ** 2)
+
+    valid = np.isfinite(coh)
+    if valid.sum() < 10:
+        return np.nan  # too little of the spectrum is estimable to summarize
+    f = freqs[valid]
+    C = coh[valid]
+    ex = C ** 2 - coh2_null[valid]
+    i_pow = int(np.argmax(power[valid]))
+
+    out = {}
+    out['coh_max'] = np.max(C)
+    out['coh_freqAtMax'] = 2 * np.pi * f[int(np.argmax(C))]
+    out['coh_mean'] = np.mean(C)
+    out['coh_atPeakPower'] = C[i_pow]
+    out['ex_max'] = np.max(ex)
+    out['ex_mean'] = np.mean(ex)
     out['ex_atPeakPower'] = ex[i_pow]
     return out
