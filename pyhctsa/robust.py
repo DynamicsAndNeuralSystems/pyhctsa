@@ -344,6 +344,31 @@ def _sse_of_rate(bs: np.ndarray, x: np.ndarray, y: np.ndarray, with_offset: bool
     return sse
 
 
+def _golden_section_min(f, lo: float, hi: float, n_iter: int = 40) -> float:
+    """Minimizer of a unimodal scalar function on ``[lo, hi]`` by golden-section search.
+
+    Runs a fixed ``n_iter`` steps (no tolerance test): each step evaluates ``f`` at the two
+    interior points ``hi - phi*(hi - lo)`` and ``lo + phi*(hi - lo)`` (``phi`` the golden-ratio
+    conjugate; both are recomputed every step, none reused) and keeps the left part of the bracket
+    when ``f`` at the left point is ``<=`` that at the right (ties go left). Returns the midpoint of
+    the final bracket. Used by the variable-projection fits (``bf_exp_fit``, and
+    ``_saturating_exp_fit`` in ``operations.nonlinearity``).
+
+    References
+    ----------
+    J. Kiefer, Proc. Amer. Math. Soc. 4 (1953) 502-506.
+    """
+    phi = (np.sqrt(5) - 1) / 2
+    for _ in range(n_iter):
+        x1 = hi - phi * (hi - lo)
+        x2 = lo + phi * (hi - lo)
+        if f(x1) <= f(x2):
+            hi = x2
+        else:
+            lo = x1
+    return (lo + hi) / 2
+
+
 def bf_exp_fit(x: ArrayLike, y: ArrayLike, with_offset: bool = True, max_rate: float = 20) -> dict:
     """Global least-squares fit of ``a*exp(b*x) + c`` by variable projection (hctsa ``BF_ExpFit``).
 
@@ -387,15 +412,7 @@ def bf_exp_fit(x: ArrayLike, y: ArrayLike, with_offset: bool = True, max_rate: f
     k = int(np.argmin(_sse_of_rate(b_grid, x, y, with_offset)))
     lo = b_grid[max(k - 1, 0)]
     hi = b_grid[min(k + 1, b_grid.size - 1)]
-    phi = (np.sqrt(5) - 1) / 2
-    for _ in range(40):  # golden-section search
-        b1 = hi - phi * (hi - lo)
-        b2 = lo + phi * (hi - lo)
-        if _sse_of_rate(np.array([b1]), x, y, with_offset)[0] <= _sse_of_rate(np.array([b2]), x, y, with_offset)[0]:
-            hi = b2
-        else:
-            lo = b1
-    b = (lo + hi) / 2
+    b = _golden_section_min(lambda b: _sse_of_rate(np.array([b]), x, y, with_offset)[0], lo, hi)
 
     e = np.exp(b * x)
     if with_offset:

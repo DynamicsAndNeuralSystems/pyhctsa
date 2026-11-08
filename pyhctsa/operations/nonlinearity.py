@@ -27,7 +27,7 @@ from ..toolboxes.Tisean_3_0_1.ports import (  # noqa: F401 (_c1_centers is used 
     TiseanDataError as _D2DataError, _c1_centers, _c1_curves, _c2d_slopes, _lyap_spec_sums,
     _tisean_boxcount, _tisean_lyap_r,
 )
-from ..robust import bf_hist_edges, bf_random, bf_random_seed, bf_spread_perm
+from ..robust import _golden_section_min, bf_hist_edges, bf_random, bf_random_seed, bf_spread_perm
 from ..utils import _even_split_points, dict_output, _round_half_away, get_tau, theiler_window, time_delay_embed
 from ..utils import _padded_nfft
 from ..utils import _shannon_entropy
@@ -2636,15 +2636,7 @@ def _saturating_exp_fit(t: np.ndarray, p: np.ndarray, max_rate: float = 5.0) -> 
     sgn = -1.0 if k < u.size else 1.0
     j = u.size - 1 - k if k < u.size else k - u.size  # index into u
     lo, hi = u[max(j - 1, 0)], u[min(j + 1, u.size - 1)]
-    phi = (np.sqrt(5) - 1) / 2
-    for _ in range(40):  # golden-section search in log|b|
-        u1 = hi - phi * (hi - lo)
-        u2 = lo + phi * (hi - lo)
-        if sse(sgn * np.exp(u1))[0] <= sse(sgn * np.exp(u2))[0]:
-            hi = u2
-        else:
-            lo = u1
-    b = sgn * np.exp((lo + hi) / 2)
+    b = sgn * np.exp(_golden_section_min(lambda v: sse(sgn * np.exp(v))[0], lo, hi))  # in log|b|
     g = 1.0 - np.exp(b * t)
     a = np.dot(g, p) / np.dot(g, g)
     s = np.sum((p - a * g) ** 2)
