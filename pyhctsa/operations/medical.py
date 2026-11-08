@@ -4,7 +4,7 @@ from scipy import signal
 
 from ..utils import _run_lengths
 from ..robust import bf_hist_edges
-from ..utils import get_tau
+from ..utils import MAD_DIVISOR, get_tau, _padded_nfft
 
 def raw_hrv_meas(x: ArrayLike) -> dict:
     """
@@ -157,7 +157,7 @@ def hrv_classic(y: ArrayLike) -> dict:
     # does not depend on the units of the series.
     d_y = np.abs(diff_y)
     med = np.median(diff_y)
-    sig_d = np.median(np.abs(diff_y - med)) / 0.6745  # robust (MAD-based) SD of increments
+    sig_d = np.median(np.abs(diff_y - med)) / MAD_DIVISOR  # robust (MAD-based) SD of increments
     tol_d = 1e-10 * np.std(y, ddof=1)  # a spread below this (rounding error) is treated as zero
     if sig_d <= tol_d:
         # over half the increments are equal: fall back to the mean absolute deviation
@@ -181,7 +181,7 @@ def hrv_classic(y: ArrayLike) -> dict:
     # Calculate PSD
     # ------------------------------------------------------------------------------
 
-    nfft = max(256, 2 ** int(np.ceil(np.log2((n)))))
+    nfft = _padded_nfft(n)
     f, pxx = signal.periodogram(
         y,
         window=np.hanning(len(y)),
