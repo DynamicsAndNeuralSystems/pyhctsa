@@ -1,4 +1,5 @@
 import numpy as np
+from ..utils import _iqr, _quantile
 from numpy.typing import ArrayLike
 
 from ._symbolic_complexity import _normalized_lz_complexity
@@ -124,7 +125,7 @@ def moving_threshold(y: ArrayLike, a: float = 1.0, b: float = 0.1) -> dict:
     out = {
         'meanq': np.mean(q),
         'medianq': medianq,
-        'iqrq': np.diff(np.quantile(sq, [0.25, 0.75], method='hazen'))[0],
+        'iqrq': _iqr(sq),
         'maxq': sq[-1],
         'minq': sq[0],
         'stdq': np.std(q, ddof=1),
@@ -206,7 +207,7 @@ def extreme_event_order(y: ArrayLike, extreme_thresh: float = 0.05) -> dict:
 
     y = np.asarray(y, dtype=np.float64).ravel()
     yq = y[~np.isnan(y)]
-    upper_thresh, lower_thresh = np.quantile(yq, [1 - extreme_thresh, extreme_thresh], method='hazen')
+    upper_thresh, lower_thresh = _quantile(yq, [1 - extreme_thresh, extreme_thresh])
 
     pos_idx = np.flatnonzero(y > upper_thresh) + 1  # (only differences matter)
     neg_idx = np.flatnonzero(y < lower_thresh) + 1
@@ -309,7 +310,7 @@ def extremogram(y: ArrayLike, quantile: float = 0.95, max_lag: int = 100) -> dic
     if K < 1 or not np.all(np.isfinite(y)):
         return np.nan
     a = np.abs(y - y.mean())
-    ex = a > np.quantile(a, quantile)
+    ex = a > _quantile(a, quantile, method='linear')
     n_ex = int(ex.sum())
     if n_ex < 2:
         return np.nan

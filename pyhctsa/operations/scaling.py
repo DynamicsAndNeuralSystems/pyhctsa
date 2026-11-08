@@ -1,5 +1,7 @@
 from numpy.typing import ArrayLike
 import numpy as np
+from ..utils import _iqr
+from scipy.optimize import minimize_scalar
 import logging
 logger = logging.getLogger('pyhctsa')
 
@@ -97,8 +99,7 @@ def _fluctuations(y: np.ndarray, taus: np.ndarray, wtf: str, q: float, k: int) -
         elif wtf == 'iqr':
             # interquartile range in each window, with Hazen's quantile definition
             # (piecewise-linear through the (i-0.5)/n points)
-            q75, q25 = np.percentile(windows, [75, 25], axis=0, method='hazen')
-            f = q75 - q25
+            f = _iqr(windows, axis=0)
         elif wtf == 'rsrange':
             # range after removing the straight line through the window's end points
             line = np.linspace(0, 1, tau)[:, None] * (windows[-1, :] - windows[0, :]) + windows[0, :]
@@ -683,4 +684,179 @@ def mfdfa(y: ArrayLike, scale_range: list | None = None, q_range: list | None = 
     left_width = out['alpha0'] - out['alphaMin']
     right_width = out['alphaMax'] - out['alpha0']
     out['spectrumAsymmetry'] = left_width / right_width if right_width > 0 else np.nan
+    return out
+
+
+# Search interval for the local Whittle estimate of d. The objective is convex in d, so its minimum on
+# the interval is unique. [-1, 2] holds every value the estimator converges to (it tends to 1 for
+# 1 < d < 2), so a minimum at a bound means that no power law describes the band (a spectral line
+# within it, for example), and the estimate is NaN.
+_LW_D_BOUNDS = (-1.0, 2.0)
+# The fewest Fourier frequencies from which d is estimated; with fewer the output is NaN.
+_LW_MIN_FREQS = 8
+
+
+def _local_whittle_d(log_lam: np.ndarray, pgram: np.ndarray) -> float:
+    """
+    The local Whittle estimate of d from the periodogram ``pgram`` at Fourier frequencies with
+    logarithms ``log_lam``: the minimizer over ``_LW_D_BOUNDS`` of
+    ``R(d) = log(mean_j lam_j^(2d) I_j) - 2 d mean_j log(lam_j)``. NaN if the periodogram is zero
+    at one of the frequencies or the minimizer reaches a bound.
+    """
+    if not np.all(pgram > 0):
+        return np.nan
+    log_i = np.log(pgram)
+    mean_log_lam = np.mean(log_lam)
+
+    def objective(d):
+        # log-mean-exp, shifted by the largest term so that no power overflows
+        a = 2.0 * d * log_lam + log_i
+        a_max = np.max(a)
+        return a_max + np.log(np.mean(np.exp(a - a_max))) - 2.0 * d * mean_log_lam
+
+    res = minimize_scalar(objective, bounds=_LW_D_BOUNDS, method='bounded', options={'xatol': 1e-6})
+    d = float(res.x)
+    if min(d - _LW_D_BOUNDS[0], _LW_D_BOUNDS[1] - d) < 1e-3:
+        return np.nan
+    return d
+
+
+@dict_output
+def long_memory_d(y: ArrayLike) -> dict:
+    """
+    Memory parameter d from the lowest frequencies of the periodogram (local Whittle estimate).
+
+    A long-memory process has a spectral density that follows a power law at low frequencies,
+    :math:`f(\\lambda) \\sim G \\lambda^{-2d}` as :math:`\\lambda \\to 0`, with memory parameter
+    :math:`d` [1]_ [2]_. A short-memory process (white noise, any stationary ARMA process) has a
+    spectrum that is flat at zero frequency, :math:`d = 0`; :math:`0 < d < 1/2` is stationary long
+    memory, with autocorrelations that decay as :math:`k^{2d-1}` and are not summable;
+    :math:`-1/2 < d < 0` is anti-persistence; and :math:`d = 1` is a random walk. Fractional
+    Gaussian noise with Hurst exponent :math:`H` has :math:`d = H - 1/2`, and ARFIMA(p, d, q)
+    processes [3]_ [4]_ have memory parameter :math:`d` whatever their ARMA part.
+
+    The local Whittle (Gaussian semiparametric) estimator, proposed by Künsch [5]_ and analyzed by
+    Robinson [6]_, fits only the power law, and only over the :math:`m` lowest Fourier frequencies
+    :math:`\\lambda_j = 2\\pi j/N`, :math:`j = 1, \\dots, m`, leaving the spectrum at higher
+    frequencies (the short-range correlation) unmodeled:
+
+    1. The periodogram :math:`I_j = |\\sum_t (x_t - \\bar{x}) e^{-i \\lambda_j t}|^2` is computed at
+       :math:`\\lambda_1, \\dots, \\lambda_m` (its normalization does not affect the estimate).
+    2. Maximizing the Whittle likelihood of :math:`G \\lambda^{-2d}` at those frequencies, with
+       the level :math:`G` concentrated out, is minimizing
+
+       .. math::
+
+           R(d) = \\log\\Big(\\frac{1}{m} \\sum_{j=1}^m \\lambda_j^{2d} I_j\\Big)
+                  - \\frac{2d}{m} \\sum_{j=1}^m \\log \\lambda_j,
+
+       which is convex in :math:`d`.
+    3. :math:`\\hat{d}` is the minimizer of :math:`R` on :math:`[-1, 2]` (bounded Brent search).
+
+    The estimate is computed on two bands, fixed fractions of the sampling rate: the frequencies
+    below 1/128 cycles per sample (``d``; timescales longer than 128 samples,
+    :math:`m = \\lfloor N/128 \\rfloor`) and those below 1/32 cycles per sample (``d_32``,
+    :math:`m = \\lfloor N/32 \\rfloor`). Their difference, ``d_diff``, is near 0 when one power law
+    holds over both bands, and is positive when positive short-range correlation steepens the
+    spectrum within the wider band (an AR(1) process with coefficient 0.8 adds about 0.08 to
+    ``d_32`` and nothing measurable to ``d``).
+
+    The bands are fixed fractions of the sampling rate rather than the usual power of the
+    length, :math:`m = N^a` with :math:`a` between 0.5 and 0.8 [7]_ [8]_. A power rule makes the
+    estimate consistent for :math:`d`, but the band then moves to lower frequencies as :math:`N`
+    grows, so on a short-memory process the bias from short-range correlation, and with it the
+    feature's expected value, drifts with the length (for an AR(1) process with coefficient 0.8
+    and :math:`m = N^{0.65}`, from +0.41 at N = 500 to +0.12 at N = 8000). A fixed band
+    estimates one population quantity at every length, the average log-log slope of the
+    spectrum over that band (equal to :math:`d` when the band lies inside the low-frequency power
+    law), and only its variance falls with :math:`N`. Long memory is a property of the lowest
+    frequencies: in simulations of short-memory AR(1) and ARMA(1, 1) processes the bias of ``d``
+    was at most +0.03 and did not change with :math:`N` from 2000 to 8000, whereas a band reaching
+    1/16 cycles per sample was biased by +0.2 (AR(1), coefficient 0.8) to +0.4 (ARMA(1, 1)).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+
+    Returns
+    -------
+    dict
+        - 'd': the local Whittle estimate on the frequencies below 1/128 cycles per sample.
+        - 'd_32': the local Whittle estimate on the frequencies below 1/32 cycles per sample.
+        - 'd_diff': ``d_32 - d``.
+
+        An estimate is NaN when its band holds fewer than 8 Fourier frequencies (``d`` and
+        ``d_diff`` for N < 1024, ``d_32`` for N < 256), when the periodogram is zero at one of
+        them, or when the minimizer reaches a bound of the search interval :math:`[-1, 2]`,
+        which happens when no power law describes the band (a strong periodic component within
+        it, for example). All are NaN for a constant series or one containing NaN or Inf.
+
+    Notes
+    -----
+    The estimator is consistent for :math:`-1/2 < d < 1/2`, with :math:`\\hat{d}` asymptotically
+    normal with variance :math:`1/(4m)`, the semiparametric efficiency bound [6]_; normality with
+    that variance extends to :math:`d < 3/4`, and consistency to :math:`d \\le 1` [9]_. The
+    standard error therefore depends only on the length (about :math:`1/(2\\sqrt{m})`, 0.18 for
+    ``d`` at N = 1024 and 0.06 at N = 8192, and somewhat larger at small :math:`m`), so it is not
+    returned, nor is the z-score :math:`2\\sqrt{m}\\,\\hat{d}` or the linear transform
+    :math:`H = d + 1/2`. The log-periodogram regression of Geweke and Porter-Hudak [7]_ (GPH)
+    estimates the same quantity with asymptotic variance :math:`\\pi^2/(24m)`, about 1.6 times
+    larger (standard deviation about 1.28 times larger), and is not computed.
+
+    Limitations:
+
+    - For :math:`1 < d < 2` the estimate converges to 1 [9]_, so a random walk, an integrated
+      series and a trended series all give values near 1, and values between about 0.5 and 1.1 do
+      not distinguish stationary persistence, a unit root and a trend.
+    - The estimator is inconsistent for :math:`d < -1/2`: an over-differenced series (e.g.
+      differenced white noise, :math:`d = -1`) gives about -0.5 to -0.7, so values below about
+      -0.5 mean only strong anti-persistence.
+    - Like every semiparametric estimator of :math:`d`, it reads any low-frequency power as long
+      memory: trends, level shifts and slow oscillations raise ``d`` (and then usually make
+      ``d_diff`` negative). A strong oscillation just above a band pushes that band's estimate
+      down (a sinusoid of period 50 in noise gives ``d_32`` of about -0.66).
+    - ``d`` is noisy at the shortest lengths at which it is defined (standard deviation about 0.3
+      at N = 1024).
+
+    Relation to :func:`fluctuation_analysis`: its exponent ``alpha`` estimates :math:`d + 1/2`
+    for a stationary series, and on ARFIMA processes the two agree closely (Spearman correlation
+    0.95 between ``d`` and the DFA ``alpha``). They differ where the models' assumptions differ:
+    under short memory at long lengths, where ``d`` is less biased and its error keeps falling as
+    :math:`1/\\sqrt{N}`; on random walks and other integrated series, where ``d`` is near 1 and
+    ``alpha`` is usually NaN; and on a power law confined to frequencies below a corner, which ``d``
+    isolates and the fluctuation function, averaging over a broad range of frequencies at every
+    window length, does not.
+
+    References
+    ----------
+    .. [1] J. Beran, "Statistics for Long-Memory Processes", Chapman & Hall (1994).
+    .. [2] P. M. Robinson (ed.), "Time Series with Long Memory", Oxford University Press (2003).
+    .. [3] C. W. J. Granger and R. Joyeux, "An introduction to long-memory time series models and
+       fractional differencing", J. Time Ser. Anal. 1, 15-29 (1980).
+    .. [4] J. R. M. Hosking, "Fractional differencing", Biometrika 68, 165-176 (1981).
+    .. [5] H. R. Künsch, "Statistical aspects of self-similar processes", Proc. First World
+       Congress of the Bernoulli Society 1, 67-74 (1987).
+    .. [6] P. M. Robinson, "Gaussian semiparametric estimation of long range dependence",
+       Ann. Stat. 23, 1630-1661 (1995).
+    .. [7] J. Geweke and S. Porter-Hudak, "The estimation and application of long memory time
+       series models", J. Time Ser. Anal. 4, 221-238 (1983).
+    .. [8] C. M. Hurvich, R. Deo and J. Brodsky, "The mean squared error of Geweke and
+       Porter-Hudak's estimator of the memory parameter of a long-memory time series",
+       J. Time Ser. Anal. 19, 19-46 (1998).
+    .. [9] P. C. B. Phillips and K. Shimotsu, "Local Whittle estimation in nonstationary and unit
+       root cases", Ann. Stat. 32, 656-692 (2004).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = y.size
+    m_32, m_128 = N // 32, N // 128
+    if m_32 < _LW_MIN_FREQS or not np.all(np.isfinite(y)) or np.all(y == y[0]):
+        return np.nan
+    # periodogram at the Fourier frequencies 2 pi j / N, j = 1, ..., N // 32 (scale is irrelevant)
+    pgram = np.abs(np.fft.rfft(y - np.mean(y))[1:m_32 + 1]) ** 2
+    log_lam = np.log(2 * np.pi * np.arange(1, m_32 + 1) / N)
+    out = {'d': np.nan, 'd_32': _local_whittle_d(log_lam, pgram), 'd_diff': np.nan}
+    if m_128 >= _LW_MIN_FREQS:
+        out['d'] = _local_whittle_d(log_lam[:m_128], pgram[:m_128])
+        out['d_diff'] = out['d_32'] - out['d']
     return out

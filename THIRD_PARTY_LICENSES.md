@@ -75,7 +75,7 @@ These components are used with credit. No unlicensed third-party source is inclu
 | `MD_*` heart-rate-variability measures | (C) 2016 Max A. Little and Ben D. Fulcher. |
 | Permutation entropy variant (`permEnLE`) | Bruce Land and Damian Elias, Cornell University (https://people.ece.cornell.edu/land/PROJECTS/Complexity/). The variant is a one-line formula. |
 | Visibility-graph measures | Lacasa et al., *PNAS* 105, 4972 (2008); Luque et al., *Phys. Rev. E* 80, 046103 (2009). The degree algorithms in *pyhctsa* are original. |
-| KSG and Gaussian mutual-information estimators (`pyhctsa/ksg.py`) | Kraskov, Stoegbauer & Grassberger, *Phys. Rev. E* 69, 066138 (2004). The Java Information Dynamics Toolkit (J. T. Lizier, *Front. Robot. AI* 1, 11 (2014)) is the implementation *hctsa* uses and the reference for the method's conventions; the estimators in *pyhctsa* are written from the published equations and include no JIDT code. |
+| KSG mutual-information estimator (`pyhctsa/ksg.py`) | Kraskov, Stoegbauer & Grassberger, *Phys. Rev. E* 69, 066138 (2004). The Java Information Dynamics Toolkit (J. T. Lizier, *Front. Robot. AI* 1, 11 (2014)) is the implementation *hctsa* uses and the reference for the method's conventions; the estimator in *pyhctsa* is written from the published equations and includes no JIDT code. |
 | TSTOOL methods (`CO_TC3`, `CO_trev`, `NL_DelayTime`, `NL_FractalDimensions`, `NL_ReturnTime`) | C. Merkwirth, U. Parlitz, I. Wedekind, D. Engster and W. Lauterborn (TSTOOL), via the *hctsa* reimplementations. The expressions are re-implemented; no TSTOOL source is included. |
 
 ## 4. Implemented from published descriptions (clean-room), and dependency credits
