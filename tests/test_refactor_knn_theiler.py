@@ -80,16 +80,15 @@ EXPECTED = {
     ('ksg_mi', 'sine', 2, 3): 0.4524730936138077,
     ('ksg_mi', 'rep', 1, 0): 7.202397910223058,
     ('ksg_mi', 'rep', 1, 3): 7.178390485779044,
-    ('ksg_mi', 'rep', 2, 0): -1.3204804013957627,
-    ('ksg_mi', 'rep', 2, 3): -1.2997212290306326,
+    ('ksg_mi', 'rep', 2, 0): 0.007668018685738964,
+    ('ksg_mi', 'rep', 2, 3): 0.020412563749243162,
 }
-# No operation pin for ksg_mi on 'rep': with exact ties in the joint max-norm distances, which
-# tied rows the k-d tree returns first differs between platforms (the ubuntu and windows runners
-# give -1.3213785 for algorithm 2, theiler 0: one marginal count flips), so no tight tolerance is
-# portable. The 'rep' case is covered by test_ref_ksg_joint_neighbors below, where the same tree
-# built on the same machine resolves the ties identically. (The values above are kept as
-# documentation of the main-checkout values.)
-KSG_PINNED_SERIES = ('ar1', 'sine')
+# ksg_mi on 'rep', algorithm 2: on main the exact ties in the joint max-norm distances made the
+# value depend on which tied rows the k-d tree returned first, which differed between platforms
+# (main gave -1.3204804013957627 and -1.2997212290306326 on macOS; ubuntu and windows gave
+# -1.3213785 at theiler 0). Since #64 (branch fix-ksg-tie-order) algorithm 2 breaks the ties with
+# fixed-seed jitter, so the value is portable and is pinned again, at the new value.
+KSG_PINNED_SERIES = ('ar1', 'sine', 'rep')
 
 # Per-operation (rtol, atol) for the pins (the values above are unchanged main-checkout values).
 T1 = (1e-9, 0)  # tier 1, closed-form arithmetic: return-time histogram statistics

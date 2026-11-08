@@ -18,9 +18,19 @@ joint ``(x, y)`` space:
   of sample ``i``;
 * algorithm 2: ``I = psi(k) - 1/k + psi(N) - <psi(n_x) + psi(n_y)>``, where ``eps_x(i)`` and
   ``eps_y(i)`` are the largest ``x`` and ``y`` separations among the ``k`` joint neighbors, and
-  ``n_x`` (``n_y``) counts the samples within (at most) ``eps_x(i)`` (``eps_y(i)``). Where
-  several samples tie at the k-th joint distance (repeated values), so that the ``k`` joint
-  neighbors are not unique, ``eps_x(i)`` and ``eps_y(i)`` are taken over all the tied samples.
+  ``n_x`` (``n_y``) counts the samples within (at most) ``eps_x(i)`` (``eps_y(i)``).
+
+The estimators assume continuous data. On data with repeated values, algorithm 2 is ill-defined
+twice over: the ``k`` joint neighbors are not unique where several samples tie at the k-th
+distance (which ones a k-d tree returns depends on its traversal, so on the platform), and every
+sample sharing the boundary value counts towards ``n_x`` (``n_y``), which biases the estimate
+down, often below zero. So, in algorithm 2, each column of ``x`` or ``y`` that has a repeated
+value has its repeated entries made distinct first, with tiny Gaussian jitter (standard
+deviation ``1e-10`` of the standardized column) from the portable fixed-seed stream
+:func:`pyhctsa.robust.bf_random`: the ties are broken as the continuous data they approximate
+would break them, and the result is deterministic and the same on every platform. Values that
+occur once are not touched (distances can still tie without repeated values, e.g. on a regular
+grid; those ties are left to the tree).
 
 References
 ----------
@@ -30,9 +40,9 @@ References
    complex systems", Front. Robot. AI 1, 11 (2014).
 """
 import numpy as np
+from .robust import bf_random
 from .utils import _sample_std
 from numba import njit
-from scipy.spatial import cKDTree
 from scipy.special import digamma
 
 from .utils import _knn_theiler
@@ -42,60 +52,9 @@ from .utils import _knn_theiler
 # Neighbor search and counting
 # ----------------------------------------------------------------------------------------------
 
-def _joint_neighbors(z, k, w):
-    """The k nearest max-norm neighbors of each row of ``z`` outside the Theiler window ``w``
-    (:func:`utils._knn_theiler`): distances and row indices, ``inf`` and -1 where fewer than k
-    rows lie outside the window. Among rows tied in distance, which are kept is the tree's choice.
-    """
-    return _knn_theiler(z, k, w, metric='chebyshev')
-
-
 def _max_separation(a, neighbors):
     """For each row i of ``a``: the largest max-norm separation from row i of its neighbors."""
     return np.abs(a[neighbors] - a[:, None, :]).max(axis=(1, 2))
-
-
-# Relative tolerance within which two joint distances count as tied (algorithm 2).
-_TIE_RTOL = 1e-12
-
-
-def _marginal_epsilons(x, y, dist, neighbors, w):
-    """Algorithm 2's ``eps_x``, ``eps_y``: for each row i, the largest ``x`` and ``y``
-    max-norm separations from row i over its joint neighbor set.
-
-    ``dist`` and ``neighbors`` hold the ``k + 1`` nearest joint neighbors of each row outside
-    the Theiler window ``w`` (from :func:`_joint_neighbors`). The neighbor set of row i is its
-    k nearest neighbors, unless the (k+1)-th lies within the relative tolerance ``_TIE_RTOL``
-    of the k-th joint distance ``d_k``: the k nearest are then not unique, and the set is every
-    row outside the window within ``d_k * (1 + _TIE_RTOL)`` of row i (all the rows tied at
-    ``d_k``, not just the k the tree returned), from a radius search. The estimate is then a
-    function of the data alone, whatever order the tree returns tied rows in. Untied rows (all
-    of them, for continuous data) keep exactly the k nearest neighbors.
-    """
-    k = dist.shape[1] - 1
-    eps_x = _max_separation(x, neighbors[:, :k])
-    eps_y = _max_separation(y, neighbors[:, :k])
-    r = dist[:, k - 1] * (1.0 + _TIE_RTOL)
-    tied = dist[:, k] <= r
-    # a tie at distance 0 is a set of coincident points, whose separations are all 0
-    eps_x[tied & (r == 0.0)] = 0.0
-    eps_y[tied & (r == 0.0)] = 0.0
-    tied = np.flatnonzero(tied & (r > 0.0))
-    if tied.size:
-        z = np.hstack([x, y])
-        balls = cKDTree(z).query_ball_point(z[tied], r[tied], p=np.inf)
-        lengths = np.fromiter((len(b) for b in balls), np.intp, tied.size)
-        rows = np.repeat(tied, lengths)
-        cols = np.fromiter((j for b in balls for j in b), np.intp, lengths.sum())
-        outside = np.abs(cols - rows) > w
-        rows, cols = rows[outside], cols[outside]
-        sep_x = np.abs(x[cols] - x[rows]).max(axis=1)
-        sep_y = np.abs(y[cols] - y[rows]).max(axis=1)
-        eps_x[tied] = 0.0
-        eps_y[tied] = 0.0
-        np.maximum.at(eps_x, rows, sep_x)
-        np.maximum.at(eps_y, rows, sep_y)
-    return eps_x, eps_y
 
 
 @njit(cache=True)
@@ -157,15 +116,49 @@ def _standardize(a):
     return (a - a.mean(axis=0)) / sd
 
 
+# Standard deviation of the tie-breaking jitter of algorithm 2, relative to the standardized column
+_TIE_JITTER = 1e-10
+
+
+def _break_ties(a, first_seed):
+    """``a`` (standardized columns) with its repeated values made distinct: in each non-constant
+    column j, every entry whose value occurs more than once gets Gaussian jitter of standard
+    deviation ``_TIE_JITTER``, entry i the i-th value of ``bf_random(n, first_seed + j,
+    'normal')``, so the result is deterministic and portable. Jitter this small can land two
+    entries on the same float again (a birthday collision at round-off resolution, in large tie
+    blocks); the entries still repeated are then jittered again, with the stream of seed
+    ``first_seed + j + 1000 * pass``, until none is. Entries whose values are distinct are not
+    touched.
+    """
+    out = a
+    n = a.shape[0]
+    for j in range(a.shape[1]):
+        if _sample_std(a[:, j]) == 0:
+            continue
+        col = a[:, j]
+        for p in range(100):
+            _, inverse, counts = np.unique(col, return_inverse=True, return_counts=True)
+            repeated = counts[inverse.ravel()] > 1
+            if not repeated.any():
+                break
+            if out is a:
+                out = a.copy()
+            col = out[:, j]
+            col[repeated] += _TIE_JITTER * bf_random(n, first_seed + j + 1000 * p, 'normal')[repeated]
+    return np.ascontiguousarray(out)
+
+
 def ksg_mi(x, y, k=4, algorithm=1, theiler=0):
     """Kraskov-Stoegbauer-Grassberger estimate of the mutual information I(x; y), in nats.
 
     Each column of ``x`` and of ``y`` is first standardized to zero mean and unit variance, so
-    that the max norm weighs all dimensions equally. The estimator is meant for continuous
-    data: repeated values (coincident points) bias it, and a caller may break them, e.g. with
-    tiny noise. The result is deterministic either way: algorithm 2 takes the marginal
-    separations over every sample tied at the k-th joint distance (to a relative tolerance of
-    1e-12), not over whichever k of them the neighbor search returns.
+    that the max norm weighs all dimensions equally. The estimators assume continuous data. In
+    algorithm 2, the repeated values of each column then get tiny, fixed-seed Gaussian jitter
+    (standard deviation 1e-10, from :func:`pyhctsa.robust.bf_random`; seeds 0, 1, ... over the
+    columns of ``x`` and then of ``y``), which breaks the ties deterministically and identically
+    on every platform; see the module docstring. Values that occur once are not touched.
+    Algorithm 1 is used as given: it depends on the joint neighbors only through the k-th
+    distance, so it is deterministic on tied data, though biased by them.
 
     Parameters
     ----------
@@ -205,17 +198,20 @@ def ksg_mi(x, y, k=4, algorithm=1, theiler=0):
 
     x = np.ascontiguousarray(_standardize(x))
     y = np.ascontiguousarray(_standardize(y))
-    z = np.hstack([x, y])
+    if algorithm == 2:
+        # break exact ties (repeated values) with fixed-seed jitter, a seed per column
+        x = _break_ties(x, 0)
+        y = _break_ties(y, x.shape[1])
+    # the k nearest max-norm neighbors of each joint point outside the Theiler window
+    dist, neighbors = _knn_theiler(np.hstack([x, y]), k, theiler, metric='chebyshev')
 
     if algorithm == 1:
-        eps = _joint_neighbors(z, k, theiler)[0][:, -1]
+        eps = dist[:, -1]
         n_x = _count_within(x, eps, theiler, True)
         n_y = _count_within(y, eps, theiler, True)
         mi = digamma(k) + digamma(n) - np.mean(digamma(n_x + 1) + digamma(n_y + 1))
     else:
-        # one neighbor more than k, to detect ties at the k-th joint distance
-        eps_x, eps_y = _marginal_epsilons(x, y, *_joint_neighbors(z, k + 1, theiler), theiler)
-        n_x = _count_within(x, eps_x, theiler, False)
-        n_y = _count_within(y, eps_y, theiler, False)
+        n_x = _count_within(x, _max_separation(x, neighbors), theiler, False)
+        n_y = _count_within(y, _max_separation(y, neighbors), theiler, False)
         mi = digamma(k) - 1.0 / k + digamma(n) - np.mean(digamma(n_x) + digamma(n_y))
     return float(mi)
