@@ -13,7 +13,7 @@ from statsmodels.tsa.arima.model import ARIMA
 from pyhctsa.operations import model_fit as mf
 from pyhctsa.operations.model_fit import (
     _ar_fb, _arcov, _arch_test_pvalues, _arx_losses, _even_split_points, _kstep_residuals,
-    _kstep_residuals_ss, _lbq_test_pvalues, _n4_arx_order, _n4_core, _n4_fpe, _n4_horizons,
+    _lbq_test_pvalues, _n4_arx_order, _n4_core, _n4_fpe, _n4_horizons,
     _n4_state_space, _defined_errors, _diffuse_predictions, _nanmax_or_nan, _nanmin_or_nan, _poly_to_innovations, _prediction_errors,
     _ss_initial_state, _stabilize_matrix,
 )
@@ -275,12 +275,12 @@ def test_prediction_similarity_invariance_and_degenerate():
     t = np.array([[1.0, 0.4], [-0.3, 2.0]])
     ti = np.linalg.inv(t)
     for k in (1, 3):
-        np.testing.assert_allclose(_kstep_residuals_ss(a, kg, cv, y, k),
-                                   _kstep_residuals_ss(t @ a @ ti, t @ kg, cv @ ti, y, k), atol=1e-9)
+        np.testing.assert_allclose(_prediction_errors((a, kg, cv), y, k),
+                                   _prediction_errors((t @ a @ ti, t @ kg, cv @ ti), y, k), atol=1e-9)
     np.testing.assert_allclose(_kstep_residuals(np.array([1.0]), np.array([1.0]), y, 2), -y)  # no states
     y_nan = y.copy()
     y_nan[5] = np.nan
-    assert np.all(np.isnan(_kstep_residuals_ss(a, kg, cv, y_nan, 1)))
+    assert np.all(np.isnan(_prediction_errors((a, kg, cv), y_nan, 1)))
     x0, err = _ss_initial_state(a, kg, cv, y[:4], 10)             # horizons beyond the data: free run only
     np.testing.assert_allclose(y[:4] - err, mf._ss_predict(a, kg, cv, y[:4], x0, 10), atol=1e-10)
 

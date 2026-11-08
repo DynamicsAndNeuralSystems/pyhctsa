@@ -557,14 +557,14 @@ def test_wvarchg_counts_and_locates_known_changes():
     assert np.median(errs) <= 40
 
 
-def test_variance_inflation_reflects_dependence():
+def test_mean_square_inflation_reflects_dependence():
     rng = np.random.default_rng(2029)
     white = rng.standard_normal(4000)
-    assert cp._variance_inflation(white) < 1.6
+    assert cp._mean_square_inflation(white) < 1.6
     from scipy.signal import lfilter
     ar = lfilter([1.0], [1.0, -0.9], rng.standard_normal(4200))[200:]
-    assert cp._variance_inflation(ar) > 3.0
-    assert cp._variance_inflation(np.zeros(100)) == 1.0
+    assert cp._mean_square_inflation(ar) > 3.0
+    assert cp._mean_square_inflation(np.zeros(100)) == 1.0
 
 
 def test_penalized_rule_is_zero_when_contrast_does_not_improve():
