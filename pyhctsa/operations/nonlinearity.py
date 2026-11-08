@@ -30,6 +30,7 @@ from ..toolboxes.Tisean_3_0_1.ports import (  # noqa: F401 (_c1_centers is used 
 from ..robust import bf_hist_edges, bf_random, bf_random_seed, bf_spread_perm
 from ..utils import _even_split_points, dict_output, _round_half_away, get_tau, theiler_window, time_delay_embed
 from ..utils import _padded_nfft
+from ..utils import _shannon_entropy
 
 logger = logging.getLogger('pyhctsa')
 
@@ -2966,8 +2967,7 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
         out['totalPersistenceH1'] = np.sum(pers1)
         # zero-persistence pairs contribute nothing to the entropy (0 log 0 = 0)
         pos = pers1[pers1 > 0]
-        p = pos / np.sum(pos)
-        out['persistenceEntropyH1'] = -np.sum(p * np.log(p)) if p.size else 0.0
+        out['persistenceEntropyH1'] = _shannon_entropy(pos, normalize=True) if pos.size else 0.0
     out['totalPersistenceH0'] = np.sum(lifetimes(drop_essential(dgms[0])))
     return out
 
@@ -3136,7 +3136,7 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         # -sum(p log p) is biased low by (M-1)/(2n) for M occupied boxes and n
         # points on the section, so the raw value tracks the series length.
         out[f'hboxcounts{num_partitions}'] = (
-            -np.sum(pos * np.log(pos)) + (pos.size - 1) / (2 * nn))
+            _shannon_entropy(pos) + (pos.size - 1) / (2 * nn))
         out[f'tracepbox{num_partitions}'] = np.sum(np.diag(pbox))  # trace
 
     return out
@@ -3650,7 +3650,7 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
         out['DIV'] = 1 / out['L_max']
         counts = np.bincount(diag_lengths)
         p = counts[counts > 0] / diag_lengths.size
-        out['L_entr'] = -np.sum(p * np.log(p))
+        out['L_entr'] = _shannon_entropy(p)
 
     # Vertical line lengths, from the full band-excluded matrix, grouping recurrent points by column
     vert_lengths = _line_lengths(dst, src, vmin)
@@ -3876,13 +3876,13 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
 
     # Entropy of the histogram, as a distribution over lags
     p_trett = trett / np.sum(trett)
-    out['hhist'] = -np.sum(p_trett[p_trett > 0] * np.log(p_trett[p_trett > 0]))
+    out['hhist'] = _shannon_entropy(p_trett)
 
     # Coarse-grain to 20 bins of lags
     num_bins = 20
     inds = _even_split_points(0, nn, num_bins + 1)  # bin boundaries, evenly spread over 0..nn
     cglav = np.array([np.sum(p_trett[inds[b]:inds[b + 1]]) for b in range(num_bins)])
-    out['hcgdist'] = -np.sum(cglav[cglav > 0] * np.log(cglav[cglav > 0]))
+    out['hcgdist'] = _shannon_entropy(cglav)
     out['rangecgdist'] = np.ptp(cglav)
     out['pzeroscgdist'] = np.sum(cglav == 0) / num_bins
 
@@ -3892,7 +3892,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     nhist = np.histogram(trett, bins=edges)[0] / nn
     out['maxhisthist'] = np.max(nhist)
     out['phisthistmin'] = nhist[0]  # probability in the first (lowest-value) bin
-    out['hhisthist'] = -np.sum(nhist[nhist > 0] * np.log(nhist[nhist > 0]))
+    out['hhisthist'] = _shannon_entropy(nhist)
 
     return out
 

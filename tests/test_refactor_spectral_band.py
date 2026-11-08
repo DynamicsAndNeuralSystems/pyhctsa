@@ -40,8 +40,8 @@ def _series():
 SERIES = _series()
 
 CALLS = {
-    'phase_amp_coupling': (sp.phase_amp_coupling, {}),
-    'phase_amp_coupling_max_n': (sp.phase_amp_coupling, {'max_n': 700, 'n_bands': 4}),
+    'phase_amp_coupling': (sp.cross_frequency_coupling, {}),
+    'phase_amp_coupling_max_n': (sp.cross_frequency_coupling, {'max_n': 700, 'n_bands': 4}),
     'envelope_stats': (sp.envelope_stats, {}),
     'phase_fluctuation_scaling': (sp.phase_fluctuation_scaling, {'max_n': 900}),
     'bicoherence': (sp.bicoherence, {'max_n': 800}),
@@ -429,7 +429,7 @@ def test_crop_messages(caplog):
     y = SERIES['ar1']
     with pytest.warns(UserWarning, match=r'^Time series \(1200 samples\) exceeds max_n = 700; '
                                          r'analyzing the first 700 samples$'):
-        sp.phase_amp_coupling(y, max_n=700)
+        sp.cross_frequency_coupling(y, max_n=700)
     with caplog.at_level(logging.INFO, logger='pyhctsa'):
         nl.nlpe(y, max_n=500)
         nl.zero_one_test(y, max_n=600)

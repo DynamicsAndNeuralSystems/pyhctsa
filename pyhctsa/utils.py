@@ -445,6 +445,48 @@ def simple_binner(x_data: ArrayLike, num_bins: int) -> tuple:
 
     return N, bin_edges
 
+def _shannon_entropy(p: ArrayLike, base: Union[float, None] = None, normalize: bool = False,
+                     axis: Union[int, None] = None):
+    """
+    Shannon entropy ``-sum p log p`` of a probability vector (or of each slice along ``axis``).
+
+    Parameters
+    ----------
+    p : ArrayLike
+        Probabilities (or nonnegative weights, with ``normalize=True``).
+    base : float or None, optional
+        Logarithm base: None for the natural log (nats), 2 for bits (``np.log2``), 10 for
+        ``np.log10``; any other base divides the natural log by ``log(base)``.
+    normalize : bool, optional
+        Divide ``p`` by its sum (along ``axis``) first. Default False.
+    axis : int or None, optional
+        None (default) treats ``p`` as one flattened vector and returns a scalar; an integer
+        returns one entropy per slice along that axis.
+
+    Returns
+    -------
+    np.float64 or np.ndarray
+        The entropy. Terms with ``p <= 0`` or NaN contribute 0 (``0 log 0 = 0``): with
+        ``axis=None`` they are dropped before summing (so an empty or all-zero ``p`` gives -0.0),
+        with an integer ``axis`` they are set to 0 in place. No eps is added.
+    """
+    p = np.asarray(p, dtype=float)
+    if normalize:
+        p = p / np.sum(p, axis=axis, keepdims=axis is not None)
+    if base is None:
+        log = np.log
+    elif base == 2:
+        log = np.log2
+    elif base == 10:
+        log = np.log10
+    else:
+        log = lambda v: np.log(v) / np.log(base)
+    if axis is None:
+        p = p[p > 0]
+        return -np.sum(p * log(p))
+    pos = p > 0
+    return -np.sum(np.where(pos, p * log(np.where(pos, p, 1.0)), 0.0), axis=axis)
+
 def point_of_crossing(x: ArrayLike, threshold: float) -> tuple:
     """
     Linearly interpolate to the point of crossing a threshold
