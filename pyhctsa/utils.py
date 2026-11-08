@@ -992,7 +992,7 @@ def _ami_first_min(ami: np.ndarray) -> float:
     sm = _smooth3(ami)
     if ami.size >= 4:
         d2 = np.diff(ami, 2)
-        sigma = 1.4826 * np.median(np.abs(d2 - np.median(d2))) / np.sqrt(6.0)
+        sigma = MAD_TO_SIGMA * np.median(np.abs(d2 - np.median(d2))) / np.sqrt(6.0)
         delta = 2.0 * sigma
     else:
         delta = 0.0
@@ -1584,3 +1584,59 @@ def make_function_name_mappings(
             df_all_modules.to_csv(f, index=False)
 
     return df_all_modules
+
+
+# ------------------------------------------------------------------------------
+# Robust-scale constants and the round-off guard
+# ------------------------------------------------------------------------------
+# For Gaussian data the median absolute deviation (MAD) is sigma * Phi^{-1}(3/4) = 0.67449 sigma,
+# so sigma is estimated by MAD * 1.4826 or MAD / 0.6745. The two rounded forms differ by about 1e-5
+# (relative) from each other and from the exact Phi^{-1}(3/4), so each site keeps the form it uses;
+# changing one changes outputs in the fifth significant digit.
+MAD_TO_SIGMA = 1.4826   # sigma ~= MAD_TO_SIGMA * MAD (multiplied)
+MAD_DIVISOR = 0.6745    # sigma ~= MAD / MAD_DIVISOR (divided; Holland & Welsch's rounding)
+
+
+def _is_roundoff(x: np.ndarray, ref: Union[np.ndarray, None] = None, n: Union[int, None] = None) -> bool:
+    """True if ``x`` has no variation beyond floating-point round-off.
+
+    The criterion is ``std(x, ddof=1) <= 10 * n * eps * rms(ref)``: a bound on the rounding error
+    of a computation over ``n`` values, relative to the magnitude (root-mean-square) of the values
+    ``ref`` it acts on. A fitted or filtered value accumulates rounding over sums of up to ``n``
+    terms (at most about ``n * eps / 2``), and a sinusoid of frequency up to 1/2 evaluated at times
+    up to ``n`` has a rounding error in its phase of up to about ``1.5 * pi * n * eps`` (three
+    roundings of ``2 * pi * f * t``), in both the data and the fit. Averaged over the series (the
+    phase error grows with ``t``), these are below about ``8 * n * eps`` of the root-mean-square,
+    so ``10 * n * eps`` covers them.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        The values tested (a processed series, residuals, or the values to be fitted).
+    ref : np.ndarray, optional
+        The values whose root-mean-square sets the scale; ``x`` itself if omitted.
+    n : int, optional
+        The number of values the computation acts on; ``ref.size`` if omitted. Callers pass the
+        length of the original series when it differs.
+    """
+    x = np.asarray(x, dtype=float)
+    ref = x if ref is None else np.asarray(ref, dtype=float)
+    if n is None:
+        n = ref.size
+    return bool(np.std(x, ddof=1) <= 10 * n * np.finfo(float).eps * np.sqrt(np.mean(ref ** 2)))
+
+
+def _piecewise_poly_residual(y: np.ndarray, order: int, num_bits: int) -> np.ndarray:
+    """Remove a polynomial of the given order from each of ``num_bits`` equal pieces.
+
+    The pieces come from hctsa's ``PP_PreProcess`` (``SUB_rempt``): boundaries at
+    ``round(linspace(0, N, num_bits + 1))`` (exact rounding), with the fit made against the sample times 0, ..., length of piece - 1.
+    """
+    n = len(y)
+    bits = _even_split_points(0, n, num_bits + 1)
+    out = np.zeros(n)
+    for k in range(num_bits):
+        seg = y[bits[k]:bits[k + 1]]
+        x = np.arange(len(seg), dtype=float)
+        out[bits[k]:bits[k + 1]] = seg - np.polynomial.Polynomial.fit(x, seg, order)(x)
+    return out
