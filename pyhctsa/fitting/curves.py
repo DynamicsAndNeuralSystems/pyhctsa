@@ -106,7 +106,7 @@ def polyfit(x, y, deg):
             return np.full(n, np.nan)
 
 
-def goodness_of_fit(y, y_fit, num_coeffs):
+def goodness_of_fit(y, y_fit, num_coeffs, *, guard_sst=True, adj_from_rsquare=False):
     """Goodness-of-fit statistics of a fitted curve.
 
     Parameters
@@ -117,6 +117,14 @@ def goodness_of_fit(y, y_fit, num_coeffs):
         Fitted values.
     num_coeffs : int
         Number of fitted coefficients m.
+    guard_sst : bool, optional
+        If True (default), ``rsquare`` and ``adjrsquare`` are NaN unless SSE and SST are finite
+        and SST > 0. If False, they are evaluated as plain floating-point arithmetic, so a zero
+        SST gives ``-inf`` (SSE > 0) or NaN (SSE = 0) rather than NaN in every case.
+    adj_from_rsquare : bool, optional
+        How adjusted R^2 is evaluated: ``1 - SSE (n-1) / (SST (n-m))`` (False, default) or
+        ``1 - (1 - R^2) (n-1) / (n-m)`` (True). The two are algebraically equal but can differ
+        in the last digits, which is a large relative difference when adjusted R^2 is near 0.
 
     Returns
     -------
@@ -137,14 +145,19 @@ def goodness_of_fit(y, y_fit, num_coeffs):
     n = y.size
     v = n - int(num_coeffs)
     with np.errstate(all="ignore"):
-        sse = float(np.sum((y - yh) ** 2))
-        sst = float(np.sum((y - np.mean(y)) ** 2)) if n > 0 else np.nan
-        defined = bool(np.isfinite(sse) and np.isfinite(sst) and sst > 0)
+        sse = np.sum((y - yh) ** 2)
+        sst = np.sum((y - np.mean(y)) ** 2) if n > 0 else np.nan
+        defined = not guard_sst or bool(np.isfinite(sse) and np.isfinite(sst) and sst > 0)
         rsq = 1.0 - sse / sst if defined else np.nan
-        adj = 1.0 - sse * (n - 1) / (sst * v) if (defined and v > 0) else np.nan
+        if not (defined and v > 0):
+            adj = np.nan
+        elif adj_from_rsquare:
+            adj = 1.0 - (1.0 - rsq) * (n - 1) / v
+        else:
+            adj = 1.0 - sse * (n - 1) / (sst * v)
         rmse = float(np.sqrt(sse / v)) if v > 0 else np.nan
     return {
-        "sse": sse,
+        "sse": float(sse),
         "rsquare": float(rsq),
         "adjrsquare": float(adj),
         "rmse": rmse,

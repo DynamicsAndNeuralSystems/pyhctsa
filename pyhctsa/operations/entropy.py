@@ -5,6 +5,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 import numpy as np
+from ..utils import _quantile
 import pywt
 from numpy.typing import ArrayLike
 from numba import njit
@@ -19,6 +20,7 @@ from ._symbolic_complexity import (_equiprobable_symbols, _normalized_lz_complex
                                   _shannon_block_entropy)
 from ..utils import (dict_output, _zscore_or_zeros, get_tau, make_buffer, pre_process, theiler_window,
                      time_delay_embed, z_score)
+from ..utils import _shannon_entropy
 
 
 def _entropy_summary(ents: np.ndarray) -> dict:
@@ -159,8 +161,8 @@ def distribution_entropy(
     y = np.asarray(y, dtype=float)
     if olremp != 0:
         y_hat = y[
-            (y >= np.quantile(y, olremp, method='hazen')) &
-            (y <= np.quantile(y, 1 - olremp, method='hazen'))
+            (y >= _quantile(y, olremp)) &
+            (y <= _quantile(y, 1 - olremp))
         ]
         if y_hat.size == 0:
             return np.nan
@@ -193,7 +195,7 @@ def distribution_entropy(
         # log(bin width) term in the entropy sum, so the grid is anchored to extreme quantiles
         # instead (consistent estimators, so the interval converges as N grows).
         num_grid_pts = 200
-        lo, hi = np.quantile(y, [0.001, 0.999], method='hazen')
+        lo, hi = _quantile(y, [0.001, 0.999])
         if not hi > lo:  # degenerate (near-constant) input
             return np.nan
         pad = 0.1 * (hi - lo)  # a little headroom beyond the quantile range
@@ -820,15 +822,14 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
 
     # Permutation entropy with a floor of 1/N on the pattern probabilities
     p_le = np.maximum(1 / nx, p)
-    pe_le = -np.sum(p_le * np.log(p_le)) / (m - 1) if m > 1 else np.nan
+    pe_le = _shannon_entropy(p_le) / (m - 1) if m > 1 else np.nan
 
     # Weighted permutation entropy: each vector is weighted by the (population)
     # variance of its m values
     w = np.var(embedded, axis=1)
     if np.sum(w) > 0:
         pw = np.bincount(perm_idx, weights=w, minlength=num_perms) / np.sum(w)
-        pw = pw[pw > 0]
-        norm_wpe = -np.sum(pw * np.log2(pw)) / np.log2(num_perms)
+        norm_wpe = _shannon_entropy(pw, base=2) / np.log2(num_perms)
     else:
         norm_wpe = np.nan
 
@@ -947,7 +948,7 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
     n = len(y) - (m - 1) * tau
     if n < 4:  # with 3 or fewer embedded points the only possible return time is 2
         return np.nan
-    v = np.column_stack([y[k * tau:k * tau + n] for k in range(m)])
+    v = time_delay_embed(y, m, tau)
     hist = _close_returns_hist(np.ascontiguousarray(v), float(epsilon))
     if t_max > -1:
         hist = hist[:int(t_max)]
@@ -957,7 +958,7 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
     rpd = hist / total
     nb = len(rpd)
     nz = rpd > 0
-    ent = -np.sum(rpd[nz] * np.log(rpd[nz]))
+    ent = _shannon_entropy(rpd)
     return {"H": ent,
             "H_norm": ent / np.log(nb) if nb > 1 else np.nan,
             "propNonZero": float(np.mean(nz)),
@@ -1032,7 +1033,7 @@ def _apen_phis(x: ArrayLike, m: int, r: float, tau: int = 1) -> tuple:
     phis = []
     for length in (m, m + 1):
         n_vec = x.size - (length - 1) * tau
-        vecs = np.column_stack([x[j * tau:j * tau + n_vec] for j in range(length)])
+        vecs = time_delay_embed(x, length, tau)
         counts = cKDTree(vecs).query_ball_point(vecs, r, p=np.inf, return_length=True)
         phis.append(np.mean(np.log(counts / n_vec)))
     return phis[0], phis[1]
@@ -1204,15 +1205,14 @@ def permutation_entropy_complexity(y: ArrayLike, m: int = 2, tau: Union[int, str
     p = np.bincount(_ordinal_pattern_rank(x), minlength=num_perms) / nx
 
     # Normalized Shannon entropy of P
-    p_0 = p[p > 0]
-    s_p = -np.sum(p_0 * np.log2(p_0))
+    s_p = _shannon_entropy(p, base=2)
     s_max = np.log2(num_perms)
     h_norm = s_p / s_max
 
     # Jensen-Shannon statistical complexity of P relative to the uniform distribution Pe
     pe = 1 / num_perms
     p_mix = (p + pe) / 2  # every entry > 0, since pe > 0
-    s_mix = -np.sum(p_mix * np.log2(p_mix))
+    s_mix = _shannon_entropy(p_mix, base=2)
     js_div = s_mix - s_p / 2 - s_max / 2  # the entropy of Pe is log2(m!)
 
     # Normalizing constant so that Q_J is in [0, 1], attained for P a point mass
@@ -1312,9 +1312,7 @@ def wavelet_entropy(y: ArrayLike, wavelet_name: str = 'sym4', level: int = 5) ->
     total = energy.sum()
     if not total > 0:
         return np.nan
-    p = energy / total
-    p = p[p > 0]
-    return float(-np.sum(p * np.log2(p)) / np.log2(level + 1))
+    return float(_shannon_entropy(energy / total, base=2) / np.log2(level + 1))
 
 _RANDOMIZE_STATS = ('xcn1', 'xc1', 'd1', 'ac1', 'ac2', 'ac3', 'ac4', 'permen3_1', 'statav5',
                     'swss5_1')
@@ -1580,7 +1578,7 @@ def _ro_pattern_dists(y: np.ndarray, tau: int) -> np.ndarray:
     cdf = lambda k: F0[k.astype(np.int64)]
     cdf2 = lambda k: F20[k.astype(np.int64)]
     pm = lambda k: f[k.astype(np.int64) - 1]
-    W = np.column_stack([r[:n - 2 * tau], r[tau:n - tau], r[2 * tau:]])
+    W = time_delay_embed(r, 3, tau)
     nx = W.shape[0]
     S = np.zeros((8, 6))
 
@@ -1900,15 +1898,14 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
     z = np.clip(np.floor(c * y_mapped) + 1, 1, c).astype(np.int64)
 
     # Z[i, k] = z[i + k*tau], one row per embedding vector
-    emb = z[np.arange(num_vectors)[:, None] + np.arange(m) * tau]
+    emb = time_delay_embed(z, m, tau).astype(np.int64)  # exact: z holds small integers
 
     # Dispersion entropy: the patterns are the class sequences themselves (c^m of them),
     # encoded as base-c integers
     place_values = c ** np.arange(m - 1, -1, -1, dtype=np.int64)
     pattern_idx = (emb - 1) @ place_values
     p = np.bincount(pattern_idx, minlength=c ** m) / num_vectors
-    p = p[p > 0]
-    disp_en = -np.sum(p * np.log(p))
+    disp_en = _shannon_entropy(p)
     out = {'dispEn': disp_en, 'normDispEn': disp_en / np.log(float(c) ** m)}
 
     # Fluctuation-based: the patterns are the successive class differences, each in
@@ -1922,8 +1919,7 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
     f_place_values = (2 * c - 1) ** np.arange(m - 2, -1, -1, dtype=np.int64)
     f_idx = d_z @ f_place_values
     p_f = np.bincount(f_idx, minlength=num_fluct) / num_vectors
-    p_f = p_f[p_f > 0]
-    f_disp_en = -np.sum(p_f * np.log(p_f))
+    f_disp_en = _shannon_entropy(p_f)
     out['fDispEn'] = f_disp_en
     out['normFDispEn'] = f_disp_en / np.log(float(num_fluct))
     return out
@@ -2002,7 +1998,7 @@ def fuzzy_entropy(y: ArrayLike, M: int = 2, r: float = 0.2, n: float = 2) -> dic
 
     phi = np.zeros(M + 1)
     for m in range(1, M + 2):
-        Z = y[np.arange(Nv)[:, None] + np.arange(m)[None, :]]
+        Z = time_delay_embed(y, m, 1)[:Nv]  # the first Nv vectors, shared by every m
         Z = Z - Z.mean(axis=1, keepdims=True)  # remove each run's own mean (local baseline)
         total = _fuzzy_similarity_sum(np.ascontiguousarray(Z.T), float(width), float(n))
         phi[m - 1] = total / (Nv * (Nv - 1))

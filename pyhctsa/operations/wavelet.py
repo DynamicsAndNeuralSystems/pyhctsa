@@ -9,6 +9,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 from ..utils import MAD_TO_SIGMA, _even_split_points, dict_output, sign_change
+from ..utils import _shannon_entropy as _prob_entropy  # wavelet._shannon_entropy is the c^2 cost
 from ..toolboxes.pywavelets.cwt import _custom_cwt
 
 # Robust noise scale of wavelet detail coefficients (Donoho & Johnstone 1994, Biometrika
@@ -320,8 +321,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
 
     # 2D entropy (relative to its maximum)
     SC_a = SC/np.sum(SC)
-    SC_pos = SC_a[SC_a > 0]  # (0*log(0) = 0 by continuity)
-    out['SC_h'] = -np.sum(SC_pos * np.log(SC_pos)) - np.log(num_entries)
+    out['SC_h'] = _prob_entropy(SC_a) - np.log(num_entries)  # (0*log(0) = 0 by continuity)
 
     # Entropy of the maximum of SC in each of 10 time boxes at each scale
     num_boxes = 10
@@ -333,9 +333,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     for j in range(num_boxes):
         dd_SC[:, j] = np.max(SC[:, cutoffs[j]:cutoffs[j + 1]], axis=1)
     dd_SC = dd_SC / np.sum(dd_SC)
-    dd_SC_o = dd_SC.ravel()
-    dd_SC_o = dd_SC_o[dd_SC_o > 0]  # (0*log(0) = 0 by continuity)
-    out['dd_SC_h'] = -np.sum(dd_SC_o * np.log(dd_SC_o))
+    out['dd_SC_h'] = _prob_entropy(dd_SC)  # (0*log(0) = 0 by continuity)
 
     # Sum across scales
     SSC = sum(SC)
@@ -817,9 +815,7 @@ def _shannon_entropy(c: np.ndarray) -> float:
         return 0.0
     if not np.all(np.isfinite(c)):
         return float('nan')
-    s = c ** 2
-    nz = s > 0
-    return float(-np.sum(s[nz] * np.log(s[nz])))
+    return float(_prob_entropy(c ** 2))
 
 
 @dict_output
@@ -913,6 +909,5 @@ def wpd_best_tree(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] 
         'meanDepth': np.mean(depths),
         'stdDepth': np.std(depths, ddof=1) if depths.size > 1 else 0.0,
     }
-    p = E[E > 0]
-    out['entropy'] = -np.sum(p * np.log(p))
+    out['entropy'] = _prob_entropy(E)
     return out
