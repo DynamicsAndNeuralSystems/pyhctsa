@@ -80,7 +80,7 @@ Further credits
 - The permutation-entropy variant is that of B. Land and D. Elias (Cornell University).
 - The visibility-graph measures follow Lacasa et al., PNAS 105, 4972 (2008) and Luque et al., Phys. Rev. E 80, 046103
   (2009).
-- The Kraskov-Stoegbauer-Grassberger and Gaussian mutual-information estimators (``pyhctsa/ksg.py``) are written from the
+- The Kraskov-Stoegbauer-Grassberger mutual-information estimator (``pyhctsa/ksg.py``) is written from the
   published method (Kraskov et al., Phys. Rev. E 69, 066138, 2004); the Java Information Dynamics Toolkit (J. T. Lizier,
   Front. Robot. AI 1, 11, 2014) is credited as the method reference used by *hctsa*. No JIDT code is included.
 - Several methods follow TSTOOL (C. Merkwirth, U. Parlitz, I. Wedekind, D. Engster, W. Lauterborn): the tc3, trev,

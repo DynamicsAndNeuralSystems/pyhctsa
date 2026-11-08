@@ -4,11 +4,12 @@ from typing import Union
 
 import numba
 import numpy as np
+from ..utils import _iqr, _quantile
 from numpy.typing import ArrayLike
-from scipy import fft as sp_fft
 from scipy.linalg import solve_triangular
 from scipy.optimize import curve_fit
 from scipy.stats import chi2, expon, kstest, kurtosis, norm, skew
+from scipy.stats import f as f_dist
 from scipy.stats import mode as smode
 from scipy.spatial import cKDTree
 from statsmodels.tsa.stattools import pacf
@@ -17,9 +18,9 @@ from ..operations.information import automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..robust import bf_hist_edges, bf_quantile_edges, bf_random, bf_remove_points
 from ..utils import (dict_output, _round_half_away, _tie_aware_ranks, _zscore_or_zeros, get_tau,
-                     frame_signal, point_of_crossing, sign_change, theiler_window,
+                     _acf_fft, frame_signal, point_of_crossing, sign_change, _theiler_int,
                      time_delay_embed, z_score)
-from ..utils import _zscore_or_none
+from ..utils import _zscore_or_none, _shannon_entropy
 
 
 def _resolve_delay(y: ArrayLike, tau: Union[int, float, str, None], cap: bool = False,
@@ -170,9 +171,8 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
     y = np.asarray(y, dtype=float).ravel()
 
     # The Theiler window (NaN if the autocorrelation function never crosses zero)
-    theiler_win = theiler_window(y, theiler_win)
-    if np.isnan(theiler_win):
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    theiler_win = _theiler_int(y, theiler_win)
+    if theiler_win is None:
         return np.nan
 
     # Embed the signal
@@ -415,7 +415,7 @@ def oversampling(y: ArrayLike) -> dict:
     # eta and its outlier-robust companion:
     out['eta'] = float(np.ptp(y) / mean_abs_diff)
 
-    q05, q95 = np.quantile(y, [0.05, 0.95], method='hazen')
+    q05, q95 = _quantile(y, [0.05, 0.95])
     robust_range = q95 - q05
     out['etaRobust'] = float(robust_range / mean_abs_diff)
 
@@ -545,7 +545,7 @@ def falling_sticks(y: ArrayLike) -> dict:
     else:
         out['skewness_all'] = np.nan  # undefined for constant angles
         out['kurtosis_all'] = np.nan
-    out['q10_all'] = np.quantile(all_angles, 0.1, method='hazen') if len(all_angles) >= 2 else np.nan
+    out['q10_all'] = _quantile(all_angles, 0.1) if len(all_angles) >= 2 else np.nan
 
     # Persistence of the fall-angle sequence
     if len(angles_pos) >= 2 and not _fall_is_constant(angles_pos):
@@ -1781,10 +1781,10 @@ def stick_angles(y: ArrayLike) -> dict:
     # What does the distribution look like?
     # Some quantiles and moments
     if len(zangles[0]) > 0:
-        out['q1_p'] = np.quantile(zangles[0], 0.01, method='hazen')
-        out['q10_p'] = np.quantile(zangles[0], 0.1, method='hazen')
-        out['q90_p'] = np.quantile(zangles[0], 0.9, method='hazen')
-        out['q99_p'] = np.quantile(zangles[0], 0.99, method='hazen')
+        out['q1_p'] = _quantile(zangles[0], 0.01)
+        out['q10_p'] = _quantile(zangles[0], 0.1)
+        out['q90_p'] = _quantile(zangles[0], 0.9)
+        out['q99_p'] = _quantile(zangles[0], 0.99)
         out['skewness_p'] = skew(angles[0])
         out['kurtosis_p'] = kurtosis(angles[0], fisher=False)
     else:
@@ -1792,17 +1792,17 @@ def stick_angles(y: ArrayLike) -> dict:
             out['skewness_p'], out['kurtosis_p'] = np.nan, np.nan, np.nan,  np.nan, np.nan, np.nan
     
     if len(zangles[1]) > 0:
-        out['q1_n'] = np.quantile(zangles[1], 0.01, method='hazen')
-        out['q10_n'] = np.quantile(zangles[1], 0.1, method='hazen')
-        out['q90_n'] = np.quantile(zangles[1], 0.9, method='hazen')
-        out['q99_n'] = np.quantile(zangles[1], 0.99, method='hazen')
+        out['q1_n'] = _quantile(zangles[1], 0.01)
+        out['q10_n'] = _quantile(zangles[1], 0.1)
+        out['q90_n'] = _quantile(zangles[1], 0.9)
+        out['q99_n'] = _quantile(zangles[1], 0.99)
         out['skewness_n'] = skew(angles[1])
         out['kurtosis_n'] = kurtosis(angles[1], fisher=False)
     else:
         out['q1_n'], out['q10_n'], out['q90_n'], out['q99_n'], \
             out['skewness_n'], out['kurtosis_n'] = np.nan, np.nan, np.nan,  np.nan, np.nan, np.nan
     
-    f_quantz = lambda x : np.quantile(zallAngles, x, method='hazen')
+    f_quantz = lambda x : _quantile(zallAngles, x)
     out['q1_all'] = f_quantz(0.01)
     out['q10_all'] = f_quantz(0.1)
     out['q90_all'] = f_quantz(0.9)
@@ -2348,6 +2348,158 @@ def residual_autocorr_scan(y: ArrayLike, max_lag: int = 300, max_ar_order: int =
     return out
 
 
+def _neighbour_mean(spec: np.ndarray, half_width: int, guard: int = 1) -> np.ndarray:
+    """Mean of the ``2 * half_width`` bins at distances ``guard + 1 .. guard + half_width`` on either side of each
+    bin of a one-sided periodogram, reflecting at both ends (the periodogram of a real series is symmetric about
+    frequency 0 and about 1/2)."""
+    nb = spec.size
+    pad = half_width + guard
+    padded = np.concatenate([spec[pad:0:-1], spec, spec[-2:-pad - 2:-1]])
+    cs = np.concatenate([[0.0], np.cumsum(padded)])
+    idx = np.arange(nb) + pad
+    left = cs[idx - guard] - cs[idx - guard - half_width]
+    right = cs[idx + guard + 1 + half_width] - cs[idx + guard + 1]
+    return (left + right) / (2 * half_width)
+
+
+@dict_output
+def cyclostationarity_scan(y: ArrayLike, max_lag: int = 20, n_smooth: int = 16, min_cycles: int = 4,
+                           max_ar_order: int = 10, peak_level: float = 0.05) -> dict:
+    """
+    Scan for second-order cyclostationarity: periodic variation of the autocovariance.
+
+    Detects a series whose variability, or the correlation between nearby samples, rises and falls on a
+    regular cycle, even though nothing periodic shows in the series itself: its mean stays constant and its
+    power spectrum has no peak at that period. Examples are noise whose loudness swells and fades regularly,
+    a process whose memory strengthens and weakens with a period, and seasonal series whose volatility follows
+    the season.
+
+    Formally, a series is second-order cyclostationary (periodically correlated) when its autocovariance at some lag tau
+    varies periodically in time, with cyclic frequency alpha: amplitude-modulated noise, dynamics whose
+    coefficients vary with a period, or seasonal series [1]_, [2]_. It need not have a periodic mean or any peak
+    in its power spectrum, so spectral and autocorrelation features miss it. Its signature is Gardner's
+    spectral-line regeneration [1]_: the lag-product series ``e_t e_{t+tau}`` of a cyclostationary series has a
+    spectral line (a finite-strength sinusoidal component) at frequency alpha, while that of a stationary
+    series has only a continuous spectrum. The cyclic autocorrelation R^alpha(tau) is that line's amplitude.
+
+    The test for a line at one cyclic frequency and lag is a single-lag form of the Dandawate-Giannakis test
+    [3]_, applied at every Fourier frequency:
+
+    1. Prewhiten the series by an AR(p) model, p <= ``max_ar_order`` chosen by AIC (as in
+       :func:`residual_autocorr_scan`), and z-score the residuals e. Prewhitening removes the spectral shape of
+       a stationary series, so that a sharp spectral peak is not read as cyclostationarity.
+    2. For each lag tau = 0..``max_lag``, form the mean-removed lag product ``e_t e_{t+tau}`` (truncated to even
+       length n) and its periodogram I(alpha_k) at alpha_k = k/n.
+    3. Compare each bin with the mean S(alpha_k) of the ``2 * n_smooth`` bins on either side of it (skipping
+       the adjacent bin). Under a locally flat continuum, I/S ~ F(2, 4 n_smooth) (F(1, 4 n_smooth) at alpha =
+       1/2), which gives a p-value for a line at that bin.
+    4. Take the smallest p-value p_min over all M cells (alpha_k with at least ``min_cycles`` cycles in the
+       record, and tau). The score -ln(M p_min) is approximately standard Gumbel for a stationary series (mean
+       0.58, 95th percentile 2.97) at any length, and grows with length for a cyclostationary one.
+
+    Deterministic phase-coherent oscillators (e.g. the Rossler or van der Pol flows) score highly. This is
+    correct in the fraction-of-time sense of cyclostationarity [1]_, since their residual variance is locked
+    to the phase of the oscillation. Smooth low-pass series that an AR(``max_ar_order``) model under-whitens
+    give scores below the null mean. The cyclic frequency and lag are in samples, so the outputs depend on the
+    sampling rate.
+
+    References
+    ----------
+    .. [1] W. A. Gardner, "Exploitation of spectral redundancy in cyclostationary signals", IEEE Signal
+       Process. Mag. 8(2), 14-36 (1991).
+    .. [2] W. A. Gardner, A. Napolitano and L. Paura, "Cyclostationarity: Half a century of research", Signal
+       Process. 86(4), 639-697 (2006).
+    .. [3] A. V. Dandawate and G. B. Giannakis, "Statistical tests for presence of cyclostationarity", IEEE
+       Trans. Signal Process. 42(9), 2355-2369 (1994).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    max_lag : int, optional
+        The largest lag tau of the lag products (default: 20). Capped at an eighth of the residual length.
+    n_smooth : int, optional
+        The number of periodogram bins on each side used to estimate the continuum at each cyclic frequency
+        (default: 16).
+    min_cycles : int, optional
+        The lowest cyclic frequency scanned, in cycles per record (default: 4).
+    max_ar_order : int, optional
+        The largest order of the prewhitening AR model (default: 10).
+    peak_level : float, optional
+        The significance level at which the strongest line counts as a detected rhythm (default: 0.05). Below
+        it, ``peak_alpha`` and ``peak_lag`` are NaN.
+
+    Returns
+    -------
+    dict
+        - ``max_score``: -ln(M p_min) over all cyclic frequencies and lags.
+        - ``lag0_score``: the same over lag 0 only, i.e. spectral lines in the squared residuals (periodic
+          variance).
+        - ``peak_alpha``: the cyclic frequency of the strongest line, in cycles per sample (its period is
+          1 / ``peak_alpha`` samples).
+        - ``peak_lag``: the lag of the strongest line.
+
+        ``peak_alpha`` and ``peak_lag`` locate a rhythm only when there is one: they are NaN unless
+        ``max_score`` exceeds the Gumbel null's 1 - ``peak_level`` quantile, -ln(-ln(1 - ``peak_level``))
+        (2.97 at the default 0.05). Without a significant line, the strongest bin is just the largest noise
+        fluctuation, at a position uniform over the cells scanned, so its location means nothing. At the
+        default level about 5% of stationary series still get values.
+
+        Returns NaN for a constant series or fewer than 64 residuals.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    max_lag, n_smooth, min_cycles = int(max_lag), int(n_smooth), int(min_cycles)
+    if max_lag < 0 or n_smooth < 1 or min_cycles < 1:
+        raise ValueError("need max_lag >= 0, n_smooth >= 1 and min_cycles >= 1")
+    if not 0 < peak_level < 1:
+        raise ValueError(f"peak_level = {peak_level} must lie in (0, 1)")
+
+    e, _ = _ar_prewhiten(y, int(max_ar_order))
+    if e is None or e.size < 64:
+        return np.nan
+    sd = np.std(e)
+    if not sd > 0:
+        return np.nan
+    e = (e - np.mean(e)) / sd
+    m = e.size
+    max_lag = min(max_lag, m // 8)
+    dof = 4 * n_smooth   # denominator degrees of freedom: 2 * n_smooth neighbouring bins, 2 each
+
+    p_best, alpha_best, lag_best = 1.0, np.nan, np.nan
+    p0, num_cells, num_cells0 = 1.0, 0, 0
+    for tau in range(max_lag + 1):
+        prod = e[:m - tau] * e[tau:]
+        n = prod.size - (prod.size % 2)
+        prod = prod[:n] - np.mean(prod[:n])
+        spec = np.abs(np.fft.rfft(prod)) ** 2 / n   # bins k = 0..n/2
+        spec[0] = np.mean(spec[1:n_smooth + 1])     # the mean was removed: stand in the level nearby at DC
+        cont = _neighbour_mean(spec, n_smooth)
+        k = np.arange(min_cycles, spec.size)
+        if k.size == 0 or not np.all(cont[k] > 0):
+            continue # degenerate lag product (e.g. a coarsely quantised series): skip this lag
+        ratio = spec[k] / cont[k]
+        p = (1.0 + ratio / (2 * n_smooth)) ** (-2 * n_smooth)   # F(2, dof) survival function
+        if k[-1] == n // 2:                                       # alpha = 1/2: a real bin, F(1, dof)
+            p[-1] = f_dist.sf(ratio[-1], 1, dof)
+        j = int(np.argmin(p))
+        num_cells += p.size
+        if p[j] < p_best:
+            p_best, alpha_best, lag_best = p[j], k[j] / n, tau
+        if tau == 0:
+            p0, num_cells0 = p[j], p.size
+    if num_cells == 0:
+        return np.nan
+
+    def _gumbel_score(p_min, num):
+        return np.nan if num == 0 else float(-np.log(max(num * p_min, 1e-300)))
+
+    max_score = _gumbel_score(p_best, num_cells)
+    if not max_score > -np.log(-np.log1p(-peak_level)):   # no significant line: its location is noise
+        alpha_best, lag_best = np.nan, np.nan
+    return {'max_score': max_score, 'lag0_score': _gumbel_score(p0, num_cells0),
+            'peak_alpha': float(alpha_best), 'peak_lag': float(lag_best)}
+
+
 @dict_output
 def bicorrelation(y: ArrayLike, max_lag: Union[int, str] = 'hinich', max_ar_order: int = 10) -> dict:
     """
@@ -2502,9 +2654,7 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     out['d_median'] = np.median(d) # Median distance
     out['d_std'] = np.std(d, ddof=1) # Standard deviation of distances
     # the IQR uses the Hazen definition of the quantiles
-    q75 = np.percentile(d, 75, method='hazen')
-    q25 = np.percentile(d, 25, method='hazen')
-    iqr_val = q75 - q25
+    iqr_val = _iqr(d)
     out['d_iqr'] = iqr_val # Interquartile range of distances
     out['d_max'] = np.max(d) # Maximum distance
     out['d_min'] = np.min(d) # Minimum distance
@@ -2683,8 +2833,8 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     y = np.asarray(y, dtype=float).ravel()
     if theiler_win is None:
         theiler_win = ('ac', 1)
-    theiler_win = theiler_window(y, theiler_win)
-    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
+    theiler_win = _theiler_int(y, theiler_win, warn=False)
+    if theiler_win is None:  # the autocorrelation function never crosses zero
         return np.nan
 
     # Set tau from the series if it is a rule ('tau'/'ac', 'ac1e' or 'mi'), capped at N/10
@@ -2744,8 +2894,7 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     out['std'] = np.std(counts, ddof=1)
     out['median'] = np.median(counts)
     out['mean'] = np.mean(counts)
-    out['iqr'] = np.percentile(counts, 75, method='hazen') - np.percentile(counts,
-                                                                           25, method='hazen')
+    out['iqr'] = _iqr(counts)
     out['iqronrange'] = out['iqr']/np.ptp(counts)
 
     # distribution - using the sqrt binning rule, with explicit edges (the local densities are
@@ -2759,8 +2908,7 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     out['mode_val'] = np.max(bin_counts_norm)
     out['mode'] = bin_centres[np.argmax(bin_counts_norm)]
     # sum(p * log(p)) over histogram bins (minus the Shannon entropy)
-    out['hist_ent'] = np.sum(bin_counts_norm[bin_counts_norm > 0] *
-                             np.log(bin_counts_norm[bin_counts_norm > 0]))
+    out['hist_ent'] = -_shannon_entropy(bin_counts_norm)
 
     # Stationarity measure for fifths of the time series
     afifth = int(np.floor(N/5))
@@ -2917,41 +3065,6 @@ def glscf(y: ArrayLike, alpha: float, beta: float, tau: Union[int, str] = 'tau')
     p4 = np.sqrt(np.mean(y2 ** (2*beta)) - (np.mean(y2 ** beta))**2)
 
     return np.divide((p1-p2), (p3 * p4))
-
-
-def _acf_fft(y: np.ndarray) -> np.ndarray:
-    """Sample autocorrelation function at lags 0..N-1, computed by FFT.
-
-    Parameters
-    ----------
-    y : array-like
-        Time series of length N >= 1.
-
-    Returns
-    -------
-    numpy.ndarray
-        float64 array of length N with ``acf[0] == 1``; all NaN if ``y`` is constant (or
-        has length 1) or contains NaN or Inf.
-
-    Notes
-    -----
-    ``r_k = c_k / c_0`` with ``c_k = (1/N) sum_t (y_t - ybar)(y_{t+k} - ybar)`` (Box, Jenkins &
-    Reinsel 1994, *Time Series Analysis*, 3rd ed., eq. 2.1.12), evaluated through the
-    Wiener-Khinchin relation: the inverse DFT of the power spectrum of the mean-removed series,
-    zero-padded to a fast FFT length of at least 2N - 1, is its linear autocovariance sequence
-    (any padded length >= 2N - 1 gives the same, exact, linear autocovariance).
-    """
-    y = np.asarray(y, dtype=float).ravel()
-    N = y.size
-    if N == 0:
-        return np.zeros(0)
-    if not np.all(np.isfinite(y)) or np.ptp(y) == 0:
-        return np.full(N, np.nan)
-    z = y - y.mean()
-    nfft = sp_fft.next_fast_len(2 * N - 1, real=True)
-    f = sp_fft.rfft(z, nfft)
-    a = sp_fft.irfft(f * np.conj(f), nfft)[:N]
-    return np.real(a / a[0])
 
 
 def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
@@ -4215,11 +4328,9 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     y = np.asarray(y, dtype=float).ravel()
     n = y.size
 
-    theiler_win = theiler_window(y, theiler_win, n)
-    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    theiler_win = _theiler_int(y, theiler_win, n)
+    if theiler_win is None:  # the autocorrelation function never crosses zero
         return np.nan
-    theiler_win = int(theiler_win)
 
     # Embed the signal
     if isinstance(m, str):

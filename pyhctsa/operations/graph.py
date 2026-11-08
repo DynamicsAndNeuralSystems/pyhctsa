@@ -1,6 +1,7 @@
 from typing import Union
 
 import numpy as np
+from ..utils import _quantile
 from numpy.typing import ArrayLike
 import scipy
 from numba import njit
@@ -11,6 +12,7 @@ from math import factorial
 logger = logging.getLogger('pyhctsa')
 
 from pyhctsa.operations.correlation import autocorr, first_crossing
+from pyhctsa.fitting import goodness_of_fit
 from pyhctsa.robust import bf_fit_density_curve, bf_residual_stats
 from pyhctsa.utils import dict_output, get_tau, time_delay_embed
 from pyhctsa.operations.entropy import _break_ties, _ordinal_pattern_rank, distribution_entropy
@@ -262,7 +264,7 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
     stdk = np.std(k, ddof=1)
     mediank = np.median(k)
     maxk = np.max(k)
-    q05, q25, q75, q95 = np.quantile(k, [0.05, 0.25, 0.75, 0.95], method='hazen')
+    q05, q25, q75, q95 = _quantile(k, [0.05, 0.25, 0.75, 0.95])
 
     out = {}
     # Degree distribution: basic statistics
@@ -294,13 +296,9 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
         else:
             k_fit = bf_fit_density_curve(k_vals, k_prob, curve)
             res = k_prob - k_fit  # residuals, in order of increasing degree
-            sse = np.sum(res ** 2)
-            sstot = np.sum((k_prob - np.mean(k_prob)) ** 2)
-            dfe = len(k_vals) - num_params  # degrees of freedom of the error
-            with np.errstate(all='ignore'):
-                r2 = 1 - sse / sstot
-                adjr2 = 1 - (1 - r2) * (len(k_vals) - 1) / dfe
-            rmse = np.sqrt(sse / dfe) * stdk  # in density units of the standardized degrees
+            gof = goodness_of_fit(k_prob, k_fit, num_params, guard_sst=False, adj_from_rsquare=True)
+            r2, adjr2 = gof['rsquare'], gof['adjrsquare']
+            rmse = gof['rmse'] * stdk  # in density units of the standardized degrees
             res_ac1, res_ac2, res_runsz = bf_residual_stats(res, k_prob)
         out[f'{prefix}_r2'] = r2
         out[f'{prefix}_adjr2'] = adjr2

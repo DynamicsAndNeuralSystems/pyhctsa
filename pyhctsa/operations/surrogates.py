@@ -4,6 +4,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 import numpy as np
+from ..utils import _iqr
 from numpy.typing import ArrayLike
 from scipy.stats import norm
 
@@ -36,7 +37,7 @@ def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str)
 
     # what fraction of the range is the sample in? 
     medsurr = np.median(stat_surr)
-    iqrsurr = np.quantile(stat_surr, q=.75, method='hazen') - np.quantile(stat_surr, q=.25, method='hazen')
+    iqrsurr = _iqr(stat_surr)
     if iqrsurr == 0:
         out['mediqr'] = np.nan
     else:
@@ -618,7 +619,7 @@ def surrogates(
         out['zsigned'] = (tc3_y - muhat) / sigmahat
 
     # iqrs from median
-    iqrsurr = np.quantile(tc3_surr, 0.75, method='hazen') - np.quantile(tc3_surr, 0.25, method='hazen')
+    iqrsurr = _iqr(tc3_surr)
     if iqrsurr == 0:
         out['iqrsfrommedian'] = np.nan
     else:

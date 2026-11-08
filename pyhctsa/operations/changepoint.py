@@ -1,6 +1,7 @@
 import numpy as np
 
 from ..toolboxes.Max_Little.ML_l1pwc import l1pwc, l1pwc_lmax
+from ..utils import _autocov_fft
 
 def stepdetect(y: np.ndarray, method: str = 'l1pwc', params: float | int = 10) -> dict:
     """
@@ -276,7 +277,7 @@ def _variance_segmentations(y: np.ndarray, K: int, d: int) -> tuple:
     return J, t_est
 
 
-def _variance_inflation(x: np.ndarray, max_lag: int = 200) -> float:
+def _mean_square_inflation(x: np.ndarray, max_lag: int = 200) -> float:
     """
     Variance inflation of segment-wise mean squares caused by serial dependence and heavy tails.
 
@@ -294,8 +295,7 @@ def _variance_inflation(x: np.ndarray, max_lag: int = 200) -> float:
     if N < 8 or not v > 0:
         return 1.0
     L = int(min(max_lag, N // 4))
-    f = np.fft.rfft(xc, 2 * N)
-    a = np.fft.irfft(f * np.conj(f))[:L + 1]
+    a = _autocov_fft(x, L + 1, pad='2n')
     rho = a[1:] / a[0]
     h = np.arange(1, L + 1)
     tau = 1.0 + 2.0 * np.sum((1.0 - h / (L + 1.0)) * rho ** 2)
@@ -311,7 +311,7 @@ def _num_changes_penalized(J: np.ndarray, t_est: np.ndarray, N: int, tau: float 
     k, where ``J[k]`` is the Gaussian variance contrast (minus twice the maximized
     log-likelihood, up to a constant) of the best segmentation with k change points,
     ``n_j`` are its segment lengths, and ``tau`` >= 1 is the variance inflation of
-    :func:`_variance_inflation`. The penalty is the Zhang and Siegmund (2007) mBIC form
+    :func:`_mean_square_inflation`. The penalty is the Zhang and Siegmund (2007) mBIC form
     (a ln(n_j) term for each segment's own parameter and ln N for each change-point
     location); dividing the contrast by ``tau`` counts N / tau effective observations.
 
@@ -377,7 +377,7 @@ def _wvarchg(y: np.ndarray, K: int, d: int) -> int:
     if y.size < 2 or not np.all(np.isfinite(y)) or K < 1:
         return 0
     J, t_est = _variance_segmentations(y, K, d)
-    return _num_changes_penalized(J, t_est, y.size, _variance_inflation(y))
+    return _num_changes_penalized(J, t_est, y.size, _mean_square_inflation(y))
 
 
 def wavelet_var_chg(y: np.ndarray, w_name: str = 'db3', level: int | str = 3,
