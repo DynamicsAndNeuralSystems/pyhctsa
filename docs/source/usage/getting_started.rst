@@ -39,6 +39,7 @@ N×F, where N is the number of time-series instances and F is the number of time
 
 Many features are sensitive to how finely a series is sampled relative to its own dynamics.
 Before extracting features from an oversampled dataset, see :doc:`sampling_rate` for how to check the sampling rate and resample all series with one factor.
+Trends leak into many features too: see :doc:`trends` for how to diagnose a trend and, if you decide to remove it, how to detrend every series in the same way.
 
 🤖 Calling Individual Operations
 --------------------------------

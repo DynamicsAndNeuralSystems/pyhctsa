@@ -19,8 +19,8 @@ import yaml
 from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
-from .utils import (_check_optional_deps, _input_problem, _zscore_or_zeros, decimate_ac1e, decimation_phases, nan_outputs,
-                    z_score, SHORT_SERIES_WARNING_LENGTH, _round_half_away)
+from .utils import (_check_optional_deps, _input_problem, _zscore_or_zeros, decimate_ac1e, decimation_phases,
+                    detrend_linear, nan_outputs, z_score, SHORT_SERIES_WARNING_LENGTH, _round_half_away)
 from .quality import Quality, classify, quality_summary
 from .results import ERROR_COLUMNS, save_results
 from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk,
@@ -70,26 +70,46 @@ yaml.SafeLoader.add_constructor("!range", range_constructor)
 
 # The input transforms a config can request with ``preprocess:`` (besides ``zscore:`` and
 # ``abs:``), the hctsa input each one reproduces, and the suffix it adds to the feature label.
-# ``x_z`` is the z-scored series (``zscore: True``); the label suffix is hctsa's.
+# ``x_z`` is the z-scored series (``zscore: True``); the label suffix is hctsa's, except for
+# ``detrend``, which has no hctsa counterpart.
 _PREPROCESS_LABELS = {
     'decimate_ac1e': '_dec',     # mean over phases p of f(zscore(x_z[p::tau])), tau = get_tau(x_z, 'ac1e')
     'decimate_ac1e-rank': '_dec-rank',  # the same with tau = get_tau(x_z, 'ac1e-rank')
     'diff1': '_diff1',           # diff(x_z)
     'zscore_abs': '_mag',        # zscore(abs(x_z)): the magnitudes, re-z-scored
     'zscore_sign': '_sign',      # zscore(sign(x_z)): the signs, re-z-scored
+    'detrend': '_lindt',         # zscore(detrend_linear(x_z)): the least-squares line removed, re-z-scored
 }
+
+
+def _detrend_input(x, rezscore: bool):
+    """The residual of the least-squares line through ``x`` (re-z-scored if ``rezscore``), or a
+    scalar ``nan`` when ``x`` is a line up to round-off (fewer than 3 samples, a constant, or
+    an exact ramp): nothing meaningful is left to compute a feature on."""
+    x = np.asarray(x, dtype=float)
+    r = detrend_linear(x)
+    rms = np.sqrt(np.mean(x ** 2)) if x.size else 0.0
+    if x.size < 3 or np.std(r) <= 10 * x.size * np.finfo(float).eps * rms:
+        return np.nan
+    return _zscore_or_zeros(r) if rezscore else r
+
 
 def _transform_input(x, zscore: bool = False, absval: bool = False,
                      preprocess: Union[str, None] = None):
     """The series a feature function is called on: z-score, then ``preprocess``, then abs.
 
     Returns a scalar ``nan`` when ``decimate_ac1e`` cannot determine its delay or would leave
-    fewer than 3 samples (the feature is then undefined, as in hctsa).
+    fewer than 3 samples, or when ``detrend`` leaves only round-off (the series was a line);
+    the feature is then undefined, as in hctsa.
     """
     if zscore:
         x = z_score(x)
     if preprocess == 'decimate_ac1e':
         x = decimate_ac1e(x, rezscore=zscore)
+        if not isinstance(x, np.ndarray):
+            return np.nan
+    elif preprocess == 'detrend':
+        x = _detrend_input(x, rezscore=zscore)
         if not isinstance(x, np.ndarray):
             return np.nan
     elif preprocess == 'diff1':
@@ -143,7 +163,11 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False,
     - ``'decimate_ac1e-rank'``: the same, with the delay set from the ranks (``'ac1e-rank'``),
       for features that depend on the data only through their order;
     - ``'diff1'``: incremental differences, ``diff(x_z)`` (not re-z-scored);
-    - ``'zscore_abs'`` / ``'zscore_sign'``: ``zscore(abs(x_z))`` / ``zscore(sign(x_z))``.
+    - ``'zscore_abs'`` / ``'zscore_sign'``: ``zscore(abs(x_z))`` / ``zscore(sign(x_z))``;
+    - ``'detrend'``: the least-squares line removed (:func:`~pyhctsa.utils.detrend_linear`)
+      and the residual z-scored again if ``zscore`` (features named ``*_lindt``). A series that
+      is a line up to round-off has no residual to work with, so the outputs are all NaN.
+      pyhctsa-only: hctsa has no such input.
 
     ``min_length`` is the shortest series (after these transforms, so for ``decimate_ac1e`` the
     decimated series) on which the feature is defined: for a shorter one the function is not

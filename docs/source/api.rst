@@ -48,6 +48,16 @@ Diagnose oversampling and resample a dataset before extraction (see :doc:`usage/
    pyhctsa.sampling.sampling_report
    pyhctsa.sampling.resample_dataset
 
+Trends and drift
+----------------
+
+Diagnose a trend and remove the least-squares line from every series before extraction (see :doc:`usage/trends`).
+
+.. autosummary::
+   :toctree: generated/
+
+   pyhctsa.utils.detrend_linear
+
 Shared hctsa helpers
 --------------------
 
@@ -397,6 +407,7 @@ Stationarity
    pyhctsa.operations.stationarity.ts_length
    pyhctsa.operations.stationarity.std_nth_deriv
    pyhctsa.operations.stationarity.trend
+   pyhctsa.operations.stationarity.monotonic_trend
    pyhctsa.operations.stationarity.stat_av
    pyhctsa.operations.stationarity.sliding_window
    pyhctsa.operations.stationarity.ramping_windows

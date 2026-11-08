@@ -72,6 +72,9 @@ INPUTS = {
     "zscore(sign(x_z))": (True, False, "zscore_sign"),
     "zscore(BF_PreProcess(x_z,'decimate_ac1e'))": (True, False, "decimate_ac1e"),
 }
+# pyhctsa-only inputs: preprocess values hctsa never used (preprocess -> the input they compute). A config with one is
+# a pyhctsa-only variant of its function's hctsa configs, left out of the comparison like a variant_of entry.
+PYHCTSA_ONLY_INPUTS = {"detrend": "zscore(detrend_linear(x_z))"}
 # unregistered pyhctsa functions with a name that does not follow hctsa's: hctsa function -> (module, python function)
 EXTRA_IMPL = {
     "EN_BubbleEn": ("entropy", "bubble_entropy"), "EN_DispEn": ("entropy", "dispersion_entropy"),
@@ -579,6 +582,7 @@ def compare(hctsa: Path, yaml_path: Path, log=print, run=False, series=None) -> 
     matched_calls, matched_cfg = set(), set()
     pair_for_label = {}   # yaml label -> hctsa call labels it matches
     all_labels = {}
+    variant_inputs = defaultdict(list)   # (module, name, preprocess) -> labels of configs with a pyhctsa-only input
     for f, entries in list(impl.items()) + [(f, [(m, n, None)]) for f, (m, n) in unregistered.items()]:
         hargs = hctsa_signature(hctsa, f) or []
         hdef = hctsa_defaults(hctsa, f)
@@ -593,14 +597,17 @@ def compare(hctsa: Path, yaml_path: Path, log=print, run=False, series=None) -> 
             if lost:
                 res.setdefault("unpaired_params", []).append((f, name, lost))
             for label, kw, z, ab, pre, sel, exc in (expand(meta) if meta else []):
+                if label in all_labels:
+                    res.setdefault("duplicate_labels", []).append((label, f, all_labels[label][0]))
+                all_labels[label] = (f, module, name)
+                if pre in PYHCTSA_ONLY_INPUTS:   # an input hctsa never used: a pyhctsa-only variant, not compared
+                    variant_inputs[(module, name, pre)].append(label)
+                    continue
                 hits = []
                 for c in calls:
                     extra = match_one(f, c, hargs, kw, (z, ab, pre), params, amap, name, hdef)
                     if extra is not None:
                         hits.append((c, extra))
-                if label in all_labels:
-                    res.setdefault("duplicate_labels", []).append((label, f, all_labels[label][0]))
-                all_labels[label] = (f, module, name)
                 if not hits:
                     res["extra"].append((label, f, module, name, kw, z, ab, pre))
                     continue
@@ -654,9 +661,10 @@ def compare(hctsa: Path, yaml_path: Path, log=print, run=False, series=None) -> 
         "hctsa_calls_implemented": sum(len(calls_of[f]) for f in list(impl) + list(unregistered)),
         "missing_calls": sum(len(v) for v in res["missing"].values()), "extra_configs": len(res["extra"]) +
         sum(len(v[3]) for v in res["deregistered"]),
-        "variant_configs": sum(len(v[3]) for v in variants),
+        "variant_configs": sum(len(v[3]) for v in variants) + sum(len(v) for v in variant_inputs.values()),
         "dropped_calls": sum(len(v) for v in res["dropped"].values()),
     }
+    res["variant_inputs"] = sorted((m, n, pre, labs) for (m, n, pre), labs in variant_inputs.items())
     res["stale_dropped"] = sorted(dropped - {c.label for c in mops} - matched_calls) + sorted(dropped & matched_calls)
     res["matched_labels"] = sorted(matched_cfg)
     res["pairs"] = pair_for_label
@@ -773,10 +781,13 @@ def report(res: dict, verbose: bool, log=print) -> int:
         f"pyhctsa: {cn['yaml_configs']} configs")
     log(f"  hctsa calls of implemented functions: {cn['hctsa_calls_implemented']}, matched by a config: "
         f"{cn['calls_matched']}, missing: {cn['missing_calls']}; configs with no hctsa call: {cn['extra_configs']}")
-    if res.get("variants"):
-        log(f"  pyhctsa-only variants (variant_of, not compared with hctsa): {cn['variant_configs']} configs")
+    if res.get("variants") or res.get("variant_inputs"):
+        log(f"  pyhctsa-only variants (variant_of entries and pyhctsa-only inputs, not compared with hctsa): "
+            f"{cn['variant_configs']} configs")
         for module, name, orig, labs in res["variants"]:
             log(f"      {module}.{name} (variant of {orig}): {len(labs)} configs")
+        for module, name, pre, labs in res.get("variant_inputs", []):
+            log(f"      {module}.{name} (preprocess: {pre}, {PYHCTSA_ONLY_INPUTS[pre]}): {len(labs)} configs")
     if res.get("dropped"):
         log(f"  hctsa calls deliberately not computed (dropped_hctsa_calls): {cn['dropped_calls']}")
         for f, calls in sorted(res["dropped"].items()):

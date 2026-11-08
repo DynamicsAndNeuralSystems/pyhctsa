@@ -159,6 +159,12 @@ correlation:
       - {tau: 20, zscore: True, abs: True}   # CO_AutoCorr(abs(x_z),20,'Fourier')
       - {tau: 40, zscore: True, abs: True}   # CO_AutoCorr(abs(x_z),40,'Fourier')
       - {tau: 80, zscore: True, abs: True}   # CO_AutoCorr(abs(x_z),80,'Fourier')
+      # pyhctsa-only: the same lags on the linearly detrended series (ac_<tau>_lindt)
+      - {tau: !range [1, 40], zscore: True, preprocess: detrend}
+      - {tau: 50, zscore: True, preprocess: detrend}
+      - {tau: 60, zscore: True, preprocess: detrend}
+      - {tau: 80, zscore: True, preprocess: detrend}
+      - {tau: 100, zscore: True, preprocess: detrend}
     legacy_name: CO_AutoCorr
     ordered_args: ['tau']
 
@@ -326,6 +332,7 @@ correlation:
       - statsmodels
     configs:
       - {max_tau: 20, what_method: 'burg', zscore: True, exclude: ['pac_1']}   # CO_PartialAutoCorr(x_z,20,'burg')
+      - {max_tau: 20, what_method: 'burg', zscore: True, exclude: ['pac_1'], preprocess: detrend}   # pyhctsa-only: linearly detrended
     legacy_name: CO_PartialAutoCorr
     ordered_args: ['max_tau', 'what_method']
 
@@ -574,6 +581,9 @@ correlation:
     configs:
       - {corr_fun: 'ac', threshold: 0, what_out: 'both', zscore: True}
       - {corr_fun: 'ac', threshold: '1/e', what_out: 'both', zscore: True}
+      # pyhctsa-only: the crossing times of the linearly detrended series
+      - {corr_fun: 'ac', threshold: 0, what_out: 'both', zscore: True, preprocess: detrend}
+      - {corr_fun: 'ac', threshold: '1/e', what_out: 'both', zscore: True, preprocess: detrend}
     legacy_name: CO_FirstCrossing
     ordered_args: ['corr_fun', 'threshold', 'what_out']
   
@@ -597,6 +607,9 @@ correlation:
     configs:
       - {stop_when: 'drown', zscore: True, exclude: ['decayTimescale', 'fexpacf_r2', 'fexpacf_stdres', 'nextrema', 'nmaxima']}
       - {stop_when: 'pos_drown', zscore: True, exclude: ['actau', 'nextrema', 'nmaxima']}   # CO_AutoCorrShape(x_z,'posDrown')
+      # pyhctsa-only: the ACF shape of the linearly detrended series
+      - {stop_when: 'drown', zscore: True, exclude: ['decayTimescale', 'fexpacf_r2', 'fexpacf_stdres', 'nextrema', 'nmaxima'], preprocess: detrend}
+      - {stop_when: 'pos_drown', zscore: True, exclude: ['actau', 'nextrema', 'nmaxima'], preprocess: detrend}
     legacy_name: CO_AutoCorrShape
     ordered_args: ['stop_when']
   
@@ -611,6 +624,10 @@ correlation:
       - {tau: [[1, 2, 3, 4, 5]], meth: 'std1', num_bins: 2, zscore: True, select: ['ami1']}
       - {tau: [[1, 2, 3, 4, 5]], meth: 'std2', num_bins: 2, zscore: True, select: ['ami1', 'ami5']}
       - {tau: [[1, 2, 3, 4, 5]], meth: 'even', num_bins: 2, zscore: True}
+      # pyhctsa-only: the same AMIs of the linearly detrended series
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std1', num_bins: 2, zscore: True, select: ['ami1'], preprocess: detrend}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'std2', num_bins: 2, zscore: True, select: ['ami1', 'ami5'], preprocess: detrend}
+      - {tau: [[1, 2, 3, 4, 5]], meth: 'even', num_bins: 2, zscore: True, preprocess: detrend}
 
 
     legacy_name: CO_HistogramAMI
@@ -1076,6 +1093,14 @@ stationarity:
       - {zscore: True}
     legacy_name: SY_Trend
     ordered_args: 
+
+  monotonic_trend:   # pyhctsa-only: Mann-Kendall tau of the series against time and the Theil-Sen slope
+    base_name: monotonic_trend
+    dependencies:
+    configs:
+      - {zscore: True}
+    variant_of: trend
+    ordered_args:
   
   ts_length:
     base_name: ts_length

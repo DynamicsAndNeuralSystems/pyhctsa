@@ -1850,6 +1850,62 @@ def trend(y: ArrayLike) -> dict:
 
     return out
 
+
+@dict_output
+def monotonic_trend(y: ArrayLike, max_points: int = 2000) -> dict:
+    """
+    Monotonic trend of a time series against time: the Mann-Kendall test and the Theil-Sen slope.
+
+    Kendall's tau between the series and the sample index measures how consistently the series
+    rises (tau near 1) or falls (tau near -1) over the record, whatever the shape of the rise
+    (no p-value is reported: under the serial correlation of a typical time series the
+    independent-samples p-value of tau is not a test, only a transform of tau and the length);
+    the Theil-Sen slope, the median of the slopes between all pairs of samples, is a robust
+    counterpart of the least-squares gradient (:func:`trend`), insensitive to outliers and to a
+    few extreme samples at either end of the record.
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    max_points : int, optional
+        The Theil-Sen slope uses every pair of samples when the series has at most this many
+        samples; a longer series is subsampled to ``max_points`` evenly spaced samples first
+        (the median of about two million pairwise slopes), using the samples' true time
+        differences. Kendall's tau always uses the whole series. Default is 2000.
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+            - 'tau': Kendall's tau-b between the series and time (the Mann-Kendall statistic,
+              normalised to [-1, 1]).
+            - 'sen_slope': The Theil-Sen slope, in units of the series per sample.
+
+        All NaN for a constant series or one with fewer than 3 samples.
+
+    Notes
+    -----
+    Mann (1945), Econometrica 13, 245; Kendall (1970), Rank Correlation Methods, 4th ed.;
+    Theil (1950), Proc. KNAW 53, 386; Sen (1968), J. Am. Stat. Assoc. 63, 1379.
+    pyhctsa-only: hctsa has no monotonic-trend statistic at the sample level (:func:`ramping_windows`
+    applies Kendall's tau to windowed statistics across ten segments).
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    N = len(y)
+    if N < 3 or np.any(np.isnan(y)) or np.ptp(y) == 0:
+        return np.nan
+    out = {}
+    out['tau'] = _kendall(np.arange(N, dtype=float), y)[0]
+    if N > max_points:
+        idx = np.unique(np.round(np.linspace(0, N - 1, max_points)).astype(int))
+    else:
+        idx = np.arange(N)
+    t = idx.astype(float)
+    i, j = np.triu_indices(len(idx), 1)
+    out['sen_slope'] = float(np.median((y[idx[j]] - y[idx[i]]) / (t[j] - t[i])))
+    return out
+
 def stat_av(y: ArrayLike, what_type: str = 'seg', extra_param: int = 5) -> float:
     """
     Simple mean-stationarity metric using the StatAv measure.

@@ -30,6 +30,12 @@ Welcome to the `pyhctsa` usage guide. Select from the following:
 
       Choosing a sampling rate for your dataset before extracting features.
 
+   .. grid-item-card:: :material-regular:`trending_up;3em` Trends and drift
+      :link: trends
+      :link-type: doc
+
+      Diagnosing trends and deciding whether to detrend a dataset before extracting features.
+
 .. toctree::
    :maxdepth: 1
    :hidden:
@@ -38,3 +44,4 @@ Welcome to the `pyhctsa` usage guide. Select from the following:
    tutorial_bon_eeg
    advanced_usage
    sampling_rate
+   trends

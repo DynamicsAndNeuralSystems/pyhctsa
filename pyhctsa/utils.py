@@ -1159,6 +1159,40 @@ def pre_process(y: ArrayLike, how: Union[str, None]) -> Union[np.ndarray, float]
     raise ValueError(f"Unknown preprocessing setting: '{how}'")
 
 
+def detrend_linear(x: ArrayLike) -> np.ndarray:
+    """
+    Remove the least-squares line from a time series.
+
+    Parameters
+    ----------
+    x : array-like
+        The time series (1-D).
+
+    Returns
+    -------
+    numpy.ndarray
+        float64 array of the same length: ``x`` minus the ordinary-least-squares line fitted
+        against the sample index, so the result has zero mean and no linear trend. A series of
+        fewer than 3 samples is returned as zeros (a line passes through any two points).
+
+    Notes
+    -----
+    Only the mean and the slope are removed: long memory, slow oscillations and level shifts
+    stay in the series. This is the transform behind the ``*_lindt`` features (a feature
+    configuration with ``preprocess: detrend``, which re-z-scores the residual); apply it to
+    every series of a dataset to detrend the data before feature extraction.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    n = x.size
+    if n < 3:
+        return np.zeros(n)
+    t = np.arange(n, dtype=float)
+    t -= t.mean()
+    xm = x - x.mean()
+    slope = np.dot(t, xm) / np.dot(t, t)
+    return xm - slope * t
+
+
 def _zscore_or_zeros(x: np.ndarray) -> np.ndarray:
     """z-score with the N-1 standard deviation; a constant input gives zeros.
 
