@@ -202,6 +202,12 @@ def _aaft(z):
 
 CALLS['aaft'] = _aaft
 
+# Re-pinned on this branch (cons-mad-constant, #61): the following values change with the convention
+# this branch fixes (see its PR body); every other value is the main-checkout value.
+#   ar1|ppc_spline24.kscn_olapint
+#   ar1|ppi_resampledown.gauss1_kd_jump
+#   sine|ppc_spline24.kscn_olapint
+#   sine|ppi_resampledown.gauss1_kd_jump
 PINS = {('ar1', 'aaft'): {'s0_0': -0.89053590008085,
                    's0_150': -1.1088554414548837,
                    's1_7': -0.14423793297261175,
@@ -215,7 +221,7 @@ PINS = {('ar1', 'aaft'): {'s0_0': -0.89053590008085,
                         'swss5_1': -0.0006279644207190213},
  ('ar1', 'ppc_rav3'): {'statav2': -0.09330006798937752, 'swms10_1': 0.02508146942766271},
  ('ar1', 'ppc_resample_2_1'): {'olbt_m2': 0.000264033910530901, 'statav2': 0.032182930383142835},
- ('ar1', 'ppc_spline24'): {'kscn_olapint': -0.002499017419227327,
+ ('ar1', 'ppc_spline24'): {'kscn_olapint': -0.002499004821770876,
                            'olbt_s5': 0.006316542697736803,
                            'statav2': -0.1566146016910181},
  ('ar1', 'ppi_diff'): {'ol_trend': 0.36514556556377564,
@@ -224,7 +230,7 @@ PINS = {('ar1', 'aaft'): {'s0_0': -0.89053590008085,
  ('ar1', 'ppi_rav'): {'normdiff_trend': 3.499183654371031,
                       'statav5_trend': 3.2348014284627133,
                       'xc1_jump': 8.167896116653964},
- ('ar1', 'ppi_resampledown'): {'gauss1_kd_jump': 6.33993099494131, 'statav5_trend': 2.422665148112958},
+ ('ar1', 'ppi_resampledown'): {'gauss1_kd_jump': 6.339878473375589, 'statav5_trend': 2.422665148112958},
  ('ar1', 'ss_fft'): {'area_2_1': 0.9235045547140299,
                      'area_5_3': 0.05116707705069407,
                      'logarea_2_2': -5.730415016750034,
@@ -265,7 +271,7 @@ PINS = {('ar1', 'aaft'): {'s0_0': -0.89053590008085,
                          'swss5_1': -0.013834287927298754},
  ('sine', 'ppc_rav3'): {'statav2': 0.564690775745768, 'swms10_1': -0.013189420284764811},
  ('sine', 'ppc_resample_2_1'): {'olbt_m2': 0.00017318075243662268, 'statav2': -0.6421137789357829},
- ('sine', 'ppc_spline24'): {'kscn_olapint': 0.00012319494167525343,
+ ('sine', 'ppc_spline24'): {'kscn_olapint': 0.00012320125711853393,
                             'olbt_s5': 0.0029557139117370058,
                             'statav2': 0.27624550322977176},
  ('sine', 'ppi_diff'): {'ol_trend': -1.2254912098011226,
@@ -274,7 +280,7 @@ PINS = {('ar1', 'aaft'): {'s0_0': -0.89053590008085,
  ('sine', 'ppi_rav'): {'normdiff_trend': 3.5364277295250774,
                        'statav5_trend': -2.6339034875828515,
                        'xc1_jump': 9.728958060116113},
- ('sine', 'ppi_resampledown'): {'gauss1_kd_jump': 1.8497235845198898, 'statav5_trend': 2.4842912417144865},
+ ('sine', 'ppi_resampledown'): {'gauss1_kd_jump': 1.8497434256044576, 'statav5_trend': 2.4842912417144865},
  ('sine', 'ss_fft'): {'area_2_1': 0.8894188195138792,
                       'area_5_3': 0.051195476035843346,
                       'logarea_2_2': -5.205763540479876,
