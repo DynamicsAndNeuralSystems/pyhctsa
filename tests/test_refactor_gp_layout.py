@@ -226,12 +226,14 @@ CASES = [
      {'logh1': 0.0, 'logh2': np.nan, 'logh3': np.nan, 'logh4': -0.05738379311870417,
       'nlml': 1.3615547400859684}),
     ('wn', lambda y: mf.gp_hyperparameters(y, 'covSEiso_covPeriodic_covNoise', 1, 100, 'first'),
-     {'logh1': 0.0, 'logh3': np.nan, 'logh4': np.nan,
-     # logh2, logh5, logh6 and nlml (main values -1.4736004215830034, -0.4964149089149668,
-     # -0.36405912244996264, 1.3378221522489182) are not pinned: the length scales and period are
-     # unidentified on white noise (flat marginal likelihood), so the optimizer stops at a
-     # different point per platform (logh5 drifts by up to a factor of 8 between CI runners on
-     # main itself). Only logh1 (0.0, a bound) and the NaN outputs are pinned.
+     {'logh1': 0.0, 'logh2': np.nan, 'logh3': np.nan, 'logh4': np.nan, 'logh5': np.nan,
+      'logh6': -0.05288807443961939, 'nlml': 1.3660504587650533,
+     # On main, logh2, logh5, logh6 and nlml (-1.4736004215830034, -0.4964149089149668,
+     # -0.36405912244996264, 1.3378221522489182) were not pinned: the split of the variance between
+     # the two components was unidentified on white noise (flat marginal likelihood), so the
+     # optimizer stopped at a different point per platform (logh5 drifted by up to a factor of 8
+     # between CI runners). On branch fix-gp-unidentified-amplitudes (#67) the amplitudes are NaN
+     # and the noise and nlml are those of the white-noise model, functions of the data alone.
      }),
 ]
 
