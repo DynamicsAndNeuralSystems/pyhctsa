@@ -19,7 +19,9 @@ joint ``(x, y)`` space:
   of sample ``i``;
 * algorithm 2: ``I = psi(k) - 1/k + psi(N) - <psi(n_x) + psi(n_y)>``, where ``eps_x(i)`` and
   ``eps_y(i)`` are the largest ``x`` and ``y`` separations among the ``k`` joint neighbors, and
-  ``n_x`` (``n_y``) counts the samples within (at most) ``eps_x(i)`` (``eps_y(i)``).
+  ``n_x`` (``n_y``) counts the samples within (at most) ``eps_x(i)`` (``eps_y(i)``). Where
+  several samples tie at the k-th joint distance (repeated values), so that the ``k`` joint
+  neighbors are not unique, ``eps_x(i)`` and ``eps_y(i)`` are taken over all the tied samples.
 
 References
 ----------
@@ -38,24 +40,76 @@ from scipy.special import digamma
 # Neighbor search and counting
 # ----------------------------------------------------------------------------------------------
 
-def _joint_neighbors(z, k, w):
+def _joint_neighbors(z, k, w, extra=0):
     """Distances and indices of the k nearest max-norm neighbors of each row of ``z``.
 
     Rows whose index differs by at most ``w`` from the query row (the row itself included) are
     not candidates. Rather than searching with exclusions, this asks the k-d tree for the
-    ``k + 2w + 1`` nearest rows, of which at most ``2w + 1`` fall in the window, and keeps the
-    first k that do not.
+    ``k + 2w + 1`` nearest rows (``extra`` more, for testing), of which at most ``2w + 1`` fall
+    in the window, and keeps the first k that do not. Among rows tied in distance, which are
+    kept is the tree's choice. Where fewer than k rows lie outside the window, the missing
+    entries are ``inf`` (distance) and -1 (index).
     """
     n = z.shape[0]
-    dist, idx = cKDTree(z).query(z, k=k + 2 * w + 1, p=np.inf)
-    keep = np.abs(idx - np.arange(n)[:, None]) > w
-    keep &= np.cumsum(keep, axis=1) <= k
-    return dist[keep].reshape(n, k), idx[keep].reshape(n, k)
+    k_fetch = min(n, k + 2 * w + 1 + extra)
+    d, i = cKDTree(z).query(z, k=k_fetch, p=np.inf)
+    d, i = d.reshape(n, k_fetch), i.reshape(n, k_fetch)
+    outside = np.abs(i - np.arange(n)[:, None]) > w
+    rank = np.cumsum(outside, axis=1)  # 1-based rank among the rows outside the window
+    rows, cols = np.nonzero(outside & (rank <= k))
+    dist = np.full((n, k), np.inf)
+    idx = np.full((n, k), -1, dtype=np.intp)
+    dist[rows, rank[rows, cols] - 1] = d[rows, cols]
+    idx[rows, rank[rows, cols] - 1] = i[rows, cols]
+    return dist, idx
 
 
 def _max_separation(a, neighbors):
     """For each row i of ``a``: the largest max-norm separation from row i of its neighbors."""
     return np.abs(a[neighbors] - a[:, None, :]).max(axis=(1, 2))
+
+
+# Relative tolerance within which two joint distances count as tied (algorithm 2).
+_TIE_RTOL = 1e-12
+
+
+def _marginal_epsilons(x, y, dist, neighbors, w):
+    """Algorithm 2's ``eps_x``, ``eps_y``: for each row i, the largest ``x`` and ``y``
+    max-norm separations from row i over its joint neighbor set.
+
+    ``dist`` and ``neighbors`` hold the ``k + 1`` nearest joint neighbors of each row outside
+    the Theiler window ``w`` (from :func:`_joint_neighbors`). The neighbor set of row i is its
+    k nearest neighbors, unless the (k+1)-th lies within the relative tolerance ``_TIE_RTOL``
+    of the k-th joint distance ``d_k``: the k nearest are then not unique, and the set is every
+    row outside the window within ``d_k * (1 + _TIE_RTOL)`` of row i (all the rows tied at
+    ``d_k``, not just the k the tree returned), from a radius search. The estimate is then a
+    function of the data alone, whatever order the tree returns tied rows in. Untied rows (all
+    of them, for continuous data) keep exactly the k nearest neighbors.
+    """
+    k = dist.shape[1] - 1
+    eps_x = _max_separation(x, neighbors[:, :k])
+    eps_y = _max_separation(y, neighbors[:, :k])
+    r = dist[:, k - 1] * (1.0 + _TIE_RTOL)
+    tied = dist[:, k] <= r
+    # a tie at distance 0 is a set of coincident points, whose separations are all 0
+    eps_x[tied & (r == 0.0)] = 0.0
+    eps_y[tied & (r == 0.0)] = 0.0
+    tied = np.flatnonzero(tied & (r > 0.0))
+    if tied.size:
+        z = np.hstack([x, y])
+        balls = cKDTree(z).query_ball_point(z[tied], r[tied], p=np.inf)
+        lengths = np.fromiter((len(b) for b in balls), np.intp, tied.size)
+        rows = np.repeat(tied, lengths)
+        cols = np.fromiter((j for b in balls for j in b), np.intp, lengths.sum())
+        outside = np.abs(cols - rows) > w
+        rows, cols = rows[outside], cols[outside]
+        sep_x = np.abs(x[cols] - x[rows]).max(axis=1)
+        sep_y = np.abs(y[cols] - y[rows]).max(axis=1)
+        eps_x[tied] = 0.0
+        eps_y[tied] = 0.0
+        np.maximum.at(eps_x, rows, sep_x)
+        np.maximum.at(eps_y, rows, sep_y)
+    return eps_x, eps_y
 
 
 @njit(cache=True)
@@ -121,9 +175,11 @@ def ksg_mi(x, y, k=4, algorithm=1, theiler=0):
     """Kraskov-Stoegbauer-Grassberger estimate of the mutual information I(x; y), in nats.
 
     Each column of ``x`` and of ``y`` is first standardized to zero mean and unit variance, so
-    that the max norm weighs all dimensions equally. The caller is responsible for breaking
-    exact ties (repeated values) in the data, e.g. with tiny noise, as the estimator is
-    ill-defined for coincident points.
+    that the max norm weighs all dimensions equally. The estimator is meant for continuous
+    data: repeated values (coincident points) bias it, and a caller may break them, e.g. with
+    tiny noise. The result is deterministic either way: algorithm 2 takes the marginal
+    separations over every sample tied at the k-th joint distance (to a relative tolerance of
+    1e-12), not over whichever k of them the neighbor search returns.
 
     Parameters
     ----------
@@ -163,16 +219,18 @@ def ksg_mi(x, y, k=4, algorithm=1, theiler=0):
 
     x = np.ascontiguousarray(_standardize(x))
     y = np.ascontiguousarray(_standardize(y))
-    dist, neighbors = _joint_neighbors(np.hstack([x, y]), k, theiler)
+    z = np.hstack([x, y])
 
     if algorithm == 1:
-        eps = dist[:, -1]
+        eps = _joint_neighbors(z, k, theiler)[0][:, -1]
         n_x = _count_within(x, eps, theiler, True)
         n_y = _count_within(y, eps, theiler, True)
         mi = digamma(k) + digamma(n) - np.mean(digamma(n_x + 1) + digamma(n_y + 1))
     else:
-        n_x = _count_within(x, _max_separation(x, neighbors), theiler, False)
-        n_y = _count_within(y, _max_separation(y, neighbors), theiler, False)
+        # one neighbor more than k, to detect ties at the k-th joint distance
+        eps_x, eps_y = _marginal_epsilons(x, y, *_joint_neighbors(z, k + 1, theiler), theiler)
+        n_x = _count_within(x, eps_x, theiler, False)
+        n_y = _count_within(y, eps_y, theiler, False)
         mi = digamma(k) - 1.0 / k + digamma(n) - np.mean(digamma(n_x) + digamma(n_y))
     return float(mi)
 
