@@ -259,4 +259,6 @@ def test_nlpe_feature_fixture():
             except NotImplementedError:
                 pytest.skip("residual_analysis depends on ARFIT (another work package)")
             for k, v in row[key].items():
+                if k in ("sws", "swm"):
+                    continue   # the window spreads are relative to their stationary sampling spread (sliding_window 'stdratio'), deliberately unlike hctsa's plain spreads
                 assert got[k] == pytest.approx(v, abs=1e-8), (row["series"], key, k)

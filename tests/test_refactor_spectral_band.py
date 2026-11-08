@@ -60,6 +60,11 @@ CALLS = {
 #   envelope_stats|sin_odd.dom_ifspread
 #   spectral_summaries_welch|ar1.linfitsemilog_all_sigma
 #   spectral_summaries_welch|sin_odd.linfitsemilog_all_sigma
+# Re-pinned on this branch (sliding-window-null): window spreads (swm, sws, statav*, swms*, swss*) are now
+# relative to their stationary sampling spread (sliding_window 'stdratio'), so they change on purpose (see its
+# PR body); every other value is as before.
+#   nlpe|ar1.swm
+#   nlpe|sin_odd.swm
 PINNED = {
     'phase_amp_coupling': {
         'ar1': {
@@ -178,14 +183,14 @@ PINNED = {
             'msqerr': 1.9221495919908007,
             'stde': 1.386604430175024,
             'ac3': 0.009024102742685964,
-            'swm': 0.12244984454334751,
+            'swm': 1.4039383339089024,
             'minsbc': 0.013230449339834749,
         },
         'sin_odd': {
             'msqerr': 0.593816823224132,
             'stde': 0.7713595763787796,
             'ac3': 0.04447896565328907,
-            'swm': 0.11574162331978662,
+            'swm': 1.1634222298422676,
             'minsbc': 0.020145685381460332,
         },
     },

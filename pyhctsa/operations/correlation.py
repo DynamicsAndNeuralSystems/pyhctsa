@@ -1627,8 +1627,10 @@ def stick_angles(y: ArrayLike) -> dict:
           or all angles)
         - ``statav{2,3,4,5}_{p,n}_{m,s}``, ``statav{2,3,4,5}_all_m``, ``statav5_all_s``: the
           standard deviation across 2, 3, 4 or 5 equal parts of the sequence of the mean
-          (``_m``) or the standard deviation (``_s``) of the angles, divided by their overall
-          standard deviation (for ``_all``, parts of the positive-then-negative sequence)
+          (``_m``) or the standard deviation (``_s``) of the angles, relative to the spread
+          expected from sampling error if the sequence were stationary
+          (:func:`pyhctsa.operations.stationarity.sliding_window`, ``'stdratio'``; for ``_all``,
+          parts of the positive-then-negative sequence)
         - ``tau_p``, ``tau_n``: the first zero-crossing of the autocorrelation function of
           the positive or negative set's angle sequence (interpolated); ``ac1_p``, ``ac1_n``:
           their lag-1 autocorrelations
@@ -1806,20 +1808,14 @@ def stick_angles(y: ArrayLike) -> dict:
     return out
 
 def _sub_statav(x: ArrayLike, n: int) -> tuple:
-    # helper function
-    nn = len(x)
-    if nn < 2 * n: # not long enough
-        statavmean = np.nan
-        statavstd = np.nan
-    else:
-        x_buff = frame_signal(x, int(np.floor(nn/n)))
-        if x_buff.shape[1] > n:
-            # remove final pt
-            x_buff = x_buff[:, :n]
-        statavmean = _sample_std(np.mean(x_buff, axis=0), axis=0)/_sample_std(x, axis=0)
-        statavstd = _sample_std(_sample_std(x_buff, axis=0), axis=0)/_sample_std(x, axis=0)
-
-    return statavmean, statavstd
+    """The spread of the mean and of the SD across ``n`` equal parts of ``x``, each relative to its spread
+    expected from sampling error if ``x`` were stationary (:func:`pyhctsa.operations.stationarity.sliding_window`,
+    ``'stdratio'``); NaN if a part has fewer than 2 values."""
+    # imported here: stationarity imports from this module
+    from ..operations.stationarity import sliding_window
+    if len(x) < 2 * n:  # not long enough
+        return np.nan, np.nan
+    return sliding_window(x, 'mean', 'stdratio', n, 1), sliding_window(x, 'std', 'stdratio', n, 1)
 
 def nonlinear_autocorr(y: ArrayLike, taus: ArrayLike, absval: Union[bool, None] = None,
                        tau: Union[int, str] = 1) -> float:
@@ -2903,11 +2899,12 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     # sum(p * log(p)) over histogram bins (minus the Shannon entropy)
     out['hist_ent'] = -_shannon_entropy(bin_counts_norm)
 
-    # Stationarity measure for fifths of the time series
-    afifth = int(np.floor(N/5))
-    buffer_m = np.array([counts[i*afifth:(i+1)*afifth] for i in range(5)])
-    out['statav5_m'] = _sample_std(np.mean(buffer_m, axis=1)) / _sample_std(counts)
-    out['statav5_s'] = _sample_std(_sample_std(buffer_m, axis=1)) / _sample_std(counts)
+    # Stationarity across fifths of the series: the spread of the mean and SD of the local densities,
+    # relative to the spread expected from sampling error if they were stationary
+    # (imported here: stationarity imports from this module)
+    from ..operations.stationarity import sliding_window
+    out['statav5_m'] = sliding_window(counts, 'mean', 'stdratio', 5, 1)
+    out['statav5_s'] = sliding_window(counts, 'std', 'stdratio', 5, 1)
 
     return out
 
@@ -3514,8 +3511,8 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
     from ..operations.stationarity import sliding_window
 
     for num_seg in (2, 3, 4):
-        out[f'statav{num_seg}_m'] = sliding_window(np_counts, 'mean', 'std', num_seg, 1)
-        out[f'statav{num_seg}_s'] = sliding_window(np_counts, 'std', 'std', num_seg, 1)
+        out[f'statav{num_seg}_m'] = sliding_window(np_counts, 'mean', 'stdratio', num_seg, 1)
+        out[f'statav{num_seg}_s'] = sliding_window(np_counts, 'std', 'stdratio', num_seg, 1)
 
     return out
 

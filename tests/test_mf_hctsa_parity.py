@@ -50,6 +50,8 @@ SINE_SKIP = {'ss1', 'ss3', 'ssbest', 'armax31'}
 # outputs that count sign changes of a quantity which, for x_sine, is itself at the level of rounding (a perfect
 # predictor's root-mean-square error, about 1e-14, across horizons), so the count depends on the platform's BLAS
 SINE_ROUNDOFF_KEYS = {'stde_ndown'}
+# residual stationarity (sws, swm, and outputs built from them): the window spreads are relative to their stationary sampling spread (sliding_window 'stdratio'), deliberately unlike hctsa's plain spreads
+STDRATIO_TOKENS = {'sws', 'swm'}
 
 
 def _is_nan(v):
@@ -71,6 +73,8 @@ def test_matches_hctsa(label, name):
         if key not in out:
             continue   # (an output that pyhctsa does not compute, e.g. np/Ts constants)
         if name == 'x_sine' and key in SINE_ROUNDOFF_KEYS:
+            continue
+        if STDRATIO_TOKENS & set(key.split('_')):
             continue
         got = out[key]
         if _is_nan(exp):
