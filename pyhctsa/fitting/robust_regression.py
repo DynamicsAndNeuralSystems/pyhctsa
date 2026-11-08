@@ -17,10 +17,10 @@ Notation:
   zero for ``|u| >= 1``.
 
 Algorithm. Start from the ordinary least-squares fit. Repeat: compute the scale ``sigma`` as the
-median absolute leverage-adjusted residual (after discarding the ``p - 1`` smallest) divided by
-0.6745, set the weights ``w(u_i)``, and solve the weighted least-squares problem, until the
-coefficients change by at most ``1e-10 (1 + max|b|)`` in the maximum norm (at most 200
-iterations). The estimate is a fixed point of this map ``b -> T(b)``. Because the scale is
+median absolute leverage-adjusted residual (after discarding the ``p - 1`` smallest) times
+``MAD_TO_SIGMA = 1/Phi^{-1}(3/4)``, set the weights ``w(u_i)``, and solve the weighted
+least-squares problem, until the coefficients change by at most ``1e-10 (1 + max|b|)`` in the
+maximum norm (at most 200 iterations). The estimate is a fixed point of this map ``b -> T(b)``. Because the scale is
 re-estimated from the residuals at every step, ``T`` is not a descent step of one fixed objective,
 and at some fixed points its Jacobian has an eigenvalue below -1 (the iteration overshoots and
 wanders about the fixed point, chaotically, so the coefficients at the iteration limit depend on
@@ -46,7 +46,7 @@ import numpy as np
 import scipy.linalg as sla
 from scipy import stats as _sps
 
-from ..utils import MAD_DIVISOR
+from ..utils import MAD_TO_SIGMA
 
 _EPS = np.finfo(float).eps
 
@@ -154,13 +154,14 @@ class BisquareIRLS:
         """MAD-based scale of the adjusted residuals.
 
         Median of the absolute adjusted residuals after discarding the ``rank - 1`` smallest
-        ones (the degrees of freedom absorbed by the fit; Holland & Welsch 1977), divided by
-        0.6745. No centring. Leverage-one rows are excluded and reduce the number discarded.
+        ones (the degrees of freedom absorbed by the fit; Holland & Welsch 1977), times
+        ``MAD_TO_SIGMA = 1/Phi^{-1}(3/4)``. No centring. Leverage-one rows are excluded and reduce
+        the number discarded.
         """
         a = np.sort(np.abs(self.adjusted_residuals(b)[~self.exact]))
         k = max(self.rank - 1 - int(self.exact.sum()), 0)
         a = a[k:] if k < a.size else a
-        return float(np.median(a)) / MAD_DIVISOR if a.size else 0.0
+        return MAD_TO_SIGMA * float(np.median(a)) if a.size else 0.0
 
     def _scaled_residuals(self, b):
         """``u_i = r_i / (sqrt(1 - h_i) c sigma)``; with ``sigma = 0``: 0 for exact zeros, else inf."""

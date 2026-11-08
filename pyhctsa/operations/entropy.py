@@ -4,6 +4,7 @@ from typing import Optional, Union
 import logging
 logger = logging.getLogger('pyhctsa')
 
+from ..utils import _sample_std
 import numpy as np
 from ..utils import _quantile
 import pywt
@@ -18,7 +19,7 @@ from ..toolboxes.physionet import sampen as _sampen_c
 from ..robust import bf_hist_edges, bf_ks_density, bf_random, bf_random_seed
 from ._symbolic_complexity import (_equiprobable_symbols, _normalized_lz_complexity,
                                   _shannon_block_entropy)
-from ..utils import (dict_output, _zscore_or_zeros, get_tau, make_buffer, pre_process, theiler_window,
+from ..utils import (dict_output, _coarse_grain, _zscore_or_zeros, get_tau, make_buffer, pre_process, theiler_window,
                      time_delay_embed, z_score)
 from ..utils import _shannon_entropy
 
@@ -30,7 +31,7 @@ def _entropy_summary(ents: np.ndarray) -> dict:
         'minent': np.min(ents),
         'medent': np.median(ents),
         'meanent': np.mean(ents),
-        'stdent': np.std(ents, ddof=1),
+        'stdent': _sample_std(ents),
     }
 
 
@@ -132,7 +133,8 @@ def distribution_entropy(
         - (for 'ks'): a positive real number, the bandwidth (standard deviation of the Gaussian
           kernel) of the kernel density estimate; or empty (``''`` / ``None``) for the default
           bandwidth, the normal-reference rule ``sigma * (4 / (3 N)) ** (1/5)`` with
-          ``sigma = median(|y - median(y)|) / 0.6745`` (see :func:`~pyhctsa.robust.bf_ks_density`).
+          ``sigma = MAD_TO_SIGMA * median(|y - median(y)|)``, ``MAD_TO_SIGMA = 1/Phi^{-1}(3/4)``
+          (see :func:`~pyhctsa.robust.bf_ks_density`).
 
         Default is 10.
 
@@ -415,7 +417,7 @@ def multi_scale_entropy(
     max_ind = int(np.argmax(samp_ens))
     min_ind = int(np.argmin(samp_ens))
     mean_val = np.mean(samp_ens)
-    std_val = np.std(samp_ens, ddof=1) if num_scales > 1 else 0.0
+    std_val = _sample_std(samp_ens)
     out[f'max{en_name}'] = samp_ens[max_ind]
     out['maxScale'] = scale_range[max_ind]
     out[f'min{en_name}'] = samp_ens[min_ind]
@@ -527,7 +529,7 @@ def sample_entropy(y: ArrayLike, m: int = 2, r: Optional[float] = None,
     m = int(m)
     y = np.ascontiguousarray(y, dtype=np.float64)
     if r is None:
-        r = 0.1 * np.std(y, ddof=1)
+        r = 0.1 * _sample_std(y)
     if pre_process_how == 'diff1':
         y = np.ascontiguousarray(np.diff(y))
 
@@ -1011,7 +1013,7 @@ def approximate_entropy(x: ArrayLike, mnom: int = 1, rth: float = 0.2,
     # number of delay vectors of length m and m + 1
     if len(x) - (mnom - 1) * tau < 2 or len(x) - mnom * tau < 2:
         return np.nan
-    r = rth * np.std(x, ddof=1) # threshold of similarity
+    r = rth * _sample_std(x) # threshold of similarity
     phi = _apen_phis(x, mnom, r, tau)
 
     return phi[0] - phi[1]
@@ -1100,7 +1102,7 @@ def bubble_entropy(y: ArrayLike, m: int = 10, tau: Union[int, str] = 1) -> Union
         raise ValueError(f"The embedding dimension must be at least 2 (m = {m} given)")
     out = {'bubbleEn': np.nan}
     y = np.asarray(y, dtype=float).ravel()
-    if not np.std(y, ddof=1) > 0:  # constant (or non-finite) series
+    if not _sample_std(y) > 0:  # constant (or non-finite) series
         return out
     tau = get_tau(y, tau)  # resolve a rule once, so both dimensions share one delay
     if np.isnan(tau):
@@ -1524,7 +1526,7 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
     n = y.size
     if randomize_how not in ('statdist', 'dyndist', 'permute'):
         raise ValueError(f"Unknown randomization method '{randomize_how}'.")
-    if not np.isclose(np.mean(y), 0, atol=1e-6) or not np.isclose(np.std(y, ddof=1), 1, atol=1e-6):
+    if not np.isclose(np.mean(y), 0, atol=1e-6) or not np.isclose(_sample_std(y), 1, atol=1e-6):
         logger.warning('The input time series should be z-scored for randomize.')
 
     # The random choices for every step, reproducible from the seed: two uniform draws per
@@ -1886,15 +1888,14 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
         f = np.nan if m < 2 else 0.0
         return {'dispEn': 0.0, 'normDispEn': 0.0, 'fDispEn': f, 'normFDispEn': f}
 
-    # Map the series onto (0, 1), then onto the c amplitude classes
+    # Map the series onto (0, 1), then onto the c amplitude classes: classes 1..c as
+    # z = round(c*y + 0.5) (Rostaghi & Azami), i.e. floor(c*y) + 1 for y >= 0, clamped into
+    # 1..c (y = 1 would give c + 1): c equal-width bins of the mapped values
     if mapping_how == 'ncdf':
-        y_mapped = norm.cdf(y, loc=np.mean(y), scale=np.std(y, ddof=1))
+        y_mapped = norm.cdf(y, loc=np.mean(y), scale=_sample_std(y))
+        z = _coarse_grain(y_mapped, c, 'width', limits=(0, 1)) + 1
     else:
-        y_mapped = (y - np.min(y)) / (np.max(y) - np.min(y))
-
-    # Classes 1..c as z = round(c*y + 0.5) (Rostaghi & Azami), i.e. floor(c*y) + 1 for y >= 0,
-    # then clamp into 1..c (y = 1 would give c + 1)
-    z = np.clip(np.floor(c * y_mapped) + 1, 1, c).astype(np.int64)
+        z = _coarse_grain(y, c, 'width') + 1  # (a min-max rescaling onto [0, 1])
 
     # Z[i, k] = z[i + k*tau], one row per embedding vector
     emb = time_delay_embed(z, m, tau).astype(np.int64)  # exact: z holds small integers
@@ -1989,7 +1990,7 @@ def fuzzy_entropy(y: ArrayLike, M: int = 2, r: float = 0.2, n: float = 2) -> dic
     N = y.size
     out = {f'fuzzyEn{m}': np.nan for m in range(1, M + 1)}
 
-    sd = np.std(y, ddof=1) if N > 1 else np.nan
+    sd = _sample_std(y)
     Nv = N - M  # number of starting points shared by every embedding dimension
     if not np.isfinite(sd) or sd == 0 or Nv < 3:
         return out

@@ -3,6 +3,7 @@ logger = logging.getLogger('pyhctsa')
 from typing import Union
 
 import numba
+from ..utils import _sample_std, _sample_var
 import numpy as np
 from ..utils import _iqr, _quantile
 from numpy.typing import ArrayLike
@@ -16,8 +17,8 @@ from statsmodels.tsa.stattools import pacf
 
 from ..operations.information import automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
-from ..robust import bf_hist_edges, bf_quantile_edges, bf_random, bf_remove_points
-from ..utils import (dict_output, _round_half_away, _tie_aware_ranks, _zscore_or_zeros, get_tau,
+from ..robust import bf_hist_edges, bf_random, bf_remove_points
+from ..utils import (dict_output, _coarse_grain, _round_half_away, _tie_aware_ranks, _zscore_or_zeros, get_tau,
                      _acf_fft, frame_signal, point_of_crossing, sign_change, _theiler_int,
                      time_delay_embed, z_score)
 from ..utils import _zscore_or_none, _shannon_entropy
@@ -251,13 +252,6 @@ def pos_neg_asymmetry(y: ArrayLike) -> dict:
         switch is itself asymmetric (e.g. sharper downward crossings than
         upward ones).
     """
-    def _pn_std(x: np.ndarray):
-        if x.size == 0:
-            return np.nan
-        if x.size == 1:
-            return 0.0
-        return float(np.std(x, ddof=1))
-
     def _pn_corr(x: np.ndarray, y: np.ndarray) -> float:
         if x[0] == x.min() and x[0] == x.max():
             return np.nan
@@ -293,9 +287,9 @@ def pos_neg_asymmetry(y: ArrayLike) -> dict:
     out['propPos'] = n_pos / m if m > 0 else np.nan
 
     # Conditional volatility (leverage-effect-style asymmetry)
-    out['volPos'] = _pn_std(dy[pos_mask]) if n_pos >= 2 else np.nan
-    out['volNeg'] = _pn_std(dy[neg_mask]) if n_neg >= 2 else np.nan
-    vol_all = _pn_std(dy)
+    out['volPos'] = _sample_std(dy[pos_mask]) if n_pos >= 2 else np.nan
+    out['volNeg'] = _sample_std(dy[neg_mask]) if n_neg >= 2 else np.nan
+    vol_all = _sample_std(dy)
     if n_pos >= 2 and n_neg >= 2 and vol_all > 0:
         # Normalized contrast: positive when the positive regime is more volatile.
         out['volAsym'] = (out['volPos'] - out['volNeg']) / vol_all
@@ -322,8 +316,8 @@ def pos_neg_asymmetry(y: ArrayLike) -> dict:
     out['propNP'] = n_np / m if m > 0 else np.nan
 
     # Crossing-jump volatility:
-    out['volPN'] = _pn_std(dy[pn_mask]) if n_pn >= 2 else np.nan
-    out['volNP'] = _pn_std(dy[np_mask]) if n_np >= 2 else np.nan
+    out['volPN'] = _sample_std(dy[pn_mask]) if n_pn >= 2 else np.nan
+    out['volNP'] = _sample_std(dy[np_mask]) if n_np >= 2 else np.nan
     if n_pn >= 2 and n_np >= 2 and vol_all > 0:
         # Positive when downward crossings are more violent than upward ones.
         out['volAsymCross'] = (out['volPN'] - out['volNP']) / vol_all
@@ -512,8 +506,8 @@ def falling_sticks(y: ArrayLike) -> dict:
     out['mean_all'] = _fall_safe_stat(np.mean, all_angles)
     out['median_all'] = _fall_safe_stat(np.median, all_angles)
     out['std_all'] = _fall_safe_stat(
-        lambda x: np.std(x, ddof=1) if len(x) > 1 else 0.0, all_angles)
-    if len(all_angles) > 0 and _fall_is_constant(all_angles):
+        _sample_std, all_angles)
+    if len(all_angles) > 1 and _fall_is_constant(all_angles):
         out['std_all'] = 0.0  # constant to rounding error: the spread is zero
 
     # Asymmetry between the positive- and negative-branch fall angles:
@@ -575,7 +569,7 @@ def _fall_is_constant(x: np.ndarray) -> bool:
     """
     if len(x) < 2:
         return True
-    return bool(np.std(x, ddof=1) <= 1e-10 * max(1.0, float(np.max(np.abs(x)))))
+    return bool(_sample_std(x) <= 1e-10 * max(1.0, float(np.max(np.abs(x)))))
 
 
 def _fall_branch(ix: ArrayLike, y: ArrayLike) -> tuple:
@@ -1233,7 +1227,7 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     out['theta_ac3'] = autocorr(theta, 3, 'Fourier')
 
     out['theta_mean'] = np.mean(theta)
-    out['theta_std'] = np.std(theta, ddof=1)
+    out['theta_std'] = _sample_std(theta)
     
     # 10 equal bins on the support of the angles (-pi/2, pi/2) (explicit edges, so that angles
     # of exactly zero from tied values or of exactly +/-pi/2 from a vertical step fall in the
@@ -1242,7 +1236,7 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     # (NaN angles are in no bin but count in the number of elements the counts are divided by)
     px = np.histogram(theta[~np.isnan(theta)], bins=bin_edges)[0] / len(theta)
     bin_widths = np.diff(bin_edges)
-    out['hist10std'] = np.std(px, ddof=1)
+    out['hist10std'] = _sample_std(px)
     out['histent'] = -np.sum(px[px>0] * np.log(px[px>0] / bin_widths[px>0]))
     
     # Stationarity in fifths of the time series
@@ -1256,7 +1250,7 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     n = n / afifth
     
     for i in range(4):
-        out[f'stdb{i+1}'] = np.std(n[i, :], ddof=1)  # across the five fifths
+        out[f'stdb{i+1}'] = _sample_std(n[i, :])  # across the five fifths
 
     # STATIONARITY of points in the space (do they move around in the space)
     # (1) in terms of distance from origin
@@ -1267,21 +1261,21 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     eucdm = [np.mean(np.sqrt(x[:, 0]**2 + x[:, 1]**2)) for x in buffer_m]
     for i in range(5):
         out[f'eucdm{i+1}'] = eucdm[i]
-    out['std_eucdm'] = np.std(eucdm, ddof=1)
+    out['std_eucdm'] = _sample_std(eucdm)
     out['mean_eucdm'] = np.mean(eucdm)
 
     # Standard deviation of Euclidean distances in each segment
-    eucds = [np.std(np.sqrt(x[:, 0]**2 + x[:, 1]**2), ddof=1) for x in buffer_m]
+    eucds = [_sample_std(np.sqrt(x[:, 0]**2 + x[:, 1]**2)) for x in buffer_m]
     for i in range(5):
         out[f'eucds{i+1}'] = eucds[i]
-    out['std_eucds'] = np.std(eucds, ddof=1)
+    out['std_eucds'] = _sample_std(eucds)
     out['mean_eucds'] = np.mean(eucds)
 
     # Maximum volume in each segment (defined as area of rectangle of max span in each direction)
     maxspanx = [np.ptp(x[:, 0]) for x in buffer_m]
     maxspany = [np.ptp(x[:, 1]) for x in buffer_m]
     spanareas = np.multiply(maxspanx, maxspany)
-    out['stdspana'] = np.std(spanareas, ddof=1)
+    out['stdspana'] = _sample_std(spanareas)
     out['meanspana'] = np.mean(spanareas)
 
     # Outliers in the embedding space
@@ -1411,7 +1405,7 @@ def compare_min_ami(y: ArrayLike, bin_method: str = 'std1',
     out['range'] = np.ptp(ami_mins)
     out['median'] = np.median(ami_mins)
     out['mean'] = np.mean(ami_mins)
-    out['std'] = np.std(ami_mins, ddof=1) # will return NaN for single values instead of 0
+    out['std'] = _sample_std(ami_mins) # will return NaN for single values instead of 0
     out['nunique'] = len(np.unique(ami_mins))
     out['mode'], out['modef'] = smode(ami_mins)
     out['modef'] = out['modef'] / num_bins_range
@@ -1456,9 +1450,9 @@ def _ami_hist_binning(y: ArrayLike, meth: str, num_bins: int):
 
     The binning depends only on ``y``, ``meth`` and ``num_bins`` --- not on the time
     lag --- so callers that sweep lags (e.g. ``compare_min_ami``) can compute this once
-    and reuse it. The edges are explicit (:func:`~pyhctsa.robust.bf_hist_edges`,
-    :func:`~pyhctsa.robust.bf_quantile_edges`): they place a value exactly on an edge always
-    in the same bin. Returns ``(idx, valid, num_bins)`` where ``idx[k]`` is the 0-based bin
+    and reuse it. The edges are explicit (:func:`~pyhctsa.robust.bf_hist_edges`): they place
+    a value exactly on an edge always in the same bin. 'quantiles' uses the equiprobable
+    symbols of :func:`~pyhctsa.utils._coarse_grain`. Returns ``(idx, valid, num_bins)`` where ``idx[k]`` is the 0-based bin
     of ``y[k]`` and ``valid[k]`` is False if the point falls outside the bin range. The
     assignment reproduces ``np.histogram2d``'s bins exactly (last bin right-inclusive).
     """
@@ -1477,8 +1471,9 @@ def _ami_hist_binning(y: ArrayLike, meth: str, num_bins: int):
             b = np.concatenate(([np.min(y) - 0.1], b))
         if np.max(y) > b[-1]:
             b = np.concatenate((b, [np.max(y) + 0.1]))
-    elif meth == 'quantiles':  # use quantiles with ~equal number in each bin
-        b = bf_quantile_edges(y, num_bins)  # (fewer bins if values are tied at a quantile)
+    elif meth == 'quantiles':  # equiprobable bins (Hazen quantile cuts, tied values sharing a bin)
+        idx = _coarse_grain(y, num_bins, 'quantile')
+        return idx, np.ones(idx.size, dtype=bool), int(num_bins)
     else:
         raise ValueError(f"Unknown method '{meth}'")
 
@@ -1562,8 +1557,8 @@ def histogram_ami(
         - 'even': evenly-spaced bins through the range
         - 'std1': bins extending to ±1 standard deviation from mean
         - 'std2': bins extending to ±2 standard deviations from mean
-        - 'quantiles': equiprobable bins using quantiles (fewer bins if values are tied at a
-          quantile)
+        - 'quantiles': equiprobable bins cut at the Hazen quantiles (tied values share a bin,
+          by their mid-rank; see :func:`~pyhctsa.utils._coarse_grain`)
 
         The bin edges are explicit, so that a value exactly on an edge always falls in the same
         bin (see :func:`~pyhctsa.robust.bf_hist_edges`).
@@ -1678,7 +1673,7 @@ def stick_angles(y: ArrayLike) -> dict:
     out['mean_n'] = np.nanmean(angles[1])
     out['median_n'] = np.nanmedian(angles[1])
 
-    out['std'] = np.nanstd(all_angles, ddof=1)
+    out['std'] = _sample_std(all_angles[~np.isnan(all_angles)])
     out['mean'] = np.nanmean(all_angles)
     out['median'] = np.nanmedian(all_angles)
 
@@ -1715,7 +1710,7 @@ def stick_angles(y: ArrayLike) -> dict:
         a = np.asarray(a, dtype=float)
         if a.size == 0:
             return []
-        return z_score(a) if np.var(a, ddof=1) > 1e-10 else _zscore_or_zeros(a)
+        return z_score(a) if _sample_var(a) > 1e-10 else _zscore_or_zeros(a)
     zangles = [_z(angles[0]), _z(angles[1])]
     zallAngles = _z(all_angles)
 
@@ -1823,8 +1818,8 @@ def _sub_statav(x: ArrayLike, n: int) -> tuple:
         if x_buff.shape[1] > n:
             # remove final pt
             x_buff = x_buff[:, :n]
-        statavmean = np.std(np.mean(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
-        statavstd = np.std(np.std(x_buff, axis=0, ddof=1), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
+        statavmean = _sample_std(np.mean(x_buff, axis=0), axis=0)/_sample_std(x, axis=0)
+        statavstd = _sample_std(_sample_std(x_buff, axis=0), axis=0)/_sample_std(x, axis=0)
 
     return statavmean, statavstd
 
@@ -2652,13 +2647,13 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
 
     out['d_mean'] = np.mean(d) # Mean distance
     out['d_median'] = np.median(d) # Median distance
-    out['d_std'] = np.std(d, ddof=1) # Standard deviation of distances
+    out['d_std'] = _sample_std(d) # Standard deviation of distances
     # the IQR uses the Hazen definition of the quantiles
     iqr_val = _iqr(d)
     out['d_iqr'] = iqr_val # Interquartile range of distances
     out['d_max'] = np.max(d) # Maximum distance
     out['d_min'] = np.min(d) # Minimum distance
-    out['d_cv'] = np.mean(d) / np.std(d, ddof=1) # Mean over standard deviation of distances (reciprocal of the coefficient of variation)
+    out['d_cv'] = np.mean(d) / _sample_std(d) # Mean over standard deviation of distances (reciprocal of the coefficient of variation)
 
     # Empirical distances distribution often fits Exponential distribution quite well
     # Fit to all values (often some extreme outliers, but oh well)
@@ -2778,7 +2773,7 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     incircle_values = [out['incircle_01'], out['incircle_02'], out['incircle_05'],
                        out['incircle_1'], out['incircle_2'], out['incircle_3']]
     out['medianincircle'] = np.median(incircle_values)
-    out['stdincircle'] = np.std(incircle_values, ddof=1)
+    out['stdincircle'] = _sample_std(incircle_values)
     
     return out
 
@@ -2891,7 +2886,7 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     out['ac2'] = autocorr(counts, 2, 'Fourier')
     out['ac3'] = autocorr(counts, 3, 'Fourier')
     out['tau'] = first_crossing(counts, 'ac', 0, 'continuous')
-    out['std'] = np.std(counts, ddof=1)
+    out['std'] = _sample_std(counts)
     out['median'] = np.median(counts)
     out['mean'] = np.mean(counts)
     out['iqr'] = _iqr(counts)
@@ -2913,8 +2908,8 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     # Stationarity measure for fifths of the time series
     afifth = int(np.floor(N/5))
     buffer_m = np.array([counts[i*afifth:(i+1)*afifth] for i in range(5)])
-    out['statav5_m'] = np.std(np.mean(buffer_m, axis=1), ddof=1) / np.std(counts, ddof=1)
-    out['statav5_s'] = np.std(np.std(buffer_m, axis=1, ddof=1), ddof=1) / np.std(counts, ddof=1)
+    out['statav5_m'] = _sample_std(np.mean(buffer_m, axis=1)) / _sample_std(counts)
+    out['statav5_s'] = _sample_std(_sample_std(buffer_m, axis=1)) / _sample_std(counts)
 
     return out
 
@@ -3131,7 +3126,7 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
                 else:
                     out[i] = acf[int(t)]
     elif method == 'TimeDomainStat':
-        sigma2 = np.std(y, ddof=1)**2  # time-series variance
+        sigma2 = _sample_std(y)**2  # time-series variance
         mu = np.mean(y)  # time-series mean
         
         def acf_y(t):
@@ -3503,7 +3498,7 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
     # compute stats on number of hits inside the shape
     out = {}
     out["max"] = np.max(np_counts)
-    out["std"] = np.std(np_counts, ddof=1)
+    out["std"] = _sample_std(np_counts)
     out["mean"] = np.mean(np_counts)
     
     vals, hits = np.unique(np_counts, return_counts=True)
@@ -3702,7 +3697,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
         exp_fit = exp_func(np.arange(nac), b_fit)
         residuals = acf - exp_fit
         out['fexpacf_r2'] = 1 - (np.sum(residuals**2) / np.sum((acf - np.mean(acf))**2))
-        out['fexpacf_stdres'] = np.std(residuals, ddof=1)
+        out['fexpacf_stdres'] = _sample_std(residuals)
 
     else:
         # Fit inappropriate (or failed): return nans for the relevant stats
@@ -4523,7 +4518,7 @@ def matrix_profile(y: ArrayLike, m: Union[int, list, tuple] = ('ac', 8),
     cs2 = np.concatenate(([0.0], np.cumsum(y ** 2)))
     mu = (cs[m:] - cs[:num_win]) / m
     sig = np.sqrt(np.maximum((cs2[m:] - cs2[:num_win]) / m - mu ** 2, 0.0))
-    flat = sig < 1e-8 * np.std(y, ddof=1)
+    flat = sig < 1e-8 * _sample_std(y)
     sig[flat] = np.inf  # flat windows have no shape: they match nothing (r = 0)
 
     # Sliding dot products of the first window against all windows (by FFT)

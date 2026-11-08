@@ -95,7 +95,7 @@ def _fluctuations(y: np.ndarray, taus: np.ndarray, wtf: str, q: float, k: int) -
             f = np.ptp(windows, axis=0)
         elif wtf == 'std':
             # sample standard deviation (N-1 normalization) in each window
-            f = np.std(windows, axis=0, ddof=1)
+            f = _sample_std(windows, axis=0)
         elif wtf == 'iqr':
             # interquartile range in each window, with Hazen's quantile definition
             # (piecewise-linear through the (i-0.5)/n points)

@@ -3,6 +3,7 @@ from typing import Union
 import logging
 logger = logging.getLogger('pyhctsa')
 
+from ..utils import _sample_std
 import numpy as np
 from ..utils import _iqr
 from numpy.typing import ArrayLike
@@ -29,7 +30,7 @@ def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str)
         logger.warning("SDgivemestats failed")
         return np.nan
     # ASSUME GAUSSIAN DISTRIBUTION: z-statistic of the series' value
-    sigma = np.std(stat_surr, ddof=1)
+    sigma = _sample_std(stat_surr)
     if not sigma > 0:
         # all surrogates have the same value of this statistic: no meaningful z-score
         out['zscore'] = np.nan
@@ -596,7 +597,7 @@ def surrogates(
     out = {}
     # 1) fit a Gaussian to the surrogates
     muhat = np.mean(tc3_surr)
-    sigmahat = np.std(tc3_surr, ddof=1)
+    sigmahat = _sample_std(tc3_surr)
     if sigmahat == 0:
         # all surrogates give an identical value of this statistic: cannot meaningfully
         # assess how many stds/z the data value is from them

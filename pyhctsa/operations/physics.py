@@ -1,14 +1,14 @@
 from typing import Union
 
+from ..utils import _sample_std
 import numpy as np
-from ..utils import _quantile
 from numpy.typing import ArrayLike
 from scipy.stats import ansari
 
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
 from ..robust import bf_ks_density, bf_runs_z
-from ..utils import dict_output, get_tau
+from ..utils import _coarse_grain, dict_output, get_tau
 
 def walker(y: ArrayLike, walker_rule: str = 'prop',
            walker_params: Union[None, float, int, list] = None) -> dict:
@@ -152,8 +152,8 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
                 # w[i] is not yet computed, so the local std of the walker is
                 # built from its previous wl values plus the provisional w_mom.
                 # The series is read one step lagged: y[i-wl-1 : i] (wl+1 samples).
-                sy = np.std(y[i-wl-1:i], ddof=1)
-                sw = np.std(np.append(w[i-wl:i], w_mom), ddof=1)
+                sy = _sample_std(y[i-wl-1:i])
+                sw = _sample_std(np.append(w[i-wl:i], w_mom))
                 w[i] = w_mom * (sy / sw)
             else:
                 w[i] = w_mom
@@ -166,7 +166,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     # (i) The walk itself
     out['w_mean'] = np.mean(w)
     out['w_median'] = np.median(w)
-    out['w_std'] = np.std(w, ddof=1)
+    out['w_std'] = _sample_std(w)
     out['w_ac1'] = autocorr(w, 1, 'Fourier')
     out['w_ac2'] = autocorr(w, 2, 'Fourier')
     out['w_tau'] = first_crossing(w, 'ac', 0, 'continuous')
@@ -178,7 +178,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     out['sw_meanabsdiff'] = np.mean(np.abs(y - w))
     out['sw_taudiff'] = (first_crossing(y, 'ac', 0, 'continuous')
                          - first_crossing(w, 'ac', 0, 'continuous'))
-    out['sw_stdrat'] = np.std(w, ddof=1) / np.std(y, ddof=1)
+    out['sw_stdrat'] = _sample_std(w) / _sample_std(y)
     # a difference, not a ratio, which blows up when y has ac1 near 0
     out['sw_ac1diff'] = out['w_ac1'] - autocorr(y, 1, 'Fourier')
     out['sw_minrat'] = np.min(w) / np.min(y)
@@ -314,7 +314,7 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
     out = {}
     out['mean'] = np.mean(x) # mean position
     out['median'] = np.median(x) # median position
-    out['std'] = np.std(x, ddof=1) # std. dev.
+    out['std'] = _sample_std(x) # std. dev.
     out['range'] = np.ptp(x)
     out['proppos'] = np.sum(x >0)/N
     out['pcross'] = np.sum(x[:-1] * x[1:] < 0) / (N - 1)
@@ -385,7 +385,7 @@ def kramers_moyal(y: ArrayLike, tau: Union[int, str] = 1, num_bins: int = 15) ->
           jumps). Unlike the shape of D2, not changed by a monotone transformation of the data.
 
         NaN (a single float) if there are fewer than 20 * `num_bins` increments, if no delay
-        can be estimated for a `tau` rule, or if tied values make the quantile bins coincide.
+        can be estimated for a `tau` rule, or if tied values leave a quantile bin empty.
     """
     y = np.asarray(y, dtype=np.float64).ravel()
     if isinstance(tau, str):
@@ -400,12 +400,10 @@ def kramers_moyal(y: ArrayLike, tau: Union[int, str] = 1, num_bins: int = 15) ->
         return np.nan  # data-dependent: too few samples per bin
 
     # Conditional moments in equiprobable bins of x
-    edges = _quantile(x, np.linspace(0, 1, num_bins + 1))
-    edges[0], edges[-1] = -np.inf, np.inf
-    bin_ = np.digitize(x, edges[1:-1])  # 0..num_bins-1; bin i is [edges[i], edges[i+1])
+    bin_ = _coarse_grain(x, num_bins, 'quantile')  # 0..num_bins-1 (Hazen quantile cuts)
     n = np.bincount(bin_, minlength=num_bins).astype(np.float64)
     if np.any(n == 0):
-        return np.nan  # data-dependent: heavily tied values (quantile edges coincide)
+        return np.nan  # data-dependent: heavily tied values (a quantile bin is empty)
     xc = np.empty(num_bins)
     D1 = np.empty(num_bins)
     D2 = np.empty(num_bins)

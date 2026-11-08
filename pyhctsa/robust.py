@@ -21,11 +21,12 @@ from collections import OrderedDict
 from typing import Optional, Tuple, Union
 
 import numpy as np
+from .utils import _sample_std
 import scipy.fft
 from numba import njit
 from numpy.typing import ArrayLike
 
-from .utils import MAD_DIVISOR, _is_roundoff, _round_half_away
+from .utils import MAD_TO_SIGMA, _is_roundoff, _round_half_away
 
 __all__ = [
     'bf_random', 'bf_random_seed', 'bf_tie_break_noise', 'bf_runs_z', 'bf_residual_stats', 'bf_theil_sen',
@@ -206,7 +207,7 @@ def bf_tie_break_noise(y: ArrayLike, seed: int = 0) -> np.ndarray:
     if y.size < 2:
         return y
     unique_frac = np.unique(y).size / y.size
-    sigma = np.std(y, ddof=1)
+    sigma = _sample_std(y)
     if unique_frac < 0.9 and sigma > 0:
         noise = bf_random(y.size, seed, 'normal').reshape(y.shape, order='F')
         y = y + 1e-10 * sigma * noise
@@ -595,7 +596,7 @@ def bf_fit_density_curve(x: ArrayLike, p: ArrayLike, model: str) -> np.ndarray:
         if model == 'power':
             t = np.log(x / np.mean(x))  # a power law is an exponential in log(x)
         else:
-            sx = np.std(x, ddof=1)
+            sx = _sample_std(x)
             t = (x - np.mean(x)) / (sx + (sx == 0))
         # start: weighted least squares line for log(p) over the non-empty bins
         ok = p > 0
@@ -931,7 +932,7 @@ def bf_ks_density(y: ArrayLike, xi: Optional[ArrayLike] = None,
 
     Evaluates ``f(x) = mean_i N(x; y_i, h^2)`` exactly (no binning, no truncation of the
     kernel). The default bandwidth is Silverman's rule with a robust scale,
-    ``h = s*(4/(3n))^(1/5)``, ``s = median(|y - median(y)|)/0.6745`` (``s = std(y)`` if the
+    ``h = s*(4/(3n))^(1/5)``, ``s = MAD_TO_SIGMA * median(|y - median(y)|)`` (``s = std(y)`` if the
     median absolute deviation is zero; if that too is zero, ``h``, ``xi`` and ``f`` are NaN).
 
     Parameters
@@ -958,9 +959,9 @@ def bf_ks_density(y: ArrayLike, xi: Optional[ArrayLike] = None,
     n = y.size
 
     if h is None:
-        s = np.median(np.abs(y - np.median(y))) / MAD_DIVISOR  # robust estimate of the standard deviation
+        s = MAD_TO_SIGMA * np.median(np.abs(y - np.median(y)))  # robust estimate of the standard deviation
         if s <= 0:
-            s = np.std(y, ddof=1) if n > 1 else 0.0
+            s = _sample_std(y)
         h = np.nan if s <= 0 else s * (4 / (3 * n)) ** (1 / 5)
 
     if xi is None:

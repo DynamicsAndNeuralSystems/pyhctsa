@@ -205,12 +205,17 @@ CASES = {
 }
 
 # Generated from the main checkout (0fa9013), before the refactor.
+# Re-pinned on this branch (cons-mad-constant, #61): the following values change with the convention
+# this branch fixes (see its PR body); every other value is the main-checkout value.
+#   simple_fit_exp1_ks|ar1.adjr2
+#   simple_fit_exp1_ks|ar1.r2
+#   simple_fit_exp1_ks|wn.r2
 EXPECTED = {
     ('spectral_summaries', 'wn'): {'fpolysat_r2': 0.9810690730312851, 'fpolysat_rmse': 0.03413046016877067, 'fpoly2_r2': 0.9987726868073356, 'fpoly2_rmse': 0.008698815144143513},
     ('sinusoid_fit_sin1', 'wn'): {'r2': 0.0014937324451347322, 'adjr2': -0.0018513471781647084, 'rmse': 0.922775328752735},
     ('sinusoid_fit_fourier1', 'wn'): {'r2': 0.022396254165364282, 'adjr2': 0.017475429941364418, 'rmse': 0.9138313255143474},
     ('simple_fit_gauss1', 'wn'): {'r2': 0.9168221256096379, 'adjr2': 0.9092605006650596, 'rmse': 0.04494544570221991},
-    ('simple_fit_exp1_ks', 'wn'): {'r2': 0.004903534590019687, 'adjr2': -0.005250510975388201, 'rmse': 0.13638393981312666},
+    ('simple_fit_exp1_ks', 'wn'): {'r2': 0.004903482373435297, 'adjr2': -0.005250510975388201, 'rmse': 0.13638393981312666},
     ('outlier_include', 'wn'): {'nflr2': 0.9485279796940483, 'nflrmse': 6.354357228287337, 'stdrflr2': 0.8334423855477887, 'stdrflrmse': 3.7441908156958306},
     ('visibility_graph', 'wn'): {'dgaussk_r2': 0.7687129256831513, 'dgaussk_adjr2': 0.7398020413935452, 'dgaussk_rmse': 0.10742332995895273, 'dexpk_r2': 0.45992427266315505, 'dexpk_adjr2': 0.428155112231576, 'dexpk_rmse': 0.15925232799392475, 'dpowerk_r2': 0.2385123324434938, 'dpowerk_adjr2': 0.1937189402342876, 'dpowerk_rmse': 0.1890992895590311},
     ('transition_p_alphabet', 'wn'): {'trflin5_adjr2': 0.7844188036710243, 'trflin10adjr2': 0.7844188036710243},
@@ -219,7 +224,7 @@ EXPECTED = {
     ('sinusoid_fit_sin1', 'ar1'): {'r2': 0.15206778735488746, 'adjr2': 0.14922714342642818, 'rmse': 1.670930286807655},
     ('sinusoid_fit_fourier1', 'ar1'): {'r2': 0.15363678086667654, 'adjr2': 0.14937656332070348, 'rmse': 1.6707835489397702},
     ('simple_fit_gauss1', 'ar1'): {'r2': 0.9484996958868672, 'adjr2': 0.9438178500584006, 'rmse': 0.032014166331249774},
-    ('simple_fit_exp1_ks', 'ar1'): {'r2': 0.007916881614282167, 'adjr2': -0.002206415512102655, 'rmse': 0.13324873476439322},
+    ('simple_fit_exp1_ks', 'ar1'): {'r2': 0.00791677215464115, 'adjr2': -0.002206526088678773, 'rmse': 0.13324873476439322},
     ('outlier_include', 'ar1'): {'nflr2': 0.9428431376251895, 'nflrmse': 7.073868383570861, 'stdrflr2': 0.8817177567577196, 'stdrflrmse': 3.3010726377579376},
     ('visibility_graph', 'ar1'): {'dgaussk_r2': 0.8415462965525552, 'dgaussk_adjr2': 0.8127365322893834, 'dgaussk_rmse': 0.07998391658633684, 'dexpk_r2': 0.39600470321992254, 'dexpk_adjr2': 0.34567176182158277, 'dexpk_rmse': 0.14951128268332914, 'dpowerk_r2': 0.17434714204398594, 'dpowerk_adjr2': 0.10554273721431817, 'dpowerk_rmse': 0.17480583821464138},
     ('transition_p_alphabet', 'ar1'): {'trflin5_adjr2': 0.9217186292026659, 'trflin10adjr2': 0.9217186292026659},

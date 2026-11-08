@@ -98,8 +98,9 @@ def test_sample_std_equals_numpy_ddof1():
 
 
 def test_sample_std_degenerate_inputs():
-    assert _sample_std([4.2]) == 0.0          # documented convention (C1): one value -> 0
-    assert _sample_std([[1.0], [2.0]], axis=1).tolist() == [0.0, 0.0]
+    assert math.isnan(_sample_std([4.2]))     # one value: the N-1 spread is undefined -> NaN
+    assert np.isnan(_sample_std([[1.0], [2.0]], axis=1)).all()
+    assert _sample_std([4.2], single=0.0) == 0.0
     assert math.isnan(_sample_std([]))
     assert math.isnan(_sample_std([np.nan]))
     assert math.isnan(_sample_std([1.0, np.nan, 2.0]))

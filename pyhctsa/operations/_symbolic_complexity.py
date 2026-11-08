@@ -5,7 +5,8 @@ the published definitions cited in their docstrings.
 """
 import numpy as np
 from numba import njit
-from scipy.stats import rankdata
+
+from ..utils import _coarse_grain
 
 from ..utils import _shannon_entropy
 
@@ -66,16 +67,12 @@ def _lempel_ziv_phrase_count(symbols: np.ndarray) -> int:
 
 
 def _equiprobable_symbols(x: np.ndarray, n_bins: int) -> np.ndarray:
-    """Coarse-grain ``x`` into ``n_bins`` roughly equiprobable symbols 1..n_bins by rank.
-
-    With R the average rank (1..N) of each sample, the symbol is
-    ``floor(R * n_bins / (N + 1)) + 1``; tied values share their average rank, hence a
-    symbol. Symbols present are not guaranteed to cover all of 1..n_bins when many values
-    are tied.
+    """Coarse-grain ``x`` into ``n_bins`` equiprobable symbols 1..n_bins
+    (:func:`pyhctsa.utils._coarse_grain` plus one: Hazen quantile cuts, tied values sharing the
+    symbol of their mid-rank). Symbols present are not guaranteed to cover all of 1..n_bins
+    when many values are tied.
     """
-    x = np.asarray(x, dtype=np.float64).ravel()
-    ranks = rankdata(x, method='average')
-    return (np.floor(ranks * n_bins / (x.size + 1)).astype(np.int64) + 1)
+    return _coarse_grain(x, n_bins, 'quantile') + 1
 
 
 def _normalized_lz_complexity(labels: np.ndarray) -> float:
@@ -105,14 +102,10 @@ def _shannon_block_entropy(y: np.ndarray, num_bins: int, depth: int) -> float:
     """Shannon entropy (nats) of the overlapping words of ``depth`` symbols in an
     equal-frequency coarse-graining of ``y`` into ``num_bins`` symbols (not divided by depth).
 
-    Symbols come from the ranks of the samples: the sorted series is cut into ``num_bins``
-    consecutive groups of (nearly) equal size, group ``g`` (``g = 0..num_bins-1``) holding the
-    ranks ``floor(g N / num_bins)`` to ``floor((g + 1) N / num_bins) - 1`` (0-based). A sample
-    gets the symbol of the group in which its value starts, so equal values always share a
-    symbol (a tie that straddles a group boundary goes to the upper group). The entropy is
-    ``-sum p ln p`` over the empirical frequencies ``p`` of the ``N - depth + 1`` overlapping
-    words. The cut at rank ``floor(g N / num_bins)`` is the convention that reproduces hctsa's
-    values.
+    Symbols ``0..num_bins-1`` are the equiprobable coarse-graining of
+    :func:`pyhctsa.utils._coarse_grain` (cuts at the Hazen quantiles, bins closed on the left,
+    tied values sharing the symbol of their mid-rank). The entropy is ``-sum p ln p`` over the
+    empirical frequencies ``p`` of the ``N - depth + 1`` overlapping words.
 
     Returns NaN if ``y`` contains NaN or is shorter than ``depth``, and 0 if there is only
     one symbol or one word.
@@ -133,9 +126,7 @@ def _shannon_block_entropy(y: np.ndarray, num_bins: int, depth: int) -> float:
     if n_bins == 1 or n_words <= 1:
         return 0.0
 
-    sorted_y = np.sort(y)
-    cut_values = sorted_y[(np.arange(1, n_bins) * n) // n_bins]  # first value of groups 1..n_bins-1
-    symbols = np.searchsorted(cut_values, y, side='right')  # number of cut values <= sample
+    symbols = _coarse_grain(y, n_bins, 'quantile')
 
     # each row is one word: `depth` consecutive symbols
     words = np.lib.stride_tricks.sliding_window_view(symbols, depth)

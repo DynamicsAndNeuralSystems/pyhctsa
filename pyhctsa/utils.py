@@ -18,7 +18,7 @@ import pandas as pd
 from scipy import fft as sp_fft
 from scipy.signal import correlate
 from scipy.spatial import cKDTree
-from scipy.stats import chi2, rankdata
+from scipy.stats import chi2, norm, rankdata
 
 
 def _check_optional_deps(dep: str) -> bool:
@@ -38,7 +38,7 @@ def _reference_series() -> list:
     ar = np.zeros(1000)
     for i in range(1, 1000):
         ar[i] = 0.7 * ar[i - 1] + e[i]
-    z = lambda v: (v - v.mean()) / v.std(ddof=1)
+    z = lambda v: (v - v.mean()) / _sample_std(v)
     return [z(ar), np.exp(0.5 * z(ar)), z(np.sin(0.2 * np.arange(1000)) + 0.3 * rng.randn(1000)), z(np.cumsum(e))]
 
 _FIELD_CACHE: dict = {}
@@ -372,8 +372,8 @@ def z_score(x: ArrayLike) -> np.ndarray:
                          "Values appear to be constant.")
 
     # Z-score twice to reduce numerical error
-    zscored_data = np.divide((x - np.mean(x)), np.std(x, ddof=1))
-    zscored_data = np.divide((zscored_data - np.mean(zscored_data)), np.std(zscored_data, ddof=1))
+    zscored_data = np.divide((x - np.mean(x)), _sample_std(x))
+    zscored_data = np.divide((zscored_data - np.mean(zscored_data)), _sample_std(zscored_data))
 
     return zscored_data
 
@@ -774,13 +774,14 @@ def _iqr(x: ArrayLike, axis: Union[int, None] = None, method: str = 'hazen'):
     return q75 - q25
 
 
-def _sample_std(x: ArrayLike, axis: Union[int, None] = None):
-    """Sample standard deviation with the N-1 normalization; 0 for a single observation.
+def _sample_var(x: ArrayLike, axis: Union[int, None] = None, single: float = np.nan):
+    """Sample variance with the N-1 (Bessel) normalization; NaN for fewer than two observations.
 
-    This is ``numpy.std(ddof=1)`` with one pyhctsa convention: a single finite observation gives
-    0 (not NaN), so that features built on a spread do not drop out for degenerate short
-    inputs. An empty input gives NaN without a warning. NaN or Inf in the data propagate to NaN. For complex data the result is real
-    (the absolute value is squared).
+    This is ``numpy.var(ddof=1)`` with the pyhctsa convention for degenerate sample sizes made
+    explicit and warning-free. The N-1 estimator is undefined for one observation (0/0): a single
+    value carries no information about spread, so the result is NaN, not 0 (which would read as
+    "no variability"). An empty input also gives NaN. NaN or Inf in the data propagate to NaN.
+    For complex data the result is real (the absolute value is squared).
 
     Parameters
     ----------
@@ -788,15 +789,22 @@ def _sample_std(x: ArrayLike, axis: Union[int, None] = None):
         Data.
     axis : int or None
         Axis to operate along; ``None`` flattens.
+    single : float
+        Value returned for a single finite observation (default NaN). Set it (to 0) only where
+        the values are not a sample but the complete set of components of one object (the
+        coefficients or modes of a fitted model, the leaves of a tree, the nodes of a network),
+        whose spread is exactly 0 when there is one component, or where the value is an internal
+        placeholder in a running computation; say why at the call site. A single non-finite
+        observation still gives NaN.
 
     Returns
     -------
     numpy.float64 or numpy.ndarray
-        Standard deviation(s); the input shape with ``axis`` removed.
+        Variance(s); the input shape with ``axis`` removed.
 
     Notes
     -----
-    S = sqrt( sum |A_i - mean(A)|^2 / (N-1) ).
+    S^2 = sum |A_i - mean(A)|^2 / (N-1), defined for N >= 2.
     """
     a = np.asarray(x)
     if a.dtype.kind not in 'fc':
@@ -812,14 +820,46 @@ def _sample_std(x: ArrayLike, axis: Union[int, None] = None):
     if n == 0:
         res = np.full(out_shape, np.nan)
     elif n == 1:
-        # one observation: 0, unless that value is itself NaN/Inf
-        res = np.where(np.isfinite(np.squeeze(a, axis=axis)), 0.0, np.nan)
+        # one observation: the N-1 estimator is 0/0; `single` (finite data only) or NaN
+        res = np.where(np.isfinite(np.squeeze(a, axis=axis)), single, np.nan)
     else:
         with np.errstate(all='ignore'):
-            res = np.std(a, axis=axis, ddof=1)
+            res = np.var(a, axis=axis, ddof=1)
     if scalar:
         return np.float64(res)
     return np.asarray(res, dtype=float)
+
+
+def _sample_std(x: ArrayLike, axis: Union[int, None] = None, single: float = np.nan):
+    """Sample standard deviation with the N-1 normalization; NaN for fewer than two observations.
+
+    The square root of :func:`_sample_var` (the same operation order as ``numpy.std(ddof=1)``,
+    so values agree bitwise for N >= 2), with the same convention: one observation gives NaN
+    (the spread is undefined, not zero) unless ``single`` is set, and an empty input gives NaN,
+    without a warning. NaN or Inf in the data propagate to NaN. For complex data the result is
+    real.
+
+    Parameters
+    ----------
+    x : array_like
+        Data.
+    axis : int or None
+        Axis to operate along; ``None`` flattens.
+    single : float
+        Value returned for a single finite observation (default NaN); see :func:`_sample_var`.
+
+    Returns
+    -------
+    numpy.float64 or numpy.ndarray
+        Standard deviation(s); the input shape with ``axis`` removed.
+
+    Notes
+    -----
+    S = sqrt( sum |A_i - mean(A)|^2 / (N-1) ), defined for N >= 2.
+    """
+    v = _sample_var(x, axis=axis, single=single)
+    with np.errstate(invalid='ignore'):
+        return np.sqrt(v)
 
 
 
@@ -989,7 +1029,7 @@ def _tie_aware_ranks(y: ArrayLike, tol: float = _TIE_TOL, iso: float = _TIE_ISO)
     order = np.argsort(y, kind='stable')
     ys = y[order]
     gap = np.diff(ys)
-    t = tol * (np.std(y, ddof=1) if n > 1 else 0.0)
+    t = tol * _sample_std(y)
     run_start = np.r_[True, gap > t]                  # runs of gaps <= t
     run_id = np.cumsum(run_start) - 1
     size = np.bincount(run_id)
@@ -1024,6 +1064,52 @@ def _average_ranks(y: ArrayLike) -> np.ndarray:
     return rankdata(np.asarray(y, dtype=float).ravel(), method='average')
 
 
+def _coarse_grain(x: ArrayLike, n_symbols: int, how: str = 'quantile',
+                  limits: Union[tuple, None] = None) -> np.ndarray:
+    """Symbols ``0..n_symbols-1`` of a static partition of the values of ``x``.
+
+    - ``how='quantile'``: the equiprobable (maximum-entropy) partition, cut at the ``j/n_symbols``
+      quantiles of the data. With ``R`` the average rank (1..N) of a value, its symbol is
+      ``floor(n_symbols * (R - 1/2) / N)``: the number of cuts at or below its mid-distribution
+      value ``(R - 1/2) / N``, the Hazen plotting position (Hyndman & Fan definition 5, the
+      quantile definition used throughout pyhctsa). For distinct values this is exactly the
+      partition at the Hazen quantiles with bins closed on the left (a value on a cut takes the
+      upper symbol), and the bin counts differ by at most one. Tied values share a symbol (a
+      symbol is a function of the value); a tied group is assigned by its mid-rank, i.e. to the
+      bin holding the center of its rank span. Constant input gives the single symbol
+      ``n_symbols // 2``. The symbols are invariant under any strictly increasing transformation.
+    - ``how='width'``: equal-width bins, ``floor(n_symbols * (x - lo) / (hi - lo))`` clipped to
+      ``0..n_symbols-1``, with ``(lo, hi)`` the range of the data, or ``limits`` (then values
+      outside fall in the end bins). Bins are closed on the left; ``hi`` itself is in the top
+      bin. A degenerate range (constant input) gives the single symbol ``n_symbols // 2``.
+
+    Raises ``ValueError`` if ``x`` contains NaN.
+
+    Notes
+    -----
+    C. S. Daw, C. E. A. Finney and E. R. Tracy, Rev. Sci. Instrum. 74:915 (2003), sec. III.A
+    (equiprobable partitions); R. J. Hyndman and Y. Fan, Am. Stat. 50:361 (1996).
+    """
+    x = np.asarray(x, dtype=np.float64).ravel()
+    k = int(n_symbols)
+    if k < 1:
+        raise ValueError(f"n_symbols must be a positive integer, not {n_symbols}")
+    if np.isnan(x).any():
+        raise ValueError("cannot coarse-grain a series containing NaN")
+    if x.size == 0:
+        return np.zeros(0, dtype=np.int64)
+    if how == 'quantile':
+        # 2R - 1 is an integer for average ranks, so the floor is exact (also on a cut)
+        twice_r_minus_1 = np.rint(2 * _average_ranks(x) - 1).astype(np.int64)
+        return (k * twice_r_minus_1) // (2 * x.size)
+    if how == 'width':
+        lo, hi = (np.min(x), np.max(x)) if limits is None else map(float, limits)
+        if not hi > lo:
+            return np.full(x.size, k // 2, dtype=np.int64)
+        return np.clip(np.floor(k * ((x - lo) / (hi - lo))), 0, k - 1).astype(np.int64)
+    raise ValueError(f"Unknown coarse-graining '{how}': use 'quantile' or 'width'")
+
+
 def _is_rank_rule(rule) -> bool:
     """Whether ``rule`` is a rank-based time-delay rule of :func:`get_tau` ('ac1e-rank', ...)."""
     return isinstance(rule, str) and rule in _TAU_RULES and rule.endswith(_RANK_SUFFIX)
@@ -1049,7 +1135,7 @@ def _ami_first_min(ami: np.ndarray) -> float:
     second differences (for independent noise of standard deviation ``sigma`` a second
     difference has standard deviation ``sqrt(6)*sigma``)::
 
-        d2 = diff(ami, 2);  sigma = 1.4826 * median(|d2 - median(d2)|) / sqrt(6)
+        d2 = diff(ami, 2);  sigma = MAD_TO_SIGMA * median(|d2 - median(d2)|) / sqrt(6)
 
     with ``delta = 2*sigma`` (``delta = 0`` if ``L < 4``). The result is the first lag ``l``
     in ``2..L-1`` at which the smoothed curve ``sm`` has a strict local minimum
@@ -1112,7 +1198,7 @@ def _tau_mi(y: np.ndarray, ranks: Union[np.ndarray, None] = None) -> float:
     # Kraskov (k=4, algorithm 1) AMI of the z-scored tie-aware ranks; the same fixed-seed
     # jitter (1e-10 sd) is always added to break the exact ties
     r = _tie_aware_ranks(y) if ranks is None else np.asarray(ranks, dtype=float)
-    sd = np.std(r, ddof=1)
+    sd = _sample_std(r)
     if not sd > 0:
         return np.nan  # constant series
     r = (r - r.mean()) / sd
@@ -1173,7 +1259,7 @@ def get_tau(y: ArrayLike, rule: Union[int, str] = 'ac1e') -> Union[int, float]:
           which the smoothed curve has a strict local minimum lying more than ``2*sigma`` below
           both the highest smoothed AMI at shorter lags and the highest at longer lags. Here
           ``sigma`` is the AMI estimator noise, estimated robustly from the second differences of
-          the raw AMI curve, ``sigma = 1.4826 * MAD(diff(ami, 2)) / sqrt(6)`` (MAD the median
+          the raw AMI curve, ``sigma = MAD_TO_SIGMA * MAD(diff(ami, 2)) / sqrt(6)`` (MAD the median
           absolute deviation from the median; ``sigma = 0`` if fewer than 4 lags are available);
           see ``_ami_first_min``. The ranks make the AMI robust to tiny perturbations and
           nearly invariant under monotone transformations of the data (the ``'ac1e'`` cap is
@@ -1462,7 +1548,7 @@ def _zscore_or_zeros(x: np.ndarray) -> np.ndarray:
     a = np.asarray(x, dtype=float)
     if a.size == 0:
         return a.copy()
-    sd = float(_sample_std(a))
+    sd = float(_sample_std(a, single=0.0))  # one value is a constant input: zeros
     if sd == 0:
         sd = 1.0
     with np.errstate(invalid='ignore'):
@@ -1485,7 +1571,7 @@ def _zscore_or_none(x: np.ndarray) -> Union[np.ndarray, None]:
         skip or reject a degenerate input rather than map it to zeros as
         :func:`_zscore_or_zeros` does.
     """
-    sd = np.std(x, ddof=1)
+    sd = _sample_std(x)
     if not sd > 0:
         return None
     return (x - np.mean(x)) / sd
@@ -1857,12 +1943,14 @@ def _first_extremum(values, kind: str = 'min', not_found: Union[int, float] = np
 # ------------------------------------------------------------------------------
 # Robust-scale constants and the round-off guard
 # ------------------------------------------------------------------------------
-# For Gaussian data the median absolute deviation (MAD) is sigma * Phi^{-1}(3/4) = 0.67449 sigma,
-# so sigma is estimated by MAD * 1.4826 or MAD / 0.6745. The two rounded forms differ by about 1e-5
-# (relative) from each other and from the exact Phi^{-1}(3/4), so each site keeps the form it uses;
-# changing one changes outputs in the fifth significant digit.
-MAD_TO_SIGMA = 1.4826   # sigma ~= MAD_TO_SIGMA * MAD (multiplied)
-MAD_DIVISOR = 0.6745    # sigma ~= MAD / MAD_DIVISOR (divided; Holland & Welsch's rounding)
+# Normal-consistency factors for the two robust scales. For Gaussian data of standard deviation
+# sigma the median absolute deviation from the median (MAD) tends to sigma * Phi^{-1}(3/4) and the
+# interquartile range (IQR) to 2 * sigma * Phi^{-1}(3/4), with Phi^{-1}(3/4) = 0.6744897501960817,
+# so sigma is estimated consistently by MAD_TO_SIGMA * MAD and IQR_TO_SIGMA * IQR (Hampel 1974,
+# JASA 69:383-393; Rousseeuw & Croux 1993, JASA 88:1273-1283). Every robust scale in pyhctsa uses
+# these exact factors, multiplied, rather than a rounded 1.4826, 1/0.6745, 1/1.349 or 1/1.35.
+MAD_TO_SIGMA = 1.0 / float(norm.ppf(0.75))   # 1 / Phi^{-1}(3/4) = 1.482602218505602
+IQR_TO_SIGMA = MAD_TO_SIGMA / 2.0            # 1 / (2 Phi^{-1}(3/4)) = 0.741301109252801
 
 
 def _is_roundoff(x: np.ndarray, ref: Union[np.ndarray, None] = None, n: Union[int, None] = None) -> bool:
@@ -1891,7 +1979,7 @@ def _is_roundoff(x: np.ndarray, ref: Union[np.ndarray, None] = None, n: Union[in
     ref = x if ref is None else np.asarray(ref, dtype=float)
     if n is None:
         n = ref.size
-    return bool(np.std(x, ddof=1) <= 10 * n * np.finfo(float).eps * np.sqrt(np.mean(ref ** 2)))
+    return bool(_sample_std(x) <= 10 * n * np.finfo(float).eps * np.sqrt(np.mean(ref ** 2)))
 
 
 def _piecewise_poly_residual(y: np.ndarray, order: int, num_bits: int) -> np.ndarray:

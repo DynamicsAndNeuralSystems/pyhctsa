@@ -14,7 +14,7 @@ from scipy.stats import expon, gumbel_l, lognorm, norm, rayleigh, uniform, weibu
 from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
 from ..fitting import goodness_of_fit
 from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_remove_points, bf_residual_stats
-from ..utils import dict_output, _round_half_away, _sample_std, sign_change, simple_binner, x_corr
+from ..utils import IQR_TO_SIGMA, dict_output, _round_half_away, _sample_std, sign_change, simple_binner, x_corr
 
 logger = logging.getLogger('pyhctsa')
 
@@ -115,10 +115,10 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
         if np.all(x == x[0]):
             logger.warning("Data are a constant; the beta distribution cannot be fitted.")
             return np.nan  # no variation to fit
-        sd = np.std(x, ddof=1)
+        sd = _sample_std(x)
         x = (x - np.min(x) + 0.01 * sd) / (np.max(x) - np.min(x) + 0.02 * sd)
     n = len(x)
-    x_step = np.std(x, ddof=1) / 100  # set a step size
+    x_step = _sample_std(x) / 100  # set a step size
 
     # ----------------------------
     # Fit distribution & find the support bounds over which to compare
@@ -135,7 +135,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     right_quantile = None
     if what_distn == 'norm':
         # Normal distribution (normfit uses the unbiased standard deviation)
-        loc, scale = np.mean(x), np.std(x, ddof=1)
+        loc, scale = np.mean(x), _sample_std(x)
         dist = norm(loc=loc, scale=scale)
         thresh = dist.pdf(loc) / 100.0
         left_start = right_start = np.mean(x)
@@ -208,7 +208,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
             return np.nan
         # Log-normal distribution (lognfit uses the unbiased std of log(x)); peak is at the mode
         lx = np.log(x)
-        mu, sigma = np.mean(lx), np.std(lx, ddof=1)
+        mu, sigma = np.mean(lx), _sample_std(lx)
         mode = np.exp(mu - sigma ** 2)
         dist = lognorm(s=sigma, loc=0, scale=np.exp(mu))
         thresh = dist.pdf(mode) / 100.0
@@ -287,7 +287,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
                            else xi[_nanargmax_or_zero(ffit)] - xi[_nanargmax_or_zero(f)])
         # OLAPINT: overlap integral between the two curves; multiplying by std(x) makes
         # this scale-invariant
-        out['olapint'] = np.sum(f * ffit * dx) * np.std(x, ddof=1)
+        out['olapint'] = np.sum(f * ffit * dx) * _sample_std(x)
         # RELENT: relative entropy of the two distributions (points where either
         # density is exactly zero are skipped: 0*log(0) := 0)
         r = (ffit != 0) & (f != 0)
@@ -344,7 +344,9 @@ def withinp(x: ArrayLike, p: float = 1.0, mean_or_median: str = 'mean') -> float
         The number (proportion) of standard deviations. Default is 1.0
     mean_or_median : str 
         Whether to use units of 'mean' and standard deviation, or 'median' 
-        and rescaled interquartile range. Default is ``'mean'``.
+        and rescaled interquartile range (``IQR_TO_SIGMA * IQR``,
+        ``IQR_TO_SIGMA = 1/(2 Phi^{-1}(3/4))``).
+        Default is ``'mean'``.
 
     Returns
     --------
@@ -356,11 +358,11 @@ def withinp(x: ArrayLike, p: float = 1.0, mean_or_median: str = 'mean') -> float
 
     if mean_or_median == 'mean':
         mu = np.mean(x)
-        sig = np.std(x, ddof=1)
+        sig = _sample_std(x)
     elif mean_or_median == 'median':
         mu = np.median(x)
         iqr_val = _iqr(x)
-        sig = iqr_val / 1.35
+        sig = IQR_TO_SIGMA * iqr_val
     else:
         raise ValueError(f"Unknown setting: '{mean_or_median}'")
 
@@ -411,7 +413,7 @@ def spread(y: ArrayLike, spread_measure: str = 'std') -> float:
     """
     y = np.asarray(y)
     if spread_measure == 'std':
-        out = np.std(y, ddof=1)
+        out = _sample_std(y)
     elif spread_measure == 'iqr':
         out = _iqr(y)
     elif spread_measure == 'mad':
@@ -509,7 +511,7 @@ def pleft(y: ArrayLike, th: float = 0.1) -> float:
     y = np.asarray(y)
     p = _quantile(np.abs(y - np.mean(y)), 1-th)
     # A proportion, th, of the data lie further than p from the mean
-    out = np.divide(p, np.std(y, ddof=1))
+    out = np.divide(p, _sample_std(y))
 
     return float(out)
 
@@ -708,7 +710,7 @@ def cv(x: ArrayLike, k: int = 1) -> float:
 
     # Compute the coefficient of variation (of order k) of the data
     mu = np.mean(x)
-    sigma = np.std(x, ddof=1)
+    sigma = _sample_std(x)
     if abs(mu) < 1e-10 * sigma:
         # the mean is zero up to rounding error (e.g., a centered or z-scored series), so
         # the ratio is rounding noise of order 1e17
@@ -776,9 +778,9 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
     y = np.asarray(y)
     out = 0.0
     if what_skew == 'pearsonMode':
-        out = (np.mean(y) - bf_half_sample_mode(y)) / np.std(y, ddof=1)
+        out = (np.mean(y) - bf_half_sample_mode(y)) / _sample_std(y)
     elif what_skew in ('pearson', 'pearsonMedian'):
-        out = (3 * (np.mean(y) - np.median(y)) / np.std(y, ddof=1))
+        out = (3 * (np.mean(y) - np.median(y)) / _sample_std(y))
     elif what_skew == 'bowley':
         qs = _quantile(y, [0.25, 0.5, 0.75])
         out = (qs[2]+qs[0] - 2 * qs[1]) / (qs[2] - qs[0]) 
@@ -813,7 +815,7 @@ def burstiness(y: ArrayLike) -> dict:
     """
     y = np.asarray(y)
     me = np.mean(y)
-    std = np.std(y, ddof=1)
+    std = _sample_std(y)
 
     r = np.divide(std,me) # coefficient of variation
     b = np.divide((r - 1), (r + 1)) # Original Goh and Barabasi burstiness statistic, B
@@ -1140,7 +1142,7 @@ def outlier_test(y: ArrayLike, p: float = 2,
     mean_middle = np.mean(middle_portion)
     
     # Std of the middle (100-2*p)% of the data
-    std_middle = np.std(middle_portion, ddof=1) / np.std(y, ddof=1)  # [although std(y) should be 1]
+    std_middle = _sample_std(middle_portion) / _sample_std(y)  # [although std(y) should be 1]
 
     out = {'mean': mean_middle, 'std': std_middle}
 
@@ -1367,7 +1369,7 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     out = {}
     out['mean'] = np.mean(y_transform)
     out['median'] = np.median(y_transform)
-    out['std'] = np.std(y_transform, ddof=1)
+    out['std'] = _sample_std(y_transform)
     # difference rather than ratio: a ratio blows up (and changes sign) when skew(y) is near 0
     out['skewnessdiff'] = stats.skew(y_transform) - stats.skew(y)
     # Pearson kurtosis (not the excess kurtosis, which can be zero or negative and makes the ratio unstable)
@@ -1652,7 +1654,7 @@ def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') ->
     return {
         'r2': gof['rsquare'],
         'adjr2': gof['adjrsquare'],
-        'rmse': float(gof['rmse'] * np.std(x, ddof=1)),
+        'rmse': float(gof['rmse'] * _sample_std(x)),
         'resAC1': float(res_ac1),
         'resAC2': float(res_ac2),
         'resrunsz': float(res_runsz),

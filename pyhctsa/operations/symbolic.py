@@ -1,19 +1,16 @@
 from itertools import product
 
 import numpy as np
-from ..utils import _quantile
 from typing import Optional, Union
 from numpy.typing import ArrayLike
 import logging
 logger = logging.getLogger('pyhctsa')
 
-from scipy.stats import mstats
-
 from ..operations.correlation import autocorr
 from ..fitting import goodness_of_fit
 from ..robust import bf_exp_fit
 from ..utils import _run_lengths
-from ..utils import dict_output, _sample_std, binarize, sign_change, get_tau, time_delay_embed
+from ..utils import dict_output, _coarse_grain, _sample_std, binarize, sign_change, get_tau, time_delay_embed
 from ..utils import _shannon_entropy
 
 def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_groups: int = 3,
@@ -197,11 +194,9 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     out['mean'] = np.mean(store)
     out['sum'] = np.sum(store)
     out['median'] = np.median(store)
-    lq = mstats.mquantiles(store, 0.25, alphap=0.5, betap=0.5) # outputs an array of size one
-    out['lq'] = lq[0] #convert array to int
-    uq = mstats.mquantiles(store, 0.75, alphap=0.5, betap=0.5)
-    out['uq'] = uq[0]
-    out['std'] = np.std(store, ddof=1)
+    out['lq'] = np.quantile(store, 0.25, method='hazen')
+    out['uq'] = np.quantile(store, 0.75, method='hazen')
+    out['std'] = _sample_std(store)
     out['propUnseen'] = prop_unseen
 
     # Standardized distance of the mean information gain from 1 (the length-stable form),
@@ -1016,7 +1011,9 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str], lag: int 
         The method of coarse-graining.
         Options: 
 
-        - 'quantile': an equiprobable alphabet by the value of each point,
+        - 'quantile': an equiprobable alphabet by the value of each point (cuts at the Hazen
+          quantiles, bins closed on the left, tied values sharing the symbol of their mid-rank;
+          see :func:`pyhctsa.utils._coarse_grain`),
         - 'diff': as 'quantile', but applied to the increments ``diff(y)``: an equiprobable
           alphabet by the *value* of each increment (not a literal sign split; this was called
           'updown' before hctsa renamed it),
@@ -1105,12 +1102,8 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str], lag: int 
     
     # Do the coarse graining
     if how_to_cg == 'quantile':
-        th = _quantile(y, np.linspace(0, 1, num_groups + 1)) # thresholds for dividing the time-series values
-        th[0] = th[0] - 1 # this ensures the first point is included
-        yth = np.zeros(N, dtype=int)
-        # turn the time series into a set of numbers from 1:num_groups
-        for i in range(num_groups):
-            yth[(y > th[i]) & (y <= th[i+1])] = i + 1
+        # equiprobable symbols 1..num_groups (Hazen quantile cuts, ties by mid-rank)
+        yth = _coarse_grain(y, num_groups, 'quantile') + 1
 
     elif how_to_cg == 'embed2quadrants': # divides based on quadrants in a 2-D embedding space
         # create alphabet in quadrants -- {1,2,3,4}
