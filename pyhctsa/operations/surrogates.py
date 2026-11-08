@@ -3,7 +3,9 @@ from typing import Union
 import logging
 logger = logging.getLogger('pyhctsa')
 
+from ..utils import _sample_std
 import numpy as np
+from ..utils import _iqr
 from numpy.typing import ArrayLike
 from scipy.stats import norm
 
@@ -11,6 +13,7 @@ from ..operations.correlation import tc3, trev
 from ..operations.information import automutual_info, first_min
 from ._nlpe import _nn_prediction_residuals
 from ..operations.nonlinearity import fnn, nlpe
+from ..operations.pre_process import _rank_map_gaussian
 from ..robust import bf_ks_density, bf_random, bf_random_seed
 from ..utils import dict_output, get_tau, theiler_window, _round_half_away
 
@@ -27,7 +30,7 @@ def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str)
         logger.warning("SDgivemestats failed")
         return np.nan
     # ASSUME GAUSSIAN DISTRIBUTION: z-statistic of the series' value
-    sigma = np.std(stat_surr, ddof=1)
+    sigma = _sample_std(stat_surr)
     if not sigma > 0:
         # all surrogates have the same value of this statistic: no meaningful z-score
         out['zscore'] = np.nan
@@ -36,7 +39,7 @@ def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str)
 
     # what fraction of the range is the sample in? 
     medsurr = np.median(stat_surr)
-    iqrsurr = np.quantile(stat_surr, q=.75, method='hazen') - np.quantile(stat_surr, q=.25, method='hazen')
+    iqrsurr = _iqr(stat_surr)
     if iqrsurr == 0:
         out['mediqr'] = np.nan
     else:
@@ -166,13 +169,11 @@ def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
         # sort and rank order the data
         ix = np.argsort(x, kind='stable')
         x_sorted = x[ix]
-        x_ro = np.argsort(ix, kind='stable')  # rank-ordered permutation
         noise = bf_random(N * num_surrs, seed, 'normal').reshape(N, num_surrs, order='F')
         phases = uniform_block(n_free, seed + 1)
         for s in range(num_surrs):
             # random-order white Gaussian-distributed noise, ranked as x
-            n_sort = np.sort(noise[:, s])
-            y = n_sort[x_ro]
+            y = _rank_map_gaussian(x, draws=noise[:, s])
             # random-phase surrogate of y (phase-randomized noise ranked as x)
             y_rp = _random_phase(y, phases[:, s])
             # rank order x with respect to y_rp
@@ -596,7 +597,7 @@ def surrogates(
     out = {}
     # 1) fit a Gaussian to the surrogates
     muhat = np.mean(tc3_surr)
-    sigmahat = np.std(tc3_surr, ddof=1)
+    sigmahat = _sample_std(tc3_surr)
     if sigmahat == 0:
         # all surrogates give an identical value of this statistic: cannot meaningfully
         # assess how many stds/z the data value is from them
@@ -618,7 +619,7 @@ def surrogates(
         out['zsigned'] = (tc3_y - muhat) / sigmahat
 
     # iqrs from median
-    iqrsurr = np.quantile(tc3_surr, 0.75, method='hazen') - np.quantile(tc3_surr, 0.25, method='hazen')
+    iqrsurr = _iqr(tc3_surr)
     if iqrsurr == 0:
         out['iqrsfrommedian'] = np.nan
     else:

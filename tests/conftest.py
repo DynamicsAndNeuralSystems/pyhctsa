@@ -52,3 +52,15 @@ def e1000_available() -> bool:
     from pyhctsa.utils import _E1000, _data_cache_dir
     cached = os.path.exists(os.path.join(_data_cache_dir(), _E1000["filename"]))
     return cached or os.environ.get("PYHCTSA_TEST_DOWNLOAD") == "1"
+
+
+@pytest.fixture
+def reference_mad_constant(monkeypatch):
+    """Scale the MAD by the rounded 1/0.6745 of the MATLAB reference implementations (robustfit,
+    ksdensity) instead of pyhctsa's exact ``utils.MAD_TO_SIGMA = 1/Phi^{-1}(3/4)`` (about 1e-5
+    apart), in the kernel-density bandwidth and the robust-regression scale. Tests that cross-check
+    those algorithms against stored MATLAB outputs use it, so they compare the algorithm, not the
+    constant."""
+    import importlib
+    for name in ("pyhctsa.robust", "pyhctsa.fitting.robust_regression"):
+        monkeypatch.setattr(importlib.import_module(name), "MAD_TO_SIGMA", 1 / 0.6745)

@@ -6,11 +6,12 @@ from numpy.typing import ArrayLike
 import logging
 logger = logging.getLogger('pyhctsa')
 
-from scipy.stats import mstats
-
 from ..operations.correlation import autocorr
+from ..fitting import goodness_of_fit
 from ..robust import bf_exp_fit
-from ..utils import dict_output, _sample_std, binarize, sign_change, get_tau, time_delay_embed
+from ..utils import _run_lengths
+from ..utils import dict_output, _coarse_grain, _sample_std, binarize, sign_change, get_tau, time_delay_embed
+from ..utils import _shannon_entropy
 
 def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_groups: int = 3,
              coarse_grain_method: str = 'quantile', num_iters: int = 500,
@@ -193,11 +194,9 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     out['mean'] = np.mean(store)
     out['sum'] = np.sum(store)
     out['median'] = np.median(store)
-    lq = mstats.mquantiles(store, 0.25, alphap=0.5, betap=0.5) # outputs an array of size one
-    out['lq'] = lq[0] #convert array to int
-    uq = mstats.mquantiles(store, 0.75, alphap=0.5, betap=0.5)
-    out['uq'] = uq[0]
-    out['std'] = np.std(store, ddof=1)
+    out['lq'] = np.quantile(store, 0.25, method='hazen')
+    out['uq'] = np.quantile(store, 0.75, method='hazen')
+    out['std'] = _sample_std(store)
     out['propUnseen'] = prop_unseen
 
     # Standardized distance of the mean information gain from 1 (the length-stable form),
@@ -406,7 +405,7 @@ def _f_entropy(p, num_samples=None, word_length=1, alphabet_size=2, fixed_margin
     """
     p = np.asarray(p, dtype=float).ravel()
     r = p > 0
-    h = -np.sum(p[r] * np.log(p[r]))
+    h = _shannon_entropy(p)
     if num_samples is not None and num_samples > 0:
         df = int(np.sum(r)) - 1
         if fixed_marginals:
@@ -472,6 +471,25 @@ def binary_stretch(x: ArrayLike, stretch_what: str = 'gaps1') -> float:
 
     return out if out is not None else 0
 
+def _binary_stretches(y_bin: np.ndarray) -> tuple:
+    """Lengths of the runs of 0s and of the runs of 1s in a 0/1 sequence, each in order (runs
+    touching either end counted in full; an empty array when a symbol does not occur)."""
+    values, lengths = _run_lengths(y_bin)
+    return lengths[values == 0], lengths[values == 1]
+
+def _stretch_summary(stretch: np.ndarray, N: int, suffix: str) -> dict:
+    """Longest, mean and standard deviation (N-1) of the run lengths ``stretch``, raw and divided
+    by the string length ``N``, keyed ``longstretch<suffix>`` etc.; with no runs the longest and
+    mean are 0 and the standard deviations NaN."""
+    if len(stretch) == 0:
+        return {f'longstretch{suffix}': 0, f'longstretch{suffix}norm': 0,
+                f'meanstretch{suffix}': 0, f'meanstretch{suffix}norm': 0,
+                f'stdstretch{suffix}': np.nan, f'stdstretch{suffix}norm': np.nan}
+    long, mean, std = np.max(stretch), np.mean(stretch), _sample_std(stretch)
+    return {f'longstretch{suffix}': long, f'longstretch{suffix}norm': long / N,
+            f'meanstretch{suffix}': mean, f'meanstretch{suffix}norm': mean / N,
+            f'stdstretch{suffix}': std, f'stdstretch{suffix}norm': std / N}
+
 def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     """
     Compute statistics on a binary symbolisation of the input time series.
@@ -515,45 +533,14 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     out['pupstat2'] = np.sum(y_bin[N//2:] == 1) / np.sum(y_bin[:N//2] == 1)
 
     # Consecutive strings of ones/zeros (normalized by length)
-    diff_y = np.diff(np.where(np.concatenate(([1], y_bin, [1])))[0])
-    stretch0 = diff_y[diff_y != 1] - 1
-
-    diff_y = np.diff(np.where(np.concatenate(([0], y_bin, [0])) == 0)[0])
-    stretch1 = diff_y[diff_y != 1] - 1
+    stretch0, stretch1 = _binary_stretches(y_bin)
 
     # pstretches
     # Number of different stretches as proportion of the time-series length
     out['pstretch1'] = len(stretch1) / N
 
-    if len(stretch0) == 0:
-        out['longstretch0'] = 0
-        out['longstretch0norm'] = 0
-        out['meanstretch0'] = 0
-        out['meanstretch0norm'] = 0
-        out['stdstretch0'] = np.nan
-        out['stdstretch0norm'] = np.nan
-    else:
-        out['longstretch0'] = np.max(stretch0)
-        out['longstretch0norm'] = np.max(stretch0) / N
-        out['meanstretch0'] = np.mean(stretch0)
-        out['meanstretch0norm'] = np.mean(stretch0) / N
-        out['stdstretch0'] = _sample_std(stretch0)
-        out['stdstretch0norm'] = _sample_std(stretch0) / N
-
-    if len(stretch1) == 0:
-        out['longstretch1'] = 0
-        out['longstretch1norm'] = 0
-        out['meanstretch1'] = 0
-        out['meanstretch1norm'] = 0
-        out['stdstretch1'] = np.nan
-        out['stdstretch1norm'] = np.nan
-    else:
-        out['longstretch1'] = np.max(stretch1)
-        out['longstretch1norm'] = np.max(stretch1) / N
-        out['meanstretch1'] = np.mean(stretch1)
-        out['meanstretch1norm'] = np.mean(stretch1) / N
-        out['stdstretch1'] = _sample_std(stretch1)
-        out['stdstretch1norm'] = _sample_std(stretch1) / N
+    out.update(_stretch_summary(stretch0, N, '0'))
+    out.update(_stretch_summary(stretch1, N, '1'))
     
     out['meanstretchdiff'] = (out['meanstretch1'] - out['meanstretch0']) / N
     out['stdstretchdiff'] = (out['stdstretch1'] - out['stdstretch0']) / N
@@ -622,10 +609,7 @@ def binary_stats_ar1(y: ArrayLike, binary_method: str = 'mean') -> dict:
     N = len(y_bin)  # note: N = len(y) - 1 for 'diff'
 
     # Empirical run-length statistics (cf. binary_stats)
-    diff_y = np.diff(np.where(np.concatenate(([1], y_bin, [1])))[0])
-    stretch0 = diff_y[diff_y != 1] - 1
-    diff_y = np.diff(np.where(np.concatenate(([0], y_bin, [0])) == 0)[0])
-    stretch1 = diff_y[diff_y != 1] - 1
+    stretch0, stretch1 = _binary_stretches(y_bin)
 
     out = {}
     out['pstretch1'] = len(stretch1) / N
@@ -740,6 +724,9 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
 
     # (((3))) Output measures from the transition matrix
     out = {}
+    # the trace, symdiff, trace of the covariance and std of the eigenvalues are shared with
+    # transition_p_alphabet (see _matrix_measures)
+    _, _, trace_t, symdiff_t, trcov_t, stdeig_t = _matrix_measures(T)
 
     # (i) Raw values of the transition matrix; only for num_groups = 2, 3 are all
     # elements returned (in column-major order, T1 = T[0, 0], T2 = T[1, 0], ...), otherwise just the diagonal
@@ -752,11 +739,11 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
 
     # (ii) Measures on the diagonal
     diag_t = np.diag(T)
-    out['ondiag'] = np.sum(diag_t)  # trace
+    out['ondiag'] = trace_t  # trace
     out['stddiag'] = _sample_std(diag_t)  # std of diagonal elements
 
     # (iii) Measures of symmetry:
-    out['symdiff'] = np.sum(np.abs(T - T.T))  # sum of differences of individual elements
+    out['symdiff'] = symdiff_t  # sum of differences of individual elements
     # difference in sums of upper and lower triangular parts of T
     out['symsumdiff'] = np.sum(np.tril(T, -1)) - np.sum(np.triu(T, 1))
 
@@ -769,7 +756,7 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
 
     # (iv) Measures from eigenvalues of T
     eig_t = np.linalg.eigvals(T)
-    out['stdeig'] = _sample_std(eig_t)  # std of eigenvalues
+    out['stdeig'] = stdeig_t  # std of eigenvalues
     out['maxeig'] = np.max(np.real(eig_t))  # maximum eigenvalue
     out['mineig'] = np.min(np.real(eig_t))  # minimum eigenvalue
     # mean eigenvalue is equivalent to the trace
@@ -796,14 +783,14 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     row_sums = src_prob
     p_joint = t_f[t_f > 0]
     p_marg = row_sums[row_sums > 0]
-    h_joint = -np.sum(p_joint * np.log(p_joint))
-    h_marginal = -np.sum(p_marg * np.log(p_marg))
+    h_joint = _shannon_entropy(p_joint)
+    h_marginal = _shannon_entropy(p_marg)
     out['transEntropy'] = (h_joint - h_marginal
                            + (p_joint.size - p_marg.size) / (2 * (len(yth) - tau)))
 
     # (v) Measures from the covariance matrix:
     cov_t = np.cov(T, rowvar=False)
-    out['sumdiagcov'] = np.trace(cov_t)  # trace of covariance matrix
+    out['sumdiagcov'] = trcov_t  # trace of covariance matrix
 
     # (vi) Eigenvalues of the covariance matrix. It is symmetric, so its
     # eigenvalues are real, as `eigvalsh` returns
@@ -818,10 +805,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
 
 def _linear_adjr2(x: np.ndarray, y: np.ndarray) -> float:
     """Adjusted R^2 of an ordinary least-squares line fitted to y against x."""
-    n = len(y)
     p = np.polyfit(x, y, 1)
-    rsq = 1 - np.sum((y - np.polyval(p, x)) ** 2) / np.sum((y - np.mean(y)) ** 2)
-    return 1 - (1 - rsq) * (n - 1) / (n - 2)
+    return goodness_of_fit(y, np.polyval(p, x), 2, guard_sst=False, adj_from_rsquare=True)['adjrsquare']
 
 
 def _transition_matrix(yth: np.ndarray, num_groups: int, tau: int = 1) -> np.ndarray:
@@ -833,9 +818,20 @@ def _transition_matrix(yth: np.ndarray, num_groups: int, tau: int = 1) -> np.nda
 
 
 def _transition_measures(yth: np.ndarray, num_groups: int, tau: int = 1) -> np.ndarray:
-    """A set of metrics on the tau-step transition matrix of a symbolized time series."""
-    T = _transition_matrix(yth, num_groups, tau)
+    """A set of metrics on the tau-step transition matrix of a symbolized time series
+    (see :func:`_matrix_measures`)."""
+    return _matrix_measures(_transition_matrix(yth, num_groups, tau))
 
+
+def _matrix_measures(T: np.ndarray) -> np.ndarray:
+    """Six measures of a transition matrix ``T``.
+
+    Returns the mean and the maximum of the diagonal, the trace, the sum of absolute
+    differences between ``T`` and its transpose, the trace of the covariance matrix of the
+    columns of ``T`` (``np.cov(T, rowvar=False)``, n - 1 normalization), and the sample
+    standard deviation of the eigenvalues of ``T`` (:func:`pyhctsa.utils._sample_std`, n - 1,
+    real for complex eigenvalues).
+    """
     out = np.zeros(6)
     #   (i) diagonal elements
     diag_t = np.diag(T)
@@ -1015,7 +1011,9 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str], lag: int 
         The method of coarse-graining.
         Options: 
 
-        - 'quantile': an equiprobable alphabet by the value of each point,
+        - 'quantile': an equiprobable alphabet by the value of each point (cuts at the Hazen
+          quantiles, bins closed on the left, tied values sharing the symbol of their mid-rank;
+          see :func:`pyhctsa.utils._coarse_grain`),
         - 'diff': as 'quantile', but applied to the increments ``diff(y)``: an equiprobable
           alphabet by the *value* of each increment (not a literal sign split; this was called
           'updown' before hctsa renamed it),
@@ -1104,12 +1102,8 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str], lag: int 
     
     # Do the coarse graining
     if how_to_cg == 'quantile':
-        th = np.quantile(y, np.linspace(0, 1, num_groups + 1), method='hazen') # thresholds for dividing the time-series values
-        th[0] = th[0] - 1 # this ensures the first point is included
-        yth = np.zeros(N, dtype=int)
-        # turn the time series into a set of numbers from 1:num_groups
-        for i in range(num_groups):
-            yth[(y > th[i]) & (y <= th[i+1])] = i + 1
+        # equiprobable symbols 1..num_groups (Hazen quantile cuts, ties by mid-rank)
+        yth = _coarse_grain(y, num_groups, 'quantile') + 1
 
     elif how_to_cg == 'embed2quadrants': # divides based on quadrants in a 2-D embedding space
         # create alphabet in quadrants -- {1,2,3,4}

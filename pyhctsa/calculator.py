@@ -19,12 +19,11 @@ import yaml
 from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
-from .utils import (_check_optional_deps, _input_problem, _zscore_or_zeros, decimate_ac1e, decimation_phases,
-                    detrend_linear, nan_outputs, z_score, SHORT_SERIES_WARNING_LENGTH, _round_half_away)
+from .utils import (_check_optional_deps, _input_problem, _zscore, decimate_ac1e, decimation_phases, detrend_linear,
+                    nan_outputs, z_score, SHORT_SERIES_WARNING_LENGTH, _round_half_away)
 from .quality import Quality, classify, quality_summary
 from .results import ERROR_COLUMNS, save_results
-from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk,
-                         _extract_features_single_series)
+from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk, _extract_features_single_series)
 
 class RangeList(list):
     """A list produced by the ``!range`` YAML constructor.
@@ -91,7 +90,7 @@ def _detrend_input(x, rezscore: bool):
     rms = np.sqrt(np.mean(x ** 2)) if x.size else 0.0
     if x.size < 3 or np.std(r) <= 10 * x.size * np.finfo(float).eps * rms:
         return np.nan
-    return _zscore_or_zeros(r) if rezscore else r
+    return _zscore(r) if rezscore else r
 
 
 def _transform_input(x, zscore: bool = False, absval: bool = False,
@@ -115,9 +114,9 @@ def _transform_input(x, zscore: bool = False, absval: bool = False,
     elif preprocess == 'diff1':
         x = np.diff(np.asarray(x, dtype=float))
     elif preprocess == 'zscore_abs':
-        x = _zscore_or_zeros(np.abs(x))
+        x = _zscore(np.abs(x))
     elif preprocess == 'zscore_sign':
-        x = _zscore_or_zeros(np.sign(x))
+        x = _zscore(np.sign(x))
     if absval:
         x = np.abs(x)
     return x

@@ -9,10 +9,10 @@ import logging
 
 import numpy as np
 import pytest
+from scipy.stats import norm
 
 from pyhctsa.calculator import FeatureCalculator
-from pyhctsa.operations.correlation import (crinkle_statistic, crinkle_statistic_kurtosis,
-                                            nonlinear_autocorr, translate_shape)
+from pyhctsa.operations.correlation import (crinkle_statistic, crinkle_statistic_kurtosis, nonlinear_autocorr, translate_shape)
 from pyhctsa.operations.entropy import sample_entropy, sample_entropy_ranked
 from pyhctsa.operations.extreme_events import moving_threshold
 from pyhctsa.operations.medical import pol_var, porta
@@ -20,7 +20,7 @@ from pyhctsa.operations.model_fit import local_simple
 from pyhctsa.operations.scaling import higuchi_fd
 from pyhctsa.operations.symbolic import binary_stats
 from pyhctsa.toolboxes.physionet import sampen as _sampen_c
-from pyhctsa.utils import _zscore_or_zeros, decimation_phases, get_tau, z_score
+from pyhctsa.utils import _zscore, decimation_phases, get_tau, z_score
 
 
 def _smooth(n, k, seed):
@@ -130,7 +130,7 @@ def test_crinkle_lag():
 
 def _porta_levels(y, L=6):
     q25, med, q75 = np.percentile(y, [25, 50, 75])
-    w = (q75 - q25) / 1.349 * 6 / L
+    w = (q75 - q25) / (2 * norm.ppf(0.75)) * 6 / L
     return np.array([int(np.sum(v >= med + w * (np.arange(1, L) - L / 2))) for v in y])
 
 
@@ -199,7 +199,7 @@ def test_local_simple_lag():
     e = y[:-TAU] - y[TAU:]
     np.testing.assert_allclose(out['meane'], e.mean())
     np.testing.assert_allclose(out['meanabs'], np.mean(np.abs(e)))
-    ez = _zscore_or_zeros(e)
+    ez = _zscore(e)
     ac1 = np.sum(ez[:-TAU] * ez[TAU:]) / (np.sum(ez ** 2))
     np.testing.assert_allclose(out['ac1'], ac1, atol=1e-10)
 
@@ -231,7 +231,7 @@ def test_decimation_phases():
     phases = decimation_phases(y, 'ac1e')
     assert len(phases) == tau
     for p, yp in enumerate(phases):
-        np.testing.assert_allclose(yp, _zscore_or_zeros(y[p::tau]))
+        np.testing.assert_allclose(yp, _zscore(y[p::tau]))
 
 
 def test_dec_is_phase_average(calc):
@@ -240,7 +240,7 @@ def test_dec_is_phase_average(calc):
     tau = int(get_tau(x, 'ac1e'))
     f = calc.feature_funcs['moving_threshold_0p1_0p1_dec']
     got = f(y)
-    outs = [moving_threshold(_zscore_or_zeros(x[p::tau]), 0.1, 0.1) for p in range(tau)]
+    outs = [moving_threshold(_zscore(x[p::tau]), 0.1, 0.1) for p in range(tau)]
     for k, v in got.items():
         vals = np.array([o[k] for o in outs], dtype=float)
         np.testing.assert_allclose(v, np.nanmean(vals), rtol=1e-12)
@@ -251,7 +251,7 @@ def test_dec_rank_uses_rank_delay(calc):
     x = z_score(y)
     tau = int(get_tau(x, 'ac1e-rank'))
     got = calc.feature_funcs['binary_stats_diff_dec-rank'](y)
-    outs = [binary_stats(_zscore_or_zeros(x[p::tau]), 'diff') for p in range(tau)]
+    outs = [binary_stats(_zscore(x[p::tau]), 'diff') for p in range(tau)]
     np.testing.assert_allclose(got['pupstat2'], np.nanmean([o['pupstat2'] for o in outs]), rtol=1e-12)
 
 

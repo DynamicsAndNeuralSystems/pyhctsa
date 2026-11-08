@@ -8,12 +8,11 @@ from scipy.signal import lfilter
 from scipy.stats import hypergeom
 
 from pyhctsa.operations import stationarity as ST
-from pyhctsa.robust import bf_quantile_edges
+from pyhctsa.utils import _coarse_grain
 
 
 def _bins(y, num_bins=10):
-    edges = bf_quantile_edges(y, num_bins)
-    return np.searchsorted(edges, y, side='right') - 1, len(edges) - 1
+    return _coarse_grain(y, num_bins, 'quantile'), num_bins
 
 
 def _null(y, num_segs, mode, num_bins=10):

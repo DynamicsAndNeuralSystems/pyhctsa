@@ -3,22 +3,23 @@ logger = logging.getLogger('pyhctsa')
 from typing import Union
 
 import numba
+from ..utils import _sample_std, _sample_var
 import numpy as np
+from ..utils import _iqr, _quantile
 from numpy.typing import ArrayLike
-from scipy import fft as sp_fft
 from scipy.linalg import solve_triangular
 from scipy.optimize import curve_fit
 from scipy.stats import chi2, expon, kstest, kurtosis, norm, skew
+from scipy.stats import f as f_dist
 from scipy.stats import mode as smode
 from scipy.spatial import cKDTree
 from statsmodels.tsa.stattools import pacf
 
 from ..operations.information import automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
-from ..robust import bf_hist_edges, bf_quantile_edges, bf_random, bf_remove_points
-from ..utils import (dict_output, _round_half_away, _tie_aware_ranks, _zscore_or_zeros, get_tau,
-                     frame_signal, point_of_crossing, sign_change, theiler_window,
-                     time_delay_embed, z_score)
+from ..robust import bf_hist_edges, bf_random, bf_remove_points
+from ..utils import (dict_output, _coarse_grain, _round_half_away, _tie_aware_ranks, _zscore, get_tau, _acf_fft, frame_signal, point_of_crossing, sign_change, _theiler_int, time_delay_embed, z_score)
+from ..utils import _shannon_entropy
 
 
 def _resolve_delay(y: ArrayLike, tau: Union[int, float, str, None], cap: bool = False,
@@ -169,9 +170,8 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
     y = np.asarray(y, dtype=float).ravel()
 
     # The Theiler window (NaN if the autocorrelation function never crosses zero)
-    theiler_win = theiler_window(y, theiler_win)
-    if np.isnan(theiler_win):
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    theiler_win = _theiler_int(y, theiler_win)
+    if theiler_win is None:
         return np.nan
 
     # Embed the signal
@@ -250,13 +250,6 @@ def pos_neg_asymmetry(y: ArrayLike) -> dict:
         switch is itself asymmetric (e.g. sharper downward crossings than
         upward ones).
     """
-    def _pn_std(x: np.ndarray):
-        if x.size == 0:
-            return np.nan
-        if x.size == 1:
-            return 0.0
-        return float(np.std(x, ddof=1))
-
     def _pn_corr(x: np.ndarray, y: np.ndarray) -> float:
         if x[0] == x.min() and x[0] == x.max():
             return np.nan
@@ -292,9 +285,9 @@ def pos_neg_asymmetry(y: ArrayLike) -> dict:
     out['propPos'] = n_pos / m if m > 0 else np.nan
 
     # Conditional volatility (leverage-effect-style asymmetry)
-    out['volPos'] = _pn_std(dy[pos_mask]) if n_pos >= 2 else np.nan
-    out['volNeg'] = _pn_std(dy[neg_mask]) if n_neg >= 2 else np.nan
-    vol_all = _pn_std(dy)
+    out['volPos'] = _sample_std(dy[pos_mask]) if n_pos >= 2 else np.nan
+    out['volNeg'] = _sample_std(dy[neg_mask]) if n_neg >= 2 else np.nan
+    vol_all = _sample_std(dy)
     if n_pos >= 2 and n_neg >= 2 and vol_all > 0:
         # Normalized contrast: positive when the positive regime is more volatile.
         out['volAsym'] = (out['volPos'] - out['volNeg']) / vol_all
@@ -321,8 +314,8 @@ def pos_neg_asymmetry(y: ArrayLike) -> dict:
     out['propNP'] = n_np / m if m > 0 else np.nan
 
     # Crossing-jump volatility:
-    out['volPN'] = _pn_std(dy[pn_mask]) if n_pn >= 2 else np.nan
-    out['volNP'] = _pn_std(dy[np_mask]) if n_np >= 2 else np.nan
+    out['volPN'] = _sample_std(dy[pn_mask]) if n_pn >= 2 else np.nan
+    out['volNP'] = _sample_std(dy[np_mask]) if n_np >= 2 else np.nan
     if n_pn >= 2 and n_np >= 2 and vol_all > 0:
         # Positive when downward crossings are more violent than upward ones.
         out['volAsymCross'] = (out['volPN'] - out['volNP']) / vol_all
@@ -414,7 +407,7 @@ def oversampling(y: ArrayLike) -> dict:
     # eta and its outlier-robust companion:
     out['eta'] = float(np.ptp(y) / mean_abs_diff)
 
-    q05, q95 = np.quantile(y, [0.05, 0.95], method='hazen')
+    q05, q95 = _quantile(y, [0.05, 0.95])
     robust_range = q95 - q05
     out['etaRobust'] = float(robust_range / mean_abs_diff)
 
@@ -511,8 +504,8 @@ def falling_sticks(y: ArrayLike) -> dict:
     out['mean_all'] = _fall_safe_stat(np.mean, all_angles)
     out['median_all'] = _fall_safe_stat(np.median, all_angles)
     out['std_all'] = _fall_safe_stat(
-        lambda x: np.std(x, ddof=1) if len(x) > 1 else 0.0, all_angles)
-    if len(all_angles) > 0 and _fall_is_constant(all_angles):
+        _sample_std, all_angles)
+    if len(all_angles) > 1 and _fall_is_constant(all_angles):
         out['std_all'] = 0.0  # constant to rounding error: the spread is zero
 
     # Asymmetry between the positive- and negative-branch fall angles:
@@ -544,11 +537,11 @@ def falling_sticks(y: ArrayLike) -> dict:
     else:
         out['skewness_all'] = np.nan  # undefined for constant angles
         out['kurtosis_all'] = np.nan
-    out['q10_all'] = np.quantile(all_angles, 0.1, method='hazen') if len(all_angles) >= 2 else np.nan
+    out['q10_all'] = _quantile(all_angles, 0.1) if len(all_angles) >= 2 else np.nan
 
     # Persistence of the fall-angle sequence
     if len(angles_pos) >= 2 and not _fall_is_constant(angles_pos):
-        z_angles_pos = _zscore_or_zeros(angles_pos)
+        z_angles_pos = _zscore(angles_pos)
         out['tau_p'] = first_crossing(z_angles_pos, 'ac', 0, 'continuous')
         out['ac1_p'] = autocorr(z_angles_pos, 1, 'Fourier')
     else:
@@ -556,7 +549,7 @@ def falling_sticks(y: ArrayLike) -> dict:
         out['ac1_p'] = np.nan
 
     if len(angles_neg) >= 2 and not _fall_is_constant(angles_neg):
-        z_angles_neg = _zscore_or_zeros(angles_neg)
+        z_angles_neg = _zscore(angles_neg)
         out['tau_n'] = first_crossing(z_angles_neg, 'ac', 0, 'continuous')
         out['ac1_n'] = autocorr(z_angles_neg, 1, 'Fourier')
     else:
@@ -574,7 +567,7 @@ def _fall_is_constant(x: np.ndarray) -> bool:
     """
     if len(x) < 2:
         return True
-    return bool(np.std(x, ddof=1) <= 1e-10 * max(1.0, float(np.max(np.abs(x)))))
+    return bool(_sample_std(x) <= 1e-10 * max(1.0, float(np.max(np.abs(x)))))
 
 
 def _fall_branch(ix: ArrayLike, y: ArrayLike) -> tuple:
@@ -958,11 +951,7 @@ def _gaussian_ranks(y: ArrayLike) -> Union[np.ndarray, None]:
     n = x.size
     if n < 2 or not np.all(np.isfinite(x)):
         return None
-    g = norm.ppf((_tie_aware_ranks(x) - 0.5) / n)
-    sd = np.std(g, ddof=1)
-    if not sd > 0:
-        return None
-    return (g - np.mean(g)) / sd
+    return _zscore(norm.ppf((_tie_aware_ranks(x) - 0.5) / n), constant='none')
 
 
 def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True,
@@ -1236,7 +1225,7 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     out['theta_ac3'] = autocorr(theta, 3, 'Fourier')
 
     out['theta_mean'] = np.mean(theta)
-    out['theta_std'] = np.std(theta, ddof=1)
+    out['theta_std'] = _sample_std(theta)
     
     # 10 equal bins on the support of the angles (-pi/2, pi/2) (explicit edges, so that angles
     # of exactly zero from tied values or of exactly +/-pi/2 from a vertical step fall in the
@@ -1245,7 +1234,7 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     # (NaN angles are in no bin but count in the number of elements the counts are divided by)
     px = np.histogram(theta[~np.isnan(theta)], bins=bin_edges)[0] / len(theta)
     bin_widths = np.diff(bin_edges)
-    out['hist10std'] = np.std(px, ddof=1)
+    out['hist10std'] = _sample_std(px)
     out['histent'] = -np.sum(px[px>0] * np.log(px[px>0] / bin_widths[px>0]))
     
     # Stationarity in fifths of the time series
@@ -1259,7 +1248,7 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     n = n / afifth
     
     for i in range(4):
-        out[f'stdb{i+1}'] = np.std(n[i, :], ddof=1)  # across the five fifths
+        out[f'stdb{i+1}'] = _sample_std(n[i, :])  # across the five fifths
 
     # STATIONARITY of points in the space (do they move around in the space)
     # (1) in terms of distance from origin
@@ -1270,21 +1259,21 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     eucdm = [np.mean(np.sqrt(x[:, 0]**2 + x[:, 1]**2)) for x in buffer_m]
     for i in range(5):
         out[f'eucdm{i+1}'] = eucdm[i]
-    out['std_eucdm'] = np.std(eucdm, ddof=1)
+    out['std_eucdm'] = _sample_std(eucdm)
     out['mean_eucdm'] = np.mean(eucdm)
 
     # Standard deviation of Euclidean distances in each segment
-    eucds = [np.std(np.sqrt(x[:, 0]**2 + x[:, 1]**2), ddof=1) for x in buffer_m]
+    eucds = [_sample_std(np.sqrt(x[:, 0]**2 + x[:, 1]**2)) for x in buffer_m]
     for i in range(5):
         out[f'eucds{i+1}'] = eucds[i]
-    out['std_eucds'] = np.std(eucds, ddof=1)
+    out['std_eucds'] = _sample_std(eucds)
     out['mean_eucds'] = np.mean(eucds)
 
     # Maximum volume in each segment (defined as area of rectangle of max span in each direction)
     maxspanx = [np.ptp(x[:, 0]) for x in buffer_m]
     maxspany = [np.ptp(x[:, 1]) for x in buffer_m]
     spanareas = np.multiply(maxspanx, maxspany)
-    out['stdspana'] = np.std(spanareas, ddof=1)
+    out['stdspana'] = _sample_std(spanareas)
     out['meanspana'] = np.mean(spanareas)
 
     # Outliers in the embedding space
@@ -1414,7 +1403,7 @@ def compare_min_ami(y: ArrayLike, bin_method: str = 'std1',
     out['range'] = np.ptp(ami_mins)
     out['median'] = np.median(ami_mins)
     out['mean'] = np.mean(ami_mins)
-    out['std'] = np.std(ami_mins, ddof=1) # will return NaN for single values instead of 0
+    out['std'] = _sample_std(ami_mins) # will return NaN for single values instead of 0
     out['nunique'] = len(np.unique(ami_mins))
     out['mode'], out['modef'] = smode(ami_mins)
     out['modef'] = out['modef'] / num_bins_range
@@ -1459,9 +1448,9 @@ def _ami_hist_binning(y: ArrayLike, meth: str, num_bins: int):
 
     The binning depends only on ``y``, ``meth`` and ``num_bins`` --- not on the time
     lag --- so callers that sweep lags (e.g. ``compare_min_ami``) can compute this once
-    and reuse it. The edges are explicit (:func:`~pyhctsa.robust.bf_hist_edges`,
-    :func:`~pyhctsa.robust.bf_quantile_edges`): they place a value exactly on an edge always
-    in the same bin. Returns ``(idx, valid, num_bins)`` where ``idx[k]`` is the 0-based bin
+    and reuse it. The edges are explicit (:func:`~pyhctsa.robust.bf_hist_edges`): they place
+    a value exactly on an edge always in the same bin. 'quantiles' uses the equiprobable
+    symbols of :func:`~pyhctsa.utils._coarse_grain`. Returns ``(idx, valid, num_bins)`` where ``idx[k]`` is the 0-based bin
     of ``y[k]`` and ``valid[k]`` is False if the point falls outside the bin range. The
     assignment reproduces ``np.histogram2d``'s bins exactly (last bin right-inclusive).
     """
@@ -1480,8 +1469,9 @@ def _ami_hist_binning(y: ArrayLike, meth: str, num_bins: int):
             b = np.concatenate(([np.min(y) - 0.1], b))
         if np.max(y) > b[-1]:
             b = np.concatenate((b, [np.max(y) + 0.1]))
-    elif meth == 'quantiles':  # use quantiles with ~equal number in each bin
-        b = bf_quantile_edges(y, num_bins)  # (fewer bins if values are tied at a quantile)
+    elif meth == 'quantiles':  # equiprobable bins (Hazen quantile cuts, tied values sharing a bin)
+        idx = _coarse_grain(y, num_bins, 'quantile')
+        return idx, np.ones(idx.size, dtype=bool), int(num_bins)
     else:
         raise ValueError(f"Unknown method '{meth}'")
 
@@ -1565,8 +1555,8 @@ def histogram_ami(
         - 'even': evenly-spaced bins through the range
         - 'std1': bins extending to ±1 standard deviation from mean
         - 'std2': bins extending to ±2 standard deviations from mean
-        - 'quantiles': equiprobable bins using quantiles (fewer bins if values are tied at a
-          quantile)
+        - 'quantiles': equiprobable bins cut at the Hazen quantiles (tied values share a bin,
+          by their mid-rank; see :func:`~pyhctsa.utils._coarse_grain`)
 
         The bin edges are explicit, so that a value exactly on an edge always falls in the same
         bin (see :func:`~pyhctsa.robust.bf_hist_edges`).
@@ -1681,7 +1671,7 @@ def stick_angles(y: ArrayLike) -> dict:
     out['mean_n'] = np.nanmean(angles[1])
     out['median_n'] = np.nanmedian(angles[1])
 
-    out['std'] = np.nanstd(all_angles, ddof=1)
+    out['std'] = _sample_std(all_angles[~np.isnan(all_angles)])
     out['mean'] = np.nanmean(all_angles)
     out['median'] = np.nanmedian(all_angles)
 
@@ -1718,7 +1708,7 @@ def stick_angles(y: ArrayLike) -> dict:
         a = np.asarray(a, dtype=float)
         if a.size == 0:
             return []
-        return z_score(a) if np.var(a, ddof=1) > 1e-10 else _zscore_or_zeros(a)
+        return z_score(a) if _sample_var(a) > 1e-10 else _zscore(a)
     zangles = [_z(angles[0]), _z(angles[1])]
     zallAngles = _z(all_angles)
 
@@ -1784,10 +1774,10 @@ def stick_angles(y: ArrayLike) -> dict:
     # What does the distribution look like?
     # Some quantiles and moments
     if len(zangles[0]) > 0:
-        out['q1_p'] = np.quantile(zangles[0], 0.01, method='hazen')
-        out['q10_p'] = np.quantile(zangles[0], 0.1, method='hazen')
-        out['q90_p'] = np.quantile(zangles[0], 0.9, method='hazen')
-        out['q99_p'] = np.quantile(zangles[0], 0.99, method='hazen')
+        out['q1_p'] = _quantile(zangles[0], 0.01)
+        out['q10_p'] = _quantile(zangles[0], 0.1)
+        out['q90_p'] = _quantile(zangles[0], 0.9)
+        out['q99_p'] = _quantile(zangles[0], 0.99)
         out['skewness_p'] = skew(angles[0])
         out['kurtosis_p'] = kurtosis(angles[0], fisher=False)
     else:
@@ -1795,17 +1785,17 @@ def stick_angles(y: ArrayLike) -> dict:
             out['skewness_p'], out['kurtosis_p'] = np.nan, np.nan, np.nan,  np.nan, np.nan, np.nan
     
     if len(zangles[1]) > 0:
-        out['q1_n'] = np.quantile(zangles[1], 0.01, method='hazen')
-        out['q10_n'] = np.quantile(zangles[1], 0.1, method='hazen')
-        out['q90_n'] = np.quantile(zangles[1], 0.9, method='hazen')
-        out['q99_n'] = np.quantile(zangles[1], 0.99, method='hazen')
+        out['q1_n'] = _quantile(zangles[1], 0.01)
+        out['q10_n'] = _quantile(zangles[1], 0.1)
+        out['q90_n'] = _quantile(zangles[1], 0.9)
+        out['q99_n'] = _quantile(zangles[1], 0.99)
         out['skewness_n'] = skew(angles[1])
         out['kurtosis_n'] = kurtosis(angles[1], fisher=False)
     else:
         out['q1_n'], out['q10_n'], out['q90_n'], out['q99_n'], \
             out['skewness_n'], out['kurtosis_n'] = np.nan, np.nan, np.nan,  np.nan, np.nan, np.nan
     
-    f_quantz = lambda x : np.quantile(zallAngles, x, method='hazen')
+    f_quantz = lambda x : _quantile(zallAngles, x)
     out['q1_all'] = f_quantz(0.01)
     out['q10_all'] = f_quantz(0.1)
     out['q90_all'] = f_quantz(0.9)
@@ -1826,8 +1816,8 @@ def _sub_statav(x: ArrayLike, n: int) -> tuple:
         if x_buff.shape[1] > n:
             # remove final pt
             x_buff = x_buff[:, :n]
-        statavmean = np.std(np.mean(x_buff, axis=0), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
-        statavstd = np.std(np.std(x_buff, axis=0, ddof=1), ddof=1, axis=0)/np.std(x, ddof=1, axis=0)
+        statavmean = _sample_std(np.mean(x_buff, axis=0), axis=0)/_sample_std(x, axis=0)
+        statavstd = _sample_std(_sample_std(x_buff, axis=0), axis=0)/_sample_std(x, axis=0)
 
     return statavmean, statavstd
 
@@ -2131,11 +2121,10 @@ def nonlinear_autocorr_abs_surrogate_ratio(y: ArrayLike, taus: ArrayLike, num_su
     surrs = _make_surrogates(g, 'RP', int(num_surrs), random_seed)
     vals = []
     for s in range(surrs.shape[1]):
-        gs = surrs[:, s]
-        sd = np.std(gs, ddof=1)
-        if not sd > 0:
+        gs = _zscore(surrs[:, s], constant='none')
+        if gs is None:  # a constant surrogate is skipped
             continue
-        vals.append(np.mean(np.abs(_lag_product((gs - np.mean(gs)) / sd, taus))))
+        vals.append(np.mean(np.abs(_lag_product(gs, taus))))
     den = np.mean(vals) if vals else np.nan
     if not den > 0:
         return np.nan
@@ -2352,6 +2341,158 @@ def residual_autocorr_scan(y: ArrayLike, max_lag: int = 300, max_ar_order: int =
     return out
 
 
+def _neighbour_mean(spec: np.ndarray, half_width: int, guard: int = 1) -> np.ndarray:
+    """Mean of the ``2 * half_width`` bins at distances ``guard + 1 .. guard + half_width`` on either side of each
+    bin of a one-sided periodogram, reflecting at both ends (the periodogram of a real series is symmetric about
+    frequency 0 and about 1/2)."""
+    nb = spec.size
+    pad = half_width + guard
+    padded = np.concatenate([spec[pad:0:-1], spec, spec[-2:-pad - 2:-1]])
+    cs = np.concatenate([[0.0], np.cumsum(padded)])
+    idx = np.arange(nb) + pad
+    left = cs[idx - guard] - cs[idx - guard - half_width]
+    right = cs[idx + guard + 1 + half_width] - cs[idx + guard + 1]
+    return (left + right) / (2 * half_width)
+
+
+@dict_output
+def cyclostationarity_scan(y: ArrayLike, max_lag: int = 20, n_smooth: int = 16, min_cycles: int = 4,
+                           max_ar_order: int = 10, peak_level: float = 0.05) -> dict:
+    """
+    Scan for second-order cyclostationarity: periodic variation of the autocovariance.
+
+    Detects a series whose variability, or the correlation between nearby samples, rises and falls on a
+    regular cycle, even though nothing periodic shows in the series itself: its mean stays constant and its
+    power spectrum has no peak at that period. Examples are noise whose loudness swells and fades regularly,
+    a process whose memory strengthens and weakens with a period, and seasonal series whose volatility follows
+    the season.
+
+    Formally, a series is second-order cyclostationary (periodically correlated) when its autocovariance at some lag tau
+    varies periodically in time, with cyclic frequency alpha: amplitude-modulated noise, dynamics whose
+    coefficients vary with a period, or seasonal series [1]_, [2]_. It need not have a periodic mean or any peak
+    in its power spectrum, so spectral and autocorrelation features miss it. Its signature is Gardner's
+    spectral-line regeneration [1]_: the lag-product series ``e_t e_{t+tau}`` of a cyclostationary series has a
+    spectral line (a finite-strength sinusoidal component) at frequency alpha, while that of a stationary
+    series has only a continuous spectrum. The cyclic autocorrelation R^alpha(tau) is that line's amplitude.
+
+    The test for a line at one cyclic frequency and lag is a single-lag form of the Dandawate-Giannakis test
+    [3]_, applied at every Fourier frequency:
+
+    1. Prewhiten the series by an AR(p) model, p <= ``max_ar_order`` chosen by AIC (as in
+       :func:`residual_autocorr_scan`), and z-score the residuals e. Prewhitening removes the spectral shape of
+       a stationary series, so that a sharp spectral peak is not read as cyclostationarity.
+    2. For each lag tau = 0..``max_lag``, form the mean-removed lag product ``e_t e_{t+tau}`` (truncated to even
+       length n) and its periodogram I(alpha_k) at alpha_k = k/n.
+    3. Compare each bin with the mean S(alpha_k) of the ``2 * n_smooth`` bins on either side of it (skipping
+       the adjacent bin). Under a locally flat continuum, I/S ~ F(2, 4 n_smooth) (F(1, 4 n_smooth) at alpha =
+       1/2), which gives a p-value for a line at that bin.
+    4. Take the smallest p-value p_min over all M cells (alpha_k with at least ``min_cycles`` cycles in the
+       record, and tau). The score -ln(M p_min) is approximately standard Gumbel for a stationary series (mean
+       0.58, 95th percentile 2.97) at any length, and grows with length for a cyclostationary one.
+
+    Deterministic phase-coherent oscillators (e.g. the Rossler or van der Pol flows) score highly. This is
+    correct in the fraction-of-time sense of cyclostationarity [1]_, since their residual variance is locked
+    to the phase of the oscillation. Smooth low-pass series that an AR(``max_ar_order``) model under-whitens
+    give scores below the null mean. The cyclic frequency and lag are in samples, so the outputs depend on the
+    sampling rate.
+
+    References
+    ----------
+    .. [1] W. A. Gardner, "Exploitation of spectral redundancy in cyclostationary signals", IEEE Signal
+       Process. Mag. 8(2), 14-36 (1991).
+    .. [2] W. A. Gardner, A. Napolitano and L. Paura, "Cyclostationarity: Half a century of research", Signal
+       Process. 86(4), 639-697 (2006).
+    .. [3] A. V. Dandawate and G. B. Giannakis, "Statistical tests for presence of cyclostationarity", IEEE
+       Trans. Signal Process. 42(9), 2355-2369 (1994).
+
+    Parameters
+    ----------
+    y : array-like
+        The input time series.
+    max_lag : int, optional
+        The largest lag tau of the lag products (default: 20). Capped at an eighth of the residual length.
+    n_smooth : int, optional
+        The number of periodogram bins on each side used to estimate the continuum at each cyclic frequency
+        (default: 16).
+    min_cycles : int, optional
+        The lowest cyclic frequency scanned, in cycles per record (default: 4).
+    max_ar_order : int, optional
+        The largest order of the prewhitening AR model (default: 10).
+    peak_level : float, optional
+        The significance level at which the strongest line counts as a detected rhythm (default: 0.05). Below
+        it, ``peak_alpha`` and ``peak_lag`` are NaN.
+
+    Returns
+    -------
+    dict
+        - ``max_score``: -ln(M p_min) over all cyclic frequencies and lags.
+        - ``lag0_score``: the same over lag 0 only, i.e. spectral lines in the squared residuals (periodic
+          variance).
+        - ``peak_alpha``: the cyclic frequency of the strongest line, in cycles per sample (its period is
+          1 / ``peak_alpha`` samples).
+        - ``peak_lag``: the lag of the strongest line.
+
+        ``peak_alpha`` and ``peak_lag`` locate a rhythm only when there is one: they are NaN unless
+        ``max_score`` exceeds the Gumbel null's 1 - ``peak_level`` quantile, -ln(-ln(1 - ``peak_level``))
+        (2.97 at the default 0.05). Without a significant line, the strongest bin is just the largest noise
+        fluctuation, at a position uniform over the cells scanned, so its location means nothing. At the
+        default level about 5% of stationary series still get values.
+
+        Returns NaN for a constant series or fewer than 64 residuals.
+    """
+    y = np.asarray(y, dtype=float).ravel()
+    max_lag, n_smooth, min_cycles = int(max_lag), int(n_smooth), int(min_cycles)
+    if max_lag < 0 or n_smooth < 1 or min_cycles < 1:
+        raise ValueError("need max_lag >= 0, n_smooth >= 1 and min_cycles >= 1")
+    if not 0 < peak_level < 1:
+        raise ValueError(f"peak_level = {peak_level} must lie in (0, 1)")
+
+    e, _ = _ar_prewhiten(y, int(max_ar_order))
+    if e is None or e.size < 64:
+        return np.nan
+    sd = np.std(e)
+    if not sd > 0:
+        return np.nan
+    e = (e - np.mean(e)) / sd
+    m = e.size
+    max_lag = min(max_lag, m // 8)
+    dof = 4 * n_smooth   # denominator degrees of freedom: 2 * n_smooth neighbouring bins, 2 each
+
+    p_best, alpha_best, lag_best = 1.0, np.nan, np.nan
+    p0, num_cells, num_cells0 = 1.0, 0, 0
+    for tau in range(max_lag + 1):
+        prod = e[:m - tau] * e[tau:]
+        n = prod.size - (prod.size % 2)
+        prod = prod[:n] - np.mean(prod[:n])
+        spec = np.abs(np.fft.rfft(prod)) ** 2 / n   # bins k = 0..n/2
+        spec[0] = np.mean(spec[1:n_smooth + 1])     # the mean was removed: stand in the level nearby at DC
+        cont = _neighbour_mean(spec, n_smooth)
+        k = np.arange(min_cycles, spec.size)
+        if k.size == 0 or not np.all(cont[k] > 0):
+            continue # degenerate lag product (e.g. a coarsely quantised series): skip this lag
+        ratio = spec[k] / cont[k]
+        p = (1.0 + ratio / (2 * n_smooth)) ** (-2 * n_smooth)   # F(2, dof) survival function
+        if k[-1] == n // 2:                                       # alpha = 1/2: a real bin, F(1, dof)
+            p[-1] = f_dist.sf(ratio[-1], 1, dof)
+        j = int(np.argmin(p))
+        num_cells += p.size
+        if p[j] < p_best:
+            p_best, alpha_best, lag_best = p[j], k[j] / n, tau
+        if tau == 0:
+            p0, num_cells0 = p[j], p.size
+    if num_cells == 0:
+        return np.nan
+
+    def _gumbel_score(p_min, num):
+        return np.nan if num == 0 else float(-np.log(max(num * p_min, 1e-300)))
+
+    max_score = _gumbel_score(p_best, num_cells)
+    if not max_score > -np.log(-np.log1p(-peak_level)):   # no significant line: its location is noise
+        alpha_best, lag_best = np.nan, np.nan
+    return {'max_score': max_score, 'lag0_score': _gumbel_score(p0, num_cells0),
+            'peak_alpha': float(alpha_best), 'peak_lag': float(lag_best)}
+
+
 @dict_output
 def bicorrelation(y: ArrayLike, max_lag: Union[int, str] = 'hinich', max_ar_order: int = 10) -> dict:
     """
@@ -2504,15 +2645,13 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
 
     out['d_mean'] = np.mean(d) # Mean distance
     out['d_median'] = np.median(d) # Median distance
-    out['d_std'] = np.std(d, ddof=1) # Standard deviation of distances
+    out['d_std'] = _sample_std(d) # Standard deviation of distances
     # the IQR uses the Hazen definition of the quantiles
-    q75 = np.percentile(d, 75, method='hazen')
-    q25 = np.percentile(d, 25, method='hazen')
-    iqr_val = q75 - q25
+    iqr_val = _iqr(d)
     out['d_iqr'] = iqr_val # Interquartile range of distances
     out['d_max'] = np.max(d) # Maximum distance
     out['d_min'] = np.min(d) # Minimum distance
-    out['d_cv'] = np.mean(d) / np.std(d, ddof=1) # Mean over standard deviation of distances (reciprocal of the coefficient of variation)
+    out['d_cv'] = np.mean(d) / _sample_std(d) # Mean over standard deviation of distances (reciprocal of the coefficient of variation)
 
     # Empirical distances distribution often fits Exponential distribution quite well
     # Fit to all values (often some extreme outliers, but oh well)
@@ -2632,7 +2771,7 @@ def embed2_basic(y: ArrayLike, tau: Union[int, str] = 1) -> dict:
     incircle_values = [out['incircle_01'], out['incircle_02'], out['incircle_05'],
                        out['incircle_1'], out['incircle_2'], out['incircle_3']]
     out['medianincircle'] = np.median(incircle_values)
-    out['stdincircle'] = np.std(incircle_values, ddof=1)
+    out['stdincircle'] = _sample_std(incircle_values)
     
     return out
 
@@ -2687,8 +2826,8 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     y = np.asarray(y, dtype=float).ravel()
     if theiler_win is None:
         theiler_win = ('ac', 1)
-    theiler_win = theiler_window(y, theiler_win)
-    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
+    theiler_win = _theiler_int(y, theiler_win, warn=False)
+    if theiler_win is None:  # the autocorrelation function never crosses zero
         return np.nan
 
     # Set tau from the series if it is a rule ('tau'/'ac', 'ac1e' or 'mi'), capped at N/10
@@ -2745,11 +2884,10 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     out['ac2'] = autocorr(counts, 2, 'Fourier')
     out['ac3'] = autocorr(counts, 3, 'Fourier')
     out['tau'] = first_crossing(counts, 'ac', 0, 'continuous')
-    out['std'] = np.std(counts, ddof=1)
+    out['std'] = _sample_std(counts)
     out['median'] = np.median(counts)
     out['mean'] = np.mean(counts)
-    out['iqr'] = np.percentile(counts, 75, method='hazen') - np.percentile(counts,
-                                                                           25, method='hazen')
+    out['iqr'] = _iqr(counts)
     out['iqronrange'] = out['iqr']/np.ptp(counts)
 
     # distribution - using the sqrt binning rule, with explicit edges (the local densities are
@@ -2763,14 +2901,13 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     out['mode_val'] = np.max(bin_counts_norm)
     out['mode'] = bin_centres[np.argmax(bin_counts_norm)]
     # sum(p * log(p)) over histogram bins (minus the Shannon entropy)
-    out['hist_ent'] = np.sum(bin_counts_norm[bin_counts_norm > 0] *
-                             np.log(bin_counts_norm[bin_counts_norm > 0]))
+    out['hist_ent'] = -_shannon_entropy(bin_counts_norm)
 
     # Stationarity measure for fifths of the time series
     afifth = int(np.floor(N/5))
     buffer_m = np.array([counts[i*afifth:(i+1)*afifth] for i in range(5)])
-    out['statav5_m'] = np.std(np.mean(buffer_m, axis=1), ddof=1) / np.std(counts, ddof=1)
-    out['statav5_s'] = np.std(np.std(buffer_m, axis=1, ddof=1), ddof=1) / np.std(counts, ddof=1)
+    out['statav5_m'] = _sample_std(np.mean(buffer_m, axis=1)) / _sample_std(counts)
+    out['statav5_s'] = _sample_std(_sample_std(buffer_m, axis=1)) / _sample_std(counts)
 
     return out
 
@@ -2923,41 +3060,6 @@ def glscf(y: ArrayLike, alpha: float, beta: float, tau: Union[int, str] = 'tau')
     return np.divide((p1-p2), (p3 * p4))
 
 
-def _acf_fft(y: np.ndarray) -> np.ndarray:
-    """Sample autocorrelation function at lags 0..N-1, computed by FFT.
-
-    Parameters
-    ----------
-    y : array-like
-        Time series of length N >= 1.
-
-    Returns
-    -------
-    numpy.ndarray
-        float64 array of length N with ``acf[0] == 1``; all NaN if ``y`` is constant (or
-        has length 1) or contains NaN or Inf.
-
-    Notes
-    -----
-    ``r_k = c_k / c_0`` with ``c_k = (1/N) sum_t (y_t - ybar)(y_{t+k} - ybar)`` (Box, Jenkins &
-    Reinsel 1994, *Time Series Analysis*, 3rd ed., eq. 2.1.12), evaluated through the
-    Wiener-Khinchin relation: the inverse DFT of the power spectrum of the mean-removed series,
-    zero-padded to a fast FFT length of at least 2N - 1, is its linear autocovariance sequence
-    (any padded length >= 2N - 1 gives the same, exact, linear autocovariance).
-    """
-    y = np.asarray(y, dtype=float).ravel()
-    N = y.size
-    if N == 0:
-        return np.zeros(0)
-    if not np.all(np.isfinite(y)) or np.ptp(y) == 0:
-        return np.full(N, np.nan)
-    z = y - y.mean()
-    nfft = sp_fft.next_fast_len(2 * N - 1, real=True)
-    f = sp_fft.rfft(z, nfft)
-    a = sp_fft.irfft(f * np.conj(f), nfft)[:N]
-    return np.real(a / a[0])
-
-
 def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
              method: str = 'Fourier') -> Union[float, np.ndarray]:
     """
@@ -3022,7 +3124,7 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
                 else:
                     out[i] = acf[int(t)]
     elif method == 'TimeDomainStat':
-        sigma2 = np.std(y, ddof=1)**2  # time-series variance
+        sigma2 = _sample_std(y)**2  # time-series variance
         mu = np.mean(y)  # time-series mean
         
         def acf_y(t):
@@ -3394,7 +3496,7 @@ def translate_shape(y: ArrayLike, shape: str = 'circle', d: int = 2,
     # compute stats on number of hits inside the shape
     out = {}
     out["max"] = np.max(np_counts)
-    out["std"] = np.std(np_counts, ddof=1)
+    out["std"] = _sample_std(np_counts)
     out["mean"] = np.mean(np_counts)
     
     vals, hits = np.unique(np_counts, return_counts=True)
@@ -3593,7 +3695,7 @@ def autocorr_shape(y: ArrayLike, stop_when: Union[int, str] = 'pos_drown') -> di
         exp_fit = exp_func(np.arange(nac), b_fit)
         residuals = acf - exp_fit
         out['fexpacf_r2'] = 1 - (np.sum(residuals**2) / np.sum((acf - np.mean(acf))**2))
-        out['fexpacf_stdres'] = np.std(residuals, ddof=1)
+        out['fexpacf_stdres'] = _sample_std(residuals)
 
     else:
         # Fit inappropriate (or failed): return nans for the relevant stats
@@ -4219,11 +4321,9 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     y = np.asarray(y, dtype=float).ravel()
     n = y.size
 
-    theiler_win = theiler_window(y, theiler_win, n)
-    if np.isnan(theiler_win):  # the autocorrelation function never crosses zero
-        logger.warning('No autocorrelation zero-crossing to set the Theiler window')
+    theiler_win = _theiler_int(y, theiler_win, n)
+    if theiler_win is None:  # the autocorrelation function never crosses zero
         return np.nan
-    theiler_win = int(theiler_win)
 
     # Embed the signal
     if isinstance(m, str):
@@ -4416,7 +4516,7 @@ def matrix_profile(y: ArrayLike, m: Union[int, list, tuple] = ('ac', 8),
     cs2 = np.concatenate(([0.0], np.cumsum(y ** 2)))
     mu = (cs[m:] - cs[:num_win]) / m
     sig = np.sqrt(np.maximum((cs2[m:] - cs2[:num_win]) / m - mu ** 2, 0.0))
-    flat = sig < 1e-8 * np.std(y, ddof=1)
+    flat = sig < 1e-8 * _sample_std(y)
     sig[flat] = np.inf  # flat windows have no shape: they match nothing (r = 0)
 
     # Sliding dot products of the first window against all windows (by FFT)

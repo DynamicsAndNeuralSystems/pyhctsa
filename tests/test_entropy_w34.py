@@ -36,6 +36,7 @@ def test_dispersion_entropy():
     assert _all_nan(dispersion_entropy(_x()[:5], 3, 6, 2))
 
 
+@pytest.mark.usefixtures('reference_mad_constant')  # MATLAB robustfit's 1/0.6745, see tests/conftest.py
 def test_multi_scale_entropy():
     o = multi_scale_entropy(_x(), range(1, 11), 2, 0.15)
     np.testing.assert_allclose(

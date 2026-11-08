@@ -20,7 +20,11 @@ from pyhctsa.operations import physics as PH
 from pyhctsa.operations import pre_process as PP
 from pyhctsa.operations import spectral as SP
 from pyhctsa.operations import stationarity as ST
-from pyhctsa.robust import bf_quantile_edges
+from pyhctsa.utils import _coarse_grain
+
+# MATLAB scales the MAD by 1/0.6745 (ksdensity, robustfit); pyhctsa by the exact 1/Phi^{-1}(3/4),
+# about 1e-5 apart. Compare the algorithms with MATLAB's constant (fixture in tests/conftest.py).
+pytestmark = pytest.mark.usefixtures('reference_mad_constant')
 
 with open(os.path.join(os.path.dirname(__file__), 'data', 'p2_b.json')) as fh:
     _FIX = json.load(fh)
@@ -126,7 +130,11 @@ class TestDistribution:
                 # convert the hctsa value to the same scale before comparing
                 pos_keys = ('mdrm', 'mdrmd', 'mrm', 'mrmd')
                 std_keys = ('mdrstd', 'mrstd')   # spreads of the positions scale by N/(N-1)
-                _check(py, ml, f'oi {kind} {n}', rtol=1e-5, atol=1e-6, skip=pos_keys + std_keys)
+                # the standard error of a single interval is NaN (utils._sample_std; MATLAB gives 0), which
+                # makes the cross-correlations of the mean gap with it NaN when the sweep ends on one interval
+                xc_keys = ('xcmerr1', 'xcmerrn1') if n == 'short60' and kind != 'abs' else ()
+                _check(py, ml, f'oi {kind} {n}', rtol=1e-5, atol=1e-6, skip=pos_keys + std_keys + xc_keys)
+                assert all(np.isnan(_num(py[k])) for k in xc_keys)
                 if isinstance(py, dict) and isinstance(ml, dict):
                     N = len(SERIES[n])
                     for k in std_keys:
@@ -231,16 +239,16 @@ class TestStationarity:
             _check(py, ml, f'ld {n}', rtol=1e-9, atol=1e-12, skip=('meandiv',))
             if isinstance(ml, dict):
                 y = SERIES[n]
-                counts, _ = np.histogram(y, bins=bf_quantile_edges(y, 10))
+                counts = np.bincount(_coarse_grain(y, 10), minlength=10)
                 null = np.sum(ST._random_order_tv(counts, len(y), len(y) // segs, mode))
                 np.testing.assert_allclose(py['ex_meandiv'] + null, ml['meandiv'], rtol=1e-9, atol=1e-12)
 
     def test_local_distributions_bounds(self):
         y = SERIES['s3']
-        counts, _ = np.histogram(y, bins=bf_quantile_edges(y, 8))
+        counts = np.bincount(_coarse_grain(y, 8), minlength=8)
         null = np.sum(ST._random_order_tv(counts, len(y), len(y) // 4, 'par'))
         assert -null <= ST.local_distributions(y, 4, 'par', 8)['ex_meandiv'] <= 1 - null
-        counts, _ = np.histogram(y, bins=bf_quantile_edges(y, 10))
+        counts = np.bincount(_coarse_grain(y, 10), minlength=10)
         null = np.sum(ST._random_order_tv(counts, len(y), len(y) // 2, 'each'))
         assert -null <= ST.local_distributions(y, 2, 'each') <= 1 - null
 
