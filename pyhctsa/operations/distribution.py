@@ -11,6 +11,7 @@ from scipy.stats import gamma as gamma_dist
 from scipy.stats import expon, gumbel_l, lognorm, norm, rayleigh, uniform, weibull_min, skew, kurtosis
 
 from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
+from ..fitting import goodness_of_fit
 from ..robust import bf_exp_fit, bf_fit_density_curve, bf_half_sample_mode, bf_hist_edges, bf_ks_density, bf_remove_points, bf_residual_stats
 from ..utils import dict_output, _round_half_away, _sample_std, sign_change, simple_binner, x_corr
 
@@ -869,10 +870,9 @@ def _fit_lin_gof(x: np.ndarray, y: np.ndarray) -> tuple:
     n = len(y)
     if n < 3 or not np.ptp(y) > 1e-12 * np.max(np.abs(y)):  # (constant to within rounding)
         return (np.nan,) * 4
-    sst = np.sum((y - np.mean(y)) ** 2)
     a, b = np.polyfit(x, y, 1)
-    sse = np.sum((y - (a * x + b)) ** 2)
-    return a, b, 1 - sse / sst, np.sqrt(sse / (n - 2))
+    gof = goodness_of_fit(y, a * x + b, 2, guard_sst=False)
+    return a, b, gof['rsquare'], gof['rmse']
 
 
 def _exp_fit_outputs(x: np.ndarray, y: np.ndarray) -> tuple:
@@ -1646,19 +1646,14 @@ def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') ->
     # Toolbox: R^2, R^2 adjusted for the number of fitted parameters, and the root-mean-square
     # error from the residual sum of squares divided by the degrees of freedom of the error
     res = dny - dny_fit
-    sse = np.sum(res ** 2)
-    sstot = np.sum((dny - np.mean(dny)) ** 2)
-    with np.errstate(all='ignore'):
-        r2 = 1 - sse / sstot
-        adjr2 = 1 - (1 - r2) * (len(dny) - 1) / dfe
-    rmse = np.sqrt(sse / dfe)
+    gof = goodness_of_fit(dny, dny_fit, num_params, guard_sst=False, adj_from_rsquare=True)
 
     # Remaining structure in the residuals, in order of increasing value:
     res_ac1, res_ac2, res_runsz = bf_residual_stats(res, dny)
     return {
-        'r2': float(r2),
-        'adjr2': float(adjr2),
-        'rmse': float(rmse * np.std(x, ddof=1)),
+        'r2': gof['rsquare'],
+        'adjr2': gof['adjrsquare'],
+        'rmse': float(gof['rmse'] * np.std(x, ddof=1)),
         'resAC1': float(res_ac1),
         'resAC2': float(res_ac2),
         'resrunsz': float(res_runsz),
