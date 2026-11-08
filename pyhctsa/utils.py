@@ -620,6 +620,23 @@ def frame_signal(x: ArrayLike, n: int, p: int = 0) -> np.ndarray:
     win = np.lib.stride_tricks.sliding_window_view(z, n)[::h][:ncols]
     return win.T.copy()
 
+
+# Smallest FFT length of the zero-padded spectral estimates (the 'periodogram' and 'welch' spectra
+# of spectral.spectral_summaries, medical.hrv_classic, nonlinearity._period_normalized_tau): the
+# spectrum is evaluated on max(256, next power of two >= segment length) frequencies, an
+# interpolated grid that is finer than the DFT grid of short segments. The peak-prominence
+# thresholds of spectral_summaries are calibrated on this grid (a pyhctsa choice).
+_MIN_NFFT = 256
+
+
+def _padded_nfft(length: int) -> int:
+    """FFT length of the zero-padded spectral estimates: ``max(256, 2**ceil(log2(length)))``.
+
+    The 256 floor (``_MIN_NFFT``) is part of the convention; FFT lengths without it are computed
+    inline by their callers.
+    """
+    return max(_MIN_NFFT, 2 ** int(np.ceil(np.log2(length))))
+
 # ------------------------------------------------------------------------------
 # Adaptive time delays, Theiler windows and decimation (hctsa BF_GetTau,
 # BF_TheilerWindow, BF_PreProcess)

@@ -14,19 +14,9 @@ from ..fitting import goodness_of_fit, robust_linear_fit
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import moments
 from ..robust import bf_fit_sinusoids, bf_residual_stats
-from ..utils import _even_split_points, dict_output, sign_change
+from ..utils import _even_split_points, _padded_nfft, dict_output, sign_change
+from ..utils import _MIN_NFFT  # noqa: F401 (re-exported for the tests)
 from ..utils import _shannon_entropy
-
-# Smallest FFT length of the zero-padded spectral estimates ('periodogram' and 'welch' in
-# spectral_summaries): the spectrum is evaluated on max(256, next power of two >= segment length)
-# frequencies, an interpolated grid that is finer than the DFT grid of short segments. The
-# peak-prominence thresholds of spectral_summaries are calibrated on this grid (a pyhctsa choice).
-_MIN_NFFT = 256
-
-
-def _padded_nfft(length: int) -> int:
-    """FFT length of the zero-padded spectral estimates: ``max(256, 2**ceil(log2(length)))``."""
-    return max(_MIN_NFFT, 2 ** int(np.ceil(np.log2(length))))
 
 
 @dict_output
@@ -892,6 +882,54 @@ def _give_me_robust_stats(x_data: ArrayLike, y_data: ArrayLike, field_name: str,
             out[f'{field_name}_{key}'] = np.nan
     return out
 
+
+def _crop_max_n(y: np.ndarray, max_n: Union[int, str]) -> np.ndarray:
+    """The first ``max_n`` samples of `y`, with a warning when it is cropped.
+
+    ``max_n = 'full'`` keeps the whole series; any other value is compared with ``len(y)`` as
+    given and converted with ``int()`` for the crop.
+    """
+    if not (isinstance(max_n, str) and max_n == 'full') and len(y) > max_n:
+        warnings.warn(f"Time series ({len(y)} samples) exceeds max_n = {int(max_n)}; "
+                      f"analyzing the first {int(max_n)} samples")
+        y = y[:int(max_n)]
+    return y
+
+
+def _usable_bins(n: int) -> np.ndarray:
+    """Indices of the positive-frequency DFT bins of an ``n``-point FFT, excluding DC and Nyquist.
+
+    Bins ``1, ..., ceil(n/2) - 1``: for even ``n`` the Nyquist bin ``n/2`` is excluded (it carries
+    no meaningful oscillatory phase); odd ``n`` has no Nyquist bin.
+    """
+    return np.arange(1, (n + 1) // 2)
+
+
+def _analytic_signal_fft(Y: np.ndarray, bins: np.ndarray, ifft=np.fft.ifft) -> np.ndarray:
+    """Band-limited analytic signal from a full FFT `Y`: the inverse FFT of ``2*Y`` on `bins`.
+
+    All other bins (negative frequencies, DC, and positive bins outside `bins`) are zeroed: the
+    FFT-domain Hilbert transform and the band-pass in one step. `bins` must hold positive-frequency
+    bins only (from :func:`_usable_bins`). `ifft` is the inverse transform matching the forward one
+    the caller used (``np.fft.ifft`` or ``scipy.fft.ifft``), so results agree to the last digit.
+    """
+    Z = np.zeros(len(Y), dtype=complex)
+    Z[bins] = 2 * Y[bins]
+    return ifft(Z)
+
+
+def _dominant_band(power: np.ndarray, usable: np.ndarray, half_width: int) -> np.ndarray:
+    """Bins within `half_width` of the spectral peak, clipped to the `usable` bins.
+
+    `power` is the power on the `usable` bins (``|Y[usable]|**2``); the peak is its first
+    ``argmax``. Returns ``usable[i_peak] - half_width, ..., usable[i_peak] + half_width``, clipped
+    to ``[usable[0], usable[-1]]``.
+    """
+    peak_bin = usable[int(np.argmax(power))]
+    return np.arange(max(usable[0], peak_bin - half_width),
+                     min(usable[-1], peak_bin + half_width) + 1)
+
+
 def _band_analytic_signals(y: np.ndarray, n_bands: int) -> Union[list, None]:
     """Analytic signals of ``y`` in ``n_bands`` equal-width frequency bands.
 
@@ -901,12 +939,7 @@ def _band_analytic_signals(y: np.ndarray, n_bands: int) -> Union[list, None]:
     step). Returns ``None`` if there are fewer than 2 usable bins per band (needed for a non-degenerate analytic
     signal).
     """
-    n = len(y)
-    half_n = n // 2 + 1 # one-sided bins: DC (0) up to Nyquist (half_n - 1, if n even)
-    if n % 2 == 0:
-        usable_bins = np.arange(1, half_n - 1)
-    else:
-        usable_bins = np.arange(1, half_n)
+    usable_bins = _usable_bins(len(y))
 
     min_bins_per_band = 2
     if len(usable_bins) < n_bands * min_bins_per_band:
@@ -914,13 +947,8 @@ def _band_analytic_signals(y: np.ndarray, n_bands: int) -> Union[list, None]:
 
     edges = _even_split_points(0, len(usable_bins), n_bands + 1)
     y_fft = scipy.fft.fft(y)
-    analytic = []
-    for b in range(n_bands):
-        bins = usable_bins[edges[b]:edges[b + 1]]
-        yb = np.zeros(n, dtype=complex)
-        yb[bins] = 2 * y_fft[bins]
-        analytic.append(scipy.fft.ifft(yb))
-    return analytic
+    return [_analytic_signal_fft(y_fft, usable_bins[edges[b]:edges[b + 1]], ifft=scipy.fft.ifft)
+            for b in range(n_bands)]
 
 def _xcorr_lags(a: np.ndarray, b: np.ndarray, max_lag: int) -> np.ndarray:
     """mean_t a(t) b(t + k) for k = -max_lag..max_lag (biased: divided by len(a); zero-padded FFT)."""
@@ -1129,14 +1157,8 @@ def cross_frequency_coupling(y: ArrayLike, n_bands: int = 5, max_n: Union[int, s
     if n_bands < 2:
         raise ValueError(f"n_bands = {n_bands}: need at least 2 bands to form a pair")
 
+    y = _crop_max_n(y, max_n)
     n = len(y)
-    if isinstance(max_n, str) and max_n == 'full':
-        pass # No cropping
-    elif n > max_n:
-        warnings.warn(f"Time series ({n} samples) exceeds max_n = {int(max_n)}; "
-                      f"analyzing the first {int(max_n)} samples")
-        y = y[:int(max_n)]
-        n = int(max_n)
 
     # z-score (all outputs are scale- and shift-invariant; this keeps the envelope arithmetic well scaled)
     sd = np.std(y)
@@ -1721,8 +1743,7 @@ def envelope_stats(y: ArrayLike, power_frac: float = 0.5, trim_frac: float = 0.0
     y = y - np.mean(y)
 
     # Frequency bins (DC and Nyquist excluded, as in cross_frequency_coupling):
-    half_n = N // 2 + 1
-    usable = np.arange(1, half_n - 1 if N % 2 == 0 else half_n)
+    usable = _usable_bins(N)
     Y = np.fft.fft(y)
 
     # Samples dropped from each end of the (circularly computed) analytic signal:
@@ -1730,9 +1751,7 @@ def envelope_stats(y: ArrayLike, power_frac: float = 0.5, trim_frac: float = 0.0
     keep = slice(n_trim, N - n_trim)
 
     # (a) Full band
-    Yfull = np.zeros(N, dtype=complex)
-    Yfull[usable] = 2 * Y[usable]
-    env_full = np.abs(np.fft.ifft(Yfull)[keep])
+    env_full = np.abs(_analytic_signal_fft(Y, usable)[keep])
     out['full_cv'], _, out['full_kurt'], out['full_tau'] = _envelope_summary(env_full)
 
     # (b) Dominant band: the largest periodogram peak +/- the smallest half-width
@@ -1746,13 +1765,9 @@ def envelope_stats(y: ArrayLike, power_frac: float = 0.5, trim_frac: float = 0.0
                 - cum_pow[np.maximum(0, i_peak - hws)])
     ok = np.flatnonzero(band_pow >= power_frac * cum_pow[-1])
     half_width = int(hws[ok[0]]) if ok.size else n_bins
-    peak_bin = usable[i_peak]
-    band = np.arange(max(usable[0], peak_bin - half_width),
-                     min(usable[-1], peak_bin + half_width) + 1)
+    band = _dominant_band(pw, usable, half_width)
 
-    Ydom = np.zeros(N, dtype=complex)
-    Ydom[band] = 2 * Y[band]
-    z_dom = np.fft.ifft(Ydom)
+    z_dom = _analytic_signal_fft(Y, band)
     env_dom = np.abs(z_dom[keep])
     out['dom_cv'], out['dom_skew'], out['dom_kurt'], out['dom_tau'] = _envelope_summary(env_dom)
 
@@ -1835,31 +1850,21 @@ def phase_fluctuation_scaling(y: ArrayLike, half_width_frac: float = 0.01,
     strange nonchaotic dynamics", Phys. Rev. E 77, 046220 (2008).
     """
     y = np.asarray(y, dtype=float).ravel()
+    y = _crop_max_n(y, max_n)
     N = len(y)
-    if N > max_n:
-        warnings.warn(f"Time series ({N} samples) exceeds max_n = {max_n}; "
-                      f"analyzing the first {max_n} samples")
-        y = y[:max_n]
-        N = max_n
 
     # Dominant non-edge spectral peak (DC and Nyquist bins excluded):
-    half_n = N // 2 + 1
-    usable = np.arange(1, half_n - 1 if N % 2 == 0 else half_n)
+    usable = _usable_bins(N)
     half_width_bins = max(2, int(np.floor(half_width_frac * len(usable) + 0.5)))
     if len(usable) < 4 * half_width_bins:
         warnings.warn(f"Time series too short (N = {N}) for a well-defined dominant frequency band")
         return np.nan
 
     Y = np.fft.fft(y)
-    power = np.abs(Y[usable]) ** 2
-    peak_bin = usable[int(np.argmax(power))]
-    band = np.arange(max(usable[0], peak_bin - half_width_bins),
-                     min(usable[-1], peak_bin + half_width_bins) + 1)
+    band = _dominant_band(np.abs(Y[usable]) ** 2, usable, half_width_bins)
 
     # Band-limited analytic signal and its instantaneous phase:
-    Yband = np.zeros(N, dtype=complex)
-    Yband[band] = 2 * Y[band]
-    phi = np.unwrap(np.angle(np.fft.ifft(Yband)))
+    phi = np.unwrap(np.angle(_analytic_signal_fft(Y, band)))
     if not np.all(np.isfinite(phi)):
         warnings.warn("Non-finite instantaneous phase (degenerate band-limited signal?)")
         return np.nan
@@ -2003,12 +2008,8 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
     if seg_length < min_seg_length:
         raise ValueError(f"seg_length = {seg_length} is too short for a meaningful FFT "
                          f"segment (need >= {min_seg_length})")
+    y = _crop_max_n(y, max_n)
     N = len(y)
-    if not (isinstance(max_n, str) and max_n == 'full') and N > max_n:
-        warnings.warn(f"Time series ({N} samples) exceeds max_n = {max_n}; "
-                      f"analyzing the first {max_n} samples")
-        y = y[:max_n]
-        N = int(max_n)
 
     # Segment geometry (50% overlap, as many segments as fit), shared by the real
     # series and every surrogate:
