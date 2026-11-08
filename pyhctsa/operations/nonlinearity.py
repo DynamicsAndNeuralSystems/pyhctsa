@@ -4,6 +4,7 @@ import warnings
 from typing import Union
 
 import numpy as np
+from ..utils import _iqr, _quantile
 from numba import njit as _njit
 from numpy.typing import ArrayLike
 from scipy.optimize import minimize_scalar
@@ -26,8 +27,8 @@ from ..toolboxes.Tisean_3_0_1.ports import (  # noqa: F401 (_c1_centers is used 
     TiseanDataError as _D2DataError, _c1_centers, _c1_curves, _c2d_slopes, _lyap_spec_sums,
     _tisean_boxcount, _tisean_lyap_r,
 )
-from ..robust import bf_hist_edges, bf_random, bf_random_seed, bf_spread_perm
-from ..utils import _even_split_points, dict_output, _round_half_away, get_tau, theiler_window, _theiler_int, time_delay_embed, _knn_theiler
+from ..robust import bf_hist_edges, bf_random, bf_random_seed, bf_spread_perm, _golden_section_min
+from ..utils import _even_split_points, dict_output, _round_half_away, get_tau, theiler_window, _theiler_int, time_delay_embed, _knn_theiler, _padded_nfft, _shannon_entropy
 
 logger = logging.getLogger('pyhctsa')
 
@@ -348,16 +349,9 @@ def zero_one_test(y, num_c=20, max_n=10000):
                 "maxN='full'; computation may be slow."
             )
 
-    else:
-        max_n = int(max_n)
-
-        if n > max_n:
-            logger.warning(
-                f"Time series ({n} samples) exceeds maxN={max_n}; "
-                f"analyzing the first {max_n} samples."
-            )
-            y = y[:max_n]
-            n = max_n
+    y = _check_max_n(y, max_n, message="Time series ({n} samples) exceeds maxN={k}; "
+                     "analyzing the first {k} samples.")
+    n = y.size
 
     # The test regresses on lags 1..N//10, so it needs N >= 20 (2 lags). K, a correlation over
     # those lags, needs 3 (N >= 30; with 2 it is +-1, in practice always 1): that is a per-field
@@ -683,14 +677,9 @@ def nlpe(y: ArrayLike, de: Union[int, str, list] = 3, tau: Union[int, str] = 1,
 
     #% nlpe can cause memory pains for long time series
     #% Let's do this dirty cheat
-    if isinstance(max_n, str):
-        if max_n != 'full':
-            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
-    elif n > max_n:
-        # crop the time series to the first max_n samples
-        y = y[:int(max_n)]
-        logger.info(f"Michael Small's nlpe code is only being evaluated on the first {max_n} (/{n}) samples.")
-        n = int(max_n)
+    y = _check_max_n(y, max_n, level=logging.INFO, message="Michael Small's nlpe code is only being "
+                     "evaluated on the first {max_n} (/{n}) samples.")
+    n = len(y)
 
     if n < 20: # short time series cause problems
         logger.warning(f'Time series (N = {len(y)}) is too short.')
@@ -1010,8 +999,7 @@ def local_density(y: ArrayLike, nnr: int = 3,
     out = {}
     out['minden'] = np.min(locden)
     out['maxden'] = np.max(locden)
-    out['iqrden'] = (np.percentile(locden, 75, method='hazen')
-                     - np.percentile(locden, 25, method='hazen'))
+    out['iqrden'] = _iqr(locden)
     out['rangeden'] = np.ptp(locden)
     out['stdden'] = np.std(locden, ddof=1)
     out['meanden'] = np.mean(locden)
@@ -1459,8 +1447,7 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
         out['takens05_max'] = np.max(takens05)
         out['takens05_min'] = np.min(takens05)
         out['takens05_std'] = np.std(takens05, ddof=1)
-        q75, q25 = np.percentile(takens05, [75, 25], method='hazen')
-        out['takens05_iqr'] = q75 - q25
+        out['takens05_iqr'] = _iqr(takens05)
 
         # Find outliers as a means of inferring m_min: look for the estimate
         # approaching a constant for m > m_min
@@ -2589,15 +2576,7 @@ def _saturating_exp_fit(t: np.ndarray, p: np.ndarray, max_rate: float = 5.0) -> 
     sgn = -1.0 if k < u.size else 1.0
     j = u.size - 1 - k if k < u.size else k - u.size  # index into u
     lo, hi = u[max(j - 1, 0)], u[min(j + 1, u.size - 1)]
-    phi = (np.sqrt(5) - 1) / 2
-    for _ in range(40):  # golden-section search in log|b|
-        u1 = hi - phi * (hi - lo)
-        u2 = lo + phi * (hi - lo)
-        if sse(sgn * np.exp(u1))[0] <= sse(sgn * np.exp(u2))[0]:
-            hi = u2
-        else:
-            lo = u1
-    b = sgn * np.exp((lo + hi) / 2)
+    b = sgn * np.exp(_golden_section_min(lambda v: sse(sgn * np.exp(v))[0], lo, hi))  # in log|b|
     g = 1.0 - np.exp(b * t)
     a = np.dot(g, p) / np.dot(g, g)
     s = np.sum((p - a * g) ** 2)
@@ -2792,7 +2771,7 @@ def _period_normalized_tau(y: np.ndarray) -> Union[int, str]:
         return 'mi'
     win_length = int(np.floor(y.size / 4.5))  # Welch segments of N/4.5 samples (8 segments at 50% overlap)
     f, pxx = _welch(y - np.mean(y), fs=1, window=np.hamming(win_length), nperseg=win_length,
-                    noverlap=win_length // 2, nfft=max(256, 2 ** int(np.ceil(np.log2(win_length)))),
+                    noverlap=win_length // 2, nfft=_padded_nfft(win_length),
                     detrend=False, return_onesided=True, scaling='density')
     f, pxx = f[1:], pxx[1:]  # exclude the DC bin
     if pxx.size < 3:
@@ -2915,8 +2894,7 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
         out['totalPersistenceH1'] = np.sum(pers1)
         # zero-persistence pairs contribute nothing to the entropy (0 log 0 = 0)
         pos = pers1[pers1 > 0]
-        p = pos / np.sum(pos)
-        out['persistenceEntropyH1'] = -np.sum(p * np.log(p)) if p.size else 0.0
+        out['persistenceEntropyH1'] = _shannon_entropy(pos, normalize=True) if pos.size else 0.0
     out['totalPersistenceH0'] = np.sum(lifetimes(drop_essential(dgms[0])))
     return out
 
@@ -2924,8 +2902,8 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
 def _count_boxes(x: np.ndarray, y: np.ndarray, nbox: int) -> np.ndarray:
     """Counts of points per box, where the boxes are quantiles along each axis."""
     props = np.arange(nbox + 1) / nbox
-    xbox = np.quantile(x, props, method='hazen')
-    ybox = np.quantile(y, props, method='hazen')
+    xbox = _quantile(x, props)
+    ybox = _quantile(y, props)
     # Nudge the top edge so the largest point falls inside the last box.
     xbox[-1] += 1
     ybox[-1] += 1
@@ -3023,11 +3001,10 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     out['pcross'] = nn / n  # proportion of time series that crosses poincare surface
 
     for lab, u in (('x', x), ('y', yy)):
-        q25, q75 = np.quantile(u, [0.25, 0.75], method='hazen')
         out[f'max{lab}'] = np.max(u)
         out[f'min{lab}'] = np.min(u)
         out[f'std{lab}'] = np.std(u, ddof=1)
-        out[f'iqr{lab}'] = q75 - q25
+        out[f'iqr{lab}'] = _iqr(u)
         out[f'mean{lab}'] = np.mean(u)
         out[f'ac1{lab}'] = autocorr(u, 1, 'Fourier')
         out[f'ac2{lab}'] = autocorr(u, 2, 'Fourier')
@@ -3050,8 +3027,7 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     out['meands'] = np.mean(ds)
     out['maxds'] = np.max(ds)
     out['minds'] = np.min(ds)
-    q25, q75 = np.quantile(ds, [0.25, 0.75], method='hazen')
-    out['iqrds'] = q75 - q25
+    out['iqrds'] = _iqr(ds)
 
     # Now normalize both axes and look for structure in the cloud of points.
     # Don't normalize for standard deviation -- this probably reveals some
@@ -3061,11 +3037,10 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
 
     # Statistics on distance on Poincare surface from (mean,mean)
     d = np.sqrt(x**2 + yy**2)
-    q25, q75 = np.quantile(d, [0.25, 0.75], method='hazen')
     out['maxD'] = np.max(d)
     out['minD'] = np.min(d)
     out['stdD'] = np.std(d, ddof=1)
-    out['iqrD'] = q75 - q25
+    out['iqrD'] = _iqr(d)
     out['meanD'] = np.mean(d)
     out['ac1D'] = autocorr(d, 1, 'Fourier')
     out['ac2D'] = autocorr(d, 2, 'Fourier')
@@ -3085,7 +3060,7 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         # -sum(p log p) is biased low by (M-1)/(2n) for M occupied boxes and n
         # points on the section, so the raw value tracks the series length.
         out[f'hboxcounts{num_partitions}'] = (
-            -np.sum(pos * np.log(pos)) + (pos.size - 1) / (2 * nn))
+            _shannon_entropy(pos) + (pos.size - 1) / (2 * nn))
         out[f'tracepbox{num_partitions}'] = np.sum(np.diag(pbox))  # trace
 
     return out
@@ -3247,7 +3222,7 @@ def _recurrence_radius(Y: np.ndarray, rr: float, random_seed: Union[int, str, No
     """
     n_emb = Y.shape[0]
     sub = _random_subset(n_emb, min(2000, n_emb), random_seed)
-    return float(np.quantile(pdist(Y[sub]), rr, method='hazen'))
+    return float(_quantile(pdist(Y[sub]), rr))
 
 
 def _recurrent_pairs(Y: np.ndarray, radius: float) -> tuple:
@@ -3259,14 +3234,23 @@ def _recurrent_pairs(Y: np.ndarray, radius: float) -> tuple:
     return src, dst
 
 
-def _check_max_n(y: np.ndarray, max_n: Union[int, str], what: str) -> np.ndarray:
-    """Crop the series to its first `max_n` samples (``'full'`` for no cropping)."""
+def _check_max_n(y: np.ndarray, max_n: Union[int, str], what: str = '', *,
+                 message: Union[str, None] = None, level: int = logging.WARNING) -> np.ndarray:
+    """Crop `y` to its first `max_n` rows (``'full'`` for no cropping), logging when it is cropped.
+
+    `y` is a series or an array of embedded points (cropped along its first axis); ``len(y)`` is
+    compared with `max_n` as given, and the crop uses ``int(max_n)``. Any string other than
+    ``'full'`` raises a ValueError. The log record, at `level`, is `message` formatted with ``n``
+    (``len(y)`` before cropping), ``max_n`` (as given) and ``k`` (``int(max_n)``); by default it
+    says the series is too long for `what`.
+    """
     if isinstance(max_n, str):
         if max_n != 'full':
             raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
-    elif y.size > max_n:
-        logger.warning(f'Time series ({y.size} > {max_n}) is too long for {what}. '
-                       f'Analyzing the first {int(max_n)} samples')
+    elif len(y) > max_n:
+        if message is None:
+            message = 'Time series ({n} > {max_n}) is too long for ' + what + '. Analyzing the first {k} samples'
+        logger.log(level, message.format(n=len(y), max_n=max_n, k=int(max_n)))
         y = y[:int(max_n)]
     return y
 
@@ -3587,7 +3571,7 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
         out['DIV'] = 1 / out['L_max']
         counts = np.bincount(diag_lengths)
         p = counts[counts > 0] / diag_lengths.size
-        out['L_entr'] = -np.sum(p * np.log(p))
+        out['L_entr'] = _shannon_entropy(p)
 
     # Vertical line lengths, from the full band-excluded matrix, grouping recurrent points by column
     vert_lengths = _line_lengths(dst, src, vmin)
@@ -3771,8 +3755,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     out['std'] = np.std(trett, ddof=1)
     out['pzeros'] = np.sum(trett == 0) / nn
     out['pg05'] = np.sum(trett > max_trett * 0.5) / nn
-    q25, q75 = np.quantile(trett, [0.25, 0.75], method='hazen')
-    out['iqr'] = q75 - q25
+    out['iqr'] = _iqr(trett)
 
     # Recurrent peaks
     icross05 = np.flatnonzero((trett[:-1] - 0.5 * max_trett) * (trett[1:] - 0.5 * max_trett) < 0)
@@ -3801,13 +3784,13 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
 
     # Entropy of the histogram, as a distribution over lags
     p_trett = trett / np.sum(trett)
-    out['hhist'] = -np.sum(p_trett[p_trett > 0] * np.log(p_trett[p_trett > 0]))
+    out['hhist'] = _shannon_entropy(p_trett)
 
     # Coarse-grain to 20 bins of lags
     num_bins = 20
     inds = _even_split_points(0, nn, num_bins + 1)  # bin boundaries, evenly spread over 0..nn
     cglav = np.array([np.sum(p_trett[inds[b]:inds[b + 1]]) for b in range(num_bins)])
-    out['hcgdist'] = -np.sum(cglav[cglav > 0] * np.log(cglav[cglav > 0]))
+    out['hcgdist'] = _shannon_entropy(cglav)
     out['rangecgdist'] = np.ptp(cglav)
     out['pzeroscgdist'] = np.sum(cglav == 0) / num_bins
 
@@ -3817,7 +3800,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     nhist = np.histogram(trett, bins=edges)[0] / nn
     out['maxhisthist'] = np.max(nhist)
     out['phisthistmin'] = nhist[0]  # probability in the first (lowest-value) bin
-    out['hhisthist'] = -np.sum(nhist[nhist > 0] * np.log(nhist[nhist > 0]))
+    out['hhisthist'] = _shannon_entropy(nhist)
 
     return out
 
@@ -4058,13 +4041,8 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     if np.all(np.ptp(y_embed, axis=0) < 1e-10):
         return np.nan
 
-    if isinstance(max_n, str):
-        if max_n != 'full':
-            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
-    elif n_embed > max_n:
-        logger.warning(f'Cropping to the first {int(max_n)} of {n_embed} embedded points '
-                       '(memory/time cap, not a convergence point)')
-        y_embed = y_embed[:int(max_n)]
+    y_embed = _check_max_n(y_embed, max_n, message='Cropping to the first {k} of {n} embedded points '
+                           '(memory/time cap, not a convergence point)')
 
     # Principal axes of the cloud, and the whitened cloud (zero mean, identity covariance)
     centered = y_embed - y_embed.mean(axis=0)
@@ -4235,16 +4213,11 @@ def embed_kernel_pca(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3,
 
     # Crop to max_n embedded points for the kernel matrix (memory/time cap)
     n_emb = y_embed.shape[0]
-    if isinstance(max_n, str):
-        if max_n != 'full':
-            raise ValueError(f"max_n must be an integer or 'full', got '{max_n}'")
-        if n_emb > 5000:
-            logger.warning(f"{n_emb} embedded points exceeds 5000 with max_n='full'; the kernel "
-                           'eigendecomposition may take several seconds')
-    elif n_emb > max_n:
-        logger.warning(f'Cropping to the first {int(max_n)} of {n_emb} embedded points for kernel PCA '
-                       '(memory/time cap, not a convergence point)')
-        y_embed = y_embed[:int(max_n)]
+    if isinstance(max_n, str) and max_n == 'full' and n_emb > 5000:
+        logger.warning(f"{n_emb} embedded points exceeds 5000 with max_n='full'; the kernel "
+                       'eigendecomposition may take several seconds')
+    y_embed = _check_max_n(y_embed, max_n, message='Cropping to the first {k} of {n} embedded points '
+                           'for kernel PCA (memory/time cap, not a convergence point)')
     n = y_embed.shape[0]
     if n - 1 < m:
         logger.warning(f'Not enough embedded points ({n}) after cropping for a rank-{m} kernel PCA')
@@ -4399,8 +4372,7 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
     out['stdmedian'] = np.std(np.median(rs[:, 1:], axis=0), ddof=1) if m_max > 2 else 0.0
     stretch = rs[:, 1:].ravel()
     out['medianstretch'] = np.median(stretch)
-    q25, q75 = np.quantile(stretch, [0.25, 0.75], method='hazen')
-    out['iqrstretch'] = q75 - q25
+    out['iqrstretch'] = _iqr(stretch)
     return out
 
 
@@ -4566,7 +4538,7 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
             continue
         g = -np.log(_merge_ties(dist_j, tol))  # (chronological order preserved)
 
-        u = np.quantile(g, q, method='hazen')
+        u = _quantile(g, q)
         exceed = g > u  # exceedance indicator, in chronological order
         n_u = int(exceed.sum())
         if n_u < min_exceed or np.unique(g[exceed]).size < min_exceed:
