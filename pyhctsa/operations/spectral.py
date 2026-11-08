@@ -1,6 +1,7 @@
 import math
 import warnings
 import numpy as np
+from ..utils import _iqr, _quantile
 from numpy.typing import ArrayLike
 from typing import Union
 import scipy.fft
@@ -614,8 +615,8 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
 
     # Distribution
     # quantiles
-    q25_s, q75_s = np.quantile(s, [0.25, 0.75], method='hazen')
-    q25_log, q75_log = np.quantile(log_s, [0.25, 0.75], method='hazen')
+    q25_s, q75_s = _quantile(s, [0.25, 0.75])
+    q25_log, q75_log = _quantile(log_s, [0.25, 0.75])
     out['iqr'] = q75_s - q25_s
     out['logiqr'] = q75_log - q25_log
     out['q25'] = q25_s
@@ -2059,7 +2060,7 @@ def bicoherence(y: ArrayLike, seg_length: int = 64, max_n: Union[int, str] = 'fu
         _bicoherence_grid(surrogates[:, s], step, num_seg, seg_length, half_n, win, pi, pj)
         for s in range(num_surr)])
     null_vals = null_vals[np.isfinite(null_vals)]
-    surr_thresh = float(np.quantile(null_vals, 1 - alpha, method='hazen'))
+    surr_thresh = float(_quantile(null_vals, 1 - alpha))
     out['propSig'] = np.mean(bic > surr_thresh)
 
     # How far the standard asymptotic threshold is from the empirical one:
@@ -2574,8 +2575,7 @@ def rhythmicity(y: ArrayLike, m: float = 5, tau: float = 1.5, n_freq: int = 40,
     out['lavi_mean'] = np.mean(S)
     out['lavi_median'] = med
     out['lavi_std'] = np.std(S, ddof=1)
-    q1, q3 = np.quantile(S, [0.25, 0.75], method='hazen')
-    out['lavi_iqr'] = q3 - q1
+    out['lavi_iqr'] = _iqr(S)
     out['lavi_max'] = np.max(S)
     out['lavi_min'] = np.min(S)
     with np.errstate(divide='ignore', invalid='ignore'):

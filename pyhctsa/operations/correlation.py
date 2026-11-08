@@ -4,6 +4,7 @@ from typing import Union
 
 import numba
 import numpy as np
+from ..utils import _iqr, _quantile
 from numpy.typing import ArrayLike
 from scipy.linalg import solve_triangular
 from scipy.optimize import curve_fit
@@ -414,7 +415,7 @@ def oversampling(y: ArrayLike) -> dict:
     # eta and its outlier-robust companion:
     out['eta'] = float(np.ptp(y) / mean_abs_diff)
 
-    q05, q95 = np.quantile(y, [0.05, 0.95], method='hazen')
+    q05, q95 = _quantile(y, [0.05, 0.95])
     robust_range = q95 - q05
     out['etaRobust'] = float(robust_range / mean_abs_diff)
 
@@ -544,7 +545,7 @@ def falling_sticks(y: ArrayLike) -> dict:
     else:
         out['skewness_all'] = np.nan  # undefined for constant angles
         out['kurtosis_all'] = np.nan
-    out['q10_all'] = np.quantile(all_angles, 0.1, method='hazen') if len(all_angles) >= 2 else np.nan
+    out['q10_all'] = _quantile(all_angles, 0.1) if len(all_angles) >= 2 else np.nan
 
     # Persistence of the fall-angle sequence
     if len(angles_pos) >= 2 and not _fall_is_constant(angles_pos):
@@ -1784,10 +1785,10 @@ def stick_angles(y: ArrayLike) -> dict:
     # What does the distribution look like?
     # Some quantiles and moments
     if len(zangles[0]) > 0:
-        out['q1_p'] = np.quantile(zangles[0], 0.01, method='hazen')
-        out['q10_p'] = np.quantile(zangles[0], 0.1, method='hazen')
-        out['q90_p'] = np.quantile(zangles[0], 0.9, method='hazen')
-        out['q99_p'] = np.quantile(zangles[0], 0.99, method='hazen')
+        out['q1_p'] = _quantile(zangles[0], 0.01)
+        out['q10_p'] = _quantile(zangles[0], 0.1)
+        out['q90_p'] = _quantile(zangles[0], 0.9)
+        out['q99_p'] = _quantile(zangles[0], 0.99)
         out['skewness_p'] = skew(angles[0])
         out['kurtosis_p'] = kurtosis(angles[0], fisher=False)
     else:
@@ -1795,17 +1796,17 @@ def stick_angles(y: ArrayLike) -> dict:
             out['skewness_p'], out['kurtosis_p'] = np.nan, np.nan, np.nan,  np.nan, np.nan, np.nan
     
     if len(zangles[1]) > 0:
-        out['q1_n'] = np.quantile(zangles[1], 0.01, method='hazen')
-        out['q10_n'] = np.quantile(zangles[1], 0.1, method='hazen')
-        out['q90_n'] = np.quantile(zangles[1], 0.9, method='hazen')
-        out['q99_n'] = np.quantile(zangles[1], 0.99, method='hazen')
+        out['q1_n'] = _quantile(zangles[1], 0.01)
+        out['q10_n'] = _quantile(zangles[1], 0.1)
+        out['q90_n'] = _quantile(zangles[1], 0.9)
+        out['q99_n'] = _quantile(zangles[1], 0.99)
         out['skewness_n'] = skew(angles[1])
         out['kurtosis_n'] = kurtosis(angles[1], fisher=False)
     else:
         out['q1_n'], out['q10_n'], out['q90_n'], out['q99_n'], \
             out['skewness_n'], out['kurtosis_n'] = np.nan, np.nan, np.nan,  np.nan, np.nan, np.nan
     
-    f_quantz = lambda x : np.quantile(zallAngles, x, method='hazen')
+    f_quantz = lambda x : _quantile(zallAngles, x)
     out['q1_all'] = f_quantz(0.01)
     out['q10_all'] = f_quantz(0.1)
     out['q90_all'] = f_quantz(0.9)
@@ -2658,9 +2659,7 @@ def embed2_dist(y: ArrayLike, tau: Union[None, str, int] = None) -> dict:
     out['d_median'] = np.median(d) # Median distance
     out['d_std'] = np.std(d, ddof=1) # Standard deviation of distances
     # the IQR uses the Hazen definition of the quantiles
-    q75 = np.percentile(d, 75, method='hazen')
-    q25 = np.percentile(d, 25, method='hazen')
-    iqr_val = q75 - q25
+    iqr_val = _iqr(d)
     out['d_iqr'] = iqr_val # Interquartile range of distances
     out['d_max'] = np.max(d) # Maximum distance
     out['d_min'] = np.min(d) # Minimum distance
@@ -2900,8 +2899,7 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
     out['std'] = np.std(counts, ddof=1)
     out['median'] = np.median(counts)
     out['mean'] = np.mean(counts)
-    out['iqr'] = np.percentile(counts, 75, method='hazen') - np.percentile(counts,
-                                                                           25, method='hazen')
+    out['iqr'] = _iqr(counts)
     out['iqronrange'] = out['iqr']/np.ptp(counts)
 
     # distribution - using the sqrt binning rule, with explicit edges (the local densities are

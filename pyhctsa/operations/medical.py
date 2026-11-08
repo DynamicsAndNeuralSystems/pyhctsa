@@ -1,4 +1,5 @@
 import numpy as np
+from ..utils import _quantile
 from numpy.typing import ArrayLike
 from scipy import signal
 
@@ -515,7 +516,7 @@ def porta(x: ArrayLike, num_levels: int = 6, tau: int | str = 1) -> dict:
 
     # quantize into 0:num_levels-1: equal bins over median +/- 3 robust SDs, open end bins
     num_levels = int(num_levels)
-    q25, med, q75 = np.percentile(x, [25, 50, 75])
+    q25, med, q75 = _quantile(x, [0.25, 0.5, 0.75], method='linear')
     scale = (q75 - q25) / 1.349  # robust standard deviation
     if scale <= 1e-12 * np.max(np.abs(x)):  # more than half the values tied
         scale = 1.2533 * np.mean(np.abs(x - med))  # mean absolute deviation (Gaussian-consistent)

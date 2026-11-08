@@ -1,5 +1,6 @@
 from numpy.typing import ArrayLike
 import numpy as np
+from ..utils import _iqr
 from scipy.optimize import minimize_scalar
 import logging
 logger = logging.getLogger('pyhctsa')
@@ -78,8 +79,7 @@ def _fluctuations(y: np.ndarray, taus: np.ndarray, wtf: str, q: float, k: int) -
         elif wtf == 'iqr':
             # interquartile range in each window, with Hazen's quantile definition
             # (piecewise-linear through the (i-0.5)/n points)
-            q75, q25 = np.percentile(windows, [75, 25], axis=0, method='hazen')
-            f = q75 - q25
+            f = _iqr(windows, axis=0)
         elif wtf == 'rsrange':
             # range after removing the straight line through the window's end points
             line = np.linspace(0, 1, tau)[:, None] * (windows[-1, :] - windows[0, :]) + windows[0, :]

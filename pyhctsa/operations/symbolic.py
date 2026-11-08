@@ -1,6 +1,7 @@
 from itertools import product
 
 import numpy as np
+from ..utils import _quantile
 from typing import Optional, Union
 from numpy.typing import ArrayLike
 import logging
@@ -1090,7 +1091,7 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str], lag: int 
     
     # Do the coarse graining
     if how_to_cg == 'quantile':
-        th = np.quantile(y, np.linspace(0, 1, num_groups + 1), method='hazen') # thresholds for dividing the time-series values
+        th = _quantile(y, np.linspace(0, 1, num_groups + 1)) # thresholds for dividing the time-series values
         th[0] = th[0] - 1 # this ensures the first point is included
         yth = np.zeros(N, dtype=int)
         # turn the time series into a set of numbers from 1:num_groups

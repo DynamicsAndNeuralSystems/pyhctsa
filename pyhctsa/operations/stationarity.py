@@ -5,6 +5,7 @@ import warnings
 from typing import Union
 
 import numpy as np
+from ..utils import _iqr
 from numpy.typing import ArrayLike
 from scipy.signal import detrend, find_peaks
 from scipy.special import gammaln, ndtri
@@ -582,7 +583,7 @@ def _calc_me_moments(x_buff: ArrayLike, mom_type: str):
     elif mom_type == 'median':
         moms = np.median(x_buff, axis=0)
     elif mom_type == 'iqr':
-        moms = np.percentile(x_buff, 75, method='hazen', axis=0) - np.percentile(x_buff, 25, method='hazen', axis=0)
+        moms = _iqr(x_buff, axis=0)
     else:
         raise ValueError(f"Unknown statistic {mom_type}")
     
@@ -1092,8 +1093,8 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     out['absmean'] = np.abs(np.mean(y[r])) # Makes sense without normalization if y is z-scored
     out['std'] = np.std(y[r], ddof=1) # Makes sense without normalization if y is z-scored
     out['median'] = np.median(y[r]) # if median is very small then normalization could be very noisy
-    raw_iqr_yr = np.percentile(y[r], 75, method='hazen') - np.percentile(y[r], 25, method='hazen')
-    raw_iqr_y = np.percentile(y, 75, method='hazen') - np.percentile(y, 25, method='hazen')
+    raw_iqr_yr = _iqr(y[r])
+    raw_iqr_y = _iqr(y)
     out['iqr'] = np.abs(1 - (raw_iqr_yr/raw_iqr_y)) if raw_iqr_y > 0 else np.nan
     # ratios are NaN when the global statistic is exactly zero
     global_skew = skew(y)
@@ -1739,9 +1740,6 @@ def _cross_prediction_stats(xperr: np.ndarray) -> dict:
     # Output statistics on the matrix of cross-prediction errors
     def _range(v):
         return np.max(v) - np.min(v)
-    def _iqr(v):
-        q = np.quantile(v, [0.25, 0.75], method='hazen')
-        return q[1] - q[0]
 
     out = {}
     # diagonal elements are using a segment to predict itself -- ought to be pretty good
