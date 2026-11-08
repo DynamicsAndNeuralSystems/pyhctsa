@@ -12,7 +12,7 @@ import pytest
 
 from pyhctsa import utils
 from pyhctsa.robust import bf_hist_edges, bf_quantile_edges
-from pyhctsa.utils import _even_split_points, _sample_std, _zscore_or_zeros
+from pyhctsa.utils import _even_split_points, _sample_std, _zscore
 
 
 @pytest.fixture(autouse=True)
@@ -110,13 +110,13 @@ def test_sample_std_degenerate_inputs():
 def test_zscore_convention():
     rng = np.random.default_rng(5)
     x = rng.standard_normal(100) * 3 + 2
-    z = _zscore_or_zeros(x)
+    z = _zscore(x)
     assert z.mean() == pytest.approx(0, abs=1e-14)
     assert np.std(z, ddof=1) == pytest.approx(1, rel=1e-14)
-    assert np.array_equal(_zscore_or_zeros(np.full(7, 2.5)), np.zeros(7))   # constant -> zeros
-    assert _zscore_or_zeros([3.0]).tolist() == [0.0]
-    assert _zscore_or_zeros([]).size == 0
-    assert np.isnan(_zscore_or_zeros([1.0, np.nan, 2.0])).all()
+    assert np.array_equal(_zscore(np.full(7, 2.5)), np.zeros(7))   # constant -> zeros
+    assert _zscore([3.0]).tolist() == [0.0]
+    assert _zscore([]).size == 0
+    assert np.isnan(_zscore([1.0, np.nan, 2.0])).all()
 
 
 def test_round_half_away_convention():

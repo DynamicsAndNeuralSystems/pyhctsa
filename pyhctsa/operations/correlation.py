@@ -18,10 +18,8 @@ from statsmodels.tsa.stattools import pacf
 from ..operations.information import automutual_info
 from ..toolboxes.c22 import periodicity_wang_wrapper
 from ..robust import bf_hist_edges, bf_random, bf_remove_points
-from ..utils import (dict_output, _coarse_grain, _round_half_away, _tie_aware_ranks, _zscore_or_zeros, get_tau,
-                     _acf_fft, frame_signal, point_of_crossing, sign_change, _theiler_int,
-                     time_delay_embed, z_score)
-from ..utils import _zscore_or_none, _shannon_entropy
+from ..utils import (dict_output, _coarse_grain, _round_half_away, _tie_aware_ranks, _zscore, get_tau, _acf_fft, frame_signal, point_of_crossing, sign_change, _theiler_int, time_delay_embed, z_score)
+from ..utils import _shannon_entropy
 
 
 def _resolve_delay(y: ArrayLike, tau: Union[int, float, str, None], cap: bool = False,
@@ -543,7 +541,7 @@ def falling_sticks(y: ArrayLike) -> dict:
 
     # Persistence of the fall-angle sequence
     if len(angles_pos) >= 2 and not _fall_is_constant(angles_pos):
-        z_angles_pos = _zscore_or_zeros(angles_pos)
+        z_angles_pos = _zscore(angles_pos)
         out['tau_p'] = first_crossing(z_angles_pos, 'ac', 0, 'continuous')
         out['ac1_p'] = autocorr(z_angles_pos, 1, 'Fourier')
     else:
@@ -551,7 +549,7 @@ def falling_sticks(y: ArrayLike) -> dict:
         out['ac1_p'] = np.nan
 
     if len(angles_neg) >= 2 and not _fall_is_constant(angles_neg):
-        z_angles_neg = _zscore_or_zeros(angles_neg)
+        z_angles_neg = _zscore(angles_neg)
         out['tau_n'] = first_crossing(z_angles_neg, 'ac', 0, 'continuous')
         out['ac1_n'] = autocorr(z_angles_neg, 1, 'Fourier')
     else:
@@ -953,7 +951,7 @@ def _gaussian_ranks(y: ArrayLike) -> Union[np.ndarray, None]:
     n = x.size
     if n < 2 or not np.all(np.isfinite(x)):
         return None
-    return _zscore_or_none(norm.ppf((_tie_aware_ranks(x) - 0.5) / n))
+    return _zscore(norm.ppf((_tie_aware_ranks(x) - 0.5) / n), constant='none')
 
 
 def crinkle_statistic_kurtosis(y: ArrayLike, gaussian_rank: bool = True,
@@ -1710,7 +1708,7 @@ def stick_angles(y: ArrayLike) -> dict:
         a = np.asarray(a, dtype=float)
         if a.size == 0:
             return []
-        return z_score(a) if _sample_var(a) > 1e-10 else _zscore_or_zeros(a)
+        return z_score(a) if _sample_var(a) > 1e-10 else _zscore(a)
     zangles = [_z(angles[0]), _z(angles[1])]
     zallAngles = _z(all_angles)
 
@@ -2123,7 +2121,7 @@ def nonlinear_autocorr_abs_surrogate_ratio(y: ArrayLike, taus: ArrayLike, num_su
     surrs = _make_surrogates(g, 'RP', int(num_surrs), random_seed)
     vals = []
     for s in range(surrs.shape[1]):
-        gs = _zscore_or_none(surrs[:, s])
+        gs = _zscore(surrs[:, s], constant='none')
         if gs is None:  # a constant surrogate is skipped
             continue
         vals.append(np.mean(np.abs(_lag_product(gs, taus))))

@@ -11,7 +11,7 @@ import pytest
 
 from pyhctsa.operations import correlation as co
 from pyhctsa.operations import stationarity as st
-from pyhctsa.utils import _zscore_or_none, _zscore_or_zeros
+from pyhctsa.utils import _zscore
 
 
 def series():
@@ -154,11 +154,11 @@ def test_window_starts():
     np.testing.assert_array_equal(st._window_starts(10, 10, 1), [0])
 
 
-def test_zscore_or_none():
+def test_zscore_constant_none():
     x = np.array([1.0, 2.0, 4.0, 7.0])
-    np.testing.assert_array_equal(_zscore_or_none(x), _zscore_or_zeros(x))
-    assert _zscore_or_none(np.ones(5)) is None
+    np.testing.assert_array_equal(_zscore(x, constant='none'), _zscore(x))
+    assert _zscore(np.ones(5), constant='none') is None
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
-        assert _zscore_or_none(np.array([3.0])) is None
-        assert _zscore_or_none(np.array([1.0, np.nan, 2.0])) is None
+        assert _zscore(np.array([3.0]), constant='none') is None
+        assert _zscore(np.array([1.0, np.nan, 2.0]), constant='none') is None

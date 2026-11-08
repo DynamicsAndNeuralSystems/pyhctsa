@@ -22,7 +22,7 @@ from ..robust import bf_exp_fit, bf_random, bf_random_seed
 from ..utils import dict_output, _coarse_grain, _autocov_fft, _round_half_away, _sample_std, get_tau, frame_signal, sign_change, z_score
 from ..utils import _shannon_entropy
 from ..fitting import polyfit, robust_linear_fit
-from ..utils import _zscore_or_zeros, make_buffer
+from ..utils import _zscore, make_buffer
 
 _PP_TREND = {'ar': 'n', 'ard': 'c', 'ts': 'ct'}
 _PP_TEST_TYPE = {'t1': 'tau', 't2': 'rho'}
@@ -1423,7 +1423,7 @@ def peak_intervals(y: ArrayLike, min_prom: float = 1) -> dict:
     if N < 20 or not np.all(np.isfinite(y)) or _sample_std(y) == 0:
         return out
 
-    y = _zscore_or_zeros(y) # prominence is in units of the series' standard deviation
+    y = _zscore(y) # prominence is in units of the series' standard deviation
 
     locs, props = find_peaks(y, prominence=min_prom)
     proms = props['prominences']
@@ -2046,7 +2046,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
             tau = int(tau)
             for i in range(num_steps):
                 w = windows[i]
-                zw = _zscore_or_zeros(w) # a constant window gives zeros
+                zw = _zscore(w) # a constant window gives zeros
                 qs[i] = np.mean(zw[:-tau] * zw[tau:] * (zw[tau:] - zw[:-tau]))
     else:
         raise ValueError(f"Unknown statistic '{window_stat}'")
@@ -2242,7 +2242,7 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] =
         seg_ac1[i] = autocorr(z[i, :], 1, 'Fourier')
         if not np.isnan(tau) and tau < seg_length - 1: # need pairs to average over
             t = int(tau)
-            zseg = _zscore_or_zeros(z[i, :]) # z-scored *within* this segment (a constant segment gives zeros)
+            zseg = _zscore(z[i, :]) # z-scored *within* this segment (a constant segment gives zeros)
             seg_asym_ac1[i] = np.mean(zseg[:-t] * zseg[t:] * (zseg[t:] - zseg[:-t]))
 
     # ------------------------------------------------------------------------------

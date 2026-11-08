@@ -17,10 +17,8 @@ from sklearn.neighbors import KDTree
 
 from ..toolboxes.physionet import sampen as _sampen_c
 from ..robust import bf_hist_edges, bf_ks_density, bf_random, bf_random_seed
-from ._symbolic_complexity import (_equiprobable_symbols, _normalized_lz_complexity,
-                                  _shannon_block_entropy)
-from ..utils import (dict_output, _coarse_grain, _zscore_or_zeros, get_tau, make_buffer, pre_process, theiler_window,
-                     time_delay_embed, z_score)
+from ._symbolic_complexity import (_equiprobable_symbols, _normalized_lz_complexity, _shannon_block_entropy)
+from ..utils import (dict_output, _coarse_grain, _zscore, get_tau, make_buffer, pre_process, theiler_window, time_delay_embed, z_score)
 from ..utils import _shannon_entropy
 
 
@@ -362,7 +360,7 @@ def multi_scale_entropy(
         if np.isscalar(y) or np.ndim(y) == 0:  # e.g., an undefined autocorrelation time
             logger.warning(f"Could not apply '{pre_process_how}' pre-processing")
             return np.nan
-        y = _zscore_or_zeros(y)
+        y = _zscore(y)
 
     # Coarse-graining and entropy across scales, using all `scale` possible non-overlapping
     # starting offsets (Eq. (16) of Costa et al. is the offset-0 coarse-graining)

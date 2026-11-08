@@ -14,9 +14,7 @@ import pytest
 import pyhctsa.ksg
 import pyhctsa.utils as utils
 from pyhctsa.operations.entropy import multi_scale_entropy
-from pyhctsa.utils import (_DECIMATE_MIN_POINTS, _ami_first_min, _tau_ac1e, _tau_mi,
-                           _zscore_or_zeros, decimate_ac1e, get_tau, make_buffer, pre_process,
-                           z_score)
+from pyhctsa.utils import (_DECIMATE_MIN_POINTS, _ami_first_min, _tau_ac1e, _tau_mi, _zscore, decimate_ac1e, get_tau, make_buffer, pre_process, z_score)
 
 T = np.arange(1000.0)
 
@@ -48,7 +46,7 @@ def test_decimation_plain_subsample_when_long_enough():
     tau = get_tau(y, 'ac1e')
     assert tau > 1 and -(-y.size // tau) >= _DECIMATE_MIN_POINTS
     np.testing.assert_array_equal(pre_process(y, 'decimate_ac1e'), y[::tau])
-    np.testing.assert_allclose(decimate_ac1e(y), _zscore_or_zeros(y[::tau]))
+    np.testing.assert_allclose(decimate_ac1e(y), _zscore(y[::tau]))
 
 
 def test_decimation_short_result_kept():
@@ -110,7 +108,7 @@ def test_multi_scale_entropy_rescale_tau_matches_ac1e_coarse_graining():
     y = _ar1(0.9, seed=2, n=3000)
     tau = get_tau(y, 'ac1e')
     assert tau > 1 and tau != get_tau(y, 'ac')
-    y_cg = _zscore_or_zeros(np.mean(make_buffer(y, tau), axis=1))
+    y_cg = _zscore(np.mean(make_buffer(y, tau), axis=1))
     a = multi_scale_entropy(y, range(1, 11), 2, 0.15, pre_process_how='rescale_tau')
     b = multi_scale_entropy(y_cg, range(1, 11), 2, 0.15)
     assert isinstance(a, dict) and a.keys() == b.keys()

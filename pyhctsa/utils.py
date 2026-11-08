@@ -1524,57 +1524,49 @@ def pre_process(y: ArrayLike, how: Union[str, None]) -> Union[np.ndarray, float]
     raise ValueError(f"Unknown preprocessing setting: '{how}'")
 
 
-def _zscore_or_zeros(x: np.ndarray) -> np.ndarray:
-    """z-score with the N-1 standard deviation; a constant input gives zeros.
+def _zscore(x: ArrayLike, constant: str = 'zeros') -> Union[np.ndarray, None]:
+    """z-score with the N-1 standard deviation, with a stated result for an input it cannot standardize.
 
     Parameters
     ----------
-    x : numpy.ndarray
+    x : array_like
         Data (callers pass a 1-D series); all elements are standardized together.
-
-    Returns
-    -------
-    numpy.ndarray
-        float64 array of the same shape: ``(x - mean)/sd``. If ``sd`` is exactly 0 (a constant series,
-        or a single value) it is replaced by 1, so the result is all zeros. A NaN ``sd`` (data containing
-        NaN or Inf) propagates, giving all NaN. Empty input gives an empty array.
-
-    Notes
-    -----
-    pyhctsa convention: the sample standard deviation (n-1 in the denominator) is used, and a
-    standard deviation of 0 is replaced by 1, so that a constant series maps to zeros rather
-    than NaN (features that standardize their input then stay defined).
-    """
-    a = np.asarray(x, dtype=float)
-    if a.size == 0:
-        return a.copy()
-    sd = float(_sample_std(a, single=0.0))  # one value is a constant input: zeros
-    if sd == 0:
-        sd = 1.0
-    with np.errstate(invalid='ignore'):
-        return (a - np.mean(a)) / sd
-
-
-def _zscore_or_none(x: np.ndarray) -> Union[np.ndarray, None]:
-    """z-score with the N-1 standard deviation, or None if that standard deviation is not positive.
-
-    Parameters
-    ----------
-    x : numpy.ndarray
-        Data (callers pass a 1-D series); all elements are standardized together.
+    constant : {'zeros', 'none'}
+        What an input with no spread gives.
+        ``'zeros'``: a standard deviation of exactly 0 (a constant series, or a single value) is
+        replaced by 1, so the result is all zeros and a feature that standardizes its input stays
+        defined; a NaN standard deviation (data containing NaN or Inf) propagates, giving all NaN,
+        and an empty input gives an empty array.
+        ``'none'``: ``None`` whenever the standard deviation is not positive (a constant input, or
+        NaN from fewer than two values or non-finite data), for callers that skip or reject a
+        degenerate input.
 
     Returns
     -------
     numpy.ndarray or None
-        ``(x - mean)/sd`` with ``sd = numpy.std(x, ddof=1)``; None when ``sd`` is not positive
-        (a constant input, or NaN from fewer than two values or non-finite data), for callers that
-        skip or reject a degenerate input rather than map it to zeros as
-        :func:`_zscore_or_zeros` does.
+        float64 array of the same shape, ``(x - mean) / sd`` with ``sd`` the sample standard
+        deviation (:func:`_sample_std`), or ``None`` as described for ``constant='none'``.
+
+    Notes
+    -----
+    pyhctsa convention: the sample standard deviation (N-1 in the denominator) is used; which
+    degenerate rule applies is the caller's choice, stated at the call site.
     """
-    sd = _sample_std(x)
-    if not sd > 0:
-        return None
-    return (x - np.mean(x)) / sd
+    if constant not in ('zeros', 'none'):
+        raise ValueError(f"constant must be 'zeros' or 'none', got {constant!r}")
+    a = np.asarray(x, dtype=float)
+    if constant == 'zeros':
+        if a.size == 0:
+            return a.copy()
+        sd = float(_sample_std(a, single=0.0))  # one value is a constant input: zeros
+        if sd == 0:
+            sd = 1.0
+    else:
+        sd = _sample_std(a)
+        if not sd > 0:
+            return None
+    with np.errstate(invalid='ignore'):
+        return (a - np.mean(a)) / sd
 
 
 def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, float]:
@@ -1603,7 +1595,7 @@ def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, fl
     y = pre_process(x_z, 'decimate_ac1e')
     if not isinstance(y, np.ndarray):
         return np.nan
-    return _zscore_or_zeros(y) if rezscore else y
+    return _zscore(y) if rezscore else y
 
 
 def decimation_phases(x_z: ArrayLike, rule: str = 'ac1e',
@@ -1640,7 +1632,7 @@ def decimation_phases(x_z: ArrayLike, rule: str = 'ac1e',
         return np.nan
     tau = int(tau)
     phases = [y[p::tau] for p in range(min(tau, y.size))]
-    phases = [_zscore_or_zeros(yp) if rezscore else yp for yp in phases
+    phases = [_zscore(yp) if rezscore else yp for yp in phases
               if yp.size >= _DECIMATE_MIN_POINTS]
     return phases if phases else np.nan
 
