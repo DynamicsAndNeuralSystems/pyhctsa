@@ -4001,13 +4001,13 @@ def _gp_white_noise_report(log_hyper: np.ndarray, components: list, noise_pos, y
     not beat its white-noise special case, :func:`_gp_beats_white_noise`), set in place in
     ``log_hyper`` (the log covariance hyperparameters). Only the total variance of the series is
     then identified, not its split between the components: the signal amplitudes
-    (:func:`_gp_amp_pos`) are set to NaN, and the ``covNoise`` standard deviations (the total
+    (``_gp_layout(components)['amp']``) are set to NaN, and the ``covNoise`` standard deviations (the total
     observation noise, as :func:`_gp_latent` reports it) to that of the white-noise model, the
     root-mean-square of ``yt`` (the maximum-likelihood standard deviation of a zero-mean Gaussian).
     Returns that log standard deviation.
     """
     log_sd = 0.5 * np.log(np.mean(np.asarray(yt, dtype=float) ** 2))
-    log_hyper[_gp_amp_pos(components)] = np.nan
+    log_hyper[_gp_layout(components)['amp']] = np.nan
     log_hyper[np.asarray(noise_pos, dtype=int)] = log_sd
     return log_sd
 

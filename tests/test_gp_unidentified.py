@@ -66,7 +66,7 @@ def test_gp_hyperparameters_white_noise_other_kernels(cov_func):
     out = mf.gp_hyperparameters(y, cov_func, 1, 200, 'first')
     log_sd, nlml = _white_noise(y[:200])
     components = parse_cov(cov_func)[1]
-    for i in mf._gp_amp_pos(components):
+    for i in mf._gp_layout(components)['amp']:
         assert np.isnan(out[f'logh{i + 1}'])
     for i in mf._gp_noise_pos(components):
         np.testing.assert_allclose(out[f'logh{i + 1}'], log_sd, rtol=RTOL, atol=0)
