@@ -203,12 +203,19 @@ def _series():
 
 SERIES = _series()
 
+# On branch fix-gp-unidentified-amplitudes (#67): where the fitted model does not beat white noise
+# (both ``wn`` cases and ``gp_fit_across`` on ``ar1``, whose training points are too sparse for the
+# AR(1) correlation), the signal amplitude is NaN, the noise is the white-noise standard deviation
+# and nlml is that of the white-noise model, by design; those pins were moved to the new values
+# (main's: ar1 nlml 1.300436272482262, logh2 -0.08815140550692771, logh3 -0.5452414046928566;
+# wn logh3 -0.35719140570889624; covRQiso logh2 -1.9962119439868855, logh4 -0.06755834772024763,
+# nlml 1.3603913867845026). The prediction outputs (stde, stdmu, meanS) are unchanged.
 CASES = [
     ('ar1', lambda y: mf.gp_fit_across(y, 'covSEiso_covNoise'),
-     {'stde': 0.9177860630020508, 'meanS': 0.723678877103032, 'nlml': 1.300436272482262,
-      'logh2': -0.08815140550692771, 'logh3': -0.5452414046928566}),
+     {'stde': 0.9177860630020508, 'meanS': 0.723678877103032, 'nlml': 1.4202118466028613,
+      'logh2': np.nan, 'logh3': 0.053576715480535816}),
     ('wn', lambda y: mf.gp_fit_across(y, 'covSEiso_covNoise'),
-     {'stde': 1.0226552606920438, 'stdmu': 0.018258212994875116, 'logh3': -0.35719140570889624}),
+     {'stde': 1.0226552606920438, 'stdmu': 0.018258212994875116, 'logh3': -0.28804460879053595}),
     ('ar1', lambda y: mf.gp_hyperparameters(y, 'covSEiso_covNoise', 1, 200, 'first'),
      {'logh1': 0.6171109040249246, 'logh2': -0.16161561102675429, 'logh3': -0.8616060751511386,
       'nlml': 1.029397269591294, 'meanS': 0.4989946447392767}),
@@ -216,15 +223,17 @@ CASES = [
      {'logh1': 0.8960543012209071, 'logh2': -0.11666246313149084, 'logh3': -0.9909786549775478,
       'stde': 0.2548620189842625}),
     ('wn', lambda y: mf.gp_hyperparameters(y, 'covRQiso_covNoise', 1, 200, 'first'),
-     {'logh1': 0.0, 'logh2': -1.9962119439868855, 'logh3': np.nan, 'logh4': -0.06755834772024763,
-      'nlml': 1.3603913867845026}),
+     {'logh1': 0.0, 'logh2': np.nan, 'logh3': np.nan, 'logh4': -0.05738379311870417,
+      'nlml': 1.3615547400859684}),
     ('wn', lambda y: mf.gp_hyperparameters(y, 'covSEiso_covPeriodic_covNoise', 1, 100, 'first'),
-     {'logh1': 0.0, 'logh3': np.nan, 'logh4': np.nan,
-     # logh2, logh5, logh6 and nlml (main values -1.4736004215830034, -0.4964149089149668,
-     # -0.36405912244996264, 1.3378221522489182) are not pinned: the length scales and period are
-     # unidentified on white noise (flat marginal likelihood), so the optimizer stops at a
-     # different point per platform (logh5 drifts by up to a factor of 8 between CI runners on
-     # main itself). Only logh1 (0.0, a bound) and the NaN outputs are pinned.
+     {'logh1': 0.0, 'logh2': np.nan, 'logh3': np.nan, 'logh4': np.nan, 'logh5': np.nan,
+      'logh6': -0.05288807443961939, 'nlml': 1.3660504587650533,
+     # On main, logh2, logh5, logh6 and nlml (-1.4736004215830034, -0.4964149089149668,
+     # -0.36405912244996264, 1.3378221522489182) were not pinned: the split of the variance between
+     # the two components was unidentified on white noise (flat marginal likelihood), so the
+     # optimizer stopped at a different point per platform (logh5 drifted by up to a factor of 8
+     # between CI runners). On branch fix-gp-unidentified-amplitudes (#67) the amplitudes are NaN
+     # and the noise and nlml are those of the white-noise model, functions of the data alone.
      }),
 ]
 

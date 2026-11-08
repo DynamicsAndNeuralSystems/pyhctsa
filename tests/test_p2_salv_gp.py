@@ -33,6 +33,11 @@ def test_spreadgap_matches_hctsa(call, name):
     out = CALLS[call](SERIES[name])
     tight = {'q90abs_run', 'q10abs_run', 'q90abs_std_run', 'low25abs_std_run', 'high25errbar', 'q90nlml', 'oosmedabserr'}
     for key, exp in REF[call][name].items():
+        if call.startswith('gph') and key in ('logh2', 'logh3', 'nlml'):
+            # pyhctsa departs from hctsa by design (pyhctsa#63): without correlation structure the
+            # signal amplitude is NaN and the noise and nlml are those of the white-noise model
+            # (tested in tests/test_gp_unidentified.py)
+            continue
         if exp is None:  # hctsa gives NaN
             assert np.isnan(out[key]), f'{call} {name} {key}'
             continue
