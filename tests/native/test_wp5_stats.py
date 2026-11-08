@@ -12,6 +12,7 @@ from pyhctsa.operations import distribution as D
 from pyhctsa.operations import extreme_events as EE
 from pyhctsa.operations import hypothesis_tests as H
 from pyhctsa.operations import stationarity as S
+from pyhctsa.toolboxes.distribution_fits.distfits import evfit
 from pyhctsa.utils import _sample_std
 
 
@@ -50,16 +51,16 @@ def test_distribution_ks_small_for_correct_family():
     assert H.distribution_test(x, 'ks', 'uni') > 0.1          # a normal sample is not uniform
 
 
-def test_ev_mle_recovers_parameters_and_stationary():
+def test_evfit_recovers_parameters_and_stationary():
     rng = np.random.default_rng(1)
     x = stats.gumbel_l.rvs(loc=0.5, scale=2.0, size=100000, random_state=rng)
-    mu, sd = H._ev_mle(x)
+    mu, sd = evfit(x)
     assert mu == pytest.approx(0.5, rel=0.02) and sd == pytest.approx(2.0, rel=0.01)
     # maximum of the likelihood: perturbations lower it
     ll = lambda m, s: stats.gumbel_l.logpdf(x, m, s).sum()
     for dm, ds in [(1e-3, 0), (-1e-3, 0), (0, 1e-3), (0, -1e-3)]:
         assert ll(mu, sd) >= ll(mu + dm, sd + ds)
-    assert all(np.isnan(H._ev_mle(np.ones(10))))
+    assert all(np.isnan(evfit(np.ones(10))))
 
 
 # --------------------------------------------------------------------------- variance ratio
