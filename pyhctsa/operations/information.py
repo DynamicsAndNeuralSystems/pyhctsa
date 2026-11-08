@@ -3,6 +3,7 @@ logger = logging.getLogger('pyhctsa')
 from typing import Any, Dict, List, Optional, Union, Callable
 
 import numpy as np
+from ..utils import _quantile
 from numpy.typing import ArrayLike
 from scipy import stats
 
@@ -374,7 +375,7 @@ def _give_me_edges(r, v, n_bins):
         return bf_hist_edges(v, n_bins)  # equal-width bins spanning the data (explicit edges)
     elif isinstance(r, str) and r == 'quantile':  # bin edges based on quantiles
         ee = 1E-6 * np.ptp(v)  # this small addition (relative to the data) gets lost in the last bin
-        edges = np.asarray(np.quantile(v, np.linspace(0, 1, n_bins + 1), method='hazen'), dtype=float)
+        edges = np.asarray(_quantile(v, np.linspace(0, 1, n_bins + 1)), dtype=float)
         edges[-1] += ee
         return edges
     elif not isinstance(r, str) and len(r) == 2:  # a two-component vector
@@ -500,8 +501,8 @@ def automutual_info_stats(
     # Number of crossings at mean/median level, percentiles
     out['pcrossmean'] = np.mean(np.diff(np.sign(ami - np.mean(ami))) != 0)
     out['pcrossmedian'] = np.mean(np.diff(np.sign(ami - np.median(ami))) != 0)
-    out['pcrossq10'] = np.mean(sign_change(ami - np.percentile(ami, 10, method='hazen')))
-    out['pcrossq90'] = np.mean(sign_change(ami - np.percentile(ami, 90, method='hazen')))
+    out['pcrossq10'] = np.mean(sign_change(ami - _quantile(ami, 0.1)))
+    out['pcrossq90'] = np.mean(sign_change(ami - _quantile(ami, 0.9)))
 
     # ac1
     out['amiac1'] = autocorr(ami, 1, 'Fourier')

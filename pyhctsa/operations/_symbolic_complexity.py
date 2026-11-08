@@ -7,6 +7,8 @@ import numpy as np
 from numba import njit
 from scipy.stats import rankdata
 
+from ..utils import _shannon_entropy
+
 
 @njit(cache=True)
 def _lempel_ziv_phrase_count_scan(s):
@@ -142,5 +144,4 @@ def _shannon_block_entropy(y: np.ndarray, num_bins: int, depth: int) -> float:
         counts = np.unique(words.astype(np.int64) @ weights, return_counts=True)[1]
     else:
         counts = np.unique(words, axis=0, return_counts=True)[1]
-    p = counts / n_words
-    return float(-np.sum(p * np.log(p)))
+    return float(_shannon_entropy(counts / n_words))
