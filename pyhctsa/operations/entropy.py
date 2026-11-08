@@ -946,7 +946,7 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
     n = len(y) - (m - 1) * tau
     if n < 4:  # with 3 or fewer embedded points the only possible return time is 2
         return np.nan
-    v = np.column_stack([y[k * tau:k * tau + n] for k in range(m)])
+    v = time_delay_embed(y, m, tau)
     hist = _close_returns_hist(np.ascontiguousarray(v), float(epsilon))
     if t_max > -1:
         hist = hist[:int(t_max)]
@@ -1031,7 +1031,7 @@ def _apen_phis(x: ArrayLike, m: int, r: float, tau: int = 1) -> tuple:
     phis = []
     for length in (m, m + 1):
         n_vec = x.size - (length - 1) * tau
-        vecs = np.column_stack([x[j * tau:j * tau + n_vec] for j in range(length)])
+        vecs = time_delay_embed(x, length, tau)
         counts = cKDTree(vecs).query_ball_point(vecs, r, p=np.inf, return_length=True)
         phis.append(np.mean(np.log(counts / n_vec)))
     return phis[0], phis[1]
@@ -1576,7 +1576,7 @@ def _ro_pattern_dists(y: np.ndarray, tau: int) -> np.ndarray:
     cdf = lambda k: F0[k.astype(np.int64)]
     cdf2 = lambda k: F20[k.astype(np.int64)]
     pm = lambda k: f[k.astype(np.int64) - 1]
-    W = np.column_stack([r[:n - 2 * tau], r[tau:n - tau], r[2 * tau:]])
+    W = time_delay_embed(r, 3, tau)
     nx = W.shape[0]
     S = np.zeros((8, 6))
 
@@ -1896,7 +1896,7 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
     z = np.clip(np.floor(c * y_mapped) + 1, 1, c).astype(np.int64)
 
     # Z[i, k] = z[i + k*tau], one row per embedding vector
-    emb = z[np.arange(num_vectors)[:, None] + np.arange(m) * tau]
+    emb = time_delay_embed(z, m, tau).astype(np.int64)  # exact: z holds small integers
 
     # Dispersion entropy: the patterns are the class sequences themselves (c^m of them),
     # encoded as base-c integers
@@ -1996,7 +1996,7 @@ def fuzzy_entropy(y: ArrayLike, M: int = 2, r: float = 0.2, n: float = 2) -> dic
 
     phi = np.zeros(M + 1)
     for m in range(1, M + 2):
-        Z = y[np.arange(Nv)[:, None] + np.arange(m)[None, :]]
+        Z = time_delay_embed(y, m, 1)[:Nv]  # the first Nv vectors, shared by every m
         Z = Z - Z.mean(axis=1, keepdims=True)  # remove each run's own mean (local baseline)
         total = _fuzzy_similarity_sum(np.ascontiguousarray(Z.T), float(width), float(n))
         phi[m - 1] = total / (Nv * (Nv - 1))

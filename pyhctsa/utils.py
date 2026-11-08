@@ -1228,6 +1228,25 @@ def theiler_window(y: Union[ArrayLike, None], spec: Union[int, float, list, tupl
     raise ValueError("Unrecognized Theiler window specification")
 
 
+def _theiler_int(y: Union[ArrayLike, None], spec: Union[int, float, list, tuple],
+                 N: Union[int, None] = None, what: str = 'the Theiler window',
+                 reason: str = 'No autocorrelation zero-crossing',
+                 warn: bool = True) -> Union[int, None]:
+    """
+    A Theiler window (or other autocorrelation-scaled length) as an int, or None if unset.
+
+    Resolves `spec` with :func:`theiler_window` (same `y`, `spec`, `N`). When that gives NaN
+    (no autocorrelation time), logs ``f'{reason} to set {what}'`` (unless `warn` is False)
+    and returns None, so a caller returns NaN; otherwise returns the window as an ``int``.
+    """
+    w = theiler_window(y, spec, N)
+    if np.isnan(w):
+        if warn:
+            logger.warning(f'{reason} to set {what}')
+        return None
+    return int(w)
+
+
 # pre_process(y, 'decimate_ac1e') gives NaN when the decimated series would be shorter than
 # the global minimum series length (a decimated series is a series). Each *_dec feature's own
 # minimum length (hctsa.yaml) is then checked on the decimated series. hctsa's BF_PreProcess
