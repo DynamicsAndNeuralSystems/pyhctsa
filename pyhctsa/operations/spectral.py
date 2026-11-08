@@ -1699,8 +1699,8 @@ def envelope_stats(y: ArrayLike, power_frac: float = 0.5, trim_frac: float = 0.0
         - ``dom_cv``, ``dom_skew`` (the envelope's skewness), ``dom_kurt``,
           ``dom_tau``: as above for the dominant band.
         - ``dom_ifspread``: a robust spread of the dominant band's instantaneous
-          frequency (1.4826 times the median absolute deviation of the phase
-          increments, in cycles per sample).
+          frequency (``MAD_TO_SIGMA = 1/Phi^{-1}(3/4)`` times the median absolute deviation of
+          the phase increments, in cycles per sample).
 
         All fields are NaN for constant, non-finite, or very short (N < 50) series.
         A 1/e timescale is NaN when the autocorrelation never falls below 1/e
@@ -2479,7 +2479,8 @@ def rhythmicity(y: ArrayLike, m: float = 5, tau: float = 1.5, n_freq: int = 40,
 
     Notes
     -----
-    Scaled MAD is ``1.4826`` times the median absolute deviation from the median. The wavelet
+    Scaled MAD is ``MAD_TO_SIGMA = 1/Phi^{-1}(3/4) = 1.4826...`` times the median absolute deviation
+    from the median. The wavelet
     at frequency ``f`` is a Gaussian-windowed complex exponential with envelope standard
     deviation ``m / (2 pi f)`` samples, truncated at 3.5 standard deviations, made zero-mean
     and normalized to unit energy.

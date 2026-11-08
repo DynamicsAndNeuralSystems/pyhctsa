@@ -8,13 +8,12 @@ from scipy import stats
 import logging
 logger = logging.getLogger('pyhctsa')
 
-from ..utils import _even_split_points, dict_output, sign_change
+from ..utils import MAD_TO_SIGMA, _even_split_points, dict_output, sign_change
 from ..utils import _shannon_entropy as _prob_entropy  # wavelet._shannon_entropy is the c^2 cost
 from ..toolboxes.pywavelets.cwt import _custom_cwt
 
-# Scale factor of the median absolute deviation of Gaussian noise, Phi^{-1}(0.75) = 0.67449
-# (Donoho & Johnstone 1994, Biometrika 81(3):425-455): sigma = median(|d|) / _MAD_TO_SIGMA.
-_MAD_TO_SIGMA = float(stats.norm.ppf(0.75))
+# Robust noise scale of wavelet detail coefficients (Donoho & Johnstone 1994, Biometrika
+# 81(3):425-455): sigma = MAD_TO_SIGMA * median(|d|), MAD_TO_SIGMA = 1/Phi^{-1}(3/4).
 
 
 def _valid_filter_mean_square(z: np.ndarray, f: np.ndarray) -> np.float64:
@@ -168,7 +167,7 @@ def scal_2_freq(y: ArrayLike, w_name: str = 'db3', a_max: int = 5, delta: int = 
     stdc = []
     for k in range(1, a_max+1):
         d = _detcoef(coeffs, k)
-        stdc.append(np.median(np.abs(d)) / _MAD_TO_SIGMA)
+        stdc.append(MAD_TO_SIGMA * np.median(np.abs(d)))
     #% Compute identified period.
     j_max = np.argmax(stdc)
     out = {"lmax": j_max + 1, # level with highest energy coefficients
@@ -220,7 +219,7 @@ def dwt_coeff(y: ArrayLike, w_name: str = 'db3', level: int = 3) -> dict:
             # std coefficients at this level:
             out[f'stdd_l{k}'] = np.std(d, ddof=1)
             #% 1-D noise coefficient estimate (estimate of the noise std):
-            out[f'noisestd_l{k}'] = np.median(np.abs(d)) / _MAD_TO_SIGMA  # robust noise sd (Donoho & Johnstone)
+            out[f'noisestd_l{k}'] = MAD_TO_SIGMA * np.median(np.abs(d))  # robust noise sd (Donoho & Johnstone)
         else:
             # exceeds max level, return nans
             out[f'maxd_l{k}'] = np.nan 

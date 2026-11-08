@@ -25,7 +25,7 @@ import scipy.fft
 from numba import njit
 from numpy.typing import ArrayLike
 
-from .utils import MAD_DIVISOR, _is_roundoff, _round_half_away
+from .utils import MAD_TO_SIGMA, _is_roundoff, _round_half_away
 
 __all__ = [
     'bf_random', 'bf_random_seed', 'bf_tie_break_noise', 'bf_runs_z', 'bf_residual_stats', 'bf_theil_sen',
@@ -931,7 +931,7 @@ def bf_ks_density(y: ArrayLike, xi: Optional[ArrayLike] = None,
 
     Evaluates ``f(x) = mean_i N(x; y_i, h^2)`` exactly (no binning, no truncation of the
     kernel). The default bandwidth is Silverman's rule with a robust scale,
-    ``h = s*(4/(3n))^(1/5)``, ``s = median(|y - median(y)|)/0.6745`` (``s = std(y)`` if the
+    ``h = s*(4/(3n))^(1/5)``, ``s = MAD_TO_SIGMA * median(|y - median(y)|)`` (``s = std(y)`` if the
     median absolute deviation is zero; if that too is zero, ``h``, ``xi`` and ``f`` are NaN).
 
     Parameters
@@ -958,7 +958,7 @@ def bf_ks_density(y: ArrayLike, xi: Optional[ArrayLike] = None,
     n = y.size
 
     if h is None:
-        s = np.median(np.abs(y - np.median(y))) / MAD_DIVISOR  # robust estimate of the standard deviation
+        s = MAD_TO_SIGMA * np.median(np.abs(y - np.median(y)))  # robust estimate of the standard deviation
         if s <= 0:
             s = np.std(y, ddof=1) if n > 1 else 0.0
         h = np.nan if s <= 0 else s * (4 / (3 * n)) ** (1 / 5)

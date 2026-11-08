@@ -86,7 +86,9 @@ PINS = {
     'embed2_shapes|sine': {'iqr': 0.11619718309859156, 'iqronrange': 0.31428571428571433, 'median': 0.27816901408450706},
     'embed2_shapes|heavy_ties': {'iqr': 0.326530612244898, 'iqronrange': 0.5393258426966293, 'median': 0.3741496598639456},
     'withinp|ar1': {'value': 0.6533333333333333},
-    'withinp|sine': {'value': 0.7166666666666667},
+    # withinp (median mode) scales the IQR by the exact IQR_TO_SIGMA since cons-mad-constant (#61)
+    # instead of 1/1.35: one sample of the sine series moves across the band (0.7167 on main).
+    'withinp|sine': {'value': 0.72},
     'withinp|heavy_ties': {'value': 0.68},
     'spread_iqr|ar1': {'value': 1.2406424559498603},
     'spread_iqr|sine': {'value': 1.569826084696433},

@@ -132,7 +132,8 @@ def distribution_entropy(
         - (for 'ks'): a positive real number, the bandwidth (standard deviation of the Gaussian
           kernel) of the kernel density estimate; or empty (``''`` / ``None``) for the default
           bandwidth, the normal-reference rule ``sigma * (4 / (3 N)) ** (1/5)`` with
-          ``sigma = median(|y - median(y)|) / 0.6745`` (see :func:`~pyhctsa.robust.bf_ks_density`).
+          ``sigma = MAD_TO_SIGMA * median(|y - median(y)|)``, ``MAD_TO_SIGMA = 1/Phi^{-1}(3/4)``
+          (see :func:`~pyhctsa.robust.bf_ks_density`).
 
         Default is 10.
 
