@@ -24,6 +24,7 @@ import scipy.fft
 from pyhctsa.operations import medical as md
 from pyhctsa.operations import nonlinearity as nl
 from pyhctsa.operations import spectral as sp
+from pyhctsa.utils import MAD_TO_SIGMA
 
 
 def _series():
@@ -53,6 +54,12 @@ CALLS = {
     'embed_kernel_pca': (nl.embed_kernel_pca, {'max_n': 300}),
 }
 
+# Re-pinned on this branch (cons-mad-constant, #61): the following values change with the convention
+# this branch fixes (see its PR body); every other value is the main-checkout value.
+#   envelope_stats|ar1.dom_ifspread
+#   envelope_stats|sin_odd.dom_ifspread
+#   spectral_summaries_welch|ar1.linfitsemilog_all_sigma
+#   spectral_summaries_welch|sin_odd.linfitsemilog_all_sigma
 PINNED = {
     'phase_amp_coupling': {
         'ar1': {
@@ -80,14 +87,14 @@ PINNED = {
             'full_kurt': 3.072060821424426,
             'dom_cv': 0.5488229077973847,
             'dom_kurt': 2.582744449508469,
-            'dom_ifspread': 0.006855560811158193,
+            'dom_ifspread': 0.006855571069555646,
         },
         'sin_odd': {
             'full_cv': 0.35638175239959974,
             'full_kurt': 2.899025885040078,
             'dom_cv': 0.08218266644905439,
             'dom_kurt': 5.313460719412068,
-            'dom_ifspread': 0.00026455008098093616,
+            'dom_ifspread': 0.0002645504768434997,
         },
     },
     'phase_fluctuation_scaling': {
@@ -125,14 +132,14 @@ PINNED = {
             'maxS': 13.643921523814466,
             'logstd': 1.389451831981044,
             'fpoly2_r2': 0.8239741667739016,
-            'linfitsemilog_all_sigma': 0.6157699250328597,
+            'linfitsemilog_all_sigma': 0.6157705960277321,
             'ncross_log_f50': 9.0,
         },
         'sin_odd': {
             'maxS': 14.707338053612684,
             'logstd': 0.8170941202649162,
             'fpoly2_r2': 0.654978995748215,
-            'linfitsemilog_all_sigma': 0.4304900808864068,
+            'linfitsemilog_all_sigma': 0.4304897629234888,
             'ncross_log_f50': 2.0,
         },
     },
@@ -276,7 +283,9 @@ def _ref_envelope_stats(y, power_frac=0.5, trim_frac=0.05):
     # standard deviation for a Gaussian)
     phi = np.unwrap(np.angle(z_dom[keep]))
     inst_freq = np.diff(phi) / (2 * np.pi)
-    out['dom_ifspread'] = 1.4826 * np.median(np.abs(inst_freq - np.median(inst_freq)))
+    # (cons-mad-constant, #61: the exact MAD_TO_SIGMA replaces 1.4826 here as in the operation;
+    # the rest of the body is verbatim)
+    out['dom_ifspread'] = MAD_TO_SIGMA * np.median(np.abs(inst_freq - np.median(inst_freq)))
     return out
 
 
