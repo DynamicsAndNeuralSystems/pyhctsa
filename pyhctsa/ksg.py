@@ -20,6 +20,18 @@ joint ``(x, y)`` space:
   ``eps_y(i)`` are the largest ``x`` and ``y`` separations among the ``k`` joint neighbors, and
   ``n_x`` (``n_y``) counts the samples within (at most) ``eps_x(i)`` (``eps_y(i)``).
 
+The estimators assume continuous data. On data with repeated values, algorithm 2 is ill-defined
+twice over: the ``k`` joint neighbors are not unique where several samples tie at the k-th
+distance (which ones a k-d tree returns depends on its traversal, so on the platform), and every
+sample sharing the boundary value counts towards ``n_x`` (``n_y``), which biases the estimate
+down, often below zero. So, in algorithm 2, each column of ``x`` or ``y`` that has a repeated
+value has its repeated entries made distinct first, with tiny Gaussian jitter (standard
+deviation ``1e-10`` of the standardized column) from the portable fixed-seed stream
+:func:`pyhctsa.robust.bf_random`: the ties are broken as the continuous data they approximate
+would break them, and the result is deterministic and the same on every platform. Values that
+occur once are not touched (distances can still tie without repeated values, e.g. on a regular
+grid; those ties are left to the tree).
+
 References
 ----------
 .. [1] A. Kraskov, H. Stoegbauer, P. Grassberger, "Estimating mutual information",
@@ -28,6 +40,7 @@ References
    complex systems", Front. Robot. AI 1, 11 (2014).
 """
 import numpy as np
+from .robust import bf_random
 from .utils import _sample_std
 from numba import njit
 from scipy.special import digamma
@@ -103,13 +116,49 @@ def _standardize(a):
     return (a - a.mean(axis=0)) / sd
 
 
+# Standard deviation of the tie-breaking jitter of algorithm 2, relative to the standardized column
+_TIE_JITTER = 1e-10
+
+
+def _break_ties(a, first_seed):
+    """``a`` (standardized columns) with its repeated values made distinct: in each non-constant
+    column j, every entry whose value occurs more than once gets Gaussian jitter of standard
+    deviation ``_TIE_JITTER``, entry i the i-th value of ``bf_random(n, first_seed + j,
+    'normal')``, so the result is deterministic and portable. Jitter this small can land two
+    entries on the same float again (a birthday collision at round-off resolution, in large tie
+    blocks); the entries still repeated are then jittered again, with the stream of seed
+    ``first_seed + j + 1000 * pass``, until none is. Entries whose values are distinct are not
+    touched.
+    """
+    out = a
+    n = a.shape[0]
+    for j in range(a.shape[1]):
+        if _sample_std(a[:, j]) == 0:
+            continue
+        col = a[:, j]
+        for p in range(100):
+            _, inverse, counts = np.unique(col, return_inverse=True, return_counts=True)
+            repeated = counts[inverse.ravel()] > 1
+            if not repeated.any():
+                break
+            if out is a:
+                out = a.copy()
+            col = out[:, j]
+            col[repeated] += _TIE_JITTER * bf_random(n, first_seed + j + 1000 * p, 'normal')[repeated]
+    return np.ascontiguousarray(out)
+
+
 def ksg_mi(x, y, k=4, algorithm=1, theiler=0):
     """Kraskov-Stoegbauer-Grassberger estimate of the mutual information I(x; y), in nats.
 
     Each column of ``x`` and of ``y`` is first standardized to zero mean and unit variance, so
-    that the max norm weighs all dimensions equally. The caller is responsible for breaking
-    exact ties (repeated values) in the data, e.g. with tiny noise, as the estimator is
-    ill-defined for coincident points.
+    that the max norm weighs all dimensions equally. The estimators assume continuous data. In
+    algorithm 2, the repeated values of each column then get tiny, fixed-seed Gaussian jitter
+    (standard deviation 1e-10, from :func:`pyhctsa.robust.bf_random`; seeds 0, 1, ... over the
+    columns of ``x`` and then of ``y``), which breaks the ties deterministically and identically
+    on every platform; see the module docstring. Values that occur once are not touched.
+    Algorithm 1 is used as given: it depends on the joint neighbors only through the k-th
+    distance, so it is deterministic on tied data, though biased by them.
 
     Parameters
     ----------
@@ -149,6 +198,10 @@ def ksg_mi(x, y, k=4, algorithm=1, theiler=0):
 
     x = np.ascontiguousarray(_standardize(x))
     y = np.ascontiguousarray(_standardize(y))
+    if algorithm == 2:
+        # break exact ties (repeated values) with fixed-seed jitter, a seed per column
+        x = _break_ties(x, 0)
+        y = _break_ties(y, x.shape[1])
     # the k nearest max-norm neighbors of each joint point outside the Theiler window
     dist, neighbors = _knn_theiler(np.hstack([x, y]), k, theiler, metric='chebyshev')
 
