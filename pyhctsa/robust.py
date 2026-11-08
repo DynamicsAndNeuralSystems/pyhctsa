@@ -25,7 +25,7 @@ import scipy.fft
 from numba import njit
 from numpy.typing import ArrayLike
 
-from .utils import _round_half_away
+from .utils import MAD_DIVISOR, _is_roundoff, _round_half_away
 
 __all__ = [
     'bf_random', 'bf_random_seed', 'bf_tie_break_noise', 'bf_runs_z', 'bf_residual_stats', 'bf_theil_sen',
@@ -291,7 +291,7 @@ def bf_residual_stats(res: ArrayLike, y: ArrayLike) -> Tuple[float, float, float
     from .operations.correlation import autocorr
     res = np.asarray(res, dtype=float).ravel()
     y = np.asarray(y, dtype=float).ravel()
-    if np.std(res, ddof=1) <= 10 * res.size * np.finfo(float).eps * np.sqrt(np.mean(y ** 2)):
+    if _is_roundoff(res, y, n=res.size):
         return np.nan, np.nan, np.nan  # nothing but round-off is left (an exact fit)
     with np.errstate(all='ignore'):
         ac = np.asarray(autocorr(res, [1, 2], 'Fourier'), dtype=float).ravel()
@@ -958,7 +958,7 @@ def bf_ks_density(y: ArrayLike, xi: Optional[ArrayLike] = None,
     n = y.size
 
     if h is None:
-        s = np.median(np.abs(y - np.median(y))) / 0.6745  # robust estimate of the standard deviation
+        s = np.median(np.abs(y - np.median(y))) / MAD_DIVISOR  # robust estimate of the standard deviation
         if s <= 0:
             s = np.std(y, ddof=1) if n > 1 else 0.0
         h = np.nan if s <= 0 else s * (4 / (3 * n)) ** (1 / 5)
@@ -1223,3 +1223,20 @@ def bf_remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
             return y_t
         raise ValueError(f"Cannot 'saturate' when using '{remove_how}' method")
     raise ValueError(f"Unknown remove_or_saturate option: '{remove_or_saturate}'")
+
+
+def _rank_map_gaussian(y: np.ndarray, random_seed=None, draws: np.ndarray = None) -> np.ndarray:
+    """Replace the values of y by Gaussian values of the same rank (hctsa's ``rmgd``).
+
+    N Gaussian values are drawn and sorted, and the k-th smallest is given to the k-th smallest
+    value of y. ``random_seed`` is as in ``remove_points``: an integer, ``None``/``'default'``
+    for seed 0, or ``'none'`` for a seed drawn from NumPy's global random state. The draws come
+    from the portable generator :func:`pyhctsa.robust.bf_random` (normal), so they are hctsa's
+    for the same seed. The sorted draws can instead be supplied as ``draws``.
+    """
+    n = len(y)
+    if draws is None:
+        draws = bf_random(n, bf_random_seed(random_seed), 'normal')
+    out = np.zeros(n)
+    out[np.argsort(y, kind='stable')] = np.sort(draws)
+    return out
