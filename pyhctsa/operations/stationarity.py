@@ -21,6 +21,7 @@ from ..robust import bf_exp_fit, bf_quantile_edges, bf_random, bf_random_seed
 from ..utils import dict_output, _autocov_fft, _round_half_away, _sample_std, get_tau, frame_signal, sign_change, z_score
 from ..utils import _shannon_entropy
 from ..fitting import polyfit, robust_linear_fit
+from ..utils import _zscore_or_zeros, make_buffer
 
 _PP_TREND = {'ar': 'n', 'ard': 'c', 'ts': 'ct'}
 _PP_TEST_TYPE = {'t1': 'tau', 't2': 'rho'}
@@ -417,16 +418,11 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
 
     for i, nseg in enumerate(nsegr):
         wlen = int(np.floor(len(y) / nseg))  # window length
-        inc = int(np.floor(wlen / nmov))  # increment to move at each step
-        # if increment is rounded to zero, prop it up
-        if inc == 0:
-            inc = 1
+        starts = _window_starts(len(y), wlen, nmov)
+        qs = np.zeros((len(starts), num_features))
 
-        num_steps = int(np.floor((len(y) - wlen) / inc) + 1)
-        qs = np.zeros((num_steps, num_features))
-
-        for j in range(num_steps):
-            y_sub = y[j * inc:j * inc + wlen]
+        for j, start in enumerate(starts):
+            y_sub = y[start:start + wlen]
             tau_l = first_crossing(y_sub, 'ac', 0, 'discrete')
 
             qs[j, 0] = np.mean(y_sub)
@@ -993,11 +989,8 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
             'meanabsmaxmin': np.nan
         }
     
-    # Calculate number of complete segments
-    num_segments = int(np.floor(N/segment_length))
-    
-    # More efficient segmentation using array operations
-    segments = y[:num_segments * segment_length].reshape(num_segments, segment_length)
+    # Non-overlapping segments (a trailing partial segment is discarded)
+    segments = make_buffer(y, segment_length)
     
     # Calculate statistics
     segment_means = np.mean(segments, axis=1)
@@ -1429,7 +1422,7 @@ def peak_intervals(y: ArrayLike, min_prom: float = 1) -> dict:
     if N < 20 or not np.all(np.isfinite(y)) or np.std(y, ddof=1) == 0:
         return out
 
-    y = (y - np.mean(y)) / np.std(y, ddof=1) # prominence is in units of the series' standard deviation
+    y = _zscore_or_zeros(y) # prominence is in units of the series' standard deviation
 
     locs, props = find_peaks(y, prominence=min_prom)
     proms = props['prominences']
@@ -1998,45 +1991,41 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
     if win_length == 0:
         logger.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
         return np.nan
-    inc = np.floor(win_length/inc_move) # increment to move at each step
-    # if incrment rounded down to zero, prop it up
-    if inc == 0:
-        inc = 1
-
-    num_steps = int(np.floor((len(y)-win_length)/inc) + 1)
+    windows = [y[start:start + int(win_length)] for start in _window_starts(len(y), win_length, inc_move)]
+    num_steps = len(windows)
     qs = np.zeros(num_steps)
 
     if window_stat == 'mean':
         for i in range(num_steps):
-            qs[i] = np.mean(y[_get_window(i, inc, win_length)])
+            qs[i] = np.mean(windows[i])
     elif window_stat == 'std':
         for i in range(num_steps):
-            qs[i] = _sample_std(y[_get_window(i, inc, win_length)])
+            qs[i] = _sample_std(windows[i])
     elif window_stat == 'ent':
         for i in range(num_steps):
-            qs[i] = distribution_entropy(y[_get_window(i, inc, win_length)], 'ks','[]')
+            qs[i] = distribution_entropy(windows[i], 'ks','[]')
     elif window_stat == 'permen':
         for i in range(num_steps):
-            qs[i] = _perm_en_norm(y[_get_window(i, inc, win_length)])
+            qs[i] = _perm_en_norm(windows[i])
     elif window_stat == 'specen':
         for i in range(num_steps):
-            qs[i] = _spectral_entropy_norm(y[_get_window(i, inc, win_length)])
+            qs[i] = _spectral_entropy_norm(windows[i])
     elif window_stat == 'apen':
         for i in range(num_steps):
-            qs[i] = approximate_entropy(y[_get_window(i, inc, win_length)], 1, 0.2)
+            qs[i] = approximate_entropy(windows[i], 1, 0.2)
     elif window_stat == 'sampen':
         for i in range(num_steps):
-            sampen_dict = sample_entropy(y[_get_window(i, inc, win_length)], 1, 0.1)
+            sampen_dict = sample_entropy(windows[i], 1, 0.1)
             qs[i] = sampen_dict['sampen1']
     elif window_stat in ('mom3', 'mom4', 'mom5'):
         the_mom = int(window_stat[3:])
         for i in range(num_steps):
-            qs[i] = moments(y[_get_window(i, inc, win_length)], the_mom)
+            qs[i] = moments(windows[i], the_mom)
     elif window_stat == 'lillie':
         # Lilliefors statistic (as lillietest's kstat): KS distance between the empirical CDF
         # and a normal CDF with the window's own mean and std (N-1)
         for i in range(num_steps):
-            w = y[_get_window(i, inc, win_length)]
+            w = windows[i]
             if len(w) < 4:
                 qs[i] = np.nan # lillietest needs at least 4 observations
             elif np.std(w, ddof=1) == 0:
@@ -2045,7 +2034,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
                 qs[i] = kstest(w, norm(loc=np.mean(w), scale=np.std(w, ddof=1)).cdf).statistic
     elif window_stat == 'AC1':
         for i in range(num_steps):
-            qs[i] = autocorr(y[_get_window(i, inc, win_length)], 1, 'Fourier')
+            qs[i] = autocorr(windows[i], 1, 'Fourier')
     elif window_stat == 'asymAC1':
         # an adaptive lag is set from the whole series, not per window
         tau = get_tau(y, asym_tau)
@@ -2055,9 +2044,8 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         if not np.isnan(tau) and tau < win_length - 1: # need pairs to average over
             tau = int(tau)
             for i in range(num_steps):
-                w = y[_get_window(i, inc, win_length)]
-                sd = np.std(w, ddof=1)
-                zw = (w - np.mean(w)) / (sd if sd > 0 else 1.0) # a constant window gives zeros
+                w = windows[i]
+                zw = _zscore_or_zeros(w) # a constant window gives zeros
                 qs[i] = np.mean(zw[:-tau] * zw[tau:] * (zw[tau:] - zw[:-tau]))
     else:
         raise ValueError(f"Unknown statistic '{window_stat}'")
@@ -2103,12 +2091,17 @@ def _spectral_entropy_norm(w: np.ndarray) -> float:
         return np.nan
     return _shannon_entropy(Py, base=2, normalize=True) / np.log2(len(w)//2)  # 0*log(0) = 0
 
-def _get_window(step_ind, inc, win_length):
-    # helper function to convert a step index (stepInd) to a range of indices corresponding to that window
-    start_idx = (step_ind) * inc
-    end_idx = (step_ind) * inc + win_length
-    
-    return np.arange(start_idx, end_idx).astype(int)
+def _window_starts(n: int, wlen: float, inc_move: float) -> np.ndarray:
+    """Start indices of the windows of length ``wlen`` that slide along ``n`` samples.
+
+    The step is ``floor(wlen / inc_move)`` (raised to 1 if that rounds to 0), and every window
+    lies wholly inside the series: ``floor((n - wlen) / step) + 1`` windows, the first at 0.
+    """
+    inc = int(np.floor(wlen / inc_move))
+    if inc == 0:
+        inc = 1
+    num_steps = int(np.floor((n - wlen) / inc) + 1)
+    return np.arange(num_steps) * inc
 
 def _kendall(x: np.ndarray, y: np.ndarray) -> tuple:
     """
@@ -2248,8 +2241,7 @@ def ramping_windows(y: ArrayLike, num_seg: int = 10, asym_tau: Union[int, str] =
         seg_ac1[i] = autocorr(z[i, :], 1, 'Fourier')
         if not np.isnan(tau) and tau < seg_length - 1: # need pairs to average over
             t = int(tau)
-            sd = np.std(z[i, :], ddof=1)
-            zseg = (z[i, :] - np.mean(z[i, :])) / (sd if sd > 0 else 1.0) # z-scored *within* this segment (a constant segment gives zeros)
+            zseg = _zscore_or_zeros(z[i, :]) # z-scored *within* this segment (a constant segment gives zeros)
             seg_asym_ac1[i] = np.mean(zseg[:-t] * zseg[t:] * (zseg[t:] - zseg[:-t]))
 
     # ------------------------------------------------------------------------------
