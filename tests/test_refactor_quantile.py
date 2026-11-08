@@ -69,6 +69,9 @@ CALLS = [
   ('compare_test_sets', 'model_fit', 'compare_test_sets', {'the_model': 'ar', 'ord': 4, 'subset_how': 'spread', 'sample_p': [25, 0.1], 'steps': 1}, ['stde_iqr', 'ac1_iqr', 'meane_iqr', 'stdrat_iqr']),
 ]
 
+# Re-pinned on this branch (cons-coarse-grain, #60): the following values change with the convention
+# this branch fixes (see its PR body); every other value is the main-checkout value.
+#   surprise|heavy_ties.mean
 PINS = {
     'oversampling|ar1': {'eta': 12.49178335825558, 'etaRobust': 7.453175255073525, 'numHalvings': 1.0, 'etaAfterDownsampling': 8.810775668302176},
     'oversampling|sine': {'eta': 7.183445207566253, 'etaRobust': 5.175780705124405, 'numHalvings': 0.0, 'etaAfterDownsampling': 7.183445207566253},
@@ -179,7 +182,7 @@ PINS = {
     'surrogates|heavy_ties': {'iqrsfrommedian': 1.551537903444498},
     'surprise|ar1': {'median': 1.148622709242771, 'lq': 0.9203640572617908, 'uq': 1.3156767939059373, 'mean': 1.1622261803876606},
     'surprise|sine': {'median': 1.148622709242771, 'lq': 1.0282530526404763, 'uq': 1.201266442728193, 'mean': 1.1329601109923655},
-    'surprise|heavy_ties': {'median': 1.0986122886681098, 'lq': 1.0055218656020977, 'uq': 1.2568362938830038, 'mean': 1.11999000272458},
+    'surprise|heavy_ties': {'median': 1.0986122886681098, 'lq': 1.0055218656020977, 'uq': 1.2568362938830038, 'mean': 1.1279824007553279},
     'binary_stats_iqr|ar1': {'pupstat2': 0.7647058823529411, 'pstretch1': 0.14333333333333334, 'longstretch0': 14.0, 'meanstretch1': 3.488372093023256},
     'binary_stats_iqr|sine': {'pupstat2': 0.948051948051948, 'pstretch1': 0.21, 'longstretch0': 8.0, 'meanstretch1': 2.380952380952381},
     'binary_stats_iqr|heavy_ties': {'pupstat2': 1.054054054054054, 'pstretch1': 0.25, 'longstretch0': 7.0, 'meanstretch1': 2.026666666666667},

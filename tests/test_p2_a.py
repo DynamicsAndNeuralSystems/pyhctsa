@@ -58,6 +58,16 @@ KNOWN_DIFF = {('e2d_tau', 'quant_ar'), ('rect', 'lattice300'),
               # pairs at exactly the recurrence radius are counted (d <= r exactly), and the series are
               # no longer rounded to 7 significant digits: neighbor ties of quantized/lattice data move
               ('rqa2', 'lattice300'), ('lyap', 'quant_ar'), ('lyap7', 'quant_ar')}
+# pyhctsa's equiprobable coarse-graining (utils._coarse_grain: Hazen quantile cuts closed on the
+# left, tied values sharing the symbol of their mid-rank) differs from hctsa's on tied series
+# (quant_ar, lattice300) and where a value sits exactly on a cut (the median of the odd-length
+# increments of Z1 and Z6); its convention is pinned in tests/test_refactor_coarse_grain.py
+KNOWN_DIFF |= {('hami_quantiles_10', 'quant_ar'), ('hami_quantiles_50', 'quant_ar'),
+               ('hami_quantiles_50', 'lattice300'), ('cmin_quantiles', 'lattice300'),
+               ('fs2', 'Z1'), ('fs2', 'Z6'), ('fs2', 'lattice300'), ('fs8', 'Z1'), ('fs8', 'Z6'),
+               ('fs8', 'quant_ar'), ('fs8', 'lattice300')}
+KNOWN_DIFF |= {(k, s) for k in ('fs1', 'fs4', 'fs5', 'fs6', 'fs7', 'tpa_c', 'tpa_def')
+               for s in ('quant_ar', 'lattice300')}
 # DVV draws its random reference vectors and surrogate permutations from hctsa's portable stream rather
 # than a MATLAB stream, so its values differ from the MATLAB run by sampling variation only; the
 # statistics are tested as properties in tests/native/test_wp6_nonlinear.py

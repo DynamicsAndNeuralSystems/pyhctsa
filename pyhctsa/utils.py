@@ -1024,6 +1024,52 @@ def _average_ranks(y: ArrayLike) -> np.ndarray:
     return rankdata(np.asarray(y, dtype=float).ravel(), method='average')
 
 
+def _coarse_grain(x: ArrayLike, n_symbols: int, how: str = 'quantile',
+                  limits: Union[tuple, None] = None) -> np.ndarray:
+    """Symbols ``0..n_symbols-1`` of a static partition of the values of ``x``.
+
+    - ``how='quantile'``: the equiprobable (maximum-entropy) partition, cut at the ``j/n_symbols``
+      quantiles of the data. With ``R`` the average rank (1..N) of a value, its symbol is
+      ``floor(n_symbols * (R - 1/2) / N)``: the number of cuts at or below its mid-distribution
+      value ``(R - 1/2) / N``, the Hazen plotting position (Hyndman & Fan definition 5, the
+      quantile definition used throughout pyhctsa). For distinct values this is exactly the
+      partition at the Hazen quantiles with bins closed on the left (a value on a cut takes the
+      upper symbol), and the bin counts differ by at most one. Tied values share a symbol (a
+      symbol is a function of the value); a tied group is assigned by its mid-rank, i.e. to the
+      bin holding the center of its rank span. Constant input gives the single symbol
+      ``n_symbols // 2``. The symbols are invariant under any strictly increasing transformation.
+    - ``how='width'``: equal-width bins, ``floor(n_symbols * (x - lo) / (hi - lo))`` clipped to
+      ``0..n_symbols-1``, with ``(lo, hi)`` the range of the data, or ``limits`` (then values
+      outside fall in the end bins). Bins are closed on the left; ``hi`` itself is in the top
+      bin. A degenerate range (constant input) gives the single symbol ``n_symbols // 2``.
+
+    Raises ``ValueError`` if ``x`` contains NaN.
+
+    Notes
+    -----
+    C. S. Daw, C. E. A. Finney and E. R. Tracy, Rev. Sci. Instrum. 74:915 (2003), sec. III.A
+    (equiprobable partitions); R. J. Hyndman and Y. Fan, Am. Stat. 50:361 (1996).
+    """
+    x = np.asarray(x, dtype=np.float64).ravel()
+    k = int(n_symbols)
+    if k < 1:
+        raise ValueError(f"n_symbols must be a positive integer, not {n_symbols}")
+    if np.isnan(x).any():
+        raise ValueError("cannot coarse-grain a series containing NaN")
+    if x.size == 0:
+        return np.zeros(0, dtype=np.int64)
+    if how == 'quantile':
+        # 2R - 1 is an integer for average ranks, so the floor is exact (also on a cut)
+        twice_r_minus_1 = np.rint(2 * _average_ranks(x) - 1).astype(np.int64)
+        return (k * twice_r_minus_1) // (2 * x.size)
+    if how == 'width':
+        lo, hi = (np.min(x), np.max(x)) if limits is None else map(float, limits)
+        if not hi > lo:
+            return np.full(x.size, k // 2, dtype=np.int64)
+        return np.clip(np.floor(k * ((x - lo) / (hi - lo))), 0, k - 1).astype(np.int64)
+    raise ValueError(f"Unknown coarse-graining '{how}': use 'quantile' or 'width'")
+
+
 def _is_rank_rule(rule) -> bool:
     """Whether ``rule`` is a rank-based time-delay rule of :func:`get_tau` ('ac1e-rank', ...)."""
     return isinstance(rule, str) and rule in _TAU_RULES and rule.endswith(_RANK_SUFFIX)

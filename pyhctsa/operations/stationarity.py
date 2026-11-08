@@ -17,8 +17,8 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import fit_kernel_smooth, moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
 from ..toolboxes.Tisean_3_0_1.ports import _nstat_z_error, _nstat_z_std
-from ..robust import bf_exp_fit, bf_quantile_edges, bf_random, bf_random_seed
-from ..utils import dict_output, _autocov_fft, _round_half_away, _sample_std, get_tau, frame_signal, sign_change, z_score
+from ..robust import bf_exp_fit, bf_random, bf_random_seed
+from ..utils import dict_output, _coarse_grain, _autocov_fft, _round_half_away, _sample_std, get_tau, frame_signal, sign_change, z_score
 from ..utils import _shannon_entropy
 from ..fitting import polyfit, robust_linear_fit
 from ..utils import _zscore_or_zeros, make_buffer
@@ -248,8 +248,8 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
     variation distance between their histograms: half the sum of the absolute differences
     between the proportions of values in each bin (0 for identical distributions, 1 for
     distributions with no bin in common). The bins are common to all segments and
-    equiprobable for the full series (edges at its quantiles,
-    :func:`pyhctsa.robust.bf_quantile_edges`), so the measure has no smoothing parameter
+    equiprobable for the full series (cut at its Hazen quantiles, tied values sharing a bin;
+    :func:`pyhctsa.utils._coarse_grain`), so the measure has no smoothing parameter
     and does not depend on the scale of the data. Either each segment is compared to the
     parent (full time series) distribution, or each to all other segments.
 
@@ -335,17 +335,18 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
         if each_or_par == 'each' and num_segs == 2:
             return np.nan
         return {'ex_meandiv': np.nan, 'ex_meandiv_ess': np.nan, 'stddiv': np.nan}
-    bin_edges = bf_quantile_edges(y, int(num_bins))  # bins common to all segments, equiprobable for the full series
-    counts, _ = np.histogram(y, bins=bin_edges)  # bin counts of the full series
+    num_bins = int(num_bins)
+    which_bin = _coarse_grain(y, num_bins, 'quantile')  # bins common to all segments, equiprobable for the full series
+    counts = np.bincount(which_bin, minlength=num_bins)  # bin counts of the full series
 
-    def proportions(v):
-        c, _ = np.histogram(v, bins=bin_edges)
+    def proportions(b):
+        c = np.bincount(b, minlength=num_bins)
         return c / np.sum(c)
 
     # Compute the distribution (proportion in each bin) in all num_segs segments of the time series
-    dns = np.zeros((len(bin_edges) - 1, num_segs))
+    dns = np.zeros((num_bins, num_segs))
     for i in range(num_segs):
-        dns[:, i] = proportions(y[i * lseg:(i + 1) * lseg])
+        dns[:, i] = proportions(which_bin[i * lseg:(i + 1) * lseg])
     # expected distance for the values in random order (per bin)
     null_terms = _random_order_tv(counts, N, lseg, each_or_par)
     null_div = np.sum(null_terms)
@@ -375,7 +376,6 @@ def local_distributions(y: ArrayLike, num_segs: int = 5, each_or_par: str = 'par
 
     # Effective sample size: each bin's expected distance scaled by sqrt(g), the variance
     # inflation of its count from autocorrelation within the segments
-    which_bin = np.clip(np.searchsorted(bin_edges, y, side='right') - 1, 0, len(counts) - 1)
     g = np.ones(len(counts))
     for i in np.nonzero((counts > 0) & (counts < N))[0]:
         g[i] = _variance_inflation(_segment_acf((which_bin == i).astype(float), num_segs, lseg), lseg)

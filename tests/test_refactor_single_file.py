@@ -208,6 +208,16 @@ CALLS['aaft'] = _aaft
 #   ar1|ppi_resampledown.gauss1_kd_jump
 #   sine|ppc_spline24.kscn_olapint
 #   sine|ppi_resampledown.gauss1_kd_jump
+# Re-pinned on this branch (cons-coarse-grain, #60): the following values change with the convention
+# this branch fixes (see its PR body); every other value is the main-checkout value.
+#   ar1|tpa.maxdiagfexp_r2
+#   ar1|tpa.meandiagfexp_b
+#   ar1|tpa.trfexp_b
+#   ar1|tpa.trflin5_adjr2
+#   sine|tpa.maxdiagfexp_r2
+#   sine|tpa.meandiagfexp_b
+#   sine|tpa.trfexp_b
+#   sine|tpa.trflin5_adjr2
 PINS = {('ar1', 'aaft'): {'s0_0': -0.89053590008085,
                    's0_150': -1.1088554414548837,
                    's1_7': -0.14423793297261175,
@@ -254,10 +264,10 @@ PINS = {('ar1', 'aaft'): {'s0_0': -0.89053590008085,
                        'sumdiagcov': 0.00428922120625197,
                        'symdiff': 0.14093959731543626,
                        'transEntropy': 1.4193248735350872},
- ('ar1', 'tpa'): {'maxdiagfexp_r2': 0.9475961923812124,
-                  'meandiagfexp_b': -0.4807734505758499,
-                  'trfexp_b': -0.1590524155360214,
-                  'trflin5_adjr2': 0.8994532811083845},
+ ('ar1', 'tpa'): {'maxdiagfexp_r2': 0.9435083918947654,
+                  'meandiagfexp_b': -0.48026475634228166,
+                  'trfexp_b': -0.15817778142655836,
+                  'trflin5_adjr2': 0.8978594877479456},
  ('sine', 'aaft'): {'s0_0': -1.1922321143778,
                     's0_150': -0.12874462072887535,
                     's1_7': -0.7746263241939627,
@@ -304,10 +314,10 @@ PINS = {('ar1', 'aaft'): {'s0_0': -0.89053590008085,
                         'sumdiagcov': 0.004700238727985226,
                         'symdiff': 0.15436241610738255,
                         'transEntropy': 1.3711530330987605},
- ('sine', 'tpa'): {'maxdiagfexp_r2': 0.9842223976724699,
-                   'meandiagfexp_b': -0.5458298523934537,
-                   'trfexp_b': -0.1904908822424008,
-                   'trflin5_adjr2': 0.8386379838134774}}
+ ('sine', 'tpa'): {'maxdiagfexp_r2': 0.9831674520941863,
+                   'meandiagfexp_b': -0.545604860291395,
+                   'trfexp_b': -0.1899985128784129,
+                   'trflin5_adjr2': 0.8383230523235148}}
 
 SERIES = _series()
 
