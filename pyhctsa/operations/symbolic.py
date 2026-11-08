@@ -9,8 +9,10 @@ logger = logging.getLogger('pyhctsa')
 from scipy.stats import mstats
 
 from ..operations.correlation import autocorr
+from ..fitting import goodness_of_fit
 from ..robust import bf_exp_fit
 from ..utils import dict_output, _sample_std, binarize, sign_change, get_tau, time_delay_embed
+from ..utils import _shannon_entropy
 
 def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_groups: int = 3,
              coarse_grain_method: str = 'quantile', num_iters: int = 500,
@@ -406,7 +408,7 @@ def _f_entropy(p, num_samples=None, word_length=1, alphabet_size=2, fixed_margin
     """
     p = np.asarray(p, dtype=float).ravel()
     r = p > 0
-    h = -np.sum(p[r] * np.log(p[r]))
+    h = _shannon_entropy(p)
     if num_samples is not None and num_samples > 0:
         df = int(np.sum(r)) - 1
         if fixed_marginals:
@@ -796,8 +798,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
     row_sums = src_prob
     p_joint = t_f[t_f > 0]
     p_marg = row_sums[row_sums > 0]
-    h_joint = -np.sum(p_joint * np.log(p_joint))
-    h_marginal = -np.sum(p_marg * np.log(p_marg))
+    h_joint = _shannon_entropy(p_joint)
+    h_marginal = _shannon_entropy(p_marg)
     out['transEntropy'] = (h_joint - h_marginal
                            + (p_joint.size - p_marg.size) / (2 * (len(yth) - tau)))
 
@@ -818,10 +820,8 @@ def transition_matrix(y: ArrayLike, how_to_cg: str = 'quantile',
 
 def _linear_adjr2(x: np.ndarray, y: np.ndarray) -> float:
     """Adjusted R^2 of an ordinary least-squares line fitted to y against x."""
-    n = len(y)
     p = np.polyfit(x, y, 1)
-    rsq = 1 - np.sum((y - np.polyval(p, x)) ** 2) / np.sum((y - np.mean(y)) ** 2)
-    return 1 - (1 - rsq) * (n - 1) / (n - 2)
+    return goodness_of_fit(y, np.polyval(p, x), 2, guard_sst=False, adj_from_rsquare=True)['adjrsquare']
 
 
 def _transition_matrix(yth: np.ndarray, num_groups: int, tau: int = 1) -> np.ndarray:
