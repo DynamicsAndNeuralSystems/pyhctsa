@@ -2069,6 +2069,14 @@ spectral:
     legacy_name: SP_Rhythmicity
     ordered_args: ['m', 'tau', 'n_freq']
 
+  doubled_phase_coherence:   # pyhctsa-only: record-long coherence of the squared Morlet band signal (phase kept modulo pi), excess over a Gaussian spectral null
+    base_name: dpc
+    dependencies:
+    configs:
+      - {harmonic: 2, zscore: True, exclude: ['coh_max', 'coh_freqAtMax', 'coh_mean', 'coh_atPeakPower']}
+    variant_of: rhythmicity
+    ordered_args: ['harmonic']
+
 model_fit:
   ar_cov:
     base_name: ar_cov
