@@ -17,6 +17,7 @@ from numpy.typing import ArrayLike
 import pandas as pd
 from scipy import fft as sp_fft
 from scipy.signal import correlate
+from scipy.spatial import cKDTree
 from scipy.stats import chi2, rankdata
 
 
@@ -1325,6 +1326,54 @@ def _theiler_int(y: Union[ArrayLike, None], spec: Union[int, float, list, tuple]
             logger.warning(f'{reason} to set {what}')
         return None
     return int(w)
+
+
+def _knn_theiler(X: np.ndarray, k: int, theiler: int, metric: str = 'euclidean',
+                 query: Union[ArrayLike, None] = None, tree: str = 'scipy',
+                 chunk: int = 2_000_000) -> tuple[np.ndarray, np.ndarray]:
+    """
+    The k nearest neighbors of points of `X` outside a Theiler window, from a k-d tree.
+
+    For each query row i (all rows of `X`, or the row indices `query`), the distances and row
+    indices of its k nearest rows j with ``|i - j| > theiler`` (so i itself is excluded too), in
+    ascending distance. Rather than searching with exclusions, this asks a k-d tree for the
+    ``k + 2*theiler + 1`` nearest rows (at most ``2*theiler + 1`` of which fall in the window)
+    and keeps the first k outside it, in the tree's order (so ties are broken as the tree breaks
+    them). `metric` is ``'euclidean'`` or ``'chebyshev'`` (max norm). `tree` is ``'scipy'``
+    (``scipy.spatial.cKDTree``) or ``'sklearn'`` (``sklearn.neighbors.KDTree``): the two agree
+    up to tie order, but their Euclidean distances can differ in the last bit in four or more
+    dimensions (they sum the squared differences in different orders), so a caller keeps the
+    library its outputs were defined with. Queries run in blocks of about `chunk` fetched
+    neighbors, to bound memory. Where fewer than k rows lie outside the window, the missing
+    entries are ``inf`` (distance) and -1 (index).
+    """
+    X = np.asarray(X, dtype=float)
+    n = X.shape[0]
+    q = np.arange(n) if query is None else np.asarray(query, dtype=np.intp)
+    k_fetch = min(n, k + 2 * theiler + 1)
+    if tree == 'scipy':
+        p = {'euclidean': 2, 'chebyshev': np.inf}[metric]
+        kdt = cKDTree(X)
+        search = lambda Q: kdt.query(Q, k=k_fetch, p=p)  # noqa: E731
+    elif tree == 'sklearn':
+        from sklearn.neighbors import KDTree
+        kdt = KDTree(X, metric=metric)
+        search = lambda Q: kdt.query(Q, k=k_fetch)  # noqa: E731
+    else:
+        raise ValueError(f"Unknown tree '{tree}'")
+    dist = np.full((q.size, k), np.inf)
+    idx = np.full((q.size, k), -1, dtype=np.intp)
+    step = max(1, chunk // k_fetch)
+    for c in range(0, q.size, step):
+        qc = q[c:c + step]
+        d, i = search(X[qc])
+        d, i = d.reshape(qc.size, k_fetch), i.reshape(qc.size, k_fetch)
+        outside = np.abs(i - qc[:, None]) > theiler
+        rank = np.cumsum(outside, axis=1)  # 1-based rank among the rows outside the window
+        rows, cols = np.nonzero(outside & (rank <= k))
+        dist[c + rows, rank[rows, cols] - 1] = d[rows, cols]
+        idx[c + rows, rank[rows, cols] - 1] = i[rows, cols]
+    return dist, idx
 
 
 # pre_process(y, 'decimate_ac1e') gives NaN when the decimated series would be shorter than
