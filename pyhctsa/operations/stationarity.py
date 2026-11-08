@@ -18,7 +18,6 @@ from ..operations.entropy import approximate_entropy, distribution_entropy, perm
 from ..toolboxes.Tisean_3_0_1.ports import _nstat_z_error, _nstat_z_std
 from ..robust import bf_exp_fit, bf_quantile_edges, bf_random, bf_random_seed
 from ..utils import dict_output, _autocov_fft, _round_half_away, _sample_std, get_tau, frame_signal, sign_change, z_score
-from ..utils import dict_output, _round_half_away, _sample_std, get_tau, frame_signal, sign_change, z_score
 from ..utils import _shannon_entropy
 from ..fitting import polyfit, robust_linear_fit
 
