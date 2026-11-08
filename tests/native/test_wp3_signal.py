@@ -470,7 +470,7 @@ def test_stepdetect_on_a_stepped_signal():
     # a pure constant has one segment of full length
     flat = cp.stepdetect(np.ones(100) + 1e-12 * np.arange(100), 'l1pwc', 0.9)
     assert flat['nsegments'] == pytest.approx(1 / 100)
-    assert flat['cvstepint'] == 0.0
+    assert np.isnan(flat['cvstepint'])  # one interval: its spread is undefined
 
 
 def test_stepdetect_change_point_counts_by_half(monkeypatch):

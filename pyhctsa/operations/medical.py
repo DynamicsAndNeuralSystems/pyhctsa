@@ -1,3 +1,4 @@
+from ..utils import _sample_std, _sample_var
 import numpy as np
 from ..utils import _quantile
 from numpy.typing import ArrayLike
@@ -73,9 +74,9 @@ def raw_hrv_meas(x: ArrayLike) -> dict:
 
     # Poincare plot measures
     diff_x = np.diff(x)
-    sd_diff = np.std(diff_x, ddof=1)
+    sd_diff = _sample_std(diff_x)
     out['SD1'] = 1/np.sqrt(2) * sd_diff * 1000
-    out['SD2'] = np.sqrt(2 * np.var(x, ddof=1) - (1/2) * sd_diff**2) * 1000
+    out['SD2'] = np.sqrt(2 * _sample_var(x) - (1/2) * sd_diff**2) * 1000
 
     # CVI: cardiac vagal index (Toichi et al., 1997)
     out['CVI'] = np.log10(out['SD1'] * out['SD2'] * 16)
@@ -160,7 +161,7 @@ def hrv_classic(y: ArrayLike) -> dict:
     d_y = np.abs(diff_y)
     med = np.median(diff_y)
     sig_d = MAD_TO_SIGMA * np.median(np.abs(diff_y - med))  # robust (MAD-based) SD of increments
-    tol_d = 1e-10 * np.std(y, ddof=1)  # a spread below this (rounding error) is treated as zero
+    tol_d = 1e-10 * _sample_std(y)  # a spread below this (rounding error) is treated as zero
     if sig_d <= tol_d:
         # over half the increments are equal: fall back to the mean absolute deviation
         # about the median (consistent with the SD for Gaussian increments)
@@ -223,8 +224,8 @@ def hrv_classic(y: ArrayLike) -> dict:
 
     # Poincare plot measures:
     # cf. "Do Existing Measures ... ", Brennan et. al. (2001), IEEE Trans Biomed Eng 48(11)
-    rmssd = np.std(diff_y, ddof=1)
-    sigma = np.std(y, ddof=1)
+    rmssd = _sample_std(diff_y)
+    sigma = _sample_std(y)
 
     out["SD1"] = 1 / np.sqrt(2) * rmssd * 1000
     out["SD2"] = np.sqrt(2 * sigma**2 - (1 / 2) * rmssd**2) * 1000

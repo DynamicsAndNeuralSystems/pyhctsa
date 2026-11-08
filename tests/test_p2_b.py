@@ -130,7 +130,11 @@ class TestDistribution:
                 # convert the hctsa value to the same scale before comparing
                 pos_keys = ('mdrm', 'mdrmd', 'mrm', 'mrmd')
                 std_keys = ('mdrstd', 'mrstd')   # spreads of the positions scale by N/(N-1)
-                _check(py, ml, f'oi {kind} {n}', rtol=1e-5, atol=1e-6, skip=pos_keys + std_keys)
+                # the standard error of a single interval is NaN (utils._sample_std; MATLAB gives 0), which
+                # makes the cross-correlations of the mean gap with it NaN when the sweep ends on one interval
+                xc_keys = ('xcmerr1', 'xcmerrn1') if n == 'short60' and kind != 'abs' else ()
+                _check(py, ml, f'oi {kind} {n}', rtol=1e-5, atol=1e-6, skip=pos_keys + std_keys + xc_keys)
+                assert all(np.isnan(_num(py[k])) for k in xc_keys)
                 if isinstance(py, dict) and isinstance(ml, dict):
                     N = len(SERIES[n])
                     for k in std_keys:

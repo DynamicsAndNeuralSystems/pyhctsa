@@ -3,6 +3,7 @@ import logging
 import warnings
 from typing import Union
 
+from ..utils import _sample_std, _sample_var
 import numpy as np
 from ..utils import _iqr, _quantile
 from numba import njit as _njit
@@ -161,7 +162,7 @@ def fnn(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         out[f'nHood2_{i}'] = n_hood2[i - 1] if found else np.nan
     out['minpfnn'] = np.min(p_nn)
     out['meanpfnn'] = np.mean(p_nn)
-    out['stdpfnn'] = np.std(p_nn, ddof=1) if p_nn.size > 1 else 0.0
+    out['stdpfnn'] = _sample_std(p_nn)
     out['maxnHood2'] = np.max(n_hood2)
     out['meannHood2'] = np.mean(n_hood2)
     # one minimum count for all ten (that of the smallest threshold), so a dimension either
@@ -481,9 +482,9 @@ def zero_one_test(y, num_c=20, max_n=10000):
 
     return {
         "K": np.median(k_c),
-        "Kstd": np.std(k_c, ddof=1),
+        "Kstd": _sample_std(k_c),
         "D": np.median(d_c),
-        "Dstd": np.std(d_c, ddof=1),
+        "Dstd": _sample_std(d_c),
     }
 
 def _first_fn(p, threshold, over_or_under='under'):
@@ -840,7 +841,7 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
     out['difftau12'] = tau[1] - tau[0]
     out['difftau13'] = tau[2] - tau[0]
     out['meantau'] = np.mean(tau)
-    out['stdtau'] = np.std(tau, ddof=1)
+    out['stdtau'] = _sample_std(tau)
     out['mintau'] = np.min(tau)
     out['maxtau'] = np.max(tau)
 
@@ -994,14 +995,14 @@ def local_density(y: ArrayLike, nnr: int = 3,
     # Log of the k-NN density estimate, with distances in units of the series' SD:
     neff = n_embed - 2*past - 1  # number of points that can be neighbors of a given point
     locden = (np.log(nnr/neff) - ((m/2)*np.log(np.pi) - gammaln(m/2 + 1))
-              - m*np.log(d/np.std(y, ddof=1)))
+              - m*np.log(d/_sample_std(y)))
 
     out = {}
     out['minden'] = np.min(locden)
     out['maxden'] = np.max(locden)
     out['iqrden'] = _iqr(locden)
     out['rangeden'] = np.ptp(locden)
-    out['stdden'] = np.std(locden, ddof=1)
+    out['stdden'] = _sample_std(locden)
     out['meanden'] = np.mean(locden)
     out['medianden'] = np.median(locden)
 
@@ -1048,7 +1049,7 @@ def _best_flat_range(v: np.ndarray, gamma: float, stptr: np.ndarray,
     mybad = np.empty((stptr.size, endptr.size))
     for i, s in enumerate(stptr):
         for j, e in enumerate(endptr):
-            mybad[i, j] = np.std(vnorm[s - 1:e], ddof=1)
+            mybad[i, j] = _sample_std(vnorm[s - 1:e])
     mybad -= gamma * (endptr[np.newaxis, :] - stptr[:, np.newaxis] + 1)
     return _argmin_first_colmajor(mybad)
 
@@ -1094,7 +1095,7 @@ def _sub_findmmin(ds: ArrayLike) -> dict:
     if l < 2:
         return out
 
-    mybad = np.array([np.std(dsn[i - 1:], ddof=1) - gamma * (l - i + 1)
+    mybad = np.array([_sample_std(dsn[i - 1:]) - gamma * (l - i + 1)
                       for i in range(1, l)])
     if not np.all(np.isnan(mybad)):
         a = int(np.nanargmin(mybad))  # 0-based
@@ -1141,7 +1142,7 @@ def _findscalingr(x: np.ndarray) -> dict:
     out['goodness'] = best
     out['dimest'] = float(sub.mean())
     out['dimstd'] = (0.0 if 1 in sub.shape
-                     else float(np.std(sub.mean(axis=0), ddof=1)))
+                     else float(_sample_std(sub.mean(axis=0))))
     return out
 
 
@@ -1446,7 +1447,7 @@ def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> 
         out['takens05_median'] = np.median(takens05)
         out['takens05_max'] = np.max(takens05)
         out['takens05_min'] = np.min(takens05)
-        out['takens05_std'] = np.std(takens05, ddof=1)
+        out['takens05_std'] = _sample_std(takens05)
         out['takens05_iqr'] = _iqr(takens05)
 
         # Find outliers as a means of inferring m_min: look for the estimate
@@ -1622,7 +1623,7 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
     # stays between about 0.04 and 0.4 for typical series at their 'fnn' dimensions, whereas a
     # fixed radius of 0.1 standard deviations leaves many noise-like series with too few radii
     # holding pairs to fit).
-    max_eps = float(r * np.std(y, ddof=1) * np.sqrt(m))
+    max_eps = float(r * _sample_std(y) * np.sqrt(m))
     try:
         tables = _tisean.d2(y, delay=tau, embed=m, theiler=thwin, howoften=nbins,
                             maxfound=0 if nref == -1 else int(nref), epsmax=max_eps)
@@ -1673,7 +1674,7 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
         out['robfit_sea2'] = stats['se'][1]
         out['robfitresmeanabs'] = np.mean(np.abs(res))
         out['robfitresmeansq'] = np.mean(res ** 2)
-        out['robfitresac1'] = (np.nan if np.std(res, ddof=1) <= round_off
+        out['robfitresac1'] = (np.nan if _sample_std(res) <= round_off
                                else autocorr(res, 1, 'Fourier'))
     else:
         for k in ('robfit_a1', 'robfit_a2', 'robfit_sigrat', 'robfit_s', 'robfit_sea1',
@@ -2308,7 +2309,7 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
         bc_logr = np.log(bc_r)
 
         # Correlation sum, over the same number of scales: epsilon from max_eps/10 to max_eps
-        max_eps = float(np.std(y, ddof=1) * np.sqrt(big_m))
+        max_eps = float(_sample_std(y) * np.sqrt(big_m))
         min_eps = max_eps / 10
         tables = _tisean.d2(y, delay=tau, embed=big_m, theiler=int(thwin), howoften=num_bins,
                             maxfound=0, epsmax=max_eps, epsmin=min_eps)
@@ -2730,7 +2731,7 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
     out['min'] = np.min(v_d)
     out['mean'] = np.mean(v_d)
     out['meanDiff'] = np.mean(d_v)
-    out['stdDiff'] = np.std(d_v, ddof=1)
+    out['stdDiff'] = _sample_std(d_v)
     out['trendDiff'] = np.polyfit(t_d[:-1], d_v, 1)[0]
 
     # Comparison to the surrogates, where both are defined
@@ -2744,7 +2745,7 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
     # target variances are 0 below the square of 1e-12 of the range of x (see _dvv_curve), which
     # on the normalized scale of the curves is tol_v; with no spread in a regressor or across the
     # surrogates, a slope or a Gaussian probability is undefined
-    tol_v = (1e-12 * np.ptp(x)) ** 2 / np.var(x, ddof=1)
+    tol_v = (1e-12 * np.ptp(x)) ** 2 / _sample_var(x)
     flat = np.ptp(v_b) <= tol_v
     with np.errstate(invalid='ignore', divide='ignore'):
         out['dataSurrCorr'] = np.nan if flat else np.corrcoef(v_b, s_b)[0, 1]
@@ -2752,7 +2753,7 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
     out['numZeroCrossings'] = np.sum((v_b - s_b)[1:] * (v_b - s_b)[:-1] < 0)
     out['trendSurr'] = np.polyfit(t_b, s_b, 1)[0]
     out['meanDiffTrendSurr'] = out['trendSurr'] - out['trend']
-    sd_surr = np.std(dvv_surr[both], axis=1, ddof=1)
+    sd_surr = _sample_std(dvv_surr[both], axis=1)
     spread = sd_surr > tol_v
     probs = _norm.cdf(v_b[spread], loc=np.mean(dvv_surr[both][spread], axis=1), scale=sd_surr[spread])
     out['meanNormCDF'] = np.mean(probs) if probs.size else np.nan  # (NaN if the surrogates never spread)
@@ -3003,7 +3004,7 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     for lab, u in (('x', x), ('y', yy)):
         out[f'max{lab}'] = np.max(u)
         out[f'min{lab}'] = np.min(u)
-        out[f'std{lab}'] = np.std(u, ddof=1)
+        out[f'std{lab}'] = _sample_std(u)
         out[f'iqr{lab}'] = _iqr(u)
         out[f'mean{lab}'] = np.mean(u)
         out[f'ac1{lab}'] = autocorr(u, 1, 'Fourier')
@@ -3039,7 +3040,7 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
     d = np.sqrt(x**2 + yy**2)
     out['maxD'] = np.max(d)
     out['minD'] = np.min(d)
-    out['stdD'] = np.std(d, ddof=1)
+    out['stdD'] = _sample_std(d)
     out['iqrD'] = _iqr(d)
     out['meanD'] = np.mean(d)
     out['ac1D'] = autocorr(d, 1, 'Fourier')
@@ -3430,8 +3431,8 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
                                             (src_all[inside] - lo, dst_all[inside] - lo)))
     stats = np.array(stats)
     if not np.any(np.isnan(stats[:, 0])):
-        out['T_MRT_var'] = float(np.var(stats[:, 0], ddof=1))
-        out['N_MPRT_var'] = float(np.var(stats[:, 1], ddof=1))
+        out['T_MRT_var'] = float(_sample_var(stats[:, 0]))
+        out['N_MPRT_var'] = float(_sample_var(stats[:, 1]))
     return out
 
 
@@ -3752,7 +3753,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     nn = lags.size
     max_trett = np.max(trett)
     out['max'] = max_trett
-    out['std'] = np.std(trett, ddof=1)
+    out['std'] = _sample_std(trett)
     out['pzeros'] = np.sum(trett == 0) / nn
     out['pg05'] = np.sum(trett > max_trett * 0.5) / nn
     out['iqr'] = _iqr(trett)
@@ -3766,7 +3767,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
         out['maxpeaksep'] = np.max(d) / nn
         out['minpeaksep'] = np.min(d) / nn
         out['rangepeaksep'] = np.ptp(d) / nn
-        out['stdpeaksep'] = (np.std(d, ddof=1) if d.size > 1 else 0.0) / np.sqrt(nn)
+        out['stdpeaksep'] = _sample_std(d) / np.sqrt(nn)
     else:
         for name in ('meanpeaksep', 'maxpeaksep', 'minpeaksep', 'rangepeaksep', 'stdpeaksep'):
             out[name] = np.nan
@@ -3775,7 +3776,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
     # defined unless both halves are constant, or empty)
     half = nn // 2
     tol_trett = 1e-12 * max_trett
-    sd_short, sd_long = np.std(trett[:half], ddof=1), np.std(trett[half:], ddof=1)
+    sd_short, sd_long = _sample_std(trett[:half]), _sample_std(trett[half:])
     mean_short, mean_long = np.mean(trett[:half]), np.mean(trett[half:])
     out['fracsdrt'] = (sd_short / (sd_short + sd_long)
                        if sd_short + sd_long > tol_trett else np.nan)
@@ -4065,7 +4066,7 @@ def embed_cluster(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
 
     # Separation of a 2-component Gaussian mixture, from deterministic hard-split starts:
     # the optimal 2-means split along PC1 and along the sep_pp direction
-    reg_val = 1e-6 * np.mean(np.var(y_embed, axis=0, ddof=1))  # (proportional to the data's scale)
+    reg_val = 1e-6 * np.mean(_sample_var(y_embed, axis=0))  # (proportional to the data's scale)
     pc1_thr = _optimal_two_means_splits(pc1[:, None])[1][0]
     starts = [pp_proj > thr[i_best], pc1 > pc1_thr]
     gm2 = None
@@ -4111,7 +4112,7 @@ def _spectrum_stats(perc: np.ndarray, m: int) -> dict:
     # has exactly m entries, but the kernel spectrum has one per embedded point, and taken over
     # all of them its spread falls with the number of points
     top = perc[:m]
-    stats['std'] = np.std(top, ddof=1)
+    stats['std'] = _sample_std(top)
     stats['range'] = np.ptp(top)
     stats['min'] = np.min(top)
     stats['max'] = np.max(top)
@@ -4368,8 +4369,8 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
         out[f'medianr{r}'] = np.median(row)
         out[f'minr{r}'] = np.min(row)
         out[f'meanchr{r}'] = np.mean(np.diff(row)) if row.size > 1 else np.nan
-    out['stdmean'] = np.std(np.mean(rs[:, 1:], axis=0), ddof=1) if m_max > 2 else 0.0
-    out['stdmedian'] = np.std(np.median(rs[:, 1:], axis=0), ddof=1) if m_max > 2 else 0.0
+    out['stdmean'] = _sample_std(np.mean(rs[:, 1:], axis=0))
+    out['stdmedian'] = _sample_std(np.median(rs[:, 1:], axis=0))
     stretch = rs[:, 1:].ravel()
     out['medianstretch'] = np.median(stretch)
     out['iqrstretch'] = _iqr(stretch)
@@ -4563,7 +4564,7 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
 
     def nanstd(x):
         x = x[~np.isnan(x)]
-        return (np.std(x, ddof=1) if x.size > 1 else 0.0) if x.size else np.nan
+        return _sample_std(x)
 
     valid = ~np.isnan(local_dim) & ~np.isnan(theta)
     out = {}
@@ -4599,7 +4600,7 @@ def _c1_scaling_range(slopes: np.ndarray) -> Union[tuple, None]:
     if a is None:
         return None
     rng = slopes[stptr[a] - 1:endptr[b]]
-    return stptr[a], endptr[b], best, np.mean(rng), np.std(rng, ddof=1)
+    return stptr[a], endptr[b], best, np.mean(rng), _sample_std(rng)
 
 
 @dict_output
@@ -4768,7 +4769,7 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
     if m < 3:
         raise ValueError('The embedding dimension, m, must be at least 3 (the outputs include LE3)')
 
-    y = y + 0.001 * np.std(y, ddof=1) * bf_random(n, bf_random_seed(random_seed), 'normal')
+    y = y + 0.001 * _sample_std(y) * bf_random(n, bf_random_seed(random_seed), 'normal')
 
     params = _embedding_params(y, tau_method, m)
     if params is None:

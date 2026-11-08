@@ -2,6 +2,7 @@ from fractions import Fraction
 from typing import Union
 import re
 import numpy as np
+from ..utils import _sample_var
 from numpy.typing import ArrayLike
 from scipy.signal import lfilter, resample_poly
 from scipy.stats import boxcox
@@ -424,8 +425,8 @@ def _profile_trend_jump(f: np.ndarray) -> tuple:
 
     m1 = np.array([np.mean(f[:j + 1]) for j in range(n)])
     m2 = np.array([np.mean(f[j:]) for j in range(n)])
-    se1 = np.array([_sample_std(f[:j + 1]) / np.sqrt(j + 1) for j in range(n)])
-    se2 = np.array([_sample_std(f[j:]) / np.sqrt(n - j) for j in range(n)])
+    se1 = np.array([_sample_std(f[:j + 1], single=0.0) / np.sqrt(j + 1) for j in range(n)])  # one-point side: SE 0
+    se2 = np.array([_sample_std(f[j:], single=0.0) / np.sqrt(n - j) for j in range(n)])
     i = int(np.argmax(np.abs(m1 - m2)))
     with np.errstate(divide='ignore', invalid='ignore'):
         jump = float(np.abs((m1[i] - m2[i]) / np.sqrt(se1[i] ** 2 + se2[i] ** 2)))
@@ -677,7 +678,7 @@ def preproc_schreiber_denoise(y: ArrayLike, m: int = 5, d: int = 1, num_iter: in
 
     out = {}
     out['rmsCorrection'] = float(np.sqrt(np.mean((y - y_den) ** 2)))
-    out['fracVarRemoved'] = float(1 - np.var(y_den, ddof=1) / np.var(y, ddof=1))
+    out['fracVarRemoved'] = float(1 - _sample_var(y_den) / _sample_var(y))
     out['corrOrigDenoised'] = float(np.corrcoef(y, y_den)[0, 1])
     out['ac1Change'] = autocorr(y_den, 1, 'Fourier') - autocorr(y, 1, 'Fourier')
     # (over the points with a full embedding vector: the first (m-1)*d samples have no

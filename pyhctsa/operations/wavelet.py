@@ -2,6 +2,7 @@ from typing import Union
 
 import warnings
 import numpy as np
+from ..utils import _sample_std
 from numpy.typing import ArrayLike
 import pywt
 from scipy import stats
@@ -217,7 +218,7 @@ def dwt_coeff(y: ArrayLike, w_name: str = 'db3', level: int = 3) -> dict:
             #% minimum coefficient at this level:
             out[f'mind_l{k}'] = np.min(d)
             # std coefficients at this level:
-            out[f'stdd_l{k}'] = np.std(d, ddof=1)
+            out[f'stdd_l{k}'] = _sample_std(d)
             #% 1-D noise coefficient estimate (estimate of the noise std):
             out[f'noisestd_l{k}'] = MAD_TO_SIGMA * np.median(np.abs(d))  # robust noise sd (Donoho & Johnstone)
         else:
@@ -281,7 +282,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     num_entries = SC.size
     max_SC = np.max(SC)
     mean_SC = np.mean(SC)
-    std_SC = np.std(SC, ddof=1)
+    std_SC = _sample_std(SC)
 
     # 1) Coefficients, coeffs
     abs_coeffs = np.abs(coeffs)
@@ -342,7 +343,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     out['min_ssc'] = np.min(SSC)
     out['maxonmed_ssc'] = max_SSC / np.median(SSC)
     out['pcross_maxssc50'] = np.sum(sign_change(SSC - 0.5 * max_SSC)) / (N - 1)
-    out['std_ssc'] = np.std(SSC, ddof=1)
+    out['std_ssc'] = _sample_std(SSC)
 
     #Stationarity
     midpoint = N // 2  # Integer division is equivalent to floor
@@ -352,12 +353,12 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     mean2_1 = SC_1.mean()
     mean2_2 = SC_2.mean()
 
-    std2_1 = SC_1.std(ddof=1)
-    std2_2 = SC_2.std(ddof=1)
+    std2_1 = _sample_std(SC_1)
+    std2_2 = _sample_std(SC_2)
 
     out['stat_2_m_s'] = np.mean([std2_1, std2_2]) / mean_SC
-    out['stat_2_s_m'] = np.std([mean2_1, mean2_2], ddof=1) / std_SC
-    out['stat_2_s_s'] = np.std([std2_1, std2_2], ddof=1) / std_SC
+    out['stat_2_s_m'] = _sample_std([mean2_1, mean2_2]) / std_SC
+    out['stat_2_s_s'] = _sample_std([std2_1, std2_2]) / std_SC
 
     return out
 
@@ -435,9 +436,9 @@ def detail_coeffs(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] 
     out['max_max'] = maxs_s[0]
 
     #% stds
-    out['std_mean'] = np.std(means, ddof=1)
-    out['std_median'] = np.std(medians, ddof=1)
-    out['std_max'] = np.std(maxs, ddof=1)
+    out['std_mean'] = _sample_std(means)
+    out['std_median'] = _sample_std(medians)
+    out['std_max'] = _sample_std(maxs)
 
     #% At what level is the maximum
     out['wheremax_mean'] = np.argwhere(means == means_s[0]).flatten()[0] + 1  # 1-based level
@@ -907,7 +908,7 @@ def wpd_best_tree(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] 
     out = {
         'numLeaves': len(leaves),
         'meanDepth': np.mean(depths),
-        'stdDepth': np.std(depths, ddof=1) if depths.size > 1 else 0.0,
+        'stdDepth': _sample_std(depths, single=0.0),  # all leaves of the tree: 0 for a single leaf
     }
     out['entropy'] = _prob_entropy(E)
     return out

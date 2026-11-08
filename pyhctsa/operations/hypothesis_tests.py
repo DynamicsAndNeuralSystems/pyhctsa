@@ -3,6 +3,7 @@ import logging
 logger = logging.getLogger('pyhctsa')
 
 import numpy as np
+from ..utils import _sample_std
 from numpy.typing import ArrayLike
 from scipy.special import gammaln, logsumexp
 from scipy.stats import binomtest, chi2, kstest, norm, wilcoxon
@@ -38,7 +39,7 @@ def _fit_distribution_cdf(x: np.ndarray, the_distn: str) -> tuple:
     from ..toolboxes.distribution_fits.distfits import betafit, evfit, gamfit, wblfit
     x = np.ravel(np.asarray(x, dtype=float))
     if the_distn == 'norm':
-        frozen = _st.norm(loc=float(np.mean(x)), scale=float(np.std(x, ddof=1)))
+        frozen = _st.norm(loc=float(np.mean(x)), scale=float(_sample_std(x)))
         return frozen.cdf, 2
     if the_distn == 'ev':
         mu, sigma = evfit(x)
@@ -59,7 +60,7 @@ def _fit_distribution_cdf(x: np.ndarray, the_distn: str) -> tuple:
         return _st.gamma(a, scale=b).cdf, 2
     if the_distn == 'logn':
         lx = np.log(x)
-        return _st.lognorm(s=float(np.std(lx, ddof=1)), scale=float(np.exp(np.mean(lx)))).cdf, 2
+        return _st.lognorm(s=float(_sample_std(lx)), scale=float(np.exp(np.mean(lx)))).cdf, 2
     if the_distn == 'wbl':
         scale, shape = wblfit(x)
         return _st.weibull_min(shape, scale=scale).cdf, 2
@@ -208,7 +209,7 @@ def distribution_test(x: ArrayLike, the_test: str = 'chi2gof', the_distn: str = 
 
     if the_distn == 'beta':
         # hctsa's own (crude) rescaling of the data into the open interval (0,1)
-        sd = np.std(x, ddof=1)
+        sd = _sample_std(x)
         x = (x - np.min(x) + 0.01 * sd) / (np.max(x) - np.min(x) + 0.02 * sd)
     elif the_distn in ('rayleigh', 'exp', 'gamma'):
         if np.any(x < 0):

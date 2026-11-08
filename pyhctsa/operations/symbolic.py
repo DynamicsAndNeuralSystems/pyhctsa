@@ -196,7 +196,7 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
     out['median'] = np.median(store)
     out['lq'] = np.quantile(store, 0.25, method='hazen')
     out['uq'] = np.quantile(store, 0.75, method='hazen')
-    out['std'] = np.std(store, ddof=1)
+    out['std'] = _sample_std(store)
     out['propUnseen'] = prop_unseen
 
     # Standardized distance of the mean information gain from 1 (the length-stable form),
