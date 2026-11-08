@@ -13,7 +13,7 @@ from ..operations.correlation import autocorr
 from ..operations.distribution import compare_ks_fit, outlier_test, simple_fit
 from ..operations.model_fit import _ar_rms_error
 from ..operations.nonlinearity import zero_one_test
-from ..operations.stationarity import sliding_window, stat_av
+from ..operations.stationarity import sliding_window
 from ..toolboxes.Tisean_3_0_1.ports import _nrlazy
 from ..robust import _rank_map_gaussian, bf_fit_sinusoids
 from ..utils import (_even_split_points, _is_roundoff, _piecewise_poly_residual, dict_output, _sample_std, _zscore, z_score)
@@ -240,12 +240,12 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
 
         Normalized differences (positive statistics):
 
-        - ``statav2``: StatAv with 2 segments (``stat_av``)
-        - ``swms2_2``, ``swms5_1``, ``swms10_1``: the standard deviation of the window
-          means across windows (``sliding_window`` 'mean'), with 2 windows overlapping
-          by half, and 5 and 10 non-overlapping windows
+        - ``statav2``: the spread of the means of 2 halves (``sliding_window`` 'mean', 'stdratio')
+        - ``swms2_2``, ``swms5_1``, ``swms10_1``: the spread of the window means across
+          windows, relative to its stationary sampling spread (``sliding_window`` 'mean',
+          'stdratio'), with 2 windows overlapping by half, and 5 and 10 non-overlapping windows
         - ``swss2_1``, ``swss5_1``, ``swss10_1``: the same for the window standard
-          deviations (``sliding_window`` 'std')
+          deviations (``sliding_window`` 'std', 'stdratio')
         - ``kscn_olapint``: the overlap integral of the kernel-smoothed distribution
           with the best-fitting normal (``compare_ks_fit``)
         - ``olbt_s5``: the standard deviation after trimming the 5% most extreme values
@@ -329,17 +329,18 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
 
     # 1) Stationarity
     # (a) StatAv
-    out['statav2'] = _norm_diff(stat_av(y_d, 'seg', 2), stat_av(y, 'seg', 2))
+    out['statav2'] = _norm_diff(sliding_window(y_d, 'mean', 'stdratio', 2, 1),
+                                sliding_window(y, 'mean', 'stdratio', 2, 1))
 
     # (b) Sliding window mean
     for win, step in [(2, 2), (5, 1), (10, 1)]:
-        out[f'swms{win}_{step}'] = _norm_diff(sliding_window(y_d, 'mean', 'std', win, step),
-                                              sliding_window(y, 'mean', 'std', win, step))
+        out[f'swms{win}_{step}'] = _norm_diff(sliding_window(y_d, 'mean', 'stdratio', win, step),
+                                              sliding_window(y, 'mean', 'stdratio', win, step))
 
     # (c) Sliding window std
     for win, step in [(2, 1), (5, 1), (10, 1)]:
-        out[f'swss{win}_{step}'] = _norm_diff(sliding_window(y_d, 'std', 'std', win, step),
-                                              sliding_window(y, 'std', 'std', win, step))
+        out[f'swss{win}_{step}'] = _norm_diff(sliding_window(y_d, 'std', 'stdratio', win, step),
+                                              sliding_window(y, 'std', 'stdratio', win, step))
 
     # 2) Gaussianity
     # (a) Gaussian fit to the kernel density estimate
@@ -383,9 +384,9 @@ def _iterate_stats(y: np.ndarray, y_d: np.ndarray) -> np.ndarray:
     y_d = z_score(y_d)
 
     # 1) Stationarity: StatAv, sliding-window mean and standard deviation
-    f[0] = stat_av(y_d, 'seg', 5)
-    f[1] = sliding_window(y_d, 'mean', 'std', 5, 2)
-    f[2] = sliding_window(y_d, 'std', 'std', 5, 2) / sliding_window(y, 'std', 'std', 5, 2)
+    f[0] = sliding_window(y_d, 'mean', 'stdratio', 5, 1)
+    f[1] = sliding_window(y_d, 'mean', 'stdratio', 5, 2)
+    f[2] = sliding_window(y_d, 'std', 'stdratio', 5, 2) / sliding_window(y, 'std', 'stdratio', 5, 2)
 
     # 2) Gaussianity: Gaussian fits to the kernel density and to a histogram, and a normal fit
     me = simple_fit(y_d, 'gauss1', 0)
@@ -466,10 +467,11 @@ def preproc_iterate(y: ArrayLike, dt_meth: str = 'diff') -> dict:
         strength, a trend (key ending ``_trend``) and a jump (ending ``_jump``) of its profile
         across the strengths:
 
-        - ``statav5``: StatAv with 5 segments (``stat_av``)
-        - ``swms5_2``: the standard deviation of the window means in 5 windows overlapping by half
-        - ``swss5_2``: the standard deviation of the window standard deviations in 5 windows
-          overlapping by half, relative to that of the original series
+        - ``statav5``: the spread of the means of 5 non-overlapping windows, relative to its
+          stationary sampling spread (``sliding_window`` 'mean', 'stdratio')
+        - ``swms5_2``: the same for 5 windows overlapping by half
+        - ``swss5_2``: the same for the window standard deviations in 5 windows overlapping by
+          half, relative to that of the original series
         - ``gauss1_kd``: the root-mean-square error of a Gaussian fit to the kernel-smoothed
           distribution of values
         - ``gauss1_hsqrt``: the root-mean-square error of a Gaussian fit to a histogram of the

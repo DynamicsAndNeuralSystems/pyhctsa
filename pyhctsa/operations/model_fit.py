@@ -27,7 +27,7 @@ from ..operations.stationarity import sliding_window
 from ..toolboxes.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..robust import _rank_map_gaussian, bf_exp_fit, bf_random, bf_random_seed, bf_spread_perm
 from ..toolboxes.gpml.optimizers import minimize
-from ..utils import (_ar_design, _even_split_points, _is_roundoff, _piecewise_poly_residual, dict_output, _sample_std, _zscore, get_tau, z_score)
+from ..utils import (_ar_design, _even_split_points, _is_roundoff, _piecewise_poly_residual, dict_output, _sample_std, _stationary_cov, _stationary_sample_var, _zscore, get_tau, z_score)
 from ..utils import ljung_box
 
 
@@ -2322,35 +2322,6 @@ _RESID_ROUNDOFF = 1e-12  # residual mean square, relative to the data's, below w
 _NULL_ROUNDOFF = 1e-12   # stationary variance, relative to a segment's, below which it is zero
 
 
-def _stationary_cov(w: np.ndarray, spans: np.ndarray) -> np.ndarray:
-    """
-    Covariance matrix of segment estimates from a stationary series.
-
-    Each segment's estimate is taken to be, to first order, an average of terms over the samples in
-    its span (``spans[i]`` = first and last sample, inclusive), with variance ``w[i]``. Two estimates
-    from spans of ``n_i`` and ``n_j`` samples that share ``o_ij`` samples then have covariance
-    ``C_ij = sqrt(w_i w_j) o_ij / sqrt(n_i n_j)``.
-    """
-    w = np.asarray(w, dtype=float)
-    first, last = spans[:, 0], spans[:, 1]
-    n = last - first + 1
-    shared = np.clip(np.minimum(last[:, None], last[None, :]) - np.maximum(first[:, None], first[None, :]) + 1,
-                     0, None)
-    return np.sqrt(np.outer(w, w)) * shared / np.sqrt(np.outer(n, n))
-
-
-def _stationary_sample_var(w: np.ndarray, spans: np.ndarray) -> float:
-    """
-    Expected sample variance (``ddof=1``), across segments, of estimates from a stationary series:
-    ``(sum_i C_ii - sum_ij C_ij / m) / (m - 1)`` for the ``m`` estimates with covariance ``C``
-    (:func:`_stationary_cov`). It is ``w`` for disjoint spans of equal variance, less when spans
-    overlap, and 0 when every span is the same.
-    """
-    cov = _stationary_cov(w, spans)
-    m = len(cov)
-    return float((np.trace(cov) - np.sum(cov) / m) / (m - 1))
-
-
 def _spread_ratio(values: np.ndarray, w: np.ndarray, spans: np.ndarray) -> float:
     """SD of ``values`` across segments over its expectation for a stationary series
     (:func:`_stationary_sample_var`); NaN if that expectation is zero to rounding (relative to the
@@ -3319,9 +3290,10 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
         else:
             out['taurat'] = tau_e / tau_y
 
-    # Stationarity of the residuals (on the raw, not z-scored, residuals)
-    out['sws'] = sliding_window(e, 'std', 'std', 5, 1)
-    out['swm'] = sliding_window(e, 'mean', 'std', 5, 1)
+    # Stationarity of the residuals: the spread of the window SD and mean across 5 windows, relative to
+    # the spread expected from sampling error if the residuals were stationary
+    out['sws'] = sliding_window(e, 'std', 'stdratio', 5, 1)
+    out['swm'] = sliding_window(e, 'mean', 'stdratio', 5, 1)
 
     if level == 'core':
         return out

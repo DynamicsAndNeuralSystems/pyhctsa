@@ -218,29 +218,60 @@ CALLS['aaft'] = _aaft
 #   sine|tpa.meandiagfexp_b
 #   sine|tpa.trfexp_b
 #   sine|tpa.trflin5_adjr2
+# Re-pinned on this branch (sliding-window-null): the window spreads of preproc_compare and preproc_iterate
+# (statav*, swms*, swss*) are now relative to their stationary sampling spread (sliding_window 'stdratio'), so
+# they change on purpose (see its PR body); every other value is as before.
+#   ar1|ppc_diff1.statav2
+#   ar1|ppc_diff1.swms5_1
+#   ar1|ppc_medianf3.statav2
+#   ar1|ppc_medianf3.swss10_1
+#   ar1|ppc_poly2.statav2
+#   ar1|ppc_poly2.swss5_1
+#   ar1|ppc_rav3.statav2
+#   ar1|ppc_rav3.swms10_1
+#   ar1|ppc_resample_2_1.statav2
+#   ar1|ppc_spline24.statav2
+#   ar1|ppi_diff.statav5_trend
+#   ar1|ppi_diff.swms5_2_jump
+#   ar1|ppi_rav.statav5_trend
+#   ar1|ppi_resampledown.statav5_trend
+#   sine|ppc_diff1.statav2
+#   sine|ppc_diff1.swms5_1
+#   sine|ppc_medianf3.statav2
+#   sine|ppc_medianf3.swss10_1
+#   sine|ppc_poly2.statav2
+#   sine|ppc_poly2.swss5_1
+#   sine|ppc_rav3.statav2
+#   sine|ppc_rav3.swms10_1
+#   sine|ppc_resample_2_1.statav2
+#   sine|ppc_spline24.statav2
+#   sine|ppi_diff.statav5_trend
+#   sine|ppi_diff.swms5_2_jump
+#   sine|ppi_rav.statav5_trend
+#   sine|ppi_resampledown.statav5_trend
 PINS = {('ar1', 'aaft'): {'s0_0': -0.89053590008085,
                    's0_150': -1.1088554414548837,
                    's1_7': -0.14423793297261175,
                    'sum_abs_diff': 321.0306014398218},
  ('ar1', 'ppc_diff1'): {'olbt_m5': -0.004695540477370447,
-                        'statav2': -0.49299785681868713,
-                        'swms5_1': -0.8440439017153872},
- ('ar1', 'ppc_medianf3'): {'statav2': 0.07351547861016382, 'swss10_1': 0.09862292132937572},
+                        'statav2': -0.009880156988507627,
+                        'swms5_1': -0.7249047894544692},
+ ('ar1', 'ppc_medianf3'): {'statav2': 0.047745502940270766, 'swss10_1': 0.02818711179057317},
  ('ar1', 'ppc_poly2'): {'olbt_m2': -0.0001985513910114584,
-                        'statav2': -0.8771503581062706,
-                        'swss5_1': -0.0006279644207190213},
- ('ar1', 'ppc_rav3'): {'statav2': -0.09330006798937752, 'swms10_1': 0.02508146942766271},
- ('ar1', 'ppc_resample_2_1'): {'olbt_m2': 0.000264033910530901, 'statav2': 0.032182930383142835},
+                        'statav2': -0.8754559212615137,
+                        'swss5_1': 0.07075603510318344},
+ ('ar1', 'ppc_rav3'): {'statav2': -0.1557138111767727, 'swms10_1': 0.008497049918258648},
+ ('ar1', 'ppc_resample_2_1'): {'olbt_m2': 0.000264033910530901, 'statav2': 0.13686278489762485},
  ('ar1', 'ppc_spline24'): {'kscn_olapint': -0.002499004821770876,
                            'olbt_s5': 0.006316542697736803,
-                           'statav2': -0.1566146016910181},
+                           'statav2': -0.23281409201232472},
  ('ar1', 'ppi_diff'): {'ol_trend': 0.36514556556377564,
-                       'statav5_trend': -2.4620666826341835,
-                       'swms5_2_jump': 3.844546185660663},
+                       'statav5_trend': 0.6681859285335958,
+                       'swms5_2_jump': 3.6201543132423635},
  ('ar1', 'ppi_rav'): {'normdiff_trend': 3.499183654371031,
-                      'statav5_trend': 3.2348014284627133,
+                      'statav5_trend': -3.6360909754290063,
                       'xc1_jump': 8.167896116653964},
- ('ar1', 'ppi_resampledown'): {'gauss1_kd_jump': 6.339878473375589, 'statav5_trend': 2.422665148112958},
+ ('ar1', 'ppi_resampledown'): {'gauss1_kd_jump': 6.339878473375589, 'statav5_trend': -2.0842010814422594},
  ('ar1', 'ss_fft'): {'area_2_1': 0.9235045547140299,
                      'area_5_3': 0.05116707705069407,
                      'logarea_2_2': -5.730415016750034,
@@ -273,24 +304,24 @@ PINS = {('ar1', 'aaft'): {'s0_0': -0.89053590008085,
                     's1_7': -0.7746263241939627,
                     'sum_abs_diff': 361.7399708787202},
  ('sine', 'ppc_diff1'): {'olbt_m5': 0.008217161892132382,
-                         'statav2': 0.5356773638021818,
-                         'swms5_1': -0.7370061540140986},
- ('sine', 'ppc_medianf3'): {'statav2': -0.4447468259603433, 'swss10_1': 0.061660285625295234},
+                         'statav2': -0.006008131746899335,
+                         'swms5_1': -0.5339732994151778},
+ ('sine', 'ppc_medianf3'): {'statav2': -0.7046250768584214, 'swss10_1': -0.031325500431392664},
  ('sine', 'ppc_poly2'): {'olbt_m2': -0.0010587479850067247,
-                         'statav2': -0.1155379663734372,
-                         'swss5_1': -0.013834287927298754},
- ('sine', 'ppc_rav3'): {'statav2': 0.564690775745768, 'swms10_1': -0.013189420284764811},
- ('sine', 'ppc_resample_2_1'): {'olbt_m2': 0.00017318075243662268, 'statav2': -0.6421137789357829},
+                         'statav2': -0.4469347781418036,
+                         'swss5_1': -0.018879007120733482},
+ ('sine', 'ppc_rav3'): {'statav2': 0.46208363306527017, 'swms10_1': 0.00944742150062969},
+ ('sine', 'ppc_resample_2_1'): {'olbt_m2': 0.00017318075243662268, 'statav2': -0.6903728466949438},
  ('sine', 'ppc_spline24'): {'kscn_olapint': 0.00012320125711853393,
                             'olbt_s5': 0.0029557139117370058,
-                            'statav2': 0.27624550322977176},
+                            'statav2': 0.064889588085977},
  ('sine', 'ppi_diff'): {'ol_trend': -1.2254912098011226,
-                        'statav5_trend': -1.858312251256477,
-                        'swms5_2_jump': 3.9531763839307597},
+                        'statav5_trend': 2.678678002779236,
+                        'swms5_2_jump': 3.0083590760933334},
  ('sine', 'ppi_rav'): {'normdiff_trend': 3.5364277295250774,
-                       'statav5_trend': -2.6339034875828515,
+                       'statav5_trend': -1.924271055630306,
                        'xc1_jump': 9.728958060116113},
- ('sine', 'ppi_resampledown'): {'gauss1_kd_jump': 1.8497434256044576, 'statav5_trend': 2.4842912417144865},
+ ('sine', 'ppi_resampledown'): {'gauss1_kd_jump': 1.8497434256044576, 'statav5_trend': -0.13736178874508864},
  ('sine', 'ss_fft'): {'area_2_1': 0.8894188195138792,
                       'area_5_3': 0.051195476035843346,
                       'logarea_2_2': -5.205763540479876,

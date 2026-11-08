@@ -63,6 +63,8 @@ def test_matches_hctsa_robust(label, name):
         assert key in out, f'{label} on {name}: missing output {key}'
         if key in DEPARTS.get(label, ()):
             continue
+        if {'sws', 'swm'} & set(key.split('_')):
+            continue   # the window spreads are relative to their stationary sampling spread (sliding_window 'stdratio'), deliberately unlike hctsa's plain spreads
         if exp is None:
             assert np.isnan(out[key]), f'{label}/{key} on {name}: hctsa gives NaN, got {out[key]}'
         else:
