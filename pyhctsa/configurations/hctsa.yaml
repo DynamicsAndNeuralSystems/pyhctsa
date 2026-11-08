@@ -1297,9 +1297,9 @@ stationarity:
     base_name: slow_feature_analysis
     dependencies:
     configs:
-      - {num_windows: 20, zscore: True}
+      - {zscore: True}   # multi-scale: W = 10, 20, 40, ... windows of >= 20 samples (N >= 200)
     legacy_name: SY_SlowFeatureAnalysis
-    ordered_args: ['num_windows']
+    ordered_args:
   
   peak_intervals:
     base_name: peak_intervals
