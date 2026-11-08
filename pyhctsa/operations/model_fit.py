@@ -23,9 +23,10 @@ from ..operations.correlation import autocorr, first_crossing
 from ..operations.distribution import simple_fit
 from ..operations.stationarity import sliding_window
 from ..toolboxes.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
-from ..robust import bf_exp_fit, bf_random, bf_random_seed, bf_spread_perm
+from ..robust import _rank_map_gaussian, bf_exp_fit, bf_random, bf_random_seed, bf_spread_perm
 from ..toolboxes.gpml.optimizers import minimize
-from ..utils import _even_split_points, dict_output, _sample_std, _zscore_or_zeros, get_tau, z_score
+from ..utils import (_even_split_points, _is_roundoff, _piecewise_poly_residual, dict_output, _sample_std,
+                     _zscore_or_zeros, get_tau, z_score)
 
 
 def _nanmax_or_nan(a, axis=None):
@@ -449,15 +450,6 @@ def _armax_fit(y: np.ndarray, p: int, q: int) -> tuple:
     return a, c, float(np.mean(err ** 2)), cov
 
 
-def _armax_residuals(a: np.ndarray, c: np.ndarray, y: np.ndarray, steps: int) -> np.ndarray:
-    """
-    k-step-ahead prediction errors of an ARMA model (alias of :func:`_kstep_residuals`).
-
-    Returns ``yhat - y``.
-    """
-    return _kstep_residuals(a, c, y, steps)
-
-
 @dict_output
 def armax(y: ArrayLike, orders: Union[list, tuple] = (3, 3), p_train: float = 0.8,
           num_steps: int = 1) -> dict:
@@ -542,7 +534,7 @@ def armax(y: ArrayLike, orders: Union[list, tuple] = (3, 3), p_train: float = 0.
         a_tr, c_tr, _, _ = _armax_fit(y_train, p, q)
     except ValueError:
         return np.nan
-    m_residuals = _defined_errors(_armax_residuals(a_tr, c_tr, y_test, int(num_steps)))
+    m_residuals = _defined_errors(_kstep_residuals(a_tr, c_tr, y_test, int(num_steps)))
     out.update(residual_analysis(m_residuals, y_test, 'full'))
     return out
 
@@ -564,8 +556,6 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     GPL-3.0-or-later for pyhctsa.
     """
     from scipy.signal import detrend
-    # (imported here: pre_process imports nonlinearity, which imports this module)
-    from .pre_process import _ar_rms_error, _is_roundoff, _piecewise_poly_residual, _rank_map_gaussian
     y = np.asarray(y, dtype=float).ravel()
     if pre_proc in ('nothing', 'none'):
         return y
@@ -2296,6 +2286,37 @@ def _fb_lsq(y: np.ndarray, p: int) -> tuple:
     resid = t_fwd - x_fwd @ phi
     return phi, float(resid @ resid)
 
+
+def _ar_rms_error(data: np.ndarray, order: int) -> float:
+    """
+    Root-mean-square one-step prediction error of an AR model.
+
+    Fits an AR model of the given order by forward-backward least squares and returns the
+    root of the mean squared in-sample one-step errors, with the first ``order`` errors zero
+    (initial conditions estimated) and the forward residuals for the rest.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        The time series.
+    order : int
+        The AR order.
+
+    Returns
+    -------
+    float
+        The RMS prediction error (NaN for non-finite input).
+
+    Notes
+    -----
+    Forward-backward linear prediction: S. L. Marple Jr., *Digital Spectral Analysis with
+    Applications*, Prentice-Hall, 1987, ch. 8.
+    """
+    y = np.asarray(data, dtype=float).ravel()
+    _, sse = _fb_lsq(y, int(order))
+    return float(np.sqrt(sse / len(y)))
+
+
 def _fpe_stats(fpes: np.ndarray) -> dict:
     """Spread statistics of the final prediction errors across segments (``fpe_*`` outputs)."""
     return {'fpe_std': np.std(fpes, ddof=1), 'fpe_mean': np.mean(fpes), 'fpe_max': np.max(fpes),
@@ -3627,19 +3648,6 @@ def is_seasonal(y: ArrayLike) -> int:
     
     return out
 
-def _gp_roundoff_constant(yt: np.ndarray, n: int) -> bool:
-    """True when the values to be fitted are constant to within round-off.
-
-    A Gaussian process has nothing to describe in a constant series, and its fit has no scale to
-    work with (the noise floor is set relative to the standard deviation), so the operations
-    return NaN. The bound is the rounding error accumulated over sums of up to ``n`` terms (the
-    length of the series acted on), relative to the root-mean-square of the values:
-    ``std <= 10 * n * eps * rms``, as in :func:`pyhctsa.operations.pre_process.preproc_compare`.
-    """
-    yt = np.asarray(yt, dtype=float)
-    return bool(np.std(yt, ddof=1) <= 10 * n * np.finfo(float).eps * np.sqrt(np.mean(yt ** 2)))
-
-
 def _gp_objective(tt, yt, cov, noise_pos, alpha_pos, alpha_cap, len_pos=(), len_lo=-np.inf, len_hi=np.inf, amp_pos=()):
     """
     The objective of the GP hyperparameter fit, with its clamp: returns ``(clamp, nlz)`` where
@@ -4108,7 +4116,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
           ``'covSEiso_covNoise'``).
 
         All values are NaN if the fit fails, or if the training values are constant to within
-        round-off (see :func:`_gp_roundoff_constant`). If the training points show no correlation structure (the
+        round-off (see :func:`pyhctsa.utils._is_roundoff`). If the training points show no correlation structure (the
         fitted model must beat its white-noise special case in a likelihood-ratio test, see
         :func:`_gp_beats_white_noise`), the length scale (``logh1``, ``h_lonN``) is not identified, and
         is reported as the spacing of the training points, the bound the data allow; the other
@@ -4129,7 +4137,7 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
     tt = _even_split_points(0, N - 1, npoints, 'floor').astype(float)   # times 0..N-1
     yt = y[tt.astype(int)]
-    if _gp_roundoff_constant(yt, N):
+    if _is_roundoff(yt, n=N):  # constant to within round-off: nothing to describe, no scale
         return nan_out
 
     theta, nlz_fit = _gp_fit_converged(tt, yt, cov, components, noise_pos)
@@ -4721,17 +4729,6 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
     return out
 
 
-def _kstep_residuals_ss(F: np.ndarray, K: np.ndarray, C: np.ndarray, y: np.ndarray,
-                        steps: int, init: str = 'diffuse') -> np.ndarray:
-    """
-    k-step-ahead prediction errors of a state-space model.
-
-    Returns ``yhat - y`` (prediction minus data) for the innovations-form model
-    ``(F, K, C)``; see :func:`_prediction_errors` for the initial state.
-    """
-    return _prediction_errors((F, K, C), y, int(steps), init)
-
-
 def _poly_to_innovations(a: np.ndarray, c: np.ndarray) -> tuple:
     """Observer-canonical innovations-form (A, K, C) of the model A(q) y = C(q) e."""
     a = np.atleast_1d(np.asarray(a, dtype=float)).ravel()
@@ -4769,7 +4766,7 @@ def _kstep_residuals(a: np.ndarray, c: np.ndarray, y: np.ndarray, steps: int) ->
     f, gain, out = _poly_to_innovations(a, c)
     if f.shape[0] == 0:
         return -y
-    return _kstep_residuals_ss(f, gain, out, y, steps)
+    return _prediction_errors((f, gain, out), y, int(steps))
 
 
 def _fit_predictor_model(y: np.ndarray, model: str, order):
@@ -4789,7 +4786,7 @@ def _fit_predictor_model(y: np.ndarray, model: str, order):
             fit = _n4_state_space(y, order if isinstance(order, str) else int(order))
         except (np.linalg.LinAlgError, ValueError):
             return None
-        return lambda y_seg, steps: _kstep_residuals_ss(fit['A'], fit['K'], fit['C'], y_seg, steps)
+        return lambda y_seg, steps: _prediction_errors((fit['A'], fit['K'], fit['C']), y_seg, int(steps))
     if model == 'ar':
         if isinstance(order, str) and order == 'best':
             try:
@@ -5254,7 +5251,7 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     the first ``max_n`` samples, or (iii) taking random samples. Times are the sample indices
     (``squish_or_squash = 1``), so length scales and periods are in samples of the cut
     series. The output is NaN if the fit fails, or if the values fitted are constant to within
-    round-off (see :func:`_gp_roundoff_constant`).
+    round-off (see :func:`pyhctsa.utils._is_roundoff`).
 
     Parameters
     ----------
@@ -5400,7 +5397,7 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
     else:
         t = set_time_index(N)
 
-    if _gp_roundoff_constant(y, n_in):
+    if _is_roundoff(y, n=n_in):  # constant to within round-off: nothing to describe, no scale
         return np.nan
 
     # Learn the hyperparameters (mean-zero process, Gaussian likelihood, exact inference)
