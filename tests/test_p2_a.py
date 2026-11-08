@@ -52,7 +52,9 @@ except ImportError:
 TOL = {'d2a': 1e-6, 'tpa_c': 1e-5, 'tpa_def': 1e-5, 'fd1': 1e-6, 'fd2': 1e-6, 'fd3': 1e-6, 'lyap': 1e-5, 'lyap7': 1e-5,
        'pha': 1e-3, 'phb': 1e-3, 'an_1_gaussian_x': 1e-6, 'mami_ac_gaussian': 1e-4, 'mami_ac1e_gaussian': 1e-4}
 # output fields to leave out (MATLAB's optimizer vs ours: the exponential-fit parameters of randomize)
-SKIP_FIELDS = {'rand_dyndist': ('fexp',), 'rand_permute': ('fexp',), 'rand_statdist': ('fexp',), 'rand_s5': ('fexp',)}
+SKIP_FIELDS = {'rand_dyndist': ('fexp',), 'rand_permute': ('fexp',), 'rand_statdist': ('fexp',), 'rand_s5': ('fexp',),
+               # statav: the window spreads are relative to their stationary sampling spread (sliding_window 'stdratio'), deliberately unlike hctsa's plain spreads
+               'stick': ('statav',), 'e2s_1': ('statav',), 'e2s_0p1': ('statav',)}
 # (call, series) pairs that are degenerate at rounding level or differ by a known upstream effect
 KNOWN_DIFF = {('e2d_tau', 'quant_ar'), ('rect', 'lattice300'),
               # pairs at exactly the recurrence radius are counted (d <= r exactly), and the series are

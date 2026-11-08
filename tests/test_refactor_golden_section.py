@@ -135,12 +135,23 @@ OPS = {
 #   sin|transition_p_alphabet.trfexp_b
 #   sin|transition_p_alphabet.trfexp_r2
 #   sin|transition_p_alphabet.trfexp_rmse
+# Re-pinned on this branch (sliding-window-null): window spreads (swm, sws, statav*, swms*, swss*) are now
+# relative to their stationary sampling spread (sliding_window 'stdratio'), so they change on purpose (see its
+# PR body); every other value is as before.
+#   ar1|loop_local_simple.sws_fexp_b
+#   ar1|loop_local_simple.sws_fexp_r2
+#   ar1|loop_local_simple.sws_fexp_adjr2
+#   ar1|loop_local_simple.sws_fexp_rmse
+#   sin|loop_local_simple.sws_fexp_b
+#   sin|loop_local_simple.sws_fexp_r2
+#   sin|loop_local_simple.sws_fexp_adjr2
+#   sin|loop_local_simple.sws_fexp_rmse
 EXPECTED = {
     ('ar1', 'outlier_include'): {'mfexpb': 2.1634567328140175, 'mfexpr2': 0.9911909611311535, 'mfexprmse': 0.7171442873618252, 'nfexpb': -1.0080706511701287, 'nfexpr2': 0.9984041450973923, 'nfexprmse': 1.146651044904612, 'stdrfexpb': 1.384716719678781, 'stdrfexpr2': 0.994622981966881, 'stdrfexprmse': 0.5699139149010414},
     ('ar1', 'transition_p_alphabet'): {'meandiagfexp_a': 0.9507177999879877, 'meandiagfexp_b': -0.48294688328814117, 'meandiagfexp_r2': 0.9849405097579514, 'meandiagfexp_adjr2': 0.9819286117095417, 'meandiagfexp_rmse': 0.01613078078207405, 'maxdiagfexp_a': 0.6627644466935889, 'maxdiagfexp_b': -0.3149659921360167, 'maxdiagfexp_r2': 0.9671612239628987, 'maxdiagfexp_adjr2': 0.9605934687554785, 'maxdiagfexp_rmse': 0.02090393261517731, 'trfexp_a': 1.0041621623405603, 'trfexp_b': -0.16097625390616888, 'trfexp_r2': 0.9835870693269559, 'trfexp_adjr2': 0.9803044831923471, 'trfexp_rmse': 0.022694617809869703, 'trcovfexp_a': 0.29298611321456297, 'trcovfexp_b': -0.7948744989529248, 'trcovfexp_r2': 0.9954281515685559, 'trcovfexp_adjr2': 0.9945137818822671, 'trcovfexp_rmse': 0.0015610553552370136, 'stdeigfexp_a': 0.271697520318342, 'stdeigfexp_b': -0.22567315596262943, 'stdeigfexp_r2': 0.9810657977833603, 'stdeigfexp_adjr2': 0.9772789573400325, 'stdeigfexp_rmse': 0.006913752966268968},
     ('ar1', 'largest_lyap'): {'expfit_a': 1.7490235932201303, 'expfit_b': -0.5837230780759545, 'expfit_r2': 0.9683657465320821, 'expfit_adjr2': 0.9680103054818807, 'expfit_rmse': 0.03996097856526671},
     ('ar1', 'std_nth_deriv_change'): {'fexp_a': 0.2118839880588739, 'fexp_b': 0.6646838923808013, 'fexp_r2': 0.9999845663288156, 'fexp_rmse': 0.21909040472072494, 'minOrder': 1.0, 'minRatio': 1.0, 'overDiffRatio': 240.71698570311383, 'isInterior': 0.0, 'minOrderInterp': 1.0},
-    ('ar1', 'loop_local_simple'): {'sws_fexp_b': -0.2851744878047869, 'sws_fexp_r2': 0.9914136402641577, 'sws_fexp_adjr2': 0.9889603946253456, 'sws_fexp_rmse': 0.0038409517999407933},
+    ('ar1', 'loop_local_simple'): {'sws_fexp_b': -0.2891177462514205, 'sws_fexp_r2': 0.5370524026581296, 'sws_fexp_adjr2': 0.4047816605604524, 'sws_fexp_rmse': 0.1380518787835665},
     ('ar1', 'bf_exp_fit_offset'): {'a': 12.969690451794357, 'b': 0.02360981753328741, 'c': -11.852816441988855, 'r2': 0.9823832576815348, 'adjr2': 0.9814310013399962, 'rmse': 0.8224717614502375},
     ('ar1', 'bf_exp_fit_nooffset'): {'a': 3.0467869552190643, 'b': 0.05038927765029011, 'c': 0.0, 'r2': 0.965693695222583, 'adjr2': 0.9647908977284404, 'rmse': 1.132541772580041},
     ('ar1', 'saturating_exp_fit'): {'a': -41.18772072860475, 'b': 0.010020378065216487, 'r2': 0.9863792774182357, 'adjr2': 0.9861444373737226, 'rmse': 1.1567232948975534},
@@ -148,7 +159,7 @@ EXPECTED = {
     ('sin', 'transition_p_alphabet'): {'meandiagfexp_a': 1.1085370348423813, 'meandiagfexp_b': -0.4902336484672757, 'meandiagfexp_r2': 0.9896589193255364, 'meandiagfexp_adjr2': 0.9875907031906437, 'meandiagfexp_rmse': 0.015461512354675865, 'maxdiagfexp_a': 0.896267795057849, 'maxdiagfexp_b': -0.38609889480599613, 'maxdiagfexp_r2': 0.984850731578381, 'maxdiagfexp_adjr2': 0.9818208778940571, 'maxdiagfexp_rmse': 0.017685816742517988, 'trfexp_a': 1.1982994316313706, 'trfexp_b': -0.17522296830005896, 'trfexp_r2': 0.9909390966672093, 'trfexp_adjr2': 0.9891269160006511, 'trfexp_rmse': 0.02053135871380233, 'trcovfexp_a': 0.9315871484332647, 'trcovfexp_b': -1.0120490439898053, 'trcovfexp_r2': 0.9965054899377485, 'trcovfexp_adjr2': 0.9958065879252982, 'trcovfexp_rmse': 0.0028511652763407386, 'stdeigfexp_a': 0.14408305812333808, 'stdeigfexp_b': -0.11452168994534535, 'stdeigfexp_r2': 0.8904099547361898, 'stdeigfexp_adjr2': 0.8684919456834277, 'stdeigfexp_rmse': 0.008111960048081339},
     ('sin', 'largest_lyap'): {'expfit_a': 1.346059264741789, 'expfit_b': -0.6816755822723262, 'expfit_r2': 0.6082017074214228, 'expfit_adjr2': 0.6060128901444475, 'expfit_rmse': 0.09528677603961304},
     ('sin', 'std_nth_deriv_change'): {'fexp_a': 0.21721168024180207, 'fexp_b': 0.6664390290972432, 'fexp_r2': 0.9999934267452425, 'fexp_rmse': 0.14924117800118378, 'minOrder': 1.0, 'minRatio': 1.0, 'overDiffRatio': 295.5752990316364, 'isInterior': 0.0, 'minOrderInterp': 1.0},
-    ('sin', 'loop_local_simple'): {'sws_fexp_b': -0.9670774658523957, 'sws_fexp_r2': 0.8511169394157636, 'sws_fexp_adjr2': 0.8085789221059818, 'sws_fexp_rmse': 0.005948922309670753},
+    ('sin', 'loop_local_simple'): {'sws_fexp_b': 0.44292691808246865, 'sws_fexp_r2': 0.26084371265647444, 'sws_fexp_adjr2': 0.04965620198689569, 'sws_fexp_rmse': 0.1912145403161038},
     ('sin', 'bf_exp_fit_offset'): {'a': 465.5902802779816, 'b': 0.0016626345112370573, 'c': -465.67102130569714, 'r2': 0.9873575031538504, 'adjr2': 0.9866741249459504, 'rmse': 1.0879503187174921},
     ('sin', 'bf_exp_fit_nooffset'): {'a': 5.493536652770192, 'b': 0.04649545026077186, 'c': 0.0, 'r2': 0.936853324834461, 'adjr2': 0.9351915702248416, 'rmse': 2.399257962993339},
     ('sin', 'saturating_exp_fit'): {'a': -250.87626707363822, 'b': 0.0030088021976658586, 'r2': 0.994299143250739, 'adjr2': 0.994200852617131, 'rmse': 1.1039034615437537},

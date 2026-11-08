@@ -1107,53 +1107,44 @@ stationarity:
   
   sliding_window:
     base_name: sliding_window
-    min_length: "num_seg * {'mean': 2 if across_win_stat == 'std' else 1, 'std': 2, 'ent': 2, 'mom3': 3, 'AC1': 3, 'asymAC1': num(asym_tau, 1) + 2, 'lillie': 4, 'permen': 4, 'specen': 4}[window_stat]"
+    min_length: "num_seg * {'mean': 2 if across_win_stat in ('std', 'stdratio') else 1, 'std': 2, 'ent': 2, 'mom3': 3, 'AC1': 3, 'asymAC1': num(asym_tau, 1) + 2, 'lillie': 4, 'permen': 4, 'specen': 4}[window_stat]"
     dependencies:
     configs:
-      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
-      - {window_stat: 'mean', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}
-      
-
-
-
-      - {window_stat: 'std', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
-      - {window_stat: 'std', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}
-
-
-
-      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
-
-
-
-
-
-      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}
-      
-
-      - {window_stat: 'AC1', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}
-
-
-
-      - {window_stat: 'AC1', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'AC1','permen',10,2)
-      - {window_stat: 'asymAC1', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'asymAC1','std',2,1)
-      - {window_stat: 'asymAC1', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'asymAC1','std',10,1)
-      - {window_stat: 'asymAC1', across_win_stat: 'std', num_seg: 5, inc_move: 1, asym_tau: 'ac1e', zscore: True}   # SY_SlidingWindow(x_z,'asymAC1','std',5,1,'ac1e')
-      - {window_stat: 'asymAC1', across_win_stat: 'std', num_seg: 10, inc_move: 1, asym_tau: 'ac1e', zscore: True}   # SY_SlidingWindow(x_z,'asymAC1','std',10,1,'ac1e')
-      - {window_stat: 'ent', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'ent','std',2,1)
-      - {window_stat: 'ent', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'ent','std',10,1)
-      - {window_stat: 'lillie', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'lillie','std',2,1)
-      - {window_stat: 'lillie', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'lillie','std',10,1)
+      # The spread of a window statistic relative to its stationary sampling spread ('stdratio'), at a coarse
+      # scale (2 windows, half overlapping) and a fine one: 10 non-overlapping windows for the distributional
+      # and correlation statistics, 5 half-overlapping windows for the pattern-counting entropies, which need
+      # longer windows to fill their counts
+      - {window_stat: 'mean', across_win_stat: 'stdratio', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'mean', across_win_stat: 'stdratio', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'stdratio', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'stdratio', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'stdratio', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'stdratio', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'stdratio', num_seg: 10, inc_move: 1, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'stdratio', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'permen', across_win_stat: 'stdratio', num_seg: 5, inc_move: 2, zscore: True}
+      - {window_stat: 'permen', across_win_stat: 'stdratio', num_seg: 2, inc_move: 2, zscore: True}
+      - {window_stat: 'specen', across_win_stat: 'stdratio', num_seg: 5, inc_move: 2, zscore: True}
+      - {window_stat: 'specen', across_win_stat: 'stdratio', num_seg: 2, inc_move: 2, zscore: True}
+      # the ordinal structure (permutation entropy) of the sequence of window statistics: flat in length already
       - {window_stat: 'mean', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'mean','permen',10,2)
-      - {window_stat: 'mom3', across_win_stat: 'std', num_seg: 10, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'mom3','std',10,1)
-      - {window_stat: 'mom3', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'mom3','permen',10,2)
       - {window_stat: 'std', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'std','permen',10,2)
-      - {window_stat: 'permen', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'permen','std',2,1)
-      - {window_stat: 'permen', across_win_stat: 'std', num_seg: 5, inc_move: 10, zscore: True}   # SY_SlidingWindow(x_z,'permen','std',5,10)
-      - {window_stat: 'specen', across_win_stat: 'ent', num_seg: 5, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'specen','ent',5,1)
-      - {window_stat: 'specen', across_win_stat: 'std', num_seg: 2, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'specen','std',2,1)
-      - {window_stat: 'specen', across_win_stat: 'std', num_seg: 5, inc_move: 1, zscore: True}   # SY_SlidingWindow(x_z,'specen','std',5,1)
+      - {window_stat: 'mom3', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'mom3','permen',10,2)
+      - {window_stat: 'AC1', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'AC1','permen',10,2)
       - {window_stat: 'specen', across_win_stat: 'permen', num_seg: 5, inc_move: 10, zscore: True}   # SY_SlidingWindow(x_z,'specen','permen',5,10)
     legacy_name: SY_SlidingWindow
+    # The 'std' summaries are replaced by 'stdratio' (the plain spread across a fixed number of windows is mostly
+    # sampling error, which shrinks with series length). The asymAC1, Lilliefors and kernel-entropy window
+    # statistics and the entropy summary of spectral entropy are dropped: none responds to drift in the mean,
+    # variance or dynamics once the length effect is removed, and kernel entropy tracks the same drift as std.
+    dropped_hctsa_calls: ['SY_SlidingWindow_m_s_2_1', 'SY_SlidingWindow_m_s_10_1', 'SY_SlidingWindow_s_s2_1',
+                          'SY_SlidingWindow_s_s10_1', 'SY_SlidingWindow_mom3_s2_1', 'SY_SlidingWindow_mom3_s10_1',
+                          'SY_SlidingWindow_ac1_s2_1', 'SY_SlidingWindow_ac1_s10_1', 'SY_SlidingWindow_permen_s2_1',
+                          'SY_SlidingWindow_permen_s5_10', 'SY_SlidingWindow_specen_s2_1', 'SY_SlidingWindow_specen_s5_1',
+                          'SY_SlidingWindow_asymac1_s2_1', 'SY_SlidingWindow_asymac1_s10_1',
+                          'SY_SlidingWindow_asymac1_s5_1_ac1e', 'SY_SlidingWindow_asymac1_s10_1_ac1e',
+                          'SY_SlidingWindow_ent_s2_1', 'SY_SlidingWindow_ent_s10_1', 'SY_SlidingWindow_lil_s2_1',
+                          'SY_SlidingWindow_lil_s10_1', 'SY_SlidingWindow_specen_ent5_1']
     ordered_args: ['window_stat', 'across_win_stat', 'num_seg', 'inc_move', 'asym_tau']
   
   local_global:

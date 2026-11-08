@@ -744,11 +744,9 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
         for b in range(n_bands):
             out[f'area_{n_bands}_{b + 1}'] = np.sum(split[:, b]) * dw
             out[f'logarea_{n_bands}_{b + 1}'] = np.sum(np.log(split[:, b])) * dw
-        out[f'statav{n_bands}_s'] = _sample_std(_sample_std(split, axis=0), axis=0) / _sample_std(s)
+        out[f'statav{n_bands}_s'] = _band_spreads(split, s)[1]
         # The same on log(S): on the linear spectrum, whichever band contains the dominant peak swamps these
-        split_log = _equal_bands(log_s, n_bands)
-        out[f'logstatav{n_bands}_m'] = _sample_std(np.mean(split_log, axis=0)) / _sample_std(log_s)
-        out[f'logstatav{n_bands}_s'] = _sample_std(_sample_std(split_log, axis=0), axis=0) / _sample_std(log_s)
+        out[f'logstatav{n_bands}_m'], out[f'logstatav{n_bands}_s'] = _band_spreads(_equal_bands(log_s, n_bands), log_s)
 
     # Count crossings of the log spectrum with a horizontal line set a fraction of the way from
     # min(log S) to max(log S). On the linear spectrum a threshold at a fixed fraction of max(S) sits far
@@ -763,6 +761,15 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['ncross_log_f50'] = ncrossfn_rel_log(0.5)
 
     return out
+
+def _band_spreads(bands: np.ndarray, x: np.ndarray) -> tuple:
+    """The SD across frequency bands (the columns of ``bands``) of the band means and of the band SDs,
+    each relative to the SD of the whole spectrum ``x``: how unevenly the spectrum's level and
+    variability are spread over the bands."""
+    sd = _sample_std(x)
+    return (_sample_std(np.mean(bands, axis=0)) / sd,
+            _sample_std(_sample_std(bands, axis=0)) / sd)
+
 
 def _equal_bands(x: np.ndarray, n_bands: int) -> np.ndarray:
     """Split ``x`` into ``n_bands`` consecutive bands of equal length ``len(x) // n_bands``

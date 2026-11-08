@@ -19,7 +19,8 @@ from ..operations.distribution import fit_kernel_smooth, moments
 from ..operations.entropy import approximate_entropy, distribution_entropy, permutation_entropy, sample_entropy
 from ..toolboxes.Tisean_3_0_1.ports import _nstat_z_error, _nstat_z_std
 from ..robust import bf_exp_fit, bf_random, bf_random_seed
-from ..utils import dict_output, _coarse_grain, _autocov_fft, _round_half_away, _sample_std, get_tau, frame_signal, sign_change, z_score
+from ..utils import (dict_output, _coarse_grain, _acf_fourier, _autocov_fft, _round_half_away, _sample_std,
+                     _stationary_sample_var, get_tau, frame_signal, sign_change, z_score)
 from ..utils import _shannon_entropy
 from ..fitting import polyfit, robust_linear_fit
 from ..utils import _zscore, make_buffer
@@ -1957,9 +1958,24 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         Method to summarize the sequence of local estimates:
 
         - 'std': standard deviation, normalized by that of the full series
+        - 'stdratio': standard deviation, relative to the standard deviation expected from
+          sampling error alone if the series were stationary: about 1 for a stationary series
+          at any length, and larger when the local statistic changes over time. With a fixed
+          number of windows, the plain 'std' is mostly that sampling error, so it shrinks as
+          the windows grow. The expected spread comes from the variance of the statistic in
+          matched block surrogates whose windows sample the whole series evenly (each window
+          made of one block from every stretch of the series, so changes over time cancel),
+          allowing for the correlation of overlapping windows (as in
+          :func:`pyhctsa.operations.model_fit.fit_subsegments`). The surrogates use a fixed
+          seed, so the output is reproducible. NaN if no spread is expected (for example, a
+          constant series)
         - 'ent': (kernel-smoothed) distributional entropy of the sequence of local
           estimates (:func:`pyhctsa.operations.distribution.fit_kernel_smooth`; NaN if the
           local estimates are all the same)
+        - 'entnorm': the same entropy, of the local estimates divided by their stationary
+          standard deviation (as for 'stdratio'). The entropy of the plain estimates
+          moves with the log of their spread, so it falls as the windows grow; in these
+          units it does not
         - 'permen': normalized permutation entropy, PermEn(3, 1), of the sequence of local
           estimates
         - 'apen', 'sampen': approximate entropy (m=1, r=0.2) and sample entropy (m=2, r=0.15)
@@ -1985,71 +2001,17 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
     float
         The summary, ``across_win_stat``, of the local estimates of ``window_stat``: how the
         local statistic varies across the time series (for 'std', relative to the full-series
-        standard deviation). NaN if the windows are too short, or if all window statistics are NaN.
+        standard deviation; for 'stdratio', relative to the spread expected from sampling
+        error). NaN if the windows are too short, or if all window statistics are NaN.
     """
     y = np.asarray(y, dtype=float).ravel()
     win_length = np.floor(len(y)/num_seg)
     if win_length == 0:
         logger.warning(f"Time-series of length {len(y)} is too short for {num_seg} windows")
         return np.nan
-    windows = [y[start:start + int(win_length)] for start in _window_starts(len(y), win_length, inc_move)]
-    num_steps = len(windows)
-    qs = np.zeros(num_steps)
-
-    if window_stat == 'mean':
-        for i in range(num_steps):
-            qs[i] = np.mean(windows[i])
-    elif window_stat == 'std':
-        for i in range(num_steps):
-            qs[i] = _sample_std(windows[i])
-    elif window_stat == 'ent':
-        for i in range(num_steps):
-            qs[i] = distribution_entropy(windows[i], 'ks','[]')
-    elif window_stat == 'permen':
-        for i in range(num_steps):
-            qs[i] = _perm_en_norm(windows[i])
-    elif window_stat == 'specen':
-        for i in range(num_steps):
-            qs[i] = _spectral_entropy_norm(windows[i])
-    elif window_stat == 'apen':
-        for i in range(num_steps):
-            qs[i] = approximate_entropy(windows[i], 1, 0.2)
-    elif window_stat == 'sampen':
-        for i in range(num_steps):
-            sampen_dict = sample_entropy(windows[i], 1, 0.1)
-            qs[i] = sampen_dict['sampen1']
-    elif window_stat in ('mom3', 'mom4', 'mom5'):
-        the_mom = int(window_stat[3:])
-        for i in range(num_steps):
-            qs[i] = moments(windows[i], the_mom)
-    elif window_stat == 'lillie':
-        # Lilliefors statistic (as lillietest's kstat): KS distance between the empirical CDF
-        # and a normal CDF with the window's own mean and std (N-1)
-        for i in range(num_steps):
-            w = windows[i]
-            if len(w) < 4:
-                qs[i] = np.nan # lillietest needs at least 4 observations
-            elif _sample_std(w) == 0:
-                qs[i] = 1.0 # a constant window: lillietest's kstat is 1
-            else:
-                qs[i] = kstest(w, norm(loc=np.mean(w), scale=_sample_std(w)).cdf).statistic
-    elif window_stat == 'AC1':
-        for i in range(num_steps):
-            qs[i] = autocorr(windows[i], 1, 'Fourier')
-    elif window_stat == 'asymAC1':
-        # an adaptive lag is set from the whole series, not per window
-        tau = get_tau(y, asym_tau)
-        if not np.isnan(tau) and tau < 1:
-            raise ValueError("asym_tau must be a positive integer or a get_tau rule (e.g., 'ac1e')")
-        qs[:] = np.nan
-        if not np.isnan(tau) and tau < win_length - 1: # need pairs to average over
-            tau = int(tau)
-            for i in range(num_steps):
-                w = windows[i]
-                zw = _zscore(w) # a constant window gives zeros
-                qs[i] = np.mean(zw[:-tau] * zw[tau:] * (zw[tau:] - zw[:-tau]))
-    else:
-        raise ValueError(f"Unknown statistic '{window_stat}'")
+    starts = _window_starts(len(y), win_length, inc_move)
+    window_fn = _window_stat_fn(window_stat, y, win_length, asym_tau)
+    qs = np.array([window_fn(y[start:start + int(win_length)]) for start in starts], dtype=float)
 
     # Check for all errors (e.g., short time series):
     if np.all(np.isnan(qs)):
@@ -2059,6 +2021,20 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
     if across_win_stat == 'std':
         #% normalized by std of full time series
         out = _sample_std(qs)/_sample_std(y)
+    elif across_win_stat in ('stdratio', 'entnorm'):
+        ok = np.isfinite(qs)
+        if np.sum(ok) < 2:
+            return np.nan
+        spans = np.column_stack([starts, starts + int(win_length) - 1])[ok]
+        w = _window_null_var(y, window_fn, num_seg, int(win_length))
+        null = _stationary_sample_var(np.full(len(spans), w), spans) if np.isfinite(w) else np.nan
+        if not np.isfinite(null) or null <= _NULL_ROUNDOFF * w:
+            return np.nan
+        if across_win_stat == 'stdratio':
+            out = float(_sample_std(qs[ok]) / np.sqrt(null))
+        else:
+            ks_outs = fit_kernel_smooth(qs[ok] / np.sqrt(null))
+            out = ks_outs['entropy'] if isinstance(ks_outs, dict) else np.nan
     elif across_win_stat == 'permen':
         out = _perm_en_norm(qs)
     elif across_win_stat == 'apen':
@@ -2075,6 +2051,148 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         raise ValueError(f"Unknown statistic '{across_win_stat}'")
 
     return out
+
+_NULL_ROUNDOFF = 1e-12   # stationary variance, relative to a window's, below which it is zero
+_NULL_BLOCK_TAUS = 5      # surrogate blocks are at least this many decorrelation times long
+_NULL_MAX_BLOCKS = 50     # at most this many blocks per surrogate window
+_NULL_DF = 40             # surrogates give at least this many degrees of freedom in all
+_NULL_MATCH = 2           # samples matched at each join between surrogate blocks
+
+
+def _window_stat_fn(window_stat: str, y: np.ndarray, win_length: float, asym_tau) -> callable:
+    """The statistic of one window used by :func:`sliding_window`, as a function of the window's samples."""
+    if window_stat == 'mean':
+        return np.mean
+    if window_stat == 'std':
+        return _sample_std
+    if window_stat == 'ent':
+        return lambda w: distribution_entropy(w, 'ks', '[]')
+    if window_stat == 'permen':
+        return _perm_en_norm
+    if window_stat == 'specen':
+        return _spectral_entropy_norm
+    if window_stat == 'apen':
+        return lambda w: approximate_entropy(w, 1, 0.2)
+    if window_stat == 'sampen':
+        return lambda w: sample_entropy(w, 1, 0.1)['sampen1']
+    if window_stat in ('mom3', 'mom4', 'mom5'):
+        the_mom = int(window_stat[3:])
+        return lambda w: moments(w, the_mom)
+    if window_stat == 'lillie':
+        # Lilliefors statistic (as lillietest's kstat): KS distance between the empirical CDF
+        # and a normal CDF with the window's own mean and std (N-1)
+        def lillie(w):
+            if len(w) < 4:
+                return np.nan # lillietest needs at least 4 observations
+            if _sample_std(w) == 0:
+                return 1.0 # a constant window: lillietest's kstat is 1
+            return kstest(w, norm(loc=np.mean(w), scale=_sample_std(w)).cdf).statistic
+        return lillie
+    if window_stat == 'AC1':
+        return lambda w: autocorr(w, 1, 'Fourier')
+    if window_stat == 'asymAC1':
+        # an adaptive lag is set from the whole series, not per window
+        tau = get_tau(y, asym_tau)
+        if not np.isnan(tau) and tau < 1:
+            raise ValueError("asym_tau must be a positive integer or a get_tau rule (e.g., 'ac1e')")
+        if np.isnan(tau) or tau >= win_length - 1: # need pairs to average over
+            return lambda w: np.nan
+        tau = int(tau)
+        def asym(w):
+            zw = _zscore(w) # a constant window gives zeros
+            return np.mean(zw[:-tau] * zw[tau:] * (zw[tau:] - zw[:-tau]))
+        return asym
+    raise ValueError(f"Unknown statistic '{window_stat}'")
+
+
+def _decorrelation_time(y: np.ndarray, num_seg: int = 1, win_length: Union[int, None] = None) -> int:
+    """
+    The lag beyond which the autocorrelation of the fluctuations stays small: the smallest lag
+    ``k >= 1`` with ``|rho_j| < 1/e`` for every lag ``j >= k`` up to a quarter of the window
+    length. ``rho`` is the autocorrelation within each of ``num_seg`` consecutive windows of
+    ``win_length`` samples (each about its own least-squares line), averaged over the windows, so
+    that slow changes (a drifting mean, a trend, a level shift between windows) do not lengthen it. Unlike the first 1/e
+    crossing it covers the slowly decaying envelope of an oscillation. A quarter of the window
+    length (at least 1) if the autocorrelation never settles, and 1 for a constant series.
+    """
+    win_length = len(y) // num_seg if win_length is None else int(win_length)
+    max_lag = max(win_length // 4, 1)
+    acfs = []
+    for i in range(num_seg):
+        seg = y[i * win_length:(i + 1) * win_length]
+        t = np.arange(seg.size) - (seg.size - 1) / 2
+        slope = np.dot(t, seg) / np.dot(t, t) if seg.size > 1 else 0.0  # least-squares line
+        acf = _acf_fourier(seg - np.mean(seg) - slope * t)[1:max_lag + 1]
+        if acf.size == max_lag and np.all(np.isfinite(acf)):
+            acfs.append(acf)
+    if not acfs:
+        return 1
+    envelope = np.maximum.accumulate(np.abs(np.mean(acfs, axis=0))[::-1])[::-1]  # max |rho_j| over j >= k
+    below = np.flatnonzero(envelope < 1 / np.e)
+    return int(below[0]) + 1 if below.size else max_lag
+
+
+def _window_null_var(y: np.ndarray, window_fn: callable, num_seg: int, win_length: int) -> float:
+    """
+    Sampling variance of a window statistic for a stationary series like ``y``.
+
+    The variance is estimated from block surrogates in which every window samples the whole
+    series evenly, so that changes over time cancel while the dynamics within blocks are kept.
+    The first ``num_seg * win_length`` samples are cut into ``num_seg * G`` blocks, with ``G``
+    (2 to 50) blocks per window, each at least 5 decorrelation times (of the fluctuations within
+    windows, :func:`_decorrelation_time`) long where the windows are long enough. Consecutive runs of
+    ``num_seg`` blocks form ``G`` stretches, and each surrogate window takes one block from every
+    stretch, in a random order within the stretch. Each block after the first is shifted by up to
+    half its length so that its two preceding samples best match (least squares) the last two
+    samples of the block before it, which makes every join look like an ordinary step of the series
+    (the idea of the matched-block bootstrap of Carlstein et al., 1998, which favors joining blocks
+    whose ends match). Unmatched joins inflate the variance of statistics that respond to jumps
+    (the lag-1 autocorrelation of an oscillation, or the time asymmetry 'asymAC1'). The variance of the statistic across
+    the ``num_seg`` surrogate windows, averaged over enough surrogates for 40 degrees of freedom
+    in all, is the estimate. The random orders come from :func:`pyhctsa.robust.bf_random` with a
+    fixed seed, so the result is reproducible. NaN if fewer than two surrogate windows give a
+    finite statistic.
+
+    References
+    ----------
+    .. [1] E. Carlstein, K.-A. Do, P. Hall, T. Hesterberg and H. R. Kunsch, "Matched-block
+        bootstrap for dependent data", Bernoulli 4(3), 305-328 (1998). doi:10.2307/3318719
+    """
+    N = len(y)
+    tau = _decorrelation_time(y, num_seg, win_length)
+    num_blocks_per_win = int(min(max(win_length // (_NULL_BLOCK_TAUS * tau), 2),
+                                 _NULL_MAX_BLOCKS, win_length))
+    G, S = num_blocks_per_win, int(num_seg)
+    if G < 2 or S < 2:
+        return np.nan
+    edges = np.round(np.linspace(0, S * win_length, S * G + 1)).astype(int)
+    starts, lengths = edges[:-1], np.diff(edges)
+    num_surr = int(np.ceil(_NULL_DF / (S - 1)))
+    # one random order of the S blocks in each stretch, for each surrogate
+    orders = np.argsort(bf_random(num_surr * G * S, 0).reshape(num_surr, G, S), axis=2, kind='stable')
+    variances = []
+    for r in range(num_surr):
+        vals = np.empty(S)
+        for j in range(S):
+            b = orders[r, 0, j]
+            parts = [y[starts[b]:starts[b] + lengths[b]]]
+            end = starts[b] + lengths[b]
+            for k in range(1, G):
+                b = k * S + orders[r, k, j]
+                L = lengths[b]
+                h = max(L // 2, 1)
+                cand = np.arange(max(_NULL_MATCH, starts[b] - h), min(N - L, starts[b] + h) + 1)
+                cost = np.zeros(len(cand))
+                for i in range(1, _NULL_MATCH + 1):
+                    cost += (y[cand - i] - y[end - i]) ** 2
+                start = cand[np.argmin(cost)]
+                parts.append(y[start:start + L])
+                end = start + L
+            vals[j] = window_fn(np.concatenate(parts))
+        vals = vals[np.isfinite(vals)]
+        if len(vals) >= 2:
+            variances.append(np.var(vals, ddof=1))
+    return float(np.mean(variances)) if variances else np.nan
 
 def _perm_en_norm(v: np.ndarray) -> float:
     """Normalized permutation entropy PermEn(3, 1); NaN if it cannot be computed (too short)."""

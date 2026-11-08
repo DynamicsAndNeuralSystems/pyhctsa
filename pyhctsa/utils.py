@@ -936,6 +936,35 @@ def _acf_fft(y: ArrayLike) -> np.ndarray:
     return np.real(a / a[0])
 
 
+def _stationary_cov(w: np.ndarray, spans: np.ndarray) -> np.ndarray:
+    """
+    Covariance matrix of segment estimates from a stationary series.
+
+    Each segment's estimate is taken to be, to first order, an average of terms over the samples in
+    its span (``spans[i]`` = first and last sample, inclusive), with variance ``w[i]``. Two estimates
+    from spans of ``n_i`` and ``n_j`` samples that share ``o_ij`` samples then have covariance
+    ``C_ij = sqrt(w_i w_j) o_ij / sqrt(n_i n_j)``.
+    """
+    w = np.asarray(w, dtype=float)
+    first, last = spans[:, 0], spans[:, 1]
+    n = last - first + 1
+    shared = np.clip(np.minimum(last[:, None], last[None, :]) - np.maximum(first[:, None], first[None, :]) + 1,
+                     0, None)
+    return np.sqrt(np.outer(w, w)) * shared / np.sqrt(np.outer(n, n))
+
+
+def _stationary_sample_var(w: np.ndarray, spans: np.ndarray) -> float:
+    """
+    Expected sample variance (``ddof=1``), across segments, of estimates from a stationary series:
+    ``(sum_i C_ii - sum_ij C_ij / m) / (m - 1)`` for the ``m`` estimates with covariance ``C``
+    (:func:`_stationary_cov`). It is ``w`` for disjoint spans of equal variance, less when spans
+    overlap, and 0 when every span is the same.
+    """
+    cov = _stationary_cov(w, spans)
+    m = len(cov)
+    return float((np.trace(cov) - np.sum(cov) / m) / (m - 1))
+
+
 def _acf_fourier(y: np.ndarray) -> np.ndarray:
     """ACF at lags 0..N-1 (CO_AutoCorr(y, [], 'Fourier')); all-NaN for a constant series."""
     with np.errstate(all='ignore'):

@@ -63,7 +63,9 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
         between the kernel-smoothed densities of y and w, at most 2)), and of
         the residual w - y (``res_runsz`` (signed z-statistic of a runs test for randomness,
         :func:`pyhctsa.robust.bf_runs_z`: negative when it has fewer runs about its median
-        than expected), ``res_swss5_1``, ``res_ac1``).
+        than expected), ``res_swss5_1`` (the spread of the residual's SD across 5 windows, relative
+        to its stationary sampling spread: :func:`pyhctsa.operations.stationarity.sliding_window`,
+        ``'stdratio'``), ``res_ac1``).
     """
     y = np.asarray(y, dtype=float)
     N = len(y)
@@ -200,7 +202,7 @@ def walker(y: ArrayLike, walker_rule: str = 'prop',
     # (iii) Residuals between time series and walker
     res = w - y
     out['res_runsz'] = bf_runs_z(res)  # runs test z-statistic
-    out['res_swss5_1'] = sliding_window(res, 'std', 'std', 5, 1)
+    out['res_swss5_1'] = sliding_window(res, 'std', 'stdratio', 5, 1)
     out['res_ac1'] = autocorr(res, 1)
 
     return out
