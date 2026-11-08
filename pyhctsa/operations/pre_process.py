@@ -10,11 +10,13 @@ logger = logging.getLogger('pyhctsa')
 
 from ..operations.correlation import autocorr
 from ..operations.distribution import compare_ks_fit, outlier_test, simple_fit
+from ..operations.model_fit import _ar_rms_error
 from ..operations.nonlinearity import zero_one_test
 from ..operations.stationarity import sliding_window, stat_av
 from ..toolboxes.Tisean_3_0_1.ports import _nrlazy
-from ..robust import bf_fit_sinusoids, bf_random, bf_random_seed
-from ..utils import _even_split_points, dict_output, _sample_std, _zscore_or_zeros, z_score
+from ..robust import _rank_map_gaussian, bf_fit_sinusoids
+from ..utils import (_even_split_points, _is_roundoff, _piecewise_poly_residual, dict_output, _sample_std,
+                     _zscore_or_zeros, z_score)
 
 def _med_filt_1d(x: ArrayLike, k: int) -> ArrayLike:
     """Running median of window length ``k``, with the end values repeated beyond the ends.
@@ -133,6 +135,53 @@ def _spline_detrend(y: np.ndarray, npieces: int, order: int) -> np.ndarray:
     return y - B @ coef
 
 
+# The parameterized transforms of preproc_compare: (kind, method-name pattern with integer parameters)
+_TRANSFORM_PATTERNS = (
+    ('poly', r'poly([1-9])'),
+    ('spline', r'spline(\d)(\d)'),
+    ('diff', r'diff(\d)'),
+    ('medianf', r'medianf(\d+)'),
+    ('rav', r'rav(\d+)'),
+    ('resample', r'resample_(\d+)_(\d+)'),
+)
+
+
+def _parse_transform(name: str):
+    """``(kind, *params)`` for a parameterized transform name of ``preproc_compare`` (e.g.
+    ``'spline24'`` -> ``('spline', 2, 4)``), or None if the name is not one of them."""
+    for kind, pattern in _TRANSFORM_PATTERNS:
+        if (m := re.fullmatch(pattern, name)):
+            return (kind, *(int(g) for g in m.groups()))
+    return None
+
+
+def _transform(y: np.ndarray, kind: str, *params: int) -> np.ndarray:
+    """Apply one preprocessing transform, shared by ``preproc_compare`` and ``preproc_iterate``.
+
+    - ``'poly', order``: residual of a least-squares polynomial fit against times 0, ..., N - 1
+    - ``'spline', npieces, order``: residual of a least-squares spline (:func:`_spline_detrend`)
+    - ``'diff', n``: the n-th differences (length N - n)
+    - ``'medianf', n``: running median of window n, end values repeated (:func:`_med_filt_1d`)
+    - ``'rav', n``: causal running mean of window n (``lfilter(ones(n)/n, 1, y)``, zero initial state)
+    - ``'resample', up, down``: polyphase resampling by up/down (``scipy.signal.resample_poly``)
+    """
+    if kind == 'poly':
+        r = np.arange(len(y), dtype=float)
+        return y - np.polynomial.Polynomial.fit(r, y, params[0])(r)
+    if kind == 'spline':
+        return _spline_detrend(y, *params)
+    if kind == 'diff':
+        return np.diff(y, n=params[0])
+    if kind == 'medianf':
+        return _med_filt_1d(y, params[0])
+    if kind == 'rav':
+        n = params[0]
+        return lfilter(np.ones(n) / n, [1], y)
+    if kind == 'resample':
+        return resample_poly(y, *params)
+    raise ValueError(f"Unknown transform '{kind}'")
+
+
 @dict_output
 def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
     """
@@ -232,14 +281,13 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
     # ------------------------------------------------------------------
     # Apply preprocessing: y (raw) -> y_d (detrended/transformed)
     # ------------------------------------------------------------------
-    if (m := re.fullmatch(r'poly([1-9])', detrend_meth)):
-        # 1) Polynomial detrend
-        order = int(m.group(1))
-        r = np.arange(N, dtype=float)
-        y_d = y - np.polynomial.Polynomial.fit(r, y, order)(r)
+    if (spec := _parse_transform(detrend_meth)) is not None:
+        # Polynomial or spline detrend, differencing, median filter, running average or
+        # resampling (see _transform)
+        y_d = _transform(y, *spec)
 
     elif (m := re.fullmatch(r'sin([1-8])', detrend_meth)):
-        # 2) Seasonal detrend: sum of sinusoids
+        # Seasonal detrend: sum of sinusoids
         # (a constant is fitted jointly, so that a constant plus sinusoids is removed exactly:
         # the frequencies are bounded away from zero, so the sinusoids cannot absorb a mean)
         num_sin = int(m.group(1))
@@ -247,36 +295,15 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
             return np.nan  # too short to fit this many sinusoids and a constant
         y_d = y - bf_fit_sinusoids(y, num_sin, constant=True)[0]
 
-    elif (m := re.fullmatch(r'spline(\d)(\d)', detrend_meth)):
-        # 3) Spline detrend
-        y_d = _spline_detrend(y, int(m.group(1)), int(m.group(2)))
-
-    elif (m := re.fullmatch(r'diff(\d)', detrend_meth)):
-        # 4) Differencing
-        y_d = np.diff(y, n=int(m.group(1)))
-
-    elif (m := re.fullmatch(r'medianf(\d+)', detrend_meth)):
-        # 5) Median filter
-        y_d = _med_filt_1d(y, int(m.group(1)))
-
-    elif (m := re.fullmatch(r'rav(\d+)', detrend_meth)):
-        # 6) Running average
-        n = int(m.group(1))
-        y_d = lfilter(np.ones(n) / n, [1], y)
-
-    elif (m := re.fullmatch(r'resample_(\d+)_(\d+)', detrend_meth)):
-        # 7) Resample
-        y_d = resample_poly(y, int(m.group(1)), int(m.group(2)))
-
     elif detrend_meth == 'logr':
-        # 8) Log returns
+        # Log returns
         if not np.all(y > 0):
             return np.nan
         y_ref = np.log(y)
         y_d = np.diff(y_ref)
 
     elif detrend_meth == 'boxcox':
-        # 9) Box-Cox transformation
+        # Box-Cox transformation
         if not np.all(y > 0):
             return np.nan
         y_d = boxcox(y)[0]
@@ -346,25 +373,9 @@ def preproc_compare(y: ArrayLike, detrend_meth: str = 'medianf3') -> dict:
     return out
 
 
-def _is_roundoff(y_d: np.ndarray, y_ref: np.ndarray) -> bool:
-    """True if the processed series ``y_d`` has no variation beyond floating-point round-off.
-
-    The criterion is ``std(y_d) <= 10 * N * eps * rms(y_ref)``, with ``y_ref`` the series the
-    processing acts on and ``N`` its length: a bound on the rounding error of the processing,
-    relative to the magnitude (root-mean-square) of the values it acts on. A fitted or
-    filtered value accumulates rounding over sums of up to N terms (at most about N*eps/2),
-    and a sinusoid of frequency up to 1/2 evaluated at times up to N has a rounding error in
-    its phase of up to about 1.5*pi*N*eps (three roundings of 2*pi*f*t), in both the data and
-    the fit. Averaged over the series (the phase error grows with t), these are below about
-    8*N*eps of the root-mean-square, so 10*N*eps covers them.
-    """
-    eps = np.finfo(float).eps
-    return bool(np.std(y_d, ddof=1) <= 10 * y_ref.size * eps * np.sqrt(np.mean(y_ref ** 2)))
-
-
 def _iterate_stats(y: np.ndarray, y_d: np.ndarray) -> np.ndarray:
     """The ten statistics of ``preproc_iterate`` for one processed series ``y_d`` (and original ``y``);
-    all NaN if ``y_d`` is round-off of the processing of ``y`` (see :func:`_is_roundoff`)."""
+    all NaN if ``y_d`` is round-off of the processing of ``y`` (see :func:`pyhctsa.utils._is_roundoff`)."""
     f = np.full(10, np.nan)
     if _is_roundoff(y_d, y):
         return f
@@ -496,18 +507,14 @@ def preproc_iterate(y: ArrayLike, dt_meth: str = 'diff') -> dict:
     for q, n in enumerate(n_range):
         n = int(n)
         if dt_meth == 'spline':
-            y_d = _spline_detrend(y, n, 4)  # n pieces, cubic
-        elif dt_meth == 'diff':
-            y_d = np.diff(y, n=n)
-        elif dt_meth == 'medianf':
-            y_d = _med_filt_1d(y, n)
-        elif dt_meth == 'rav':
-            y_d = lfilter(np.ones(n) / n, [1], y)
+            spec = ('spline', n, 4)  # n pieces, cubic
         elif dt_meth == 'resampleup':
-            y_d = resample_poly(y, n, 1)
-        else:  # resampledown
-            y_d = resample_poly(y, 1, n)
-        outmat[q] = _iterate_stats(y, y_d)
+            spec = ('resample', n, 1)
+        elif dt_meth == 'resampledown':
+            spec = ('resample', 1, n)
+        else:  # diff, medianf, rav
+            spec = (dt_meth, n)
+        outmat[q] = _iterate_stats(y, _transform(y, *spec))
 
     names = ['statav5', 'swms5_2', 'swss5_2', 'gauss1_kd', 'gauss1_hsqrt', 'norm_kscomp',
              'ol', 'xcn1', 'xc1', 'normdiff']
@@ -517,74 +524,10 @@ def preproc_iterate(y: ArrayLike, dt_meth: str = 'diff') -> dict:
     return out
 
 
-def _piecewise_poly_residual(y: np.ndarray, order: int, num_bits: int) -> np.ndarray:
-    """Remove a polynomial of the given order from each of ``num_bits`` equal pieces.
-
-    The pieces come from hctsa's ``PP_PreProcess`` (``SUB_rempt``): boundaries at
-    ``round(linspace(0, N, num_bits + 1))`` (exact rounding), with the fit made against the sample times 0, ..., length of piece - 1.
-    """
-    n = len(y)
-    bits = _even_split_points(0, n, num_bits + 1)
-    out = np.zeros(n)
-    for k in range(num_bits):
-        seg = y[bits[k]:bits[k + 1]]
-        x = np.arange(len(seg), dtype=float)
-        out[bits[k]:bits[k + 1]] = seg - np.polynomial.Polynomial.fit(x, seg, order)(x)
-    return out
-
-
 def _piecewise_poly_detrend(y: np.ndarray, order: int, num_bits: int) -> np.ndarray:
     """Remove a polynomial of the given order from each of ``num_bits`` equal pieces (z-scored result);
-    see :func:`_piecewise_poly_residual`."""
+    see :func:`pyhctsa.utils._piecewise_poly_residual`."""
     return z_score(_piecewise_poly_residual(y, order, num_bits))
-
-
-def _rank_map_gaussian(y: np.ndarray, random_seed=None, draws: np.ndarray = None) -> np.ndarray:
-    """Replace the values of y by Gaussian values of the same rank (hctsa's ``rmgd``).
-
-    N Gaussian values are drawn and sorted, and the k-th smallest is given to the k-th smallest
-    value of y. ``random_seed`` is as in ``remove_points``: an integer, ``None``/``'default'``
-    for seed 0, or ``'none'`` for a seed drawn from NumPy's global random state. The draws come
-    from the portable generator :func:`pyhctsa.robust.bf_random` (normal), so they are hctsa's
-    for the same seed. The sorted draws can instead be supplied as ``draws``.
-    """
-    n = len(y)
-    if draws is None:
-        draws = bf_random(n, bf_random_seed(random_seed), 'normal')
-    out = np.zeros(n)
-    out[np.argsort(y, kind='stable')] = np.sort(draws)
-    return out
-
-
-def _ar_rms_error(data: np.ndarray, order: int) -> float:
-    """
-    Root-mean-square one-step prediction error of an AR model.
-
-    Fits an AR model of the given order by forward-backward least squares and returns the
-    root of the mean squared in-sample one-step errors, with the first ``order`` errors zero
-    (initial conditions estimated) and the forward residuals for the rest.
-
-    Parameters
-    ----------
-    data : np.ndarray
-        The time series.
-    order : int
-        The AR order.
-
-    Returns
-    -------
-    float
-        The RMS prediction error (NaN for non-finite input).
-
-    Notes
-    -----
-    Forward-backward linear prediction: S. L. Marple Jr., *Digital Spectral Analysis with
-    Applications*, Prentice-Hall, 1987, ch. 8.
-    """
-    from .model_fit import _fb_lsq
-    y = np.asarray(data, dtype=float).ravel()
-    _, sse = _fb_lsq(y, int(order))
-    return float(np.sqrt(sse / len(y)))
 
 
 def preproc_model_fit(y: ArrayLike, model: str = 'ar', order: int = 2,

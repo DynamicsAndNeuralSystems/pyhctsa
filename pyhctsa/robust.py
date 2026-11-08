@@ -25,7 +25,7 @@ import scipy.fft
 from numba import njit
 from numpy.typing import ArrayLike
 
-from .utils import _round_half_away
+from .utils import MAD_TO_SIGMA, _is_roundoff, _round_half_away
 
 __all__ = [
     'bf_random', 'bf_random_seed', 'bf_tie_break_noise', 'bf_runs_z', 'bf_residual_stats', 'bf_theil_sen',
@@ -291,7 +291,7 @@ def bf_residual_stats(res: ArrayLike, y: ArrayLike) -> Tuple[float, float, float
     from .operations.correlation import autocorr
     res = np.asarray(res, dtype=float).ravel()
     y = np.asarray(y, dtype=float).ravel()
-    if np.std(res, ddof=1) <= 10 * res.size * np.finfo(float).eps * np.sqrt(np.mean(y ** 2)):
+    if _is_roundoff(res, y, n=res.size):
         return np.nan, np.nan, np.nan  # nothing but round-off is left (an exact fit)
     with np.errstate(all='ignore'):
         ac = np.asarray(autocorr(res, [1, 2], 'Fourier'), dtype=float).ravel()
@@ -344,6 +344,31 @@ def _sse_of_rate(bs: np.ndarray, x: np.ndarray, y: np.ndarray, with_offset: bool
     return sse
 
 
+def _golden_section_min(f, lo: float, hi: float, n_iter: int = 40) -> float:
+    """Minimizer of a unimodal scalar function on ``[lo, hi]`` by golden-section search.
+
+    Runs a fixed ``n_iter`` steps (no tolerance test): each step evaluates ``f`` at the two
+    interior points ``hi - phi*(hi - lo)`` and ``lo + phi*(hi - lo)`` (``phi`` the golden-ratio
+    conjugate; both are recomputed every step, none reused) and keeps the left part of the bracket
+    when ``f`` at the left point is ``<=`` that at the right (ties go left). Returns the midpoint of
+    the final bracket. Used by the variable-projection fits (``bf_exp_fit``, and
+    ``_saturating_exp_fit`` in ``operations.nonlinearity``).
+
+    References
+    ----------
+    J. Kiefer, Proc. Amer. Math. Soc. 4 (1953) 502-506.
+    """
+    phi = (np.sqrt(5) - 1) / 2
+    for _ in range(n_iter):
+        x1 = hi - phi * (hi - lo)
+        x2 = lo + phi * (hi - lo)
+        if f(x1) <= f(x2):
+            hi = x2
+        else:
+            lo = x1
+    return (lo + hi) / 2
+
+
 def bf_exp_fit(x: ArrayLike, y: ArrayLike, with_offset: bool = True, max_rate: float = 20) -> dict:
     """Global least-squares fit of ``a*exp(b*x) + c`` by variable projection (hctsa ``BF_ExpFit``).
 
@@ -387,15 +412,7 @@ def bf_exp_fit(x: ArrayLike, y: ArrayLike, with_offset: bool = True, max_rate: f
     k = int(np.argmin(_sse_of_rate(b_grid, x, y, with_offset)))
     lo = b_grid[max(k - 1, 0)]
     hi = b_grid[min(k + 1, b_grid.size - 1)]
-    phi = (np.sqrt(5) - 1) / 2
-    for _ in range(40):  # golden-section search
-        b1 = hi - phi * (hi - lo)
-        b2 = lo + phi * (hi - lo)
-        if _sse_of_rate(np.array([b1]), x, y, with_offset)[0] <= _sse_of_rate(np.array([b2]), x, y, with_offset)[0]:
-            hi = b2
-        else:
-            lo = b1
-    b = (lo + hi) / 2
+    b = _golden_section_min(lambda b: _sse_of_rate(np.array([b]), x, y, with_offset)[0], lo, hi)
 
     e = np.exp(b * x)
     if with_offset:
@@ -914,7 +931,7 @@ def bf_ks_density(y: ArrayLike, xi: Optional[ArrayLike] = None,
 
     Evaluates ``f(x) = mean_i N(x; y_i, h^2)`` exactly (no binning, no truncation of the
     kernel). The default bandwidth is Silverman's rule with a robust scale,
-    ``h = s*(4/(3n))^(1/5)``, ``s = median(|y - median(y)|)/0.6745`` (``s = std(y)`` if the
+    ``h = s*(4/(3n))^(1/5)``, ``s = MAD_TO_SIGMA * median(|y - median(y)|)`` (``s = std(y)`` if the
     median absolute deviation is zero; if that too is zero, ``h``, ``xi`` and ``f`` are NaN).
 
     Parameters
@@ -941,7 +958,7 @@ def bf_ks_density(y: ArrayLike, xi: Optional[ArrayLike] = None,
     n = y.size
 
     if h is None:
-        s = np.median(np.abs(y - np.median(y))) / 0.6745  # robust estimate of the standard deviation
+        s = MAD_TO_SIGMA * np.median(np.abs(y - np.median(y)))  # robust estimate of the standard deviation
         if s <= 0:
             s = np.std(y, ddof=1) if n > 1 else 0.0
         h = np.nan if s <= 0 else s * (4 / (3 * n)) ** (1 / 5)
@@ -1206,3 +1223,20 @@ def bf_remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
             return y_t
         raise ValueError(f"Cannot 'saturate' when using '{remove_how}' method")
     raise ValueError(f"Unknown remove_or_saturate option: '{remove_or_saturate}'")
+
+
+def _rank_map_gaussian(y: np.ndarray, random_seed=None, draws: np.ndarray = None) -> np.ndarray:
+    """Replace the values of y by Gaussian values of the same rank (hctsa's ``rmgd``).
+
+    N Gaussian values are drawn and sorted, and the k-th smallest is given to the k-th smallest
+    value of y. ``random_seed`` is as in ``remove_points``: an integer, ``None``/``'default'``
+    for seed 0, or ``'none'`` for a seed drawn from NumPy's global random state. The draws come
+    from the portable generator :func:`pyhctsa.robust.bf_random` (normal), so they are hctsa's
+    for the same seed. The sorted draws can instead be supplied as ``draws``.
+    """
+    n = len(y)
+    if draws is None:
+        draws = bf_random(n, bf_random_seed(random_seed), 'normal')
+    out = np.zeros(n)
+    out[np.argsort(y, kind='stable')] = np.sort(draws)
+    return out

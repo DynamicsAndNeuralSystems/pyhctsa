@@ -23,6 +23,10 @@ from pyhctsa.robust import bf_random
 from pyhctsa.toolboxes.Tisean_3_0_1 import tisean
 
 warnings.filterwarnings('ignore')
+
+# MATLAB scales the MAD by 1/0.6745 (ksdensity, robustfit); pyhctsa by the exact 1/Phi^{-1}(3/4),
+# about 1e-5 apart. Compare the algorithms with MATLAB's constant (fixture in tests/conftest.py).
+pytestmark = pytest.mark.usefixtures('reference_mad_constant')
 logging.getLogger('pyhctsa').setLevel(logging.ERROR)
 
 with open(os.path.join(os.path.dirname(__file__), 'data', 'p2_a.json')) as f:
