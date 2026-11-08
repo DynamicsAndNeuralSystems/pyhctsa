@@ -1460,6 +1460,39 @@ def decimation_phases(x_z: ArrayLike, rule: str = 'ac1e',
     return phases if phases else np.nan
 
 
+def _ar_design(y: np.ndarray, p: int, start: int = None) -> tuple:
+    """
+    Lag design of a least-squares AR(p) fit: regressors and targets for one-step prediction.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        The series (1-D).
+    p : int
+        The AR order (number of lag columns).
+    start : int, optional
+        The first target sample, ``start >= p`` (default ``p``, every sample that has ``p``
+        predecessors). A larger ``start`` lets fits of several orders share the same targets.
+
+    Returns
+    -------
+    x : np.ndarray
+        Regressors, shape ``(N - start, p)``, lag 1 first: ``x[i, k-1] = y[t-k]`` for
+        ``t = start + i``.
+    target : np.ndarray
+        The targets ``y[start:]``.
+
+    Notes
+    -----
+    Both are read-only strided views of ``y`` (``x`` has a negative column stride); callers
+    copy them when they need a writable or contiguous array.
+    """
+    win = np.lib.stride_tricks.sliding_window_view(y, p + 1)  # row j = y[j:j+p+1]
+    if start is not None:
+        win = win[start - p:]
+    return win[:, :p][:, ::-1], win[:, p]
+
+
 def time_delay_embed(y: ArrayLike, m: int, tau: Union[int, str] = 1,
                      reverse: bool = False) -> np.ndarray:
     """

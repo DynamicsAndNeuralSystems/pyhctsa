@@ -25,7 +25,7 @@ from ..operations.stationarity import sliding_window
 from ..toolboxes.gpml.gpml import CovSEisoNoise, gp_predict, gp_train
 from ..robust import _rank_map_gaussian, bf_exp_fit, bf_random, bf_random_seed, bf_spread_perm
 from ..toolboxes.gpml.optimizers import minimize
-from ..utils import (_even_split_points, _is_roundoff, _piecewise_poly_residual, dict_output, _sample_std,
+from ..utils import (_ar_design, _even_split_points, _is_roundoff, _piecewise_poly_residual, dict_output, _sample_std,
                      _zscore_or_zeros, get_tau, z_score)
 from ..utils import ljung_box
 
@@ -367,9 +367,7 @@ def _armax_fit(y: np.ndarray, p: int, q: int) -> tuple:
     # (1) Hannan-Rissanen start. Stage 1: innovations from a long AR model
     e = np.full(n_obs, np.nan)
     if m > 0:
-        win = sliding_window_view(y, m + 1)
-        x1 = win[:, :m][:, ::-1]
-        t1 = win[:, m]
+        x1, t1 = _ar_design(y, m)
         e[m:] = t1 - x1 @ (_pinv(x1) @ t1)
     # Stage 2: regression on lagged values and lagged innovations
     tt = np.arange(t0, n_obs)
@@ -1303,7 +1301,7 @@ def _n4_arx_order_compute(y: np.ndarray) -> int:
         return 0
     target = y[lmax:]
     n = len(target)
-    lags = sliding_window_view(y, lmax + 1)[:, :lmax][:, ::-1]   # column k-1 = y[t-k]
+    lags = _ar_design(y, lmax)[0]   # column k-1 = y[t-k]
     floor_s2 = 1e-10 * np.mean(target ** 2)
     aic = np.empty(lmax + 1)
     with np.errstate(divide='ignore'):
@@ -2270,10 +2268,9 @@ def _fb_lsq(y: np.ndarray, p: int) -> tuple:
         raise ValueError("The series is too short for the requested AR order")
     if not np.all(np.isfinite(y)):
         return np.full(p, np.nan), np.nan
-    win = sliding_window_view(y, p + 1)  # row j = y[j:j+p+1]
     # forward: y[t] ~ sum_k phi_k y[t-k], t = p..N-1  (lags in reversed column order)
-    x_fwd = win[:, :p][:, ::-1]
-    t_fwd = win[:, p]
+    x_fwd, t_fwd = _ar_design(y, p)
+    win = sliding_window_view(y, p + 1)  # row j = y[j:j+p+1]
     # backward: y[t] ~ sum_k phi_k y[t+k], t = 0..N-1-p
     x_bwd = win[:, 1:]
     t_bwd = win[:, 0]
@@ -2418,12 +2415,11 @@ def _ar_pooled_moments(segs: list, coefs: list, p: int) -> dict:
     """
     resids, gram, ms_data = [], np.zeros((p, p)), 0.0
     for seg, a in zip(segs, coefs):
-        win = sliding_window_view(seg, p + 1)
-        x_fwd = win[:, :p][:, ::-1]
-        e = win[:, p] + x_fwd @ a
+        x_fwd, t_fwd = _ar_design(seg, p)
+        e = t_fwd + x_fwd @ a
         resids.append(e)
         gram += x_fwd.T @ x_fwd
-        ms_data += win[:, p] @ win[:, p]
+        ms_data += t_fwd @ t_fwd
     n_res = np.array([len(e) for e in resids])
     sse = sum(e @ e for e in resids)
     dof = np.sum(n_res) - len(segs) * p
@@ -3379,9 +3375,7 @@ def _arcov(y: np.ndarray, p: int) -> tuple:
         raise ValueError("The series is too short for the requested AR order")
     if not np.all(np.isfinite(y)):
         return np.full(p, np.nan), np.nan
-    win = sliding_window_view(y, p + 1)
-    design = win[:, :p][:, ::-1]
-    target = win[:, p]
+    design, target = _ar_design(y, p)
     phi = np.linalg.lstsq(design, target, rcond=None)[0]
     resid = target - design @ phi
     return phi, float(resid @ resid) / (n_obs - p)
@@ -3430,7 +3424,7 @@ def ar_cov(y: ArrayLike, p: int = 2) -> dict:
         out[f'a{i+1}'] = a[i]
     # Residual analysis: one-step predictions from the p past values, for the samples that
     # have them (the samples the fit was made on); prediction minus data
-    past = sliding_window_view(y, p + 1)[:, :p][:, ::-1]  # y[t-1], ..., y[t-p] for t = p..N-1
+    past = _ar_design(y, p)[0]  # y[t-1], ..., y[t-p] for t = p..N-1
     err = past @ phi - y[p:]
     out.update(residual_analysis(err, y, 'core'))
 
@@ -4538,10 +4532,8 @@ def _arx_losses(y_train: np.ndarray, y_test: np.ndarray, orders) -> tuple:
 
 def _lag_matrix(y: np.ndarray, na: int, start: int) -> tuple:
     """Regressors (lags 1..na) and targets for the samples ``y[start:]``."""
-    n_obs = len(y)
-    idx = np.arange(start, n_obs)
-    x = np.column_stack([y[idx - k] for k in range(1, na + 1)])
-    return x, y[idx]
+    x, t = _ar_design(y, na, start)
+    return x.copy(), t.copy()  # fresh (aligned, C-ordered) arrays keep the solver's rounding
 
 
 def _lag_regression(y: np.ndarray, na: int, start: int) -> np.ndarray:
