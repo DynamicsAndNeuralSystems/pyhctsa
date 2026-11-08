@@ -9,12 +9,12 @@ from scipy import stats
 import logging
 logger = logging.getLogger('pyhctsa')
 
-from ..utils import _even_split_points, dict_output, sign_change
+from ..utils import MAD_TO_SIGMA, _even_split_points, dict_output, sign_change
+from ..utils import _shannon_entropy as _prob_entropy  # wavelet._shannon_entropy is the c^2 cost
 from ..toolboxes.pywavelets.cwt import _custom_cwt
 
-# Scale factor of the median absolute deviation of Gaussian noise, Phi^{-1}(0.75) = 0.67449
-# (Donoho & Johnstone 1994, Biometrika 81(3):425-455): sigma = median(|d|) / _MAD_TO_SIGMA.
-_MAD_TO_SIGMA = float(stats.norm.ppf(0.75))
+# Robust noise scale of wavelet detail coefficients (Donoho & Johnstone 1994, Biometrika
+# 81(3):425-455): sigma = MAD_TO_SIGMA * median(|d|), MAD_TO_SIGMA = 1/Phi^{-1}(3/4).
 
 
 def _valid_filter_mean_square(z: np.ndarray, f: np.ndarray) -> np.float64:
@@ -168,7 +168,7 @@ def scal_2_freq(y: ArrayLike, w_name: str = 'db3', a_max: int = 5, delta: int = 
     stdc = []
     for k in range(1, a_max+1):
         d = _detcoef(coeffs, k)
-        stdc.append(np.median(np.abs(d)) / _MAD_TO_SIGMA)
+        stdc.append(MAD_TO_SIGMA * np.median(np.abs(d)))
     #% Compute identified period.
     j_max = np.argmax(stdc)
     out = {"lmax": j_max + 1, # level with highest energy coefficients
@@ -220,7 +220,7 @@ def dwt_coeff(y: ArrayLike, w_name: str = 'db3', level: int = 3) -> dict:
             # std coefficients at this level:
             out[f'stdd_l{k}'] = _sample_std(d)
             #% 1-D noise coefficient estimate (estimate of the noise std):
-            out[f'noisestd_l{k}'] = np.median(np.abs(d)) / _MAD_TO_SIGMA  # robust noise sd (Donoho & Johnstone)
+            out[f'noisestd_l{k}'] = MAD_TO_SIGMA * np.median(np.abs(d))  # robust noise sd (Donoho & Johnstone)
         else:
             # exceeds max level, return nans
             out[f'maxd_l{k}'] = np.nan 
@@ -322,8 +322,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
 
     # 2D entropy (relative to its maximum)
     SC_a = SC/np.sum(SC)
-    SC_pos = SC_a[SC_a > 0]  # (0*log(0) = 0 by continuity)
-    out['SC_h'] = -np.sum(SC_pos * np.log(SC_pos)) - np.log(num_entries)
+    out['SC_h'] = _prob_entropy(SC_a) - np.log(num_entries)  # (0*log(0) = 0 by continuity)
 
     # Entropy of the maximum of SC in each of 10 time boxes at each scale
     num_boxes = 10
@@ -335,9 +334,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     for j in range(num_boxes):
         dd_SC[:, j] = np.max(SC[:, cutoffs[j]:cutoffs[j + 1]], axis=1)
     dd_SC = dd_SC / np.sum(dd_SC)
-    dd_SC_o = dd_SC.ravel()
-    dd_SC_o = dd_SC_o[dd_SC_o > 0]  # (0*log(0) = 0 by continuity)
-    out['dd_SC_h'] = -np.sum(dd_SC_o * np.log(dd_SC_o))
+    out['dd_SC_h'] = _prob_entropy(dd_SC)  # (0*log(0) = 0 by continuity)
 
     # Sum across scales
     SSC = sum(SC)
@@ -819,9 +816,7 @@ def _shannon_entropy(c: np.ndarray) -> float:
         return 0.0
     if not np.all(np.isfinite(c)):
         return float('nan')
-    s = c ** 2
-    nz = s > 0
-    return float(-np.sum(s[nz] * np.log(s[nz])))
+    return float(_prob_entropy(c ** 2))
 
 
 @dict_output
@@ -915,6 +910,5 @@ def wpd_best_tree(y: ArrayLike, w_name: str = 'db3', max_level: Union[int, str] 
         'meanDepth': np.mean(depths),
         'stdDepth': _sample_std(depths, single=0.0),  # all leaves of the tree: 0 for a single leaf
     }
-    p = E[E > 0]
-    out['entropy'] = -np.sum(p * np.log(p))
+    out['entropy'] = _prob_entropy(E)
     return out

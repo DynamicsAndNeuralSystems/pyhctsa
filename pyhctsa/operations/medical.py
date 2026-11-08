@@ -1,10 +1,12 @@
 from ..utils import _sample_std, _sample_var
 import numpy as np
+from ..utils import _quantile
 from numpy.typing import ArrayLike
 from scipy import signal
 
+from ..utils import _run_lengths
 from ..robust import bf_hist_edges
-from ..utils import get_tau
+from ..utils import _coarse_grain, IQR_TO_SIGMA, MAD_TO_SIGMA, get_tau, _padded_nfft
 
 def raw_hrv_meas(x: ArrayLike) -> dict:
     """
@@ -94,7 +96,8 @@ def hrv_classic(y: ArrayLike) -> dict:
     1. **pNNx-style measures (pnnrel025, pnnrel05, pnnrel1, pnnrel2, pnnrel3)**
     The proportion of successive differences whose magnitude exceeds 0.25, 0.5, 1, 2 and 3
     times the robust standard deviation of the successive differences,
-    ``sigD = median(|d - median(d)|)/0.6745`` with ``d = diff(y)`` [1]. If ``sigD`` is
+    ``sigD = MAD_TO_SIGMA * median(|d - median(d)|)`` (``MAD_TO_SIGMA = 1/Phi^{-1}(3/4)``) with
+    ``d = diff(y)`` [1]. If ``sigD`` is
     at rounding-error level (``<= 1e-10*std(y)``, i.e. more than half the increments are
     equal) the mean absolute deviation about the median times ``sqrt(pi/2)`` is used
     instead; if that is also negligible (all increments equal) all five are NaN. Thresholds
@@ -157,7 +160,7 @@ def hrv_classic(y: ArrayLike) -> dict:
     # does not depend on the units of the series.
     d_y = np.abs(diff_y)
     med = np.median(diff_y)
-    sig_d = np.median(np.abs(diff_y - med)) / 0.6745  # robust (MAD-based) SD of increments
+    sig_d = MAD_TO_SIGMA * np.median(np.abs(diff_y - med))  # robust (MAD-based) SD of increments
     tol_d = 1e-10 * _sample_std(y)  # a spread below this (rounding error) is treated as zero
     if sig_d <= tol_d:
         # over half the increments are equal: fall back to the mean absolute deviation
@@ -181,7 +184,7 @@ def hrv_classic(y: ArrayLike) -> dict:
     # Calculate PSD
     # ------------------------------------------------------------------------------
 
-    nfft = max(256, 2 ** int(np.ceil(np.log2((n)))))
+    nfft = _padded_nfft(n)
     f, pxx = signal.periodogram(
         y,
         window=np.hanning(len(y)),
@@ -297,9 +300,7 @@ def pol_var(x: ArrayLike, d: float = 1, D: int = 6, tau: int | str = 1) -> float
     pc = 0
     for ph in range(min(tau, N)):  # runs along each lag-tau chain
         chain = x_sym[ph::tau]
-        change = np.flatnonzero(chain[1:] != chain[:-1]) + 1
-        run_lengths = np.diff(np.concatenate(([0], change, [chain.size])))
-        pc += int(np.sum(run_lengths // D))
+        pc += int(np.sum(_run_lengths(chain)[1] // D))
 
     p = pc / N
 
@@ -389,9 +390,7 @@ def pol_var_resid(x: ArrayLike, D: int = 3, ar_order: int = 2) -> float:
         return np.nan
     x_sym = abs_resid >= threshold
 
-    change = np.flatnonzero(x_sym[1:] != x_sym[:-1]) + 1
-    run_lengths = np.diff(np.concatenate(([0], change, [n])))
-    return float(np.sum(run_lengths // D) / n)
+    return float(np.sum(_run_lengths(x_sym)[1] // D) / n)
 
 def pnn(x: ArrayLike) -> dict:
     """
@@ -464,7 +463,8 @@ def porta(x: ArrayLike, num_levels: int = 6, tau: int | str = 1) -> dict:
     complexity/regularity of the symbolic dynamics of RR interval sequences.
 
     The levels are equal-width bins one robust standard deviation wide (for six levels),
-    ``s = IQR / 1.349``, centred on the median: the span ``median +/- 3 s`` is divided into
+    ``s = IQR_TO_SIGMA * IQR`` (``IQR_TO_SIGMA = 1/(2 Phi^{-1}(3/4))``), centred on the median: the
+    span ``median +/- 3 s`` is divided into
     ``num_levels`` bins and values beyond it fall in the end bins. Porta et al. divide the full
     range ``[min, max]`` into equal bins [2]_, after replacing ectopic beats, artifacts and jumps
     of more than 30% in the RR series. Without that cleaning one outlier widens every range
@@ -519,12 +519,11 @@ def porta(x: ArrayLike, num_levels: int = 6, tau: int | str = 1) -> dict:
 
     # quantize into 0:num_levels-1: equal bins over median +/- 3 robust SDs, open end bins
     num_levels = int(num_levels)
-    q25, med, q75 = np.percentile(x, [25, 50, 75])
-    scale = (q75 - q25) / 1.349  # robust standard deviation
+    q25, med, q75 = _quantile(x, [0.25, 0.5, 0.75], method='linear')
+    scale = IQR_TO_SIGMA * (q75 - q25)  # robust standard deviation
     if scale <= 1e-12 * np.max(np.abs(x)):  # more than half the values tied
         scale = 1.2533 * np.mean(np.abs(x - med))  # mean absolute deviation (Gaussian-consistent)
-    inner = med + (6 * scale / num_levels) * (np.arange(1, num_levels) - num_levels / 2)
-    sym = np.searchsorted(inner, x, side='right')
+    sym = _coarse_grain(x, num_levels, 'width', limits=(med - 3 * scale, med + 3 * scale))
 
     # transitions between symbols tau apart
     s = np.sign(sym[tau:] - sym[:-tau])

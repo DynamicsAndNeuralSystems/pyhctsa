@@ -8,7 +8,7 @@ from scipy.stats import ansari
 from ..operations.correlation import autocorr, first_crossing
 from ..operations.stationarity import sliding_window
 from ..robust import bf_ks_density, bf_runs_z
-from ..utils import dict_output, get_tau
+from ..utils import _coarse_grain, dict_output, get_tau
 
 def walker(y: ArrayLike, walker_rule: str = 'prop',
            walker_params: Union[None, float, int, list] = None) -> dict:
@@ -385,7 +385,7 @@ def kramers_moyal(y: ArrayLike, tau: Union[int, str] = 1, num_bins: int = 15) ->
           jumps). Unlike the shape of D2, not changed by a monotone transformation of the data.
 
         NaN (a single float) if there are fewer than 20 * `num_bins` increments, if no delay
-        can be estimated for a `tau` rule, or if tied values make the quantile bins coincide.
+        can be estimated for a `tau` rule, or if tied values leave a quantile bin empty.
     """
     y = np.asarray(y, dtype=np.float64).ravel()
     if isinstance(tau, str):
@@ -400,12 +400,10 @@ def kramers_moyal(y: ArrayLike, tau: Union[int, str] = 1, num_bins: int = 15) ->
         return np.nan  # data-dependent: too few samples per bin
 
     # Conditional moments in equiprobable bins of x
-    edges = np.quantile(x, np.linspace(0, 1, num_bins + 1), method='hazen')
-    edges[0], edges[-1] = -np.inf, np.inf
-    bin_ = np.digitize(x, edges[1:-1])  # 0..num_bins-1; bin i is [edges[i], edges[i+1])
+    bin_ = _coarse_grain(x, num_bins, 'quantile')  # 0..num_bins-1 (Hazen quantile cuts)
     n = np.bincount(bin_, minlength=num_bins).astype(np.float64)
     if np.any(n == 0):
-        return np.nan  # data-dependent: heavily tied values (quantile edges coincide)
+        return np.nan  # data-dependent: heavily tied values (a quantile bin is empty)
     xc = np.empty(num_bins)
     D1 = np.empty(num_bins)
     D2 = np.empty(num_bins)
