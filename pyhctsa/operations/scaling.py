@@ -6,7 +6,7 @@ logger = logging.getLogger('pyhctsa')
 
 from ..toolboxes.physionet.mma import mma_hurst
 from ..robust import bf_theil_sen
-from ..fitting import polyfit, robust_linear_fit
+from ..fitting import goodness_of_fit, polyfit, robust_linear_fit
 from ..utils import _arange_inclusive, dict_output, get_tau, _round_half_away_array, _sample_std
 from ..operations.correlation import autocorr
 
@@ -648,11 +648,7 @@ def mfdfa(y: ArrayLike, scale_range: list | None = None, q_range: list | None = 
             continue
         p = np.polyfit(log_s[good], log_fq[good, qi], 1)
         hq[qi] = p[0]
-        fitted = np.polyval(p, log_s[good])
-        ss_res = np.sum((log_fq[good, qi] - fitted) ** 2)
-        ss_tot = np.sum((log_fq[good, qi] - np.mean(log_fq[good, qi])) ** 2)
-        if ss_tot > 0:
-            r2q[qi] = 1 - ss_res / ss_tot
+        r2q[qi] = goodness_of_fit(log_fq[good, qi], np.polyval(p, log_s[good]), 2)['rsquare']
     if np.any(np.isnan(hq)):
         return np.nan
 

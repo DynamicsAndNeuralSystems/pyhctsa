@@ -359,8 +359,8 @@ def _polysat_fit(w: np.ndarray, y: np.ndarray) -> dict:
     b = np.exp((lo + hi) / 2)
     g = w2 / (b + w2)
     a = np.dot(g, y) / np.dot(g, g)
-    s = np.sum((y - a * g) ** 2)
-    return dict(a=a, b=b, r2=1 - s / np.sum((y - np.mean(y)) ** 2), rmse=np.sqrt(s / (n - 2)))
+    gof = goodness_of_fit(y, a * g, 2, guard_sst=False)
+    return dict(a=a, b=b, r2=gof['rsquare'], rmse=gof['rmse'])
 
 
 @dict_output
@@ -1588,14 +1588,8 @@ def sinusoid_fit(y: ArrayLike, model: str = 'sin1') -> Union[dict, float]:
         return np.nan
 
     res = y - fitted
-    sse = np.sum(res ** 2)
-    sstot = np.sum((y - np.mean(y)) ** 2)
-    dfe = N - n_coeff  # degrees of freedom of the error
-    with np.errstate(all='ignore'):
-        r2 = 1 - sse / sstot
-        adjr2 = 1 - (1 - r2) * (N - 1) / dfe if dfe > 0 else np.nan
-        rmse = np.sqrt(sse / dfe) if dfe > 0 else np.nan
-    out = {'r2': float(r2), 'adjr2': float(adjr2), 'rmse': float(rmse)}
+    gof = goodness_of_fit(y, fitted, n_coeff, guard_sst=False, adj_from_rsquare=True)
+    out = {'r2': gof['rsquare'], 'adjr2': gof['adjrsquare'], 'rmse': gof['rmse']}
     # Remaining structure in the residuals
     out['resAC1'], out['resAC2'], out['resrunsz'] = bf_residual_stats(res, y)
     return out
