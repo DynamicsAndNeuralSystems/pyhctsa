@@ -376,16 +376,74 @@ def z_score(x: ArrayLike) -> np.ndarray:
 
     return zscored_data
 
+def _lagged_products(x: np.ndarray, max_lag: int, later_first: bool = False) -> np.ndarray:
+    """
+    Lagged inner products ``c_k = sum_t x_t x_{t+k}`` for ``k = 0, ..., max_lag``.
+
+    Each is one ``np.dot`` over the overlapping samples (O(N * max_lag)), with no
+    demeaning and no normalization; callers demean ``x`` and divide as their statistic
+    requires (``c_k / c_0`` is the biased sample autocorrelation).
+    ``later_first`` swaps the operands to ``np.dot(x[k:], x[:N-k])`` (statsmodels' ``acovf``
+    order). The sum is the same, but BLAS splits it by the alignment of the first operand,
+    so the two orders can differ in the last bit; each caller keeps the order it has always used.
+    """
+    n = x.shape[0]
+    if later_first:
+        return np.array([np.dot(x, x)] + [np.dot(x[k:], x[:n-k]) for k in range(1, max_lag+1)])
+    return np.array([np.dot(x[:n-k], x[k:]) for k in range(max_lag+1)])
+
+def ljung_box(x: ArrayLike, lags, model_df: int = 0, later_first: bool = False) -> tuple:
+    """
+    Ljung-Box Q statistics and p-values for autocorrelation, at one or several lags.
+
+    ``Q(L) = N (N + 2) sum_{k=1}^{L} r_k^2 / (N - k)``, with ``r_k = c_k / c_0`` the sample
+    autocorrelation of the mean-removed series (autocovariances normalized by ``N`` at
+    every lag), as in ``statsmodels.stats.diagnostic.acorr_ljungbox``. The p-value is the
+    chi-squared upper tail with ``L - model_df`` degrees of freedom, NaN where that is not
+    positive. All lags share one pass over the autocovariances up to the largest lag.
+
+    Parameters
+    ----------
+    x : array-like
+        Input series, e.g. model residuals (no NaN handling: a NaN gives NaN outputs).
+    lags : int or array-like of int
+        An integer ``L`` tests lags ``1, ..., L``; a sequence tests exactly those lags.
+    model_df : int, optional
+        Degrees of freedom consumed by a fitted model, subtracted from each lag. Default 0.
+    later_first : bool, optional
+        Operand order of the lagged dot products (see ``_lagged_products``); True reproduces
+        ``acorr_ljungbox`` bit for bit. Default False.
+
+    Returns
+    -------
+    q, pvalues : np.ndarray
+        The statistics and p-values, one per tested lag.
+
+    Notes
+    -----
+    G. M. Ljung and G. E. P. Box, "On a Measure of Lack of Fit in Time Series Models",
+    Biometrika 65 (1978) 297-303.
+    """
+    x = np.asarray(x, dtype=float)
+    nobs = x.shape[0]
+    lags = np.arange(1, int(lags) + 1) if np.ndim(lags) == 0 else np.asarray(lags, dtype=int)
+    max_lag = int(lags.max())
+    acov = _lagged_products(x - x.mean(), max_lag, later_first) / nobs
+    sacf = acov / acov[0]
+    sacf2 = sacf[1:max_lag+1]**2 / (nobs - np.arange(1, max_lag+1))
+    q = nobs * (nobs+2) * np.cumsum(sacf2)[lags-1]
+    df = lags - model_df
+    pvalues = np.full(q.shape, np.nan)
+    ok = df > 0
+    pvalues[ok] = chi2.sf(q[ok], df[ok])
+    return q, pvalues
+
 def ljung_box_pvalue(x: ArrayLike, n_lags: int = 20, model_df: int = 0) -> float:
     """
     P-value of the Ljung-Box Q-test for autocorrelation up to ``n_lags``.
 
-    Equivalent to ``statsmodels.stats.diagnostic.acorr_ljungbox(x,
-    lags=[n_lags], model_df=model_df)`` but O(N * n_lags) rather than O(N^2):
-    it forms only the ``n_lags + 1`` autocovariances actually needed instead of
-    statsmodels' full ``acf(fft=False)`` (which computes the entire N-lag
-    autocovariance via ``np.correlate(..., 'full')``). Agrees with statsmodels
-    to ~1e-15 (``np.dot`` (BLAS) rounds differently from numpy's full-array correlation).
+    The p-value of :func:`ljung_box` at the single lag ``n_lags``, which is first clipped to
+    one less than the number of non-NaN samples.
 
     Parameters
     ----------
@@ -406,13 +464,7 @@ def ljung_box_pvalue(x: ArrayLike, n_lags: int = 20, model_df: int = 0) -> float
     x = np.asarray(x)
     t = np.sum(~np.isnan(x)) # effective sample size
     n_lags = min(n_lags, t - 1)
-    nobs = x.shape[0]
-    xo = x - x.mean()
-    acov = np.array([np.dot(xo[:nobs-k], xo[k:]) for k in range(n_lags+1)]) / nobs
-    sacf = acov / acov[0]
-    sacf2 = sacf[1:n_lags+1]**2 / (nobs - np.arange(1, n_lags+1))
-    q = nobs * (nobs+2) * np.cumsum(sacf2)[n_lags-1]
-    return chi2.sf(q, n_lags - model_df)
+    return ljung_box(x, [n_lags], model_df)[1][0]
 
 def simple_binner(x_data: ArrayLike, num_bins: int) -> tuple:
     """
