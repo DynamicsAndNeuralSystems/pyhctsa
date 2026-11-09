@@ -2,6 +2,7 @@
 import numpy as np
 import pytest
 from scipy.signal import lfilter
+from scipy.special import gammaln
 
 from pyhctsa.operations import stationarity as st
 from pyhctsa.operations._sfa_null_table import PROBS, QUANTILES, W_NODES
@@ -14,6 +15,23 @@ PERIOD_LO, PERIOD_HI = 0.9, 1.1
 
 def _ar1(n, phi, rng):
     return lfilter([1.0], [1.0, -phi], rng.standard_normal(n + 500))[500:]
+
+
+def _arfima_acf(d, n):
+    k = np.arange(n)
+    return np.exp(gammaln(k + d) + gammaln(1 - d) - gammaln(k - d + 1) - gammaln(d))
+
+
+def _arfima(n, d, rng):
+    # exact Gaussian ARFIMA(0, d, 0) by circulant embedding
+    acf = _arfima_acf(d, n)
+    lam = np.maximum(np.fft.fft(np.r_[acf, acf[-2:0:-1]]).real, 0)
+    z = rng.standard_normal(len(lam)) + 1j * rng.standard_normal(len(lam))
+    return np.fft.fft(np.sqrt(lam / len(lam)) * z).real[:n]
+
+
+def _ar2(n, a1, a2, rng):
+    return lfilter([1.0], [1.0, -a1, -a2], rng.standard_normal(n + 1000))[1000:]
 
 
 def _tv_ar1(phi, rng):
@@ -53,9 +71,47 @@ def test_null_calibration(gen, n):
     reps = 200
     s = np.array([_score(make()) for _ in range(reps)])
     assert np.all(s >= 0)
+    _assert_calibrated(s)
+
+
+def _assert_calibrated(s):
     for alpha in (0.05, 0.01):
-        bound = alpha + 3 * np.sqrt(alpha * (1 - alpha) / reps)
+        bound = alpha + 3 * np.sqrt(alpha * (1 - alpha) / len(s))
         assert np.mean(s >= -np.log10(alpha)) <= bound
+
+
+@pytest.mark.parametrize("gen", ["arfima0.25", "arfima0.4", "ar2_osc"])
+@pytest.mark.parametrize("n", [800, 4000])
+def test_null_calibration_long_memory_and_oscillatory(gen, n):
+    # long-memory noise correlates window means at every window length, and narrowband noise
+    # correlates window variances (its amplitude varies slowly): neither is drift
+    rng = np.random.default_rng([22, n, len(gen)])
+    make = {"arfima0.25": lambda: _arfima(n, 0.25, rng),
+            "arfima0.4": lambda: _arfima(n, 0.4, rng),
+            "ar2_osc": lambda: _ar2(n, 1.6, -0.9, rng)}[gen]
+    _assert_calibrated(np.array([_score(make()) for _ in range(200)]))
+
+
+def test_null_noise_model():
+    rng = np.random.default_rng(23)
+    def fit(y):
+        z = y.reshape(10, -1)
+        return st._sfa_null_acf(z - z.mean(axis=1, keepdims=True), 60)
+    # white noise: no correlation
+    full, short = fit(rng.standard_normal(4000))
+    assert np.allclose(full[1:], 0) and np.allclose(short[1:], 0)
+    # AR(2) with complex roots: recovers its autocorrelation, no long memory
+    full, short = fit(_ar2(100_000, 1.6, -0.9, rng))
+    assert full[1] == pytest.approx(1.6 / 1.9, abs=0.02) and np.allclose(full, short)
+    # the adjacent-window correlation of window variances matches simulation
+    v = np.var(_ar2(400_000, 1.6, -0.9, rng).reshape(-1, 25), axis=1)
+    assert st._sfa_block_corr(short**2, 25) == pytest.approx(np.corrcoef(v[1:], v[:-1])[0, 1], abs=0.03)
+    # ARFIMA(0, 0.25, 0): long memory, recovered on the grid of d
+    full, short = fit(_arfima(100_000, 0.25, rng))
+    assert np.allclose(full, _arfima_acf(0.25, 61), atol=0.03) and np.allclose(short[1:], 0)
+    # and the adjacent-window correlation of means matches simulation (2^(2d) - 1 for large windows)
+    m = _arfima(400_000, 0.25, rng).reshape(-1, 25).mean(axis=1)
+    assert st._sfa_block_corr(full, 25) == pytest.approx(np.corrcoef(m[1:], m[:-1])[0, 1], abs=0.03)
 
 
 @pytest.mark.parametrize("kind", ["ar_coef", "variance", "mean"])
@@ -65,8 +121,9 @@ def test_detects_linear_drift(kind):
     make = {"ar_coef": lambda: _tv_ar1(np.linspace(0.2, 0.7, n), rng),
             "variance": lambda: np.linspace(1.0, 1.6, n) * rng.standard_normal(n),
             "mean": lambda: np.linspace(0.0, 0.8, n) + rng.standard_normal(n)}[kind]
-    s = np.array([_score(make()) for _ in range(30)])
-    assert np.mean(s >= SCORE_01) >= 0.5
+    s = np.array([_score(make()) for _ in range(60)])
+    # about half of series for the AR-coefficient drift, which is the weakest of the three
+    assert np.mean(s >= SCORE_01) >= 0.35
     # a strong drift is unmistakable (p < 1e-4)
     big = {"ar_coef": lambda: _tv_ar1(np.linspace(0.0, 0.9, n), rng),
            "variance": lambda: np.linspace(1.0, 3.0, n) * rng.standard_normal(n),

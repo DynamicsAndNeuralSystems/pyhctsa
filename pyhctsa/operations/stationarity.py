@@ -8,7 +8,7 @@ from ..utils import _sample_var
 import numpy as np
 from ..utils import _iqr
 from numpy.typing import ArrayLike
-from scipy.signal import detrend, find_peaks
+from scipy.signal import detrend, find_peaks, lfilter
 from scipy.special import gammaln, ndtri
 from scipy.stats import kendalltau, kurtosis, kstest, skew, pearsonr, norm, rankdata
 from statsmodels.tools.sm_exceptions import InterpolationWarning
@@ -2474,7 +2474,7 @@ def _sfa_normal_scores(X: np.ndarray):
     return ndtri((rankdata(X, axis=0) - 0.5) / X.shape[0])
 
 
-def _sfa_fit(S: np.ndarray):
+def _sfa_fit(S: np.ndarray, rho=None):
     """PCA and SFA of the (num_windows x 5) normal-score matrix S. Returns None when its covariance
     is numerically singular (e.g. a statistic that takes the same value in every window)."""
     Sc = S - np.mean(S, axis=0)
@@ -2485,7 +2485,12 @@ def _sfa_fit(S: np.ndarray):
         return None
     Zw = Sc @ Vp / np.sqrt(pca_eigs) # PCA-whitened: unit covariance, all five directions kept
     etas, Us = np.linalg.eigh(np.cov(np.diff(Zw, axis=0), rowvar=False)) # ascending: slowest first
-    return {'etas': etas, 'slow': Zw @ Us[:, 0], 'pca_eigs': pca_eigs, 'pc1': Sc @ Vp[:, 0]}
+    eta_adj = etas[0]
+    if rho is not None:
+        dS = np.diff(Sc, axis=0) / np.sqrt(1 - np.asarray(rho))
+        eta_adj = np.linalg.eigvalsh(np.cov(dS @ Vp / np.sqrt(pca_eigs), rowvar=False))[0]
+    return {'etas': etas, 'eta_adj': eta_adj, 'slow': Zw @ Us[:, 0], 'pca_eigs': pca_eigs,
+            'pc1': Sc @ Vp[:, 0]}
 
 
 def _sfa_log10_p(eta: float, num_windows: int) -> float:
@@ -2513,6 +2518,83 @@ def _sfa_adjacent_corr(phi: float, L: int) -> float:
     cross = phi * (1 - phi**L)**2 / (1 - phi)**2
     within = L * (1 + phi) / (1 - phi) - 2 * phi * (1 - phi**L) / (1 - phi)**2
     return cross / within
+
+
+def _sfa_block_corr(g: np.ndarray, L: int) -> float:
+    """Correlation between the sums of two adjacent length-L blocks of a stationary sequence with
+    autocovariance g[0], g[1], ... (needs len(g) >= 2L)."""
+    k = np.arange(1, 2 * L)
+    cross = np.sum(np.minimum(k, 2 * L - k) * g[1:2 * L])
+    within = L * g[0] + 2 * np.sum((L - k[:L - 1]) * g[1:L])
+    return float(cross / within) if within > 0 else 0.0
+
+
+def _sfa_null_acf(z: np.ndarray, max_lag: int, max_order: int = 20):
+    """Noise model for the adjacent-window correction: an ARFIMA(p, d, 0) process fitted by
+    Whittle's method to the pooled periodogram of the rows of z (windows, each demeaned).
+
+    Each window is scaled to unit variance first, so that a drift in variance across windows does
+    not weight the pooled spectrum, and the lowest Fourier frequency of a window is left out, so
+    that a slow component with about one cycle per window (drift) is not mistaken for noise. The
+    memory parameter d is chosen from a grid in [0, 0.45] (AIC penalty) and the AR order
+    p <= min(max_order, L0 // 10) by BIC: white noise gives d = p = 0.
+
+    Returns the autocorrelation functions (lags 0..max_lag) of the full model and of its
+    short-memory AR(p) part, or None if no window has positive variance."""
+    with np.errstate(invalid='ignore', divide='ignore'):
+        zs = z / np.sqrt(np.mean(z**2, axis=1, keepdims=True))
+    zs = zs[np.all(np.isfinite(zs), axis=1)]
+    if len(zs) == 0:
+        return None
+    nwin, L0 = zs.shape
+    T = nwin * L0
+    P = int(min(max_order, L0 // 10))
+    I = np.mean(np.abs(np.fft.rfft(zs, axis=1))**2, axis=0)[2:]
+    w = 2 * np.pi * np.arange(2, len(I) + 2) / L0
+    log_frac = np.log(2 * np.sin(w / 2))
+    cosk = np.cos(np.outer(np.arange(P + 1), w))
+    E = np.exp(-1j * np.outer(w, np.arange(1, P + 1)))
+    best = (np.inf, 0.0, np.zeros(0))
+    for d in np.arange(0.0, 0.46, 0.05):
+        g = I * np.exp(2 * d * log_frac) # periodogram with the long memory removed
+        c = cosk @ g / len(g)
+        if not c[0] > 0:
+            break
+        # Levinson-Durbin recursion gives the AR(p) fit for every p <= P
+        a = np.zeros(0)
+        err = c[0]
+        for p in range(P + 1):
+            if p > 0:
+                k = (c[p] - np.dot(a, c[p - 1:0:-1])) / err
+                a = np.r_[a - k * a[::-1], k]
+                err *= 1 - k**2
+            A = np.abs(1 - E[:, :p] @ a)**2 if p else np.ones_like(w)
+            # Whittle: log mean(I / f) + mean(log f), with model spectrum f = |2 sin(w/2)|^(-2d) / A
+            crit = (T * (np.log(np.mean(g * A)) - 2 * d * np.mean(log_frac) - np.mean(np.log(A)))
+                    + p * np.log(T) + 2 * (d > 0))
+            if crit < best[0]:
+                best = (crit, d, a.copy())
+    _, d, a = best
+
+    # autocovariance of the AR(p) part from its MA weights psi; then of the full model, as the
+    # autocovariance of fractional noise filtered by the AR part
+    psi = np.ones(1)
+    if len(a):
+        imp = np.zeros(4 * max_lag + 200)
+        imp[0] = 1.0
+        psi = lfilter([1.0], np.r_[1.0, -a], imp)
+        psi = psi[:np.flatnonzero(np.abs(psi) > 1e-6 * np.max(np.abs(psi)))[-1] + 1]
+    K = len(psi)
+    r_psi = np.correlate(psi, psi, mode='full') # lags -(K-1)..(K-1)
+    acf_short = np.zeros(max_lag + 1)
+    acf_short[:min(K, max_lag + 1)] = r_psi[K - 1:][:max_lag + 1]
+    if d == 0:
+        acf_full = acf_short.copy()
+    else:
+        kk = np.arange(max_lag + K)
+        gam_d = np.exp(gammaln(kk + d) + gammaln(1 - d) - gammaln(kk - d + 1) - gammaln(d))
+        acf_full = np.convolve(np.r_[gam_d[:0:-1], gam_d], r_psi, mode='valid')[max_lag:]
+    return acf_full / acf_full[0], acf_short / acf_short[0]
 
 
 def _sfa_slow_period(slow: np.ndarray, w: int) -> float:
@@ -2558,23 +2640,33 @@ def slow_feature_analysis(y: ArrayLike, min_window_length: int = 20) -> dict:
     windows with exchangeable (iid) rows of statistics (``scripts/gen_sfa_null_table.py``). Because the
     statistics enter as rank normal scores, this null does not depend on their marginal distributions,
     so it holds for heavy-tailed series as well as Gaussian ones. Serial correlation in the series
-    correlates the statistics of adjacent windows (through samples near their shared boundary), which
-    would make ``eta1`` smaller than under the null for short windows. To stay calibrated, each
-    ``eta1`` is divided by ``1 - rho`` before the lookup, where ``rho`` is the correlation between the
-    means of adjacent windows of an AR(1) process with the series' lag-1 autocorrelation (estimated
-    within ten windows, so a slow drift does not inflate it, and bias-corrected). The window mean is
-    the statistic most affected, so this errs on the conservative side.
+    correlates the statistics of adjacent windows, which would make ``eta1`` smaller than under the
+    null. To stay calibrated, the first difference of each statistic is divided by
+    ``sqrt(1 - rho)`` before the SFA eigenvalue is computed, where ``rho`` is the correlation between
+    that statistic in adjacent windows of a noise model fitted to the series. The noise model is an
+    ARFIMA(p, d, 0) process, fitted by Whittle's method to the pooled periodogram of ten windows,
+    each demeaned and scaled to unit variance and without its lowest frequency, so that a slow
+    drift is not mistaken for noise; white noise gives ``rho = 0``. For the window mean, ``rho``
+    follows from the model's autocorrelation function (including long memory, ``d > 0``, which
+    correlates the means of windows of every length); for the other four statistics it is the
+    adjacent-window correlation of the window variance of the model's short-memory part (Gaussian
+    approximation), which captures narrowband (oscillatory) noise, whose amplitude varies slowly.
+    Neither ``rho`` is allowed below the adjacent-window correlation of means of an AR(1) process
+    with the series' (bias-corrected) lag-1 autocorrelation.
 
     The scales are combined by the Sidak-corrected minimum p-value. In simulations (2,000 series of
-    each process and length; nominal levels 0.05 and 0.01), the false-positive rate stayed within
+    each process and length, N = 200, 400, 800, 1600 and 4000), the false-positive rate stayed within
     sampling error of the nominal level or below it for white noise, AR(1) with coefficient 0.8, 0.9
-    or 0.95, and Student-t noise with 2 or 3 degrees of freedom or Cauchy noise, at
-    N = 200, 400, 800, 1600 and 4000.
+    or 0.95, AR(2) with coefficients (1.0, -0.5) or (1.9, -0.95), and Student-t noise with 2 or 3
+    degrees of freedom or Cauchy noise. It was at most 0.08 at the 0.05 level and 0.035 at the 0.01
+    level for ARFIMA(0, d, 0) noise with d = 0.1, 0.25 or 0.4, fractional Gaussian noise with Hurst
+    exponent 0.9, and narrowband AR(2) noise with coefficients (1.6, -0.9), the excess growing with N.
+    Long memory and slow drift cannot be fully told apart in a single record.
 
     This operation is a compact variant of feature-based SFA (f-SFA) [2]_, which applies SFA to
     sliding-window catch22/catch24 features; here five fixed window statistics are used.
 
-    Cost: about 0.7 ms at N = 200 (one scale), 4 ms at N = 4000 (five scales) and 13 ms at N = 20000
+    Cost: about 1 ms at N = 200 (one scale), 8 ms at N = 4000 (five scales) and 17 ms at N = 20000
     (eight scales).
 
     References
@@ -2649,6 +2741,14 @@ def slow_feature_analysis(y: ArrayLike, min_window_length: int = 20) -> dict:
     with np.errstate(invalid='ignore', divide='ignore'):
         r1 = np.sum(z0[:, 1:] * z0[:, :-1]) / np.sum(z0**2)
     phi = min((r1 * L0 + 1) / (L0 - 3), 0.99) if np.isfinite(r1) else 0.0
+    acfs = _sfa_null_acf(z0, 2 * (N // scales[0])) if np.isfinite(r1) else None
+
+    def _rho(L):
+        rho_mean = rho_other = _sfa_adjacent_corr(phi, L)
+        if acfs is not None:
+            rho_mean = max(rho_mean, _sfa_block_corr(acfs[0], L))
+            rho_other = max(rho_other, _sfa_block_corr(acfs[1]**2, L))
+        return np.clip([rho_mean] + 4 * [rho_other], 0.0, 0.99)
 
     from ._sfa_null_table import PROBS, QUANTILES
     null_median = QUANTILES[:, int(np.argmin(np.abs(PROBS - 0.5)))]
@@ -2656,10 +2756,10 @@ def slow_feature_analysis(y: ArrayLike, min_window_length: int = 20) -> dict:
     per_scale = [] # (W, log10 p, effect size, fit, normal scores)
     for W in scales:
         S = _sfa_normal_scores(_sfa_window_stats(y, W))
-        fit = None if S is None else _sfa_fit(S)
+        fit = None if S is None else _sfa_fit(S, _rho(N // W))
         if fit is None:
             continue
-        eta = fit['etas'][0] / (1 - _sfa_adjacent_corr(phi, N // W))
+        eta = fit['eta_adj']
         # effect size: eta1 relative to its null median at this W (1 = no slow structure)
         effect = eta / null_median[int(np.flatnonzero(W_NODES == W)[0])]
         per_scale.append((W, _sfa_log10_p(eta, W), effect, fit, S))
