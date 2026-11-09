@@ -102,6 +102,9 @@ Correlation
    pyhctsa.operations.correlation.autocorr
    pyhctsa.operations.correlation.autocorr_x2_shape
    pyhctsa.operations.correlation.cyclostationarity_scan
+   pyhctsa.operations.correlation.residual_autocorr_scan
+   pyhctsa.operations.correlation.reversibility_scan
+   pyhctsa.operations.correlation.bicorrelation
    pyhctsa.operations.correlation.add_noise
    pyhctsa.operations.correlation.theiler_q
    pyhctsa.operations.correlation.crinkle_statistic
@@ -199,6 +202,7 @@ Entropy
    pyhctsa.operations.entropy.fuzzy_entropy
    pyhctsa.operations.entropy.permutation_entropy_complexity
    pyhctsa.operations.entropy.randomize
+   pyhctsa.operations.entropy.randomize_ordinal
    pyhctsa.operations.entropy.wavelet_entropy
 
 .. _extemeeventsmeths:
@@ -210,6 +214,7 @@ Extreme Events
 
    pyhctsa.operations.extreme_events.moving_threshold
    pyhctsa.operations.extreme_events.extreme_event_order
+   pyhctsa.operations.extreme_events.extremogram
 
 .. _graphmeths:
 
