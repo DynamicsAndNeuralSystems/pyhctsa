@@ -35,6 +35,10 @@ def test_call_parsing():
 def test_every_input_has_a_calculator_preprocess():
     for z, ab, pre in chk.INPUTS.values():
         assert pre is None or pre in _PREPROCESS_LABELS
+    # a pyhctsa-only input is a calculator preprocess that no hctsa input expression maps to
+    hctsa_pre = {pre for _, _, pre in chk.INPUTS.values() if pre}
+    assert set(chk.PYHCTSA_ONLY_INPUTS) <= set(_PREPROCESS_LABELS)
+    assert not (set(chk.PYHCTSA_ONLY_INPUTS) & hctsa_pre)
 
 
 def test_mvalue():
@@ -111,6 +115,25 @@ def test_compare_leaves_out_pyhctsa_only_variants(tiny_hctsa, tmp_path):
     assert not res["extra"] and not res["deregistered"] and not res.get("duplicate_labels")
     assert [v[:3] for v in res["variants"]] == [("correlation", "autocorr_v", "autocorr")]
     assert res["counts"]["variant_configs"] == 1
+
+
+def test_compare_leaves_out_configs_with_a_pyhctsa_only_input(tiny_hctsa, tmp_path):
+    cfg = {"correlation": {"autocorr": {"base_name": "autocorr", "ordered_args": ["tau"], "legacy_name": "CO_AutoCorr",
+                                        "configs": [{"tau": [1, 2], "zscore": True},
+                                                    {"tau": 10, "zscore": True, "abs": True},
+                                                    {"tau": [1, 2], "zscore": True, "preprocess": "detrend"}]}}}
+    res = chk.compare(tiny_hctsa, _write_yaml(tmp_path, cfg), log=lambda *a: None)
+    assert not res["extra"] and not res["missing"].get("CO_AutoCorr") and not res.get("duplicate_labels")
+    assert res["variant_inputs"] == [("correlation", "autocorr", "detrend", ["autocorr_1_lindt", "autocorr_2_lindt"])]
+    assert res["counts"]["variant_configs"] == 2 and res["counts"]["yaml_configs"] == 5
+    lines = []
+    chk.report(res, False, log=lines.append)
+    assert any("autocorr (preprocess: detrend" in line for line in lines)
+    assert not any("_lindt" in line for line in lines if "no hctsa counterpart" in line)
+    # the same label twice is still a duplicate
+    cfg["correlation"]["autocorr"]["configs"].append({"tau": 1, "zscore": True, "preprocess": "detrend"})
+    res = chk.compare(tiny_hctsa, _write_yaml(tmp_path, cfg), log=lambda *a: None)
+    assert [d[0] for d in res["duplicate_labels"]] == ["autocorr_1_lindt"]
 
 
 def test_suggest_writes_matching_configs(tiny_hctsa, tmp_path):

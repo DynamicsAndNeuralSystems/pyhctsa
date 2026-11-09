@@ -53,9 +53,11 @@ def test_decorator_hands_over_transformed_series():
 
 
 def test_labels():
-    for pre, suffix in [('diff1', '_diff1'), ('zscore_abs', '_mag'), ('zscore_sign', '_sign'), ('decimate_ac1e', '_dec')]:
+    for pre, suffix in [('diff1', '_diff1'), ('zscore_abs', '_mag'), ('zscore_sign', '_sign'), ('decimate_ac1e', '_dec'),
+                        ('detrend', '_lindt')]:
         assert _build_label('f', {'a': 2}, ['a'], True, False, pre) == f'f_2{suffix}'
     assert _build_label('f', {}, [], True, True, 'decimate_ac1e') == 'f_abs_dec'
+    assert _build_label('f', {}, [], False, True, 'detrend') == 'f_raw_abs_lindt'
 
 
 def test_calculator_applies_inputs(tmp_path, monkeypatch):
@@ -68,12 +70,17 @@ def test_calculator_applies_inputs(tmp_path, monkeypatch):
         {'zscore': True, 'preprocess': 'zscore_abs', 'k': 2},
         {'zscore': True, 'preprocess': 'zscore_sign'},
         {'zscore': False, 'preprocess': 'diff1'},
+        {'zscore': True, 'preprocess': 'detrend'},
     ]}}}
     p = tmp_path / 'c.yaml'
     p.write_text(yaml.safe_dump(cfg))
     fc = FeatureCalculator(str(p))
-    assert list(fc.feature_funcs) == ['echo', 'echo_abs', 'echo_diff1', 'echo_2_mag', 'echo_sign', 'echo_raw_diff1']
+    assert list(fc.feature_funcs) == ['echo', 'echo_abs', 'echo_diff1', 'echo_2_mag', 'echo_sign', 'echo_raw_diff1',
+                                      'echo_lindt']
     out = fc.extract(X).iloc[0]
+    assert out['echo_lindt.n'] == X.size
+    np.testing.assert_allclose(out['echo_lindt.mean'], 0, atol=1e-12)
+    np.testing.assert_allclose(out['echo_lindt.std'], 1)
     assert out['echo.n'] == X.size and out['echo_diff1.n'] == X.size - 1
     np.testing.assert_allclose(out['echo_abs.mean'], np.abs(XZ).mean())
     np.testing.assert_allclose(out['echo_2_mag.mean'], 0, atol=1e-12)
