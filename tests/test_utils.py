@@ -238,6 +238,17 @@ class TestRegressions:
         df = pyhctsa.utils.make_function_name_mappings(str(p))
         assert list(df["pyhctsa name"]) == ["sample_entropy"]
 
+    def test_name_mappings_read_the_mapping_file(self, tmp_path):
+        cfg = {"entropy": {"sample_entropy": {"configs": []},
+                           "sample_entropy_v": {"variant_of": "sample_entropy", "configs": []}}}
+        (tmp_path / "c.yaml").write_text(yaml.safe_dump(cfg))
+        (tmp_path / "m.yaml").write_text(yaml.safe_dump({"entropy": {"sample_entropy": {"legacy_name": "EN_SampEn"}}}))
+        df = pyhctsa.utils.make_function_name_mappings(str(tmp_path / "c.yaml"), mapping_file=str(tmp_path / "m.yaml"))
+        assert list(df["pyhctsa name"]) == ["sample_entropy"] and list(df["hctsa legacy name"]) == ["EN_SampEn"]
+        # the default configuration takes its names from the packaged mapping file
+        default = pyhctsa.utils.make_function_name_mappings()
+        assert default["hctsa legacy name"].notna().all() and "CO_AutoCorr" in set(default["hctsa legacy name"])
+
     def test_name_mappings_do_not_clobber_range(self, tmp_path, module_config):
         # building the mappings must not change how !range is parsed elsewhere
         from pyhctsa.calculator import FeatureCalculator

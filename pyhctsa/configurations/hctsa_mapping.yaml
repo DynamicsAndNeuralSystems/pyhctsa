@@ -1,0 +1,502 @@
+# Legacy mapping: how the operations of hctsa.yaml correspond to hctsa (the MATLAB toolbox,
+# https://github.com/benfulcher/hctsa) for users moving between the two. Nothing here affects
+# feature extraction. Same module -> operation keys as hctsa.yaml; an operation with no entry has no
+# hctsa counterpart.
+#
+#   legacy_name           the hctsa function the operation implements
+#   note                  (optional) a difference from hctsa's registered outputs
+#   dropped_hctsa_calls   hctsa features (master operation labels) of legacy_name that pyhctsa
+#                         deliberately does not compute, each with the reason
+#
+# Lag-tau form: hctsa computes some features on the series decimated to one sample per 1/e
+# autocorrelation time (labels ending _dec). pyhctsa instead computes the statistic at lag tau = that
+# time on the whole series (its tau: 'ac1e' configs), so that every decimation phase contributes.
+# scripts/check_hctsa_yaml.py compares hctsa.yaml with hctsa's registered calls using this file.
+
+
+medical:
+  hrv_classic:
+    legacy_name: MD_hrv_classic
+  pnn:
+    legacy_name: MD_pNN
+  pol_var:
+    legacy_name: MD_PolVar
+    dropped_hctsa_calls:
+      MD_PolVar_1_3_dec: 'replaced by the tau: ''ac1e'' config (lag-tau form)'
+  raw_hrv_meas:
+    legacy_name: MD_RawHRVMeas
+  porta:
+    legacy_name: MD_Porta
+    dropped_hctsa_calls:
+      MD_Porta_dec: 'replaced by the tau: ''ac1e'' config (lag-tau form)'
+
+extreme_events:
+  moving_threshold:
+    legacy_name: EX_MovingThreshold
+  extreme_event_order:
+    legacy_name: EX_ExtremeEventOrder
+
+criticality:
+  rad:
+    legacy_name: CR_RAD
+
+correlation:
+  oversampling:
+    legacy_name: CO_Oversampling
+  time_rev_kld:
+    legacy_name: CO_TimeRevKLD
+  autocorr:
+    legacy_name: CO_AutoCorr
+  autocorr_x2_shape:
+    legacy_name: CO_AutoCorrX2Shape
+  add_noise:
+    legacy_name: CO_AddNoise
+  glscf:
+    legacy_name: CO_GLSCF
+  fzcglscf:
+    legacy_name: CO_FZCGLSCF
+  embed2:
+    legacy_name: CO_Embed2
+  embed2_shapes:
+    legacy_name: CO_Embed2_Shapes
+  embed2_basic:
+    legacy_name: CO_Embed2_Basic
+  embed2_dist:
+    legacy_name: CO_Embed2_Dist
+  embed2_angle_tau:
+    legacy_name: CO_Embed2_AngleTau
+  partial_autocorr:
+    legacy_name: CO_PartialAutoCorr
+  nonlinear_autocorr:
+    legacy_name: CO_NonlinearAutocorr
+    dropped_hctsa_calls:
+      AC_nl_036_dec: replaced by the lag-tau configs with the same taus
+      AC_nl_112_dec: replaced by the lag-tau configs with the same taus
+      AC_nl_1234_abs_dec: replaced by the lag-tau configs with the same taus
+  stick_angles:
+    legacy_name: CO_StickAngles
+  falling_sticks:
+    legacy_name: CO_FallingSticks
+  first_crossing:
+    legacy_name: CO_FirstCrossing
+  translate_shape:
+    legacy_name: CO_TranslateShape
+    dropped_hctsa_calls:
+      CO_TranslateShape_circle_25_pts_dec: 'replaced by the tau: ''ac1e'' config (lag-tau form)'
+  autocorr_shape:
+    legacy_name: CO_AutoCorrShape
+  histogram_ami:
+    legacy_name: CO_HistogramAMI
+  compare_min_ami:
+    legacy_name: CO_CompareMinAMI
+  periodicity_wang:
+    legacy_name: PD_PeriodicityWang
+  trev:
+    legacy_name: CO_trev
+  tc3:
+    legacy_name: CO_TC3
+  time_rev_kaplan:
+    legacy_name: DK_timerev
+  pos_neg_asymmetry:
+    legacy_name: CO_PosNegAsymmetry
+  crinkle_statistic:
+    legacy_name: DK_crinkle
+    dropped_hctsa_calls:
+      DK_crinkle_statistic_dec: 'replaced by the tau: ''ac1e'' config (lag-tau form)'
+  theiler_q:
+    legacy_name: DK_theilerQ
+  joint_non_gaussianity:
+    legacy_name: CO_JointNonGaussianity
+  matrix_profile:
+    legacy_name: CO_MatrixProfile
+  quantilogram:
+    legacy_name: CO_Quantilogram
+  remove_points:
+    legacy_name: CO_RemovePoints
+
+information:
+  automutual_info_stats:
+    legacy_name: IN_AutoMutualInfoStats
+  first_min:
+    legacy_name: CO_FirstMin
+  first_max:
+    legacy_name: CO_FirstMin
+  multivariate_ami:
+    legacy_name: IN_MultivariateAMI
+
+entropy:
+  distribution_entropy:
+    legacy_name: EN_DistributionEntropy
+  permutation_entropy:
+    legacy_name: EN_PermEn
+  lempel_ziv_complexity:
+    legacy_name: EN_LZComplexity
+    dropped_hctsa_calls:
+      EN_LZComplexity_2_dec: 'the decimated calls are dropped: at a fixed length they mostly measure the decimated length'
+      EN_LZComplexity_5_dec: 'the decimated calls are dropped: at a fixed length they mostly measure the decimated length'
+  complexity_invariant_distance:
+    legacy_name: EN_CID
+  approximate_entropy:
+    legacy_name: EN_ApEn
+  rpde:
+    legacy_name: EN_rpde
+  sample_entropy:
+    legacy_name: EN_SampEn
+    dropped_hctsa_calls:
+      EN_SampEn_5_02_dec: 'replaced by the tau: ''ac1e'' config (lag-tau form)'
+  multi_scale_entropy:
+    legacy_name: EN_MSE
+  shannon_entropy:
+    legacy_name: EN_Shannon
+  bubble_entropy:
+    legacy_name: EN_BubbleEn
+  dispersion_entropy:
+    legacy_name: EN_DispEn
+  fuzzy_entropy:
+    legacy_name: EN_FuzzyEn
+  permutation_entropy_complexity:
+    legacy_name: EN_PermEnComplexity
+  randomize_ordinal:
+    legacy_name: EN_RandomizeOrdinal
+  wavelet_entropy:
+    legacy_name: EN_wentropy
+
+stationarity:
+  stat_av:
+    legacy_name: SY_StatAv
+  trend:
+    legacy_name: SY_Trend
+  ts_length:
+    legacy_name: ST_Length
+  fit_polynomial:
+    legacy_name: ST_FitPolynomial
+  sliding_window:
+    legacy_name: SY_SlidingWindow
+    dropped_hctsa_calls:
+      SY_SlidingWindow_m_s_2_1: &std_summary 'replaced by the ''stdratio'' summary: the plain spread across a fixed number of windows is mostly sampling error, which shrinks with series length'
+      SY_SlidingWindow_m_s_10_1: *std_summary
+      SY_SlidingWindow_s_s2_1: *std_summary
+      SY_SlidingWindow_s_s10_1: *std_summary
+      SY_SlidingWindow_mom3_s2_1: *std_summary
+      SY_SlidingWindow_mom3_s10_1: *std_summary
+      SY_SlidingWindow_ac1_s2_1: *std_summary
+      SY_SlidingWindow_ac1_s10_1: *std_summary
+      SY_SlidingWindow_permen_s2_1: *std_summary
+      SY_SlidingWindow_permen_s5_10: *std_summary
+      SY_SlidingWindow_specen_s2_1: *std_summary
+      SY_SlidingWindow_specen_s5_1: *std_summary
+      SY_SlidingWindow_asymac1_s2_1: &no_drift 'window statistic dropped: it does not respond to drift in the mean, variance or dynamics once the length effect is removed'
+      SY_SlidingWindow_asymac1_s10_1: *no_drift
+      SY_SlidingWindow_asymac1_s5_1_ac1e: *no_drift
+      SY_SlidingWindow_asymac1_s10_1_ac1e: *no_drift
+      SY_SlidingWindow_ent_s2_1: &kernel_ent 'kernel-entropy window statistic dropped: it tracks the same drift as std'
+      SY_SlidingWindow_ent_s10_1: *kernel_ent
+      SY_SlidingWindow_lil_s2_1: *no_drift
+      SY_SlidingWindow_lil_s10_1: *no_drift
+      SY_SlidingWindow_specen_ent5_1: 'the entropy summary of spectral entropy is dropped: it does not respond to drift once the length effect is removed'
+  local_global:
+    legacy_name: SY_LocalGlobal
+  drifting_mean:
+    legacy_name: SY_DriftingMean
+  range_evolve:
+    legacy_name: SY_RangeEvolve
+  kpss_test:
+    legacy_name: SY_KPSStest
+  pp_test:
+    legacy_name: SY_PPtest
+    note: 'lagmaxp and lagminp are excluded: deregistered in hctsa'
+  local_extrema:
+    legacy_name: ST_LocalExtrema
+  simple_stats:
+    legacy_name: ST_SimpleStats
+  moment_corr:
+    legacy_name: ST_MomentCorr
+  local_distributions:
+    legacy_name: SY_LocalDistributions
+  ramping_windows:
+    legacy_name: SY_RampingWindows
+  slow_feature_analysis:
+    legacy_name: SY_SlowFeatureAnalysis
+  peak_intervals:
+    legacy_name: ST_PeakIntervals
+  drifting_auto_corr:
+    legacy_name: SY_DriftingAutoCorr
+  drifting_mean_cusum:
+    legacy_name: SY_DriftingMeanCUSUM
+  spread_random_local:
+    legacy_name: SY_SpreadRandomLocal
+  std_nth_deriv_change:
+    legacy_name: SY_StdNthDerChange
+  nstat_z:
+    legacy_name: SY_nstat_z
+
+distribution:
+  withinp:
+    legacy_name: DN_WithinP
+  unique:
+    legacy_name: DN_Unique
+  spread:
+    legacy_name: DN_Spread
+  quantile:
+    legacy_name: DN_Quantile
+  proportion_values:
+    legacy_name: DN_ProportionValues
+  pleft:
+    legacy_name: DN_PLeft
+  min_max:
+    legacy_name: DN_MinMax
+  mean:
+    legacy_name: DN_Mean
+  cv:
+    legacy_name: DN_CV
+  custom_skewness:
+    legacy_name: DN_CustomSkewness
+  burstiness:
+    legacy_name: DN_Burstiness
+  moments:
+    legacy_name: DN_Moments
+  outlier_include:
+    legacy_name: DN_OutlierInclude
+  outlier_test:
+    legacy_name: DN_OutlierTest
+  trimmed_mean:
+    legacy_name: DN_TrimmedMean
+  histogram_asymmetry:
+    legacy_name: DN_HistogramAsymmetry
+  histogram_mode:
+    legacy_name: DN_HistogramMode
+  remove_points:
+    legacy_name: DN_RemovePoints
+  compare_ks_fit:
+    legacy_name: DN_CompareKSFit
+    note: 'peaksepx of ''uni'' is excluded: deregistered in hctsa'
+  fit_kernel_smooth:
+    legacy_name: DN_FitKernelSmooth
+  simple_fit:
+    legacy_name: DN_SimpleFit
+  tail_index:
+    legacy_name: DN_TailIndex
+
+scaling:
+  fluctuation_analysis:
+    legacy_name: SC_FluctAnal
+    dropped_hctsa_calls:
+      SC_FluctAnal_2_endptdiff_50_logi:
+      SC_FluctAnal_2_range_50_logi:
+      SC_FluctAnal_2_std_50_logi:
+      SC_FluctAnal_2_iqr_50_logi:
+      SC_FluctAnal_2_dfa_50_0_logi:
+  mma:
+    legacy_name: SC_MMA
+  higuchi_fd:
+    legacy_name: SC_HiguchiFD
+    dropped_hctsa_calls:
+      SC_HiguchiFD_8_dec: 'replaced by the tau: ''ac1e'' config (lag-tau form)'
+  mfdfa:
+    legacy_name: SC_MFDFA
+
+symbolic:
+  transition_matrix:
+    legacy_name: SB_TransitionMatrix
+  transition_p_alphabet:
+    legacy_name: SB_TransitionPAlphabet
+  binary_stats:
+    legacy_name: SB_BinaryStats
+    dropped_hctsa_calls:
+      SB_BinaryStats_diff_dec: the decimated call is replaced by its average over all decimation phases, with the rank delay (_dec-rank)
+  motif_three:
+    legacy_name: SB_MotifThree
+  motif_two:
+    legacy_name: SB_MotifTwo
+  binary_stretch:
+    legacy_name: SB_BinaryGapHomogeneity
+  surprise:
+    legacy_name: FC_Surprise
+  binary_stats_ar1:
+    legacy_name: SB_BinaryStats_AR1
+
+wavelet:
+  wl_coeffs:
+    legacy_name: WL_Coeffs
+  detail_coeffs:
+    legacy_name: WL_DetailCoeffs
+  cwt:
+    legacy_name: WL_cwt
+  dwt_coeff:
+    legacy_name: WL_DWTCoeff
+  scal_2_freq:
+    legacy_name: WL_scal2frq
+  wfbm:
+    legacy_name: WL_fBM
+  modwt_var:
+    legacy_name: WL_modwtvar
+  wpd_best_tree:
+    legacy_name: WL_wpdBestTree
+
+hypothesis_tests:
+  distribution_test:
+    legacy_name: HT_DistributionTest
+  variance_ratio_test:
+    legacy_name: SY_VarRatioTest
+  independence_tests:
+    legacy_name: HT_IndependenceTests
+  marginal_tests:
+    legacy_name: HT_MarginalTests
+
+spectral:
+  cross_frequency_coupling:
+    legacy_name: SP_PhaseAmpCoupling
+  spectral_summaries:
+    legacy_name: SP_Summaries
+  spectral_summaries_phase:
+    legacy_name: SP_SummariesPhase
+  specparam:
+    legacy_name: SP_Specparam
+  cepstrum:
+    legacy_name: SP_Cepstrum
+  bicoherence:
+    legacy_name: SP_Bicoherence
+  envelope_stats:
+    legacy_name: SP_EnvelopeStats
+  phase_fluctuation_scaling:
+    legacy_name: SP_PhaseFluctuationScaling
+  sinusoid_fit:
+    legacy_name: SP_SinusoidFit
+  spectral_time_freq:
+    legacy_name: SP_SpectralTimeFreq
+  rhythmicity:
+    legacy_name: SP_Rhythmicity
+
+model_fit:
+  ar_cov:
+    legacy_name: MF_AR_arcov
+  exp_smoothing:
+    legacy_name: MF_ExpSmoothing
+  ar_fit:
+    legacy_name: MF_arfit
+  local_simple:
+    legacy_name: FC_LocalSimple
+    dropped_hctsa_calls:
+      FC_LocalSimple_mean1_dec: 'replaced by the tau: ''ac1e'' config (lag-tau form)'
+  loop_local_simple:
+    legacy_name: FC_LoopLocalSimple
+  fit_subsegments:
+    legacy_name: MF_FitSubsegments
+    dropped_hctsa_calls:
+      MF_FitSubsegments_arsbc_spread_25_01: duplicates the 'uniform' arsbc config (the same statistics of 25 segments)
+  hmm_fit:
+    legacy_name: MF_hmm_Fit
+  gp_fit_across:
+    legacy_name: MF_GP_FitAcross
+  compare_ar:
+    legacy_name: MF_CompareAR
+  compare_test_sets:
+    legacy_name: MF_CompareTestSets
+  garch_compare:
+    legacy_name: MF_GARCHcompare
+  garch_fit:
+    legacy_name: MF_GARCHfit
+  gp_hyperparameters:
+    legacy_name: MF_GP_Hyperparameters
+  state_space_comp_order:
+    legacy_name: MF_StateSpaceCompOrder
+  state_space_n4sid:
+    legacy_name: MF_StateSpace_n4sid
+  armax:
+    legacy_name: MF_armax
+  hmm_compare_n_states:
+    legacy_name: MF_hmm_CompareNStates
+  steps_ahead:
+    legacy_name: MF_steps_ahead
+
+graph:
+  visibility_graph:
+    legacy_name: NW_VisibilityGraph
+  ordinal_partition_network:
+    legacy_name: NW_OrdinalPartitionNetwork
+
+physics:
+  force_potential:
+    legacy_name: PH_ForcePotential
+  walker:
+    legacy_name: PH_Walker
+  kramers_moyal:
+    legacy_name: PH_KramersMoyal
+
+pre_process:
+  preproc_compare:
+    legacy_name: PP_Compare
+  preproc_iterate:
+    legacy_name: PP_Iterate
+  preproc_model_fit:
+    legacy_name: PP_ModelFit
+  preproc_schreiber_denoise:
+    legacy_name: PP_SchreiberDenoise
+
+surrogates:
+  surrogate_test:
+    legacy_name: SD_SurrogateTest
+  surrogates:
+    legacy_name: SD_Surrogates
+
+nonlinearity:
+  nsamdf:
+    legacy_name: NL_NSAMDF
+  nlpe:
+    legacy_name: NL_nlpe
+  embed_pca:
+    legacy_name: NL_EmbedPCA
+  ssa:
+    legacy_name: NL_SSA
+  zero_one_test:
+    legacy_name: NL_ZeroOneTest
+  local_density:
+    legacy_name: NL_LocalDensity
+  tisean_d2:
+    legacy_name: NL_d2
+  poincare_section:
+    legacy_name: NL_PoincareSection
+  delay_time:
+    legacy_name: NL_DelayTime
+  box_count_entropy_rate:
+    legacy_name: NL_BoxCountEntropyRate
+  dvv:
+    legacy_name: NL_DVV
+  dimensions:
+    legacy_name: NL_Dimensions
+  evt_local_dim:
+    legacy_name: NL_EVTLocalDim
+  embed_cluster:
+    legacy_name: NL_EmbedCluster
+  embed_kernel_pca:
+    legacy_name: NL_EmbedKernelPCA
+  fnn:
+    legacy_name: NL_FNN
+  fractal_dimensions:
+    legacy_name: NL_FractalDimensions
+  gp_corr_sum:
+    legacy_name: NL_GPCorrSum
+  largest_lyap:
+    legacy_name: NL_LargestLyap
+  lyap_spec:
+    legacy_name: NL_LyapSpec
+  persistent_homology:
+    legacy_name: NL_PersistentHomology
+  rqa:
+    legacy_name: NL_RQA
+  recurrence_times:
+    legacy_name: NL_RecurrenceTimes
+  return_time:
+    legacy_name: NL_ReturnTime
+  takens_estimator:
+    legacy_name: NL_TakensEstimator
+  tisean_c1:
+    legacy_name: NL_c1
+
+changepoint:
+  stepdetect:
+    legacy_name: CP_ML_StepDetect
+  l1pwc_sweep_lambda:
+    legacy_name: CP_l1pwc_SweepLambda
+  wavelet_var_chg:
+    legacy_name: CP_WaveletVarChg

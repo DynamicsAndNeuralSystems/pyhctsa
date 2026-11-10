@@ -6,8 +6,8 @@ calls (parameter settings) as hctsa's ``FeatureSets/INP_mops_hctsa.txt`` (master
 ``INP_ops_hctsa.txt`` (operations: one master output field each). This script reads a hctsa checkout and reports
 
 (a) hctsa calls of implemented functions that no pyhctsa config reproduces (the functions pyhctsa implements are those
-    with a ``legacy_name`` in the yaml, plus unregistered public functions of ``pyhctsa/operations`` whose name matches
-    an hctsa function, or is listed in ``EXTRA_IMPL``);
+    with a ``legacy_name`` in the legacy mapping, ``configurations/hctsa_mapping.yaml``, plus unregistered public
+    functions of ``pyhctsa/operations`` whose name matches an hctsa function, or is listed in ``EXTRA_IMPL``);
 (b) pyhctsa configs that match no hctsa call (a function deregistered in hctsa, or a differing setting);
 (c) output-name differences: a call's hctsa fields (``master.field`` of INP_ops) against the keys pyhctsa returns, found
     by running each matched config on test series (``--run``); pyhctsa need not return hctsa's fields, so differing
@@ -19,8 +19,8 @@ calls (parameter settings) as hctsa's ``FeatureSets/INP_mops_hctsa.txt`` (master
 Entries with ``variant_of: <yaml entry>`` and no ``legacy_name`` are pyhctsa-only variants of a ported function (a
 reformulation under a new name; the original stays unchanged). They have no hctsa call to pair with, so they are left
 out of the comparison and only listed, under "pyhctsa-only variants"; their labels still count towards (e).
-An entry's ``dropped_hctsa_calls: [<hctsa master operation label>, ...]`` lists hctsa calls of its function that
-pyhctsa deliberately does not compute; they are listed separately rather than under (a).
+An entry's ``dropped_hctsa_calls`` in the legacy mapping (``<hctsa master operation label>: <reason>``) lists hctsa
+calls of its function that pyhctsa deliberately does not compute; they are listed separately rather than under (a).
 
 A pyhctsa config matches an hctsa call when the input agrees (see ``INPUTS``) and every argument they share has the same
 value. An argument a call leaves out takes hctsa's default (read from the ``if nargin < k`` blocks of the .m file; if
@@ -307,9 +307,21 @@ def _key(name: str) -> str:
 # ---------------------------------------------------------------------------------------------------------------
 # pyhctsa side
 # ---------------------------------------------------------------------------------------------------------------
-def load_yaml(path: Path) -> dict:
+MAPPING_NAME = "hctsa_mapping.yaml"   # the legacy mapping, beside the feature configuration
+
+
+def load_yaml(path: Path, mapping: Path = None) -> dict:
+    """The feature configuration with its legacy mapping attached (``legacy_name`` and ``dropped_hctsa_calls`` of
+    each entry): ``mapping``, else the ``hctsa_mapping.yaml`` beside ``path`` if there is one."""
     from pyhctsa import calculator   # registers the !range constructor on yaml.SafeLoader
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    from pyhctsa.utils import _merge_legacy_mapping
+    path = Path(path)
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if mapping is None and (path.parent / MAPPING_NAME).exists():
+        mapping = path.parent / MAPPING_NAME
+    if mapping is not None:
+        _merge_legacy_mapping(cfg, yaml.safe_load(Path(mapping).read_text(encoding="utf-8")))
+    return cfg
 
 
 def _default_value(d):

@@ -147,8 +147,39 @@ def test_suggest_writes_matching_configs(tiny_hctsa, tmp_path):
 
 
 # ---- the default feature set itself ----
+HCTSA_MAPPING = HCTSA_YAML.with_name("hctsa_mapping.yaml")
+
+
 def _load():
-    return yaml.safe_load(HCTSA_YAML.read_text(encoding="utf-8"))
+    return chk.load_yaml(HCTSA_YAML)   # with the legacy mapping (hctsa_mapping.yaml) attached
+
+
+def test_legacy_mapping_matches_the_configuration():
+    # the mapping names only operations the configuration defines, in the same module, and holds only its own keys
+    cfg = yaml.safe_load(HCTSA_YAML.read_text(encoding="utf-8"))
+    mapping = yaml.safe_load(HCTSA_MAPPING.read_text(encoding="utf-8"))
+    for module, ops in mapping.items():
+        for name, entry in ops.items():
+            assert name in cfg.get(module, {}), f"{module}.{name} is in hctsa_mapping.yaml but not hctsa.yaml"
+            assert entry.get("legacy_name"), f"{module}.{name} has no legacy_name"
+            assert set(entry) <= {"legacy_name", "note", "dropped_hctsa_calls"}, f"{module}.{name}: {set(entry)}"
+            assert isinstance(entry.get("dropped_hctsa_calls", {}), dict)
+    for module, fns in cfg.items():   # and the configuration itself carries none of the mapping
+        for name, meta in fns.items():
+            assert not {"legacy_name", "dropped_hctsa_calls"} & set(meta), f"{module}.{name}"
+
+
+def test_load_yaml_attaches_the_mapping(tmp_path):
+    (tmp_path / "c.yaml").write_text(yaml.safe_dump({"m": {"f": {"configs": [{}]}, "g": {"configs": [{}]}}}))
+    assert "legacy_name" not in chk.load_yaml(tmp_path / "c.yaml")["m"]["f"]   # no mapping beside it
+    (tmp_path / "hctsa_mapping.yaml").write_text(yaml.safe_dump(
+        {"m": {"f": {"legacy_name": "XX_F", "dropped_hctsa_calls": {"XX_F_1": "why", "XX_F_2": None}}}}))
+    cfg = chk.load_yaml(tmp_path / "c.yaml")
+    assert cfg["m"]["f"]["legacy_name"] == "XX_F" and cfg["m"]["f"]["dropped_hctsa_calls"] == ["XX_F_1", "XX_F_2"]
+    assert "legacy_name" not in cfg["m"]["g"]
+    (tmp_path / "hctsa_mapping.yaml").write_text(yaml.safe_dump({"m": {"missing": {"legacy_name": "XX_M"}}}))
+    with pytest.raises(KeyError):
+        chk.load_yaml(tmp_path / "c.yaml")
 
 
 def test_labels_are_unique():
