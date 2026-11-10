@@ -1,8 +1,27 @@
 # pyhctsa feature configuration: module -> master operation -> its parameter configs.
 #
+# Keys of a master operation (the operation's own key is its function's name in the module):
+#   base_name         the stem of its feature labels
+#   dependencies      optional packages it needs; without them it is skipped
+#   configs           its parameter settings. A list value gives one config per element (wrap it in a
+#                     second list to pass the list itself); !range [a, b] or [a, b, step] is the
+#                     inclusive list a..b. The meta keys zscore, abs, preprocess, select and exclude
+#                     are not passed to the function (see FeatureCalculator)
+#   ordered_args      the parameters that make up each feature label, in order
+#   variant_of        for a reformulation of another entry, the entry it reformulates
+#   min_length, field_min_length   see below
+#   legacy_name, dropped_hctsa_calls   the legacy mapping: the hctsa function the operation
+#                     implements, and hctsa calls of it that are deliberately not computed
+#
+# Comments: three spaces before '#', lowercase fragments with no full stop, US spelling. A comment
+# says what a config or setting does, or why, in this package's terms. Correspondence with other
+# software and a feature's history belong to the legacy mapping keys. Reasons for min_length,
+# ordered_args and dropped_hctsa_calls trail their line (above it when the line wraps); reasons
+# for field_min_length entries go on the line above their key.
+#
 # min_length (optional, per master operation): the shortest series on which the feature is defined,
 # as an int or a Python expression in the operation's parameters (configured values, else the
-# function's defaults). Below it every output of the feature is NaN (hctsa's 'not appropriate').
+# function's defaults). Below it every output of the feature is NaN.
 # These are the shortest lengths at which the computation is defined and its output can take more
 # than two values (lags, embeddings, windows, model orders), set conservatively. They apply to the
 # series the function receives, i.e. after zscore/preprocess (decimate_ac1e shortens the series).
@@ -25,7 +44,7 @@ medical:
     dependencies:
     configs:
       - {zscore: False, exclude: ['pnn30', 'pnn40', 'pnn60', 'pnn70', 'pnn80', 'pnn90']}
-    legacy_name: MD_pNN 
+    legacy_name: MD_pNN
 
   pol_var:
     base_name: pol_var
@@ -46,12 +65,12 @@ medical:
       - {d: 0.1, D: 4, zscore: True}
       - {d: 0.1, D: 5, zscore: True}
       - {d: 0.1, D: 6, zscore: True}
-      - {D: 3, tau: 'ac1e', zscore: True}   # lag form of MD_PolVar(zscore(BF_PreProcess(x_z,'decimate_ac1e')),1,3): all tau phases
+      - {D: 3, tau: 'ac1e', zscore: True}
     legacy_name: MD_PolVar
     ordered_args: ['d', 'D', 'tau']
-    dropped_hctsa_calls: ['MD_PolVar_1_3_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
+    dropped_hctsa_calls: ['MD_PolVar_1_3_dec']   # replaced by the tau: 'ac1e' config (lag-tau form)
 
-  pol_var_resid:   # pyhctsa-only: pol_var on |AR(2) residuals| with a median threshold (no hctsa counterpart)
+  pol_var_resid:   # pol_var on |AR(2) residuals| with a median threshold
     base_name: pol_var_resid
     min_length: "2 * D + ar_order"
     dependencies:
@@ -67,17 +86,17 @@ medical:
     configs:
       - {zscore: False, exclude: ['tri10']}
     legacy_name: MD_RawHRVMeas
-  
+
   porta:
     base_name: porta
     min_length: 4
     dependencies:
     configs:
-      - {zscore: True}   # MD_Porta(x_z,6) (num_levels 6, the default); robust levels
-      - {tau: 'ac1e', zscore: True}   # lag form of MD_Porta(zscore(BF_PreProcess(x_z,'decimate_ac1e')),6): all tau phases
+      - {zscore: True}   # robust levels
+      - {tau: 'ac1e', zscore: True}
     legacy_name: MD_Porta
     ordered_args: ['num_levels', 'tau']   # num_levels is left at its default, so the labels are porta and porta_ac1e
-    dropped_hctsa_calls: ['MD_Porta_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
+    dropped_hctsa_calls: ['MD_Porta_dec']   # replaced by the tau: 'ac1e' config (lag-tau form)
 
 extreme_events:
   moving_threshold:
@@ -89,8 +108,8 @@ extreme_events:
       - {a: 0.1, b: 0.02, zscore: True, exclude: ['meankicksize']}
       - {a: 1.0, b: 0.1, zscore: True, exclude: ['meankicksize']}
       - {a: 1.0, b: 0.02, zscore: True, exclude: ['meankicksize']}
-      - {a: 0.1, b: 0.1, zscore: True, preprocess: decimate_ac1e, exclude: ['meankicksize']}   # EX_MovingThreshold(zscore(BF_PreProcess(x_z,'decimate_ac1e')),0.1,0.1)
-      - {a: 1, b: 0.02, zscore: True, preprocess: decimate_ac1e, exclude: ['meankicksize', 'pkick', 'meankickf', 'mediankickf', 'stdkickf']}   # EX_MovingThreshold(zscore(BF_PreProcess(x_z,'decimate_ac1e')),1,0.02)
+      - {a: 0.1, b: 0.1, zscore: True, preprocess: decimate_ac1e, exclude: ['meankicksize']}
+      - {a: 1, b: 0.02, zscore: True, preprocess: decimate_ac1e, exclude: ['meankicksize', 'pkick', 'meankickf', 'mediankickf', 'stdkickf']}
     legacy_name: EX_MovingThreshold
     ordered_args: ['a', 'b']
 
@@ -99,12 +118,12 @@ extreme_events:
     min_length: "min(n for n in range(2, 1000) if n * (1 - extreme_thresh) + 0.5 < n - 1)"
     dependencies:
     configs:
-      - {extreme_thresh: 0.1, zscore: True, exclude: ['alternationRate', 'meanInterval', 'meanIntervalNeg', 'meanIntervalPos', 'propNP', 'propPosEvents']}   # EX_ExtremeEventOrder(x_z,0.1)
-      - {extreme_thresh: 0.05, zscore: True, exclude: ['alternationRate', 'meanInterval', 'meanIntervalNeg', 'meanIntervalPos', 'propNP', 'propPosEvents']}   # EX_ExtremeEventOrder(x_z,0.05)
+      - {extreme_thresh: 0.1, zscore: True, exclude: ['alternationRate', 'meanInterval', 'meanIntervalNeg', 'meanIntervalPos', 'propNP', 'propPosEvents']}
+      - {extreme_thresh: 0.05, zscore: True, exclude: ['alternationRate', 'meanInterval', 'meanIntervalNeg', 'meanIntervalPos', 'propNP', 'propPosEvents']}
     legacy_name: EX_ExtremeEventOrder
     ordered_args: ['extreme_thresh']
 
-  extremogram:   # pyhctsa-only: the largest extremogram value (recurrence of extremes of |x|) over lags 1-100
+  extremogram:   # the largest extremogram value (recurrence of extremes of |x|) over lags 1-100
     base_name: extremogram
     dependencies:
     configs:
@@ -123,7 +142,7 @@ criticality:
       - {tau: 'tau', zscore: True}
     legacy_name: CR_RAD
     ordered_args: ['tau']
-    
+
 correlation:
 
   oversampling:
@@ -136,13 +155,13 @@ correlation:
       - {zscore: True}
     legacy_name: CO_Oversampling
     ordered_args:
-  
+
   time_rev_kld:
     base_name: time_rev_kld
     dependencies:
     configs:
-      - {tau: 'ac1e', m: 2, zscore: True}   # CO_TimeRevKLD(x_z,'ac1e',2,3,{'ac',1},'full')
-      - {tau: 'ac1e', m: 3, zscore: True}   # CO_TimeRevKLD(x_z,'ac1e',3,3,{'ac',1},'full')
+      - {tau: 'ac1e', m: 2, zscore: True}
+      - {tau: 'ac1e', m: 3, zscore: True}
     legacy_name: CO_TimeRevKLD
     ordered_args: ['tau', 'm', 'k', 'theiler_win', 'max_n']
 
@@ -151,15 +170,15 @@ correlation:
     dependencies:
     configs:
       - {tau: !range [1, 40], zscore: True}
-      - {tau: 50, zscore: True}   # CO_AutoCorr(x_z,50,'Fourier')
-      - {tau: 60, zscore: True}   # CO_AutoCorr(x_z,60,'Fourier')
-      - {tau: 80, zscore: True}   # CO_AutoCorr(x_z,80,'Fourier')
-      - {tau: 100, zscore: True}   # CO_AutoCorr(x_z,100,'Fourier')
-      - {tau: 10, zscore: True, abs: True}   # CO_AutoCorr(abs(x_z),10,'Fourier')
-      - {tau: 20, zscore: True, abs: True}   # CO_AutoCorr(abs(x_z),20,'Fourier')
-      - {tau: 40, zscore: True, abs: True}   # CO_AutoCorr(abs(x_z),40,'Fourier')
-      - {tau: 80, zscore: True, abs: True}   # CO_AutoCorr(abs(x_z),80,'Fourier')
-      # pyhctsa-only: the same lags on the linearly detrended series (ac_<tau>_lindt)
+      - {tau: 50, zscore: True}
+      - {tau: 60, zscore: True}
+      - {tau: 80, zscore: True}
+      - {tau: 100, zscore: True}
+      - {tau: 10, zscore: True, abs: True}
+      - {tau: 20, zscore: True, abs: True}
+      - {tau: 40, zscore: True, abs: True}
+      - {tau: 80, zscore: True, abs: True}
+      # the same lags on the linearly detrended series (ac_<tau>_lindt)
       - {tau: !range [1, 40], zscore: True, preprocess: detrend}
       - {tau: 50, zscore: True, preprocess: detrend}
       - {tau: 60, zscore: True, preprocess: detrend}
@@ -168,47 +187,47 @@ correlation:
     legacy_name: CO_AutoCorr
     ordered_args: ['tau']
 
-  residual_autocorr_scan:   # pyhctsa-only: the largest residual autocorrelation (and of squared residuals) over lags up to 300, after AR prewhitening
+  residual_autocorr_scan:   # the largest residual autocorrelation (and of squared residuals) over lags up to 300, after AR prewhitening
     base_name: resid_ac_scan
     dependencies:
     configs:
       - {zscore: True, exclude: ['peak_lag']}   # peak_lag: the scanned range grows with N
     variant_of: autocorr
 
-  cyclostationarity_scan:   # pyhctsa-only: spectral lines in the lag products of AR residuals (second-order cyclostationarity), over all cyclic frequencies and lags 0-20
+  cyclostationarity_scan:   # spectral lines in the lag products of AR residuals (second-order cyclostationarity), over all cyclic frequencies and lags 0-20
     base_name: cyclo_scan
     min_length: 128
     dependencies:
     configs:
       - {zscore: True}
     variant_of: autocorr
-  
+
   autocorr_x2_shape:
     base_name: acx2_shape
     min_length: "max_lag + 1 if isnum(max_lag) else None"
     dependencies:
     configs:
       - {max_lag: 15, exclude: ['maxLag', 'meanabsdiff', 'sumdiff'], zscore: True}
-      - {max_lag: 'double_drown', zscore: True, exclude: ['meanabsdiff']}   # CO_AutoCorrX2Shape(x_z,'doubleDrown')
+      - {max_lag: 'double_drown', zscore: True, exclude: ['meanabsdiff']}
     legacy_name: CO_AutoCorrX2Shape
     ordered_args: ['max_lag']
-  
+
   add_noise:
     base_name: add_noise
     min_length: "max(extra_param + 1, num(tau, 1) + 2) if ami_method == 'quantiles' else num(tau, 1) + {'gaussian': 3, 'kraskov1': 6, 'kraskov2': 6}.get(ami_method, 2)"
     dependencies:
     configs:
-      - {tau: 1,   ami_method: 'quantiles', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'quantiles',10,'default',10)
-      - {tau: 1,   ami_method: 'even',      extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'even',10,'default',10)
-      - {tau: 1,   ami_method: 'std1',      extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'std1',10,'default',10)
-      - {tau: 1,   ami_method: 'gaussian',                   num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'meanch', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'gaussian',[],'default',10)
-      - {tau: 1,   ami_method: 'kraskov1',  extra_param: 4,  num_draws: 5, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,1,'kraskov1','4','default',5)
+      - {tau: 1,   ami_method: 'quantiles', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
+      - {tau: 1,   ami_method: 'even',      extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
+      - {tau: 1,   ami_method: 'std1',      extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
+      - {tau: 1,   ami_method: 'gaussian',                   num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'meanch', 'pcrossmean', 'pdec']}
+      - {tau: 1,   ami_method: 'kraskov1',  extra_param: 4,  num_draws: 5, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
 
-      - {tau: 'ac', ami_method: 'gaussian',                   num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac','gaussian',[],'default',10)
-      - {tau: 'ac1e', ami_method: 'even', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac1e','even',10,'default',10)
-      - {tau: 'ac1e', ami_method: 'kraskov1', extra_param: 4, num_draws: 5, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac1e','kraskov1','4','default',5)
-      - {tau: 'ac1e', ami_method: 'quantiles', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac1e','quantiles',10,'default',10)
-      - {tau: 'ac1e', ami_method: 'std1', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}   # CO_AddNoise(x_z,'ac1e','std1',10,'default',10)
+      - {tau: 'ac', ami_method: 'gaussian',                   num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
+      - {tau: 'ac1e', ami_method: 'even', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
+      - {tau: 'ac1e', ami_method: 'kraskov1', extra_param: 4, num_draws: 5, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
+      - {tau: 'ac1e', ami_method: 'quantiles', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
+      - {tau: 'ac1e', ami_method: 'std1', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
     legacy_name: CO_AddNoise
     ordered_args: ['tau', 'ami_method', 'extra_param']
 
@@ -251,16 +270,16 @@ correlation:
       - {alpha: 2, beta: 5, tau: 3, zscore: True}
       - {alpha: 2, beta: 5, tau: 4, zscore: True}
       - {alpha: 2, beta: 5, tau: 5, zscore: True}
-      - {alpha: 1, beta: 1, tau: 'mi', zscore: True}   # CO_GLSCF(x_z,1,1,'mi')
-      - {alpha: 1, beta: 2, tau: 'mi', zscore: True}   # CO_GLSCF(x_z,1,2,'mi')
-      - {alpha: 1, beta: 5, tau: 'mi', zscore: True}   # CO_GLSCF(x_z,1,5,'mi')
-      - {alpha: 1, beta: 10, tau: 'mi', zscore: True}   # CO_GLSCF(x_z,1,10,'mi')
-      - {alpha: 2, beta: 2, tau: 4, zscore: True}   # CO_GLSCF(x_z,2,2,4)
-      - {alpha: 2, beta: 2, tau: 'mi', zscore: True}   # CO_GLSCF(x_z,2,2,'mi')
-      - {alpha: 2, beta: 5, tau: 'mi', zscore: True}   # CO_GLSCF(x_z,2,5,'mi')
+      - {alpha: 1, beta: 1, tau: 'mi', zscore: True}
+      - {alpha: 1, beta: 2, tau: 'mi', zscore: True}
+      - {alpha: 1, beta: 5, tau: 'mi', zscore: True}
+      - {alpha: 1, beta: 10, tau: 'mi', zscore: True}
+      - {alpha: 2, beta: 2, tau: 4, zscore: True}
+      - {alpha: 2, beta: 2, tau: 'mi', zscore: True}
+      - {alpha: 2, beta: 5, tau: 'mi', zscore: True}
     legacy_name: CO_GLSCF
     ordered_args: ['alpha', 'beta', 'tau']
-  
+
   fzcglscf:
     base_name: fzcglscf
     min_length: 4
@@ -294,7 +313,7 @@ correlation:
     dependencies:
     configs:
       - {tau: 'tau', zscore: True}
-      - {tau: 1, zscore: True, select: ['stdb1', 'stdb2', 'stdb3', 'stdb4', 'theta_ac2', 'theta_ac3', 'theta_std']}   # CO_Embed2(x_z,1)
+      - {tau: 1, zscore: True, select: ['stdb1', 'stdb2', 'stdb3', 'stdb4', 'theta_ac2', 'theta_ac3', 'theta_std']}
     legacy_name: CO_Embed2
     ordered_args: ['tau']
 
@@ -302,8 +321,8 @@ correlation:
     base_name: embed2_shapes
     dependencies:
     configs:
-      - {tau: 'ac1e', r: 0.1, zscore: True}   # CO_Embed2_Shapes(x_z,'ac1e','circle',0.1,{'ac',1})
-      - {tau: 'ac1e', r: 1, zscore: True}   # CO_Embed2_Shapes(x_z,'ac1e','circle',1,{'ac',1})
+      - {tau: 'ac1e', r: 0.1, zscore: True}
+      - {tau: 'ac1e', r: 1, zscore: True}
     legacy_name: CO_Embed2_Shapes
     ordered_args: ['tau', 'shape', 'r']
 
@@ -312,7 +331,7 @@ correlation:
     dependencies:
     configs:
       - {tau: 1, zscore: True}
-      - {tau: 'ac1e', zscore: True}   # CO_Embed2_Basic(x_z,'ac1e')
+      - {tau: 'ac1e', zscore: True}
     legacy_name: CO_Embed2_Basic
     ordered_args: ['tau']
 
@@ -322,7 +341,7 @@ correlation:
     dependencies:
     configs:
       - {tau: 'tau', zscore: True, exclude: ['d_expfit_nlogL', 'd_mean']}
-      - {tau: 1, zscore: True, select: ['d_ac1', 'd_ac3']}   # CO_Embed2_Dist(x_z,1)
+      - {tau: 1, zscore: True, select: ['d_ac1', 'd_ac3']}
     legacy_name: CO_Embed2_Dist
     ordered_args: ['tau']
 
@@ -333,14 +352,14 @@ correlation:
       - {max_tau: 50, zscore: True}
     legacy_name: CO_Embed2_AngleTau
     ordered_args: ['max_tau']
-  
+
   partial_autocorr:
     base_name: partial_autocorr
     dependencies:
       - statsmodels
     configs:
-      - {max_tau: 20, what_method: 'burg', zscore: True, exclude: ['pac_1']}   # CO_PartialAutoCorr(x_z,20,'burg')
-      - {max_tau: 20, what_method: 'burg', zscore: True, exclude: ['pac_1'], preprocess: detrend}   # pyhctsa-only: linearly detrended
+      - {max_tau: 20, what_method: 'burg', zscore: True, exclude: ['pac_1']}
+      - {max_tau: 20, what_method: 'burg', zscore: True, exclude: ['pac_1'], preprocess: detrend}
     legacy_name: CO_PartialAutoCorr
     ordered_args: ['max_tau', 'what_method']
 
@@ -371,7 +390,7 @@ correlation:
 
       - {taus: [[2, 4, 6, 8]], absval: False, zscore: True}
       - {taus: [[2, 4, 6, 8]], absval: True, zscore: True}
-      
+
       - {taus: [[1, 2, 4]], absval: False, zscore: True}
       - {taus: [[1, 3, 4]], absval: False, zscore: True}
 
@@ -437,26 +456,26 @@ correlation:
       - {taus: [[1, 3, 3]], absval: False, zscore: True}
       - {taus: [[2, 2, 3]], absval: False, zscore: True}
       - {taus: [[2, 3, 3]], absval: False, zscore: True}
-      - {taus: [[0, 1]], absval: False, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,1],false)
-      - {taus: [[0, 1]], absval: True, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,1],true)
-      - {taus: [[0, 2]], absval: False, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,2],false)
-      - {taus: [[0, 2]], absval: True, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,2],true)
-      - {taus: [[0, 3]], absval: False, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,3],false)
-      - {taus: [[0, 3]], absval: True, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,3],true)
-      - {taus: [[0, 4]], absval: False, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,4],false)
-      - {taus: [[0, 4]], absval: True, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,4],true)
-      - {taus: [[0, 5]], absval: False, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,5],false)
-      - {taus: [[0, 5]], absval: True, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,5],true)
-      - {taus: [[0, 6]], absval: False, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,6],false)
-      - {taus: [[0, 6]], absval: True, zscore: True}   # CO_NonlinearAutocorr(x_z,[0,6],true)
-      - {taus: [[0, 3, 6]], absval: False, tau: 'ac1e', zscore: True}   # lag form of CO_NonlinearAutocorr(zscore(BF_PreProcess(x_z,'decimate_ac1e')),[0,3,6],false)
-      - {taus: [[1, 1, 2]], absval: False, tau: 'ac1e', zscore: True}   # lag form of CO_NonlinearAutocorr(zscore(BF_PreProcess(x_z,'decimate_ac1e')),[1,1,2],false)
-      - {taus: [[1, 2, 3, 4]], absval: True, tau: 'ac', zscore: True}   # lag form of CO_NonlinearAutocorr(zscore(BF_PreProcess(x_z,'decimate_ac1e')),[1,2,3,4],true); delay 'ac' chosen by test
+      - {taus: [[0, 1]], absval: False, zscore: True}
+      - {taus: [[0, 1]], absval: True, zscore: True}
+      - {taus: [[0, 2]], absval: False, zscore: True}
+      - {taus: [[0, 2]], absval: True, zscore: True}
+      - {taus: [[0, 3]], absval: False, zscore: True}
+      - {taus: [[0, 3]], absval: True, zscore: True}
+      - {taus: [[0, 4]], absval: False, zscore: True}
+      - {taus: [[0, 4]], absval: True, zscore: True}
+      - {taus: [[0, 5]], absval: False, zscore: True}
+      - {taus: [[0, 5]], absval: True, zscore: True}
+      - {taus: [[0, 6]], absval: False, zscore: True}
+      - {taus: [[0, 6]], absval: True, zscore: True}
+      - {taus: [[0, 3, 6]], absval: False, tau: 'ac1e', zscore: True}
+      - {taus: [[1, 1, 2]], absval: False, tau: 'ac1e', zscore: True}
+      - {taus: [[1, 2, 3, 4]], absval: True, tau: 'ac', zscore: True}   # delay 'ac' chosen by test
     legacy_name: CO_NonlinearAutocorr
     ordered_args: ['taus', 'absval', 'tau']
-    dropped_hctsa_calls: ['AC_nl_036_dec', 'AC_nl_112_dec', 'AC_nl_1234_abs_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
+    dropped_hctsa_calls: ['AC_nl_036_dec', 'AC_nl_112_dec', 'AC_nl_1234_abs_dec']   # replaced by the lag-tau configs with the same taus
 
-  nonlinear_autocorr_excess:   # pyhctsa-only: nonlinear_autocorr minus its Gaussian (Isserlis) value, on Gaussian ranks
+  nonlinear_autocorr_excess:   # nonlinear_autocorr minus its Gaussian (Isserlis) value, on Gaussian ranks
     base_name: ac_nl_excess
     dependencies:
     configs:   # the absval=False configs of nonlinear_autocorr
@@ -530,14 +549,14 @@ correlation:
     variant_of: nonlinear_autocorr
     ordered_args: ['taus', 'tau']
 
-  bicorrelation:   # pyhctsa-only: Hinich's bicorrelation plane (0 < r < s <= L) of AR residuals: portmanteau, largest cell, largest reversal-asymmetric cell
+  bicorrelation:   # Hinich's bicorrelation plane (0 < r < s <= L) of AR residuals: portmanteau, largest cell, largest reversal-asymmetric cell
     base_name: bicorr
     dependencies:
     configs:
       - {zscore: True}
     variant_of: nonlinear_autocorr
 
-  nonlinear_autocorr_abs_surrogate_ratio:   # pyhctsa-only: absval nonlinear_autocorr on Gaussian ranks / phase-randomised surrogates
+  nonlinear_autocorr_abs_surrogate_ratio:   # absval nonlinear_autocorr on Gaussian ranks / phase-randomized surrogates
     base_name: ac_nl_abs_surr_ratio
     dependencies:
     configs:   # the absval=True configs of nonlinear_autocorr
@@ -565,7 +584,7 @@ correlation:
       - {taus: [[1, 2, 3, 4]], tau: 'ac', zscore: True}   # delay 'ac' as nonlinear_autocorr's, from the Gaussian ranks
     variant_of: nonlinear_autocorr
     ordered_args: ['taus', 'tau']
-  
+
   stick_angles:
     base_name: stick_angles
     dependencies:
@@ -573,7 +592,7 @@ correlation:
       - {zscore: True, exclude: ['statav2_all_m', 'statav3_all_m', 'statav4_all_m', 'statav5_all_m', 'statav5_all_s', 'tau_n']}
     legacy_name: CO_StickAngles
     ordered_args:
-  
+
   falling_sticks:
     base_name: falling_sticks
     min_length: 4
@@ -582,19 +601,19 @@ correlation:
       - {zscore: True, exclude: ['kurtosis_all', 'median_all', 'median_n', 'median_p']}
     legacy_name: CO_FallingSticks
     ordered_args:
-  
+
   first_crossing:
     base_name: first_crossing
     dependencies:
     configs:
       - {corr_fun: 'ac', threshold: 0, what_out: 'both', zscore: True}
       - {corr_fun: 'ac', threshold: '1/e', what_out: 'both', zscore: True}
-      # pyhctsa-only: the crossing times of the linearly detrended series
+      # the crossing times of the linearly detrended series
       - {corr_fun: 'ac', threshold: 0, what_out: 'both', zscore: True, preprocess: detrend}
       - {corr_fun: 'ac', threshold: '1/e', what_out: 'both', zscore: True, preprocess: detrend}
     legacy_name: CO_FirstCrossing
     ordered_args: ['corr_fun', 'threshold', 'what_out']
-  
+
   translate_shape:
     base_name: translate_shape
     min_length: "2 * (int(d) if shape == 'rectangle' else floor(d)) + 1"
@@ -604,23 +623,23 @@ correlation:
       - {shape: 'circle', d: 2.5, how_to_move: 'pts', zscore: True, exclude: ['max']}
       - {shape: 'circle', d: 3.5, how_to_move: 'pts', zscore: True, exclude: ['max', 'sevens']}
       - {shape: 'rectangle', d: 2, how_to_move: 'pts', zscore: True, exclude: ['max']}
-      - {d: 2.5, tau: 'ac1e', zscore: True, exclude: ['max']}   # lag form of CO_TranslateShape(zscore(BF_PreProcess(x_z,'decimate_ac1e')),'circle',2.5,'pts'): all tau phases
+      - {d: 2.5, tau: 'ac1e', zscore: True, exclude: ['max']}
     legacy_name: CO_TranslateShape
     ordered_args: ['shape', 'd', 'how_to_move', 'tau']
-    dropped_hctsa_calls: ['CO_TranslateShape_circle_25_pts_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
+    dropped_hctsa_calls: ['CO_TranslateShape_circle_25_pts_dec']   # replaced by the tau: 'ac1e' config (lag-tau form)
 
   autocorr_shape:
     base_name: autocorr_shape
     min_length: "4 if stop_when == 'pos_drown' else None"
     configs:
       - {stop_when: 'drown', zscore: True, exclude: ['decayTimescale', 'fexpacf_r2', 'fexpacf_stdres', 'nextrema', 'nmaxima']}
-      - {stop_when: 'pos_drown', zscore: True, exclude: ['actau', 'nextrema', 'nmaxima']}   # CO_AutoCorrShape(x_z,'posDrown')
-      # pyhctsa-only: the ACF shape of the linearly detrended series
+      - {stop_when: 'pos_drown', zscore: True, exclude: ['actau', 'nextrema', 'nmaxima']}
+      # the ACF shape of the linearly detrended series
       - {stop_when: 'drown', zscore: True, exclude: ['decayTimescale', 'fexpacf_r2', 'fexpacf_stdres', 'nextrema', 'nmaxima'], preprocess: detrend}
       - {stop_when: 'pos_drown', zscore: True, exclude: ['actau', 'nextrema', 'nmaxima'], preprocess: detrend}
     legacy_name: CO_AutoCorrShape
     ordered_args: ['stop_when']
-  
+
   histogram_ami:
     base_name: histogram_ami
     min_length: 4
@@ -632,7 +651,7 @@ correlation:
       - {tau: [[1, 2, 3, 4, 5]], meth: 'std1', num_bins: 2, zscore: True, select: ['ami1']}
       - {tau: [[1, 2, 3, 4, 5]], meth: 'std2', num_bins: 2, zscore: True, select: ['ami1', 'ami5']}
       - {tau: [[1, 2, 3, 4, 5]], meth: 'even', num_bins: 2, zscore: True}
-      # pyhctsa-only: the same AMIs of the linearly detrended series
+      # the same AMIs of the linearly detrended series
       - {tau: [[1, 2, 3, 4, 5]], meth: 'std1', num_bins: 2, zscore: True, select: ['ami1'], preprocess: detrend}
       - {tau: [[1, 2, 3, 4, 5]], meth: 'std2', num_bins: 2, zscore: True, select: ['ami1', 'ami5'], preprocess: detrend}
       - {tau: [[1, 2, 3, 4, 5]], meth: 'even', num_bins: 2, zscore: True, preprocess: detrend}
@@ -660,8 +679,8 @@ correlation:
     configs:
       - {zscore: True}
     legacy_name: PD_PeriodicityWang
-    ordered_args: 
-  
+    ordered_args:
+
   trev:
     base_name: trev
     field_min_length:
@@ -675,12 +694,12 @@ correlation:
       - {tau: 3, zscore: True}
       - {tau: 'ac', zscore: True}
       - {tau: 'mi', zscore: True}
-      - {tau: 5, zscore: True, exclude: ['denom', 'num']}   # CO_trev(x_z,5)
-      - {tau: 10, zscore: True, exclude: ['denom', 'num']}   # CO_trev(x_z,10)
+      - {tau: 5, zscore: True, exclude: ['denom', 'num']}
+      - {tau: 10, zscore: True, exclude: ['denom', 'num']}
     legacy_name: CO_trev
     ordered_args: ['tau']
 
-  trev_studentized:   # pyhctsa-only: the trev numerator divided by its HAC (flat-top kernel) standard error
+  trev_studentized:   # the trev numerator divided by its HAC (flat-top kernel) standard error
     base_name: trev_studentized
     dependencies:
     configs:
@@ -694,7 +713,7 @@ correlation:
     variant_of: trev
     ordered_args: ['tau']
 
-  reversibility_scan:   # pyhctsa-only: studentised Ramsey-Rothman reversal asymmetry gamma_{i,j}(k) on Gaussian ranks, scanned over lags 1-20
+  reversibility_scan:   # studentized Ramsey-Rothman reversal asymmetry gamma_{i,j}(k) on Gaussian ranks, scanned over lags 1-20
     base_name: rev_scan
     dependencies:
     configs:
@@ -711,10 +730,10 @@ correlation:
       - {tau: 2, zscore: True}
       - {tau: 3, zscore: True}
       - {tau: 'mi', zscore: True}
-      - {tau: 5, zscore: True, exclude: ['denom', 'num']}   # CO_TC3(x_z,5)
+      - {tau: 5, zscore: True, exclude: ['denom', 'num']}
     legacy_name: CO_TC3
     ordered_args: ['tau']
-  
+
   time_rev_kaplan:
     base_name: time_rev_kaplan
     dependencies:
@@ -725,7 +744,7 @@ correlation:
       - {time_lag: 4, zscore: True}
     legacy_name: DK_timerev
     ordered_args: ['time_lag']
-  
+
   pos_neg_asymmetry:
     base_name: pos_neg_asymmetry
     dependencies:
@@ -739,12 +758,12 @@ correlation:
     dependencies:
     configs:
       - {zscore: True}
-      - {tau: 'ac1e', zscore: True}   # lag form of DK_crinkle(zscore(BF_PreProcess(x_z,'decimate_ac1e'))): all tau phases
+      - {tau: 'ac1e', zscore: True}
     legacy_name: DK_crinkle
     ordered_args: ['tau']
-    dropped_hctsa_calls: ['DK_crinkle_statistic_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
+    dropped_hctsa_calls: ['DK_crinkle_statistic_dec']   # replaced by the tau: 'ac1e' config (lag-tau form)
 
-  crinkle_statistic_kurtosis:   # pyhctsa-only: excess kurtosis of the second difference, on Gaussian ranks
+  crinkle_statistic_kurtosis:   # excess kurtosis of the second difference, on Gaussian ranks
     base_name: crinkle_statistic_kurtosis
     dependencies:
     configs:
@@ -752,7 +771,7 @@ correlation:
       - {tau: 'ac1e', zscore: True}   # delay from the Gaussian ranks (rank-invariant)
     variant_of: crinkle_statistic
     ordered_args: ['tau']
-  
+
   theiler_q:
     base_name: theiler_q
     dependencies:
@@ -765,8 +784,8 @@ correlation:
     base_name: joint_non_gaussianity
     dependencies:
     configs:
-      - {tau: 'ac1e', m: 2, zscore: True}   # CO_JointNonGaussianity(x_z,'ac1e',2,{'ac',1},10000)
-      - {tau: 'ac1e', m: 3, zscore: True}   # CO_JointNonGaussianity(x_z,'ac1e',3,{'ac',1},10000)
+      - {tau: 'ac1e', m: 2, zscore: True}
+      - {tau: 'ac1e', m: 3, zscore: True}
     legacy_name: CO_JointNonGaussianity
     ordered_args: ['m']
 
@@ -774,7 +793,7 @@ correlation:
     base_name: matrix_profile
     dependencies:
     configs:
-      - {zscore: True, exclude: ['meanR']}   # CO_MatrixProfile(x_z,{'ac',8},5000)
+      - {zscore: True, exclude: ['meanR']}
     legacy_name: CO_MatrixProfile
 
   quantilogram:
@@ -782,8 +801,8 @@ correlation:
     min_length: "max(30, 2 * lag + 1) if isnum(lag) else 9"
     dependencies:
     configs:
-      - {lag: 1, zscore: True, select: ['q05', 'q95']}   # CO_Quantilogram(x_z,1)
-      - {lag: 'mi', zscore: True, exclude: ['q25', 'q50', 'q75']}   # CO_Quantilogram(x_z,'mi')
+      - {lag: 1, zscore: True, select: ['q05', 'q95']}
+      - {lag: 'mi', zscore: True, exclude: ['q25', 'q50', 'q75']}
     legacy_name: CO_Quantilogram
     ordered_args: ['lag']
 
@@ -792,18 +811,18 @@ correlation:
     min_length: "min(n for n in range(2, 1000) if n - round(n * (1 - p)) >= 1 and round(n * (1 - p)) >= 2)"
     dependencies:
     configs:
-      - {remove_how: 'absclose', p: 0.1, remove_or_saturate: 'remove', zscore: True}   # CO_RemovePoints(x_z,'absclose',0.1,'remove')
-      - {remove_how: 'absclose', p: 0.5, remove_or_saturate: 'remove', zscore: True}   # CO_RemovePoints(x_z,'absclose',0.5,'remove')
-      - {remove_how: 'absclose', p: 0.8, remove_or_saturate: 'remove', zscore: True}   # CO_RemovePoints(x_z,'absclose',0.8,'remove')
-      - {remove_how: 'absfar', p: 0.1, remove_or_saturate: 'remove', zscore: True}   # CO_RemovePoints(x_z,'absfar',0.1,'remove')
-      - {remove_how: 'absfar', p: 0.1, remove_or_saturate: 'saturate', zscore: True}   # CO_RemovePoints(x_z,'absfar',0.1,'saturate')
-      - {remove_how: 'absfar', p: 0.8, remove_or_saturate: 'remove', zscore: True}   # CO_RemovePoints(x_z,'absfar',0.8,'remove')
-      - {remove_how: 'absfar', p: 0.8, remove_or_saturate: 'saturate', zscore: True}   # CO_RemovePoints(x_z,'absfar',0.8,'saturate')
-      - {remove_how: 'max', p: 0.1, remove_or_saturate: 'saturate', zscore: True}   # CO_RemovePoints(x_z,'max',0.1,'saturate')
-      - {remove_how: 'max', p: 0.8, remove_or_saturate: 'saturate', zscore: True}   # CO_RemovePoints(x_z,'max',0.8,'saturate')
-      - {remove_how: 'min', p: 0.1, remove_or_saturate: 'saturate', zscore: True}   # CO_RemovePoints(x_z,'min',0.1,'saturate')
-      - {remove_how: 'min', p: 0.5, remove_or_saturate: 'saturate', zscore: True}   # CO_RemovePoints(x_z,'min',0.5,'saturate')
-      - {remove_how: 'min', p: 0.8, remove_or_saturate: 'saturate', zscore: True}   # CO_RemovePoints(x_z,'min',0.8,'saturate')
+      - {remove_how: 'absclose', p: 0.1, remove_or_saturate: 'remove', zscore: True}
+      - {remove_how: 'absclose', p: 0.5, remove_or_saturate: 'remove', zscore: True}
+      - {remove_how: 'absclose', p: 0.8, remove_or_saturate: 'remove', zscore: True}
+      - {remove_how: 'absfar', p: 0.1, remove_or_saturate: 'remove', zscore: True}
+      - {remove_how: 'absfar', p: 0.1, remove_or_saturate: 'saturate', zscore: True}
+      - {remove_how: 'absfar', p: 0.8, remove_or_saturate: 'remove', zscore: True}
+      - {remove_how: 'absfar', p: 0.8, remove_or_saturate: 'saturate', zscore: True}
+      - {remove_how: 'max', p: 0.1, remove_or_saturate: 'saturate', zscore: True}
+      - {remove_how: 'max', p: 0.8, remove_or_saturate: 'saturate', zscore: True}
+      - {remove_how: 'min', p: 0.1, remove_or_saturate: 'saturate', zscore: True}
+      - {remove_how: 'min', p: 0.5, remove_or_saturate: 'saturate', zscore: True}
+      - {remove_how: 'min', p: 0.8, remove_or_saturate: 'saturate', zscore: True}
     legacy_name: CO_RemovePoints
     ordered_args: ['remove_how', 'p', 'remove_or_saturate']
 
@@ -815,8 +834,8 @@ information:
     configs:
       - {max_tau: 40, est_method: 'gaussian', zscore: True, select: ['fmmi']}
       - {max_tau: 40, est_method: 'kraskov1', extra_param: 4, zscore: True, exclude: ['mami', 'pmaxima', 'pminima']}
-      - {max_tau: 20, est_method: 'gaussian', zscore: True, preprocess: diff1, exclude: ['pmaxima', 'pminima', 'sumami_fmmi']}   # IN_AutoMutualInfoStats(diff(x_z),20,'gaussian')
-      - {max_tau: 20, est_method: 'kraskov1', extra_param: 4, zscore: True, preprocess: diff1, exclude: ['mami', 'pmaxima', 'pminima']}   # IN_AutoMutualInfoStats(diff(x_z),20,'kraskov1','4')
+      - {max_tau: 20, est_method: 'gaussian', zscore: True, preprocess: diff1, exclude: ['pmaxima', 'pminima', 'sumami_fmmi']}
+      - {max_tau: 20, est_method: 'kraskov1', extra_param: 4, zscore: True, preprocess: diff1, exclude: ['mami', 'pmaxima', 'pminima']}
     legacy_name: IN_AutoMutualInfoStats
     ordered_args: ['max_tau', 'est_method', 'extra_param']
 
@@ -830,10 +849,10 @@ information:
       - {min_what: 'mi-kraskov1', extra_param: 4, zscore: True}
       - {min_what: 'mi-hist', extra_param: 5, zscore: True}
       - {min_what: 'mi-hist', extra_param: 10, zscore: True}
-      - {min_what: 'mi-kraskov2', extra_param: 4, zscore: True}   # CO_FirstMin(x_z,'mi-kraskov2','4')
+      - {min_what: 'mi-kraskov2', extra_param: 4, zscore: True}
     legacy_name: CO_FirstMin
     ordered_args: ['min_what', 'extra_param']
-  
+
   first_max:
     base_name: first_max
     min_length: "{'ac': 5, 'mi-gaussian': 6, 'mi-hist': 7}.get(max_what, 10)"
@@ -844,18 +863,18 @@ information:
       - {max_what: 'mi-kraskov1', extra_param: 4, zscore: True}
       - {max_what: 'mi-hist', extra_param: 5, zscore: True}
       - {max_what: 'mi-hist', extra_param: 10, zscore: True}
-      - {max_what: 'mi-kraskov2', extra_param: 4, zscore: True}   # CO_FirstMin(x_z,'mi-kraskov2','4',false)
+      - {max_what: 'mi-kraskov2', extra_param: 4, zscore: True}
     legacy_name: CO_FirstMin
     ordered_args: ['max_what', 'extra_param']
-  
+
   multivariate_ami:
     base_name: multivariate_ami
     dependencies:
     configs:
-      - {tau_method: 'ac', est_method: 'gaussian', zscore: True, select: ['multiAMI', 'synergy']}   # IN_MultivariateAMI(x_z,'ac','gaussian')
-      - {tau_method: 'ac', est_method: 'kraskov2', zscore: True, select: ['multiAMI', 'synergy']}   # IN_MultivariateAMI(x_z,'ac','kraskov2')
-      - {tau_method: 'mi', est_method: 'gaussian', zscore: True, select: ['multiAMI', 'synergy']}   # IN_MultivariateAMI(x_z,'mi','gaussian')
-      - {tau_method: 'mi', est_method: 'kraskov2', zscore: True, select: ['multiAMI', 'synergy']}   # IN_MultivariateAMI(x_z,'mi','kraskov2')
+      - {tau_method: 'ac', est_method: 'gaussian', zscore: True, select: ['multiAMI', 'synergy']}
+      - {tau_method: 'ac', est_method: 'kraskov2', zscore: True, select: ['multiAMI', 'synergy']}
+      - {tau_method: 'mi', est_method: 'gaussian', zscore: True, select: ['multiAMI', 'synergy']}
+      - {tau_method: 'mi', est_method: 'kraskov2', zscore: True, select: ['multiAMI', 'synergy']}
     legacy_name: IN_MultivariateAMI
     ordered_args: ['tau_method', 'est_method']
 
@@ -872,24 +891,24 @@ entropy:
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 20, olremp: 0, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 50, olremp: 0, zscore: True}
-      
+
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.01, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.02, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.05, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.1, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.2, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0.3, zscore: True}
-      - {hist_or_ks: 'hist', num_bins: 'auto', olremp: 0.01, zscore: True}   # EN_DistributionEntropy(x_z,'hist','auto',0.01)
-      - {hist_or_ks: 'hist', num_bins: 'auto', olremp: 0.02, zscore: True}   # EN_DistributionEntropy(x_z,'hist','auto',0.02)
-      - {hist_or_ks: 'ks', num_bins: null, olremp: 0.01, zscore: True}   # EN_DistributionEntropy(x_z,'ks',[],0.01)
-      - {hist_or_ks: 'ks', num_bins: null, olremp: 0.1, zscore: True}   # EN_DistributionEntropy(x_z,'ks',[],0.1)
-      - {hist_or_ks: 'ks', num_bins: null, olremp: 0.02, zscore: True}   # EN_DistributionEntropy(x_z,'ks',[],0.02)
-      - {hist_or_ks: 'ks', num_bins: null, olremp: 0.2, zscore: True}   # EN_DistributionEntropy(x_z,'ks',[],0.2)
-      - {hist_or_ks: 'ks', num_bins: null, olremp: 0.3, zscore: True}   # EN_DistributionEntropy(x_z,'ks',[],0.3)
-      - {hist_or_ks: 'ks', num_bins: null, olremp: 0.05, zscore: True}   # EN_DistributionEntropy(x_z,'ks',[],0.05)
+      - {hist_or_ks: 'hist', num_bins: 'auto', olremp: 0.01, zscore: True}
+      - {hist_or_ks: 'hist', num_bins: 'auto', olremp: 0.02, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: null, olremp: 0.01, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: null, olremp: 0.1, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: null, olremp: 0.02, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: null, olremp: 0.2, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: null, olremp: 0.3, zscore: True}
+      - {hist_or_ks: 'ks', num_bins: null, olremp: 0.05, zscore: True}
     legacy_name: EN_DistributionEntropy
     ordered_args: ['hist_or_ks', 'num_bins', 'olremp']
-  
+
   permutation_entropy:
     base_name: permutation_entropy
     configs:
@@ -903,11 +922,11 @@ entropy:
       - {m: 4, tau: 2, zscore: True, select: ['normPermEn', 'ordAsym']}
       - {m: 5, tau: 2, zscore: True, exclude: ['permEn', 'permEnLE']}
 
-      - {m: 2, tau: 'ac1e-rank', zscore: True, select: ['normPermEn']}   # EN_PermEn(x_z,2,'ac1e')
-      - {m: 3, tau: 'ac1e-rank', zscore: True, select: ['normPermEn']}   # EN_PermEn(x_z,3,'ac1e')
-      - {m: 3, tau: 10, zscore: True, select: ['normPermEn']}   # EN_PermEn(x_z,3,10)
-      - {m: 4, tau: 'ac1e-rank', zscore: True, select: ['normPermEn', 'ordAsym']}   # EN_PermEn(x_z,4,'ac1e')
-      - {m: 5, tau: 'ac1e-rank', zscore: True, exclude: ['permEn', 'permEnLE']}   # EN_PermEn(x_z,5,'ac1e')
+      - {m: 2, tau: 'ac1e-rank', zscore: True, select: ['normPermEn']}
+      - {m: 3, tau: 'ac1e-rank', zscore: True, select: ['normPermEn']}
+      - {m: 3, tau: 10, zscore: True, select: ['normPermEn']}
+      - {m: 4, tau: 'ac1e-rank', zscore: True, select: ['normPermEn', 'ordAsym']}
+      - {m: 5, tau: 'ac1e-rank', zscore: True, exclude: ['permEn', 'permEnLE']}
     legacy_name: EN_PermEn
     ordered_args: ['m', 'tau']
 
@@ -945,7 +964,7 @@ entropy:
     configs:
       - {zscore: True, exclude: ['CE1', 'CE2', 'minCE1']}
     legacy_name: EN_CID
-  
+
   approximate_entropy:
     base_name: approximate_entropy
     min_length: "mnom * num(tau, 1) + 3"
@@ -955,7 +974,7 @@ entropy:
       - {mnom: 2, rth: 0.1, zscore: True}
       - {mnom: 1, rth: 0.2, zscore: True}
       - {mnom: 2, rth: 0.2, zscore: True}
-      - {mnom: 2, tau: 'ac1e', zscore: True}   # EN_ApEn(x_z,2,0.2,'ac1e')
+      - {mnom: 2, tau: 'ac1e', zscore: True}
     legacy_name: EN_ApEn
     ordered_args: ['mnom', 'rth']
 
@@ -967,7 +986,7 @@ entropy:
       - {m: 3, tau: 'ac', zscore: True, exclude: ['meanNonZero']}
     legacy_name: EN_rpde
     ordered_args: ['m', 'tau']
-  
+
   sample_entropy:
     base_name: sample_entropy
     min_length: 4
@@ -980,19 +999,16 @@ entropy:
       - {m: 5, r: 0.3, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5']}
       - {m: 5, r: 0.1, pre_process_how: 'diff1', zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen3', 'sampen4', 'sampen5', 'meanchsampen']}
       - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen4', 'sampen5', 'meanchsampen']}
-      - {m: 5, r: 0.2, tau: 'ac1e', theiler_win: [['ac1e', 1]], zscore: True, select: ['sampen1', 'sampen2', 'sampen3', 'sampen4']}   # delayed SampEn with a Theiler window (replaces EN_SampEn(zscore(BF_PreProcess(x_z,'decimate_ac1e')),5,0.2))
+      - {m: 5, r: 0.2, tau: 'ac1e', theiler_win: [['ac1e', 1]], zscore: True, select: ['sampen1', 'sampen2', 'sampen3', 'sampen4']}
     legacy_name: EN_SampEn
     ordered_args: ['m', 'r', 'pre_process_how', 'tau']
+    dropped_hctsa_calls: ['EN_SampEn_5_02_dec']   # replaced by the tau: 'ac1e' config (lag-tau form)
 
-  # pyhctsa-only variant of sample_entropy: SampEn of the ranks, invariant to the value distribution.
-  # Mirrors sample_entropy's configs; sampen0 (a function of N and r alone for ranks) is not returned.
-    dropped_hctsa_calls: ['EN_SampEn_5_02_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
-
-  sample_entropy_ranked:
+  sample_entropy_ranked:   # SampEn of the ranks, invariant to the value distribution
     base_name: sample_entropy_ranked
     min_length: 4
     dependencies:
-    configs:
+    configs:   # sample_entropy's configs; no sampen0, which for ranks depends on N and r alone
       - {m: 5, r: 0.2, zscore: True, select: ['sampen1', 'sampen2', 'sampen3']}
       - {m: 5, r: 0.2, pre_process_how: 'diff1', zscore: True, select: ['sampen1', 'sampen2', 'sampen3']}
       - {m: 5, r: 0.2, tau: 'ac1e', theiler_win: [['ac1e', 1]], zscore: True, select: ['sampen1', 'sampen2', 'sampen3', 'sampen4']}   # delay and window from the ranks
@@ -1006,10 +1022,10 @@ entropy:
       - {scale_range: [!range [1, 10]], m: 2, r: 0.15, pre_process_how: 'diff1', zscore: True, exclude: ['maxSampEn', 'meanch']}
       - {scale_range: [!range [1, 10]], m: 2, r: 0.15, pre_process_how: 'rescale_tau', zscore: True, exclude: ['maxSampEn', 'meanch']}
       - {scale_range: [!range [1, 10]], m: 2, r: 0.15, zscore: True, exclude: ['maxSampEn', 'meanch', 'sampen_s1']}
-      - {scale_range: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], pre_process_how: '', what_entropy: 'dispen', zscore: True, select: ['meanDispEn', 'minDispEn', 'stdDispEn']}   # EN_MSE(x_z,1:10,2,0.15,'','dispen',6)
+      - {scale_range: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], pre_process_how: '', what_entropy: 'dispen', zscore: True, select: ['meanDispEn', 'minDispEn', 'stdDispEn']}
     legacy_name: EN_MSE
     ordered_args: ['scale_range', 'm', 'r', 'pre_process_how']
-  
+
   shannon_entropy:
     base_name: shannon_entropy
     min_length: "{2: 5, 3: 7, 5: 9}[depth] if isnum(num_bins) else depth + 3"
@@ -1019,18 +1035,18 @@ entropy:
       - {num_bins: 2, depth: 3, zscore: True}
       - {num_bins: [[2, 3, 4, 5, 6, 7, 8, 9, 10]], depth: 2, zscore: True, exclude: ['medent', 'minent']}
       - {num_bins: [[2, 3, 4, 5, 6, 7, 8, 9, 10]], depth: 3, zscore: True, exclude: ['medent', 'minent']}
-      - {num_bins: 2, depth: 5, zscore: True}   # EN_Shannon(x_z,2,5)
+      - {num_bins: 2, depth: 5, zscore: True}
     legacy_name: EN_Shannon
     ordered_args: ['num_bins', 'depth']
-  
+
   bubble_entropy:
     base_name: bubble_entropy
     dependencies:
     configs:
-      - {m: 5, tau: 1, zscore: True}   # EN_BubbleEn(x_z,5,1)
-      - {m: 10, tau: 1, zscore: True}   # EN_BubbleEn(x_z,10,1)
-      - {m: 10, tau: 'mi-rank', zscore: True}   # EN_BubbleEn(x_z,10,'mi')
-      - {m: 10, tau: 1, zscore: True, preprocess: diff1}   # EN_BubbleEn(diff(x_z),10,1)
+      - {m: 5, tau: 1, zscore: True}
+      - {m: 10, tau: 1, zscore: True}
+      - {m: 10, tau: 'mi-rank', zscore: True}
+      - {m: 10, tau: 1, zscore: True, preprocess: diff1}
     legacy_name: EN_BubbleEn
     ordered_args: ['m', 'tau']
 
@@ -1038,14 +1054,14 @@ entropy:
     base_name: dispersion_entropy
     dependencies:
     configs:
-      - {m: 2, c: 6, tau: 'ac', zscore: True, exclude: ['dispEn', 'fDispEn']}   # EN_DispEn(x_z,2,6,'ac')
-      - {m: 2, c: 3, tau: 'ac', zscore: True, exclude: ['dispEn', 'fDispEn']}   # EN_DispEn(x_z,2,3,'ac')
-      - {m: 3, c: 4, tau: 'ac', zscore: True, exclude: ['dispEn', 'fDispEn']}   # EN_DispEn(x_z,3,4,'ac')
-      - {m: 2, c: 6, tau: 'mi', zscore: True, exclude: ['dispEn', 'fDispEn']}   # EN_DispEn(x_z,2,6,'mi')
-      - {m: 3, c: 4, tau: 'mi', zscore: True, exclude: ['dispEn', 'fDispEn']}   # EN_DispEn(x_z,3,4,'mi')
-      - {m: 2, c: 6, tau: 2, zscore: True, exclude: ['dispEn', 'fDispEn']}   # EN_DispEn(x_z,2,6,2)
-      - {m: 4, c: 3, tau: 'ac1e', zscore: True, select: ['normFDispEn']}   # EN_DispEn(x_z,4,3,'ac1e')
-      - {m: 4, c: 3, tau: 1, zscore: True, select: ['normDispEn']}   # EN_DispEn(x_z,4,3,1)
+      - {m: 2, c: 6, tau: 'ac', zscore: True, exclude: ['dispEn', 'fDispEn']}
+      - {m: 2, c: 3, tau: 'ac', zscore: True, exclude: ['dispEn', 'fDispEn']}
+      - {m: 3, c: 4, tau: 'ac', zscore: True, exclude: ['dispEn', 'fDispEn']}
+      - {m: 2, c: 6, tau: 'mi', zscore: True, exclude: ['dispEn', 'fDispEn']}
+      - {m: 3, c: 4, tau: 'mi', zscore: True, exclude: ['dispEn', 'fDispEn']}
+      - {m: 2, c: 6, tau: 2, zscore: True, exclude: ['dispEn', 'fDispEn']}
+      - {m: 4, c: 3, tau: 'ac1e', zscore: True, select: ['normFDispEn']}
+      - {m: 4, c: 3, tau: 1, zscore: True, select: ['normDispEn']}
     legacy_name: EN_DispEn
     ordered_args: ['m', 'c', 'tau']
 
@@ -1053,7 +1069,7 @@ entropy:
     base_name: fuzzy_entropy
     dependencies:
     configs:
-      - {M: 3, zscore: True, preprocess: diff1, exclude: ['fuzzyEn3']}   # EN_FuzzyEn(diff(x_z),3,0.2,2)
+      - {M: 3, zscore: True, preprocess: diff1, exclude: ['fuzzyEn3']}
     legacy_name: EN_FuzzyEn
     ordered_args: ['M']
 
@@ -1061,12 +1077,12 @@ entropy:
     base_name: permutation_entropy_complexity
     dependencies:
     configs:
-      - {m: 4, tau: 1, zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,4,1)
-      - {m: 4, tau: 2, zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,4,2)
-      - {m: 4, tau: 'ac1e-rank', zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,4,'ac1e')
-      - {m: 5, tau: 1, zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,5,1)
-      - {m: 5, tau: 2, zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,5,2)
-      - {m: 5, tau: 'ac1e-rank', zscore: True, exclude: ['hNorm']}   # EN_PermEnComplexity(x_z,5,'ac1e')
+      - {m: 4, tau: 1, zscore: True, exclude: ['hNorm']}
+      - {m: 4, tau: 2, zscore: True, exclude: ['hNorm']}
+      - {m: 4, tau: 'ac1e-rank', zscore: True, exclude: ['hNorm']}
+      - {m: 5, tau: 1, zscore: True, exclude: ['hNorm']}
+      - {m: 5, tau: 2, zscore: True, exclude: ['hNorm']}
+      - {m: 5, tau: 'ac1e-rank', zscore: True, exclude: ['hNorm']}
     legacy_name: EN_PermEnComplexity
     ordered_args: ['m', 'tau']
 
@@ -1074,14 +1090,14 @@ entropy:
     base_name: randomize_ordinal
     dependencies:
     configs:
-      - {zscore: True, select: ['halftime']}   # EN_RandomizeOrdinal(x_z)
+      - {zscore: True, select: ['halftime']}
     legacy_name: EN_RandomizeOrdinal
 
   wavelet_entropy:
     base_name: wavelet_entropy
     dependencies:
     configs:
-      - {zscore: True}   # EN_wentropy(x_z,'sym4',5)
+      - {zscore: True}
     legacy_name: EN_wentropy
 
 stationarity:
@@ -1100,16 +1116,16 @@ stationarity:
     configs:
       - {zscore: True}
     legacy_name: SY_Trend
-    ordered_args: 
+    ordered_args:
 
-  monotonic_trend:   # pyhctsa-only: Mann-Kendall tau of the series against time and the Theil-Sen slope
+  monotonic_trend:   # Mann-Kendall tau of the series against time and the Theil-Sen slope
     base_name: monotonic_trend
     dependencies:
     configs:
       - {zscore: True}
     variant_of: trend
     ordered_args:
-  
+
   ts_length:
     base_name: ts_length
     dependencies:
@@ -1129,7 +1145,7 @@ stationarity:
       - {k: 4, zscore: True}
     legacy_name: ST_FitPolynomial
     ordered_args: ['k']
-  
+
   sliding_window:
     base_name: sliding_window
     min_length: "num_seg * {'mean': 2 if across_win_stat in ('std', 'stdratio') else 1, 'std': 2, 'ent': 2, 'mom3': 3, 'AC1': 3, 'asymAC1': num(asym_tau, 1) + 2, 'lillie': 4, 'permen': 4, 'specen': 4}[window_stat]"
@@ -1152,11 +1168,11 @@ stationarity:
       - {window_stat: 'specen', across_win_stat: 'stdratio', num_seg: 5, inc_move: 2, zscore: True}
       - {window_stat: 'specen', across_win_stat: 'stdratio', num_seg: 2, inc_move: 2, zscore: True}
       # the ordinal structure (permutation entropy) of the sequence of window statistics: flat in length already
-      - {window_stat: 'mean', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'mean','permen',10,2)
-      - {window_stat: 'std', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'std','permen',10,2)
-      - {window_stat: 'mom3', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'mom3','permen',10,2)
-      - {window_stat: 'AC1', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}   # SY_SlidingWindow(x_z,'AC1','permen',10,2)
-      - {window_stat: 'specen', across_win_stat: 'permen', num_seg: 5, inc_move: 10, zscore: True}   # SY_SlidingWindow(x_z,'specen','permen',5,10)
+      - {window_stat: 'mean', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'std', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'mom3', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'AC1', across_win_stat: 'permen', num_seg: 10, inc_move: 2, zscore: True}
+      - {window_stat: 'specen', across_win_stat: 'permen', num_seg: 5, inc_move: 10, zscore: True}
     legacy_name: SY_SlidingWindow
     # The 'std' summaries are replaced by 'stdratio' (the plain spread across a fixed number of windows is mostly
     # sampling error, which shrinks with series length). The asymAC1, Lilliefors and kernel-entropy window
@@ -1171,7 +1187,7 @@ stationarity:
                           'SY_SlidingWindow_ent_s2_1', 'SY_SlidingWindow_ent_s10_1', 'SY_SlidingWindow_lil_s2_1',
                           'SY_SlidingWindow_lil_s10_1', 'SY_SlidingWindow_specen_ent5_1']
     ordered_args: ['window_stat', 'across_win_stat', 'num_seg', 'inc_move', 'asym_tau']
-  
+
   local_global:
     base_name: local_global
     field_min_length:
@@ -1195,13 +1211,13 @@ stationarity:
       - {subset_how: 'unicg', n: 50, zscore: True}
       - {subset_how: 'unicg', n: 100, zscore: True}
       - {subset_how: 'unicg', n: 500, zscore: True}
-      
+
       - {subset_how: 'p', n: 0.01, zscore: True}
       - {subset_how: 'p', n: 0.05, zscore: True}
       - {subset_how: 'p', n: 0.1, zscore: True}
     legacy_name: SY_LocalGlobal
     ordered_args: ['subset_how', 'n']
-  
+
   drifting_mean:
     base_name: drifting_mean
     min_length: "l + 1"
@@ -1211,7 +1227,7 @@ stationarity:
       - {segment_how: 'fix', l: 100, zscore: True, exclude: ['mean']}
     legacy_name: SY_DriftingMean
     ordered_args: ['segment_how', 'l']
-  
+
   range_evolve:
     base_name: range_evolve
     field_min_length:
@@ -1238,14 +1254,14 @@ stationarity:
       - {lags: [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], zscore: True}
     legacy_name: SY_KPSStest
     ordered_args: ['lags']
-  
+
   pp_test:
     base_name: pp_test
     min_length: "max(lags) + 2"
     dependencies:
     configs:
-      - {lags: [[0, 1, 2, 3, 4, 5]], model: 'ar', test_statistic: 't1', zscore: True, exclude: ['lagmaxp', 'lagminp', 'minBIC']}   # lagmaxp/lagminp deregistered in hctsa
-    legacy_name: SY_PPtest
+      - {lags: [[0, 1, 2, 3, 4, 5]], model: 'ar', test_statistic: 't1', zscore: True, exclude: ['lagmaxp', 'lagminp', 'minBIC']}
+    legacy_name: SY_PPtest   # lagmaxp and lagminp are excluded: deregistered in hctsa
     ordered_args: ['lags', 'model', 'test_statistic']
 
   local_extrema:
@@ -1259,7 +1275,7 @@ stationarity:
       - {how_to_window: 'n', n: 100, zscore: True}
     legacy_name: ST_LocalExtrema
     ordered_args: ['how_to_window', 'n']
-  
+
   simple_stats:
     base_name: simple_stats
     min_length: 4
@@ -1268,7 +1284,7 @@ stationarity:
       - {what_stat: 'pmcross', zscore: True}
     legacy_name: ST_SimpleStats
     ordered_args: ['what_stat']
-  
+
   moment_corr:
     base_name: moment_corr
     dependencies:
@@ -1286,7 +1302,7 @@ stationarity:
       - {window_length: 0.02, w_overlap: 0.2, mom_1: 'median', mom_2: 'iqr', what_transform: 'sqrt', zscore: True}
     legacy_name: ST_MomentCorr
     ordered_args: ['window_length', 'w_overlap', 'mom_1', 'mom_2', 'what_transform']
-  
+
   local_distributions:
     base_name: local_distributions
     min_length: "max(num_segs, 12)"
@@ -1299,16 +1315,16 @@ stationarity:
       - {num_segs: 5, each_or_par: 'each', zscore: True}
     legacy_name: SY_LocalDistributions
     ordered_args: ['num_segs', 'each_or_par']
-  
+
   ramping_windows:
     base_name: ramping_windows
     dependencies:
     configs:
       - {num_seg: 10, zscore: True, exclude: ['ac1_p', 'ac1_pearson_p', 'asymac1_p', 'asymac1_pearson_p', 'kurt_p', 'kurt_pearson_p', 'mean_p', 'mean_pearson_p', 'skew_p', 'skew_pearson_p', 'var_p', 'var_pearson_p']}
-      - {asym_tau: 'ac1e', zscore: True, select: ['asymac1_pearson_r', 'asymac1_tau']}   # SY_RampingWindows(x_z,10,'ac1e')
+      - {asym_tau: 'ac1e', zscore: True, select: ['asymac1_pearson_r', 'asymac1_tau']}
     legacy_name: SY_RampingWindows
     ordered_args: ['num_seg']
-  
+
   slow_feature_analysis:
     base_name: slow_feature_analysis
     dependencies:
@@ -1316,14 +1332,14 @@ stationarity:
       - {zscore: True}   # multi-scale: W = 10, 20, 40, ... windows of >= 20 samples (N >= 200)
     legacy_name: SY_SlowFeatureAnalysis
     ordered_args:
-  
+
   peak_intervals:
     base_name: peak_intervals
     dependencies:
     configs:
-      - {min_prom: 0.5, zscore: True}   # ST_PeakIntervals(x_z,0.5)
-      - {min_prom: 1, zscore: True}   # ST_PeakIntervals(x_z,1)
-      - {min_prom: 2, zscore: True}   # ST_PeakIntervals(x_z,2)
+      - {min_prom: 0.5, zscore: True}
+      - {min_prom: 1, zscore: True}
+      - {min_prom: 2, zscore: True}
     legacy_name: ST_PeakIntervals
     ordered_args: ['min_prom']
 
@@ -1331,10 +1347,10 @@ stationarity:
     base_name: drifting_auto_corr
     dependencies:
     configs:
-      - {tau: 1, zscore: True}   # SY_DriftingAutoCorr(x_z,1)
-      - {tau: 2, zscore: True}   # SY_DriftingAutoCorr(x_z,2)
-      - {tau: 1, what_product: 'asymmetry', zscore: True}   # SY_DriftingAutoCorr(x_z,1,'asymmetry')
-      - {tau: 2, what_product: 'asymmetry', zscore: True}   # SY_DriftingAutoCorr(x_z,2,'asymmetry')
+      - {tau: 1, zscore: True}
+      - {tau: 2, zscore: True}
+      - {tau: 1, what_product: 'asymmetry', zscore: True}
+      - {tau: 2, what_product: 'asymmetry', zscore: True}
     legacy_name: SY_DriftingAutoCorr
     ordered_args: ['tau', 'what_product']
 
@@ -1342,16 +1358,16 @@ stationarity:
     base_name: drifting_mean_cusum
     dependencies:
     configs:
-      - {zscore: True}   # SY_DriftingMeanCUSUM(x_z)
+      - {zscore: True}
     legacy_name: SY_DriftingMeanCUSUM
 
   spread_random_local:
     base_name: spread_random_local
     dependencies:
     configs:
-      - {l: 100, zscore: True}   # SY_SpreadRandomLocal(x_z,100,100,'default')
-      - {l: 'ac2', zscore: True}   # SY_SpreadRandomLocal(x_z,'ac2',100,'default')
-      - {l: 'ac5', zscore: True}   # SY_SpreadRandomLocal(x_z,'ac5',100,'default')
+      - {l: 100, zscore: True}
+      - {l: 'ac2', zscore: True}
+      - {l: 'ac5', zscore: True}
     legacy_name: SY_SpreadRandomLocal
     ordered_args: ['l']
 
@@ -1359,15 +1375,15 @@ stationarity:
     base_name: std_nth_deriv_change
     dependencies:
     configs:
-      - {zscore: True, exclude: ['minOrderInterp']}   # SY_StdNthDerChange(x_z)
+      - {zscore: True, exclude: ['minOrderInterp']}
     legacy_name: SY_StdNthDerChange
 
   nstat_z:
     base_name: nstat_z
     dependencies:
     configs:
-      - {num_seg: 4, zscore: True, exclude: ['maxeig', 'maximageig', 'rangeeig', 'rangemean', 'rangemedian', 'rangerange', 'rangestd']}   # SY_nstat_z(x_z,4,{1,3})
-      - {num_seg: 5, zscore: True, exclude: ['maxeig', 'maximageig', 'rangeeig', 'rangemean', 'rangemedian', 'rangerange', 'rangestd']}   # SY_nstat_z(x_z,5,{1,3})
+      - {num_seg: 4, zscore: True, exclude: ['maxeig', 'maximageig', 'rangeeig', 'rangemean', 'rangemedian', 'rangerange', 'rangestd']}
+      - {num_seg: 5, zscore: True, exclude: ['maxeig', 'maximageig', 'rangeeig', 'rangemean', 'rangemedian', 'rangerange', 'rangestd']}
     legacy_name: SY_nstat_z
     ordered_args: ['num_seg']
 
@@ -1400,7 +1416,7 @@ distribution:
       - {zscore: False}
     legacy_name: DN_Unique
     ordered_args:
-  
+
   spread:
     base_name: spread
     dependencies:
@@ -1435,8 +1451,8 @@ distribution:
       - {p: 0.97, zscore: True}
       - {p: 0.98, zscore: True}
       - {p: 0.99, zscore: True}
-      - {p: 0.15, zscore: True}   # DN_Quantile(x_z,0.15)
-      - {p: 0.85, zscore: True}   # DN_Quantile(x_z,0.85)
+      - {p: 0.15, zscore: True}
+      - {p: 0.85, zscore: True}
     legacy_name: DN_Quantile
     ordered_args: ['p']
 
@@ -1471,7 +1487,7 @@ distribution:
       - {min_or_max: 'min', zscore: True}
     legacy_name: DN_MinMax
     ordered_args: ['min_or_max']
-  
+
   mean:
     base_name: mean
     dependencies:
@@ -1483,7 +1499,7 @@ distribution:
       - {mean_type: 'midhinge', zscore: False}
     legacy_name: DN_Mean
     ordered_args: ['mean_type']
-  
+
   cv:
     base_name: cv
     dependencies:
@@ -1498,18 +1514,18 @@ distribution:
     dependencies:
     configs:
       - {what_skew: 'bowley', zscore: True}
-      - {what_skew: 'pearsonMode', zscore: False}   # DN_CustomSkewness(x,'pearsonMode')
+      - {what_skew: 'pearsonMode', zscore: False}
     legacy_name: DN_CustomSkewness
     ordered_args: ['what_skew']
-  
+
   burstiness:
     base_name: burstiness
     dependencies:
     configs:
       - {zscore: False}
     legacy_name: DN_Burstiness
-    ordered_args: 
-  
+    ordered_args:
+
   moments:
     base_name: moments
     min_length: "4 if the_mom == 4 and do_normalize else None"
@@ -1524,7 +1540,7 @@ distribution:
       - {the_mom: 9, zscore: True}
       - {the_mom: 10, zscore: True}
       - {the_mom: 11, zscore: True}
-      
+
       - {the_mom: 3, do_normalize: False, zscore: False}
       - {the_mom: 4, do_normalize: False, zscore: False}
       - {the_mom: 5, do_normalize: False, zscore: False}
@@ -1545,9 +1561,9 @@ distribution:
       - {threshold_how: 'abs', inc: 0.01, zscore: True}
       - {threshold_how: 'pos', inc: 0.01, zscore: True}
       - {threshold_how: 'neg', inc: 0.01, zscore: True}
-      - {threshold_how: 'abs', fixed_thresh: 2, zscore: True, exclude: ['propIncluded']}   # DN_OutlierInclude(x_z,'abs',0.01,2)
-      - {threshold_how: 'neg', fixed_thresh: 2, zscore: True}   # DN_OutlierInclude(x_z,'neg',0.01,2)
-      - {threshold_how: 'pos', fixed_thresh: 2, zscore: True}   # DN_OutlierInclude(x_z,'pos',0.01,2)
+      - {threshold_how: 'abs', fixed_thresh: 2, zscore: True, exclude: ['propIncluded']}
+      - {threshold_how: 'neg', fixed_thresh: 2, zscore: True}
+      - {threshold_how: 'pos', fixed_thresh: 2, zscore: True}
     legacy_name: DN_OutlierInclude
     ordered_args: ['threshold_how', 'inc']
 
@@ -1571,7 +1587,7 @@ distribution:
       - {p_exclude: 50}
     legacy_name: DN_TrimmedMean
     ordered_args: ['p_exclude']
-  
+
   histogram_asymmetry:
     base_name: histogram_asymmetry
     dependencies:
@@ -1579,7 +1595,7 @@ distribution:
       - {num_bins: 11, do_simple: False, zscore: True, exclude: ['densityDiff']}
     legacy_name: DN_HistogramAsymmetry
     ordered_args: ['num_bins']
-  
+
   histogram_mode:
     base_name: histogram_mode
     dependencies:
@@ -1622,22 +1638,22 @@ distribution:
     configs:
       - {what_distn: 'norm', zscore: False}
       - {what_distn: 'ev', zscore: False}
-      - {what_distn: 'uni', zscore: False, exclude: ['peaksepx']}   # DN_CompareKSFit(x,'uni'); peaksepx deregistered in hctsa
+      - {what_distn: 'uni', zscore: False, exclude: ['peaksepx']}
       - {what_distn: 'exp', zscore: False}
       - {what_distn: 'logn', zscore: False}
-      - {what_distn: 'beta', zscore: False}   # DN_CompareKSFit(x,'beta')
-      - {what_distn: 'gamma', zscore: False}   # DN_CompareKSFit(x,'gamma')
-      - {what_distn: 'rayleigh', zscore: False}   # DN_CompareKSFit(x,'rayleigh')
-      - {what_distn: 'wbl', zscore: False}   # DN_CompareKSFit(x,'wbl')
-    legacy_name: DN_CompareKSFit
+      - {what_distn: 'beta', zscore: False}
+      - {what_distn: 'gamma', zscore: False}
+      - {what_distn: 'rayleigh', zscore: False}
+      - {what_distn: 'wbl', zscore: False}
+    legacy_name: DN_CompareKSFit   # peaksepx of 'uni' is excluded: deregistered in hctsa
     ordered_args: ['what_distn']
-  
+
   fit_kernel_smooth:
     base_name: fit_kernel_smooth
     dependencies:
     configs:
-      - {zscore: False, exclude: ['max', 'entropy']}   # DN_FitKernelSmooth(x)
-      - {area: [[0.05, 0.1, 0.2, 0.3]], arclength: [[0.5, 2]], zscore: True, exclude: ['npeaks', 'asym', 'plsym']}   # DN_FitKernelSmooth(x_z,'area',[0.05,0.1,0.2,0.3],'arclength',[0.5,2])
+      - {zscore: False, exclude: ['max', 'entropy']}
+      - {area: [[0.05, 0.1, 0.2, 0.3]], arclength: [[0.5, 2]], zscore: True, exclude: ['npeaks', 'asym', 'plsym']}
     legacy_name: DN_FitKernelSmooth
     ordered_args: ['none']   # keeps the settings out of the label
 
@@ -1645,13 +1661,13 @@ distribution:
     base_name: simple_fit
     dependencies:
     configs:
-      - {dmodel: 'exp1', num_bins: 'sqrt', zscore: True, exclude: ['adjr2']}   # DN_SimpleFit(x_z,'exp1','sqrt')
-      - {dmodel: 'exp1', num_bins: 0, zscore: True, exclude: ['adjr2']}   # DN_SimpleFit(x_z,'exp1',0)
-      - {dmodel: 'gauss1', num_bins: 'sqrt', zscore: True, exclude: ['adjr2']}   # DN_SimpleFit(x_z,'gauss1','sqrt')
-      - {dmodel: 'gauss1', num_bins: 0, zscore: True, exclude: ['adjr2']}   # DN_SimpleFit(x_z,'gauss1',0)
-      - {dmodel: 'gauss2', num_bins: 'sqrt', zscore: True, exclude: ['adjr2']}   # DN_SimpleFit(x_z,'gauss2','sqrt')
-      - {dmodel: 'gauss2', num_bins: 0, zscore: True, exclude: ['adjr2']}   # DN_SimpleFit(x_z,'gauss2',0)
-      - {dmodel: 'power1', num_bins: 'sqrt', zscore: False, exclude: ['adjr2']}   # DN_SimpleFit(x,'power1','sqrt')
+      - {dmodel: 'exp1', num_bins: 'sqrt', zscore: True, exclude: ['adjr2']}
+      - {dmodel: 'exp1', num_bins: 0, zscore: True, exclude: ['adjr2']}
+      - {dmodel: 'gauss1', num_bins: 'sqrt', zscore: True, exclude: ['adjr2']}
+      - {dmodel: 'gauss1', num_bins: 0, zscore: True, exclude: ['adjr2']}
+      - {dmodel: 'gauss2', num_bins: 'sqrt', zscore: True, exclude: ['adjr2']}
+      - {dmodel: 'gauss2', num_bins: 0, zscore: True, exclude: ['adjr2']}
+      - {dmodel: 'power1', num_bins: 'sqrt', zscore: False, exclude: ['adjr2']}
     legacy_name: DN_SimpleFit
     ordered_args: ['dmodel', 'num_bins']
 
@@ -1659,8 +1675,8 @@ distribution:
     base_name: tail_index
     dependencies:
     configs:
-      - {tail_frac: 0.05, zscore: True}   # DN_TailIndex(x_z,0.05)
-      - {tail_frac: 0.1, zscore: True, exclude: ['hillUpper']}   # DN_TailIndex(x_z,0.10)
+      - {tail_frac: 0.05, zscore: True}
+      - {tail_frac: 0.1, zscore: True, exclude: ['hillUpper']}
     legacy_name: DN_TailIndex
     ordered_args: ['tail_frac']
 
@@ -1690,26 +1706,26 @@ scaling:
       - {do_overlap: False, scale_range: null, q_range: [[-5, 5]], zscore: True}
     legacy_name: SC_MMA
     ordered_args: ['do_overlap', 'scale_range', 'q_range']
-  
+
   higuchi_fd:
     base_name: higuchi_fd
     dependencies:
     configs:
       - {kmax: 8, zscore: True}
-      - {kmax: 8, tau: 'ac1e', zscore: True}   # lag form of SC_HiguchiFD(zscore(BF_PreProcess(x_z,'decimate_ac1e')),8): all tau phases
+      - {kmax: 8, tau: 'ac1e', zscore: True}
     legacy_name: SC_HiguchiFD
     ordered_args: ['kmax', 'tau']
-    dropped_hctsa_calls: ['SC_HiguchiFD_8_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
+    dropped_hctsa_calls: ['SC_HiguchiFD_8_dec']   # replaced by the tau: 'ac1e' config (lag-tau form)
 
   mfdfa:
     base_name: mfdfa
     dependencies:
     configs:
-      - {q_range: [[-5, 5]], zscore: True, exclude: ['fAlphaMax']}   # SC_MFDFA(x_z,[],[-5,5],1)
+      - {q_range: [[-5, 5]], zscore: True, exclude: ['fAlphaMax']}
     legacy_name: SC_MFDFA
     ordered_args: ['q_range']
 
-  long_memory_d:   # pyhctsa-only: local Whittle estimate of the memory parameter d below 1/128 and 1/32 cycles per sample
+  long_memory_d:   # local Whittle estimate of the memory parameter d below 1/128 and 1/32 cycles per sample
     base_name: long_memory_d
     dependencies:
     configs:
@@ -1726,12 +1742,12 @@ symbolic:
       - {how_to_cg: 'quantile', num_groups: 4, tau: 1, zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}
       - {how_to_cg: 'quantile', num_groups: 5, tau: 1, zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}
 
-      - {how_to_cg: 'quantile', num_groups: 2, tau: 'mi-rank', zscore: True, select: ['T1', 'sumdiagcov']}   # SB_TransitionMatrix(x_z,'quantile',2,'mi')
-      - {how_to_cg: 'quantile', num_groups: 3, tau: 'mi-rank', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap', 'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9']}   # SB_TransitionMatrix(x_z,'quantile',3,'mi')
-      - {how_to_cg: 'quantile', num_groups: 4, tau: 'mi-rank', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}   # SB_TransitionMatrix(x_z,'quantile',4,'mi')
-      - {how_to_cg: 'quantile', num_groups: 5, tau: 'mi-rank', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}   # SB_TransitionMatrix(x_z,'quantile',5,'mi')
-      - {how_to_cg: 'updown', num_groups: 2, tau: 'ac-rank', zscore: True, select: ['lam2mod', 'stddiag', 'sumdiagcov']}   # SB_TransitionMatrix(x_z,'updown',2,'ac')
-      - {how_to_cg: 'updown', num_groups: 2, tau: 1, zscore: True, select: ['lam2mod', 'stddiag', 'sumdiagcov']}   # SB_TransitionMatrix(x_z,'updown',2,1)
+      - {how_to_cg: 'quantile', num_groups: 2, tau: 'mi-rank', zscore: True, select: ['T1', 'sumdiagcov']}
+      - {how_to_cg: 'quantile', num_groups: 3, tau: 'mi-rank', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap', 'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9']}
+      - {how_to_cg: 'quantile', num_groups: 4, tau: 'mi-rank', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}
+      - {how_to_cg: 'quantile', num_groups: 5, tau: 'mi-rank', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}
+      - {how_to_cg: 'updown', num_groups: 2, tau: 'ac-rank', zscore: True, select: ['lam2mod', 'stddiag', 'sumdiagcov']}
+      - {how_to_cg: 'updown', num_groups: 2, tau: 1, zscore: True, select: ['lam2mod', 'stddiag', 'sumdiagcov']}
     legacy_name: SB_TransitionMatrix
     ordered_args: ['how_to_cg', 'num_groups', 'tau']
 
@@ -1740,7 +1756,7 @@ symbolic:
     dependencies:
     configs:
       - {num_groups: [!range [2, 40]], tau: 1, zscore: True, exclude: ['maxdiagfexp_adjr2', 'meandiagfexp_adjr2', 'stdeigfexp_adjr2', 'trcovfexp_adjr2', 'trfexp_adjr2']}
-      - {num_groups: [[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]], tau: 'ac1e-rank', zscore: True, exclude: ['maxdiagfexp_adjr2', 'meandiagfexp_adjr2', 'stdeigfexp_adjr2', 'trcovfexp_adjr2', 'trfexp_adjr2']}   # SB_TransitionPAlphabet(x_z,2:20,'ac1e')
+      - {num_groups: [[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]], tau: 'ac1e-rank', zscore: True, exclude: ['maxdiagfexp_adjr2', 'meandiagfexp_adjr2', 'stdeigfexp_adjr2', 'trcovfexp_adjr2', 'trfexp_adjr2']}
     legacy_name: SB_TransitionPAlphabet
     ordered_args: ['num_groups', 'tau']
 
@@ -1751,8 +1767,8 @@ symbolic:
     configs:
       - {binary_method: 'mean', zscore: True, exclude: ['longstretch0norm', 'longstretch1norm', 'meanstretch0norm', 'meanstretch1norm', 'stdstretch0norm', 'stdstretch1norm']}
       - {binary_method: 'diff', zscore: True, exclude: ['longstretch0norm', 'longstretch1norm', 'meanstretch0norm', 'meanstretch1norm', 'stdstretch0norm', 'stdstretch1norm']}
-      - {binary_method: 'diff', zscore: True, preprocess: decimate_ac1e-rank, exclude: ['longstretch0norm', 'longstretch1norm', 'meanstretch0norm', 'meanstretch1norm', 'stdstretch0norm', 'stdstretch1norm']}   # SB_BinaryStats(zscore(BF_PreProcess(x_z,'decimate_ac1e')),'diff')
-      - {binary_method: 'iqr', zscore: True, exclude: ['longstretch0norm', 'longstretch1norm', 'meanstretch0norm', 'meanstretch1norm', 'stdstretch0norm', 'stdstretch1norm']}   # SB_BinaryStats(x_z,'iqr')
+      - {binary_method: 'diff', zscore: True, preprocess: decimate_ac1e-rank, exclude: ['longstretch0norm', 'longstretch1norm', 'meanstretch0norm', 'meanstretch1norm', 'stdstretch0norm', 'stdstretch1norm']}
+      - {binary_method: 'iqr', zscore: True, exclude: ['longstretch0norm', 'longstretch1norm', 'meanstretch0norm', 'meanstretch1norm', 'stdstretch0norm', 'stdstretch1norm']}
     legacy_name: SB_BinaryStats
     ordered_args: ['binary_method']
     dropped_hctsa_calls: ['SB_BinaryStats_diff_dec']   # the decimated call is replaced by its average over all decimation phases, with the rank delay (_dec-rank)
@@ -1764,8 +1780,8 @@ symbolic:
     configs:
       - {cg_how: 'quantile', zscore: True, exclude: ['a', 'b', 'c', 'h']}
       - {cg_how: 'diffquant', zscore: True, exclude: ['a', 'b', 'c', 'h']}
-      - {cg_how: 'diffquant', tau: 'ac1e', zscore: True, exclude: ['a', 'b', 'c', 'h']}   # SB_MotifThree(x_z,'diffquant','ac1e')
-      - {cg_how: 'quantile', tau: 'ac1e-rank', zscore: True, exclude: ['a', 'b', 'c', 'h']}   # SB_MotifThree(x_z,'quantile','ac1e')
+      - {cg_how: 'diffquant', tau: 'ac1e', zscore: True, exclude: ['a', 'b', 'c', 'h']}
+      - {cg_how: 'quantile', tau: 'ac1e-rank', zscore: True, exclude: ['a', 'b', 'c', 'h']}
     legacy_name: SB_MotifThree
     ordered_args: ['cg_how', 'tau']
 
@@ -1776,12 +1792,12 @@ symbolic:
       - {binarize_how: 'diff', zscore: True, exclude: ['d', 'ud', 'udd', 'uddd', 'uud', 'uuud']}
       - {binarize_how: 'mean', zscore: True, exclude: ['d', 'ud', 'udd', 'uddd', 'uud', 'uuud']}
       - {binarize_how: 'median', zscore: True, exclude: ['d', 'h', 'u', 'ud', 'udd', 'uddd', 'uud', 'uuud']}
-      - {binarize_how: 'diff', tau: 'ac1e-rank', zscore: True, exclude: ['d', 'ud', 'udd', 'uddd', 'uud', 'uuud']}   # SB_MotifTwo(x_z,'diff','ac1e')
-      - {binarize_how: 'mean', tau: 'ac1e', zscore: True, exclude: ['d', 'h', 'u', 'ud', 'udd', 'uddd', 'uud', 'uuud']}   # SB_MotifTwo(x_z,'mean','ac1e')
-      - {binarize_how: 'median', tau: 'ac1e-rank', zscore: True, exclude: ['d', 'h', 'u', 'ud', 'udd', 'uddd', 'uud', 'uuud']}   # SB_MotifTwo(x_z,'median','ac1e')
+      - {binarize_how: 'diff', tau: 'ac1e-rank', zscore: True, exclude: ['d', 'ud', 'udd', 'uddd', 'uud', 'uuud']}
+      - {binarize_how: 'mean', tau: 'ac1e', zscore: True, exclude: ['d', 'h', 'u', 'ud', 'udd', 'uddd', 'uud', 'uuud']}
+      - {binarize_how: 'median', tau: 'ac1e-rank', zscore: True, exclude: ['d', 'h', 'u', 'ud', 'udd', 'uddd', 'uud', 'uuud']}
     legacy_name: SB_MotifTwo
     ordered_args: ['binarize_how', 'tau']
-  
+
   binary_stretch:
     base_name: binary_stretch
     min_length: 7
@@ -1791,7 +1807,7 @@ symbolic:
       - {stretch_what: 'gaps0', zscore: True}
     legacy_name: SB_BinaryGapHomogeneity
     ordered_args: ['stretch_what']
-  
+
   surprise:
     base_name: surprise
     min_length: "memory + 1 + (coarse_grain_method == 'diff') + (what_prior == 'dist')"
@@ -1823,25 +1839,25 @@ symbolic:
       - {what_prior: 'dist', memory: 5, num_groups: 1, coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True, exclude: ['max', 'median', 'propUnseen', 'sum', 'tstat']}
 
       - {what_prior: 'T1', memory: 10, num_groups: 1, coarse_grain_method: 'embed2quadrants', num_iters: 500, zscore: True, exclude: ['lq', 'median', 'min', 'sum', 'tstat']}
-      - {what_prior: 'dist', memory: 5, num_groups: 'ac1e', coarse_grain_method: 'embed2quadrants', zscore: True, exclude: ['median', 'propUnseen', 'sum', 'tstat']}   # FC_Surprise(x_z,'dist',5,'ac1e','embed2quadrants',500,'default')
-      - {what_prior: 'dist', memory: 20, num_groups: 'ac1e', coarse_grain_method: 'embed2quadrants', zscore: True, exclude: ['median', 'propUnseen', 'sum', 'tstat']}   # FC_Surprise(x_z,'dist',20,'ac1e','embed2quadrants',500,'default')
-      - {what_prior: 'T1', memory: 10, num_groups: 'ac1e', coarse_grain_method: 'embed2quadrants', zscore: True, exclude: ['median', 'sum', 'tstat']}   # FC_Surprise(x_z,'T1',10,'ac1e','embed2quadrants',500,'default')
-      - {what_prior: 'T1', memory: 50, num_groups: 3, coarse_grain_method: 'quantile', zscore: True, exclude: ['median', 'sum', 'tstat']}   # FC_Surprise(x_z,'T1',50,3,'quantile',500,'default')
-      - {what_prior: 'T1', memory: 50, num_groups: 'ac1e', coarse_grain_method: 'embed2quadrants', zscore: True, exclude: ['median', 'sum', 'tstat']}   # FC_Surprise(x_z,'T1',50,'ac1e','embed2quadrants',500,'default')
-      - {what_prior: 'T2', memory: 50, num_groups: 3, coarse_grain_method: 'quantile', zscore: True, exclude: ['median', 'sum', 'tstat']}   # FC_Surprise(x_z,'T2',50,3,'quantile',500,'default')
-      - {what_prior: 'T2', memory: 50, num_groups: 3, coarse_grain_method: 'diff', zscore: True, exclude: ['median', 'sum', 'tstat']}   # FC_Surprise(x_z,'T2',50,3,'diff',500,'default')
-      - {what_prior: 'T2', memory: 50, num_groups: 'ac1e', coarse_grain_method: 'embed2quadrants', zscore: True, exclude: ['median', 'sum', 'tstat']}   # FC_Surprise(x_z,'T2',50,'ac1e','embed2quadrants',500,'default')
-      - {what_prior: 'T2', memory: 100, num_groups: 'ac1e', coarse_grain_method: 'embed2quadrants', zscore: True, exclude: ['median', 'sum', 'tstat']}   # FC_Surprise(x_z,'T2',100,'ac1e','embed2quadrants',500,'default')
+      - {what_prior: 'dist', memory: 5, num_groups: 'ac1e', coarse_grain_method: 'embed2quadrants', zscore: True, exclude: ['median', 'propUnseen', 'sum', 'tstat']}
+      - {what_prior: 'dist', memory: 20, num_groups: 'ac1e', coarse_grain_method: 'embed2quadrants', zscore: True, exclude: ['median', 'propUnseen', 'sum', 'tstat']}
+      - {what_prior: 'T1', memory: 10, num_groups: 'ac1e', coarse_grain_method: 'embed2quadrants', zscore: True, exclude: ['median', 'sum', 'tstat']}
+      - {what_prior: 'T1', memory: 50, num_groups: 3, coarse_grain_method: 'quantile', zscore: True, exclude: ['median', 'sum', 'tstat']}
+      - {what_prior: 'T1', memory: 50, num_groups: 'ac1e', coarse_grain_method: 'embed2quadrants', zscore: True, exclude: ['median', 'sum', 'tstat']}
+      - {what_prior: 'T2', memory: 50, num_groups: 3, coarse_grain_method: 'quantile', zscore: True, exclude: ['median', 'sum', 'tstat']}
+      - {what_prior: 'T2', memory: 50, num_groups: 3, coarse_grain_method: 'diff', zscore: True, exclude: ['median', 'sum', 'tstat']}
+      - {what_prior: 'T2', memory: 50, num_groups: 'ac1e', coarse_grain_method: 'embed2quadrants', zscore: True, exclude: ['median', 'sum', 'tstat']}
+      - {what_prior: 'T2', memory: 100, num_groups: 'ac1e', coarse_grain_method: 'embed2quadrants', zscore: True, exclude: ['median', 'sum', 'tstat']}
     legacy_name: FC_Surprise
     ordered_args: ['what_prior', 'memory', 'num_groups', 'coarse_grain_method', 'num_iters']
-    
+
   binary_stats_ar1:
     base_name: binary_stats_ar1
     min_length: "4 if binary_method == 'diff' else None"
     dependencies:
     configs:
-      - {binary_method: 'diff', zscore: True, select: ['meanstretch0_ar1rat', 'meanstretch1_ar1rat', 'pstretch1_ar1rat']}   # SB_BinaryStats_AR1(x_z,'diff')
-      - {binary_method: 'mean', zscore: True, select: ['meanstretch0_ar1rat', 'meanstretch1_ar1rat', 'pstretch1_ar1rat']}   # SB_BinaryStats_AR1(x_z,'mean')
+      - {binary_method: 'diff', zscore: True, select: ['meanstretch0_ar1rat', 'meanstretch1_ar1rat', 'pstretch1_ar1rat']}
+      - {binary_method: 'mean', zscore: True, select: ['meanstretch0_ar1rat', 'meanstretch1_ar1rat', 'pstretch1_ar1rat']}
     legacy_name: SB_BinaryStats_AR1
     ordered_args: ['binary_method']
 
@@ -1859,7 +1875,7 @@ wavelet:
       - {w_name: 'db3', level: 'max', zscore: True, exclude: ['wb99m']}
     legacy_name: WL_Coeffs
     ordered_args: ['w_name', 'level']
-  
+
   detail_coeffs:
     base_name: detail_coeffs
     min_length: "4 * (dec_len(w_name) - 1)"
@@ -1869,17 +1885,17 @@ wavelet:
       - {w_name: 'db3', max_level: 'max', zscore: True}
     legacy_name: WL_DetailCoeffs
     ordered_args: ['w_name', 'max_level']
-  
+
   cwt:
     base_name: cwt
     dependencies:
       - PyWavelets
     configs:
       - {w_name: 'db3', max_scale: 32, zscore: True, exclude: ['gam2']}
-      - {w_name: 'morl', zscore: True, exclude: ['gam2']}   # WL_cwt(x_z,'morl',32)
+      - {w_name: 'morl', zscore: True, exclude: ['gam2']}
     legacy_name: WL_cwt
     ordered_args: ['w_name', 'max_scale']
-  
+
   dwt_coeff:
     base_name: dwt_coeff
     dependencies:
@@ -1889,7 +1905,7 @@ wavelet:
       - {w_name: 'sym2', level: 5, zscore: True}
     legacy_name: WL_DWTCoeff
     ordered_args: ['w_name', 'level']
-  
+
   scal_2_freq:
     base_name: scal_2_freq
     min_length: "8 * (dec_len(w_name) - 1)"
@@ -1899,7 +1915,7 @@ wavelet:
       - {w_name: 'db3', a_max: 'max', delta: 1, zscore: True, select: ['lmax']}
     legacy_name: WL_scal2frq
     ordered_args: ['w_name', 'a_max', 'delta']
-  
+
   wfbm:
     base_name: wfbm
     dependencies:
@@ -1907,8 +1923,8 @@ wavelet:
     configs:
       - {zscore: True}
     legacy_name: WL_fBM
-    ordered_args: 
-  
+    ordered_args:
+
   modwt_var:
     base_name: modwt_var
     min_length: "dec_len(w_name) + 1"
@@ -1918,12 +1934,12 @@ wavelet:
       - {w_name: 'db3', level: 5, zscore: True}
     legacy_name: WL_modwtvar
     ordered_args: ['w_name', 'level']
-  
+
   wpd_best_tree:
     base_name: wpd_best_tree
     dependencies:
     configs:
-      - {zscore: True}   # WL_wpdBestTree(x_z,'db3',5)
+      - {zscore: True}
     legacy_name: WL_wpdBestTree
 
 hypothesis_tests:
@@ -1959,7 +1975,7 @@ hypothesis_tests:
       - {the_test: 'ks', the_distn: 'wbl', zscore: False}
     legacy_name: HT_DistributionTest
     ordered_args: ['the_test', 'the_distn', 'num_bins']
-  
+
   variance_ratio_test:
     base_name: variance_ratio_test
     min_length: "2 * (max(periods) if isinstance(periods, list) else periods) + 1"
@@ -1968,7 +1984,7 @@ hypothesis_tests:
     configs:
       - {periods: 2, iids: 0, zscore: True, select: ['ratio']}
       - {periods: 4, iids: 0, zscore: True, select: ['ratio']}
-      - {periods: [[2, 4, 6, 8, 2, 4, 6, 8]], iids: [[0, 0, 0, 0, 1, 1, 1, 1]], zscore: True, exclude: ['maxratio', 'maxstat', 'meanratio', 'meanstat', 'minstat']}   # SY_VarRatioTest(x_z,[2,4,6,8,2,4,6,8],[0,0,0,0,1,1,1,1])
+      - {periods: [[2, 4, 6, 8, 2, 4, 6, 8]], iids: [[0, 0, 0, 0, 1, 1, 1, 1]], zscore: True, exclude: ['maxratio', 'maxstat', 'meanratio', 'meanstat', 'minstat']}
     legacy_name: SY_VarRatioTest
     ordered_args: ['periods', 'iids']
 
@@ -1977,8 +1993,8 @@ hypothesis_tests:
     min_length: "4 if the_test == 'runsz' else None"
     dependencies:
     configs:
-      - {the_test: 'lbq', zscore: True}   # HT_IndependenceTests(x_z,'lbq')
-      - {the_test: 'runsz', zscore: False}   # HT_IndependenceTests(x,'runsz')
+      - {the_test: 'lbq', zscore: True}
+      - {the_test: 'runsz', zscore: False}
     legacy_name: HT_IndependenceTests
     ordered_args: ['the_test']
 
@@ -1987,9 +2003,9 @@ hypothesis_tests:
     min_length: "{'signtest': 6, 'signrank': 5}.get(the_test)"
     dependencies:
     configs:
-      - {the_test: 'logjb', zscore: False}   # HT_MarginalTests(x,'logjb')
-      - {the_test: 'signrank', zscore: True}   # HT_MarginalTests(x_z,'signrank')
-      - {the_test: 'signtest', zscore: True}   # HT_MarginalTests(x_z,'signtest')
+      - {the_test: 'logjb', zscore: False}
+      - {the_test: 'signrank', zscore: True}
+      - {the_test: 'signtest', zscore: True}
     legacy_name: HT_MarginalTests
     ordered_args: ['the_test']
 
@@ -2010,10 +2026,10 @@ spectral:
     configs:
       - {psd_meth: 'periodogram', window_type: 'hamming', zscore: True, exclude: ['fpoly2_sse', 'linfitloglog_all_sea1', 'linfitloglog_hf_sea1', 'linfitsemilog_all_sea1', 'meanPeakWidth_prom5', 'meanProm_5', 'median', 'numPeaks_50power', 'numPromPeaks_3', 'numPromPeaks_5', 'numPromPeaks_8', 'peakpower_1', 'peakPower_2', 'peakPower_5', 'peakPower_prom5', 'q25', 'q75', 'spect_shann_ent', 'std', 'w_weighted_peak_prom', 'width_weighted_prom']}
       - {psd_meth: 'welch', window_type: 'rect', zscore: True, exclude: ['fpoly2_sse', 'linfitloglog_all_sea1', 'linfitloglog_hf_sea1', 'linfitsemilog_all_sea1', 'median', 'q25', 'q75', 'spect_shann_ent', 'std']}
-      - {zscore: True, exclude: ['fpoly2_sse', 'linfitloglog_all_sea1', 'linfitloglog_hf_sea1', 'linfitsemilog_all_sea1', 'meanPeakWidth_prom5', 'meanProm_5', 'median', 'numPeaks_50power', 'numPromPeaks_3', 'numPromPeaks_5', 'numPromPeaks_8', 'peakpower_1', 'peakPower_2', 'peakPower_5', 'peakPower_prom5', 'q25', 'q75', 'spect_shann_ent', 'std', 'w_weighted_peak_prom', 'width_weighted_prom']}   # SP_Summaries(x_z,'fft',[],[],false)
+      - {zscore: True, exclude: ['fpoly2_sse', 'linfitloglog_all_sea1', 'linfitloglog_hf_sea1', 'linfitsemilog_all_sea1', 'meanPeakWidth_prom5', 'meanProm_5', 'median', 'numPeaks_50power', 'numPromPeaks_3', 'numPromPeaks_5', 'numPromPeaks_8', 'peakpower_1', 'peakPower_2', 'peakPower_5', 'peakPower_prom5', 'q25', 'q75', 'spect_shann_ent', 'std', 'w_weighted_peak_prom', 'width_weighted_prom']}
     legacy_name: SP_Summaries
     ordered_args: ['psd_meth', 'window_type']
-  
+
   spectral_summaries_phase:
     base_name: spectral_summaries_phase
     min_length: 5
@@ -2022,15 +2038,15 @@ spectral:
       - {zscore: True}
     legacy_name: SP_SummariesPhase
     ordered_args:
-  
+
   specparam:
     base_name: specparam
     dependencies:
     configs:
-      - {aperiodic_mode: 'fixed', max_n_peaks: 4, peak_threshold: 1, zscore: True, exclude: ['modelMAE', 'modelR2', 'totalPeakPower']}   # SP_Specparam(x_z,'fixed',4,1,[0.02,0.5],[],Inf)
+      - {aperiodic_mode: 'fixed', max_n_peaks: 4, peak_threshold: 1, zscore: True, exclude: ['modelMAE', 'modelR2', 'totalPeakPower']}
     legacy_name: SP_Specparam
     ordered_args: ['aperiodic_mode', 'max_n_peaks', 'peak_threshold']
-  
+
   cepstrum:
     base_name: cepstrum
     dependencies:
@@ -2043,30 +2059,30 @@ spectral:
     base_name: bicoherence
     dependencies:
     configs:
-      - {zscore: True}   # SP_Bicoherence(x_z,64,'full',100)
+      - {zscore: True}
     legacy_name: SP_Bicoherence
 
   envelope_stats:
     base_name: envelope_stats
     dependencies:
     configs:
-      - {zscore: True}   # SP_EnvelopeStats(x_z,0.5,0.05)
+      - {zscore: True}
     legacy_name: SP_EnvelopeStats
 
   phase_fluctuation_scaling:
     base_name: phase_fluctuation_scaling
     dependencies:
     configs:
-      - {zscore: True, exclude: ['slope_diff', 'slope_short']}   # SP_PhaseFluctuationScaling(x_z,0.01,16,10000)
+      - {zscore: True, exclude: ['slope_diff', 'slope_short']}
     legacy_name: SP_PhaseFluctuationScaling
 
   sinusoid_fit:
     base_name: sinusoid_fit
     dependencies:
     configs:
-      - {model: 'sin1', zscore: True, exclude: ['adjr2', 'r2']}   # SP_SinusoidFit(x_z,'sin1')
-      - {model: 'sin2', zscore: True, exclude: ['adjr2', 'r2']}   # SP_SinusoidFit(x_z,'sin2')
-      - {model: 'sin3', zscore: True, exclude: ['adjr2', 'r2']}   # SP_SinusoidFit(x_z,'sin3')
+      - {model: 'sin1', zscore: True, exclude: ['adjr2', 'r2']}
+      - {model: 'sin2', zscore: True, exclude: ['adjr2', 'r2']}
+      - {model: 'sin3', zscore: True, exclude: ['adjr2', 'r2']}
     legacy_name: SP_SinusoidFit
     ordered_args: ['model']
 
@@ -2074,18 +2090,18 @@ spectral:
     base_name: spectral_time_freq
     dependencies:
     configs:
-      - {zscore: True}   # SP_SpectralTimeFreq(x_z,20)
+      - {zscore: True}
     legacy_name: SP_SpectralTimeFreq
 
   rhythmicity:
     base_name: rhythmicity
     dependencies:
     configs:
-      - {m: 5, tau: 1.5, n_freq: 40, zscore: True}   # SP_Rhythmicity(x_z,5,1.5,40,0.02,0.4,5,40)
+      - {m: 5, tau: 1.5, n_freq: 40, zscore: True}
     legacy_name: SP_Rhythmicity
     ordered_args: ['m', 'tau', 'n_freq']
 
-  doubled_phase_coherence:   # pyhctsa-only: record-long coherence of the squared Morlet band signal (phase kept modulo pi), excess over a Gaussian spectral null
+  doubled_phase_coherence:   # record-long coherence of the squared Morlet band signal (phase kept modulo pi), excess over a Gaussian spectral null
     base_name: dpc
     dependencies:
     configs:
@@ -2115,7 +2131,7 @@ model_fit:
       - {n_train: 0.5, alpha: 'best', zscore: True}
     legacy_name: MF_ExpSmoothing
     ordered_args: ['n_train', 'alpha']
-  
+
   ar_fit:
     base_name: ar_fit
     dependencies:
@@ -2142,11 +2158,11 @@ model_fit:
       - {forecast_meth: 'lfit', train_length: 3, zscore: True}
       - {forecast_meth: 'lfit', train_length: 4, zscore: True}
       - {forecast_meth: 'lfit', train_length: 5, zscore: True}
-      - {forecast_meth: 'lfit', train_length: 'ac1e', zscore: True}   # FC_LocalSimple(x_z,'lfit','ac1e')
-      - {forecast_meth: 'mean', train_length: 1, tau: 'ac1e', zscore: True}   # lag form of FC_LocalSimple(zscore(BF_PreProcess(x_z,'decimate_ac1e')),'mean',1): all tau phases
+      - {forecast_meth: 'lfit', train_length: 'ac1e', zscore: True}
+      - {forecast_meth: 'mean', train_length: 1, tau: 'ac1e', zscore: True}
     legacy_name: FC_LocalSimple
     ordered_args: ['forecast_meth', 'train_length', 'tau']
-    dropped_hctsa_calls: ['FC_LocalSimple_mean1_dec']   # replaced by the lag-tau form over the whole series (all decimation phases)
+    dropped_hctsa_calls: ['FC_LocalSimple_mean1_dec']   # replaced by the tau: 'ac1e' config (lag-tau form)
 
   loop_local_simple:
     base_name: loop_local_simple
@@ -2155,7 +2171,7 @@ model_fit:
       - {forecast_meth: 'mean', zscore: True, exclude: ['stde_peaksize', 'sws_fexp_r2']}
     legacy_name: FC_LoopLocalSimple
     ordered_args: ['forecast_meth']
-  
+
   fit_subsegments:
     base_name: fit_subsegments
     min_length: "{'ar': 30, 'arcrosspred': 15, 'arsbc': 210, 'ss': 120}[model]"
@@ -2169,15 +2185,14 @@ model_fit:
     dependencies:
       - statsmodels
     configs:
-      - {model: 'ar', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True, select: ['fpe_mean', 'logfpe_stdratio', 'a_1_stdratio', 'a_1_maxdev', 'a_2_mean', 'a_2_stdratio', 'a_2_maxdev']}   # MF_FitSubsegments(x_z,'ar',2,'uniform',[25,0.1])
-      - {model: 'arcrosspred', order: 2, subset_how: 'uniform', sample_p: 5, zscore: True, select: ['excess_ratio']}   # MF_FitSubsegments(x_z,'arcrosspred',2,'uniform',5)
-      - {model: 'arsbc', subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True, select: ['orders_mode', 'orders_mean']}   # MF_FitSubsegments(x_z,'arsbc',[],'uniform',[25,0.1])
-      - {model: 'ss', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True, select: ['logfpe_stdratio']}   # MF_FitSubsegments(x_z,'ss',2,'uniform',[25,0.1])
+      - {model: 'ar', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True, select: ['fpe_mean', 'logfpe_stdratio', 'a_1_stdratio', 'a_1_maxdev', 'a_2_mean', 'a_2_stdratio', 'a_2_maxdev']}
+      - {model: 'arcrosspred', order: 2, subset_how: 'uniform', sample_p: 5, zscore: True, select: ['excess_ratio']}
+      - {model: 'arsbc', subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True, select: ['orders_mode', 'orders_mean']}
+      - {model: 'ss', order: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], zscore: True, select: ['logfpe_stdratio']}
     legacy_name: MF_FitSubsegments
-    # the 'spread' arsbc config duplicates the 'uniform' one (the same statistics of 25 segments)
-    dropped_hctsa_calls: ['MF_FitSubsegments_arsbc_spread_25_01']
+    dropped_hctsa_calls: ['MF_FitSubsegments_arsbc_spread_25_01']   # duplicates the 'uniform' arsbc config (the same statistics of 25 segments)
     ordered_args: ['model', 'order', 'subset_how', 'sample_p']
-  
+
   hmm_fit:
     base_name: hmm_fit
     dependencies:
@@ -2186,12 +2201,12 @@ model_fit:
       - {train_p: 0.8, num_states: 2, zscore: True, exclude: ['maxMu', 'minMu']}
     legacy_name: MF_hmm_Fit
     ordered_args: ['train_p', 'num_states']
-  
+
   gp_fit_across:
     base_name: gp_fit_across
     dependencies:
     configs:
-      - {cov_func: 'covSEiso_covNoise', zscore: True, exclude: ['logh1', 'logh2', 'logh3']}   # MF_GP_FitAcross(x_z,{'covSum',{'covSEiso','covNoise'}},20)
+      - {cov_func: 'covSEiso_covNoise', zscore: True, exclude: ['logh1', 'logh2', 'logh3']}
     legacy_name: MF_GP_FitAcross
     ordered_args: ['cov_func', 'npoints']
 
@@ -2199,8 +2214,8 @@ model_fit:
     base_name: compare_ar
     dependencies:
     configs:
-      - {orders: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], test_how: 0.5, zscore: True, exclude: ['bestaic', 'maxdiff', 'medianv']}   # MF_CompareAR(x_z,1:10,0.5)
-      - {orders: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], test_how: 'all', zscore: True, exclude: ['best_n', 'bestaic', 'maxdiff', 'medianv']}   # MF_CompareAR(x_z,1:10,'all')
+      - {orders: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], test_how: 0.5, zscore: True, exclude: ['bestaic', 'maxdiff', 'medianv']}
+      - {orders: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]], test_how: 'all', zscore: True, exclude: ['best_n', 'bestaic', 'maxdiff', 'medianv']}
     legacy_name: MF_CompareAR
     ordered_args: ['test_how']
 
@@ -2209,10 +2224,10 @@ model_fit:
     min_length: "481 if subset_how == 'spread' else 260"
     dependencies:
     configs:
-      - {the_model: 'ar', ord: 4, subset_how: 'spread', sample_p: [[25, 0.1]], steps: 1, zscore: True}   # MF_CompareTestSets(x_z,'ar',4,'spread',[25,0.1],1)
-      - {the_model: 'ar', ord: 'best', subset_how: 'uniform', sample_p: [[25, 0.1]], steps: 1, zscore: True}   # MF_CompareTestSets(x_z,'ar','best','uniform',[25,0.1],1)
-      - {the_model: 'ss', ord: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], steps: 1, zscore: True}   # MF_CompareTestSets(x_z,'ss',2,'uniform',[25,0.1],1)
-      - {the_model: 'ss', ord: 'best', subset_how: 'uniform', sample_p: [[25, 0.1]], steps: 1, zscore: True}   # MF_CompareTestSets(x_z,'ss','best','uniform',[25,0.1],1)
+      - {the_model: 'ar', ord: 4, subset_how: 'spread', sample_p: [[25, 0.1]], steps: 1, zscore: True}
+      - {the_model: 'ar', ord: 'best', subset_how: 'uniform', sample_p: [[25, 0.1]], steps: 1, zscore: True}
+      - {the_model: 'ss', ord: 2, subset_how: 'uniform', sample_p: [[25, 0.1]], steps: 1, zscore: True}
+      - {the_model: 'ss', ord: 'best', subset_how: 'uniform', sample_p: [[25, 0.1]], steps: 1, zscore: True}
     legacy_name: MF_CompareTestSets
     ordered_args: ['the_model', 'ord', 'subset_how']
 
@@ -2221,7 +2236,7 @@ model_fit:
     min_length: 6
     dependencies:
     configs:
-      - {pre_proc: 'ar', zscore: True, exclude: ['hasStructure', 'Ks_vary_p', 'Ks_vary_q', 'max_maxarchps', 'max_maxlbqps', 'max_meanlbqps', 'maxAIC', 'maxBIC', 'maxK', 'mean_maxarchps', 'mean_maxlbqps', 'mean_meanarchps', 'mean_meanlbqps', 'meanAIC', 'meanBIC', 'meanK', 'meanLLF', 'min_maxarchps', 'min_maxlbqps', 'min_meanarchps', 'min_meanlbqps', 'minAIC', 'minBIC', 'minK', 'minLLF']}   # MF_GARCHcompare(x_z,'ar',1:3,1:3)
+      - {pre_proc: 'ar', zscore: True, exclude: ['hasStructure', 'Ks_vary_p', 'Ks_vary_q', 'max_maxarchps', 'max_maxlbqps', 'max_meanlbqps', 'maxAIC', 'maxBIC', 'maxK', 'mean_maxarchps', 'mean_maxlbqps', 'mean_meanarchps', 'mean_meanlbqps', 'meanAIC', 'meanBIC', 'meanK', 'meanLLF', 'min_maxarchps', 'min_maxlbqps', 'min_meanarchps', 'min_meanlbqps', 'minAIC', 'minBIC', 'minK', 'minLLF']}
     legacy_name: MF_GARCHcompare
     ordered_args: ['pre_proc']
 
@@ -2230,9 +2245,9 @@ model_fit:
     min_length: 6
     dependencies:
     configs:
-      - {zscore: True, exclude: ['ac1_stde2', 'aic', 'ARCHerr_1', 'bic', 'constant', 'constanterr', 'distDoF', 'engle_pval_stde_1', 'engle_pval_stde_10', 'GARCHerr_1', 'hasStructure', 'lbq_max_diff_p', 'lbq_mean_diff_p', 'lbq_pval_stde_1', 'lbq_pval_stde_10', 'lbq_pval_stde_5', 'leverage', 'leverageerr', 'maxenglepval_stde', 'maxlbqpval_stde2', 'meansigma', 'minenglepval_stde', 'minlbqpval_stde2', 'offset', 'rangesigma', 'stdsigma', 'summaryexitflag', 'uncondVar', 'zres_ac1', 'zres_ac2', 'zres_ac3', 'zres_ftbth', 'zres_meane', 'zres_minsbc', 'zres_popt', 'zres_propbth', 'zres_stde', 'zres_swm', 'zres_taurat']}   # MF_GARCHfit(x_z,'ar',1,1)
-      - {model_type: 'gjr', innovation_dist: 'gaussian', zscore: True, select: ['leverage']}   # MF_GARCHfit(x_z,'ar',1,1,'default','gjr','gaussian')
-      - {model_type: 'garch', innovation_dist: 't', zscore: True, select: ['distDoF']}   # MF_GARCHfit(x_z,'ar',1,1,'default','garch','t')
+      - {zscore: True, exclude: ['ac1_stde2', 'aic', 'ARCHerr_1', 'bic', 'constant', 'constanterr', 'distDoF', 'engle_pval_stde_1', 'engle_pval_stde_10', 'GARCHerr_1', 'hasStructure', 'lbq_max_diff_p', 'lbq_mean_diff_p', 'lbq_pval_stde_1', 'lbq_pval_stde_10', 'lbq_pval_stde_5', 'leverage', 'leverageerr', 'maxenglepval_stde', 'maxlbqpval_stde2', 'meansigma', 'minenglepval_stde', 'minlbqpval_stde2', 'offset', 'rangesigma', 'stdsigma', 'summaryexitflag', 'uncondVar', 'zres_ac1', 'zres_ac2', 'zres_ac3', 'zres_ftbth', 'zres_meane', 'zres_minsbc', 'zres_popt', 'zres_propbth', 'zres_stde', 'zres_swm', 'zres_taurat']}
+      - {model_type: 'gjr', innovation_dist: 'gaussian', zscore: True, select: ['leverage']}
+      - {model_type: 'garch', innovation_dist: 't', zscore: True, select: ['distDoF']}
     legacy_name: MF_GARCHfit
     ordered_args: ['model_type', 'innovation_dist']
 
@@ -2240,11 +2255,11 @@ model_fit:
     base_name: gp_hyperparameters
     dependencies:
     configs:
-      - {cov_func: 'covSEiso_covNoise', max_n: 50, resample_how: 'random_i', zscore: True, exclude: ['maxS', 'stde', 'minS', 'meanS']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,50,'random_i','default')
-      - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'logh3', 'stde', 'maxS', 'minS', 'meanS']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,200,'first')
-      - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'resample', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'stde', 'std_mu_data', 'maxS', 'minS', 'meanS']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covSEiso','covNoise'}},1,200,'resample')
-      - {cov_func: 'covMaterniso3_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'nlml', 'stde', 'meanabs_std', 'std_mu_data', 'maxS', 'minS', 'meanS']}   # MF_GP_Hyperparameters(x_z,{'covSum',{{'covMaterniso',3},'covNoise'}},1,200,'first')
-      - {cov_func: 'covRQiso_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'logh2', 'logh3', 'logh4', 'nlml', 'stde', 'std_mu_data', 'maxS', 'minS', 'meanS']}   # MF_GP_Hyperparameters(x_z,{'covSum',{'covRQiso','covNoise'}},1,200,'first')
+      - {cov_func: 'covSEiso_covNoise', max_n: 50, resample_how: 'random_i', zscore: True, exclude: ['maxS', 'stde', 'minS', 'meanS']}
+      - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'logh3', 'stde', 'maxS', 'minS', 'meanS']}
+      - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'resample', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'stde', 'std_mu_data', 'maxS', 'minS', 'meanS']}
+      - {cov_func: 'covMaterniso3_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'nlml', 'stde', 'meanabs_std', 'std_mu_data', 'maxS', 'minS', 'meanS']}
+      - {cov_func: 'covRQiso_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'logh2', 'logh3', 'logh4', 'nlml', 'stde', 'std_mu_data', 'maxS', 'minS', 'meanS']}
     legacy_name: MF_GP_Hyperparameters
     ordered_args: ['cov_func', 'max_n', 'resample_how']
 
@@ -2253,7 +2268,7 @@ model_fit:
     min_length: 12
     dependencies:
     configs:
-      - {max_order: 8, zscore: True, exclude: ['meandiffaic', 'minaic', 'minlossfn']}   # MF_StateSpaceCompOrder(x_z,8)
+      - {max_order: 8, zscore: True, exclude: ['meandiffaic', 'minaic', 'minlossfn']}
     legacy_name: MF_StateSpaceCompOrder
     ordered_args: ['max_order']
 
@@ -2261,9 +2276,9 @@ model_fit:
     base_name: state_space_n4sid
     dependencies:
     configs:
-      - {ord: 1, zscore: True, exclude: ['Ts', 'lossfn', 'noisevar', 'np']}   # MF_StateSpace_n4sid(x_z,1,0.5,1)
-      - {ord: 2, zscore: True, exclude: ['Ts', 'lossfn', 'noisevar', 'np']}   # MF_StateSpace_n4sid(x_z,2,0.5,1)
-      - {ord: 3, zscore: True, exclude: ['Ts', 'lossfn', 'noisevar', 'np']}   # MF_StateSpace_n4sid(x_z,3,0.5,1)
+      - {ord: 1, zscore: True, exclude: ['Ts', 'lossfn', 'noisevar', 'np']}
+      - {ord: 2, zscore: True, exclude: ['Ts', 'lossfn', 'noisevar', 'np']}
+      - {ord: 3, zscore: True, exclude: ['Ts', 'lossfn', 'noisevar', 'np']}
     legacy_name: MF_StateSpace_n4sid
     ordered_args: ['ord']
 
@@ -2271,9 +2286,9 @@ model_fit:
     base_name: armax
     dependencies:
     configs:
-      - {orders: [[1, 1]], p_train: 0.5, zscore: True, exclude: ['lossfn', 'noisevar']}   # MF_armax(x_z,[1,1],0.5,1)
-      - {orders: [[2, 2]], p_train: 0.5, zscore: True, exclude: ['lossfn', 'noisevar']}   # MF_armax(x_z,[2,2],0.5,1)
-      - {orders: [[3, 1]], p_train: 0.5, zscore: True, exclude: ['lossfn', 'noisevar']}   # MF_armax(x_z,[3,1],0.5,1)
+      - {orders: [[1, 1]], p_train: 0.5, zscore: True, exclude: ['lossfn', 'noisevar']}
+      - {orders: [[2, 2]], p_train: 0.5, zscore: True, exclude: ['lossfn', 'noisevar']}
+      - {orders: [[3, 1]], p_train: 0.5, zscore: True, exclude: ['lossfn', 'noisevar']}
     legacy_name: MF_armax
     ordered_args: ['orders']
 
@@ -2281,7 +2296,7 @@ model_fit:
     base_name: hmm_compare_n_states
     dependencies:
     configs:
-      - {zscore: True}   # MF_hmm_CompareNStates(x_z,0.6,2:4,'default')
+      - {zscore: True}
     legacy_name: MF_hmm_CompareNStates
 
   steps_ahead:
@@ -2299,10 +2314,10 @@ model_fit:
       stde_stddiff: 8
     dependencies:
     configs:
-      - {model: 'ar', order: 2, zscore: True}   # MF_steps_ahead(x_z,'ar',2,6)
-      - {model: 'ar', order: 'best', zscore: True}   # MF_steps_ahead(x_z,'ar','best',6)
-      - {model: 'arma', order: [[3, 1]], zscore: True}   # MF_steps_ahead(x_z,'arma',[3,1],6)
-      - {model: 'ss', order: 'best', zscore: True}   # MF_steps_ahead(x_z,'ss','best',6)
+      - {model: 'ar', order: 2, zscore: True}
+      - {model: 'ar', order: 'best', zscore: True}
+      - {model: 'arma', order: [[3, 1]], zscore: True}
+      - {model: 'ss', order: 'best', zscore: True}
     legacy_name: MF_steps_ahead
     ordered_args: ['model', 'order']
 
@@ -2313,7 +2328,7 @@ graph:
     dependencies:
     configs:
       - {meth: 'norm', zscore: True, exclude: ['dexpk_adjr2', 'dgaussk_adjr2', 'dpowerk_adjr2', 'expnlogL', 'gaussnlogL', 'rangek']}
-      - {max_l: 'full', zscore: True, exclude: ['dexpk_adjr2', 'dgaussk_adjr2', 'dpowerk_adjr2', 'expnlogL', 'gaussnlogL', 'rangek']}   # NW_VisibilityGraph(x_z,'horiz','full')
+      - {max_l: 'full', zscore: True, exclude: ['dexpk_adjr2', 'dgaussk_adjr2', 'dpowerk_adjr2', 'expnlogL', 'gaussnlogL', 'rangek']}
     legacy_name: NW_VisibilityGraph
     ordered_args: ['meth']
 
@@ -2321,8 +2336,8 @@ graph:
     base_name: ordinal_partition_network
     dependencies:
     configs:
-      - {d: 4, tau: 1, zscore: True}   # NW_OrdinalPartitionNetwork(x_z,4,1)
-      - {d: 4, tau: 'ac1e-rank', zscore: True, exclude: ['maxEdgeWeight', 'maxInDegree', 'maxOutDegree']}   # NW_OrdinalPartitionNetwork(x_z,4,'ac1e')
+      - {d: 4, tau: 1, zscore: True}
+      - {d: 4, tau: 'ac1e-rank', zscore: True, exclude: ['maxEdgeWeight', 'maxInDegree', 'maxOutDegree']}
     legacy_name: NW_OrdinalPartitionNetwork
     ordered_args: ['tau']
 
@@ -2335,12 +2350,12 @@ physics:
       - {what_potential: 'dblwell', params: [[1, 0.5, 0.2]], zscore: True}
       - {what_potential: 'dblwell', params: [[3, 0.01, 0.1]], zscore: True}
 
-      - {what_potential: 'sine', params: [[0.5, 5, 0.1]], zscore: True, exclude: ['meanabs']}   # PH_ForcePotential(x_z,'sine',[0.5,5,0.1])
-      - {what_potential: 'sine', params: [[1, 2, 0.1]], zscore: True, exclude: ['meanabs']}   # PH_ForcePotential(x_z,'sine',[1,2,0.1])
-      - {what_potential: 'sine', params: [[1, 5, 0.1]], zscore: True, exclude: ['meanabs']}   # PH_ForcePotential(x_z,'sine',[1,5,0.1])
+      - {what_potential: 'sine', params: [[0.5, 5, 0.1]], zscore: True, exclude: ['meanabs']}
+      - {what_potential: 'sine', params: [[1, 2, 0.1]], zscore: True, exclude: ['meanabs']}
+      - {what_potential: 'sine', params: [[1, 5, 0.1]], zscore: True, exclude: ['meanabs']}
     legacy_name: PH_ForcePotential
     ordered_args: ['what_potential', 'params']
-  
+
   walker:
     base_name: walker
     dependencies:
@@ -2363,7 +2378,7 @@ physics:
     base_name: kramers_moyal
     dependencies:
     configs:
-      - {zscore: True, exclude: ['driftLin']}   # PH_KramersMoyal(x_z,1,15)
+      - {zscore: True, exclude: ['driftLin']}
     legacy_name: PH_KramersMoyal
 
 pre_process:
@@ -2378,9 +2393,9 @@ pre_process:
 
       - {detrend_meth: 'resample_1_2', zscore: False, exclude: ['gauss1_kd_resrunsz']}
       - {detrend_meth: 'resample_2_1', zscore: False, exclude: ['gauss1_kd_resrunsz']}
-      - {detrend_meth: 'medianf3', zscore: False, exclude: ['gauss1_kd_resrunsz']}   # PP_Compare(x,'medianf3')
-      - {detrend_meth: 'sin1', zscore: False, exclude: ['gauss1_kd_resrunsz']}   # PP_Compare(x,'sin1')
-      - {detrend_meth: 'spline24', zscore: False, exclude: ['gauss1_kd_resrunsz']}   # PP_Compare(x,'spline24')
+      - {detrend_meth: 'medianf3', zscore: False, exclude: ['gauss1_kd_resrunsz']}
+      - {detrend_meth: 'sin1', zscore: False, exclude: ['gauss1_kd_resrunsz']}
+      - {detrend_meth: 'spline24', zscore: False, exclude: ['gauss1_kd_resrunsz']}
     legacy_name: PP_Compare
     ordered_args: ['detrend_meth']
 
@@ -2389,7 +2404,7 @@ pre_process:
     min_length: 7
     dependencies:
     configs:
-      - {zscore: False, exclude: ['normdiff_jump', 'normdiff_trend', 'xc1_jump', 'xc1_trend', 'xcn1_jump', 'xcn1_trend']}   # PP_Iterate(x,'diff')
+      - {zscore: False, exclude: ['normdiff_jump', 'normdiff_trend', 'xc1_jump', 'xc1_trend', 'xcn1_jump', 'xcn1_trend']}
     legacy_name: PP_Iterate
 
   preproc_model_fit:
@@ -2397,15 +2412,15 @@ pre_process:
     min_length: 5
     dependencies:
     configs:
-      - {zscore: True}   # PP_ModelFit(x_z,'ar',2,'default')
+      - {zscore: True}
     legacy_name: PP_ModelFit
 
   preproc_schreiber_denoise:
     base_name: preproc_schreiber_denoise
     dependencies:
     configs:
-      - {num_iter: 1, neighborhood_std: 0.3, zscore: True, exclude: ['corrOrigDenoised']}   # PP_SchreiberDenoise(x_z,5,1,1,0.3)
-      - {num_iter: 4, neighborhood_std: 0.3, zscore: True, exclude: ['corrOrigDenoised']}   # PP_SchreiberDenoise(x_z,5,1,4,0.3)
+      - {num_iter: 1, neighborhood_std: 0.3, zscore: True, exclude: ['corrOrigDenoised']}
+      - {num_iter: 4, neighborhood_std: 0.3, zscore: True, exclude: ['corrOrigDenoised']}
     legacy_name: PP_SchreiberDenoise
     ordered_args: ['num_iter']
 
@@ -2415,7 +2430,7 @@ surrogates:
     min_length: 7
     dependencies:
     configs:
-      - {the_test_stat: [['amikraskov1', 'amikraskovmi', 'o3', 'tc3']], zscore: True, exclude: ['tc3_mediqr']}   # SD_SurrogateTest(x_z,'RP',99,[],{'amikraskov1','amikraskovmi','o3','tc3'},'default')
+      - {the_test_stat: [['amikraskov1', 'amikraskovmi', 'o3', 'tc3']], zscore: True, exclude: ['tc3_mediqr']}
     legacy_name: SD_SurrogateTest
     ordered_args: ['surr_meth', 'num_surrs', 'the_test_stat']
 
@@ -2423,16 +2438,16 @@ surrogates:
     base_name: surrogates
     dependencies:
     configs:
-      - {tau: 1, nsurr: 100, surr_method: 1, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}   # SD_Surrogates(x_z,1,100,1,'tc3','default')
-      - {tau: 1, nsurr: 100, surr_method: 1, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}   # SD_Surrogates(x_z,1,100,1,'trev','default')
-      - {tau: 1, nsurr: 100, surr_method: 2, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meansurr']}   # SD_Surrogates(x_z,1,100,2,'tc3','default')
-      - {tau: 1, nsurr: 100, surr_method: 2, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}   # SD_Surrogates(x_z,1,100,2,'trev','default')
-      - {tau: 1, nsurr: 100, surr_method: 3, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}   # SD_Surrogates(x_z,1,100,3,'trev','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 1, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}   # SD_Surrogates(x_z,'mi',100,1,'tc3','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 1, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}   # SD_Surrogates(x_z,'mi',100,1,'trev','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 2, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meansurr']}   # SD_Surrogates(x_z,'mi',100,2,'tc3','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 2, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}   # SD_Surrogates(x_z,'mi',100,2,'trev','default')
-      - {tau: 'mi', nsurr: 100, surr_method: 3, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}   # SD_Surrogates(x_z,'mi',100,3,'trev','default')
+      - {tau: 1, nsurr: 100, surr_method: 1, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}
+      - {tau: 1, nsurr: 100, surr_method: 1, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}
+      - {tau: 1, nsurr: 100, surr_method: 2, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meansurr']}
+      - {tau: 1, nsurr: 100, surr_method: 2, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}
+      - {tau: 1, nsurr: 100, surr_method: 3, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}
+      - {tau: 'mi', nsurr: 100, surr_method: 1, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}
+      - {tau: 'mi', nsurr: 100, surr_method: 1, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}
+      - {tau: 'mi', nsurr: 100, surr_method: 2, surrfn: 'tc3', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meansurr']}
+      - {tau: 'mi', nsurr: 100, surr_method: 2, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}
+      - {tau: 'mi', nsurr: 100, surr_method: 3, surrfn: 'trev', zscore: True, exclude: ['kspminfromext', 'ksphereonmax', 'ksiqrsfrommode', 'stdfrommean', 'ztestp', 'meannumsurr', 'meansurr', 'zsigned']}
     legacy_name: SD_Surrogates
     ordered_args: ['tau', 'surr_method', 'surrfn']
 
@@ -2450,11 +2465,11 @@ nonlinearity:
     dependencies:
     configs:
       - {de: 2, tau: 'mi', zscore: True, exclude: ['msqerr']}
-      - {de: 3, tau: 'ac1e', zscore: True, exclude: ['msqerr']}   # NL_nlpe(x_z,3,'ac1e',5000,{'ac',1})
-      - {de: [['fnn', 0.05]], tau: 'mi', zscore: True, exclude: ['msqerr']}   # NL_nlpe(x_z,{'fnn',0.05},'mi',5000,{'ac',1})
+      - {de: 3, tau: 'ac1e', zscore: True, exclude: ['msqerr']}
+      - {de: [['fnn', 0.05]], tau: 'mi', zscore: True, exclude: ['msqerr']}
     legacy_name: NL_nlpe
     ordered_args: ['de', 'tau']
-  
+
   embed_pca:
     base_name: embed_pca
     dependencies:
@@ -2464,7 +2479,7 @@ nonlinearity:
       - {tau: 'ac', m: 3, zscore: True, exclude: ['fb001', 'max', 'min', 'perc_1', 'perc_3']}
     legacy_name: NL_EmbedPCA
     ordered_args: ['tau', 'm']
-  
+
   ssa:
     base_name: ssa
     dependencies:
@@ -2474,7 +2489,7 @@ nonlinearity:
       - {L: 100, zscore: True}
     legacy_name: NL_SSA
     ordered_args: ['L']
-  
+
   zero_one_test:
     base_name: zero_one_test
     field_min_length:
@@ -2491,21 +2506,21 @@ nonlinearity:
     base_name: local_density
     dependencies:
     configs:
-      - {nnr: 5, tau: 1, m: 3, zscore: True}   # NL_LocalDensity(x_z,5,{'ac',1},{1,3})
-      - {nnr: 5, tau: 'ac1e', m: 2, zscore: True}   # NL_LocalDensity(x_z,5,{'ac',1},{'ac1e',2})
-      - {nnr: 5, tau: 'ac1e', m: [['fnn', 0.05]], zscore: True}   # NL_LocalDensity(x_z,5,{'ac',1},{'ac1e',{'fnn',0.05}})
+      - {nnr: 5, tau: 1, m: 3, zscore: True}
+      - {nnr: 5, tau: 'ac1e', m: 2, zscore: True}
+      - {nnr: 5, tau: 'ac1e', m: [['fnn', 0.05]], zscore: True}
     legacy_name: NL_LocalDensity
     ordered_args: ['nnr', 'past', 'tau', 'm']
-  
+
   tisean_d2:
     base_name: tisean_d2
     dependencies:
     configs:
-      - {tau: 1, zscore: True, exclude: ['bend2g_meandim']}   # NL_d2(x_z,1,10,{'ac',1})
-      - {tau: 'ac1e', zscore: True, exclude: ['bend2g_meandim']}   # NL_d2(x_z,'ac1e',10,{'ac',1})
+      - {tau: 1, zscore: True, exclude: ['bend2g_meandim']}
+      - {tau: 'ac1e', zscore: True, exclude: ['bend2g_meandim']}
     legacy_name: NL_d2
     ordered_args: ['tau', 'maxm', 'theiler_win']
-    
+
   poincare_section:
     base_name: poincare_section
     dependencies:
@@ -2515,12 +2530,12 @@ nonlinearity:
       - {ref: 'max', tau: 1, zscore: True, exclude: ['meanpbox10', 'meanpbox5', 'rangepbox10', 'rangepbox5']}
     legacy_name: NL_PoincareSection
     ordered_args: ['ref', 'tau']
-  
+
   delay_time:
     base_name: delay_time
     dependencies:
     configs:
-      - {zscore: True, exclude: ['mintau']}   # NL_DelayTime(x_z,{'ac',10},{'ac',1},'default')
+      - {zscore: True, exclude: ['mintau']}
     legacy_name: NL_DelayTime
     ordered_args: ['max_delay', 'past']
 
@@ -2528,7 +2543,7 @@ nonlinearity:
     base_name: box_count_entropy_rate
     dependencies:
     configs:
-      - {num_bins: 50, embed_params: [['ac1e', 5]], zscore: True, select: ['iqrstretch', 'meanchr11', 'meanchr14', 'meanchr17', 'meanchr2', 'meanchr20', 'meanchr24', 'meanchr28', 'meanchr3', 'meanchr32', 'meanchr36', 'meanchr4', 'meanchr6', 'meanchr8', 'meand2', 'meand3', 'meand4', 'meand5', 'meanr11', 'meanr14', 'meanr17', 'meanr2', 'meanr20', 'meanr24', 'meanr28', 'meanr3', 'meanr32', 'meanr36', 'meanr4', 'meanr6', 'meanr8', 'mediand2', 'mediand3', 'mediand4', 'mediand5', 'medianr11', 'medianr14', 'medianr17', 'medianr20', 'medianr24', 'medianr28', 'medianr3', 'medianr32', 'medianr36', 'medianr4', 'medianr6', 'medianr8', 'medianstretch', 'minr11', 'minr14', 'minr17', 'minr2', 'minr20', 'minr24', 'minr28', 'minr3', 'minr32', 'minr36', 'minr4', 'minr6', 'minr8', 'stdmean', 'stdmedian']}   # NL_BoxCountEntropyRate(x_z,50,{'ac1e',5})
+      - {num_bins: 50, embed_params: [['ac1e', 5]], zscore: True, select: ['iqrstretch', 'meanchr11', 'meanchr14', 'meanchr17', 'meanchr2', 'meanchr20', 'meanchr24', 'meanchr28', 'meanchr3', 'meanchr32', 'meanchr36', 'meanchr4', 'meanchr6', 'meanchr8', 'meand2', 'meand3', 'meand4', 'meand5', 'meanr11', 'meanr14', 'meanr17', 'meanr2', 'meanr20', 'meanr24', 'meanr28', 'meanr3', 'meanr32', 'meanr36', 'meanr4', 'meanr6', 'meanr8', 'mediand2', 'mediand3', 'mediand4', 'mediand5', 'medianr11', 'medianr14', 'medianr17', 'medianr20', 'medianr24', 'medianr28', 'medianr3', 'medianr32', 'medianr36', 'medianr4', 'medianr6', 'medianr8', 'medianstretch', 'minr11', 'minr14', 'minr17', 'minr2', 'minr20', 'minr24', 'minr28', 'minr3', 'minr32', 'minr36', 'minr4', 'minr6', 'minr8', 'stdmean', 'stdmedian']}
     legacy_name: NL_BoxCountEntropyRate
     ordered_args: ['num_bins', 'embed_params']
 
@@ -2536,8 +2551,8 @@ nonlinearity:
     base_name: dvv
     dependencies:
     configs:
-      - {ntv: 50, zscore: True, exclude: ['dataSurrCorr', 'trendDataSurr', 'numZeroCrossings', 'stdDiff']}   # NL_DVV(x_z,3,100,2,50,10,'default')
-      - {ntv: 50, tau: 'ac1e', zscore: True, exclude: ['dataSurrCorr', 'trendDataSurr', 'numZeroCrossings', 'stdDiff']}   # NL_DVV(x_z,3,100,2,50,10,'default','ac1e')
+      - {ntv: 50, zscore: True, exclude: ['dataSurrCorr', 'trendDataSurr', 'numZeroCrossings', 'stdDiff']}
+      - {ntv: 50, tau: 'ac1e', zscore: True, exclude: ['dataSurrCorr', 'trendDataSurr', 'numZeroCrossings', 'stdDiff']}
     legacy_name: NL_DVV
     ordered_args: ['tau']
 
@@ -2545,7 +2560,7 @@ nonlinearity:
     base_name: dimensions
     dependencies:
     configs:
-      - {embed_params: [['ac1e', ['fnn', 0.05]]], thwin: [['ac', 1]], zscore: True, exclude: ['bc_lfitmeansqdev1', 'bc_mindiff', 'bc_minm1', 'bc_minm2', 'bc_minm3', 'bc_minmmax', 'bc_range1', 'bc_range2', 'bc_range3', 'bc_rangemmax', 'co_lfitb1', 'co_lfitb2', 'co_lfitb3', 'co_lfitm1', 'co_lfitm2', 'co_lfitm3', 'co_lfitmeansqdev1', 'co_lfitmeansqdev2', 'co_lfitmeansqdev3', 'co_lfitmmax', 'co_minscalingexp', 'co_range1', 'co_range2', 'co_range3', 'co_rangemmax', 'scr_bc_m1_meanabsres', 'scr_bc_m2_meanabsres', 'scr_bc_m3_meanabsres', 'scr_bc_mopt_meanabsres', 'scr_co_m1_logrmax', 'scr_co_m1_logrmin', 'scr_co_m1_logrrange', 'scr_co_m1_meanabsres', 'scr_co_m1_minbad', 'scr_co_m1_pgone', 'scr_co_m2_logrmin', 'scr_co_m2_meanabsres', 'scr_co_m2_minbad', 'scr_co_m2_pgone', 'scr_co_m3_logrmax', 'scr_co_m3_meanabsres', 'scr_co_m3_minbad', 'scr_co_m3_pgone', 'scr_co_mopt_meanabsres', 'scr_co_mopt_scaling_exp']}   # NL_Dimensions(x_z,50,{'ac1e',{'fnn',0.05}},{'ac',1})
+      - {embed_params: [['ac1e', ['fnn', 0.05]]], thwin: [['ac', 1]], zscore: True, exclude: ['bc_lfitmeansqdev1', 'bc_mindiff', 'bc_minm1', 'bc_minm2', 'bc_minm3', 'bc_minmmax', 'bc_range1', 'bc_range2', 'bc_range3', 'bc_rangemmax', 'co_lfitb1', 'co_lfitb2', 'co_lfitb3', 'co_lfitm1', 'co_lfitm2', 'co_lfitm3', 'co_lfitmeansqdev1', 'co_lfitmeansqdev2', 'co_lfitmeansqdev3', 'co_lfitmmax', 'co_minscalingexp', 'co_range1', 'co_range2', 'co_range3', 'co_rangemmax', 'scr_bc_m1_meanabsres', 'scr_bc_m2_meanabsres', 'scr_bc_m3_meanabsres', 'scr_bc_mopt_meanabsres', 'scr_co_m1_logrmax', 'scr_co_m1_logrmin', 'scr_co_m1_logrrange', 'scr_co_m1_meanabsres', 'scr_co_m1_minbad', 'scr_co_m1_pgone', 'scr_co_m2_logrmin', 'scr_co_m2_meanabsres', 'scr_co_m2_minbad', 'scr_co_m2_pgone', 'scr_co_m3_logrmax', 'scr_co_m3_meanabsres', 'scr_co_m3_minbad', 'scr_co_m3_pgone', 'scr_co_mopt_meanabsres', 'scr_co_mopt_scaling_exp']}
     legacy_name: NL_Dimensions
     ordered_args: ['embed_params']
 
@@ -2553,8 +2568,8 @@ nonlinearity:
     base_name: evt_local_dim
     dependencies:
     configs:
-      - {tau: 'ac1e', m: 3, zscore: True}   # NL_EVTLocalDim(x_z,'ac1e',3,0.98,{'ac',1},200,5,'full','default')
-      - {tau: 'mi', m: 5, zscore: True}   # NL_EVTLocalDim(x_z,'mi',5,0.98,{'ac',1},200,5,'full','default')
+      - {tau: 'ac1e', m: 3, zscore: True}
+      - {tau: 'mi', m: 5, zscore: True}
     legacy_name: NL_EVTLocalDim
     ordered_args: ['tau', 'm']
 
@@ -2562,9 +2577,9 @@ nonlinearity:
     base_name: embed_cluster
     dependencies:
     configs:
-      - {tau: 1, m: 2, zscore: True}   # NL_EmbedCluster(x_z,1,2,'full')
-      - {tau: 'ac1e', m: 2, zscore: True}   # NL_EmbedCluster(x_z,'ac1e',2,'full')
-      - {tau: 'mi', m: 3, zscore: True}   # NL_EmbedCluster(x_z,'mi',3,'full')
+      - {tau: 1, m: 2, zscore: True}
+      - {tau: 'ac1e', m: 2, zscore: True}
+      - {tau: 'mi', m: 3, zscore: True}
     legacy_name: NL_EmbedCluster
     ordered_args: ['tau', 'm']
 
@@ -2572,9 +2587,9 @@ nonlinearity:
     base_name: embed_kernel_pca
     dependencies:
     configs:
-      - {tau: 1, m: 10, zscore: True, exclude: ['fb05', 'max', 'min', 'nto70', 'nto80_diff', 'nto90', 'perc_10', 'perc_6', 'perc_7', 'perc_8', 'perc_9', 'range']}   # NL_EmbedKernelPCA(x_z,1,10,2000)
-      - {tau: 'ac1e', m: 3, zscore: True, exclude: ['fb05', 'max', 'min', 'nto70', 'nto80_diff', 'nto90', 'perc_3', 'range']}   # NL_EmbedKernelPCA(x_z,'ac1e',3,2000)
-      - {tau: 'mi', m: 10, zscore: True, exclude: ['fb05', 'max', 'min', 'nto70', 'nto80_diff', 'nto90', 'perc_10', 'perc_6', 'perc_7', 'perc_8', 'perc_9', 'range']}   # NL_EmbedKernelPCA(x_z,'mi',10,2000)
+      - {tau: 1, m: 10, zscore: True, exclude: ['fb05', 'max', 'min', 'nto70', 'nto80_diff', 'nto90', 'perc_10', 'perc_6', 'perc_7', 'perc_8', 'perc_9', 'range']}
+      - {tau: 'ac1e', m: 3, zscore: True, exclude: ['fb05', 'max', 'min', 'nto70', 'nto80_diff', 'nto90', 'perc_3', 'range']}
+      - {tau: 'mi', m: 10, zscore: True, exclude: ['fb05', 'max', 'min', 'nto70', 'nto80_diff', 'nto90', 'perc_10', 'perc_6', 'perc_7', 'perc_8', 'perc_9', 'range']}
     legacy_name: NL_EmbedKernelPCA
     ordered_args: ['tau', 'm']
 
@@ -2582,9 +2597,9 @@ nonlinearity:
     base_name: fnn
     dependencies:
     configs:
-      - {tau: 1, just_best: 0, escape_factor: 5, zscore: True}   # NL_FNN(x_z,1,10,{'ac',1},0,[],5)
-      - {tau: 'ac', just_best: 0, escape_factor: 5, zscore: True}   # NL_FNN(x_z,'ac',10,{'ac',1},0,[],5)
-      - {tau: 'mi', just_best: 0, escape_factor: 5, zscore: True}   # NL_FNN(x_z,'mi',10,{'ac',1},0,[],5)
+      - {tau: 1, just_best: 0, escape_factor: 5, zscore: True}
+      - {tau: 'ac', just_best: 0, escape_factor: 5, zscore: True}
+      - {tau: 'mi', just_best: 0, escape_factor: 5, zscore: True}
     legacy_name: NL_FNN
     ordered_args: ['tau']
 
@@ -2592,11 +2607,11 @@ nonlinearity:
     base_name: fractal_dimensions
     dependencies:
     configs:
-      - {kmin: 2, kmax: 10, nref: -1, gend: 5, embed_params: [[1, 5]], zscore: True, exclude: ['meanDq']}   # NL_FractalDimensions(x_z,2,10,-1,1,5,{'ac',1},32,{1,5},'default')
-      - {kmin: 2, kmax: 100, nref: 0.2, gend: 5, embed_params: [[1, 5]], zscore: True, exclude: ['meanDq']}   # NL_FractalDimensions(x_z,2,100,0.2,1,5,{'ac',1},32,{1,5},'default')
-      - {kmin: 2, kmax: 100, nref: 0.2, gend: 5, embed_params: [['ac1e', 5]], zscore: True, exclude: ['meanDq']}   # NL_FractalDimensions(x_z,2,100,0.2,1,5,{'ac',1},32,{'ac1e',5},'default')
-      - {kmin: 5, kmax: 20, nref: 0.2, gend: 10, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['meanDq']}   # NL_FractalDimensions(x_z,5,20,0.2,1,10,{'ac',1},32,{'ac',{'fnn',0.05}},'default')
-      - {kmin: 5, kmax: 100, nref: 0.2, gend: 10, embed_params: [['ac1e', 3]], zscore: True, exclude: ['meanDq']}   # NL_FractalDimensions(x_z,5,100,0.2,1,10,{'ac',1},32,{'ac1e',3},'default')
+      - {kmin: 2, kmax: 10, nref: -1, gend: 5, embed_params: [[1, 5]], zscore: True, exclude: ['meanDq']}
+      - {kmin: 2, kmax: 100, nref: 0.2, gend: 5, embed_params: [[1, 5]], zscore: True, exclude: ['meanDq']}
+      - {kmin: 2, kmax: 100, nref: 0.2, gend: 5, embed_params: [['ac1e', 5]], zscore: True, exclude: ['meanDq']}
+      - {kmin: 5, kmax: 20, nref: 0.2, gend: 10, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['meanDq']}
+      - {kmin: 5, kmax: 100, nref: 0.2, gend: 10, embed_params: [['ac1e', 3]], zscore: True, exclude: ['meanDq']}
     legacy_name: NL_FractalDimensions
     ordered_args: ['kmin', 'kmax', 'nref', 'gend', 'embed_params']
 
@@ -2604,8 +2619,8 @@ nonlinearity:
     base_name: gp_corr_sum
     dependencies:
     configs:
-      - {nref: -1, r: 0.1, nbins: 40, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['maxlnr', 'robfit_sea1', 'robfitresmeansq', 'minlnr']}   # NL_GPCorrSum(x_z,-1,0.1,{'ac',1},40,{'ac',{'fnn',0.05}},1)
-      - {nref: -1, r: 0.5, nbins: 20, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['maxlnr', 'robfit_sea1', 'robfitresmeanabs']}   # NL_GPCorrSum(x_z,-1,0.5,{'ac',1},20,{'ac',{'fnn',0.05}},1)
+      - {nref: -1, r: 0.1, nbins: 40, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['maxlnr', 'robfit_sea1', 'robfitresmeansq', 'minlnr']}
+      - {nref: -1, r: 0.5, nbins: 20, embed_params: [['ac', ['fnn', 0.05]]], zscore: True, exclude: ['maxlnr', 'robfit_sea1', 'robfitresmeanabs']}
     legacy_name: NL_GPCorrSum
     ordered_args: ['r', 'nbins', 'embed_params']
 
@@ -2613,8 +2628,8 @@ nonlinearity:
     base_name: largest_lyap
     dependencies:
     configs:
-      - {embed_params: [[1, 4]], zscore: True, exclude: ['expfit_adjr2', 'p1']}   # NL_LargestLyap(x_z,-1,{'ac1e',30},{'ac1e',1},3,{1,4})
-      - {embed_params: [['mi', ['fnn', 0.05]]], zscore: True, exclude: ['expfit_adjr2', 'p1']}   # NL_LargestLyap(x_z,-1,{'ac1e',30},{'ac1e',1},3,{'mi',{'fnn',0.05}})
+      - {embed_params: [[1, 4]], zscore: True, exclude: ['expfit_adjr2', 'p1']}
+      - {embed_params: [['mi', ['fnn', 0.05]]], zscore: True, exclude: ['expfit_adjr2', 'p1']}
     legacy_name: NL_LargestLyap
     ordered_args: ['embed_params']
 
@@ -2622,7 +2637,7 @@ nonlinearity:
     base_name: lyap_spec
     dependencies:
     configs:
-      - {max_n: 'full', zscore: True}   # NL_LyapSpec(x_z,1,3,30,'full',{'ac',1})
+      - {max_n: 'full', zscore: True}
     legacy_name: NL_LyapSpec
     ordered_args: ['max_n']
 
@@ -2631,8 +2646,8 @@ nonlinearity:
     dependencies:
       - ripser
     configs:
-      - {zscore: True}   # NL_PersistentHomology(x_z)
-      - {tau: 'periodWelch', m: 2, zscore: True}   # NL_PersistentHomology(x_z,'periodWelch',2)
+      - {zscore: True}
+      - {tau: 'periodWelch', m: 2, zscore: True}
     legacy_name: NL_PersistentHomology
     ordered_args: ['tau', 'm']
 
@@ -2640,7 +2655,7 @@ nonlinearity:
     base_name: rqa
     dependencies:
     configs:
-      - {tau: 'mi', m: [['fnn', 0.05]], max_n: 'full', zscore: True, exclude: ['DIV']}   # NL_RQA(x_z,'mi',{'fnn',0.05},{'ac',1},0.1,2,2,'full','default')
+      - {tau: 'mi', m: [['fnn', 0.05]], max_n: 'full', zscore: True, exclude: ['DIV']}
     legacy_name: NL_RQA
     ordered_args: ['tau', 'm', 'max_n']
 
@@ -2648,7 +2663,7 @@ nonlinearity:
     base_name: recurrence_times
     dependencies:
     configs:
-      - {tau: 'mi', m: [['fnn', 0.05]], max_n: 'full', zscore: True}   # NL_RecurrenceTimes(x_z,'mi',{'fnn',0.05},{'ac',1},0.1,4,'full','default')
+      - {tau: 'mi', m: [['fnn', 0.05]], max_n: 'full', zscore: True}
     legacy_name: NL_RecurrenceTimes
     ordered_args: ['tau', 'm', 'max_n']
 
@@ -2656,9 +2671,9 @@ nonlinearity:
     base_name: return_time
     dependencies:
     configs:
-      - {nnr: 0.05, nref: 500, embed_params: [[1, 3]], zscore: True, exclude: ['max', 'maxhisthist', 'maxpeaksep', 'minpeaksep', 'rangecgdist', 'stdpeaksep']}   # NL_ReturnTime(x_z,0.05,100,{'ac',1},500,{1,3})
-      - {nnr: 0.02, nref: 500, embed_params: [[1, 8]], zscore: True, exclude: ['max', 'maxhisthist', 'maxpeaksep', 'minpeaksep', 'rangecgdist', 'stdpeaksep']}   # NL_ReturnTime(x_z,0.02,100,{'ac',1},500,{1,8})
-      - {nnr: 0.02, nref: 500, embed_params: [['ac', 3]], zscore: True, exclude: ['max', 'maxhisthist', 'maxpeaksep', 'minpeaksep', 'rangecgdist', 'stdpeaksep']}   # NL_ReturnTime(x_z,0.02,100,{'ac',1},500,{'ac',3})
+      - {nnr: 0.05, nref: 500, embed_params: [[1, 3]], zscore: True, exclude: ['max', 'maxhisthist', 'maxpeaksep', 'minpeaksep', 'rangecgdist', 'stdpeaksep']}
+      - {nnr: 0.02, nref: 500, embed_params: [[1, 8]], zscore: True, exclude: ['max', 'maxhisthist', 'maxpeaksep', 'minpeaksep', 'rangecgdist', 'stdpeaksep']}
+      - {nnr: 0.02, nref: 500, embed_params: [['ac', 3]], zscore: True, exclude: ['max', 'maxhisthist', 'maxpeaksep', 'minpeaksep', 'rangecgdist', 'stdpeaksep']}
     legacy_name: NL_ReturnTime
     ordered_args: ['nnr', 'embed_params']
 
@@ -2666,11 +2681,11 @@ nonlinearity:
     base_name: takens_estimator
     dependencies:
     configs:
-      - {c0: 0.01, embed_params: [[1, 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{1,3})
-      - {c0: 0.01, embed_params: [[1, 8]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{1,8})
-      - {c0: 0.01, embed_params: [['ac', 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{'ac',3})
-      - {c0: 0.01, embed_params: [['mi', 3]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{'mi',3})
-      - {c0: 0.01, embed_params: [['mi', ['fnn', 0.05]]], zscore: True}   # NL_TakensEstimator(x_z,-1,0.01,{'ac',1},{'mi',{'fnn',0.05}},'default')
+      - {c0: 0.01, embed_params: [[1, 3]], zscore: True}
+      - {c0: 0.01, embed_params: [[1, 8]], zscore: True}
+      - {c0: 0.01, embed_params: [['ac', 3]], zscore: True}
+      - {c0: 0.01, embed_params: [['mi', 3]], zscore: True}
+      - {c0: 0.01, embed_params: [['mi', ['fnn', 0.05]]], zscore: True}
     legacy_name: NL_TakensEstimator
     ordered_args: ['c0', 'embed_params']
 
@@ -2678,8 +2693,8 @@ nonlinearity:
     base_name: tisean_c1
     dependencies:
     configs:
-      - {mmm: [[1, 7]], tsep: 0.02, nref: 0.5, zscore: True, exclude: ['maxd']}   # NL_c1(x_z,1,[1,7],0.02,0.5)
-      - {mmm: [[2, 6]], tsep: 25, nref: 0.1, zscore: True, exclude: ['maxd']}   # NL_c1(x_z,1,[2,6],25,0.1)
+      - {mmm: [[1, 7]], tsep: 0.02, nref: 0.5, zscore: True, exclude: ['maxd']}
+      - {mmm: [[2, 6]], tsep: 25, nref: 0.1, zscore: True, exclude: ['maxd']}
     legacy_name: NL_c1
     ordered_args: ['mmm', 'tsep', 'nref']
 
@@ -2689,10 +2704,10 @@ changepoint:
     dependencies:
     configs:
       - {method: 'l1pwc', params: 10, zscore: True, exclude: ['lambdamax', 's']}
-      - {params: 3, zscore: True, exclude: ['lambdamax', 's']}   # CP_ML_StepDetect(x_z,'l1pwc',3)
+      - {params: 3, zscore: True, exclude: ['lambdamax', 's']}
     legacy_name: CP_ML_StepDetect
     ordered_args: ['method', 'params']
-  
+
   l1pwc_sweep_lambda:
     base_name: l1pwc_sweep_lambda
     dependencies:
@@ -2706,9 +2721,9 @@ changepoint:
     dependencies:
       - PyWavelets
     configs:
-      - {w_name: 'db3', level: 2, max_n_chpts: 10, zscore: True}   # CP_WaveletVarChg(x_z,'db3',2,10,0.01)
-      - {w_name: 'db3', level: 3, max_n_chpts: 10, zscore: True}   # CP_WaveletVarChg(x_z,'db3',3,10,0.01)
-      - {w_name: 'sym2', level: 2, max_n_chpts: 10, zscore: True}   # CP_WaveletVarChg(x_z,'sym2',2,10,0.01)
-      - {w_name: 'sym2', level: 3, max_n_chpts: 10, zscore: True}   # CP_WaveletVarChg(x_z,'sym2',3,10,0.01)
+      - {w_name: 'db3', level: 2, max_n_chpts: 10, zscore: True}
+      - {w_name: 'db3', level: 3, max_n_chpts: 10, zscore: True}
+      - {w_name: 'sym2', level: 2, max_n_chpts: 10, zscore: True}
+      - {w_name: 'sym2', level: 3, max_n_chpts: 10, zscore: True}
     legacy_name: CP_WaveletVarChg
     ordered_args: ['w_name', 'level']
