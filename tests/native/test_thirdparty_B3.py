@@ -138,7 +138,7 @@ def test_apen_antropy_public_crosscheck():
 def test_permutation_entropy_bits():
     x = np.random.default_rng(3).standard_normal(500)
     out = permutation_entropy(x, 3, 1)
-    assert np.isfinite(out['normPermEn']) and 0 < out['normPermEn'] <= 1
+    assert np.isfinite(out['normPermEn']) and 0 < out['normPermEn'] <= 1.01  # jackknife estimate: may exceed 1 slightly
 
 
 # ---- x_corr -------------------------------------------------------------------------------

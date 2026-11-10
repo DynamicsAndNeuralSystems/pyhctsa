@@ -11,14 +11,13 @@ import pywt
 from numpy.typing import ArrayLike
 from numba import njit
 from scipy.spatial import cKDTree
-from scipy.special import xlogy
 from scipy.stats import norm, rankdata
 from sklearn.neighbors import KDTree
 
 from ..toolboxes.physionet import sampen as _sampen_c
 from ..robust import bf_hist_edges, bf_ks_density, bf_random, bf_random_seed
 from ._symbolic_complexity import (_equiprobable_symbols, _normalized_lz_complexity, _shannon_block_entropy)
-from ..utils import (dict_output, _coarse_grain, _zscore, get_tau, make_buffer, pre_process, theiler_window, time_delay_embed, z_score)
+from ..utils import (_jackknife_counts, _jackknife_entropy, dict_output, _coarse_grain, _zscore, get_tau, make_buffer, pre_process, theiler_window, time_delay_embed, z_score)
 from ..utils import _shannon_entropy
 
 
@@ -42,7 +41,10 @@ def shannon_entropy(
     Approximate Shannon entropy of a time series.
 
     Uses a num_bins-bin encoding and depth-symbol sequences (uniform population binning),
-    as in M. Small's toolbox [1]_.
+    as in M. Small's toolbox [1]_. The entropy of the word distribution is a delete-one
+    jackknife estimate, which removes the downward bias of the plug-in entropy (about
+    ``(num_bins**depth - 1) / (2 M)`` nats for ``M`` words); it can slightly exceed the
+    maximum ``log(num_bins)`` per symbol for short series.
 
     In this wrapper function, you can evaluate the code at a given n and d, and
     also across a range of depth and num_bins to return statistics on how the obtained
@@ -745,6 +747,17 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
 
     The ordinal patterns are ranked as in hctsa's EN_PermEn (BF_OrdinalPatternRank).
 
+    The plug-in entropy of pattern counts is biased low by about ``(m! - 1) / (2 M)`` nats for
+    ``M`` embedding vectors, so it drifts with series length. ``permEn`` and ``normPermEn`` are
+    therefore the delete-one jackknife estimate of the entropy (Zahl, Ecology 58, 907, 1977,
+    doi:10.2307/1936227; see Paninski, Neural Comput. 15, 1191, 2003,
+    doi:10.1162/089976603321780272, for the bias), computed from the pattern counts alone, so
+    they stay unchanged under strictly increasing transformations of the series. The estimate is
+    nearly unbiased but can exceed its nominal maximum slightly for very short series
+    (``normPermEn`` slightly above 1); it is not clipped, and no minimum length beyond 5
+    embedding vectors is imposed. ``permEnLE``, ``normWPE`` and ``ordAsym`` are plug-in
+    quantities.
+
     The ``permEnLE`` output follows the adapted implementation of permutation entropy by Bruce
     Land and Damian Elias (Cornell University;
     https://people.ece.cornell.edu/land/PROJECTS/Complexity/), as in hctsa's ``EN_PermEn``.
@@ -780,8 +793,9 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
     dict
         A dictionary containing:
 
-        - 'permEn': the permutation entropy (bits),
-        - 'normPermEn': permEn normalized by log2(m!),
+        - 'permEn': the permutation entropy (bits), as a delete-one jackknife estimate,
+        - 'normPermEn': permEn normalized by log2(m!); like permEn it can exceed its
+          nominal maximum of 1 slightly for short series (not clipped),
         - 'permEnLE': the permutation entropy of Bandt and Pompe with patterns of
           probability below 1/N floored at 1/N (natural log, divided by m - 1),
         - 'normWPE': the weighted permutation entropy normalized by log2(m!)
@@ -816,7 +830,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
     perm_idx = _ordinal_pattern_rank(ranked)
     count_perms = np.bincount(perm_idx, minlength=num_perms)
     p = count_perms / nx
-    pe = -np.sum(xlogy(p, p)) / np.log(2)  # bits
+    pe = _jackknife_entropy(count_perms) / np.log(2)  # bits, jackknife-corrected
     pe_norm = pe / np.log2(num_perms)
 
     # Permutation entropy with a floor of 1/N on the pattern probabilities
@@ -1180,9 +1194,17 @@ def permutation_entropy_complexity(y: ArrayLike, m: int = 2, tau: Union[int, str
         A dictionary containing:
 
         - 'hNorm': the normalized Shannon entropy of the ordinal-pattern distribution,
-          ``H[P] = S[P] / log2(m!)``, in [0, 1],
+          ``H[P] = S[P] / log2(m!)``, nominally in [0, 1],
         - 'jsComplexity': the Jensen-Shannon statistical complexity,
-          ``C[P] = Q_J[P, P_uniform] * H[P]``, in [0, 1].
+          ``C[P] = Q_J[P, P_uniform] * H[P]``, nominally in [0, 1].
+
+        Both are delete-one jackknife estimates computed from the pattern counts (see
+        :func:`permutation_entropy` for the bias being removed): 'hNorm' of the entropy and
+        'jsComplexity' of the whole product ``C``, which also captures the covariance of its
+        two factors. Being nearly unbiased at the boundary of the range, 'hNorm' can exceed 1
+        and 'jsComplexity' can be slightly negative for short series (for example, for
+        noise at a few hundred points); they are not clipped, and no minimum length beyond 5
+        embedding vectors is imposed.
 
         Both are NaN if the delay cannot be determined or the series is too short to
         embed (fewer than 5 embedding vectors).
@@ -1201,24 +1223,25 @@ def permutation_entropy_complexity(y: ArrayLike, m: int = 2, tau: Union[int, str
     nx = x.shape[0]
 
     num_perms = factorial(m)
-    p = np.bincount(_ordinal_pattern_rank(x), minlength=num_perms) / nx
-
-    # Normalized Shannon entropy of P
-    s_p = _shannon_entropy(p, base=2)
+    counts = np.bincount(_ordinal_pattern_rank(x), minlength=num_perms)
     s_max = np.log2(num_perms)
-    h_norm = s_p / s_max
-
-    # Jensen-Shannon statistical complexity of P relative to the uniform distribution Pe
     pe = 1 / num_perms
-    p_mix = (p + pe) / 2  # every entry > 0, since pe > 0
-    s_mix = _shannon_entropy(p_mix, base=2)
-    js_div = s_mix - s_p / 2 - s_max / 2  # the entropy of Pe is log2(m!)
 
     # Normalizing constant so that Q_J is in [0, 1], attained for P a point mass
     n = float(num_perms)
     q0 = -2 / (((n + 1) / n) * np.log2(n + 1) - 2 * np.log2(2 * n) + np.log2(n))
 
-    return {'hNorm': h_norm, 'jsComplexity': q0 * js_div * h_norm}
+    def complexity(p):
+        # C = Q_0 * D_JS[P, uniform] * H[P], with H the normalized Shannon entropy
+        s_p = _shannon_entropy(p, base=2)
+        p_mix = (p + pe) / 2  # every entry > 0, since pe > 0
+        s_mix = _shannon_entropy(p_mix, base=2)
+        js_div = s_mix - s_p / 2 - s_max / 2  # the entropy of Pe is log2(m!)
+        return q0 * js_div * (s_p / s_max)
+
+    # Delete-one jackknife of the entropy and of the whole product C (not of each factor)
+    h_norm = _jackknife_entropy(counts) / np.log(2) / s_max
+    return {'hNorm': h_norm, 'jsComplexity': _jackknife_counts(counts, complexity)}
 
 
 def _modwt_band_energies(y: np.ndarray, wavelet_name: str, level: int) -> np.ndarray:
@@ -1797,6 +1820,13 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
     Maps the time series onto ``c`` amplitude classes, replaces each run of ``m`` values
     (spaced ``tau`` samples apart) by the sequence of classes it visits (a 'dispersion
     pattern'), and returns the Shannon entropy of the resulting pattern distribution.
+    The plug-in entropy of pattern counts is biased low by about ``(K - 1) / (2 M)`` nats for
+    ``K`` possible patterns and ``M`` embedding vectors, so all four entropies are delete-one
+    jackknife estimates computed from the counts (Zahl, Ecology 58, 907, 1977,
+    doi:10.2307/1936227; see Paninski, Neural Comput. 15, 1191, 2003,
+    doi:10.1162/089976603321780272). These are nearly unbiased but can slightly exceed their
+    nominal maximum (the normalized values slightly above 1) for short series; they are not
+    clipped.
     Port of hctsa's ``EN_DispEn``.
 
     Unlike permutation entropy (:func:`permutation_entropy`), which records only the rank
@@ -1902,8 +1932,7 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
     # encoded as base-c integers
     place_values = c ** np.arange(m - 1, -1, -1, dtype=np.int64)
     pattern_idx = (emb - 1) @ place_values
-    p = np.bincount(pattern_idx, minlength=c ** m) / num_vectors
-    disp_en = _shannon_entropy(p)
+    disp_en = _jackknife_entropy(np.bincount(pattern_idx, minlength=c ** m))
     out = {'dispEn': disp_en, 'normDispEn': disp_en / np.log(float(c) ** m)}
 
     # Fluctuation-based: the patterns are the successive class differences, each in
@@ -1916,8 +1945,7 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
     num_fluct = (2 * c - 1) ** (m - 1)
     f_place_values = (2 * c - 1) ** np.arange(m - 2, -1, -1, dtype=np.int64)
     f_idx = d_z @ f_place_values
-    p_f = np.bincount(f_idx, minlength=num_fluct) / num_vectors
-    f_disp_en = _shannon_entropy(p_f)
+    f_disp_en = _jackknife_entropy(np.bincount(f_idx, minlength=num_fluct))
     out['fDispEn'] = f_disp_en
     out['normFDispEn'] = f_disp_en / np.log(float(num_fluct))
     return out

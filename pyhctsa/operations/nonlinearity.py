@@ -2801,6 +2801,11 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
     is dropped. Uses ripser [1]_ (the ``ripser`` Python package, an optional dependency; hctsa
     runs the ripser executable).
 
+    Below the point-cloud cap (``max_n``, 1000 points) the persistence totals and entropy
+    (``totH0``, ``totH1``, ``entH1``) grow with the number of embedded points, so for fewer than
+    about 1000 embedded points they are comparable only between series of similar length;
+    ``maxPersistenceH1`` is not affected.
+
     References
     ----------
     .. [1] U. Bauer, "Ripser: efficient computation of Vietoris-Rips persistence barcodes",
@@ -4297,6 +4302,11 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
     for flows (long delays) the informative scales lie beyond ``r = 18``, and that beyond
     ``r = 36`` the 5-dimensional embedding saturates (``I = 0``) for series of a few thousand
     points.
+
+    The fine-scale outputs depend on the series length: a plug-in entropy of ``n`` embedded
+    points cannot exceed ``log(n)``, and the box sizes follow the min-max range of the series,
+    which widens with ``n``. Values are therefore comparable only between series of similar
+    length.
 
     Parameters
     ----------

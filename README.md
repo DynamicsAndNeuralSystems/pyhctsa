@@ -71,7 +71,7 @@ Instantiate a `FeatureCalculator` and call `extract` on your data:
 from pyhctsa.calculator import FeatureCalculator
 from pyhctsa.utils import get_dataset
 
-calc = FeatureCalculator()          # Loaded 1081 master operations.
+calc = FeatureCalculator()          # Loaded 1080 master operations.
 
 e1000 = get_dataset()               # Empirical1000 dataset (downloaded once, 33 MB)
 data = e1000[0]                     # a list, array, or pandas Series
