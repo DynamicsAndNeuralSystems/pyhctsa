@@ -261,6 +261,8 @@ class TestStationarity:
         idx = [0, 3, 4, 6, 10, 12, 18, 19, 20, 21, 22, 24]
         for j in idx:
             a, b, ns, im = _SW[j]
+            if 'permen' in (a, b):
+                continue  # jackknife estimate; deliberately differs from hctsa's plug-in permutation entropy
             for n, ml in _series(f'D_sw{j + 1}', ZS):
                 _scalar(ST.sliding_window(SERIES[n], a, b, ns, im), ml, f'sw {_SW[j]} {n}', rtol=1e-7, atol=1e-9)
 
@@ -277,9 +279,12 @@ class TestStationarity:
 
     def test_spread_random_local_matches_matlab(self):
         for n, ml in _series('G_srl', ZS):
-            _check(ST.spread_random_local(SERIES[n], 100, 100), ml, f'srl {n}', rtol=1e-8, atol=1e-10)
+            # stdpermen: jackknife estimate; deliberately differs from hctsa's plug-in
+            _check(ST.spread_random_local(SERIES[n], 100, 100), ml, f'srl {n}', rtol=1e-8, atol=1e-10,
+                   skip=('stdpermen',))
         for n, ml in _series('G_srl_s5', ZS):
-            _check(ST.spread_random_local(SERIES[n], 50, 30, 5), ml, f'srl seed 5 {n}', rtol=1e-8, atol=1e-10)
+            _check(ST.spread_random_local(SERIES[n], 50, 30, 5), ml, f'srl seed 5 {n}', rtol=1e-8, atol=1e-10,
+                   skip=('stdpermen',))
 
 
 # ------------------------------------------------------------------------------

@@ -18,6 +18,7 @@ import pandas as pd
 from scipy import fft as sp_fft
 from scipy.signal import correlate
 from scipy.spatial import cKDTree
+from scipy.special import xlogy
 from scipy.stats import chi2, norm, rankdata
 
 
@@ -2051,3 +2052,53 @@ def _piecewise_poly_residual(y: np.ndarray, order: int, num_bits: int) -> np.nda
         x = np.arange(len(seg), dtype=float)
         out[bits[k]:bits[k + 1]] = seg - np.polynomial.Polynomial.fit(x, seg, order)(x)
     return out
+
+
+def _jackknife_counts(counts: ArrayLike, f: Callable) -> float:
+    """Delete-one jackknife estimate of ``f(p)`` from a vector of category counts.
+
+    With counts ``n`` summing to ``M`` and the plug-in value ``f(n / M)``, the estimate is
+    ``M f(n / M) - (M - 1) / M * sum_i n_i f((n - e_i) / (M - 1))``, where ``e_i`` is the unit
+    vector of category ``i`` (Zahl, Ecology 58, 907, 1977; doi:10.2307/1936227). Deleting any one
+    of the ``n_i`` observations in category ``i`` gives the same leave-one-out vector, so only
+    one evaluation of ``f`` per observed category is needed. The estimate removes the leading
+    O(1/M) bias of any smooth function of the frequencies; for the Shannon entropy this is the
+    plug-in bias of about ``-(K - 1) / (2 M)`` over ``K`` categories (Paninski, Neural Comput.
+    15, 1191, 2003; doi:10.1162/089976603321780272).
+
+    Parameters
+    ----------
+    counts : array-like
+        Non-negative integer counts (zeros allowed), with total at least 2.
+    f : callable
+        Maps a probability vector (same length as ``counts``) to a float.
+    """
+    n = np.asarray(counts, dtype=float)
+    total = n.sum()
+    plug = f(n / total)
+    acc = 0.0
+    for i in np.flatnonzero(n):
+        loo = n.copy()
+        loo[i] -= 1.0
+        acc += n[i] * f(loo / (total - 1.0))
+    return float(total * plug - (total - 1.0) * acc / total)
+
+
+def _jackknife_entropy(counts: ArrayLike) -> float:
+    """Delete-one jackknife estimate (nats) of the Shannon entropy of a count vector.
+
+    Equal to ``_jackknife_counts(counts, lambda p: -sum(p log p))``, but computed in O(K) for
+    ``K`` categories: with ``S = sum_i n_i log n_i``, the entropy of the counts is
+    ``log M - S / M``, and reducing one count ``n_i`` by one changes ``S`` by
+    ``(n_i - 1) log(n_i - 1) - n_i log n_i``, so each leave-one-out entropy is an O(1) update.
+    Needs a total count of at least 2.
+    """
+    n = np.asarray(counts, dtype=float)
+    n = n[n > 0]
+    total = n.sum()
+    nlogn = xlogy(n, n)
+    s = nlogn.sum()
+    h = np.log(total) - s / total
+    s_loo = s - nlogn + xlogy(n - 1.0, n - 1.0)  # S after removing one observation from cell i
+    h_loo = np.log(total - 1.0) - s_loo / (total - 1.0)
+    return float(total * h - (total - 1.0) * np.sum(n * h_loo) / total)

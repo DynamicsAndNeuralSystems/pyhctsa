@@ -10,6 +10,8 @@ from ..utils import _coarse_grain
 
 from ..utils import _shannon_entropy
 
+from ..utils import _jackknife_entropy
+
 
 @njit(cache=True)
 def _lempel_ziv_phrase_count_scan(s):
@@ -104,8 +106,11 @@ def _shannon_block_entropy(y: np.ndarray, num_bins: int, depth: int) -> float:
 
     Symbols ``0..num_bins-1`` are the equiprobable coarse-graining of
     :func:`pyhctsa.utils._coarse_grain` (cuts at the Hazen quantiles, bins closed on the left,
-    tied values sharing the symbol of their mid-rank). The entropy is ``-sum p ln p`` over the
-    empirical frequencies ``p`` of the ``N - depth + 1`` overlapping words.
+    tied values sharing the symbol of their mid-rank). The entropy ``-sum p ln p`` of the
+    frequencies ``p`` of the ``N - depth + 1`` overlapping words is a delete-one jackknife
+    estimate (``_jackknife_entropy``), which removes the O(1/N) downward bias of the plug-in
+    entropy (about ``(K - 1) / (2 N)`` for ``K`` possible words); it can slightly exceed
+    ``depth * ln(num_bins)`` for short series and is not clipped.
 
     Returns NaN if ``y`` contains NaN or is shorter than ``depth``, and 0 if there is only
     one symbol or one word.
@@ -135,4 +140,4 @@ def _shannon_block_entropy(y: np.ndarray, num_bins: int, depth: int) -> float:
         counts = np.unique(words.astype(np.int64) @ weights, return_counts=True)[1]
     else:
         counts = np.unique(words, axis=0, return_counts=True)[1]
-    return float(_shannon_entropy(counts / n_words))
+    return _jackknife_entropy(counts)

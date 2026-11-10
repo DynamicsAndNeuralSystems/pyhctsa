@@ -136,7 +136,10 @@ def test_shannon_fixture():
             if nb != 2:  # the reference cut (sorted value at rank floor(g N / k)) differs from
                 continue  # pyhctsa's Hazen convention (utils._coarse_grain) for k >= 3
             for b, d in enumerate(row["depth"]):
-                assert _shannon_block_entropy(y, nb, d) == pytest.approx(ref[a, b], abs=1e-12)
+                # jackknife estimate; deliberately differs from hctsa's plug-in (higher by about
+                # (K - 1) / (2 M)), so only agreement within the size of that correction is checked
+                got = _shannon_block_entropy(y, nb, d)
+                assert got == pytest.approx(ref[a, b], abs=nb ** d / (y.size - d + 1))
 
 
 def test_shannon_wrapper_fixture():
@@ -144,7 +147,10 @@ def test_shannon_wrapper_fixture():
         if "EN_Shannon_2_3" not in row:
             continue
         y = INP[row["series"]]
-        assert entropy.shannon_entropy(y, 2, 3) == pytest.approx(row["EN_Shannon_2_3"], abs=1e-12)
+        # jackknife estimates; deliberately differ from the plug-in, so only agreement within
+        # the size of the bias correction (K / M per word) is checked
+        m = y.size - 2
+        assert entropy.shannon_entropy(y, 2, 3) == pytest.approx(row["EN_Shannon_2_3"], abs=8 / m)
         # (the reference over 2..10 bins uses hctsa's cut, which differs for k >= 3)
         got = entropy.shannon_entropy(y, list(range(2, 11)), 2)
         ents = [_shannon_block_entropy(y, k, 2) / 2 for k in range(2, 11)]
@@ -154,21 +160,30 @@ def test_shannon_wrapper_fixture():
 
 def test_shannon_hand_cases():
     y = np.arange(1, 9, dtype=float)
-    expect = -(2 * (3 / 7) * math.log(3 / 7) + (1 / 7) * math.log(1 / 7))
-    assert _shannon_block_entropy(y, 2, 2) == pytest.approx(expect, abs=1e-14)
+    # words 00, 01, 11 with counts 3, 3, 1; jackknife estimate of their entropy (brute force)
+    counts = np.array([3.0, 3.0, 1.0])
+
+    def h(p):
+        p = p[p > 0]
+        return -np.sum(p * np.log(p))
+    acc = sum(counts[i] * h(np.where(np.arange(3) == i, counts - 1, counts) / 6) for i in range(3))
+    expect = 7 * h(counts / 7) - 6 / 7 * acc
+    assert _shannon_block_entropy(y, 2, 2) == pytest.approx(expect, abs=1e-12)
     assert _shannon_block_entropy(y, 1, 3) == 0.0
     assert _shannon_block_entropy(y, 2, 8) == 0.0  # a single word
     assert np.isnan(_shannon_block_entropy(y, 2, 9))
     assert np.isnan(_shannon_block_entropy(np.array([1., np.nan, 2.]), 2, 1))
     # tie-free: balanced symbols, depth 1 -> ln(num_bins)
-    assert _shannon_block_entropy(np.random.default_rng(0).standard_normal(600), 6, 1) == pytest.approx(math.log(6))
+    assert _shannon_block_entropy(np.random.default_rng(0).standard_normal(600), 6, 1) == pytest.approx(math.log(6), abs=1e-2)  # jackknife estimate overshoots the maximum by about (K - 1) / (2 M)
 
 
 def test_shannon_large_alphabet_words():
     # n_bins ** depth beyond int64: falls back to row-unique counting
     y = np.random.default_rng(5).standard_normal(300)
     h = _shannon_block_entropy(y, 40, 12)
-    assert h == pytest.approx(math.log(300 - 12 + 1))  # every word distinct
+    # every word distinct: all counts 1, so the jackknife is M ln M - (M - 1) ln (M - 1)
+    mm = 300 - 12 + 1
+    assert h == pytest.approx(mm * math.log(mm) - (mm - 1) * math.log(mm - 1))
 
 
 # ---------------------------------------------------------------- nlpe

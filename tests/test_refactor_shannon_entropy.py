@@ -54,6 +54,23 @@ _CALLS = [
 #   entropy.shannon_entropy|ar1.None
 #   entropy.shannon_entropy|sine.None
 #   entropy.shannon_entropy|wn.None
+# Re-pinned on this branch (jackknife-entropy): these plug-in entropies of pattern counts are now
+# delete-one jackknife estimates, so they change on purpose (see its PR body); every other value is as before.
+#   entropy.permutation_entropy_complexity|wn.hNorm
+#   entropy.permutation_entropy_complexity|wn.jsComplexity
+#   entropy.permutation_entropy_complexity|ar1.hNorm
+#   entropy.permutation_entropy_complexity|ar1.jsComplexity
+#   entropy.permutation_entropy_complexity|sine.hNorm
+#   entropy.permutation_entropy_complexity|sine.jsComplexity
+#   entropy.dispersion_entropy|wn.dispEn
+#   entropy.dispersion_entropy|wn.fDispEn
+#   entropy.dispersion_entropy|ar1.dispEn
+#   entropy.dispersion_entropy|ar1.fDispEn
+#   entropy.dispersion_entropy|sine.dispEn
+#   entropy.dispersion_entropy|sine.fDispEn
+#   entropy.shannon_entropy|wn.None
+#   entropy.shannon_entropy|ar1.None
+#   entropy.shannon_entropy|sine.None
 _EXPECTED = {
     ('entropy', 'permutation_entropy', 'wn', 'permEnLE'): 0.8951686285063656,
     ('entropy', 'permutation_entropy', 'wn', 'normWPE'): 0.9989359783759333,
@@ -67,24 +84,24 @@ _EXPECTED = {
     ('entropy', 'rpde', 'ar1', 'H_norm'): 0.7935506552309022,
     ('entropy', 'rpde', 'sine', 'H'): 4.71626164002619,
     ('entropy', 'rpde', 'sine', 'H_norm'): 0.7591438387267782,
-    ('entropy', 'permutation_entropy_complexity', 'wn', 'hNorm'): 0.9949453328290863,
-    ('entropy', 'permutation_entropy_complexity', 'wn', 'jsComplexity'): 0.006633386640429113,
-    ('entropy', 'permutation_entropy_complexity', 'ar1', 'hNorm'): 0.9280524475736934,
-    ('entropy', 'permutation_entropy_complexity', 'ar1', 'jsComplexity'): 0.08020747865396677,
-    ('entropy', 'permutation_entropy_complexity', 'sine', 'hNorm'): 0.9545217776180919,
-    ('entropy', 'permutation_entropy_complexity', 'sine', 'jsComplexity'): 0.05623535718780492,
+    ('entropy', 'permutation_entropy_complexity', 'wn', 'hNorm'): 1.0023557183638094,
+    ('entropy', 'permutation_entropy_complexity', 'wn', 'jsComplexity'): -0.0031424900484284812,
+    ('entropy', 'permutation_entropy_complexity', 'ar1', 'hNorm'): 0.9355193279030297,
+    ('entropy', 'permutation_entropy_complexity', 'ar1', 'jsComplexity'): 0.07076265580639785,
+    ('entropy', 'permutation_entropy_complexity', 'sine', 'hNorm'): 0.961974512240623,
+    ('entropy', 'permutation_entropy_complexity', 'sine', 'jsComplexity'): 0.04659455750629249,
     ('entropy', 'wavelet_entropy', 'wn', None): 0.7125752950298527,
     ('entropy', 'wavelet_entropy', 'ar1', None): 0.9465474722450863,
     ('entropy', 'wavelet_entropy', 'sine', None): 0.5363290849534131,
-    ('entropy', 'dispersion_entropy', 'wn', 'dispEn'): 5.12611713304794,
-    ('entropy', 'dispersion_entropy', 'wn', 'fDispEn'): 4.26535211391932,
-    ('entropy', 'dispersion_entropy', 'ar1', 'dispEn'): 4.503189672231559,
-    ('entropy', 'dispersion_entropy', 'ar1', 'fDispEn'): 3.2306244420279695,
-    ('entropy', 'dispersion_entropy', 'sine', 'dispEn'): 4.164579615543262,
-    ('entropy', 'dispersion_entropy', 'sine', 'fDispEn'): 2.937993914120066,
-    ('entropy', 'shannon_entropy', 'wn', None): 1.088066797770798,
-    ('entropy', 'shannon_entropy', 'ar1', None): 0.9349343261626059,
-    ('entropy', 'shannon_entropy', 'sine', None): 0.8447257424865436,
+    ('entropy', 'dispersion_entropy', 'wn', 'dispEn'): 5.382001380931342,
+    ('entropy', 'dispersion_entropy', 'wn', 'fDispEn'): 4.3675739044465445,
+    ('entropy', 'dispersion_entropy', 'ar1', 'dispEn'): 4.682332715291523,
+    ('entropy', 'dispersion_entropy', 'ar1', 'fDispEn'): 3.2889203249287675,
+    ('entropy', 'dispersion_entropy', 'sine', 'dispEn'): 4.331022170917549,
+    ('entropy', 'dispersion_entropy', 'sine', 'fDispEn'): 2.9926101888158883,
+    ('entropy', 'shannon_entropy', 'wn', None): 1.0969466298600612,
+    ('entropy', 'shannon_entropy', 'ar1', None): 0.9438190046468359,
+    ('entropy', 'shannon_entropy', 'sine', None): 0.8537206871778077,
     ('nonlinearity', 'persistent_homology', 'wn', 'persistenceEntropyH1'): 5.045602488533601,
     ('nonlinearity', 'persistent_homology', 'ar1', 'persistenceEntropyH1'): 4.975308596394514,
     ('nonlinearity', 'persistent_homology', 'sine', 'persistenceEntropyH1'): 4.8371356563554535,
