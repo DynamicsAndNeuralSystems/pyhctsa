@@ -1903,13 +1903,36 @@ def x_corr(x: ArrayLike, y: ArrayLike, normed: bool = True, max_lags: int = 10) 
         c = c / np.sqrt(np.sum(x ** 2) * np.sum(y ** 2))
     return lags, c
 
+def _merge_legacy_mapping(config: dict, mapping: dict) -> dict:
+    """
+    Attach the legacy mapping (``configurations/hctsa_mapping.yaml``) to a parsed feature configuration.
+
+    Each operation named in ``mapping`` gets its ``legacy_name`` and, as a list of labels,
+    its ``dropped_hctsa_calls`` (keys set in ``config`` itself are kept). ``config`` is changed
+    in place and returned. A mapping entry for an operation that ``config`` lacks raises KeyError.
+    """
+    for module, ops in (mapping or {}).items():
+        for name, entry in (ops or {}).items():
+            if module not in config or name not in config[module]:
+                raise KeyError(f"legacy mapping names {module}.{name}, which the configuration does not define")
+            meta = config[module][name]
+            if entry.get("legacy_name"):
+                meta.setdefault("legacy_name", entry["legacy_name"])
+            if entry.get("dropped_hctsa_calls"):
+                meta.setdefault("dropped_hctsa_calls", list(entry["dropped_hctsa_calls"]))
+    return config
+
+
 def make_function_name_mappings(
-    yaml_file: Union[str, None] = None, csv_out_fpath: Union[None, str] = None) -> pd.DataFrame:
+    yaml_file: Union[str, None] = None, csv_out_fpath: Union[None, str] = None,
+    mapping_file: Union[str, None] = None) -> pd.DataFrame:
     """
     Map pyhctsa function names to their legacy counterparts in the MATLAB HCTSA.
 
-    pyhctsa-only variants (entries with ``variant_of`` and no ``legacy_name``) have no hctsa
-    counterpart and are left out.
+    The names come from the legacy mapping file (``configurations/hctsa_mapping.yaml`` for the
+    default configuration, else ``mapping_file`` if given) and from any ``legacy_name`` keys in
+    the configuration itself. Variants (entries with ``variant_of`` and no legacy name) have no
+    hctsa counterpart and are left out.
     """
     # only the names are needed, so parse with a private loader that ignores
     # !range rather than overriding the constructor on the shared SafeLoader
@@ -1919,9 +1942,14 @@ def make_function_name_mappings(
 
     if yaml_file is None:
         yaml_file = resources.files("pyhctsa.configurations").joinpath("hctsa.yaml")
+        if mapping_file is None:
+            mapping_file = resources.files("pyhctsa.configurations").joinpath("hctsa_mapping.yaml")
 
     with open(yaml_file, "r", encoding="utf-8") as f:
         yam = yaml.load(f, Loader=_MappingLoader)
+    if mapping_file is not None:
+        with open(mapping_file, "r", encoding="utf-8") as f:
+            _merge_legacy_mapping(yam, yaml.safe_load(f))
     module_dfs = []
     for module in yam:
         corr_mod = yam[module]

@@ -56,11 +56,10 @@ bubble_entropy,EN_BubbleEn,entropy
 dispersion_entropy,EN_DispEn,entropy
 fuzzy_entropy,EN_FuzzyEn,entropy
 permutation_entropy_complexity,EN_PermEnComplexity,entropy
-randomize,EN_Randomize,entropy
+randomize_ordinal,EN_RandomizeOrdinal,entropy
 wavelet_entropy,EN_wentropy,entropy
 stat_av,SY_StatAv,stationarity
 trend,SY_Trend,stationarity
-std_nth_deriv,SY_StdNthDer,stationarity
 ts_length,ST_Length,stationarity
 fit_polynomial,ST_FitPolynomial,stationarity
 sliding_window,SY_SlidingWindow,stationarity
@@ -146,7 +145,6 @@ loop_local_simple,FC_LoopLocalSimple,model_fit
 fit_subsegments,MF_FitSubsegments,model_fit
 hmm_fit,MF_hmm_Fit,model_fit
 gp_fit_across,MF_GP_FitAcross,model_fit
-gp_local_prediction,MF_GP_LocalPrediction,model_fit
 compare_ar,MF_CompareAR,model_fit
 compare_test_sets,MF_CompareTestSets,model_fit
 garch_compare,MF_GARCHcompare,model_fit

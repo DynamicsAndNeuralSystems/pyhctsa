@@ -16,7 +16,6 @@ it can either be left empty or excluded from the configuration altogether.
             dependencies:
             configs:
                 - {param1: 1.0, param2: 2.0, zscore: True, abs: True}
-            legacy_name: MD_PolVar
             ordered_args: ['d', 'D']
 
 In plain English, the YAML configuration instructs `pyhctsa` to ::
@@ -48,10 +47,6 @@ In plain English, the YAML configuration instructs `pyhctsa` to ::
    A list of parameter sets, where each entry defines a unique configuration.
    See below for a detailed explanation.
 
-``legacy_name``
-   Maps functions from the MATLAB HCTSA to equivalent ``pyhctsa`` implementations.
-   May be left empty or omitted if not applicable.
-
 ``ordered_args``
    Specifies the order in which parameters from each configuration entry are
    injected into the feature function. Also used to construct the time-series feature identifiers.
@@ -81,7 +76,6 @@ The following YAML is specified:
             configs:
                 - {param1: 1.0, param2: 1.0}
                 - {param1: 2.0, param2: 2.0}
-            legacy_name:
             ordered_args: ['param1', 'param2']
 
 In this example, two separate configurations are specified: one where ``param1 = 1.0``
@@ -115,7 +109,6 @@ To use either or both of these pre-processing options, they can be specified in 
             configs:
                 - {param1: 1.0, param2: 1.0, zscore: True}
                 - {param1: 2.0, param2: 2.0, zscore: True, abs: True}
-            legacy_name:
             ordered_args: ['param1', 'param2']
 
 In this example, `pyhctsa` will first z-score the time-series data before computing `feature_function` for the first configuration, while for the second configuration, it will first z-score the data, 
@@ -134,7 +127,6 @@ To make the YAML structure example more concrete, consider the :func:`pol_var <p
             - {d: 1.0, D: 4, zscore: True}
             - {d: 1.0, D: 5, zscore: True}
             - {d: 1.0, D: 6, zscore: True}
-            legacy_name: MD_PolVar
             ordered_args: ['d', 'D']
 
 As per the API, the :func:`pol_var <pyhctsa.operations.medical.pol_var>` function accepts two parameters: ``d`` and ``D``. A total of 4 unique configurations will be evaluated by
@@ -170,7 +162,6 @@ The default configuration for this function in `pyhctsa` is:
         dependencies:
         configs:
             - {binary_method: 'mean', zscore: True}
-        legacy_name: SB_BinaryStats
         ordered_args: ['binary_method']
 
 We can then run the :func:`FeatureCalculator <pyhctsa.calculator.FeatureCalculator>` with this default configuration:
@@ -217,7 +208,6 @@ For example, to isolate the feature `pupstat2`, we can specify the following:
         dependencies:
         configs:
             - {binary_method: 'mean', zscore: True, select: 'pupstat2'}
-        legacy_name: SB_BinaryStats
         ordered_args: ['binary_method']
 
 Running the `FeatureCalculator` with this configuration:

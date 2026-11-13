@@ -17,6 +17,10 @@ functions and equivalent `pyhctsa` implementations for reference.
    ``SB_BinaryStretch`` → ``SB_BinaryGapHomogeneity``. A few ported functions (``CO_RM_AMInformation``,
    ``DN_HighLowMu``, ``SY_DynWin``) have since been removed from `hctsa` and are listed under their last name.
 
+The table is generated from ``pyhctsa/configurations/hctsa_mapping.yaml``, which also lists the
+`hctsa` features that `pyhctsa` deliberately does not compute (``dropped_hctsa_calls``), each with the reason.
+``scripts/check_hctsa_yaml.py`` compares the two feature sets in full, given a `hctsa` checkout.
+
 .. csv-table::
    :file: legacy_function_name_mappings.csv
    :header-rows: 1

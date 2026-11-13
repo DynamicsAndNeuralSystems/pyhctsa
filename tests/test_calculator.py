@@ -201,8 +201,9 @@ class TestFeatureFiltering:
     
 
 class TestConfigFiles:
-    ALLOWED_KEYS = {"base_name", "dependencies", "configs", "legacy_name", "ordered_args", "min_length",
-                    "field_min_length", "variant_of", "dropped_hctsa_calls"}
+    # the legacy mapping (legacy_name, dropped_hctsa_calls) lives in hctsa_mapping.yaml, not here
+    ALLOWED_KEYS = {"base_name", "dependencies", "configs", "ordered_args", "min_length",
+                    "field_min_length", "variant_of"}
 
     def test_config_keys_are_known(self):
         # misspelled keys (e.g. 'depedencies') are silently ignored by the calculator
