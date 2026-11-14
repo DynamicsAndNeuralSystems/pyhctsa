@@ -1,4 +1,5 @@
 import copy
+import difflib
 import importlib
 import inspect
 import math
@@ -222,7 +223,7 @@ def classify_output(res) -> int:
     return int(classify(res)[1])
 
 def _apply_selection_wrapper(func: Callable, filter_keys: Union[str, list[str]],
-                             keep: bool = True) -> Callable:
+                             keep: bool = True, label: Union[str, None] = None) -> Callable:
     """
     Wraps a function to selectively filter keys from its dict output.
 
@@ -234,6 +235,8 @@ def _apply_selection_wrapper(func: Callable, filter_keys: Union[str, list[str]],
         filter_keys (str or list[str]): Key or keys to keep or discard from the output dict.
         keep (bool): If True, only the specified keys are retained. If False, the specified
                     keys are discarded and all remaining keys are returned. Defaults to True.
+        label (str or None): The feature label, for the warning given when a key is not among
+                    the outputs of the function (a misspelled ``select`` or ``exclude`` name).
 
     Returns
     -------
@@ -252,7 +255,10 @@ def _apply_selection_wrapper(func: Callable, filter_keys: Union[str, list[str]],
         if isinstance(result, dict):
             missing = [k for k in keys if k not in result] # log all of the missing keys
             if missing:
-                logger.info(f'Warning: time-series features for func {func} not found {missing}')
+                warnings.warn(f"{label or getattr(func, '__name__', 'A feature function')}: "
+                              f"{', '.join(repr(k) for k in missing)} (named in "
+                              f"{'select' if keep else 'exclude'}) not among its outputs: "
+                              f"{', '.join(result)}.", stacklevel=2)
             if keep:
                 return {k: result[k] for k in keys if k in result}
             else:
@@ -517,6 +523,65 @@ class _FieldMinLengths:
         return {k: (np.nan if (b := self.bound(k)) is not None and n < b else v) for k, v in out.items()}
 
 
+# The keys of a master operation's entry in a configuration file. ``legacy_name`` is accepted and
+# ignored (configurations written for pyhctsa 1.x carry it).
+_ENTRY_KEYS = {'base_name', 'dependencies', 'configs', 'ordered_args', 'variant_of', 'min_length',
+               'field_min_length', 'legacy_name'}
+
+
+def _did_you_mean(name: str, candidates) -> str:
+    close = difflib.get_close_matches(name, list(candidates), n=3)
+    return f" Did you mean {' or '.join(repr(c) for c in close)}?" if close else ""
+
+
+def _check_entry(where: str, entry) -> None:
+    """Checks the shape of one master operation's entry (``where`` is ``module.operation``)."""
+    if not isinstance(entry, dict):
+        raise ValueError(f"The entry of '{where}' must be a mapping (base_name, configs, ...), "
+                         f"not {entry!r}. Check the indentation of the configuration file.")
+    for key in entry:
+        if key not in _ENTRY_KEYS:
+            warnings.warn(f"Unknown key '{key}' in the entry of '{where}' is ignored."
+                          f"{_did_you_mean(key, _ENTRY_KEYS)}", stacklevel=5)
+    configs = entry.get('configs', [{}])
+    if not isinstance(configs, list) or not all(isinstance(c, dict) for c in configs):
+        raise ValueError(f"'configs' of '{where}' must be a list of mappings (one per parameter "
+                         f"setting), not {configs!r}.")
+
+
+def _check_meta(where: str, do_zscore, do_absval, select, exclude) -> None:
+    """Checks the meta keys of one config of ``where``."""
+    for key, value in (('zscore', do_zscore), ('abs', do_absval)):
+        if not isinstance(value, bool):
+            raise ValueError(f"'{key}' of a config of '{where}' must be true or false, not {value!r}.")
+    if select is not None and exclude is not None:
+        raise ValueError(f"A config of '{where}' has both 'select' and 'exclude': give one of them.")
+    for key, value in (('select', select), ('exclude', exclude)):
+        if value is None:
+            continue
+        names = [value] if isinstance(value, str) else value
+        if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names):
+            raise ValueError(f"'{key}' of a config of '{where}' must be an output name or a "
+                             f"non-empty list of output names, not {value!r}.")
+
+
+def _check_parameters(where: str, op_func: Callable, params: dict) -> None:
+    """Checks that the function of ``where`` has every parameter a config sets."""
+    try:
+        accepted = inspect.signature(op_func).parameters
+    except (TypeError, ValueError):  # no introspectable signature: checked when it is called
+        return
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in accepted.values()):
+        return
+    names = list(accepted)[1:]  # the first parameter is the time series
+    for key in params:
+        if key not in names:
+            raise ValueError(f"A config of '{where}' sets '{key}', which is neither a parameter of "
+                             f"{op_func.__name__}() ({', '.join(names) or 'it has none'}) nor a meta "
+                             f"key (zscore, abs, preprocess, select, exclude)."
+                             f"{_did_you_mean(key, names + ['zscore', 'abs', 'preprocess', 'select', 'exclude'])}")
+
+
 class FeatureCalculator:
     """
     A configuration-driven feature extraction calculator for time series data.
@@ -597,6 +662,9 @@ class FeatureCalculator:
         return calc
 
     def _load_config(self, config: dict):
+        if not isinstance(config, dict) or not config:
+            raise ValueError("The configuration is empty: it must map operations modules to their "
+                             "master operations (see the configuration section of the documentation).")
         # building consumes the meta params (zscore, abs, ...) of self.config, so keep the
         # parsed configuration for parallel workers to rebuild the features from
         self._parsed_config = copy.deepcopy(config)
@@ -641,10 +709,19 @@ class FeatureCalculator:
                 raise ImportError(_import_failure_message(module_key, e)) from e
 
             # Process features from this module
+            if not isinstance(self.config[module_key], dict) or not self.config[module_key]:
+                raise ValueError(f"Module '{module_key}' of the configuration lists no operations.")
             for feature_name, feature_config in self.config[module_key].items():
+                where = f"{module_key}.{feature_name}"
+                _check_entry(where, feature_config)
                 if not self._check_deps(module_key, feature_name, feature_config):
                     continue
-                op_func = getattr(module, feature_name)
+                op_func = getattr(module, feature_name, None)
+                if not callable(op_func):
+                    public = [n for n, f in vars(module).items()
+                              if callable(f) and not n.startswith('_') and getattr(f, '__module__', None) == module.__name__]
+                    raise ValueError(f"'{where}': the module pyhctsa.operations.{module_key} has no "
+                                     f"function '{feature_name}'.{_did_you_mean(feature_name, public)}")
                 base_name = feature_config.get("base_name", feature_name)
                 ordered_args = feature_config.get("ordered_args", [])
                 min_length_spec = feature_config.get("min_length", None)
@@ -657,7 +734,9 @@ class FeatureCalculator:
                     preprocess = config_item.pop('preprocess', None)
                     select_features = config_item.pop('select', None)
                     exclude_features = config_item.pop('exclude', None)
+                    _check_meta(where, do_zscore, do_absval, select_features, exclude_features)
                     _preprocess_decorator(do_zscore, do_absval, preprocess)  # validates preprocess
+                    _check_parameters(where, op_func, config_item)
                     # standardise config_item into a list of combinations
                     # if config_item is empty, product(*) returns [()], allowing us to loop once
                     keys = list(config_item.keys())
@@ -668,6 +747,13 @@ class FeatureCalculator:
                         
                         # generate label and apply wrappers
                         label = _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval, preprocess)
+                        if label in feature_funcs:
+                            raise ValueError(
+                                f"Two configs give the feature label '{label}' (the second is {combo_dict} of "
+                                f"'{where}'), so one would replace the other. A label is made of base_name "
+                                f"and the values of the parameters in ordered_args: list every parameter "
+                                f"that differs between configs in ordered_args, or give the operations "
+                                f"different base_names.")
                         min_length = _eval_min_length(min_length_spec, op_func, combo_dict, label)
                         self.min_lengths[label] = min_length
                         field_min_lengths = (None if field_min_length_spec is None else
@@ -680,9 +766,11 @@ class FeatureCalculator:
                         final_func = partial(master_func, **combo_dict)
                         # filter out certain features if specified by the user with the select/include keys
                         if select_features:
-                            final_func = _apply_selection_wrapper(final_func, filter_keys=select_features, keep=True)
+                            final_func = _apply_selection_wrapper(final_func, filter_keys=select_features,
+                                                                  keep=True, label=label)
                         elif exclude_features:
-                            final_func = _apply_selection_wrapper(final_func, filter_keys=exclude_features, keep=False)
+                            final_func = _apply_selection_wrapper(final_func, filter_keys=exclude_features,
+                                                                  keep=False, label=label)
                         
                         feature_funcs[label] = final_func
         
