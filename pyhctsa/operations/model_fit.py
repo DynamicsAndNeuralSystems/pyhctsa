@@ -3446,7 +3446,10 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
         - ``C``: the noise variance
         - ``sbc_k``, ``minsbc``, ``popt_sbc``, ``aroundmin_sbc``: Schwarz's criterion for
           each order, its minimum, the position (1-based, within ``p_min..p_max``) of
-          the minimum, and its size relative to the neighboring values
+          the minimum, and the depth of the minimum: how far the criterion at the
+          neighboring orders (their mean; the one neighbor at either end of the range) lies
+          above it. The depth is at least 0 and, being a difference of a logarithmic
+          criterion, does not change when the series is rescaled (NaN with a single order).
         - ``fpe_k``, ``minfpe``, ``popt_fpe``, ``aroundmin_fpe``: the same for the
           logarithm of Akaike's final prediction error
         - ``res_siglev``: significance level of the Li-McLeod test for autocorrelation
@@ -3516,15 +3519,10 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
         out[f'min{crit}'] = np.min(vals)
         pos = int(np.argmin(vals))  # first minimum
         out[f'popt_{crit}'] = pos + 1  # as hctsa: a position in p_min:p_max
-        if len(vals) == 1:
-            around = np.nan
-        elif pos == 0:
-            around = abs(vals[1])
-        elif pos == len(vals) - 1:
-            around = abs(vals[pos - 1])
-        else:
-            around = np.mean(np.abs([vals[pos - 1], vals[pos + 1]]))
-        out[f'aroundmin_{crit}'] = abs(np.min(vals)) / around
+        # depth of the minimum below its neighbors (a difference: the criteria are logarithms
+        # with an arbitrary zero, so their ratio has no meaning)
+        neighbors = [vals[j] for j in (pos - 1, pos + 1) if 0 <= j < len(vals)]
+        out[f'aroundmin_{crit}'] = np.mean(neighbors) - vals[pos] if neighbors else np.nan
 
     # (II) Test the residuals
     try:

@@ -93,7 +93,8 @@ def test_MF_arfit_fixture():
         for key, ref in row['out'].items():
             # sws, swm: the residuals' window spreads are relative to their stationary sampling spread
             # (sliding_window 'stdratio'), deliberately unlike hctsa's plain spreads
-            if key not in got or key in ('sws', 'swm'):
+            # aroundmin_*: the depth of the criterion's minimum, not hctsa's ratio of absolute values
+            if key not in got or key in ('sws', 'swm') or key.startswith('aroundmin_'):
                 continue
             np.testing.assert_allclose(got[key], ref, rtol=1e-8, atol=1e-10, equal_nan=True,
                                        err_msg=f"{row['series']} {key}")

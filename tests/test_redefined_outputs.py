@@ -5,6 +5,7 @@ import pytest
 
 from pyhctsa.operations import correlation as co
 from pyhctsa.operations import distribution as di
+from pyhctsa.operations import model_fit as mf
 from pyhctsa.operations import symbolic as sy
 
 
@@ -108,3 +109,37 @@ def test_time_rev_kld_separates_reversible_from_irreversible_series():
     assert np.all(np.isfinite(reversible)) and np.max(np.abs(reversible)) < 0.12
     irreversible = [co.time_rev_kld(_ar1(0.5, 2000, seed, 'exp'), 'ac1e', 2)['raw'] for seed in range(4)]
     assert np.min(irreversible) > 0.25
+
+
+# ------------------------------------------------------------------------------
+# ar_fit: aroundmin_* is the depth of the order-selection minimum
+# ------------------------------------------------------------------------------
+@pytest.mark.parametrize('crit', ['sbc', 'fpe'])
+def test_ar_fit_aroundmin_is_the_depth_of_the_minimum(crit):
+    for seed, phi in enumerate((0.0, 0.5, 0.9)):
+        y = _ar1(phi, 1000, seed)
+        out = mf.ar_fit(y, 1, 8, 'sbc')
+        vals = np.array([out[f'{crit}_{p}'] for p in range(1, 9)])
+        pos = int(np.argmin(vals))
+        assert out[f'popt_{crit}'] == pos + 1
+        neighbors = [vals[j] for j in (pos - 1, pos + 1) if 0 <= j < 8]
+        assert out[f'aroundmin_{crit}'] == pytest.approx(np.mean(neighbors) - vals[pos], abs=1e-14)
+        assert out[f'aroundmin_{crit}'] >= 0
+        # differences of a log criterion do not depend on the scale of the series
+        # (the ratio it replaces went from 1.72 to 0.98 on rescaling a white-noise series by 1.05)
+        scaled = mf.ar_fit(1.05 * y, 1, 8, 'sbc')
+        assert scaled[f'aroundmin_{crit}'] == pytest.approx(out[f'aroundmin_{crit}'], abs=1e-9)
+    assert np.isnan(mf.ar_fit(_ar1(0.5, 300, 5), 2, 2, 'sbc')[f'aroundmin_{crit}'])  # a single order
+
+
+def test_ar_fit_aroundmin_is_deep_for_a_clear_order_and_shallow_for_white_noise():
+    rng = np.random.default_rng(0)
+    e = rng.standard_normal(3000)
+    x = np.zeros(3000)
+    for t in range(2, 3000):
+        x[t] = 1.2 * x[t - 1] - 0.7 * x[t - 2] + e[t]
+    out = mf.ar_fit(_zscore(x[500:]), 1, 8, 'sbc')
+    assert out['popt_sbc'] == 2 and out['aroundmin_sbc'] > 0.1
+    white = [mf.ar_fit(_zscore(np.random.default_rng(s).standard_normal(1000)), 1, 8, 'sbc')['aroundmin_fpe']
+             for s in range(10)]
+    assert 0 <= np.min(white) and np.max(white) < 0.02  # (the ratio ranged from 0.006 to 3.7)

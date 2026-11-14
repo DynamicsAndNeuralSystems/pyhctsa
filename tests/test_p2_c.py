@@ -44,6 +44,9 @@ PARAMS = [(label, name) for label, (_, names, _, _) in CASES.items() for name in
 # structure the signal amplitude is NaN and the noise and nlml are those of the white-noise model
 # (hctsa reports the fitted point). They are tested in tests/test_gp_unidentified.py.
 DEPARTS = {label: {'logh2', 'logh3', 'nlml'} for label in ('gh_ri2', 'gh_rb', 'gpfa', 'gphp_first')}
+# ar_fit's aroundmin_* is the depth of the criterion's minimum below its neighbors (hctsa: a ratio of
+# absolute values of a criterion whose zero is arbitrary). Tested in tests/test_redefined_outputs.py.
+DEPARTS['arfit18'] = {'aroundmin_sbc', 'aroundmin_fpe'}
 
 
 def _is_nan_output(out):
