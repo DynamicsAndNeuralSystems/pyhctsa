@@ -3,6 +3,7 @@ values set by the series length, statistics used outside their domain)."""
 import numpy as np
 import pytest
 
+from pyhctsa.operations import distribution as di
 from pyhctsa.operations import symbolic as sy
 
 
@@ -43,3 +44,37 @@ def test_pupstat2_compares_proportions_and_is_antisymmetric():
     # reversing an even-length series swaps the halves
     y = _zscore(np.random.default_rng(3).standard_normal(400))
     assert sy.binary_stats(y[::-1], 'mean')['pupstat2'] == pytest.approx(-sy.binary_stats(y, 'mean')['pupstat2'])
+
+
+# ------------------------------------------------------------------------------
+# burstiness and the harmonic mean: statistics of non-negative data
+# ------------------------------------------------------------------------------
+def test_burstiness_is_bounded_on_its_domain_and_nan_outside_it():
+    rng = np.random.default_rng(0)
+    for x in (rng.exponential(size=2000), rng.lognormal(size=2000), rng.poisson(3, 2000).astype(float),
+              np.r_[0.0, rng.gamma(0.2, size=1999)], np.full(50, 2.0) + 1e-3 * rng.random(50)):
+        out = di.burstiness(x)
+        r = x.std(ddof=1) / x.mean()
+        assert out['B'] == pytest.approx((r - 1) / (r + 1), abs=1e-15)
+        assert -1 <= out['B'] <= 1 and -1.01 <= out['B_Kim'] <= 1.01
+    assert abs(di.burstiness(rng.exponential(size=20000))['B']) < 0.02  # a Poisson process: 0
+    # the pole at mean = -std (was 39, -1.8e16 and -41 here), and any other signed series
+    z = _zscore(rng.standard_normal(1000))
+    for mu in (-0.95, -1.0, -1.05, 0.0, 0.5):
+        out = di.burstiness(z + mu)
+        assert np.isnan(out['B']) and np.isnan(out['B_Kim'])
+    assert all(np.isnan(v) for v in di.burstiness(np.zeros(10)).values())
+
+
+def test_harmonic_mean_domain():
+    rng = np.random.default_rng(1)
+    x = rng.lognormal(size=500)
+    hm = di.mean(x, 'harm')
+    assert hm == pytest.approx(1 / np.mean(1 / x), rel=1e-13)
+    assert hm <= di.mean(x, 'geom') <= di.mean(x, 'norm')
+    assert di.mean(np.r_[0.0, x], 'harm') == 0.0
+    assert di.mean(np.array([1, 2, 4]), 'harm') == pytest.approx(12 / 7)  # integer input
+    # signed data: the sum of reciprocals has poles (was between -184 and 2.0 over four samples of mean 0.1)
+    z = _zscore(rng.standard_normal(1000))
+    assert np.isnan(di.mean(z + 0.1, 'harm')) and np.isnan(di.mean(z - 1.05, 'harm'))
+    assert np.isnan(di.mean(-x, 'harm'))
