@@ -17,8 +17,6 @@ from ..operations.pre_process import _rank_map_gaussian
 from ..robust import bf_ks_density, bf_random, bf_random_seed
 from ..utils import dict_output, get_tau, theiler_window, _round_half_away
 
-warnings.filterwarnings("ignore", category=RuntimeWarning)
-
 def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str) -> dict:
     """Compute statistics on the surrogate distribution: the z-score of the series' value against
     the surrogates' (NaN if they are all equal), its distance from their median in interquartile ranges

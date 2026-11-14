@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from typing import Union
-import logging
 import multiprocessing as mp
 import time
 from functools import partial
@@ -95,8 +95,25 @@ def _extract_features_single_series(ts, feature_funcs):
             quality[col] = int(q)
     return {"values": values, "quality": quality, "times": times, "errors": errors}
 
+@contextmanager
+def _quiet_feature_warnings():
+    """Silences ``RuntimeWarning`` while feature functions run, and restores the caller's warning
+    filters afterwards.
+
+    Thousands of estimators applied to an arbitrary series routinely divide by zero, take empty
+    means or meet singular fits; each such case is reported in the output (NaN and a
+    :class:`~pyhctsa.quality.Quality` code), so the warnings add nothing. Entered once per
+    extraction (or per chunk in a worker), not once per function, so that any other warning is
+    still shown only once per location.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        yield
+
+
 def _compute_features_for_chunk(chunk, feature_funcs):
-    return [_extract_features_single_series(ts, feature_funcs) for ts in chunk]
+    with _quiet_feature_warnings():
+        return [_extract_features_single_series(ts, feature_funcs) for ts in chunk]
 
 # the configuration this worker process last built feature functions from, and those functions
 _worker_config = None
@@ -108,14 +125,11 @@ def _feature_funcs_from_config(config):
     if _worker_funcs is None or config != _worker_config:
         import copy
         from .calculator import FeatureCalculator
-        logger = logging.getLogger('pyhctsa')
-        level = logger.level
-        logger.setLevel(logging.ERROR)  # the calling process has already reported skipped features
-        try:
+        with warnings.catch_warnings():
+            # the calling process has already reported features skipped for a missing dependency
+            warnings.simplefilter("ignore", UserWarning)
             # a copy: building consumes the config's meta params, and config is the cache key
             _worker_funcs = FeatureCalculator._from_config(copy.deepcopy(config)).feature_funcs
-        finally:
-            logger.setLevel(level)
         _worker_config = config
     return _worker_funcs
 
