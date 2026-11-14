@@ -3,6 +3,7 @@ values set by the series length, statistics used outside their domain)."""
 import numpy as np
 import pytest
 
+from pyhctsa.operations import correlation as co
 from pyhctsa.operations import distribution as di
 from pyhctsa.operations import symbolic as sy
 
@@ -10,6 +11,11 @@ from pyhctsa.operations import symbolic as sy
 def _zscore(x):
     x = np.asarray(x, dtype=float)
     return (x - x.mean()) / x.std(ddof=1)
+
+
+def _all_nan(out):
+    """Every output undefined (a dict of NaNs, or a bare NaN when no series gives outputs with these arguments)."""
+    return all(np.isnan(v) for v in out.values()) if isinstance(out, dict) else bool(np.isnan(out))
 
 
 def _ar1(phi, n, seed, innovations='gauss'):
@@ -78,3 +84,27 @@ def test_harmonic_mean_domain():
     z = _zscore(rng.standard_normal(1000))
     assert np.isnan(di.mean(z + 0.1, 'harm')) and np.isnan(di.mean(z - 1.05, 'harm'))
     assert np.isnan(di.mean(-x, 'harm'))
+
+
+# ------------------------------------------------------------------------------
+# time_rev_kld: needs ten Theiler windows
+# ------------------------------------------------------------------------------
+def test_time_rev_kld_is_nan_when_the_series_spans_too_few_theiler_windows():
+    rng = np.random.default_rng(0)
+    walk = _zscore(np.cumsum(rng.standard_normal(5000)))  # reversible, but one correlation time long
+    out = co.time_rev_kld(walk, 'ac1e', 2)
+    assert np.isnan(out['raw']) and np.isnan(out['abs'])  # (was between -2.4 and 2.4 over eight such walks)
+    # an explicit window: 10 * (w + k) embedded points are needed
+    y = _ar1(0.5, 500, 1)
+    assert np.isfinite(co.time_rev_kld(y, 1, 2, k=3, theiler_win=46)['raw'])   # 499 >= 490
+    assert np.isnan(co.time_rev_kld(y, 1, 2, k=3, theiler_win=47)['raw'])      # 499 < 500
+    # the cap on the number of embedded points counts
+    assert _all_nan(co.time_rev_kld(_ar1(0.5, 2000, 2), 1, 2, k=3, theiler_win=40, max_n=400))
+
+
+def test_time_rev_kld_separates_reversible_from_irreversible_series():
+    reversible = [co.time_rev_kld(_ar1(phi, 2000, seed), 'ac1e', 2)['raw']
+                  for seed, phi in enumerate((0.0, 0.3, 0.6, 0.8, 0.9, 0.95))]
+    assert np.all(np.isfinite(reversible)) and np.max(np.abs(reversible)) < 0.12
+    irreversible = [co.time_rev_kld(_ar1(0.5, 2000, seed, 'exp'), 'ac1e', 2)['raw'] for seed in range(4)]
+    assert np.min(irreversible) > 0.25
