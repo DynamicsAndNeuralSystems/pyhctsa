@@ -5,6 +5,7 @@ import pytest
 
 from pyhctsa.operations import correlation as co
 from pyhctsa.operations import distribution as di
+from pyhctsa.operations import entropy as en
 from pyhctsa.operations import model_fit as mf
 from pyhctsa.operations import symbolic as sy
 
@@ -175,3 +176,43 @@ def test_loop_local_simple_best_window_varies_across_series():
         positions.append(mf.loop_local_simple(_ar1(phi, 500, seed), 'mean')['stde_minpos'])
     values, counts = np.unique(positions, return_counts=True)
     assert len(values) >= 3 and counts.max() < 0.8 * len(positions)
+
+
+# ------------------------------------------------------------------------------
+# rpde: a fixed maximum recurrence time
+# ------------------------------------------------------------------------------
+def _logistic(n, x0=0.3):
+    x = np.empty(n + 100)
+    x[0] = x0
+    for i in range(1, n + 100):
+        x[i] = 4 * x[i - 1] * (1 - x[i - 1])
+    return _zscore(x[100:])
+
+
+def test_rpde_does_not_depend_on_length_for_deterministic_dynamics():
+    lengths = (500, 1000, 2000, 5000)
+    sine = [en.rpde(_zscore(np.sin(2 * np.pi * np.arange(n) / 37)), 3, 1) for n in lengths]
+    chaos = [en.rpde(_logistic(n), 3, 1) for n in lengths]
+    assert np.ptp([o['H_norm'] for o in sine]) < 0.02 and np.ptp([o['H_norm'] for o in chaos]) < 0.08
+    # (the share of occupied bins of a broad RPD, as for chaos, still grows as more points return)
+    assert np.ptp([o['propNonZero'] for o in sine]) < 0.02
+    # the modal recurrence time of a sinusoid holds a fixed share of the returns (with one bin per
+    # embedded point, maxRPD was proportional to the length: 162, 637 and 1113 for 500, 2000 and 4000 points)
+    assert np.ptp([o['maxRPD'] for o in sine]) < 0.02 * sine[0]['maxRPD']
+    assert max(o['H_norm'] for o in sine) < 0.2 < 0.8 < min(o['H_norm'] for o in chaos)
+    # without the limit the same dynamics give outputs that drift with the length
+    unlimited = [en.rpde(_logistic(n), 3, 1, t_max=-1)['H_norm'] for n in lengths]
+    assert np.ptp(unlimited) > 0.1
+
+
+def test_rpde_is_high_for_noise_once_enough_points_return():
+    out = [en.rpde(_zscore(np.random.default_rng(s).standard_normal(2000)), 3, 1, 0.3) for s in range(3)]
+    assert min(o['H_norm'] for o in out) > 0.9
+    assert all(0 < o['propNonZero'] <= 1 and o['maxRPD'] >= 1 for o in out)
+
+
+def test_rpde_period_is_the_modal_recurrence_time():
+    y = _zscore(np.sin(2 * np.pi * np.arange(1000) / 20))
+    hist = en._close_returns_hist(np.ascontiguousarray(np.c_[y[:-5], y[5:]]), 0.12, 100)
+    assert np.argmax(hist) == 20 and hist[:2].sum() == 0
+    assert hist.sum() <= 1000 - 5 - 100  # only the points that can be followed for 100 steps
