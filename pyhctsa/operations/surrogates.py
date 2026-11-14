@@ -19,10 +19,15 @@ from ..utils import dict_output, get_tau, theiler_window, _round_half_away
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
+# A spread of surrogate values (standard deviation, interquartile range) at or below this fraction
+# of their largest magnitude is rounding error, not a spread: ratios to it are NaN
+_ROUNDING = 1e-10
+
+
 def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str) -> dict:
     """Compute statistics on the surrogate distribution: the z-score of the series' value against
     the surrogates' (NaN if they are all equal), its distance from their median in interquartile ranges
-    (NaN if the interquartile range is 0) and a rank-based p-value (as in hctsa; a p-value or kernel
+    (NaN if the interquartile range is 0 up to rounding, see ``_ROUNDING``) and a rank-based p-value (as in hctsa; a p-value or kernel
     density of the z-scored value is not returned, being redundant with these)."""
     num_surrs = len(stat_surr)
     out = {}
@@ -40,7 +45,7 @@ def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str)
     # what fraction of the range is the sample in? 
     medsurr = np.median(stat_surr)
     iqrsurr = _iqr(stat_surr)
-    if iqrsurr == 0:
+    if iqrsurr <= _ROUNDING * np.max(np.abs(stat_surr)):
         out['mediqr'] = np.nan
     else:
         out['mediqr'] = np.abs(stat_x-medsurr)/iqrsurr
@@ -542,13 +547,14 @@ def surrogates(
           the statistic than the null ensemble); NaN if ``sigmahat`` is at the rounding
           level of the surrogates' values (``sigmahat <= 1e-10 * max|value|``).
         - ``'ztestp'``: the p-value of a z-test of ``s`` against N(muhat, sigmahat).
-        - ``'iqrsfrommedian'``: ``|s - median| / iqrsurr`` (NaN if ``iqrsurr`` is 0).
+        - ``'iqrsfrommedian'``: ``|s - median| / iqrsurr`` (NaN if ``iqrsurr`` is at the rounding
+          level of the surrogates' values, as for ``zsigned``).
         - ``'kspminfromext'``: the smaller of the kernel-density probabilities of a value
           below and above ``s`` (0 if ``s`` lies above the density grid).
         - ``'ksphereonmax'``: the kernel density at ``s`` relative to the peak of
           N(muhat, sigmahat) (0 if ``s`` lies above the density grid).
         - ``'ksiqrsfrommode'``: ``|s - (mode of the kernel density)| / iqrsurr`` (NaN if
-          ``iqrsurr`` is 0).
+          ``iqrsurr`` is at the rounding level).
 
         ``normpatponmax``, ``stdfrommean``, ``ztestp``, ``kspminfromext`` and ``ksphereonmax``
         are NaN if the surrogates all have the same value (the kernel density uses
@@ -613,14 +619,15 @@ def surrogates(
         out['ztestp'] = 2 * norm.sf(np.abs((tc3_y - muhat) / sigmahat))
 
     # signed z-score (NaN if the surrogates' spread is at rounding level)
-    if sigmahat <= 1e-10 * np.max(np.abs(tc3_surr)):
+    rounding = _ROUNDING * np.max(np.abs(tc3_surr))
+    if sigmahat <= rounding:
         out['zsigned'] = np.nan
     else:
         out['zsigned'] = (tc3_y - muhat) / sigmahat
 
     # iqrs from median
     iqrsurr = _iqr(tc3_surr)
-    if iqrsurr == 0:
+    if iqrsurr <= rounding:
         out['iqrsfrommedian'] = np.nan
     else:
         out['iqrsfrommedian'] = np.abs(tc3_y - np.median(tc3_surr)) / iqrsurr
@@ -649,7 +656,7 @@ def surrogates(
 
     # iqrs from mode
     imode = int(np.argmax(ksf)) if not np.any(np.isnan(ksf)) else 0
-    if iqrsurr == 0:
+    if iqrsurr <= rounding:
         out['ksiqrsfrommode'] = np.nan
     else:
         out['ksiqrsfrommode'] = np.abs(ksx[imode] - tc3_y) / iqrsurr
