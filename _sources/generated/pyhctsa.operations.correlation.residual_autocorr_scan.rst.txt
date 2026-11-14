@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.residual\_autocorr\_scan
+=======================================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: residual_autocorr_scan

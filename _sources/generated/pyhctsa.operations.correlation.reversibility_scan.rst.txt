@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.reversibility\_scan
+==================================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: reversibility_scan

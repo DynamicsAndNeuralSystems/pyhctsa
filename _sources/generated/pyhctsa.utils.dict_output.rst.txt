@@ -1,0 +1,6 @@
+﻿pyhctsa.utils.dict\_output
+==========================
+
+.. currentmodule:: pyhctsa.utils
+
+.. autofunction:: dict_output

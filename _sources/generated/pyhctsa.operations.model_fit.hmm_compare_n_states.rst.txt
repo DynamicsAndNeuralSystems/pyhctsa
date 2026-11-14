@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.hmm\_compare\_n\_states
+=====================================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: hmm_compare_n_states

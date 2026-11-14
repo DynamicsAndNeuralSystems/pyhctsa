@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.min\_max
+========================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: min_max

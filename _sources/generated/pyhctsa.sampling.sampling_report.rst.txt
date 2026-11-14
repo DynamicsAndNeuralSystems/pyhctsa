@@ -1,0 +1,6 @@
+﻿pyhctsa.sampling.sampling\_report
+=================================
+
+.. currentmodule:: pyhctsa.sampling
+
+.. autofunction:: sampling_report

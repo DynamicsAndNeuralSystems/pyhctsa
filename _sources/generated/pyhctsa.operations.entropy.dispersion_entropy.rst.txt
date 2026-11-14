@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.dispersion\_entropy
+==============================================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: dispersion_entropy

@@ -1,0 +1,6 @@
+﻿pyhctsa.quality.quality\_summary
+================================
+
+.. currentmodule:: pyhctsa.quality
+
+.. autofunction:: quality_summary

@@ -1,0 +1,6 @@
+﻿pyhctsa.sampling.resample\_dataset
+==================================
+
+.. currentmodule:: pyhctsa.sampling
+
+.. autofunction:: resample_dataset

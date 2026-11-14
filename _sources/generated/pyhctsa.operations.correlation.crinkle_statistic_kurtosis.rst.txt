@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.crinkle\_statistic\_kurtosis
+===========================================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: crinkle_statistic_kurtosis

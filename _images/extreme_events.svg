@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<svg viewBox="0 0 160 100" width="160" height="100" xmlns="http://www.w3.org/2000/svg">
+            <line x1="8" y1="30" x2="152" y2="30" stroke="#9dbde3" stroke-width="1" stroke-dasharray="3 3"></line>
+            <line x1="8" y1="82" x2="152" y2="82" stroke="#9dbde3" stroke-width="1" stroke-dasharray="3 3"></line>
+            <path d="M8 51.61 L 11.69 52.06 L 15.38 60.29 L 19.08 57.79 L 22.77 56.19 L 26.46 55.15 L 30.15 55.7 L 33.85 53.66 L 37.54 56.48 L 41.23 18 L 44.92 53.82 L 48.62 52.9 L 52.31 58.38 L 56 56.17 L 59.69 53.27 L 63.38 54.81 L 67.08 54.14 L 70.77 90 L 74.46 54.17 L 78.15 60.3 L 81.85 53.73 L 85.54 59.4 L 89.23 53.22 L 92.92 52.79 L 96.62 52.89 L 100.31 54.12 L 104 14 L 107.69 58.36 L 111.38 52.17 L 115.08 59.72 L 118.77 56.48 L 122.46 57.09 L 126.15 57.62 L 129.85 60.19 L 133.54 90 L 137.23 59.79 L 140.92 58.95 L 144.62 51.86 L 148.31 53.07 L 152 54.71" fill="none" stroke="#727272" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" stroke-opacity="0.92"></path>
+            <circle cx="41.23" cy="18" r="2.4" fill="#c0453f"></circle><circle cx="104" cy="14" r="2.4" fill="#c0453f"></circle><circle cx="70.77" cy="90" r="2.4" fill="#c0453f"></circle><circle cx="133.54" cy="90" r="2.4" fill="#c0453f"></circle>
+          </svg>

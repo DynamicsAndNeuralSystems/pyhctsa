@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.ar\_fit
+=====================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: ar_fit

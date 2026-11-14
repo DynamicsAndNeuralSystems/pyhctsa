@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.autocorr\_x2\_shape
+==================================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: autocorr_x2_shape

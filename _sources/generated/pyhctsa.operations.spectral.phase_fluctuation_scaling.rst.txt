@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.spectral.phase\_fluctuation\_scaling
+=======================================================
+
+.. currentmodule:: pyhctsa.operations.spectral
+
+.. autofunction:: phase_fluctuation_scaling

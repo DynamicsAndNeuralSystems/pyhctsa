@@ -1,0 +1,2112 @@
+
+
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="pyhctsa.operations.spectral.rhythmicity.html">
+      
+      
+        <link rel="next" href="pyhctsa.operations.stationarity.local_distributions.html">
+      
+      
+      <link rel="icon" href="">
+    
+    
+      
+        <title>pyhctsa.operations.spectral.doubled_phase_coherence - pyhctsa  documentation</title>
+      
+    
+    
+      
+        
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+        <link rel="stylesheet" type="text/css" href="../_static/sphinx_immaterial_theme.cf2c65c97ee1b6f01.min.css?v=0a68cab4" />
+        <link rel="stylesheet" type="text/css" href="../_static/termynal.css" />
+        <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=6a604523" />
+        <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=d69b33a3" />
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#pyhctsa.operations.spectral.doubled_phase_coherence" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../index.html" title="pyhctsa  documentation" class="md-header__button md-logo" aria-label="pyhctsa  documentation" data-md-component="logo">
+      <img src="../_static/apps_113dp_FFFFFF.svg" alt="logo">
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            pyhctsa  documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              pyhctsa.operations.spectral.doubled_phase_coherence
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    pyhctsa
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../index.html" title="pyhctsa  documentation" class="md-nav__button md-logo" aria-label="pyhctsa  documentation" data-md-component="logo">
+      <img src="../_static/apps_113dp_FFFFFF.svg" alt="logo">
+    </a>
+    pyhctsa  documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/DynamicsAndNeuralSystems/pyhctsa" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    pyhctsa
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/index.rst (reference label)"><span>Home</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/installation.rst (reference label)"><span>Installation</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/usage/index.rst (reference label)"><span>Usage Guide</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../methods/index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/methods/index.rst (reference label)"><span>Time-<wbr>Series Analysis Methods</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../api.html" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst (reference label)"><span>API Reference</span></span>
+    
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            <span title="/api.rst (reference label)"><span>API Reference</span></span>
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#core" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#core (reference label)"><span>Core</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#quality-labels-and-saved-results" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#quality-labels-and-saved-results (reference label)"><span>Quality labels and saved results</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#utilities" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#utilities (reference label)"><span>Utilities</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#sampling-rate" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#sampling-rate (reference label)"><span>Sampling rate</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#trends-and-drift" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#trends-and-drift (reference label)"><span>Trends and drift</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#shared-hctsa-helpers" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#shared-hctsa-helpers (reference label)"><span>Shared hctsa helpers</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_7" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../api.html#time-series-analysis-method-modules" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#time-series-analysis-method-modules (reference label)"><span>Time-<wbr>Series Analysis Method Modules</span></span>
+    
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5_7" id="__nav_5_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_7">
+            <span class="md-nav__icon md-icon"></span>
+            <span title="/api.rst#time-series-analysis-method-modules (reference label)"><span>Time-<wbr>Series Analysis Method Modules</span></span>
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#changepoint" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#changepoint (reference label)"><span>Changepoint</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#correlation" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#correlation (reference label)"><span>Correlation</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#criticality" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#criticality (reference label)"><span>Criticality</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#distribution" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#distribution (reference label)"><span>Distribution</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#entropy" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#entropy (reference label)"><span>Entropy</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#extreme-events" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#extreme-events (reference label)"><span>Extreme Events</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#graph" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#graph (reference label)"><span>Graph</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#hypothesis-tests" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#hypothesis-tests (reference label)"><span>Hypothesis Tests</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#information" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#information (reference label)"><span>Information</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#medical" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#medical (reference label)"><span>Medical</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#model-fit" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#model-fit (reference label)"><span>Model Fit</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#nonlinearity" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#nonlinearity (reference label)"><span>Nonlinearity</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#physics" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#physics (reference label)"><span>Physics</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#pre-process" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#pre-process (reference label)"><span>Pre-<wbr>Process</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#scaling" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#scaling (reference label)"><span>Scaling</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_7_16" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../api.html#spectral" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#spectral (reference label)"><span>Spectral</span></span>
+    
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5_7_16" id="__nav_5_7_16_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_7_16_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_7_16">
+            <span class="md-nav__icon md-icon"></span>
+            <span title="/api.rst#spectral (reference label)"><span>Spectral</span></span>
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pyhctsa.operations.spectral.cross_frequency_coupling.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/generated/pyhctsa.operations.spectral.cross_frequency_coupling.rst (reference label)"><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>cross_<wbr>frequency_<wbr>coupling</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pyhctsa.operations.spectral.spectral_summaries.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/generated/pyhctsa.operations.spectral.spectral_summaries.rst (reference label)"><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>spectral_<wbr>summaries</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pyhctsa.operations.spectral.spectral_summaries_phase.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/generated/pyhctsa.operations.spectral.spectral_summaries_phase.rst (reference label)"><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>spectral_<wbr>summaries_<wbr>phase</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pyhctsa.operations.spectral.specparam.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/generated/pyhctsa.operations.spectral.specparam.rst (reference label)"><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>specparam</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pyhctsa.operations.spectral.cepstrum.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/generated/pyhctsa.operations.spectral.cepstrum.rst (reference label)"><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>cepstrum</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pyhctsa.operations.spectral.bicoherence.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/generated/pyhctsa.operations.spectral.bicoherence.rst (reference label)"><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>bicoherence</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pyhctsa.operations.spectral.envelope_stats.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/generated/pyhctsa.operations.spectral.envelope_stats.rst (reference label)"><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>envelope_<wbr>stats</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pyhctsa.operations.spectral.phase_fluctuation_scaling.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/generated/pyhctsa.operations.spectral.phase_fluctuation_scaling.rst (reference label)"><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>phase_<wbr>fluctuation_<wbr>scaling</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pyhctsa.operations.spectral.sinusoid_fit.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/generated/pyhctsa.operations.spectral.sinusoid_fit.rst (reference label)"><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>sinusoid_<wbr>fit</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pyhctsa.operations.spectral.spectral_time_freq.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/generated/pyhctsa.operations.spectral.spectral_time_freq.rst (reference label)"><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>spectral_<wbr>time_<wbr>freq</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pyhctsa.operations.spectral.rhythmicity.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/generated/pyhctsa.operations.spectral.rhythmicity.rst (reference label)"><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>rhythmicity</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    <span title="/generated/pyhctsa.operations.spectral.doubled_phase_coherence.rst (reference label)"><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>doubled_<wbr>phase_<wbr>coherence</span></span>
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="#" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/generated/pyhctsa.operations.spectral.doubled_phase_coherence.rst (reference label)"><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>doubled_<wbr>phase_<wbr>coherence</span></span>
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary">
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence" class="md-nav__link">
+    
+      <span aria-label="Python function" class="objinfo-icon objinfo-icon__procedure" title="Python function">F</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence (Python function) — Record-long coherence of the doubled phase of each frequency band."><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>doubled_<wbr>phase_<wbr>coherence</span></span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="pyhctsa.operations.spectral.doubled_phase_coherence">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence-parameters" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span>Parameters</span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Parameters">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.y" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.y (Python parameter) — The input time series."><span>y</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.harmonic" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.harmonic (Python parameter) — The power h to which the band signal is raised (the phase is multiplied by h). Default is 2 (coherence modulo pi); 1 gives a spectral quantity, kept as a check."><span>harmonic</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.m" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.m (Python parameter) — Width of the Morlet wavelet, in cycles."><span>m</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.n_freq" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.n_freq (Python parameter) — Number of log-spaced analysis frequencies."><span>n_<wbr>freq</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.f_low" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.f_low (Python parameter) — Lowest analysis frequency, in cycles per sample."><span>f_<wbr>low</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.f_high" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.f_high (Python parameter) — Highest analysis frequency, in cycles per sample."><span>f_<wbr>high</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.min_cycles" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.min_cycles (Python parameter) — A frequency is used only if the edge-free band signal spans at least this many of its cycles."><span>min_<wbr>cycles</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.pad" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.pad (Python parameter) — Zero-padding factor of the DFT of X**h on which the demodulation frequency nu is searched."><span>pad</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence-returns" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span>Returns</span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence-return-type" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span>Return type</span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#stationarity" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#stationarity (reference label)"><span>Stationarity</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#surrogates" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#surrogates (reference label)"><span>Surrogates</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#symbolic" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#symbolic (reference label)"><span>Symbolic</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html#wavelet" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/api.rst#wavelet (reference label)"><span>Wavelet</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/development/index.rst (reference label)"><span>Development</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mappings/index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/mappings/index.rst (reference label)"><span>HCTSA function mappings</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../authors.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/authors.rst (reference label)"><span>Authors</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../acknowledgements.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/acknowledgements.rst (reference label)"><span>Acknowledgements and third-<wbr>party code</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    <span title="/license.rst (reference label)"><span>License</span></span>
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary">
+  
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence" class="md-nav__link">
+    
+      <span aria-label="Python function" class="objinfo-icon objinfo-icon__procedure" title="Python function">F</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence (Python function) — Record-long coherence of the doubled phase of each frequency band."><span>pyhctsa.<wbr>operations.<wbr>spectral.<wbr>doubled_<wbr>phase_<wbr>coherence</span></span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="pyhctsa.operations.spectral.doubled_phase_coherence">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence-parameters" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span>Parameters</span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Parameters">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.y" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.y (Python parameter) — The input time series."><span>y</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.harmonic" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.harmonic (Python parameter) — The power h to which the band signal is raised (the phase is multiplied by h). Default is 2 (coherence modulo pi); 1 gives a spectral quantity, kept as a check."><span>harmonic</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.m" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.m (Python parameter) — Width of the Morlet wavelet, in cycles."><span>m</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.n_freq" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.n_freq (Python parameter) — Number of log-spaced analysis frequencies."><span>n_<wbr>freq</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.f_low" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.f_low (Python parameter) — Lowest analysis frequency, in cycles per sample."><span>f_<wbr>low</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.f_high" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.f_high (Python parameter) — Highest analysis frequency, in cycles per sample."><span>f_<wbr>high</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.min_cycles" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.min_cycles (Python parameter) — A frequency is used only if the edge-free band signal spans at least this many of its cycles."><span>min_<wbr>cycles</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence.pad" class="md-nav__link">
+    
+      <span aria-label="Python parameter" class="objinfo-icon objinfo-icon__sub-data" title="Python parameter">p</span>
+    
+    <span class="md-ellipsis">
+      <span title="pyhctsa.operations.spectral.doubled_phase_coherence.pad (Python parameter) — Zero-padding factor of the DFT of X**h on which the demodulation frequency nu is searched."><span>pad</span></span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence-returns" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span>Returns</span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyhctsa.operations.spectral.doubled_phase_coherence-return-type" class="md-nav__link">
+    
+    <span class="md-ellipsis">
+      <span>Return type</span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset" role="main">
+                
+                
+                  
+
+
+<h1 id="pyhctsa-operations-spectral-doubled-phase-coherence">pyhctsa.operations.spectral.doubled_phase_coherence<a class="headerlink" href="#pyhctsa-operations-spectral-doubled-phase-coherence" title="Link to this heading">¶</a></h1>
+<dl class="py function objdesc">
+<dt class="sig sig-object highlight sig-wrap py" id="pyhctsa.operations.spectral.doubled_phase_coherence">
+<span class="sig-prename descclassname"><span class="pre">pyhctsa.operations.spectral.</span></span><span class="sig-name descname"><span class="pre">doubled_phase_coherence</span></span><span class="sig-paren">(</span><span class="sig-param-decl"><em class="sig-param"><a class="n reference internal" href="#pyhctsa.operations.spectral.doubled_phase_coherence.y" title="pyhctsa.operations.spectral.doubled_phase_coherence.y (Python parameter) — The input time series."><span class="n"><span class="pre">y</span></span></a></em>, </span><span class="sig-param-decl"><em class="sig-param"><a class="n reference internal" href="#pyhctsa.operations.spectral.doubled_phase_coherence.harmonic" title="pyhctsa.operations.spectral.doubled_phase_coherence.harmonic (Python parameter) — The power h to which the band signal is raised (the phase is multiplied by h). Default is 2 (coherence modulo pi); 1 gives a spectral quantity, kept as a check."><span class="n"><span class="pre">harmonic</span></span></a><span class="o"><span class="pre">=</span></span><code class="code python default_value docutils literal highlight highlight-python"><span class="mi">2</span></code></em>, </span><span class="sig-param-decl"><em class="sig-param"><a class="n reference internal" href="#pyhctsa.operations.spectral.doubled_phase_coherence.m" title="pyhctsa.operations.spectral.doubled_phase_coherence.m (Python parameter) — Width of the Morlet wavelet, in cycles."><span class="n"><span class="pre">m</span></span></a><span class="o"><span class="pre">=</span></span><code class="code python default_value docutils literal highlight highlight-python"><span class="mi">5</span></code></em>, </span><span class="sig-param-decl"><em class="sig-param"><a class="n reference internal" href="#pyhctsa.operations.spectral.doubled_phase_coherence.n_freq" title="pyhctsa.operations.spectral.doubled_phase_coherence.n_freq (Python parameter) — Number of log-spaced analysis frequencies."><span class="n"><span class="pre">n_freq</span></span></a><span class="o"><span class="pre">=</span></span><code class="code python default_value docutils literal highlight highlight-python"><span class="mi">40</span></code></em>, </span><span class="sig-param-decl"><em class="sig-param"><a class="n reference internal" href="#pyhctsa.operations.spectral.doubled_phase_coherence.f_low" title="pyhctsa.operations.spectral.doubled_phase_coherence.f_low (Python parameter) — Lowest analysis frequency, in cycles per sample."><span class="n"><span class="pre">f_low</span></span></a><span class="o"><span class="pre">=</span></span><code class="code python default_value docutils literal highlight highlight-python"><span class="mf">0.02</span></code></em>, </span><span class="sig-param-decl"><em class="sig-param"><a class="n reference internal" href="#pyhctsa.operations.spectral.doubled_phase_coherence.f_high" title="pyhctsa.operations.spectral.doubled_phase_coherence.f_high (Python parameter) — Highest analysis frequency, in cycles per sample."><span class="n"><span class="pre">f_high</span></span></a><span class="o"><span class="pre">=</span></span><code class="code python default_value docutils literal highlight highlight-python"><span class="mf">0.3</span></code></em>, </span><span class="sig-param-decl"><em class="sig-param"><a class="n reference internal" href="#pyhctsa.operations.spectral.doubled_phase_coherence.min_cycles" title="pyhctsa.operations.spectral.doubled_phase_coherence.min_cycles (Python parameter) — A frequency is used only if the edge-free band signal spans at least this many of its cycles."><span class="n"><span class="pre">min_cycles</span></span></a><span class="o"><span class="pre">=</span></span><code class="code python default_value docutils literal highlight highlight-python"><span class="mi">40</span></code></em>, </span><span class="sig-param-decl"><em class="sig-param"><a class="n reference internal" href="#pyhctsa.operations.spectral.doubled_phase_coherence.pad" title="pyhctsa.operations.spectral.doubled_phase_coherence.pad (Python parameter) — Zero-padding factor of the DFT of X**h on which the demodulation frequency nu is searched."><span class="n"><span class="pre">pad</span></span></a><span class="o"><span class="pre">=</span></span><code class="code python default_value docutils literal highlight highlight-python"><span class="mi">4</span></code></em></span><span class="sig-paren">)</span><a class="headerlink" href="#pyhctsa.operations.spectral.doubled_phase_coherence" title="Link to this definition">¶</a></dt>
+<dd><p>Record-long coherence of the doubled phase of each frequency band.</p>
+<p>Does an oscillation keep its timing across the whole record, up to a sign? Squaring a band
+signal <code class="docutils literal notranslate"><span class="pre">X(t)</span> <span class="pre">=</span> <span class="pre">A(t)</span> <span class="pre">exp(i</span> <span class="pre">phi(t))</span></code> doubles its phase, which makes it blind to a sign flip
+(<code class="docutils literal notranslate"><span class="pre">phi</span> <span class="pre">-&gt;</span> <span class="pre">phi</span> <span class="pre">+</span> <span class="pre">pi</span></code>). An oscillation whose phase is kept only modulo <code class="docutils literal notranslate"><span class="pre">pi</span></code> (polarity
+reversals, bursts of alternating or random sign on one underlying clock, a binary
+phase-shift-keyed carrier) is incoherent as <code class="docutils literal notranslate"><span class="pre">X</span></code> but coherent as <code class="docutils literal notranslate"><span class="pre">X**2</span></code>: <code class="docutils literal notranslate"><span class="pre">X**2</span></code> is then a
+single phasor at twice the carrier frequency, running through the whole record. An oscillation
+whose phase is re-drawn at random (bursts that reset) stays incoherent in both, and so does any
+linear Gaussian process, whose band signal is circular (its phase is uniform and independent
+of its amplitude). The power spectrum cannot see this: flipping the sign of each burst, or
+re-drawing its phase, leaves the spectrum’s expectation unchanged.</p>
+<p>The method, at each of <code class="docutils literal notranslate"><span class="pre">n_freq</span></code> log-spaced frequencies <code class="docutils literal notranslate"><span class="pre">f</span></code> from <code class="docutils literal notranslate"><span class="pre">f_low</span></code> to <code class="docutils literal notranslate"><span class="pre">f_high</span></code>:</p>
+<ol class="arabic simple">
+<li><p>A complex Morlet wavelet transform (<code class="docutils literal notranslate"><span class="pre">m</span></code> cycles, as in <a class="reference internal" href="pyhctsa.operations.spectral.rhythmicity.html#pyhctsa.operations.spectral.rhythmicity" title="pyhctsa.operations.spectral.rhythmicity (Python function) — Phase-persistence (&quot;rhythmicity&quot;) spectrum of a time series."><code class="xref py py-func docutils literal notranslate"><span class="pre">rhythmicity()</span></code></a>) gives the band
+signal <code class="docutils literal notranslate"><span class="pre">X(t,</span> <span class="pre">f)</span></code>; only its <code class="docutils literal notranslate"><span class="pre">n_e</span></code> edge-free samples are used, and <code class="docutils literal notranslate"><span class="pre">f</span></code> is used only if
+they span at least <code class="docutils literal notranslate"><span class="pre">min_cycles</span></code> cycles.</p></li>
+<li><p>The coherence of <code class="docutils literal notranslate"><span class="pre">X**h</span></code> (<code class="docutils literal notranslate"><span class="pre">h</span> <span class="pre">=</span> <span class="pre">harmonic</span></code>, 2 by default) is its amplitude-weighted
+resultant length at the best demodulation frequency,
+<code class="docutils literal notranslate"><span class="pre">C(f)</span> <span class="pre">=</span> <span class="pre">max_nu</span> <span class="pre">|sum_t</span> <span class="pre">X(t)**h</span> <span class="pre">exp(-2</span> <span class="pre">pi</span> <span class="pre">i</span> <span class="pre">nu</span> <span class="pre">t)|</span> <span class="pre">/</span> <span class="pre">sum_t</span> <span class="pre">|X(t)|**h</span></code>,
+with <code class="docutils literal notranslate"><span class="pre">nu</span></code> searched on a DFT zero-padded to <code class="docutils literal notranslate"><span class="pre">pad</span> <span class="pre">*</span> <span class="pre">n_e</span></code> points, over the band where the
+Gaussian null below gives <code class="docutils literal notranslate"><span class="pre">X**h</span></code> non-negligible power (at least 1% of its peak; around
+<code class="docutils literal notranslate"><span class="pre">h</span> <span class="pre">f</span></code>). <code class="docutils literal notranslate"><span class="pre">C</span></code> is in [0, 1]: 1 when <code class="docutils literal notranslate"><span class="pre">X**h</span></code> is a single steady phasor (a sinusoid, or a
+sinusoid of randomly flipping sign at <code class="docutils literal notranslate"><span class="pre">h</span> <span class="pre">=</span> <span class="pre">2</span></code>), and about <code class="docutils literal notranslate"><span class="pre">1/sqrt(K)</span></code> for <code class="docutils literal notranslate"><span class="pre">K</span></code>
+bursts of independent phase.</p></li>
+<li><p>The spectral null. Part of <code class="docutils literal notranslate"><span class="pre">C</span></code> is noise: for a finite record <code class="docutils literal notranslate"><span class="pre">C</span></code> is positive even for a
+circular process, by an amount that falls as <code class="docutils literal notranslate"><span class="pre">N**-1/2</span></code> and depends on the spectrum. A
+Gaussian process with the series’ own (zero-padded) periodogram has <code class="docutils literal notranslate"><span class="pre">E</span> <span class="pre">X**h</span> <span class="pre">=</span> <span class="pre">0</span></code> and, by
+Isserlis’ theorem for circular complex Gaussians (<code class="docutils literal notranslate"><span class="pre">E[X_t**h</span> <span class="pre">conj(X_s)**h]</span> <span class="pre">=</span> <span class="pre">h!</span> <span class="pre">c**h</span></code>),
+<code class="docutils literal notranslate"><span class="pre">E|S(nu)|**2</span> <span class="pre">=</span> <span class="pre">h!</span> <span class="pre">sum_k</span> <span class="pre">(n_e</span> <span class="pre">-</span> <span class="pre">|k|)</span> <span class="pre">c(k)**h</span> <span class="pre">exp(-2</span> <span class="pre">pi</span> <span class="pre">i</span> <span class="pre">nu</span> <span class="pre">k)</span></code>, with <code class="docutils literal notranslate"><span class="pre">S</span></code> the DFT of
+<code class="docutils literal notranslate"><span class="pre">X**h</span></code> and <code class="docutils literal notranslate"><span class="pre">c(k)</span> <span class="pre">=</span> <span class="pre">E</span> <span class="pre">X(t</span> <span class="pre">+</span> <span class="pre">k)</span> <span class="pre">X*(t)</span></code> the lag covariance of the band signal, computed
+exactly from the periodogram as in <a class="reference internal" href="pyhctsa.operations.spectral.rhythmicity.html#pyhctsa.operations.spectral.rhythmicity" title="pyhctsa.operations.spectral.rhythmicity (Python function) — Phase-persistence (&quot;rhythmicity&quot;) spectrum of a time series."><code class="xref py py-func docutils literal notranslate"><span class="pre">rhythmicity()</span></code></a>. Treating the <code class="docutils literal notranslate"><span class="pre">|S|**2</span></code> at the
+<code class="docutils literal notranslate"><span class="pre">n_e</span></code>-point (unpadded) DFT frequencies in the band as independent exponentials with these
+means, their expected maximum (one quadrature) gives <code class="docutils literal notranslate"><span class="pre">E0[C(f)**2]</span></code>, including the upward
+bias of maximizing over <code class="docutils literal notranslate"><span class="pre">nu</span></code>. The excess <code class="docutils literal notranslate"><span class="pre">C(f)**2</span> <span class="pre">-</span> <span class="pre">E0[C(f)**2]</span></code> is about zero for any
+linear Gaussian process, whatever its spectrum or length, and positive when the <code class="docutils literal notranslate"><span class="pre">h</span></code>-fold
+phase stays coherent for longer than the wavelet resolves.</p></li>
+</ol>
+<p>For <code class="docutils literal notranslate"><span class="pre">h</span> <span class="pre">=</span> <span class="pre">2</span></code>, <code class="docutils literal notranslate"><span class="pre">C</span></code> is the sample circularity quotient <code class="docutils literal notranslate"><span class="pre">|E</span> <span class="pre">z**2|</span> <span class="pre">/</span> <span class="pre">E|z|**2</span></code> (Ollila 2008)
+of the band signal demodulated at <code class="docutils literal notranslate"><span class="pre">nu</span> <span class="pre">/</span> <span class="pre">2</span></code> (<code class="docutils literal notranslate"><span class="pre">z</span> <span class="pre">=</span> <span class="pre">X</span> <span class="pre">exp(-i</span> <span class="pre">pi</span> <span class="pre">nu</span> <span class="pre">t)</span></code>), maximized over
+<code class="docutils literal notranslate"><span class="pre">nu</span></code>: 0 for a circular (proper) variable, 1 for one confined to a line through the origin. In
+the language of cyclostationarity it is the normalized conjugate cyclic autocorrelation of the
+band signal at lag 0 and cycle frequency <code class="docutils literal notranslate"><span class="pre">nu</span></code> (Gardner 1991; Gardner et al. 2006), the
+feature by which squaring recovers the carrier of a binary phase-shift-keyed signal. Doubling
+an angle to make it insensitive to <code class="docutils literal notranslate"><span class="pre">theta</span> <span class="pre">-&gt;</span> <span class="pre">theta</span> <span class="pre">+</span> <span class="pre">pi</span></code> is the standard treatment of axial
+data (Mardia &amp; Jupp 2000). Expanding <code class="docutils literal notranslate"><span class="pre">|sum_t</span> <span class="pre">X_t**2</span> <span class="pre">e_t|**2</span></code> over pairs of times shows that
+<code class="docutils literal notranslate"><span class="pre">C**2</span></code> is also the amplitude-weighted lagged coherence of Fransen et al. (2015), applied to
+<code class="docutils literal notranslate"><span class="pre">X**2</span></code> and pooled over every lag rather than taken at one. At <code class="docutils literal notranslate"><span class="pre">h</span> <span class="pre">=</span> <span class="pre">1</span></code> the numerator is a
+smoothed periodogram ordinate, so <code class="docutils literal notranslate"><span class="pre">h</span> <span class="pre">=</span> <span class="pre">1</span></code> adds nothing to the power spectrum;
+<code class="docutils literal notranslate"><span class="pre">h</span> <span class="pre">&gt;=</span> <span class="pre">2</span></code> is a statistic of order <code class="docutils literal notranslate"><span class="pre">2h</span></code>, and only <code class="docutils literal notranslate"><span class="pre">h</span> <span class="pre">=</span> <span class="pre">2</span></code> is in
+the default feature set. The general-<code class="docutils literal notranslate"><span class="pre">h</span></code> null is the <code class="docutils literal notranslate"><span class="pre">h</span></code>-th power of the one at <code class="docutils literal notranslate"><span class="pre">h</span> <span class="pre">=</span> <span class="pre">1</span></code>:
+for a circular Gaussian pair with lag correlation <code class="docutils literal notranslate"><span class="pre">rho</span></code>, the Cauchy-Schwarz-normalized
+coherence of <code class="docutils literal notranslate"><span class="pre">(X_t**h,</span> <span class="pre">X_s**h)</span></code> is <code class="docutils literal notranslate"><span class="pre">rho**h</span></code>. The null and its expected-maximum correction
+are this implementation’s own derivation, in the spirit of the analytic LAVI null of
+<a class="reference internal" href="pyhctsa.operations.spectral.rhythmicity.html#pyhctsa.operations.spectral.rhythmicity" title="pyhctsa.operations.spectral.rhythmicity (Python function) — Phase-persistence (&quot;rhythmicity&quot;) spectrum of a time series."><code class="xref py py-func docutils literal notranslate"><span class="pre">rhythmicity()</span></code></a> (Karvat et al. 2026): they replace a surrogate distribution by its
+expectation.</p>
+<p>The series is treated as evenly sampled with unit spacing: frequencies are in cycles per
+sample and reported angular frequencies are <code class="docutils literal notranslate"><span class="pre">2*pi*f</span></code>, as in <a class="reference internal" href="pyhctsa.operations.spectral.rhythmicity.html#pyhctsa.operations.spectral.rhythmicity" title="pyhctsa.operations.spectral.rhythmicity (Python function) — Phase-persistence (&quot;rhythmicity&quot;) spectrum of a time series."><code class="xref py py-func docutils literal notranslate"><span class="pre">rhythmicity()</span></code></a>.</p>
+<dl class="field-list simple">
+<dt class="field-odd" id="pyhctsa.operations.spectral.doubled_phase_coherence-parameters">Parameters<span class="colon">:</span><a class="headerlink" href="#pyhctsa.operations.spectral.doubled_phase_coherence-parameters" title="Permalink to this headline">¶</a></dt>
+<dd class="field-odd"><dl class="simple api-field highlight">
+<dt id="pyhctsa.operations.spectral.doubled_phase_coherence.y"><span class="sig-name descname">y</span><span class="p"> : </span><span class="desctype"><span class="desctype">array-like</span></span><a class="headerlink" href="#pyhctsa.operations.spectral.doubled_phase_coherence.y" title="Permalink to this definition">¶</a></dt><dd><p>The input time series.</p>
+</dd>
+<dt id="pyhctsa.operations.spectral.doubled_phase_coherence.harmonic"><span class="sig-name descname">harmonic</span><span class="p"> : </span><span class="desctype"><span class="desctype">int, optional</span></span><a class="headerlink" href="#pyhctsa.operations.spectral.doubled_phase_coherence.harmonic" title="Permalink to this definition">¶</a></dt><dd><p>The power <code class="docutils literal notranslate"><span class="pre">h</span></code> to which the band signal is raised (the phase is multiplied by <code class="docutils literal notranslate"><span class="pre">h</span></code>).
+Default is 2 (coherence modulo <code class="docutils literal notranslate"><span class="pre">pi</span></code>); 1 gives a spectral quantity, kept as a check.</p>
+</dd>
+<dt id="pyhctsa.operations.spectral.doubled_phase_coherence.m"><span class="sig-name descname">m</span><span class="p"> : </span><span class="desctype"><span class="desctype">float, optional</span></span><a class="headerlink" href="#pyhctsa.operations.spectral.doubled_phase_coherence.m" title="Permalink to this definition">¶</a></dt><dd><p>Width of the Morlet wavelet, in cycles. Default is 5, as in <a class="reference internal" href="pyhctsa.operations.spectral.rhythmicity.html#pyhctsa.operations.spectral.rhythmicity" title="pyhctsa.operations.spectral.rhythmicity (Python function) — Phase-persistence (&quot;rhythmicity&quot;) spectrum of a time series."><code class="xref py py-func docutils literal notranslate"><span class="pre">rhythmicity()</span></code></a>.</p>
+</dd>
+<dt id="pyhctsa.operations.spectral.doubled_phase_coherence.n_freq"><span class="sig-name descname">n_freq</span><span class="p"> : </span><span class="desctype"><span class="desctype">int, optional</span></span><a class="headerlink" href="#pyhctsa.operations.spectral.doubled_phase_coherence.n_freq" title="Permalink to this definition">¶</a></dt><dd><p>Number of log-spaced analysis frequencies. Default is 40.</p>
+</dd>
+<dt id="pyhctsa.operations.spectral.doubled_phase_coherence.f_low"><span class="sig-name descname">f_low</span><span class="p"> : </span><span class="desctype"><span class="desctype">float, optional</span></span><a class="headerlink" href="#pyhctsa.operations.spectral.doubled_phase_coherence.f_low" title="Permalink to this definition">¶</a></dt><dd><p>Lowest analysis frequency, in cycles per sample. Default is 0.02.</p>
+</dd>
+<dt id="pyhctsa.operations.spectral.doubled_phase_coherence.f_high"><span class="sig-name descname">f_high</span><span class="p"> : </span><span class="desctype"><span class="desctype">float, optional</span></span><a class="headerlink" href="#pyhctsa.operations.spectral.doubled_phase_coherence.f_high" title="Permalink to this definition">¶</a></dt><dd><p>Highest analysis frequency, in cycles per sample. It must satisfy
+<code class="docutils literal notranslate"><span class="pre">f_high</span> <span class="pre">(1</span> <span class="pre">+</span> <span class="pre">3/m)</span> <span class="pre">&lt;=</span> <span class="pre">0.5</span></code>, so that the wavelet’s passband (spectral standard deviation
+<code class="docutils literal notranslate"><span class="pre">f/m</span></code>) stays three standard deviations below the Nyquist frequency. Otherwise the
+wavelet also passes the negative-frequency image of the real series, <code class="docutils literal notranslate"><span class="pre">X</span></code> is no longer
+analytic, <code class="docutils literal notranslate"><span class="pre">E</span> <span class="pre">X**2</span></code> is no longer zero, and <code class="docutils literal notranslate"><span class="pre">X**2</span></code> carries a spurious line even for white
+noise (at <code class="docutils literal notranslate"><span class="pre">f</span> <span class="pre">=</span> <span class="pre">0.4</span></code> with <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">=</span> <span class="pre">5</span></code> the excess of white noise grows with N, to about 0.04
+at N = 16384, instead of staying at 0). Default is 0.3, the largest round value allowed for <code class="docutils literal notranslate"><span class="pre">m</span> <span class="pre">=</span> <span class="pre">5</span></code> (limit 0.3125),
+rather than the 0.4 of <a class="reference internal" href="pyhctsa.operations.spectral.rhythmicity.html#pyhctsa.operations.spectral.rhythmicity" title="pyhctsa.operations.spectral.rhythmicity (Python function) — Phase-persistence (&quot;rhythmicity&quot;) spectrum of a time series."><code class="xref py py-func docutils literal notranslate"><span class="pre">rhythmicity()</span></code></a>.</p>
+</dd>
+<dt id="pyhctsa.operations.spectral.doubled_phase_coherence.min_cycles"><span class="sig-name descname">min_cycles</span><span class="p"> : </span><span class="desctype"><span class="desctype">float, optional</span></span><a class="headerlink" href="#pyhctsa.operations.spectral.doubled_phase_coherence.min_cycles" title="Permalink to this definition">¶</a></dt><dd><p>A frequency is used only if the edge-free band signal spans at least this many of its
+cycles. Default is 40, as in <a class="reference internal" href="pyhctsa.operations.spectral.rhythmicity.html#pyhctsa.operations.spectral.rhythmicity" title="pyhctsa.operations.spectral.rhythmicity (Python function) — Phase-persistence (&quot;rhythmicity&quot;) spectrum of a time series."><code class="xref py py-func docutils literal notranslate"><span class="pre">rhythmicity()</span></code></a>.</p>
+</dd>
+<dt id="pyhctsa.operations.spectral.doubled_phase_coherence.pad"><span class="sig-name descname">pad</span><span class="p"> : </span><span class="desctype"><span class="desctype">int, optional</span></span><a class="headerlink" href="#pyhctsa.operations.spectral.doubled_phase_coherence.pad" title="Permalink to this definition">¶</a></dt><dd><p>Zero-padding factor of the DFT of <code class="docutils literal notranslate"><span class="pre">X**h</span></code> on which the demodulation frequency <code class="docutils literal notranslate"><span class="pre">nu</span></code> is
+searched. Default is 4: the maximum of an unpadded DFT can miss a line between two bins
+and lose up to 36% of <code class="docutils literal notranslate"><span class="pre">C</span></code> (a pure sinusoid can give 0.64 instead of 1); padding by 4
+caps this scalloping loss at 2.6%.</p>
+</dd>
+</dl>
+</dd>
+<dt class="field-even" id="pyhctsa.operations.spectral.doubled_phase_coherence-returns">Returns<span class="colon">:</span><a class="headerlink" href="#pyhctsa.operations.spectral.doubled_phase_coherence-returns" title="Permalink to this headline">¶</a></dt>
+<dd class="field-even"><p><p>Statistics over the frequencies that qualify. NaN if the input is constant or not finite,
+or if fewer than 10 frequencies qualify (with the defaults, N below 286). For the
+coherence spectrum <code class="docutils literal notranslate"><span class="pre">C(f)</span></code>:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">coh_max</span></code>, <code class="docutils literal notranslate"><span class="pre">coh_freqAtMax</span></code>: the largest coherence and its angular frequency
+<code class="docutils literal notranslate"><span class="pre">2*pi*f</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">coh_mean</span></code>: the mean coherence over frequency.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">coh_atPeakPower</span></code>: the coherence at the frequency with the most wavelet power.</p></li>
+</ul>
+<p>These raw values include the finite-record noise floor, which falls as <code class="docutils literal notranslate"><span class="pre">N**-1/2</span></code> (by a
+factor of about 2 from N = 500 to 10000 on noise), so they are excluded from the default
+feature set. For the excess over the spectral null, <code class="docutils literal notranslate"><span class="pre">C(f)**2</span> <span class="pre">-</span> <span class="pre">E0[C(f)**2]</span></code>:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ex_max</span></code>: the largest excess, the most sign-invariant-coherent band. It keeps a mild
+downward drift with N on noise (about 0.1 at N = 500 to 0.03 at N = 10000), being the
+maximum of about 40 zero-mean estimates whose spread shrinks with N.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ex_mean</span></code>: the mean excess over frequency.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ex_atPeakPower</span></code>: the excess at the frequency with the most wavelet power: does the
+dominant oscillation keep its timing (modulo <code class="docutils literal notranslate"><span class="pre">pi</span></code> at <code class="docutils literal notranslate"><span class="pre">h</span> <span class="pre">=</span> <span class="pre">2</span></code>) across the record?</p></li>
+</ul>
+<p>Typical <code class="docutils literal notranslate"><span class="pre">ex_atPeakPower</span></code> at N = 4096: about 0 for linear Gaussian processes and the
+Lorenz system; 0.7 for a sustained noisy sinusoid; 0.8 for bursts of random sign on one
+clock; 0.3 for bursts with independent phases; 0.15 for Student-t (2 degrees of freedom)
+noise.</p>
+</p>
+</dd>
+<dt class="field-odd" id="pyhctsa.operations.spectral.doubled_phase_coherence-return-type">Return type<span class="colon">:</span><a class="headerlink" href="#pyhctsa.operations.spectral.doubled_phase_coherence-return-type" title="Permalink to this headline">¶</a></dt>
+<dd class="field-odd"><p>dict or float</p>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<ul class="simple">
+<li><p>The excess reads “the doubled phase is coherent for longer than the wavelet resolves”. A
+single long burst satisfies this within itself, so bursts with independent phases also give
+positive values; they fall below bursts that keep a common clock only when the record holds
+many bursts (the coherence of <code class="docutils literal notranslate"><span class="pre">K</span></code> independent bursts is about <code class="docutils literal notranslate"><span class="pre">1/sqrt(K)</span></code>), and with
+about 3 bursts or fewer per record the two are indistinguishable.</p></li>
+<li><p>Heavy tails give small positive values: each large isolated event makes a short,
+self-coherent transient in <code class="docutils literal notranslate"><span class="pre">X**2</span></code>.</p></li>
+<li><p>The null treats the in-band DFT ordinates of <code class="docutils literal notranslate"><span class="pre">X**h</span></code> as independent exponentials (the DFT
+of a long stationary record is asymptotically complex Gaussian and independent across
+frequencies). This is approximate when the band holds few ordinates (short series, low
+<code class="docutils literal notranslate"><span class="pre">f</span></code>), and it does not hold for strongly non-Gaussian amplitudes, by design: that departure
+is part of what the excess reports.</p></li>
+<li><p>About N = 1000 samples or more are needed for reliable values; with the defaults the output
+is defined from N = 286.</p></li>
+<li><p>The cost is about three times that of <a class="reference internal" href="pyhctsa.operations.spectral.rhythmicity.html#pyhctsa.operations.spectral.rhythmicity" title="pyhctsa.operations.spectral.rhythmicity (Python function) — Phase-persistence (&quot;rhythmicity&quot;) spectrum of a time series."><code class="xref py py-func docutils literal notranslate"><span class="pre">rhythmicity()</span></code></a> (a 4-times padded FFT and the
+expected-maximum quadrature at each frequency).</p></li>
+</ul>
+<p class="rubric">References</p>
+<p>Ollila, E. (2008). On the circularity of a complex random variable. IEEE Signal Processing
+Letters, 15, 841-844. doi:10.1109/LSP.2008.2005050</p>
+<p>Gardner, W. A. (1991). Exploitation of spectral redundancy in cyclostationary signals. IEEE
+Signal Processing Magazine, 8(2), 14-36. doi:10.1109/79.81007</p>
+<p>Gardner, W. A., Napolitano, A., &amp; Paura, L. (2006). Cyclostationarity: half a century of
+research. Signal Processing, 86(4), 639-697. doi:10.1016/j.sigpro.2005.06.016</p>
+<p>Mardia, K. V., &amp; Jupp, P. E. (2000). Directional Statistics. Wiley.</p>
+<p>Fransen, A. M. M., van Ede, F., &amp; Maris, E. (2015). Identifying neuronal oscillations using
+rhythmicity. NeuroImage, 118, 256-267. doi:10.1016/j.neuroimage.2015.06.003</p>
+<p>Karvat, G., et al. (2026). Universal rhythmic architecture uncovers two modes of neural
+dynamics. Nature Communications, 17.</p>
+</dd></dl>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  
+  
+  <div class="md-footer-meta md-typeset">
+    
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-footer-copyright__highlight">
+        &#169; Copyright 2026, Joshua B. Moore.
+        
+    </div>
+  
+    Created using
+    <a href="https://www.sphinx-doc.org/" target="_blank" rel="noopener">Sphinx</a>
+    9.0.4.
+     and
+    <a href="https://github.com/jbms/sphinx-immaterial/" target="_blank" rel="noopener">Sphinx-Immaterial</a>
+  
+</div>
+      
+    </div>
+    
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.expand", "navigation.sections", "navigation.top", "header.autohide"], "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+      
+        <script src="../_static/sphinx_immaterial_theme.32136f45f91ae6956.min.js?v=a7a9472a"></script>
+        <script defer="defer" src="../_static/termynal.js"></script>
+        <script data-sd-tabs-storage-prefix="sphinx-design-tab-id-" src="../_static/design-tabs.js?v=fcb327ea"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script async="async" data-goatcounter="https://pyhctsa.goatcounter.com/count" src="https://gc.zgo.at/count.js"></script>
+    
+  </body>
+</html>

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.physics.kramers\_moyal
+=========================================
+
+.. currentmodule:: pyhctsa.operations.physics
+
+.. autofunction:: kramers_moyal

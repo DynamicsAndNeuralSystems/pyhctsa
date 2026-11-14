@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.translate\_shape
+===============================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: translate_shape

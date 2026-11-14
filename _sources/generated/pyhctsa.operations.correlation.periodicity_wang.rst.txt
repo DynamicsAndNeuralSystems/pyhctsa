@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.periodicity\_wang
+================================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: periodicity_wang

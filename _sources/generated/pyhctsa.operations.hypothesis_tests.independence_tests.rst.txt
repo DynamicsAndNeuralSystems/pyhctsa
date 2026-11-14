@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.hypothesis\_tests.independence\_tests
+========================================================
+
+.. currentmodule:: pyhctsa.operations.hypothesis_tests
+
+.. autofunction:: independence_tests

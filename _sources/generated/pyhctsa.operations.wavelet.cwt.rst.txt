@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.wavelet.cwt
+==============================
+
+.. currentmodule:: pyhctsa.operations.wavelet
+
+.. autofunction:: cwt

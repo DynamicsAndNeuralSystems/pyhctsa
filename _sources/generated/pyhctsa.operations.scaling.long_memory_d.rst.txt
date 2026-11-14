@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.scaling.long\_memory\_d
+==========================================
+
+.. currentmodule:: pyhctsa.operations.scaling
+
+.. autofunction:: long_memory_d
