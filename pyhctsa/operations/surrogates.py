@@ -19,11 +19,6 @@ from ..utils import dict_output, get_tau, theiler_window, _round_half_away
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-# A spread of surrogate values (standard deviation, interquartile range) at or below this fraction
-# of their largest magnitude is rounding error, not a spread: ratios to it are NaN
-_ROUNDING = 1e-10
-
-
 def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str) -> dict:
     """Compute statistics on the surrogate distribution: the z-score of the series' value against
     the surrogates' (NaN if they are all equal), its distance from their median in interquartile ranges
@@ -65,6 +60,11 @@ def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str)
     out['prank'] = prank
 
     return out
+
+# A spread of surrogate values (standard deviation, interquartile range) at or below this fraction
+# of their largest magnitude is rounding error, not a spread: ratios to it are NaN
+_ROUNDING = 1e-10
+
 
 def _random_phase(x: np.ndarray, u: np.ndarray, fc: float = 0) -> np.ndarray:
     """
