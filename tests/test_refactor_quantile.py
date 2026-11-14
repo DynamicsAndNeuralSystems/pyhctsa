@@ -183,9 +183,10 @@ PINS = {
     'surprise|ar1': {'median': 1.148622709242771, 'lq': 0.9203640572617908, 'uq': 1.3156767939059373, 'mean': 1.1622261803876606},
     'surprise|sine': {'median': 1.148622709242771, 'lq': 1.0282530526404763, 'uq': 1.201266442728193, 'mean': 1.1329601109923655},
     'surprise|heavy_ties': {'median': 1.0986122886681098, 'lq': 1.0055218656020977, 'uq': 1.2568362938830038, 'mean': 1.1279824007553279},
-    'binary_stats_iqr|ar1': {'pupstat2': 0.7647058823529411, 'pstretch1': 0.14333333333333334, 'longstretch0': 14.0, 'meanstretch1': 3.488372093023256},
-    'binary_stats_iqr|sine': {'pupstat2': 0.948051948051948, 'pstretch1': 0.21, 'longstretch0': 8.0, 'meanstretch1': 2.380952380952381},
-    'binary_stats_iqr|heavy_ties': {'pupstat2': 1.054054054054054, 'pstretch1': 0.25, 'longstretch0': 7.0, 'meanstretch1': 2.026666666666667},
+    # pupstat2 is the contrast (p2 - p1)/(p2 + p1) of the two halves: (r - 1)/(r + 1) of the ratios r pinned before
+    'binary_stats_iqr|ar1': {'pupstat2': -0.1333333333333333, 'pstretch1': 0.14333333333333334, 'longstretch0': 14.0, 'meanstretch1': 3.488372093023256},
+    'binary_stats_iqr|sine': {'pupstat2': -0.026666666666666616, 'pstretch1': 0.21, 'longstretch0': 8.0, 'meanstretch1': 2.380952380952381},
+    'binary_stats_iqr|heavy_ties': {'pupstat2': 0.026315789473684213, 'pstretch1': 0.25, 'longstretch0': 7.0, 'meanstretch1': 2.026666666666667},
     'compare_test_sets|ar1': {'stde_iqr': 0.11415603291747473, 'ac1_iqr': 0.24249442882530625, 'meane_iqr': 0.11670768133300422, 'stdrat_iqr': 0.07140005997821697},
     'compare_test_sets|sine': {'stde_iqr': 0.1584466859225243, 'ac1_iqr': 0.2321803078383256, 'meane_iqr': 0.10434872808700917, 'stdrat_iqr': 0.11873764440391787},
     'compare_test_sets|heavy_ties': {'stde_iqr': 0.2195496661575822, 'ac1_iqr': 0.22042605130826803, 'meane_iqr': 0.2196504844239674, 'stdrat_iqr': 0.024220190408709347},
