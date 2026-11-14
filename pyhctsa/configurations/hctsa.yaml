@@ -975,7 +975,6 @@ entropy:
       - {num_bins: [[2, 3, 4, 5, 6, 7, 8, 9, 10]], depth: 2, zscore: True, exclude: ['medent', 'minent']}
       - {num_bins: 2, depth: 5, zscore: True}
     ordered_args: ['num_bins', 'depth']
-    dropped_hctsa_calls: ['EN_Shannon_2t10_3']   # redundant with the depth-2 config at a fixed length (|Spearman| 0.97-1.00)
 
   bubble_entropy:
     base_name: bubble_entropy
