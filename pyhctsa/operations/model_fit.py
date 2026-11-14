@@ -4590,8 +4590,11 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
           error of the loss over orders ``i`` onward,
           ``std(v[i:]) / sqrt(len(v) - i)``, ignoring zeros,
         - ``where01max``: the first position in the list of orders (from 1) from
-          which that standard error is below 10% of its maximum (NaN if none),
-        - ``whereen4``: the first position from which it is below 1e-4 (NaN if none),
+          which that standard error is below 10% of its maximum. The standard error over
+          the last order alone is taken as 0, so the last position (``len(orders)``) means
+          that the loss has not settled anywhere earlier in the range of orders,
+        - ``whereen4``: likewise, the first position from which it is below 1e-4 (the last
+          position if it is not below 1e-4 anywhere earlier),
         - ``best_n``: the order with the smallest loss,
         - ``aic_n``: the order that minimizes Akaike's Information Criterion,
           ``log(loss * (1 + 2 * order / n))`` with ``n`` the number of test points scored,

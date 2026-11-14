@@ -216,3 +216,21 @@ def test_rpde_period_is_the_modal_recurrence_time():
     hist = en._close_returns_hist(np.ascontiguousarray(np.c_[y[:-5], y[5:]]), 0.12, 100)
     assert np.argmax(hist) == 20 and hist[:2].sum() == 0
     assert hist.sum() <= 1000 - 5 - 100  # only the points that can be followed for 100 steps
+
+
+# ------------------------------------------------------------------------------
+# compare_ar: where the loss settles (documented behavior, unchanged)
+# ------------------------------------------------------------------------------
+def test_compare_ar_settling_positions_are_the_last_order_when_the_loss_never_settles():
+    orders = np.arange(1, 11)
+    seen = set()
+    for seed in range(12):
+        y = _ar1(0.7, 1000, seed)
+        out = mf.compare_ar(y, orders, 0.5)
+        losses, _ = mf._arx_losses(y[:500], y[500:], orders)
+        se = np.array([np.std(losses[i:], ddof=1) / np.sqrt(10 - i) for i in range(9)])  # two or more orders
+        for key, below in (('where01max', se < 0.1 * se.max()), ('whereen4', se < 1e-4)):
+            expected = np.flatnonzero(below)[0] + 1 if below.any() else len(orders)
+            assert out[key] == expected
+            seen.add(int(out[key]))
+    assert len(orders) in seen and len(seen) > 2  # both the settled and the never-settled cases occur
