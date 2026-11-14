@@ -148,6 +148,8 @@ entropy:
     legacy_name: EN_MSE
   shannon_entropy:
     legacy_name: EN_Shannon
+    dropped_hctsa_calls:
+      EN_Shannon_2t10_3: 'redundant with the depth-2 config at a fixed length (|Spearman| 0.97-1.00)'
   bubble_entropy:
     legacy_name: EN_BubbleEn
   dispersion_entropy:
