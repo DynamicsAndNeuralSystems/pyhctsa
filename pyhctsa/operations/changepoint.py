@@ -439,7 +439,7 @@ def wavelet_var_chg(y: np.ndarray, w_name: str = 'db3', level: int | str = 3,
 
     # Replace the 2% of the greatest (absolute) values by the mean
     x = np.sort(np.abs(det))
-    idx = int(np.fix(x.size * 0.98))
+    idx = int(np.trunc(x.size * 0.98))
     if idx < 1:
         return np.nan
     v2p100 = x[idx - 1]
