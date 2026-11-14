@@ -1,6 +1,8 @@
+import os
 import numpy as np, scipy.io as sio, json
 from pyhctsa.utils import z_score
-X=np.load('/Users/benfulcher/Sydney Uni Dropbox/Ben Fulcher/hctsa/Empirical1000Dataset/Empirical_Synthetic1000/data/stationary1000/figshare_1000x1000/series.npz',allow_pickle=True)['X']
+# E1000_SYNTHETIC_NPZ: series.npz of the 1000 synthetic series of the Empirical1000 collection
+X=np.load(os.environ['E1000_SYNTHETIC_NPZ'],allow_pickle=True)['X']
 S={}
 for k,i in enumerate(range(0,1000,25)): S[f's{k}']=z_score(X[i])
 rng=np.random.default_rng(11)

@@ -29,8 +29,8 @@ In plain English, the YAML configuration instructs `pyhctsa` to ::
 
 ``module``
    The top-level key (e.g., ``distribution``) must exactly match a module in
-   ``pyhctsa.operations`` (case-sensitive). If a function is not nested within the
-   specified module, ``pyhctsa`` will skip its computation.
+   ``pyhctsa.operations`` (case-sensitive). A function that is not in the
+   specified module is an error when the ``FeatureCalculator`` is built.
 
 ``function_name``
    The name of the function as defined in the module (case-sensitive), e.g.,
@@ -158,11 +158,11 @@ The default configuration for this function in `pyhctsa` is:
 
     symbolic: 
         binary_stats:
-        base_name: binary_stats
-        dependencies:
-        configs:
-            - {binary_method: 'mean', zscore: True}
-        ordered_args: ['binary_method']
+            base_name: binary_stats
+            dependencies:
+            configs:
+                - {binary_method: 'mean', zscore: True}
+            ordered_args: ['binary_method']
 
 We can then run the :func:`FeatureCalculator <pyhctsa.calculator.FeatureCalculator>` with this default configuration:
 
@@ -204,11 +204,11 @@ For example, to isolate the feature `pupstat2`, we can specify the following:
 
     symbolic: 
         binary_stats:
-        base_name: binary_stats
-        dependencies:
-        configs:
-            - {binary_method: 'mean', zscore: True, select: 'pupstat2'}
-        ordered_args: ['binary_method']
+            base_name: binary_stats
+            dependencies:
+            configs:
+                - {binary_method: 'mean', zscore: True, select: 'pupstat2'}
+            ordered_args: ['binary_method']
 
 Running the `FeatureCalculator` with this configuration:
 
@@ -263,6 +263,7 @@ Code  Label               Meaning
 7     ``link error``      An output expected from the feature was missing
 8     ``non-scalar``      The feature returned something other than one number (a bug)
 9     ``rejected input``  The series failed the input check (e.g. too short, constant, or containing NaN or Inf)
+255   ``not computed``    Not computed (a placeholder: :meth:`extract` never returns it)
 ====  ==================  ======================================================================================
 
 .. code-block:: python

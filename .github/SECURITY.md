@@ -10,3 +10,8 @@ The _pyhctsa_ team will send a response indicating the next steps in handling yo
 
 The following versions of _pyhctsa_ are
 currently being supported with security updates.
+
+| Version | Supported |
+|---|---|
+| 2.x | Yes |
+| 1.x and earlier (yanked from PyPI) | No |

@@ -647,14 +647,14 @@ def preproc_schreiber_denoise(y: ArrayLike, m: int = 5, d: int = 1, num_iter: in
         - ``fracNoCorrection``: the fraction of points with a neighbor count of 1, that is, with no
           neighbors besides themselves, so that no correction was possible there (diagnoses whether
           ``neighborhood_std`` was too small for these data)
-
-        (``meanNeighbors`` and ``fracNoCorrection`` are over the points that have a full embedding
-        vector, samples ``(m-1)*d + 1`` to ``N``; the first ``(m-1)*d`` samples are never corrected.)
         - ``KDenoised``: the statistic K of the 0-1 test for chaos (``zero_one_test``) computed on
           the denoised series, since measurement noise inflates the apparent diffusion of the
           test's (p, q) trajectory
         - ``KChange``: ``KDenoised`` minus K of the original series: does removing noise change
           the chaos verdict for this series?
+
+        (``meanNeighbors`` and ``fracNoCorrection`` are over the points that have a full embedding
+        vector, samples ``(m-1)*d + 1`` to ``N``; the first ``(m-1)*d`` samples are never corrected.)
 
         All values are NaN if the series is too short for the embedding, or if nrlazy cannot
         process it (a constant series). The 0-1 test needs at least 200 samples, so ``KDenoised``
