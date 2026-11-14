@@ -143,3 +143,35 @@ def test_ar_fit_aroundmin_is_deep_for_a_clear_order_and_shallow_for_white_noise(
     white = [mf.ar_fit(_zscore(np.random.default_rng(s).standard_normal(1000)), 1, 8, 'sbc')['aroundmin_fpe']
              for s in range(10)]
     assert 0 <= np.min(white) and np.max(white) < 0.02  # (the ratio ranged from 0.006 to 3.7)
+
+
+# ------------------------------------------------------------------------------
+# loop_local_simple: the window length that forecasts best
+# ------------------------------------------------------------------------------
+def test_loop_local_simple_reports_the_best_window_length():
+    rng = np.random.default_rng(0)
+    n = 1000
+    walk = _zscore(np.cumsum(rng.standard_normal(n)))
+    white = _zscore(rng.standard_normal(n))
+    smooth = _zscore(np.sin(2 * np.pi * np.arange(n) / 150) + rng.standard_normal(n))
+    out = {name: mf.loop_local_simple(y, 'mean') for name, y in (('walk', walk), ('white', white), ('smooth', smooth))}
+    assert out['walk']['stde_minpos'] == 1         # the last value is the best predictor
+    assert out['white']['stde_minpos'] >= 9        # the longest averages are
+    assert 2 <= out['smooth']['stde_minpos'] <= 10
+    for name, y in (('walk', walk), ('white', white), ('smooth', smooth)):
+        stde = np.array([mf.local_simple(y, 'mean', length)['stde'] for length in range(1, 11)])
+        assert out[name]['stde_minpos'] == np.argmin(stde) + 1
+        assert out[name]['stde_minsize'] == pytest.approx(stde.min() / stde.mean())
+        assert 0 < out[name]['stde_minsize'] <= 1
+        assert 'stde_peakpos' not in out[name] and 'stde_peaksize' not in out[name]
+
+
+def test_loop_local_simple_best_window_varies_across_series():
+    # the output it replaces (the position of the curve's extreme value) was 1 on 92% of a panel like this
+    positions = []
+    for seed in range(40):
+        rng = np.random.default_rng(seed)
+        phi = rng.uniform(-0.9, 0.95)
+        positions.append(mf.loop_local_simple(_ar1(phi, 500, seed), 'mean')['stde_minpos'])
+    values, counts = np.unique(positions, return_counts=True)
+    assert len(values) >= 3 and counts.max() < 0.8 * len(positions)

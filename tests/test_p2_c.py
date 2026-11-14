@@ -47,6 +47,10 @@ DEPARTS = {label: {'logh2', 'logh3', 'nlml'} for label in ('gh_ri2', 'gh_rb', 'g
 # ar_fit's aroundmin_* is the depth of the criterion's minimum below its neighbors (hctsa: a ratio of
 # absolute values of a criterion whose zero is arbitrary). Tested in tests/test_redefined_outputs.py.
 DEPARTS['arfit18'] = {'aroundmin_sbc', 'aroundmin_fpe'}
+# hctsa outputs that pyhctsa replaces by outputs of another name: loop_local_simple gives the position
+# and relative size of the smallest forecast error (stde_minpos, stde_minsize) in place of hctsa's
+# stde_peakpos and stde_peaksize, which are the first window length on nearly every series.
+REPLACED = {'loopm': {'stde_peakpos', 'stde_peaksize'}}
 
 
 def _is_nan_output(out):
@@ -63,6 +67,9 @@ def test_matches_hctsa_robust(label, name):
         return
     assert isinstance(out, dict), f'{label} on {name}: expected outputs, got {out}'
     for key, exp in expected.items():
+        if key in REPLACED.get(label, ()):
+            assert key not in out
+            continue
         assert key in out, f'{label} on {name}: missing output {key}'
         if key in DEPARTS.get(label, ()):
             continue

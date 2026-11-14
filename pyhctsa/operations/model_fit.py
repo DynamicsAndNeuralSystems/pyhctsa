@@ -2803,9 +2803,14 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         linear least squares (:func:`pyhctsa.robust.bf_exp_fit`); a and c are not output
         because they are poorly determined when the curve is close to a straight line.
         The four ``sws_fexp_*`` outputs are NaN if the ``sws`` curve is constant.
-        ``stde_peakpos`` (1-based position in the list
-        of window lengths of the extreme value of the ``stde`` curve) and
-        ``stde_peaksize``.
+        ``stde_minpos`` is the window length that forecasts best: the 1-based position, in the
+        list of window lengths, of the smallest residual standard deviation (the first, if
+        tied). It is 1 when the last value is the best predictor of the next (e.g. a random
+        walk), the last position when a long average is (e.g. white noise), and in between
+        for a smooth signal in noise. ``stde_minsize`` is that smallest residual standard
+        deviation divided by the mean over window lengths (at most 1; near 1 if the window
+        length makes little difference). Both are NaN if the series is too short for the
+        longest window.
     """
     y = np.asarray(y)
     if forecast_meth == 'mean':
@@ -2828,31 +2833,16 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     std_err_chnn = np.mean(np.diff(stats_st[:, 0]))/(np.ptp(stats_st[:, 0]))
     out['stde_chn'] = std_err_chnn
     out['stde_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:, 0])))
-    # (ii) Is there a peak?
+    # (ii) Which window length forecasts best?
     if np.any(np.isnan(stats_st[:, 0])):
         # an error curve with a gap (a training length the series is too short for, or an
-        # undefined error) has no well-defined extremum
-        wigv, wig = np.nan, np.nan
-    elif std_err_chnn < 0: # on the whole decreasing, as expected: look for a maximum
-        wigv = np.max(stats_st[:, 0])
-        wig = np.where(stats_st[:, 0] == wigv)[0][0]  # find first occurrence
-        if wig != 0 and stats_st[wig - 1, 0] > wigv:
-            wig = np.nan  # maximum is not a local maximum; previous value exceeds it
-        elif wig != len(train_length_range) - 1 and stats_st[wig + 1, 0] > wigv:
-            wig = np.nan  # maximum is not a local maximum; the next value exceeds it
+        # undefined error) has no well-defined minimum
+        out['stde_minpos'] = np.nan
+        out['stde_minsize'] = np.nan
     else:
-        wigv = np.min(stats_st[:, 0])
-        wig = np.where(stats_st[:, 0] == wigv)[0][0]  # find first occurrence
-        if wig != 0 and stats_st[wig - 1, 0] < wigv:
-            wig = np.nan  # minimum is not a local minimum; previous value is less
-        elif wig != len(train_length_range) - 1 and stats_st[wig + 1, 0] < wigv:
-            wig = np.nan  # minimum is not a local minimum; the next value is less
-    if not np.isnan(wig):
-        out['stde_peakpos'] = wig + 1  # 1-based position
-        out['stde_peaksize'] = wigv / np.mean(stats_st[:, 0])
-    else:  # put NaNs in all the outputs
-        out['stde_peakpos'] = np.nan
-        out['stde_peaksize'] = np.nan
+        best = int(np.argmin(stats_st[:, 0]))  # first occurrence
+        out['stde_minpos'] = best + 1  # 1-based position
+        out['stde_minsize'] = stats_st[best, 0] / np.mean(stats_st[:, 0])
 
     #% (2)-(5) Curve statistics for the remaining metrics:
     #%   sws (sliding window stationarity), swm (sliding window mean), ac1, ac2

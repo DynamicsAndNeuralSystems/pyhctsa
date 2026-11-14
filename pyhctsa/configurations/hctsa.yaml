@@ -1999,7 +1999,7 @@ model_fit:
     base_name: loop_local_simple
     dependencies:
     configs:
-      - {forecast_meth: 'mean', zscore: True, exclude: ['stde_peaksize', 'sws_fexp_r2']}
+      - {forecast_meth: 'mean', zscore: True, exclude: ['stde_minsize', 'sws_fexp_r2']}
     ordered_args: ['forecast_meth']
 
   fit_subsegments:
