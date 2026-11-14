@@ -1,4 +1,4 @@
-D='/private/tmp/claude-501/-Users-benfulcher-ClaudeCode/284548a7-cca3-4e84-b4f2-b19985958841/scratchpad/fix/p2-b';
+D=getenv('P2B_FIXTURE_DIR');  % the directory gen_inputs.py wrote inputs.mat to
 S=load([D '/inputs.mat']); names=cellstr(S.names); R=struct();
 for i=1:numel(names)
   y=double(S.(names{i})); y=y(:); r=struct();

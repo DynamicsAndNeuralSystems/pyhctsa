@@ -804,8 +804,9 @@ def kpss_test(y: ArrayLike, lags: Union[int, list] = 0) -> dict:
     The test was introduced in [1].
 
     The function can be used in two ways:
+
     1. With a single lag value - returns basic test statistic and p-value
-    2. With multiple lag values - returns statistics about how the test results 
+    2. With multiple lag values - returns statistics about how the test results
        change across different lags
     
     References
@@ -2672,11 +2673,11 @@ def slow_feature_analysis(y: ArrayLike, min_window_length: int = 20) -> dict:
     References
     ----------
     .. [1] Wiskott, L. & Sejnowski, T.J. "Slow feature analysis: unsupervised learning of
-    invariances." Neural Computation 14(4), 715-770 (2002).
+       invariances." Neural Computation 14(4), 715-770 (2002).
     .. [2] Owens, K.S., Tamaki, M. & Fulcher, B.D. "Parameter inference from a non-stationary
-    unknown process using statistical feature-based slow feature analysis", arXiv:2609.01651
-    (2026). The full feature-based method (f-SFA: sliding-window catch22/catch24 features +
-    SFA) is implemented in the Python package fsfa: https://github.com/KieranOwens/fsfa
+       unknown process using statistical feature-based slow feature analysis", arXiv:2609.01651
+       (2026). The full feature-based method (f-SFA: sliding-window catch22/catch24 features +
+       SFA) is implemented in the Python package fsfa: https://github.com/KieranOwens/fsfa
 
     Parameters
     ----------

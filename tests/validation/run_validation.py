@@ -547,6 +547,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # HCTSA_PATH =  '/Users/jmoo2880/Documents/hctsa' #-> REPLACE WITH ACTUAL LOCATION
-    # JIDT_PATH =  '/Users/jmoo2880/Documents/hctsa/Toolboxes/infodynamics-dist/infodynamics.jar' #-> REPLACE WITH ACTUAL LOCATION
+    # HCTSA_PATH =  '/path/to/hctsa' #-> REPLACE WITH ACTUAL LOCATION
+    # JIDT_PATH =  '/path/to/hctsa/Toolboxes/infodynamics-dist/infodynamics.jar' #-> REPLACE WITH ACTUAL LOCATION
 

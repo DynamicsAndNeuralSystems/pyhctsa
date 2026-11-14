@@ -8,8 +8,9 @@ import pytest
 
 from pyhctsa.operations import entropy
 
-SP = "/Users/benfulcher/ClaudeCode/pyhctsa-cleanroom-work"
-SPEC = os.path.join(SP, "cleanroom", "specs", "thirdparty")
+# The black-box reference outputs these tests compare with are not in the repository: point
+# THIRDPARTY_SPEC_DIR at the directory that holds thirdparty_blackbox.json to run them
+SPEC = os.environ.get("THIRDPARTY_SPEC_DIR", "")
 KEYS = ["H", "H_norm", "propNonZero", "meanNonZero", "maxRPD"]
 
 

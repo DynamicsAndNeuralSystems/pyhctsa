@@ -25,8 +25,8 @@ As a living library of time-series analysis methods, `pyhctsa` thrives on a wide
       We use GitHub issues to track all bugs an feature requests. Feel free to open an issue if you have found 
       a bug or wish to see a feature implemented.  
     - **Documentation**: Enhancing and updating our documentation to make it more comprehensive, up-to-date and user-friendly. 
-      If you find a typo in the documentation, or have suggestions for improvements, do not hesitate to send an email to 
-      the mailing list or preferably submit a GitHub pull request.
+      If you find a typo in the documentation, or have suggestions for improvements, do not hesitate to open a GitHub issue or,
+      preferably, submit a GitHub pull request.
     - **Examples and tutorials**: Creating practical and informative examples or tutorials to assist users in understanding and utilising `pyhctsa`.
     - **Troubleshooting**: Another way to contribute is to report issues you are facing and give a "thumbs up" on 
       issues that others reported and that are relevant to you. It also helps us if you spread the word by referencing the project
