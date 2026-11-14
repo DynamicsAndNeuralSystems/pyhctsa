@@ -1220,12 +1220,19 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
 
     out = {}
 
-    out['theta_ac1'] = autocorr(theta, 1, 'Fourier')
-    out['theta_ac2'] = autocorr(theta, 2, 'Fourier')
-    out['theta_ac3'] = autocorr(theta, 3, 'Fourier')
-
-    out['theta_mean'] = np.mean(theta)
-    out['theta_std'] = _sample_std(theta)
+    # The angle between two successive points that coincide (repeated values in the series) is
+    # undefined (0/0); the statistics of the angle sequence are over the defined angles, as in
+    # embed2_angle_tau
+    theta_defined = theta[~np.isnan(theta)]
+    if theta_defined.size > 0:
+        out['theta_ac1'] = autocorr(theta_defined, 1, 'Fourier')
+        out['theta_ac2'] = autocorr(theta_defined, 2, 'Fourier')
+        out['theta_ac3'] = autocorr(theta_defined, 3, 'Fourier')
+        out['theta_mean'] = np.mean(theta_defined)
+        out['theta_std'] = _sample_std(theta_defined)
+    else:
+        for key in ('theta_ac1', 'theta_ac2', 'theta_ac3', 'theta_mean', 'theta_std'):
+            out[key] = np.nan
     
     # 10 equal bins on the support of the angles (-pi/2, pi/2) (explicit edges, so that angles
     # of exactly zero from tied values or of exactly +/-pi/2 from a vertical step fall in the

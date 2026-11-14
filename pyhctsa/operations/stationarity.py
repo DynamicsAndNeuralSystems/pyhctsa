@@ -1091,14 +1091,18 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     raw_iqr_yr = _iqr(y[r])
     raw_iqr_y = _iqr(y)
     out['iqr'] = np.abs(1 - (raw_iqr_yr/raw_iqr_y)) if raw_iqr_y > 0 else np.nan
-    # ratios are NaN when the global statistic is exactly zero
+    # Ratios are NaN when the global statistic is zero. The skewness and the autocorrelation are
+    # dimensionless and of order 1, and their values on data are never below about 1/sqrt(N), so
+    # a magnitude under 1e-10 is zero up to round-off (e.g. the skewness of a series taking two
+    # values equally often, which is about 1e-17 after z-scoring).
+    zero_tol = 1e-10
     global_skew = skew(y)
-    out['skewness'] = np.abs(1 - (skew(y[r])/global_skew)) if global_skew != 0 else np.nan
+    out['skewness'] = np.abs(1 - (skew(y[r])/global_skew)) if np.abs(global_skew) > zero_tol else np.nan
     # use Pearson definition (normal ==> 3.0)
     global_kurt = kurtosis(y, fisher=False)
     out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/global_kurt)) if global_kurt != 0 else np.nan
     global_ac1 = autocorr(y, 1, 'Fourier')
-    out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')/global_ac1)) if global_ac1 != 0 else np.nan
+    out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')/global_ac1)) if np.abs(global_ac1) > zero_tol else np.nan
 
     return out
 
