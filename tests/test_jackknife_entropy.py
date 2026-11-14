@@ -91,10 +91,10 @@ def test_dispersion_and_shannon_unbiased_on_noise():
 
 
 def test_dropped_config():
-    path = Path(__file__).resolve().parents[1] / 'pyhctsa' / 'configurations' / 'hctsa.yaml'
+    configs = Path(__file__).resolve().parents[1] / 'pyhctsa' / 'configurations'
     loader = type('L', (yaml.SafeLoader,), {})
     loader.add_constructor('!range', lambda ld, node: None)
-    cfg = yaml.load(path.read_text(), Loader=loader)
-    entry = cfg['entropy']['shannon_entropy']
-    assert 'EN_Shannon_2t10_3' in entry['dropped_hctsa_calls']
+    entry = yaml.load((configs / 'hctsa.yaml').read_text(), Loader=loader)['entropy']['shannon_entropy']
     assert not any(c.get('depth') == 3 and isinstance(c.get('num_bins'), list) for c in entry['configs'])
+    mapping = yaml.safe_load((configs / 'hctsa_mapping.yaml').read_text())['entropy']['shannon_entropy']
+    assert 'EN_Shannon_2t10_3' in mapping['dropped_hctsa_calls']
