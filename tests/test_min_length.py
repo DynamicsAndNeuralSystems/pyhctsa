@@ -182,7 +182,7 @@ def test_short_series_fixes_return_nan_not_errors():
     out = motif_three(x, 'quantile')  # 3 symbols: no word of length 4
     assert np.isnan(out["hhhh"]) and np.isfinite(out["hh"])
     out = loop_local_simple(_series("noise", 8))  # training windows up to 10 > N
-    assert np.isnan(out["stde_peakpos"])
+    assert np.isnan(out["stde_minpos"]) and np.isnan(out["stde_minsize"])
     assert np.isnan(rad_core(np.array([0.0, 0.0, 1.0, 2.0, 3.0, 0.5]), 1))  # tied sub-median pair
     assert np.isnan(_arch_test_pvalues(_series("noise", 10))).all()
     assert np.isnan(_lbq_test_pvalues(_series("noise", 10))).all()

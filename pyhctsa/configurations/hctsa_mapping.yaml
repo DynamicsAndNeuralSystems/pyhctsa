@@ -382,6 +382,7 @@ model_fit:
       FC_LocalSimple_mean1_dec: 'replaced by the tau: ''ac1e'' config (lag-tau form)'
   loop_local_simple:
     legacy_name: FC_LoopLocalSimple
+    note: 'stde_minpos (the window length with the smallest error) replaces stde_peakpos, and stde_minsize (excluded) stde_peaksize'
   fit_subsegments:
     legacy_name: MF_FitSubsegments
     dropped_hctsa_calls:

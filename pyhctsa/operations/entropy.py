@@ -854,7 +854,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
             "normWPE": norm_wpe, "ordAsym": ord_asym}
 
 @njit(cache=True)
-def _close_returns_hist(v: np.ndarray, epsilon: float) -> np.ndarray:
+def _close_returns_hist(v: np.ndarray, epsilon: float, t_max: int = -1) -> np.ndarray:
     """First-return (recurrence time) histogram of an embedded trajectory.
 
     For each point ``v[i]`` the trajectory is followed forward until it has left the
@@ -863,26 +863,41 @@ def _close_returns_hist(v: np.ndarray, epsilon: float) -> np.ndarray:
     Points whose trajectory never returns contribute nothing. Distances are Euclidean and
     computed on the fly, so memory use is O(n m).
 
+    With ``t_max > 0`` only recurrence times up to ``t_max`` are counted, and only from the
+    first ``n - t_max`` points, each of which is followed for the full ``t_max`` steps. Every
+    counted time is then equally observable, whereas over the whole trajectory a time ``T``
+    can only be seen from the first ``n - T`` points.
+
     Parameters
     ----------
     v : numpy.ndarray
         Embedded trajectory, shape ``(n, m)``, float64.
     epsilon : float
         Ball radius.
+    t_max : int, optional
+        The largest recurrence time counted (-1: no limit). Default is -1.
 
     Returns
     -------
     numpy.ndarray
-        int64 array of length ``n`` (``hist[0]`` is always 0).
+        int64 array indexed by recurrence time, of length ``t_max + 1``, or ``n`` with no
+        limit (``hist[0]`` and ``hist[1]`` are always 0: the trajectory must leave the ball
+        and come back).
     """
     n, m = v.shape
-    hist = np.zeros(n, dtype=np.int64)
-    for i in range(n):
+    if t_max > 0:
+        n_start = max(n - t_max, 0)
+        hist = np.zeros(t_max + 1, dtype=np.int64)
+    else:
+        n_start = n
+        hist = np.zeros(n, dtype=np.int64)
+    for i in range(n_start):
+        j_end = i + t_max + 1 if t_max > 0 else n
         j = i + 1
         # phase 1: stay inside the ball around v[i]
         # phase 2: stay outside it; the first re-entry ends the scan
         outside = False
-        while j < n:
+        while j < j_end:
             d = 0.0
             for k in range(m):
                 diff = v[j, k] - v[i, k]
@@ -897,9 +912,8 @@ def _close_returns_hist(v: np.ndarray, epsilon: float) -> np.ndarray:
             j += 1
     return hist
 
-
 @dict_output
-def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.12, t_max: int = -1) -> dict:
+def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.12, t_max: int = 100) -> dict:
     """
     Recurrence period density entropy (RPDE).
 
@@ -914,6 +928,21 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
     :math:`\\ln N_b`, the largest entropy attainable with :math:`N_b` bins, to give ``H_norm``
     in [0, 1]. A periodic signal concentrates the RPD on a few times (``H_norm`` near 0), while
     a stochastic signal spreads it widely (``H_norm`` near 1).
+
+    Recurrence times are counted up to ``t_max`` samples, so the RPD has the same
+    :math:`N_b = t_{max} - 1` bins (the times 2 to ``t_max``; a return takes at least two
+    steps) whatever the length of the series, and the outputs of series of different lengths
+    are comparable. Each of the first ``n - t_max`` embedded points is followed for ``t_max``
+    steps, so every time is equally observable. A period longer than ``t_max`` samples is not
+    seen. With no limit (``t_max = -1``, the form in which the method was published) the RPD
+    has one bin per embedded point: ``H_norm``, ``propNonZero`` and ``maxRPD`` then change
+    with the length of the series for the same dynamics (``maxRPD`` of a sinusoid is
+    proportional to the length), and long recurrence times are under-counted.
+
+    The entropy is estimated from the points that return within ``t_max`` steps. When few do
+    (a stochastic series with a small ``epsilon`` for its length and embedding dimension),
+    ``H`` cannot exceed the logarithm of their number and ``H_norm`` is low for that reason:
+    choose ``epsilon`` large enough for the series lengths at hand.
 
     The series is used as given: scale it first (``epsilon`` is an absolute distance, so a
     z-scored series is intended).
@@ -930,8 +959,7 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
     epsilon : float, optional
         Recurrence neighborhood radius. Default is 0.12.
     t_max : int, optional
-        Maximum recurrence time: the RPD is truncated to its first ``t_max`` bins
-        (-1: no limit). Default is -1.
+        Maximum recurrence time, in samples (at least 3), or -1 for no limit. Default is 100.
 
     Returns
     -------
@@ -939,9 +967,9 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
         ``H`` (entropy of the RPD, nats), ``H_norm`` (``H / ln(Nb)``, where ``Nb`` is
         the number of bins of the RPD, empty bins included), ``propNonZero`` (fraction of
         bins that are non-empty), ``meanNonZero`` (mean non-zero RPD value times ``Nb``)
-        and ``maxRPD`` (largest RPD value times ``Nb``). All are NaN if the embedding
-        parameters cannot be determined, the embedding has fewer than 2 points, or no
-        point ever returns.
+        and ``maxRPD`` (largest RPD value times ``Nb``, i.e. relative to a uniform RPD). All
+        are NaN if the embedding parameters cannot be determined, the embedding has no more
+        than ``t_max`` points (fewer than 4 with no limit), or no point returns.
 
     Notes
     -----
@@ -950,9 +978,13 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
     scaling properties for voice disorder detection", *BioMedical Engineering OnLine*
     6:23 (2007). The close-returns idea goes back to G. B. Mindlin and R. Gilmore,
     "Topological analysis and synthesis of chaotic time series", *Physica D* 58, 229
-    (1992). The scan is O(n^2) in the worst case and is compiled with numba.
+    (1992). The scan is O(n t_max) (O(n^2) in the worst case with no limit) and is compiled
+    with numba.
     """
     y = np.asarray(y, dtype=float).ravel()
+    t_max = int(t_max)
+    if 0 < t_max < 3:
+        raise ValueError(f"t_max must be at least 3 (or -1 for no limit), got {t_max}")
     tau = get_tau(y, tau)
     if np.isnan(tau):  # the delay could not be determined (e.g., constant series)
         logger.warning("rpde: could not determine the embedding delay; returning NaN.")
@@ -961,10 +993,13 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
     n = len(y) - (m - 1) * tau
     if n < 4:  # with 3 or fewer embedded points the only possible return time is 2
         return np.nan
-    v = time_delay_embed(y, m, tau)
-    hist = _close_returns_hist(np.ascontiguousarray(v), float(epsilon))
-    if t_max > -1:
-        hist = hist[:int(t_max)]
+    v = np.ascontiguousarray(time_delay_embed(y, m, tau))
+    if t_max > 0:
+        if n <= t_max:  # no point can be followed for t_max steps
+            return np.nan
+        hist = _close_returns_hist(v, float(epsilon), t_max)[2:]  # the times 2, ..., t_max
+    else:
+        hist = _close_returns_hist(v, float(epsilon))  # one bin per embedded point
     total = hist.sum()
     if total == 0:
         return np.nan

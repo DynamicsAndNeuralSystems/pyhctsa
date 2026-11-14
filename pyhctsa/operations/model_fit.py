@@ -2803,9 +2803,14 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
         linear least squares (:func:`pyhctsa.robust.bf_exp_fit`); a and c are not output
         because they are poorly determined when the curve is close to a straight line.
         The four ``sws_fexp_*`` outputs are NaN if the ``sws`` curve is constant.
-        ``stde_peakpos`` (1-based position in the list
-        of window lengths of the extreme value of the ``stde`` curve) and
-        ``stde_peaksize``.
+        ``stde_minpos`` is the window length that forecasts best: the 1-based position, in the
+        list of window lengths, of the smallest residual standard deviation (the first, if
+        tied). It is 1 when the last value is the best predictor of the next (e.g. a random
+        walk), the last position when a long average is (e.g. white noise), and in between
+        for a smooth signal in noise. ``stde_minsize`` is that smallest residual standard
+        deviation divided by the mean over window lengths (at most 1; near 1 if the window
+        length makes little difference). Both are NaN if the series is too short for the
+        longest window.
     """
     y = np.asarray(y)
     if forecast_meth == 'mean':
@@ -2828,31 +2833,16 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     std_err_chnn = np.mean(np.diff(stats_st[:, 0]))/(np.ptp(stats_st[:, 0]))
     out['stde_chn'] = std_err_chnn
     out['stde_meansgndiff'] = np.mean(np.sign(np.diff(stats_st[:, 0])))
-    # (ii) Is there a peak?
+    # (ii) Which window length forecasts best?
     if np.any(np.isnan(stats_st[:, 0])):
         # an error curve with a gap (a training length the series is too short for, or an
-        # undefined error) has no well-defined extremum
-        wigv, wig = np.nan, np.nan
-    elif std_err_chnn < 0: # on the whole decreasing, as expected: look for a maximum
-        wigv = np.max(stats_st[:, 0])
-        wig = np.where(stats_st[:, 0] == wigv)[0][0]  # find first occurrence
-        if wig != 0 and stats_st[wig - 1, 0] > wigv:
-            wig = np.nan  # maximum is not a local maximum; previous value exceeds it
-        elif wig != len(train_length_range) - 1 and stats_st[wig + 1, 0] > wigv:
-            wig = np.nan  # maximum is not a local maximum; the next value exceeds it
+        # undefined error) has no well-defined minimum
+        out['stde_minpos'] = np.nan
+        out['stde_minsize'] = np.nan
     else:
-        wigv = np.min(stats_st[:, 0])
-        wig = np.where(stats_st[:, 0] == wigv)[0][0]  # find first occurrence
-        if wig != 0 and stats_st[wig - 1, 0] < wigv:
-            wig = np.nan  # minimum is not a local minimum; previous value is less
-        elif wig != len(train_length_range) - 1 and stats_st[wig + 1, 0] < wigv:
-            wig = np.nan  # minimum is not a local minimum; the next value is less
-    if not np.isnan(wig):
-        out['stde_peakpos'] = wig + 1  # 1-based position
-        out['stde_peaksize'] = wigv / np.mean(stats_st[:, 0])
-    else:  # put NaNs in all the outputs
-        out['stde_peakpos'] = np.nan
-        out['stde_peaksize'] = np.nan
+        best = int(np.argmin(stats_st[:, 0]))  # first occurrence
+        out['stde_minpos'] = best + 1  # 1-based position
+        out['stde_minsize'] = stats_st[best, 0] / np.mean(stats_st[:, 0])
 
     #% (2)-(5) Curve statistics for the remaining metrics:
     #%   sws (sliding window stationarity), swm (sliding window mean), ac1, ac2
@@ -3446,7 +3436,10 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
         - ``C``: the noise variance
         - ``sbc_k``, ``minsbc``, ``popt_sbc``, ``aroundmin_sbc``: Schwarz's criterion for
           each order, its minimum, the position (1-based, within ``p_min..p_max``) of
-          the minimum, and its size relative to the neighboring values
+          the minimum, and the depth of the minimum: how far the criterion at the
+          neighboring orders (their mean; the one neighbor at either end of the range) lies
+          above it. The depth is at least 0 and, being a difference of a logarithmic
+          criterion, does not change when the series is rescaled (NaN with a single order).
         - ``fpe_k``, ``minfpe``, ``popt_fpe``, ``aroundmin_fpe``: the same for the
           logarithm of Akaike's final prediction error
         - ``res_siglev``: significance level of the Li-McLeod test for autocorrelation
@@ -3516,15 +3509,10 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
         out[f'min{crit}'] = np.min(vals)
         pos = int(np.argmin(vals))  # first minimum
         out[f'popt_{crit}'] = pos + 1  # as hctsa: a position in p_min:p_max
-        if len(vals) == 1:
-            around = np.nan
-        elif pos == 0:
-            around = abs(vals[1])
-        elif pos == len(vals) - 1:
-            around = abs(vals[pos - 1])
-        else:
-            around = np.mean(np.abs([vals[pos - 1], vals[pos + 1]]))
-        out[f'aroundmin_{crit}'] = abs(np.min(vals)) / around
+        # depth of the minimum below its neighbors (a difference: the criteria are logarithms
+        # with an arbitrary zero, so their ratio has no meaning)
+        neighbors = [vals[j] for j in (pos - 1, pos + 1) if 0 <= j < len(vals)]
+        out[f'aroundmin_{crit}'] = np.mean(neighbors) - vals[pos] if neighbors else np.nan
 
     # (II) Test the residuals
     try:
@@ -4602,8 +4590,11 @@ def compare_ar(y: ArrayLike, orders: ArrayLike = np.arange(1, 11),
           error of the loss over orders ``i`` onward,
           ``std(v[i:]) / sqrt(len(v) - i)``, ignoring zeros,
         - ``where01max``: the first position in the list of orders (from 1) from
-          which that standard error is below 10% of its maximum (NaN if none),
-        - ``whereen4``: the first position from which it is below 1e-4 (NaN if none),
+          which that standard error is below 10% of its maximum. The standard error over
+          the last order alone is taken as 0, so the last position (``len(orders)``) means
+          that the loss has not settled anywhere earlier in the range of orders,
+        - ``whereen4``: likewise, the first position from which it is below 1e-4 (the last
+          position if it is not below 1e-4 anywhere earlier),
         - ``best_n``: the order with the smallest loss,
         - ``aic_n``: the order that minimizes Akaike's Information Criterion,
           ``log(loss * (1 + 2 * order / n))`` with ``n`` the number of test points scored,

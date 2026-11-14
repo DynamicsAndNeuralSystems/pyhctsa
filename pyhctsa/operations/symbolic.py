@@ -518,9 +518,13 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     Returns
     -------
     dict
-        Statistics computed on the binary symbolisation. The standard deviations of the
-        stretch lengths are NaN if there are no stretches of that symbol, and 0 if there
-        is a single stretch.
+        Statistics computed on the binary symbolisation. ``pupstat2`` measures the
+        stationarity of the symbols: with ``p1`` and ``p2`` the proportions of 1s in the first
+        and second halves of the string, it is the contrast ``(p2 - p1) / (p2 + p1)``, between
+        -1 (all the 1s in the first half) and 1 (all in the second half), 0 when the two
+        halves have the same proportion, and NaN if there are no 1s. The standard deviations
+        of the stretch lengths are NaN if there are no stretches of that symbol, and 0 if
+        there is a single stretch.
     """
     
     # Binarize the time series
@@ -528,9 +532,16 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     y_bin = binarize(y, binarize_how=binary_method)
     N = len(y_bin)
 
-    # Stationarity of binarised time series
+    # Stationarity of the binarized time series: the contrast between the proportions of 1s in
+    # its second and first halves
     out = {}
-    out['pupstat2'] = np.sum(y_bin[N//2:] == 1) / np.sum(y_bin[:N//2] == 1)
+    n_half = N // 2
+    p_first = np.mean(y_bin[:n_half] == 1) if n_half > 0 else np.nan
+    p_second = np.mean(y_bin[n_half:] == 1)
+    if p_first + p_second > 0:
+        out['pupstat2'] = (p_second - p_first) / (p_second + p_first)
+    else:  # no 1s (or too short to split): no contrast to measure
+        out['pupstat2'] = np.nan
 
     # Consecutive strings of ones/zeros (normalized by length)
     stretch0, stretch1 = _binary_stretches(y_bin)
