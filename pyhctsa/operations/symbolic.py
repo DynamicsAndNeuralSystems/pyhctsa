@@ -523,8 +523,7 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
         and second halves of the string, it is the contrast ``(p2 - p1) / (p2 + p1)``, between
         -1 (all the 1s in the first half) and 1 (all in the second half), 0 when the two
         halves have the same proportion, and NaN if there are no 1s. The standard deviations
-        of the stretch lengths are NaN if there are no stretches of that symbol, and 0 if
-        there is a single stretch.
+        of the stretch lengths are NaN if there are fewer than two stretches of that symbol.
     """
     
     # Binarize the time series
