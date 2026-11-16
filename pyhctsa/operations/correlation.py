@@ -887,7 +887,7 @@ def crinkle_statistic(y: ArrayLike, tau: Union[int, str] = 1) -> float:
     tau : int or str, optional
         The step of the second difference, in samples: an integer, or a rule for
         :func:`~pyhctsa.utils.get_tau` (e.g. ``'ac1e'``). The numerator then averages
-        :math:`(\tilde{x}_{t-\tau} - 2\tilde{x}_t + \tilde{x}_{t+\tau})^4` over every
+        :math:`(\\tilde{x}_{t-\\tau} - 2\\tilde{x}_t + \\tilde{x}_{t+\\tau})^4` over every
         interior point, which pools the ``tau`` phases of the series sampled every ``tau``
         samples. Default 1. NaN when a rule cannot set the delay.
 
