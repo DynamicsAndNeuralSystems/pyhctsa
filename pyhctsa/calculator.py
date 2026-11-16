@@ -23,7 +23,8 @@ from .utils import (_check_optional_deps, _input_problem, _zscore, decimate_ac1e
                     nan_outputs, z_score, SHORT_SERIES_WARNING_LENGTH, _round_half_away)
 from .quality import Quality, classify, quality_summary
 from .results import ERROR_COLUMNS, save_results
-from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk, _extract_features_single_series)
+from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk,
+                         _extract_features_single_series, _quiet_feature_warnings)
 
 class RangeList(list):
     """A list produced by the ``!range`` YAML constructor.
@@ -261,35 +262,68 @@ def _apply_selection_wrapper(func: Callable, filter_keys: Union[str, list[str]],
         return result
     return wrapper
 
+def _is_series_like(ts) -> bool:
+    """Whether ``ts`` is a container of samples (a list, tuple, pandas Series, or an array with at
+    least one dimension) rather than a single sample."""
+    return isinstance(ts, (list, tuple, pd.Series)) or (isinstance(ts, np.ndarray) and ts.ndim >= 1)
+
+
+def _as_series(ts, position: Union[int, None] = None) -> np.ndarray:
+    """One time series as a 1-D float array. ``position`` (its index in a list of series) is only
+    used in error messages."""
+    which = "The time series" if position is None else f"Time series {position}"
+    try:
+        arr = np.asarray(ts)
+    except ValueError as e:  # ragged nested sequences
+        raise ValueError(f"{which} is not a 1D sequence of numbers ({e}).") from None
+    if np.iscomplexobj(arr):
+        raise ValueError(f"{which} is complex-valued: features are defined for real-valued series.")
+    if arr.ndim != 1:
+        raise ValueError(f"{which} is not 1D (shape {arr.shape}): give each series as a 1D sequence "
+                         f"of numbers.")
+    try:
+        return np.asarray(arr, dtype=float)
+    except (TypeError, ValueError):
+        raise ValueError(f"{which} is not numeric (dtype {arr.dtype}).") from None
+
+
 def _standardise_inputs(data) -> list[np.ndarray]:
-     # standardise the input into a list of 1D float arrays
+    """The input of :meth:`FeatureCalculator.extract` as a list of 1-D float arrays, one per series.
+
+    Accepts one series (a 1-D array, a pandas Series, or a list or tuple of numbers), or several:
+    a 2-D array with one series per row, or a list or tuple of series (lists, tuples, arrays or
+    pandas Series, of any lengths).
+    """
+    if isinstance(data, pd.DataFrame):
+        raise ValueError("A pandas DataFrame does not say whether its rows or its columns are the "
+                         "time series: pass df.to_numpy() (one series per row), df.to_numpy().T "
+                         "(one series per column), or a list of series.")
+    if isinstance(data, pd.Series):
+        return [_as_series(data)]
     if isinstance(data, np.ndarray):
         if data.ndim == 1:
-            return [np.asarray(data, dtype=float)]
-        elif data.ndim == 2:
+            return [_as_series(data)]
+        if data.ndim == 2:
             if data.shape[0] > data.shape[1]:
-                # notify the user to check that the shapes make sense
-                logger.warning(f"Check that the shape of the 2D input is such "
-                      f"that (n_series, n_samples). Got shape: {data.shape}")
-            return [np.asarray(row, dtype=float) for row in data]
-        else:
-            raise ValueError("NumPy array must be 1D or 2D.")
-    # list/tuple/array-likes
-    elif isinstance(data, (list, tuple)):
-        # if it looks like a list of series, coerce each
-        # otherwise treat as a single series.
-        if len(data) > 0 and all(isinstance(ts, (list, np.ndarray)) for ts in data):
-            out = []
-            for ts in data:
-                out.append(np.asarray(ts, dtype=float))
-            return out
-        # single series
-        return [np.asarray(data, dtype=float)]
-    else:
-        raise ValueError(
-        "Input must be a 1D series, a list of 1D series, or a 2D array "
-        "with shape (n_series, n_samples)")
-   
+                warnings.warn(f"The 2D input has shape {data.shape}, read as {data.shape[0]} time "
+                              f"series of {data.shape[1]} samples each (one series per row). "
+                              f"Transpose it if the series are its columns.", stacklevel=3)
+            return [_as_series(row, i) for i, row in enumerate(data)]
+        raise ValueError("NumPy array must be 1D or 2D.")
+    if isinstance(data, (list, tuple)):
+        if len(data) == 0:
+            raise ValueError("The input is empty.")
+        series_like = [_is_series_like(ts) for ts in data]
+        if all(series_like):  # a list of series
+            return [_as_series(ts, i) for i, ts in enumerate(data)]
+        if not any(series_like):  # one series, given as a list of numbers
+            return [_as_series(data)]
+        raise ValueError("The input mixes numbers and sequences: give one series (a sequence of "
+                         "numbers) or a list of series.")
+    raise ValueError("Input must be a 1D series, a list of 1D series, or a 2D array "
+                     "with shape (n_series, n_samples)")
+
+
 def _format_range_bound(val) -> str:
     """Render a single !range bound for a label by dropping the decimal point.
 
@@ -689,9 +723,10 @@ class FeatureCalculator:
         if self._skipped_functions:
             details = ", ".join(f"{name} (needs {', '.join(deps)})" for name, deps in self._skipped_functions)
             missing_all = sorted({d for _, deps in self._skipped_functions for d in deps})
-            logger.warning(f"Skipped {len(self._skipped_functions)} feature set(s) because optional "
-                           f"dependencies are not installed: {details}. "
-                           f"Install with: pip install {' '.join(missing_all)}")
+            # stacklevel: the code that constructed the calculator
+            warnings.warn(f"Skipped {len(self._skipped_functions)} feature set(s) because optional "
+                          f"dependencies are not installed: {details}. "
+                          f"Install with: pip install {' '.join(missing_all)}", stacklevel=4)
         return feature_funcs
 
     def extract(self, data: Union[ArrayLike, list[ArrayLike]],
@@ -706,8 +741,12 @@ class FeatureCalculator:
         data: ArrayLike or list[ArrayLike]
             The input time series data. Two forms are accepted:
             
-            * **Single series**: a 1-D array-like of real values.
-            * **Multiple series**: a 2-D array or list of 1-D array-likes.
+            * **Single series**: a 1-D array, a pandas Series, or a list or tuple of real numbers.
+            * **Multiple series**: a 2-D array with one series per row, or a list or tuple of
+              series (arrays, pandas Series, lists or tuples), which may differ in length.
+
+            A pandas DataFrame is not accepted, since it does not say whether its rows or its
+            columns are the series: pass ``df.to_numpy()`` (rows) or ``df.to_numpy().T`` (columns).
         labels: ArrayLike, list, str, int, or None, optional
             Labels for each time series. The order of labels is assumed to match 
             the order of the time series as passed in the `data` argument.
@@ -768,6 +807,8 @@ class FeatureCalculator:
             # default names
             n = len(series_list)
             labels_list = [f"ts_{i}" for i in range(1, n + 1)]
+        # built before computing, so that labels pandas cannot index by fail at once
+        index = pd.Index(labels_list, name="instance")
 
         if invalid:
             warnings.warn(f"{len(invalid)} of {len(series_list)} time series are invalid and were not "
@@ -793,17 +834,18 @@ class FeatureCalculator:
                 ) as progress:
                     task = progress.add_task("Sequential Extraction", total=len(valid_series))
                     rows = []
-                    for ts in valid_series:
-                        rows.append(_extract_features_single_series(ts, self.feature_funcs))
-                        progress.advance(task)
+                    with _quiet_feature_warnings():
+                        for ts in valid_series:
+                            rows.append(_extract_features_single_series(ts, self.feature_funcs))
+                            progress.advance(task)
             else:
-                rows = [_extract_features_single_series(ts, self.feature_funcs)
-                        for ts in valid_series]
+                with _quiet_feature_warnings():
+                    rows = [_extract_features_single_series(ts, self.feature_funcs)
+                            for ts in valid_series]
 
         elapsed = time.perf_counter() - start_time
         if verbose:
             print(f"Feature extraction completed in {elapsed:.3f} seconds.")
-        index = pd.Index(labels_list, name="instance")
         if len(rows) != len(problems) - len(invalid):
             raise RuntimeError(f"Expected results for {len(problems) - len(invalid)} series, got {len(rows)}")
         it = iter(rows)
