@@ -30,8 +30,9 @@ def test_output_names_and_order():
 
 @pytest.mark.parametrize("case", REF["cases"], ids=lambda c: c["name"])
 def test_matches_hctsa_reference(case):
-    """Values from hctsa's SP_Rhythmicity on the same (z-scored) series: a 4-series sample of the 1000 x 1000
-    dataset at the registered settings, synthetic series of other lengths, and a non-default parameter set."""
+    """Values from hctsa's SP_Rhythmicity on the same (z-scored) series: a 4-series sample of the 1000×1000
+    collection (figshare, doi:10.6084/m9.figshare.34013331) at the registered settings, synthetic series of
+    other lengths, and a non-default parameter set."""
     y = np.asarray(case["y"])
     y = z_score(y) if y.std() > 0 else y
     out = sp.rhythmicity(y, **case["params"])
