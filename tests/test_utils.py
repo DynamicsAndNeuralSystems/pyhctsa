@@ -5,10 +5,12 @@ import yaml
 from pyhctsa.utils import get_dataset, z_score, _check_optional_deps, _validate_data, sign_change
 import pyhctsa.calculator
 import pyhctsa.utils
-from conftest import e1000_available, load_e1000_subset
+from conftest import e1000_available, load_e1000_subset, s1000_available
 
 needs_e1000 = pytest.mark.skipif(not e1000_available(),
                                  reason="Empirical1000 not cached; set PYHCTSA_TEST_DOWNLOAD=1 to download it")
+needs_s1000 = pytest.mark.skipif(not s1000_available(),
+                                 reason="1000x1000 collection not cached; set PYHCTSA_TEST_DOWNLOAD=1 to download it")
 
 
 # 1. Dataset loading tests
@@ -29,6 +31,28 @@ class TestDataLoader:
         assert len(data) == 1000, "Expected list of length 1000"
         for a, b in zip(data[:6], load_e1000_subset()):
             assert np.array_equal(a, b)
+
+    def test_get_dataset_1000x1000_reads_the_rows_of_the_cached_file(self, monkeypatch, tmp_path):
+        # no network: a stand-in for the downloaded file
+        X = np.random.default_rng(0).standard_normal((4, 25))
+        path = tmp_path / "series.npz"
+        np.savez(path, X=X, ids=np.array(["a", "b", "c", "d"]))
+        monkeypatch.setattr(pyhctsa.utils, "_fetch_verified", lambda url, dest, size, sha256: str(path))
+        data = get_dataset("1000x1000")
+        assert isinstance(data, list) and len(data) == 4
+        assert all(isinstance(ts, np.ndarray) and ts.dtype == float and ts.shape == (25,) for ts in data)
+        assert np.array_equal(np.vstack(data), X)
+
+    @needs_s1000
+    def test_get_dataset_1000x1000(self):
+        import json
+        import pathlib
+        data = get_dataset("1000x1000")
+        assert len(data) == 1000 and all(ts.shape == (1000,) and np.all(np.isfinite(ts)) for ts in data)
+        # the reference fixtures of test_p2_c.py store z-scored rows of this collection
+        stored = json.loads((pathlib.Path(__file__).parent / "data" / "p2_c.json").read_text())["series"]
+        for row in (0, 250, 700, 900):
+            np.testing.assert_allclose(z_score(data[row]), stored[f"s{row}"], rtol=0, atol=1e-12)
 
     def test_fetch_verified_checks_digest_and_caches(self, tmp_path):
         import hashlib
