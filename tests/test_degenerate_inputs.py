@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from pyhctsa.operations import correlation, model_fit, spectral, stationarity, surrogates
-from pyhctsa.utils import z_score
+from pyhctsa.utils import _iqr, z_score
 
 
 # --- spectral_time_freq: the spectral-kurtosis null holds only for circular complex coefficients --
@@ -61,24 +61,46 @@ def test_embed2_angle_statistics_unchanged_without_ties():
     assert out['theta_std'] == pytest.approx(np.std(theta, ddof=1), rel=1e-12)
 
 
-# --- local_global: a ratio to a global statistic that is zero up to round-off is NaN --------------
+# --- local_global: skewness and ac1 are differences, defined when the global statistic is zero ----
 
-def test_local_global_skewness_ratio_is_nan_for_a_balanced_two_valued_series():
+def test_local_global_skewness_is_finite_for_a_balanced_two_valued_series():
+    from scipy.stats import skew
     rng = np.random.default_rng(8)
     y = z_score(rng.permutation(np.repeat([0.0, 1.0], 500)))  # skewness is exactly 0, 1e-17 computed
     for subset_how, n in (('l', 100), ('p', 0.1), ('unicg', 100)):
         out = stationarity.local_global(y, subset_how, n)
-        assert np.isnan(out['skewness']), (subset_how, out['skewness'])
+        # (a ratio to the computed global skewness was about 1e17)
+        assert 0 <= out['skewness'] < 1, (subset_how, out['skewness'])
         assert np.isfinite(out['kurtosis'])  # (Pearson kurtosis is at least 1: its ratio is always defined)
+    assert stationarity.local_global(y, 'l', 100)['skewness'] == pytest.approx(abs(skew(y[:100])), abs=1e-12)
 
 
-def test_local_global_ratios_unchanged_for_ordinary_series():
-    from scipy.stats import skew
+def test_local_global_definitions():
+    from scipy.stats import kurtosis, skew
     rng = np.random.default_rng(9)
     y = z_score(rng.gamma(2.0, size=1000))
+    s = y[:100]
     out = stationarity.local_global(y, 'l', 100)
-    assert out['skewness'] == pytest.approx(abs(1 - skew(y[:100]) / skew(y)), rel=1e-12)
-    assert np.isfinite(out['ac1'])
+    # differences for the dimensionless statistics that can be zero
+    assert out['skewness'] == pytest.approx(abs(skew(s) - skew(y)), rel=1e-12)
+    assert out['ac1'] == pytest.approx(abs(correlation.autocorr(s, 1, 'Fourier') - correlation.autocorr(y, 1, 'Fourier')),
+                                       rel=1e-12)
+    # relative deviations for the two whose full-series value is bounded away from zero
+    assert out['kurtosis'] == pytest.approx(abs(1 - kurtosis(s, fisher=False) / kurtosis(y, fisher=False)), rel=1e-12)
+    assert out['iqr'] == pytest.approx(abs(1 - _iqr(s) / _iqr(y)), rel=1e-12)
+
+
+@pytest.mark.parametrize("N", [1000, 5000])
+def test_local_global_skewness_and_ac1_are_stable_on_white_noise(N):
+    # The full-series skewness and lag-1 autocorrelation of white noise are sampling noise around
+    # zero, of size 1/sqrt(N). As ratios to them, both outputs were heavy-tailed (values in the
+    # hundreds in a few percent of realizations) with a median that grew with N.
+    rng = np.random.default_rng(10)
+    outs = [stationarity.local_global(z_score(rng.standard_normal(N)), 'l', 100) for _ in range(200)]
+    for key, bound in (('skewness', 1.5), ('ac1', 0.6)):
+        v = np.array([o[key] for o in outs])
+        assert np.all(np.isfinite(v)) and v.max() < bound, (key, v.max())
+        assert np.median(v) < 0.25, (key, np.median(v))
 
 
 # --- surrogates: a spread of surrogate values at rounding level is not a spread ------------------
