@@ -109,7 +109,13 @@ def _fluctuations(y: np.ndarray, taus: np.ndarray, wtf: str, q: float, k: int) -
             f = np.ptp(_detrend_windows(windows, k), axis=0)
         else:
             raise ValueError(f"Unknown fluctuation analysis method: {wtf}")
-        F[i] = np.mean(np.abs(f) ** q) ** (1 / q)
+        f = np.abs(f)
+        if q <= 0 and np.any(f <= 0):
+            F[i] = np.nan  # a window that does not fluctuate: the average is undefined (as for DFA)
+        elif q == 0:
+            F[i] = np.exp(np.mean(np.log(f)))  # the q -> 0 limit: the geometric mean
+        else:
+            F[i] = np.mean(f ** q) ** (1 / q)
     return F
 
 
@@ -249,8 +255,9 @@ def fluctuation_analysis(x: np.ndarray, q: float | int = 2, wtf: str = 'rsrange'
         MF-DFA [5]_: with F^2(v) the variance of the detrended profile in window v,
         ``F_q = ( mean_v F^2(v)^(q/2) )^(1/q)``, and for q = 0 the logarithmic average
         ``F_0 = exp( mean_v ln F^2(v) / 2 )``; the exponent is then the generalized Hurst
-        exponent h(q), NaN for q < 0 if some window has zero variance. For the other methods q
-        must be nonzero.
+        exponent h(q), NaN for q < 0 if some window has zero variance. The other methods take
+        any real q in the same way: ``F = mean_v(|f(v)|**q)**(1/q)``, the geometric mean of
+        ``|f(v)|`` at q = 0, and NaN outputs for q <= 0 if some window has zero fluctuation.
     wtf : str, optional
         What to fluctuate. Options are:
 

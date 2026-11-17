@@ -4883,9 +4883,11 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
 
     out = {}
     for j in range(max_steps):
-        # relative to the best null (dumb) predictor
-        out[f'stde_h{j + 1}'] = mf_rms[j] / min(sm1_rms[j], sm2_rms[j], sminf_rms)
-        out[f'meanabs_h{j + 1}'] = mf_abs[j] / min(sm1_abs[j], sm2_abs[j], sminf_abs)
+        # relative to the best null (dumb) predictor among those defined at this horizon (the
+        # sliding-mean predictors are NaN when the series is too short for them; the built-in
+        # min() would then depend on the order of its arguments)
+        out[f'stde_h{j + 1}'] = mf_rms[j] / np.nanmin([sm1_rms[j], sm2_rms[j], sminf_rms])
+        out[f'meanabs_h{j + 1}'] = mf_abs[j] / np.nanmin([sm1_abs[j], sm2_abs[j], sminf_abs])
         # raw ac1 values -- ratios don't really make sense
         out[f'ac1_h{j + 1}'] = abs(mf_ac1[j])
 
