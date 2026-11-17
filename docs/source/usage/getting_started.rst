@@ -35,6 +35,12 @@ Once a `FeatureCalculator` has been initialized, you can call the extract method
 bundled with pyhctsa: the first call downloads it (33 MB) to ``~/.cache/pyhctsa`` (set the
 ``PYHCTSA_DATA_DIR`` environment variable to use another directory).
 
+``get_dataset('1000x1000')`` returns the `1000×1000 collection <https://dynamicsandneuralsystems.github.io/1000x1000/>`_
+(`doi:10.6084/m9.figshare.34013331.v1 <https://doi.org/10.6084/m9.figshare.34013331.v1>`_): 1000 synthetic
+time series, each 1000 samples long, simulated from 133 generating mechanisms (noise and linear
+processes, maps, chaotic flows, oscillators, point processes and others). It is downloaded (7.5 MB)
+and cached in the same way.
+
 Note that each time-series instances does not have to be the same length to compute a vector of features. The results of the extraction will be returned in a pandas dataframe of shape 
 N×F, where N is the number of time-series instances and F is the number of time-series features.
 

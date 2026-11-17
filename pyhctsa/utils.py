@@ -215,6 +215,19 @@ _E1000 = {
     "doi": "10.6084/m9.figshare.5436136.v11",
 }
 
+# The 1000×1000 collection (Fulcher, "The 1000×1000 collection: 1000 synthetic time series from
+# 133 dynamical processes", figshare, doi:10.6084/m9.figshare.34013331.v1, CC BY 4.0): 1000
+# simulated time series of 1000 samples each, the rows of ``X`` in ``series.npz`` (float64, full
+# precision; the record's CSV file is rounded to 6 significant figures). Downloaded and cached like
+# Empirical1000.
+_S1000 = {
+    "url": "https://ndownloader.figshare.com/files/69420651",
+    "filename": "1000x1000_series.npz",
+    "size": 7504362,
+    "sha256": "98927c2b5f1e4cf1307959efc5787a9277ac58bb3fcf76f3d7b48cb920c4795c",
+    "doi": "10.6084/m9.figshare.34013331.v1",
+}
+
 
 def _data_cache_dir() -> str:
     """Directory for downloaded datasets.
@@ -287,6 +300,11 @@ def get_dataset(which: str = "e1000") -> list:
           figshare, doi:10.6084/m9.figshare.5436136.v11). It is not bundled with pyhctsa: the first
           call downloads it (33 MB) into the user cache directory (``~/.cache/pyhctsa``; set
           ``PYHCTSA_DATA_DIR`` to use another directory) and verifies its SHA-256 digest.
+        - ``"1000x1000"``: the 1000×1000 collection of 1000 synthetic time series, each 1000
+          samples long, simulated from 133 generating mechanisms: noise and linear processes,
+          maps, chaotic flows, oscillators, point processes and others (Fulcher, figshare,
+          doi:10.6084/m9.figshare.34013331.v1). Downloaded on the first call (7.5 MB), cached
+          and verified in the same way.
         - ``"sinusoid"``: Sinusoidal test data (bundled).
         - ``"noise"``: Gaussian noise data (T = 1000 sample length time series; bundled).
 
@@ -298,11 +316,12 @@ def get_dataset(which: str = "e1000") -> list:
     Raises
     ------
     ConnectionError
-        If ``"e1000"`` is not cached and cannot be downloaded.
+        If ``"e1000"`` or ``"1000x1000"`` is not cached and cannot be downloaded.
     """
     utils_dir = os.path.dirname(os.path.abspath(__file__))
     datasets = {
         "e1000": "empirical1000",
+        "1000x1000": "1000x1000",
         "sinusoid": "sinusoid",
         "noise": "gaussian noise",
     }
@@ -314,6 +333,11 @@ def get_dataset(which: str = "e1000") -> list:
         path = _fetch_verified(_E1000["url"], os.path.join(_data_cache_dir(), _E1000["filename"]),
                                _E1000["size"], _E1000["sha256"])
         dataset = _load_csv(path)
+    elif which == "1000x1000":
+        path = _fetch_verified(_S1000["url"], os.path.join(_data_cache_dir(), _S1000["filename"]),
+                               _S1000["size"], _S1000["sha256"])
+        with np.load(path) as npz:
+            dataset = list(np.asarray(npz["X"], dtype=float))
     else:
         fname = {"sinusoid": "sinusoid.txt", "noise": "noise_gaussian.txt"}[which]
         data_path = os.path.join(utils_dir, "data", fname)

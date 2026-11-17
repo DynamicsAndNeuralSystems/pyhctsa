@@ -46,12 +46,23 @@ def e1000_subset() -> list:
     return load_e1000_subset()
 
 
+def _download_available(record: dict) -> bool:
+    from pyhctsa.utils import _data_cache_dir
+    cached = os.path.exists(os.path.join(_data_cache_dir(), record["filename"]))
+    return cached or os.environ.get("PYHCTSA_TEST_DOWNLOAD") == "1"
+
+
 def e1000_available() -> bool:
     """The full Empirical1000 dataset is used only if it is already in the user cache or
     ``PYHCTSA_TEST_DOWNLOAD=1`` allows the tests to download it (33 MB)."""
-    from pyhctsa.utils import _E1000, _data_cache_dir
-    cached = os.path.exists(os.path.join(_data_cache_dir(), _E1000["filename"]))
-    return cached or os.environ.get("PYHCTSA_TEST_DOWNLOAD") == "1"
+    from pyhctsa.utils import _E1000
+    return _download_available(_E1000)
+
+
+def s1000_available() -> bool:
+    """As :func:`e1000_available`, for the 1000×1000 collection (7.5 MB)."""
+    from pyhctsa.utils import _S1000
+    return _download_available(_S1000)
 
 
 @pytest.fixture
