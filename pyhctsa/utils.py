@@ -218,7 +218,7 @@ _E1000 = {
 # The 1000×1000 collection (Fulcher, "The 1000×1000 collection: 1000 synthetic time series from
 # 133 dynamical processes", figshare, doi:10.6084/m9.figshare.34013331.v1, CC BY 4.0): 1000
 # simulated time series of 1000 samples each, the rows of ``X`` in ``series.npz`` (float64, full
-# precision; the record's CSV file is rounded to 6 decimal places). Downloaded and cached like
+# precision; the record's CSV file is rounded to 6 significant figures). Downloaded and cached like
 # Empirical1000.
 _S1000 = {
     "url": "https://ndownloader.figshare.com/files/69420651",
