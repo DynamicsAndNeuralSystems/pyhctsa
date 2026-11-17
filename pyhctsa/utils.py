@@ -204,7 +204,7 @@ def _load_csv(path: str) -> list:
     return dataset
 
 # The Empirical1000 dataset (Fulcher, "1000 Empirical Time series", figshare,
-# doi:10.6084/m9.figshare.5436136, version 11, CC BY 4.0): one time series per row of
+# doi:10.6084/m9.figshare.5436136.v11, CC BY 4.0): one time series per row of
 # ``hctsa_timeseries-data.csv``. It is not shipped with the package; get_dataset('e1000')
 # downloads it once into the user cache directory (see :func:`_data_cache_dir`).
 _E1000 = {
@@ -212,7 +212,7 @@ _E1000 = {
     "filename": "e1000_hctsa_timeseries-data.csv",
     "size": 33059330,
     "sha256": "1dcd0184c080ffb2f90279304c6cd0cbee20ab9f04f65ad7956cae5f60485fec",
-    "doi": "10.6084/m9.figshare.5436136",
+    "doi": "10.6084/m9.figshare.5436136.v11",
 }
 
 
@@ -284,7 +284,7 @@ def get_dataset(which: str = "e1000") -> list:
         Options are:
 
         - ``"e1000"``: the Empirical1000 dataset of 1000 empirical time series (Fulcher,
-          figshare, doi:10.6084/m9.figshare.5436136). It is not bundled with pyhctsa: the first
+          figshare, doi:10.6084/m9.figshare.5436136.v11). It is not bundled with pyhctsa: the first
           call downloads it (33 MB) into the user cache directory (``~/.cache/pyhctsa``; set
           ``PYHCTSA_DATA_DIR`` to use another directory) and verifies its SHA-256 digest.
         - ``"sinusoid"``: Sinusoidal test data (bundled).

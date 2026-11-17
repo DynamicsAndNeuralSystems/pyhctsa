@@ -2227,11 +2227,14 @@ def spectral_time_freq(y: ArrayLike, num_windows: int = 20) -> Union[dict, float
     -------
     dict or float
         - ``sk_max``, ``sk_mean``, ``sk_std``, ``sk_range``: maximum, mean, standard
-          deviation and range, over frequencies, of the spectral kurtosis.
+          deviation and range, over frequencies, of the spectral kurtosis. The lowest
+          (zero) and highest frequency bins are left out: their spectrogram coefficients
+          are real, or nearly so, and their spectral kurtosis is then up to 1 rather than 0
+          for Gaussian noise.
         - ``sk_fracAboveThresh``: the fraction of frequencies whose spectral kurtosis
           exceeds the 95% Gaussian-null threshold (non-Gaussian, bursty behavior).
         - ``sk_freqAtMax``: the angular frequency, in radians per sample (``2*pi``
-          times the frequency in cycles per sample, from 0 to pi, matching
+          times the frequency in cycles per sample, between 0 and pi, matching
           ``spectral_summaries``), at which the spectral kurtosis is largest.
         - ``sk_relSpread``: the relative spread of power across windows: the mean over
           frequencies of the standard deviation across windows of the power in each
@@ -2266,7 +2269,14 @@ def spectral_time_freq(y: ArrayLike, num_windows: int = 20) -> Union[dict, float
         return np.nan  # too short for across-window statistics to mean anything
 
     P, fout = _spectrogram_power(y, window, noverlap)  # one-sided power, (frequency bin, window)
-    kurt, thresh = _spectral_kurtosis(P)  # spectral kurtosis per frequency bin, and its 95% threshold
+    # Spectral kurtosis per frequency bin, and its 95% threshold, leaving out the first and last
+    # bins. The null (0 for Gaussian noise) is for circular complex STFT coefficients. For a bin
+    # at frequency index k the null value is |W2(2k)/W2(0)|^2, where W2 is the DFT of the squared
+    # window: 1 at zero frequency and at the Nyquist frequency (real coefficients), about 0.4 at
+    # the last bin of an odd-length window (half a bin below Nyquist), and under 0.05 elsewhere.
+    complex_bins = slice(1, -1)
+    kurt, thresh = _spectral_kurtosis(P[complex_bins])
+    f_kurt = fout[complex_bins]
     spread = _sample_std(P, axis=1)
     centroid = np.mean(P, axis=1)
 
@@ -2276,7 +2286,7 @@ def spectral_time_freq(y: ArrayLike, num_windows: int = 20) -> Union[dict, float
     out['sk_std'] = _sample_std(kurt)
     out['sk_range'] = np.max(kurt) - np.min(kurt)
     out['sk_fracAboveThresh'] = np.mean(kurt > thresh)
-    out['sk_freqAtMax'] = 2 * np.pi * fout[int(np.argmax(kurt))]
+    out['sk_freqAtMax'] = 2 * np.pi * f_kurt[int(np.argmax(kurt))]
     out['sk_relSpread'] = np.mean(spread) / np.mean(centroid)
 
     se = _spectral_entropy(P)  # normalized spectral entropy of each window

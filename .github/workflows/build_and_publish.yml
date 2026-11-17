@@ -30,7 +30,11 @@ jobs:
         uses: pypa/cibuildwheel@v4.2.1
         env:
           CIBW_ARCHS: "auto64"
-          CIBW_SKIP: "cp3??t-* cp315-*"   # (no free-threaded builds; no 3.15 until CI tests it)
+          # no free-threaded builds; no 3.15 until CI tests it; no musllinux: numba (llvmlite) and
+          # scikit-learn publish no musllinux wheels, so a musllinux wheel could not be installed
+          CIBW_SKIP: "cp3??t-* cp315-* *-musllinux_*"
+          # install each wheel in a fresh environment and run the default feature set on one series
+          CIBW_TEST_COMMAND: "python {project}/.github/workflows/ci/wheel_smoke_test.py"
           CIBW_BUILD_VERBOSITY: "1"
           CIBW_MANYLINUX_X86_64_IMAGE: "manylinux_2_28"
           CIBW_MANYLINUX_AARCH64_IMAGE: "manylinux_2_28"
@@ -96,6 +100,19 @@ jobs:
         with:
           name: all-dist-files
           path: dist
+
+      # A release to PyPI is made from its tag: run the workflow on the tag v<version>
+      # (Actions > Build & Publish > Run workflow > Use workflow from: Tags)
+      - name: Require the release tag for PyPI
+        if: inputs.target == 'pypi'
+        run: |
+          sdist=$(ls dist/pyhctsa-*.tar.gz)
+          version=$(basename "$sdist" .tar.gz); version=${version#pyhctsa-}
+          echo "Built version: $version; running on $GITHUB_REF_TYPE '$GITHUB_REF_NAME'"
+          if [ "$GITHUB_REF_TYPE" != "tag" ] || [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Publishing pyhctsa $version to PyPI must run on the tag v$version"
+            exit 1
+          fi
 
       - name: Publish to TestPyPI
         if: inputs.target == 'testpypi'

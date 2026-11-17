@@ -10,8 +10,9 @@ from scipy import stats
 from pyhctsa.operations._ar_stepwise import _arfit, _arfit_modes, _arfit_residuals
 from pyhctsa.operations.model_fit import ar_fit
 
-SPEC = os.environ.get(
-    'THIRDPARTY_SPEC_DIR', '/Users/benfulcher/ClaudeCode/pyhctsa-cleanroom-work/cleanroom/specs/thirdparty')
+# The black-box reference outputs these tests compare with are not in the repository: point
+# THIRDPARTY_SPEC_DIR at the directory that holds thirdparty_blackbox.json to run them
+SPEC = os.environ.get('THIRDPARTY_SPEC_DIR', '')
 _BB = os.path.join(SPEC, 'thirdparty_blackbox.json')
 _IN = os.path.join(SPEC, 'gen', 'thirdparty_inputs.json')
 have_fixtures = os.path.exists(_BB) and os.path.exists(_IN)

@@ -42,7 +42,13 @@ dependencies = [
 
 classifiers = [
   "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Science/Research",
   "Intended Audience :: Developers",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Operating System :: OS Independent",
+  "Programming Language :: C",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -54,15 +60,22 @@ classifiers = [
 [project.optional-dependencies]
 tda = ["ripser"]  # persistent_homology (NL_PersistentHomology); skipped by the calculator without it
 parquet = ["pyarrow"]  # FeatureCalculator.save / save_results to .parquet
-test = ["pytest>=6.0", "pytest-cov", "pytest-mock", "ripser"]
+test = ["pytest>=6.0", "pytest-cov", "pytest-mock", "ripser", "pyarrow"]
 
 [project.urls]
 Homepage = "https://dynamicsandneuralsystems.github.io/pyhctsa/"
 Repository = "https://github.com/DynamicsAndNeuralSystems/pyhctsa"
+Documentation = "https://dynamicsandneuralsystems.github.io/pyhctsa/"
+Issues = "https://github.com/DynamicsAndNeuralSystems/pyhctsa/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pyhctsa*"]  # keep tests/, docs/, scripts/ out of the wheel
+exclude = ["pyhctsa._build*"]  # build helper that setup.py loads from the sdist, not runtime code
+
+[tool.setuptools.exclude-package-data]
+"*" = ["*.c", "*.h"]  # C sources are in the sdist (MANIFEST.in); the wheel has the compiled extensions
+pyhctsa = ["_build/*"]  # (MANIFEST.in puts it in the sdist, which would otherwise make it package data)
 
 [tool.setuptools.package-data]
 pyhctsa = [

@@ -2802,9 +2802,9 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
     runs the ripser executable).
 
     Below the point-cloud cap (``max_n``, 1000 points) the persistence totals and entropy
-    (``totH0``, ``totH1``, ``entH1``) grow with the number of embedded points, so for fewer than
-    about 1000 embedded points they are comparable only between series of similar length;
-    ``maxPersistenceH1`` is not affected.
+    (``totalPersistenceH0``, ``totalPersistenceH1``, ``persistenceEntropyH1``) grow with the
+    number of embedded points, so for fewer than about 1000 embedded points they are comparable
+    only between series of similar length; ``maxPersistenceH1`` is not affected.
 
     References
     ----------

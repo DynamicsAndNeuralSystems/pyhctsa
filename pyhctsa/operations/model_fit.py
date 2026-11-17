@@ -971,10 +971,13 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     stde2 = stde ** 2
     engle_stde, lbq_stde2 = G.residual_tests(sigmas)
 
-    out['engle_mean_diff_p'] = np.mean(engle_stde - engle_y)
-    out['engle_max_diff_p'] = np.max(engle_stde - engle_y)
-    out['lbq_mean_diff_p'] = np.mean(lbq_stde2 - lbq_y2)
-    out['lbq_max_diff_p'] = np.max(lbq_stde2 - lbq_y2)
+    # With a constant conditional variance the standardized residuals are the series times a
+    # constant, so every test on them equals the test on the series: the differences are exactly
+    # 0 (computed, they are round-off of either sign)
+    out['engle_mean_diff_p'] = np.mean(engle_stde - engle_y) if has else 0.0
+    out['engle_max_diff_p'] = np.max(engle_stde - engle_y) if has else 0.0
+    out['lbq_mean_diff_p'] = np.mean(lbq_stde2 - lbq_y2) if has else 0.0
+    out['lbq_max_diff_p'] = np.max(lbq_stde2 - lbq_y2) if has else 0.0
 
     out['engle_pval_stde_1'] = engle_stde[0]
     out['engle_pval_stde_5'] = engle_stde[4]
@@ -993,7 +996,7 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
         out[f'zres_{key}'] = value
 
     out['ac1_stde2'] = autocorr(stde2, 1, 'Fourier')
-    out['diff_ac1'] = autocorr(y ** 2, 1, 'Fourier') - out['ac1_stde2']
+    out['diff_ac1'] = autocorr(y ** 2, 1, 'Fourier') - out['ac1_stde2'] if has else 0.0
 
     # A fit with the variance constant at its floor has no likelihood maximum: what depends on the
     # likelihood or on the variance path is then not a property of the series
@@ -4871,9 +4874,11 @@ def steps_ahead(y: ArrayLike, model: str = 'ar', order: Union[int, str, list] = 
 
     out = {}
     for j in range(max_steps):
-        # relative to the best null (dumb) predictor
-        out[f'stde_h{j + 1}'] = mf_rms[j] / min(sm1_rms[j], sm2_rms[j], sminf_rms)
-        out[f'meanabs_h{j + 1}'] = mf_abs[j] / min(sm1_abs[j], sm2_abs[j], sminf_abs)
+        # relative to the best null (dumb) predictor among those defined at this horizon (the
+        # sliding-mean predictors are NaN when the series is too short for them; the built-in
+        # min() would then depend on the order of its arguments)
+        out[f'stde_h{j + 1}'] = mf_rms[j] / np.nanmin([sm1_rms[j], sm2_rms[j], sminf_rms])
+        out[f'meanabs_h{j + 1}'] = mf_abs[j] / np.nanmin([sm1_abs[j], sm2_abs[j], sminf_abs])
         # raw ac1 values -- ratios don't really make sense
         out[f'ac1_h{j + 1}'] = abs(mf_ac1[j])
 

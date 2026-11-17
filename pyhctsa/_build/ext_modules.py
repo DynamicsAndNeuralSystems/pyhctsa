@@ -3,20 +3,13 @@ import numpy as np
 from setuptools import Extension
 
 def _compile_args():
-    if platform.system() == "Windows":
-        # MSVC: no -std=c99; use defaults (C11-ish) and enable O2
-        return ["/O2"]
-    return ["-O3", "-fPIC", "-std=c99", "-ffast-math"]
-
-def _strict_compile_args():
-    # The TISEAN kernels turn floating-point values into discrete decisions:
-    # d2 truncates log()-derived length-scale indices to int, poincare tests
-    # samples against a crossing level, false_nearest hashes scaled coordinates into
-    # grid boxes, and lyap_r both truncates coordinates
-    # into boxes and compares squared distances against a search radius, so a
-    # reassociated or approximated expression moves a pair to the neighbouring
-    # bin, drops a cut entirely, or picks a different nearest neighbour.
-    # Keep IEEE semantics here (no -ffast-math).
+    # IEEE semantics on every platform (no -ffast-math): the extensions turn floating-point
+    # values into discrete decisions (template matches within a tolerance, peaks and troughs of
+    # an autocorrelation function, length-scale indices truncated to int, samples tested against
+    # a crossing level, coordinates hashed into grid boxes, distances compared with a search
+    # radius), so a reassociated or approximated expression can move a pair to the neighbouring
+    # bin or pick a different neighbour. -ffast-math also implies -ffinite-math-only, under
+    # which a compiler may drop the isnan() checks the code relies on.
     if platform.system() == "Windows":
         return ["/O2", "/fp:precise"]
     return ["-O2", "-fPIC", "-std=c99"]
@@ -52,7 +45,7 @@ def build_extensions():
         "pyhctsa.toolboxes.Tisean_3_0_1.d2",
         sources=["pyhctsa/toolboxes/Tisean_3_0_1/TS_d2.c"],
         include_dirs=["pyhctsa/toolboxes/Tisean_3_0_1", np_inc],
-        extra_compile_args=_strict_compile_args(),
+        extra_compile_args=_compile_args(),
         libraries=_libraries(),
     )
 
@@ -60,7 +53,7 @@ def build_extensions():
         "pyhctsa.toolboxes.Tisean_3_0_1.poincare",
         sources=["pyhctsa/toolboxes/Tisean_3_0_1/TS_poincare.c"],
         include_dirs=["pyhctsa/toolboxes/Tisean_3_0_1", np_inc],
-        extra_compile_args=_strict_compile_args(),
+        extra_compile_args=_compile_args(),
         libraries=_libraries(),
     )
 
@@ -68,7 +61,7 @@ def build_extensions():
         "pyhctsa.toolboxes.Tisean_3_0_1.false_nearest",
         sources=["pyhctsa/toolboxes/Tisean_3_0_1/TS_false_nearest.c"],
         include_dirs=["pyhctsa/toolboxes/Tisean_3_0_1", np_inc],
-        extra_compile_args=_strict_compile_args(),
+        extra_compile_args=_compile_args(),
         libraries=_libraries(),
     )
 

@@ -6,3 +6,6 @@ recursive-include pyhctsa/toolboxes LICENSE* COPYING* NOTICE* README*
 recursive-include pyhctsa/_build *.py
 include LICENSE
 include THIRD_PARTY_LICENSES.md
+include CITATION.cff
+# the test suite needs data files and fixtures that are not shipped: leave it out of the sdist whole
+prune tests

@@ -84,6 +84,13 @@ def _flat(v):
     return {'': np.nan if v is None else float(v)}
 
 
+# embed2's statistics of the angle sequence are over the defined angles; MATLAB gives NaN for them
+# as soon as one angle is undefined (two successive embedded points coincide, which needs repeated
+# values). Pinned in tests/test_degenerate_inputs.py
+TIED_SKIP_FIELDS = {(k, s): ('theta_ac1', 'theta_ac2', 'theta_ac3', 'theta_mean', 'theta_std')
+                    for k in ('e2_tau', 'e2_1') for s in ('quant_ar', 'lattice300')}
+
+
 @pytest.mark.parametrize('key,series', CASES, ids=[f'{k}-{s}' for k, s in CASES])
 def test_matches_matlab(key, series):
     call = FIX['calls'][key]
@@ -100,7 +107,7 @@ def test_matches_matlab(key, series):
     exp = _flat(call['expected'][series])
     got = _flat(got) if not (isinstance(got, float) and np.isnan(got)) else {'': np.nan}
     tol = TOL.get(key, 1e-8)
-    skip = SKIP_FIELDS.get(key, ())
+    skip = SKIP_FIELDS.get(key, ()) + TIED_SKIP_FIELDS.get((key, series), ())
     if key.startswith('rand_'):
         # permen (the difference of normPermEn(3,1) before and after randomizing) is a jackknife estimate;
         # deliberately differs from hctsa's plug-in. (With tied values, from resampling with replacement

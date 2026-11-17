@@ -1,4 +1,5 @@
 import copy
+import difflib
 import importlib
 import inspect
 import math
@@ -23,7 +24,8 @@ from .utils import (_check_optional_deps, _input_problem, _zscore, decimate_ac1e
                     nan_outputs, z_score, SHORT_SERIES_WARNING_LENGTH, _round_half_away)
 from .quality import Quality, classify, quality_summary
 from .results import ERROR_COLUMNS, save_results
-from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk, _extract_features_single_series)
+from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk,
+                         _extract_features_single_series, _quiet_feature_warnings)
 
 class RangeList(list):
     """A list produced by the ``!range`` YAML constructor.
@@ -222,7 +224,7 @@ def classify_output(res) -> int:
     return int(classify(res)[1])
 
 def _apply_selection_wrapper(func: Callable, filter_keys: Union[str, list[str]],
-                             keep: bool = True) -> Callable:
+                             keep: bool = True, label: Union[str, None] = None) -> Callable:
     """
     Wraps a function to selectively filter keys from its dict output.
 
@@ -234,6 +236,8 @@ def _apply_selection_wrapper(func: Callable, filter_keys: Union[str, list[str]],
         filter_keys (str or list[str]): Key or keys to keep or discard from the output dict.
         keep (bool): If True, only the specified keys are retained. If False, the specified
                     keys are discarded and all remaining keys are returned. Defaults to True.
+        label (str or None): The feature label, for the warning given when a key is not among
+                    the outputs of the function (a misspelled ``select`` or ``exclude`` name).
 
     Returns
     -------
@@ -252,7 +256,10 @@ def _apply_selection_wrapper(func: Callable, filter_keys: Union[str, list[str]],
         if isinstance(result, dict):
             missing = [k for k in keys if k not in result] # log all of the missing keys
             if missing:
-                logger.info(f'Warning: time-series features for func {func} not found {missing}')
+                warnings.warn(f"{label or getattr(func, '__name__', 'A feature function')}: "
+                              f"{', '.join(repr(k) for k in missing)} (named in "
+                              f"{'select' if keep else 'exclude'}) not among its outputs: "
+                              f"{', '.join(result)}.", stacklevel=2)
             if keep:
                 return {k: result[k] for k in keys if k in result}
             else:
@@ -261,35 +268,68 @@ def _apply_selection_wrapper(func: Callable, filter_keys: Union[str, list[str]],
         return result
     return wrapper
 
+def _is_series_like(ts) -> bool:
+    """Whether ``ts`` is a container of samples (a list, tuple, pandas Series, or an array with at
+    least one dimension) rather than a single sample."""
+    return isinstance(ts, (list, tuple, pd.Series)) or (isinstance(ts, np.ndarray) and ts.ndim >= 1)
+
+
+def _as_series(ts, position: Union[int, None] = None) -> np.ndarray:
+    """One time series as a 1-D float array. ``position`` (its index in a list of series) is only
+    used in error messages."""
+    which = "The time series" if position is None else f"Time series {position}"
+    try:
+        arr = np.asarray(ts)
+    except ValueError as e:  # ragged nested sequences
+        raise ValueError(f"{which} is not a 1D sequence of numbers ({e}).") from None
+    if np.iscomplexobj(arr):
+        raise ValueError(f"{which} is complex-valued: features are defined for real-valued series.")
+    if arr.ndim != 1:
+        raise ValueError(f"{which} is not 1D (shape {arr.shape}): give each series as a 1D sequence "
+                         f"of numbers.")
+    try:
+        return np.asarray(arr, dtype=float)
+    except (TypeError, ValueError):
+        raise ValueError(f"{which} is not numeric (dtype {arr.dtype}).") from None
+
+
 def _standardise_inputs(data) -> list[np.ndarray]:
-     # standardise the input into a list of 1D float arrays
+    """The input of :meth:`FeatureCalculator.extract` as a list of 1-D float arrays, one per series.
+
+    Accepts one series (a 1-D array, a pandas Series, or a list or tuple of numbers), or several:
+    a 2-D array with one series per row, or a list or tuple of series (lists, tuples, arrays or
+    pandas Series, of any lengths).
+    """
+    if isinstance(data, pd.DataFrame):
+        raise ValueError("A pandas DataFrame does not say whether its rows or its columns are the "
+                         "time series: pass df.to_numpy() (one series per row), df.to_numpy().T "
+                         "(one series per column), or a list of series.")
+    if isinstance(data, pd.Series):
+        return [_as_series(data)]
     if isinstance(data, np.ndarray):
         if data.ndim == 1:
-            return [np.asarray(data, dtype=float)]
-        elif data.ndim == 2:
+            return [_as_series(data)]
+        if data.ndim == 2:
             if data.shape[0] > data.shape[1]:
-                # notify the user to check that the shapes make sense
-                logger.warning(f"Check that the shape of the 2D input is such "
-                      f"that (n_series, n_samples). Got shape: {data.shape}")
-            return [np.asarray(row, dtype=float) for row in data]
-        else:
-            raise ValueError("NumPy array must be 1D or 2D.")
-    # list/tuple/array-likes
-    elif isinstance(data, (list, tuple)):
-        # if it looks like a list of series, coerce each
-        # otherwise treat as a single series.
-        if len(data) > 0 and all(isinstance(ts, (list, np.ndarray)) for ts in data):
-            out = []
-            for ts in data:
-                out.append(np.asarray(ts, dtype=float))
-            return out
-        # single series
-        return [np.asarray(data, dtype=float)]
-    else:
-        raise ValueError(
-        "Input must be a 1D series, a list of 1D series, or a 2D array "
-        "with shape (n_series, n_samples)")
-   
+                warnings.warn(f"The 2D input has shape {data.shape}, read as {data.shape[0]} time "
+                              f"series of {data.shape[1]} samples each (one series per row). "
+                              f"Transpose it if the series are its columns.", stacklevel=3)
+            return [_as_series(row, i) for i, row in enumerate(data)]
+        raise ValueError("NumPy array must be 1D or 2D.")
+    if isinstance(data, (list, tuple)):
+        if len(data) == 0:
+            raise ValueError("The input is empty.")
+        series_like = [_is_series_like(ts) for ts in data]
+        if all(series_like):  # a list of series
+            return [_as_series(ts, i) for i, ts in enumerate(data)]
+        if not any(series_like):  # one series, given as a list of numbers
+            return [_as_series(data)]
+        raise ValueError("The input mixes numbers and sequences: give one series (a sequence of "
+                         "numbers) or a list of series.")
+    raise ValueError("Input must be a 1D series, a list of 1D series, or a 2D array "
+                     "with shape (n_series, n_samples)")
+
+
 def _format_range_bound(val) -> str:
     """Render a single !range bound for a label by dropping the decimal point.
 
@@ -517,6 +557,65 @@ class _FieldMinLengths:
         return {k: (np.nan if (b := self.bound(k)) is not None and n < b else v) for k, v in out.items()}
 
 
+# The keys of a master operation's entry in a configuration file. ``legacy_name`` is accepted and
+# ignored (configurations written for pyhctsa 1.x carry it).
+_ENTRY_KEYS = {'base_name', 'dependencies', 'configs', 'ordered_args', 'variant_of', 'min_length',
+               'field_min_length', 'legacy_name'}
+
+
+def _did_you_mean(name: str, candidates) -> str:
+    close = difflib.get_close_matches(name, list(candidates), n=3)
+    return f" Did you mean {' or '.join(repr(c) for c in close)}?" if close else ""
+
+
+def _check_entry(where: str, entry) -> None:
+    """Checks the shape of one master operation's entry (``where`` is ``module.operation``)."""
+    if not isinstance(entry, dict):
+        raise ValueError(f"The entry of '{where}' must be a mapping (base_name, configs, ...), "
+                         f"not {entry!r}. Check the indentation of the configuration file.")
+    for key in entry:
+        if key not in _ENTRY_KEYS:
+            warnings.warn(f"Unknown key '{key}' in the entry of '{where}' is ignored."
+                          f"{_did_you_mean(key, _ENTRY_KEYS)}", stacklevel=5)
+    configs = entry.get('configs', [{}])
+    if not isinstance(configs, list) or not all(isinstance(c, dict) for c in configs):
+        raise ValueError(f"'configs' of '{where}' must be a list of mappings (one per parameter "
+                         f"setting), not {configs!r}.")
+
+
+def _check_meta(where: str, do_zscore, do_absval, select, exclude) -> None:
+    """Checks the meta keys of one config of ``where``."""
+    for key, value in (('zscore', do_zscore), ('abs', do_absval)):
+        if not isinstance(value, bool):
+            raise ValueError(f"'{key}' of a config of '{where}' must be true or false, not {value!r}.")
+    if select is not None and exclude is not None:
+        raise ValueError(f"A config of '{where}' has both 'select' and 'exclude': give one of them.")
+    for key, value in (('select', select), ('exclude', exclude)):
+        if value is None:
+            continue
+        names = [value] if isinstance(value, str) else value
+        if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names):
+            raise ValueError(f"'{key}' of a config of '{where}' must be an output name or a "
+                             f"non-empty list of output names, not {value!r}.")
+
+
+def _check_parameters(where: str, op_func: Callable, params: dict) -> None:
+    """Checks that the function of ``where`` has every parameter a config sets."""
+    try:
+        accepted = inspect.signature(op_func).parameters
+    except (TypeError, ValueError):  # no introspectable signature: checked when it is called
+        return
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in accepted.values()):
+        return
+    names = list(accepted)[1:]  # the first parameter is the time series
+    for key in params:
+        if key not in names:
+            raise ValueError(f"A config of '{where}' sets '{key}', which is neither a parameter of "
+                             f"{op_func.__name__}() ({', '.join(names) or 'it has none'}) nor a meta "
+                             f"key (zscore, abs, preprocess, select, exclude)."
+                             f"{_did_you_mean(key, names + ['zscore', 'abs', 'preprocess', 'select', 'exclude'])}")
+
+
 class FeatureCalculator:
     """
     A configuration-driven feature extraction calculator for time series data.
@@ -597,6 +696,9 @@ class FeatureCalculator:
         return calc
 
     def _load_config(self, config: dict):
+        if not isinstance(config, dict) or not config:
+            raise ValueError("The configuration is empty: it must map operations modules to their "
+                             "master operations (see the configuration section of the documentation).")
         # building consumes the meta params (zscore, abs, ...) of self.config, so keep the
         # parsed configuration for parallel workers to rebuild the features from
         self._parsed_config = copy.deepcopy(config)
@@ -641,10 +743,19 @@ class FeatureCalculator:
                 raise ImportError(_import_failure_message(module_key, e)) from e
 
             # Process features from this module
+            if not isinstance(self.config[module_key], dict) or not self.config[module_key]:
+                raise ValueError(f"Module '{module_key}' of the configuration lists no operations.")
             for feature_name, feature_config in self.config[module_key].items():
+                where = f"{module_key}.{feature_name}"
+                _check_entry(where, feature_config)
                 if not self._check_deps(module_key, feature_name, feature_config):
                     continue
-                op_func = getattr(module, feature_name)
+                op_func = getattr(module, feature_name, None)
+                if not callable(op_func):
+                    public = [n for n, f in vars(module).items()
+                              if callable(f) and not n.startswith('_') and getattr(f, '__module__', None) == module.__name__]
+                    raise ValueError(f"'{where}': the module pyhctsa.operations.{module_key} has no "
+                                     f"function '{feature_name}'.{_did_you_mean(feature_name, public)}")
                 base_name = feature_config.get("base_name", feature_name)
                 ordered_args = feature_config.get("ordered_args", [])
                 min_length_spec = feature_config.get("min_length", None)
@@ -657,7 +768,9 @@ class FeatureCalculator:
                     preprocess = config_item.pop('preprocess', None)
                     select_features = config_item.pop('select', None)
                     exclude_features = config_item.pop('exclude', None)
+                    _check_meta(where, do_zscore, do_absval, select_features, exclude_features)
                     _preprocess_decorator(do_zscore, do_absval, preprocess)  # validates preprocess
+                    _check_parameters(where, op_func, config_item)
                     # standardise config_item into a list of combinations
                     # if config_item is empty, product(*) returns [()], allowing us to loop once
                     keys = list(config_item.keys())
@@ -668,6 +781,13 @@ class FeatureCalculator:
                         
                         # generate label and apply wrappers
                         label = _build_label(base_name, combo_dict, ordered_args, do_zscore, do_absval, preprocess)
+                        if label in feature_funcs:
+                            raise ValueError(
+                                f"Two configs give the feature label '{label}' (the second is {combo_dict} of "
+                                f"'{where}'), so one would replace the other. A label is made of base_name "
+                                f"and the values of the parameters in ordered_args: list every parameter "
+                                f"that differs between configs in ordered_args, or give the operations "
+                                f"different base_names.")
                         min_length = _eval_min_length(min_length_spec, op_func, combo_dict, label)
                         self.min_lengths[label] = min_length
                         field_min_lengths = (None if field_min_length_spec is None else
@@ -680,18 +800,21 @@ class FeatureCalculator:
                         final_func = partial(master_func, **combo_dict)
                         # filter out certain features if specified by the user with the select/include keys
                         if select_features:
-                            final_func = _apply_selection_wrapper(final_func, filter_keys=select_features, keep=True)
+                            final_func = _apply_selection_wrapper(final_func, filter_keys=select_features,
+                                                                  keep=True, label=label)
                         elif exclude_features:
-                            final_func = _apply_selection_wrapper(final_func, filter_keys=exclude_features, keep=False)
+                            final_func = _apply_selection_wrapper(final_func, filter_keys=exclude_features,
+                                                                  keep=False, label=label)
                         
                         feature_funcs[label] = final_func
         
         if self._skipped_functions:
             details = ", ".join(f"{name} (needs {', '.join(deps)})" for name, deps in self._skipped_functions)
             missing_all = sorted({d for _, deps in self._skipped_functions for d in deps})
-            logger.warning(f"Skipped {len(self._skipped_functions)} feature set(s) because optional "
-                           f"dependencies are not installed: {details}. "
-                           f"Install with: pip install {' '.join(missing_all)}")
+            # stacklevel: the code that constructed the calculator
+            warnings.warn(f"Skipped {len(self._skipped_functions)} feature set(s) because optional "
+                          f"dependencies are not installed: {details}. "
+                          f"Install with: pip install {' '.join(missing_all)}", stacklevel=4)
         return feature_funcs
 
     def extract(self, data: Union[ArrayLike, list[ArrayLike]],
@@ -706,8 +829,12 @@ class FeatureCalculator:
         data: ArrayLike or list[ArrayLike]
             The input time series data. Two forms are accepted:
             
-            * **Single series**: a 1-D array-like of real values.
-            * **Multiple series**: a 2-D array or list of 1-D array-likes.
+            * **Single series**: a 1-D array, a pandas Series, or a list or tuple of real numbers.
+            * **Multiple series**: a 2-D array with one series per row, or a list or tuple of
+              series (arrays, pandas Series, lists or tuples), which may differ in length.
+
+            A pandas DataFrame is not accepted, since it does not say whether its rows or its
+            columns are the series: pass ``df.to_numpy()`` (rows) or ``df.to_numpy().T`` (columns).
         labels: ArrayLike, list, str, int, or None, optional
             Labels for each time series. The order of labels is assumed to match 
             the order of the time series as passed in the `data` argument.
@@ -768,6 +895,8 @@ class FeatureCalculator:
             # default names
             n = len(series_list)
             labels_list = [f"ts_{i}" for i in range(1, n + 1)]
+        # built before computing, so that labels pandas cannot index by fail at once
+        index = pd.Index(labels_list, name="instance")
 
         if invalid:
             warnings.warn(f"{len(invalid)} of {len(series_list)} time series are invalid and were not "
@@ -793,17 +922,18 @@ class FeatureCalculator:
                 ) as progress:
                     task = progress.add_task("Sequential Extraction", total=len(valid_series))
                     rows = []
-                    for ts in valid_series:
-                        rows.append(_extract_features_single_series(ts, self.feature_funcs))
-                        progress.advance(task)
+                    with _quiet_feature_warnings():
+                        for ts in valid_series:
+                            rows.append(_extract_features_single_series(ts, self.feature_funcs))
+                            progress.advance(task)
             else:
-                rows = [_extract_features_single_series(ts, self.feature_funcs)
-                        for ts in valid_series]
+                with _quiet_feature_warnings():
+                    rows = [_extract_features_single_series(ts, self.feature_funcs)
+                            for ts in valid_series]
 
         elapsed = time.perf_counter() - start_time
         if verbose:
             print(f"Feature extraction completed in {elapsed:.3f} seconds.")
-        index = pd.Index(labels_list, name="instance")
         if len(rows) != len(problems) - len(invalid):
             raise RuntimeError(f"Expected results for {len(problems) - len(invalid)} series, got {len(rows)}")
         it = iter(rows)

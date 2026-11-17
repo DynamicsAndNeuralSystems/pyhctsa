@@ -2,7 +2,7 @@
 (hctsa branch robust/salv-gp).
 
 Expected values in ``data/p2_salv_gp.json`` are hctsa's (MATLAB R2026a) on the z-scored rows of the
-stationary1000 corpus stored in ``data/p2_c.json``.
+1000×1000 collection (figshare, doi:10.6084/m9.figshare.34013331) stored in ``data/p2_c.json``.
 """
 import json
 import pathlib

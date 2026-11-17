@@ -804,8 +804,9 @@ def kpss_test(y: ArrayLike, lags: Union[int, list] = 0) -> dict:
     The test was introduced in [1].
 
     The function can be used in two ways:
+
     1. With a single lag value - returns basic test statistic and p-value
-    2. With multiple lag values - returns statistics about how the test results 
+    2. With multiple lag values - returns statistics about how the test results
        change across different lags
     
     References
@@ -1044,10 +1045,16 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     Returns
     --------
     dict
-        A dictionary containing various statistical measures comparing
-        the subset to the full time series: `absmean`, `std`, `median`, `iqr`, `skewness`, `kurtosis`, `ac1`
-        (the last four are the absolute relative deviation of the subset statistic from the full-series
-        one, NaN when the full-series statistic is zero).
+        A dictionary of measures comparing the subset to the full time series:
+
+        - `absmean`, `std`, `median`: the subset's absolute mean, standard deviation and median
+          (for a z-scored series the full-series values are 0, 1 and near 0).
+        - `iqr`, `kurtosis`: the absolute relative deviation, ``|1 - subset/full|``, of the subset's
+          interquartile range and (Pearson) kurtosis from the full-series values. `iqr` is NaN when
+          the full-series interquartile range is zero.
+        - `skewness`, `ac1`: the absolute difference, ``|subset - full|``, of the skewness and of
+          the lag-1 autocorrelation. Both are dimensionless and zero for many ordinary series
+          (symmetric, uncorrelated), where a ratio to the full-series value has no stable value.
     """
     # check input time series is z-scored
     y = np.asarray(y)
@@ -1091,14 +1098,15 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
     raw_iqr_yr = _iqr(y[r])
     raw_iqr_y = _iqr(y)
     out['iqr'] = np.abs(1 - (raw_iqr_yr/raw_iqr_y)) if raw_iqr_y > 0 else np.nan
-    # ratios are NaN when the global statistic is exactly zero
-    global_skew = skew(y)
-    out['skewness'] = np.abs(1 - (skew(y[r])/global_skew)) if global_skew != 0 else np.nan
-    # use Pearson definition (normal ==> 3.0)
-    global_kurt = kurtosis(y, fisher=False)
-    out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/global_kurt)) if global_kurt != 0 else np.nan
-    global_ac1 = autocorr(y, 1, 'Fourier')
-    out['ac1'] = np.abs(1 - (autocorr(y[r], 1, 'Fourier')/global_ac1)) if global_ac1 != 0 else np.nan
+    # Skewness and lag-1 autocorrelation: absolute differences. Their full-series values are zero
+    # plus sampling noise for symmetric and for uncorrelated series, so a ratio to them is
+    # heavy-tailed and grows with the series length; both are dimensionless, so the difference
+    # needs no normalization.
+    out['skewness'] = np.abs(skew(y[r]) - skew(y))
+    # Kurtosis: a ratio, like the interquartile range. The Pearson definition (normal ==> 3.0) is
+    # at least 1, so the ratio is always defined.
+    out['kurtosis'] = np.abs(1 - (kurtosis(y[r], fisher=False)/kurtosis(y, fisher=False)))
+    out['ac1'] = np.abs(autocorr(y[r], 1, 'Fourier') - autocorr(y, 1, 'Fourier'))
 
     return out
 
@@ -2672,11 +2680,11 @@ def slow_feature_analysis(y: ArrayLike, min_window_length: int = 20) -> dict:
     References
     ----------
     .. [1] Wiskott, L. & Sejnowski, T.J. "Slow feature analysis: unsupervised learning of
-    invariances." Neural Computation 14(4), 715-770 (2002).
+       invariances." Neural Computation 14(4), 715-770 (2002).
     .. [2] Owens, K.S., Tamaki, M. & Fulcher, B.D. "Parameter inference from a non-stationary
-    unknown process using statistical feature-based slow feature analysis", arXiv:2609.01651
-    (2026). The full feature-based method (f-SFA: sliding-window catch22/catch24 features +
-    SFA) is implemented in the Python package fsfa: https://github.com/KieranOwens/fsfa
+       unknown process using statistical feature-based slow feature analysis", arXiv:2609.01651
+       (2026). The full feature-based method (f-SFA: sliding-window catch22/catch24 features +
+       SFA) is implemented in the Python package fsfa: https://github.com/KieranOwens/fsfa
 
     Parameters
     ----------

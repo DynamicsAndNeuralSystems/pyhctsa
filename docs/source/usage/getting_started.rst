@@ -18,7 +18,8 @@ If you would like to specify a custom feature set, you can pass the correspondin
 
    custom_calc = FeatureCalculator(config_path="subset.yaml")
 
-The number of master operations (callable functions) specified by the .yaml will be displayed for verification e.g., Loaded 1080 master operations for the default feature set.
+``len(calc.feature_funcs)`` is the number of feature functions (parameter settings of an operation) the configuration defines: 1080 for the default feature set.
+Each returns one feature or several, 6344 in all.
 Once a `FeatureCalculator` has been initialized, you can call the extract method to compute time series features on either a single time-series instance or a list of multiple instances:
 
 .. code-block:: python
@@ -30,7 +31,7 @@ Once a `FeatureCalculator` has been initialized, you can call the extract method
     res = calc.extract(data)
 
 ``get_dataset()`` returns the Empirical1000 dataset of 1000 empirical time series
-(`doi:10.6084/m9.figshare.5436136 <https://doi.org/10.6084/m9.figshare.5436136>`_). It is not
+(`doi:10.6084/m9.figshare.5436136.v11 <https://doi.org/10.6084/m9.figshare.5436136.v11>`_). It is not
 bundled with pyhctsa: the first call downloads it (33 MB) to ``~/.cache/pyhctsa`` (set the
 ``PYHCTSA_DATA_DIR`` environment variable to use another directory).
 
@@ -64,15 +65,27 @@ cores on your local machine using the `LocalDistributor`:
     
     from pyhctsa.distribute import LocalDistributor
     from pyhctsa.calculator import FeatureCalculator
+    from pyhctsa.utils import get_dataset
 
-    # initialize the calculator
-    calc = FeatureCalculator()
+    if __name__ == "__main__":
+        data = get_dataset()[:10]
 
-    # create a LocalDistributor and specify the number of workers
-    # it is generally recommended to set n_workers to the number of physical CPU cores
-    dist = LocalDistributor(n_workers=4)
+        # initialize the calculator
+        calc = FeatureCalculator()
 
-    # pass the distributor to the .extract() method
-    res = calc.extract(data, distributor=dist)
+        # create a LocalDistributor and specify the number of workers
+        # it is generally recommended to set n_workers to the number of physical CPU cores
+        dist = LocalDistributor(n_workers=4)
+
+        # pass the distributor to the .extract() method
+        res = calc.extract(data, distributor=dist)
+
+.. important::
+
+   In a script, the code that starts the extraction must be under ``if __name__ == "__main__":``, as above.
+   The workers are new Python processes that import your script, and without the guard each of them would
+   start the extraction again: Python then raises a ``RuntimeError`` about the "bootstrapping phase" and the
+   call never returns.
+   The guard is not needed in a notebook or an interactive session.
 
     

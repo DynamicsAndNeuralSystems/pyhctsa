@@ -1,6 +1,7 @@
 """Accuracy tests for the clean-room short statistics (work package B3): Kaplan's statistics,
 nsAMDF curve helpers, fractal-dimension error, approximate entropy, x_corr."""
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -13,8 +14,9 @@ from pyhctsa.operations.nonlinearity import (
     _fractal_dim_error, _increment_pnorm_curve, fractal_dimensions, nsamdf)
 from pyhctsa.utils import x_corr
 
-SP = Path('/Users/benfulcher/ClaudeCode/pyhctsa-cleanroom-work')
-SPEC = SP / 'cleanroom/specs/thirdparty'
+# The black-box reference outputs these tests compare with are not in the repository: point
+# THIRDPARTY_SPEC_DIR at the directory that holds thirdparty_blackbox.json to run them
+SPEC = Path(os.environ.get('THIRDPARTY_SPEC_DIR', 'THIRDPARTY_SPEC_DIR-not-set'))
 FIX = SPEC / 'thirdparty_blackbox.json'
 INPUTS = SPEC / 'gen/thirdparty_inputs.json'
 

@@ -145,7 +145,7 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
         Default: 3 (matches local_density's default).
     theiler_win : int, float, list or tuple, optional
         The Theiler window: the number of temporally-adjacent points excluded from both the
-        within-set and cross-set neighbor searches (|i-j| <= theiler_win), applied
+        within-set and cross-set neighbor searches (``|i-j| <= theiler_win``), applied
         at matching time indices in both the forward and reversed embeddings. Either
         ``['ac', c]`` for ``c`` times the first zero crossing of the autocorrelation function
         (or ``['ac1e', c]`` for its 1/e time), a number of samples, or a number in (0, 1) for a
@@ -380,7 +380,7 @@ def oversampling(y: ArrayLike) -> dict:
     -------
     dict
         Dictionary containing:
-            - 'eta': The oversampling statistic, range(y)/mean(|diff(y)|).
+            - 'eta': The oversampling statistic, ``range(y)/mean(|diff(y)|)``.
             - 'etaRobust': The same ratio with range replaced by a 5th-95th
               percentile range, since eta's numerator (a global max-min) is a
               single-outlier-sensitive statistic; etaRobust asks the same
@@ -894,7 +894,7 @@ def crinkle_statistic(y: ArrayLike, tau: Union[int, str] = 1) -> float:
     tau : int or str, optional
         The step of the second difference, in samples: an integer, or a rule for
         :func:`~pyhctsa.utils.get_tau` (e.g. ``'ac1e'``). The numerator then averages
-        :math:`(\tilde{x}_{t-\tau} - 2\tilde{x}_t + \tilde{x}_{t+\tau})^4` over every
+        :math:`(\\tilde{x}_{t-\\tau} - 2\\tilde{x}_t + \\tilde{x}_{t+\\tau})^4` over every
         interior point, which pools the ``tau`` phases of the series sampled every ``tau``
         samples. Default 1. NaN when a rule cannot set the delay.
 
@@ -1227,12 +1227,19 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
 
     out = {}
 
-    out['theta_ac1'] = autocorr(theta, 1, 'Fourier')
-    out['theta_ac2'] = autocorr(theta, 2, 'Fourier')
-    out['theta_ac3'] = autocorr(theta, 3, 'Fourier')
-
-    out['theta_mean'] = np.mean(theta)
-    out['theta_std'] = _sample_std(theta)
+    # The angle between two successive points that coincide (repeated values in the series) is
+    # undefined (0/0); the statistics of the angle sequence are over the defined angles, as in
+    # embed2_angle_tau
+    theta_defined = theta[~np.isnan(theta)]
+    if theta_defined.size > 0:
+        out['theta_ac1'] = autocorr(theta_defined, 1, 'Fourier')
+        out['theta_ac2'] = autocorr(theta_defined, 2, 'Fourier')
+        out['theta_ac3'] = autocorr(theta_defined, 3, 'Fourier')
+        out['theta_mean'] = np.mean(theta_defined)
+        out['theta_std'] = _sample_std(theta_defined)
+    else:
+        for key in ('theta_ac1', 'theta_ac2', 'theta_ac3', 'theta_mean', 'theta_std'):
+            out[key] = np.nan
     
     # 10 equal bins on the support of the angles (-pi/2, pi/2) (explicit edges, so that angles
     # of exactly zero from tied values or of exactly +/-pi/2 from a vertical step fall in the

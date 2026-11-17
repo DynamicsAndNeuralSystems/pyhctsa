@@ -198,6 +198,7 @@ stationarity:
       SY_SlidingWindow_specen_ent5_1: 'the entropy summary of spectral entropy is dropped: it does not respond to drift once the length effect is removed'
   local_global:
     legacy_name: SY_LocalGlobal
+    note: 'skewness and ac1 are absolute differences from the full-series value; hctsa has relative deviations'
   drifting_mean:
     legacy_name: SY_DriftingMean
   range_evolve:
