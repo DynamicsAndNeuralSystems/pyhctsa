@@ -6,10 +6,17 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
+from importlib.metadata import PackageNotFoundError, version as _dist_version
 from pathlib import Path
 import subprocess
+import sys
 
 project = 'pyhctsa'
+try:  # the installed package the documentation is built from
+    release = _dist_version('pyhctsa')
+except PackageNotFoundError:
+    release = ''
+version = '.'.join(release.split('.')[:2])
 copyright = '2026, Joshua B. Moore'
 author = 'Joshua B. Moore'
 
@@ -41,7 +48,7 @@ napoleon_google_docstring = False
 # -- CSV generation ----------------------------------------------------------
 def generate_csv(app):
     script = Path(__file__).parent / "scripts" / "generate_mappings.py"
-    subprocess.run(["python", str(script)], check=True)
+    subprocess.run([sys.executable, str(script)], check=True)
 
 def setup(app):
     app.connect("builder-inited", generate_csv)

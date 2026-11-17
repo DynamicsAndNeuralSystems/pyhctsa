@@ -11,7 +11,7 @@ We use the following conventions when organising dependencies in `pyhctsa`:
 
    # Standard python libraries
    import time
-   from typing import union
+   from typing import Union
 
    # third-party imports
    import numpy as np

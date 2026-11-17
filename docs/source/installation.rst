@@ -11,8 +11,8 @@ The easiest way to install `pyhctsa` is using `pip <https://pypi.org/project/pyh
 
    > pip install pyhctsa
 
-This gives 6384 of the 6392 features of the *hctsa* v3.0.0 feature set.
-The other 8, the persistent-homology features (``NL_PersistentHomology``), need the optional
+This gives 6336 of the 6344 features of the default feature set.
+The other 8, the persistent-homology features (``persistent_homology``), need the optional
 `ripser <https://github.com/scikit-tda/ripser.py>`_ package; without it the calculator skips them and
 warns. For the full feature set, install with the ``tda`` extra:
 

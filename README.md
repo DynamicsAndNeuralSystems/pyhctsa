@@ -49,8 +49,8 @@ _pyhctsa_ requires Python 3.10 or newer:
 pip install pyhctsa
 ```
 
-This gives 6384 of the 6392 features of the _hctsa_ v3.0.0 feature set.
-The other 8, the persistent-homology features (`NL_PersistentHomology`), need the optional `ripser` package; without it the calculator skips them and warns.
+This gives 6336 of the 6344 features of the default feature set.
+The other 8, the persistent-homology features (`persistent_homology`), need the optional `ripser` package; without it the calculator skips them and warns.
 For the full feature set, install with the `tda` extra:
 
 ```bash
@@ -71,7 +71,7 @@ Instantiate a `FeatureCalculator` and call `extract` on your data:
 from pyhctsa.calculator import FeatureCalculator
 from pyhctsa.utils import get_dataset
 
-calc = FeatureCalculator()          # Loaded 1080 master operations.
+calc = FeatureCalculator()          # the default feature set
 
 e1000 = get_dataset()               # Empirical1000 dataset (downloaded once, 33 MB)
 data = e1000[0]                     # a list, array, or pandas Series
@@ -129,15 +129,15 @@ Machine-readable metadata is provided in [`CITATION.cff`](https://github.com/Dyn
 
 ## Licenses
 
-_pyhctsa_ is licensed under the [GNU General Public License v3.0 or later](LICENSE). It is a Python implementation of
+_pyhctsa_ is licensed under the [GNU General Public License v3.0 or later](https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/LICENSE). It is a Python implementation of
 the feature library of [_hctsa_](https://github.com/benfulcher/hctsa). Some features use third-party code, bundled in
-[`pyhctsa/toolboxes/`](pyhctsa/toolboxes) under its own GPL-compatible license (full texts in
-[`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)); others are clean-room re-implementations of published methods.
+[`pyhctsa/toolboxes/`](https://github.com/DynamicsAndNeuralSystems/pyhctsa/tree/main/pyhctsa/toolboxes) under its own GPL-compatible license (full texts in
+[`THIRD_PARTY_LICENSES.md`](https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/THIRD_PARTY_LICENSES.md)); others are clean-room re-implementations of published methods.
 Full credits are on the [Acknowledgements](https://dynamicsandneuralsystems.github.io/pyhctsa/acknowledgements.html) page of the documentation.
 
 ## Notes
 
-- **Version 2 and this repository's history.** _pyhctsa_ 2.0 (October 2026) lives in a re-created repository with a fresh history.
+- **Version 2 and this repository's history.** _pyhctsa_ 2.0 (November 2026) lives in a re-created repository with a fresh history.
   Every function that depended on MATLAB code was re-implemented clean-room from published methods, and bundled third-party code is GPL-compatible (see [Licenses](#licenses)).
   Earlier releases (1.x) have been yanked; please upgrade.
 - **AI use.** Much of _pyhctsa_ 2.0, including the clean-room re-implementations, tests and documentation, was written with AI coding assistants (Anthropic's Claude) under the direction of the maintainers.

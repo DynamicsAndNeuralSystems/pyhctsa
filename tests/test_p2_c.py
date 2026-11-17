@@ -1,7 +1,9 @@
 """Tests for the model-fitting features redefined in hctsa's robustness work (hctsa robust/all).
 
 Expected values in ``data/p2_c.json`` are outputs of hctsa (MATLAB R2026a, branch robust/all) on the stored
-series: z-scored rows of the stationary1000 corpus (``s<row>``), an exact sinusoid and a 30-sample series.
+series: z-scored rows of the 1000×1000 collection of synthetic time series (``s<row>`` is that row of its
+``series.npz``; Fulcher, figshare, doi:10.6084/m9.figshare.34013331; 'stationary1000' in the stored notes), an
+exact sinusoid and a 30-sample series.
 """
 import json
 import pathlib

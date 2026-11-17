@@ -145,7 +145,7 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
         Default: 3 (matches local_density's default).
     theiler_win : int, float, list or tuple, optional
         The Theiler window: the number of temporally-adjacent points excluded from both the
-        within-set and cross-set neighbor searches (|i-j| <= theiler_win), applied
+        within-set and cross-set neighbor searches (``|i-j| <= theiler_win``), applied
         at matching time indices in both the forward and reversed embeddings. Either
         ``['ac', c]`` for ``c`` times the first zero crossing of the autocorrelation function
         (or ``['ac1e', c]`` for its 1/e time), a number of samples, or a number in (0, 1) for a
@@ -373,7 +373,7 @@ def oversampling(y: ArrayLike) -> dict:
     -------
     dict
         Dictionary containing:
-            - 'eta': The oversampling statistic, range(y)/mean(|diff(y)|).
+            - 'eta': The oversampling statistic, ``range(y)/mean(|diff(y)|)``.
             - 'etaRobust': The same ratio with range replaced by a 5th-95th
               percentile range, since eta's numerator (a global max-min) is a
               single-outlier-sensitive statistic; etaRobust asks the same
