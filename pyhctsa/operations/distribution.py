@@ -560,7 +560,9 @@ def mean(y: ArrayLike, mean_type: str = 'arithmetic') -> float:
         - 'norm' or 'arithmetic': standard arithmetic mean
         - 'median': middle value (50th percentile)
         - 'geom': geometric mean (nth root of product)
-        - 'harm': harmonic mean (reciprocal of mean of reciprocals)
+        - 'harm': harmonic mean (reciprocal of mean of reciprocals), defined for positive
+          data: NaN if any value is negative (the sum of reciprocals then has poles, so the
+          result is not a measure of location), and 0, its limit, if any value is zero
         - 'rms': root mean square (quadratic mean)
         - 'iqm': interquartile mean (mean of values between Q1 and Q3)
         - 'midhinge': average of first and third quartiles
@@ -581,8 +583,13 @@ def mean(y: ArrayLike, mean_type: str = 'arithmetic') -> float:
         out = np.median(y)
     elif mean_type == 'geom': # geometric mean
         out = stats.gmean(y)
-    elif mean_type == 'harm': # harmonic mean
-        out = N/sum(y**(-1))
+    elif mean_type == 'harm': # harmonic mean (of non-negative data)
+        if np.any(y < 0):
+            out = np.nan
+        elif np.any(y == 0):
+            out = 0.0  # the limit as any value goes to zero
+        else:
+            out = N / np.sum(1.0 / y)
     elif mean_type == 'rms':
         out = np.sqrt(np.mean(y**2))
     elif mean_type == 'iqm': # interquartile mean
@@ -792,9 +799,15 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
 def burstiness(y: ArrayLike) -> dict:
     """
     Calculate burstiness statistics of a time series.
-    
-    Implements both the original Goh & Barabasi burstiness and
-    the improved Kim & Jo version for finite time series.
+
+    Implements both the original Goh & Barabasi burstiness, :math:`B = (r - 1)/(r + 1)`
+    with :math:`r = \\sigma/\\mu` the coefficient of variation, and the Kim & Jo version,
+    which corrects it for the finite length of the series.
+
+    Burstiness is a statistic of non-negative data (inter-event times, counts), for which
+    :math:`B` lies between -1 (regular) and 1 (bursty), with 0 for a Poisson process.
+    Both versions are NaN if any value is negative: :math:`r` is then not a relative
+    spread, and :math:`B` is unbounded, with a pole at :math:`\\mu = -\\sigma`.
 
     References
     ----------
@@ -812,9 +825,14 @@ def burstiness(y: ArrayLike) -> dict:
 
         - 'B': Original burstiness statistic
         - 'B_Kim': Improved burstiness for finite series
+
+        Both are NaN if any value is negative, or if all values are zero.
     """
     y = np.asarray(y)
     me = np.mean(y)
+    if np.any(y < 0) or not me > 0:
+        # outside the domain of the statistic (non-negative data with a positive mean)
+        return {'B': np.nan, 'B_Kim': np.nan}
     std = _sample_std(y)
 
     r = np.divide(std,me) # coefficient of variation

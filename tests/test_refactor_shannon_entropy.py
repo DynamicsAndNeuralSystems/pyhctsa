@@ -26,7 +26,7 @@ _SERIES = _series()
 
 _CALLS = [
   ('entropy', 'permutation_entropy', dict(m=3, tau=1), ['permEnLE', 'normWPE']),
-  ('entropy', 'rpde', dict(m=2, tau=1), ['H', 'H_norm']),
+  ('entropy', 'rpde', dict(m=2, tau=1, t_max=-1), ['H', 'H_norm']),
   ('entropy', 'permutation_entropy_complexity', dict(m=4, tau=1), ['hNorm', 'jsComplexity']),
   ('entropy', 'wavelet_entropy', dict(), None),
   ('entropy', 'dispersion_entropy', dict(m=3), ['dispEn', 'fDispEn']),

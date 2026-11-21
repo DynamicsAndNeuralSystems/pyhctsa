@@ -52,7 +52,7 @@ CALLS = {
     'embed_pca': (NL.embed_pca, {}),
     'embed_kernel_pca': (NL.embed_kernel_pca, {}),
     'persistent_homology': (NL.persistent_homology, {}),
-    'rpde': (EN.rpde, dict(m=3, tau='ac')),
+    'rpde': (EN.rpde, dict(m=3, tau='ac', t_max=-1)),
     'approximate_entropy': (EN.approximate_entropy, dict(mnom=2, rth=0.1)),
     'randomize_ordinal': (EN.randomize_ordinal, {}),
     'dispersion_entropy': (EN.dispersion_entropy, dict(m=2, c=6, tau='ac')),
