@@ -1353,6 +1353,9 @@ def get_tau(y: ArrayLike, rule: Union[int, str] = 'ac1e') -> Union[int, float]:
 
     Notes
     -----
+    On a series with a trend or random-walk component the AMI has no genuine minimum, and
+    ``'mi'`` can return a lag set by estimator noise, below ``ac1e``.
+
     The last few results are cached (keyed on the rule and the series' values), since
     many operations resolve the same delay for the same series and the Kraskov AMI behind
     ``'mi'`` is the expensive part.
