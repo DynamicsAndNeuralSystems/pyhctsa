@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.bicorrelation
+============================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: bicorrelation

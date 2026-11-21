@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.oversampling
+===========================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: oversampling

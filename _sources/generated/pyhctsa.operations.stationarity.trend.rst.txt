@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.trend
+=====================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: trend

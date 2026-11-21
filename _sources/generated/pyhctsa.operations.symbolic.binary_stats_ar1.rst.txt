@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.symbolic.binary\_stats\_ar1
+==============================================
+
+.. currentmodule:: pyhctsa.operations.symbolic
+
+.. autofunction:: binary_stats_ar1

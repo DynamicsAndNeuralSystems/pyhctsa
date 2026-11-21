@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.spectral.doubled\_phase\_coherence
+=====================================================
+
+.. currentmodule:: pyhctsa.operations.spectral
+
+.. autofunction:: doubled_phase_coherence

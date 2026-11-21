@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.fit\_mle
+========================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: fit_mle

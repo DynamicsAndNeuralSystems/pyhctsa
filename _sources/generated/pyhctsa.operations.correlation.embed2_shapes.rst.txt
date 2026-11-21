@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.embed2\_shapes
+=============================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: embed2_shapes

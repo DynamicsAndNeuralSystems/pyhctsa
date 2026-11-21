@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.spectral.rhythmicity
+=======================================
+
+.. currentmodule:: pyhctsa.operations.spectral
+
+.. autofunction:: rhythmicity

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.extreme\_events.extreme\_event\_order
+========================================================
+
+.. currentmodule:: pyhctsa.operations.extreme_events
+
+.. autofunction:: extreme_event_order

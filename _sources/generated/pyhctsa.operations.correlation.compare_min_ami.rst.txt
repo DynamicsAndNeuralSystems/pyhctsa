@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.compare\_min\_ami
+================================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: compare_min_ami

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.medical.pol\_var\_resid
+==========================================
+
+.. currentmodule:: pyhctsa.operations.medical
+
+.. autofunction:: pol_var_resid

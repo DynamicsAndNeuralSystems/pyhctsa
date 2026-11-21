@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.hypothesis\_tests.marginal\_tests
+====================================================
+
+.. currentmodule:: pyhctsa.operations.hypothesis_tests
+
+.. autofunction:: marginal_tests

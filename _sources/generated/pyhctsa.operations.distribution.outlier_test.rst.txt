@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.outlier\_test
+=============================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: outlier_test

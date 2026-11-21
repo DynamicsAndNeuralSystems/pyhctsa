@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.extreme\_events.extremogram
+==============================================
+
+.. currentmodule:: pyhctsa.operations.extreme_events
+
+.. autofunction:: extremogram

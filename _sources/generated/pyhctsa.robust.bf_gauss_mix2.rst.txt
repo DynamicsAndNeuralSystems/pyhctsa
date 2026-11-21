@@ -1,0 +1,6 @@
+﻿pyhctsa.robust.bf\_gauss\_mix2
+==============================
+
+.. currentmodule:: pyhctsa.robust
+
+.. autofunction:: bf_gauss_mix2

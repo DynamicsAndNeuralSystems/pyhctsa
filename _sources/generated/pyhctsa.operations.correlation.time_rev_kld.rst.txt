@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.time\_rev\_kld
+=============================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: time_rev_kld

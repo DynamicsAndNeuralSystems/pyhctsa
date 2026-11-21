@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.quantile
+========================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: quantile

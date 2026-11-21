@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.nonlinearity.fnn
+===================================
+
+.. currentmodule:: pyhctsa.operations.nonlinearity
+
+.. autofunction:: fnn

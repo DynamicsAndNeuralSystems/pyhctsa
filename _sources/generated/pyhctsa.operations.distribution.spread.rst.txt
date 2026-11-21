@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.spread
+======================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: spread

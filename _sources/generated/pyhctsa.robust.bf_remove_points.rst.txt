@@ -1,0 +1,6 @@
+﻿pyhctsa.robust.bf\_remove\_points
+=================================
+
+.. currentmodule:: pyhctsa.robust
+
+.. autofunction:: bf_remove_points

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.fuzzy\_entropy
+=========================================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: fuzzy_entropy

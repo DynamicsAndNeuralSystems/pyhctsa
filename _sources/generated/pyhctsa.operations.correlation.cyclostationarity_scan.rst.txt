@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.cyclostationarity\_scan
+======================================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: cyclostationarity_scan

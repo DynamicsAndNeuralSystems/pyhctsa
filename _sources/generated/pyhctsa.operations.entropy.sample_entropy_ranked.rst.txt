@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.sample\_entropy\_ranked
+==================================================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: sample_entropy_ranked

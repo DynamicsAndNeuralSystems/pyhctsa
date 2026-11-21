@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.ar\_cov
+=====================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: ar_cov

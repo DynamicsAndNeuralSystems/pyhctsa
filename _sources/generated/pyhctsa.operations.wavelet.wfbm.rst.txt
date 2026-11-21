@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.wavelet.wfbm
+===============================
+
+.. currentmodule:: pyhctsa.operations.wavelet
+
+.. autofunction:: wfbm

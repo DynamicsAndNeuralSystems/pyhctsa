@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.wavelet.scal\_2\_freq
+========================================
+
+.. currentmodule:: pyhctsa.operations.wavelet
+
+.. autofunction:: scal_2_freq

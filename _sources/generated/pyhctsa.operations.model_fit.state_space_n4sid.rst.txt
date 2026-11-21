@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.state\_space\_n4sid
+=================================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: state_space_n4sid

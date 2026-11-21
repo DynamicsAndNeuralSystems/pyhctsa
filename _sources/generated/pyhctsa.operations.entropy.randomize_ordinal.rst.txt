@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.randomize\_ordinal
+=============================================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: randomize_ordinal
