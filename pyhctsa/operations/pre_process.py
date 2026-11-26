@@ -452,7 +452,7 @@ def preproc_iterate(y: ArrayLike, dt_meth: str = 'diff') -> dict:
         The preprocessing to apply:
 
         - ``"spline"``: remove a least-squares cubic spline with 1, ..., 20 pieces
-        - ``"diff"``: take incremental differences, 1, ..., 5 times (the method hctsa uses)
+        - ``"diff"``: take incremental differences, 1, ..., 5 times
         - ``"medianf"``: a median filter with 25 window lengths from 1 to N/25
         - ``"rav"``: a running mean filter with 25 window lengths from 1 to N/25
         - ``"resampleup"``: progressively upsample the series, by factors 1, ..., 20
@@ -543,7 +543,7 @@ def preproc_model_fit(y: ArrayLike, model: str = 'ar', order: int = 2,
     version is z-scored before the model is fitted. The AR model is fitted by forward-backward
     least squares.
 
-    Only one representative of each family of preprocessings (from hctsa's ``PP_PreProcess``)
+    Only one representative of each family of preprocessings
     is fitted, as the other candidates were found to correlate at r >= 0.95 with one of these:
 
     - ``d1``: incremental differencing (first differences)
@@ -563,10 +563,11 @@ def preproc_model_fit(y: ArrayLike, model: str = 'ar', order: int = 2,
     order : int, optional
         The order of the AR model to fit. Default is 2.
     random_seed : int, 'default', 'none' or None, optional
-        The seed of the random draws used by ``rmgd`` (hctsa's ``BF_RandomSeed``): an integer,
+        The seed of the random draws used by ``rmgd`` (see :func:`pyhctsa.robust.bf_random_seed`):
+        an integer,
         ``'default'`` or ``None`` for seed 0, or ``'none'`` for a seed drawn from NumPy's global
         random state. The draws come from the portable generator
-        :func:`pyhctsa.robust.bf_random`, so they are hctsa's for the same seed.
+        :func:`pyhctsa.robust.bf_random`, so they depend on the seed alone.
 
     Returns
     -------

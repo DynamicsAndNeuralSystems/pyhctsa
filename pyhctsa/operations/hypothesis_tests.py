@@ -208,7 +208,7 @@ def distribution_test(x: ArrayLike, the_test: str = 'chi2gof', the_distn: str = 
     num_bins = int(num_bins)
 
     if the_distn == 'beta':
-        # hctsa's own (crude) rescaling of the data into the open interval (0,1)
+        # a simple (crude) rescaling of the data into the open interval (0,1)
         sd = _sample_std(x)
         x = (x - np.min(x) + 0.01 * sd) / (np.max(x) - np.min(x) + 0.02 * sd)
     elif the_distn in ('rayleigh', 'exp', 'gamma'):
@@ -331,7 +331,7 @@ def variance_ratio_test(y: ArrayLike, periods: Union[int, list[int], float] = 2,
 
     res = np.array([_vratiotest(y, int(p), bool(iid)) for p, iid in zip(periods, iids)])
     pvals, stats, ratios = res[:, 0], res[:, 1], res[:, 2]
-    if len(periods) == 1:  # a single test: summarize it directly, as in hctsa
+    if len(periods) == 1:  # a single test: summarize it directly
         return {'pValue': pvals[0], 'stat': stats[0], 'ratio': ratios[0]}
     imax, imin = np.argmin(np.abs(stats)), np.argmax(np.abs(stats))  # largest, smallest p-value (first on ties)
 
@@ -355,7 +355,7 @@ def hypothesis_test(x: ArrayLike, the_test: str = 'signtest') -> float:
     """
     Perform statistical hypothesis testing on a time series.
 
-    Deprecated in hctsa in favor of :func:`marginal_tests` (tests about the
+    Superseded by :func:`marginal_tests` (tests about the
     distribution of values) and :func:`independence_tests` (tests of serial
     independence), to which this dispatches.
 
@@ -588,8 +588,7 @@ def marginal_tests(y: ArrayLike, the_test: str = 'signtest') -> float:
 
     Tests the distribution of the values of the time series, ignoring their temporal
     order (a shuffled series gives the same p-value); see :func:`independence_tests`
-    for tests of serial dependence. This is the part of hctsa's former
-    ``HT_HypothesisTest`` that tests marginal properties.
+    for tests of serial dependence.
 
     Parameters
     ----------
@@ -647,8 +646,7 @@ def independence_tests(y: ArrayLike, the_test: str = 'runsz') -> float:
 
     Tests whether the values of the time series are independent of one another. Unlike
     the tests in :func:`marginal_tests`, the result depends on the temporal order of the
-    values. This is the part of hctsa's former ``HT_HypothesisTest`` that tests
-    dependence. The runs test is returned as its z-statistic (in closed form), the other
+    values. The runs test is returned as its z-statistic (in closed form), the other
     tests as p-values.
 
     Parameters

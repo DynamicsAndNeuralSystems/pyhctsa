@@ -5,7 +5,7 @@ Nonparametric (KSG) mutual-information estimator.
 (KSG), algorithms 1 and 2 [1]_.
 
 It is written directly from the published definitions; the Java Information Dynamics
-Toolkit (JIDT; Lizier, 2014 [2]_), which hctsa uses for these estimators, served only as a
+Toolkit (JIDT; Lizier, 2014 [2]_) served only as a
 reference for the method conventions (which neighbors are counted, how the marginals are
 scaled), not as a source of code.
 

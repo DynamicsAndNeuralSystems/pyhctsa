@@ -4,10 +4,10 @@
 # ``minimize`` is a port of minimize.m, Copyright (C) 2001-2010 Carl Edward Rasmussen.
 # Python port and modifications (c) 2025-2026 the pyhctsa authors, distributed under GPL-3.0-or-later.
 """
-Optimizers from the gpml Gaussian-process toolbox (Rasmussen & Nickisch), as used by hctsa.
+Optimizers from the gpml Gaussian-process toolbox (Rasmussen & Nickisch).
 
-``minimize`` is Rasmussen's conjugate-gradient minimizer. hctsa runs it with a hard budget of 50
-function evaluations and reports the resulting hyperparameters *as feature values*, so the optimizer's trajectory (its line-search
+``minimize`` is Rasmussen's conjugate-gradient minimizer. The GP features run it with a hard budget
+of function evaluations (50 by default) and report the resulting hyperparameters *as feature values*, so the optimizer's trajectory (its line-search
 branch structure and its truncation point) is part of the definition of the feature; a different
 optimizer (e.g. L-BFGS-B) would give different feature values.
 
@@ -57,8 +57,8 @@ def minimize(x0, f, length, *args):
         caught and handled by bisecting the step and retrying.
     length : int
         Length of the run. Positive gives the maximum number of line searches,
-        negative gives the maximum number of function evaluations. hctsa uses
-        ``-50``.
+        negative gives the maximum number of function evaluations. The GP
+        features use ``-50``.
     *args
         Extra arguments forwarded to ``f``.
 

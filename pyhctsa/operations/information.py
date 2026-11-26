@@ -12,7 +12,7 @@ from ..utils import _first_extremum, dict_output, _coarse_grain, get_tau, sign_c
 from ..robust import bf_hist_edges, bf_tie_break_noise
 from ..ksg import ksg_mi
 
-# hctsa BF_TieBreakNoise: tiny jitter from hctsa's portable BF_Random stream (pyhctsa.robust),
+# Tiny tie-breaking jitter from the portable bf_random stream (pyhctsa.robust),
 # so the draws are reproducible across platforms. Aliased to a private name for the
 # callers in this module.
 _tie_break_noise = bf_tie_break_noise
@@ -21,7 +21,7 @@ _tie_break_noise = bf_tie_break_noise
 def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, None]) -> Callable:
     """Helper to return the correct correlation function based on method type.
 
-    As in hctsa's ``CO_FirstMin``: a naked ``'mi'`` is the Kraskov AMI (``'mi-kraskov1'``),
+    A naked ``'mi'`` is the Kraskov AMI (``'mi-kraskov1'``),
     and for ``'mi'``/``'mi-kraskov1'`` ``extra_param`` is not passed on (the estimator's
     default of 4 nearest neighbors is used).
     """
@@ -43,7 +43,7 @@ def _get_corr_fn(y: np.ndarray, min_what: str, extra_param: Union[int, float, No
     else:
         raise ValueError(f"Unknown correlation type specified: {min_what}")
 
-# 1 - r^2 is floored at 1e-12 in the Gaussian AMI (hctsa IN_AutoMutualInfo): at |r| = 1 it is
+# 1 - r^2 is floored at 1e-12 in the Gaussian AMI: at |r| = 1 it is
 # rounding noise, and can be 0 or negative, so a deterministic relationship (a trend, a pure
 # oscillation) gives a finite value (at most -0.5*log(1e-12) = 13.8 nats)
 _GAUSSIAN_AMI_FLOOR = 1e-12
@@ -53,7 +53,7 @@ def _gaussian_ami_from_r(r):
     """Gaussian AMI ``-0.5*log(max(1 - r^2, 1e-12))`` from a Pearson correlation ``r`` (scalar or array).
 
     The maximum ignores NaN (``numpy.fmax``), so a NaN correlation (a constant delay window)
-    gives the floor, 13.8 nats, as in hctsa.
+    gives the floor, 13.8 nats.
     """
     with np.errstate(invalid='ignore'):
         return -0.5 * np.log(np.fmax(1.0 - np.asarray(r, dtype=float) ** 2, _GAUSSIAN_AMI_FLOOR))
@@ -106,8 +106,8 @@ def _ami_gaussian_curve(y: np.ndarray):
     precision at long lags of smooth series (r close to 1), where the AMI -0.5*log(1 - r^2)
     amplifies the error (up to ~1e-2, enough to create a spurious extremum). Every lag whose
     fast estimate has 1 - r^2 below 1e-2 (or is not finite) is therefore recomputed exactly,
-    lag by lag, from the Pearson correlation of the two windows, as hctsa does. The value is
-    floored as in hctsa (``1 - r^2 >= 1e-12``, so at most 13.8 nats), and a degenerate (constant)
+    lag by lag, from the Pearson correlation of the two windows. The value is
+    floored (``1 - r^2 >= 1e-12``, so at most 13.8 nats), and a degenerate (constant)
     delay window has the floor value. Assumes ``n >= 3`` (guarded by ``_self_corr_curve``).
     """
     y = np.asarray(y, dtype=float)
@@ -174,7 +174,7 @@ def _first_min_from_curve(c: np.ndarray, n: int):
     """First strict local minimum of a precomputed lag-curve (lags 1..len(c)).
 
     NaN if the curve hits a NaN first; ``n`` (the series length) if the curve keeps
-    decreasing, as in hctsa's ``CO_FirstMin``.
+    decreasing.
     """
     lag = _first_extremum(c, 'min', not_found=n)
     if np.isnan(lag):
@@ -185,8 +185,7 @@ def _first_min_from_curve(c: np.ndarray, n: int):
 def _first_max_from_curve(c: np.ndarray, n: int):
     """First strict local maximum of a precomputed lag-curve (lags 1..len(c)).
 
-    NaN if the curve hits a NaN first; ``n`` (the series length) if no maximum is found,
-    as in hctsa's ``CO_FirstMin`` with ``minNotMax = false``.
+    NaN if the curve hits a NaN first; ``n`` (the series length) if no maximum is found.
     """
     lag = _first_extremum(c, 'max', not_found=n)
     if np.isnan(lag):
@@ -218,9 +217,8 @@ def first_min(
         - ``'mi-gaussian'``: AMI using the Gaussian estimator (default; a monotonic function of
           the absolute autocorrelation, so not a nonlinear timescale).
         - ``'mi'``: AMI using the Kraskov estimator, the same as ``'mi-kraskov1'`` with the
-          estimator's default of 4 nearest neighbors (as in current hctsa; earlier versions of
-          hctsa, and of pyhctsa, used the name ``'mi'`` for the Gaussian estimator, which
-          must now be requested as ``'mi-gaussian'``).
+          estimator's default of 4 nearest neighbors (the Gaussian estimator is
+          ``'mi-gaussian'``).
         - ``'mi-kraskov1'``: AMI using the Kraskov estimator (variant 1; 4 nearest neighbors,
           ``extra_param`` is not passed on).
         - ``'mi-kraskov2'``: AMI using the Kraskov estimator (variant 2); ``extra_param`` is
@@ -237,7 +235,7 @@ def first_min(
     -------
     int
         The time of the first minimum. If the function keeps decreasing and no minimum
-        is found, the length of the time series is returned (as in hctsa); NaN if a NaN
+        is found, the length of the time series is returned; NaN if a NaN
         is reached first (e.g. an AMI that cannot be computed because the series is too short).
     """
     y = np.asarray(y)
@@ -276,8 +274,8 @@ def first_max(
         Automutual information (AMI):
 
         - ``'mi-gaussian'``: AMI using the Gaussian estimator (default).
-        - ``'mi'``: AMI using the Kraskov estimator, the same as ``'mi-kraskov1'`` (as in current
-          hctsa; the Gaussian estimator must now be requested as ``'mi-gaussian'``).
+        - ``'mi'``: AMI using the Kraskov estimator, the same as ``'mi-kraskov1'`` (the Gaussian
+          estimator is ``'mi-gaussian'``).
         - ``'mi-kraskov1'``: AMI using the Kraskov estimator (variant 1; 4 nearest neighbors).
         - ``'mi-kraskov2'``: AMI using the Kraskov estimator (variant 2); ``extra_param`` is
           the number of nearest neighbors.
@@ -293,7 +291,7 @@ def first_max(
     -------
     int
         The time of the first maximum. If no maximum is found, the length of the time
-        series is returned (as in hctsa); NaN if a NaN is reached first.
+        series is returned; NaN if a NaN is reached first.
     """
     y = np.asarray(y)
     n = len(y)
@@ -555,7 +553,7 @@ def automutual_info(
 
         For the Kraskov estimators, a series with many repeated values (fewer than 90%
         unique) first gets tiny, reproducible Gaussian jitter (standard deviation
-        ``1e-10 * std(y)``, fixed seed) to break the exact ties, as in hctsa.
+        ``1e-10 * std(y)``, fixed seed) to break the exact ties.
 
         Default is ``'gaussian'``.
 
@@ -582,7 +580,7 @@ def automutual_info(
     min_samples = 5  # minimum 5 samples to compute mutual information (could make higher?)
     kval = 4 # default 
     if extra_param is not None and extra_param != '':
-        kval = int(extra_param)  # (hctsa passes the number of neighbors as a string, '4')
+        kval = int(extra_param)  # (may be given as a string, e.g. '4')
 
     # Loop over time delays if a vector
     if not isinstance(time_delay, list):
@@ -598,7 +596,7 @@ def automutual_info(
         raise ValueError(f'Unknown estimator: {est_method}')
     if est_method in ('kraskov1', 'kraskov2'):
         # Series with many repeated values make the nearest-neighbour estimators blow up:
-        # add tiny, reproducible tie-breaking jitter, once to the whole series (hctsa BF_TieBreakNoise)
+        # add tiny, reproducible tie-breaking jitter, once to the whole series
         y = _tie_break_noise(y)
     
     for k, delay in enumerate(time_delay):
@@ -665,7 +663,7 @@ def multivariate_ami(y: ArrayLike, tau_method: Union[int, str] = 'ac',
     """
     Multivariate automutual information, I(x_t; x_{t-tau}, x_{t-2tau}).
 
-    Port of hctsa's ``IN_MultivariateAMI``. Measures how much information the past two points
+    Measures how much information the past two points
     (spaced ``tau`` apart, with ``tau`` estimated from the series' own autocorrelation
     structure) jointly carry about the present, and, via the ``synergy`` output, whether that
     joint information exceeds or falls short of the sum of the pairwise automutual informations

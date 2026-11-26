@@ -208,8 +208,9 @@ def distribution_entropy(
             # uses the specified width (the standard deviation of the Gaussian kernel). NB: a
             # fixed absolute bandwidth makes the density estimate inconsistent (for consistency
             # the bandwidth must shrink with the sample size), so the smoothness of the
-            # estimated density, and hence its entropy, drifts with N: hctsa does not register
-            # the fixed-bandwidth settings, but the option remains for a specific smoothing scale.
+            # estimated density, and hence its entropy, drifts with N: the default feature set does
+            # not register the fixed-bandwidth settings, but the option remains for a specific
+            # smoothing scale.
             bw = float(num_bins)
         else:
             raise ValueError(
@@ -725,9 +726,9 @@ def _ordinal_pattern_rank(x: np.ndarray) -> np.ndarray:
     """
     Index in 0..m!-1 of the ordinal pattern (the argsort permutation) of each row of `x`.
 
-    The permutation is encoded by its Lehmer code, as hctsa's BF_OrdinalPatternRank
-    does. Ties within a row are broken by position (a stable sort); feature functions pass
-    embeddings of :func:`_break_ties` output, which has no ties.
+    The permutation is encoded by its Lehmer code. Ties within a row are broken by position (a
+    stable sort); feature functions pass embeddings of :func:`_break_ties` output, which has no
+    ties.
     """
     m = x.shape[1]
     ix = np.argsort(x, axis=1, kind='stable')
@@ -745,8 +746,6 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
     as described in [1], along with a weighted permutation entropy [2] and a
     measure of the time-reversal asymmetry of the ordinal patterns.
 
-    The ordinal patterns are ranked as in hctsa's EN_PermEn (BF_OrdinalPatternRank).
-
     The plug-in entropy of pattern counts is biased low by about ``(m! - 1) / (2 M)`` nats for
     ``M`` embedding vectors, so it drifts with series length. ``permEn`` and ``normPermEn`` are
     therefore the delete-one jackknife estimate of the entropy (Zahl, Ecology 58, 907, 1977,
@@ -760,7 +759,7 @@ def permutation_entropy(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1) -> d
 
     The ``permEnLE`` output follows the adapted implementation of permutation entropy by Bruce
     Land and Damian Elias (Cornell University;
-    https://people.ece.cornell.edu/land/PROJECTS/Complexity/), as in hctsa's ``EN_PermEn``.
+    https://people.ece.cornell.edu/land/PROJECTS/Complexity/).
 
     References
     ----------
@@ -1065,12 +1064,11 @@ def bubble_entropy(y: ArrayLike, m: int = 10, tau: Union[int, str] = 1) -> Union
     from ``m`` to ``m + 1`` values, ``H_(m+1) - H_m``, divided by ``log((m+1)/(m-1))`` to
     normalize for the dimension. Low values indicate series whose runs have predictable
     orderings. For white noise the long-series value is about 0.64 for ``m = 5`` and 0.69
-    for ``m = 10`` (rising slowly toward 0.75 as ``m`` grows). Port of hctsa's
-    ``EN_BubbleEn``.
+    for ``m = 10`` (rising slowly toward 0.75 as ``m`` grows).
 
     A swap is counted when an earlier value is greater than a later one. Tied values are first
-    put in a fixed pseudo-random order (as in :func:`permutation_entropy`); hctsa never swaps
-    them, which reads every run of equal values as sorted and makes discrete data look more
+    put in a fixed pseudo-random order (as in :func:`permutation_entropy`); never swapping
+    them would read every run of equal values as sorted and make discrete data look more
     regular than it is. The estimate is a small
     difference between two entropies, so it is noisy when the series is short relative to
     the number of possible swap counts: for series of about 1000 samples, embedding
@@ -1078,7 +1076,7 @@ def bubble_entropy(y: ArrayLike, m: int = 10, tau: Union[int, str] = 1) -> Union
 
     With a delay set by the timescale of the series, the runs of ``m`` values span
     ``(m-1)*tau`` samples, so for a slowly decorrelating series (a large delay) there are
-    few runs and the value is noisy. hctsa uses ``'mi'``, which is rarely NaN: it falls
+    few runs and the value is noisy. The ``'mi'`` delay is rarely NaN: it falls
     back on the first automutual-information minimum when the autocorrelation function
     never decays to 1/e. The ``'ac1e'`` delay is NaN when the autocorrelation function
     never decays to 1/e (as for many random walks) or the runs are too few, and the first
@@ -1157,14 +1155,13 @@ def permutation_entropy_complexity(y: ArrayLike, m: int = 2, tau: Union[int, str
     instead close to zero at both those extremes and peaks for structured-but-disordered
     ('chaotic') ordinal-pattern distributions, a distinct axis of information from
     entropy alone. 'hNorm' reproduces the 'normPermEn' of :func:`permutation_entropy`.
-    Port of hctsa's ``EN_PermEnComplexity``.
 
     At ``m = 2`` there are only two ordinal states, so H and C are both unimodal,
     symmetric functions of a single probability: they are then forced to be near-perfect
     reparameterizations of one another regardless of the input data, making
     'jsComplexity' redundant with plain permutation entropy at that order. ``m = 3`` is
     also largely redundant in practice; only ``m = 4`` and ``m = 5`` are registered
-    in the default hctsa feature set.
+    in the default feature set.
 
     References
     ----------
@@ -1286,7 +1283,7 @@ def wavelet_entropy(y: ArrayLike, wavelet_name: str = 'sym4', level: int = 5) ->
     ``p_j = E_j / sum(E)``, and returns the Shannon entropy of this relative-energy
     distribution across bands, normalized to [0, 1] by its maximum possible value,
     ``log2(level + 1)`` [1]. Low values mean the energy is concentrated in few bands;
-    high values that it is spread evenly across bands. Port of hctsa's ``EN_wentropy``; the MODWT uses the
+    high values that it is spread evenly across bands. The MODWT uses the
     filters of PyWavelets.
 
     The output is invariant to rescaling ``y``, and is bounded in [0, 1] (the value 1 is
@@ -1480,11 +1477,11 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
     start and after every ``N/10`` steps. The randomization is repeated ``num_reps`` times from
     the same series and the statistics at each checkpoint are averaged over the repeats (a
     single randomization gives a noisy trajectory, and the fitted parameters would mostly reflect
-    that noise). Port of hctsa's ``EN_Randomize``.
+    that noise).
 
     The random indices come from the portable generator :func:`~pyhctsa.robust.bf_random`
     (two uniform draws per step, as indices uniform on 1..N), so the result is reproducible
-    and, for the same seed, follows the same randomization as hctsa.
+    and depends on the seed alone.
 
     Parameters
     ----------
@@ -1502,7 +1499,7 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
 
         Default is ``'statdist'``.
     random_seed : int or {'default', 'none'}, optional
-        The seed of the random choices, as hctsa's ``BF_RandomSeed``: a number;
+        The seed of the random choices (see :func:`~pyhctsa.robust.bf_random_seed`): a number;
         ``'default'`` (or None) is 0; ``'none'`` draws a seed from NumPy's global stream (the
         run is then not reproducible). Default is None.
     num_reps : int, optional
@@ -1563,7 +1560,7 @@ def randomize(y: ArrayLike, randomize_how: str = 'statdist',
 
 
 # ---------------------------------------------------------------------------------------
-# randomize_ordinal (hctsa's EN_RandomizeOrdinal)
+# randomize_ordinal
 # ---------------------------------------------------------------------------------------
 _RO_SUBSETS = [(), (0,), (1,), (2,), (0, 1), (0, 2), (1, 2), (0, 1, 2)]  # kept samples of a window
 
@@ -1694,7 +1691,6 @@ def randomize_ordinal(y: ArrayLike, tau: Union[int, str] = 1) -> Union[dict, flo
     computes exactly (with no random draws) the expected distribution of the ordinal patterns
     of order 3 (the patterns of Bandt and Pompe's permutation entropy [1], PermEn(3, tau))
     after ``t`` steps, and reports how quickly the ordinal structure of the series is lost.
-    Port of hctsa's ``EN_RandomizeOrdinal``.
 
     The calculation is exact because, after ``t`` steps, each sample has either never been
     overwritten, or it holds a value drawn independently and uniformly from the original
@@ -1827,7 +1823,6 @@ def dispersion_entropy(y: ArrayLike, m: int = 2, c: int = 6, tau: Union[int, str
     doi:10.1162/089976603321780272). These are nearly unbiased but can slightly exceed their
     nominal maximum (the normalized values slightly above 1) for short series; they are not
     clipped.
-    Port of hctsa's ``EN_DispEn``.
 
     Unlike permutation entropy (:func:`permutation_entropy`), which records only the rank
     ordering within each embedding vector and so discards amplitude information entirely
@@ -1969,7 +1964,7 @@ def fuzzy_entropy(y: ArrayLike, M: int = 2, r: float = 0.2, n: float = 2) -> dic
     All runs of length 1, ..., M+1 are taken from the same ``N - M`` starting points, so
     that successive dimensions are compared on the same footing. The distances are
     computed pair by pair, so memory use does not grow with the square of the series length
-    (the run time does: it is O(N^2 M)). Port of hctsa's ``EN_FuzzyEn``.
+    (the run time does: it is O(N^2 M)).
 
     The similarity is written here as ``exp(-(d/r)**n)``, so that ``r`` is a distance (in
     units of the standard deviation of ``y``). Chen et al. (2007) write it as

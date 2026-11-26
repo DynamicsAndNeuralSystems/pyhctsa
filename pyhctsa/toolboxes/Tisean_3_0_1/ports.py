@@ -47,7 +47,7 @@ from numba import njit
 # ------------------------------------------------------------------------------
 
 class TiseanDataError(ValueError):
-    """A data-dependent failure of a TISEAN routine (d2, boxcount, lyap_r, ...), for which hctsa returns NaN."""
+    """A data-dependent failure of a TISEAN routine (d2, boxcount, lyap_r, ...): the feature is NaN."""
 
 
 # ------------------------------------------------------------------------------
@@ -184,9 +184,10 @@ def _lyap_r_divergence(emb, pair_ref, pair_nb, weight, steps, tol2, chunk):
 
 
 def _tisean_lyap_r(y: np.ndarray, delay: int, dim: int, mindist: int, steps: int) -> Union[tuple, None]:
-    # TISEAN's ``lyap_r -d<delay> -m<dim> -t<mindist> -s<steps>`` (Rosenstein et al.; source_c/lyap_r.c
-    # as modified in hctsa), in process. For every reference vector, the nearest neighbors (outside
-    # the Theiler window ``mindist``) are found: all the vectors whose distance to it is within
+    # TISEAN's ``lyap_r -d<delay> -m<dim> -t<mindist> -s<steps>`` (Rosenstein et al.;
+    # source_c/lyap_r.c with the modifications listed in the module docstring), in process. For
+    # every reference vector, the nearest neighbors (outside the Theiler window ``mindist``) are
+    # found: all the vectors whose distance to it is within
     # 1e-12 (of the data interval) of the nearest distance below 1, vectors closer than 1e-12 to it
     # being repeats of it and not neighbors. Each pair is followed for ``steps`` steps; a pair
     # that merges (comes within 1e-12) is left out at every step, and each reference contributes
@@ -255,7 +256,7 @@ def _logf(x) -> np.float32:
 @njit(cache=True)
 def _c1_centers(nmax, m, delay, ju):
     """
-    The order of the reference points in hctsa's d1.f: the embedded points ``(m-1) * delay + 1 ..
+    The order of the reference points in the modified d1.f: the embedded points ``(m-1) * delay + 1 ..
     nmax`` (``nvalid`` of them) taken as ``i -> (i * s mod nvalid)``, with ``s`` the golden-ratio
     stride (computed in single precision, as in the Fortran) raised until it is coprime to
     ``nvalid``. Every prefix is spread evenly over the series and the order is fixed (stock TISEAN
@@ -390,10 +391,10 @@ def _f32_cumsum_last(v):
 def _c1_curves(y: np.ndarray, delay: int, m_from: int, m_to: int, nmin: int, n_ref: int,
                kmax: int = 100, res: float = 2.0) -> list:
     """
-    TISEAN's ``c1 -d<delay> -m<m_from> -M<m_to> -t<nmin> -n<n_ref>`` (as patched in hctsa): for
-    each embedding dimension, the table of [mean log distance to the k-th neighbor -> exp, mass]
-    pairs (as float32, as TISEAN writes them) for masses doubling every ``1/res`` octaves.
-    Everything that is single precision in the Fortran is single precision here. A mass for which
+    TISEAN's ``c1 -d<delay> -m<m_from> -M<m_to> -t<nmin> -n<n_ref>`` (as modified, see the module
+    docstring): for each embedding dimension, the table of [mean log distance to the k-th neighbor
+    -> exp, mass] pairs (as float32, as TISEAN writes them) for masses doubling every ``1/res``
+    octaves. Everything that is single precision in the Fortran is single precision here. A mass for which
     no point has a neighbor outside the Theiler window is skipped, the number of neighbors asked
     for never exceeds the number that exist, and at most as many reference points are used as there
     are embedded points. A reference point that coincides with its k-th neighbor (to within 1e-12

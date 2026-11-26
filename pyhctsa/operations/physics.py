@@ -361,7 +361,7 @@ def kramers_moyal(y: ArrayLike, tau: Union[int, str] = 1, num_bins: int = 15) ->
     Parameters
     ----------
     y : array-like
-        The input time series (z-scored in hctsa).
+        The input time series (typically z-scored).
     tau : int or str, optional
         The increment lag, in samples (default: 1); or a rule that sets it from the series:
         'ac' (first zero-crossing of the autocorrelation function), 'ac1e' (floor of its

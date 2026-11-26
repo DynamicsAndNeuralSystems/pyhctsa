@@ -244,7 +244,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
         The input time series.
     w_name : str, optional
         The wavelet name, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), or the continuous
-        Morlet wavelet 'morl' (the second wavelet registered in hctsa). For either kind, the
+        Morlet wavelet 'morl'. For either kind, the
         wavelet function is integrated on a grid of 2**10 points over its support, and the
         integral, stretched to each scale, is convolved with the series and differenced (the
         continuous transform with that wavelet at integer scales).
@@ -719,11 +719,11 @@ def modwt_var(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 5) -> 
     across the bands (Percival & Walden, 2000, DOI 10.1017/CBO9780511841040, ch. 5), and
     the statistics use these energy shares, computed from all N coefficients of each band.
 
-    (Up to pyhctsa 2.0, as in hctsa, the band variances used only the coefficients
-    unaffected by the boundary. At the scaling band that leaves ``N - (2^J - 1)(L - 1)``
-    strongly overlapping coefficients (N - 155 for db3 at level 5), so ``scalingFrac`` was
-    biased towards 0 for N up to about 300, exactly 0 at some lengths, and jumped where the
-    level had to be reduced. The energy shares agree with the old values on long series.)
+    (Band variances from only the coefficients unaffected by the boundary would be worse: at
+    the scaling band that leaves ``N - (2^J - 1)(L - 1)`` strongly overlapping coefficients
+    (N - 155 for db3 at level 5), so ``scalingFrac`` would be biased towards 0 for N up to
+    about 300, exactly 0 at some lengths, and jump where the level had to be reduced. On long
+    series the two agree.)
 
     Parameters
     ----------
