@@ -20,6 +20,15 @@ warns. For the full feature set, install with the ``tda`` extra:
 
    > pip install "pyhctsa[tda]"
 
+On Python 3.14, the 34 hidden-Markov-model features (``hmm_fit``, ``hmm_compare_n_states``) are skipped
+in the same way, because `hmmlearn <https://github.com/hmmlearn/hmmlearn>`_ does not yet publish
+wheels for it. To get them there, install ``hmmlearn`` yourself, which builds it from source and needs
+a C++ compiler:
+
+.. code-block:: bash
+
+   > pip install "pyhctsa[hmm]"
+
 From Source
 -----------
 You can also install `pyhctsa` directly from the source code:

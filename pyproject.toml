@@ -32,7 +32,8 @@ dependencies = [
   "statsmodels",
   "numba",
   "scikit-learn",
-  "hmmlearn",
+  # no Python 3.14 wheels yet: installed where wheels exist, and the HMM features are skipped without it
+  "hmmlearn; python_version < '3.14'",
   "arch",
   "PyWavelets",
   "rich",
@@ -58,9 +59,10 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+hmm = ["hmmlearn"]  # hmm_fit, hmm_compare_n_states on Python 3.14 (builds from source there)
 tda = ["ripser"]  # persistent_homology (NL_PersistentHomology); skipped by the calculator without it
 parquet = ["pyarrow"]  # FeatureCalculator.save / save_results to .parquet
-test = ["pytest>=6.0", "pytest-cov", "pytest-mock", "ripser", "pyarrow"]
+test = ["pytest>=6.0", "pytest-cov", "pytest-mock", "ripser", "pyarrow", "hmmlearn"]
 
 [project.urls]
 Homepage = "https://dynamicsandneuralsystems.github.io/pyhctsa/"

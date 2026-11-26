@@ -222,6 +222,20 @@ class TestConfigFiles:
         calc = FeatureCalculator()
         assert calc._skipped_functions == [], f"Skipped: {calc._skipped_functions}"
 
+    def test_hmm_features_are_skipped_without_hmmlearn(self, monkeypatch):
+        # hmmlearn has no wheels for some Python versions: without it the calculator still
+        # builds, and leaves out the features that need it with a warning that names it
+        import pyhctsa.calculator as calculator
+        real = calculator._check_optional_deps
+        monkeypatch.setattr(calculator, "_check_optional_deps", lambda dep: dep != "hmmlearn" and real(dep))
+        with pytest.warns(UserWarning, match="hmmlearn"):
+            calc = FeatureCalculator()
+        skipped = {name for name, _ in calc._skipped_functions}
+        assert skipped == {"model_fit.hmm_fit", "model_fit.hmm_compare_n_states"}
+        assert not any("hmm" in label for label in calc.feature_funcs)
+        out = calc.extract(np.random.default_rng(0).standard_normal(200))
+        assert out.shape[1] > 6000 and not any("hmm" in c for c in out.columns)
+
     def test_module_config_matches_hctsa_yaml(self, module_config):
         # each single-module config cut from hctsa.yaml must parse to exactly that module
         with open(HCTSA_YAML, encoding="utf-8") as f:
