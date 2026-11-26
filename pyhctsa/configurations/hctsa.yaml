@@ -927,6 +927,7 @@ entropy:
     configs:
       # epsilon = 0.3: with the 0.12 of the published method (long, finely sampled recordings) fewer than
       # about 30 of 1000 points of a noisy series return within t_max = 100 steps in three dimensions
+      # (the outputs are NaN below 50 returns; the RPD has about one bin per five returns, up to 99)
       - {m: 3, tau: 1, epsilon: 0.3, zscore: True, exclude: ['meanNonZero']}
       - {m: 3, tau: 'ac', epsilon: 0.3, zscore: True, exclude: ['meanNonZero']}
     ordered_args: ['m', 'tau']

@@ -913,7 +913,8 @@ def _close_returns_hist(v: np.ndarray, epsilon: float, t_max: int = -1) -> np.nd
     return hist
 
 @dict_output
-def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.12, t_max: int = 100) -> dict:
+def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.12, t_max: int = 100,
+         returns_per_bin: int = 5, min_returns: int = 50) -> dict:
     """
     Recurrence period density entropy (RPDE).
 
@@ -929,20 +930,25 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
     in [0, 1]. A periodic signal concentrates the RPD on a few times (``H_norm`` near 0), while
     a stochastic signal spreads it widely (``H_norm`` near 1).
 
-    Recurrence times are counted up to ``t_max`` samples, so the RPD has the same
-    :math:`N_b = t_{max} - 1` bins (the times 2 to ``t_max``; a return takes at least two
-    steps) whatever the length of the series, and the outputs of series of different lengths
-    are comparable. Each of the first ``n - t_max`` embedded points is followed for ``t_max``
-    steps, so every time is equally observable. A period longer than ``t_max`` samples is not
-    seen. With no limit (``t_max = -1``, the form in which the method was published) the RPD
-    has one bin per embedded point: ``H_norm``, ``propNonZero`` and ``maxRPD`` then change
-    with the length of the series for the same dynamics (``maxRPD`` of a sinusoid is
-    proportional to the length), and long recurrence times are under-counted.
+    Recurrence times are counted up to ``t_max`` samples, from the first ``n - t_max`` embedded
+    points, each of which is followed for ``t_max`` steps, so every time from 2 to ``t_max`` is
+    equally observable whatever the length of the series (a return takes at least two steps). A
+    period longer than ``t_max`` samples is not seen.
 
-    The entropy is estimated from the points that return within ``t_max`` steps. When few do
-    (a stochastic series with a small ``epsilon`` for its length and embedding dimension),
-    ``H`` cannot exceed the logarithm of their number and ``H_norm`` is low for that reason:
-    choose ``epsilon`` large enough for the series lengths at hand.
+    The number of bins of the RPD is set by the number of returns counted, :math:`R`: the times 2
+    to ``t_max`` are grouped into :math:`N_b = \\min(t_{max} - 1, \\lceil R / r \\rceil)` bins of
+    equal width, with ``r = returns_per_bin``. A plug-in entropy over more bins than there are
+    returns is limited by :math:`\\ln R`, not by the dynamics, so with a fixed number of bins the
+    outputs of a stochastic series grow with its length as more points return. A series whose
+    points mostly return (periodic or low-dimensional dynamics) reaches the full ``t_max - 1``
+    bins at a few hundred points and is binned at single-sample resolution from then on. With
+    fewer than ``min_returns`` returns the outputs are NaN: there are then too few bins for the
+    entropy to distinguish one RPD from another.
+
+    With no limit (``t_max = -1``, the form in which the method was published) the RPD has one
+    bin per embedded point and is not regrouped: ``H_norm``, ``propNonZero`` and ``maxRPD`` then
+    change with the length of the series for the same dynamics (``maxRPD`` of a sinusoid is
+    proportional to the length), and long recurrence times are under-counted.
 
     The series is used as given: scale it first (``epsilon`` is an absolute distance, so a
     z-scored series is intended).
@@ -960,6 +966,11 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
         Recurrence neighborhood radius. Default is 0.12.
     t_max : int, optional
         Maximum recurrence time, in samples (at least 3), or -1 for no limit. Default is 100.
+    returns_per_bin : int, optional
+        Average number of returns per bin of the RPD (with a limit ``t_max``); 0 keeps one bin
+        per recurrence time. Default is 5.
+    min_returns : int, optional
+        Fewest returns for which the outputs are computed (with a limit ``t_max``). Default is 50.
 
     Returns
     -------
@@ -969,7 +980,8 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
         bins that are non-empty), ``meanNonZero`` (mean non-zero RPD value times ``Nb``)
         and ``maxRPD`` (largest RPD value times ``Nb``, i.e. relative to a uniform RPD). All
         are NaN if the embedding parameters cannot be determined, the embedding has no more
-        than ``t_max`` points (fewer than 4 with no limit), or no point returns.
+        than ``t_max`` points (fewer than 4 with no limit), or fewer than ``min_returns`` points
+        return (none, with no limit).
 
     Notes
     -----
@@ -998,11 +1010,20 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
         if n <= t_max:  # no point can be followed for t_max steps
             return np.nan
         hist = _close_returns_hist(v, float(epsilon), t_max)[2:]  # the times 2, ..., t_max
+        total = hist.sum()
+        if total == 0 or total < min_returns:
+            return np.nan
+        if returns_per_bin > 0:
+            # about returns_per_bin returns per bin, up to one bin per recurrence time
+            nb = int(min(len(hist), max(2, np.ceil(total / returns_per_bin))))
+            if nb < len(hist):
+                edges = np.round(np.linspace(0, len(hist), nb + 1)).astype(int)
+                hist = np.add.reduceat(hist, edges[:-1])
     else:
         hist = _close_returns_hist(v, float(epsilon))  # one bin per embedded point
-    total = hist.sum()
-    if total == 0:
-        return np.nan
+        total = hist.sum()
+        if total == 0:
+            return np.nan
     rpd = hist / total
     nb = len(rpd)
     nz = rpd > 0

@@ -179,7 +179,7 @@ def test_loop_local_simple_best_window_varies_across_series():
 
 
 # ------------------------------------------------------------------------------
-# rpde: a fixed maximum recurrence time
+# rpde: a fixed maximum recurrence time, and bins set by the number of returns
 # ------------------------------------------------------------------------------
 def _logistic(n, x0=0.3):
     x = np.empty(n + 100)
@@ -190,7 +190,8 @@ def _logistic(n, x0=0.3):
 
 
 def test_rpde_does_not_depend_on_length_for_deterministic_dynamics():
-    lengths = (500, 1000, 2000, 5000)
+    # (from 1000 points both series have enough returns for one bin per recurrence time)
+    lengths = (1000, 2000, 5000)
     sine = [en.rpde(_zscore(np.sin(2 * np.pi * np.arange(n) / 37)), 3, 1) for n in lengths]
     chaos = [en.rpde(_logistic(n), 3, 1) for n in lengths]
     assert np.ptp([o['H_norm'] for o in sine]) < 0.02 and np.ptp([o['H_norm'] for o in chaos]) < 0.08
@@ -209,6 +210,47 @@ def test_rpde_is_high_for_noise_once_enough_points_return():
     out = [en.rpde(_zscore(np.random.default_rng(s).standard_normal(2000)), 3, 1, 0.3) for s in range(3)]
     assert min(o['H_norm'] for o in out) > 0.9
     assert all(0 < o['propNonZero'] <= 1 and o['maxRPD'] >= 1 for o in out)
+
+
+def test_rpde_of_stochastic_series_does_not_grow_with_length():
+    # With one bin per recurrence time (99 bins) the entropy of a noisy series is limited by the
+    # number of points that return, which grows with the length. Bins set by the number of returns
+    # (about five returns per bin, up to 99 bins) remove most of that growth.
+    lengths = (500, 1000, 2000, 5000)
+    def med(n, **kw):
+        return np.median([en.rpde(_zscore(np.random.default_rng(100 * n + s).standard_normal(n)), 3, 1, 0.3, **kw)['H_norm']
+                          for s in range(5)])
+    adaptive = [med(n) for n in lengths]
+    fixed = [med(n, returns_per_bin=0, min_returns=0) for n in lengths]
+    assert np.ptp(adaptive) < 0.08 and min(adaptive) > 0.9
+    assert np.ptp(fixed) > 0.12 and fixed[0] < 0.88
+
+
+def test_rpde_bins_follow_the_number_of_returns():
+    y = _zscore(np.random.default_rng(7).standard_normal(700))
+    v = np.ascontiguousarray(np.c_[y[:-2], y[1:-1], y[2:]])
+    hist = en._close_returns_hist(v, 0.3, 100)[2:]
+    n_ret = hist.sum()
+    assert 50 <= n_ret < 5 * 99  # enough returns for an output, too few for 99 bins
+    nb = int(np.ceil(n_ret / 5))
+    edges = np.round(np.linspace(0, 99, nb + 1)).astype(int)
+    p = np.add.reduceat(hist, edges[:-1]) / n_ret
+    expected = -np.sum(p[p > 0] * np.log(p[p > 0])) / np.log(nb)
+    out = en.rpde(y, 3, 1, 0.3)
+    assert out['H_norm'] == pytest.approx(expected, rel=1e-12)
+    assert out['propNonZero'] == pytest.approx(np.mean(p > 0), rel=1e-12)
+    # one bin per recurrence time on request
+    full = en.rpde(y, 3, 1, 0.3, returns_per_bin=0)
+    assert full['propNonZero'] == pytest.approx(np.mean(hist > 0), rel=1e-12)
+
+
+def test_rpde_is_nan_when_too_few_points_return():
+    y = _zscore(np.random.default_rng(1).standard_normal(1000))
+    v = np.ascontiguousarray(np.c_[y[:-2], y[1:-1], y[2:]])
+    assert 0 < en._close_returns_hist(v, 0.12, 100).sum() < 50  # the published radius: a handful of returns
+    assert _all_nan(en.rpde(y, 3, 1, 0.12))
+    assert np.isfinite(en.rpde(y, 3, 1, 0.12, min_returns=0)['H_norm'])
+    assert np.isfinite(en.rpde(y, 3, 1, 0.3)['H_norm'])
 
 
 def test_rpde_period_is_the_modal_recurrence_time():

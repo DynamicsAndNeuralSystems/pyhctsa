@@ -107,7 +107,8 @@ def test_rpde_tmax_counts_times_up_to_tmax_from_points_followed_for_tmax_steps()
     nz = rpd > 0
     H = -np.sum(rpd[nz] * np.log(rpd[nz]))
     nb = t_max - 1
-    out = entropy.rpde(y, 2, 1, 0.12, t_max)
+    # (one bin per recurrence time, whatever the number of returns)
+    out = entropy.rpde(y, 2, 1, 0.12, t_max, returns_per_bin=0, min_returns=0)
     ref = [H, H / np.log(nb), nz.mean(), rpd[nz].mean() * nb, rpd.max() * nb]
     np.testing.assert_allclose([out[k] for k in KEYS], ref, rtol=1e-12)
     with pytest.raises(ValueError):
@@ -123,7 +124,9 @@ def test_rpde_nan_cases():
     # no embedded point can be followed for t_max steps
     y = np.sin(np.arange(101) / 3.0)
     assert all(np.isnan(v) for v in entropy.rpde(y, 2, 1).values())  # 100 embedded points, t_max = 100
-    assert np.isfinite(entropy.rpde(y, 2, 1, t_max=99)["H"])
+    assert np.isfinite(entropy.rpde(y, 2, 1, t_max=99, min_returns=0)["H"])
+    # one point can be followed: far fewer returns than the default min_returns
+    assert all(np.isnan(v) for v in entropy.rpde(y, 2, 1, t_max=99).values())
     assert set(entropy.rpde(np.sin(np.arange(300) / 3.0), 2, 5)) == set(KEYS)
 
 
