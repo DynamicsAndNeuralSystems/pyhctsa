@@ -653,11 +653,19 @@ class FeatureCalculator:
     - ``preprocess``: one more input transform, applied to the (z-scored) series before ``abs``;
       its label suffix follows ``_abs``. The values:
 
-      * ``decimate_ac1e`` (suffix ``_dec``): the z-scored series is decimated to one sample per
-        floored 1/e autocorrelation time and z-scored again. If that time cannot be determined
-        (e.g. the ACF never falls to 1/e), or fewer than 3 samples would remain (or fewer than
-        the operation's ``min_length``), the feature is NaN. See
-        :func:`pyhctsa.utils.decimate_ac1e`;
+      * ``decimate_ac1e`` (suffix ``_dec``): with ``tau`` the floored 1/e autocorrelation time,
+        the series is decimated to one sample per ``tau`` from each of the ``tau`` starting
+        phases (``x_z[p::tau]``, ``p = 0, ..., tau - 1``), each subseries z-scored again (with
+        ``zscore: True``). The function is computed on every subseries that has at least 3
+        samples and at least the operation's ``min_length``, and its outputs are averaged over
+        them (field by field, ignoring NaN). The feature is NaN if ``tau`` cannot be determined
+        (e.g. the ACF never falls to 1/e) or no subseries qualifies. See
+        :func:`pyhctsa.utils.decimation_phases`;
+      * ``decimate_ac1e-rank`` (``_dec-rank``): the same, with ``tau`` set from the ranks of the
+        series (``get_tau(x_z, 'ac1e-rank')``), for features that depend on the data only
+        through their order;
+      * ``detrend`` (``_lindt``): the least-squares line removed and the residual z-scored again
+        (with ``zscore: True``); NaN if the series is a line up to round-off;
       * ``diff1`` (``_diff1``): ``diff(x_z)``;
       * ``zscore_abs`` (``_mag``): ``zscore(abs(x_z))``; ``zscore_sign`` (``_sign``):
         ``zscore(sign(x_z))``. (``abs: True`` alone is ``abs(x_z)``.)

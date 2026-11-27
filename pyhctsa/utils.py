@@ -1731,9 +1731,10 @@ def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, fl
 
     Keeps every ``tau``-th sample, ``tau = get_tau(x_z, 'ac1e')``, then z-scores the result
     (N-1 standard deviation; a constant result becomes zeros). If fewer than 3 samples
-    (``_DECIMATE_MIN_POINTS``) would remain, the result is ``nan``. This gives the
-    ``*_dec`` variants of rate-dependent features. A config requests it with
-    ``preprocess: decimate_ac1e`` (see :class:`~pyhctsa.calculator.FeatureCalculator`).
+    (``_DECIMATE_MIN_POINTS``) would remain, the result is ``nan``. This is the subseries
+    from the first sample alone; the ``*_dec`` features (``preprocess: decimate_ac1e``) use
+    every starting phase and average over them (:func:`decimation_phases`; see
+    :class:`~pyhctsa.calculator.FeatureCalculator`).
 
     Parameters
     ----------
