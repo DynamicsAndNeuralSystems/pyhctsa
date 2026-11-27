@@ -95,6 +95,9 @@ extreme_events:
     min_length: "ceil(1 / b)"   # the barrier's memory: a shorter series (or decimated phase) never leaves its start-up
     dependencies:
     configs:
+      # (a, b) in {0.1, 1.0} x {0.1, 0.02}; on the decimated series only the two settings whose outputs
+      # depend on the sampling rate. at 1 / 0.02 decimated the kick statistics are excluded: they need about
+      # 250 correlation times to settle
       - {a: 0.1, b: 0.1, zscore: True, exclude: ['meankicksize']}
       - {a: 0.1, b: 0.02, zscore: True, exclude: ['meankicksize']}
       - {a: 1.0, b: 0.1, zscore: True, exclude: ['meankicksize']}
@@ -201,6 +204,8 @@ correlation:
     min_length: "max(extra_param + 1, num(tau, 1) + 2) if ami_method == 'quantiles' else num(tau, 1) + {'gaussian': 3, 'kraskov1': 6, 'kraskov2': 6}.get(ami_method, 2)"
     dependencies:
     configs:
+      # five AMI estimators at lags 1 and 'ac1e'; gaussian also at 'ac', whose noise-crossing points no other
+      # feature reproduces
       - {tau: 1,   ami_method: 'quantiles', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
       - {tau: 1,   ami_method: 'even',      extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
       - {tau: 1,   ami_method: 'std1',      extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
@@ -212,6 +217,7 @@ correlation:
       - {tau: 'ac1e', ami_method: 'kraskov1', extra_param: 4, num_draws: 5, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
       - {tau: 'ac1e', ami_method: 'quantiles', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
       - {tau: 'ac1e', ami_method: 'std1', extra_param: 10, num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
+      - {tau: 'ac1e', ami_method: 'gaussian',                 num_draws: 10, zscore: True, exclude: ['ami_at_15', 'ami_at_20', 'fitexpadjr2', 'pcrossmean', 'pdec']}
     ordered_args: ['tau', 'ami_method', 'extra_param']
 
   glscf:
@@ -219,6 +225,8 @@ correlation:
     min_length: "num(tau, 1) + 3"
     dependencies:
     configs:
+      # alpha 1 x beta {1, 2, 5, 10} and alpha 2 x beta {2, 5}, each at lags 1-5 and 'mi'. alpha 2 / beta 10
+      # is not run: other settings reproduce it (|rho| >= 0.97)
       - {alpha: 1, beta: 1, tau: 1, zscore: True}
       - {alpha: 1, beta: 1, tau: 2, zscore: True}
       - {alpha: 1, beta: 1, tau: 3, zscore: True}
@@ -765,14 +773,18 @@ correlation:
     min_length: "min(n for n in range(2, 1000) if n - round(n * (1 - p)) >= 1 and round(n * (1 - p)) >= 2)"
     dependencies:
     configs:
+      # five operations x proportion p {0.1, 0.5, 0.8}; absclose has no saturate form
       - {remove_how: 'absclose', p: 0.1, remove_or_saturate: 'remove', zscore: True}
       - {remove_how: 'absclose', p: 0.5, remove_or_saturate: 'remove', zscore: True}
       - {remove_how: 'absclose', p: 0.8, remove_or_saturate: 'remove', zscore: True}
       - {remove_how: 'absfar', p: 0.1, remove_or_saturate: 'remove', zscore: True}
-      - {remove_how: 'absfar', p: 0.1, remove_or_saturate: 'saturate', zscore: True}
+      - {remove_how: 'absfar', p: 0.5, remove_or_saturate: 'remove', zscore: True}
       - {remove_how: 'absfar', p: 0.8, remove_or_saturate: 'remove', zscore: True}
+      - {remove_how: 'absfar', p: 0.1, remove_or_saturate: 'saturate', zscore: True}
+      - {remove_how: 'absfar', p: 0.5, remove_or_saturate: 'saturate', zscore: True}
       - {remove_how: 'absfar', p: 0.8, remove_or_saturate: 'saturate', zscore: True}
       - {remove_how: 'max', p: 0.1, remove_or_saturate: 'saturate', zscore: True}
+      - {remove_how: 'max', p: 0.5, remove_or_saturate: 'saturate', zscore: True}
       - {remove_how: 'max', p: 0.8, remove_or_saturate: 'saturate', zscore: True}
       - {remove_how: 'min', p: 0.1, remove_or_saturate: 'saturate', zscore: True}
       - {remove_how: 'min', p: 0.5, remove_or_saturate: 'saturate', zscore: True}
@@ -834,8 +846,9 @@ entropy:
     min_length: "max(4, int(0.5 / olremp) + 1) if olremp > 0 else None"
     dependencies:
     configs:
-
-
+      # histogram: bin counts {5, 10, 20, 50} without outlier removal, and removal fractions 0.01-0.3 at 10
+      # bins; kernel smoothing ('ks') over the removal fractions. automatic bins only at 0.01 and 0.02: at the
+      # other fractions they reproduce a fixed-bin or ks setting (|rho| >= 0.95)
       - {hist_or_ks: 'hist', num_bins: 5, olremp: 0, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 10, olremp: 0, zscore: True}
       - {hist_or_ks: 'hist', num_bins: 20, olremp: 0, zscore: True}
@@ -860,6 +873,8 @@ entropy:
   permutation_entropy:
     base_name: permutation_entropy
     configs:
+      # m 2-5 at lags 1, 2 and 'ac1e-rank', plus m 3 at a fixed long lag of 10, which no other setting
+      # reproduces
       - {m: 2, tau: 1, zscore: True, select: ['normPermEn']}
       - {m: 3, tau: 1, zscore: True, select: ['normPermEn']}
       - {m: 4, tau: 1, zscore: True, select: ['normPermEn', 'ordAsym']}
@@ -934,6 +949,9 @@ entropy:
     min_length: 4
     dependencies:
     configs:
+      # each tolerance r keeps the template lengths its data support: at small r, long templates rarely match
+      # and sampen is undefined. quadSampEn is excluded everywhere (sampen plus a constant at fixed r); the
+      # 'ac1e' setting keeps sampen1-4 (its sampen0 repeats the lag-1 settings)
       - {m: 5, r: 0.05, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen3', 'sampen4', 'sampen5', 'meanchsampen']}
       - {m: 5, r: 0.1, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen3', 'sampen4', 'sampen5', 'meanchsampen']}
       - {m: 5, r: 0.15, zscore: True, exclude: ['quadSampEn0', 'quadSampEn1', 'quadSampEn2', 'quadSampEn3', 'quadSampEn4', 'quadSampEn5', 'sampen4', 'sampen5', 'meanchsampen']}
@@ -990,6 +1008,10 @@ entropy:
     base_name: dispersion_entropy
     dependencies:
     configs:
+      # (m, c) pairs with 9-81 possible patterns, each at the lags where it is not redundant. at lag 1, (2, 6)
+      # and (3, 4) reproduce sample and approximate entropy (|rho| > 0.95), so (2, 6) runs at lag 2, 'ac' and
+      # 'mi', and (3, 4) at 'ac' and 'mi'. (4, 3) runs at lags 1 and 'ac1e' with one output each (the other
+      # reproduces another feature)
       - {m: 2, c: 6, tau: 'ac', zscore: True, exclude: ['dispEn', 'fDispEn']}
       - {m: 2, c: 3, tau: 'ac', zscore: True, exclude: ['dispEn', 'fDispEn']}
       - {m: 3, c: 4, tau: 'ac', zscore: True, exclude: ['dispEn', 'fDispEn']}
@@ -1494,13 +1516,19 @@ distribution:
     min_length: "min(n for n in range(2, 1000) if n - round(n * (1 - p)) >= 1) if remove_or_saturate == 'saturate' else None"
     dependencies:
     configs:
+      # five operations x proportion p {0.1, 0.5, 0.8}; absclose has no saturate form. median is kept only where
+      # the operation can move it
       - {remove_how: 'absclose', p: 0.1, remove_or_saturate: 'remove', zscore: True, select: ['kurtosisrat', 'mean', 'median', 'skewnessdiff', 'std']}
       - {remove_how: 'absclose', p: 0.5, remove_or_saturate: 'remove', zscore: True, select: ['kurtosisrat', 'mean', 'median', 'skewnessdiff', 'std']}
       - {remove_how: 'absclose', p: 0.8, remove_or_saturate: 'remove', zscore: True, select: ['kurtosisrat', 'mean', 'median', 'skewnessdiff', 'std']}
 
       - {remove_how: 'absfar', p: 0.1, remove_or_saturate: 'remove', zscore: True, select: ['kurtosisrat', 'mean', 'median', 'skewnessdiff', 'std']}
+      # no mean at 0.5: it repeats the absclose 0.5 mean (|rho| = 1), as the two halves of a z-scored series sum to 0
+      - {remove_how: 'absfar', p: 0.5, remove_or_saturate: 'remove', zscore: True, select: ['kurtosisrat', 'median', 'skewnessdiff', 'std']}
       - {remove_how: 'absfar', p: 0.8, remove_or_saturate: 'remove', zscore: True, select: ['kurtosisrat', 'mean', 'median', 'skewnessdiff', 'std']}
       - {remove_how: 'absfar', p: 0.1, remove_or_saturate: 'saturate', zscore: True, select: ['kurtosisrat', 'mean', 'skewnessdiff', 'std']}
+      # no median at 0.5: clipping the outer half leaves it at the series median (|rho| = 1)
+      - {remove_how: 'absfar', p: 0.5, remove_or_saturate: 'saturate', zscore: True, select: ['kurtosisrat', 'mean', 'skewnessdiff', 'std']}
       - {remove_how: 'absfar', p: 0.8, remove_or_saturate: 'saturate', zscore: True, select: ['kurtosisrat', 'mean', 'median', 'skewnessdiff', 'std']}
 
       - {remove_how: 'min', p: 0.1, remove_or_saturate: 'saturate', zscore: True, select: ['kurtosisrat', 'mean', 'skewnessdiff', 'std']}
@@ -1508,6 +1536,7 @@ distribution:
       - {remove_how: 'min', p: 0.8, remove_or_saturate: 'saturate', zscore: True, select: ['kurtosisrat', 'mean', 'skewnessdiff', 'std']}
 
       - {remove_how: 'max', p: 0.1, remove_or_saturate: 'saturate', zscore: True, select: ['kurtosisrat', 'mean', 'skewnessdiff', 'std']}
+      - {remove_how: 'max', p: 0.5, remove_or_saturate: 'saturate', zscore: True, select: ['kurtosisrat', 'mean', 'skewnessdiff', 'std']}
       - {remove_how: 'max', p: 0.8, remove_or_saturate: 'saturate', zscore: True, select: ['kurtosisrat', 'mean', 'skewnessdiff', 'std']}
     ordered_args: ['remove_how', 'p', 'remove_or_saturate']
 
@@ -1606,6 +1635,9 @@ symbolic:
     min_length: "5 if how_to_cg == 'quantile' and num_groups == 2 else 4 if how_to_cg == 'updown' else None"
     dependencies:
     configs:
+      # quantile alphabets of 3-5 symbols at lag 1 and at the 'mi-rank' lag, 2 symbols at 'mi-rank' only (at
+      # lag 1 its outputs reduce to a sign-blind function of lag-1 dependence); updown at lag 1, 'ac-rank' and
+      # 'ac1e-rank'. each setting excludes outputs that are constant or reproduce other features
       - {how_to_cg: 'quantile', num_groups: 3, tau: 1, zscore: True, select: ['lam2mod', 'maximeig', 'mineig', 'ondiag', 'secondeig', 'stddiag', 'stdeig', 'sumdiagcov', 'symdiff', 'symsumdiff', 'transEntropy', 'transKLdiv']}
       - {how_to_cg: 'quantile', num_groups: 4, tau: 1, zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}
       - {how_to_cg: 'quantile', num_groups: 5, tau: 1, zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}
@@ -1615,6 +1647,7 @@ symbolic:
       - {how_to_cg: 'quantile', num_groups: 4, tau: 'mi-rank', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}
       - {how_to_cg: 'quantile', num_groups: 5, tau: 'mi-rank', zscore: True, exclude: ['maxeig', 'maxeigcov', 'mineigcov', 'specgap']}
       - {how_to_cg: 'updown', num_groups: 2, tau: 'ac-rank', zscore: True, select: ['lam2mod', 'stddiag', 'sumdiagcov']}
+      - {how_to_cg: 'updown', num_groups: 2, tau: 'ac1e-rank', zscore: True, select: ['lam2mod', 'stddiag', 'sumdiagcov']}
       - {how_to_cg: 'updown', num_groups: 2, tau: 1, zscore: True, select: ['lam2mod', 'stddiag', 'sumdiagcov']}
     ordered_args: ['how_to_cg', 'num_groups', 'tau']
 
@@ -1674,6 +1707,10 @@ symbolic:
     min_length: "memory + 1 + (coarse_grain_method == 'diff') + (what_prior == 'dist')"
     dependencies:
     configs:
+      # quantile and diff: memory and alphabet grow together, (20, 2), (50, 3), (100, 4), under each prior,
+      # and the dist prior also at (5, 2). embed2quadrants (4 symbols; num_groups is the embedding lag) at a
+      # sparser set of memories at lag 1 and 'ac1e': intermediate memories reproduce their neighbors. each
+      # short-memory setting has an output no other feature reproduces
       - {what_prior: 'dist', memory: 5, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True, exclude: ['median', 'propUnseen', 'sum', 'tstat']}
       - {what_prior: 'dist', memory: 20, num_groups: 2, coarse_grain_method: 'quantile', num_iters: 500, zscore: True, exclude: ['median', 'propUnseen', 'sum', 'tstat']}
       - {what_prior: 'dist', memory: 50, num_groups: 3, coarse_grain_method: 'quantile', num_iters: 500, zscore: True, exclude: ['median', 'propUnseen', 'sum', 'tstat']}
@@ -1977,6 +2014,10 @@ model_fit:
     base_name: local_simple
     dependencies:
     configs:
+      # forecast from the mean, median or straight-line fit of the last train_length values, with one
+      # adaptive length per method ('ac' for mean, 'ac1e' for median and lfit); mean of 1 (persistence) also
+      # at lag 'ac1e'. the fixed lengths differ by method: dropping mean 2, 4 or 'ac', median 7, or lfit 2 or
+      # 4 loses a residual statistic no other feature reproduces
       - {forecast_meth: 'mean', train_length: 1,    zscore: True}
       - {forecast_meth: 'mean', train_length: 2,    zscore: True}
       - {forecast_meth: 'mean', train_length: 3,    zscore: True}
@@ -1986,6 +2027,7 @@ model_fit:
       - {forecast_meth: 'median', train_length: 3, zscore: True}
       - {forecast_meth: 'median', train_length: 5, zscore: True}
       - {forecast_meth: 'median', train_length: 7, zscore: True}
+      - {forecast_meth: 'median', train_length: 'ac1e', zscore: True}
 
       - {forecast_meth: 'lfit', train_length: 2, zscore: True}
       - {forecast_meth: 'lfit', train_length: 3, zscore: True}
@@ -2078,11 +2120,16 @@ model_fit:
     base_name: gp_hyperparameters
     dependencies:
     configs:
+      # three covariances x two reductions to 200 points ('first' keeps a local stretch at full resolution,
+      # 'resample' the whole series coarser); SE also on 20 random draws of 50 points, the only setting with
+      # the out-of-sample error and input-spacing outputs (undefined or constant on evenly spaced points)
       - {cov_func: 'covSEiso_covNoise', max_n: 50, resample_how: 'random_i', zscore: True, exclude: ['maxS', 'stde', 'minS', 'meanS']}
       - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'logh3', 'stde', 'maxS', 'minS', 'meanS']}
       - {cov_func: 'covSEiso_covNoise', max_n: 200, resample_how: 'resample', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'stde', 'std_mu_data', 'maxS', 'minS', 'meanS']}
       - {cov_func: 'covMaterniso3_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'nlml', 'stde', 'meanabs_std', 'std_mu_data', 'maxS', 'minS', 'meanS']}
       - {cov_func: 'covRQiso_covNoise', max_n: 200, resample_how: 'first', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'logh2', 'logh3', 'logh4', 'nlml', 'stde', 'std_mu_data', 'maxS', 'minS', 'meanS']}
+      - {cov_func: 'covMaterniso3_covNoise', max_n: 200, resample_how: 'resample', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'nlml', 'stde', 'meanabs_std', 'std_mu_data', 'maxS', 'minS', 'meanS']}
+      - {cov_func: 'covRQiso_covNoise', max_n: 200, resample_how: 'resample', zscore: True, exclude: ['oosmedabserr', 'std_S_data', 'logh2', 'logh3', 'logh4', 'nlml', 'stde', 'std_mu_data', 'maxS', 'minS', 'meanS']}
     ordered_args: ['cov_func', 'max_n', 'resample_how']
 
   state_space_comp_order:
@@ -2398,6 +2445,8 @@ nonlinearity:
     base_name: fractal_dimensions
     dependencies:
     configs:
+      # estimator settings (kmin, kmax, nref, gend) vary together with the embedding; dropping any of the
+      # first four loses outputs no other feature reproduces
       - {kmin: 2, kmax: 10, nref: -1, gend: 5, embed_params: [[1, 5]], zscore: True, exclude: ['meanDq']}
       - {kmin: 2, kmax: 100, nref: 0.2, gend: 5, embed_params: [[1, 5]], zscore: True, exclude: ['meanDq']}
       - {kmin: 2, kmax: 100, nref: 0.2, gend: 5, embed_params: [['ac1e', 5]], zscore: True, exclude: ['meanDq']}

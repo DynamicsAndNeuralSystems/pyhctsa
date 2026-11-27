@@ -11,7 +11,7 @@ The easiest way to install `pyhctsa` is using `pip <https://pypi.org/project/pyh
 
    > pip install pyhctsa
 
-This gives all 6344 features of the default feature set on Python 3.10 to 3.13.
+This gives all 6406 features of the default feature set on Python 3.10 to 3.13.
 Two dependencies are used by only a few features.
 If either cannot be imported, the calculator skips those features and warns, naming the package to
 install, instead of failing.
@@ -30,7 +30,7 @@ If your environment lacks it (after ``pip install --no-deps``, for example), add
 
 `hmmlearn <https://github.com/hmmlearn/hmmlearn>`_, for the 34 hidden-Markov-model features
 (``hmm_fit``, ``hmm_compare_n_states``), is installed with `pyhctsa` on Python 3.10 to 3.13.
-It does not yet publish wheels for Python 3.14, so there `pyhctsa` gives 6310 features.
+It does not yet publish wheels for Python 3.14, so there `pyhctsa` gives 6372 features.
 To get the other 34, install ``hmmlearn`` yourself, which builds it from source and needs a C++
 compiler:
 
