@@ -2025,6 +2025,10 @@ def make_function_name_mappings(
     default configuration, else ``mapping_file`` if given) and from any ``legacy_name`` keys in
     the configuration itself. Variants (entries with ``variant_of`` and no legacy name) have no
     hctsa counterpart and are left out.
+
+    Returns a DataFrame with columns ``pyhctsa name``, ``hctsa legacy name`` and ``pyhctsa module``;
+    the pyhctsa version is in its ``attrs["feature_set_version"]``. If ``csv_out_fpath`` is given,
+    the table is also written there as a plain CSV (a header row, no index and no metadata).
     """
     # only the names are needed, so parse with a private loader that ignores
     # !range rather than overriding the constructor on the shared SafeLoader
@@ -2069,7 +2073,7 @@ def make_function_name_mappings(
     df_all_modules.attrs["feature_set_version"] = __version__
 
     if csv_out_fpath:
-        # Write metadata as comment lines, then the CSV
+        # the table only: attrs (the version) are not written to the CSV
         with open(csv_out_fpath, "w", encoding="utf-8", newline="") as f:
             df_all_modules.to_csv(f, index=False)
 
