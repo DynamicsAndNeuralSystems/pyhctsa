@@ -198,12 +198,14 @@ def test_rpde_does_not_depend_on_length_for_deterministic_dynamics():
     # (the share of occupied bins of a broad RPD, as for chaos, still grows as more points return)
     assert np.ptp([o['propNonZero'] for o in sine]) < 0.02
     # the modal recurrence time of a sinusoid holds a fixed share of the returns (with one bin per
-    # embedded point, maxRPD was proportional to the length: 162, 637 and 1113 for 500, 2000 and 4000 points)
+    # embedded point, maxRPD is proportional to the length: 227, 918 and 1838 for 500, 2000 and 4000 points)
     assert np.ptp([o['maxRPD'] for o in sine]) < 0.02 * sine[0]['maxRPD']
-    assert max(o['H_norm'] for o in sine) < 0.2 < 0.8 < min(o['H_norm'] for o in chaos)
+    # (about 0.31 and 0.87 at the default radius of 0.3; about 0.12 and 0.96 at 0.12)
+    assert max(o['H_norm'] for o in sine) < 0.4 < 0.8 < min(o['H_norm'] for o in chaos)
     # without the limit the same dynamics give outputs that drift with the length
+    # (by about 0.1 here, against 0.02 with it)
     unlimited = [en.rpde(_logistic(n), 3, 1, t_max=-1)['H_norm'] for n in lengths]
-    assert np.ptp(unlimited) > 0.1
+    assert np.ptp(unlimited) > 0.08
 
 
 def test_rpde_is_high_for_noise_once_enough_points_return():
@@ -250,7 +252,7 @@ def test_rpde_is_nan_when_too_few_points_return():
     assert 0 < en._close_returns_hist(v, 0.12, 100).sum() < 50  # the published radius: a handful of returns
     assert _all_nan(en.rpde(y, 3, 1, 0.12))
     assert np.isfinite(en.rpde(y, 3, 1, 0.12, min_returns=0)['H_norm'])
-    assert np.isfinite(en.rpde(y, 3, 1, 0.3)['H_norm'])
+    assert np.isfinite(en.rpde(y, 3, 1)['H_norm'])  # the default radius, 0.3
 
 
 def test_rpde_period_is_the_modal_recurrence_time():

@@ -74,7 +74,7 @@ def test_rpde_outputs_from_histogram():
     rng = np.random.default_rng(5)
     y = rng.standard_normal(400)
     y = (y - y.mean()) / y.std(ddof=1)
-    out = entropy.rpde(y, 3, 1, t_max=-1)  # no limit: one bin per embedded point
+    out = entropy.rpde(y, 3, 1, 0.12, t_max=-1)  # no limit: one bin per embedded point
     h = _close_returns_naive(_embed(y, 3, 1), 0.12)
     rpd = h / h.sum()
     nz = rpd > 0
@@ -156,7 +156,7 @@ def test_fixture_rpde():
         if "rpde_3_1" not in r:
             continue
         y = np.asarray(inp[r["series"]], float)
-        for key, args in [("rpde_3_1", (3, 1)), ("rpde_2_1", (2, 1, 0.12)), ("rpde_3_ac", (3, "ac"))]:
+        for key, args in [("rpde_3_1", (3, 1, 0.12)), ("rpde_2_1", (2, 1, 0.12)), ("rpde_3_ac", (3, "ac", 0.12))]:
             got = entropy.rpde(y, *args, t_max=-1)
             np.testing.assert_allclose([got[k] for k in KEYS], [r[key][k] for k in KEYS],
                                        rtol=1e-12, atol=1e-12, err_msg=f"{r['series']} {key}")

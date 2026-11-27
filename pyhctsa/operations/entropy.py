@@ -913,7 +913,7 @@ def _close_returns_hist(v: np.ndarray, epsilon: float, t_max: int = -1) -> np.nd
     return hist
 
 @dict_output
-def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.12, t_max: int = 100,
+def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.3, t_max: int = 100,
          returns_per_bin: int = 5, min_returns: int = 50) -> dict:
     """
     Recurrence period density entropy (RPDE).
@@ -953,6 +953,16 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
     The series is used as given: scale it first (``epsilon`` is an absolute distance, so a
     z-scored series is intended).
 
+    The default radius, ``epsilon = 0.3``, is set by how many points return within ``t_max``
+    steps. A smaller radius resolves finer recurrence structure, but fewer points come back
+    inside it. For z-scored white noise embedded with ``m = 3`` and ``tau = 1``, about 4000
+    points are needed for ``min_returns`` returns at ``epsilon = 0.12`` (the radius of the
+    published method, which was applied to long, finely sampled recordings), and about 500 at
+    0.3. The cost of the larger radius is less contrast between dynamics: at 10000 points
+    (``m = 3``, ``tau = 1``), ``H_norm`` is about 0.12 at ``epsilon = 0.12`` and 0.31 at 0.3 for
+    a sinusoid of period 37 samples, 0.96 and 0.87 for the logistic map at r = 4, and 0.97 and
+    0.99 for white noise.
+
     Parameters
     ----------
     y : array-like
@@ -963,7 +973,7 @@ def rpde(y: ArrayLike, m: int = 2, tau: Union[int, str] = 1, epsilon: float = 0.
         Embedding time delay: an integer, or a rule understood by
         :func:`~pyhctsa.utils.get_tau`. Default is 1.
     epsilon : float, optional
-        Recurrence neighborhood radius. Default is 0.12.
+        Recurrence neighborhood radius (Euclidean, in the units of the series). Default is 0.3.
     t_max : int, optional
         Maximum recurrence time, in samples (at least 3), or -1 for no limit. Default is 100.
     returns_per_bin : int, optional
