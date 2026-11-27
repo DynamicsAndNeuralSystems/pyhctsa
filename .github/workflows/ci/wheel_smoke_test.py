@@ -28,8 +28,14 @@ def main() -> int:
         importlib.import_module(name)
 
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore")  # (features skipped without the optional ripser)
+        warnings.simplefilter("ignore")  # (any skipped features are checked below)
         calc = FeatureCalculator()
+    # every dependency is installed with the wheel, except hmmlearn on Python 3.14 (no wheels there)
+    skipped = {name for name, _ in calc._skipped_functions}
+    allowed = {"model_fit.hmm_fit", "model_fit.hmm_compare_n_states"} if sys.version_info >= (3, 14) else set()
+    if skipped - allowed:
+        print(f"feature functions skipped for a missing dependency: {calc._skipped_functions}")
+        return 1
     rng = np.random.default_rng(0)
     e = rng.standard_normal(400)
     y = np.empty(400)

@@ -33,10 +33,19 @@ for sd in subdirs:
         if short:
             print(f"{sd.name}: sha256={short}…")
 
-shapes = [d.shape for d in dfs]
-if len(set(shapes)) != 1:
-    print("Shape mismatch across platforms:", dict(zip(labels, shapes)))
+n_rows = [d.shape[0] for d in dfs]
+if len(set(n_rows)) != 1:
+    print("Row count mismatch across platforms:", dict(zip(labels, n_rows)))
     finish(1)
+
+# Column sets can differ legitimately: features whose dependency is not installed on that Python
+# version are skipped (hmmlearn on 3.14). Report them and compare the columns all artifacts share.
+all_cols = set.union(*[set(d.columns) for d in dfs])
+for lab, d in zip(labels, dfs):
+    absent = sorted(all_cols - set(d.columns))
+    if absent:
+        print(f"{lab}: {len(absent)} columns absent (present elsewhere): {', '.join(absent[:10])}"
+              + (" ..." if len(absent) > 10 else ""))
 
 num_cols = set.intersection(*[set(d.select_dtypes(include=[np.number]).columns) for d in dfs])
 if not num_cols:
