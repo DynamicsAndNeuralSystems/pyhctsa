@@ -263,7 +263,7 @@ def force_potential(y: ArrayLike, what_potential: str = 'dblwell',
         Simulation parameters in the form ``[alpha, kappa, deltat]``.
 
         - ``alpha``: Controls the well separation (``"dblwell"``) or the
-        oscillation period (``"sine"``).
+          oscillation period (``"sine"``).
         - ``kappa``: Friction (damping) coefficient.
         - ``deltat``: Integration time step.
 
