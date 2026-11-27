@@ -1,5 +1,6 @@
 import copy
 import difflib
+import hashlib
 import importlib
 import inspect
 import math
@@ -21,7 +22,8 @@ from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
 from .utils import (_check_optional_deps, _input_problem, _zscore, decimate_ac1e, decimation_phases, detrend_linear,
-                    nan_outputs, z_score, SHORT_SERIES_WARNING_LENGTH, _round_half_away)
+                    nan_outputs, z_score, SHORT_SERIES_WARNING_LENGTH, _round_half_away,
+                    TIE_WARNING_FRACTION, _tied_fraction, _scrub_home)
 from .quality import Quality, classify, quality_summary
 from .results import ERROR_COLUMNS, save_results
 from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk,
@@ -426,7 +428,8 @@ def _assemble(records: list, problems: list, index: pd.Index):
     ``records`` holds one worker record per series (``None`` for a series rejected by the input
     check, whose reason is in ``problems``). Columns are the union of the computed outputs, in
     order of first appearance; a computed series missing one of them has ``Quality.LINK_ERROR``
-    there, and a rejected series has ``Quality.REJECTED`` everywhere.
+    there, and a rejected series has ``Quality.REJECTED`` everywhere. Each error message has the
+    user's home directory replaced by ``~`` (:func:`~pyhctsa.utils._scrub_home`).
     """
     computed = [r for r in records if r is not None]
     columns = list(dict.fromkeys(c for r in computed for c in r["values"]))
@@ -441,14 +444,14 @@ def _assemble(records: list, problems: list, index: pd.Index):
     for i, (r, problem) in enumerate(zip(records, problems)):
         if r is None:
             quality[i] = int(Quality.REJECTED)
-            errors.append((index[i], None, "InvalidInput", problem))
+            errors.append((index[i], None, "InvalidInput", _scrub_home(problem)))
             continue
         for c, v in r["values"].items():
             values[i, col_idx[c]] = v
             quality[i, col_idx[c]] = r["quality"][c]
         for f, t in r["times"].items():
             times[i, f_idx[f]] = t
-        errors.extend((index[i], f, etype, msg) for f, etype, msg in r["errors"])
+        errors.extend((index[i], f, etype, _scrub_home(msg)) for f, etype, msg in r["errors"])
     return (pd.DataFrame(values, index=index, columns=columns),
             pd.DataFrame(quality, index=index, columns=columns),
             pd.DataFrame(errors, columns=ERROR_COLUMNS),
@@ -561,6 +564,15 @@ class _FieldMinLengths:
 # ignored (configurations written for pyhctsa 1.x carry it).
 _ENTRY_KEYS = {'base_name', 'dependencies', 'configs', 'ordered_args', 'variant_of', 'min_length',
                'field_min_length', 'legacy_name'}
+
+
+def _n_feature_functions(entry: dict) -> int:
+    """The number of feature functions (parameter combinations) one master operation's entry
+    builds: for each config, the product of the lengths of its list-valued parameters."""
+    meta = {'zscore', 'abs', 'preprocess', 'select', 'exclude'}
+    return sum(math.prod(len(v) if isinstance(v, list) else 1
+                         for k, v in c.items() if k not in meta)
+               for c in entry.get('configs', [{}]))
 
 
 def _did_you_mean(name: str, candidates) -> str:
@@ -684,7 +696,10 @@ class FeatureCalculator:
             config_path = ROOT_DIR / "configurations" / "hctsa.yaml"
         self.config_path = config_path
         with open(config_path, encoding='utf-8') as f:
-            config = yaml.safe_load(f)
+            text = f.read()
+        # identifies the configuration's content in saved results (see save())
+        self._config_sha256 = hashlib.sha256(text.encode('utf-8')).hexdigest()
+        config = yaml.safe_load(text)
         self._load_config(config)
 
     @classmethod
@@ -692,6 +707,7 @@ class FeatureCalculator:
         """A calculator built from an already-parsed configuration (used by parallel workers)."""
         calc = cls.__new__(cls)
         calc.config_path = None
+        calc._config_sha256 = None
         calc._load_config(config)
         return calc
 
@@ -857,12 +873,18 @@ class FeatureCalculator:
               are hctsa's ``TS_Quality``).
             * ``errors``: one row per feature function that raised (``instance``, ``feature``,
               ``error_type``, ``message``), and one per series rejected by the input check
-              (``feature`` is ``None``).
+              (``feature`` is ``None``). The user's home directory is replaced by ``~`` in
+              ``message``.
             * ``calc_time``: seconds per series and feature function.
 
             A series that fails the input check (too short, constant, or containing NaN or Inf) is not
             computed, and its row is coded ``Quality.REJECTED``. If every series fails it, a
             ``ValueError`` is raised.
+
+            A ``UserWarning`` (one per call) says how many series consist almost entirely of
+            repeated values, whose rank-, bin- and symbol-based features can change when the
+            series is rescaled or shifted (see "Series with many repeated values" in the usage
+            guide). It changes no value.
         """
         # forget the previous extraction, so save() cannot pair new values with old labels
         self.quality = self.errors = self.calc_time = None
@@ -880,6 +902,17 @@ class FeatureCalculator:
             warnings.warn(f"Time series as short as N = {n_min} samples: features that cannot be computed "
                           f"at a length return NaN, and most others are very noisy estimates below "
                           f"N = {SHORT_SERIES_WARNING_LENGTH}.", stacklevel=2)
+        # a diagnostic only: tie-heavy series are computed like any other
+        n_tied = sum(1 for t, p in zip(series_list, problems)
+                     if p is None and _tied_fraction(t) > TIE_WARNING_FRACTION)
+        if n_tied:
+            warnings.warn(f"{n_tied} of {len(series_list)} time series consist almost entirely of repeated "
+                          f"values (more than {TIE_WARNING_FRACTION:.0%} of their samples share their value "
+                          f"with another sample), as counts or coarsely quantised data do. Features that "
+                          f"rank, bin or symbolise the data split such ties by rounding, so many of their "
+                          f"values can change when the series is rescaled or shifted. See 'Series with "
+                          f"many repeated values': https://dynamicsandneuralsystems.github.io/pyhctsa/usage/"
+                          f"getting_started.html#repeated-values", stacklevel=2)
         # check labels if provided
         if labels is not None:
             # allow single label for single series, otherwise require one label per series
@@ -950,15 +983,56 @@ class FeatureCalculator:
 
         The format follows the suffix: ``.npz`` (no extra dependency) or ``.parquet`` (needs
         pyarrow). Read it back with :func:`pyhctsa.load_results`.
+
+        The file also records which feature set produced the values (``meta`` of
+        :func:`~pyhctsa.load_results`): the pyhctsa version, the time of saving, the configuration
+        (``config_name``, its file name only, and ``config_sha256``, the SHA-256 of its text, which
+        changes with any edit), the number of feature functions, whether :attr:`feature_funcs` was
+        changed after the configuration built it (``feature_functions_modified``), and the operations
+        skipped for missing optional dependencies (``skipped_operations``, ``missing_dependencies``,
+        ``n_skipped_feature_functions``). ``meta`` adds to these, or overrides them.
+
+        A file you share therefore shows the series labels (the index), the configuration's file
+        name and hash, the pyhctsa version, when it was saved and which optional packages were
+        missing, besides the values, quality codes, errors and timings. pyhctsa records no file
+        paths (not even :attr:`config_path`), user names or host names. The ``message`` column of
+        :attr:`errors` holds each exception's message, with the user's home directory replaced by
+        ``~`` (``/Users/<name>/...`` becomes ``~/...``). A message can still contain a path outside
+        the home directory, or other text that the failing package or custom feature function
+        chose to include.
         """
         if self.quality is None:
             raise RuntimeError("Nothing to save: call extract() first.")
         if not values.index.equals(self.quality.index) or not values.columns.equals(self.quality.columns):
             raise ValueError("values must be the DataFrame returned by the last extract()")
-        info = {"n_feature_functions": len(self.feature_funcs),
-                "config_path": None if self.config_path is None else str(self.config_path)}
+        info = self._feature_set_record()
         info.update(meta or {})
         return save_results(path, values, self.quality, self.errors, self.calc_time, info)
+
+    def _feature_set_record(self) -> dict:
+        """What identifies the feature set this calculator computes, as recorded by :meth:`save`.
+
+        The configuration is identified by its file name and content hash, not its path: a path
+        would put the saver's user name and directory layout into files that get shared."""
+        path = self.config_path
+        parsed = getattr(self, "_parsed_config", None) or {}
+        skipped = {}
+        for name, deps in getattr(self, "_skipped_functions", []):
+            module, op = name.split(".", 1)
+            entry = (parsed.get(module) or {}).get(op) or {}
+            skipped[name] = {"missing": list(deps), "n_feature_functions": _n_feature_functions(entry)}
+        funcs = self.feature_funcs
+        built = getattr(self, "_config_funcs", funcs)
+        return {
+            "config_name": None if path is None else Path(path).name,
+            "config_sha256": getattr(self, "_config_sha256", None),
+            "n_feature_functions": len(funcs),
+            "feature_functions_modified": (list(funcs) != list(built)
+                                           or any(built[k] is not f for k, f in funcs.items())),
+            "missing_dependencies": sorted({d for s in skipped.values() for d in s["missing"]}),
+            "skipped_operations": skipped,
+            "n_skipped_feature_functions": sum(s["n_feature_functions"] for s in skipped.values()),
+        }
 
     def _parallel_task(self) -> tuple[Callable, dict]:
         """The chunk function, and its keyword arguments, to hand to a distributor.

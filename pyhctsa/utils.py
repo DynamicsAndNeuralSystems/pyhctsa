@@ -2,8 +2,9 @@ import csv
 import hashlib
 import math
 import os
+import re
 from fractions import Fraction
-from functools import wraps
+from functools import lru_cache, wraps
 from importlib.metadata import PackageNotFoundError, version
 from importlib import resources
 from typing import Union, Callable
@@ -90,6 +91,24 @@ def dict_output(func: Callable) -> Callable:
 MIN_SERIES_LENGTH = 3
 # Below this length most features are noisy estimates; extract() warns (but still computes).
 SHORT_SERIES_WARNING_LENGTH = 20
+# extract() warns (but computes as usual) when more than this fraction of a series' samples share
+# their value with another sample: features that rank, bin or symbolise such a series split its
+# ties by rounding, so their values can change when it is rescaled or shifted (usage docs,
+# "Series with many repeated values"). Above it, multiplying by 3.7 changed 124-544 z-scored
+# features of counts, quantised processes and Empirical1000 series; below it, 29-180, overlapping
+# the 54-100 of series with no repeated values stored to a few significant digits. Continuous
+# float64 or float32 data stays far below it (under 0.02 for a million float32 samples).
+TIE_WARNING_FRACTION = 0.9
+
+
+def _tied_fraction(ts: np.ndarray) -> float:
+    """The fraction of samples whose value occurs more than once in the series.
+
+    0 when every value is distinct, 1 when every value repeats (e.g. counts or coarsely quantised
+    data). It depends only on which samples are equal, not on the units of the series.
+    """
+    _, counts = np.unique(ts, return_counts=True)
+    return float(counts[counts > 1].sum()) / len(ts)
 
 
 def _input_problem(ts: np.ndarray) -> Union[str, None]:
@@ -108,6 +127,55 @@ def _input_problem(ts: np.ndarray) -> Union[str, None]:
     if np.any(np.isinf(ts)):
         return "contains Inf"
     return None
+
+
+@lru_cache(maxsize=1)
+def _home_pattern():
+    """A regular expression matching the user's home directory as it may appear in a message
+    (``None`` if there is no usable home directory).
+
+    It matches the home directory and, if different, its resolved form (``os.path.realpath``,
+    e.g. ``/private/var/...`` for ``/var/...`` on macOS), with each separator written as ``/``,
+    ``\\`` or ``\\\\`` (a backslash doubled by ``repr``, as in the message of an ``OSError``), and
+    ignoring case on Windows. A match must end the path component (``/Users/<name>`` does not
+    match in ``/Users/<name>2``). A home that is empty, relative or a filesystem root (``/``,
+    ``C:\\``) is not used. Computed once per process; a ``\\\\server\\share`` drive is matched
+    only as written.
+    """
+    sep = r"(?:/|\\{1,2})"
+    forms = {}
+    home = os.path.expanduser("~")
+    if not home or not os.path.isabs(home):  # e.g. an unexpanded '~' (no home directory found)
+        return None
+    for p in (home, os.path.realpath(home)):
+        drive, rest = os.path.splitdrive(p)
+        parts = [c for c in re.split(r"[\\/]+", rest) if c]
+        if not parts:  # a filesystem root
+            continue
+        form = re.escape(drive) + sep + sep.join(re.escape(c) for c in parts)
+        forms.setdefault(form, len(drive) + len(parts) + sum(map(len, parts)))
+    if not forms:
+        return None
+    # the longest first, so that a resolved form containing the other (/private/var/...) wins
+    alternatives = sorted(forms, key=forms.get, reverse=True)
+    flags = re.IGNORECASE if os.name == "nt" else 0
+    # not followed by more of a name: /Users/<name>2, /Users/<name>-old or /Users/<name>.bak
+    return re.compile("(?:" + "|".join(alternatives) + r")(?![\w-]|\.\w)", flags)
+
+
+def _scrub_home(message):
+    """``message`` with the user's home directory replaced by ``~`` (see :func:`_home_pattern`).
+
+    Used for the messages recorded in the errors table, which saved files carry. Returns
+    ``message`` unchanged if it is not a string, or if anything goes wrong.
+    """
+    try:
+        pattern = _home_pattern()
+        if pattern is None or not isinstance(message, str):
+            return message
+        return pattern.sub("~", message)
+    except Exception:
+        return message
 
 def _validate_data(ts: np.ndarray) -> bool:
     """validate a time series before computing features"""

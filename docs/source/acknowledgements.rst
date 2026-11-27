@@ -111,7 +111,7 @@ Dependencies
 Runtime dependencies, called through their public interfaces (no code copied; all GPL-compatible):
 NumPy, SciPy, pandas, statsmodels and scikit-learn (BSD-3-Clause), numba (BSD-2-Clause), PyYAML, PyWavelets and rich
 (MIT), pathos, lmfit and `hmmlearn <https://github.com/hmmlearn/hmmlearn>`_ (BSD-3-Clause; hmmlearn replaces
-Z. Ghahramani's HMM code used in *hctsa*), `arch <https://github.com/bashtage/arch>`_ (NCSA), and, optionally,
+Z. Ghahramani's HMM code used in *hctsa*), `arch <https://github.com/bashtage/arch>`_ (NCSA), and
 `ripser <https://github.com/scikit-tda/ripser.py>`_ (MIT). See
 `THIRD_PARTY_LICENSES.md <https://github.com/DynamicsAndNeuralSystems/pyhctsa/blob/main/THIRD_PARTY_LICENSES.md>`_,
 section 4.2.

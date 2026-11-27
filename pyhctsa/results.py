@@ -6,10 +6,16 @@ pyspi's ``Calculator.save``. ``.parquet`` can be read from R (``arrow``) and MAT
 parquet file holds one table, it writes one file per table next to the values:
 ``<name>.parquet`` (values), ``<name>.quality.parquet``, ``<name>.errors.parquet`` and
 ``<name>.calc_time.parquet``.
+
+Every file also records the feature set that produced the values (the pyhctsa version, the
+configuration's name and content hash, the optional dependencies that were missing, ...): in the
+``meta`` array of a ``.npz`` file, and in the key-value schema metadata (key ``pyhctsa``) of each
+``.parquet`` file. :func:`load_results` returns it as ``meta``.
 """
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple, Union
 
@@ -37,12 +43,15 @@ class Results(NamedTuple):
     calc_time: Union[pd.DataFrame, None]
     """Seconds per series and feature function (``None`` if not saved)."""
     meta: dict
-    """pyhctsa version, sizes, and any metadata passed to :func:`save_results`."""
+    """What produced the values: pyhctsa version, sizes, time saved, the feature set (written by
+    :meth:`FeatureCalculator.save`), and any metadata passed to :func:`save_results`. Keys a file
+    does not hold (older files, or files saved without them) are absent."""
 
 
 def _meta(values: pd.DataFrame, extra: Union[dict, None]) -> dict:
     meta = {"pyhctsa_version": __version__, "n_series": int(values.shape[0]),
-            "n_features": int(values.shape[1])}
+            "n_features": int(values.shape[1]),
+            "saved_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     meta.update(extra or {})
     return meta
 
@@ -63,7 +72,9 @@ def save_results(path, values: pd.DataFrame, quality: pd.DataFrame,
     errors, calc_time : pandas.DataFrame, optional
         :attr:`FeatureCalculator.errors` and :attr:`FeatureCalculator.calc_time`.
     meta : dict, optional
-        Extra metadata to store (JSON-serialisable).
+        Extra metadata to store (JSON-serialisable). The pyhctsa version, the number of series
+        and features, and the time saved (UTC) are always stored; :meth:`FeatureCalculator.save`
+        adds the feature set (configuration, its SHA-256, skipped optional dependencies).
 
     Returns
     -------
@@ -93,26 +104,18 @@ def save_results(path, values: pd.DataFrame, quality: pd.DataFrame,
         np.savez_compressed(path, **arrays)
     elif path.suffix == ".parquet":
         _require_pyarrow()
-        import pyarrow as pa
-        import pyarrow.parquet as pq
         stem = path.with_suffix("")
-        v = values.copy()
-        v.attrs = {}
-        table = pa.Table.from_pandas(v)
-        # the metadata goes in the file's own key-value metadata, which any reader (and any
-        # pandas version) keeps
-        table = table.replace_schema_metadata(
-            {**(table.schema.metadata or {}), PARQUET_META_KEY: json.dumps(info, default=_json_default)})
-        pq.write_table(table, path)
-        quality.astype(np.uint8).to_parquet(f"{stem}.quality.parquet")
+        meta_json = json.dumps(info, default=_json_default)
+        _write_parquet(values, path, meta_json)
+        _write_parquet(quality.astype(np.uint8), f"{stem}.quality.parquet", meta_json)
         e = errors[ERROR_COLUMNS].copy()
         # a parquet column holds one type: keep the instance labels' own type when they share one
         if pd.api.types.infer_dtype(e["instance"], skipna=True) not in ("integer", "string", "empty"):
             e["instance"] = e["instance"].astype(str)
-        e.to_parquet(f"{stem}.errors.parquet", index=False)
+        _write_parquet(e, f"{stem}.errors.parquet", meta_json, index=False)
         ct = Path(f"{stem}.calc_time.parquet")
         if calc_time is not None:
-            calc_time.to_parquet(ct)
+            _write_parquet(calc_time, ct, meta_json)
         elif ct.exists():  # do not leave an earlier save's timings beside these values
             ct.unlink()
     else:
@@ -126,6 +129,8 @@ def load_results(path) -> Results:
     Returns a :class:`Results` named tuple, ``(values, quality, errors, calc_time, meta)``, as
     pyspi's ``load_results`` does. (The quality matrix is not put in ``values.attrs``: pandas
     copies ``attrs`` on every operation and cannot concatenate frames holding DataFrames there.)
+    ``meta`` says what produced the values (see :class:`Results`); it is ``{}`` for a file that
+    holds no pyhctsa metadata, such as a parquet file written by pandas.
     """
     path = Path(path)
     if path.suffix == ".npz":
@@ -142,7 +147,7 @@ def load_results(path) -> Results:
             if "calc_time" in f.files:
                 calc_time = pd.DataFrame(f["calc_time"], index=index,
                                          columns=[str(c) for c in f["calc_time_functions"]])
-            meta = json.loads(str(f["meta"]))
+            meta = json.loads(str(f["meta"])) if "meta" in f.files else {}
     elif path.suffix == ".parquet":
         _require_pyarrow()
         import pyarrow.parquet as pq
@@ -160,6 +165,19 @@ def load_results(path) -> Results:
         errors = pd.DataFrame(columns=ERROR_COLUMNS)
     values.attrs = {}
     return Results(values, quality, errors, calc_time, meta)
+
+
+def _write_parquet(df: pd.DataFrame, path, meta_json: str, index: Union[bool, None] = None):
+    """``df`` to ``path``, with ``meta_json`` in the file's own key-value schema metadata, which
+    any parquet reader (and any pandas version) keeps."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    df = df.copy()
+    df.attrs = {}
+    table = pa.Table.from_pandas(df, preserve_index=index)
+    table = table.replace_schema_metadata({**(table.schema.metadata or {}),
+                                           PARQUET_META_KEY: meta_json})
+    pq.write_table(table, path)
 
 
 def _json_default(o):
