@@ -34,6 +34,9 @@ dependencies = [
   "scikit-learn",
   # no Python 3.14 wheels yet: installed where wheels exist, and the HMM features are skipped without it
   "hmmlearn; python_version < '3.14'",
+  # persistent_homology; wheels for Python 3.10-3.14 on Linux (glibc >= 2.28, musl), macOS and Windows x64.
+  # Its features are skipped with a warning if it cannot be imported
+  "ripser",
   "arch",
   "PyWavelets",
   "rich",
@@ -60,7 +63,7 @@ classifiers = [
 
 [project.optional-dependencies]
 hmm = ["hmmlearn"]  # hmm_fit, hmm_compare_n_states on Python 3.14 (builds from source there)
-tda = ["ripser"]  # persistent_homology (NL_PersistentHomology); skipped by the calculator without it
+tda = ["ripser"]  # persistent_homology; a default dependency now, kept so existing `pyhctsa[tda]` installs still work
 parquet = ["pyarrow"]  # FeatureCalculator.save / save_results to .parquet
 test = ["pytest>=6.0", "pytest-cov", "pytest-mock", "ripser", "pyarrow", "hmmlearn"]
 
