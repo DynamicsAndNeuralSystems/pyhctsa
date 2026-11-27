@@ -117,6 +117,14 @@ If you use _pyhctsa_ in your work, please cite the accompanying JOSS paper:
 > Moore, J. B., & Fulcher, B. D. (2026). _pyhctsa_: A Python package for highly comparative time-series analysis.
 > _Journal of Open Source Software_, 11(123), 10581. https://doi.org/10.21105/joss.10581
 
+Please also cite the papers that introduced highly comparative time-series analysis and _hctsa_:
+
+> Fulcher, B. D., & Jones, N. S. (2017). _hctsa_: A computational framework for automated time-series phenotyping using massive feature extraction.
+> _Cell Systems_, 5(5), 527–531.e3. https://doi.org/10.1016/j.cels.2017.10.001
+
+> Fulcher, B. D., Little, M. A., & Jones, N. S. (2013). Highly comparative time-series analysis: the empirical structure of time series and their methods.
+> _Journal of the Royal Society Interface_, 10(83), 20130048. https://doi.org/10.1098/rsif.2013.0048
+
 <details>
 <summary>BibTeX</summary>
 
@@ -130,6 +138,28 @@ If you use _pyhctsa_ in your work, please cite the accompanying JOSS paper:
   number  = {123},
   pages   = {10581},
   doi     = {10.21105/joss.10581}
+}
+
+@article{Fulcher2017hctsa,
+  author  = {Fulcher, Ben D. and Jones, Nick S.},
+  title   = {hctsa: A computational framework for automated time-series phenotyping using massive feature extraction},
+  journal = {Cell Systems},
+  year    = {2017},
+  volume  = {5},
+  number  = {5},
+  pages   = {527--531.e3},
+  doi     = {10.1016/j.cels.2017.10.001}
+}
+
+@article{Fulcher2013hctsa,
+  author  = {Fulcher, Ben D. and Little, Max A. and Jones, Nick S.},
+  title   = {Highly comparative time-series analysis: the empirical structure of time series and their methods},
+  journal = {Journal of the Royal Society Interface},
+  year    = {2013},
+  volume  = {10},
+  number  = {83},
+  pages   = {20130048},
+  doi     = {10.1098/rsif.2013.0048}
 }
 ```
 
