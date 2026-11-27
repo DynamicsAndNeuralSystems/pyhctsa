@@ -1,0 +1,51 @@
+name: Dependency Python-version caps
+
+# Some dependencies are listed in pyproject.toml only below a Python version (python_version < 'X.Y'), because they
+# have no wheels for X.Y yet and a failed source build would fail the whole pyhctsa install. Once a month this checks
+# PyPI for wheels for X.Y (and later) on every platform pyhctsa builds wheels for, and opens an issue for each cap that
+# can be raised. It does nothing while no dependency is capped.
+#
+# GitHub disables scheduled workflows in a public repository after 60 days without repository activity (it emails a
+# warning first). If the repository goes quiet, re-enable this under Actions > Dependency Python-version caps.
+on:
+  schedule:
+    - cron: "23 4 1 * *"  # 04:23 UTC on the 1st of each month
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check the caps against PyPI
+        run: |
+          python -m pip install --upgrade packaging
+          python .github/workflows/ci/check_dependency_caps.py --json caps.json
+
+      - name: Open an issue for each cap that can be raised
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        # (gh reads from /dev/null so that it cannot consume the loop's input)
+        run: |
+          jq -c '.dependencies[] | select(.ready)' caps.json | while read -r dep; do
+            title=$(jq -r '.issue_title' <<< "$dep")
+            open=$(gh issue list --state open --search "\"$title\" in:title" --json title --limit 100 < /dev/null \
+                   | jq --arg t "$title" 'map(select(.title == $t)) | length')
+            if [ "$open" -gt 0 ]; then
+              echo "An open issue already exists: $title"
+              continue
+            fi
+            jq -r '.issue_body' <<< "$dep" > issue_body.md
+            gh issue create --title "$title" --body-file issue_body.md < /dev/null
+          done
