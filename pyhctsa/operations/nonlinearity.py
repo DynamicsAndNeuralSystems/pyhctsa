@@ -2798,7 +2798,7 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
     connected components (H0). The filtration stops at the threshold, so a class still alive
     there is counted as dying at the threshold (lifetime ``(threshold - birth)/threshold``),
     except for the single essential H0 class (the connected component that never dies), which
-    is dropped. Uses ripser [1]_ (the ``ripser`` Python package, an optional dependency; hctsa
+    is dropped. Uses ripser [1]_ (the ``ripser`` Python package, installed with pyhctsa; hctsa
     runs the ripser executable).
 
     Below the point-cloud cap (``max_n``, 1000 points) the persistence totals and entropy

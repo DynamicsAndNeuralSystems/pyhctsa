@@ -49,13 +49,19 @@ _pyhctsa_ requires Python 3.10 or newer:
 pip install pyhctsa
 ```
 
-This gives 6398 of the 6406 features of the default feature set.
-The other 8, the persistent-homology features (`persistent_homology`), need the optional `ripser` package; without it the calculator skips them and warns.
-For the full feature set, install with the `tda` extra:
+This gives all 6406 features of the default feature set on Python 3.10 to 3.13.
+Two dependencies are used by only a few features.
+If either cannot be imported, the calculator skips those features and warns, naming the package to install, instead of failing:
 
-```bash
-pip install "pyhctsa[tda]"
-```
+- `ripser`, for the 8 persistent-homology features (`persistent_homology`), is installed with pyhctsa.
+  It publishes wheels for Python 3.10 to 3.14 on Linux, macOS and Windows (x64), so no compiler is needed.
+  If your environment lacks it (after `pip install --no-deps`, for example), add it with `pip install ripser`.
+- `hmmlearn`, for the 34 hidden-Markov-model features (`hmm_fit`, `hmm_compare_n_states`), is installed with pyhctsa on Python 3.10 to 3.13.
+  It does not yet publish wheels for Python 3.14, so there pyhctsa gives 6372 features.
+  To get the other 34, install it yourself (`pip install "pyhctsa[hmm]"`), which builds it from source and needs a C++ compiler.
+
+Each is installed only where it is known to publish a wheel, so that a failed build of either can never stop pyhctsa from installing.
+On other platforms (a Python version newer than those listed, or Windows on ARM) neither is installed, and the warning gives the command to add it.
 
 We strongly recommend installing into a fresh virtual environment to prevent dependency clashes:
 

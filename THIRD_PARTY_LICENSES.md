@@ -118,7 +118,7 @@ No code from these is copied; they are called through their public interfaces an
 | [pathos](https://github.com/uqfoundation/pathos) | process-based parallel computation | BSD-3-Clause |
 | [lmfit](https://lmfit.github.io/lmfit-py/) | sinusoid model fitting | BSD-3-Clause |
 | [hmmlearn](https://github.com/hmmlearn/hmmlearn) | Gaussian hidden Markov model (replaces Z. Ghahramani's HMM code used in *hctsa*) | BSD-3-Clause |
-| [ripser](https://github.com/scikit-tda/ripser.py) (optional, `tda` extra) | persistent homology | MIT |
+| [ripser](https://github.com/scikit-tda/ripser.py) | persistent homology | MIT |
 
 ## 5. Licence texts
 
