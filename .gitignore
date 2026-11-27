@@ -78,6 +78,7 @@ docs/auto*/
 /docs/_build/
 !pyhctsa/_build/
 _templates/
+!docs/source/_templates/
 *.doctree
 *.pickle
 .doctrees/
