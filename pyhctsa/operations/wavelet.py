@@ -719,11 +719,11 @@ def modwt_var(y: ArrayLike, w_name: str = 'db3', level: Union[int, str] = 5) -> 
     across the bands (Percival & Walden, 2000, DOI 10.1017/CBO9780511841040, ch. 5), and
     the statistics use these energy shares, computed from all N coefficients of each band.
 
-    (Up to pyhctsa 2.0, as in hctsa, the band variances used only the coefficients
-    unaffected by the boundary. At the scaling band that leaves ``N - (2^J - 1)(L - 1)``
-    strongly overlapping coefficients (N - 155 for db3 at level 5), so ``scalingFrac`` was
-    biased towards 0 for N up to about 300, exactly 0 at some lengths, and jumped where the
-    level had to be reduced. The energy shares agree with the old values on long series.)
+    All N coefficients are used because restricting each band to the coefficients unaffected
+    by the boundary leaves only ``N - (2^J - 1)(L - 1)`` strongly overlapping coefficients at
+    the scaling band (N - 155 for db3 at level 5): ``scalingFrac`` is then biased towards 0
+    for N up to about 300, exactly 0 at some lengths, and jumps where the level has to be
+    reduced. On long series the two agree.
 
     Parameters
     ----------
