@@ -15,6 +15,8 @@ This gives all 6344 features of the default feature set on Python 3.10 to 3.13.
 Two dependencies are used by only a few features.
 If either cannot be imported, the calculator skips those features and warns, naming the package to
 install, instead of failing.
+Each is installed only where it is known to publish a wheel, so that a failed build of either can never stop `pyhctsa` from installing.
+On other platforms (a Python version newer than those listed, or Windows on ARM) neither is installed, and the warning gives the command to add it.
 
 `ripser <https://github.com/scikit-tda/ripser.py>`_, for the 8 persistent-homology features
 (``persistent_homology``), is installed with `pyhctsa`.

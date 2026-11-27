@@ -60,6 +60,9 @@ If either cannot be imported, the calculator skips those features and warns, nam
   It does not yet publish wheels for Python 3.14, so there pyhctsa gives 6310 features.
   To get the other 34, install it yourself (`pip install "pyhctsa[hmm]"`), which builds it from source and needs a C++ compiler.
 
+Each is installed only where it is known to publish a wheel, so that a failed build of either can never stop pyhctsa from installing.
+On other platforms (a Python version newer than those listed, or Windows on ARM) neither is installed, and the warning gives the command to add it.
+
 We strongly recommend installing into a fresh virtual environment to prevent dependency clashes:
 
 ```bash
