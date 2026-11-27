@@ -21,7 +21,8 @@ from numpy.typing import ArrayLike
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
 from .utils import (_check_optional_deps, _input_problem, _zscore, decimate_ac1e, decimation_phases, detrend_linear,
-                    nan_outputs, z_score, SHORT_SERIES_WARNING_LENGTH, _round_half_away)
+                    nan_outputs, z_score, SHORT_SERIES_WARNING_LENGTH, _round_half_away,
+                    TIE_WARNING_FRACTION, _tied_fraction)
 from .quality import Quality, classify, quality_summary
 from .results import ERROR_COLUMNS, save_results
 from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk,
@@ -863,6 +864,11 @@ class FeatureCalculator:
             A series that fails the input check (too short, constant, or containing NaN or Inf) is not
             computed, and its row is coded ``Quality.REJECTED``. If every series fails it, a
             ``ValueError`` is raised.
+
+            A ``UserWarning`` (one per call) says how many series consist almost entirely of
+            repeated values, whose rank-, bin- and symbol-based features can change when the
+            series is rescaled or shifted (see "Series with many repeated values" in the usage
+            guide). It changes no value.
         """
         # forget the previous extraction, so save() cannot pair new values with old labels
         self.quality = self.errors = self.calc_time = None
@@ -880,6 +886,17 @@ class FeatureCalculator:
             warnings.warn(f"Time series as short as N = {n_min} samples: features that cannot be computed "
                           f"at a length return NaN, and most others are very noisy estimates below "
                           f"N = {SHORT_SERIES_WARNING_LENGTH}.", stacklevel=2)
+        # a diagnostic only: tie-heavy series are computed like any other
+        n_tied = sum(1 for t, p in zip(series_list, problems)
+                     if p is None and _tied_fraction(t) > TIE_WARNING_FRACTION)
+        if n_tied:
+            warnings.warn(f"{n_tied} of {len(series_list)} time series consist almost entirely of repeated "
+                          f"values (more than {TIE_WARNING_FRACTION:.0%} of their samples share their value "
+                          f"with another sample), as counts or coarsely quantised data do. Features that "
+                          f"rank, bin or symbolise the data split such ties by rounding, so many of their "
+                          f"values can change when the series is rescaled or shifted. See 'Series with "
+                          f"many repeated values': https://dynamicsandneuralsystems.github.io/pyhctsa/usage/"
+                          f"getting_started.html#repeated-values", stacklevel=2)
         # check labels if provided
         if labels is not None:
             # allow single label for single series, otherwise require one label per series
