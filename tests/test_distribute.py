@@ -64,3 +64,16 @@ def test_parsed_config_rebuilds_the_same_features(calc):
     # building removes from calc.config
     _, kwargs = calc._parallel_task()
     assert list(FeatureCalculator._from_config(kwargs["config"]).feature_funcs) == list(calc.feature_funcs)
+
+
+def test_parallel_extraction_warns_once_about_repeated_values(calc, distributor):
+    import warnings
+    counts = [np.random.default_rng(i).poisson(3, 200).astype(float) for i in range(4)]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        parallel = calc.extract(counts + SERIES, distributor=distributor)
+    messages = [str(w.message) for w in caught if "of repeated values" in str(w.message)]
+    assert len(messages) == 1 and messages[0].startswith("4 of 7 time series")
+    with pytest.warns(UserWarning, match="4 of 7 time series"):
+        serial = calc.extract(counts + SERIES)
+    pd.testing.assert_frame_equal(parallel, serial, check_exact=True)
