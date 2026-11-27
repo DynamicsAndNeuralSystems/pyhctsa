@@ -33,10 +33,12 @@ dependencies = [
   "numba",
   "scikit-learn",
   # no Python 3.14 wheels yet: installed where wheels exist, and the HMM features are skipped without it
-  "hmmlearn; python_version < '3.14'",
+  # (nor for Windows on ARM)
+  "hmmlearn; python_version < '3.14' and (sys_platform != 'win32' or platform_machine != 'ARM64')",
   # persistent_homology; wheels for Python 3.10-3.14 on Linux (glibc >= 2.28, musl), macOS and Windows x64.
+  # Not listed for Windows on ARM, where it has no wheel and a failed build would fail the whole install.
   # Its features are skipped with a warning if it cannot be imported
-  "ripser",
+  "ripser; sys_platform != 'win32' or platform_machine != 'ARM64'",
   "arch",
   "PyWavelets",
   "rich",
