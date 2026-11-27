@@ -20,7 +20,7 @@ def _series():
     return {'ar1': z_score(ar), 'sin': z_score(sin), 'trend': np.arange(60.0), 'const': np.ones(30)}
 
 
-# the registered configurations of first_min / first_max in hctsa.yaml
+# the registered configurations of first_min / first_max in feature_config.yaml
 _CONFIGS = [('ac', None), ('mi-gaussian', None), ('mi-kraskov1', 4), ('mi-hist', 5),
             ('mi-hist', 10), ('mi-kraskov2', 4)]
 nan = np.nan

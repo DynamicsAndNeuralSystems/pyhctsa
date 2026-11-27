@@ -9,7 +9,8 @@ from pyhctsa.calculator import FeatureCalculator, classify_output, _standardise_
 from pyhctsa.utils import get_dataset
 from conftest import load_e1000_subset
 
-HCTSA_YAML = os.path.join(os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "configurations", "hctsa.yaml")
+FEATURE_CONFIG = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                              "pyhctsa", "configurations", "feature_config.yaml")
 
 # 1. Time-series feature module tests
 class TestOperations:
@@ -42,11 +43,12 @@ class TestCalculator:
         # check that default feature set is loaded
         assert len(calc.config) > 0, "Expected a non-zero number of modules loaded into the FeatureCalculator."
         config_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "configurations", "hctsa.yaml")
+            os.path.dirname(os.path.dirname(__file__)), "pyhctsa", "configurations", "feature_config.yaml")
         # load yaml for comparison
         with open(config_path, 'rb') as f:
-            hctsa_yaml = yaml.safe_load(f)
-        assert len(hctsa_yaml) == len(calc.config), f"Expected {len(hctsa_yaml)} modules to be loaded, got {len(hctsa_yaml)} instead."
+            default_config = yaml.safe_load(f)
+        assert len(default_config) == len(calc.config), \
+            f"Expected {len(default_config)} modules to be loaded, got {len(calc.config)} instead."
     # test the loading of a single module e.g. correlation
     def test_calculator_custom(self, module_config):
         calc = FeatureCalculator(config_path=module_config("correlation"))
@@ -207,7 +209,7 @@ class TestConfigFiles:
 
     def test_config_keys_are_known(self):
         # misspelled keys (e.g. 'depedencies') are silently ignored by the calculator
-        with open(HCTSA_YAML, encoding="utf-8") as f:
+        with open(FEATURE_CONFIG, encoding="utf-8") as f:
             config = yaml.safe_load(f)
         unknown = []
         for module, features in config.items():
@@ -240,9 +242,9 @@ class TestConfigFiles:
         out = calc.extract(np.random.default_rng(0).standard_normal(200))
         assert out.shape[1] > 6000 and not any(c.startswith(bases) for c in out.columns)
 
-    def test_module_config_matches_hctsa_yaml(self, module_config):
-        # each single-module config cut from hctsa.yaml must parse to exactly that module
-        with open(HCTSA_YAML, encoding="utf-8") as f:
+    def test_module_config_matches_feature_config(self, module_config):
+        # each single-module config cut from feature_config.yaml must parse to exactly that module
+        with open(FEATURE_CONFIG, encoding="utf-8") as f:
             config = yaml.safe_load(f)
         for module, features in config.items():
             with open(module_config(module), encoding="utf-8") as f:

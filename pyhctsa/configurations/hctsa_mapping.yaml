@@ -1,6 +1,6 @@
-# Legacy mapping: how the operations of hctsa.yaml correspond to hctsa (the MATLAB toolbox,
+# Legacy mapping: how the operations of feature_config.yaml correspond to hctsa (the MATLAB toolbox,
 # https://github.com/benfulcher/hctsa) for users moving between the two. Nothing here affects
-# feature extraction. Same module -> operation keys as hctsa.yaml; an operation with no entry has no
+# feature extraction. Same module -> operation keys as feature_config.yaml; an operation with no entry has no
 # hctsa counterpart.
 #
 #   legacy_name           the hctsa function the operation implements
@@ -11,7 +11,7 @@
 # Lag-tau form: hctsa computes some features on the series decimated to one sample per 1/e
 # autocorrelation time (labels ending _dec). pyhctsa instead computes the statistic at lag tau = that
 # time on the whole series (its tau: 'ac1e' configs), so that every decimation phase contributes.
-# scripts/check_hctsa_yaml.py compares hctsa.yaml with hctsa's registered calls using this file.
+# scripts/check_hctsa_yaml.py compares feature_config.yaml with hctsa's registered calls using this file.
 
 
 medical:

@@ -1,5 +1,5 @@
-"""scripts/check_hctsa_yaml.py (the comparison of hctsa.yaml with hctsa's INP_mops / INP_ops) and the shape of the
-default feature set."""
+"""scripts/check_hctsa_yaml.py (the comparison of feature_config.yaml with hctsa's INP_mops / INP_ops) and the
+shape of the default feature set."""
 import importlib.util
 import os
 from collections import Counter
@@ -11,7 +11,7 @@ import yaml
 from pyhctsa.calculator import FeatureCalculator, _PREPROCESS_LABELS
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "check_hctsa_yaml.py"
-HCTSA_YAML = Path(__file__).resolve().parents[1] / "pyhctsa" / "configurations" / "hctsa.yaml"
+FEATURE_CONFIG = Path(__file__).resolve().parents[1] / "pyhctsa" / "configurations" / "feature_config.yaml"
 spec = importlib.util.spec_from_file_location("check_hctsa_yaml", SCRIPT)
 chk = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(chk)
@@ -147,20 +147,20 @@ def test_suggest_writes_matching_configs(tiny_hctsa, tmp_path):
 
 
 # ---- the default feature set itself ----
-HCTSA_MAPPING = HCTSA_YAML.with_name("hctsa_mapping.yaml")
+HCTSA_MAPPING = FEATURE_CONFIG.with_name("hctsa_mapping.yaml")
 
 
 def _load():
-    return chk.load_yaml(HCTSA_YAML)   # with the legacy mapping (hctsa_mapping.yaml) attached
+    return chk.load_yaml(FEATURE_CONFIG)   # with the legacy mapping (hctsa_mapping.yaml) attached
 
 
 def test_legacy_mapping_matches_the_configuration():
     # the mapping names only operations the configuration defines, in the same module, and holds only its own keys
-    cfg = yaml.safe_load(HCTSA_YAML.read_text(encoding="utf-8"))
+    cfg = yaml.safe_load(FEATURE_CONFIG.read_text(encoding="utf-8"))
     mapping = yaml.safe_load(HCTSA_MAPPING.read_text(encoding="utf-8"))
     for module, ops in mapping.items():
         for name, entry in ops.items():
-            assert name in cfg.get(module, {}), f"{module}.{name} is in hctsa_mapping.yaml but not hctsa.yaml"
+            assert name in cfg.get(module, {}), f"{module}.{name} is in hctsa_mapping.yaml but not feature_config.yaml"
             assert entry.get("legacy_name"), f"{module}.{name} has no legacy_name"
             assert set(entry) <= {"legacy_name", "note", "dropped_hctsa_calls"}, f"{module}.{name}: {set(entry)}"
             assert isinstance(entry.get("dropped_hctsa_calls", {}), dict)
@@ -213,7 +213,7 @@ def test_every_function_names_its_hctsa_function_and_known_preprocess():
 
 @pytest.mark.skipif(not os.environ.get("HCTSA_DIR"), reason="set HCTSA_DIR to a hctsa checkout to compare against it")
 def test_default_feature_set_matches_hctsa():
-    res = chk.compare(Path(os.environ["HCTSA_DIR"]), HCTSA_YAML, log=lambda *a: None)
+    res = chk.compare(Path(os.environ["HCTSA_DIR"]), FEATURE_CONFIG, log=lambda *a: None)
     assert not any(res["missing"].values()), {f: [c.label for c in v] for f, v in res["missing"].items() if v}
     assert not res["extra"] and not res["deregistered"]
     assert not res.get("duplicate_labels")

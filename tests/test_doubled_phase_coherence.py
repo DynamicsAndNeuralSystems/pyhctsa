@@ -133,8 +133,8 @@ def test_invalid_parameters_raise(kwargs):
 
 def test_calculator_entry(tmp_path):
     from pyhctsa.calculator import FeatureCalculator
-    # the registered entry, as written in hctsa.yaml (which has custom tags, so it is cut out as text)
-    text = (Path(__file__).resolve().parents[1] / "pyhctsa" / "configurations" / "hctsa.yaml").read_text()
+    # the registered entry, as written in feature_config.yaml (which has custom tags, so it is cut out as text)
+    text = (Path(__file__).resolve().parents[1] / "pyhctsa" / "configurations" / "feature_config.yaml").read_text()
     entry = text[text.index("  doubled_phase_coherence:"):].split("\n\n")[0]
     path = tmp_path / "dpc.yaml"
     path.write_text("spectral:\n" + entry + "\n")

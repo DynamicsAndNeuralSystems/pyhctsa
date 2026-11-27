@@ -97,6 +97,6 @@ the column names:
     - NaN means 'not appropriate for this input' (a constant series, too few samples, a fit that does not exist);
       do not raise for these;
     - return the fields the method defines, and no fields that have no meaning for it; the ``select:`` and
-      ``exclude:`` keys of ``hctsa.yaml`` choose which fields of a function are registered as features;
+      ``exclude:`` keys of ``feature_config.yaml`` choose which fields of a function are registered as features;
     - random draws come from :func:`~pyhctsa.robust.bf_random` through :func:`~pyhctsa.robust.bf_random_seed`,
       never from NumPy's global stream.

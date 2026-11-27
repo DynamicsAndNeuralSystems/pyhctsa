@@ -1,4 +1,4 @@
-"""A missing REQUIRED dependency must raise; only OPTIONAL ones (declared per feature in hctsa.yaml)
+"""A missing REQUIRED dependency must raise; only OPTIONAL ones (declared per feature in feature_config.yaml)
 lead to skipping just the features that need them, with a single clear warning."""
 import importlib
 

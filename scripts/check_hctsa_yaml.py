@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Compare pyhctsa's default feature set with hctsa's.
 
-pyhctsa's ``configurations/hctsa.yaml`` should register, for every hctsa function pyhctsa implements, the same
+pyhctsa's ``configurations/feature_config.yaml`` should register, for every hctsa function pyhctsa implements, the same
 calls (parameter settings) as hctsa's ``FeatureSets/INP_mops_hctsa.txt`` (master operations) and
 ``INP_ops_hctsa.txt`` (operations: one master output field each). This script reads a hctsa checkout and reports
 
@@ -862,7 +862,7 @@ def report(res: dict, verbose: bool, log=print) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("hctsa", type=Path, help="a hctsa checkout")
-    ap.add_argument("--yaml", type=Path, default=REPO / "pyhctsa" / "configurations" / "hctsa.yaml")
+    ap.add_argument("--yaml", type=Path, default=REPO / "pyhctsa" / "configurations" / "feature_config.yaml")
     ap.add_argument("--run", action="store_true", help="run each matched config on a test series and compare output names")
     ap.add_argument("--series", type=Path, help="test series for --run (.npy or text); default: a generated AR(1) + sine")
     ap.add_argument("--suggest", action="store_true", help="print yaml for the missing calls of implemented functions")

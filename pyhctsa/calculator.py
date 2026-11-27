@@ -476,7 +476,7 @@ def _dec_len(w_name: str) -> int:
     return pywt.Wavelet(w_name).dec_len
 
 
-# Names a ``min_length`` expression in hctsa.yaml may use, besides the operation's parameters.
+# Names a ``min_length`` expression in feature_config.yaml may use, besides the operation's parameters.
 _MIN_LENGTH_NAMESPACE = {
     'num': _num, 'isnum': _is_numeric, 'fnn': _is_fnn, 'dec_len': _dec_len,
     'floor': math.floor, 'ceil': math.ceil, 'sqrt': math.sqrt, 'round': _round_half_away,
@@ -486,7 +486,7 @@ _MIN_LENGTH_NAMESPACE = {
 
 
 def _eval_min_length(spec, op_func: Callable, params: dict, label: str) -> Union[int, None]:
-    """The minimum series length of one master operation, from the ``min_length`` of its hctsa.yaml
+    """The minimum series length of one master operation, from the ``min_length`` of its feature_config.yaml
     entry: an int, or a Python expression in the operation's parameters (the configured values,
     and the function's defaults for those not configured). ``None``/absent: no minimum."""
     if spec is None:
@@ -640,7 +640,7 @@ class FeatureCalculator:
     Parameters
     ----------
     config_path: str or None, optional
-        Path to the YAML configuration file. If None, uses the default 'hctsa.yaml'
+        Path to the YAML configuration file. If None, uses the default 'feature_config.yaml'
         configuration file in the package configurations directory.
     
     Notes
@@ -690,7 +690,7 @@ class FeatureCalculator:
         # set the default config path
         if config_path is None:
             ROOT_DIR = Path(__file__).resolve().parent
-            config_path = ROOT_DIR / "configurations" / "hctsa.yaml"
+            config_path = ROOT_DIR / "configurations" / "feature_config.yaml"
         self.config_path = config_path
         with open(config_path, encoding='utf-8') as f:
             text = f.read()
@@ -752,7 +752,7 @@ class FeatureCalculator:
             except ImportError as e:
                 # An operations module that cannot be imported would silently drop all of its
                 # features, so this is always an error. Genuinely optional dependencies are
-                # declared per feature in hctsa.yaml and skipped in _check_deps, never here.
+                # declared per feature in feature_config.yaml and skipped in _check_deps, never here.
                 raise ImportError(_import_failure_message(module_key, e)) from e
 
             # Process features from this module

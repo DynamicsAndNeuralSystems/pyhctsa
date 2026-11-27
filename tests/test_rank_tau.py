@@ -14,7 +14,7 @@ from pyhctsa.calculator import FeatureCalculator
 from pyhctsa.operations.symbolic import (_lagged_word_probs, _transition_matrix, motif_three, motif_two,
                                          transition_matrix, transition_p_alphabet)
 from pyhctsa.utils import _average_ranks, _is_rank_rule, _tau_mi, get_tau, z_score
-from conftest import HCTSA_YAML
+from conftest import FEATURE_CONFIG
 
 DATA = Path(__file__).resolve().parent / "data"
 
@@ -101,8 +101,8 @@ def test_linear_rules_still_depend_on_the_values():
 
 
 def _rank_rule_config(tmp_path):
-    """The configs of hctsa.yaml that set their delay by a rank-based rule, as a config file."""
-    cfg = yaml.safe_load(HCTSA_YAML.read_text(encoding="utf-8"))
+    """The configs of feature_config.yaml that set their delay by a rank-based rule, as a config file."""
+    cfg = yaml.safe_load(FEATURE_CONFIG.read_text(encoding="utf-8"))
     sub = {}
     for module, ops in cfg.items():
         for op, meta in ops.items():

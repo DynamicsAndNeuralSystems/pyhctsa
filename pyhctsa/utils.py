@@ -86,7 +86,7 @@ def dict_output(func: Callable) -> Callable:
 
 # The shortest series any feature is computed on. A z-scored series of length 2 is always
 # +-(1, -1)/sqrt(2) (one bit of information), so nothing below 3 samples is meaningful.
-# Each master operation has its own, usually larger, ``min_length`` (hctsa.yaml) below which
+# Each master operation has its own, usually larger, ``min_length`` (feature_config.yaml) below which
 # its outputs are NaN: see FeatureCalculator.
 MIN_SERIES_LENGTH = 3
 # Below this length most features are noisy estimates; extract() warns (but still computes).
@@ -116,7 +116,7 @@ def _input_problem(ts: np.ndarray) -> Union[str, None]:
 
     Rejects series shorter than :data:`MIN_SERIES_LENGTH` (3) samples, constant series, and
     series containing NaN or Inf. Longer short series are accepted: features that cannot be
-    computed at that length return NaN (their ``min_length`` in hctsa.yaml, or their own checks).
+    computed at that length return NaN (their ``min_length`` in feature_config.yaml, or their own checks).
     """
     if len(ts) < MIN_SERIES_LENGTH:
         return f"too short (N = {len(ts)} < {MIN_SERIES_LENGTH})"
@@ -1587,7 +1587,7 @@ def _knn_theiler(X: np.ndarray, k: int, theiler: int, metric: str = 'euclidean',
 
 # pre_process(y, 'decimate_ac1e') gives NaN when the decimated series would be shorter than
 # the global minimum series length (a decimated series is a series). Each *_dec feature's own
-# minimum length (hctsa.yaml) is then checked on the decimated series. No larger floor (such as
+# minimum length (feature_config.yaml) is then checked on the decimated series. No larger floor (such as
 # 50 points, a reliability cut) is imposed: a 2026 scan found every *_dec feature tested
 # carries signal of its target from 4-15 decimated points (realisation noise is large there,
 # but the values are not noise).
@@ -2033,7 +2033,7 @@ def make_function_name_mappings(
     _MappingLoader.add_constructor("!range", lambda loader, node: None)
 
     if yaml_file is None:
-        yaml_file = resources.files("pyhctsa.configurations").joinpath("hctsa.yaml")
+        yaml_file = resources.files("pyhctsa.configurations").joinpath("feature_config.yaml")
         if mapping_file is None:
             mapping_file = resources.files("pyhctsa.configurations").joinpath("hctsa_mapping.yaml")
 

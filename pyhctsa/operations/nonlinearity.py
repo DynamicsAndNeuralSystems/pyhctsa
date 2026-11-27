@@ -356,7 +356,7 @@ def zero_one_test(y, num_c=20, max_n=10000):
 
     # The test regresses on lags 1..N//10, so it needs N >= 20 (2 lags). K, a correlation over
     # those lags, needs 3 (N >= 30; with 2 it is +-1, in practice always 1): that is a per-field
-    # bound in hctsa.yaml. (No larger bound: a 2026 scan found K separates regular from
+    # bound in feature_config.yaml. (No larger bound: a 2026 scan found K separates regular from
     # irregular dynamics from N = 30, though K only reads on its 0-1 scale from N ~ 200-300.)
     if n < 20:
         logger.warning(
