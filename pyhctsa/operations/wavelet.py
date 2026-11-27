@@ -252,14 +252,6 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
     max_scale : int, optional
         The maximum scale of wavelet analysis. Default is 32.
 
-    The scaled power is relative to the mean power, ``SC = S / mean(S)`` with
-    ``S = |coeffs|**2`` (so the mean of SC is 1, independent of the number of
-    coefficients). ``pover99``, ``pover98``, ``pover95``, ``pover90`` and ``pover80`` are the
-    energy shares of the strongest 1, 2, 5, 10 and 20% of coefficients (the sum of the
-    largest ``max(1, floor((100 - p)/100*numEntries))`` values of SC, divided by
-    ``numEntries``). ``SC_h`` is the entropy of SC relative to its maximum,
-    ``-sum(SC_a*log(SC_a)) - log(numEntries)`` with ``SC_a = SC/sum(SC)``.
-
     Returns
     -------
     dict
@@ -268,6 +260,16 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
         likelihood; NaN if any scaled power is exactly zero, which the gamma distribution
         cannot describe) and ``dd_SC_h`` (the entropy of the maximum of SC in each of 10 time
         boxes at each scale).
+
+    Notes
+    -----
+    The scaled power is relative to the mean power, ``SC = S / mean(S)`` with
+    ``S = |coeffs|**2`` (so the mean of SC is 1, independent of the number of
+    coefficients). ``pover99``, ``pover98``, ``pover95``, ``pover90`` and ``pover80`` are the
+    energy shares of the strongest 1, 2, 5, 10 and 20% of coefficients (the sum of the
+    largest ``max(1, floor((100 - p)/100*numEntries))`` values of SC, divided by
+    ``numEntries``). ``SC_h`` is the entropy of SC relative to its maximum,
+    ``-sum(SC_a*log(SC_a)) - log(numEntries)`` with ``SC_a = SC/sum(SC)``.
     """
     y = np.asarray(y, dtype=float)
     N = len(y)

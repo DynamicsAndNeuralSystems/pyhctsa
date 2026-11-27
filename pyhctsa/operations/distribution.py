@@ -767,12 +767,6 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
 
         Default is ``"pearson"``.
 
-    Notes
-    -----
-    The mode of a histogram depends on the number and edges of its bins, so the
-    half-sample mode is used instead: closed-form, robust, and without a smoothing
-    parameter.
-
     Returns
     -------
     float
@@ -781,6 +775,12 @@ def custom_skewness(y: ArrayLike, what_skew: str = 'pearson') -> float:
         - Positive values indicate right skew.
         - Negative values indicate left skew.
         - Zero indicates symmetry.
+
+    Notes
+    -----
+    The mode of a histogram depends on the number and edges of its bins, so the
+    half-sample mode is used instead: closed-form, robust, and without a smoothing
+    parameter.
     """
     y = np.asarray(y)
     out = 0.0

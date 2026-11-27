@@ -3088,15 +3088,16 @@ def autocorr(y: ArrayLike, tau: Union[int, list] = 1,
         - If a ``list`` of integers, returns autocorrelations at those lags.
         - A NaN lag (e.g. a delay that could not be set) gives NaN for that entry
           (``"Fourier"`` method).
-        - If an empty list, returns the full autocorrelation function when 
-        using the ``"Fourier"`` estimation method.
+        - If an empty list, returns the full autocorrelation function when
+          using the ``"Fourier"`` estimation method.
+
         Default is 1.
 
     method : {"Fourier", "TimeDomainStat", "TimeDomain"}, optional
         Method used to compute the autocorrelation.
 
         - ``"Fourier"``: Computes autocorrelation via the Wiener–Khinchin
-            theorem using the Fourier transform.
+          theorem using the Fourier transform.
         - ``"TimeDomainStat"``: Statistical time-domain estimator.
         - ``"TimeDomain"``: Direct time-domain computation.
 
