@@ -23,7 +23,7 @@ from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, T
 
 from .utils import (_check_optional_deps, _input_problem, _zscore, decimate_ac1e, decimation_phases, detrend_linear,
                     nan_outputs, z_score, SHORT_SERIES_WARNING_LENGTH, _round_half_away,
-                    TIE_WARNING_FRACTION, _tied_fraction)
+                    TIE_WARNING_FRACTION, _tied_fraction, _scrub_home)
 from .quality import Quality, classify, quality_summary
 from .results import ERROR_COLUMNS, save_results
 from .distribute import (_compute_config_features_for_chunk, _compute_features_for_chunk,
@@ -428,7 +428,8 @@ def _assemble(records: list, problems: list, index: pd.Index):
     ``records`` holds one worker record per series (``None`` for a series rejected by the input
     check, whose reason is in ``problems``). Columns are the union of the computed outputs, in
     order of first appearance; a computed series missing one of them has ``Quality.LINK_ERROR``
-    there, and a rejected series has ``Quality.REJECTED`` everywhere.
+    there, and a rejected series has ``Quality.REJECTED`` everywhere. Each error message has the
+    user's home directory replaced by ``~`` (:func:`~pyhctsa.utils._scrub_home`).
     """
     computed = [r for r in records if r is not None]
     columns = list(dict.fromkeys(c for r in computed for c in r["values"]))
@@ -443,14 +444,14 @@ def _assemble(records: list, problems: list, index: pd.Index):
     for i, (r, problem) in enumerate(zip(records, problems)):
         if r is None:
             quality[i] = int(Quality.REJECTED)
-            errors.append((index[i], None, "InvalidInput", problem))
+            errors.append((index[i], None, "InvalidInput", _scrub_home(problem)))
             continue
         for c, v in r["values"].items():
             values[i, col_idx[c]] = v
             quality[i, col_idx[c]] = r["quality"][c]
         for f, t in r["times"].items():
             times[i, f_idx[f]] = t
-        errors.extend((index[i], f, etype, msg) for f, etype, msg in r["errors"])
+        errors.extend((index[i], f, etype, _scrub_home(msg)) for f, etype, msg in r["errors"])
     return (pd.DataFrame(values, index=index, columns=columns),
             pd.DataFrame(quality, index=index, columns=columns),
             pd.DataFrame(errors, columns=ERROR_COLUMNS),
@@ -872,7 +873,8 @@ class FeatureCalculator:
               are hctsa's ``TS_Quality``).
             * ``errors``: one row per feature function that raised (``instance``, ``feature``,
               ``error_type``, ``message``), and one per series rejected by the input check
-              (``feature`` is ``None``).
+              (``feature`` is ``None``). The user's home directory is replaced by ``~`` in
+              ``message``.
             * ``calc_time``: seconds per series and feature function.
 
             A series that fails the input check (too short, constant, or containing NaN or Inf) is not
@@ -993,9 +995,11 @@ class FeatureCalculator:
         A file you share therefore shows the series labels (the index), the configuration's file
         name and hash, the pyhctsa version, when it was saved and which optional packages were
         missing, besides the values, quality codes, errors and timings. pyhctsa records no file
-        paths (not even :attr:`config_path`), user names or host names; the ``message`` column of
-        :attr:`errors` holds each exception's message as it was raised, which a failing package or
-        custom feature function could have written a path into.
+        paths (not even :attr:`config_path`), user names or host names. The ``message`` column of
+        :attr:`errors` holds each exception's message, with the user's home directory replaced by
+        ``~`` (``/Users/<name>/...`` becomes ``~/...``). A message can still contain a path outside
+        the home directory, or other text that the failing package or custom feature function
+        chose to include.
         """
         if self.quality is None:
             raise RuntimeError("Nothing to save: call extract() first.")

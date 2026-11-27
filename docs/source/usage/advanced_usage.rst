@@ -307,5 +307,8 @@ A saved file is often shared, so it helps to know what it shows besides the valu
 It shows the series labels you gave (the index), the configuration's file name and hash, the pyhctsa version, the time of saving (UTC), and which optional packages were missing.
 pyhctsa itself records no file paths (not even the configuration's), user names or host names.
 Files saved by some unreleased development versions also hold ``config_path``, the configuration's full path, which then appears in ``meta``.
-The one place a path could still appear is the ``message`` column of the errors table, which holds each failure's exception message as it was raised: a custom feature function, or an optional package that fails to import, can write a path into that message.
+The one place a path could still appear is the ``message`` column of the errors table, which holds each failure's exception message: a custom feature function, or an optional package that fails to import, can write a path into that message.
+pyhctsa replaces your home directory with ``~`` in these messages, so ``/Users/<name>/project/data.csv`` is recorded as ``~/project/data.csv`` (on Windows, with either kind of slash and any letter case).
+A message can still contain a path outside your home directory, or other text that the failing function chose to include.
+Only the recorded message changes: warnings, log output and exceptions raised to you are as they were.
 
