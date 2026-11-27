@@ -38,6 +38,9 @@ compiler:
 
    > pip install "pyhctsa[hmm]"
 
+`pyhctsa` publishes no wheel for Intel Macs (macOS x86_64), so pip builds it from source there, which needs the Xcode Command Line Tools.
+On Intel Macs, use Python 3.10 to 3.13: `numba <https://numba.pydata.org/>`_, a required dependency, no longer publishes Intel Mac wheels and has none for Python 3.14.
+
 From Source
 -----------
 You can also install `pyhctsa` directly from the source code:

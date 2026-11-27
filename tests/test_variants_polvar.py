@@ -128,7 +128,7 @@ def test_pol_var_resid_null_on_marginal_and_responsive_to_volatility_clustering(
         assert _auc(f(ar, lambda y: pol_var_resid(y, D)), f(arch, lambda y: pol_var_resid(y, D))) > 0.9
 
 
-# ---------------------------------------------------------------- registration in hctsa.yaml
+# ---------------------------------------------------------------- registration in feature_config.yaml
 
 def test_variants_are_registered_as_pyhctsa_only():
     fc = FeatureCalculator()

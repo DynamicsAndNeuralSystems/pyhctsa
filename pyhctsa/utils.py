@@ -86,7 +86,7 @@ def dict_output(func: Callable) -> Callable:
 
 # The shortest series any feature is computed on. A z-scored series of length 2 is always
 # +-(1, -1)/sqrt(2) (one bit of information), so nothing below 3 samples is meaningful.
-# Each master operation has its own, usually larger, ``min_length`` (hctsa.yaml) below which
+# Each master operation has its own, usually larger, ``min_length`` (feature_config.yaml) below which
 # its outputs are NaN: see FeatureCalculator.
 MIN_SERIES_LENGTH = 3
 # Below this length most features are noisy estimates; extract() warns (but still computes).
@@ -116,7 +116,7 @@ def _input_problem(ts: np.ndarray) -> Union[str, None]:
 
     Rejects series shorter than :data:`MIN_SERIES_LENGTH` (3) samples, constant series, and
     series containing NaN or Inf. Longer short series are accepted: features that cannot be
-    computed at that length return NaN (their ``min_length`` in hctsa.yaml, or their own checks).
+    computed at that length return NaN (their ``min_length`` in feature_config.yaml, or their own checks).
     """
     if len(ts) < MIN_SERIES_LENGTH:
         return f"too short (N = {len(ts)} < {MIN_SERIES_LENGTH})"
@@ -1587,7 +1587,7 @@ def _knn_theiler(X: np.ndarray, k: int, theiler: int, metric: str = 'euclidean',
 
 # pre_process(y, 'decimate_ac1e') gives NaN when the decimated series would be shorter than
 # the global minimum series length (a decimated series is a series). Each *_dec feature's own
-# minimum length (hctsa.yaml) is then checked on the decimated series. No larger floor (such as
+# minimum length (feature_config.yaml) is then checked on the decimated series. No larger floor (such as
 # 50 points, a reliability cut) is imposed: a 2026 scan found every *_dec feature tested
 # carries signal of its target from 4-15 decimated points (realisation noise is large there,
 # but the values are not noise).
@@ -1731,9 +1731,10 @@ def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, fl
 
     Keeps every ``tau``-th sample, ``tau = get_tau(x_z, 'ac1e')``, then z-scores the result
     (N-1 standard deviation; a constant result becomes zeros). If fewer than 3 samples
-    (``_DECIMATE_MIN_POINTS``) would remain, the result is ``nan``. This gives the
-    ``*_dec`` variants of rate-dependent features. A config requests it with
-    ``preprocess: decimate_ac1e`` (see :class:`~pyhctsa.calculator.FeatureCalculator`).
+    (``_DECIMATE_MIN_POINTS``) would remain, the result is ``nan``. This is the subseries
+    from the first sample alone; the ``*_dec`` features (``preprocess: decimate_ac1e``) use
+    every starting phase and average over them (:func:`decimation_phases`; see
+    :class:`~pyhctsa.calculator.FeatureCalculator`).
 
     Parameters
     ----------
@@ -2025,6 +2026,10 @@ def make_function_name_mappings(
     default configuration, else ``mapping_file`` if given) and from any ``legacy_name`` keys in
     the configuration itself. Variants (entries with ``variant_of`` and no legacy name) have no
     hctsa counterpart and are left out.
+
+    Returns a DataFrame with columns ``pyhctsa name``, ``hctsa legacy name`` and ``pyhctsa module``;
+    the pyhctsa version is in its ``attrs["feature_set_version"]``. If ``csv_out_fpath`` is given,
+    the table is also written there as a plain CSV (a header row, no index and no metadata).
     """
     # only the names are needed, so parse with a private loader that ignores
     # !range rather than overriding the constructor on the shared SafeLoader
@@ -2033,7 +2038,7 @@ def make_function_name_mappings(
     _MappingLoader.add_constructor("!range", lambda loader, node: None)
 
     if yaml_file is None:
-        yaml_file = resources.files("pyhctsa.configurations").joinpath("hctsa.yaml")
+        yaml_file = resources.files("pyhctsa.configurations").joinpath("feature_config.yaml")
         if mapping_file is None:
             mapping_file = resources.files("pyhctsa.configurations").joinpath("hctsa_mapping.yaml")
 
@@ -2069,7 +2074,7 @@ def make_function_name_mappings(
     df_all_modules.attrs["feature_set_version"] = __version__
 
     if csv_out_fpath:
-        # Write metadata as comment lines, then the CSV
+        # the table only: attrs (the version) are not written to the CSV
         with open(csv_out_fpath, "w", encoding="utf-8", newline="") as f:
             df_all_modules.to_csv(f, index=False)
 

@@ -1,4 +1,4 @@
-"""Per-feature minimum series lengths (``min_length`` in hctsa.yaml) and the global length check.
+"""Per-feature minimum series lengths (``min_length`` in feature_config.yaml) and the global length check.
 
 Below its ``min_length`` a feature is not defined (hctsa's 'not appropriate', quality code 2): all of
 its outputs are NaN and the set of output fields is unchanged. At ``min_length`` it is computed.

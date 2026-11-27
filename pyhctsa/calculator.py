@@ -476,7 +476,7 @@ def _dec_len(w_name: str) -> int:
     return pywt.Wavelet(w_name).dec_len
 
 
-# Names a ``min_length`` expression in hctsa.yaml may use, besides the operation's parameters.
+# Names a ``min_length`` expression in feature_config.yaml may use, besides the operation's parameters.
 _MIN_LENGTH_NAMESPACE = {
     'num': _num, 'isnum': _is_numeric, 'fnn': _is_fnn, 'dec_len': _dec_len,
     'floor': math.floor, 'ceil': math.ceil, 'sqrt': math.sqrt, 'round': _round_half_away,
@@ -486,7 +486,7 @@ _MIN_LENGTH_NAMESPACE = {
 
 
 def _eval_min_length(spec, op_func: Callable, params: dict, label: str) -> Union[int, None]:
-    """The minimum series length of one master operation, from the ``min_length`` of its hctsa.yaml
+    """The minimum series length of one master operation, from the ``min_length`` of its feature_config.yaml
     entry: an int, or a Python expression in the operation's parameters (the configured values,
     and the function's defaults for those not configured). ``None``/absent: no minimum."""
     if spec is None:
@@ -640,7 +640,7 @@ class FeatureCalculator:
     Parameters
     ----------
     config_path: str or None, optional
-        Path to the YAML configuration file. If None, uses the default 'hctsa.yaml'
+        Path to the YAML configuration file. If None, uses the default 'feature_config.yaml'
         configuration file in the package configurations directory.
     
     Notes
@@ -653,11 +653,19 @@ class FeatureCalculator:
     - ``preprocess``: one more input transform, applied to the (z-scored) series before ``abs``;
       its label suffix follows ``_abs``. The values:
 
-      * ``decimate_ac1e`` (suffix ``_dec``): the z-scored series is decimated to one sample per
-        floored 1/e autocorrelation time and z-scored again. If that time cannot be determined
-        (e.g. the ACF never falls to 1/e), or fewer than 3 samples would remain (or fewer than
-        the operation's ``min_length``), the feature is NaN. See
-        :func:`pyhctsa.utils.decimate_ac1e`;
+      * ``decimate_ac1e`` (suffix ``_dec``): with ``tau`` the floored 1/e autocorrelation time,
+        the series is decimated to one sample per ``tau`` from each of the ``tau`` starting
+        phases (``x_z[p::tau]``, ``p = 0, ..., tau - 1``), each subseries z-scored again (with
+        ``zscore: True``). The function is computed on every subseries that has at least 3
+        samples and at least the operation's ``min_length``, and its outputs are averaged over
+        them (field by field, ignoring NaN). The feature is NaN if ``tau`` cannot be determined
+        (e.g. the ACF never falls to 1/e) or no subseries qualifies. See
+        :func:`pyhctsa.utils.decimation_phases`;
+      * ``decimate_ac1e-rank`` (``_dec-rank``): the same, with ``tau`` set from the ranks of the
+        series (``get_tau(x_z, 'ac1e-rank')``), for features that depend on the data only
+        through their order;
+      * ``detrend`` (``_lindt``): the least-squares line removed and the residual z-scored again
+        (with ``zscore: True``); NaN if the series is a line up to round-off;
       * ``diff1`` (``_diff1``): ``diff(x_z)``;
       * ``zscore_abs`` (``_mag``): ``zscore(abs(x_z))``; ``zscore_sign`` (``_sign``):
         ``zscore(sign(x_z))``. (``abs: True`` alone is ``abs(x_z)``.)
@@ -690,7 +698,7 @@ class FeatureCalculator:
         # set the default config path
         if config_path is None:
             ROOT_DIR = Path(__file__).resolve().parent
-            config_path = ROOT_DIR / "configurations" / "hctsa.yaml"
+            config_path = ROOT_DIR / "configurations" / "feature_config.yaml"
         self.config_path = config_path
         with open(config_path, encoding='utf-8') as f:
             text = f.read()
@@ -752,7 +760,7 @@ class FeatureCalculator:
             except ImportError as e:
                 # An operations module that cannot be imported would silently drop all of its
                 # features, so this is always an error. Genuinely optional dependencies are
-                # declared per feature in hctsa.yaml and skipped in _check_deps, never here.
+                # declared per feature in feature_config.yaml and skipped in _check_deps, never here.
                 raise ImportError(_import_failure_message(module_key, e)) from e
 
             # Process features from this module

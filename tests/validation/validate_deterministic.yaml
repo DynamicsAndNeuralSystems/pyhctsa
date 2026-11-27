@@ -937,11 +937,15 @@ functions:
     arg_map:
       m: m
       tau: tau
-    matlab_signature: ['y', 'm', 'tau']
+      epsilon: epsilon
+      t_max: T_max
+    matlab_signature: ['y', 'm', 'tau', 'epsilon', 'T_max']
     output_type: array
+    # the unlimited form at the published radius, given explicitly (the python defaults are
+    # epsilon 0.3, t_max 100 with binning); returns_per_bin and min_returns are python-only
     test_cases:
-      - {m: 3.0, tau: 1.0, zscore: True}
-      - {m: 3.0, tau: 'ac', zscore: True}
+      - {m: 3.0, tau: 1.0, epsilon: 0.12, t_max: -1, returns_per_bin: 0, min_returns: 0, zscore: True}
+      - {m: 3.0, tau: 'ac', epsilon: 0.12, t_max: -1, returns_per_bin: 0, min_returns: 0, zscore: True}
   
   sample_entropy:
     python_func: sample_entropy

@@ -32,7 +32,8 @@
 ---
 
 The **PY**thon toolkit for **H**ighly **C**omparative **T**ime-**S**eries **A**nalysis (_pyhctsa_) is a living library of
-time-series analysis methods. It computes **over 6300 interpretable time-series features** (6344 in the default feature set: 6104 from the operations of `hctsa` plus 240 pyhctsa-only features) from a single univariate
+time-series analysis methods.
+It computes **over 6300 interpretable time-series features** (6406 in the default feature set: 6166 from the operations of `hctsa` plus 240 pyhctsa-only features) from a single univariate
 series — spanning distributional shape, autocorrelation, entropy and information theory, scaling, stationarity,
 nonlinear dynamics, spectral and wavelet properties, model fits, and more — making it the most comprehensive feature
 set available in native Python.
@@ -62,6 +63,9 @@ If either cannot be imported, the calculator skips those features and warns, nam
 
 Each is installed only where it is known to publish a wheel, so that a failed build of either can never stop pyhctsa from installing.
 On other platforms (a Python version newer than those listed, or Windows on ARM) neither is installed, and the warning gives the command to add it.
+
+pyhctsa publishes no wheel for Intel Macs (macOS x86_64), so pip builds it from source there, which needs the Xcode Command Line Tools.
+On Intel Macs, use Python 3.10 to 3.13: `numba`, a required dependency, no longer publishes Intel Mac wheels and has none for Python 3.14.
 
 We strongly recommend installing into a fresh virtual environment to prevent dependency clashes:
 

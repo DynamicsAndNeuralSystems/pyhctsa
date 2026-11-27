@@ -165,7 +165,7 @@ def test_saved_metadata_reveals_no_paths_or_user(tmp_path, monkeypatch, suffix, 
         user = None
     for meta in _stored_meta(path, suffix):
         assert "config_path" not in meta
-        assert meta["config_name"] == ("small.yaml" if custom else "hctsa.yaml")
+        assert meta["config_name"] == Path(calc.config_path).name   # the file name only, not its path
         for s in _strings(meta):
             for f in forbidden:
                 assert f not in s, (s, f)
