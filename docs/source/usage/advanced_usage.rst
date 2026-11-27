@@ -290,7 +290,7 @@ A series that fails the input check is not computed and its row is coded 9; only
 Two result files with the same columns can come from different configurations or pyhctsa versions, so :meth:`~pyhctsa.calculator.FeatureCalculator.save` also stores the feature set that produced the values, returned by :func:`~pyhctsa.load_results` as ``meta``:
 
 - ``pyhctsa_version``, ``saved_utc`` (when the file was written), ``n_series`` and ``n_features`` (columns);
-- ``config_path`` (as given, or the default configuration's path), ``config_name`` (its file name) and ``config_sha256``, the SHA-256 of the configuration's text, which changes with any edit to it, even one that leaves the feature names alone;
+- ``config_name`` (the configuration's file name, without its directory) and ``config_sha256``, the SHA-256 of the configuration's text, which changes with any edit to it, even one that leaves the feature names alone;
 - ``n_feature_functions``, and ``feature_functions_modified``: whether ``feature_funcs`` was changed after the configuration built it (e.g. to compute a subset);
 - ``missing_dependencies``, ``skipped_operations`` (each operation skipped because an optional dependency was not installed, with the missing packages and the number of feature functions it would have built) and ``n_skipped_feature_functions``.
 
@@ -302,4 +302,10 @@ Two result files with the same columns can come from different configurations or
 A ``.npz`` file holds the record as JSON in its ``meta`` array; each ``.parquet`` file holds it in its schema metadata under the key ``pyhctsa`` (``pyarrow.parquet.read_schema(path).metadata[b"pyhctsa"]``), so other parquet readers still read the tables as usual.
 The values that :meth:`~pyhctsa.calculator.FeatureCalculator.extract` returns carry no metadata: the record is written only by ``save``.
 Files without the record (e.g. a parquet file written by pandas) still load, with ``meta`` holding only what they do have.
+
+A saved file is often shared, so it helps to know what it shows besides the values, quality codes, errors and timings.
+It shows the series labels you gave (the index), the configuration's file name and hash, the pyhctsa version, the time of saving (UTC), and which optional packages were missing.
+pyhctsa itself records no file paths (not even the configuration's), user names or host names.
+Files saved by some unreleased development versions also hold ``config_path``, the configuration's full path, which then appears in ``meta``.
+The one place a path could still appear is the ``message`` column of the errors table, which holds each failure's exception message as it was raised: a custom feature function, or an optional package that fails to import, can write a path into that message.
 

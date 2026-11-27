@@ -966,12 +966,19 @@ class FeatureCalculator:
         pyarrow). Read it back with :func:`pyhctsa.load_results`.
 
         The file also records which feature set produced the values (``meta`` of
-        :func:`~pyhctsa.load_results`): the pyhctsa version, the configuration file (``config_path``
-        as given, ``config_name``, and ``config_sha256``, the SHA-256 of its text, which changes
-        with any edit), the number of feature functions, whether :attr:`feature_funcs` was changed
-        after the configuration built it (``feature_functions_modified``), and the operations skipped
-        for missing optional dependencies (``skipped_operations``, ``missing_dependencies``,
+        :func:`~pyhctsa.load_results`): the pyhctsa version, the time of saving, the configuration
+        (``config_name``, its file name only, and ``config_sha256``, the SHA-256 of its text, which
+        changes with any edit), the number of feature functions, whether :attr:`feature_funcs` was
+        changed after the configuration built it (``feature_functions_modified``), and the operations
+        skipped for missing optional dependencies (``skipped_operations``, ``missing_dependencies``,
         ``n_skipped_feature_functions``). ``meta`` adds to these, or overrides them.
+
+        A file you share therefore shows the series labels (the index), the configuration's file
+        name and hash, the pyhctsa version, when it was saved and which optional packages were
+        missing, besides the values, quality codes, errors and timings. pyhctsa records no file
+        paths (not even :attr:`config_path`), user names or host names; the ``message`` column of
+        :attr:`errors` holds each exception's message as it was raised, which a failing package or
+        custom feature function could have written a path into.
         """
         if self.quality is None:
             raise RuntimeError("Nothing to save: call extract() first.")
@@ -982,7 +989,10 @@ class FeatureCalculator:
         return save_results(path, values, self.quality, self.errors, self.calc_time, info)
 
     def _feature_set_record(self) -> dict:
-        """What identifies the feature set this calculator computes, as recorded by :meth:`save`."""
+        """What identifies the feature set this calculator computes, as recorded by :meth:`save`.
+
+        The configuration is identified by its file name and content hash, not its path: a path
+        would put the saver's user name and directory layout into files that get shared."""
         path = self.config_path
         parsed = getattr(self, "_parsed_config", None) or {}
         skipped = {}
@@ -993,7 +1003,6 @@ class FeatureCalculator:
         funcs = self.feature_funcs
         built = getattr(self, "_config_funcs", funcs)
         return {
-            "config_path": None if path is None else str(path),
             "config_name": None if path is None else Path(path).name,
             "config_sha256": getattr(self, "_config_sha256", None),
             "n_feature_functions": len(funcs),

@@ -49,7 +49,7 @@ def test_saved_files_record_the_feature_set(tmp_path, suffix):
     r = load_results(calc.save(tmp_path / f"res{suffix}", df, meta={"note": "x"}))
     m = r.meta
     assert m["pyhctsa_version"] == __version__
-    assert m["config_path"] == config and m["config_name"] == "small.yaml"
+    assert "config_path" not in m and m["config_name"] == "small.yaml"
     assert m["config_sha256"] == hashlib.sha256(CONFIG.encode("utf-8")).hexdigest()
     assert m["n_features"] == df.shape[1] and m["n_series"] == 2
     assert m["n_feature_functions"] == 3 and m["feature_functions_modified"] is False
@@ -112,6 +112,72 @@ def test_changed_feature_funcs_are_flagged(tmp_path):
     calc.feature_funcs = dict(list(calc.feature_funcs.items())[:2])
     r = load_results(calc.save(tmp_path / "res.npz", _extract(calc)))
     assert r.meta["feature_functions_modified"] is True and r.meta["n_feature_functions"] == 2
+
+
+def _stored_meta(path: Path, suffix: str) -> list:
+    """The metadata record as written in every file of one save (read without load_results)."""
+    if suffix == ".npz":
+        with np.load(path) as f:
+            return [json.loads(str(f["meta"]))]
+    import pyarrow.parquet as pq
+    stem = path.with_suffix("")
+    files = [path] + [Path(f"{stem}.{t}.parquet") for t in ("quality", "errors", "calc_time")]
+    return [json.loads(pq.read_schema(p).metadata[b"pyhctsa"]) for p in files]
+
+
+def _strings(o):
+    if isinstance(o, dict):
+        for k, v in o.items():
+            yield str(k)
+            yield from _strings(v)
+    elif isinstance(o, (list, tuple)):
+        for v in o:
+            yield from _strings(v)
+    elif o is not None:
+        yield str(o)
+
+
+@pytest.mark.parametrize("custom", [False, True], ids=["default_config", "custom_config"])
+@pytest.mark.parametrize("suffix", [".npz", ".parquet"])
+def test_saved_metadata_reveals_no_paths_or_user(tmp_path, monkeypatch, suffix, custom):
+    """A shared file must not expose where, or by whom, it was written."""
+    _need(suffix)
+    import getpass
+    import os
+    work = tmp_path / "project"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    if custom:
+        calc = FeatureCalculator(_write(work / "small.yaml", CONFIG))
+    else:
+        calc = FeatureCalculator()
+        calc.feature_funcs = dict(list(calc.feature_funcs.items())[:5])
+    path = calc.save(work / f"res{suffix}", _extract(calc))
+    forbidden = {p for p in (str(Path.home()), os.getcwd(), str(work), str(tmp_path)) if len(p) > 1}
+    try:
+        user = getpass.getuser()
+    except Exception:  # no user name to find (e.g. some containers)
+        user = None
+    for meta in _stored_meta(path, suffix):
+        assert "config_path" not in meta
+        assert meta["config_name"] == ("small.yaml" if custom else "hctsa.yaml")
+        for s in _strings(meta):
+            for f in forbidden:
+                assert f not in s, (s, f)
+            if user and len(user) > 2:  # a very short name would match by chance
+                assert user not in s, (s, user)
+    # the calculator itself still knows where its configuration came from
+    assert calc.config_path is not None
+
+
+def test_old_files_with_config_path_still_load(tmp_path):
+    """Files written before config_path was dropped hold it; they load, and keep it in meta."""
+    calc = FeatureCalculator(_write(tmp_path / "small.yaml", CONFIG))
+    df = _extract(calc)
+    path = calc.save(tmp_path / "res.npz", df, meta={"config_path": "/somewhere/small.yaml"})
+    r = load_results(path)
+    assert r.meta["config_path"] == "/somewhere/small.yaml"
+    pd.testing.assert_frame_equal(r.values, df, check_names=False)
 
 
 def test_npz_without_metadata_loads(tmp_path):
