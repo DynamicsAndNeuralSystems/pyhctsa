@@ -163,7 +163,7 @@ def visibility_graph(y: ArrayLike, meth: str = 'horiz', max_l: Union[int, str] =
     degrees, and the autocorrelation of the sequence of degrees taken in time order.
     cf. [1] and [2].
 
-    Follows hctsa's ``NW_VisibilityGraph``, which builds on visibility-graph code by Enyu Zhuang
+    Builds on visibility-graph code by Enyu Zhuang
     (after Lacasa et al. [1] and Luque et al. [2]); the degree computations here are written for
     pyhctsa.
 

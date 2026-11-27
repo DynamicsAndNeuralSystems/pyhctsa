@@ -20,7 +20,7 @@ from ..utils import dict_output, get_tau, theiler_window, _round_half_away
 def _sd_give_me_stats(stat_x: float, stat_surr: ArrayLike, left_right_both: str) -> dict:
     """Compute statistics on the surrogate distribution: the z-score of the series' value against
     the surrogates' (NaN if they are all equal), its distance from their median in interquartile ranges
-    (NaN if the interquartile range is 0 up to rounding, see ``_ROUNDING``) and a rank-based p-value (as in hctsa; a p-value or kernel
+    (NaN if the interquartile range is 0 up to rounding, see ``_ROUNDING``) and a rank-based p-value (a p-value or kernel
     density of the z-scored value is not returned, being redundant with these)."""
     num_surrs = len(stat_surr)
     out = {}
@@ -66,7 +66,7 @@ _ROUNDING = 1e-10
 
 def _random_phase(x: np.ndarray, u: np.ndarray, fc: float = 0) -> np.ndarray:
     """
-    Random-phase-Fourier-transform surrogate of x (hctsa's ``SUB_RandomPhase``), with the uniform
+    Random-phase-Fourier-transform surrogate of x, with the uniform
     random numbers ``u`` (one per free frequency bin, in (0, 1)) setting the phases.
 
     The magnitude spectrum of x (at full length N) is kept, and every phase is randomized
@@ -100,13 +100,13 @@ def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
                     random_seed: Union[int, str, None] = 0,
                     extra_params: Union[float, None] = None) -> ArrayLike:
     """
-    Generates surrogate time series (hctsa's ``SD_MakeSurrogates``).
+    Generates surrogate time series.
 
     Method described relatively clearly in Guarin Lopez et al. (arXiv, 2010)
     Used bits of aaft code that references (and presumably was obtained from) [1].
 
     The random numbers come from the portable generator :func:`~pyhctsa.robust.bf_random`, so
-    the surrogates are the same as hctsa's for the same seed, and NumPy's global random state is
+    the surrogates depend on the seed alone, and NumPy's global random state is
     untouched. All the surrogates are drawn in one go: column k of the random numbers (a block
     of consecutive draws) makes surrogate k. (AAFT draws its Gaussian noise from the seed and
     its phases from the seed + 1.)
@@ -138,7 +138,8 @@ def _make_surrogates(x: ArrayLike, surr_method: str = 'RP', num_surrs: int = 1,
     num_surrs : int, optional
         The number of surrogates to generate. Default is 1.
     random_seed : int, str or None, optional
-        The seed of the random numbers, as hctsa's ``BF_RandomSeed``: a number, ``'default'`` or
+        The seed of the random numbers (see :func:`~pyhctsa.robust.bf_random_seed`): a number,
+        ``'default'`` or
         ``None`` (0), or ``'none'`` (a seed from NumPy's global stream). Default is 0.
     extra_params : float, optional
         The cut-off frequency for 'TFT', in frequency bins (a value below 1 is taken as a
@@ -283,12 +284,12 @@ def surrogate_test(
             tested two-sided.
         - 'tc3': a time-reversal asymmetry measure (``tc3`` at lag 1); tested two-sided.
         - 'amigaussian1' and 'fmmigaussian': as 'amikraskov1' and 'fmmikraskov' but with
-            the Gaussian estimate of the automutual information. That is a function of
-            the autocorrelation only, which random-phase surrogates preserve, so
-            these tests cannot detect anything (their p-values are close to uniform for
-            every series); hctsa does not register them. The earlier names 'ami1' and
-            'fmmi' (which both meant the Gaussian estimate) are accepted as
-            'amigaussian1' and 'fmmigaussian' with a deprecation warning.
+            the Gaussian estimate of the automutual information. That is a function of the
+            autocorrelation only, which random-phase surrogates preserve, so these tests cannot
+            detect anything (their p-values are close to uniform for every series), so the default
+            feature set does not register them. The earlier names 'ami1' and 'fmmi' (which both
+            meant the Gaussian estimate) are accepted as 'amigaussian1' and 'fmmigaussian' with a
+            deprecation warning.
 
         - 'nlpe': the mean squared error of the locally constant nonlinear prediction
             (:func:`pyhctsa.operations.nonlinearity.nlpe`, embedding dimension 3, delay 1,
@@ -307,11 +308,11 @@ def surrogate_test(
         NaN if the interquartile range is 0) and ``s_prank`` (rank-based p-value
         ``(k + 1) / (num_surrs + 1)``, with ``k`` the number of surrogates at least as extreme
         as the series in the tested direction; doubled and capped at 1 for two-sided tests).
-        As in hctsa, no Gaussian p-value or kernel density (``s_p``, ``s_f``) is returned.
+        No Gaussian p-value or kernel density (``s_p``, ``s_f``) is returned (they are redundant
+        with these).
 
     random_seed : int, str or None, optional
-        The seed of the surrogates (see :func:`_make_surrogates`; ``'default'`` is 0, as in hctsa's
-        registered calls). Default is 0.
+        The seed of the surrogates (see :func:`_make_surrogates`; ``'default'`` is 0). Default is 0.
     extrap : float, optional
         The cut-off frequency for 'TFT' surrogates (see ``_make_surrogates``).
 
@@ -320,7 +321,7 @@ def surrogate_test(
     dict or float
         Dictionary of statistics comparing the original time series to its
         surrogates for each test statistic. NaN if a statistic cannot be computed on
-        every surrogate (hctsa raises an error, which its operation wrapper turns into NaN).
+        every surrogate.
     """
     x = np.asarray(x)
     n = len(x)
@@ -347,7 +348,7 @@ def surrogate_test(
     def _compare(label, stat_x, stat_surr, side):
         some_stats = _sd_give_me_stats(stat_x, stat_surr, side)
         if not isinstance(some_stats, dict):
-            return False  # NaN in the surrogates' statistics: hctsa errors
+            return False  # NaN in the surrogates' statistics: the comparison is undefined
         for k, v in some_stats.items():
             out[f'{label}_{k}'] = v
         return True
@@ -436,7 +437,7 @@ def surrogate_test(
         # locally constant phase space prediction error; embedding parameters fixed
         de, tau = 3, 1
         tmp = nlpe(x, de, tau, 5000, ('ac', 1))
-        if not isinstance(tmp, dict):  # hctsa errors on taking the field of a NaN
+        if not isinstance(tmp, dict):  # nlpe is undefined for this series
             return np.nan
         nlpe_x = tmp['msqerr']
         nlpe_surr = np.zeros(num_surrs)
@@ -478,7 +479,7 @@ def surrogates(
     random_seed: Union[int, str, None] = 0
 ) -> Union[dict, float]:
     """
-    Surrogate data test of a nonlinear statistic, tc3 or trev (hctsa's ``SD_Surrogates``).
+    Surrogate data test of a nonlinear statistic, tc3 or trev.
 
     Generates surrogate time series and tests them against the original time series
     according to a test statistic: T_{C3} (:func:`tc3`) or T_{rev} (:func:`trev`), both
@@ -490,7 +491,7 @@ def surrogates(
 
     Method as implemented in the TSTOOL package for nonlinear time-series analysis (C.
     Merkwirth, U. Parlitz, I. Wedekind, D. Engster and W. Lauterborn; GNU GPL), here
-    re-implemented through hctsa's ``SD_Surrogates``.
+    re-implemented.
 
     Parameters
     ----------
@@ -514,8 +515,7 @@ def surrogates(
     surrfn : {'tc3', 'trev'}, optional
         The statistic to evaluate on all surrogates. Default is ``'tc3'``.
     random_seed : int, str or None, optional
-        The seed of the surrogates (see :func:`_make_surrogates`; ``'default'`` is 0, as in hctsa's
-        registered calls). Default is 0.
+        The seed of the surrogates (see :func:`_make_surrogates`; ``'default'`` is 0). Default is 0.
 
     Returns
     -------
@@ -596,7 +596,7 @@ def surrogates(
 
     if np.isnan(tc3_surr).any():
         logger.warning(f"Surrogate statistic '{surrfn}' failed for a surrogate")
-        return np.nan  # (hctsa errors if it fails for all; its z-test errors on a NaN std)
+        return np.nan  # the surrogate distribution (and its z-test) is then undefined
 
     out = {}
     # 1) fit a Gaussian to the surrogates

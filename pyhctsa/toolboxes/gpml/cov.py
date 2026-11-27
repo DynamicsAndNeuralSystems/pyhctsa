@@ -223,11 +223,11 @@ class CovSum:
 
 def parse_cov(cov_func):
     """
-    Build a covariance function from hctsa's / gpml's specification.
+    Build a covariance function from a gpml-style specification.
 
     ``cov_func`` is either the gpml form ``['covSum', ['covSEiso', 'covPeriodic', 'covNoise']]``
     (a parametrized component is a pair, ``['covMaterniso', 3]``), or a string of the component
-    names joined with underscores, as in hctsa's operation names, with the Matern degree
+    names joined with underscores, as in the feature labels, with the Matern degree
     appended: ``'covSEiso_covPeriodic_covNoise'``, ``'covMaterniso3_covNoise'``,
     ``'covRQiso_covNoise'``.
 

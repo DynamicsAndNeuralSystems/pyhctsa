@@ -131,8 +131,7 @@ def _gaussian_hmm_fit(y_train: np.ndarray, num_states: int, n_cycles: int = 30,
                       rhos: tuple = (0.9, 0.5, 0.99), floor_frac: float = 0.01,
                       tol: float = 1e-4) -> tuple:
     """
-    Deterministic Gaussian HMM fit (hctsa's ``MF_hmm_Fit`` and ``MF_hmm_CompareNStates``;
-    shared by :func:`hmm_fit` and :func:`hmm_compare_n_states`).
+    Deterministic Gaussian HMM fit (shared by :func:`hmm_fit` and :func:`hmm_compare_n_states`).
 
     Baum-Welch EM (``hmmlearn``'s ``GaussianHMM``, see :func:`_gaussian_hmm_em`) is run from
     six fixed starting points (the initialization is fully specified here, so the fit does not
@@ -204,7 +203,7 @@ def hmm_fit(y: ArrayLike, train_p: float = 0.8, num_states: int = 3) -> dict:
     A hidden Markov model fitted to the first part of the series, and how well it describes the rest.
 
     Fits a hidden Markov model (HMM) with Gaussian emissions to the first ``train_p``
-    proportion of the time series (hctsa's ``MF_hmm_Fit``, by Baum-Welch EM with
+    proportion of the time series (by Baum-Welch EM with
     ``hmmlearn``). The emissions of all states share one variance (a tied covariance). The model is
     trained with at most 30 cycles of EM (Baum-Welch), or until convergence.
 
@@ -457,7 +456,7 @@ def armax(y: ArrayLike, orders: Union[list, tuple] = (3, 3), p_train: float = 0.
     The coefficients of a fitted ARMA model, and how well it predicts the later part of the series.
 
     Fits an autoregressive moving-average (ARMA) model with orders ``[p, q]`` to the whole
-    time series by conditional least squares from a Hannan-Rissanen start (hctsa's ``MF_armax``). The coefficients, their
+    time series by conditional least squares from a Hannan-Rissanen start. The coefficients, their
     uncertainties, and the goodness of fit are from this fit. The model is then fitted again to
     the first ``p_train`` proportion of the time series and used to predict the remainder
     ``num_steps`` samples ahead; the prediction residuals (prediction minus data) are
@@ -540,7 +539,7 @@ def armax(y: ArrayLike, orders: Union[list, tuple] = (3, 3), p_train: float = 0.
 
 def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     """
-    Whiten a time series by comparing a range of preprocessings (hctsa's ``BF_Whiten``).
+    Whiten a time series by comparing a range of preprocessings.
 
     ``'none'`` leaves the series alone; ``'detrend'`` removes a linear trend; ``'ar'``
     removes a linear trend and then applies (``PP_PreProcess(y, 'ar', 2, 0.05, 0)``) the
@@ -548,9 +547,9 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     (``p1_5`` ... ``p2_40``) and rank-mapping onto a Gaussian (``rmgd``), after which the
     z-scored series is the hardest for an AR(2) model to predict. It has to beat doing
     nothing by 5% for a preprocessing to be applied. The Gaussian draws of ``rmgd`` come
-    from the portable generator (:func:`pyhctsa.robust.bf_random`, the same numbers as in hctsa),
-    seeded as ``BF_RandomSeed`` (``None``/``'default'``: seed 0, ``'none'``: a seed from NumPy's
-    global state, or a number).
+    from the portable generator (:func:`pyhctsa.robust.bf_random`), seeded as by
+    :func:`pyhctsa.robust.bf_random_seed` (``None``/``'default'``: seed 0, ``'none'``: a seed from
+    NumPy's global state, or a number).
 
     Port of hctsa's ``BF_Whiten``, Copyright (C) Ben D. Fulcher, relicensed by the author under
     GPL-3.0-or-later for pyhctsa.
@@ -579,7 +578,7 @@ def _whiten(y: np.ndarray, pre_proc: str, random_seed=None) -> np.ndarray:
     # rank-map onto a Gaussian (stochastic, from the portable generator)
     candidates['rmgd'] = _rank_map_gaussian(
         y, draws=bf_random(len(y), bf_random_seed(random_seed), 'normal'))
-    # (hctsa's log, log returns, Box-Cox and square-root versions need a positive series,
+    # (no log, log-return, Box-Cox or square-root candidates: they need a positive series,
     # which a detrended series never is)
 
     names = list(candidates)
@@ -786,8 +785,8 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     """
     A GARCH model of the changing variance of the series, and what it leaves in the residuals.
 
-    The series is whitened and z-scored, so the model is of the variance around a zero mean
-    (hctsa's ``MF_GARCHfit``). A GARCH, GJR-GARCH or t-GARCH(P, Q) model is fitted by maximum
+    The series is whitened and z-scored, so the model is of the variance around a zero mean.
+    A GARCH, GJR-GARCH or t-GARCH(P, Q) model is fitted by maximum
     likelihood (:func:`pyhctsa.operations._garch.mle`), unless the series shows no evidence of
     conditional heteroskedasticity, in which case the constant-variance model is reported.
     Statistics are the fitted parameters, the log-likelihood and information criteria, the
@@ -811,9 +810,9 @@ def garch_fit(y: ArrayLike, preproc: str = 'ar', P: int = 1, Q: int = 1,
     Q : int, optional
         The ARCH degree: the number of lagged squared innovations. Default is 1.
     random_seed : int, 'default', 'none' or None, optional
-        The seed of the random Gaussian draws used by the whitening (``rmgd``), as hctsa's
-        ``BF_RandomSeed``. Default is ``None`` (seed 0). The draws come from the portable
-        generator (:func:`pyhctsa.robust.bf_random`), so they are hctsa's.
+        The seed of the random Gaussian draws used by the whitening (``rmgd``), as read by
+        :func:`pyhctsa.robust.bf_random_seed`. Default is ``None`` (seed 0). The draws come from the
+        portable generator (:func:`pyhctsa.robust.bf_random`), so they depend on the seed alone.
     model_type : {'garch', 'gjr'}, optional
         The conditional variance model: ``'garch'`` (default, symmetric response to shocks) or
         ``'gjr'`` (GJR-GARCH, adds a leverage term so negative and positive shocks can have
@@ -1017,7 +1016,7 @@ def garch_compare(y: ArrayLike, pre_proc: str = 'none', pr: ArrayLike = (1, 2, 3
     How well GARCH models of different orders describe the changing variance of the series.
 
     Fits a set of zero-mean GARCH(p, q) models with Gaussian innovations to the (whitened and
-    z-scored) time series (hctsa's ``MF_GARCHcompare``) and returns statistics on the goodness
+    z-scored) time series and returns statistics on the goodness
     of fit across a range of p (the number of lagged variances) and q (the number of lagged
     squared innovations): summaries across the grid of fitted models, and the orders that fit
     best. The models are fitted as in :func:`garch_fit`, in order of increasing p and q, each
@@ -2040,7 +2039,7 @@ def state_space_n4sid(y: ArrayLike, ord: Union[int, str] = 2, ptrain: float = 0.
     A fitted state-space model of the series, and how well it predicts the later part of the series.
 
     First fits the model to the whole time series, then trains it on the first portion and
-    tries to predict the rest (hctsa's ``MF_StateSpace_n4sid``; the subspace algorithm N4SID is
+    tries to predict the rest (the subspace algorithm N4SID is
     implemented directly).
     The state-space model has the form (discrete time, no input, sampling interval 1)
     ``x(t+1) = A x(t) + K e(t)``, ``y(t) = C x(t) + e(t)``,
@@ -2155,7 +2154,7 @@ def state_space_comp_order(y: ArrayLike, max_order: int = 10) -> Union[dict, flo
     Fits state-space models (subspace identification, :func:`state_space_n4sid`) of orders 1, 2, ..., ``max_order`` to the whole time series (all fits
     are within the sample), and returns statistics on how the goodness of fit changes across this
     range, measured by Akaike's information criterion (AIC) and by the loss function (the
-    estimated variance of the one-step prediction error), hctsa's ``MF_StateSpaceCompOrder``.
+    estimated variance of the one-step prediction error).
     An order at which the model cannot be fitted is left out of the summaries, and the output is
     NaN only if no order can be fitted.
 
@@ -2487,8 +2486,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
 
     The spread of parameters obtained (including in-sample goodness of fit statistics)
     provides some indication of stationarity. Values of goodness of fit provide some
-    indication of model suitability. Inherits strongly from :func:`compare_test_sets`
-    (hctsa's ``MF_FitSubsegments``).
+    indication of model suitability. Inherits strongly from :func:`compare_test_sets`.
 
     For a stationary series the estimates still differ between segments by sampling error,
     which shrinks as the segments (a fixed fraction of the series) grow. The spread across
@@ -2561,8 +2559,8 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
             prediction error (``fpe_*``, ``logfpe_stdratio``) varies across segments.
         - 'arma': fits an ARMA model by prediction-error minimization (``armax``; ``order``
             is ``[p, q]``). Outputs are how the FPE (``fpe_*``) and the fitted AR (``p_k_*``)
-            and MA (``q_k_*``) coefficients vary across segments. (Deregistered in hctsa,
-            as it is much like 'ar' and slow.)
+            and MA (``q_k_*``) coefficients vary across segments. (Not in the default feature
+            set: it is much like 'ar' and slow.)
 
         Default is ``'ss'``.
 
@@ -2587,10 +2585,11 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
         non-overlapping segments to partition the series into.
         Default is [20, 0.1].
     random_seed : int, 'default', 'none' or None, optional
-        The seed of the random segment starts (``subset_how='rand'``), as hctsa's
-        ``BF_RandomSeed``: a number, ``'default'`` or ``None`` for seed 0, or ``'none'`` for
-        a seed drawn from NumPy's global state. The draws come from the portable generator
-        (:func:`pyhctsa.robust.bf_random`), so they are hctsa's. Default is ``'default'``.
+        The seed of the random segment starts (``subset_how='rand'``), as read by
+        :func:`pyhctsa.robust.bf_random_seed`: a number, ``'default'`` or ``None`` for seed 0, or
+        ``'none'`` for a seed drawn from NumPy's global state. The draws come from the portable
+        generator (:func:`pyhctsa.robust.bf_random`), so they depend on the seed alone. Default is
+        ``'default'``.
 
     Returns
     -------
@@ -2734,7 +2733,7 @@ def fit_subsegments(y: ArrayLike, model: str = 'ss', order: Union[int, list, Non
             try:
                 fit = _n4_state_space(seg, order if isinstance(order, str) else int(order))
             except (np.linalg.LinAlgError, ValueError):
-                return np.nan  # (hctsa: an error) a segment is too short for the model
+                return np.nan  # a segment is too short for the model
             fpes[i] = _n4_fpe(fit['loss'], fit['order'], len(seg))
             # the one-step prediction errors whose mean square is the loss (the last samples of the segment)
             e = _defined_errors(_prediction_errors((fit['A'], fit['K'], fit['C']), seg))
@@ -2819,7 +2818,7 @@ def loop_local_simple(y: ArrayLike, forecast_meth: str = 'mean') -> dict:
     if forecast_meth == 'mean':
         train_length_range = np.arange(1, 11)
     elif forecast_meth == 'median':
-        train_length_range = np.arange(1, 20, 2)  # 1:2:19, as in hctsa
+        train_length_range = np.arange(1, 20, 2)  # 1, 3, ..., 19
     else:
         raise ValueError(f"Unknown prediction method: {forecast_meth}")
     stats_st = np.zeros((len(train_length_range), 5))
@@ -2925,7 +2924,7 @@ def local_simple(y: ArrayLike, forecast_meth: str = 'mean',
     tau = int(tau)
     # % Do the local prediction
     if isinstance(train_length, str) and train_length in ('ac1e', 'mi'):
-        # adaptive window (hctsa BF_GetTau): NaN if it cannot be set
+        # adaptive window (get_tau): NaN if it cannot be set
         train_length = get_tau(y, train_length)
         if np.isnan(train_length):
             logger.warning("Could not set the training length from the series")
@@ -3168,7 +3167,7 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
     Canonical summary of the residuals from a model fit.
 
     The shared residual-summary contract of the model-fitting and forecasting
-    operations (hctsa's ``MF_ResidualAnalysis``): every operation that produces a
+    operations: every operation that produces a
     residual series reports it through this function, so the same quantity carries
     the same name everywhere. Two levels are available: ``'core'`` is cheap (no test
     and no model fit), ``'full'`` adds diagnostics that need extra machinery.
@@ -3228,7 +3227,7 @@ def residual_analysis(e: ArrayLike, y: Union[ArrayLike, None] = None,
 
     Callers: ``local_simple`` (``'core'``), ``ar_cov`` (``'core'``), ``ar_fit``
     (``'core'``, on the negated ARFIT residuals), ``exp_smoothing`` (``'full'``) and
-    ``nonlinearity.nlpe`` (``'full'``, hctsa's ``NL_nlpe`` passes the series as ``y``:
+    ``nonlinearity.nlpe`` (``'full'``, passing the series as ``y``:
     ``residual_analysis(res, y, 'full')``; the one-argument call still works but
     leaves ``taurat`` NaN).
     """
@@ -3511,7 +3510,7 @@ def ar_fit(y: ArrayLike, p_min: int = 1, p_max: int = 10, selector: str = 'sbc')
             out[f'{crit}_{ps[i]}'] = vals[i]
         out[f'min{crit}'] = np.min(vals)
         pos = int(np.argmin(vals))  # first minimum
-        out[f'popt_{crit}'] = pos + 1  # as hctsa: a position in p_min:p_max
+        out[f'popt_{crit}'] = pos + 1  # a position (from 1) in p_min, ..., p_max
         # depth of the minimum below its neighbors (a difference: the criteria are logarithms
         # with an arbitrary zero, so their ratio has no meaning)
         neighbors = [vals[j] for j in (pos - 1, pos + 1) if 0 <= j < len(vals)]
@@ -3667,7 +3666,7 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
     learn GP hyperparameters for the time series ``(tt, yt)``.
 
     The GP is a mean-zero process with a Gaussian likelihood and exact Gaussian
-    inference (gpml ``infGaussLik``, as hctsa's ``MF_GP_LearnHyperp`` uses);
+    inference (gpml ``infGaussLik``);
     ``nfevals`` is negative, so it caps the number of function evaluations rather
     than the number of line searches.
 
@@ -3679,14 +3678,13 @@ def _gp_learn_hyperp(tt: np.ndarray, yt: np.ndarray, cov, nfevals: int = -50,
     positive definiteness) gives a NaN marginal likelihood with zero
     derivatives, which ``minimize`` treats as a bad step and backs away from, so
     it does not abort the fit. ``numpy.linalg.LinAlgError`` is only raised if
-    that leaves non-finite hyperparameters, the counterpart of hctsa returning
-    NaN.
+    that leaves non-finite hyperparameters (the callers then return NaN).
 
     ``hyp0`` is the initial hyperparameter vector ``[cov..., lik]``; the default is
     the initialization for ``covSum{covSEiso, covNoise}`` (``cov`` must then be
     :class:`CovSEisoNoise`), see :func:`_gp_init_hyp` for the other covariances.
 
-    Noise floor (as hctsa's ``MF_GP_LearnHyperp``): the noise standard deviations (the Gaussian
+    Noise floor: the noise standard deviations (the Gaussian
     likelihood's, and those of the ``covNoise`` terms, at the 0-based positions ``noise_pos``
     among the covariance hyperparameters; ``(2,)`` for :class:`CovSEisoNoise`) are bounded
     below by 1% of the standard deviation of the data. Without a bound the marginal
@@ -4028,8 +4026,8 @@ def gp_fit_across(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         The covariance function, a gpml ``covSum``: the names of its components joined
         with underscores (``'covSEiso_covNoise'``, ``'covSEiso_covPeriodic_covNoise'``,
         ``'covMaterniso3_covNoise'``, ``'covRQiso_covNoise'``) or in the gpml form
-        ``['covSum', ['covSEiso', 'covNoise']]``. The only configuration hctsa
-        instantiates is the default, ``'covSEiso_covNoise'`` (squared exponential plus noise).
+        ``['covSum', ['covSEiso', 'covNoise']]``. Default is
+        ``'covSEiso_covNoise'`` (squared exponential plus noise).
     npoints : int
         The number of points through the time series to fit the GP model to.
         Default is 20.
@@ -4170,8 +4168,8 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
         The covariance function, a gpml ``covSum``: the names of its components joined
         with underscores (``'covSEiso_covNoise'``, ``'covSEiso_covPeriodic_covNoise'``,
         ``'covMaterniso3_covNoise'``, ``'covRQiso_covNoise'``) or in the gpml form
-        ``['covSum', ['covSEiso', 'covNoise']]``. The only configuration hctsa
-        instantiates is the default, ``'covSEiso_covNoise'`` (squared exponential plus noise).
+        ``['covSum', ['covSEiso', 'covNoise']]``. Default is
+        ``'covSEiso_covNoise'`` (squared exponential plus noise).
     num_train : int
         The number of training samples (for each iteration). Default is 20.
     num_test : int
@@ -4196,11 +4194,11 @@ def gp_local_prediction(y: ArrayLike, cov_func: str = 'covSEiso_covNoise',
 
         Default is ``'frombefore'``.
     random_seed : int, 'default', 'none' or None, optional
-        The seed of the random splits of the ``'randomgap'`` mode, as hctsa's
-        ``BF_RandomSeed``: a number, ``'default'`` or ``None`` for seed 0, or ``'none'`` for a
-        seed drawn from NumPy's global state. One block of uniforms from the portable generator
-        (:func:`pyhctsa.robust.bf_random`) gives each window its own split (the ranks of its
-        column), so the splits are hctsa's. Default is 0.
+        The seed of the random splits of the ``'randomgap'`` mode, as read by
+        :func:`pyhctsa.robust.bf_random_seed`: a number, ``'default'`` or ``None`` for seed 0, or
+        ``'none'`` for a seed drawn from NumPy's global state. One block of uniforms from the
+        portable generator (:func:`pyhctsa.robust.bf_random`) gives each window its own split (the
+        ranks of its column), so the splits depend on the seed alone. Default is 0.
     num_splits : int, optional
         For ``'randomgap'`` and ``'spreadgap'``, the number of different splits made of each window; each
         split is fitted and predicted as a window of its own, so the outputs summarize
@@ -4465,8 +4463,7 @@ def _tail_mean(x: np.ndarray, which: str) -> float:
 
     Notes
     -----
-    Sort ascending (NaN last, as ``numpy.sort``), then average the last or first ``ceil(n/4)`` entries, as in hctsa's
-    ``MF_GP_LocalPrediction`` tail-mean helper.
+    Sort ascending (NaN last, as ``numpy.sort``), then average the last or first ``ceil(n/4)`` entries.
     """
     if which not in ('high', 'low'):
         raise ValueError(f"which must be 'high' or 'low', got {which!r}")
@@ -4939,10 +4936,11 @@ def compare_test_sets(y: ArrayLike, the_model: str = 'ss', ord: Union[int, str, 
     steps : int, optional
         The number of steps ahead to predict in each segment. Default is 2.
     random_seed : int, 'default', 'none' or None, optional
-        The seed of the random segment starts, as hctsa's ``BF_RandomSeed``: a number,
+        The seed of the random segment starts, as read by
+        :func:`pyhctsa.robust.bf_random_seed`: a number,
         ``'default'`` or ``None`` for seed 0, or ``'none'`` for a seed drawn from NumPy's
         global state. The draws come from the portable generator
-        (:func:`pyhctsa.robust.bf_random`), so they are hctsa's. Default is 0.
+        (:func:`pyhctsa.robust.bf_random`), so they depend on the seed alone. Default is 0.
 
     Returns
     -------
@@ -5071,7 +5069,7 @@ def hmm_compare_n_states(y: ArrayLike, train_p: float = 0.6,
     Fits Gaussian hidden Markov models (HMMs) with different numbers of states to the first
     ``train_p`` proportion of the time series (each with at most 30 cycles of EM), and
     compares the resulting log-likelihoods per sample on the training part and on the
-    held-out remainder (hctsa's ``MF_hmm_CompareNStates``). Each model is fitted
+    held-out remainder. Each model is fitted
     deterministically, by the best of six fixed starting points with a floor on the shared
     variance (:func:`_gaussian_hmm_fit`, as in :func:`hmm_fit`).
 
@@ -5216,10 +5214,11 @@ def gp_hyperparameters(y: ArrayLike, cov_func: Union[str, list] = 'covSEiso_covN
         - ``'random_both'``: take ``max_n`` consecutive samples from a random position, then
           a random fifth of them.
     random_seed : int, 'default', 'none' or None, optional
-        The seed of the random numbers, for the settings of ``resample_how`` that use them, as
-        hctsa's ``BF_RandomSeed``: a number, ``'default'`` or ``None`` for seed 0, or ``'none'``
-        for a seed drawn from NumPy's global state. The draws come from the portable generator
-        (:func:`pyhctsa.robust.bf_random`), so they are hctsa's. Default is 0.
+        The seed of the random numbers, for the settings of ``resample_how`` that use them, as read
+        by :func:`pyhctsa.robust.bf_random_seed`: a number, ``'default'`` or ``None`` for seed 0, or
+        ``'none'`` for a seed drawn from NumPy's global state. The draws come from the portable
+        generator (:func:`pyhctsa.robust.bf_random`), so they depend on the seed alone. Default is
+        0.
     num_draws : int, optional
         The number of independent random samples to fit, for the settings of ``resample_how``
         that use random numbers (draw ``d`` uses the seed ``2*num_draws*seed + 2*(d - 1)``, so that different seeds share no draws). The outputs are

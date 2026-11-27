@@ -111,7 +111,7 @@ def compare_ks_fit(x: ArrayLike, what_distn: str) -> dict:
     if what_distn not in ('norm', 'ev', 'uni', 'beta', 'rayleigh', 'exp', 'gamma', 'logn', 'wbl'):
         raise ValueError(f"Unknown distribution: {what_distn}.")
     if what_distn == 'beta':
-        # hctsa's own (crude) rescaling of the data into the open interval (0,1)
+        # a simple (crude) rescaling of the data into the open interval (0,1)
         if np.all(x == x[0]):
             logger.warning("Data are a constant; the beta distribution cannot be fitted.")
             return np.nan  # no variation to fit
@@ -857,8 +857,7 @@ def moments(y: ArrayLike, the_mom: int = 0, do_normalize: bool = True) -> float:
     divided by the (population, divisor N) standard deviation raised to the power
     ``the_mom``, so that ``the_mom = 3`` is the skewness and ``the_mom = 4`` the
     kurtosis (3 for a Gaussian) (or, with
-    ``do_normalize=False``, the raw central moment, as hctsa's
-    ``DN_Moments(y, theMom, false)``).
+    ``do_normalize=False``, the raw central moment).
 
     Parameters
     ----------
@@ -1371,7 +1370,7 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     random_seed : int, optional
         Seed of the random ordering used when ``remove_how='random'`` (see
         :func:`pyhctsa.robust.bf_random_seed`; ``None`` is seed 0). The ordering comes from the portable
-        generator :func:`pyhctsa.robust.bf_random`, so it matches hctsa's.
+        generator :func:`pyhctsa.robust.bf_random`, so it depends on the seed alone.
 
     Returns
     -------
@@ -1493,7 +1492,7 @@ def tail_index(y: ArrayLike, tail_frac: float = 0.05) -> dict:
 
 
 def _fmt_threshold(prefix: str, thr: float) -> str:
-    """Output name hctsa gives a threshold: sprintf('%s_%.2f') with the dot removed."""
+    """Output name for a threshold: the prefix and the threshold to two decimals, without the dot."""
     return f"{prefix}_{thr:.2f}".replace('.', '')
 
 
@@ -1602,9 +1601,9 @@ def simple_fit(x: ArrayLike, dmodel: str, num_bins: Union[int, str] = 'sqrt') ->
         The curve to fit: a Gaussian, the sum of two Gaussians, an exponential
         ``a*exp(b*x)``, or a power law ``a * x ** b`` (cannot be fit if any bin center is
         not positive; NaN is returned). NaN is also returned if there are no more bins
-        than parameters of the model. (hctsa's time-series models, the sinusoids and
+        than parameters of the model. (The time-series models, the sinusoids and
         Fourier series, are fitted by ``sinusoid_fit`` in the spectral module; the
-        names 'sin1', 'sin2', 'sin3' are passed on to it, as hctsa does.)
+        names 'sin1', 'sin2', 'sin3' are passed on to it.)
     num_bins : int or str, optional
         How to estimate the distribution: the name of a rule for the number of histogram bins
         (default ``'sqrt'``), the number of histogram bins, or 0 for a kernel-smoothed density.

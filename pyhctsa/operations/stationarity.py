@@ -718,8 +718,8 @@ def local_extrema(y: ArrayLike, how_to_window: str = 'l', n: Union[int, None] = 
     y_buff = frame_signal(y, int(window_length)) # no overlap
     # each column is a window of samples
     if N % int(window_length) != 0:
-        # remove the last window, which frame_signal zero-pads (hctsa tests for a final value of
-        # exactly 0, which also drops a genuine full window that happens to end in 0)
+        # remove the last window, which frame_signal zero-pads (decided by N: testing for a final
+        # value of exactly 0 would also drop a genuine full window that happens to end in 0)
         y_buff = y_buff[:, :-1]
     
     num_windows = np.size(y_buff, 1) # number of windows
@@ -965,7 +965,7 @@ def drifting_mean(y: ArrayLike, segment_how: str = 'fix', l: int = 20) -> dict:
         and ``min`` and of their absolute values. When the segments tile the series
         exactly, ``mean`` is the mean of the series divided by the mean segment variance,
         so it is zero up to rounding for a z-scored series and carries no information
-        there (hctsa does not register it).
+        there (the default feature set does not register it).
     """
     y = np.asarray(y)
     N = len(y)
@@ -1040,7 +1040,7 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
         Seed for the 'randcg' option: an integer, ``None`` or ``'default'`` for seed 0, or
         ``'none'`` for a seed drawn from NumPy's global random state. The points come from the
         portable generator :func:`pyhctsa.robust.bf_random` (uniform on the indices, with
-        repeats), so they are hctsa's for the same seed. Default `None` is seed 0.
+        repeats), so they depend on the seed alone. Default `None` is seed 0.
 
     Returns
     --------
@@ -1080,7 +1080,7 @@ def local_global(y: ArrayLike, subset_how: str = 'l', n: Union[int, float, None]
         r = np.zeros(1, dtype=int) if n == 1 else (2 * np.arange(n) * (N - 1) + (n - 1)) // (2 * (n - 1))
     elif subset_how == 'randcg':
         # n random points (there could be repeats): a single stochastic sample, so not
-        # very statistically robust (as in hctsa)
+        # very statistically robust
         r = np.floor(N * bf_random(int(n), bf_random_seed(random_seed))).astype(int)  
     else:
         raise ValueError(f"Unknown specifier, {subset_how}. Can be either 'l', 'p', 'unicg', or 'randcg'.")
@@ -1249,7 +1249,7 @@ def std_nth_deriv_change(y: ArrayLike, maxd: int = 10) -> dict:
     maxd = 10 if maxd is None else int(maxd)
 
     if len(y) <= maxd:
-        return np.nan  # too short to take maxd differences (hctsa's SY_StdNthDer errors)
+        return np.nan  # too short to take maxd differences
     ms = np.array([std_nth_deriv(y, i) for i in range(1, maxd + 1)])
 
     out = {}
@@ -1277,13 +1277,13 @@ def std_nth_deriv_change(y: ArrayLike, maxd: int = 10) -> dict:
     return out
 
 def _is_zscored(x: np.ndarray) -> bool:
-    # hctsa's BF_iszscored
+    # mean 0 and sample standard deviation 1, to within 100 eps
     tol = 100 * np.finfo(float).eps
     return bool(abs(np.mean(x)) < tol and abs(_sample_std(x) - 1) < tol)
 
 def _cumsum_bridge_stats(p: ArrayLike) -> Union[dict, float]:
     """
-    CUSUM/bridge stationarity statistics on a cumulative sum (hctsa's BF_CumSumBridgeStats).
+    CUSUM/bridge stationarity statistics on a cumulative sum.
 
     Given a series ``p`` whose mean is being tested for stationarity, forms ``cumsum(p)`` and
     computes: linear-fit statistics on the cumsum (cf. :func:`trend`), a CUSUM 'bridge'
@@ -1563,8 +1563,8 @@ def spread_random_local(y: ArrayLike, l: Union[int, str] = 100, num_segs: int = 
         The number of local segments to analyze. Default is 100.
     random_seed : int, str or None, optional
         Not used: the segment start points are ``floor((N - l + 1) u_j)`` with ``u_j`` the
-        golden-ratio (Weyl) sequence ``frac(j*phi)``, evenly spread and deterministic, as in
-        hctsa. Kept so that existing calls still work.
+        golden-ratio (Weyl) sequence ``frac(j*phi)``, evenly spread and deterministic. Kept so
+        that existing calls still work.
 
     Returns
     -------
@@ -1887,8 +1887,8 @@ def monotonic_trend(y: ArrayLike, max_points: int = 2000) -> dict:
     -----
     Mann (1945), Econometrica 13, 245; Kendall (1970), Rank Correlation Methods, 4th ed.;
     Theil (1950), Proc. KNAW 53, 386; Sen (1968), J. Am. Stat. Assoc. 63, 1379.
-    pyhctsa-only: hctsa has no monotonic-trend statistic at the sample level (:func:`ramping_windows`
-    applies Kendall's tau to windowed statistics across ten segments).
+    Compare :func:`ramping_windows`, which applies Kendall's tau to windowed statistics across ten
+    segments rather than to the samples.
     """
     y = np.asarray(y, dtype=float).ravel()
     N = len(y)
@@ -2014,7 +2014,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
           antisymmetric under time reversal, so zero in expectation for any
           time-reversible process
         - 'apen', 'sampen': approximate entropy (m=1, r=0.2) and sample entropy (m=2, r=0.1)
-          of each window (kept for backward compatibility; hctsa does not offer them)
+          of each window (kept for backward compatibility)
 
         Default is ``'mean'``.
 
@@ -2043,7 +2043,7 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
         - 'permen': normalized permutation entropy, PermEn(3, 1), of the sequence of local
           estimates
         - 'apen', 'sampen': approximate entropy (m=1, r=0.2) and sample entropy (m=2, r=0.15)
-          (kept for backward compatibility; hctsa does not offer them)
+          (kept for backward compatibility)
 
         Default is ``'std'``.
 

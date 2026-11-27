@@ -1,21 +1,19 @@
-"""Shared helpers for the robust, portable hctsa features (ports of hctsa ``BF_*`` functions).
+"""Shared helpers for robust, portable features.
 
-hctsa redefined a number of fragile features so that they do not depend on the random
-stream, the optimizer, the kernel-density defaults or the histogram bin rule of the
-platform. The ``BF_*`` helpers written for this live in ``PeripheryFunctions`` in hctsa;
-this module holds their Python ports. The operation modules import from here::
+Features that would otherwise depend on the random stream, the optimizer, the kernel-density
+defaults or the histogram bin rule of the platform use these helpers instead, so that their
+values are the same everywhere. The operation modules import from here::
 
     from ..robust import bf_random, bf_ks_density, bf_hist_edges, ...
 
-Each function implements the algorithm of the hctsa function it is named after, written with
-numpy primitives (``np.linspace``, ``np.quantile``). The random generator
-(:func:`bf_random`) is hctsa's portable generator: L'Ecuyer's MRG32k3a, whose stream depends
-only on the seed and not on the platform, so stochastic features are reproducible everywhere.
+The functions are written with numpy primitives (``np.linspace``, ``np.quantile``). The random
+generator (:func:`bf_random`) is L'Ecuyer's MRG32k3a, whose stream depends only on the seed and
+not on the platform, so stochastic features are reproducible everywhere.
 
-Conventions: the Python name is the snake_case of the hctsa name; vectors are 1-D
-arrays; hctsa functions that return several outputs return a tuple, and ``BF_ExpFit``
-returns a dict with the same field names as the hctsa structure. Permutations from
-:func:`bf_random` are 1-based, as in hctsa (subtract one to index an array).
+The ``bf_*`` functions are Python ports of the ``BF_*`` helper functions of the hctsa toolbox,
+each named by the snake_case of the original. Vectors are 1-D arrays; functions with several
+outputs return a tuple, and :func:`bf_exp_fit` returns a dict. Permutations from
+:func:`bf_random` are 0-based.
 """
 from collections import OrderedDict
 from typing import Optional, Tuple, Union
@@ -68,12 +66,12 @@ def _mrg32k3a(k, state, num_skip):
 
 
 def bf_random(n: int, seed: Union[int, float, ArrayLike] = 0, kind: str = 'uniform') -> np.ndarray:
-    """Portable pseudo-random numbers: a stream fixed by the seed alone (hctsa ``BF_Random``).
+    """Portable pseudo-random numbers: a stream fixed by the seed alone.
 
     L'Ecuyer's combined multiple recursive generator MRG32k3a (L'Ecuyer 1999,
     doi:10.1287/opre.47.1.159), in integer arithmetic. It leaves NumPy's global random
-    state untouched. The uniform stream is exactly that of hctsa's ``BF_Random`` (integer
-    arithmetic); normal draws are Box-Muller transforms of it, accurate to the rounding of
+    state untouched. The uniform stream is computed in integer arithmetic, so it is exact on
+    every platform; normal draws are Box-Muller transforms of it, accurate to the rounding of
     ``log``, ``cos`` and ``sin`` (about 1e-16).
 
     Parameters
@@ -92,7 +90,7 @@ def bf_random(n: int, seed: Union[int, float, ArrayLike] = 0, kind: str = 'unifo
         (2k-1, 2k) give ``sqrt(-2 log u1) cos(2 pi u2)`` and ``sqrt(-2 log u1) sin(2 pi u2)``
         as values 2k-1 and 2k.
         ``'perm'``: a random permutation of ``0..n-1`` (0-based indices): the stable argsort of
-        n uniform numbers. (hctsa's ``BF_Random(n, seed, 'perm')`` is this permutation plus 1.)
+        n uniform numbers.
 
     Returns
     -------
@@ -128,7 +126,7 @@ def bf_random(n: int, seed: Union[int, float, ArrayLike] = 0, kind: str = 'unifo
 def bf_spread_perm(n: int) -> np.ndarray:
     """
     A fixed ordering of the indices ``0..n-1`` whose first ``k`` elements are evenly spread, for
-    every ``k`` (hctsa's ``BF_SpreadPerm``, there 1-based): the indices ordered by the fractional
+    every ``k``: the indices ordered by the fractional
     parts of ``j*phi`` (``phi`` the golden-ratio conjugate), the low-discrepancy Weyl sequence. A
     deterministic substitute for the first ``k`` of a random permutation; it does not depend on
     any seed.
@@ -149,7 +147,7 @@ def bf_spread_perm(n: int) -> np.ndarray:
 
 
 def bf_random_seed(random_seed=None) -> int:
-    """The integer seed (for :func:`bf_random`) that a ``random_seed`` input stands for (hctsa ``BF_RandomSeed``).
+    """The integer seed (for :func:`bf_random`) that a ``random_seed`` input stands for.
 
     ``'default'`` or ``None`` give the fixed seed 0; a number gives that seed (rounded and made
     non-negative: ``mod(round(abs(s)), 4e9)``); ``'none'`` gives a seed drawn from NumPy's global
@@ -177,7 +175,7 @@ def bf_random_seed(random_seed=None) -> int:
 # BF_TieBreakNoise
 # ------------------------------------------------------------------------------
 def bf_tie_break_noise(y: ArrayLike, seed: int = 0) -> np.ndarray:
-    """Add tiny, reproducible jitter to break exact ties in ``y`` (hctsa ``BF_TieBreakNoise``).
+    """Add tiny, reproducible jitter to break exact ties in ``y``.
 
     ``y`` is returned unchanged unless it has a high proportion of repeated values
     (fewer than 90% of its values unique), in which case Gaussian noise of standard
@@ -218,7 +216,7 @@ def bf_tie_break_noise(y: ArrayLike, seed: int = 0) -> np.ndarray:
 # BF_RunsZ, BF_ResidualStats
 # ------------------------------------------------------------------------------
 def bf_runs_z(y: ArrayLike) -> float:
-    """Signed z-statistic of a runs test for randomness about the median (hctsa ``BF_RunsZ``).
+    """Signed z-statistic of a runs test for randomness about the median.
 
     Splits the values of ``y`` into those above the median and those at or below it,
     counts the runs and standardizes the count with its exact mean and variance under
@@ -260,7 +258,7 @@ def bf_runs_z(y: ArrayLike) -> float:
 
 
 def bf_residual_stats(res: ArrayLike, y: ArrayLike) -> Tuple[float, float, float]:
-    """Statistics of the residuals of a fit, for remaining structure (hctsa ``BF_ResidualStats``).
+    """Statistics of the residuals of a fit, for remaining structure.
 
     The autocorrelation of the residuals at lags 1 and 2 (the Fourier method of
     ``CO_AutoCorr``) and a runs test (:func:`bf_runs_z`). The residuals are taken in the
@@ -303,7 +301,7 @@ def bf_residual_stats(res: ArrayLike, y: ArrayLike) -> Tuple[float, float, float
 # BF_TheilSen
 # ------------------------------------------------------------------------------
 def bf_theil_sen(x: ArrayLike, y: ArrayLike) -> np.ndarray:
-    """Theil-Sen robust straight-line fit (hctsa ``BF_TheilSen``).
+    """Theil-Sen robust straight-line fit.
 
     The slope is the median of the slopes of the lines through all pairs of points with
     different ``x``; the intercept is the median of ``y - slope*x``. (This is not
@@ -371,7 +369,7 @@ def _golden_section_min(f, lo: float, hi: float, n_iter: int = 40) -> float:
 
 
 def bf_exp_fit(x: ArrayLike, y: ArrayLike, with_offset: bool = True, max_rate: float = 20) -> dict:
-    """Global least-squares fit of ``a*exp(b*x) + c`` by variable projection (hctsa ``BF_ExpFit``).
+    """Global least-squares fit of ``a*exp(b*x) + c`` by variable projection.
 
     For a given rate ``b`` the best ``a`` (and ``c``) follow in closed form, so only
     ``b`` is searched: on a grid of 401 rates between ``-max_rate/range(x)`` and
@@ -433,7 +431,7 @@ def bf_exp_fit(x: ArrayLike, y: ArrayLike, with_offset: bool = True, max_rate: f
 # BF_GaussMix2
 # ------------------------------------------------------------------------------
 def bf_gauss_mix2(xc: ArrayLike, p: ArrayLike, delta: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Mixture of two Gaussians fitted to a binned distribution by EM (hctsa ``BF_GaussMix2``).
+    """Mixture of two Gaussians fitted to a binned distribution by EM.
 
     Fits ``w1 N(mu1, s1^2) + w2 N(mu2, s2^2)`` to a histogram/density ``p`` on the
     equally spaced grid ``xc``, by EM on the grid points weighted by the mass ``p``
@@ -558,7 +556,7 @@ def _levenberg_marquardt(res_fun, th):
 
 
 def bf_fit_density_curve(x: ArrayLike, p: ArrayLike, model: str) -> np.ndarray:
-    """Deterministic least-squares fit of a simple curve to a density (hctsa ``BF_FitDensityCurve``).
+    """Deterministic least-squares fit of a simple curve to a density.
 
     Fits a Gaussian, a sum of two Gaussians, an exponential or a power law to a density
     (or histogram) ``p`` at the points ``x`` by minimizing the sum of squared differences.
@@ -771,7 +769,7 @@ _SIN_STAGE_CACHE_SIZE = 4
 
 
 def bf_fit_sinusoids(y: ArrayLike, k: int, constant: bool = False) -> Tuple[np.ndarray, np.ndarray]:
-    """Least-squares fit of a sum of ``k`` sinusoids to a time series (hctsa ``BF_FitSinusoids``).
+    """Least-squares fit of a sum of ``k`` sinusoids to a time series.
 
     Fits ``y(t) = sum_i a_i sin(2 pi f_i t) + b_i cos(2 pi f_i t)``, ``t = 0..N-1`` (plus a
     constant ``c`` if ``constant``). The amplitudes and phases (and ``c``) are linear, found
@@ -928,7 +926,7 @@ def _sin_refine(y: np.ndarray, f: np.ndarray, t: np.ndarray, f_lims: np.ndarray,
 # ------------------------------------------------------------------------------
 def bf_ks_density(y: ArrayLike, xi: Optional[ArrayLike] = None,
                   h: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray, float]:
-    """Gaussian kernel density estimate with an explicit bandwidth (hctsa ``BF_KSDensity``).
+    """Gaussian kernel density estimate with an explicit bandwidth.
 
     Evaluates ``f(x) = mean_i N(x; y_i, h^2)`` exactly (no binning, no truncation of the
     kernel). The default bandwidth is Silverman's rule with a robust scale,
@@ -983,7 +981,7 @@ def bf_ks_density(y: ArrayLike, xi: Optional[ArrayLike] = None,
 # ------------------------------------------------------------------------------
 def bf_hist_edges(y: ArrayLike, bin_rule: Union[int, str] = 'auto',
                   limits: Optional[ArrayLike] = None) -> np.ndarray:
-    """Equal-width histogram bin edges from an explicit bin-count rule (hctsa ``BF_HistEdges``).
+    """Equal-width histogram bin edges from an explicit bin-count rule.
 
     The bins span ``[min(y), max(y)]`` (or ``limits``) with width ``(max - min)/num_bins``.
     The interior edges are lowered, and the end edges widened, by ``1e-6`` of a bin
@@ -1062,7 +1060,7 @@ def bf_hist_edges(y: ArrayLike, bin_rule: Union[int, str] = 'auto',
 
 
 def bf_quantile_edges(y: ArrayLike, num_bins: int) -> np.ndarray:
-    """Histogram bin edges at the quantiles of the data: equiprobable bins (hctsa ``BF_QuantileEdges``).
+    """Histogram bin edges at the quantiles of the data: equiprobable bins.
 
     The Hazen quantiles of ``y`` (Hyndman & Fan definition 5) at ``0, 1/num_bins, ..., 1``,
     with repeated quantiles merged (fewer bins for tied values). All but the last edge
@@ -1098,7 +1096,7 @@ def bf_quantile_edges(y: ArrayLike, num_bins: int) -> np.ndarray:
 # BF_HalfSampleMode
 # ------------------------------------------------------------------------------
 def bf_half_sample_mode(y: ArrayLike) -> float:
-    """Half-sample mode: a robust, bin-free estimate of the mode (hctsa ``BF_HalfSampleMode``).
+    """Half-sample mode: a robust, bin-free estimate of the mode.
 
     Repeatedly keeps the ``ceil(n/2)`` consecutive sorted values that span the shortest
     interval (the first, lowest, on ties) until three or fewer values remain; the mode
@@ -1141,14 +1139,15 @@ def bf_remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
                      remove_or_saturate: str = 'remove',
                      random_seed: Union[int, str, None] = None) -> np.ndarray:
     """
-    Remove or saturate a proportion of the points of a time series (hctsa's ``BF_RemovePoints``).
+    Remove or saturate a proportion of the points of a time series.
 
     Chooses a proportion, ``p``, of the points of the (z-scored) series according to a rule, and
     either deletes them or clips their values. Removing deletes the chosen points and closes up
     the rest into a shorter series (in the original order). Saturating keeps them in place but
-    clips their values to the most extreme value among the points kept. Used by hctsa's
-    ``DN_RemovePoints`` (order-free statistics of the changed series) and ``CO_RemovePoints``
-    (autocorrelation statistics of the changed series).
+    clips their values to the most extreme value among the points kept. Used by
+    :func:`pyhctsa.operations.distribution.remove_points` (order-free statistics of the changed
+    series) and :func:`pyhctsa.operations.correlation.remove_points` (autocorrelation statistics of
+    the changed series).
 
     Parameters
     ----------
@@ -1170,7 +1169,8 @@ def bf_remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     random_seed : int, 'default' or 'none', optional
         Only relevant for ``remove_how='random'``: the seed of the random ordering (see
         :func:`bf_random_seed`; ``None`` or ``'default'`` is seed 0, so the result is reproducible).
-        The ordering is ``bf_random(N, seed, 'perm')``, the portable generator, so it matches hctsa's.
+        The ordering is ``bf_random(N, seed, 'perm')``, the portable generator, so it depends on
+        the seed alone.
 
     Returns
     -------
@@ -1227,13 +1227,13 @@ def bf_remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
 
 
 def _rank_map_gaussian(y: np.ndarray, random_seed=None, draws: np.ndarray = None) -> np.ndarray:
-    """Replace the values of y by Gaussian values of the same rank (hctsa's ``rmgd``).
+    """Replace the values of y by Gaussian values of the same rank (``rmgd``).
 
     N Gaussian values are drawn and sorted, and the k-th smallest is given to the k-th smallest
     value of y. ``random_seed`` is as in ``remove_points``: an integer, ``None``/``'default'``
     for seed 0, or ``'none'`` for a seed drawn from NumPy's global random state. The draws come
-    from the portable generator :func:`pyhctsa.robust.bf_random` (normal), so they are hctsa's
-    for the same seed. The sorted draws can instead be supplied as ``draws``.
+    from the portable generator :func:`pyhctsa.robust.bf_random` (normal), so they depend
+    on the seed alone. The sorted draws can instead be supplied as ``draws``.
     """
     n = len(y)
     if draws is None:

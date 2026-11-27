@@ -190,8 +190,8 @@ def gp_train(hyp, cov, x, y, want_dnlZ=True, inf='gauss_lik'):
     likelihood is needed to skip the (dominant) derivative computation, in
     which case ``dnlZ`` is ``None``.
 
-    ``inf`` selects the inference method; only ``'gauss_lik'`` (exact, hctsa's
-    choice) is implemented.
+    ``inf`` selects the inference method; only ``'gauss_lik'`` (exact
+    inference) is implemented.
 
     As in ``gp.m``, a failed inference (e.g., ``numpy.linalg.LinAlgError`` when
     ``I + K/sn2`` loses positive definiteness) does not raise: ``nlZ`` is NaN

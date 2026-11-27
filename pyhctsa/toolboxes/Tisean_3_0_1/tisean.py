@@ -1,8 +1,8 @@
 """
 Python front-end to the TISEAN 3.0.1 routines used by pyhctsa.
 
-hctsa drives TISEAN through the shell: it writes the time series to a temporary
-file, runs ``d2``, and then pipes the resulting ``.c2`` file through ``c2g`` and
+From the shell, TISEAN is run by writing the time series to a temporary
+file, running ``d2``, and then piping the resulting ``.c2`` file through ``c2g`` and
 ``c2t``.  Here the same three steps happen in-process:
 
 * :func:`d2` calls the C kernel in ``TS_d2.c`` (a re-entrant transcription of
@@ -10,7 +10,7 @@ file, runs ``d2``, and then pipes the resulting ``.c2`` file through ``c2g`` and
   raw pair counts, using the expressions ``d2.c`` prints.
 * :func:`false_nearest` calls the C kernel in ``TS_false_nearest.c`` (a re-entrant
   transcription of TISEAN's ``false_nearest.c``), and :func:`fnn_embedding_dimension`
-  turns its output into hctsa's choice of embedding dimension.
+  turns its output into an embedding dimension.
 * :func:`c2g` and :func:`c2t` are ports of ``source_f/c2g.f`` and
   ``source_f/c2t.f``.  Those are Fortran, so they are reimplemented rather than
   wrapped -- both are short, and this keeps the package free of a Fortran
@@ -261,8 +261,8 @@ def false_nearest(
         Time delay (``false_nearest -d``): the lag in samples between successive
         embedding coordinates. Default is 1. NOTE: TISEAN 3.0.1's ``false_nearest``
         ignores it for a scalar series (the coordinates are consecutive samples, and
-        the delay only limits the number of embedded points used); hctsa's copy and
-        this port use it as the lag.
+        the delay only limits the number of embedded points used); this port uses it
+        as the lag.
     minemb, maxemb : int, optional
         Smallest and largest embedding dimension tested (``-m``, ``-M1,<maxemb>``).
         Defaults are 1 and 10.
@@ -271,7 +271,7 @@ def false_nearest(
     escape_factor : float, optional
         Ratio of the extra-coordinate separation to the distance above which a
         neighbor is false (``-f``). TISEAN's own default, 2.0, is the default here;
-        hctsa's embedding-dimension choice uses 5.
+        :func:`fnn_embedding_dimension` uses 5.
 
     Returns
     -------
@@ -317,8 +317,7 @@ def fnn_min_count(threshold: float) -> int:
 def fnn_first_under(dim: ArrayLike, pfnn: ArrayLike, threshold: float,
                     count: Optional[ArrayLike] = None, min_count: Optional[int] = None) -> int:
     """
-    Smallest embedding dimension not ruled out by false nearest neighbors at ``threshold``
-    (``firstunderf`` in hctsa's ``NL_FNN``, which gives its ``justBest`` and ``dim*`` outputs).
+    Smallest embedding dimension not ruled out by false nearest neighbors at ``threshold``.
 
     A dimension is ruled out when its fraction of false nearest neighbors is at least
     ``threshold`` and rests on at least :func:`fnn_min_count` points. The result is the
@@ -354,10 +353,9 @@ def fnn_embedding_dimension(
     escape_factor: float = 5.0,
 ) -> float:
     """
-    Embedding dimension estimated by false nearest neighbors, as hctsa's
-    ``NL_FNN(y, delay, maxemb, theiler, 1, threshold, escape_factor)`` (no limit from the series
-    length: ``BF_Embed``'s ``{'fnn', threshold}``, when it chooses the dimension for another
-    algorithm, also caps it at ``floor(2 log10 N)``).
+    Embedding dimension estimated by false nearest neighbors (no limit from the series
+    length; when the dimension is chosen for another algorithm, it is also capped at
+    ``floor(2 log10 N)``).
 
     This is the smallest dimension not ruled out by the test (:func:`fnn_first_under` on
     :func:`false_nearest` with the given ``theiler`` window and ``escape_factor``): the first
@@ -368,7 +366,7 @@ def fnn_embedding_dimension(
     last when TISEAN stopped early, having no neighbors left within its search range).
     Unless the fraction fell below the threshold, the value is a lower bound: every dimension
     below it was tested and ruled out.
-    hctsa's defaults are reproduced: threshold 0.05, 10 dimensions, escape factor 5.
+    The defaults are threshold 0.05, 10 dimensions and escape factor 5.
     NaN where TISEAN produces no output.
 
     Parameters
@@ -378,7 +376,7 @@ def fnn_embedding_dimension(
     delay : int, optional
         Time delay of the embedding, passed to :func:`false_nearest`. Default is 1.
     theiler : int, optional
-        Theiler window in samples; hctsa uses one autocorrelation time. Default is 0.
+        Theiler window in samples (the features use one autocorrelation time). Default is 0.
     threshold : float, optional
         Fraction of false nearest neighbors to get under. Default is 0.05.
     maxemb : int, optional
@@ -442,7 +440,7 @@ def c2t(c2: List[np.ndarray]) -> List[np.ndarray]:
 
     Notes
     -----
-    As in hctsa's modified ``c2t.f``, all quantities are double precision (the original
+    All quantities are double precision (the original
     keeps the logarithms and sums in single precision, and relies on a sort that
     reverses equal keys).
     """
@@ -488,7 +486,7 @@ def c2g(c2: List[np.ndarray]) -> List[np.ndarray]:
 
     Notes
     -----
-    As in hctsa's modified ``c2g.f``, all quantities are double precision (in the original
+    All quantities are double precision (in the original
     the single-precision logarithms overflowed in the interpolation prefactor
     ``exp((e_{k+1} c_k - e_k c_{k+1}) / (e_{k+1} - e_k))`` for series with steep local slopes,
     which gave Inf/NaN output), and the points of an embedding dimension are only those with

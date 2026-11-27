@@ -244,7 +244,7 @@ def cwt(y: ArrayLike, w_name: str = 'db3', max_scale: int = 32) -> dict:
         The input time series.
     w_name : str, optional
         The wavelet name, e.g., 'db3' (Daubechies wavelet), 'sym2' (Symlet), or the continuous
-        Morlet wavelet 'morl' (the second wavelet registered in hctsa). For either kind, the
+        Morlet wavelet 'morl'. For either kind, the
         wavelet function is integrated on a grid of 2**10 points over its support, and the
         integral, stretched to each scale, is convolved with the series and differenced (the
         continuous transform with that wavelet at integer scales).

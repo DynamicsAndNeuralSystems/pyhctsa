@@ -71,7 +71,7 @@ def nan_outputs(func: Callable, *args, **kwargs) -> Union[dict, float]:
 def dict_output(func: Callable) -> Callable:
     """Decorator for a feature function that returns a dict of outputs (one feature per field).
 
-    When the function cannot compute anything (hctsa: ``out = NaN``, every output undefined) and
+    When the function cannot compute anything (every output undefined) and
     would return a bare ``nan``, the decorated function returns the dict with every field NaN
     instead (see :func:`nan_outputs`), so that the feature names stay ``<label>.<field>``
     whatever the data.
@@ -191,7 +191,7 @@ def _even_split_points(a, b, n: int, rounding: str = 'round') -> np.ndarray:
     Position ``k`` (``k = 0..n-1``) is the exact rational ``a + k (b - a)/(n - 1)`` rounded half
     up (``rounding='round'``) or floored (``rounding='floor'``), so that a position falling
     exactly halfway between two integers (or exactly on an integer) is never moved by
-    floating-point error. hctsa uses such grids for split points, window lengths and reference
+    floating-point error. Such grids give split points, window lengths and reference
     indices: for example ``n = 3`` points over ``[1, N]`` with even ``N`` has a midpoint exactly
     halfway between two integers, and this function puts it on the upper one.
 
@@ -785,19 +785,18 @@ def _padded_nfft(length: int) -> int:
     return max(_MIN_NFFT, 2 ** int(np.ceil(np.log2(length))))
 
 # ------------------------------------------------------------------------------
-# Adaptive time delays, Theiler windows and decimation (hctsa BF_GetTau,
-# BF_TheilerWindow, BF_PreProcess)
+# Adaptive time delays, Theiler windows and decimation
 # ------------------------------------------------------------------------------
 _TAU_RULES = ('ac', 'ac1e', 'mi', 'mi-gaussian', 'ac-rank', 'ac1e-rank', 'mi-rank')
 _RANK_SUFFIX = '-rank'  # a rule with this suffix is its base rule applied to the ranks of the series
-_TAU_CACHE: list = []  # (rule, N, digest, tau); small FIFO cache, like hctsa's persistent cache
+_TAU_CACHE: list = []  # (rule, N, digest, tau); small FIFO cache
 _TAU_CACHE_SIZE = 4
 
 
 def _round_half_away(x: float) -> float:
     """Round to the nearest integer, with ties rounded away from zero.
 
-    This is "school" rounding, which hctsa uses to turn proportions of a length into integer
+    This is "school" rounding, used here to turn proportions of a length into integer
     counts and window sizes (ties are common, for example half of an odd length). Unlike
     ``round``/``numpy.round``, which round ties to the nearest even integer, a tie always moves
     away from zero.
@@ -1300,7 +1299,7 @@ def _tau_mi(y: np.ndarray, ranks: Union[np.ndarray, None] = None) -> float:
     See :func:`get_tau` (rule ``'mi'``) for the definition, and ``_ami_first_min`` for the
     minimum search. Deterministic: the jitter that breaks exact ties among the (tie-aware) ranks
     is always applied, with normal draws from ``bf_random`` at a fixed seed
-    (``_TAU_MI_JITTER_SEED``), as in hctsa's ``BF_GetTau``. ``ranks``, if given, replaces the
+    (``_TAU_MI_JITTER_SEED``). ``ranks``, if given, replaces the
     tie-aware ranks of ``y`` in the AMI (rule ``'mi-rank'`` passes the exact average ranks, which
     are also ``y``).
     """
@@ -1354,7 +1353,7 @@ def get_tau(y: ArrayLike, rule: Union[int, str] = 'ac1e') -> Union[int, float]:
     """
     A time delay (in samples) set by the time series' own timescale.
 
-    Port of hctsa's ``BF_GetTau``. Adaptive delays let a feature measure structure
+    Adaptive delays let a feature measure structure
     relative to the series' own correlation time rather than the sampling interval.
     Both adaptive rules scale linearly with the sampling rate and sit on the low side
     of the correlation time: iterated maps, which decorrelate within one step, keep
@@ -1391,11 +1390,10 @@ def get_tau(y: ArrayLike, rule: Union[int, str] = 'ac1e') -> Union[int, float]:
           lag 1 or at an early lag, far below the correlation time. If the ACF never falls to
           1/e, the AMI is searched up to ``N // 10`` lags for its first such minimum, or else its
           first drop below ``-0.5 * log(1 - exp(-2))`` (the Gaussian AMI at a correlation of 1/e).
-        - ``'mi-gaussian'``: the first local minimum of the Gaussian AMI (the rule 'mi' meant
-          in earlier versions of hctsa; a monotonic function of the absolute ACF, so not a
-          nonlinear timescale);
+        - ``'mi-gaussian'``: the first local minimum of the Gaussian AMI (a monotonic
+          function of the absolute ACF, so not a nonlinear timescale);
         - ``'ac'``: the first zero crossing of the ACF (a series whose ACF is defined but
-          never crosses zero gives ``N - 1``, as in hctsa);
+          never crosses zero gives ``N - 1``);
         - ``'ac1e-rank'``, ``'mi-rank'``, ``'ac-rank'``: the rule without the suffix, applied to
           the ranks of the series (average ranks, in which only exactly equal values are tied;
           see ``_average_ranks``) in place of its values. ``'ac1e-rank'`` and ``'ac-rank'`` are
@@ -1465,7 +1463,7 @@ def theiler_window(y: Union[ArrayLike, None], spec: Union[int, float, list, tupl
     """
     Resolve a Theiler-window specification to a number of samples.
 
-    Port of hctsa's ``BF_TheilerWindow``. Neighbor-based methods exclude candidate
+    Neighbor-based methods exclude candidate
     neighbors j of a reference point i with ``|i - j| <= W``, since those are close in
     state space only because successive values are correlated (Theiler, Phys. Rev. A 34,
     2427, 1986). The window should span the time over which values stay correlated, which
@@ -1589,8 +1587,8 @@ def _knn_theiler(X: np.ndarray, k: int, theiler: int, metric: str = 'euclidean',
 
 # pre_process(y, 'decimate_ac1e') gives NaN when the decimated series would be shorter than
 # the global minimum series length (a decimated series is a series). Each *_dec feature's own
-# minimum length (hctsa.yaml) is then checked on the decimated series. hctsa's BF_PreProcess
-# uses a floor of 50 points, a reliability cut: a 2026 scan found every *_dec feature tested
+# minimum length (hctsa.yaml) is then checked on the decimated series. No larger floor (such as
+# 50 points, a reliability cut) is imposed: a 2026 scan found every *_dec feature tested
 # carries signal of its target from 4-15 decimated points (realisation noise is large there,
 # but the values are not noise).
 _DECIMATE_MIN_POINTS = MIN_SERIES_LENGTH
@@ -1598,7 +1596,7 @@ _DECIMATE_MIN_POINTS = MIN_SERIES_LENGTH
 
 def pre_process(y: ArrayLike, how: Union[str, None]) -> Union[np.ndarray, float]:
     """
-    Pre-process a time series (hctsa's ``BF_PreProcess``).
+    Pre-process a time series.
 
     Parameters
     ----------
@@ -1608,25 +1606,24 @@ def pre_process(y: ArrayLike, how: Union[str, None]) -> Union[np.ndarray, float]
         - ``'diff1'``: incremental differences;
         - ``'rescale_tau'``: coarse-grain by averaging non-overlapping windows whose length is the
           ``'ac1e'`` delay, ``get_tau(y, 'ac1e')`` (the floor of the first 1/e crossing of the
-          ACF). pyhctsa 2.0.0 used the first zero crossing of the ACF instead, which for a
-          monotonically decaying ACF is set by noise, depends on the series length and is
-          several times the correlation time;
+          ACF), not the first zero crossing of the ACF, which for a monotonically decaying ACF
+          is set by noise, depends on the series length and is several times the correlation
+          time;
         - ``'decimate_ac1e'``: keep one sample per (floored) 1/e autocorrelation time
           (``y[::get_tau(y, 'ac1e')]``), so features of the result do not change trivially with
           the sampling rate. Iterated maps (ACF below 1/e at lag 1) are unchanged. If the
           decimated series would have fewer than 3 points (``_DECIMATE_MIN_POINTS``, the global
           minimum length), the result is ``nan``; each ``*_dec`` feature's own minimum length is
-          then checked on the decimated series. (hctsa requires 50 points; features of a series
-          spanning few correlation times are noisy, but not uninformative.) In hctsa it is used as
-          ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``, see :func:`decimate_ac1e`.
+          then checked on the decimated series. (No larger floor is imposed: features of a series
+          spanning few correlation times are noisy, but not uninformative.) See
+          :func:`decimate_ac1e`.
         - ``None`` or ``''``: no change.
 
     Returns
     -------
     numpy.ndarray or float
         The processed series, or ``nan`` (scalar) when the required time delay cannot be set
-        or, for ``'decimate_ac1e'``, when fewer than 3 points would remain (as hctsa, which
-        returns the scalar NaN, below 50 points).
+        or, for ``'decimate_ac1e'``, when fewer than 3 points would remain.
     """
     y = np.asarray(y, dtype=float).ravel()
     if how is None or how == '':
@@ -1734,7 +1731,7 @@ def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, fl
 
     Keeps every ``tau``-th sample, ``tau = get_tau(x_z, 'ac1e')``, then z-scores the result
     (N-1 standard deviation; a constant result becomes zeros). If fewer than 3 samples
-    (``_DECIMATE_MIN_POINTS``) would remain, the result is ``nan``. hctsa uses this for the
+    (``_DECIMATE_MIN_POINTS``) would remain, the result is ``nan``. This gives the
     ``*_dec`` variants of rate-dependent features. A config requests it with
     ``preprocess: decimate_ac1e`` (see :class:`~pyhctsa.calculator.FeatureCalculator`).
 
@@ -1743,13 +1740,13 @@ def decimate_ac1e(x_z: ArrayLike, rezscore: bool = True) -> Union[np.ndarray, fl
     x_z : array-like
         The (already z-scored) time series.
     rezscore : bool, optional
-        Z-score the decimated series (default True, as hctsa).
+        Z-score the decimated series (default True).
 
     Returns
     -------
     numpy.ndarray or float
         The decimated series, or scalar ``nan`` if the delay cannot be set or the decimated
-        series would have fewer than 3 points (the operation then returns NaN, as in hctsa).
+        series would have fewer than 3 points (the operation then returns NaN).
     """
     y = pre_process(x_z, 'decimate_ac1e')
     if not isinstance(y, np.ndarray):
@@ -2087,7 +2084,7 @@ def _first_extremum(values, kind: str = 'min', not_found: Union[int, float] = np
     (e.g. a Kraskov AMI) is computed no further than needed. With ``kind='min'`` the result is
     1 if the curve increases from lag 1 to lag 2, and otherwise the first lag ``l`` with
     ``c(l-1) > c(l) < c(l+1)``; with ``kind='max'`` it is the first lag with
-    ``c(l-1) < c(l) > c(l+1)`` (lag 1 never counts), as in hctsa's ``CO_FirstMin``.
+    ``c(l-1) < c(l) > c(l+1)`` (lag 1 never counts).
 
     Parameters
     ----------
@@ -2164,7 +2161,7 @@ def _is_roundoff(x: np.ndarray, ref: Union[np.ndarray, None] = None, n: Union[in
 def _piecewise_poly_residual(y: np.ndarray, order: int, num_bits: int) -> np.ndarray:
     """Remove a polynomial of the given order from each of ``num_bits`` equal pieces.
 
-    The pieces come from hctsa's ``PP_PreProcess`` (``SUB_rempt``): boundaries at
+    The pieces have boundaries at
     ``round(linspace(0, N, num_bits + 1))`` (exact rounding), with the fit made against the sample times 0, ..., length of piece - 1.
     """
     n = len(y)

@@ -72,9 +72,8 @@ def range_constructor(loader, node) -> RangeList:
 yaml.SafeLoader.add_constructor("!range", range_constructor)
 
 # The input transforms a config can request with ``preprocess:`` (besides ``zscore:`` and
-# ``abs:``), the hctsa input each one reproduces, and the suffix it adds to the feature label.
-# ``x_z`` is the z-scored series (``zscore: True``); the label suffix is hctsa's, except for
-# ``detrend``, which has no hctsa counterpart.
+# ``abs:``), and the suffix each adds to the feature label. ``x_z`` is the z-scored series
+# (``zscore: True``).
 _PREPROCESS_LABELS = {
     'decimate_ac1e': '_dec',     # mean over phases p of f(zscore(x_z[p::tau])), tau = get_tau(x_z, 'ac1e')
     'decimate_ac1e-rank': '_dec-rank',  # the same with tau = get_tau(x_z, 'ac1e-rank')
@@ -103,7 +102,7 @@ def _transform_input(x, zscore: bool = False, absval: bool = False,
 
     Returns a scalar ``nan`` when ``decimate_ac1e`` cannot determine its delay or would leave
     fewer than 3 samples, or when ``detrend`` leaves only round-off (the series was a line);
-    the feature is then undefined, as in hctsa.
+    the feature is then undefined.
     """
     if zscore:
         x = z_score(x)
@@ -170,13 +169,12 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False,
     - ``'detrend'``: the least-squares line removed (:func:`~pyhctsa.utils.detrend_linear`)
       and the residual z-scored again if ``zscore`` (features named ``*_lindt``). A series that
       is a line up to round-off has no residual to work with, so the outputs are all NaN.
-      pyhctsa-only: hctsa has no such input.
 
     ``min_length`` is the shortest series (after these transforms, so for ``decimate_ac1e`` the
-    decimated series) on which the feature is defined: for a shorter one the function is not
-    called and its outputs are all NaN (:func:`~pyhctsa.utils.nan_outputs`), hctsa's "not
-    appropriate" outcome. ``field_min_lengths`` does the same for single fields of a dict output:
-    a field whose own minimum exceeds the length is set to NaN after the function has run.
+    decimated series) on which the feature is defined: for a shorter one the function is not called
+    and its outputs are all NaN (:func:`~pyhctsa.utils.nan_outputs`): the feature is not appropriate
+    for that input. ``field_min_lengths`` does the same for single fields of a dict output: a field
+    whose own minimum exceeds the length is set to NaN after the function has run.
     """
     if preprocess is not None and preprocess not in _PREPROCESS_LABELS:
         raise ValueError(f"Unknown preprocess setting '{preprocess}'; "
@@ -204,7 +202,7 @@ def _preprocess_decorator(zscore: bool = False, absval: bool = False,
                     return nan_outputs(func, *args, **kwargs)
                 return _average_outputs(outs)
             x = _transform_input(x, zscore, absval, preprocess)
-            if np.ndim(x) == 0:  # no 1/e time: every output undefined, like hctsa's NaN
+            if np.ndim(x) == 0:  # no 1/e time: every output undefined
                 return nan_outputs(func, *args, **kwargs)
             if min_length is not None and len(x) < min_length:  # too short to be defined
                 return nan_outputs(func, *args, **kwargs)
@@ -653,13 +651,12 @@ class FeatureCalculator:
     - ``zscore: True``: z-score the series first (label gets no suffix; without it, ``_raw``);
     - ``abs: True``: take the absolute value last (suffix ``_abs``);
     - ``preprocess``: one more input transform, applied to the (z-scored) series before ``abs``;
-      its label suffix follows ``_abs``. The values, with the hctsa input each reproduces:
+      its label suffix follows ``_abs``. The values:
 
-      * ``decimate_ac1e`` (suffix ``_dec``): ``zscore(BF_PreProcess(x_z, 'decimate_ac1e'))``.
-        The z-scored series is decimated to one sample per floored 1/e autocorrelation time and
-        z-scored again. If that time cannot be determined (e.g. the ACF never falls to 1/e), or
-        fewer than 3 samples would remain (or fewer than the operation's ``min_length``), the
-        feature is NaN. See
+      * ``decimate_ac1e`` (suffix ``_dec``): the z-scored series is decimated to one sample per
+        floored 1/e autocorrelation time and z-scored again. If that time cannot be determined
+        (e.g. the ACF never falls to 1/e), or fewer than 3 samples would remain (or fewer than
+        the operation's ``min_length``), the feature is NaN. See
         :func:`pyhctsa.utils.decimate_ac1e`;
       * ``diff1`` (``_diff1``): ``diff(x_z)``;
       * ``zscore_abs`` (``_mag``): ``zscore(abs(x_z))``; ``zscore_sign`` (``_sign``):
@@ -869,8 +866,8 @@ class FeatureCalculator:
 
             * ``quality``: a ``uint8`` DataFrame of the same shape, one
               :class:`~pyhctsa.quality.Quality` code per value (0 good, 1 error, 2 NaN, 3 Inf,
-              4 -Inf, 5 complex, 6 empty, 7 link error, 8 non-scalar, 9 rejected input; codes 0-7
-              are hctsa's ``TS_Quality``).
+              4 -Inf, 5 complex, 6 empty, 7 link error, 8 non-scalar, 9 rejected input; see
+              :mod:`pyhctsa.quality`).
             * ``errors``: one row per feature function that raised (``instance``, ``feature``,
               ``error_type``, ``message``), and one per series rejected by the input check
               (``feature`` is ``None``). The user's home directory is replaced by ``~`` in

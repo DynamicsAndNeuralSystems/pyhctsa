@@ -35,7 +35,7 @@ logger = logging.getLogger('pyhctsa')
 
 
 # ------------------------------------------------------------------------------
-# Embedding parameters (hctsa's NL_FNN and BF_Embed), shared by the operations below
+# Embedding parameters (false nearest neighbors, time-delay embedding), shared by the operations below
 # ------------------------------------------------------------------------------
 
 @dict_output
@@ -200,8 +200,8 @@ _FNN_DIM_CACHE_SIZE = 8
 
 def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.05) -> float:
     """
-    Embedding dimension chosen by false nearest neighbors for another algorithm, as hctsa's
-    ``BF_Embed(y, tau, {'fnn', threshold})``: ``min(m_fnn, floor(2 log10 N))`` with ``N`` the
+    Embedding dimension chosen by false nearest neighbors for another algorithm:
+    ``min(m_fnn, floor(2 log10 N))`` with ``N`` the
     length of `y` (see :func:`_max_embedding_dim`). ``m_fnn`` is :func:`fnn` with ten
     dimensions, a Theiler window of one autocorrelation time and an escape factor of 5
     (TISEAN's own, 2, makes the test look as if it never converges): the smallest dimension
@@ -230,7 +230,7 @@ def _fnn_embedding_dim(y: np.ndarray, tau: int, threshold: float = 0.05) -> floa
 def _embedding_params(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
                       ) -> Union[tuple, None]:
     """
-    The time delay and embedding dimension, as hctsa's ``BF_Embed(y, tau, m, true)``.
+    The time delay and embedding dimension of a time-delay embedding.
 
     `tau` is an integer or a rule understood by :func:`pyhctsa.utils.get_tau`. `m` is an
     integer, ``'fnn'`` (false nearest neighbors, threshold 0.05), or ``['fnn', threshold]``:
@@ -255,8 +255,8 @@ def _embedding_params(y: np.ndarray, tau: Union[int, str], m: Union[int, str, li
 
 def _embed_tau_m(y: np.ndarray, embed_params) -> tuple:
     """
-    The delay and dimension of ``[tau, m]`` embedding parameters (hctsa's
-    ``BF_Embed(y, tau, m, true)``), without doing the embedding: see
+    The delay and dimension of ``[tau, m]`` embedding parameters, without doing the
+    embedding: see
     :func:`_embedding_params`. Returns ``(nan, nan)`` if they cannot be determined.
     """
     params = _embedding_params(y, *_split_embed_params(embed_params))
@@ -274,7 +274,7 @@ def _split_embed_params(embed_params) -> tuple:
 def _bf_embed(y: np.ndarray, tau: Union[int, str], m: Union[int, str, list, tuple]
               ) -> Union[np.ndarray, None]:
     """
-    Time-delay embedding with hctsa's ``BF_Embed(y, tau, m, false)``: the embedded points as
+    Time-delay embedding: the embedded points as
     rows (see :func:`_embedding_params` for `tau` and `m`), or None when it fails
     (undetermined parameters, or a time series too short).
     """
@@ -356,7 +356,7 @@ def zero_one_test(y, num_c=20, max_n=10000):
 
     # The test regresses on lags 1..N//10, so it needs N >= 20 (2 lags). K, a correlation over
     # those lags, needs 3 (N >= 30; with 2 it is +-1, in practice always 1): that is a per-field
-    # bound in hctsa.yaml. (hctsa required N >= 200; a 2026 scan found K separates regular from
+    # bound in hctsa.yaml. (No larger bound: a 2026 scan found K separates regular from
     # irregular dynamics from N = 30, though K only reads on its 0-1 scale from N ~ 200-300.)
     if n < 20:
         logger.warning(
@@ -740,7 +740,7 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
 
     Method as implemented in the TSTOOL package for nonlinear time-series analysis (C.
     Merkwirth, U. Parlitz, I. Wedekind, D. Engster and W. Lauterborn; GNU GPL), here
-    re-implemented through hctsa's ``NL_DelayTime``.
+    re-implemented.
 
     Parameters
     ----------
@@ -760,7 +760,7 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
         also accepted). Default is ``['ac', 1]``.
     random_seed : int, str or None, optional
         Not used: the 256 reference points are deterministic (the golden-ratio sequence over the
-        sorted values), as in hctsa. Kept so that existing calls still work.
+        sorted values). Kept so that existing calls still work.
 
     Returns
     -------
@@ -810,7 +810,7 @@ def delay_time(y: ArrayLike, max_delay: Union[int, float, list, tuple] = ('ac', 
     err = np.zeros(max_delay + 1)
     for _ in range(iterations):
         # Redraw until the reference point has a value-neighbor on both sides
-        # that clears the Theiler window (as hctsa, give up with NaN after
+        # that clears the Theiler window (giving up with NaN after
         # max_attempts draws, which is data dependent).
         for _ in range(max_attempts):
             num_used += 1
@@ -938,7 +938,7 @@ def local_density(y: ArrayLike, nnr: int = 3,
     m : int or 'fnn', optional
         The embedding dimension: an integer, or ``'fnn'`` (or ``['fnn', threshold]``)
         to set it by TISEAN's false nearest neighbors (:func:`fnn`, threshold 0.05 by
-        default, at most ``floor(2 log10 N)``; as hctsa's ``BF_Embed``, see
+        default, at most ``floor(2 log10 N)``; see
         :func:`_embedding_params`). Default is 2.
 
     Returns
@@ -1319,8 +1319,8 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
     range of scales and shows the best fit to the data, and return the range, a
     goodness of fit statistic, and a dimension estimate.
 
-    Unlike hctsa, which shells out to installed TISEAN binaries, this runs the
-    vendored TISEAN sources in-process (see
+    This runs the vendored TISEAN sources in-process, so no TISEAN binaries need be
+    installed (see
     :mod:`pyhctsa.toolboxes.Tisean_3_0_1.tisean`).
 
     References
@@ -1372,7 +1372,7 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         than two dimensions qualify. The ``*mmin_*`` outputs (the smallest embedding
         dimension from which a quantity is roughly constant, and its goodness, stable value
         and linear-fit error) are NaN when the quantity is the same at every dimension, to
-        within round-off, since it cannot then be rescaled. Returns NaN, as hctsa does, if
+        within round-off, since it cannot then be rescaled. Returns NaN if
         the time series is too short, the time delay cannot be determined, or the TISEAN
         output is unusable for this series (no valid output for a long delay, no
         correlation-dimension data, or no scaling range).
@@ -1396,7 +1396,7 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
         return np.nan
 
     # Data-dependent failures (no usable TISEAN output, no scaling range, ...) return
-    # NaN, as in hctsa, rather than raising
+    # NaN (the feature is undefined for this series) rather than raising
     try:
         return _tisean_d2_summary(y, tau, maxm, theiler_win)
     except _D2DataError as exc:
@@ -1405,7 +1405,7 @@ def tisean_d2(y: ArrayLike, tau: Union[int, str] = 1, maxm: int = 10,
 
 
 def _tisean_d2_summary(y: np.ndarray, tau: int, maxm: int, theiler_win: int) -> dict:
-    # Run TISEAN's d2 and summarise it; raises _D2DataError where hctsa returns NaN.
+    # Run TISEAN's d2 and summarise it; raises _D2DataError on a data-dependent failure.
     try:
         tables = _tisean.d2(y, delay=tau, embed=maxm, theiler=theiler_win)
     except ValueError as exc:  # e.g. a delay vector longer than the series
@@ -1563,7 +1563,7 @@ def gp_corr_sum(y: ArrayLike, nref: Union[int, float] = 500, r: float = 0.05,
         TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.05 by default; at most ``floor(2 log10 N)``, see :func:`_embedding_params`). Default is ``['ac', 'fnn']``.
     do_two : int, optional
         Only 1 (corrsum-style log-spaced radii, the default) is supported; 2 has no
-        TISEAN equivalent and raises ``ValueError``, as in hctsa.
+        TISEAN equivalent and raises ``ValueError``.
 
     Returns
     -------
@@ -2002,7 +2002,7 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
 
     Method as implemented in the TSTOOL package for nonlinear time-series analysis (C.
     Merkwirth, U. Parlitz, I. Wedekind, D. Engster and W. Lauterborn; GNU GPL), here
-    re-implemented through hctsa's ``NL_FractalDimensions``.
+    re-implemented.
 
     References
     ----------
@@ -2037,7 +2037,7 @@ def fractal_dimensions(y: ArrayLike, kmin: int = 3, kmax: int = 10,
         TISEAN's false nearest neighbors (:func:`fnn`; threshold 0.05 by default; at most ``floor(2 log10 N)``, see :func:`_embedding_params`). Default is ``['ac', 'fnn']``.
     random_seed : int, str or None, optional
         Not used: the reference points (when ``nref != -1``) are the first of a fixed, evenly
-        spread ordering (:func:`~pyhctsa.robust.bf_spread_perm`), as in hctsa.
+        spread ordering (:func:`~pyhctsa.robust.bf_spread_perm`).
 
     Returns
     -------
@@ -2254,8 +2254,8 @@ def dimensions(y: ArrayLike, num_bins: int = 50,
     :math:`\\ln \\epsilon` (the range of scales, in the first and second halves of the scales,
     minimizing the mean absolute error of a linear fit less 0.02 per point spanned) for
     ``m`` = 1, 2, 3 and the embedding dimension ``m``, and the embedding dimension with the best
-    scaling fit. Unlike hctsa, which shells out to installed TISEAN binaries, this runs the
-    vendored ``d2`` and an in-process port of ``boxcount``.
+    scaling fit. This runs the vendored ``d2`` and an in-process port of ``boxcount``, so no
+    TISEAN binaries need be installed.
 
     Parameters
     ----------
@@ -2358,8 +2358,7 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
     per autocorrelation time, and a saturating exponential fit
     :math:`a (1 - e^{bt})`.
 
-    Unlike hctsa, which shells out to installed TISEAN binaries, this runs an in-process port
-    of ``lyap_r``.
+    This runs an in-process port of ``lyap_r``, so no TISEAN binaries need be installed.
 
     Distances are compared with a tolerance of 1e-12 (of the range of the data), so that the
     result depends neither on rounding nor on the order in which neighbors are searched: a point
@@ -2382,7 +2381,7 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
     y : array-like
         Input time series.
     nref : int or float, optional
-        Unused (kept for compatibility with hctsa's signature). Default is -1.
+        Unused (kept so that existing calls still work). Default is -1.
     maxtstep : int, float, or ``['ac1e', k]``, optional
         The maximum number of time steps to follow neighbors for: a number of steps, a
         value in (0, 1) as a proportion of the time-series length, or ``['ac1e', k]`` (or
@@ -2394,7 +2393,7 @@ def largest_lyap(y: ArrayLike, nref: Union[int, float] = -1,
         The Theiler window of time-correlated points to exclude as neighbors (see
         :func:`pyhctsa.utils.theiler_window`). Default is ``['ac1e', 1]``.
     nnr : int, optional
-        Unused (kept for compatibility with hctsa's signature). Default is 3.
+        Unused (kept so that existing calls still work). Default is 3.
     embed_params : [tau, m], optional
         Embedding parameters: ``tau`` is an integer or a rule understood by
         :func:`pyhctsa.utils.get_tau` (``'ac'``, ``'ac1e'``, ``'mi'``), ``m`` an integer, or
@@ -2588,7 +2587,7 @@ def _saturating_exp_fit(t: np.ndarray, p: np.ndarray, max_rate: float = 5.0) -> 
 def _dvv_draws(seed: int, n: int, n_dv: int, nsub: int, num_surr: int) -> tuple:
     """The random choices of :func:`dvv`: reference delay vectors and surrogate starting permutations.
 
-    Everything is drawn from hctsa's portable stream (:func:`~pyhctsa.robust.bf_random`), one
+    Everything is drawn from the portable stream (:func:`~pyhctsa.robust.bf_random`), one
     block per draw with its own seed ``seed * (2 num_surr + 1) + b``: block 0 chooses the
     ``nsub`` reference delay vectors of the data (the first ``nsub`` entries of a random permutation
     of the ``n_dv`` delay vectors, i.e. sampling without replacement), blocks ``1..num_surr`` give
@@ -2638,14 +2637,14 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
 
     Notes
     -----
-    Adapted from hctsa's ``NL_DVV``, which is B. D. Fulcher's modification of the DVV toolbox of
+    Adapted from B. D. Fulcher's modification of the DVV toolbox of
     Danilo P. Mandic (c) 2008 (GNU GPL, version 2 or later); the delay-vector-variance curve and
     the IAAFT surrogate are in :mod:`pyhctsa.toolboxes.DVV.dvv`.
 
     The surrogates keep the best-matching of (at most) 100 IAAFT iterates, and the rank-ordering
     step ranks the real part of the spectrum-matched series by value. The set of delay vectors
     around a reference vector excludes the reference itself. The reference vectors (sampled without
-    replacement) and the surrogate starting permutations are drawn from hctsa's portable
+    replacement) and the surrogate starting permutations are drawn from the portable
     generator (:func:`~pyhctsa.robust.bf_random`), one seeded block per draw (see
     ``_dvv_draws``): the outputs are reproducible for a given ``random_seed``, and different
     seeds give different, equally valid, random draws.
@@ -2765,7 +2764,7 @@ def dvv(y: ArrayLike, m: int = 3, num_dvs: int = 100, nd: float = 2.0,
 def _period_normalized_tau(y: np.ndarray) -> Union[int, str]:
     # An embedding delay of one fifth of the series' dominant period (from the most prominent
     # peak of the log Welch spectrum), so it scales with the sampling rate; 'mi' if the series is
-    # too short or has no sufficiently prominent peak. (hctsa: SUB_periodNormalizedTau.)
+    # too short or has no sufficiently prominent peak.
     # The Welch estimate uses Hamming-windowed segments of N/4.5 samples at 50% overlap, zero-padded
     # to nfft = max(256, next power of two): a finer frequency grid, a fixed pyhctsa choice.
     if y.size < 16:
@@ -2798,8 +2797,7 @@ def persistent_homology(y: ArrayLike, tau: Union[int, str] = 'mi', m: int = 3, m
     connected components (H0). The filtration stops at the threshold, so a class still alive
     there is counted as dying at the threshold (lifetime ``(threshold - birth)/threshold``),
     except for the single essential H0 class (the connected component that never dies), which
-    is dropped. Uses ripser [1]_ (the ``ripser`` Python package, installed with pyhctsa; hctsa
-    runs the ripser executable).
+    is dropped. Uses ripser [1]_ (the ``ripser`` Python package, installed with pyhctsa).
 
     Below the point-cloud cap (``max_n``, 1000 points) the persistence totals and entropy
     (``totalPersistenceH0``, ``totalPersistenceH1``, ``persistenceEntropyH1``) grow with the
@@ -2946,7 +2944,7 @@ def poincare_section(y: ArrayLike, ref: str = 'max',
         "from below", ``-C0``) and ``'min'`` those heading toward a local
         minimum (descending, ``-C1``). Default is ``'max'``.
 
-        The name ``ref`` follows hctsa's signature; it selects the crossing
+        Despite its name, ``ref`` selects the crossing
         direction, not a reference point.
     tau : int or str, optional
         The time-delay of the embedding: an integer, or a rule understood by
@@ -3215,8 +3213,8 @@ def ssa(y: ArrayLike, L: Union[int, None] = None) -> dict:
 # ------------------------------------------------------------------------------
 def _random_subset(n: int, k: int, random_seed: Union[int, str, None]) -> np.ndarray:
     """
-    The first ``k`` of a fixed, evenly spread ordering of ``n`` indices (from zero), as hctsa's
-    ``BF_SpreadPerm(n)(1:k) - 1``: deterministic, so ``random_seed`` is not used.
+    The first ``k`` of a fixed, evenly spread ordering of ``n`` indices (from zero),
+    ``bf_spread_perm(n)[:k]``: deterministic, so ``random_seed`` is not used.
     """
     return bf_spread_perm(n)[:k]
 
@@ -3281,7 +3279,7 @@ def _line_lengths(group: np.ndarray, pos: np.ndarray, min_len: int) -> np.ndarra
 def _recurrence_time_stats(Y: np.ndarray, radius: float, theiler: int, pairs: tuple = None) -> tuple:
     """
     Mean recurrence time and modal probability mass of the white vertical line lengths of
-    the recurrence plot of `Y` (hctsa's ``SUB_recurrenceTimeStats``).
+    the recurrence plot of `Y`.
 
     For each point, the number of non-recurrent points between successive recurrent points
     (neighbors within `radius`, outside the Theiler window; the edges of the Theiler band
@@ -3354,7 +3352,7 @@ def recurrence_times(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, 
     m : int, str or tuple, optional
         The embedding dimension: an integer, or ``'fnn'`` or ``['fnn', threshold]`` to choose it
         by false nearest neighbors (TISEAN's ``false_nearest``, threshold 0.05 by default, at
-        most ``floor(2 log10 N)`` for the ``N`` samples analyzed; as hctsa's ``BF_Embed``, see
+        most ``floor(2 log10 N)`` for the ``N`` samples analyzed; see
         :func:`_embedding_params`). Default is 3.
     theiler_win : int, float or ``['ac', k]``, optional
         The Theiler window excluding temporally-correlated neighbors (see
@@ -3476,7 +3474,7 @@ def rqa(y: ArrayLike, tau: Union[int, str] = 1, m: Union[int, str, list, tuple] 
     m : int, str or tuple, optional
         The embedding dimension: an integer, or ``'fnn'`` or ``['fnn', threshold]`` to choose it
         by false nearest neighbors (TISEAN's ``false_nearest``, threshold 0.05 by default, at
-        most ``floor(2 log10 N)`` for the ``N`` samples analyzed; as hctsa's ``BF_Embed``, see
+        most ``floor(2 log10 N)`` for the ``N`` samples analyzed; see
         :func:`_embedding_params`). Default is 3.
     theiler_win : int, float or ``['ac', k]``, optional
         The Theiler window excluding temporally-correlated neighbors from the main diagonal
@@ -3626,7 +3624,7 @@ def return_time(y: ArrayLike, nnr: Union[int, float] = 0.01, num_lags: int = 100
 
     Method as implemented in the TSTOOL package for nonlinear time-series analysis (C.
     Merkwirth, U. Parlitz, I. Wedekind, D. Engster and W. Lauterborn; GNU GPL), here
-    re-implemented through hctsa's ``NL_ReturnTime``.
+    re-implemented.
 
     References
     ----------
@@ -4110,7 +4108,7 @@ def _enough_for_pca(y_embed: np.ndarray, m: int) -> bool:
 def _spectrum_stats(perc: np.ndarray, m: int) -> dict:
     """
     Statistics of a normalized (summing to 1), descending eigenvalue spectrum, as
-    :func:`embed_pca` (hctsa's ``SUB_spectrumstats`` in NL_EmbedKernelPCA).
+    used by :func:`embed_pca`.
     """
     stats = {f'perc_{i + 1}': perc[i] for i in range(m)}
     # The spread statistics are taken over the leading m components only: the linear spectrum
@@ -4294,8 +4292,8 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
 
     The increment ``I`` approaches the entropy rate of the process (the K2 entropy, per delay
     step) rather than a slope against ``log(epsilon)``, so these features are entropy-rate-like,
-    not correlation dimensions (despite hctsa's former name for this operation,
-    NL_BoxCorrDim). hctsa registers ``meanr``, ``medianr``, ``minr`` and ``meanchr`` at
+    not correlation dimensions. The default feature set registers ``meanr``, ``medianr``,
+    ``minr`` and ``meanchr`` at
     ``r`` = 2, 3, 4, 6, 8, 11, 14, 17, 20, 24, 28, 32, 36 of ``num_bins = 50``
     (2 to 429 boxes per axis). Testing indicated that coarse scales change quickly with ``r``
     (so they are sampled densely), that neighboring finer scales are nearly redundant, that
@@ -4319,8 +4317,8 @@ def box_count_entropy_rate(y: ArrayLike, num_bins: int = 100,
     embed_params : list or tuple, optional
         The embedding parameters as ``(tau, m)``: the time delay (an integer, or a rule
         understood by :func:`pyhctsa.utils.get_tau`: ``'ac'``, ``'ac1e'`` or ``'mi'``) and the
-        embedding dimension (an integer, or ``'fnn'`` for false nearest neighbors). hctsa uses
-        ``('ac1e', 5)``. Default is ``('ac', 'fnn')``.
+        embedding dimension (an integer, or ``'fnn'`` for false nearest neighbors). The default
+        feature set uses ``('ac1e', 5)``. Default is ``('ac', 'fnn')``.
 
     Returns
     -------
@@ -4490,7 +4488,7 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
         cropping (a warning is logged above 50000 samples). Default is ``'full'``.
     random_seed : int, str or None, optional
         Not used: the poles are the first of a fixed, evenly spread ordering of the embedded
-        points (:func:`~pyhctsa.robust.bf_spread_perm`), as in hctsa. Kept so that existing
+        points (:func:`~pyhctsa.robust.bf_spread_perm`). Kept so that existing
         calls still work.
 
     Returns
@@ -4596,7 +4594,7 @@ def evt_local_dim(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 3, q: floa
 
 def _c1_scaling_range(slopes: np.ndarray) -> Union[tuple, None]:
     """
-    hctsa's search (inside NL_c1) for the length scales over which the slopes are most nearly
+    The search for the length scales over which the slopes are most nearly
     constant: a start in the first quarter and an end in the last three quarters, scoring the
     standard deviation across the range less 0.005 per point it spans. Returns the 1-based
     ``(start, end, score, mean, std)``, or None if there are too few points.
@@ -4622,14 +4620,14 @@ def tisean_c1(y: ArrayLike, tau: Union[int, str] = 1, mmm: Union[list, tuple] = 
     For a range of embedding dimensions, ``c1`` finds the distance to the k-th nearest neighbor
     (k increasing with the fraction of the points, the "mass", included) of a set of reference
     points, and the information dimension is the slope of the log mass against the log of the
-    mean log distance (``c2d`` averages the local slope over five points). hctsa looks for a
-    scaling range in each dimension and summarizes the dimension estimates across them.
+    mean log distance (``c2d`` averages the local slope over five points). A scaling range
+    is found in each dimension, and the dimension estimates are summarized across them.
 
     The routine is a port of TISEAN 3.0.1's Fortran (``c1.f``, ``d1.f``, ``c2d.f``) in single
-    precision, with the corrections of hctsa's copy of TISEAN, and reproduces that binary's output,
-    with hctsa's choice of reference points: the first of a fixed golden-ratio lattice ordering of
-    the embedded points, spread evenly over the series (stock TISEAN takes the first entries of a
-    random permutation, so the estimates depend on the draw). The stock code also uses stale memory when more reference points are requested than there are
+    precision, with the changes described here. The reference points are the first of a fixed
+    golden-ratio lattice ordering of the embedded points, spread evenly over the series (stock
+    TISEAN takes the first entries of a random permutation, so the estimates depend on the
+    draw). The stock code also uses stale memory when more reference points are requested than there are
     embedded points, and never finishes when it asks for more neighbors than exist (for example
     when the number of embedded points is a power of two); those cases are fixed here. The stock
     code also divides the sum of the log distances by ``nref - (m - 1) * tau`` instead of the
@@ -4743,7 +4741,7 @@ def lyap_spec(y: ArrayLike, tau_method: Union[int, str] = 1, m: int = 3, k_nn: i
 
     A little noise (0.001 of the standard deviation) is added to the series first, so that the
     local fits are well posed for quantized series; ``random_seed`` seeds it (the portable
-    generator :func:`~pyhctsa.robust.bf_random`, so the dither is the same as hctsa's).
+    generator :func:`~pyhctsa.robust.bf_random`, so the dither depends on the seed alone).
 
     Parameters
     ----------

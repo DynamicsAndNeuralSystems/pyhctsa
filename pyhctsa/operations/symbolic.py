@@ -55,7 +55,7 @@ def surprise(y: ArrayLike, what_prior: str = 'dist', memory: float = 0.2, num_gr
 
         - 'quantile': equiprobable alphabet by value of each time-series datapoint (default),
         - 'diff': equiprobable alphabet by the value of the incremental changes in the
-          time series (not a literal sign split; called 'updown' before it was renamed in hctsa),
+          time series (not a literal sign split),
         - 'updown': a binary split by the sign of each increment (requires ``num_groups=2``;
           not equiprobable),
         - 'embed2quadrants': 4-letter alphabet of the quadrant each data point resides in a
@@ -217,7 +217,8 @@ _SYMBOLIC_TAU_RULES = ('ac', 'ac1e', 'mi', 'ac-rank', 'ac1e-rank', 'mi-rank')
 
 def _resolve_tau(y: np.ndarray, tau: Union[int, float, str]) -> Union[int, float]:
     """
-    Resolve the lag of hctsa's SB_MotifTwo/Three, SB_TransitionMatrix and SB_TransitionPAlphabet.
+    Resolve the lag of :func:`motif_two`, :func:`motif_three`, :func:`transition_matrix` and
+    :func:`transition_p_alphabet`.
 
     `tau` is a number of samples (at least 1), or a string that sets it from the series:
     ``'ac'`` (first zero crossing of the autocorrelation function), ``'ac1e'`` (floor of its
@@ -419,7 +420,7 @@ def binary_stretch(x: ArrayLike, stretch_what: str = 'gaps1') -> float:
     """
     Homogeneity of the gaps between like symbols in a binarized time series.
 
-    This is hctsa's SB_BinaryGapHomogeneity (formerly SB_BinaryStretch). The input is
+    The input is
     binarized at zero (values above zero become 1, the rest 0; the time series is
     typically z-scored first, so this is a split about the mean). The gaps between
     successive 1s (or 0s) are then characterized by the longest block of gaps of one type
@@ -436,7 +437,7 @@ def binary_stretch(x: ArrayLike, stretch_what: str = 'gaps1') -> float:
         The input time series.
 
     stretch_what : {'gaps1', 'gaps0'}, optional
-        Which binary symbol's gaps to analyze (formerly ``'lseq1'`` and ``'lseq0'``):
+        Which binary symbol's gaps to analyze:
 
         - 'gaps1': Analyze gaps between consecutive 1s.
         - 'gaps0': Analyze gaps between consecutive 0s.
@@ -907,7 +908,6 @@ def transition_p_alphabet(y: ArrayLike, num_groups: Optional[ArrayLike] = None,
     num_groups = np.atleast_1d(np.asarray(num_groups, dtype=int))
 
     if np.size(tau) > 1 or num_groups.size == 1:
-        # (hctsa does not support varying tau either: "This setting kind of doesn't work yet")
         raise NotImplementedError('Only a scalar tau with a range of alphabet sizes is '
                                   'supported.')
     tau = _resolve_tau(y, tau if isinstance(tau, str) else np.ravel(tau)[0])
@@ -1025,8 +1025,7 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str], lag: int 
           quantiles, bins closed on the left, tied values sharing the symbol of their mid-rank;
           see :func:`pyhctsa.utils._coarse_grain`),
         - 'diff': as 'quantile', but applied to the increments ``diff(y)``: an equiprobable
-          alphabet by the *value* of each increment (not a literal sign split; this was called
-          'updown' before hctsa renamed it),
+          alphabet by the *value* of each increment (not a literal sign split),
         - 'updown': a true binary up/down split by the raw sign of each increment
           (``diff(y) > 0`` gives symbol 2, otherwise 1); ``num_groups`` must be 2. Unlike the
           other methods this is NOT equiprobable: the two states can be arbitrarily
@@ -1095,7 +1094,7 @@ def coarse_grain(y: list, how_to_cg: str, num_groups: Union[int, str], lag: int 
             tau = num_groups
 
         if tau > N/25:
-            tau = max(1, N // 25)  # (hctsa's N // 25 is a degenerate delay of 0 for N < 25)
+            tau = max(1, N // 25)  # (at least 1: N // 25 is a degenerate delay of 0 for N < 25)
         tau = int(tau)
 
         m1 = y[:N - tau]

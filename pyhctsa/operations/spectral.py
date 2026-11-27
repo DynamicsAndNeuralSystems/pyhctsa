@@ -264,9 +264,8 @@ def _fit_aperiodic(fv: ArrayLike, log_f: ArrayLike, log_s: ArrayLike,
     # fails outright), in which case the model degenerates to the 'fixed'
     # form and we keep the robust linear fit rather than a bogus knee.
     try:
-        # Coefficients ordered [a, k, c] (hctsa names the order explicitly, since
-        # fittype('a - log10(k + x^c)') would order them alphabetically as
-        # [a, c, k]); the start point and bounds below are in this order:
+        # Coefficients ordered [a, k, c], as they appear in a - log10(k + x^c) (not
+        # alphabetically); the start point and bounds below are in this order:
         knee_model = lambda p, x: p[0] - np.log10(p[1] + x ** p[2])
         p = _bounded_lsq(knee_model,
                          [ap['offset'], 1e-3, max(ap['exponent'], 0.1)],
@@ -418,7 +417,7 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
               half the peak power, and the fraction of peak power in the tallest peak.
 
             Peaks are found on log(S), and the prominence thresholds are calibrated for (and
-            hctsa registers these fields only with) ``psd_meth='welch'``.
+            the default feature set registers these fields only with) ``psd_meth='welch'``.
 
         Distribution of power values (and of log power values, with prefix ``log``)
             ``iqr``, ``logiqr``, ``q25``, ``median``, ``q75``, ``logq25``, ``logmedian``,
@@ -717,7 +716,7 @@ def spectral_summaries(y: ArrayLike, psd_meth: str = 'fft', window_type: str = '
     out['areatopeak'] = np.sum(s[0:np.argmax(s) + 1]) * dw
     out['ylogareatopeak'] = np.sum(log_s[0:np.argmax(s) + 1]) * dw  # % (semilogy)
 
-    # Robust Fits (iteratively re-weighted least squares); only the statistics hctsa emits per range
+    # Robust Fits (iteratively re-weighted least squares); a fixed set of statistics per range
     # across full range
     r_all = w > 0
     out |= _give_me_robust_stats(np.log(w[r_all]), np.log(s[r_all]), 'linfitloglog_all',
@@ -1492,10 +1491,8 @@ def sinusoid_fit(y: ArrayLike, model: str = 'sin1') -> Union[dict, float]:
     Fits a sum of 1-3 sinusoids, or a Fourier series with 1-3 terms, to the time
     series as a function of its time index ``t = 0..N-1``. The values are fitted in
     the order in which they occur, so the result depends on the temporal ordering
-    of the data. (This is the time-series-model branch of the former
-    ``DN_SimpleFit``, split off in hctsa as ``SP_SinusoidFit`` because the
-    distribution of values is unaffected by temporal ordering, whereas these fits
-    are.)
+    of the data. (Fits to the distribution of values, which is unaffected by temporal
+    ordering, are in :func:`~pyhctsa.operations.distribution.simple_fit`.)
 
     The fitted models are:
 

@@ -24,7 +24,7 @@ from ..utils import _shannon_entropy
 
 def _resolve_delay(y: ArrayLike, tau: Union[int, float, str, None], cap: bool = False,
                    default: Union[int, str] = 'ac') -> Union[int, float]:
-    """Resolve a time-delay specification to a number of samples, as hctsa does.
+    """Resolve a time-delay specification to a number of samples.
 
     A number is returned unchanged. A string is a rule for :func:`~pyhctsa.utils.get_tau`:
     ``'ac'`` or ``'tau'`` (first zero crossing of the ACF), ``'ac1e'`` (floor of the first 1/e
@@ -34,8 +34,8 @@ def _resolve_delay(y: ArrayLike, tau: Union[int, float, str, None], cap: bool = 
     Parameters
     ----------
     cap : bool
-        Cap a delay set by a rule at ``floor(N/10)`` (hctsa's ``CO_Embed2*`` do this), but never
-        below 1: for ``N < 10``, hctsa's cap gives a delay of 0, a degenerate (diagonal) embedding.
+        Cap a delay set by a rule at ``floor(N/10)``, but never below 1: for ``N < 10``,
+        ``floor(N/10)`` would be a delay of 0, a degenerate (diagonal) embedding.
 
     Returns
     -------
@@ -462,7 +462,7 @@ def falling_sticks(y: ArrayLike) -> dict:
 
     Adapted from a Python implementation ('FALLstick') by Eugene Chon
     (`@EugeneChon04 <https://github.com/EugeneChon04>`_), who wrote the original
-    Python version for hctsa; this is a port of hctsa's ``CO_FallingSticks``.
+    Python version.
 
     Parameters
     ----------
@@ -659,7 +659,7 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     on the idea in [1].
 
     The noise comes from :func:`~pyhctsa.robust.bf_random` (seed ``random_seed + i + 1`` at noise
-    level ``i``, counting from 0), so it is the same as in hctsa's ``CO_AddNoise``, in every release and
+    level ``i``, counting from 0), so it is the same in every release and
     platform, and leaves NumPy's global random state untouched.
 
     The exponential ``a * exp(b * eta)`` is fitted in closed form: least squares of
@@ -723,7 +723,8 @@ def add_noise(y: ArrayLike, tau: Union[int, str] = 1, ami_method: str = 'even',
     num_draws : int, optional
         Number of independent noise vectors averaged at each noise level (default 10). The
         draws at a level are consecutive blocks of ``len(y)`` values of one stream, so fewer
-        draws are cheaper but make the curve noisier. hctsa's Kraskov settings use 5.
+        draws are cheaper but make the curve noisier. The default feature set uses 5 with the
+        Kraskov estimator.
 
     Returns
     -------
@@ -849,7 +850,7 @@ def theiler_q(y: ArrayLike) -> float:
 
     where the numerator averages over the :math:`N - 1` adjacent pairs and the denominator
     over all :math:`N` samples. The mean is not removed (z-score the series first for a
-    location-free statistic). Statistic as used in D. Kaplan's code (hctsa ``DK_theilerQ``),
+    location-free statistic). Statistic as used in D. Kaplan's code,
     where it is credited to J. Theiler.
 
     Parameters
@@ -884,7 +885,7 @@ def crinkle_statistic(y: ArrayLike, tau: Union[int, str] = 1) -> float:
                  {\\langle \\tilde{x}_t^2 \\rangle^{2}},
 
     where the numerator averages over the :math:`N - 2` interior points and the denominator
-    over all :math:`N` samples. Statistic as used in D. Kaplan's code (hctsa ``DK_crinkle``),
+    over all :math:`N` samples. Statistic as used in D. Kaplan's code,
     where it is credited to J. Theiler.
 
     Parameters
@@ -1067,8 +1068,7 @@ def time_rev_kaplan(y: ArrayLike, time_lag: int = 1) -> float:
 
     The mean is not removed (z-score the series first for a location-free statistic).
     See J. B. Ramsey and P. Rothman, "Time irreversibility and business cycle asymmetry",
-    *J. Money Credit Bank.* 28, 1 (1996). Statistic as used in D. Kaplan's code (hctsa
-    ``DK_timerev``).
+    *J. Money Credit Bank.* 28, 1 (1996). Statistic as used in D. Kaplan's code.
 
     Parameters
     ----------
@@ -1306,7 +1306,7 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
 def _fixed_edges(num_bins: int, lo: float, hi: float) -> np.ndarray:
     """``num_bins`` equal bins on [lo, hi] as :func:`~pyhctsa.robust.bf_hist_edges` places them
     (explicit edges, with a tiny tolerance so a value on an edge falls in the upper bin). With a
-    given number of bins the data do not enter, so (as in hctsa) this also works when there
+    given number of bins the data do not enter, so this also works when there
     are none (e.g. all angles NaN)."""
     return bf_hist_edges(np.zeros(1), num_bins, [lo, hi])
 
@@ -1440,7 +1440,7 @@ def _num_prominent_peaks(x: ArrayLike, min_prominence: float) -> int:
 
     Interior points higher than both neighbors count (a flat top counts once). The prominence
     is how far a peak rises above the higher of the lowest values reached on each side before
-    meeting a higher value (or the end of the series). (hctsa's ``SUB_NumProminentPeaks``.)
+    meeting a higher value (or the end of the series).
     """
     x = np.asarray(x, dtype=float).ravel()
     x = x[np.concatenate(([True], np.diff(x) != 0))]  # merge runs of equal values
@@ -1661,7 +1661,7 @@ def stick_angles(y: ArrayLike) -> dict:
         its mirror image about zero (0 if symmetric, 1 if all angles are in bins whose mirror
         image is empty).
 
-        As in hctsa, redundant statistics are not returned: ``std_p``, ``std_n``,
+        Redundant statistics are not returned: ``std_p``, ``std_n``,
         ``statav2_all_s``, ``statav3_all_s``, ``statav4_all_s``, ``ac2_p``, ``ac2_n``,
         ``ac2_all``, ``tau_all`` and ``ac1_all``.
     """
@@ -2151,7 +2151,7 @@ def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'burg')
     The default (``'burg'``) is the sequence of reflection coefficients of Burg's recursion:
     at each order, the coefficient minimizing the summed forward and backward prediction
     errors, which has a closed form and is bounded in [-1, 1]. It needs no matrix solve, so it
-    is the same in any implementation (it is exact against hctsa's ``CO_PartialAutoCorr``), and
+    is the same in any implementation, and
     it agrees closely with the ordinary-least-squares partial autocorrelation. The latter
     (``'ols'``) regresses y(t) on k lagged values; for smooth, nearly deterministic series its
     design matrix is numerically singular and the coefficient depends on the linear solver.
@@ -2173,9 +2173,9 @@ def partial_autocorr(y: ArrayLike, max_tau: int = 10, what_method: str = 'burg')
     what_method : {'burg', 'ols', 'yule-walker'}, optional
         Method to compute partial autocorrelation:
 
-        - ``'burg'``: Burg recursion (the default, as in hctsa).
+        - ``'burg'``: Burg recursion (the default).
         - ``'ols'``: Ordinary least squares regression.
-        - ``'yule-walker'``: Yule-Walker equations method (not in hctsa).
+        - ``'yule-walker'``: Yule-Walker equations method.
 
         Default is ``'burg'``.
 
@@ -2829,7 +2829,7 @@ def embed2_shapes(y: ArrayLike, tau: Union[str, int, None] = 'tau',
         ``iqronrange``, ``mode_val``, ``mode``, ``hist_ent``, ``statav5_m``, ``statav5_s``).
         ``hist_ent`` is ``sum(p * log(p))`` over the bins of a histogram of the local densities
         (minus the Shannon entropy).
-        As in hctsa, the maximum (``max``) is not returned. If no point has any neighbor
+        The maximum (``max``) is not returned. If no point has any neighbor
         within ``r``, a fixed set of values is returned (``std``, ``median``, ``mean``, ``iqr``,
         ``hist_ent`` = 0; ``mode_val`` = 1; ``mode`` = 0; the rest NaN).
     """
@@ -3727,7 +3727,7 @@ def trev(y: ArrayLike, tau: Union[int, str] = 'ac') -> dict:
 
     Method as implemented in the TSTOOL package for nonlinear time-series analysis (C.
     Merkwirth, U. Parlitz, I. Wedekind, D. Engster and W. Lauterborn; GNU GPL), here
-    re-implemented through hctsa's ``CO_trev``.
+    re-implemented.
 
     References
     ----------
@@ -4005,7 +4005,7 @@ def tc3(y: list, tau: Union[int, str, None] = 'ac1e') -> dict:
 
     Method as implemented in the TSTOOL package for nonlinear time-series analysis (C.
     Merkwirth, U. Parlitz, I. Wedekind, D. Engster and W. Lauterborn; GNU GPL), here
-    re-implemented through hctsa's ``CO_TC3``.
+    re-implemented.
 
     Parameters
     ----------
@@ -4088,9 +4088,6 @@ def remove_points(y: ArrayLike, remove_how: str = 'absfar', p: float = 0.1,
     among the points kept. The order-free statistics of the same transformation (mean, median,
     standard deviation, skewness and kurtosis) are in :func:`~pyhctsa.operations.distribution.remove_points`.
 
-    Port of hctsa's ``CO_RemovePoints`` (split from a single function, ``DN_RemovePoints``,
-    that returned both sets of outputs).
-
     Parameters
     ----------
     y : array-like
@@ -4158,7 +4155,7 @@ def quantilogram(y: ArrayLike, lag: Union[int, str] = 1) -> dict:
     """
     Serial dependence of the series being below its own quantiles (the quantilogram).
 
-    Port of hctsa's ``CO_Quantilogram``. Computes the quantilogram of Linton and Whang [1]_:
+    Computes the quantilogram of Linton and Whang [1]_:
     the autocorrelation, at a given lag, of the 'hit' process that marks when the series is
     below its alpha-quantile, for a range of quantile levels alpha from the lower tail through
     the center to the upper tail. At level alpha, the hit process is ``h_t = 1(y_t <= q_alpha)``,
@@ -4206,8 +4203,8 @@ def quantilogram(y: ArrayLike, lag: Union[int, str] = 1) -> dict:
 
     The central quantile levels measure the same persistence as the quantile-state transition
     probabilities and the up-down motif frequencies (``transition_matrix``, ``motif_two``), so
-    hctsa registers only the tail levels (q05, q10, q90, q95 at the ``'mi'`` lag; q05 and q95
-    at lag 1). All seven levels are computed.
+    the default feature set registers only the tail levels (q05, q10, q90, q95 at the ``'mi'``
+    lag; q05 and q95 at lag 1). All seven levels are computed.
     """
     out = {f: np.nan for f in _QUANTILOGRAM_FIELDS}
 
@@ -4242,7 +4239,7 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     """
     Tests for non-Gaussianity of the joint, time-lagged embedding distribution.
 
-    Port of hctsa's ``CO_JointNonGaussianity``. Embeds the time series in ``m`` dimensions at
+    Embeds the time series in ``m`` dimensions at
     time delay ``tau`` (e.g., the pair ``(x_t, x_{t+tau})`` for m=2, or the triple
     ``(x_t, x_{t+tau}, x_{t+2tau})`` for m=3) and tests whether the resulting point cloud is
     consistent with a multivariate Gaussian.
@@ -4289,8 +4286,8 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
         The time delay for the embedding (see :func:`~pyhctsa.utils.get_tau`). Default ``'ac'``.
     m : int, optional
         The embedding dimension (default 2, the pairwise joint distribution
-        ``(x_t, x_{t+tau})``; set to 3 for the triple-wise joint distribution). hctsa's
-        false-nearest-neighbors choice of ``m`` (``{'fnn', th}``) is not available.
+        ``(x_t, x_{t+tau})``; set to 3 for the triple-wise joint distribution). A
+        false-nearest-neighbors choice of ``m`` is not available.
     theiler_win : (str, float) or int or float, optional
         The number of temporally adjacent embedded points excluded from the skewness double sum
         (``|i-j| <= theiler_win``): ``('ac', k)`` for k times the first zero-crossing of the
@@ -4298,11 +4295,10 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
         (see :func:`~pyhctsa.utils.theiler_window`). Default ``('ac', 1)``.
     max_n : int or 'full', optional
         The maximum number of embedded points used for the skewness statistic (default 10000;
-        ``'full'`` to disable). Only the first ``max_n`` embedded points enter the skewness, as
-        in hctsa (where the cap bounds an N x N Gram matrix). Here the skewness double sum is
-        evaluated exactly through the third-moment tensor in O(N d^3), so the cap does not save
-        time; it keeps values consistent with hctsa. The mean, covariance, kurtosis and KS
-        statistic always use the full embedded series.
+        ``'full'`` to disable). Only the first ``max_n`` embedded points enter the skewness. The
+        skewness double sum is evaluated exactly through the third-moment tensor in O(N d^3), so
+        the cap does not save time; it only changes the value for longer series. The mean,
+        covariance, kurtosis and KS statistic always use the full embedded series.
 
     Returns
     -------
@@ -4326,8 +4322,7 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     linear-Gaussian AR(1) process, and more so at higher m). For significance testing, compare
     to the distribution over surrogates.
 
-    The KS statistic is computed against the exact chi^2_m CDF; hctsa evaluates it on a table of
-    the CDF at values rounded to 1e-6, so the two agree to about 1e-6.
+    The KS statistic is computed against the exact chi^2_m CDF.
     """
     y = np.asarray(y, dtype=float).ravel()
     n = y.size
@@ -4387,7 +4382,7 @@ def joint_non_gaussianity(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2,
     # O(N d^3), and the pairs inside the band |i - j| <= w (which the mean excludes) are
     # subtracted in O(N w).
     if max_n != 'full' and n_emb > max_n:
-        X_skew = X[:, :int(max_n)]  # hctsa's cap, kept so values match hctsa
+        X_skew = X[:, :int(max_n)]  # the max_n cap on the skewness (see the docstring)
     else:
         X_skew = X
     n_skew = X_skew.shape[1]
@@ -4451,7 +4446,7 @@ def matrix_profile(y: ArrayLike, m: Union[int, list, tuple] = ('ac', 8),
     """
     How well each subsequence shape recurs elsewhere in a time series (the matrix profile).
 
-    Port of hctsa's ``CO_MatrixProfile``. Computes the matrix profile: for every length-``m``
+    Computes the matrix profile: for every length-``m``
     window (subsequence) of the time series, the distance to its nearest neighbor among all
     other windows, after z-normalizing each window (so only its shape matters, not its local
     level or amplitude). Trivial matches (overlapping windows, ``|i-j| < m/2``) are excluded.
@@ -4478,7 +4473,7 @@ def matrix_profile(y: ArrayLike, m: Union[int, list, tuple] = ('ac', 8),
     Parameters
     ----------
     y : array-like
-        The input time series (z-scored in hctsa).
+        The input time series (typically z-scored).
     m : int or ('ac', k), optional
         The window length in samples; or ``('ac', k)`` for k times the first zero-crossing of the
         autocorrelation function (at least 10 samples). Default ``('ac', 8)``. Longer windows give
@@ -4522,7 +4517,7 @@ def matrix_profile(y: ArrayLike, m: Union[int, list, tuple] = ('ac', 8),
     if num_win < 5 * m:
         return np.nan  # data-dependent: too few windows relative to the window length
 
-    # Window means and standard deviations (from cumulative sums, as hctsa)
+    # Window means and standard deviations (from cumulative sums)
     cs = np.concatenate(([0.0], np.cumsum(y)))
     cs2 = np.concatenate(([0.0], np.cumsum(y ** 2)))
     mu = (cs[m:] - cs[:num_win]) / m
