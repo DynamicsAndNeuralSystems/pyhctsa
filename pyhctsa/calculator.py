@@ -1,5 +1,6 @@
 import copy
 import difflib
+import hashlib
 import importlib
 import inspect
 import math
@@ -563,6 +564,15 @@ _ENTRY_KEYS = {'base_name', 'dependencies', 'configs', 'ordered_args', 'variant_
                'field_min_length', 'legacy_name'}
 
 
+def _n_feature_functions(entry: dict) -> int:
+    """The number of feature functions (parameter combinations) one master operation's entry
+    builds: for each config, the product of the lengths of its list-valued parameters."""
+    meta = {'zscore', 'abs', 'preprocess', 'select', 'exclude'}
+    return sum(math.prod(len(v) if isinstance(v, list) else 1
+                         for k, v in c.items() if k not in meta)
+               for c in entry.get('configs', [{}]))
+
+
 def _did_you_mean(name: str, candidates) -> str:
     close = difflib.get_close_matches(name, list(candidates), n=3)
     return f" Did you mean {' or '.join(repr(c) for c in close)}?" if close else ""
@@ -684,7 +694,10 @@ class FeatureCalculator:
             config_path = ROOT_DIR / "configurations" / "hctsa.yaml"
         self.config_path = config_path
         with open(config_path, encoding='utf-8') as f:
-            config = yaml.safe_load(f)
+            text = f.read()
+        # identifies the configuration's content in saved results (see save())
+        self._config_sha256 = hashlib.sha256(text.encode('utf-8')).hexdigest()
+        config = yaml.safe_load(text)
         self._load_config(config)
 
     @classmethod
@@ -692,6 +705,7 @@ class FeatureCalculator:
         """A calculator built from an already-parsed configuration (used by parallel workers)."""
         calc = cls.__new__(cls)
         calc.config_path = None
+        calc._config_sha256 = None
         calc._load_config(config)
         return calc
 
@@ -950,15 +964,45 @@ class FeatureCalculator:
 
         The format follows the suffix: ``.npz`` (no extra dependency) or ``.parquet`` (needs
         pyarrow). Read it back with :func:`pyhctsa.load_results`.
+
+        The file also records which feature set produced the values (``meta`` of
+        :func:`~pyhctsa.load_results`): the pyhctsa version, the configuration file (``config_path``
+        as given, ``config_name``, and ``config_sha256``, the SHA-256 of its text, which changes
+        with any edit), the number of feature functions, whether :attr:`feature_funcs` was changed
+        after the configuration built it (``feature_functions_modified``), and the operations skipped
+        for missing optional dependencies (``skipped_operations``, ``missing_dependencies``,
+        ``n_skipped_feature_functions``). ``meta`` adds to these, or overrides them.
         """
         if self.quality is None:
             raise RuntimeError("Nothing to save: call extract() first.")
         if not values.index.equals(self.quality.index) or not values.columns.equals(self.quality.columns):
             raise ValueError("values must be the DataFrame returned by the last extract()")
-        info = {"n_feature_functions": len(self.feature_funcs),
-                "config_path": None if self.config_path is None else str(self.config_path)}
+        info = self._feature_set_record()
         info.update(meta or {})
         return save_results(path, values, self.quality, self.errors, self.calc_time, info)
+
+    def _feature_set_record(self) -> dict:
+        """What identifies the feature set this calculator computes, as recorded by :meth:`save`."""
+        path = self.config_path
+        parsed = getattr(self, "_parsed_config", None) or {}
+        skipped = {}
+        for name, deps in getattr(self, "_skipped_functions", []):
+            module, op = name.split(".", 1)
+            entry = (parsed.get(module) or {}).get(op) or {}
+            skipped[name] = {"missing": list(deps), "n_feature_functions": _n_feature_functions(entry)}
+        funcs = self.feature_funcs
+        built = getattr(self, "_config_funcs", funcs)
+        return {
+            "config_path": None if path is None else str(path),
+            "config_name": None if path is None else Path(path).name,
+            "config_sha256": getattr(self, "_config_sha256", None),
+            "n_feature_functions": len(funcs),
+            "feature_functions_modified": (list(funcs) != list(built)
+                                           or any(built[k] is not f for k, f in funcs.items())),
+            "missing_dependencies": sorted({d for s in skipped.values() for d in s["missing"]}),
+            "skipped_operations": skipped,
+            "n_skipped_feature_functions": sum(s["n_feature_functions"] for s in skipped.values()),
+        }
 
     def _parallel_task(self) -> tuple[Callable, dict]:
         """The chunk function, and its keyword arguments, to hand to a distributor.
