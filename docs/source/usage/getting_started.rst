@@ -18,8 +18,8 @@ If you would like to specify a custom feature set, you can pass the correspondin
 
    custom_calc = FeatureCalculator(config_path="subset.yaml")
 
-``len(calc.feature_funcs)`` is the number of feature functions (parameter settings of an operation) the configuration defines: 1080 for the default feature set.
-Each returns one feature or several, 6344 in all.
+``len(calc.feature_funcs)`` is the number of feature functions (parameter settings of an operation) the configuration defines: 1091 for the default feature set.
+Each returns one feature or several, 6406 in all.
 Once a `FeatureCalculator` has been initialized, you can call the extract method to compute time series features on either a single time-series instance or a list of multiple instances:
 
 .. code-block:: python
@@ -47,6 +47,22 @@ N×F, where N is the number of time-series instances and F is the number of time
 Many features are sensitive to how finely a series is sampled relative to its own dynamics.
 Before extracting features from an oversampled dataset, see :doc:`sampling_rate` for how to check the sampling rate and resample all series with one factor.
 Trends leak into many features too: see :doc:`trends` for how to diagnose a trend and, if you decide to remove it, how to detrend every series in the same way.
+
+.. _repeated-values:
+
+🔁 Series with many repeated values
+-----------------------------------
+Counts and coarsely quantised data repeat a few values many times.
+Features that rank, bin or symbolise a series, or compare distances between its values, must split these ties.
+A rescaled or shifted series z-scores to the same values only up to rounding, and the rounding decides how ties fall.
+On 1000 Poisson counts with mean 3, multiplying by 1.05 or 3.7, or adding 7.3, changed 376-393 of the 6097 z-scored features (beyond a relative 1e-6), mostly symbolic ones (``motif_three``, ``surprise``) and local forecasters.
+Rounded and 10-level processes, and Empirical1000 series that are nearly all ties, changed 124-544; Gaussian noise changed at most 5.
+Series stored to a few significant digits changed up to about 100 even without repeats, through tied distances.
+A few estimators treat ties in their own fixed way, but pyhctsa does not jitter or alter the data.
+
+Results at a fixed scaling are reproducible.
+Use the same units and scaling for every series you compare, and consider whether rank- and symbol-based features are meaningful for your data.
+:meth:`~pyhctsa.calculator.FeatureCalculator.extract` warns when more than 90% of a series' samples share their value with another sample.
 
 🤖 Calling Individual Operations
 --------------------------------

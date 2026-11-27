@@ -150,7 +150,8 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
         ``['ac', c]`` for ``c`` times the first zero crossing of the autocorrelation function
         (or ``['ac1e', c]`` for its 1/e time), a number of samples, or a number in (0, 1) for a
         proportion of the series length (see :func:`~pyhctsa.utils.theiler_window`).
-        Default: ``('ac', 1)``. Narrowed to fit short series.
+        Default: ``('ac', 1)``. The series must span at least ten of these windows (see
+        Returns).
     max_n : int or str, optional
         The maximum number of embedded points used. Default: 'full' (no cropping); set
         to an integer to cap runtime on unusually long series.
@@ -164,8 +165,13 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
         negative near a true value of zero -- expected behavior of this
         nonparametric estimator, not a bug), with no attached significance
         level (see note above). NaN if the delay or the Theiler window cannot be
-        set, the embedding fails, or there are too few embedded points (fewer than
-        ``max(50, 10*k)``).
+        set, the embedding fails, or there are too few embedded points: fewer than
+        ``max(50, 10*k)``, or fewer than ``10*(theiler_win + k)``. The second condition is
+        that the series spans at least ten Theiler windows, i.e. about ten correlation times.
+        A slowly decorrelating series that does not (a random walk, a trend, a long-memory
+        process) has too few independent neighbors for the estimator: on reversible
+        Gaussian AR(1) series the estimate is within about 0.05 of zero when the condition
+        holds, and as low as -2.6 when it does not.
     """
     y = np.asarray(y, dtype=float).ravel()
 
@@ -186,15 +192,6 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
         return np.nan
     n_emb, d = Y.shape
 
-    # Require ~10*(k + theiler_win) embedded points; for short series, narrow the
-    # Theiler window to fit rather than give up
-    theiler_win = int(min(theiler_win, max(0, n_emb // 10 - k)))
-    min_n = max(50, 10 * k)
-    if n_emb < min_n:
-        logger.warning(f'Too few embedded points ({n_emb}) for a meaningful '
-                       f'time-reversal KLD estimate at m = {d}')
-        return np.nan
-
     if isinstance(max_n, str) and max_n == 'full':
         pass # no cropping
     elif n_emb > max_n:
@@ -202,6 +199,16 @@ def time_rev_kld(y: ArrayLike, tau: Union[int, str] = 'ac', m: int = 2, k: int =
                        "(runtime cap; raise max_n or use 'full' to disable)")
         Y = Y[:max_n, :]
         n_emb = max_n
+
+    # Require 10*(k + theiler_win) embedded points: with fewer than about ten Theiler windows
+    # in the series, the neighbors left after the exclusion are too few and too dependent, and
+    # the estimate is strongly biased (typically negative) whatever the process
+    theiler_win = int(theiler_win)
+    min_n = max(50, 10 * k, 10 * (theiler_win + k))
+    if n_emb < min_n:
+        logger.warning(f'Too few embedded points ({n_emb}) for a meaningful time-reversal KLD '
+                       f'estimate at m = {d} with a Theiler window of {theiler_win} samples')
+        return np.nan
 
     # Forward and time-reversed embeddings
     # Reversing the coordinate order of each embedded row is equivalent to

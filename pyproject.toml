@@ -32,7 +32,15 @@ dependencies = [
   "statsmodels",
   "numba",
   "scikit-learn",
-  "hmmlearn",
+  # no Python 3.14 wheels yet: installed where wheels exist, and the HMM features are skipped without it
+  # (nor for Windows on ARM)
+  "hmmlearn; python_version < '3.14' and (sys_platform != 'win32' or platform_machine != 'ARM64')",
+  # persistent_homology; wheels for Python 3.10-3.14 on Linux (glibc >= 2.28, musl), macOS and Windows x64.
+  # Not listed for Windows on ARM, where it has no wheel and a failed build would fail the whole install.
+  # Capped at the newest Python version checked to have wheels, so that a later Python installs cleanly without
+  # it; raise the cap when wheels for that version exist (the same goes for hmmlearn above).
+  # Its features are skipped with a warning if it cannot be imported
+  "ripser; python_version < '3.15' and (sys_platform != 'win32' or platform_machine != 'ARM64')",
   "arch",
   "PyWavelets",
   "rich",
@@ -58,9 +66,10 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-tda = ["ripser"]  # persistent_homology (NL_PersistentHomology); skipped by the calculator without it
+hmm = ["hmmlearn"]  # hmm_fit, hmm_compare_n_states on Python 3.14 (builds from source there)
+tda = ["ripser"]  # persistent_homology; a default dependency now, kept so existing `pyhctsa[tda]` installs still work
 parquet = ["pyarrow"]  # FeatureCalculator.save / save_results to .parquet
-test = ["pytest>=6.0", "pytest-cov", "pytest-mock", "ripser", "pyarrow"]
+test = ["pytest>=6.0", "pytest-cov", "pytest-mock", "ripser", "pyarrow", "hmmlearn"]
 
 [project.urls]
 Homepage = "https://dynamicsandneuralsystems.github.io/pyhctsa/"

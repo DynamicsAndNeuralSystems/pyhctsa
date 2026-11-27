@@ -90,6 +90,24 @@ def dict_output(func: Callable) -> Callable:
 MIN_SERIES_LENGTH = 3
 # Below this length most features are noisy estimates; extract() warns (but still computes).
 SHORT_SERIES_WARNING_LENGTH = 20
+# extract() warns (but computes as usual) when more than this fraction of a series' samples share
+# their value with another sample: features that rank, bin or symbolise such a series split its
+# ties by rounding, so their values can change when it is rescaled or shifted (usage docs,
+# "Series with many repeated values"). Above it, multiplying by 3.7 changed 124-544 z-scored
+# features of counts, quantised processes and Empirical1000 series; below it, 29-180, overlapping
+# the 54-100 of series with no repeated values stored to a few significant digits. Continuous
+# float64 or float32 data stays far below it (under 0.02 for a million float32 samples).
+TIE_WARNING_FRACTION = 0.9
+
+
+def _tied_fraction(ts: np.ndarray) -> float:
+    """The fraction of samples whose value occurs more than once in the series.
+
+    0 when every value is distinct, 1 when every value repeats (e.g. counts or coarsely quantised
+    data). It depends only on which samples are equal, not on the units of the series.
+    """
+    _, counts = np.unique(ts, return_counts=True)
+    return float(counts[counts > 1].sum()) / len(ts)
 
 
 def _input_problem(ts: np.ndarray) -> Union[str, None]:

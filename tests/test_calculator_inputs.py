@@ -202,3 +202,83 @@ def test_features_skipped_for_a_missing_dependency_are_reported_as_a_warning(tmp
     with pytest.warns(UserWarning, match="a_package_that_does_not_exist"):
         calc = FeatureCalculator(str(config))
     assert list(calc.feature_funcs) and all(not f.startswith("ac") for f in calc.feature_funcs)
+
+
+# --- series with many repeated values ---------------------------------------------------------------
+
+def _ar1(n, phi=0.8, seed=5):
+    e = np.random.default_rng(seed).standard_normal(n + 100)
+    x = np.zeros_like(e)
+    for t in range(1, len(e)):
+        x[t] = phi * x[t - 1] + e[t]
+    return x[100:]
+
+
+def _tie_heavy(n=300):
+    return np.random.default_rng(4).poisson(3, n).astype(float)
+
+
+@pytest.fixture
+def symbolic_calc(module_config):
+    # the symbolic features (motif_three, surprise, ...) are the ones ties move most
+    return FeatureCalculator(module_config("symbolic"))
+
+
+def test_tied_fraction():
+    from pyhctsa.utils import _tied_fraction
+    assert _tied_fraction(np.array([1.0, 2.0, 3.0, 4.0])) == 0.0
+    assert _tied_fraction(np.array([1.0, 1.0, 2.0, 3.0])) == 0.5
+    assert _tied_fraction(np.array([1.0, 1.0, 2.0, 2.0, 2.0])) == 1.0
+    y = _tie_heavy()
+    assert _tied_fraction(y) == _tied_fraction(3.7 * y) == _tied_fraction(y + 7.3) > 0.9
+    # continuous data, also when stored as float32, is far from the threshold
+    assert _tied_fraction(_ar1(10000).astype(np.float32)) < 0.01
+
+
+@pytest.mark.parametrize("y", [_tie_heavy(), np.round(_ar1(300)),
+                               np.digitize(_ar1(300), np.linspace(-3, 3, 9)).astype(float)],
+                         ids=["poisson", "rounded_ar1", "ten_levels"])
+def test_tie_heavy_series_warns(symbolic_calc, y):
+    with pytest.warns(UserWarning, match="1 of 1 time series consist almost entirely of repeated values"):
+        symbolic_calc.extract(y)
+
+
+@pytest.mark.parametrize("y", [np.random.default_rng(6).standard_normal(300), _ar1(300),
+                               _ar1(300).astype(np.float32),
+                               # 2/3 of the samples tied: below the threshold
+                               np.random.default_rng(6).permutation(np.r_[np.arange(200.0), np.arange(100.0)])],
+                         ids=["gaussian", "ar1", "ar1_float32", "two_thirds_tied"])
+def test_series_below_the_tie_threshold_do_not_warn(symbolic_calc, y):
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        symbolic_calc.extract(y)
+
+
+def test_tie_warning_is_given_once_for_a_list_of_series(symbolic_calc):
+    import warnings
+    data = [_tie_heavy(), np.random.default_rng(6).standard_normal(300), np.round(_ar1(300)),
+            np.array([2.0, 2.0, 2.0, 2.0])]  # constant: rejected and reported as invalid instead
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        symbolic_calc.extract(data)
+    tie_warnings = [w for w in caught if "of repeated values" in str(w.message)]
+    assert len(tie_warnings) == 1
+    assert issubclass(tie_warnings[0].category, UserWarning)
+    assert str(tie_warnings[0].message).startswith("2 of 4 time series")
+    assert "#repeated-values" in str(tie_warnings[0].message)
+
+
+def test_tie_warning_changes_no_value(symbolic_calc, monkeypatch):
+    import warnings
+    import pyhctsa.calculator as calculator
+    data = [_tie_heavy(), np.round(_ar1(300)), _ar1(300)]
+    with pytest.warns(UserWarning, match="of repeated values"):
+        with_warning = symbolic_calc.extract(data)
+    quality = symbolic_calc.quality.copy()
+    monkeypatch.setattr(calculator, "TIE_WARNING_FRACTION", 1.0)  # the diagnostic never fires
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        without_warning = symbolic_calc.extract(data)
+    pd.testing.assert_frame_equal(with_warning, without_warning, check_exact=True)
+    pd.testing.assert_frame_equal(quality, symbolic_calc.quality, check_exact=True)
