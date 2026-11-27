@@ -49,7 +49,7 @@ _pyhctsa_ requires Python 3.10 or newer:
 pip install pyhctsa
 ```
 
-This gives 6336 of the 6344 features of the default feature set.
+This gives 6398 of the 6406 features of the default feature set.
 The other 8, the persistent-homology features (`persistent_homology`), need the optional `ripser` package; without it the calculator skips them and warns.
 For the full feature set, install with the `tda` extra:
 

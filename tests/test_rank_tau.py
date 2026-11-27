@@ -26,7 +26,8 @@ RANK_CALLS = {
     'motif_two_diff_ac1e-rank', 'motif_two_median_ac1e-rank', 'motif_three_quantile_ac1e-rank',
     'transition_matrix_quantile_2_mi-rank', 'transition_matrix_quantile_3_mi-rank',
     'transition_matrix_quantile_4_mi-rank', 'transition_matrix_quantile_5_mi-rank',
-    'transition_matrix_updown_2_ac-rank', 'transition_p_alphabet_2_to_20_ac1e-rank',
+    'transition_matrix_updown_2_ac-rank', 'transition_matrix_updown_2_ac1e-rank',
+    'transition_p_alphabet_2_to_20_ac1e-rank',
 }
 NOT_ORDINAL = {'permutation_entropy_5_ac1e-rank.normWPE'}  # weighted by amplitude by design
 

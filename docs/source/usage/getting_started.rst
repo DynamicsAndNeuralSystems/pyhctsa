@@ -18,8 +18,8 @@ If you would like to specify a custom feature set, you can pass the correspondin
 
    custom_calc = FeatureCalculator(config_path="subset.yaml")
 
-``len(calc.feature_funcs)`` is the number of feature functions (parameter settings of an operation) the configuration defines: 1080 for the default feature set.
-Each returns one feature or several, 6344 in all.
+``len(calc.feature_funcs)`` is the number of feature functions (parameter settings of an operation) the configuration defines: 1091 for the default feature set.
+Each returns one feature or several, 6406 in all.
 Once a `FeatureCalculator` has been initialized, you can call the extract method to compute time series features on either a single time-series instance or a list of multiple instances:
 
 .. code-block:: python
