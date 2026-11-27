@@ -50,8 +50,25 @@ def generate_csv(app):
     script = Path(__file__).parent / "scripts" / "generate_mappings.py"
     subprocess.run([sys.executable, str(script)], check=True)
 
+# -- Attribute docstrings ----------------------------------------------------
+# Napoleon reads the first line of an attribute's docstring as "type: description", so a sentence with a
+# colon in its first line (Quality.NAN, Results.meta) loses its opening words to a spurious "Type" field.
+# Attribute types come from annotations, so attribute docstrings are kept as written: their lines are
+# saved before napoleon runs (priority 500) and restored after it.
+_attribute_docstrings = {}
+
+def _save_attribute_docstring(app, what, name, obj, options, lines):
+    if what == "attribute":
+        _attribute_docstrings[name] = list(lines)
+
+def _restore_attribute_docstring(app, what, name, obj, options, lines):
+    if what == "attribute" and name in _attribute_docstrings:
+        lines[:] = _attribute_docstrings.pop(name)
+
 def setup(app):
     app.connect("builder-inited", generate_csv)
+    app.connect("autodoc-process-docstring", _save_attribute_docstring, priority=400)
+    app.connect("autodoc-process-docstring", _restore_attribute_docstring, priority=600)
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
