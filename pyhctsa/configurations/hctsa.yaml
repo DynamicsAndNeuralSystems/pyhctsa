@@ -940,8 +940,12 @@ entropy:
     base_name: rpde
     dependencies:
     configs:
-      - {m: 3, tau: 1, zscore: True, exclude: ['meanNonZero']}
-      - {m: 3, tau: 'ac', zscore: True, exclude: ['meanNonZero']}
+      # epsilon = 0.3 (the default, stated here so these features do not follow a change of it): in three
+      # dimensions z-scored white noise needs about 500 points for 50 returns within t_max = 100 steps, against
+      # about 4000 at the 0.12 of the published method (the outputs are NaN below 50 returns; the RPD has
+      # about one bin per five returns, up to 99)
+      - {m: 3, tau: 1, epsilon: 0.3, zscore: True, exclude: ['meanNonZero']}
+      - {m: 3, tau: 'ac', epsilon: 0.3, zscore: True, exclude: ['meanNonZero']}
     ordered_args: ['m', 'tau']
 
   sample_entropy:
@@ -2041,7 +2045,7 @@ model_fit:
     base_name: loop_local_simple
     dependencies:
     configs:
-      - {forecast_meth: 'mean', zscore: True, exclude: ['stde_peaksize', 'sws_fexp_r2']}
+      - {forecast_meth: 'mean', zscore: True, exclude: ['stde_minsize', 'sws_fexp_r2']}
     ordered_args: ['forecast_meth']
 
   fit_subsegments:
