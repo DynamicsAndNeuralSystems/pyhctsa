@@ -525,6 +525,9 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
         -1 (all the 1s in the first half) and 1 (all in the second half), 0 when the two
         halves have the same proportion, and NaN if there are no 1s. The standard deviations
         of the stretch lengths are NaN if there are fewer than two stretches of that symbol.
+        ``diff21stretch1`` (``diff21stretch0``) is the proportion of the stretches of 1s (0s)
+        that have length 2 minus the proportion that have length 1; it is NaN if the symbol
+        does not occur (e.g. no 0s in the ``'diff'`` coding of an increasing series).
     """
     
     # Binarize the time series
@@ -556,8 +559,10 @@ def binary_stats(y: ArrayLike, binary_method: str = 'diff') -> dict:
     out['meanstretchdiff'] = (out['meanstretch1'] - out['meanstretch0']) / N
     out['stdstretchdiff'] = (out['stdstretch1'] - out['stdstretch0']) / N
 
-    out['diff21stretch1'] = np.mean(stretch1 == 2) - np.mean(stretch1 == 1)
-    out['diff21stretch0'] = np.mean(stretch0 == 2) - np.mean(stretch0 == 1)
+    # proportion of runs of length 2 minus proportion of length 1 (undefined with no runs)
+    for symbol, stretch in (('1', stretch1), ('0', stretch0)):
+        out[f'diff21stretch{symbol}'] = (np.mean(stretch == 2) - np.mean(stretch == 1)
+                                         if len(stretch) > 0 else np.nan)
 
     return out
 

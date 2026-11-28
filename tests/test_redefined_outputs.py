@@ -54,6 +54,21 @@ def test_pupstat2_compares_proportions_and_is_antisymmetric():
     assert sy.binary_stats(y[::-1], 'mean')['pupstat2'] == pytest.approx(-sy.binary_stats(y, 'mean')['pupstat2'])
 
 
+def test_binary_stats_diff21stretch_nan_without_warning_when_a_symbol_is_absent():
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        up = sy.binary_stats(np.arange(30.0), 'diff')  # every difference positive: no 0s
+        down = sy.binary_stats(-np.arange(30.0), 'diff')  # no 1s
+    assert np.isnan(up['diff21stretch0']) and up['diff21stretch1'] == 0  # one run of 1s, of length 29
+    assert np.isnan(down['diff21stretch1']) and down['diff21stretch0'] == 0
+    # both symbols present: the proportion of runs of length 2 minus that of length 1, as before
+    y = np.array([0, 1, 0, 1, 2, 3, 2, 1, 2, 3, 4, 3], dtype=float)  # diffs + - + + + - - + + + -
+    out = sy.binary_stats(y, 'diff')
+    assert out['diff21stretch1'] == pytest.approx(0 / 3 - 1 / 3)  # runs of 1s: 1, 3, 3
+    assert out['diff21stretch0'] == pytest.approx(1 / 3 - 2 / 3)  # runs of 0s: 1, 2, 1
+
+
 # ------------------------------------------------------------------------------
 # burstiness and the harmonic mean: statistics of non-negative data
 # ------------------------------------------------------------------------------
@@ -64,7 +79,7 @@ def test_burstiness_is_bounded_on_its_domain_and_nan_outside_it():
         out = di.burstiness(x)
         r = x.std(ddof=1) / x.mean()
         assert out['B'] == pytest.approx((r - 1) / (r + 1), abs=1e-15)
-        assert -1 <= out['B'] <= 1 and -1.01 <= out['B_Kim'] <= 1.01
+        assert -1 <= out['B'] <= 1 and -1 <= out['B_Kim'] <= 1
     assert abs(di.burstiness(rng.exponential(size=20000))['B']) < 0.02  # a Poisson process: 0
     # the pole at mean = -std (was 39, -1.8e16 and -41 here), and any other signed series
     z = _zscore(rng.standard_normal(1000))
@@ -72,6 +87,34 @@ def test_burstiness_is_bounded_on_its_domain_and_nan_outside_it():
         out = di.burstiness(z + mu)
         assert np.isnan(out['B']) and np.isnan(out['B_Kim'])
     assert all(np.isnan(v) for v in di.burstiness(np.zeros(10)).values())
+
+
+@pytest.mark.parametrize('N', [2, 3, 5, 20, 1000])
+def test_burstiness_kim_reaches_its_bounds_and_never_exceeds_one(N):
+    # Kim & Jo (2016) Eq. (22) with r from the population standard deviation (their Eq. (13)): a
+    # single nonzero value has the largest r, sqrt(N - 1), and gives exactly 1 (it gave 1.157 at
+    # N = 5, 1.014 at N = 20 and 1.00003 at N = 1000 with the sample standard deviation)
+    spike = np.zeros(N)
+    spike[N // 2] = 1.0
+    assert di.burstiness(spike)['B_Kim'] == pytest.approx(1.0, abs=1e-12)
+    assert di.burstiness(3.7 * spike)['B_Kim'] <= 1
+    assert di.burstiness(np.full(N, 2.5))['B_Kim'] == -1  # regular: all values equal
+    # B keeps the sample standard deviation
+    r = np.sqrt(N)  # std(ddof=1) / mean of a single 1 among N - 1 zeros
+    assert di.burstiness(spike)['B'] == pytest.approx((r - 1) / (r + 1), rel=1e-12)
+
+
+def test_burstiness_kim_formula_and_range():
+    rng = np.random.default_rng(7)
+    for x in (rng.exponential(size=50), rng.poisson(0.3, 30).astype(float), rng.pareto(0.8, 200),
+              np.r_[np.zeros(9), 1.0, 1.0], rng.integers(0, 2, 15).astype(float)):
+        if x.mean() == 0:
+            continue
+        n, r = len(x), x.std(ddof=0) / x.mean()
+        expected = (np.sqrt(n + 1) * r - np.sqrt(n - 1)) / ((np.sqrt(n + 1) - 2) * r + np.sqrt(n - 1))
+        out = di.burstiness(x)['B_Kim']
+        assert out == pytest.approx(expected, rel=1e-12, abs=1e-15)
+        assert -1 <= out <= 1
 
 
 def test_harmonic_mean_domain():
