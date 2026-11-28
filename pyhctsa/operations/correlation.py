@@ -1103,8 +1103,12 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
     ..., ``max_tau``. For each tau the angle of each step is measured from the horizontal, as
     in :func:`embed2`, and its autocorrelation is taken at lags 1, 2 and 3. A step between two
     coincident points (a repeated pair of values) has no direction (0/0), so its angle is
-    undefined and is removed from the sequence of angles before the autocorrelations are
-    computed. The outputs summarize the three resulting curves as a function of tau.
+    undefined. As in :func:`embed2`, the autocorrelations then take each lagged product only
+    over pairs of angles that are both defined, at their original separation in the sequence,
+    so angles either side of an undefined one are never treated as neighbors (see the Notes of
+    :func:`embed2` for the estimator). With no undefined angles this is the standard
+    autocorrelation of the angle sequence. The outputs summarize the three resulting curves as a
+    function of tau.
 
     Parameters
     ----------
@@ -1125,7 +1129,8 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
           lag-2 and lag-1 angle autocorrelations
 
         All are NaN if an angle autocorrelation is undefined at any tau (e.g., when no step
-        at that tau has a defined angle, or all of its angles are equal). A scalar NaN is
+        at that tau has a defined angle, all of its defined angles are equal, or no two defined
+        angles are the lag apart). A scalar NaN is
         returned if the series is too short to embed.
     """
     tau_range = np.arange(1, max_tau + 1)
@@ -1144,15 +1149,9 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
             logger.warning(f'Time series (N={len(y)}) too short for embedding at tau = {tau}')
             return np.nan
 
-        # remove undefined angles (0/0, from steps between coincident points)
-        theta = theta[~np.isnan(theta)]
-        if len(theta) == 0:
-            stats_store[:, i] = np.nan
-            continue
-
-        stats_store[0, i] = autocorr(theta, 1, 'Fourier')
-        stats_store[1, i] = autocorr(theta, 2, 'Fourier')
-        stats_store[2, i] = autocorr(theta, 3, 'Fourier')
+        # undefined angles (0/0, from steps between coincident points) stay in place as gaps:
+        # lagged products only over pairs of defined angles at their original separation
+        stats_store[:, i] = _gapped_autocorr(theta, [1, 2, 3])
 
     # (an undefined autocorrelation at any tau gives NaN for every statistic of its curve)
     out = {
@@ -1225,7 +1224,9 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
       ``N`` the length of the angle sequence and ``P_k`` the number of pairs ``k`` apart that
       are both defined, the lag-``k`` autocorrelation is ``(N - k)/N`` times the mean of the
       ``P_k`` products ``d_t d_{t+k}``, divided by the mean of ``d_t^2`` over the defined angles.
-      It is NaN if ``P_k`` is 0 (e.g. when every other angle is undefined, at lag 1).
+      It is NaN if ``P_k`` is 0 (e.g. when every other angle is undefined, at lag 1). As with
+      other autocorrelation estimators for sequences with missing values, it can fall outside
+      [-1, 1] when only a few pairs are defined (e.g. a few defined angles among many undefined).
 
     With no undefined angles all of these are the usual statistics of the full sequence (the
     autocorrelation is then the standard estimator, ``sum_t d_t d_{t+k} / sum_t d_t^2``).
@@ -1343,7 +1344,9 @@ def _gapped_autocorr(x: np.ndarray, lags: list) -> np.ndarray:
     keep their original separation, so values either side of a gap are never treated as
     neighbors) and ``mean_0`` over the defined values. With no missing values this is exactly
     the standard estimator (computed by :func:`autocorr`, by FFT). A lag is NaN if no pair at
-    that lag is defined, and all lags are NaN if the defined values are all equal.
+    that lag is defined, and all lags are NaN if the defined values are all equal. With missing
+    values the estimate is not guaranteed to lie in [-1, 1] (it can leave it when few pairs are
+    defined).
     """
     x = np.asarray(x, dtype=float)
     defined = ~np.isnan(x)

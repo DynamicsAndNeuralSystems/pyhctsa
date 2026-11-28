@@ -284,12 +284,59 @@ def test_persistent_homology_alive_classes_die_at_threshold(monkeypatch):
 
 
 # ------------------------------------------------------------------------------
-# embed2_angle_tau: undefined angles are removed; NaN treatment is the same for all statistics
+# embed2_angle_tau: undefined angles are gaps, never bridged; NaN treatment is the same for all
+# statistics
 # ------------------------------------------------------------------------------
 def test_embed2_angle_tau_repeated_values():
     y = np.round(_ar1(600, 0.6, 8))  # many repeated values: many 0/0 angles
     out = co.embed2_angle_tau(y, 20)
     assert all(np.isfinite(v) for v in out.values())
+
+
+def _angle_tau_curves(y, max_tau, ac):
+    """The lag-1..3 angle autocorrelation curves over tau, from a given autocorrelation function."""
+    curves = np.zeros((3, max_tau))
+    for i, tau in enumerate(range(1, max_tau + 1)):
+        with np.errstate(divide='ignore', invalid='ignore'):
+            theta = np.arctan(np.diff(y[tau:]) / np.diff(y[:-tau]))
+        curves[:, i] = ac(theta)
+    return curves
+
+
+def _summaries(curves):
+    return {'mean_thetaac1': np.mean(curves[0]), 'max_thetaac2': np.max(curves[1]),
+            'min_thetaac3': np.min(curves[2]), 'diff_thetaac12': np.sum(np.abs(curves[1] - curves[0])),
+            'ac1_thetaac1': co.autocorr(curves[0], 1, 'Fourier')}
+
+
+def test_embed2_angle_tau_unchanged_without_ties():
+    # every angle defined: exactly the standard autocorrelation of the angle sequence at each tau
+    y = _ar1(500, 0.7, 21)
+    exp = _summaries(_angle_tau_curves(y, 15, lambda th: co.autocorr(th, [1, 2, 3], 'Fourier')))
+    out = co.embed2_angle_tau(y, 15)
+    for key, val in exp.items():
+        assert out[key] == val, key
+
+
+def test_embed2_angle_tau_never_pairs_angles_across_gaps():
+    y = np.round(2 * _ar1(800, 0.6, 22))  # many repeated values: many 0/0 angles
+    max_tau = 10
+
+    def paired_only(theta):
+        # lag-k: (N - k)/N times the mean product over pairs of defined angles k apart, over the
+        # mean square of the defined angles
+        ok, N = ~np.isnan(theta), theta.size
+        d = theta - np.nanmean(theta)
+        return [(N - k) / N * np.mean([d[t] * d[t + k] for t in range(N - k) if ok[t] and ok[t + k]])
+                / np.nanmean(d ** 2) for k in (1, 2, 3)]
+
+    curves = _angle_tau_curves(y, max_tau, paired_only)
+    out = co.embed2_angle_tau(y, max_tau)
+    for key, val in _summaries(curves).items():
+        assert out[key] == pytest.approx(val, rel=1e-10, abs=1e-14), key
+    # joining the defined angles into one sequence (the previous treatment) gives other values
+    joined = _angle_tau_curves(y, max_tau, lambda th: co.autocorr(th[~np.isnan(th)], [1, 2, 3], 'Fourier'))
+    assert not np.allclose(joined, curves)
 
 
 def test_embed2_angle_tau_undefined_tau_gives_nan_for_every_statistic():
