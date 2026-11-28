@@ -92,7 +92,7 @@ def _embed2_angle_outputs(theta):
     d = theta - np.nanmean(theta)
     for k in (1, 2, 3):
         pairs = [d[t] * d[t + k] for t in range(N - k) if ok[t] and ok[t + k]]
-        out[f'theta_ac{k}'] = (N - k) / N * np.mean(pairs) / np.nanmean(d ** 2)
+        out[f'theta_ac{k}'] = np.sum(pairs) / np.nansum(d ** 2)
     return out
 
 
@@ -139,12 +139,38 @@ def test_gapped_autocorr_never_pairs_values_across_a_gap():
     assert np.isnan(ac[0]) and np.isnan(ac[2]) and np.isfinite(ac[1])
     # lag 2 pairs the defined values at their true separation
     d = x[::2] - x[::2].mean()
-    assert ac[1] == pytest.approx((40 - 2) / 40 * np.mean(d[:-1] * d[1:]) / np.mean(d ** 2), rel=1e-12)
+    assert ac[1] == pytest.approx(np.sum(d[:-1] * d[1:]) / np.sum(d ** 2), rel=1e-12)
     # all defined: the standard estimator, exactly
     z = np.random.default_rng(3).standard_normal(50)
     np.testing.assert_array_equal(_gapped_autocorr(z, [1, 2, 3]), correlation.autocorr(z, [1, 2, 3]))
     # equal defined values: undefined
     assert np.isnan(_gapped_autocorr(np.r_[1.0, np.nan, 1.0, 1.0], [1])).all()
+
+
+def test_gapped_autocorr_is_bounded_and_shrinks_with_missing_values():
+    from pyhctsa.operations.correlation import _gapped_autocorr
+    lags = list(range(1, 11))
+    # the angle sequences of a single spike among zeros: at most a few defined angles at each tau
+    # (with the previous rescaling by the number of pairs, -1.475 at one of them)
+    spike = z_score(np.r_[np.zeros(60), 1.0, np.zeros(39)])
+    for tau in range(1, 51):
+        ac = _gapped_autocorr(_embed2_angles(spike, tau), lags)
+        assert np.all(np.abs(ac[np.isfinite(ac)]) <= 1), tau
+    # random sparse sequences: few defined values, scattered
+    rng = np.random.default_rng(14)
+    for _ in range(2000):
+        n = rng.integers(3, 40)
+        x = np.where(rng.random(n) < rng.uniform(0.05, 0.6), rng.standard_normal(n), np.nan)
+        ac = _gapped_autocorr(x, lags)
+        assert np.all(np.abs(ac[np.isfinite(ac)]) <= 1)
+    # a strongly correlated sequence: the more values are missing, the closer to 0
+    x = np.sin(np.arange(400) / 10.0)
+    full = _gapped_autocorr(x, [1])[0]
+    gappy = x.copy()
+    gappy[rng.random(400) < 0.5] = np.nan
+    assert 0 < _gapped_autocorr(gappy, [1])[0] < full
+    for key in ('theta_ac1', 'theta_ac2', 'theta_ac3'):
+        assert abs(correlation.embed2(spike, 1)[key]) <= 1 or np.isnan(correlation.embed2(spike, 1)[key])
 
 
 # --- local_global: skewness and ac1 are differences, defined when the global statistic is zero ----

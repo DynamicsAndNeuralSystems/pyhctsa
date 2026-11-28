@@ -323,12 +323,12 @@ def test_embed2_angle_tau_never_pairs_angles_across_gaps():
     max_tau = 10
 
     def paired_only(theta):
-        # lag-k: (N - k)/N times the mean product over pairs of defined angles k apart, over the
-        # mean square of the defined angles
+        # lag-k: the sum of products over pairs of defined angles k apart, over the sum of squares
+        # of all the defined angles
         ok, N = ~np.isnan(theta), theta.size
         d = theta - np.nanmean(theta)
-        return [(N - k) / N * np.mean([d[t] * d[t + k] for t in range(N - k) if ok[t] and ok[t + k]])
-                / np.nanmean(d ** 2) for k in (1, 2, 3)]
+        return [np.sum([d[t] * d[t + k] for t in range(N - k) if ok[t] and ok[t + k]])
+                / np.nansum(d ** 2) for k in (1, 2, 3)]
 
     curves = _angle_tau_curves(y, max_tau, paired_only)
     out = co.embed2_angle_tau(y, max_tau)

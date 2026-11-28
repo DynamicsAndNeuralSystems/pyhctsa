@@ -1220,13 +1220,13 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     - ``theta_ac1``-``theta_ac3`` are autocorrelations of the angle sequence in which each
       lagged product is taken only over pairs of angles that are both defined, at their
       original separation in the sequence: the angles either side of an undefined one are not
-      treated as neighbors. With ``d`` the deviations of the defined angles from their mean,
-      ``N`` the length of the angle sequence and ``P_k`` the number of pairs ``k`` apart that
-      are both defined, the lag-``k`` autocorrelation is ``(N - k)/N`` times the mean of the
-      ``P_k`` products ``d_t d_{t+k}``, divided by the mean of ``d_t^2`` over the defined angles.
-      It is NaN if ``P_k`` is 0 (e.g. when every other angle is undefined, at lag 1). As with
-      other autocorrelation estimators for sequences with missing values, it can fall outside
-      [-1, 1] when only a few pairs are defined (e.g. a few defined angles among many undefined).
+      treated as neighbors. With ``d`` the deviations of the defined angles from their mean, the
+      lag-``k`` autocorrelation is the sum of the products ``d_t d_{t+k}`` over the pairs ``k``
+      apart that are both defined, divided by the sum of ``d_t^2`` over all defined angles. It
+      always lies in [-1, 1] (it is the standard estimator applied to the deviations with the
+      undefined angles set to zero), and it shrinks toward 0 as more angles are undefined, since
+      fewer pairs contribute to the numerator. It is NaN if no pair at that lag is defined (e.g.
+      when every other angle is undefined, at lag 1).
 
     With no undefined angles all of these are the usual statistics of the full sequence (the
     autocorrelation is then the standard estimator, ``sum_t d_t d_{t+k} / sum_t d_t^2``).
@@ -1336,17 +1336,15 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
 def _gapped_autocorr(x: np.ndarray, lags: list) -> np.ndarray:
     """Autocorrelation at ``lags`` of a sequence ``x`` with missing (NaN) values.
 
-    The standard (Box-Jenkins) estimator, ``r_k = sum_t d_t d_{t+k} / sum_t d_t^2`` with
-    ``d = x - mean(x)`` over the N values, can be written ``r_k = (N - k)/N * mean_k / mean_0``, with
-    ``mean_k`` the mean of the N - k lagged products and ``mean_0`` the mean of the squares. Here
-    each mean is taken over the terms that exist: ``d`` is centered on the mean of the defined
-    values, ``mean_k`` is over the pairs ``(t, t + k)`` at which both values are defined (pairs
-    keep their original separation, so values either side of a gap are never treated as
-    neighbors) and ``mean_0`` over the defined values. With no missing values this is exactly
-    the standard estimator (computed by :func:`autocorr`, by FFT). A lag is NaN if no pair at
-    that lag is defined, and all lags are NaN if the defined values are all equal. With missing
-    values the estimate is not guaranteed to lie in [-1, 1] (it can leave it when few pairs are
-    defined).
+    ``r_k = sum d_t d_{t+k} / sum d_t^2``, with ``d`` the deviations of the defined values from
+    their mean, the numerator summed over the pairs ``(t, t + k)`` at which both values are
+    defined (pairs keep their original separation, so values either side of a gap are never
+    treated as neighbors) and the denominator over all defined values. This is the standard
+    (Box-Jenkins) estimator applied to ``d`` with the missing values set to zero, so it always
+    lies in [-1, 1] (Cauchy-Schwarz) and shrinks toward 0 as more values are missing. With no
+    missing values it is exactly the standard estimator (computed by :func:`autocorr`, by FFT).
+    A lag is NaN if no pair at that lag is defined, and all lags are NaN if the defined values
+    are all equal.
     """
     x = np.asarray(x, dtype=float)
     defined = ~np.isnan(x)
@@ -1358,16 +1356,14 @@ def _gapped_autocorr(x: np.ndarray, lags: list) -> np.ndarray:
     if xd.size == 0 or np.ptp(xd) == 0:
         return out
     d = np.where(defined, x - np.mean(xd), 0.0)
-    mean_0 = np.mean(d[defined] ** 2)
+    sum_sq = np.sum(d[defined] ** 2)
     for i, k in enumerate(lags):
         if k >= N:
             continue
         both = defined[:N - k] & defined[k:]
-        num_pairs = np.count_nonzero(both)
-        if num_pairs == 0:
+        if not both.any():
             continue
-        mean_k = np.sum(d[:N - k][both] * d[k:][both]) / num_pairs
-        out[i] = (N - k) / N * mean_k / mean_0
+        out[i] = np.sum(d[:N - k][both] * d[k:][both]) / sum_sq
     return out
 
 
