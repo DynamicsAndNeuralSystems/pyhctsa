@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.is\_seasonal
+==========================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: is_seasonal

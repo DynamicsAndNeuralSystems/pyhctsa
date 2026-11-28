@@ -1,0 +1,6 @@
+﻿pyhctsa.robust.bf\_runs\_z
+==========================
+
+.. currentmodule:: pyhctsa.robust
+
+.. autofunction:: bf_runs_z

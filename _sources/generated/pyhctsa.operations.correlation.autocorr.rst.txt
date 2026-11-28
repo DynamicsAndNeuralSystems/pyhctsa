@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.autocorr
+=======================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: autocorr

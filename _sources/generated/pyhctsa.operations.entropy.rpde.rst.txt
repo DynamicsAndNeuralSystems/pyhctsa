@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.rpde
+===============================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: rpde

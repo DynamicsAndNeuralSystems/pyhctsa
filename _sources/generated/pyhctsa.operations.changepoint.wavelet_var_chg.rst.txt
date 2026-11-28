@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.changepoint.wavelet\_var\_chg
+================================================
+
+.. currentmodule:: pyhctsa.operations.changepoint
+
+.. autofunction:: wavelet_var_chg

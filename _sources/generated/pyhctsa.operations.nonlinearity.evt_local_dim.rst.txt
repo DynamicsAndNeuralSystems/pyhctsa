@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.nonlinearity.evt\_local\_dim
+===============================================
+
+.. currentmodule:: pyhctsa.operations.nonlinearity
+
+.. autofunction:: evt_local_dim

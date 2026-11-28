@@ -1,0 +1,32 @@
+﻿pyhctsa.quality.Quality
+=======================
+
+.. currentmodule:: pyhctsa.quality
+
+.. autoclass:: Quality
+   :members:
+   :member-order: bysource
+
+   
+   
+   
+
+   
+   
+   .. rubric:: Attributes
+
+   .. autosummary::
+   
+      ~Quality.GOOD
+      ~Quality.ERROR
+      ~Quality.NAN
+      ~Quality.INF
+      ~Quality.NEG_INF
+      ~Quality.COMPLEX
+      ~Quality.EMPTY
+      ~Quality.LINK_ERROR
+      ~Quality.NON_SCALAR
+      ~Quality.REJECTED
+      ~Quality.NOT_COMPUTED
+   
+   

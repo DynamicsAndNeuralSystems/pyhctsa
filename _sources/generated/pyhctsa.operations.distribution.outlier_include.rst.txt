@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.outlier\_include
+================================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: outlier_include

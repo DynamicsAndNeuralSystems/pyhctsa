@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.compare\_ks\_fit
+================================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: compare_ks_fit

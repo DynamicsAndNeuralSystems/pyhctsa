@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.theiler\_q
+=========================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: theiler_q

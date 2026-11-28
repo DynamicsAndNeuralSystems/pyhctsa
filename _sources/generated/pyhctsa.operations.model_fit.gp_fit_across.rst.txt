@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.gp\_fit\_across
+=============================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: gp_fit_across

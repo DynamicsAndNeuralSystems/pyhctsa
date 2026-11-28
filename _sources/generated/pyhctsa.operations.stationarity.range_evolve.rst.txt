@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.range\_evolve
+=============================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: range_evolve

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.multi\_scale\_entropy
+================================================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: multi_scale_entropy

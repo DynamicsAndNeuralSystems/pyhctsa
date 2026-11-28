@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.gp\_local\_prediction
+===================================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: gp_local_prediction

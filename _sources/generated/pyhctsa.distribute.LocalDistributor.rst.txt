@@ -1,0 +1,23 @@
+﻿pyhctsa.distribute.LocalDistributor
+===================================
+
+.. currentmodule:: pyhctsa.distribute
+
+.. autoclass:: LocalDistributor
+   :members:
+   :member-order: bysource
+
+   
+   
+   .. rubric:: Methods
+
+   .. autosummary::
+   
+      ~LocalDistributor.close
+      ~LocalDistributor.map
+   
+   
+
+   
+   
+   

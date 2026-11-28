@@ -1,0 +1,6 @@
+﻿pyhctsa.robust.bf\_fit\_sinusoids
+=================================
+
+.. currentmodule:: pyhctsa.robust
+
+.. autofunction:: bf_fit_sinusoids

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.garch\_fit
+========================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: garch_fit

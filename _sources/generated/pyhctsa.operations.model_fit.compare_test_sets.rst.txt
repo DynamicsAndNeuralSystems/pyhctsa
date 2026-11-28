@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.model\_fit.compare\_test\_sets
+=================================================
+
+.. currentmodule:: pyhctsa.operations.model_fit
+
+.. autofunction:: compare_test_sets

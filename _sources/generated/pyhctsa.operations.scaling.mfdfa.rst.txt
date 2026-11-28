@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.scaling.mfdfa
+================================
+
+.. currentmodule:: pyhctsa.operations.scaling
+
+.. autofunction:: mfdfa

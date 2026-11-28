@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.matrix\_profile
+==============================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: matrix_profile

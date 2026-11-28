@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.falling\_sticks
+==============================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: falling_sticks

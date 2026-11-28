@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.scaling.fluctuation\_analysis
+================================================
+
+.. currentmodule:: pyhctsa.operations.scaling
+
+.. autofunction:: fluctuation_analysis

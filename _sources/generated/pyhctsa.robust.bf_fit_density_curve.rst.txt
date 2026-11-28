@@ -1,0 +1,6 @@
+﻿pyhctsa.robust.bf\_fit\_density\_curve
+======================================
+
+.. currentmodule:: pyhctsa.robust
+
+.. autofunction:: bf_fit_density_curve

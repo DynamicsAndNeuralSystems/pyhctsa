@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.wavelet\_entropy
+===========================================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: wavelet_entropy

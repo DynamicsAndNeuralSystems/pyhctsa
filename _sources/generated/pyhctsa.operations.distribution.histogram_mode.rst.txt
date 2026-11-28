@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.distribution.histogram\_mode
+===============================================
+
+.. currentmodule:: pyhctsa.operations.distribution
+
+.. autofunction:: histogram_mode

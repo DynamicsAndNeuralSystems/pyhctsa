@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.entropy.bubble\_entropy
+==========================================
+
+.. currentmodule:: pyhctsa.operations.entropy
+
+.. autofunction:: bubble_entropy

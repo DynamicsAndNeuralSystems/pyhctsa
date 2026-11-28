@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.information.first\_min
+=========================================
+
+.. currentmodule:: pyhctsa.operations.information
+
+.. autofunction:: first_min

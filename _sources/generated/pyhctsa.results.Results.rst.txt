@@ -1,0 +1,26 @@
+﻿pyhctsa.results.Results
+=======================
+
+.. currentmodule:: pyhctsa.results
+
+.. autoclass:: Results
+   :members:
+   :member-order: bysource
+
+   
+   
+   
+
+   
+   
+   .. rubric:: Attributes
+
+   .. autosummary::
+   
+      ~Results.calc_time
+      ~Results.errors
+      ~Results.meta
+      ~Results.quality
+      ~Results.values
+   
+   

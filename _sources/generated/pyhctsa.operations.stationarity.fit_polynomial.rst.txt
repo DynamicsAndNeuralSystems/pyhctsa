@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.stationarity.fit\_polynomial
+===============================================
+
+.. currentmodule:: pyhctsa.operations.stationarity
+
+.. autofunction:: fit_polynomial

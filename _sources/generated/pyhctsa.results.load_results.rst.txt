@@ -1,0 +1,6 @@
+﻿pyhctsa.results.load\_results
+=============================
+
+.. currentmodule:: pyhctsa.results
+
+.. autofunction:: load_results

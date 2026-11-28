@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.correlation.embed2\_angle\_tau
+=================================================
+
+.. currentmodule:: pyhctsa.operations.correlation
+
+.. autofunction:: embed2_angle_tau

@@ -1,0 +1,6 @@
+﻿pyhctsa.operations.wavelet.modwt\_var
+=====================================
+
+.. currentmodule:: pyhctsa.operations.wavelet
+
+.. autofunction:: modwt_var

@@ -1,0 +1,6 @@
+﻿pyhctsa.utils.detrend\_linear
+=============================
+
+.. currentmodule:: pyhctsa.utils
+
+.. autofunction:: detrend_linear
