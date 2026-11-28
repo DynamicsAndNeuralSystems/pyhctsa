@@ -33,6 +33,7 @@ Utilities
    :toctree: generated/
 
    pyhctsa.utils.get_dataset
+   pyhctsa.utils.get_dataset_features
    pyhctsa.utils.z_score
    pyhctsa.utils.dict_output
    pyhctsa.utils.nan_outputs
