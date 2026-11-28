@@ -61,6 +61,118 @@ def test_embed2_angle_statistics_unchanged_without_ties():
     assert out['theta_std'] == pytest.approx(np.std(theta, ddof=1), rel=1e-12)
 
 
+def _embed2_angles(y, tau):
+    m = np.column_stack((y[:-tau], y[tau:]))
+    with np.errstate(divide='ignore', invalid='ignore'):
+        return np.arctan(np.diff(m[:, 1]) / np.diff(m[:, 0]))
+
+
+def _embed2_angle_outputs(theta):
+    """The angle-histogram and autocorrelation outputs of embed2 from its angle sequence, written
+    out directly: proportions over the defined angles, lagged products over pairs of defined angles."""
+    N = theta.size
+    ok = ~np.isnan(theta)
+    # (embed2's bin edges, which put angles of exactly 0 in the upper bin whatever the rounding)
+    edges = correlation._fixed_edges(10, -np.pi / 2, np.pi / 2)
+    px = np.histogram(theta[ok], bins=edges)[0] / ok.sum()
+    assert px.sum() == pytest.approx(1.0, abs=1e-12)
+    w = np.diff(edges)
+    out = {'hist10std': np.std(px, ddof=1),
+           'histent': -np.sum(px[px > 0] * np.log(px[px > 0] / w[px > 0]))}
+    afifth = N // 5
+    props = []
+    for i in range(5):
+        seg = theta[afifth * i:afifth * (i + 1)]
+        seg = seg[~np.isnan(seg)]
+        props.append(np.histogram(seg, bins=correlation._fixed_edges(4, -np.pi / 2, np.pi / 2))[0] / seg.size)
+    props = np.array(props).T
+    assert np.allclose(props.sum(axis=0), 1.0)
+    for b in range(4):
+        out[f'stdb{b + 1}'] = np.std(props[b], ddof=1)
+    d = theta - np.nanmean(theta)
+    for k in (1, 2, 3):
+        pairs = [d[t] * d[t + k] for t in range(N - k) if ok[t] and ok[t + k]]
+        out[f'theta_ac{k}'] = np.sum(pairs) / np.nansum(d ** 2)
+    return out
+
+
+def test_embed2_histograms_and_autocorrelations_unchanged_without_ties():
+    # with every angle defined: the proportions over all angles and the standard (Box-Jenkins)
+    # autocorrelation sum_t d_t d_{t+k} / sum_t d_t^2
+    rng = np.random.default_rng(12)
+    y = z_score(rng.standard_normal(403))
+    for tau in (1, 4):
+        theta = _embed2_angles(y, tau)
+        assert not np.isnan(theta).any()
+        out = correlation.embed2(y, tau)
+        exp = _embed2_angle_outputs(theta)
+        d = theta - theta.mean()
+        for k in (1, 2, 3):
+            assert exp[f'theta_ac{k}'] == pytest.approx(np.sum(d[:-k] * d[k:]) / np.sum(d ** 2), rel=1e-12)
+            assert out[f'theta_ac{k}'] == pytest.approx(correlation.autocorr(theta, k), rel=0, abs=0)
+        for key, val in exp.items():
+            assert out[key] == pytest.approx(val, rel=1e-10, abs=1e-14), key
+
+
+@pytest.mark.parametrize('tau', [1, 2, 'tau'])
+def test_embed2_with_ties_uses_only_defined_angles(tau):
+    rng = np.random.default_rng(13)
+    y = z_score(rng.poisson(0.5, 1000).astype(float))  # many 0/0 angles
+    out = correlation.embed2(y, tau)
+    tau_used = int(correlation._resolve_delay(y, tau, cap=True, default='tau'))
+    theta = _embed2_angles(y, tau_used)
+    assert np.isnan(theta).mean() > 0.1
+    exp = _embed2_angle_outputs(theta)  # (checks that the proportions sum to 1)
+    for key, val in exp.items():
+        assert out[key] == pytest.approx(val, rel=1e-10, abs=1e-14), key
+    # a proper differential entropy of a distribution on (-pi/2, pi/2): at most log(pi)
+    assert out['histent'] <= np.log(np.pi) + 1e-12
+
+
+def test_gapped_autocorr_never_pairs_values_across_a_gap():
+    from pyhctsa.operations.correlation import _gapped_autocorr
+    # alternate defined and undefined values: no two defined values are 1 apart, so lag 1 is
+    # undefined; joining the defined values into one sequence would give a lag-1 autocorrelation
+    x = np.full(40, np.nan)
+    x[::2] = np.sin(np.arange(20) / 3.0)
+    ac = _gapped_autocorr(x, [1, 2, 3])
+    assert np.isnan(ac[0]) and np.isnan(ac[2]) and np.isfinite(ac[1])
+    # lag 2 pairs the defined values at their true separation
+    d = x[::2] - x[::2].mean()
+    assert ac[1] == pytest.approx(np.sum(d[:-1] * d[1:]) / np.sum(d ** 2), rel=1e-12)
+    # all defined: the standard estimator, exactly
+    z = np.random.default_rng(3).standard_normal(50)
+    np.testing.assert_array_equal(_gapped_autocorr(z, [1, 2, 3]), correlation.autocorr(z, [1, 2, 3]))
+    # equal defined values: undefined
+    assert np.isnan(_gapped_autocorr(np.r_[1.0, np.nan, 1.0, 1.0], [1])).all()
+
+
+def test_gapped_autocorr_is_bounded_and_shrinks_with_missing_values():
+    from pyhctsa.operations.correlation import _gapped_autocorr
+    lags = list(range(1, 11))
+    # the angle sequences of a single spike among zeros: at most a few defined angles at each tau
+    # (with the previous rescaling by the number of pairs, -1.475 at one of them)
+    spike = z_score(np.r_[np.zeros(60), 1.0, np.zeros(39)])
+    for tau in range(1, 51):
+        ac = _gapped_autocorr(_embed2_angles(spike, tau), lags)
+        assert np.all(np.abs(ac[np.isfinite(ac)]) <= 1), tau
+    # random sparse sequences: few defined values, scattered
+    rng = np.random.default_rng(14)
+    for _ in range(2000):
+        n = rng.integers(3, 40)
+        x = np.where(rng.random(n) < rng.uniform(0.05, 0.6), rng.standard_normal(n), np.nan)
+        ac = _gapped_autocorr(x, lags)
+        assert np.all(np.abs(ac[np.isfinite(ac)]) <= 1)
+    # a strongly correlated sequence: the more values are missing, the closer to 0
+    x = np.sin(np.arange(400) / 10.0)
+    full = _gapped_autocorr(x, [1])[0]
+    gappy = x.copy()
+    gappy[rng.random(400) < 0.5] = np.nan
+    assert 0 < _gapped_autocorr(gappy, [1])[0] < full
+    for key in ('theta_ac1', 'theta_ac2', 'theta_ac3'):
+        assert abs(correlation.embed2(spike, 1)[key]) <= 1 or np.isnan(correlation.embed2(spike, 1)[key])
+
+
 # --- local_global: skewness and ac1 are differences, defined when the global statistic is zero ----
 
 def test_local_global_skewness_is_finite_for_a_balanced_two_valued_series():

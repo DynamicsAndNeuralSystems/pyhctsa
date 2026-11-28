@@ -809,10 +809,26 @@ def burstiness(y: ArrayLike) -> dict:
     Both versions are NaN if any value is negative: :math:`r` is then not a relative
     spread, and :math:`B` is unbounded, with a pole at :math:`\\mu = -\\sigma`.
 
+    ``B`` uses the sample standard deviation (divisor :math:`N - 1`). ``B_Kim`` is
+    Eq. (22) of [2]_,
+
+    .. math::
+
+        A_N(r) = \\frac{\\sqrt{N + 1}\\, r - \\sqrt{N - 1}}
+                       {(\\sqrt{N + 1} - 2)\\, r + \\sqrt{N - 1}},
+
+    with :math:`r` from the population standard deviation (divisor :math:`N`), as Kim & Jo
+    define it. For non-negative data this :math:`r` lies between 0 (all values equal) and
+    :math:`\\sqrt{N - 1}` (a single nonzero value), which :math:`A_N` maps to -1 and 1, so
+    ``B_Kim`` lies in [-1, 1] and reaches both bounds. (With the sample standard deviation,
+    a single nonzero value gives :math:`r = \\sqrt{N}` and ``B_Kim`` above 1, e.g. 1.157 at
+    :math:`N = 5`.)
+
     References
     ----------
     .. [1] Goh & Barabasi (2008). Europhys. Lett. 81, 48002
-    .. [2] Kim & Jo (2016). http://arxiv.org/pdf/1604.01125v1.pdf
+    .. [2] Kim & Jo (2016). Measuring burstiness for finite event sequences. Phys. Rev. E 94,
+           032311. http://arxiv.org/abs/1604.01125
     
     Parameters
     ----------
@@ -824,7 +840,7 @@ def burstiness(y: ArrayLike) -> dict:
     dict:
 
         - 'B': Original burstiness statistic
-        - 'B_Kim': Improved burstiness for finite series
+        - 'B_Kim': Improved burstiness for finite series, in [-1, 1]
 
         Both are NaN if any value is negative, or if all values are zero.
     """
@@ -833,18 +849,25 @@ def burstiness(y: ArrayLike) -> dict:
     if np.any(y < 0) or not me > 0:
         # outside the domain of the statistic (non-negative data with a positive mean)
         return {'B': np.nan, 'B_Kim': np.nan}
-    std = _sample_std(y)
 
-    r = np.divide(std,me) # coefficient of variation
-    b = np.divide((r - 1), (r + 1)) # Original Goh and Barabasi burstiness statistic, B
+    # Original Goh and Barabasi burstiness statistic, B, from the coefficient of variation
+    # (sample standard deviation); B < 1 for any standard deviation
+    r = np.divide(_sample_std(y), me)
+    b = np.divide((r - 1), (r + 1))
 
-    # improved burstiness statistic, accounting for scaling for finite time series
-    # Kim and Jo, 2016, http://arxiv.org/pdf/1604.01125v1.pdf
+    # Improved burstiness statistic, corrected for the finite length of the series:
+    # Kim and Jo (2016), Eq. (22), A_n(r) for n values. The correction maps r = 0 to -1 and the
+    # largest possible r, sqrt(n - 1) (a single nonzero value), to 1. That maximum holds for the
+    # population standard deviation (divisor n, their Eq. (13)), with which they define r; with the
+    # sample standard deviation r reaches sqrt(n), and A_n then exceeds 1.
     N = len(y)
-    p1 = np.sqrt(N+1)*r - np.sqrt(N-1)
-    p2 = (np.sqrt(N+1)-2)*r + np.sqrt(N-1)
+    r_pop = np.divide(np.std(y, ddof=0), me)
+    p1 = np.sqrt(N+1)*r_pop - np.sqrt(N-1)
+    p2 = (np.sqrt(N+1)-2)*r_pop + np.sqrt(N-1)
 
-    b_kim = np.divide(p1, p2)
+    # (clipped to its range [-1, 1] only to remove round-off, e.g. 1 + 2e-16 for a single
+    # nonzero value)
+    b_kim = np.clip(np.divide(p1, p2), -1.0, 1.0)
 
     out = {'B': b, 'B_Kim': b_kim}
 

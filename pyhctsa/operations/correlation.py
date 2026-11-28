@@ -1103,8 +1103,12 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
     ..., ``max_tau``. For each tau the angle of each step is measured from the horizontal, as
     in :func:`embed2`, and its autocorrelation is taken at lags 1, 2 and 3. A step between two
     coincident points (a repeated pair of values) has no direction (0/0), so its angle is
-    undefined and is removed from the sequence of angles before the autocorrelations are
-    computed. The outputs summarize the three resulting curves as a function of tau.
+    undefined. As in :func:`embed2`, the autocorrelations then take each lagged product only
+    over pairs of angles that are both defined, at their original separation in the sequence,
+    so angles either side of an undefined one are never treated as neighbors (see the Notes of
+    :func:`embed2` for the estimator). With no undefined angles this is the standard
+    autocorrelation of the angle sequence. The outputs summarize the three resulting curves as a
+    function of tau.
 
     Parameters
     ----------
@@ -1125,7 +1129,8 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
           lag-2 and lag-1 angle autocorrelations
 
         All are NaN if an angle autocorrelation is undefined at any tau (e.g., when no step
-        at that tau has a defined angle, or all of its angles are equal). A scalar NaN is
+        at that tau has a defined angle, all of its defined angles are equal, or no two defined
+        angles are the lag apart). A scalar NaN is
         returned if the series is too short to embed.
     """
     tau_range = np.arange(1, max_tau + 1)
@@ -1144,15 +1149,9 @@ def embed2_angle_tau(y: ArrayLike, max_tau: int) -> dict:
             logger.warning(f'Time series (N={len(y)}) too short for embedding at tau = {tau}')
             return np.nan
 
-        # remove undefined angles (0/0, from steps between coincident points)
-        theta = theta[~np.isnan(theta)]
-        if len(theta) == 0:
-            stats_store[:, i] = np.nan
-            continue
-
-        stats_store[0, i] = autocorr(theta, 1, 'Fourier')
-        stats_store[1, i] = autocorr(theta, 2, 'Fourier')
-        stats_store[2, i] = autocorr(theta, 3, 'Fourier')
+        # undefined angles (0/0, from steps between coincident points) stay in place as gaps:
+        # lagged products only over pairs of defined angles at their original separation
+        stats_store[:, i] = _gapped_autocorr(theta, [1, 2, 3])
 
     # (an undefined autocorrelation at any tau gives NaN for every statistic of its curve)
     out = {
@@ -1206,6 +1205,31 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
             - Stationarity of the angular distribution (across segments).
             - Euclidean distances from the origin (mean, std, etc.).
             - Statistics on outliers in the embedding space (e.g., area ratios).
+
+    Notes
+    -----
+    The angle of the step between two successive embedded points that coincide (which needs
+    repeated values in the series) is undefined (0/0). All statistics of the angles use only the
+    defined angles:
+
+    - ``theta_mean`` and ``theta_std`` are their mean and standard deviation.
+    - ``hist10std`` and ``histent`` are computed from the proportions of the defined angles in
+      10 equal bins on (-pi/2, pi/2), and ``stdb1``-``stdb4`` from the proportions of the defined
+      angles of each fifth of the sequence in 4 bins, so the proportions sum to 1. They are NaN
+      if there are no defined angles (``stdb1``-``stdb4``: if some fifth has none).
+    - ``theta_ac1``-``theta_ac3`` are autocorrelations of the angle sequence in which each
+      lagged product is taken only over pairs of angles that are both defined, at their
+      original separation in the sequence: the angles either side of an undefined one are not
+      treated as neighbors. With ``d`` the deviations of the defined angles from their mean, the
+      lag-``k`` autocorrelation is the sum of the products ``d_t d_{t+k}`` over the pairs ``k``
+      apart that are both defined, divided by the sum of ``d_t^2`` over all defined angles. It
+      always lies in [-1, 1] (it is the standard estimator applied to the deviations with the
+      undefined angles set to zero), and it shrinks toward 0 as more angles are undefined, since
+      fewer pairs contribute to the numerator. It is NaN if no pair at that lag is defined (e.g.
+      when every other angle is undefined, at lag 1).
+
+    With no undefined angles all of these are the usual statistics of the full sequence (the
+    autocorrelation is then the standard estimator, ``sum_t d_t d_{t+k} / sum_t d_t^2``).
     """
 
     # Set tau from the series if it is a rule ('tau'/'ac', 'ac1e' or 'mi'), capped at N/10
@@ -1228,39 +1252,45 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     out = {}
 
     # The angle between two successive points that coincide (repeated values in the series) is
-    # undefined (0/0); the statistics of the angle sequence are over the defined angles, as in
-    # embed2_angle_tau
-    theta_defined = theta[~np.isnan(theta)]
+    # undefined (0/0). The statistics of the angle sequence use the defined angles only: their mean
+    # and standard deviation, the autocorrelations from pairs of defined angles at their original
+    # separation (see _gapped_autocorr), and histograms of their proportions
+    is_defined = ~np.isnan(theta)
+    theta_defined = theta[is_defined]
     if theta_defined.size > 0:
-        out['theta_ac1'] = autocorr(theta_defined, 1, 'Fourier')
-        out['theta_ac2'] = autocorr(theta_defined, 2, 'Fourier')
-        out['theta_ac3'] = autocorr(theta_defined, 3, 'Fourier')
+        ac = _gapped_autocorr(theta, [1, 2, 3])
+        out['theta_ac1'], out['theta_ac2'], out['theta_ac3'] = ac
         out['theta_mean'] = np.mean(theta_defined)
         out['theta_std'] = _sample_std(theta_defined)
     else:
         for key in ('theta_ac1', 'theta_ac2', 'theta_ac3', 'theta_mean', 'theta_std'):
             out[key] = np.nan
-    
+
     # 10 equal bins on the support of the angles (-pi/2, pi/2) (explicit edges, so that angles
     # of exactly zero from tied values or of exactly +/-pi/2 from a vertical step fall in the
     # same bin whatever the rounding):
     bin_edges = _fixed_edges(10, -np.pi/2, np.pi/2)
-    # (NaN angles are in no bin but count in the number of elements the counts are divided by)
-    px = np.histogram(theta[~np.isnan(theta)], bins=bin_edges)[0] / len(theta)
-    bin_widths = np.diff(bin_edges)
-    out['hist10std'] = _sample_std(px)
-    out['histent'] = -np.sum(px[px>0] * np.log(px[px>0] / bin_widths[px>0]))
-    
+    # proportions of the defined angles in each bin (sum to 1; undefined with no defined angles)
+    if theta_defined.size > 0:
+        px = np.histogram(theta_defined, bins=bin_edges)[0] / theta_defined.size
+        bin_widths = np.diff(bin_edges)
+        out['hist10std'] = _sample_std(px)
+        out['histent'] = -np.sum(px[px>0] * np.log(px[px>0] / bin_widths[px>0]))
+    else:
+        out['hist10std'] = out['histent'] = np.nan
+
     # Stationarity in fifths of the time series
-    # Use histograms with 4 bins
+    # Use histograms with 4 bins: the proportions of the defined angles of each fifth in each bin
+    # (a fifth with no defined angles has undefined proportions, so its stdb are NaN)
     bin_edges4 = _fixed_edges(4, -np.pi/2, np.pi/2)
     afifth = (N-1) // 5 # -1 because angles are correlations *between* points
-    n = np.zeros((4, 5))
+    n = np.full((4, 5), np.nan)
     for i in range(5):
-        n[:, i], _ = np.histogram(theta[afifth*i:afifth*(i+1)], bins=bin_edges4)
-        
-    n = n / afifth
-    
+        theta_fifth = theta[afifth*i:afifth*(i+1)]
+        theta_fifth = theta_fifth[~np.isnan(theta_fifth)]
+        if theta_fifth.size > 0:
+            n[:, i] = np.histogram(theta_fifth, bins=bin_edges4)[0] / theta_fifth.size
+
     for i in range(4):
         out[f'stdb{i+1}'] = _sample_std(n[i, :])  # across the five fifths
 
@@ -1302,6 +1332,40 @@ def embed2(y: ArrayLike, tau: Union[int, str] = 'tau') -> dict:
     out['arearat'] = out['areas_50'] / out['areas_all']
 
     return out 
+
+def _gapped_autocorr(x: np.ndarray, lags: list) -> np.ndarray:
+    """Autocorrelation at ``lags`` of a sequence ``x`` with missing (NaN) values.
+
+    ``r_k = sum d_t d_{t+k} / sum d_t^2``, with ``d`` the deviations of the defined values from
+    their mean, the numerator summed over the pairs ``(t, t + k)`` at which both values are
+    defined (pairs keep their original separation, so values either side of a gap are never
+    treated as neighbors) and the denominator over all defined values. This is the standard
+    (Box-Jenkins) estimator applied to ``d`` with the missing values set to zero, so it always
+    lies in [-1, 1] (Cauchy-Schwarz) and shrinks toward 0 as more values are missing. With no
+    missing values it is exactly the standard estimator (computed by :func:`autocorr`, by FFT).
+    A lag is NaN if no pair at that lag is defined, and all lags are NaN if the defined values
+    are all equal.
+    """
+    x = np.asarray(x, dtype=float)
+    defined = ~np.isnan(x)
+    if defined.all():  # the same estimator, as computed for complete sequences
+        return np.atleast_1d(autocorr(x, list(lags), 'Fourier'))
+    N = x.size
+    out = np.full(len(lags), np.nan)
+    xd = x[defined]
+    if xd.size == 0 or np.ptp(xd) == 0:
+        return out
+    d = np.where(defined, x - np.mean(xd), 0.0)
+    sum_sq = np.sum(d[defined] ** 2)
+    for i, k in enumerate(lags):
+        if k >= N:
+            continue
+        both = defined[:N - k] & defined[k:]
+        if not both.any():
+            continue
+        out[i] = np.sum(d[:N - k][both] * d[k:][both]) / sum_sq
+    return out
+
 
 def _fixed_edges(num_bins: int, lo: float, hi: float) -> np.ndarray:
     """``num_bins`` equal bins on [lo, hi] as :func:`~pyhctsa.robust.bf_hist_edges` places them

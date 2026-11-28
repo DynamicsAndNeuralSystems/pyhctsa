@@ -86,8 +86,10 @@ def _flat(v):
 
 # embed2's statistics of the angle sequence are over the defined angles; MATLAB gives NaN for them
 # as soon as one angle is undefined (two successive embedded points coincide, which needs repeated
-# values). Pinned in tests/test_degenerate_inputs.py
-TIED_SKIP_FIELDS = {(k, s): ('theta_ac1', 'theta_ac2', 'theta_ac3', 'theta_mean', 'theta_std')
+# values), and divides its angle-histogram counts by the number of all angles, defined or not, so
+# its proportions sum to less than 1. Pinned in tests/test_degenerate_inputs.py
+TIED_SKIP_FIELDS = {(k, s): ('theta_ac1', 'theta_ac2', 'theta_ac3', 'theta_mean', 'theta_std',
+                             'hist10std', 'histent', 'stdb1', 'stdb2', 'stdb3', 'stdb4')
                     for k in ('e2_tau', 'e2_1') for s in ('quant_ar', 'lattice300')}
 
 
@@ -269,7 +271,9 @@ def test_embed2_dist_equal_distances_nan():
 
 def test_embed2_all_nan_angles_do_not_raise():
     out = co.embed2(np.ones(100), 1)
-    assert out['hist10std'] == 0 and out['histent'] == 0
+    # no defined angle: the angle proportions, and so the histogram statistics, are undefined
+    for key in ('hist10std', 'histent', 'stdb1', 'stdb4', 'theta_ac1', 'theta_mean'):
+        assert np.isnan(out[key]), key
 
 
 def test_stick_angles_constant_series_does_not_raise():
