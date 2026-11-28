@@ -391,7 +391,8 @@ def dyn_win(y: ArrayLike, max_num_segments: int = 10) -> dict:
     How stationarity estimates depend on the number of time-series subsegments.
 
     Specifically, variation in a range of local measures are implemented: mean,
-    standard deviation, skewness, kurtosis, ApEn(1,0.2), SampEn(1,0.2), AC(1),
+    standard deviation, skewness, kurtosis, quadratic sample entropy (sample entropy plus
+    ``log(2r)``, with m=1 and r=0.15, an absolute threshold in the units of ``y``), AC(1),
     AC(2), and the first zero-crossing of the autocorrelation function.
 
     The standard deviation of local estimates of these quantities across the time
@@ -2013,8 +2014,9 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
           the window (``tau = asym_tau``): a nonlinear autocorrelation variant that is
           antisymmetric under time reversal, so zero in expectation for any
           time-reversible process
-        - 'apen', 'sampen': approximate entropy (m=1, r=0.2) and sample entropy (m=2, r=0.1)
-          of each window (kept for backward compatibility)
+        - 'apen', 'sampen': approximate entropy (m=1, r=0.2 times the window's standard
+          deviation) and sample entropy (m=1, r=0.1, an absolute threshold in the units of
+          ``y``, not rescaled to each window) of each window (kept for backward compatibility)
 
         Default is ``'mean'``.
 
@@ -2042,8 +2044,10 @@ def sliding_window(y: ArrayLike, window_stat: str = 'mean', across_win_stat: str
           units it does not
         - 'permen': normalized permutation entropy, PermEn(3, 1), of the sequence of local
           estimates
-        - 'apen', 'sampen': approximate entropy (m=1, r=0.2) and sample entropy (m=2, r=0.15)
-          (kept for backward compatibility)
+        - 'apen', 'sampen': approximate entropy (m=1, r=0.2 times the standard deviation of
+          the local estimates) and quadratic sample entropy (sample entropy plus ``log(2r)``;
+          m=1, r=0.15, an absolute threshold in the units of the local estimates) (kept for
+          backward compatibility)
 
         Default is ``'std'``.
 
