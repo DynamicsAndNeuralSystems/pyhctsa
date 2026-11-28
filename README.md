@@ -99,6 +99,8 @@ print(res.shape)                    # (10, F) -> N series x F features
 Results are returned as a `pandas.DataFrame` of shape *N* × *F*, where *N* is the number of time-series
 instances and *F* is the number of time-series features.
 
+For Empirical1000 and the 1000×1000 collection you can skip the computation: `get_dataset_features('e1000')` (or `'1000x1000'`) downloads the full feature matrix that pyhctsa 2.0.0 computed with the default feature set.
+
 ## Next steps
 
 - [Getting started](https://dynamicsandneuralsystems.github.io/pyhctsa/usage/getting_started.html): computing features, calling individual operations, and

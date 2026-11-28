@@ -41,6 +41,9 @@ time series, each 1000 samples long, simulated from 133 generating mechanisms (n
 processes, maps, chaotic flows, oscillators, point processes and others). It is downloaded (7.5 MB)
 and cached in the same way.
 
+To use the full feature matrix of either dataset without computing it, :func:`~pyhctsa.utils.get_dataset_features` downloads the values that pyhctsa 2.0.0 computed with the default feature set (``get_dataset_features('e1000')`` or ``get_dataset_features('1000x1000')``, about 40 MB each).
+It returns the same ``(values, quality, errors, calc_time, meta)`` tuple as :func:`~pyhctsa.results.load_results`, and row ``ts_{i+1}`` holds the features of series ``i`` of :func:`~pyhctsa.utils.get_dataset`.
+
 Note that each time-series instances does not have to be the same length to compute a vector of features. The results of the extraction will be returned in a pandas dataframe of shape 
 N×F, where N is the number of time-series instances and F is the number of time-series features.
 

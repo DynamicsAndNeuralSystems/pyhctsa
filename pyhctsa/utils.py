@@ -8,8 +8,10 @@ from functools import lru_cache, wraps
 from importlib.metadata import PackageNotFoundError, version
 from importlib import resources
 from typing import Union, Callable
+import warnings
 import yaml
 from pyhctsa import __version__
+from pyhctsa.results import Results, load_results
 import logging
 logger = logging.getLogger('pyhctsa')
 
@@ -414,6 +416,148 @@ def get_dataset(which: str = "e1000") -> list:
         dataset = [np.loadtxt(data_path)]
     logger.info(f"Loaded dataset of {len(dataset)} time series.")
     return dataset
+
+
+# Precomputed feature values of the default feature set (pyhctsa 2.0.0) for the downloadable
+# datasets, saved with FeatureCalculator.save as .npz and published on figshare as new versions of
+# each dataset's record. Each file's metadata records the configuration hash, the pyhctsa version
+# and commit, and the SHA-256 of the series file it was computed from (``dataset_file_sha256``).
+# TODO: fill in "url" (the figshare file download URL, https://ndownloader.figshare.com/files/<id>)
+# and "doi" (the new versioned DOI) of both records once the files are on figshare.
+_DATASET_FEATURES = {
+    "e1000": {
+        "url": None,  # TODO: figshare file URL
+        "doi": None,  # TODO: versioned DOI of the new version of 10.6084/m9.figshare.5436136
+        "filename": "pyhctsa_2.0.0_features_e1000.npz",
+        "size": 43584812,
+        "sha256": "3c79882b8bc01a9a63eebd9e19c9d0416add330b357214a76e486cb2dfcbb3e9",
+        "series": _E1000,
+    },
+    "1000x1000": {
+        "url": None,  # TODO: figshare file URL
+        "doi": None,  # TODO: versioned DOI of the new version of 10.6084/m9.figshare.34013331
+        "filename": "pyhctsa_2.0.0_features_1000x1000.npz",
+        "size": 40376948,
+        "sha256": "a42a6102bd2f68def90a6b8939790a4cc29011382a7cd860b8ad80f5e3e4ffe9",
+        "series": _S1000,
+    },
+}
+
+_DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "configurations", "feature_config.yaml")
+
+
+def _config_sha256(path: str = _DEFAULT_CONFIG_PATH) -> str:
+    """SHA-256 of a configuration's text, as :class:`~pyhctsa.calculator.FeatureCalculator` records
+    it (``config_sha256``), without parsing the configuration or building its feature functions."""
+    with open(path, encoding="utf-8") as f:
+        return hashlib.sha256(f.read().encode("utf-8")).hexdigest()
+
+
+def get_dataset_features(which: str = "e1000") -> Results:
+    """
+    Load the precomputed features of the default feature set for a downloadable dataset.
+
+    Returns the full feature matrix of :func:`get_dataset`'s ``"e1000"`` or ``"1000x1000"``
+    dataset, computed with pyhctsa 2.0.0 and its default configuration, so that it need not be
+    computed again. The first call downloads the file (44 MB for ``"e1000"``, 40 MB for
+    ``"1000x1000"``) into the same cache directory as :func:`get_dataset` (``~/.cache/pyhctsa``;
+    set ``PYHCTSA_DATA_DIR`` to use another directory) and verifies its size and SHA-256 digest.
+    Later calls read the cached copy.
+
+    Parameters
+    ----------
+    which : str, default="e1000"
+        ``"e1000"`` (Empirical1000) or ``"1000x1000"`` (the 1000×1000 collection), as in
+        :func:`get_dataset`.
+
+    Returns
+    -------
+    Results
+        The :class:`~pyhctsa.results.Results` named tuple that :func:`~pyhctsa.results.load_results`
+        returns, ``(values, quality, errors, calc_time, meta)``. ``values`` is a 1000 × 6406
+        DataFrame (NaN wherever the quality is not ``Quality.GOOD``), ``quality`` holds the
+        :class:`~pyhctsa.quality.Quality` code of each value, ``errors`` lists the feature functions
+        that raised, ``calc_time`` holds the seconds per series and feature function, and ``meta``
+        records what produced the values (the pyhctsa version and commit, the configuration's
+        SHA-256, the dataset and the SHA-256 of its series file).
+
+        The rows are labelled ``ts_1`` to ``ts_1000``: row ``ts_{i+1}`` holds the features of
+        ``get_dataset(which)[i]``.
+
+    Raises
+    ------
+    ValueError
+        If ``which`` names no dataset with precomputed features.
+    RuntimeError
+        If this version of pyhctsa does not know the file's download URL.
+    ConnectionError
+        If the file is not cached and cannot be downloaded.
+
+    Warns
+    -----
+    UserWarning
+        If the file was computed with a pyhctsa version or a default configuration other than the
+        installed one (a different configuration hash means that the feature set may differ), or
+        from a series file other than the one :func:`get_dataset` loads. The values are returned
+        anyway; recompute them with :meth:`~pyhctsa.calculator.FeatureCalculator.extract` if the
+        difference matters.
+
+    Notes
+    -----
+    The values were computed on Linux x86-64. Recomputing them on Linux x86-64 gives bitwise-identical
+    values, but on macOS arm64 about 0.5% of the values differ, in a few numerically sensitive
+    features (for example ``force_potential_*``, ``ssa_*``, ``armax_*``, ``state_space_n4sid_*``
+    and ``gp_hyperparameters_*``).
+
+    Examples
+    --------
+    >>> from pyhctsa.utils import get_dataset, get_dataset_features
+    >>> res = get_dataset_features("e1000")     # doctest: +SKIP
+    >>> res.values.shape                        # doctest: +SKIP
+    (1000, 6406)
+    >>> x = get_dataset("e1000")[0]             # the series of row 'ts_1'  # doctest: +SKIP
+    """
+    if which not in _DATASET_FEATURES:
+        raise ValueError(f"No precomputed features for dataset '{which}'. "
+                         f"Available options: {list(_DATASET_FEATURES)}")
+    record = _DATASET_FEATURES[which]
+    if record["url"] is None:
+        raise RuntimeError(
+            f"The download URL of the precomputed '{which}' features is not set in this version of "
+            f"pyhctsa. Compute them with FeatureCalculator().extract(get_dataset('{which}')) instead.")
+    path = _fetch_verified(record["url"], os.path.join(_data_cache_dir(), record["filename"]),
+                           record["size"], record["sha256"])
+    res = load_results(path)
+    _check_dataset_features(which, res.meta)
+    return res
+
+
+def _check_dataset_features(which: str, meta: dict) -> None:
+    """Warn if precomputed features (``meta`` of their file) were not produced by this pyhctsa's
+    version and default configuration, or not from the series file :func:`get_dataset` loads."""
+    def recorded(key):
+        return meta.get(key, "not recorded")
+
+    differences = []
+    if meta.get("pyhctsa_version") != __version__:
+        differences.append(f"computed with pyhctsa {recorded('pyhctsa_version')}, but pyhctsa "
+                           f"{__version__} is installed")
+    config = _config_sha256()
+    if meta.get("config_sha256") != config:
+        differences.append(f"computed with a default configuration of SHA-256 "
+                           f"{recorded('config_sha256')}, but the installed feature_config.yaml has "
+                           f"SHA-256 {config}, so the feature set may differ")
+    series = _DATASET_FEATURES[which]["series"]
+    if meta.get("dataset") != which or meta.get("dataset_file_sha256") != series["sha256"]:
+        differences.append(f"computed from dataset '{recorded('dataset')}' with series file SHA-256 "
+                           f"{recorded('dataset_file_sha256')}, but get_dataset('{which}') loads a "
+                           f"file of SHA-256 {series['sha256']}, so the rows may not match its series")
+    if differences:
+        warnings.warn(f"The precomputed '{which}' features were " + "; and ".join(differences)
+                      + f". Recompute them with FeatureCalculator().extract(get_dataset('{which}')) "
+                      "if this matters.", UserWarning, stacklevel=3)
+
 
 def z_score(x: ArrayLike) -> np.ndarray:
     """
